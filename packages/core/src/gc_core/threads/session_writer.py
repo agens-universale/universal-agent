@@ -174,6 +174,7 @@ class SessionWriter:
             raise await self._busy(OwnershipError("аренда потеряна"))
         if self.lease is not None and self.lease.expires_at is None:
             return None
+        held = self.lease
         request = LeaseRequest(owner=self.owner, ttl=self.ttl)
         try:
             record = await self.retried(
@@ -181,9 +182,38 @@ class SessionWriter:
             )
         except OwnershipError as exc:
             raise await self._busy(exc) from None
+        if self._lapsed_under_foreign_turn(held, record):
+            # Своя аренда истекла, и тред успел записать другой ход:
+            # продолжать на его ревизии — затереть его работу. Тред — назад.
+            await self._arelease_quietly(record.lease)
+            raise await self._busy(
+                OwnershipError("аренда истекла, тред записал другой ход")
+            )
         self.lease = record.lease
         self.revision = record.revision
         return record
+
+    def _lapsed_under_foreign_turn(
+        self, held: Lease | None, record: ThreadRecord
+    ) -> bool:
+        """Продление дало новую эпоху (своя аренда истекла), а ревизия треда
+        — не та, что писал этот ход."""
+        return (
+            held is not None
+            and record.lease is not None
+            and record.lease.epoch != held.epoch
+            and record.revision != self.revision
+        )
+
+    async def _arelease_quietly(self, lease: Lease | None) -> None:
+        if lease is None:
+            return
+        try:
+            await self.store.release(self.key, lease)
+        except Exception:  # аренда истечёт сама; отказ важнее
+            _log.warning(
+                "thread release after lost lease failed", exc_info=True
+            )
 
     async def arenew(self) -> None:
         """Продлить свою аренду со сроком; её перехватили — ``ThreadBusy``."""
@@ -239,6 +269,10 @@ class SessionWriter:
 
     async def aside(self, **fields: Any) -> Receipt:
         """Запись сбоку (runtime, потоки) по своей аренде, без ревизии."""
+        if self.lease is not None:
+            # Истёкшая аренда после чужого хода — отказ, а не перезапись
+            # его runtime (запись сбоку хранилище по сроку не фенсит).
+            await self._aensure_lease()
         change = SideChange(op_id=_op_id(), lease=self.lease, **fields)
         try:
             return await self.retried(
