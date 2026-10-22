@@ -21,6 +21,7 @@ from gc_core.settings import settings_of
 from gc_core.states import State
 from gc_core.summarize.config import parse_summary_trigger_chars
 from gc_core.thread_store import ThreadSession
+from gc_core.thread_store_async import aupdate_port_meta
 from gc_core.usage.account import UsageAccount
 
 
@@ -106,9 +107,13 @@ async def acompact_thread(
     # → на следующем прогоне summary «пропадал» (откат кумулятива).
     try:
         port = thread_session.port
-        persisted_meta = await port.aload_meta(system_id, thread_id) or {}
-        persisted_meta["token_usage"] = state.usage.to_meta()
-        await port.asave_meta(system_id, thread_id, persisted_meta)
+        token_usage = state.usage.to_meta()
+        await aupdate_port_meta(
+            port,
+            system_id,
+            thread_id,
+            lambda meta: {**meta, "token_usage": token_usage},
+        )
     except Exception:
         pass
     # Обновляем live-state (что читает TUI-футер) только когда он передан и это тот

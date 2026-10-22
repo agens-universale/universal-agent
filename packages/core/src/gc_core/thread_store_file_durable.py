@@ -16,6 +16,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from gc_core.thread_store import reset_run_flags
+from gc_core.thread_store_base import ThreadStoreBase
 from gc_core.thread_store_file import FileThreadStore
 
 
@@ -30,6 +31,10 @@ class DurableFileThreadStore(FileThreadStore):
     #: сверяет хвост файла с журналом побайтно, а своей операции журнала у
     #: записи нет.
     append_turn_outcome = None
+
+    #: Слияние меты — чтением и записью через журнал: функцию слияния
+    #: операция журнала не сериализует.
+    update_meta = ThreadStoreBase.update_meta
 
     def _call(self, helper, *args, **kwargs):
         from gc_core.thread_store_journal import dispatch_file_helper

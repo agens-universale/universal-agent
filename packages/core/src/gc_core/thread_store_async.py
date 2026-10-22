@@ -54,6 +54,7 @@ import inspect
 import time
 from typing import (
     Any,
+    Callable,
     Dict,
     List,
     Optional,
@@ -307,6 +308,21 @@ class SyncThreadStoreAdapter:
         return _areplace
 
     @property
+    def aupdate_meta(self):
+        """Слияние меты одним шагом — если хранилище его умеет.
+
+        Свойство, как ``areplace_messages``: :func:`aupdate_port_meta`
+        решает по ``getattr``, идти ли им или чтением и записью.
+        """
+        if not callable(getattr(self._store, "update_meta", None)):
+            return None
+
+        async def _aupdate(system_id, thread_id, merge_fn):
+            return self._call("update_meta", system_id, thread_id, merge_fn)
+
+        return _aupdate
+
+    @property
     def aappend_turn_outcome(self):
         """Запись итога хода — если хранилище её умеет (и не гасит ``None``).
 
@@ -546,6 +562,26 @@ def athread_store(
     raise _contract_error(store, missing)
 
 
+async def aupdate_port_meta(
+    port: Any,
+    system_id: str,
+    thread_id: str,
+    merge_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Прочитать мету через порт, ``merge_fn(meta)``, записать; вернуть её.
+
+    Порт, умеющий это одним шагом (``aupdate_meta``), делает слияние под
+    своим замком — запись TUI между чтением и записью не теряется. Иначе —
+    ``aload_meta`` и ``asave_meta`` двумя вызовами.
+    """
+    update = getattr(port, "aupdate_meta", None)
+    if callable(update):
+        return await update(system_id, thread_id, merge_fn)
+    meta = merge_fn(await port.aload_meta(system_id, thread_id) or {})
+    await port.asave_meta(system_id, thread_id, meta)
+    return meta
+
+
 __all__ = [
     "ASYNC_CONTRACT_METHODS",
     "SLOW_CALL_PROBE_COUNT",
@@ -554,5 +590,6 @@ __all__ = [
     "SyncThreadStoreAdapter",
     "ThreadStoreContractError",
     "athread_store",
+    "aupdate_port_meta",
     "is_async_thread_store",
 ]

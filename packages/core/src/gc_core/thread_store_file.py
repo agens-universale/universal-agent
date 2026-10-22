@@ -18,7 +18,7 @@ DI-контейнера наследовать нас не обязан.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_core.thread_store import (
@@ -35,6 +35,7 @@ from gc_core.thread_store import (
     reset_thread_files,
     save_thread_meta,
     update_runtime_meta,
+    update_thread_meta,
 )
 from gc_core.thread_store_base import ThreadStoreBase
 from gc_core.thread_store_types import (
@@ -56,6 +57,7 @@ _WRITE_HELPERS = frozenset(
         "restore_subagent_trace_records",
         "save_thread_meta",
         "update_runtime_meta",
+        "update_thread_meta",
     }
 )
 
@@ -167,6 +169,17 @@ class FileThreadStore(ThreadStoreBase):
         self, system_id: str, thread_id: str, meta: Dict[str, Any]
     ) -> None:
         self._call(save_thread_meta, self._dir, system_id, thread_id, meta)
+
+    def update_meta(
+        self,
+        system_id: str,
+        thread_id: str,
+        merge_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Чтение, слияние и запись меты — под замком треда в процессе."""
+        return self._call(
+            update_thread_meta, self._dir, system_id, thread_id, merge_fn
+        )
 
     def patch_runtime_flag(
         self,

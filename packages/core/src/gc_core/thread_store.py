@@ -6,9 +6,19 @@ import logging
 import os
 import re
 import threading
+import weakref
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from gc_core.attachments.numbering import (
     IMAGE_SEQ_KEY,
@@ -63,7 +73,10 @@ _META_SCHEMA_VERSION = 2
 
 # Замок меты на тред внутри процесса: TUI и исполнитель пишут мету одного
 # треда из разных потоков, read-merge-write без замка теряет чужие ключи.
-_META_LOCKS: Dict[str, threading.RLock] = {}
+# Слабые ссылки: замок живёт, пока его держит хоть один писатель.
+_META_LOCKS: "weakref.WeakValueDictionary[str, Any]" = (
+    weakref.WeakValueDictionary()
+)
 _META_LOCKS_GUARD = threading.Lock()
 
 # Process-local счётчик последнего выданного seq sidecar (SPEC 2026-07-30-sidecar-append-o1-seq).
@@ -540,7 +553,10 @@ def meta_write_lock(threads_dir: str, system_id: str, thread_id: str):
     )
     key = os.path.abspath(meta_path)
     with _META_LOCKS_GUARD:
-        lock = _META_LOCKS.setdefault(key, threading.RLock())
+        lock = _META_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _META_LOCKS[key] = lock
     with lock:
         yield
 
@@ -574,6 +590,41 @@ def save_thread_meta(
     text = json.dumps(to_save, ensure_ascii=False, indent=2)
     with meta_write_lock(threads_dir, sys_norm, thread_id):
         write_text_atomic(meta_path, text)
+
+
+def update_thread_meta(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    merge_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Прочитать мету, ``merge_fn(meta)``, записать — одним шагом под замком.
+
+    Возвращает записанную мету. Замок только внутри процесса
+    (:func:`meta_write_lock`): писатель другого процесса между чтением и
+    записью не исключён.
+    """
+    sys_norm = sanitize_system_id(system_id)
+    with meta_write_lock(threads_dir, sys_norm, thread_id):
+        meta = merge_fn(load_thread_meta(threads_dir, sys_norm, thread_id))
+        save_thread_meta(threads_dir, sys_norm, thread_id, meta)
+    return meta
+
+
+def _with_tui_written_since(
+    archived_meta: Dict[str, Any], current: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Мета до сжатия с ``tui``, записанным после переноса её в архив.
+
+    Сжатие уносит файл меты в архив, и запись TUI после этого ложится в
+    новый файл; её ключи новее архивных.
+    """
+    merged = dict(archived_meta)
+    merged["tui"] = {
+        **(archived_meta.get("tui") or {}),
+        **(current.get("tui") or {}),
+    }
+    return merged
 
 
 def update_tui_meta(
@@ -1438,6 +1489,7 @@ class ThreadSession:
         *,
         previous_response_id: Optional[str],
     ) -> None:
+        from gc_core.thread_store_async import aupdate_port_meta
         from gc_core.thread_store_durable import durable_store_capability
 
         capability = durable_store_capability(self.port)
@@ -1457,13 +1509,13 @@ class ThreadSession:
         self._persist_batch_apply(
             step_messages, known_before, written, previous_response_id
         )
-        base_meta = (
-            await self.port.aload_meta(self.system_id, self.thread_id) or {}
-        )
-        await self.port.asave_meta(
+        await aupdate_port_meta(
+            self.port,
             self.system_id,
             self.thread_id,
-            self._persist_batch_meta(base_meta, step_messages, known_before),
+            lambda base_meta: self._persist_batch_meta(
+                base_meta, step_messages, known_before
+            ),
         )
 
     async def _areload_store_snapshot(self, read_snapshot) -> None:
@@ -1877,6 +1929,7 @@ class ThreadSession:
         искал ТОЛЬКО синхронное ``archive_and_replace`` и звал его прямо на
         loop.
         """
+        from gc_core.thread_store_async import aupdate_port_meta
         from gc_core.thread_store_durable import durable_store_capability
 
         # Компакция переписывает сохранённый тред: несохранённые шаги — сначала.
@@ -1910,13 +1963,17 @@ class ThreadSession:
             archived = await self._aarchive_via_store(compact_messages)
 
         known_message_keys = {make_message_key(m) for m in compact_messages}
-        new_meta = self._compact_meta(
-            summary_payload,
-            compact_messages,
-            disk_meta,
-            archived.get("archive_suffix") or "",
+        new_meta = await aupdate_port_meta(
+            self.port,
+            self.system_id,
+            self.thread_id,
+            lambda current: self._compact_meta(
+                summary_payload,
+                compact_messages,
+                _with_tui_written_since(disk_meta, current),
+                archived.get("archive_suffix") or "",
+            ),
         )
-        await self.port.asave_meta(self.system_id, self.thread_id, new_meta)
         self._compact_apply(compact_messages, known_message_keys, new_meta)
         return self._compact_result(
             archived, compact_messages, summary_message

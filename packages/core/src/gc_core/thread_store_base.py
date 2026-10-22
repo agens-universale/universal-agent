@@ -42,7 +42,7 @@ from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 from gc_core.thread_store_types import (
     MessageKey,
@@ -206,6 +206,23 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
                 payload=record.get("payload", {}) or {},
             )
 
+    def update_meta(
+        self,
+        system_id: str,
+        thread_id: str,
+        merge_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Прочитать мету, ``merge_fn(meta)``, записать; вернуть записанное.
+
+        НЕ часть контракта. Умолчание — ``load_meta`` и ``save_meta`` двумя
+        вызовами: запись другого писателя между ними теряется. Хранилищу с
+        параллельными писателями меты (TUI рядом с исполнителем) стоит
+        переопределить метод одним шагом под своим замком, как файловое.
+        """
+        meta = merge_fn(self.load_meta(system_id, thread_id) or {})
+        self.save_meta(system_id, thread_id, meta)
+        return meta
+
     def ensure_ready(self) -> None:
         """Подготовить хранилище к работе. По умолчанию — ничего не делать.
 
@@ -353,6 +370,17 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
                 kind=record.get("kind", ""),
                 payload=record.get("payload", {}) or {},
             )
+
+    async def aupdate_meta(
+        self,
+        system_id: str,
+        thread_id: str,
+        merge_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """См. :meth:`ThreadStoreBase.update_meta`."""
+        meta = merge_fn(await self.aload_meta(system_id, thread_id) or {})
+        await self.asave_meta(system_id, thread_id, meta)
+        return meta
 
     async def aensure_ready(self) -> None:
         """См. :meth:`ThreadStoreBase.ensure_ready`."""
