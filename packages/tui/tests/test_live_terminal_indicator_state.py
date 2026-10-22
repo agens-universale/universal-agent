@@ -70,19 +70,15 @@ def test_legacy_no_last_indicator_uses_status():
 def test_judge_unavailable_has_its_own_ending():
     """Проверка действий недоступна — не «превышен лимит ошибок»: человеку
     нужно знать, что дело в проверке и что помогает смена режима."""
-    from gc_tui.screens.main import (
-        resolve_live_terminal_indicator_state,
-        resolve_terminal_outcome,
-    )
+    from gc_tui.screens.main import resolve_live_terminal_indicator_state
+    from gc_tui.services.turn_outcome import outcome_word
     from gc_tui.widgets.thinking_indicator import (
         _TERMINAL_ENDINGS,
         TERMINAL_INDICATOR_STATES,
     )
 
-    outcome = resolve_terminal_outcome(
-        runner_error=None,
-        stop_requested=False,
-        terminal_outcome="judge_unavailable",
+    outcome = outcome_word(
+        failed=False, stopped=False, reason="judge_unavailable"
     )
     assert outcome == "stopped_judge"
     assert outcome in TERMINAL_INDICATOR_STATES
