@@ -2466,7 +2466,6 @@ class TraceScreen(Screen):
             images=images,
             skill=record.get("skill"),
             message_id=message_id,
-            restore_text=record.get("restore_text") or "",
         )
 
     def _render_segments(self, segments: list[dict]) -> None:
@@ -3094,7 +3093,7 @@ class TraceScreen(Screen):
             return True
         self._pending_user_widgets.pop(reply.client_id, None)
         self._remove_pending_record(reply.client_id)
-        self._restore_input(reply.restore_text, reply.images)
+        self._restore_input(reply.plain_text, reply.images)
         self.call_next(self._drop_queued_reply, reply)
         return True
 
@@ -3137,7 +3136,7 @@ class TraceScreen(Screen):
         parts = [inp.text] if inp.text else []
         images: list[Attachment] = []
         for reply in replies:
-            parts.append(reply.restore_text)
+            parts.append(reply.plain_text)
             images.extend(reply.images)
             self._pending_user_widgets.pop(reply.client_id, None)
             self._remove_pending_record(reply.client_id)
@@ -4789,7 +4788,6 @@ class TraceScreen(Screen):
         skill: str | None = None,
         skill_error: bool = False,
         message_id: str | None = None,
-        restore_text: str = "",
     ):
         """Смонтировать реплику; ``skill`` — id скилла (имя первым словом).
 
@@ -4814,7 +4812,6 @@ class TraceScreen(Screen):
             skill_error=skill_error,
             message_id=message_id,
             client_id=client_id,
-            restore_text=restore_text,
         )
         # pending/queued = свежая отправка юзера → форсим скролл вниз
         # (re-engage); normal/failed = воспроизведение из истории → обычное
@@ -4890,8 +4887,7 @@ class TraceScreen(Screen):
     ) -> str:
         """Записать pending-реплику в meta.tui + положить в `_pending_user_widgets`.
 
-        ``queued`` — поля реплики в очереди (`message_id`, `restore_text`,
-        `skill`): по ним пересборка ленты во время хода монтирует её снова
+        ``queued`` — поля реплики в очереди (`message_id`, `skill`): по ним пересборка ленты во время хода монтирует её снова
         в очереди (`_mount_orphaned_reply`).
 
         display_text — то, что показывает виджет (как ввёл юзер).
@@ -7109,7 +7105,6 @@ class TraceScreen(Screen):
                 display_text=text,
                 wire=text,
                 images=images,
-                restore_text=text,
                 technical=self._build_attachment_technical(text),
             )
             return
@@ -8122,13 +8117,11 @@ class TraceScreen(Screen):
             "skill_loaded": skill_id,
         }
         self._record_skill_meta(skill_id)
-        name = self._skill_input_name({"id": skill_id})
         self._queue_user_message(
             msg,
             display_text="",
             wire=msg["content"],
             skill=skill_id,
-            restore_text=f"/{name}",
         )
 
     def _queue_user_message(
@@ -8139,7 +8132,6 @@ class TraceScreen(Screen):
         wire: str,
         images: tuple[Attachment, ...] = (),
         skill: str | None = None,
-        restore_text: str,
         technical: Optional[str] = None,
     ) -> None:
         """Отправка во время хода (спека P3 §2.4) — единый путь реплики,
@@ -8165,7 +8157,16 @@ class TraceScreen(Screen):
             # Реплики родителя нет — итог доставки не ждёт следующую.
             self._pending_skill_marker = None
             return
-        queued = {"message_id": message["id"], "restore_text": restore_text}
+        skill_error = False
+        if skill is None and self._pending_skill_marker is not None:
+            # Итог доставки скилла (`/skill X текст`) — в запись очереди:
+            # пересборка ленты покажет `/имя` и вернёт его в поле.
+            (skill, loaded), self._pending_skill_marker = (
+                self._pending_skill_marker,
+                None,
+            )
+            skill_error = not loaded
+        queued = {"message_id": message["id"]}
         if skill is not None:
             queued["skill"] = skill
         client_id = self._track_pending(
@@ -8180,8 +8181,8 @@ class TraceScreen(Screen):
             client_id=client_id,
             images=images,
             skill=skill,
+            skill_error=skill_error,
             message_id=message["id"],
-            restore_text=restore_text,
         )
         self._refresh_queue_hint()
 
@@ -8215,12 +8216,10 @@ class TraceScreen(Screen):
             }
             if skill_loaded:
                 msg["skill_loaded"] = skill_loaded
-            name = self._skill_input_name({"id": skill_id})
             self._queue_user_message(
                 msg,
                 display_text=prompt,
                 wire=full_query,
-                restore_text=f"/{name} {prompt}",
             )
             self._on_user_text_submitted(prompt)
             self._record_skill_meta(skill_loaded)

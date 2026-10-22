@@ -299,8 +299,8 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
     цветом ошибки; `queued` — отправлена во время хода и ждёт впуска
     ядром (спека P3 §2.4): класс `-queued` (тише подложка и текст), маркер
     `MUTED`, под подложкой — подсказка `QUEUE_HINT` (`set_queue_hint`).
-    ``message_id`` / ``client_id`` / ``restore_text`` — что снять из
-    очереди и что вернуть в поле ввода.
+    ``message_id`` / ``client_id`` — что снять из очереди; в поле ввода
+    возвращается `plain_text`.
 
     ``skill`` — запускаемое имя скилла (`skill_input_name`): первым словом
     после маркера, `/имя` цветом `SKILL`; ``skill_error`` — скилл не найден:
@@ -330,14 +330,12 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         skill_error: bool = False,
         message_id: str | None = None,
         client_id: str | None = None,
-        restore_text: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._text = text
         self.message_id = message_id
         self.client_id = client_id
-        self.restore_text = restore_text
         self._skill = skill
         self._skill_error = skill_error
         self._event_no = event_no
@@ -370,7 +368,8 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
 
     @property
     def plain_text(self) -> str:
-        """Текст реплики без оформления; скилл — `/имя` первым словом."""
+        """Текст реплики без оформления; скилл — `/имя` первым словом.
+        Его же ↑, стоп и конец хода возвращают в поле ввода."""
         if self._skill is None:
             return self._text
         return f"/{self._skill} {self._text}".rstrip()

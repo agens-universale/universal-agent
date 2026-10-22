@@ -569,6 +569,54 @@ async def test_rebuild_then_admit_mounts_reply_once(tmp_path):
         assert replies == [("первое", "normal"), ("второе", "queued")]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "prompt, restored",
+    [("почини тест", "/coder почини тест"), ("", "/coder")],
+)
+async def test_rebuild_skill_reply_up_returns_slash_name(
+    tmp_path, _skills, prompt, restored
+):
+    """Текст для поля не хранится в meta: ↑ после пересборки выводит его
+    из текста реплики и скилла — так же, как до пересборки."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "coder"}]
+        runner = _busy(pilot, tmp_path)
+        await scr._cmd_use_skill("coder", prompt=prompt)
+        await pilot.pause()
+        (record,) = _pending_records(tmp_path)
+        assert "restore_text" not in record
+        assert record["skill"] == "coder"
+        scr._rebuild_from_store()
+        await pilot.pause()
+        (reply,) = _queued(pilot)
+        assert reply._band.render().plain == f"› {restored}"
+        _inp(pilot).focus()
+        await _up(pilot)
+        assert runner.withdrawn == [runner.added[0]["id"]]
+        assert _inp(pilot).text == restored
+
+
+@pytest.mark.asyncio
+async def test_rebuild_ignores_old_restore_text_field(tmp_path):
+    """Старая запись очереди с полем `restore_text` читается: поле
+    не мешает, текст для поля — из самой реплики."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        _busy(pilot, tmp_path)
+        await _send(pilot, "первое")
+        meta_path = _meta_path(tmp_path / "threads")
+        meta = json.loads(meta_path.read_text("utf-8"))
+        meta["tui"]["pending_user_messages"][0]["restore_text"] = "старое"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        scr._rebuild_from_store()
+        await pilot.pause()
+        _inp(pilot).focus()
+        await _up(pilot)
+        assert _inp(pilot).text == "первое"
+
+
 class _CompactRunner(_BusyRunner):
     """`/compact`: сообщение ложится в очередь исполнителя и после конца
     прогона ждёт там следующего."""

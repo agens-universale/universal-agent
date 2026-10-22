@@ -209,7 +209,7 @@ async def test_send_during_run_is_queued_last_with_hint(tmp_path):
         assert _trace(pilot).children[-1] is reply
         assert _hint_shown(reply)
         assert reply.message_id == runner.added[0]["id"]
-        assert reply.restore_text == "и добавь тест на ретраи"
+        assert reply.plain_text == "и добавь тест на ретраи"
         assert reply.client_id in pilot.app.screen._pending_user_widgets
 
 
@@ -424,7 +424,7 @@ async def test_mid_run_skill_with_text_is_queued(tmp_path, _skills):
         (reply,) = _replies(pilot)
         assert reply.state == "queued"
         assert reply._band.render().plain == "› /coder почини тест"
-        assert reply.restore_text == "/coder почини тест"
+        assert reply.plain_text == "/coder почини тест"
         assert reply.message_id == runner.added[0]["id"]
         assert _hint_shown(reply)
         assert scr._thinking_started_at == 7.0
@@ -441,7 +441,7 @@ async def test_mid_run_skill_without_text_is_queued(tmp_path, _skills):
         (reply,) = _replies(pilot)
         assert reply.state == "queued"
         assert reply._band.render().plain == "› /coder"
-        assert reply.restore_text == "/coder"
+        assert reply.plain_text == "/coder"
         (message,) = runner.added
         assert message["content"] == "DELIVERY[coder]"
         assert message["id"] and reply.message_id == message["id"]
