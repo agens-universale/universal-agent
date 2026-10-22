@@ -571,3 +571,22 @@ async def test_pill_counter_resets_on_task_switch(tmp_path):
         scr.attach_active_task("o23")
         await pilot.pause(0.3)
         assert scr._new_replies == 0
+
+
+@pytest.mark.asyncio
+async def test_pill_label_stable_on_app_blur(tmp_path):
+    from gc_tui.widgets.trace_overlays import PILL_ENTER
+
+    _write_task(tmp_path, "o24")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o24")
+        _, pill = _overlays(scr)
+        scr.query_one("#cmdinput").focus()
+        await _scroll(pilot, scr, 10)
+        assert pill.label == PILL_ENTER
+        pilot.app.app_focus = False
+        await pilot.pause()
+        assert pill.label == PILL_ENTER
+        pilot.app.app_focus = True
+        await pilot.pause()
+        assert pill.label == PILL_ENTER

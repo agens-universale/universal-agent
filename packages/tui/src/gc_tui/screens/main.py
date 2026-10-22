@@ -516,6 +516,7 @@ class TraceScreen(Screen):
         self._answer_flow = AnswerFlow()
         # Новые реплики агента с ухода от низа — счётчик плашки «в конец».
         self._new_replies = 0
+        self._pill_enter = False  # хвост подписи плашки: «или Enter»
         self._copy_seq = 0  # номер последнего /copy: старые итоги глохнут
         self._live_turn_tool_calls: int = (
             0  # живые call-события текущего хода (эвристика имени)
@@ -2995,13 +2996,17 @@ class TraceScreen(Screen):
         self._refresh_trace_overlays()
 
     def _end_pill_label(self) -> str:
-        """`· клик или Enter` — только когда курсор в пустом поле ввода."""
-        try:
-            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
-        except NoMatches:
-            return pill_label(self._new_replies, enter=False)
-        focused = self.focused is inp
-        return pill_label(self._new_replies, enter=focused and inp.is_blank())
+        """`· клик или Enter` — только когда курсор в пустом поле ввода.
+        Пока окно терминала не в фокусе, поле ввода снято с фокуса самим
+        Textual: хвост не пересчитываем, подпись не мигает."""
+        if self.app.app_focus:
+            try:
+                inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+            except NoMatches:
+                self._pill_enter = False
+            else:
+                self._pill_enter = self.focused is inp and inp.is_blank()
+        return pill_label(self._new_replies, enter=self._pill_enter)
 
     def _on_focus_moved_overlays(self, _focused: Optional[Widget]) -> None:
         self._refresh_trace_overlays()
@@ -7316,6 +7321,7 @@ class TraceScreen(Screen):
     def _on_terminal_focus(self, focused: bool) -> None:
         if focused:
             self._check_clipboard_tip()
+            self._refresh_trace_overlays()
 
     def _check_clipboard_tip(self) -> None:
         """Проверить буфер обмена вне UI-потока (на macOS — процесс osascript)."""
