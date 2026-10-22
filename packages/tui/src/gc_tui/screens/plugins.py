@@ -16,6 +16,7 @@ from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import OK as _OK
+from gc_tui.screens.mcp import ServerCard
 
 _FOOTER = "[Enter] раскрыть  [↑↓] плагины  [Esc] back"
 _HINT = "Управление: gc-plugin install | enable | disable | uninstall"
@@ -98,43 +99,11 @@ def plugin_cards(settings) -> list[dict]:
     return cards
 
 
-class PluginCard(Static):
+class PluginCard(ServerCard):
     """Карточка плагина: Enter/Space/клик раскрывает состав."""
 
-    can_focus = True
-
     def __init__(self, info: dict) -> None:
-        super().__init__(markup=False)
-        self.add_class("mcp-card")
-        self._info = info
-        self._expanded = False
-
-    @property
-    def expanded(self) -> bool:
-        return self._expanded
-
-    def toggle(self) -> None:
-        self._expanded = not self._expanded
-        if self.is_mounted:
-            self.update(self._renderable())
-
-    def on_mount(self) -> None:
-        self.update(self._renderable())
-
-    def on_key(self, event: events.Key) -> None:
-        if event.key in ("enter", "space"):
-            event.stop()
-            event.prevent_default()
-            self.toggle()
-
-    def on_click(self, event: events.Click) -> None:
-        event.stop()
-        event.prevent_default()
-        self.focus()
-        self.toggle()
-
-    def on_focus(self) -> None:
-        self.scroll_visible(animate=False)
+        super().__init__(info["name"], info)
 
     def _renderable(self) -> Text:
         info = self._info
