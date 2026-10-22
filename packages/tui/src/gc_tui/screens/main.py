@@ -660,8 +660,6 @@ class TraceScreen(Screen):
         # Cancel-with-undo: счётчик не-user trace-событий с момента последнего user-send.
         # Если == 0 при Esc-stop → агент ещё ничего не сгенерировал → rollback.
         self._events_since_last_user_send: int = 0
-        self._last_user_send_text: str = ""
-        self._last_user_send_images: tuple[Attachment, ...] = ()
         # Bang-shell (`!cmd`): один concurrent job; эфемерно в трейсе, не в thread.
         self._bang = None  # type: Optional["BangShellController"]
         self._bang_timeout_sec: Optional[float] = None
@@ -673,7 +671,7 @@ class TraceScreen(Screen):
         # заголовка (poll зовёт обновление каждый тик — пишем OSC только при смене).
         # Промпт заголовка терминала — ЕДИНЫЙ источник: последнее user-сообщение
         # активной сессии. Ставится из стора на attach и = тексту на каждом send.
-        # (Раньше второй источник _last_user_send_text давал прилипание/устаревание.)
+        # (Раньше второй источник давал прилипание/устаревание.)
         self._resumed_prompt: Optional[str] = None
         self._last_terminal_title: Optional[str] = None
         # client_id последней pending-реплики — для полного отката в cancel-with-undo.
@@ -3207,7 +3205,7 @@ class TraceScreen(Screen):
 
         Картинки (дизайн картинок §12): подписи `[Изображение #N]` в историю ↑ и
         имя сессии не идут — вспомненная подпись без записи в сторе была бы мёртвой
-        плашкой; для отката отправки картинки запоминаются рядом с текстом."""
+        плашкой."""
         self.spend_help_hint()
         plain = strip_image_chips(text, images)
         if self._plan_rework_pending:
@@ -3220,8 +3218,6 @@ class TraceScreen(Screen):
                     kind_class="line-meta",
                 )
             self._sync_input_placeholder()
-        self._last_user_send_text = text
-        self._last_user_send_images = images
         self._resumed_prompt = text  # send = новое последнее сообщение активной сессии (сырой текст)
         self._seed_or_update_last_actual(plain)
         self._update_terminal_title()
@@ -7862,9 +7858,12 @@ class TraceScreen(Screen):
             self._pending_orphan_cleanups.append((old_runner, tid, msg_id))
 
         # Удалить последний UserReplyContainer
+        # В поле возвращается снимаемая реплика, её `plain_text` (скилл
+        # первым словом) и картинки — тот же источник, что у ↑ и стопа.
         user_widgets = list(self.query(UserReplyContainer))
-        if user_widgets:
-            user_widgets[-1].remove()
+        restored = user_widgets[-1] if user_widgets else None
+        if restored is not None:
+            restored.remove()
 
         # Полный откат: убрать pending-запись из meta (иначе на re-entry
         # _mount_failed_from_meta покажет её как фантомную [!] failed-реплику).
@@ -7874,9 +7873,8 @@ class TraceScreen(Screen):
             self._pending_user_widgets.pop(cid, None)
             self._last_pending_client_id = None
 
-        self._restore_input(
-            self._last_user_send_text, self._last_user_send_images
-        )
+        if restored is not None:
+            self._restore_input(restored.plain_text, restored.images)
 
         # Убить индикатор + заменить runner — как в normal stop
         self._destroy_thinking_indicator()

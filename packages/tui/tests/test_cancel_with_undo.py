@@ -1,4 +1,4 @@
-"""TraceScreen счётчик _events_since_last_user_send + _last_user_send_text для cancel-with-undo."""
+"""TraceScreen счётчик _events_since_last_user_send + cancel-with-undo."""
 
 from gc_testkit.tui_support import tui_settings
 import pytest
@@ -15,7 +15,6 @@ async def test_counter_resets_on_user_send():
         scr._events_since_last_user_send = 5  # симулируем накопленные события
         scr._on_user_text_submitted("hello")
         assert scr._events_since_last_user_send == 0
-        assert scr._last_user_send_text == "hello"
 
 
 @pytest.mark.asyncio
