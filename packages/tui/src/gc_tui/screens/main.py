@@ -5491,6 +5491,14 @@ class TraceScreen(Screen):
             word, plan_proposed = kind_of(outcome)
         else:
             word, plan_proposed = self._runner_outcome(runner)
+        _log.debug(
+            "run finished: task=%s on_screen=%s cursor=%s record=%s word=%s",
+            run_tid,
+            on_screen,
+            self._cursor,
+            outcome,
+            word,
+        )
         self._stamp_run_outcome(run_tid, word, edits)
         # Строка-итог — когда поток хода вышел. Остановленный дорабатывает
         # (мигающий «■»), новый прогон уже идёт — строку ведёт тик.
@@ -5890,8 +5898,32 @@ class TraceScreen(Screen):
             or self._active_task_id is None
             or self._cursor is None
         ):
+            if self._active_task_id is not None:
+                _log.debug(
+                    "trace tail skipped: task=%s store=%s cursor=%s",
+                    self._active_task_id,
+                    self._store is not None,
+                    self._cursor,
+                )
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
+        if (
+            tail.new_records
+            or tail.stream_reset
+            or tail.compaction is not None
+        ):
+            # Наблюдение смоука (живой экран не показал ход после ошибки):
+            # что прочитано и откуда — только debug, тик идёт 4 раза в с.
+            _log.debug(
+                "trace tail: task=%s cursor=%s next=%s records=%d "
+                "reset=%s compaction=%s",
+                self._active_task_id,
+                self._cursor,
+                tail.next_cursor,
+                len(tail.new_records),
+                tail.stream_reset,
+                tail.compaction is not None,
+            )
         if tail.compaction is not None:
             self._apply_compaction(tail.compaction, tail.next_cursor)
             return
