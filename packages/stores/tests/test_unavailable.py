@@ -123,3 +123,30 @@ async def test_unavailable_message_does_not_leak_driver_text(
         await kv_store.get_thread(KEY)
     assert "hunter2" not in str(err.value)
     await store.close()
+
+
+def test_restarting_postgres_is_unavailable():
+    """Ревью, раунд 2 (R12): база перезапускается или переключается (57P01–
+    57P03), соединений не хватает (53300) — временно, ход повторит запись."""
+    asyncpg = pytest.importorskip("asyncpg")
+    from gc_stores.postgres.database import PostgresDatabase
+
+    errors = asyncpg.exceptions
+    db = PostgresDatabase("postgresql://u@localhost/db")
+    for error in (
+        errors.CannotConnectNowError,
+        errors.AdminShutdownError,
+        errors.CrashShutdownError,
+        errors.TooManyConnectionsError,
+    ):
+        assert db.unavailable(error("x")), error.__name__
+
+
+def test_restarting_mysql_is_unavailable():
+    """MySQL: сервер останавливается (1053), соединений не хватает (1040)."""
+    from gc_stores.mysql.database import MySQLDatabase
+
+    db = MySQLDatabase("mysql://u@localhost/db")
+    assert db.unavailable(Exception(1053, "Server shutdown in progress"))
+    assert db.unavailable(Exception(1040, "Too many connections"))
+    assert not db.unavailable(Exception(1062, "Duplicate entry"))

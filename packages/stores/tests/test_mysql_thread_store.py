@@ -116,3 +116,45 @@ async def test_trailing_spaces_are_different_keys(mysql_store):
     )
     assert await mysql_store.resolve_alias("dup") == first
     assert await mysql_store.resolve_alias("dup ") == second
+
+
+async def test_oversized_blob_row_does_not_break_the_pool(mysql_databases):
+    """Строка вложения больше пакета протокола (записана мимо предела —
+    старые данные): её чтение не ломает хранилище — соединение, на котором
+    драйвер сбился, пул не возвращает, дальше запросы идут (ревью, R3)."""
+    from datetime import timedelta
+
+    from gc_core.threads.models import BlobRef
+
+    store = MySQLThreadStore(await mysql_databases.acreate())
+    key = ThreadKey(system="s", thread="huge")
+    try:
+        record = await store.claim(
+            key, LeaseRequest(owner="w", ttl=timedelta(minutes=1))
+        )
+        async with store._db.transaction() as conn:
+            await conn.execute(
+                store._q.put_blob,
+                *store._args(
+                    (
+                        "s",
+                        "huge",
+                        "big.bin",
+                        "application/octet-stream",
+                        b"\0" * (20 * 1024 * 1024),
+                        datetime.now(UTC),
+                    ),
+                ),
+            )
+        ref = BlobRef(key=key, name="big.bin", mime="x", location="x")
+        with pytest.raises(Exception):  # строка не читается
+            await store.get_blob(ref)
+        failures = 0
+        for _ in range(12):  # больше, чем соединений в пуле
+            try:
+                assert (await store.get_thread(key)).lease == record.lease
+            except Exception:  # сбитое соединение — один раз
+                failures += 1
+        assert failures <= 1
+    finally:
+        await store.close()

@@ -61,3 +61,25 @@ async def test_five_megabyte_message_round_trips(store):
     )
     (entry,) = await store.read_stream(KEY, "messages")
     assert entry.data == BIG
+
+
+#: Вложение на 20 МБ — больше предела строки результата драйвера MySQL
+#: (16 МиБ).
+HUGE = b"\x89PNG" + b"\0" * (20 * 1024 * 1024)
+
+
+async def test_twenty_megabyte_blob_round_trips_or_is_refused(store):
+    """Блоб на 20 МБ читается обратно целиком или отвергается при записи
+    понятной ошибкой — и хранилище после этого работает (ревью, R3:
+    на MySQL блоб записывался, не читался и ломал соединение пула)."""
+    record = await store.claim(
+        KEY, LeaseRequest(owner="w", ttl=timedelta(minutes=1))
+    )
+    try:
+        ref = await store.put_blob(KEY, HUGE, mime="image/png")
+    except ValueError as exc:
+        assert "МиБ" in str(exc)
+    else:
+        assert await store.get_blob(ref) == HUGE
+    for _ in range(12):  # больше, чем соединений в пуле
+        assert (await store.get_thread(KEY)).lease == record.lease

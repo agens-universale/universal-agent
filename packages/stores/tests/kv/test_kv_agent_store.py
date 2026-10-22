@@ -91,7 +91,9 @@ async def test_resource_left_without_manifest_entry_is_picked_up(
     monkeypatch,
 ):
     """Процесс упал между записью ресурса и манифеста: ресурс всё равно в
-    списке — как ресурс человека, и умолчания пакета его не перетирают."""
+    списке — с источником «неизвестен» (ревью, раунд 2, R11): упасть мог и
+    ``sync --with-defaults``, поэтому умолчания пакета такой ресурс
+    обновляют, а не замораживают навсегда как ресурс человека."""
     import hashlib
 
     from gc_stores.sync import copy_defaults
@@ -108,10 +110,10 @@ async def test_resource_left_without_manifest_entry_is_picked_up(
     store = KvAgentStore(kv, agent_id="a", backend="memory")
     listed = {(r.kind, r.name): r for r in await store.list_resources()}
     picked = listed[("prompt", "summary")]
-    assert picked.source is None
+    assert picked.source == "unknown"
     assert picked.version == hashlib.sha256(b"own").hexdigest()
     await copy_defaults(store)
-    assert await store.read("prompt", "summary") == b"own"
+    assert await store.read("prompt", "summary") != b"own"
 
 
 async def test_manifest_entry_without_resource_is_dropped():

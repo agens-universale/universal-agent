@@ -558,6 +558,12 @@ class SqlThreadStore(ThreadStore):
     async def put_blob(
         self, key: ThreadKey, data: bytes, *, mime: str
     ) -> BlobRef:
+        limit = self._db.max_blob_bytes
+        if limit is not None and len(data) > limit:
+            raise ValueError(
+                f"вложение {len(data) / 2**20:.1f} МиБ больше предела "
+                f"базы {limit / 2**20:.2f} МиБ"
+            )
         name = hashlib.sha256(data).hexdigest()[:16]
         name += EXTENSIONS.get(mime, ".bin")
 
