@@ -259,3 +259,32 @@ def test_foreign_stream_line_is_skipped(tmp_path):
         handle.write('{"seq": "не число", "data": 1}\n')
     entries = asyncio.run(store.read_stream(key, "chat.responses"))
     assert len(entries) == 1
+
+
+async def test_extra_cannot_override_mapped_meta_keys(tmp_path):
+    """Ключи meta, которые ведут модели (секции фронтендов, tui), записью
+    ``extra`` не перекрываются: иначе писатель затирал бы чужие секции."""
+    from datetime import timedelta
+
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import LeaseRequest, ThreadChange, ThreadKey
+
+    key = ThreadKey(system="g", thread="t1")
+    store = FileThreadStore(str(tmp_path))
+    await Threads(store).update_frontend(key, "swarm", {"swarm_id": "s1"})
+    record = await store.claim(
+        key, LeaseRequest(owner="w", ttl=timedelta(minutes=1))
+    )
+    await store.commit(
+        key,
+        ThreadChange(
+            op_id="x",
+            expected_revision=record.revision,
+            lease=record.lease,
+            set_extra={"frontends": {}, "own_key": 1},
+        ),
+    )
+    after = await store.get_thread(key)
+    assert after.frontend["swarm"] == {"swarm_id": "s1"}
+    assert after.extra.get("own_key") == 1

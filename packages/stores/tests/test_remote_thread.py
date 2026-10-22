@@ -5,6 +5,8 @@
 (``gc_stores.remote``) — обычный ``ThreadStore``, отказы контракта приходят
 своим типом."""
 
+from datetime import timedelta
+
 import pytest
 from gc_core.threads.errors import OwnershipError, ThreadConflict
 from gc_core.threads.models import (
@@ -14,6 +16,7 @@ from gc_core.threads.models import (
     ThreadKey,
     ThreadQuery,
 )
+from gc_stores.remote import RemoteThreadStore
 from gc_stores.remote import open as open_remote
 from gc_stores.remote.server import ThreadProxy
 from gc_testkit import session_checks
@@ -28,13 +31,29 @@ async def _pair(store=None, key=KEY):
     return proxy, client
 
 
+class _ServerWritesAside(RemoteThreadStore):
+    """Песочница через прокси; секции сервера (их в проверке пишет «чужой
+    процесс») — мимо прокси, как их и пишет сервер."""
+
+    def __init__(self, client: RemoteThreadStore, backing) -> None:
+        super().__init__(client.socket, client._token)
+        self._backing = backing
+
+    async def append_side(self, key, change):
+        sections = [change.set_frontend, change.patch_frontend]
+        if any(s is not None and s[0] != "tui" for s in sections):
+            return await self._backing.append_side(key, change)
+        return await super().append_side(key, change)
+
+
 async def test_session_of_the_task_works_through_the_proxy():
     """Путь хода (сессия агента) через прокси: шаг, чужие секции, сжатие,
     повторное открытие."""
     for check in session_checks.CHECKS:
-        proxy, client = await _pair(key=session_checks.KEY)
+        backing = MemoryThreadStore()
+        proxy, client = await _pair(backing, key=session_checks.KEY)
         try:
-            await check(client)
+            await check(_ServerWritesAside(client, backing))
         finally:
             await proxy.aclose()
 
@@ -42,9 +61,13 @@ async def test_session_of_the_task_works_through_the_proxy():
 async def test_contract_errors_arrive_by_type():
     proxy, client = await _pair()
     try:
-        await client.claim(KEY, LeaseRequest(owner="sandbox"))
+        await client.claim(
+            KEY, LeaseRequest(owner="sandbox", ttl=timedelta(minutes=1))
+        )
         with pytest.raises(OwnershipError):
-            await client.claim(KEY, LeaseRequest(owner="other"))
+            await client.claim(
+                KEY, LeaseRequest(owner="other", ttl=timedelta(minutes=1))
+            )
         record = await client.get_thread(KEY)
         with pytest.raises(ThreadConflict):
             await client.commit(
@@ -121,6 +144,9 @@ async def test_blobs_of_the_task_only():
 #: удаление тредов, алиасы, чистка квитанций, чужой тред.
 _REFUSED = {
     "check_missing_thread",
+    "check_untimed_lease",
+    "check_frontend_streams",
+    "check_concurrent_create",
     "check_aliases",
     "check_list_threads_filters",
     "check_list_pagination_is_stable",
@@ -186,4 +212,72 @@ async def test_sandbox_config_opens_the_proxy(tmp_path, monkeypatch):
         await session_checks.check_session_reopens(stores.threads)
     finally:
         await stores.aclose()
+        await proxy.aclose()
+
+
+async def test_sandbox_cannot_strip_server_marks_through_the_proxy(tmp_path):
+    """Песочница — недоверенный писатель: метку задачи swarm (по ней
+    восстановление вебхука не берёт тред) она не снимет ни ``set_extra``
+    поверх файлового хранилища, ни своей секцией фронтенда; секции
+    сервера и чужие потоки ей не писать, бессрочно тред не занять."""
+    from datetime import timedelta
+
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+
+    store = FileThreadStore(str(tmp_path))
+    await Threads(store).update_frontend(KEY, "swarm", {"swarm_id": "s1"})
+    proxy, client = await _pair(store)
+    try:
+        record = await client.claim(
+            KEY, LeaseRequest(owner="sandbox", ttl=timedelta(minutes=1))
+        )
+        await client.commit(
+            KEY,
+            ThreadChange(
+                op_id="wipe",
+                expected_revision=record.revision,
+                lease=record.lease,
+                set_extra={"frontends": {}, "tui": {"title": "x"}},
+            ),
+        )
+        for change in (
+            SideChange(op_id="w", patch_frontend=("webhook", {"status": "x"})),
+            SideChange(op_id="s", set_frontend=("swarm", {})),
+            SideChange(op_id="t", append=[("a2a.tasks", [{"id": "t"}])]),
+        ):
+            with pytest.raises(PermissionError):
+                await client.append_side(KEY, change)
+        with pytest.raises(PermissionError):
+            await client.claim(KEY, LeaseRequest(owner="forever", ttl=None))
+        after = await store.get_thread(KEY)
+        assert after.frontend.get("swarm") == {"swarm_id": "s1"}
+        assert "webhook" not in after.frontend
+    finally:
+        await proxy.aclose()
+
+
+async def test_proxy_serves_a_bounded_number_of_connections(monkeypatch):
+    """Чужие соединения не съедают память сервера: прокси держит не больше
+    ``MAX_CONNECTIONS`` разом и не ждёт молчащий запрос вечно."""
+    import asyncio
+
+    from gc_stores.remote import server as proxy_server
+
+    monkeypatch.setattr(proxy_server, "READ_TIMEOUT_SECONDS", 0.3)
+    proxy, client = await _pair()
+    try:
+        idle = [
+            await asyncio.open_unix_connection(proxy.socket_path)
+            for _ in range(proxy_server.MAX_CONNECTIONS + 2)
+        ]
+        # Молчащие соединения заняли слоты, но запрос задачи пройдёт, когда
+        # их отпустит таймаут чтения.
+        record = await asyncio.wait_for(
+            client.get_thread(KEY), proxy_server.READ_TIMEOUT_SECONDS + 5
+        )
+        assert record is None
+        for _reader, writer in idle:
+            writer.close()
+    finally:
         await proxy.aclose()
