@@ -34,7 +34,6 @@ class _SlowRunner:
     def __init__(self, tid):
         self._last_target = (tid, "cli")
         self._stop_requested = False
-        self.run_started_at = None
         self.running = True
 
     def is_running(self):

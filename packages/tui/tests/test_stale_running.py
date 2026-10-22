@@ -29,7 +29,6 @@ class _Runner:
         self._last_target = (tid, "cli")
         self._thread_kind = "run"
         self._stop_requested = False
-        self.run_started_at = None
 
     def is_running(self):
         return self._running

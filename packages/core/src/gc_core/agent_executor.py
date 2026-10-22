@@ -1708,9 +1708,12 @@ class AgentExecutor:
 
     def turn_effective_start(self) -> float | None:
         """Старт текущего хода, сдвинутый на ожидания человека (монотоника
-        рантайма) — для живого счёта фронтенда; часов нет — ``None``."""
+        рантайма) — для живого счёта фронтенда. Часов нет или они закрыты
+        (ход кончился, часы следующего ещё не привязаны) — ``None``."""
         clock = current_turn_clock(self._ctx)
-        return clock.effective_start() if clock is not None else None
+        if clock is None or clock.closed:
+            return None
+        return clock.effective_start()
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

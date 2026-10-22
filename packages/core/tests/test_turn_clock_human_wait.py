@@ -285,7 +285,20 @@ def test_stop_run_closes_clock():
     mono.now += 10
     assert clock.closed is True
     assert clock.elapsed() == 4
+
+
+def test_closed_clock_gives_no_live_count_until_next_turn():
+    """Ход закрыт, часы нового ещё не привязаны (хвост из очереди, новый
+    прогон того же исполнителя): живого счёта нет — не счёт от старта
+    прошлого хода. Новые часы привязаны — счёт от них."""
+    ctx, clock, mono = _clocked()
+    executor = AgentExecutor(ctx)
     assert executor.turn_effective_start() == 100.0
+    clock.close()
+    assert executor.turn_effective_start() is None
+    mono.now += 30
+    begin_turn_main_trace(_state(), ctx)
+    assert executor.turn_effective_start() == 130.0
 
 
 def test_executor_without_clock_reads_none():

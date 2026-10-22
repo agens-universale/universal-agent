@@ -539,18 +539,6 @@ def test_confirm_stop_unblocks_blocked_confirm():
     assert result_holder == ["deny_once"]
 
 
-def test_runner_remembers_when_its_run_started():
-    """Начало прогона хранится в раннере: по нему часы хода ядра этого
-    прогона отличаются от часов прошлого хода."""
-    fake = _FakeExecutor()
-    runner = AgentRunner(executor=fake)
-    before = time.monotonic()
-    runner.start(query="x", thread_id="t1")
-    assert before <= runner.run_started_at <= time.monotonic()
-    runner.stop()
-    runner.wait(timeout=1.0)
-
-
 def test_run_seq_counts_every_spawned_run():
     """Номер прогона растёт на каждом заведённом воркере: по его смене
     экран видит конец хода, даже если следующий стартовал между тиками."""
@@ -584,13 +572,9 @@ def test_turn_effective_start_delegates_to_current_turn_clock():
     runner = AgentRunner(executor=fake)
     runner.start(query="x", thread_id="t1")
     try:
-        fake.start = runner.run_started_at + 0.5
-        assert runner.turn_effective_start() == fake.start
-        # Часы прошлого хода (ядро ещё не завело новые) — не этого прогона.
-        fake.start = runner.run_started_at - 5.0
-        assert runner.turn_effective_start() is None
+        fake.start = 42.0
+        assert runner.turn_effective_start() == 42.0
         # `/compact` — не ход: счёт от часов хода ему не принадлежит.
-        fake.start = runner.run_started_at + 0.5
         runner._thread_kind = "compact"
         assert runner.turn_effective_start() is None
     finally:
@@ -644,37 +628,3 @@ def test_stopped_runner_confirm_does_not_present():
     runner.stop()
     assert confirm(title="t", question="q", fields=[]) == "deny_once"
     assert shown == []
-
-
-class _TailExecutor(_ClockExecutor):
-    """Первый ход отдаёт хвост очереди: воркер доигрывает его вторым
-    ходом того же прогона; часы первого хода закрыты."""
-
-    def __init__(self):
-        super().__init__()
-        self.tail = [{"role": "user", "content": "хвост", "id": "m_tail"}]
-        self.seen_in_tail: list = []
-        self.runner = None
-
-    def take_undelivered_messages(self):
-        tail, self.tail = self.tail, []
-        return tail
-
-    async def arun(self, messages, **kwargs):
-        if messages == ["хвост"]:
-            self.seen_in_tail.append(self.runner.turn_effective_start())
-            return None
-        self.start = time.monotonic()  # часы первого хода
-        time.sleep(0.01)
-        return None
-
-
-def test_tail_turn_does_not_count_from_closed_clock_of_previous():
-    """Хвост из очереди — второй ход того же прогона: часы первого хода
-    уже не его, счёт ждёт часов нового хода."""
-    fake = _TailExecutor()
-    runner = AgentRunner(executor=fake)
-    fake.runner = runner
-    runner.start(query="x", thread_id="t1")
-    runner.wait(timeout=2.0)
-    assert fake.seen_in_tail == [None]

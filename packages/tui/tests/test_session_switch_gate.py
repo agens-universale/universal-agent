@@ -42,7 +42,6 @@ class _Runner:
     def __init__(self, tid, *, slow=False):
         self._last_target = (tid, "cli")
         self._stop_requested = False
-        self.run_started_at = None
         self.running = True
         self.slow = slow
         self.stops = 0

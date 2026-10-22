@@ -110,8 +110,11 @@ class StubExecutor:
             self.clock.close()
 
     def turn_effective_start(self) -> Optional[float]:
-        """Старт хода, сдвинутый на ожидания человека (как у ядра)."""
-        return self.clock.effective_start() if self.clock else None
+        """Старт хода, сдвинутый на ожидания человека; часов нет или они
+        закрыты — None (как у ядра)."""
+        if self.clock is None or self.clock.closed:
+            return None
+        return self.clock.effective_start()
 
     def add_message(self, message: dict) -> None:
         self.queued.append(message)

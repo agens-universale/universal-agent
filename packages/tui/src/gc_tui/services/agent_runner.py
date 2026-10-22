@@ -161,10 +161,6 @@ class AgentRunner:
         #: Тред и система последнего прогона: в них доигрывается сообщение,
         #: опоздавшее к закрытию.
         self._last_target: Optional[tuple[str, str]] = None
-        #: Монотоника старта последнего хода прогона (сам прогон и хвост
-        #: из очереди, доигранный этим же воркером): часы хода ядра,
-        #: заведённые раньше, — часы прошлого хода, не текущего.
-        self.run_started_at: Optional[float] = None
         #: Номер прогона: растёт на каждом заведённом воркере. Экран по его
         #: смене видит конец хода, даже если следующий прогон (хвост из
         #: очереди) стартовал между тиками опроса.
@@ -345,17 +341,14 @@ class AgentRunner:
 
     def turn_effective_start(self) -> Optional[float]:
         """Старт текущего хода по часам ядра, сдвинутый на ожидания
-        человека: от него живой счёт индикатора. Исполнителя или часов
-        текущего хода ещё нет (ядро не начало ход, на исполнителе часы
-        прошлого — в том числе первого хода перед хвостом из очереди) или
-        работа — не ход (`/compact`) — None."""
-        ex = self._executor
-        started = self.run_started_at
-        probe = getattr(ex, "turn_effective_start", None)
-        if probe is None or started is None or self._thread_kind != "run":
+        человека: от него живой счёт индикатора. Исполнителя или открытых
+        часов хода нет (ядро не начало ход; прошлый закрыт, а новый — в
+        том числе хвост из очереди — ещё не привязан) или работа — не ход
+        (`/compact`) — None."""
+        probe = getattr(self._executor, "turn_effective_start", None)
+        if probe is None or self._thread_kind != "run":
             return None
-        value = probe()
-        return value if value is not None and value >= started else None
+        return probe()
 
     def call_level(self) -> Optional[str]:
         """Фактический уровень подготовленного вызова из State, независимо от режима.
@@ -553,7 +546,6 @@ class AgentRunner:
         self._thread_kind = "run"
         self._accepting = True
         self._last_target = (thread_id, system)
-        self.run_started_at = time.monotonic()
         self.run_seq += 1
         t = threading.Thread(
             target=self._run_worker,
@@ -633,7 +625,6 @@ class AgentRunner:
                     # отдельным ходом того же треда: иначе executor (он в TUI
                     # один на сессию) отдал бы его СЛЕДУЮЩЕМУ запросу
                     # пользователя, позади этого запроса и одним с ним батчем.
-                    self.run_started_at = time.monotonic()
                     _run_agent(
                         executor,
                         _tail_batch(tail),
