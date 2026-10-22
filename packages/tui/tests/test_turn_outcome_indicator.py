@@ -315,6 +315,54 @@ async def test_quit_mid_turn_writes_stop_record_and_waits(tmp_path):
     assert (outcome["status"], outcome["reason"]) == ("stopped", USER_STOP)
 
 
+class _StreamingStub(StubExecutor):
+    """Ход стримит ответ: дельта приходит и после стопа — посреди
+    ожидания выхода, через тот же мост `call_from_thread`, что у прода."""
+
+    def __init__(self, app, **kw):
+        from gc_tui.services.stream_pump import StreamPump
+
+        super().__init__(**kw)
+        self._pump = StreamPump(
+            app._stream_sink,
+            signal=lambda: app.call_from_thread(app._stream_signal),
+            throttle_s=0.0,
+        )
+
+    def _record_outcome(self, system, thread_id, written):
+        if self.stopped:
+            self._pump.on_delta("answer", "хвост ответа")
+        super()._record_outcome(system, thread_id, written)
+
+
+@pytest.mark.asyncio
+async def test_quit_during_stream_does_not_freeze(tmp_path):
+    """Дельта стрима посреди ожидания выхода: мост на UI-поток не
+    упирается в ожидание — выход быстрый, ход закрыт записью."""
+    import time
+
+    app = _app(tmp_path)
+    app._executor_factory = lambda: _StreamingStub(
+        app, threads_dir=str(tmp_path), step_delay=0.3
+    )
+    async with app.run_test() as pilot:
+        scr = await _send(pilot)
+        tid = scr._active_task_id
+        runner = pilot.app.active_runner
+        await wait_until(
+            pilot,
+            lambda: scr._events_since_last_user_send > 0,
+            "агент начал ход",
+        )
+        began = time.monotonic()
+        pilot.app.exit()
+        await pilot.pause()
+    assert time.monotonic() - began < 1.5
+    assert runner._thread.is_alive() is False
+    (outcome,) = _outcomes(tmp_path, tid)
+    assert (outcome["status"], outcome["reason"]) == ("stopped", USER_STOP)
+
+
 # --- ожидание человека ------------------------------------------------------
 
 

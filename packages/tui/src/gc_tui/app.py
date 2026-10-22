@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import threading
 import uuid
@@ -391,8 +392,6 @@ class TuiApp(App):
         )
         self.active_runner = None  # AgentRunner | None
         self._runner_stale = False  # конфиг изменился при живом run → пересборка после завершения
-        # Выход ждёт поток хода (`on_unmount`): UI-поток стоит в ожидании.
-        self._quit_settling = False
         # Режим разрешений, выбранный в сессии (Shift+Tab, флаг запуска, сохранённый
         # в сессии). None — выбора не было, действует конфиг. Единственный
         # писатель — set_permission_mode.
@@ -1550,11 +1549,6 @@ class TuiApp(App):
         ):
             return
         snapshot = self._circuit_breaker.snapshot()
-        if self._quit_settling:
-            # UI-поток ждёт этот поток на выходе: мост через него — дедлок
-            # до таймаута ожидания, а гонки с ним нет.
-            self.persist_circuit_breaker(task_id, snapshot)
-            return
         try:
             self.call_from_thread(
                 self.persist_circuit_breaker, task_id, snapshot
@@ -1686,7 +1680,7 @@ class TuiApp(App):
         self.active_runner = None
         self._runner_stale = False
 
-    def on_unmount(self) -> None:
+    async def on_unmount(self) -> None:
         """Выход приложения — отпустить всё, что держит его из модулей ядра.
 
         Сначала `stop()`, и это не вежливость. Пока агент ждёт ответа человека,
@@ -1697,7 +1691,10 @@ class TuiApp(App):
         пустую (`cancel_ask_human`) и снимает ожидание подтверждения.
 
         После стопа — короткое ожидание потока хода (`QUIT_SETTLE_SEC`):
-        ядро закрывает ход записью итога, иначе он остался бы без неё.
+        ядро закрывает ход записью итога, иначе он остался бы без неё. Ждём
+        в потоке пула, не на loop: поток хода ходит на UI-поток мостом
+        `call_from_thread` (дельта стрима, предохранитель, подтверждение), и
+        заблокированный loop держал бы его до таймаута.
 
         Затем логгер прогона (см. `AgentRunner.release`) и подписка на
         runtime-уведомления: и то и другое живёт в модульных реестрах до конца
@@ -1712,8 +1709,7 @@ class TuiApp(App):
                 pass
         wait = getattr(runner, "wait", None)
         if callable(wait):
-            self._quit_settling = True
-            wait(timeout=QUIT_SETTLE_SEC)
+            await asyncio.to_thread(wait, QUIT_SETTLE_SEC)
         _release_runner(runner)
         unregister_runtime_notices_listener(self._on_runtime_notice)
         self._clear_image_pocket()
