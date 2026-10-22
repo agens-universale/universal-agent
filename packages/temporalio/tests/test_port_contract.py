@@ -41,6 +41,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     "agent_store": BOUND
     + " (ExternalAgentStore: чтение ресурсов агента — только в activity)",
     "ask_human": FRONTEND + ": вопрос человеку — human_request",
+    "ask_human_suspends": DATA
+    + ": флаг приостановки на вопросе (A2A); под Temporal выключен",
     "attach_state": DATA
     + ": привязка State к RunContext в памяти, без ввода-вывода",
     "auth_connector": WORKER + ": токен модели — activity модели",

@@ -138,6 +138,9 @@ TRANSIENT_STATE_DEFAULTS = {
     "vision_request_limit": lambda: None,
     "vision_routes": dict,
     "vision_probe_notices": set,
+    # Вопрос, на котором ход приостановлен (ask_human_suspends): его пишет
+    # тул в ядре и уносит запись сессии; ребёнку и в activity не нужен.
+    "pending_question": lambda: None,
 }
 
 
