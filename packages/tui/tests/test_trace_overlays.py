@@ -404,9 +404,20 @@ async def test_replies_cache_sees_remove_and_mount_in_one_tick(tmp_path):
         assert scr._trace_replies(trace) == [first]
 
 
+class _BusyRunner:
+    """Идущий ход: очередь живёт, пока он не кончился."""
+
+    def is_running(self) -> bool:
+        return True
+
+    def is_child_input_active(self) -> bool:
+        return False
+
+
 async def _tall_with_queue(pilot, tid):
-    """Лента `_tall` и две реплики в очереди у низа."""
+    """Лента `_tall` и две реплики в очереди у низа идущего хода."""
     scr = await _tall(pilot, tid)
+    pilot.app.active_runner = _BusyRunner()
     for i, text in enumerate(("в очереди 1", "в очереди 2")):
         scr._mount_user_reply(text, state="queued", client_id=f"c{i}")
     await pilot.pause(0.2)
@@ -442,6 +453,7 @@ async def test_selection_survives_queued_reply_mount(tmp_path):
         await pilot.pause()
         before = scr.get_selected_text()
         assert before
+        pilot.app.active_runner = _BusyRunner()
         scr._mount_user_reply("в очереди", state="queued", client_id="c1")
         await pilot.pause(0.2)
         assert scr.get_selected_text() == before
