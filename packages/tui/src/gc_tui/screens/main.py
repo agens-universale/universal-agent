@@ -3006,10 +3006,11 @@ class TraceScreen(Screen):
             replies, round(trace.scroll_y), lambda r: r.virtual_region.y
         )
         sticky.show(reply, box)
-        # Строкой над рамкой поля ввода — ниже индикатора хода, не поверх
-        # текста ленты.
-        input_top = self.query_one(_SEL_INPUT_ROW, Horizontal).region.y
-        pill.show(self._end_pill_label(), box, input_top - 1)
+        # Запасная нижняя строка бара индикатора: ниже индикатора хода и
+        # строк причины, не поверх текста ленты. Поле ввода баннеры прячут
+        # или отодвигают — бар остаётся на месте.
+        bar = self.query_one(_SEL_INDICATOR_BAR, Vertical).region
+        pill.show(self._end_pill_label(), box, bar.bottom - 1)
 
     def _trace_replies(self, trace: VerticalScroll) -> list:
         """Реплики верхнего уровня ленты по порядку. Кэшируется только

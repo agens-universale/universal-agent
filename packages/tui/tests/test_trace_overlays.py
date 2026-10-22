@@ -132,24 +132,104 @@ async def test_pill_label_follows_input(tmp_path):
         assert pill.label == PILL_CLICK
 
 
+def _assert_pill_clear_of_indicator(scr, pill):
+    """Плашка видна на экране и не задевает ни строку индикатора, ни
+    строки причины под ним."""
+    box = _trace(scr).content_region
+    region = pill.region
+    assert pill.display is True
+    assert region.height == 1
+    assert 0 <= region.y < scr.size.height
+    assert not region.overlaps(scr._thinking.region)
+    left = region.x - box.x
+    right = box.right - region.right
+    assert abs(left - right) <= 1
+    assert _line(pill).strip() == pill.label
+
+
+class _Running:
+    """Идёт прогон открытого треда: индикатор хода держится."""
+
+    _thread_kind = "run"
+
+    def __init__(self, tid):
+        self._last_target = (tid, "cli")
+
+    def is_running(self):
+        return True
+
+    def stop(self):
+        pass
+
+
+async def _relayout(pilot, scr):
+    """Хром сменился: после раскладки накладки переставляет опрос — тот же
+    вызов, что и в его тике."""
+    await pilot.pause()
+    scr._refresh_trace_overlays()
+    await pilot.pause()
+
+
+async def _pill_with_indicator(pilot, tid):
+    scr = await _tall(pilot, tid)
+    pilot.app.active_runner = _Running(tid)
+    scr._show_thinking_indicator()
+    await _scroll(pilot, scr, 10)
+    return scr, _overlays(scr)[1]
+
+
 @pytest.mark.asyncio
-async def test_pill_centred_one_row_above_input(tmp_path):
-    """Плашка — строкой над рамкой поля ввода: между ней и текстом поля
-    только рамка, индикатор хода выше не перекрывается."""
+async def test_pill_clear_of_indicator_without_banner(tmp_path):
     _write_task(tmp_path, "o3")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
-        scr = await _tall(pilot, "o3")
-        _, pill = _overlays(scr)
-        await _scroll(pilot, scr, 10)
-        box = _trace(scr).content_region
-        input_row = scr.query_one("#input-row")
-        region = pill.region
-        assert region.y == input_row.region.y - 1
-        assert region.height == 1
-        left = region.x - box.x
-        right = box.right - region.right
-        assert abs(left - right) <= 1
-        assert _line(pill).strip() == pill.label
+        scr, pill = await _pill_with_indicator(pilot, "o3")
+        _assert_pill_clear_of_indicator(scr, pill)
+
+
+@pytest.mark.asyncio
+async def test_pill_clear_of_error_reason_rows(tmp_path):
+    _write_task(tmp_path, "o3e")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr, pill = await _pill_with_indicator(pilot, "o3e")
+        scr._thinking.set_error("RuntimeError: " + "сбой " * 60)
+        scr._thinking.set_state("failed")
+        scr._sync_indicator_reserve()
+        await _relayout(pilot, scr)
+        assert scr._thinking.error_rows == 3
+        _assert_pill_clear_of_indicator(scr, pill)
+
+
+@pytest.mark.asyncio
+async def test_pill_clear_of_indicator_with_confirm_banner(tmp_path):
+    _write_task(tmp_path, "o3c")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr, pill = await _pill_with_indicator(pilot, "o3c")
+        scr.show_confirm_banner("Действие", "Разрешить?")
+        await _relayout(pilot, scr)
+        _assert_pill_clear_of_indicator(scr, pill)
+
+
+@pytest.mark.asyncio
+async def test_pill_clear_of_indicator_with_plan_banner(tmp_path):
+    _write_task(tmp_path, "o3p")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr, pill = await _pill_with_indicator(pilot, "o3p")
+        scr._show_plan_banner()
+        await _relayout(pilot, scr)
+        _assert_pill_clear_of_indicator(scr, pill)
+
+
+@pytest.mark.asyncio
+async def test_pill_clear_of_indicator_with_ask_human_banner(tmp_path):
+    _write_task(tmp_path, "o3a")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr, pill = await _pill_with_indicator(pilot, "o3a")
+        scr._show_child_ask_human(parent_call_id="p1", prose="Какой путь?")
+        await _relayout(pilot, scr)
+        banner = scr._ask_human_banner
+        assert banner is not None
+        _assert_pill_clear_of_indicator(scr, pill)
+        assert not pill.region.overlaps(banner.region)
 
 
 @pytest.mark.asyncio
