@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import yaml
 from gc_core.agent_store.roles import ROLE_PATTERN
@@ -171,7 +171,34 @@ class CallbacksConfig(BaseModel):
         return secrets or None
 
 
-class WebhookConfig(SurfaceConfig):
+class _ApiDocs(BaseModel):
+    """Документация API поверхности и выключенные ручки (``api_catalog``)."""
+
+    _surface: ClassVar[str]
+    #: ``/docs``, ``/redoc`` и ``/openapi.json`` — только по этому ключу;
+    #: открываются без токена, вызовы из Swagger — с токеном (Authorize).
+    docs: bool = False
+    #: Группы ручек или пути (``"/v1/dialogs*"``, ``"DELETE /v1/x"``): такие
+    #: ручки не обслуживаются (404) и в документацию не попадают.
+    disabled_routes: list[str] = Field(default_factory=list)
+
+    @field_validator("disabled_routes")
+    @classmethod
+    def _known_routes(cls, value: list[str]) -> list[str]:
+        from gc_server.api_catalog import SURFACES, unknown_disabled
+
+        unknown = unknown_disabled(cls._surface, value)
+        if unknown:
+            groups = ", ".join(SURFACES[cls._surface].groups)
+            raise ValueError(
+                f"disabled_routes: нет таких ручек: {', '.join(unknown)} — "
+                f"группы: {groups}; или путь ручки («/v1/…», «МЕТОД /путь»)"
+            )
+        return value
+
+
+class WebhookConfig(_ApiDocs, SurfaceConfig):
+    _surface: ClassVar[str] = "webhook"
     port: int = Field(default=8000, ge=1, le=65535)
     default_system: str = "generic"
     #: Роль агента вебхука: относительный путь — рядом с этим файлом, затем
@@ -225,7 +252,8 @@ class _ChannelModes(SurfaceConfig):
         return value.strip() or None
 
 
-class ChatConfig(_ChannelModes):
+class ChatConfig(_ApiDocs, _ChannelModes):
+    _surface: ClassVar[str] = "chat"
     port: int = Field(default=8090, ge=1, le=65535)
     #: Явный список origin; ``*`` отбрасывается — чужой сайт в браузере.
     cors_origins: list[str] = Field(default_factory=list)
@@ -280,12 +308,13 @@ class A2aConfig(_ChannelModes):
         return value
 
 
-class SwarmConfig(SurfaceConfig):
+class SwarmConfig(_ApiDocs, SurfaceConfig):
     """Ключи песочницы (лимиты, каталоги, обёртка…) проверяет
     ``swarm.config.build_swarm_config``; роль агента в песочнице — свой ключ
     ``agentmd_path``."""
 
     model_config = ConfigDict(extra="allow", frozen=True)
+    _surface: ClassVar[str] = "swarm"
 
     port: int = Field(default=8092, ge=1, le=65535)
     #: Тред задачи — в хранилище тредов сервера (``/logs`` и сообщения в

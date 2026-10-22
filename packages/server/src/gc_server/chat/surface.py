@@ -122,7 +122,11 @@ class ChatSurface:
         )
 
     def app(self) -> FastAPI:
-        return create_app(self.responses, self.completions)
+        from gc_server.api_docs import apply_api_docs
+
+        app = create_app(self.responses, self.completions)
+        apply_api_docs(app, "chat", self.section)
+        return app
 
     async def astart(self) -> None:
         return None
