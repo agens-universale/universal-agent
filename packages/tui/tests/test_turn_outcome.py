@@ -152,3 +152,58 @@ def test_running_without_live_run_reads_interrupted(word, live, shown):
 def test_interrupted_shares_stop_glyph():
     assert outcome_of("interrupted").glyph == outcome_of("stopped").glyph
     assert outcome_of("interrupted").list_label == "прервано"
+
+
+# --- статус ↔ слово ↔ состояние строки: один словарь (решение P3b 21) ----
+
+
+@pytest.mark.parametrize(
+    ("status", "word"),
+    [
+        ("completed", "completed"),
+        ("stopped", "cancelled"),
+        ("failed", "failed"),
+        ("unknown_failed", "failed"),
+        ("interrupted", "interrupted"),
+        ("running", None),
+        ("asking", None),
+        (None, None),
+    ],
+)
+def test_status_word_of_finished_turn(status, word):
+    from gc_tui.services.turn_outcome import word_of_status
+
+    assert word_of_status(status) == word
+
+
+@pytest.mark.parametrize(
+    ("word", "state"),
+    [
+        ("completed", "done"),
+        ("stopped", "cancelled"),
+        ("cancelled", "cancelled"),
+        ("failed", "failed"),
+        ("interrupted", "interrupted"),
+        ("stopped_steps", "stopped_steps"),
+    ],
+)
+def test_indicator_state_of_word(word, state):
+    from gc_tui.services.turn_outcome import indicator_state_of
+
+    assert indicator_state_of(word) == state
+
+
+@pytest.mark.parametrize(
+    ("word", "status"),
+    [
+        ("completed", "completed"),
+        ("stopped", "stopped"),
+        ("cancelled", "stopped"),
+        ("failed", "failed"),
+        ("stopped_judge", "stopped"),
+    ],
+)
+def test_meta_status_of_word(word, status):
+    from gc_tui.services.turn_outcome import meta_status_of
+
+    assert meta_status_of(word) == status

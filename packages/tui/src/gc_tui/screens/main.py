@@ -185,9 +185,12 @@ from gc_tui.services.trace_retention import (
 )
 from gc_tui.services.trace_scroll import reply_above
 from gc_tui.services.turn_outcome import (
+    indicator_state_of,
     kind_of,
+    meta_status_of,
     outcome_word,
     settled_status,
+    word_of_status,
 )
 from gc_tui.services.usage_meter import (
     compose_adaptive_footer_right,
@@ -248,28 +251,6 @@ _DIALOG_CONTINUATION_KINDS = frozenset(
 )
 
 
-# Слово исхода хода (`OUTCOMES`; «stopped» — слово флагов прогона) →
-# meta.tui.status: кэш статуса для списка сессий и заголовка.
-_RUN_STATUS = {
-    "completed": "completed",
-    "stopped": "stopped",
-    "cancelled": "stopped",
-    "failed": "failed",
-    "stopped_steps": "stopped",
-    "stopped_errors": "stopped",
-    "stopped_tokens": "stopped",
-    "stopped_tool_calls": "stopped",
-    "stopped_judge": "stopped",
-}
-# Слово исхода → состояние индикатора; остальные слова совпадают.
-_INDICATOR_STATE = {"completed": "done", "stopped": "cancelled"}
-
-
-def indicator_state_of(word: str) -> str:
-    """Состояние строки-итога индикатора по слову исхода хода."""
-    return _INDICATOR_STATE.get(word, word)
-
-
 def resolve_live_terminal_indicator_state(
     *, outcome: TurnOutcome | None, status, stop_requested
 ):
@@ -280,14 +261,10 @@ def resolve_live_terminal_indicator_state(
     обход _cmd_stop; лимитного исхода статус не различает."""
     if outcome is not None:
         return indicator_state_of(kind_of(outcome)[0])
-    word = status
+    word = word_of_status(status)
     if word == "completed" and stop_requested:
-        word = "stopped"
-    return {
-        "completed": "done",
-        "stopped": "cancelled",
-        "failed": "failed",
-    }.get(word)
+        word = "cancelled"
+    return indicator_state_of(word) if word else None
 
 
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
@@ -2771,12 +2748,7 @@ class TraceScreen(Screen):
         if outcome is not None:
             word, plan = kind_of(outcome)
         else:
-            word = {
-                "completed": "completed",
-                "stopped": "cancelled",
-                "failed": "failed",
-                "interrupted": "interrupted",
-            }.get(self._session_status_word())
+            word = word_of_status(self._session_status_word())
             plan = False
             if word is None:
                 return
@@ -5530,7 +5502,7 @@ class TraceScreen(Screen):
         self._write_tui_meta(
             run_tid,
             {
-                "status": _RUN_STATUS[word],
+                "status": meta_status_of(word),
                 "last_indicator": {"edits": list(edits) if edits else None},
             },
         )
