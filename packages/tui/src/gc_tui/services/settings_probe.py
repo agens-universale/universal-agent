@@ -120,12 +120,17 @@ class AgentRoute:
 
 def agent_route(settings, resolved) -> AgentRoute:
     """Маршрут агента по резолву основной модели (`resolved` — None, если
-    резолв не удался: проба тогда идёт без модели, с одними общими
-    заголовками)."""
+    резолв не удался: проба тогда идёт с `agent.model`, как до резолва, и с
+    одними общими заголовками; заглушку гейтвей с ACL по модели отклонил бы
+    при рабочем агенте)."""
     from gc_core.onboarding import MODEL_SENTINEL
+    from gc_core.settings import settings_of
     from gc_core.utils.connect_backend import connection_probe_headers
 
-    model = resolved.model if resolved is not None else ""
+    if resolved is not None:
+        model = resolved.model
+    else:
+        model = settings_of(settings).agent.model or ""
     if model == MODEL_SENTINEL:  # плейсхолдер шаблона — не имя модели
         model = ""
     headers = connection_probe_headers(settings, resolved)
@@ -212,9 +217,19 @@ def connection_probe_target(
         return replace(form, model=agent.model, headers=agent.headers)
     if not form_edited:
         return own
-    if form.endpoint == own.endpoint:
+    if _same_endpoint(form.endpoint, own.endpoint):
         return replace(form, model=agent.model, headers=agent.headers)
     return replace(form, model="", headers=agent.shared_headers)
+
+
+def _same_endpoint(left: str, right: str) -> bool:
+    """Один ли адрес: косметика (пробелы, хвостовой `/`) адрес не меняет —
+    иначе проба уходила бы в ветку заглушки при том же сервере."""
+
+    def norm(url: str) -> str:
+        return (url or "").strip().rstrip("/")
+
+    return norm(left) == norm(right)
 
 
 def probe(

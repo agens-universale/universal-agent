@@ -419,3 +419,40 @@ def test_route_in_responses_mode_has_no_own_connection():
     )
     assert route.own is None
     assert route.model == "corp/main-model"
+
+
+def test_target_edited_form_with_trailing_slash_keeps_the_model():
+    """Косметика адреса (хвостовой `/`) — тот же адрес: модель записи не
+    подменяется заглушкой."""
+    from gc_tui.services.settings_probe import connection_probe_target
+
+    url = "http://own/v1/chat/completions"
+    target = connection_probe_target(
+        _route(url), _form(endpoint=url + "/"), form_edited=True
+    )
+    assert (target.auth, target.model) == ("Bearer typed", "corp/main-model")
+    assert target.headers == {"x_cl_id": "c", "X-Own": "1"}
+
+
+@pytest.mark.parametrize(
+    ("agent_model", "expected"),
+    [("corp/raw-model", "corp/raw-model"), (None, "")],
+    ids=["raw-model", "sentinel"],
+)
+def test_route_without_resolve_falls_back_to_the_agent_model(
+    agent_model, expected
+):
+    """Резолв `ModelRouter` не удался — проба шлёт `agent.model`, как до
+    правки, а не заглушку: гейтвей с ACL по модели заглушку отклонит.
+    Плейсхолдер шаблона именем модели не считается."""
+    from gc_core.onboarding import MODEL_SENTINEL
+    from gc_testkit.settings import make_settings
+    from gc_tui.services.settings_probe import agent_route
+
+    model = MODEL_SENTINEL if agent_model is None else agent_model
+    settings = make_settings(
+        {"backend.api_mode": "chat_completions", "agent.model": model}
+    )
+    route = agent_route(settings, None)
+    assert route.model == expected
+    assert route.own is None
