@@ -212,8 +212,9 @@ async def _wait_dead(pid: int, limit: float = 2.0) -> bool:
 async def _read_pid(pid_file, limit: float = 5.0) -> int:
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
-        if pid_file.exists() and pid_file.read_text().strip():
-            return int(pid_file.read_text())
+        text = pid_file.read_text().strip() if pid_file.exists() else ""
+        if text:
+            return int(text)
         await asyncio.sleep(0.05)
     raise AssertionError("pid file was not written")
 
@@ -246,6 +247,20 @@ async def test_cancel_kills_hook(tmp_path):
 
 
 @_posix_only
+async def test_timeout_kills_child_after_bash_exit(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(
+        command=f"sleep 600 & echo $! > {pid_file}; echo x", timeout_sec=1
+    )
+    res = await run_hook(
+        plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
+    )
+    assert res.failed
+    assert await _wait_dead(await _read_pid(pid_file))
+
+
+@_posix_only
 async def test_killpg_permission_error_keeps_contract(tmp_path, monkeypatch):
     real_killpg = os.killpg
 
@@ -255,21 +270,23 @@ async def test_killpg_permission_error_keeps_contract(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "killpg", killpg_eperm)
     plugin = load_plugin(_make_plugin(tmp_path))
-    slow = HookCommand(command="sleep 600", timeout_sec=1)
+    pid_file = tmp_path / "pid"
+    slow = HookCommand(command=_pid_command(pid_file), timeout_sec=1)
     res = await run_hook(
         plugin, slow, {}, cwd=str(tmp_path), default_timeout_sec=10
     )
     assert res.failed
+    pid_file.unlink()
     task = asyncio.create_task(
         run_hook(
             plugin,
-            HookCommand(command="sleep 600"),
+            HookCommand(command=_pid_command(pid_file)),
             {},
             cwd=str(tmp_path),
             default_timeout_sec=30,
         )
     )
-    await asyncio.sleep(0.3)
+    await _read_pid(pid_file)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

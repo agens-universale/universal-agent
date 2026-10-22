@@ -90,7 +90,7 @@ def _warn_no_bash_once() -> None:
 
 async def _terminate(proc: asyncio.subprocess.Process) -> None:
     """Убить хук вместе с потомками и дождаться завершения."""
-    if proc.returncode is not None:
+    if sys.platform == "win32" and proc.returncode is not None:
         return
     try:
         if sys.platform == "win32":
