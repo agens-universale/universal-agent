@@ -379,10 +379,16 @@ async def test_closing_the_banner_returns_a_following_trace_to_the_bottom(
     высоту баннера. Опрос экрана принял бы сдвиг за уход человека вверх и
     перестал бы прижимать: ход уже кончился, новых строк не будет, и конец
     плана остался бы под краем экрана. Лента, прижатая к низу до снятия,
-    возвращается вниз; ушедшая вверх — не дёргается."""
-    async with _app(tmp_path).run_test() as pilot:
-        await _with_banner(pilot)
+    возвращается вниз; ушедшая вверх — не дёргается, в том числе когда после
+    раскладки приходит тик опроса (раз в 250 мс)."""
+    from textual.containers import VerticalScroll
+    from textual.widgets import Static
+
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         screen = pilot.app.screen
+        for i in range(80):
+            screen._trace_mount(Static(f"строка плана {i}"))
+        await _with_banner(pilot)
         scrolled = []
         screen._scroll_trace_end = lambda: scrolled.append(True)
 
@@ -393,13 +399,21 @@ async def test_closing_the_banner_returns_a_following_trace_to_the_bottom(
         assert scrolled  # опрос потом может прижать ещё раз
         assert screen._stick_bottom is True
 
+        # Человек ушёл вверх читать план: лента не внизу и не липнет. Только
+        # флаг без прокрутки — не «ушла вверх»: лента у низа, и тик опроса
+        # по праву вернул бы липкость (тест падал под нагрузкой).
         screen._show_plan_banner()
+        trace = screen.query_one("#trace", VerticalScroll)
+        trace.scroll_to(y=10, animate=False)
         await pilot.pause()
         scrolled.clear()
         screen._stick_bottom = False
         screen._hide_plan_banner()
         await pilot.pause()
+        screen._poll_active()  # тик опроса после раскладки
+        await pilot.pause()
         assert scrolled == []
+        assert trace.scroll_offset.y == 10
 
 
 async def test_closing_the_banner_keeps_a_trace_scrolled_up_in_place(
