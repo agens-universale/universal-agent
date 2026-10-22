@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 from gc_core.message_policy.user_message_policy import (
@@ -116,7 +117,7 @@ def test_tail_record_with_equal_seq_is_continuation(tmp_path):
     assert _ids(tail.new_records) == ["turn_outcome"]
     assert tail.new_records[0]["seq"] == 5
     cur = tail.next_cursor
-    raw = open(thread.live, "rb").read()
+    raw = Path(thread.live).read_bytes()
     assert store._on_record_boundary(raw, cur) is True
 
     thread.append(_user("m6"))
@@ -246,28 +247,31 @@ async def test_live_feed_ignores_record(tmp_path):
     assert seen[0]
 
 
-@pytest.mark.asyncio
-async def test_preview_ignores_record(tmp_path):
-    pytest.importorskip("textual")
+def _preview_app(segments: list[dict]):
+    """Приложение с одним превью сегментов (`render_segments_readonly`)."""
+    from gc_tui.services.trace_render import render_segments_readonly
     from textual.app import App
     from textual.containers import VerticalScroll
 
-    from gc_tui.services.trace_render import render_segments_readonly
+    class _A(App):
+        def compose(self):
+            yield VerticalScroll(id="t")
 
+        def on_mount(self):
+            render_segments_readonly(self.query_one("#t"), segments)
+
+    return _A()
+
+
+@pytest.mark.asyncio
+async def test_preview_ignores_record(tmp_path):
+    pytest.importorskip("textual")
     seen = []
     for with_record in (False, True):
         root = tmp_path / str(with_record)
         _records(root, with_record=with_record)
         segments = FileTaskStore(str(root), system=_SYS).read_segments(_TID)
-
-        class _A(App):
-            def compose(self):
-                yield VerticalScroll(id="t")
-
-            def on_mount(self):
-                render_segments_readonly(self.query_one("#t"), segments)
-
-        async with _A().run_test() as pilot:
+        async with _preview_app(segments).run_test() as pilot:
             await pilot.pause()
             seen.append(_widgets(pilot.app.query_one("#t")))
     assert seen[0] == seen[1]

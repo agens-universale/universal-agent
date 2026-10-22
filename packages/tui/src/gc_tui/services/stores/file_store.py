@@ -282,7 +282,8 @@ class FileTaskStore:
 
     @staticmethod
     def _compacted_by(seg: list[dict], leading: dict) -> dict:
-        """Сводка сжатия сегмента seg; leading — dialog_summary следующего файла.
+        """Сводка сжатия сегмента seg; leading — dialog_summary следующего
+        файла.
 
         Счёт и объём — только по сообщениям: запись итога хода сообщением
         не является."""

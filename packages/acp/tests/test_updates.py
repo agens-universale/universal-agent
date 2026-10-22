@@ -891,13 +891,13 @@ def test_history_title_path_is_relative_to_the_session_cwd():
 
 def _replay_of_thread(threads_dir, *, with_outcome: bool) -> list[dict]:
     """Проигрыш ACP с диска: тот же загрузчик, что у ``ThreadSession``."""
+    from gc_acp.session_index import ACP_SYSTEM
     from gc_core.persistence.turn_outcome import TurnOutcome
     from gc_core.thread_store import (
         append_new_thread_messages,
         append_turn_outcome_record,
         load_thread_messages,
     )
-    from gc_acp.session_index import ACP_SYSTEM
 
     turns = [
         [
@@ -949,3 +949,63 @@ def test_history_ignores_turn_outcome_records(tmp_path):
 
     assert recorded == plain
     assert plain
+
+
+def _tail_updates(path, *, with_outcome: bool) -> list[dict]:
+    """Живой хвост jsonl хода (``ToolFlow``): вызов, итог хода, ответ."""
+    from gc_acp.tool_flow import ToolFlow
+
+    lines = [
+        {
+            "type": "message",
+            "payload": {
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "c1",
+                "arguments": '{"command": "pytest -q"}',
+            },
+        },
+        {
+            "type": "message",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": "ok",
+            },
+        },
+    ]
+    if with_outcome:
+        lines.append(
+            {
+                "type": "turn_outcome",
+                "seq": 2,
+                "outcome": {
+                    "v": 1,
+                    "status": "done",
+                    "reason": None,
+                    "opened_by": None,
+                    "started_at": "2026-10-22T11:32:00.000Z",
+                    "ended_at": "2026-10-22T11:32:12.000Z",
+                    "duration_sec": 12.0,
+                    "error": None,
+                },
+            }
+        )
+    path.write_text("", encoding="utf-8")
+    flow = ToolFlow(str(path))
+    with path.open("a", encoding="utf-8") as handle:
+        for line in lines:
+            handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+    return flow.poll()
+
+
+def test_live_tail_ignores_turn_outcome_record(tmp_path):
+    """Живой хвост хода в ACP запись итога ядра не показывает."""
+    plain = _tail_updates(tmp_path / "plain.jsonl", with_outcome=False)
+    recorded = _tail_updates(tmp_path / "rec.jsonl", with_outcome=True)
+
+    assert recorded == plain
+    assert [u["sessionUpdate"] for u in plain] == [
+        "tool_call",
+        "tool_call_update",
+    ]
