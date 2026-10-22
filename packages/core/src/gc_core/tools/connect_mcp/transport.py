@@ -4,11 +4,25 @@
 """
 
 import asyncio
+import contextlib
+import hashlib
 import json
 import queue
+import re
+import subprocess
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from pathlib import Path
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import httpx
 
@@ -443,6 +457,136 @@ def _stdio_command(
     return cmd, cwd, env
 
 
+# --- stderr stdio-сервера ----------------------------------------------------
+#
+# Раньше stderr уходил в ``DEVNULL``, и сервер, упавший при старте
+# (``ModuleNotFoundError`` в его venv), выглядел на экране ``/mcp`` как
+# «нет соединения с ddgs-mcp» — без единого слова о причине. Теперь stderr
+# пишется в лог сервера в каталоге состояния gc, перезаписываемый на каждом
+# старте. Именно файл, а не ``PIPE``: непрочитанный pipe переполняется, и
+# долгоживущий сервер встаёт на записи в stderr. Буфер с фоновым читателем
+# тоже годился бы, но пути к логу у него нет, а лог целиком бывает нужен.
+
+#: Сколько хвоста лога читать в поисках последней строки: причина падения —
+#: в конце, а лог долгоживущего сервера может быть большим.
+_STDERR_TAIL_BYTES = 64 * 1024
+#: Потолок строки причины: на экране ``/mcp`` она идёт одной строкой.
+_STDERR_LINE_MAX = 300
+#: Сколько ждать, пока процесс без ответа на ``initialize`` завершится. EOF
+#: stdout приходит раньше, чем выставляется код выхода.
+_STARTUP_EXIT_GRACE_SEC = 1.0
+
+
+class McpServerExitedError(ConnectionError):
+    """stdio-сервер завершился, не ответив на ``initialize``.
+
+    Наследник ``ConnectionError``: для всех, кто ловил обрыв трубы, это
+    по-прежнему «нет соединения», меняется только текст причины.
+    """
+
+    def __init__(self, last_line: str, log_path: Path) -> None:
+        self.last_line = last_line
+        self.log_path = log_path
+        super().__init__(
+            f"сервер завершился при старте: {last_line} (лог: {log_path})"
+        )
+
+
+def _stderr_log_path(server_cfg: Dict[str, Any]) -> Path:
+    """Лог stderr: ``<state>/mcp/<команда>[-<хэш args>].stderr.log``.
+
+    Имени сервера на этом уровне нет — транспорт видит только его конфиг.
+    Хэш аргументов разводит серверы с одной командой (``python -m …``).
+    """
+    from gc_core.config_modules.env_vars import gc_paths
+
+    command = str(server_cfg.get("command") or "server")
+    name = Path(command).name or "server"
+    args = server_cfg.get("args")
+    if args:
+        argv = json.dumps(
+            [str(a) for a in args] if isinstance(args, list) else [str(args)]
+        )
+        digest = hashlib.sha1(argv.encode("utf-8"), usedforsecurity=False)
+        name = f"{name}-{digest.hexdigest()[:8]}"
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+    return gc_paths()["state"] / "mcp" / f"{name}.stderr.log"
+
+
+@contextlib.contextmanager
+def _stderr_log(
+    server_cfg: Dict[str, Any],
+) -> Iterator[Tuple[Any, Optional[Path]]]:
+    """``(куда писать stderr, путь лога)`` на время запуска процесса.
+
+    Наш дескриптор закрывается сразу после спавна: у процесса своя копия.
+    Лог не открылся (каталог только на чтение) — ``DEVNULL`` и пути нет:
+    диагностика не повод не запустить сервер.
+    """
+    path = _stderr_log_path(server_cfg)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = path.open("wb")
+    except OSError:
+        yield subprocess.DEVNULL, None
+        return
+    try:
+        yield handle, path
+    finally:
+        handle.close()
+
+
+def _last_stderr_line(path: Path) -> str:
+    """Последняя непустая строка лога; пусто — причины нет."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - _STDERR_TAIL_BYTES))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    for raw in reversed(tail.splitlines()):
+        line = raw.strip()
+        if line:
+            return line[:_STDERR_LINE_MAX]
+    return ""
+
+
+def _startup_exit_error(
+    returncode: Optional[int], log_path: Optional[Path]
+) -> Optional[McpServerExitedError]:
+    """Ошибка «сервер завершился при старте», если её есть чем подкрепить.
+
+    Процесс жив (``returncode is None``) или stderr пуст — ``None``, и
+    вызывающий оставляет прежнее поведение.
+    """
+    if returncode is None or log_path is None:
+        return None
+    line = _last_stderr_line(log_path)
+    return McpServerExitedError(line, log_path) if line else None
+
+
+async def _astartup_exit_error(
+    proc: Any, log_path: Optional[Path]
+) -> Optional[McpServerExitedError]:
+    """Асинхронная форма для ``asyncio``-подпроцесса одноразового обмена."""
+    deadline = time.monotonic() + _STARTUP_EXIT_GRACE_SEC
+    while proc.returncode is None and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    return _startup_exit_error(proc.returncode, log_path)
+
+
+def _wait_startup_exit_error(
+    proc: "subprocess.Popen", log_path: Optional[Path]
+) -> Optional[McpServerExitedError]:
+    """Синхронная форма для ``Popen`` долгоживущей сессии."""
+    try:
+        proc.wait(timeout=_STARTUP_EXIT_GRACE_SEC)
+    except subprocess.TimeoutExpired:
+        return None
+    return _startup_exit_error(proc.returncode, log_path)
+
+
 # Потолок строки JSON-RPC у asyncio-подпроцесса. Дефолт ``StreamReader`` —
 # 64 КиБ, и на строке длиннее ``readline()`` бросает ``ValueError: Separator
 # is not found, and chunk exceed the limit``, теряя буфер. Через этот порог
@@ -453,19 +597,20 @@ def _stdio_command(
 _STDIO_READ_LIMIT = 32 * 1024 * 1024
 
 
-async def _aspawn_stdio_process(server_cfg: Dict[str, Any]):
+async def _aspawn_stdio_process(server_cfg: Dict[str, Any], stderr: Any):
     """Запустить процесс MCP-сервера на текущем loop.
 
     Годится только для ОДНОРАЗОВОГО обмена: asyncio-подпроцесс привязан к
     своему loop, и на чужом падает с RuntimeError (проверено). Долгоживущая
     сессия поэтому осталась на ``subprocess.Popen`` — см. ``persistent_stdio``.
+    ``stderr`` — из ``_stderr_log``.
     """
     cmd, cwd, env = _stdio_command(server_cfg)
     return await asyncio.create_subprocess_exec(
         *cmd,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=stderr,
         cwd=cwd,
         env=env,
         limit=_STDIO_READ_LIMIT,
@@ -538,18 +683,20 @@ async def _astdio_exchange(
     было нечем, и ``selectors`` на Windows с pipe не работает. Корутину
     прервать можно, поэтому поток на этом пути больше не нужен.
     """
-    proc = await _aspawn_stdio_process(server_cfg)
+    with _stderr_log(server_cfg) as (stderr, log_path):
+        proc = await _aspawn_stdio_process(server_cfg, stderr)
     results: List[Dict[str, Any]] = []
     try:
-        for payload, expect_response in steps:
-            proc.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
-            await proc.stdin.drain()
-            if not expect_response:
-                results.append({})
-                continue
-            results.append(
-                await _aread_response(proc, timeout, payload.get("id"))
-            )
+        try:
+            await _aexchange_steps(proc, timeout, steps, results)
+        except OSError as exc:
+            # Обрыв трубы до ответа на initialize — чаще всего сервер упал
+            # при старте. Причина в его stderr, а не в «нет соединения».
+            await _araise_if_exited_at_start(proc, log_path, results, exc)
+            raise
+        # Пустой ответ на initialize от умершего процесса раньше молча
+        # становился «сессией без тулов».
+        await _araise_if_exited_at_start(proc, log_path, results)
     finally:
         # Закрываем stdin ДО терминации: многие серверы по EOF корректно
         # завершают свой event loop сами, и тогда SIGTERM/SIGKILL не нужны
@@ -562,6 +709,41 @@ async def _astdio_exchange(
             pass
         await _akill_process(proc)
     return results
+
+
+async def _aexchange_steps(
+    proc: Any,
+    timeout: float,
+    steps: List[Tuple[Dict[str, Any], bool]],
+    results: List[Dict[str, Any]],
+) -> None:
+    """Шаги обмена по порядку; ответы копятся в ``results`` по мере прихода."""
+    for payload, expect_response in steps:
+        proc.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
+        await proc.stdin.drain()
+        if not expect_response:
+            results.append({})
+            continue
+        results.append(await _aread_response(proc, timeout, payload.get("id")))
+
+
+async def _araise_if_exited_at_start(
+    proc: Any,
+    log_path: Optional[Path],
+    results: List[Dict[str, Any]],
+    cause: Optional[BaseException] = None,
+) -> None:
+    """Бросить :class:`McpServerExitedError`, если сервер умер до initialize.
+
+    Первый шаг каждого обмена — initialize, поэтому «до initialize» — это
+    пустой или отсутствующий ``results[0]``. Сервер ответил, жив или молчал
+    в stderr — ничего не делаем, вызывающий ведёт себя как раньше.
+    """
+    if results and results[0]:
+        return
+    exited = await _astartup_exit_error(proc, log_path)
+    if exited is not None:
+        raise exited from cause
 
 
 async def _akill_process(proc) -> None:

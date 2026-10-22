@@ -53,6 +53,7 @@ import signal
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.mcp_session_owner import current_owner
@@ -62,6 +63,8 @@ from gc_core.tools.connect_mcp.transport import (
     _areadline_with_timeout,
     _readline_with_timeout,
     _resolve_command,
+    _stderr_log,
+    _wait_startup_exit_error,
     forget_stdio_reader,
 )
 from gc_core.utils.aio_compat import run_coro_blocking
@@ -75,6 +78,7 @@ _CANCEL_DRAIN_BUDGET_SEC = 3.0
 
 def _spawn_detached_stdio_process(
     server_cfg: Dict[str, Any],
+    stderr: Any = subprocess.DEVNULL,
 ) -> subprocess.Popen:
     """
     Запуск stdio MCP-сервера как лидера собственной сессии/process group.
@@ -85,6 +89,9 @@ def _spawn_detached_stdio_process(
     и продолжают жить после завершения агента. Вывод целиком (parent + все
     дети) лечится только групповым сигналом, для которого нужен отдельный
     process group — его и создаём здесь.
+
+    ``stderr`` сессия передаёт из ``_stderr_log`` — лог сервера в каталоге
+    состояния gc; ``DEVNULL`` по умолчанию остался для прямых вызовов.
     """
     command = server_cfg.get("command")
     if not command:
@@ -105,7 +112,7 @@ def _spawn_detached_stdio_process(
     popen_kwargs: Dict[str, Any] = dict(
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr,
         cwd=cwd,
         env=env,
         text=True,
@@ -325,11 +332,34 @@ class PersistentStdioSession:
             except Exception:
                 pass
 
-        self._proc = _spawn_detached_stdio_process(self._server_cfg)
+        with _stderr_log(self._server_cfg) as (stderr, log_path):
+            self._proc = _spawn_detached_stdio_process(
+                self._server_cfg, stderr
+            )
         self._next_id = 2
-        self._write_line(_INIT_PAYLOAD)
-        # Ответ на initialize читаем, но его содержимое нам не нужно.
-        self._read_matching(_INIT_PAYLOAD["id"], timeout)
+        self._handshake(timeout, log_path)
+
+    def _handshake(self, timeout: float, log_path: Optional[Path]) -> None:
+        """initialize + initialized; умерший при старте сервер — с причиной.
+
+        Без ответа на initialize от мёртвого процесса раньше было «нет
+        соединения» (обрыв трубы на следующей записи) — без причины. Теперь
+        последняя строка его stderr: «сервер завершился при старте: …».
+        """
+        proc = self._proc
+        try:
+            self._write_line(_INIT_PAYLOAD)
+            # Содержимое ответа на initialize нам не нужно — только факт.
+            answered = self._read_matching(_INIT_PAYLOAD["id"], timeout)
+        except OSError as exc:
+            exited = _wait_startup_exit_error(proc, log_path)
+            if exited is not None:
+                raise exited from exc
+            raise
+        if not answered:
+            exited = _wait_startup_exit_error(proc, log_path)
+            if exited is not None:
+                raise exited
         self._write_line(_INITIALIZED_PAYLOAD)
 
     def call(
