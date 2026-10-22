@@ -19,7 +19,7 @@
 #                           (--inbox вместо -q).
 #     SWARM_THREAD_IN_STORE=1 и SWARM_THREAD_SOCKET_DIR — тред задачи в
 #                           хранилище сервера: каталог сокета прокси треда
-#                           монтируется в /run/gc-thread, путь сокета — в
+#                           монтируется в /run/gc-thread только на чтение, путь сокета — в
 #                           GC_THREAD_SOCKET (токен GC_THREAD_TOKEN — из
 #                           окружения сервера).
 #
@@ -176,8 +176,10 @@ if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
     --chdir /work
   )
   if [[ "${SWARM_THREAD_IN_STORE:-}" == "1" && -n "${SWARM_THREAD_SOCKET_DIR}" ]]; then
+    # Только на чтение: подключиться к сокету можно, писать в каталог хоста
+    # (мимо disk_mb, в память хоста при /tmp на tmpfs) — нет.
     BWRAP_CMD+=(
-      --bind "${SWARM_THREAD_SOCKET_DIR}" "${THREAD_SOCKET_MOUNT}"
+      --ro-bind "${SWARM_THREAD_SOCKET_DIR}" "${THREAD_SOCKET_MOUNT}"
       --setenv GC_THREAD_SOCKET "${THREAD_SOCKET_MOUNT}/thread.sock"
     )
   fi

@@ -391,3 +391,35 @@ def test_task_that_did_not_complete_is_not_continued(
     assert body["pending_messages"] == 1
     assert body["swarm"]["status"] == status
     assert not os.path.exists(access.socket_dir)
+
+
+def test_message_racing_the_sandbox_exit_is_continued(surface, monkeypatch):
+    """Ревью, раунд 2 (№13): песочница вышла, пока сообщение ложилось во
+    входящий поток, и обход прокси в этот момент не нашёл недоставленного.
+    Обход не закрывает прокси задачи, в которую идёт запись: следующий
+    обход видит сообщение и продолжает задачу, а не теряет его."""
+    continued = []
+
+    def fake_continue(swarm_cfg, *, system, task_id, thread):
+        continued.append((system, task_id))
+        return 99999
+
+    monkeypatch.setattr(
+        "gc_server.swarm.runner.continue_swarm_process", fake_continue
+    )
+    real_submit = Threads.submit
+    raced = []
+
+    async def racing_submit(self, key, message, **kwargs):
+        if not raced:
+            raced.append(key)
+            _sandbox_exited(surface)
+            await surface._afollow_finished_tasks()
+        return await real_submit(self, key, message, **kwargs)
+
+    monkeypatch.setattr(Threads, "submit", racing_submit)
+    with TestClient(surface.app(), base_url=LOOPBACK_URL) as client:
+        _queued_message(client)
+        client.portal.call(surface._afollow_finished_tasks)
+    assert raced, "гонка не воспроизведена"
+    assert continued == [("g", "t1")]

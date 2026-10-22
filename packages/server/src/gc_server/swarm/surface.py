@@ -85,6 +85,9 @@ class SwarmSurface:
         self.monitor: SwarmMonitor | None = None
         #: Прокси треда идущих задач (``thread_in_store``): sid → прокси.
         self._proxies: Dict[str, ThreadProxy] = {}
+        #: Задачи, в чей входящий поток сейчас идёт запись: обход прокси их
+        #: не закрывает — недоставленное он увидит после записи.
+        self._submitting: dict[str, int] = {}
         self._proxy_watch: asyncio.Task | None = None
         # Чтение meta → решение «отказ или старт» → запись meta и Popen —
         # одним куском: два одинаковых запроса не запускают две песочницы.
@@ -250,10 +253,18 @@ class SwarmSurface:
         await self._reject_foreign_thread(key)
         if self._in_store and self._active(sid):
             # Тред задачи в хранилище сервера: сообщение — во входящий поток, его
-            # заберёт ход gc-cli в песочнице (опросом ядра).
-            receipt = await self.runtime.threads("swarm").submit(
-                key, message, op_id=op_id, source="swarm"
-            )
+            # заберёт ход gc-cli в песочнице (опросом ядра). Песочница может
+            # выйти, пока запись идёт: обход прокси её задачу в это время не
+            # закрывает, а после записи увидит недоставленное и продолжит.
+            self._submitting[sid] = self._submitting.get(sid, 0) + 1
+            try:
+                receipt = await self.runtime.threads("swarm").submit(
+                    key, message, op_id=op_id, source="swarm"
+                )
+            finally:
+                left = self._submitting.pop(sid) - 1
+                if left:
+                    self._submitting[sid] = left
             return {
                 "status": "queued",
                 "message_seq": receipt.max_seq.get("inbox"),
@@ -322,7 +333,12 @@ class SwarmSurface:
         недоставленное — продолжение в той же песочнице (если задача
         завершилась штатно) или ``failed`` (песочницы уже нет). Иначе
         прокси треда закрывается."""
-        for sid in [sid for sid in self._proxies if not self._active(sid)]:
+        finished = [
+            sid
+            for sid in self._proxies
+            if not self._active(sid) and sid not in self._submitting
+        ]
+        for sid in finished:
             if not await self._acontinue(sid):
                 await self._aclose_proxies([sid])
 

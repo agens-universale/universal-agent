@@ -235,8 +235,9 @@ def _bwrap_args(tmp_path, **env):
 
 
 def test_sandbox_mounts_the_thread_socket(tmp_path):
-    """Каталог сокета прокси — в песочнице по известному пути; CLI находит
-    сокет через GC_THREAD_SOCKET."""
+    """Каталог сокета прокси — в песочнице по известному пути и только на
+    чтение (подключиться к сокету можно, писать в каталог хоста — нет:
+    ревью, раунд 2, R8); CLI находит сокет через GC_THREAD_SOCKET."""
     sockets = tmp_path / "gct"
     sockets.mkdir()
     triples = _bwrap_args(
@@ -244,7 +245,8 @@ def test_sandbox_mounts_the_thread_socket(tmp_path):
         SWARM_THREAD_IN_STORE="1",
         SWARM_THREAD_SOCKET_DIR=str(sockets),
     )
-    assert ["--bind", str(sockets), "/run/gc-thread"] in triples
+    assert ["--ro-bind", str(sockets), "/run/gc-thread"] in triples
+    assert ["--bind", str(sockets), "/run/gc-thread"] not in triples
     assert [
         "--setenv",
         "GC_THREAD_SOCKET",
