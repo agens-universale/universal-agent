@@ -9,14 +9,14 @@ import asyncio
 import io
 import os
 
-from PIL import Image
-
 from gc_core.attachments.model import ORIGIN_USER, user_label
 from gc_core.attachments.normalize import normalize_image
 from gc_core.attachments.store import IMAGES_DIRNAME, ImageStore
 from gc_core.thread_store import ThreadSession
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import ThreadKey
+from gc_testkit import run_coro
+from PIL import Image
 
 
 def delete_thread(threads_dir: str, system: str, thread: str) -> None:
@@ -33,13 +33,15 @@ def _png(color: str) -> bytes:
 
 def _snap(threads_dir: str, thread_id: str, color: str):
     store = ImageStore.for_threads_dir(threads_dir)
-    return store.snapshot(
-        normalize_image(_png(color)),
-        "cli",
-        thread_id,
-        origin=ORIGIN_USER,
-        label=user_label(1),
-        source="shot.png",
+    return run_coro(
+        store.asnapshot(
+            normalize_image(_png(color)),
+            "cli",
+            thread_id,
+            origin=ORIGIN_USER,
+            label=user_label(1),
+            source="shot.png",
+        )
     )
 
 

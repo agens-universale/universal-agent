@@ -397,13 +397,14 @@ async def test_stock_profiles_and_children_make_no_probe_with_attachment(
 async def test_custom_image_bench_requires_successful_probe(
     tmp_path, monkeypatch
 ):
+    import base64
+    import json
+
     import httpx
     from gc_core import processing_responses as pr
     from gc_core.tools.registry import get_builtin_tools_data
     from gc_core.vision import probe
     from test_image_rejection_retry import OK, _ctx, _state, _user_with_image
-    import base64
-    import json
 
     def pngs(request):
         # Как `vision/test_vision_probe_flow.pngs`: импорт из соседнего каталога
@@ -443,7 +444,9 @@ async def test_custom_image_bench_requires_successful_probe(
     )
     assert len(spy.requests) == 2
     assert pngs(spy.requests[0]) == [challenge.png]
-    assert pngs(spy.requests[1]) == [ctx.image_store.read_for_send(att)]
+    assert pngs(spy.requests[1]) == [
+        (await ctx.image_store.aread_for_send(att))
+    ]
     assert state.vision_audience.native is not None
     assert b'"fs_view_image"' in spy.requests[1].content
 

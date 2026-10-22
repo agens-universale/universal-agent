@@ -122,7 +122,7 @@ class ImageStore:
             image, att_id, path, origin=origin, label=label, source=source
         )
 
-    def commit(
+    async def acommit(
         self, att: Attachment, system_id: str, thread_id: str
     ) -> Attachment:
         """Копия из кармана в файл треда; вложение — с новым путём.
@@ -149,7 +149,7 @@ class ImageStore:
                 return att
         return replace(att, path=path)
 
-    def snapshot(
+    def _snapshot_file(
         self,
         image: NormalizedImage,
         system_id: str,
@@ -166,7 +166,7 @@ class ImageStore:
             image, att_id, path, origin=origin, label=label, source=source
         )
 
-    def read_for_send(self, att: Attachment) -> bytes | None:
+    async def aread_for_send(self, att: Attachment) -> bytes | None:
         """Байты для запроса; ``None`` — файла нет или хеш не совпал с ``att.id``."""
         try:
             with open(att.path, "rb") as handle:
@@ -179,11 +179,6 @@ class ImageStore:
     # без файлов (StoreImageStore) это ввод-вывод хранилища. Копия и чтение —
     # на loop, как у файловых тулов; снимок (запись сотен КБ) — в потоке.
 
-    async def acommit(
-        self, att: Attachment, system_id: str, thread_id: str
-    ) -> Attachment:
-        return self.commit(att, system_id, thread_id)
-
     async def asnapshot(
         self,
         image: NormalizedImage,
@@ -195,7 +190,7 @@ class ImageStore:
         source: str,
     ) -> Attachment:
         return await asyncio.to_thread(
-            self.snapshot,
+            self._snapshot_file,
             image,
             system_id,
             thread_id,
@@ -203,9 +198,6 @@ class ImageStore:
             label=label,
             source=source,
         )
-
-    async def aread_for_send(self, att: Attachment) -> bytes | None:
-        return self.read_for_send(att)
 
     def delete_thread_images(self, system_id: str, thread_id: str) -> None:
         """Удалить файлы треда; отказ по одному файлу не срывает сброс.

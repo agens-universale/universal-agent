@@ -8,12 +8,12 @@ import io
 import json
 import os
 
-from PIL import Image
-
 from gc_core.attachments.model import ORIGIN_USER, user_label
 from gc_core.attachments.normalize import normalize_image
 from gc_core.attachments.store import ImageStore
 from gc_server.cleanup_threads import cleanup_threads
+from gc_testkit import run_coro
+from PIL import Image
 
 OLD = "2020-01-01T00:00:00+00:00"
 
@@ -35,13 +35,15 @@ def _thread(threads, tid: str, updated_at: str) -> None:
 
 
 def _snap(threads, tid: str, color: str):
-    return ImageStore.for_threads_dir(str(threads)).snapshot(
-        normalize_image(_png(color)),
-        "srv",
-        tid,
-        origin=ORIGIN_USER,
-        label=user_label(1),
-        source="shot.png",
+    return run_coro(
+        ImageStore.for_threads_dir(str(threads)).asnapshot(
+            normalize_image(_png(color)),
+            "srv",
+            tid,
+            origin=ORIGIN_USER,
+            label=user_label(1),
+            source="shot.png",
+        )
     )
 
 

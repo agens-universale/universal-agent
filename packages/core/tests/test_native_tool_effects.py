@@ -328,6 +328,7 @@ async def test_view_image_worker_probes_the_model_of_the_actual_call(
     ctx, worker, _ = setup_ports(config, ViewImage)
     if level_field == "turn_level":
         from dataclasses import asdict
+
         from gc_core.execution.contracts import ToolVisionView
 
         async def legacy_effect(request):
@@ -415,7 +416,9 @@ async def test_view_image_snapshot_crosses_the_effect_boundary(
     snapshot = state.pending_tool_attachments[0]
     from gc_core.attachments.model import Attachment
 
-    stored = worker.image_store.read_for_send(Attachment.from_dict(snapshot))
+    stored = await worker.image_store.aread_for_send(
+        Attachment.from_dict(snapshot)
+    )
     assert stored, "файл снимка лежит в хранилище воркера"
 
 

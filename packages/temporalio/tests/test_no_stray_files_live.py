@@ -1,8 +1,8 @@
 """Ход под Temporal не оставляет файлов вне хранилища тредов и рабочей папки.
 
 HOME, TMPDIR и каталог состояния gc подменены на временные. Хранилище —
-SQLite (умеет файлы треда): картинка ``fs_view_image`` ложится в него, а не
-на диск воркера; лог прогона по умолчанию — не файлом (``save_logs: false``
+SQLite: картинка ``fs_view_image`` ложится в него вложением треда
+(``put_blob``), а не на диск воркера; лог прогона по умолчанию — не файлом (``save_logs: false``
 под Temporal). Любой новый файл вне белого списка роняет тест — так новая
 запись мимо хранилища видна сразу.
 """
@@ -139,6 +139,6 @@ async def test_turn_leaves_no_files_outside_store_and_workspace(
                 "WHERE system='sdk' AND thread_id='t1'"
             )
         ]
-    assert any(name.startswith("images/") for name in names), (names, outputs)
+    assert any(name.endswith(".png") for name in names), (names, outputs)
     assert (ws / "out.txt").read_text() == "x"
     assert not os.path.exists(ws / "images")
