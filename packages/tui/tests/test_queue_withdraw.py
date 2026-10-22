@@ -180,6 +180,7 @@ async def test_admitted_message_shows_footer_hint_and_stays(tmp_path):
         await _up(pilot)
         assert runner.withdrawn == [runner.added[1]["id"]]
         assert _footer(pilot) == QUEUE_ADMITTED_HINT
+        assert pilot.app.screen._footer_hint_tone == "warn"
         assert _texts(pilot) == ["первое", "второе"]
         assert _inp(pilot).text == ""
         assert len(_pending_records(tmp_path)) == 2

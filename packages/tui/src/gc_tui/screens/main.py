@@ -1713,9 +1713,10 @@ class TraceScreen(Screen):
         return str(Path.cwd())
 
     def _show_footer_refusal(
-        self, text: str, tone: Optional[str] = None
+        self, text: str, tone: Optional[str] = "warn"
     ) -> None:
-        """Содержательный отказ («✗ не сохранено: <причина>») в слоте футера.
+        """Содержательный отказ («✗ не сохранено: <причина>») в слоте футера;
+        цвет отказа — WARN, у всех отказов слота (`tone=None` — совет).
 
         Отдельно от `_show_footer_hint`: у отказа есть причина с координатой
         («slots.default: алиас "ghost" не найден…»), и 2-секундного дефолта
@@ -1755,7 +1756,7 @@ class TraceScreen(Screen):
     def _show_footer_tip(self, text: str) -> None:
         """Совет в слоте футера (подсказки картинок) — по канону отказа: 5 с,
         следующее действие человека гасит его раньше."""
-        self._show_footer_refusal(text)
+        self._show_footer_refusal(text, tone=None)
 
     def _footer_tip_fits(self) -> bool:
         """Совету есть где прозвучать: перед человеком поле ввода, оно принимает ввод, и
@@ -3047,7 +3048,7 @@ class TraceScreen(Screen):
             return False
         reply = tail[-1]
         if not runner.withdraw_message(reply.message_id):
-            self._show_footer_hint(QUEUE_ADMITTED_HINT)
+            self._show_footer_refusal(QUEUE_ADMITTED_HINT)
             return True
         self._pending_user_widgets.pop(reply.client_id, None)
         self._remove_pending_record(reply.client_id)
@@ -8580,9 +8581,7 @@ class TraceScreen(Screen):
             toggle_unavailable_hint(self.app, name, arg) if arg else None
         )
         if unavailable:
-            self._show_footer_hint(
-                f"/{name} {arg} — {unavailable}", seconds=5.0
-            )
+            self._show_footer_refusal(f"/{name} {arg} — {unavailable}")
             return
         self._show_footer_hint(
             toggle_info_line(name, toggle_state(self.app, name)), seconds=5.0
@@ -8673,7 +8672,7 @@ class TraceScreen(Screen):
             elif ev.kind in ("result", "error"):
                 result_ev = ev
         if call_ev is not None and is_light_payload(call_ev):
-            self._show_footer_hint(RETENTION_DETAIL_HINT, seconds=5.0)
+            self._show_footer_refusal(RETENTION_DETAIL_HINT)
             return
         if call_ev is None:
             call_ev, result_ev = self._resolve_nested_detail_events(
@@ -8681,7 +8680,7 @@ class TraceScreen(Screen):
             )
         if call_ev is None:
             if message.call_id and message.call_id in self._nested_tool_rows:
-                self._show_footer_hint(NESTED_NO_DETAIL, seconds=3.0)
+                self._show_footer_refusal(NESTED_NO_DETAIL)
             return
         self.app.push_screen(
             ToolCallDetailScreen(
