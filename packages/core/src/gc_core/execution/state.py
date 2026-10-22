@@ -136,6 +136,9 @@ STATE_FIELDS = ROUTING_FIELDS + (
 #: §9) и в снимок не идут — после восстановления берут эти умолчания.
 TRANSIENT_STATE_DEFAULTS = {
     "closing_reply": str,
+    # «Прогон что-то выдал» — для отката отправки во фронтенде; живёт в
+    # памяти прогона, снимок его не несёт.
+    "produced_output": bool,
     "vision_audience": lambda: None,
     "vision_live_ids": frozenset,
     "vision_request_limit": lambda: None,

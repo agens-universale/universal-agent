@@ -152,6 +152,10 @@ class State(ExecutionState):
         self.turn_tool_calls: int = (
             0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)
         )
+        # Прогон что-то выдал или сделал: дельта стрима, запись агента в
+        # тред, старт тула. До этого фронтенд вправе отменить отправку без
+        # следов. Служебные записи (реплика, техзаметки) не в счёт.
+        self.produced_output: bool = False
         self.terminal_outcome: Optional[str] = (
             None  # None | "step_limit" | "tool_errors" | "plan_proposed" | "judge_unavailable"
         )

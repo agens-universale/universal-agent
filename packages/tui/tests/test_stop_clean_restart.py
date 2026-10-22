@@ -22,7 +22,6 @@ async def test_cmd_stop_sets_indicator_cancelled():
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
-        scr._events_since_last_user_send = 5  # не cancel-with-undo
         pilot.app.active_runner = _FakeRunner()
         # Смонтировать индикатор
         scr._show_thinking_indicator()
@@ -54,7 +53,6 @@ async def test_cmd_stop_no_stopped_trace_row_when_run_cancelled():
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
-        scr._events_since_last_user_send = 5
         pilot.app.active_runner = _FakeRunner()
         scr._cmd_stop()
         await pilot.pause()
@@ -84,7 +82,6 @@ async def test_cmd_stop_marks_runner_stopped_and_clears_active():
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
-        scr._events_since_last_user_send = 5
         fake = _FakeRunner()
         pilot.app.active_runner = fake
         scr._cmd_stop()

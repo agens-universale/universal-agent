@@ -174,6 +174,9 @@ class AgentRunner:
         # стампа терминального статуса (main._poll_active) пропускает "compact",
         # чтобы ручной /compact не перетирал прежний терминал-статус на completed.
         self._thread_kind: str = ""
+        #: Состояние исполнителя на запуске прогона — прошлого прогона: новое
+        #: исполнитель привязывает позже, в рабочем потоке.
+        self._state_before_run: Any = None
         self._confirm_event = threading.Event()
         self._confirm_choice: str = "deny_once"
         # Runner сняли (замена, сброс, выход приложения) — логгер его прогона
@@ -349,6 +352,21 @@ class AgentRunner:
         if probe is None or self._thread_kind != "run":
             return None
         return probe()
+
+    def produced_output(self) -> bool:
+        """Текущий прогон уже что-то выдал или сделал (решает ядро:
+        ``State.produced_output``) — отправку не откатить. Иная работа
+        (``/compact``) — не отправка, откатывать нечего: True."""
+        if self._thread_kind != "run":
+            return True
+        state = self._executor_state()
+        if state is None or state is self._state_before_run:
+            return False
+        return bool(getattr(state, "produced_output", False))
+
+    def _executor_state(self) -> Any:
+        get_state = getattr(self._executor, "get_state", None)
+        return get_state() if get_state is not None else None
 
     def call_level(self) -> Optional[str]:
         """Фактический уровень подготовленного вызова из State, независимо от режима.
@@ -544,6 +562,7 @@ class AgentRunner:
         """Завести воркер прогона. Звать под `_lock`; запускает вызывающий."""
         self._drop_stale_answers()
         self._thread_kind = "run"
+        self._state_before_run = self._executor_state()
         self._accepting = True
         self._last_target = (thread_id, system)
         self.run_seq += 1

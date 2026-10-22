@@ -68,6 +68,9 @@ class _StoppableRunner:
     def is_running(self) -> bool:
         return True
 
+    def produced_output(self) -> bool:
+        return False
+
     def stop(self) -> None:
         pass
 
@@ -380,6 +383,7 @@ async def test_cancel_with_undo_restores_text_and_image_chips(tmp_path):
         att = make_attachment_file(8, tmp_path)
         text = f"{chip_text(8)} глянь"
         scr._on_user_text_submitted(text, (att,))
+        scr._last_user_message_id = "m_undo"
         scr._trace_mount(UserReplyContainer(text, event_no=0, images=(att,)))
         await pilot.pause()
         scr._cmd_stop()

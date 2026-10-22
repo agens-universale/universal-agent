@@ -25,7 +25,6 @@ async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
         scr.app.active_runner = _R()
         scr.app.tui_state.active_task_id = "t1"
         scr._active_task_id = "t1"
-        scr._events_since_last_user_send = 3  # не cancel-with-undo
         # смонтировать индикатор как при живом прогоне
         scr._thinking_started_at = 0.0
         scr._show_thinking_indicator(state="thinking")

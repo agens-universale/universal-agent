@@ -68,7 +68,6 @@ async def _run_in_a(pilot):
     scr._reset_thinking_timer()
     runner = _SlowRunner(_A)
     pilot.app.active_runner = runner
-    scr._events_since_last_user_send = 1  # агент уже ответил: не откат
     scr._poll_active()
     await pilot.pause()
     return scr, runner

@@ -178,7 +178,6 @@ async def test_plain_stop_then_new_switches_at_once(tmp_path):
     """После обычного стопа поток хода ещё жив — /new не ждёт его."""
     async with _app(tmp_path).run_test() as pilot:
         scr, runner = await _run_in_a(pilot, slow=True)
-        scr._events_since_last_user_send = 1  # не откат
         scr._cmd_stop()
         await pilot.pause()
         assert runner.is_running()
@@ -345,7 +344,6 @@ async def test_switch_forgets_undo_of_previous_send(tmp_path, path):
         scr = pilot.app.screen
         scr.attach_active_task(_A, is_resume=True)
         scr._last_user_message_id = "m_a"
-        scr._events_since_last_user_send = 0  # отправка только что в A
         await _switch(pilot, tmp_path, path)
         assert scr._active_task_id == _TARGET[path]
         assert scr._last_user_message_id is None

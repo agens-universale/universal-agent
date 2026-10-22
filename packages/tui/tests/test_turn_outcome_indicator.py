@@ -278,7 +278,7 @@ async def test_stop_blinks_then_cancelled_at_stop_moment(tmp_path):
         tid = scr._active_task_id
         await wait_until(
             pilot,
-            lambda: scr._events_since_last_user_send > 0,
+            lambda: pilot.app.active_runner.produced_output(),
             "агент начал ход",
         )
         old = pilot.app.active_runner
@@ -324,7 +324,7 @@ async def test_quit_mid_turn_writes_stop_record_and_waits(tmp_path):
         runner = pilot.app.active_runner
         await wait_until(
             pilot,
-            lambda: scr._events_since_last_user_send > 0,
+            lambda: pilot.app.active_runner.produced_output(),
             "агент начал ход",
         )
         pilot.app.exit()
@@ -370,7 +370,7 @@ async def test_quit_during_stream_does_not_freeze(tmp_path):
         runner = pilot.app.active_runner
         await wait_until(
             pilot,
-            lambda: scr._events_since_last_user_send > 0,
+            lambda: pilot.app.active_runner.produced_output(),
             "агент начал ход",
         )
         began = time.monotonic()

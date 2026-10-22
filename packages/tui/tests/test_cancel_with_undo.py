@@ -1,94 +1,14 @@
-"""TraceScreen счётчик _events_since_last_user_send + cancel-with-undo."""
+"""TraceScreen cancel-with-undo: откат отправки, пока ядро не отметило
+вывод прогона (`produced_output` раннера)."""
 
 from gc_testkit.tui_support import tui_settings
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_counter_resets_on_user_send():
-    """_events_since_last_user_send обнуляется при user-send."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-
-    async with TuiApp().run_test() as pilot:
-        scr = pilot.app.screen
-        scr._events_since_last_user_send = 5  # симулируем накопленные события
-        scr._on_user_text_submitted("hello")
-        assert scr._events_since_last_user_send == 0
-
-
-@pytest.mark.asyncio
-async def test_counter_increments_on_non_user_event():
-    """_events_since_last_user_send растёт на каждом не-user trace event."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.models import TraceEvent
-
-    async with TuiApp().run_test() as pilot:
-        scr = pilot.app.screen
-        scr._events_since_last_user_send = 0
-
-        # agent event
-        ev = TraceEvent(
-            no=1,
-            event_ts_utc_iso="2026-05-28T00:00:00Z",
-            kind="agent",
-            title="",
-            summary="ответ",
-            tool_name=None,
-            call_id=None,
-            full_payload=None,
-        )
-        scr._render_event(ev)
-        await pilot.pause()
-        assert scr._events_since_last_user_send == 1
-
-        # tool call event
-        ev2 = TraceEvent(
-            no=2,
-            event_ts_utc_iso="2026-05-28T00:00:00Z",
-            kind="call",
-            title="",
-            summary="read_file(path='x')",
-            tool_name="read_file",
-            call_id="c1",
-            full_payload=None,
-        )
-        scr._render_event(ev2)
-        await pilot.pause()
-        assert scr._events_since_last_user_send == 2
-
-
-@pytest.mark.asyncio
-async def test_counter_not_incremented_on_user_event():
-    """user kind событие НЕ инкрементирует (user-send сам обнуляет)."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.models import TraceEvent
-
-    async with TuiApp().run_test() as pilot:
-        scr = pilot.app.screen
-        scr._events_since_last_user_send = 3
-
-        ev = TraceEvent(
-            no=1,
-            event_ts_utc_iso="2026-05-28T00:00:00Z",
-            kind="user",
-            title="",
-            summary="привет",
-            tool_name=None,
-            call_id=None,
-            full_payload=None,
-        )
-        scr._render_event(ev)
-        await pilot.pause()
-        # User event не должен инкрементировать счётчик
-        assert scr._events_since_last_user_send == 3
-
-
-@pytest.mark.asyncio
 async def test_cancel_with_undo_removes_user_widget_and_restores_input():
-    """0 событий от агента + input пуст → Esc-stop: убрать user-widget, восстановить input."""
+    """Агент ничего не выдал + input пуст → Esc-stop: убрать user-widget,
+    восстановить input."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.user_reply import UserReplyContainer
@@ -96,6 +16,9 @@ async def test_cancel_with_undo_removes_user_widget_and_restores_input():
     class _FakeRunner:
         def is_running(self) -> bool:
             return True
+
+        def produced_output(self) -> bool:
+            return False
 
         def stop(self) -> None:
             pass
@@ -105,14 +28,14 @@ async def test_cancel_with_undo_removes_user_widget_and_restores_input():
         pilot.app.active_runner = _FakeRunner()
         # Симулируем user-send
         scr._on_user_text_submitted("исходный запрос")
+        scr._last_user_message_id = "m_undo"
         # Смонтируем user-widget вручную
         widget = UserReplyContainer("исходный запрос", event_no=0)
         scr._trace_mount(widget)
         await pilot.pause()
         assert len(scr.query(UserReplyContainer)) == 1
-        assert scr._events_since_last_user_send == 0
 
-        # Stop при 0 событий И пустом input → cancel-with-undo
+        # Stop без вывода агента И при пустом input → cancel-with-undo
         scr._cmd_stop()
         await pilot.pause()
 
@@ -149,6 +72,9 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
         def is_running(self) -> bool:
             return True
 
+        def produced_output(self) -> bool:
+            return False
+
         def stop(self) -> None:
             pass
 
@@ -165,8 +91,9 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
         scr._active_task_id = tid
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
 
-        # Симулируем быструю отправку: счётчик + pending-запись + user-widget.
+        # Симулируем быструю отправку: pending-запись + user-widget.
         scr._on_user_text_submitted("исходный запрос")
+        scr._last_user_message_id = "m_undo"
         scr._track_pending(
             display_text="исходный запрос", wire_content="исходный запрос"
         )
@@ -177,7 +104,7 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
         )
         assert len(pum) == 1  # запись записана
 
-        # Быстрая отмена (0 событий, пустой input) → cancel-with-undo.
+        # Быстрая отмена (агент ничего не выдал, пустой input) → откат.
         scr._cmd_stop()
         await pilot.pause()
 
@@ -205,6 +132,9 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
 
         def is_running(self) -> bool:
             return self._running
+
+        def produced_output(self) -> bool:
+            return False
 
         def stop(self) -> None:
             self._running = False
@@ -244,7 +174,7 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
         scr._trace_mount(UserReplyContainer("отменяю", event_no=0))
         await pilot.pause()
 
-        scr._cmd_stop()  # 0 событий + пустой input → cancel-with-undo
+        scr._cmd_stop()  # вывода нет + пустой input → cancel-with-undo
         await pilot.pause()
 
         # Немедленное удаление: реплики в треде уже нет (не ждём остановки worker'а).
@@ -271,6 +201,9 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
 
         def is_running(self) -> bool:
             return self._running
+
+        def produced_output(self) -> bool:
+            return False
 
         def stop(self) -> None:
             self._running = False
@@ -373,7 +306,8 @@ async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
 
 @pytest.mark.asyncio
 async def test_cancel_with_undo_skipped_when_events_present():
-    """≥1 agent event → НЕ cancel-with-undo, нормальная отмена: индикатор → cancelled."""
+    """Ядро отметило вывод прогона → НЕ cancel-with-undo, нормальная
+    отмена: индикатор → cancelled."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -383,6 +317,9 @@ async def test_cancel_with_undo_skipped_when_events_present():
         def is_running(self) -> bool:
             return self.running
 
+        def produced_output(self) -> bool:
+            return True  # агент уже что-то выдал
+
         def stop(self) -> None:
             self.running = False  # ход кончился сразу: итог ровный
 
@@ -390,7 +327,7 @@ async def test_cancel_with_undo_skipped_when_events_present():
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
         scr._on_user_text_submitted("запрос")
-        scr._events_since_last_user_send = 2  # агент уже что-то выдал
+        scr._last_user_message_id = "m_1"
         # Без паузы до стопа: тик без треда убрал бы индикатор «думаю».
         scr._show_thinking_indicator(state="thinking")
         scr._cmd_stop()
@@ -413,6 +350,9 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         def is_running(self) -> bool:
             return self.running
 
+        def produced_output(self) -> bool:
+            return False
+
         def stop(self) -> None:
             self.running = False  # ход кончился сразу: итог ровный
 
@@ -420,7 +360,7 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
         scr._on_user_text_submitted("первый запрос")
-        scr._events_since_last_user_send = 0
+        scr._last_user_message_id = "m_1"
         scr.query_one("#cmdinput").text = "новая печать"
         # Без паузы до стопа: тик без треда убрал бы индикатор «думаю».
         scr._show_thinking_indicator(state="thinking")
@@ -430,3 +370,59 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         ind = scr._thinking
         assert ind is not None
         assert ind._state == "cancelled"
+
+
+class _OutputRunner:
+    """Раннер с флагом ядра «прогон что-то выдал»."""
+
+    def __init__(self, produced: bool = False):
+        self.running = True
+        self.produced = produced
+
+    def is_running(self) -> bool:
+        return self.running
+
+    def produced_output(self) -> bool:
+        return self.produced
+
+    def stop(self) -> None:
+        self.running = False
+
+
+@pytest.mark.asyncio
+async def test_single_esc_does_not_undo_once_reasoning_streamed():
+    """Мысли модели уже на экране (живой стрим, в тред ещё не записаны):
+    ядро отметило вывод — откат отправки запрещён, хоть хвост и пуст."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stream_sink import StreamSink
+
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        runner = _OutputRunner()
+        pilot.app.active_runner = runner
+        scr._on_user_text_submitted("запрос")
+        scr._last_user_message_id = "m_1"
+        assert scr._can_cancel_with_undo() is True
+        sink = StreamSink()
+        sink.push("reasoning", "думаю над задачей")
+        pilot.app._stream_sink = sink
+        runner.produced = True
+
+        assert scr._can_cancel_with_undo() is False
+
+
+@pytest.mark.asyncio
+async def test_no_undo_after_leaving_the_thread_view():
+    """Сменили тред — отправки этого вида нет, откатывать нечего."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        pilot.app.active_runner = _OutputRunner()
+        scr._on_user_text_submitted("запрос")
+        scr._last_user_message_id = "m_1"
+        scr._leave_thread_view()
+
+        assert scr._can_cancel_with_undo() is False

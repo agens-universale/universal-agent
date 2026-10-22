@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -100,9 +101,15 @@ class _Executor:
         self.thread = thread
         self.blocking = blocking
         self.stopped = threading.Event()
+        #: Состояние прогона, как у ядра: флаг «прогон что-то выдал».
+        self.state = None
+
+    def get_state(self):
+        return self.state
 
     async def arun(self, messages, *, message_ids=None, **_kw):
         mid = message_ids[0]
+        self.state = SimpleNamespace(produced_output=False)
         self.thread.messages(
             {"id": mid, "role": "user", "content": messages[0]},
             {
@@ -112,6 +119,7 @@ class _Executor:
                 "content": [{"type": "output_text", "text": "ответ"}],
             },
         )
+        self.state.produced_output = True
         if not self.blocking:
             self.thread.record(mid, "done")
             return
@@ -183,7 +191,7 @@ async def test_new_turn_after_stop_waits_for_stopped_record(tmp_path):
         old = await _send(pilot, OLD_TEXT)
         await wait_until(
             pilot,
-            lambda: scr._events_since_last_user_send > 0,
+            lambda: pilot.app.active_runner.produced_output(),
             "ответ первого хода в ленте",
         )
         scr._cmd_stop()

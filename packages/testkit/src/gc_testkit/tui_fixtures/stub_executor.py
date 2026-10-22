@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 from gc_core.execution.environment import utc_now
@@ -46,6 +47,9 @@ class StubExecutor:
         self._mono = mono
         #: Часы текущего хода (как у ядра); до первого хода — None.
         self.clock: Optional[TurnClock] = None
+        #: Состояние текущего прогона (как ``State`` ядра): только флаг
+        #: ``produced_output`` — первая запись агента. До первого хода — None.
+        self.state: Optional[SimpleNamespace] = None
 
     async def arun(
         self,
@@ -78,12 +82,15 @@ class StubExecutor:
         meta_path = self.threads_dir / f"meta_{sys_}_{thread_id}.json"
 
         self.clock = TurnClock.start(mono=self._mono, wall=utc_now)
+        self.state = SimpleNamespace(produced_output=False)
         records = self._build_records(messages, scenario=self.scenario)
         written: list[dict] = []
         with open(data_path, "a", encoding="utf-8") as f:
             for rec in records:
                 if self.stopped:
                     break
+                if (rec.get("payload") or {}).get("role") != "user":
+                    self.state.produced_output = True
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 f.flush()
                 written.append(rec)
@@ -102,6 +109,9 @@ class StubExecutor:
         meta_path.write_text(
             json.dumps(meta, ensure_ascii=False), encoding="utf-8"
         )
+
+    def get_state(self) -> Optional[SimpleNamespace]:
+        return self.state
 
     def stop_run(self) -> None:
         self.stopped = True

@@ -284,6 +284,8 @@ async def _maybe_persist(
         return
     if is_persist_discarded(state, pairing=pairing):
         return
+    if any(_is_agent_record(m) for m in messages):
+        state.produced_output = True
     token = False
     if pairing:
         token = True
@@ -301,6 +303,32 @@ async def _maybe_persist(
     finally:
         if token:
             state.allow_pairing_persist = False
+
+
+def _is_agent_record(message: Any) -> bool:
+    """Запись агента (ответ, вызов, вывод тула), а не служебная реплика:
+    реплики человека и техзаметки ядра идут ролью user, промпт — system."""
+    return isinstance(message, dict) and message.get("role") not in {
+        "user",
+        "system",
+    }
+
+
+def _main_call_on_delta(
+    ctx: Any, state: State, *, stream_on: bool, mute_answer: bool
+) -> Optional[Callable[[str, str], None]]:
+    """Приёмник дельт основного вызова: первая видимая дельта отмечает,
+    что прогон что-то выдал. Заглушённый ответ видимым не считается."""
+    on_delta = getattr(ctx, "on_stream_delta", None) if stream_on else None
+    if on_delta is None:
+        return None
+
+    def marking(kind: str, text: str) -> None:
+        if kind != "reset":
+            state.produced_output = True
+        on_delta(kind, text)
+
+    return without_answer_deltas(marking) if mute_answer else marking
 
 
 def _function_call_output_message(call_id: Any, output: str) -> Dict:
@@ -1414,10 +1442,12 @@ async def _arequest_backend_canonical_once(
         settings, resolved_for_network
     )
 
-    _stream_on = _tui_stream_enabled(settings)
-    _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
-    if mute_answer and _on_delta is not None:
-        _on_delta = without_answer_deltas(_on_delta)
+    _on_delta = _main_call_on_delta(
+        ctx,
+        state,
+        stream_on=_tui_stream_enabled(settings),
+        mute_answer=mute_answer,
+    )
     prompt_message_count = len(getattr(state, "messages", []) or [])
 
     send = functools.partial(
@@ -2353,6 +2383,7 @@ async def _abefore_tool_call(
     prior: List[Dict],
     persist_messages_callback,
 ) -> None:
+    state.produced_output = True
     # smart-гейт (спека §3): считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
     if tool_name not in TURN_FINALIZING_TOOLS:
         state.turn_tool_calls += 1

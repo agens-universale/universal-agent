@@ -643,9 +643,6 @@ class TraceScreen(Screen):
         self._last_event_kind: Optional[str] = None
         # Гейт «сверяюсь…»: в этом прогоне уже было видимое событие?
         self._saw_visible_event: bool = False
-        # Cancel-with-undo: счётчик не-user trace-событий с момента последнего user-send.
-        # Если == 0 при Esc-stop → агент ещё ничего не сгенерировал → rollback.
-        self._events_since_last_user_send: int = 0
         # Bang-shell (`!cmd`): один concurrent job; эфемерно в трейсе, не в thread.
         self._bang = None  # type: Optional["BangShellController"]
         self._bang_timeout_sec: Optional[float] = None
@@ -2409,7 +2406,6 @@ class TraceScreen(Screen):
         до новой отправки."""
         self._stopping_runner = None
         self._last_user_message_id = None
-        self._events_since_last_user_send = 1
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из
@@ -3376,7 +3372,6 @@ class TraceScreen(Screen):
         self._resumed_prompt = text  # send = новое последнее сообщение активной сессии (сырой текст)
         self._seed_or_update_last_actual(plain)
         self._update_terminal_title()
-        self._events_since_last_user_send = 0
         if self._history is not None:
             self._history.append(plain)
         self._reset_history_navigation()
@@ -3546,8 +3541,6 @@ class TraceScreen(Screen):
     def _render_event(self, ev, *, live: bool = False) -> None:
         if ev.hidden:
             return
-        if ev.kind != "user":
-            self._events_since_last_user_send += 1
 
         # Any committed canonical row supersedes the ephemeral reasoning/answer
         # preview for the current step — clear it so it can't drift above new rows.
@@ -4865,6 +4858,8 @@ class TraceScreen(Screen):
             return
         self._plan_rework_pending = False
         self._hide_plan_banner()
+        # Прогон без реплики человека: откатывать по Esc нечего.
+        self._last_user_message_id = None
         if plan is not None:
             self._mark_plan_accepted(True, plan["text"])
         self.app.set_permission_mode(mode)
@@ -6504,9 +6499,8 @@ class TraceScreen(Screen):
             runner = getattr(self.app, "active_runner", None)
             is_running = runner is not None and runner.is_running()
             if is_running:
-                # Cancel-with-undo case: 0 событий после отправки → сразу, без hint
-                # (пустота инпута гарантирована веткой очистки выше).
-                if self._events_since_last_user_send == 0:
+                # Откат отправки: агент ещё ничего не выдал → сразу, без hint.
+                if self._can_cancel_with_undo():
                     self._cancel_with_undo()
                     event.stop()
                     event.prevent_default()
@@ -8060,6 +8054,10 @@ class TraceScreen(Screen):
 
     def _can_cancel_with_undo(self) -> bool:
         """Откат отправки: агент ничего не выдал, поле пустое, очереди нет.
+        «Ничего не выдал» решает ядро (`produced_output` раннера: дельта
+        стрима, запись агента, старт тула) — хвост ленты отстаёт от него.
+        Прогон без отправки этого вида (план утверждён, тред сменён) —
+        откатывать нечего.
         С очередью откатывать нечего: последняя отправка — в очереди, её
         с остальными вернёт в поле стоп (`_stop_and_replace_runner`). Нет и
         реплик, которые ядро держит после прошлого стопа или конца хода:
@@ -8069,8 +8067,11 @@ class TraceScreen(Screen):
             input_text = self.query_one(_SEL_CMDINPUT).text
         except Exception:
             pass
+        runner = getattr(self.app, "active_runner", None)
         return (
-            self._events_since_last_user_send == 0
+            self._last_user_message_id is not None
+            and runner is not None
+            and not runner.produced_output()
             and not input_text
             and not self._queued_tail(
                 self.query_one(_SEL_TRACE, VerticalScroll)
@@ -8146,9 +8147,8 @@ class TraceScreen(Screen):
     def _cancel_with_undo(self) -> None:
         """Откатить последний user-send: убрать user-widget, восстановить input.
 
-        Условие срабатывания (проверено в _cmd_stop):
-        - 0 trace-событий от агента с момента последнего user-send.
-        - input пуст.
+        Условие срабатывания — `_can_cancel_with_undo`: агент ещё ничего не
+        выдал (флаг ядра), input пуст.
 
         Реплика к этому моменту уже могла быть записана в тред (persist user-
         сообщения происходит до ответа бэкенда). Поэтому, помимо визуального
