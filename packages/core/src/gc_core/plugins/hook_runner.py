@@ -90,12 +90,14 @@ def _warn_no_bash_once() -> None:
 
 async def _terminate(proc: asyncio.subprocess.Process) -> None:
     """Убить хук вместе с потомками и дождаться завершения."""
+    if proc.returncode is not None:
+        return
     try:
         if sys.platform == "win32":
             proc.kill()
         else:
             os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
     await proc.wait()
 
@@ -150,7 +152,10 @@ async def run_hook(
         await _terminate(proc)
         return HookResult(plugin=plugin.name, failed=True)
     except asyncio.CancelledError:
-        await asyncio.shield(_terminate(proc))
+        try:
+            await asyncio.shield(_terminate(proc))
+        except Exception:
+            logger.debug("plugin hook cleanup failed", exc_info=True)
         raise
     except OSError as exc:
         logger.warning("plugin %s hook failed: %s", plugin.name, exc)

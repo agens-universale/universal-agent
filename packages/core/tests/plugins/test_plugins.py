@@ -209,6 +209,15 @@ async def _wait_dead(pid: int, limit: float = 2.0) -> bool:
     return False
 
 
+async def _read_pid(pid_file, limit: float = 5.0) -> int:
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        if pid_file.exists() and pid_file.read_text().strip():
+            return int(pid_file.read_text())
+        await asyncio.sleep(0.05)
+    raise AssertionError("pid file was not written")
+
+
 @_posix_only
 async def test_timeout_kills_process_group(tmp_path):
     plugin = load_plugin(_make_plugin(tmp_path))
@@ -218,7 +227,7 @@ async def test_timeout_kills_process_group(tmp_path):
         plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
     )
     assert res.failed
-    assert await _wait_dead(int(pid_file.read_text()))
+    assert await _wait_dead(await _read_pid(pid_file))
 
 
 @_posix_only
@@ -229,11 +238,41 @@ async def test_cancel_kills_hook(tmp_path):
     task = asyncio.create_task(
         run_hook(plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30)
     )
-    await asyncio.sleep(0.5)
+    pid = await _read_pid(pid_file)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert await _wait_dead(int(pid_file.read_text()))
+    assert await _wait_dead(pid)
+
+
+@_posix_only
+async def test_killpg_permission_error_keeps_contract(tmp_path, monkeypatch):
+    real_killpg = os.killpg
+
+    def killpg_eperm(pid, sig):
+        real_killpg(pid, sig)
+        raise PermissionError
+
+    monkeypatch.setattr(os, "killpg", killpg_eperm)
+    plugin = load_plugin(_make_plugin(tmp_path))
+    slow = HookCommand(command="sleep 600", timeout_sec=1)
+    res = await run_hook(
+        plugin, slow, {}, cwd=str(tmp_path), default_timeout_sec=10
+    )
+    assert res.failed
+    task = asyncio.create_task(
+        run_hook(
+            plugin,
+            HookCommand(command="sleep 600"),
+            {},
+            cwd=str(tmp_path),
+            default_timeout_sec=30,
+        )
+    )
+    await asyncio.sleep(0.3)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 async def test_no_bash_fails_open(tmp_path, monkeypatch, caplog):
