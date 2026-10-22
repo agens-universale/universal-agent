@@ -36,6 +36,7 @@ from textual.screen import Screen
 
 from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
+from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.session_lock import is_held_by_other
 from gc_tui.services.stream_sink import StreamSink
@@ -45,13 +46,6 @@ from gc_tui.services.voice_notices import voice_notices
 textual_compat.apply_textual_patches()
 
 _AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings → Обновление"
-
-#: Сколько выход приложения ждёт поток остановленного хода: ядро успевает
-#: закрыть ход записью итога «stopped». Лучшее усилие, не гарантия: не
-#: успело — после переоткрытия «■ Отменено» без времени (статус «stopped»
-#: пишет выход: ход закончил пользователь). «■ Прервано» — только ход
-#: убитого процесса.
-QUIT_SETTLE_SEC = 2.0
 
 # Ключи схемы с флагом ``restart`` (``gc_meta(restart=True)``, спека §3.2). Перечитка
 # конфига и сессионный профиль их НЕ замораживают: новое значение попадает в
@@ -1692,7 +1686,7 @@ class TuiApp(App):
         оставался жить, пока в очередь не придёт строка. `stop()` кладёт туда
         пустую (`cancel_ask_human`) и снимает ожидание подтверждения.
 
-        После стопа — короткое ожидание потока хода (`QUIT_SETTLE_SEC`):
+        После стопа — короткое ожидание потока хода (`STOP_SETTLE_SEC`):
         ядро закрывает ход записью итога, иначе он остался бы без неё. Ждём
         в потоке пула, не на loop: поток хода ходит на UI-поток мостом
         `call_from_thread` (дельта стрима, предохранитель, подтверждение), и
@@ -1711,7 +1705,7 @@ class TuiApp(App):
                 pass
         wait = getattr(runner, "wait", None)
         if callable(wait):
-            await asyncio.to_thread(wait, QUIT_SETTLE_SEC)
+            await asyncio.to_thread(wait, STOP_SETTLE_SEC)
         _release_runner(runner)
         unregister_runtime_notices_listener(self._on_runtime_notice)
         self._clear_image_pocket()

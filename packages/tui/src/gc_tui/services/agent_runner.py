@@ -28,6 +28,15 @@ if TYPE_CHECKING:
 # 10 мин — достаточно человеку; дальше fail-closed deny.
 CONFIRM_WAIT_TIMEOUT_SEC = 600.0
 
+#: Сколько ждут поток остановленного хода: новый ход того же треда (его
+#: реплика встаёт после записи итога стопа) и выход приложения (ход
+#: закрывается записью итога «stopped»). Лучшее усилие, не гарантия: не
+#: дождались — новый ход идёт, запись стопа ляжет после его реплики; на
+#: выходе — после переоткрытия «■ Отменено» без времени (статус «stopped»
+#: пишет выход: ход закончил пользователь). «■ Прервано» — только ход
+#: убитого процесса.
+STOP_SETTLE_SEC = 2.0
+
 _log = logging.getLogger(__name__)
 
 
@@ -176,6 +185,9 @@ class AgentRunner:
         # если поток ещё идёт, логгер отдаёт последний из них на выходе.
         self._released = False
         self._workers = 0
+        #: Остановленный раннер, чей поток ещё дописывает ход того же треда
+        #: (см. `follow`); его ждёт воркер этого прогона.
+        self._predecessor: Optional[AgentRunner] = None
 
     def _emit_error(self, exc: BaseException) -> None:
         """Сообщить об ошибке в TUI, если runner ещё «актуальный».
@@ -316,6 +328,15 @@ class AgentRunner:
         threading.Thread(
             target=_target, name="gc-ua-warm", daemon=True
         ).start()
+
+    def follow(self, previous: AgentRunner) -> None:
+        """Следующий прогон начнётся, когда поток ``previous`` закроется.
+
+        ``previous`` — остановленный ход того же треда: отвязанным он
+        дописывает запись итога, и она встаёт до реплики нового хода.
+        Ждёт воркер прогона, не вызывающий (UI), — не дольше
+        `STOP_SETTLE_SEC`."""
+        self._predecessor = previous
 
     def is_running(self) -> bool:
         with self._lock:
@@ -583,6 +604,7 @@ class AgentRunner:
                     for m in self._prebuild_messages:
                         executor.add_message(m)
                     self._prebuild_messages.clear()
+                self._await_predecessor()
                 if self._stop_requested:
                     ending = "stopped"
                     return
@@ -635,6 +657,12 @@ class AgentRunner:
                         executor, ending=ending, lost=in_flight
                     )
                 self._worker_exit()
+
+    def _await_predecessor(self) -> None:
+        """Дождаться потока остановленного хода (`follow`), ограниченно."""
+        previous, self._predecessor = self._predecessor, None
+        if previous is not None:
+            previous.wait(STOP_SETTLE_SEC)
 
     def _close_or_take_tail(
         self, executor, *, ending: str = "", lost: list | tuple = ()

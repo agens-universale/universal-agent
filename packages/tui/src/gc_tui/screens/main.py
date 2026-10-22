@@ -2702,12 +2702,13 @@ class TraceScreen(Screen):
 
     def _mount_turn_line(self, outcome: TurnOutcome) -> None:
         """Строка хода — на месте его записи (через `_trace_mount`, значит
-        над очередью). Новая — строка последнего хода: скрыта, пока её
+        над очередью и над отправленной, ещё не записанной репликой: запись
+        стопа дочитана после новой отправки). Новая — строка последнего хода: скрыта, пока её
         показывает индикатор; прошлая оседает."""
         self._settle_turn_line()
         line = build_turn_line(outcome)
         line.add_class(TURN_LINE_LATEST)
-        self._trace_mount(line)
+        self._trace_mount(line, above_sent=True)
 
     def _settle_turn_line(self) -> bool:
         """Начался новый ход: строка прошлого оседает в ленте. True — было
@@ -3208,7 +3209,12 @@ class TraceScreen(Screen):
         self.call_after_refresh(_do)
 
     def _trace_mount(
-        self, widget, *, scroll: bool = True, force_scroll: bool = False
+        self,
+        widget,
+        *,
+        scroll: bool = True,
+        force_scroll: bool = False,
+        above_sent: bool = False,
     ) -> None:
         """Смонтировать widget в #trace (индикатор живёт отдельно в #indicator-bar).
 
@@ -3218,13 +3224,21 @@ class TraceScreen(Screen):
 
         Очередь прижата к низу (спека P3 §2.4): всё новое встаёт перед первой
         репликой в очереди, сама такая реплика — в конец. Единственное место
-        этого правила: всё, что монтируется в конец ленты, идёт сюда."""
+        этого правила: всё, что монтируется в конец ленты, идёт сюда.
+
+        above_sent=True — запись о прошлом (итог хода): встаёт и над
+        отправленной репликой, которую ядро ещё не записало (`pending`), —
+        в файле треда она будет после."""
         from gc_tui.widgets.user_reply import is_queued
 
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         if force_scroll:
             self._stick_bottom = True  # отправка своего сообщения = re-engage
-        queue = [] if is_queued(widget) else self._queued_tail(trace)
+        queue = (
+            []
+            if is_queued(widget)
+            else self._queued_tail(trace, sent=above_sent)
+        )
         if queue:
             trace.mount(widget, before=queue[0])
         else:
@@ -3233,14 +3247,20 @@ class TraceScreen(Screen):
             self._scroll_trace_end()
 
     @staticmethod
-    def _queued_tail(trace) -> list:
+    def _queued_tail(trace, *, sent: bool = False) -> list:
         """Реплики очереди по порядку. Очередь — всегда сплошной хвост
-        ленты (`_trace_mount`), поэтому обход с конца, а не всей ленты."""
-        from gc_tui.widgets.user_reply import is_queued
+        ленты (`_trace_mount`), поэтому обход с конца, а не всей ленты.
+        ``sent`` — с ними и отправленные, ещё не записанные ядром."""
+        from gc_tui.widgets.user_reply import UserReplyContainer, is_queued
 
         tail = []
         for widget in reversed(trace.children):
-            if not is_queued(widget):
+            sent_reply = (
+                sent
+                and isinstance(widget, UserReplyContainer)
+                and widget.state == "pending"
+            )
+            if not (is_queued(widget) or sent_reply):
                 break
             tail.append(widget)
         return tail[::-1]
@@ -5187,7 +5207,11 @@ class TraceScreen(Screen):
         self._stamp_tui_running()
         self._run_pending = True
         # Строка итога — уже нового хода: мигание прошлого стопа её не
-        # перекрывает, даже пока поток того хода дорабатывает.
+        # перекрывает, даже пока поток того хода дорабатывает. Сам ход
+        # начнётся после того потока: тот дописывает запись итога стопа.
+        runner = self.app.active_runner
+        if runner is not None and self._stopping_alive():
+            runner.follow(self._stopping_runner)
         self._stopping_runner = None
 
     def _settle_ended_run(self) -> None:
