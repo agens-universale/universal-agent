@@ -168,11 +168,13 @@ def check_auto_scroll(
 ) -> None:
     """Хук `Screen._check_auto_scroll`: автопрокрутка выделения Textual,
     конец выделения — в `container` (`keep_select_end_in`), протяжка ниже
-    него (`auto_scroll_below`). Чисто горизонтальное движение протяжку
-    не запускает — правило Textual."""
+    него (`auto_scroll_below`). Правило Textual: чисто горизонтальное
+    движение протяжку не запускает, но идущую не гасит — признак берётся
+    до вызова Textual (над полем ввода тот прокрутку останавливает)."""
+    was_running = auto_scroll_running(screen)
     Screen._check_auto_scroll(screen, select_widget, mouse_coordinate, delta_y)
     if container is None:
         return
     keep_select_end_in(screen, container, mouse_coordinate)
-    if abs(delta_y) >= 1:
+    if was_running or abs(delta_y) >= 1:
         auto_scroll_below(screen, container, mouse_coordinate[1])

@@ -187,6 +187,26 @@ async def test_horizontal_move_below_does_not_start_scroll():
 
 
 @pytest.mark.asyncio
+async def test_horizontal_move_keeps_running_scroll_below():
+    """Протяжка ниже ленты уже идёт — горизонтальное движение над полем
+    её не гасит (у Textual идущая прокрутка тоже продолжается)."""
+    app = _BelowScreenApp()
+    async with app.run_test(size=(40, 30)) as pilot:
+        screen = app.screen
+        trace = app.query_one("#t")
+        footer = app.query_one("#f")
+        await pilot.mouse_down("#t", offset=(0, 2))
+        await pilot.hover("#t", offset=(5, 10))
+        await pilot.pause()
+        below = (5, footer.region.y + 1)
+        textual_compat.check_auto_scroll(screen, trace, footer, below, 1)
+        assert textual_compat.auto_scroll_running(screen) is True
+        aside = (9, footer.region.y + 1)
+        textual_compat.check_auto_scroll(screen, trace, footer, aside, 0)
+        assert textual_compat.auto_scroll_running(screen) is True
+
+
+@pytest.mark.asyncio
 async def test_drag_below_scrolls_to_end_and_stops():
     app = _BelowScreenApp()
     async with app.run_test(size=(40, 30)) as pilot:
