@@ -34,7 +34,14 @@ from gc_core.config_modules.images import read_images_config
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
 from gc_core.message_policy.plan_messages import accepted_plan_messages
-from gc_core.persistence.turn_outcome import is_turn_outcome_record
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+)
+from gc_core.persistence.turn_outcome import (
+    TurnOutcome,
+    is_turn_outcome_record,
+    parse_turn_outcome,
+)
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
@@ -178,8 +185,7 @@ from gc_tui.services.trace_retention import (
 )
 from gc_tui.services.trace_scroll import reply_above
 from gc_tui.services.turn_outcome import (
-    DONE_LABEL,
-    DONE_LABEL_PLAN,
+    kind_of,
     outcome_word,
     settled_status,
 )
@@ -208,7 +214,6 @@ from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import (
-    TERMINAL_INDICATOR_STATES,
     ThinkingIndicator,
     is_terminal_indicator_state,
 )
@@ -243,10 +248,12 @@ _DIALOG_CONTINUATION_KINDS = frozenset(
 )
 
 
-# Терминальный исход прогона → meta.tui.status и last_indicator.kind.
+# Слово исхода хода (`OUTCOMES`; «stopped» — слово флагов прогона) →
+# meta.tui.status: кэш статуса для списка сессий и заголовка.
 _RUN_STATUS = {
     "completed": "completed",
     "stopped": "stopped",
+    "cancelled": "stopped",
     "failed": "failed",
     "stopped_steps": "stopped",
     "stopped_errors": "stopped",
@@ -254,42 +261,33 @@ _RUN_STATUS = {
     "stopped_tool_calls": "stopped",
     "stopped_judge": "stopped",
 }
-_RUN_INDICATOR_KIND = {
-    "completed": "done",
-    "stopped": "cancelled",
-    "failed": "failed",
-    "stopped_steps": "stopped_steps",
-    "stopped_errors": "stopped_errors",
-    "stopped_tokens": "stopped_tokens",
-    "stopped_tool_calls": "stopped_tool_calls",
-    "stopped_judge": "stopped_judge",
-}
+# Слово исхода → состояние индикатора; остальные слова совпадают.
+_INDICATOR_STATE = {"completed": "done", "stopped": "cancelled"}
+
+
+def indicator_state_of(word: str) -> str:
+    """Состояние строки-итога индикатора по слову исхода хода."""
+    return _INDICATOR_STATE.get(word, word)
 
 
 def resolve_live_terminal_indicator_state(
-    *, last_indicator_kind, status, stop_requested
+    *, outcome: TurnOutcome | None, status, stop_requested
 ):
-    """Состояние терминального индикатора в idle-фазе живого прогона.
-    last_indicator.kind несёт точный лимитный исход (stopped_steps/stopped_errors),
-    тогда как meta.tui.status схлопнут в Status-литерал ("stopped"). Для лимитных
-    исходов предпочитаем kind; для прочих — прежняя логика status→state с guard
-    прямого stop в обход _cmd_stop."""
-    if last_indicator_kind in (
-        "stopped_steps",
-        "stopped_errors",
-        "stopped_tokens",
-        "stopped_tool_calls",
-        "stopped_judge",
-    ):
-        return last_indicator_kind
-    outcome = status
-    if outcome == "completed" and stop_requested:
-        outcome = "stopped"
+    """Состояние строки-итога в idle-фазе живого прогона.
+
+    Источник — запись итога последнего хода (`outcome`), если она есть.
+    Нет — статус сессии из meta (`tui.status`) с guard прямого stop в
+    обход _cmd_stop; лимитного исхода статус не различает."""
+    if outcome is not None:
+        return indicator_state_of(kind_of(outcome)[0])
+    word = status
+    if word == "completed" and stop_requested:
+        word = "stopped"
     return {
         "completed": "done",
         "stopped": "cancelled",
         "failed": "failed",
-    }.get(outcome)
+    }.get(word)
 
 
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
@@ -703,7 +701,15 @@ class TraceScreen(Screen):
         # бегущим, и отметка «ход запущен отсюда» (быстрый ход тик может не
         # застать). Раннер держим сами: стоп и пересборка снимают его с app.
         self._watched_runner = None
+        # Номер прогона, который тик застал бегущим (`AgentRunner.run_seq`):
+        # сменился при «всё ещё бежит» — хвост стартовал между тиками.
+        self._watched_run_seq: Optional[int] = None
         self._run_pending: bool = False
+        # Запись итога последнего хода открытого треда (из потока записей)
+        # и признак «после неё началась реплика» — тогда последний ход
+        # записи не имеет, строка — по статусу сессии.
+        self._last_turn_outcome: Optional[TurnOutcome] = None
+        self._outcome_superseded: bool = False
         # Остановленный раннер, чей поток ещё дорабатывает (стоп
         # кооперативный): строка итога мигает «■» (решение 26).
         self._stopping_runner = None
@@ -2182,6 +2188,8 @@ class TraceScreen(Screen):
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
         self._task_events.clear()
+        self._last_turn_outcome = None
+        self._outcome_superseded = False
         self._rendered_ids.clear()
         self._segment_starts.clear()
         self._answer_flow.new_turn()
@@ -2418,8 +2426,7 @@ class TraceScreen(Screen):
             return
         if runner is not None and runner.is_running():
             self.app.last_stop_requested = True
-        elapsed = self._turn_elapsed(runner, on_screen=False)
-        self._stamp_run_outcome(runner, tid, None, elapsed)
+        self._stamp_run_outcome(tid, self._runner_outcome(runner)[0], None)
 
     def _leave_thread_view(self) -> None:
         """Смена открытого треда: то, что экран держал о ходе прежнего,
@@ -2667,10 +2674,18 @@ class TraceScreen(Screen):
         in_window: bool = True,
     ) -> None:
         if is_turn_outcome_record(rec):
-            return  # итог хода — не сообщение ленты
+            # Итог хода — не сообщение ленты: строка последнего хода, пока
+            # после записи не началась реплика.
+            self._last_turn_outcome = parse_turn_outcome(rec)
+            self._outcome_superseded = False
+            return
         payload = rec.get("payload")
         if not isinstance(payload, dict):
             return
+        # Реплика после записи — начало следующего хода (и та, что экран
+        # уже показал сам: важна позиция в файле, а не повтор).
+        if extract_real_user_message_text(payload):
+            self._outcome_superseded = True
         mid = payload.get("id")
         if mid is not None:
             if mid in self._rendered_ids:
@@ -2722,7 +2737,7 @@ class TraceScreen(Screen):
             return
         stream_display = self.app.base_settings().settings.tui.stream_display
         indicator = ThinkingIndicator(
-            started_at=self._thinking_started_at,
+            started_at=self._live_turn_start(),
             state=state,
             sink=getattr(self.app, "_stream_sink", None),
             reasoning_tag=stream_display != "answer_reasoning",
@@ -2735,10 +2750,10 @@ class TraceScreen(Screen):
         """На resume сессии: смонтировать строку-итог прошлого хода. Только если
         прогона нет и индикатор ещё не смонтирован.
 
-        Источник: meta.tui.last_indicator (с elapsed). Фолбэк для сессий без него
-        (созданы до фичи / другим writer'ом) — персистентный статус
-        meta.tui.status / meta.status, маппится в kind, elapsed неизвестен (None →
-        «✓ Выполнил» без «за N»)."""
+        Источник — запись итога последнего хода (исход, длительность, время,
+        причина ошибки), если после неё не началась реплика. Иначе — слово
+        статуса сессии (`_session_status_word`: «■ Прервано» при running без
+        живого хода) без времени; исход не записан — строки нет."""
         if (
             self._thinking is not None
             or self._store is None
@@ -2750,40 +2765,62 @@ class TraceScreen(Screen):
             return
         tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
         last = tui.get("last_indicator")
-        edits = None
-        done_label = DONE_LABEL
-        if (
-            isinstance(last, dict)
-            and last.get("kind") in TERMINAL_INDICATOR_STATES
-        ):
-            kind = last["kind"]
-            elapsed = last.get("elapsed")
-            edits = last.get("edits")
-            if last.get("plan"):
-                done_label = DONE_LABEL_PLAN
+        edits = last.get("edits") if isinstance(last, dict) else None
+        outcome = self._latest_turn_outcome()
+        if outcome is not None:
+            word, plan = kind_of(outcome)
         else:
-            # Фолбэк: kind из единого источника статуса (того же, что заголовок).
-            # None (исход не записан) → строку-итог НЕ рисуем — не выдумываем исход.
-            kind = {
-                "completed": "done",
+            word = {
+                "completed": "completed",
                 "stopped": "cancelled",
                 "failed": "failed",
                 "interrupted": "interrupted",
             }.get(self._session_status_word())
-            if kind is None:
+            plan = False
+            if word is None:
                 return
-            elapsed = None
-        error = tui.get("last_error")
-        ind = ThinkingIndicator(
-            state=kind,
-            frozen_elapsed=elapsed if isinstance(elapsed, int) else None,
-            turn_summary=self._restored_turn_summary(edits),
-            done_label=done_label,
-            error=error if isinstance(error, str) else None,
-        )
-        self._thinking = ind
-        self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
+        self._show_turn_outcome(word, plan, outcome, edits=edits)
+
+    def _latest_turn_outcome(self) -> Optional[TurnOutcome]:
+        """Запись итога последнего хода открытого треда; после неё началась
+        реплика (ход идёт или оборван без записи) — None."""
+        return None if self._outcome_superseded else self._last_turn_outcome
+
+    def _show_turn_outcome(
+        self,
+        word: str,
+        plan: bool,
+        outcome: Optional[TurnOutcome],
+        *,
+        edits=None,
+    ) -> None:
+        """Строка-итог последнего хода в индикаторе: из записи итога —
+        длительность, время конца и причина ошибки; без записи — только
+        слово. Индикатора нет — монтируется со сводкой правок `edits`."""
+        state = indicator_state_of(word)
+        ind = self._thinking
+        if ind is None:
+            ind = ThinkingIndicator(
+                state=state, turn_summary=self._restored_turn_summary(edits)
+            )
+            self._thinking = ind
+            self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
+        ind.set_plan(plan)
+        ind.freeze_elapsed(outcome.duration_sec if outcome else None)
+        ind.set_ended_at(outcome.ended_at if outcome else None)
+        if outcome is not None:
+            # Без записи причина — живая ошибка раннера (`_poll_tick`).
+            ind.set_error((outcome.error or {}).get("message"))
+        ind.show(state)
         self._sync_indicator_reserve()
+
+    def _live_turn_start(self) -> Optional[float]:
+        """Старт живого счёта: часы хода ядра (без ожидания человека); пока
+        ядро их не завело (и для `/compact`) — момент отправки."""
+        runner = getattr(self.app, "active_runner", None)
+        probe = getattr(runner, "turn_effective_start", None)
+        start = probe() if probe is not None else None
+        return start if start is not None else self._thinking_started_at
 
     def on_indicator_rows_changed(self, event: IndicatorRowsChanged) -> None:
         event.stop()
@@ -5141,7 +5178,12 @@ class TraceScreen(Screen):
             return
         current = getattr(self.app, "active_runner", None)
         runner = self._watched_runner or current
-        if runner is current and runner is not None and runner.is_running():
+        if (
+            runner is current
+            and runner is not None
+            and runner.is_running()
+            and not self._run_replaced(runner)
+        ):
             return
         kind = getattr(runner, "_thread_kind", "run") if runner else "run"
         try:
@@ -5154,6 +5196,13 @@ class TraceScreen(Screen):
             self._was_running = False
             self._run_pending = False
             self._watched_runner = None
+            self._watched_run_seq = None
+
+    def _run_replaced(self, runner) -> bool:
+        """Раннер бежит, но уже другим прогоном, чем застал тик: хвост из
+        очереди стартовал между тиками."""
+        seen = self._watched_run_seq
+        return seen is not None and getattr(runner, "run_seq", seen) != seen
 
     def _reset_run_flags(self) -> None:
         """Сбросить error- и stop-флаги прошлого прогона (app-уровня)."""
@@ -5173,9 +5222,11 @@ class TraceScreen(Screen):
         if self._store is None or tid is None:
             return
         self._write_tui_meta(
-            tid,
-            {"status": "running", "last_indicator": None, "last_error": None},
+            tid, {"status": "running", "last_indicator": None}
         )
+        if tid == self._active_task_id:
+            # Начался новый ход: запись итога прошлого — уже не его строка.
+            self._outcome_superseded = True
 
     def _update_mcp_indicator(self) -> None:
         if self._mcp_status_done:
@@ -5415,20 +5466,29 @@ class TraceScreen(Screen):
         edits = self._close_turn_edits(kind, run_tid, on_screen=on_screen)
         if self._store is None or run_tid is None or kind == "compact":
             return
-        # Длительность — одна на ленту и мету: на экране — от точки отсчёта
-        # индикатора (отправка, ответ на вопрос агента), иначе от старта.
-        elapsed = self._turn_elapsed(runner, on_screen=on_screen)
-        if on_screen and self._thinking is not None and elapsed is not None:
-            self._thinking.freeze_elapsed(elapsed)
-        plan_proposed = self._stamp_run_outcome(
-            runner, run_tid, edits, elapsed
-        )
-        # Ход уложился между тиками: индикатор не создавался — строка-
-        # итог из только что записанной меты, как при переоткрытии.
-        # Тик, заставший прогон, индикатор создал; если его нет, его
-        # убрали намеренно (отмена-«undo») — не воскрешаем.
-        if on_screen and self._thinking is None and not self._was_running:
-            self._restore_terminal_indicator()
+        # Запись итога этого хода уже в файле (ядро пишет её до выхода
+        # прогона): дочитать хвост до решения.
+        outcome = None
+        if on_screen:
+            self._poll_trace_tail()
+            outcome = self._latest_turn_outcome()
+        if outcome is not None:
+            word, plan_proposed = kind_of(outcome)
+        else:
+            word, plan_proposed = self._runner_outcome(runner)
+        self._stamp_run_outcome(run_tid, word, edits)
+        # Строка-итог — когда поток хода вышел. Остановленный дорабатывает
+        # (мигающий «■»), новый прогон уже идёт — строку ведёт тик.
+        # Ход уложился между тиками — индикатора нет, монтируем. Тик,
+        # заставший прогон, индикатор создал; если его нет, его убрали
+        # намеренно (отмена-«undo») — не воскрешаем.
+        settled = runner is None or not runner.is_running()
+        if (
+            on_screen
+            and settled
+            and (self._thinking is not None or not self._was_running)
+        ):
+            self._show_turn_outcome(word, plan_proposed, outcome, edits=edits)
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
@@ -5440,8 +5500,6 @@ class TraceScreen(Screen):
             return
         # Ход закончился предложенным планом — баннер одобрения.
         if plan_proposed:
-            if self._thinking is not None:
-                self._thinking.set_done_label(DONE_LABEL_PLAN)
             # После дорисовки хвоста ленты в этом же тике: иначе рамка
             # плана была бы поставлена раньше исходной и задвоилась.
             self.call_after_refresh(self._present_session_plan)
@@ -5450,55 +5508,32 @@ class TraceScreen(Screen):
             self._sync_plan_panel_with_session()
             self._sync_input_placeholder()
 
-    def _turn_elapsed(self, runner, *, on_screen: bool) -> int | None:
-        """Секунды хода: на экране — от отсчёта индикатора, иначе — от
-        старта прогона в раннере; начала нет — None."""
-        started = self._thinking_started_at if on_screen else None
-        if started is None:
-            started = getattr(runner, "run_started_at", None)
-        return None if started is None else int(time.monotonic() - started)
-
-    def _stamp_run_outcome(
-        self, runner, run_tid: str, edits, elapsed: int | None
-    ) -> bool:
-        """Записать исход прогона в meta.tui треда `run_tid` (TUI-owned),
-        чтобы бейдж пережил переоткрытие сессии. True — ход кончился
-        предложенным планом. `elapsed` — длительность хода, в мету идёт
-        только у выполненного."""
-        outcome = outcome_word(
+    def _runner_outcome(self, runner) -> tuple[str, bool]:
+        """Исход прогона без записи итога: по ошибке раннера, стопу и
+        причине ядра; True — ход кончился предложенным планом."""
+        reason = getattr(self.app, "last_terminal_outcome", None)
+        word = outcome_word(
             failed=bool(getattr(self.app, "last_runner_error", None)),
             stopped=bool(getattr(self.app, "last_stop_requested", False)),
-            reason=getattr(self.app, "last_terminal_outcome", None),
+            reason=reason,
         )
         # Прямой stop в обход _cmd_stop (active_runner не обнулён) —
         # не «completed».
-        if outcome == "completed" and getattr(
-            runner, "_stop_requested", False
-        ):
-            outcome = "stopped"
-        completed = outcome == "completed"
-        plan_proposed = completed and (
-            getattr(self.app, "last_terminal_outcome", None) == "plan_proposed"
-        )
+        if word == "completed" and getattr(runner, "_stop_requested", False):
+            word = "stopped"
+        return word, word == "completed" and reason == "plan_proposed"
+
+    def _stamp_run_outcome(self, run_tid: str, word: str, edits) -> None:
+        """Записать исход прогона в meta.tui треда `run_tid` (TUI-owned):
+        статус — кэш для списка сессий и заголовка; сводка правок хода —
+        данные TUI. Исход, время и причина хода — в записи итога ядра."""
         self._write_tui_meta(
             run_tid,
             {
-                "status": _RUN_STATUS[outcome],
-                "last_error": (
-                    getattr(self.app, "last_runner_error", None)
-                    if outcome == "failed"
-                    else None
-                ),
-                "last_indicator": {
-                    "kind": _RUN_INDICATOR_KIND[outcome],
-                    "elapsed": elapsed if completed else None,
-                    "edits": list(edits) if edits else None,
-                    # ход кончился планом: строка-итог — «План готов»
-                    "plan": plan_proposed or None,
-                },
+                "status": _RUN_STATUS[word],
+                "last_indicator": {"edits": list(edits) if edits else None},
             },
         )
-        return plan_proposed
 
     def _poll_tick(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
@@ -5575,6 +5610,9 @@ class TraceScreen(Screen):
             self._stamp_tui_running(self._run_task_id(runner))
         if is_running:
             self._watched_runner = runner
+            self._watched_run_seq = getattr(runner, "run_seq", None)
+            if _kind == "run":
+                self._follow_turn_clock()
         self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
@@ -5758,28 +5796,7 @@ class TraceScreen(Screen):
             # (done → «✓ Выполнил за N», cancelled → «■ Отменено», failed →
             # «✕ Ошибка») — персистентно до следующего user-send (его _reset
             # уничтожит индикатор). Свежий/неизвестный исход → уничтожаем.
-            li_kind = None
-            status = None
-            if self._store is not None and self._active_task_id is not None:
-                tui = self._tick_meta().get("tui") or {}
-                li = tui.get("last_indicator")
-                if isinstance(li, dict):
-                    li_kind = li.get("kind")
-                status = tui.get("status")
-            term_state = resolve_live_terminal_indicator_state(
-                last_indicator_kind=li_kind,
-                status=status,
-                stop_requested=getattr(runner, "_stop_requested", False),
-            )
-            if self._thinking is not None and self._stopping_alive():
-                # Стоп запрошен, ход дорабатывает — мигающий глиф стопа.
-                self._thinking.show("stopping")
-            elif term_state is not None and self._thinking is not None:
-                # show, не set_state: стоп мог прийти, пока строка была
-                # скрыта на человеко-ожидании.
-                self._thinking.show(term_state)
-            else:
-                self._destroy_thinking_indicator()
+            self._show_idle_indicator(runner, frozen=_frozen)
             if not _frozen:
                 self._clear_stream_block()
         # Footer-left зависит от is_running — обновляем каждый тик, чтобы
@@ -5804,6 +5821,50 @@ class TraceScreen(Screen):
                 and self._runner_is_for_active_thread()
             ):
                 self._return_queue_to_input(self._withdraw_queue(runner))
+
+    def _show_idle_indicator(self, runner, *, frozen: bool) -> None:
+        """Idle: строка-итог последнего хода до следующей отправки.
+
+        Остановленный ход дорабатывает — мигающий «■». Запись итога
+        последнего хода — строка из неё (стоп: время — момент стопа).
+        Исход без записи уже показан спадающим фронтом; иначе — по статусу
+        сессии, а неизвестный исход строку убирает."""
+        ind = self._thinking
+        if ind is None:
+            return
+        if self._stopping_alive():
+            ind.show("stopping")
+            return
+        if ind._state == "stopping" and not frozen:
+            # Поток стопа вышел: его запись уже в файле — до решения.
+            self._poll_trace_tail()
+        outcome = self._latest_turn_outcome()
+        if outcome is not None:
+            self._show_turn_outcome(*kind_of(outcome), outcome)
+            return
+        if is_terminal_indicator_state(ind._state):
+            return
+        status = None
+        if self._store is not None and self._active_task_id is not None:
+            status = (self._tick_meta().get("tui") or {}).get("status")
+        state = resolve_live_terminal_indicator_state(
+            outcome=None,
+            status=status,
+            stop_requested=getattr(runner, "_stop_requested", False),
+        )
+        if state is None:
+            self._destroy_thinking_indicator()
+        else:
+            # show, не set_state: стоп мог прийти, пока строка была
+            # скрыта на человеко-ожидании.
+            ind.show(state)
+
+    def _follow_turn_clock(self) -> None:
+        """Живой счёт индикатора — от часов хода ядра: ожидание человека в
+        него не входит, ответ на вопрос агента его не обнуляет."""
+        start = self._live_turn_start()
+        if self._thinking is not None and start is not None:
+            self._thinking.set_started_at(start)
 
     def _poll_trace_tail(self) -> None:
         """Дочитать и отрисовать хвост записей активного треда."""

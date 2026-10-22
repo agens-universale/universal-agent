@@ -7,13 +7,25 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from gc_core.execution.environment import utc_now
 from gc_core.execution.message_keys import withdraw_from_queue
+from gc_core.execution.turn_clock import Mono, TurnClock
+from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
+from gc_core.thread_store import append_turn_outcome_record
 
-from gc_testkit.tui_fixtures.scenarios import SCENARIOS
+from gc_testkit.tui_fixtures.scenarios import (
+    DEFAULT_OUTCOME,
+    SCENARIO_OUTCOMES,
+    SCENARIOS,
+)
 
 
 class StubExecutor:
-    """Записывает сценарий событий в data_*.jsonl с реалистичными паузами."""
+    """Записывает сценарий событий в data_*.jsonl с реалистичными паузами.
+
+    Ход закрывается, как у ядра, записью итога: у сценария — с закреплённым
+    временем (`DEFAULT_OUTCOME` / `SCENARIO_OUTCOMES`), у остановленного —
+    `stopped/user_stop` по часам хода (конец — момент стопа)."""
 
     def __init__(
         self,
@@ -22,6 +34,7 @@ class StubExecutor:
         system: str = "cli",
         scenario: str = "full_dialog",
         step_delay: float = 0.0,  # для snapshot-тестов делаем 0
+        mono: Mono = time.monotonic,
     ) -> None:
         self.threads_dir = Path(threads_dir)
         self.system = system
@@ -30,6 +43,26 @@ class StubExecutor:
         self.stopped = False
         #: Очередь `add_message`: из неё снимает `withdraw_message`.
         self.queued: list[dict] = []
+        self._mono = mono
+        #: Часы текущего хода (как у ядра); до первого хода — None.
+        self.clock: Optional[TurnClock] = None
+
+    async def arun(
+        self,
+        messages: list,
+        *,
+        thread_id: str,
+        start_new_thread: bool = False,
+        system: Optional[str] = None,
+        **_ignored,
+    ) -> None:
+        """Ход через раннер TUI: тот же сценарий, что и у `run`."""
+        self.run(
+            messages,
+            thread_id=thread_id,
+            start_new_thread=start_new_thread,
+            system=system,
+        )
 
     def run(
         self,
@@ -44,15 +77,21 @@ class StubExecutor:
         data_path = self.threads_dir / f"data_{sys_}_{thread_id}.jsonl"
         meta_path = self.threads_dir / f"meta_{sys_}_{thread_id}.json"
 
+        self.clock = TurnClock.start(mono=self._mono, wall=utc_now)
         records = self._build_records(messages, scenario=self.scenario)
+        written: list[dict] = []
         with open(data_path, "a", encoding="utf-8") as f:
             for rec in records:
                 if self.stopped:
-                    return
+                    break
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 f.flush()
+                written.append(rec)
                 if self.step_delay > 0:
                     time.sleep(self.step_delay)
+        self._record_outcome(sys_, thread_id, written)
+        if self.stopped:
+            return
 
         meta = {
             "thread_id": thread_id,
@@ -66,6 +105,13 @@ class StubExecutor:
 
     def stop_run(self) -> None:
         self.stopped = True
+        # Момент стопа — конец хода, как у ядра.
+        if self.clock is not None:
+            self.clock.close()
+
+    def turn_effective_start(self) -> Optional[float]:
+        """Старт хода, сдвинутый на ожидания человека (как у ядра)."""
+        return self.clock.effective_start() if self.clock else None
 
     def add_message(self, message: dict) -> None:
         self.queued.append(message)
@@ -77,3 +123,44 @@ class StubExecutor:
         self, user_messages: list, *, scenario: str
     ) -> list[dict]:
         return SCENARIOS[scenario](user_messages)
+
+    def _record_outcome(
+        self, system: str, thread_id: str, written: list[dict]
+    ) -> None:
+        """Запись итога хода за последним сообщением; ход без сообщений
+        и незакрытый ход сценария записи не получают."""
+        if not written or self.clock is None:
+            return
+        self.clock.close()
+        fields = self._outcome_fields()
+        if fields is None:
+            return
+        outcome = TurnOutcome(opened_by=_opened_by(written), **fields)
+        append_turn_outcome_record(
+            str(self.threads_dir),
+            system,
+            thread_id,
+            outcome,
+            seq=written[-1].get("seq", 0),
+        )
+
+    def _outcome_fields(self) -> Optional[dict]:
+        if not self.stopped:
+            return SCENARIO_OUTCOMES.get(self.scenario, DEFAULT_OUTCOME)
+        return {
+            "status": "stopped",
+            "reason": USER_STOP,
+            "started_at": self.clock.started_at,
+            "ended_at": self.clock.ended_at,
+            "duration_sec": round(self.clock.elapsed(), 1),
+            "error": None,
+        }
+
+
+def _opened_by(records: list[dict]) -> Optional[str]:
+    """`id` первой реплики пользователя хода (как `opening_reply_id`)."""
+    for rec in records:
+        payload = rec.get("payload") or {}
+        if payload.get("role") == "user":
+            return payload.get("id")
+    return None

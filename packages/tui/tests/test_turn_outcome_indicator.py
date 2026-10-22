@@ -1,0 +1,546 @@
+"""Строка последнего хода — из записи итога ядра и часов хода ядра.
+
+Исход, время конца, длительность и причина ошибки последнего хода — только
+из записи `turn_outcome` в файле треда (решение плана 5): вживую и после
+переоткрытия одна строка. Живой счёт индикатора — от часов хода ядра
+(`runner.turn_effective_start()`): ожидание человека в него не входит, и
+ответ на вопрос агента счёт не обнуляет. Нет записи — прежнее правило по
+статусу сессии, без времени.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import timedelta
+
+import pytest
+from gc_core.execution.environment import utc_now
+from gc_core.execution.turn_clock import TurnClock
+from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
+from gc_core.thread_store import (
+    append_new_thread_messages,
+    append_turn_outcome_record,
+)
+from gc_testkit.tui_fixtures.stub_executor import StubExecutor
+from gc_testkit.tui_support import tui_settings, wait_until
+from gc_tui.services.relative_time import format_turn_clock, parse_iso_utc
+
+TID = "tout0000000000000000000000000001a"
+OTHER = "tout0000000000000000000000000002b"
+STARTED = "2026-10-22T11:32:00Z"
+ENDED = "2026-10-22T11:32:12Z"
+
+
+def _hm(iso: str) -> str:
+    return parse_iso_utc(iso).astimezone().strftime("%H:%M")
+
+
+@pytest.fixture(autouse=True)
+def _pin_now(monkeypatch):
+    """«Сейчас» строки — минута после конца хода: время без даты."""
+    from gc_tui.services import relative_time
+
+    now = parse_iso_utc(ENDED).astimezone() + timedelta(minutes=1)
+    monkeypatch.setattr(relative_time, "_now_local", lambda: now)
+
+
+def _write_thread(tmp_path, tid=TID, tui=None):
+    meta = {"thread_id": tid, "system_id": "cli"}
+    if tui is not None:
+        meta["tui"] = tui
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+
+
+def _messages(tmp_path, *payloads, start_seq=0):
+    append_new_thread_messages(
+        str(tmp_path), "cli", TID, list(payloads), set(), start_seq=start_seq
+    )
+
+
+def _reply(mid, text="вопрос"):
+    return {"id": mid, "role": "user", "content": text}
+
+
+def _answer(mid, text="ответ"):
+    return {
+        "id": mid,
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": text}],
+    }
+
+
+def _record(tmp_path, *, seq, status="done", reason=None, **kw):
+    outcome = TurnOutcome(
+        status=status,
+        reason=reason,
+        opened_by=kw.get("opened_by"),
+        started_at=STARTED,
+        ended_at=kw.get("ended", ENDED),
+        duration_sec=kw.get("dur", 12.0),
+        error=kw.get("error"),
+    )
+    append_turn_outcome_record(str(tmp_path), "cli", TID, outcome, seq=seq)
+
+
+def _records(tmp_path, tid):
+    path = tmp_path / f"data_cli_{tid}.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+def _outcomes(tmp_path, tid):
+    return [
+        r["outcome"]
+        for r in _records(tmp_path, tid)
+        if r.get("type") == "turn_outcome"
+    ]
+
+
+def _app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+
+
+def _text(scr) -> str:
+    assert scr._thinking is not None
+    return scr._thinking._render_text().plain
+
+
+async def _reopen(pilot, tmp_path, tid):
+    """Переоткрыть тред: через другой тред, как из `/sessions`."""
+    _write_thread(tmp_path, OTHER, tui={"status": "completed"})
+    scr = pilot.app.screen
+    scr.attach_active_task(OTHER, is_resume=True)
+    scr.attach_active_task(tid, is_resume=True)
+    await pilot.pause()
+    return scr
+
+
+class _ClockRunner:
+    """Живой прогон с часами хода ядра на подменной монотонике."""
+
+    _thread_kind = "run"
+    _stop_requested = False
+
+    def __init__(self, tid, clock=None):
+        self._last_target = (tid, "cli")
+        self.clock = clock
+        self.running = True
+        self.run_seq = 1
+
+    def is_running(self):
+        return self.running
+
+    def turn_effective_start(self):
+        return self.clock.effective_start() if self.clock else None
+
+    def submit_ask_human_reply(self, _answer):
+        pass
+
+    def cancel_ask_human(self):
+        pass
+
+    def cancel_confirm(self):
+        pass
+
+    def add_message(self, _message):
+        pass
+
+    def stop(self):
+        self.running = False
+
+
+def _fake_clock():
+    now = {"t": 100.0}
+    clock = TurnClock.start(mono=lambda: now["t"], wall=utc_now)
+    return clock, now
+
+
+# --- голова индикатора: время из записи -----------------------------------
+
+
+def test_indicator_head_carries_clock_time():
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(state="done", frozen_elapsed=12.0, ended_at=ENDED)
+    assert ind._render_text().plain == f"✓ Выполнил за 12с · {_hm(ENDED)}"
+    ind.set_ended_at(None)
+    assert ind._render_text().plain == "✓ Выполнил за 12с"
+
+
+def test_indicator_done_without_duration_does_not_count_itself():
+    """Нет длительности из записи — «Выполнил» без «за N»: свой счёт
+    индикатора длительностью хода не становится."""
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(started_at=0.0, clock=lambda: 100.0)
+    ind.set_state("done")
+    assert ind._render_text().plain == "✓ Выполнил"
+
+
+def test_indicator_plan_head():
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(
+        state="done", frozen_elapsed=40.0, ended_at=ENDED, plan=True
+    )
+    assert ind._render_text().plain == f"✓ План готов за 40с · {_hm(ENDED)}"
+
+
+def test_stopping_blink_has_no_time():
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(state="stopping", ended_at=ENDED)
+    assert ind._render_text().plain == "■"
+
+
+def test_live_count_follows_started_at_setter():
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(started_at=0.0, clock=lambda: 50.0)
+    ind.set_started_at(45.0)
+    assert "(5с)" in ind._render_text().plain
+
+
+# --- ход через раннер и заглушку исполнителя -------------------------------
+
+
+async def _send(pilot, text="привет"):
+    inp = pilot.app.query_one("#cmdinput")
+    inp.text = text
+    await pilot.press("enter")
+    await pilot.pause()
+    return pilot.app.screen
+
+
+@pytest.mark.asyncio
+async def test_done_turn_line_from_record_live_and_reopen(tmp_path):
+    app = _app(tmp_path)
+    app._executor_factory = lambda: StubExecutor(threads_dir=str(tmp_path))
+    async with app.run_test() as pilot:
+        scr = await _send(pilot)
+        tid = scr._active_task_id
+        head = f"✓ Выполнил за 12с · {_hm(ENDED)}"
+        await wait_until(
+            pilot,
+            lambda: scr._thinking is not None and _text(scr).startswith(head),
+            "строка итога из записи",
+        )
+        tui = scr._store.get_task_meta(tid)["tui"]
+        assert tui["status"] == "completed"
+        assert "last_error" not in tui
+        assert set(tui["last_indicator"]) == {"edits"}
+
+        scr = await _reopen(pilot, tmp_path, tid)
+        assert _text(scr).startswith(head)
+
+
+@pytest.mark.asyncio
+async def test_stop_blinks_then_cancelled_at_stop_moment(tmp_path):
+    stubs: list = []
+
+    def factory():
+        stubs.append(StubExecutor(threads_dir=str(tmp_path), step_delay=0.3))
+        return stubs[-1]
+
+    app = _app(tmp_path)
+    app._executor_factory = factory
+    async with app.run_test() as pilot:
+        scr = await _send(pilot)
+        tid = scr._active_task_id
+        await wait_until(
+            pilot,
+            lambda: scr._events_since_last_user_send > 0,
+            "агент начал ход",
+        )
+        old = pilot.app.active_runner
+        scr._cmd_stop()
+        assert scr._thinking._state == "stopping"
+        assert _text(scr) in ("■", " ")
+        await wait_until(
+            pilot, lambda: not old.is_running(), "поток хода вышел"
+        )
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(_outcomes(tmp_path, tid))
+                and scr._thinking._state == "cancelled"
+                and "·" in _text(scr)
+            ),
+            "ровный итог стопа со временем",
+        )
+        (outcome,) = _outcomes(tmp_path, tid)
+        assert (outcome["status"], outcome["reason"]) == (
+            "stopped",
+            USER_STOP,
+        )
+        assert outcome["ended_at"] == stubs[0].clock.ended_at
+        clock_time = format_turn_clock(outcome["ended_at"])
+        assert _text(scr) == f"■ Отменено · {clock_time}"
+
+        scr = await _reopen(pilot, tmp_path, tid)
+        assert _text(scr) == f"■ Отменено · {clock_time}"
+
+
+@pytest.mark.asyncio
+async def test_quit_mid_turn_writes_stop_record_and_waits(tmp_path):
+    """Выход посреди хода: ядро успевает закрыть ход записью, поток
+    раннера дождался (решение плана 6)."""
+    app = _app(tmp_path)
+    app._executor_factory = lambda: StubExecutor(
+        threads_dir=str(tmp_path), step_delay=0.3
+    )
+    async with app.run_test() as pilot:
+        scr = await _send(pilot)
+        tid = scr._active_task_id
+        runner = pilot.app.active_runner
+        await wait_until(
+            pilot,
+            lambda: scr._events_since_last_user_send > 0,
+            "агент начал ход",
+        )
+        pilot.app.exit()
+        await pilot.pause()
+    assert runner._thread.is_alive() is False
+    (outcome,) = _outcomes(tmp_path, tid)
+    assert (outcome["status"], outcome["reason"]) == ("stopped", USER_STOP)
+
+
+# --- ожидание человека ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_answer_keeps_turn_clock_and_duration_without_wait(tmp_path):
+    """Вопрос агента, ответ через 30 с: счёт после ответа — от часов хода
+    (без 30 с), не с нуля; итог — длительность из записи."""
+    from gc_tui.widgets.ask_human_banner import AskHumanBanner
+
+    _write_thread(tmp_path)
+    clock, now = _fake_clock()
+    app = _app(tmp_path)
+    runner = _ClockRunner(TID, clock)
+    app.active_runner = runner
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID)
+        # Вопрос приходит хвостом живого хода: его владелец — этот раннер.
+        StubExecutor(threads_dir=str(tmp_path), scenario="ask_human_flow").run(
+            ["спроси меня"], thread_id=TID
+        )
+        await wait_until(
+            pilot,
+            lambda: len(pilot.app.query(AskHumanBanner)) == 1,
+            "баннер вопроса",
+        )
+        now["t"] = 105.0
+        clock.begin_wait()
+        now["t"] = 135.0
+        clock.end_wait()
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "A"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert scr._thinking._started_at == 130.0
+
+        now["t"] = 142.0
+        clock.close()
+        _record(tmp_path, seq=4, dur=round(clock.elapsed(), 1))
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _text(scr).startswith(f"✓ Выполнил за 12с · {_hm(ENDED)}")
+
+
+@pytest.mark.asyncio
+async def test_confirm_wait_does_not_count(tmp_path):
+    """Подтверждение: пока человек решает, счёт хода стоит."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply("u1"))
+    clock, now = _fake_clock()
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID)
+        scr._prepare_for_new_run()
+        pilot.app.active_runner = _ClockRunner(TID, clock)
+        scr._poll_active()
+        now["t"] = 105.0
+        clock.begin_wait()
+        now["t"] = 135.0
+        scr._poll_active()
+        assert scr._thinking._started_at == 130.0
+        clock.end_wait()
+        now["t"] = 140.0
+        scr._poll_active()
+        assert scr._thinking._started_at == 130.0
+
+
+# --- исходы из записи -------------------------------------------------------
+
+
+async def _finish_turn(pilot, tmp_path, **record):
+    """Ход прошёл через экран; запись итога легла до спадающего фронта."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply("u1"))
+    scr = pilot.app.screen
+    scr.attach_active_task(TID)
+    scr._prepare_for_new_run()
+    scr._reset_thinking_timer()
+    runner = _ClockRunner(TID)
+    pilot.app.active_runner = runner
+    scr._poll_active()
+    _messages(tmp_path, _answer("a1"), start_seq=1)
+    _record(tmp_path, seq=2, **record)
+    runner.running = False
+    scr._poll_active()
+    await pilot.pause()
+    return scr
+
+
+@pytest.mark.asyncio
+async def test_error_turn_from_record_with_reason(tmp_path):
+    reason = "RuntimeError: " + "сбой " * 60
+    async with _app(tmp_path).run_test() as pilot:
+        pilot.app.last_runner_error = None
+        scr = await _finish_turn(
+            pilot,
+            tmp_path,
+            status="error",
+            ended="2026-10-22T11:50:00Z",
+            error={"type": "RuntimeError", "message": reason},
+        )
+        rows = _text(scr).split("\n")
+        assert rows[0] == f"✕ Ошибка · {_hm('2026-10-22T11:50:00Z')}"
+        assert rows[1].lstrip().startswith("└ RuntimeError: сбой")
+        assert len(rows) == 4  # голова + причина до трёх строк
+        tui = scr._store.get_task_meta(TID)["tui"]
+        assert tui["status"] == "failed"
+        assert "last_error" not in tui
+
+        live = _text(scr)
+        scr = await _reopen(pilot, tmp_path, TID)
+        assert _text(scr) == live
+
+
+@pytest.mark.asyncio
+async def test_limit_turn_from_record(tmp_path):
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _finish_turn(
+            pilot,
+            tmp_path,
+            status="stopped",
+            reason="step_limit",
+            ended="2026-10-22T12:02:00Z",
+        )
+        assert _text(scr) == (
+            "⏹ Остановлено: превышен лимит шагов · "
+            f"{_hm('2026-10-22T12:02:00Z')}"
+        )
+        assert scr._store.get_task_meta(TID)["tui"]["status"] == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_turn_without_record_falls_back_without_time(tmp_path):
+    """Ход записи не оставил (хранилище без записей): прежний путь из
+    раннера, без времени."""
+    async with _app(tmp_path).run_test() as pilot:
+        _write_thread(tmp_path)
+        _messages(tmp_path, _reply("u1"))
+        _record(tmp_path, seq=1)  # прошлый ход
+        scr = pilot.app.screen
+        scr.attach_active_task(TID)
+        scr._prepare_for_new_run()
+        scr._reset_thinking_timer()
+        runner = _ClockRunner(TID)
+        pilot.app.active_runner = runner
+        scr._poll_active()
+        _messages(tmp_path, _reply("u2"), _answer("a2"), start_seq=1)
+        pilot.app.last_terminal_outcome = "step_limit"
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _text(scr) == "⏹ Остановлено: превышен лимит шагов"
+
+
+# --- переоткрытие -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_running_thread_without_live_turn_is_interrupted(tmp_path):
+    """Ход 1 записан, ход 2 начат и оборван: «■ Прервано» без времени,
+    не итог прошлого хода."""
+    _write_thread(tmp_path, tui={"status": "running"})
+    _messages(tmp_path, _reply("u1"), _answer("a1"))
+    _record(tmp_path, seq=2)
+    _messages(tmp_path, _reply("u2"), start_seq=2)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID, is_resume=True)
+        await pilot.pause()
+        assert _text(scr) == "■ Прервано"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "line"),
+    [("completed", "✓ Выполнил"), ("failed", "✕ Ошибка")],
+)
+async def test_old_meta_without_records_uses_status_word(
+    tmp_path, status, line
+):
+    _write_thread(
+        tmp_path,
+        tui={
+            "status": status,
+            "last_indicator": {"kind": "stopped_steps", "elapsed": 7},
+            "last_error": "ReadError: boom",
+        },
+    )
+    _messages(tmp_path, _reply("u1"), _answer("a1"))
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID, is_resume=True)
+        await pilot.pause()
+        assert _text(scr) == line
+
+
+# --- хвост из очереди между тиками ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tail_started_between_ticks_settles_previous_run(tmp_path):
+    """Хвост стартовал отдельным прогоном между тиками: раннер «всё ещё
+    бежит», но номер прогона сменился — конец прошлого хода закрыт."""
+    _write_thread(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID)
+        settled: list = []
+        original = scr._on_run_finished
+
+        def _spy(runner, kind):
+            settled.append(runner.run_seq)
+            original(runner, kind)
+
+        scr._on_run_finished = _spy
+        scr._prepare_for_new_run()
+        runner = _ClockRunner(TID)
+        pilot.app.active_runner = runner
+        scr._poll_active()
+        runner.run_seq = 2
+        scr._poll_active()
+        assert settled == [2]
+        assert scr._store.get_task_meta(TID)["tui"]["status"] == "running"
+        runner.running = False
+        scr._poll_active()
+        assert len(settled) == 2

@@ -86,8 +86,72 @@ async def test_resume_unrecorded_outcome_no_line(tmp_path):
         assert scr._thinking is None
 
 
+def _outcome(status, reason=None):
+    from gc_core.persistence.turn_outcome import TurnOutcome
+
+    return TurnOutcome(
+        status=status,
+        reason=reason,
+        opened_by=None,
+        started_at="2026-10-22T11:32:00Z",
+        ended_at="",
+        duration_sec=12.0,
+        error=None,
+    )
+
+
 @pytest.mark.asyncio
-async def test_resume_completed_shows_done_with_elapsed(tmp_path, monkeypatch):
+async def test_resume_completed_shows_done_with_elapsed(tmp_path):
+    """Запись итога последнего хода — строка из неё: длительность из
+    записи; старые поля меты (`kind`, `elapsed`) не читаются."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "t1"
+        scr._store = _store_with_last_indicator(
+            {"kind": "stopped_steps", "elapsed": 99}
+        )
+        scr._last_turn_outcome = _outcome("done")
+        scr.app.active_runner = None
+        scr._thinking = None
+
+        scr._restore_terminal_indicator()
+        await pilot.pause()
+        assert scr._thinking is not None
+        assert scr._thinking._render_text().plain == "✓ Выполнил за 12с"
+
+
+@pytest.mark.asyncio
+async def test_resume_stopped_shows_cancelled(tmp_path):
+    pytest.importorskip("textual")
+    from gc_core.persistence.turn_outcome import USER_STOP
+    from gc_tui.app import TuiApp
+
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._active_task_id = "t1"
+        scr._store = _store_with_last_indicator(None)
+        scr._last_turn_outcome = _outcome("stopped", USER_STOP)
+        scr.app.active_runner = None
+        scr._thinking = None
+
+        scr._restore_terminal_indicator()
+        await pilot.pause()
+        assert scr._thinking._render_text().plain == "■ Отменено"
+
+
+@pytest.mark.asyncio
+async def test_resume_old_last_indicator_without_status_draws_nothing(
+    tmp_path,
+):
+    """Старая мета: `last_indicator.kind` без записи и без статуса —
+    исход не записан, строки нет (поле больше не источник)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -104,29 +168,7 @@ async def test_resume_completed_shows_done_with_elapsed(tmp_path, monkeypatch):
 
         scr._restore_terminal_indicator()
         await pilot.pause()
-        assert scr._thinking is not None
-        assert scr._thinking._render_text().plain == "✓ Выполнил за 12с"
-
-
-@pytest.mark.asyncio
-async def test_resume_stopped_shows_cancelled(tmp_path):
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-
-    async with TuiApp(
-        threads_dir=str(tmp_path / "threads")
-    ).run_test() as pilot:
-        scr = pilot.app.screen
-        scr._active_task_id = "t1"
-        scr._store = _store_with_last_indicator(
-            {"kind": "cancelled", "elapsed": None}
-        )
-        scr.app.active_runner = None
-        scr._thinking = None
-
-        scr._restore_terminal_indicator()
-        await pilot.pause()
-        assert scr._thinking._render_text().plain == "■ Отменено"
+        assert scr._thinking is None
 
 
 @pytest.mark.asyncio

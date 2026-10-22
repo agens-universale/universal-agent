@@ -152,9 +152,13 @@ class AgentRunner:
         #: Тред и система последнего прогона: в них доигрывается сообщение,
         #: опоздавшее к закрытию.
         self._last_target: Optional[tuple[str, str]] = None
-        #: Монотоника старта последнего прогона: от неё — длительность хода
-        #: в его итоге, даже если к концу на экране уже другая сессия.
+        #: Монотоника старта последнего прогона: часы хода ядра, заведённые
+        #: раньше, — часы прошлого хода, не этого прогона.
         self.run_started_at: Optional[float] = None
+        #: Номер прогона: растёт на каждом заведённом воркере. Экран по его
+        #: смене видит конец хода, даже если следующий прогон (хвост из
+        #: очереди) стартовал между тиками опроса.
+        self.run_seq = 0
         self._stop_requested = False
         # TUI _stop_and_replace_runner: runner снят с active_runner, но поток ещё
         # может досидеть HTTP/ретраи. Его on_error не должен залипать ✗ Ошибка
@@ -316,6 +320,19 @@ class AgentRunner:
         with self._lock:
             t = self._thread
         return t is not None and t.is_alive()
+
+    def turn_effective_start(self) -> Optional[float]:
+        """Старт текущего хода по часам ядра, сдвинутый на ожидания
+        человека: от него живой счёт индикатора. Исполнителя или часов
+        этого прогона ещё нет (ядро не начало ход, на исполнителе часы
+        прошлого) или работа — не ход (`/compact`) — None."""
+        ex = self._executor
+        started = self.run_started_at
+        probe = getattr(ex, "turn_effective_start", None)
+        if probe is None or started is None or self._thread_kind != "run":
+            return None
+        value = probe()
+        return value if value is not None and value >= started else None
 
     def call_level(self) -> Optional[str]:
         """Фактический уровень подготовленного вызова из State, независимо от режима.
@@ -514,6 +531,7 @@ class AgentRunner:
         self._accepting = True
         self._last_target = (thread_id, system)
         self.run_started_at = time.monotonic()
+        self.run_seq += 1
         t = threading.Thread(
             target=self._run_worker,
             args=(batch, thread_id, start_new_thread, system),

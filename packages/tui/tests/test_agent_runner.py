@@ -540,8 +540,8 @@ def test_confirm_stop_unblocks_blocked_confirm():
 
 
 def test_runner_remembers_when_its_run_started():
-    """Начало прогона хранится в раннере: длительность хода считается от
-    него, а не от поля экрана, которое смена сессии сбрасывает."""
+    """Начало прогона хранится в раннере: по нему часы хода ядра этого
+    прогона отличаются от часов прошлого хода."""
     fake = _FakeExecutor()
     runner = AgentRunner(executor=fake)
     before = time.monotonic()
@@ -549,6 +549,53 @@ def test_runner_remembers_when_its_run_started():
     assert before <= runner.run_started_at <= time.monotonic()
     runner.stop()
     runner.wait(timeout=1.0)
+
+
+def test_run_seq_counts_every_spawned_run():
+    """Номер прогона растёт на каждом заведённом воркере: по его смене
+    экран видит конец хода, даже если следующий стартовал между тиками."""
+    fake = _FakeExecutor()
+    runner = AgentRunner(executor=fake)
+    assert runner.run_seq == 0
+    for expected in (1, 2):
+        fake._event.clear()
+        runner.start(query="x", thread_id="t1")
+        assert runner.run_seq == expected
+        runner.stop()
+        runner.wait(timeout=1.0)
+
+
+def test_turn_effective_start_without_executor_is_none():
+    runner = AgentRunner(executor_factory=lambda: None)
+    assert runner.turn_effective_start() is None
+
+
+class _ClockExecutor(_FakeExecutor):
+    def __init__(self):
+        super().__init__()
+        self.start = None
+
+    def turn_effective_start(self):
+        return self.start
+
+
+def test_turn_effective_start_delegates_to_current_turn_clock():
+    fake = _ClockExecutor()
+    runner = AgentRunner(executor=fake)
+    runner.start(query="x", thread_id="t1")
+    try:
+        fake.start = runner.run_started_at + 0.5
+        assert runner.turn_effective_start() == fake.start
+        # Часы прошлого хода (ядро ещё не завело новые) — не этого прогона.
+        fake.start = runner.run_started_at - 5.0
+        assert runner.turn_effective_start() is None
+        # `/compact` — не ход: счёт от часов хода ему не принадлежит.
+        fake.start = runner.run_started_at + 0.5
+        runner._thread_kind = "compact"
+        assert runner.turn_effective_start() is None
+    finally:
+        runner.stop()
+        runner.wait(timeout=1.0)
 
 
 def test_stop_releases_run_waiting_for_human_answer():

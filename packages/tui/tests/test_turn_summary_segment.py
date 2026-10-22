@@ -12,7 +12,12 @@ import re
 import pytest
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
-from gc_core.thread_store import edits_journal_path
+from gc_core.persistence.turn_outcome import TurnOutcome
+from gc_core.thread_store import (
+    append_new_thread_messages,
+    append_turn_outcome_record,
+    edits_journal_path,
+)
 from gc_testkit.paths import module_dir
 from gc_testkit.tui_support import tui_settings
 from gc_tui.widgets.thinking_indicator import (
@@ -28,6 +33,27 @@ def _write_task(tmp_path, tid):
         json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8"
     )
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+
+
+def _done_turn(tmp_path, tid):
+    """Закрытый ход: реплика и запись итога ядра «за 12с»."""
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        tid,
+        [{"id": "u1", "role": "user", "content": "q"}],
+        set(),
+    )
+    outcome = TurnOutcome(
+        status="done",
+        reason=None,
+        opened_by="u1",
+        started_at="2026-10-22T11:32:00Z",
+        ended_at="",
+        duration_sec=12.0,
+        error=None,
+    )
+    append_turn_outcome_record(str(tmp_path), "cli", tid, outcome, seq=1)
 
 
 def _append_edit(
@@ -500,6 +526,9 @@ async def _turn_with_edits(pilot, tmp_path, tid):
     """Завершённый ход с правками: индикатор показывает сегмент сводки."""
     scr = pilot.app.screen
     await _falling_edge(pilot, scr, tid)
+    # Потолок ленты считается от хрома прошлой раскладки: досчитать до
+    # жестов, иначе тик опроса сдвинет строку под указателем.
+    scr._sync_trace_max_height()
     await pilot.pause()
     ind = scr._thinking
     assert ind is not None and ind._summary_span is not None
@@ -820,6 +849,7 @@ async def test_resume_shows_summary_saved_with_indicator(tmp_path):
 
     tid = "turn0000000000000000000000000006a"
     _write_task(tmp_path, tid)
+    _done_turn(tmp_path, tid)
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
@@ -830,14 +860,7 @@ async def test_resume_shows_summary_saved_with_indicator(tmp_path):
         scr.attach_active_task(tid)
         scr._store.update_tui_meta(
             tid,
-            {
-                "status": "completed",
-                "last_indicator": {
-                    "kind": "done",
-                    "elapsed": 12,
-                    "edits": [2, 5, 6],
-                },
-            },
+            {"status": "completed", "last_indicator": {"edits": [2, 5, 6]}},
         )
         pilot.app.active_runner = None
         scr._destroy_thinking_indicator()
@@ -857,6 +880,7 @@ async def test_resume_without_saved_summary_shows_no_stale_numbers(tmp_path):
 
     tid = "turn0000000000000000000000000007a"
     _write_task(tmp_path, tid)
+    _done_turn(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T0", add=9, del_=9)
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -868,10 +892,7 @@ async def test_resume_without_saved_summary_shows_no_stale_numbers(tmp_path):
         scr.attach_active_task(tid)
         scr._store.update_tui_meta(
             tid,
-            {
-                "status": "completed",
-                "last_indicator": {"kind": "done", "elapsed": 12},
-            },
+            {"status": "completed", "last_indicator": {"edits": None}},
         )
         pilot.app.active_runner = None
         scr._destroy_thinking_indicator()

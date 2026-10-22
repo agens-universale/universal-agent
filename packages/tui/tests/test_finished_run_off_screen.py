@@ -1,17 +1,23 @@
 """Конец прогона треда, который сейчас не на экране.
 
-Прогон B кончился, пока человек смотрит A: исход, длительность, сводка
-правок и план записываются в B; индикатор, баннер плана и сводка A не
-меняются. Возврат на B показывает его исход."""
+Прогон B кончился, пока человек смотрит A: статус и сводка правок
+записываются в B (исход, длительность и план — в его записи итога, её
+пишет ядро); индикатор, баннер плана и сводка A не меняются. Возврат на B
+показывает его исход."""
 
 from __future__ import annotations
 
 import json
-import time
 
 import pytest
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
-from gc_core.thread_store import edits_journal_path, save_thread_meta
+from gc_core.persistence.turn_outcome import TurnOutcome
+from gc_core.thread_store import (
+    append_new_thread_messages,
+    append_turn_outcome_record,
+    edits_journal_path,
+    save_thread_meta,
+)
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.turn_outcome import DONE_LABEL_PLAN
 
@@ -33,13 +39,31 @@ def _write_a_with_plan(tmp_path):
         _A,
         {
             "shared": serialize_shared_block(shared),
-            "tui": {
-                "status": "completed",
-                "last_indicator": {"kind": "done", "elapsed": 5},
-            },
+            "tui": {"status": "completed", "last_indicator": {"edits": None}},
         },
     )
-    (tmp_path / f"data_cli_{_A}.jsonl").touch()
+    _turn(tmp_path, _A, reason=None, duration=5.0)
+
+
+def _turn(tmp_path, tid, *, reason, duration):
+    """Закрытый ход треда: реплика и запись итога ядра за ней."""
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        tid,
+        [{"id": f"u_{tid}", "role": "user", "content": "q"}],
+        set(),
+    )
+    outcome = TurnOutcome(
+        status="done",
+        reason=reason,
+        opened_by=f"u_{tid}",
+        started_at="2026-10-22T11:32:00Z",
+        ended_at="",
+        duration_sec=duration,
+        error=None,
+    )
+    append_turn_outcome_record(str(tmp_path), "cli", tid, outcome, seq=1)
 
 
 def _write_b(tmp_path):
@@ -78,13 +102,12 @@ def _meta(tmp_path, tid):
 
 
 class _Runner:
-    """Прогон треда B, начатый 42 секунды назад."""
+    """Прогон треда B."""
 
     _thread_kind = "run"
 
     def __init__(self):
         self._last_target = (_B, "cli")
-        self.run_started_at = time.monotonic() - 42
         self._running = True
 
     def is_running(self):
@@ -115,6 +138,7 @@ async def test_plan_end_of_other_thread_stays_with_it(tmp_path):
         pilot.app.active_runner = runner
         scr._poll_active()  # тик застал прогон B: граница журнала правок
         _b_creates_file(tmp_path)
+        _turn(tmp_path, _B, reason="plan_proposed", duration=42.0)
         # B кончился планом между тиками, и человек сразу открыл A: идущего
         # хода при переходе нет (решение 25), исход B тик ещё не записал.
         runner._running = False
@@ -129,18 +153,10 @@ async def test_plan_end_of_other_thread_stays_with_it(tmp_path):
         assert scr._thinking._render_text().plain == a_before
         assert scr._thinking._summary_span is None
         assert scr._plan_banner is None
-        assert _meta(tmp_path, _A)["last_indicator"] == {
-            "kind": "done",
-            "elapsed": 5,
-        }
+        assert _meta(tmp_path, _A)["last_indicator"] == {"edits": None}
         b = _meta(tmp_path, _B)
         assert b["status"] == "completed"
-        assert b["last_indicator"] == {
-            "kind": "done",
-            "elapsed": 42,
-            "edits": [1, 2, 0],
-            "plan": True,
-        }
+        assert b["last_indicator"] == {"edits": [1, 2, 0]}
         scr.attach_active_task(_B, is_resume=True)
         await pilot.pause()
         plain = scr._thinking._render_text().plain

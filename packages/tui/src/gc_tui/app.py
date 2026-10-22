@@ -45,6 +45,11 @@ textual_compat.apply_textual_patches()
 
 _AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings → Обновление"
 
+#: Сколько выход приложения ждёт поток остановленного хода: ядро успевает
+#: закрыть ход записью итога «stopped». Лучшее усилие, не гарантия: не
+#: успело — после переоткрытия ход «■ Прервано».
+QUIT_SETTLE_SEC = 2.0
+
 # Ключи схемы с флагом ``restart`` (``gc_meta(restart=True)``, спека §3.2). Перечитка
 # конфига и сессионный профиль их НЕ замораживают: новое значение попадает в
 # действующие настройки сразу — каталог тредов окна (`_threads_dir`) перечитка
@@ -386,6 +391,8 @@ class TuiApp(App):
         )
         self.active_runner = None  # AgentRunner | None
         self._runner_stale = False  # конфиг изменился при живом run → пересборка после завершения
+        # Выход ждёт поток хода (`on_unmount`): UI-поток стоит в ожидании.
+        self._quit_settling = False
         # Режим разрешений, выбранный в сессии (Shift+Tab, флаг запуска, сохранённый
         # в сессии). None — выбора не было, действует конфиг. Единственный
         # писатель — set_permission_mode.
@@ -1543,6 +1550,11 @@ class TuiApp(App):
         ):
             return
         snapshot = self._circuit_breaker.snapshot()
+        if self._quit_settling:
+            # UI-поток ждёт этот поток на выходе: мост через него — дедлок
+            # до таймаута ожидания, а гонки с ним нет.
+            self.persist_circuit_breaker(task_id, snapshot)
+            return
         try:
             self.call_from_thread(
                 self.persist_circuit_breaker, task_id, snapshot
@@ -1684,6 +1696,9 @@ class TuiApp(App):
         оставался жить, пока в очередь не придёт строка. `stop()` кладёт туда
         пустую (`cancel_ask_human`) и снимает ожидание подтверждения.
 
+        После стопа — короткое ожидание потока хода (`QUIT_SETTLE_SEC`):
+        ядро закрывает ход записью итога, иначе он остался бы без неё.
+
         Затем логгер прогона (см. `AgentRunner.release`) и подписка на
         runtime-уведомления: и то и другое живёт в модульных реестрах до конца
         процесса и держит приложение целиком, если его не снять.
@@ -1695,6 +1710,10 @@ class TuiApp(App):
                 stop()
             except Exception:
                 pass
+        wait = getattr(runner, "wait", None)
+        if callable(wait):
+            self._quit_settling = True
+            wait(timeout=QUIT_SETTLE_SEC)
         _release_runner(runner)
         unregister_runtime_notices_listener(self._on_runtime_notice)
         self._clear_image_pocket()

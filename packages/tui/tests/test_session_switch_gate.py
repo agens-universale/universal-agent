@@ -292,13 +292,39 @@ async def test_new_thread_line_does_not_blink_for_old_stop(tmp_path):
     """Мигающий «■» — строка останавливаемого хода своей сессии; в
     открытой после перехода сессии итог её собственный."""
     app = _app(tmp_path)
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_core.thread_store import (
+        append_new_thread_messages,
+        append_turn_outcome_record,
+    )
+
     path = tmp_path / f"meta_cli_{_B}.json"
     meta = json.loads(path.read_text(encoding="utf-8"))
-    meta["tui"] = {
-        "status": "completed",
-        "last_indicator": {"kind": "done", "elapsed": 3},
-    }
+    meta["tui"] = {"status": "completed"}
     path.write_text(json.dumps(meta), encoding="utf-8")
+    # Свой закрытый ход B: реплика и запись итога ядра «за 3с».
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        _B,
+        [{"id": "u1", "role": "user", "content": "q"}],
+        set(),
+    )
+    append_turn_outcome_record(
+        str(tmp_path),
+        "cli",
+        _B,
+        TurnOutcome(
+            status="done",
+            reason=None,
+            opened_by="u1",
+            started_at="2026-10-22T11:32:00Z",
+            ended_at="",
+            duration_sec=3.0,
+            error=None,
+        ),
+        seq=1,
+    )
     async with app.run_test() as pilot:
         scr, runner = await _run_in_a(pilot, slow=True)
         await _pick_b(pilot, tmp_path)

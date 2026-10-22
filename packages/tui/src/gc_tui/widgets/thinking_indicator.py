@@ -50,10 +50,7 @@ from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
 from gc_tui.services.duration_format import format_compact_int, format_duration
 from gc_tui.services.plural import files_word
 from gc_tui.services.trace_glyphs import blink_on
-from gc_tui.services.turn_outcome import (
-    DONE_LABEL,
-    OUTCOMES,
-)
+from gc_tui.services.turn_outcome import OUTCOMES, turn_head
 
 THINKING_PHRASES = [
     "думаю",
@@ -167,7 +164,6 @@ _SUMMARY_GAP = 2
 _FALLBACK_WIDTH = 80
 #: Причина ошибки переносится не больше чем на столько строк.
 ERROR_MAX_ROWS = 3
-_DONE = OUTCOMES["completed"]
 _STOP_GLYPH = OUTCOMES["cancelled"].glyph
 
 
@@ -215,29 +211,16 @@ def compose_status_line(
     return out, (head.cell_len + gap, out.cell_len)
 
 
-# Исходы хода, кроме «Выполнил» (у него своя голова — время хода): глиф и слова.
-_TERMINAL_ENDINGS = {
-    state: (OUTCOMES[state].glyph, OUTCOMES[state].sentence)
-    for state in (
-        _STATE_CANCELLED,
-        _STATE_INTERRUPTED,
-        _STATE_FAILED,
-        _STATE_STOPPED_STEPS,
-        _STATE_STOPPED_ERRORS,
-        _STATE_STOPPED_TOKENS,
-        _STATE_STOPPED_TOOL_CALLS,
-        _STATE_STOPPED_JUDGE,
-    )
-}
-
-
 class ThinkingIndicator(Static):
     """Индикатор активности агента (thinking / validating / compressing).
 
-    `started_at` — момент, от которого считается elapsed (обычно
-    `_thinking_started_at` TraceScreen — момент последнего user-send).
+    `started_at` — момент, от которого считается живой счёт: старт хода по
+    часам ядра (экран обновляет его на каждом тике, `set_started_at`).
     Если не передан — используется текущее время (виджет монтируется «сейчас»).
     `state` — стартовый режим ("thinking" / "validating" / "compressing").
+    Строка-итог — голова `turn_head`: длительность (`frozen_elapsed`) и время
+    конца (`ended_at`) приходят снаружи, из записи итога хода; своим счётом
+    индикатор длительность хода не подменяет.
     """
 
     DEFAULT_CSS = ""  # стили — .thinking-indicator в styles.tcss
@@ -251,15 +234,19 @@ class ThinkingIndicator(Static):
         sink=None,
         reasoning_tag: bool = False,
         reasoning_clock=None,
-        frozen_elapsed: int | None = None,
+        frozen_elapsed: float | None = None,
         turn_summary: tuple[int, int, int] | None = None,
-        done_label: str = DONE_LABEL,
+        plan: bool = False,
+        ended_at: str | None = None,
         error: str | None = None,
     ) -> None:
         self._clock = clock
         # Причина упавшего хода: строка `└` под «✕ Ошибка».
         self._error = error
-        self._done_label = done_label
+        # Ход кончился предложенным планом: «План готов», не «Выполнил».
+        self._plan = plan
+        # Конец хода (UTC ISO из записи): время на часах в строке-итоге.
+        self._ended_at = ended_at
         self._sink = sink
         self._reasoning_tag = reasoning_tag
         self._reasoning_clock = reasoning_clock
@@ -270,7 +257,7 @@ class ThinkingIndicator(Static):
         # Кадр мигания «останавливаю» — свой счёт, без обёртки цикла дыхания.
         self._blink_frame: int = 0
         self._state: str = state
-        self._frozen_elapsed: int | None = frozen_elapsed
+        self._frozen_elapsed: float | None = frozen_elapsed
         self._turn_summary: str | None = (
             format_turn_summary(*turn_summary) if turn_summary else None
         )
@@ -337,11 +324,25 @@ class ThinkingIndicator(Static):
         if self.has_error_line and self.styles.height != before:
             self.post_message(IndicatorRowsChanged())
 
-    def set_done_label(self, label: str) -> None:
-        """Подпись успешного исхода хода: «Выполнил» либо «План готов»."""
-        self._done_label = label
+    def set_plan(self, plan: bool) -> None:
+        """Успешный ход кончился планом: «План готов» вместо «Выполнил»."""
+        if plan == self._plan:
+            return
+        self._plan = plan
         if self.is_mounted:
             self.refresh()
+
+    def set_ended_at(self, ended_at: str | None) -> None:
+        """Конец хода из записи итога — время на часах в строке-итоге."""
+        if ended_at == self._ended_at:
+            return
+        self._ended_at = ended_at
+        if self.is_mounted:
+            self.refresh()
+
+    def set_started_at(self, started_at: float) -> None:
+        """Старт живого счёта: часы хода ядра, без ожидания человека."""
+        self._started_at = started_at
 
     def set_turn_summary(self, summary: tuple[int, int, int] | None) -> None:
         """Сводка правок завершившегося хода — правый сегмент строки-итога."""
@@ -373,15 +374,15 @@ class ThinkingIndicator(Static):
         self._state = state
         self._blink_frame = 0
         self._sync_error_class()
-        if state == _STATE_DONE and self._frozen_elapsed is None:
-            self._frozen_elapsed = int(self._clock() - self._started_at)
         self._sync_anim()
         if self.is_mounted:
             self.refresh()
 
-    def freeze_elapsed(self, seconds: int) -> None:
-        """Длительность хода посчитана снаружи (конец хода): строка-итог
-        «Выполнил за N» берёт её, а не свой счёт — одно N с метой."""
+    def freeze_elapsed(self, seconds: float | None) -> None:
+        """Длительность хода из записи итога: строка «Выполнил за N» берёт
+        её, а не свой счёт; None — без «за N» (записи нет)."""
+        if seconds == self._frozen_elapsed:
+            return
         self._frozen_elapsed = seconds
         if self.is_mounted:
             self.refresh()
@@ -559,6 +560,29 @@ class ThinkingIndicator(Static):
     def render(self) -> Text:
         return self._render_text()
 
+    def _render_outcome(self) -> Text:
+        """Строка-итог: голова из словаря (`turn_head`), справа — сводка
+        правок хода, под «✕ Ошибка» — причина."""
+        head = turn_head(
+            self._state,
+            plan=self._plan,
+            duration_sec=self._frozen_elapsed,
+            ended_at=self._ended_at,
+        )
+        head.stylize(_DIM)
+        # Сводка правок — у ЛЮБОГО исхода: упавший или остановленный ход
+        # файлы уже менял, и после ошибки знать это важнее всего.
+        line, self._summary_span = compose_status_line(
+            head,
+            self._turn_summary,
+            self._status_width(),
+            hover=self._summary_hover,
+        )
+        if self.has_error_line:
+            line.append("\n")
+            line.append_text(self._error_line())
+        return line
+
     def _render_text(self) -> Text:
         text = Text()
         # Сегмент рисует только строка-итог «Выполнил»; во всех прочих
@@ -570,46 +594,8 @@ class ThinkingIndicator(Static):
             on = blink_on(self._blink_frame)
             text.append(_STOP_GLYPH if on else " ", style=_DIM)
             return text
-        if self._state == _STATE_DONE:
-            text.append(_DONE.glyph, style=_DIM)
-            text.append(" ")
-            # Живой done всегда замораживает elapsed в set_state → «Выполнил за N».
-            # frozen_elapsed=None — восстановление старой сессии без сохранённого
-            # времени → «Выполнил» без «за N» (не выдумываем 0с).
-            if self._frozen_elapsed is not None:
-                text.append(
-                    f"{self._done_label} за "
-                    f"{format_duration(self._frozen_elapsed)}",
-                    style=_DIM,
-                )
-            else:
-                text.append(self._done_label, style=_DIM)
-            line, self._summary_span = compose_status_line(
-                text,
-                self._turn_summary,
-                self._status_width(),
-                hover=self._summary_hover,
-            )
-            return line
-        ending = _TERMINAL_ENDINGS.get(self._state)
-        if ending is not None:
-            # Сводка правок — у ЛЮБОГО исхода, не только у «Выполнил»: упавший
-            # или остановленный ход файлы уже менял, и после ошибки знать это
-            # пользователю важнее всего (ревью PR, находка 7).
-            glyph, label = ending
-            text.append(glyph, style=_DIM)
-            text.append(" ")
-            text.append(label, style=_DIM)
-            line, self._summary_span = compose_status_line(
-                text,
-                self._turn_summary,
-                self._status_width(),
-                hover=self._summary_hover,
-            )
-            if self.has_error_line:
-                line.append("\n")
-                line.append_text(self._error_line())
-            return line
+        if is_terminal_indicator_state(self._state):
+            return self._render_outcome()
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())
             text.append(" ")

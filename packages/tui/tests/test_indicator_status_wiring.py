@@ -76,9 +76,9 @@ async def test_falling_edge_persists_last_indicator(tmp_path, monkeypatch):
         scr.app.last_stop_requested = True  # => stopped → cancelled
 
         scr._poll_active()
-        kinds = [
-            p.get("last_indicator", {}).get("kind")
-            for p in patches
-            if "last_indicator" in p
-        ]
-        assert kinds == ["cancelled"], patches
+        # Исход — статусом (кэш списка сессий); вид, время и причина хода —
+        # в записи итога ядра, в мете их нет (решение плана 5).
+        stamped = [p for p in patches if "last_indicator" in p]
+        assert stamped == [
+            {"status": "stopped", "last_indicator": {"edits": None}}
+        ], patches

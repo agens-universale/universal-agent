@@ -1,14 +1,20 @@
 """Причина ошибки хода под `✕ Ошибка` (решение владельца 7, смоук P3a).
 
 Ход упал — под строкой индикатора строка `└ <класс>: <текст>` (`DIM`).
-Причина хранится в meta треда (`tui.last_error`): видна вживую и после
-повторного открытия треда; новый ход её очищает."""
+Причина хранится в записи итога хода (`outcome.error.message`, пишет
+ядро): видна вживую и после повторного открытия треда; в мету TUI её не
+копирует; новый ход её снимает."""
 
 from __future__ import annotations
 
 import json
 
 import pytest
+from gc_core.persistence.turn_outcome import TurnOutcome
+from gc_core.thread_store import (
+    append_new_thread_messages,
+    append_turn_outcome_record,
+)
 from gc_testkit.tui_support import tui_settings
 from gc_tui.palette import DIM
 
@@ -40,7 +46,8 @@ def test_failed_indicator_without_reason_is_one_line():
     )
 
 
-def _write_task(tmp_path, tui: dict | None = None):
+def _write_task(tmp_path, tui: dict | None = None, reason: str = ""):
+    """Тред; `reason` — последний ход упал с этой причиной (запись итога)."""
     meta = {"thread_id": _TID, "system_id": "cli"}
     if tui is not None:
         meta["tui"] = tui
@@ -48,6 +55,25 @@ def _write_task(tmp_path, tui: dict | None = None):
         json.dumps(meta), encoding="utf-8"
     )
     (tmp_path / f"data_cli_{_TID}.jsonl").write_text("", encoding="utf-8")
+    if not reason:
+        return
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        _TID,
+        [{"id": "u1", "role": "user", "content": "q"}],
+        set(),
+    )
+    outcome = TurnOutcome(
+        status="error",
+        reason=None,
+        opened_by="u1",
+        started_at="2026-10-22T11:32:00Z",
+        ended_at="",
+        duration_sec=1.0,
+        error={"type": reason.split(":")[0], "message": reason},
+    )
+    append_turn_outcome_record(str(tmp_path), "cli", _TID, outcome, seq=1)
 
 
 def _app(tmp_path):
@@ -74,7 +100,7 @@ def _indicator_text(scr) -> str:
 
 
 @pytest.mark.asyncio
-async def test_live_failure_shows_and_stores_reason(tmp_path):
+async def test_live_failure_shows_reason_without_meta_copy(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.widgets.trace_row import TraceRow
 
@@ -89,7 +115,7 @@ async def test_live_failure_shows_and_stores_reason(tmp_path):
         await pilot.pause()
         assert _indicator_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
         tui = scr._store.get_task_meta(_TID)["tui"]
-        assert tui["last_error"] == "ReadError: boom"
+        assert "last_error" not in tui
         # Причина — под индикатором, не отдельной строкой `!` в ленте.
         rows = [r for r in scr.query(TraceRow) if r.has_class("line-error")]
         assert rows == []
@@ -98,14 +124,7 @@ async def test_live_failure_shows_and_stores_reason(tmp_path):
 @pytest.mark.asyncio
 async def test_reopen_restores_reason(tmp_path):
     pytest.importorskip("textual")
-    _write_task(
-        tmp_path,
-        {
-            "status": "failed",
-            "last_indicator": {"kind": "failed", "elapsed": None},
-            "last_error": "ReadError: boom",
-        },
-    )
+    _write_task(tmp_path, {"status": "failed"}, reason="ReadError: boom")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
@@ -116,20 +135,14 @@ async def test_reopen_restores_reason(tmp_path):
 @pytest.mark.asyncio
 async def test_new_turn_clears_reason(tmp_path):
     pytest.importorskip("textual")
-    _write_task(
-        tmp_path,
-        {
-            "status": "failed",
-            "last_indicator": {"kind": "failed", "elapsed": None},
-            "last_error": "ReadError: boom",
-        },
-    )
+    _write_task(tmp_path, {"status": "failed"}, reason="ReadError: boom")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID)
+        assert scr._latest_turn_outcome() is not None
         scr._prepare_for_new_run()
-        tui = scr._store.get_task_meta(_TID)["tui"]
-        assert tui["last_error"] is None
+        # Запись упавшего хода — уже не строка последнего хода.
+        assert scr._latest_turn_outcome() is None
 
 
 @pytest.mark.asyncio
@@ -194,14 +207,7 @@ async def _bar_height(scr):
 @pytest.mark.asyncio
 async def test_long_reason_grows_bar_live_and_after_reopen(tmp_path):
     pytest.importorskip("textual")
-    _write_task(
-        tmp_path,
-        {
-            "status": "failed",
-            "last_indicator": {"kind": "failed", "elapsed": None},
-            "last_error": _LONG,
-        },
-    )
+    _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
     async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
@@ -216,14 +222,7 @@ async def test_long_reason_grows_bar_live_and_after_reopen(tmp_path):
 @pytest.mark.asyncio
 async def test_resize_follows_reason_rows(tmp_path):
     pytest.importorskip("textual")
-    _write_task(
-        tmp_path,
-        {
-            "status": "failed",
-            "last_indicator": {"kind": "failed", "elapsed": None},
-            "last_error": _LONG,
-        },
-    )
+    _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
     async with _app(tmp_path).run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)

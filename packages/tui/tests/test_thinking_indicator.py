@@ -364,17 +364,18 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(
 
 
 def test_done_state_renders_vypolnil_dim_and_frozen():
+    """Длительность «Выполнил за N» — снаружи (запись итога хода), свой счёт
+    индикатора её не подменяет: время идёт, N стоит."""
     from gc_tui.widgets import thinking_indicator as ti
 
     clock = {"t": 100.0}
     ind = ti.ThinkingIndicator(started_at=0.0, clock=lambda: clock["t"])
-    ind.set_state("done")  # заморозить на 100с
+    ind.set_state("done")
+    ind.freeze_elapsed(100.0)
     clock["t"] = 999.0  # время идёт дальше
     txt = ind._render_text()
     s = txt.plain
-    assert s.startswith("✓") and "Выполнил за" in s
-    # длительность заморожена (≈100с от started_at), не 999
-    assert "1м 40с" in s or "100" in s
+    assert s == "✓ Выполнил за 1м 40с"
 
 
 @pytest.mark.asyncio

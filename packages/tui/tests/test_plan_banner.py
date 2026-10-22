@@ -303,14 +303,11 @@ async def test_plan_stands_in_a_titled_frame_and_feedback_leaves_a_trace_line(
 
 
 def test_turn_that_ended_with_a_plan_is_not_called_done():
-    from gc_tui.services.turn_outcome import DONE_LABEL_PLAN
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     plain = ThinkingIndicator(state="done", frozen_elapsed=6)
     assert "Выполнил за 6с" in plain._render_text().plain
-    plan = ThinkingIndicator(
-        state="done", frozen_elapsed=6, done_label=DONE_LABEL_PLAN
-    )
+    plan = ThinkingIndicator(state="done", frozen_elapsed=6, plan=True)
     assert "План готов за 6с" in plan._render_text().plain
 
 
