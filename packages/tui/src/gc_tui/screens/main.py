@@ -791,7 +791,7 @@ class TraceScreen(Screen):
                     markup=False,
                 )
         yield StickyReply(trace, id="trace-sticky-reply")
-        yield ScrollEndPill(trace, id="trace-end-pill", classes="trace-action")
+        yield ScrollEndPill(trace, id="trace-end-pill")
 
     def _compose_header_segments(self) -> tuple[str, str]:
         """Return (left_text, right_text) for header.

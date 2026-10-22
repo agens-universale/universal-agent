@@ -131,6 +131,11 @@ REFUSED = _mix(BG, WARN, _REFUSED_SHARE)
 _QUEUE_SHARE = 0.55
 QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
 
+# Ховер плашки «в конец»: фон светлее FOCUS_BG, текст не меняется (исключение
+# из ховера `$accent`). В теме auto — от пересчитанного FOCUS_BG.
+_PILL_HOVER_SHARE = 0.12
+PILL_HOVER_BG = _mix(FOCUS_BG, INK, _PILL_HOVER_SHARE)
+
 
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
 # литералами в виджетах. В теме auto их пересчитывает apply_background.
@@ -209,6 +214,7 @@ _FIXED = {
         "BLOCK_BG",
         "REFUSED",
         "QUEUE_BG",
+        "PILL_HOVER_BG",
         *_DIFF,
         *_TINTED,
         *_RAMP_PEAKS,
@@ -255,6 +261,7 @@ def _derived(bg: str) -> dict[str, object]:
         **{name: _shift(_FIXED[name], bg) for name in _DIFF},
         **tinted,
         "QUEUE_BG": _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
+        "PILL_HOVER_BG": _mix(tinted["FOCUS_BG"], INK, _PILL_HOVER_SHARE),
         **ramps,
     }
 
@@ -343,6 +350,7 @@ def css_variables() -> dict[str, str]:
         "note-ink": NOTE_INK,
         "user-band-bg": USER_BAND_BG,
         "queue-bg": QUEUE_BG,
+        "pill-hover-bg": PILL_HOVER_BG,
         "overlay-bg": OVERLAY_BG,
         "zebra-bg": ZEBRA_BG,
         "skill": SKILL,

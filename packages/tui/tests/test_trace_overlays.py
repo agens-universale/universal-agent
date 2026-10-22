@@ -245,7 +245,11 @@ async def test_overlays_take_no_trace_height(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_pill_hover_is_accent(tmp_path):
+async def test_pill_hover_lightens_background(tmp_path):
+    """Ховер плашки — светлее фон, цвет текста прежний (исключение из
+    `.trace-action:hover`, решение владельца)."""
+    from gc_tui import palette
+
     _write_task(tmp_path, "o10")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _tall(pilot, "o10")
@@ -255,7 +259,20 @@ async def test_pill_hover_is_accent(tmp_path):
         assert pill.rich_style.bgcolor.name.lower() == FOCUS_BG.lower()
         await pilot.hover(pill)
         await pilot.pause()
-        assert pill.rich_style.color.name.lower() == ACCENT.lower()
+        assert pill.rich_style.color.name.lower() == INK.lower()
+        hover_bg = palette.PILL_HOVER_BG.lower()
+        assert pill.rich_style.bgcolor.name.lower() == hover_bg
+        assert hover_bg != FOCUS_BG.lower()
+
+
+def test_pill_hover_bg_is_lighter_and_derived():
+    from gc_tui import palette
+
+    def lum(c):
+        return sum(palette._rgb(c))
+
+    assert lum(palette.PILL_HOVER_BG) > lum(palette.FOCUS_BG)
+    assert palette.css_variables()["pill-hover-bg"] == palette.PILL_HOVER_BG
 
 
 @pytest.mark.asyncio

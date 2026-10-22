@@ -40,6 +40,7 @@ _FIXED_CSS = {
     "note-ink": "#a5adb8",
     "user-band-bg": "#282c36",
     "queue-bg": "#1c2029",
+    "pill-hover-bg": "#4c505a",
     "overlay-bg": "#161A23",
     "zebra-bg": "#232836",
     "skill": "#afd7ff",

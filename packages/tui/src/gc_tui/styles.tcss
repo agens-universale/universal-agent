@@ -206,7 +206,8 @@ BlockPanel:focus, TodoBlock:focus {
 
 /* Накладки над лентой «не внизу» (спека P3 §2.6): поверх экрана, высоты
    ленты не занимают; место и ширину ставит код по #trace. Ховер плашки —
-   общий .trace-action:hover. */
+   светлее фон, цвет текста прежний: осознанное исключение из
+   .trace-action:hover. */
 StickyReply, ScrollEndPill {
     overlay: screen;
     position: absolute;
@@ -215,6 +216,7 @@ StickyReply, ScrollEndPill {
 }
 StickyReply { background: $user-band-bg; }
 ScrollEndPill { background: $focus-bg; color: $ink; }
+ScrollEndPill:hover { background: $pill-hover-bg; }
 
 /* spec 2026-05-27 / tool-output-detail */
 .detail-section-header {
