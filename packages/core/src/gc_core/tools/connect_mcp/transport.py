@@ -584,10 +584,15 @@ def _last_stderr_line(path: Path) -> str:
     return ""
 
 
-def _startup_exit_error(
+def _exit_error_from_log(
     returncode: Optional[int], log_path: Optional[Path]
 ) -> Optional[McpServerExitedError]:
     """Ошибка «сервер завершился при старте», если её есть чем подкрепить.
+
+    Общая часть двух ожиданий выхода — асинхронного (одноразовый обмен) и
+    блокирующего (долгоживущая сессия); имя нарочно не ``_startup_exit_error``:
+    рядом с ``_astartup_exit_error`` это был бы новый sync/async-двойник
+    (``tests/test_sync_async_pairs.py``), а тут не двойник, а общее ядро.
 
     Процесс жив (``returncode is None``) или stderr пуст — ``None``, и
     вызывающий оставляет прежнее поведение.
@@ -605,7 +610,7 @@ async def _astartup_exit_error(
     deadline = time.monotonic() + _STARTUP_EXIT_GRACE_SEC
     while proc.returncode is None and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
-    return _startup_exit_error(proc.returncode, log_path)
+    return _exit_error_from_log(proc.returncode, log_path)
 
 
 def _wait_startup_exit_error(
@@ -616,7 +621,7 @@ def _wait_startup_exit_error(
         proc.wait(timeout=_STARTUP_EXIT_GRACE_SEC)
     except subprocess.TimeoutExpired:
         return None
-    return _startup_exit_error(proc.returncode, log_path)
+    return _exit_error_from_log(proc.returncode, log_path)
 
 
 # Потолок строки JSON-RPC у asyncio-подпроцесса. Дефолт ``StreamReader`` —
