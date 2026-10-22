@@ -189,3 +189,70 @@ def test_a2a_docs_show_the_message_body_and_rpc_methods(tmp_path):
     rpc = schema["paths"]["/rpc"]["post"]["requestBody"]["content"][JSON]
     assert "SendMessage" in rpc["schema"]["properties"]["method"]["enum"]
     assert client.get("/tasks").status_code == 403  # API — по токену
+
+
+def _shared(tmp_path, **sections):
+    """Поверхности на одном адресе — приложение адреса (как у gc-serve)."""
+    from gc_server.app import _asgi
+
+    config = {
+        name: {"port": 18999, **section} for name, section in sections.items()
+    }
+    runtime = ServerRuntime(
+        base=make_settings(
+            {
+                "agent.model": "m",
+                "paths.threads_data_path": str(tmp_path / "threads"),
+            }
+        ),
+        config=ServerConfig.model_validate(config),
+    )
+    app = _asgi([build_surface(runtime, name) for name in sections])
+    return TestClient(app, base_url=LOOPBACK_URL)
+
+
+def test_shared_address_serves_one_swagger_for_all_surfaces(tmp_path):
+    """Несколько поверхностей на одном порту — один Swagger на все: ручки
+    каждой, группы с именем поверхности (у вебхука и A2A обе — «Задачи»)."""
+    client = _shared(
+        tmp_path,
+        webhook={"docs": True},
+        chat={"docs": True},
+        a2a={"docs": True},
+    )
+    assert client.get("/docs").status_code == 200
+    schema = client.get("/openapi.json").json()
+    assert "Вебхук" in schema["info"]["title"]
+    assert "A2A" in schema["info"]["title"]
+    paths = schema["paths"]
+    assert {"/v1/tasks", "/v1/models", "/message:send"} <= set(paths)
+    tags = {tag["name"] for tag in schema["tags"]}
+    assert {"Вебхук · Задачи", "A2A · Задачи", "Chat · Модели"} <= tags
+    assert paths["/v1/models"]["get"]["tags"] == ["Chat · Модели"]
+    # Ручки поверхностей по-прежнему отвечают на этом адресе.
+    assert client.get("/healthcheck").status_code == 200
+    assert client.get("/v1/models").status_code == 200
+
+
+def test_shared_swagger_skips_surfaces_without_docs(tmp_path):
+    client = _shared(tmp_path, webhook={"docs": True}, chat={})
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/v1/tasks" in paths
+    assert "/v1/models" not in paths
+
+
+def test_shared_swagger_has_a_bearer_per_surface(tmp_path):
+    """Токены поверхностей одного адреса бывают разными: у каждой — своя
+    схема, ручка требует токен своей поверхности."""
+    client = _shared(
+        tmp_path,
+        webhook={"docs": True, "auth_token": "hook"},
+        chat={"docs": True, "auth_token": "chat"},
+    )
+    schema = client.get("/openapi.json").json()
+    schemes = schema["components"]["securitySchemes"]
+    assert {"bearer_webhook", "bearer_chat"} <= set(schemes)
+    create = schema["paths"]["/v1/tasks"]["post"]
+    assert create["security"] == [{"bearer_webhook": []}]
+    models = schema["paths"]["/v1/models"]["get"]
+    assert models["security"] == [{"bearer_chat": []}]
