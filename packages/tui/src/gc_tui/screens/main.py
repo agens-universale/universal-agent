@@ -1517,7 +1517,7 @@ class TraceScreen(Screen):
             # Ход TUI держит процесс с замком сессии: «running» без него —
             # прерванный ход. Верхний статус пишут другие writer'ы — как есть.
             if tui_status == "running":
-                return settled_status("running", live=self._run_is_live())
+                return settled_status("running", live=self.open_run_is_live())
             if tui_status in ("completed", "stopped", "failed"):
                 return tui_status
             if meta.get("status") == "running":
@@ -1528,7 +1528,7 @@ class TraceScreen(Screen):
                 return "failed"
         return None  # исход неизвестен — не выдумываем «stopped»
 
-    def _run_is_live(self) -> bool:
+    def open_run_is_live(self) -> bool:
         """Ход открытого треда жив: его держит живой процесс, или его исход
         этот экран ещё не записал (ход кончился, тик не дошёл)."""
         tid = self._active_task_id

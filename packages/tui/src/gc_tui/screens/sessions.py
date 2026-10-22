@@ -255,8 +255,16 @@ class SessionsScreen(Screen):
         if (task.tui_meta or {}).get("status") != "running":
             return task.status
         return settled_status(
-            task.status, live=self.app.thread_run_is_live(task.thread_id)
+            task.status, live=self._thread_run_is_live(task.thread_id)
         )
+
+    def _thread_run_is_live(self, thread_id: str) -> bool:
+        """Открытая сессия — признаком экрана: он знает и ход, который тик
+        ещё не закрыл. Прочие — живой процесс (`thread_run_is_live`)."""
+        main = self.app._main_screen()
+        if main is not None and main._active_task_id == thread_id:
+            return main.open_run_is_live()
+        return self.app.thread_run_is_live(thread_id)
 
     def _title_line(self, task, *, selected: bool) -> Text:
         title = self._title_of(task)

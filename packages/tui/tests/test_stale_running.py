@@ -292,3 +292,29 @@ async def test_settle_failure_is_logged_once_not_retried(tmp_path, caplog):
         assert calls == ["run"]
         assert scr._run_pending is False
         assert "boom" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_sessions_open_thread_unsettled_run_is_not_interrupted(
+    tmp_path,
+):
+    """Ход открытой сессии кончился, тик его ещё не закрыл: в списке —
+    не «прервано» (тот же признак живого хода, что у экрана)."""
+    from gc_tui.screens.sessions import SessionsScreen
+
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A)
+        await pilot.app.push_screen(
+            SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        )
+        await pilot.pause()
+        sessions = pilot.app.screen
+        # без пауз: тик между строками не проходит
+        scr._prepare_for_new_run()
+        app.active_runner = _Runner(TID_A, running=False)
+        (task,) = [
+            t for t in sessions._store.list_tasks() if t.thread_id == TID_A
+        ]
+        assert sessions._task_display_status(task) == "running"
