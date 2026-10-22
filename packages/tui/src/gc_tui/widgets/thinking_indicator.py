@@ -137,7 +137,8 @@ _STATE_STOPPED_TOOL_CALLS = "stopped_tool_calls"
 _STATE_STOPPED_JUDGE = "stopped_judge"
 
 # Исходы, которые персистентны как строка-итог (done / cancelled / …) до
-# следующего user-send. Единый список для poll, resume и meta.last_indicator.
+# следующего user-send. Единый список для poll и resume; meta.last_indicator
+# исхода не несёт — только сводку правок (`edits`).
 TERMINAL_INDICATOR_STATES = frozenset(
     {
         _STATE_DONE,
