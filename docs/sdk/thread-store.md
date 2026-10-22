@@ -20,7 +20,7 @@ AGENTS.md, скиллы, субагенты и память проекта — �
 | Хранилище | Где | Когда |
 |---|---|---|
 | `FileThreadStore` | `gc_core.threads.file_store` | по умолчанию в SDK, CLI, TUI, сервере (все поверхности), gc-acp: файлы `data_*.jsonl` и `meta_*.json` в `paths.threads_data_path` (формат прежний) плюс служебный каталог `.store/`; под Temporal — `durability="fsync"` |
-| `SQLiteThreadStore` | `gc_stores.sqlite` (дистрибутив `gc-stores`) | один файл базы; файлы треда (картинки) — в ней же |
+| `SQLiteThreadStore` | `gc_stores.sqlite` (дистрибутив `gc-stores`) | один файл базы; картинки треда — вложения в ней же |
 | `PostgresThreadStore` | `gc_stores.postgres` (`gc-stores[postgres]`) | несколько инстансов на одной базе — [ниже](#postgres-несколько-инстансов-на-одной-базе) |
 | `MySQLThreadStore` | `gc_stores.mysql` (`gc-stores[mysql]`) | то же на MySQL 8 — [хранилища на базах](stores.md#mysql) |
 | `RedisThreadStore` | `gc_stores.redis` (`gc-stores[redis]`) | быстрое хранилище для простых задач, долговечность не гарантирована — [ограничения](stores.md#redis) |
@@ -241,12 +241,10 @@ await store.close()              # или `async with PostgresThreadStore(...)`
 ## Картинки и файлы треда
 
 Картинки сообщений и снимки `fs_view_image` у файлового хранилища лежат в
-`<threads_dir>/images/`, у SQLite — в самой базе (файлы треда,
-`write_thread_file` / `read_thread_file`), модель видит их ссылкой
-`thread-file://<system>/<thread>/<имя>`. У хранилища без каталога и без
-файлов треда (Postgres) картинки ложатся во временный каталог процесса и
-после перезапуска недоступны; под Temporal такое хранилище выключает
-`fs_view_image`. Подробно — в [контракте](thread-store-contract.md#картинки-и-файлы-треда).
+`<threads_dir>/images/`, у остальных — вложениями треда в самом хранилище
+(`put_blob` / `get_blob`), модель видит их ссылкой
+`thread-file://<system>/<thread>/<имя>`. Подробно — в
+[контракте](thread-store-contract.md#картинки-и-файлы-треда).
 
 ## Где что лежит
 

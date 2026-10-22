@@ -95,7 +95,6 @@ async def _executor(monkeypatch, tmp_path, on_call):
 
 
 def test_build_user_messages_puts_committed_attachments_on_its_message():
-    staged = _att("aaaaaaaaaaaaaaaa", "/pocket/aaaaaaaaaaaaaaaa.png")
     committed = _att(
         "aaaaaaaaaaaaaaaa", "/threads/images/cli_t_aaaaaaaaaaaaaaaa.png"
     )
@@ -105,8 +104,7 @@ def test_build_user_messages_puts_committed_attachments_on_its_message():
         display_contents=None,
         skills_loaded=None,
         gen_id=lambda p: "g",
-        attachments=[[staged], None],
-        commit=lambda att: committed,
+        attachments=[[committed], None],
     )
     assert msgs[0]["attachments"] == [committed.to_dict()]
     assert msgs[0]["content"] == "[Изображение #1] что тут?"
@@ -122,7 +120,6 @@ def test_build_user_messages_without_a_thread_keeps_the_pocket_attachment():
         skills_loaded=None,
         gen_id=lambda p: "g",
         attachments=[[staged]],
-        commit=None,
     )
     assert msgs[0]["attachments"] == [staged.to_dict()]
 
@@ -214,7 +211,7 @@ async def test_message_taken_mid_run_is_copied_into_the_thread(
                 "attachments": [holder["staged"].to_dict()],
             }
         )
-        holder["taken"] = kw["get_pending_messages"]()
+        holder["taken"] = await kw["get_pending_messages"]()
 
     ex = await _executor(monkeypatch, tmp_path, _on_call)
     holder["ex"] = ex
@@ -249,7 +246,7 @@ async def test_message_taken_mid_run_survives_a_full_disk(
                 "attachments": [holder["staged"].to_dict()],
             }
         )
-        holder["taken"] = kw["get_pending_messages"]()
+        holder["taken"] = await kw["get_pending_messages"]()
 
     ex = await _executor(monkeypatch, tmp_path, _on_call)
     holder["ex"] = ex

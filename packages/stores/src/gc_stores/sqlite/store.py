@@ -5,32 +5,25 @@
 диалект и схема: миграции ``sqlite/migrations`` применяются при открытии.
 
 Время — часы машины (``clock``), формат ISO-8601 UTC фиксированной ширины.
-Файлы треда (``write_thread_file``/``read_thread_file``) — в той же базе:
-картинки и медиа ядра под Temporal живут с тредом, а не на диске воркера.
+Картинки и медиа ядра — вложения треда (``put_blob``) в той же базе.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable
-from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
 from gc_core.stores import Stores
-from gc_core.thread_files import check_name
-from gc_core.threads.models import ThreadKey
 
 from gc_stores import migrations
 from gc_stores.sql.agent_store import SqlAgentStore
 from gc_stores.sql.thread_store import SqlThreadStore
-from gc_stores.sqlite.database import SqliteDatabase, connect
-from gc_stores.sqlite.dialect import SqliteDialect, stamp
+from gc_stores.sqlite.database import SqliteDatabase
+from gc_stores.sqlite.dialect import SqliteDialect
 
 #: Миграции схемы SQLite (``sqlite/migrations``).
 MIGRATIONS = migrations.load("gc_stores.sqlite")
-_BY_THREAD = "system = ? AND thread_id = ? AND name = ?"
-_FILE_MIME = "application/octet-stream"
 
 
 class SQLiteThreadStore(SqlThreadStore):
@@ -58,40 +51,6 @@ class SQLiteThreadStore(SqlThreadStore):
             clock=clock or (lambda: datetime.now(UTC)),
         )
         self._checked = True  # схема применена при открытии базы
-
-    def _connect(self) -> sqlite3.Connection:
-        return connect(self.path)
-
-    # --- файлы треда (картинки и медиа ядра) -------------------------------
-
-    def write_thread_file(
-        self, system_id: str, thread_id: str, name: str, data: bytes
-    ) -> None:
-        with closing(self._connect()) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO gc_blobs "
-                "(system, thread_id, name, mime, data, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    system_id,
-                    thread_id,
-                    check_name(name),
-                    _FILE_MIME,
-                    data,
-                    stamp(self._clock()),
-                ),
-            )
-
-    def read_thread_file(
-        self, system_id: str, thread_id: str, name: str
-    ) -> bytes | None:
-        key = ThreadKey(system=system_id, thread=thread_id)
-        with closing(self._connect()) as conn:
-            found = conn.execute(
-                f"SELECT data FROM gc_blobs WHERE {_BY_THREAD}",
-                (key.system, key.thread, check_name(name)),
-            ).fetchone()
-        return None if found is None else bytes(found[0])
 
 
 class SQLiteAgentStore(SqlAgentStore):

@@ -306,4 +306,7 @@ async def test_view_image_sends_only_normalization_to_the_pool(
 
     assert json.loads(out)["attached"] is True
     # Pillow и запись копии — в пуле; решение по id (живая, в шаге, лимит) — на loop.
-    assert went_to_pool == ["_normalized", "_store"]
+    assert went_to_pool == [
+        "_normalized",
+        "stage",
+    ]  # прогон без треда — карман

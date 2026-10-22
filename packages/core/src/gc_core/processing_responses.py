@@ -9,8 +9,19 @@ import json
 import logging
 import time
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    NoReturn,
+    Optional,
+    Tuple,
+    Union,
+)
 
+from gc_core.attachments.model import attachments_of
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.judge_runner import arun_pair_judge
 from gc_core.auto_routing.levels import auto_active, effective_level
@@ -865,29 +876,46 @@ def _request_audience(
     return audience
 
 
-def _image_bytes_reader(ctx: Any) -> Callable[[Any], Optional[bytes]]:
-    """Чем проекция читает байты вложений — хранилищем картинок контекста.
+async def _no_image_bytes(_attachment: Any) -> Optional[bytes]:
+    return None
+
+
+def _image_bytes_reader(
+    ctx: Any,
+) -> Callable[[Any], Awaitable[Optional[bytes]]]:
+    """Чем запрос читает байты вложений — хранилищем картинок контекста.
     Контекст, собранный в обход фабрики, хранилища не имеет: байт нет, живая
     картинка уходит запиской «файл недоступен» — как при удалённом файле."""
     store = getattr(ctx, "image_store", None)
     if store is None:
-        return lambda _attachment: None
-    return store.read_for_send
+        return _no_image_bytes
+    return store.aread_for_send
 
 
-def _read_once(
-    read_bytes: Callable[[Any], Optional[bytes]],
+def _no_pixels(_attachment: Any) -> Optional[bytes]:
+    """Проекция без пикселей (``responses``) байты не читает."""
+    return None
+
+
+async def _aread_live(
+    read_bytes: Callable[[Any], Awaitable[Optional[bytes]]],
+    live_ids: frozenset[str],
+    *message_lists: List[Dict],
 ) -> Callable[[Any], Optional[bytes]]:
-    """Байты картинок на один запрос: проекция идёт по двум спискам (state и батч),
-    картинки батча есть в обоих — читать и сверять файл второй раз незачем."""
-    cache: Dict[str, Optional[bytes]] = {}
-
-    def read(attachment: Any) -> Optional[bytes]:
-        if attachment.id not in cache:
-            cache[attachment.id] = read_bytes(attachment)
-        return cache[attachment.id]
-
-    return read
+    """Байты живых картинок запроса — заранее: хранилище тредов отдаёт их
+    корутиной, а проекция синхронна. Каждое вхождение (картинка и её путь)
+    читается один раз: проекция идёт по двум спискам (state и батч), картинки
+    батча есть в обоих."""
+    cache: Dict[Tuple[str, str], Optional[bytes]] = {}
+    for messages in message_lists:
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            for att in attachments_of(message):
+                place = (att.id, str(att.path))
+                if att.id in live_ids and place not in cache:
+                    cache[place] = await read_bytes(att)
+    return lambda att: cache.get((att.id, str(att.path)))
 
 
 _UNRESOLVED_MAIN = object()
@@ -1017,7 +1045,7 @@ async def _arequest_responses_once(
             audience=audience,
             live_ids=frozenset(),
             api_mode="responses",
-            read_bytes=_image_bytes_reader(ctx),
+            read_bytes=_no_pixels,
         ),
         state,
         tools=tools_for_mode(
@@ -1099,7 +1127,7 @@ async def _asend_chat_completions(
     *,
     sanitized_messages: List[Dict],
     sanitized_state_messages: List[Dict],
-    read_bytes: Callable[[Any], Optional[bytes]],
+    read_bytes: Callable[[Any], Awaitable[Optional[bytes]]],
     ctx: Any,
     settings: AppConfig,
     resolved: Any,
@@ -1112,7 +1140,9 @@ async def _asend_chat_completions(
     state.vision_live_ids = (
         live_ids if audience.native is not None else frozenset()
     )
-    read_bytes = _read_once(read_bytes)
+    read_bytes = await _aread_live(
+        read_bytes, live_ids, sanitized_state_messages, sanitized_messages
+    )
     chat_state = SimpleNamespace(
         messages=project_outbound(
             sanitized_state_messages,
@@ -2503,8 +2533,8 @@ async def aprocess_tool_outputs(messages, state: State, ctx: Any):
     return await _amain_call(messages, state, ctx)
 
 
-def _pickup_pending_as_new_turn(
-    get_pending_messages: Optional[Callable[[], List[Dict]]],
+async def _apickup_pending_as_new_turn(
+    get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]],
     state: State,
     ctx: Any,
 ) -> Optional[List[Dict]]:
@@ -2515,7 +2545,7 @@ def _pickup_pending_as_new_turn(
     пуста, ход завершается как обычно."""
     if get_pending_messages is None:
         return None
-    pending = get_pending_messages()
+    pending = await get_pending_messages()
     if not pending:
         return None
     # Новый пользовательский ход: окно прошлого хода не должно давать
@@ -2626,7 +2656,9 @@ class _AgentLoop:
             if self.check_stop is not None and self.check_stop():
                 clear_loop_detector(state)
                 return None
-            messages = self._poll_pending(messages, first_poll=first_poll)
+            messages = await self._apoll_pending(
+                messages, first_poll=first_poll
+            )
             first_poll = False
             # Если от backend'а или get_pending_messages пришёл пустой список сообщений,
             # не передаём его дальше в check_mode, чтобы не падать
@@ -2712,7 +2744,7 @@ class _AgentLoop:
         return True
 
     # ----------------------------------------------------------- iteration
-    def _poll_pending(self, messages, *, first_poll: bool):
+    async def _apoll_pending(self, messages, *, first_poll: bool):
         """Подхват сообщений из очереди (``get_pending_messages``) перед шагом цикла.
 
         `messages` здесь ещё не записан в state (запись — после опроса). Свежий
@@ -2731,7 +2763,7 @@ class _AgentLoop:
             return messages
         if not first_poll and _batch_has_pending_function_calls(messages):
             return messages
-        pending = self.get_pending_messages()
+        pending = await self.get_pending_messages()
         if not pending:
             return messages
         if first_poll or _is_tool_outputs_with_technical_tail(messages):
@@ -3319,7 +3351,7 @@ class _AgentLoop:
             await _acall_blocking_hook(self.turn_end_compaction_hook)
         # Сообщение, пришедшее во время (блокирующей) компакции, не
         # теряем: продолжаем новым ходом на уже сжатом контексте.
-        new_turn_messages = _pickup_pending_as_new_turn(
+        new_turn_messages = await _apickup_pending_as_new_turn(
             self.get_pending_messages, self.state, self.ctx
         )
         if new_turn_messages is not None:
@@ -3476,7 +3508,7 @@ async def arun_agent(
     ] = None,
     turn_end_compaction_hook: Optional[Callable[[], None]] = None,
     force_compact_hook: Optional[Callable[[], None]] = None,
-    get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
+    get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,
     mark_finalizing: Optional[Callable[[bool], None]] = None,

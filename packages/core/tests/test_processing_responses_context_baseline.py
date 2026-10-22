@@ -16,6 +16,7 @@ from gc_testkit.intent_fixtures import (
 )
 from gc_testkit.paths import module_dir
 from gc_testkit.settings import fake_ctx
+from gc_testkit import as_coro
 
 
 async def _anoop(*_a, **_k):
@@ -274,7 +275,7 @@ def test_first_poll_merges_pending_with_the_start_batch(monkeypatch):
             [{"role": "user", "content": "стартовое", "id": "m1"}],
             _make_state(),
             _make_ctx(),
-            get_pending_messages=_get_pending,
+            get_pending_messages=as_coro(_get_pending),
         )
     )
 
@@ -330,7 +331,7 @@ def test_first_poll_merges_pending_with_a_start_batch_of_tool_pairs(
             start,
             _make_state(),
             _make_ctx(),
-            get_pending_messages=_get_pending,
+            get_pending_messages=as_coro(_get_pending),
         )
     )
 

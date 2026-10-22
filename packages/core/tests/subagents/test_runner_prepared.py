@@ -137,7 +137,7 @@ async def test_prepared_runner_preserves_shared_state_usage_and_input(
         assert try_enqueue_user_message(
             ctx, {"role": "user", "content": "extra", "id": "input-1"}
         )
-        assert kwargs["get_pending_messages"]() == [
+        assert await kwargs["get_pending_messages"]() == [
             {"role": "user", "content": "extra", "id": "input-1"}
         ]
         child.shared.working_memory["result"] = "shared"

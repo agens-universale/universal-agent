@@ -19,7 +19,6 @@ from gc_core.config_modules.env_interpolation import (
 )
 from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
-    FS_VIEW_IMAGE_NAME,
     PROJECT_MEMORY_TOOL_NAME,
 )
 from gc_core.context_preparation import settings_from_snapshot
@@ -27,7 +26,6 @@ from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv, is_explicit
-from gc_core.thread_files import thread_files_capability
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_core_temporalio.activity_config import ActivitiesConfig
@@ -342,25 +340,6 @@ def _with_protected_state(settings, state_paths):
     )
 
 
-def _with_thread_images(settings, name, profile, store):
-    # Картинки треда — в хранилище тредов (файлы треда) или рядом с
-    # файловыми тредами. Хранилище без того и другого положило бы их
-    # на диск воркера мимо треда: инструмент выключается.
-    if (
-        thread_files_capability(store) is not None
-        or isinstance(getattr(store, "threads_dir", None), str)
-        or FS_VIEW_IMAGE_NAME in settings.agent.stop_tools
-    ):
-        return settings
-    logger.warning(
-        "Profile %s: store %s keeps no thread files; %s disabled",
-        name,
-        profile.store_id,
-        FS_VIEW_IMAGE_NAME,
-    )
-    return _with_stop_tool(settings, FS_VIEW_IMAGE_NAME)
-
-
 def _unless_explicit(profile, path, update):
     """``update``, если профиль не задал ``path`` явно (иначе — ничего)."""
     return {} if is_explicit(profile.core, path) else update
@@ -423,11 +402,10 @@ def _worker_runtime(profile, workspace, *, human_input):
     return replace(runtime, human_channel=False)
 
 
-def _worker_settings(name, profile, store, *, state_paths, human_input):
+def _worker_settings(profile, *, state_paths, human_input):
     """Настройки профиля под воркером Temporal (поверх ``profile.core``)."""
     settings = _with_turn_persist(profile.core, profile)
     settings = _with_protected_state(settings, state_paths)
-    settings = _with_thread_images(settings, name, profile, store)
     if not human_input:
         settings = _without_human(settings)
     # Project memory — файл в рабочей папке, общий для всех сессий
@@ -489,11 +467,7 @@ class ContextProvider:
                     f"Profile {name}: unknown store {profile.store_id}"
                 )
             settings = _worker_settings(
-                name,
-                profile,
-                stores[profile.store_id],
-                state_paths=state_paths,
-                human_input=human_input,
+                profile, state_paths=state_paths, human_input=human_input
             )
             loaded = LoadedSettings(
                 settings=settings,

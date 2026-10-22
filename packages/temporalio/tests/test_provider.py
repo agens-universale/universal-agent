@@ -474,25 +474,16 @@ async def test_worker_logs_go_to_process_logging_unless_profile_says_files(
         await provider.aclose()
 
 
-async def test_store_without_thread_files_disables_view_image(
-    tmp_path, monkeypatch
-):
-    """Хранилище без файлов треда и без каталога тредов: снимки
-    ``fs_view_image`` легли бы на диск воркера — инструмент выключен."""
-    from gc_testkit.memory_thread_store_v2 import (
-        MemoryThreadStore,
-        MemoryThreadStoreWithFiles,
-    )
+async def test_every_thread_store_keeps_view_image(tmp_path, monkeypatch):
+    """Снимки ``fs_view_image`` ложатся вложениями треда (``put_blob``) у
+    любого хранилища тредов — инструмент воркера не выключается."""
+    from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 
     monkeypatch.chdir(tmp_path)
-    for store, disabled in (
-        (MemoryThreadStore(), True),
-        (MemoryThreadStoreWithFiles(), False),
-        (FileThreadStore(str(tmp_path / "threads")), False),
-    ):
+    for store in (MemoryThreadStore(), FileThreadStore(str(tmp_path / "t"))):
         provider, _ = make_provider(tmp_path, store=store)
         stop = provider._profiles["test"][1].settings.agent.stop_tools
-        assert ("fs_view_image" in stop) is disabled, type(store)
+        assert "fs_view_image" not in stop, type(store)
         await provider.aclose()
 
 

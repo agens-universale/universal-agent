@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from gc_core.attachments.model import Attachment, chip_of
-from gc_core.attachments.store import commit_to_run_thread
+from gc_core.attachments.store import acommit_to_run_thread
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.execution.ports import port as runtime_port
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -303,7 +303,7 @@ Do not implement until they confirm.
             )
             raise
         if isinstance(response, HumanAnswer):
-            self._queue_answer_images(response.attachments)
+            await self._aqueue_answer_images(response.attachments)
             response = _answer_text(response)
         return self._ask_answered(question, via_name, response)
 
@@ -401,7 +401,7 @@ Do not implement until they confirm.
             hint=_RESPONSE_HINT,
         )
 
-    def _queue_answer_images(
+    async def _aqueue_answer_images(
         self, attachments: tuple[Attachment, ...]
     ) -> None:
         """Картинки ответа — в тред и в хвост батча (``state.pending_tool_attachments``).
@@ -414,7 +414,7 @@ Do not implement until they confirm.
         """
         for att in attachments:
             self._state.pending_tool_attachments.append(
-                commit_to_run_thread(self._ctx, att).to_dict()
+                (await acommit_to_run_thread(self._ctx, att)).to_dict()
             )
 
     def _console(self, *values: Any) -> None:

@@ -938,10 +938,12 @@ def test_pickup_pending_as_new_turn_clears_window(monkeypatch):
         loop_detector_window=["fp"],
         loop_detector_pending=[{"tool": "fs_read_file", "args": {}}],
     )
-    picked = pr._pickup_pending_as_new_turn(
-        lambda: [{"role": "user", "content": "следующий ход"}],
-        state,
-        SimpleNamespace(logger=None),
+    picked = run_coro(
+        pr._apickup_pending_as_new_turn(
+            as_coro(lambda: [{"role": "user", "content": "следующий ход"}]),
+            state,
+            SimpleNamespace(logger=None),
+        )
     )
     assert picked == [{"role": "user", "content": "следующий ход"}]
     assert state.loop_detector_window == []
@@ -957,8 +959,10 @@ def test_empty_pickup_does_not_clear_window(monkeypatch):
         loop_detector_pending=[{"tool": "fs_read_file", "args": {}}],
     )
     assert (
-        pr._pickup_pending_as_new_turn(
-            list, state, SimpleNamespace(logger=None)
+        run_coro(
+            pr._apickup_pending_as_new_turn(
+                as_coro(list), state, SimpleNamespace(logger=None)
+            )
         )
         is None
     )

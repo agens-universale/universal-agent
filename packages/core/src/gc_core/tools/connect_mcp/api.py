@@ -88,13 +88,13 @@ _MEDIA_SINK: ContextVar[Any] = ContextVar("mcp_media_sink", default=None)
 
 @contextmanager
 def media_sink_scope(ctx: Any):
-    """На время вызова инструмента: медиа MCP — файлами треда в хранилище
-    тредов (``StoreImageStore.write_media``), если оно их держит. Иначе — как
+    """На время вызова инструмента: медиа MCP — вложениями треда в хранилище
+    тредов (``StoreImageStore.awrite_media``), если оно их держит. Иначе — как
     раньше, в ``<gc_cache>/mcp-media``."""
     from gc_core.thread_paths import thread_address
 
     store = getattr(ctx, "image_store", None) if ctx is not None else None
-    write = getattr(store, "write_media", None)
+    write = getattr(store, "awrite_media", None)
     address = thread_address(ctx) if callable(write) else None
     if address is None:
         yield
@@ -141,7 +141,7 @@ def _pick_filename(
     return stem + ext
 
 
-def _save_media_block(
+async def _asave_media_block(
     block: Dict[str, Any],
     arguments: Dict[str, Any],
     base_tool_name: str,
@@ -162,7 +162,7 @@ def _save_media_block(
         raw_bytes = base64.b64decode(data, validate=False)
         if sink is not None:
             # Файл треда в хранилище тредов: на диске процесса ничего.
-            path = sink(fname, raw_bytes)
+            path = await sink(fname, raw_bytes)
         else:
             save_dir = _mcp_media_save_dir()
             os.makedirs(save_dir, exist_ok=True)
@@ -179,25 +179,27 @@ def _save_media_block(
     return out
 
 
-def _rewrite_media_blocks(
+async def _arewrite_media_blocks(
     raw: Any,
     arguments: Dict[str, Any],
     base_tool_name: str,
 ) -> Any:
     """Рекурсивно обходит result, декодирует и сохраняет image/audio блоки,
-    заменяя base64 `data` на ссылку `path` на хостовой ФС."""
+    заменяя base64 `data` на ссылку `path` (файл на хосте или вложение
+    треда)."""
     if isinstance(raw, dict):
         if raw.get("type") in ("image", "audio") and isinstance(
             raw.get("data"), str
         ):
-            return _save_media_block(raw, arguments, base_tool_name)
+            return await _asave_media_block(raw, arguments, base_tool_name)
         return {
-            k: _rewrite_media_blocks(v, arguments, base_tool_name)
+            k: await _arewrite_media_blocks(v, arguments, base_tool_name)
             for k, v in raw.items()
         }
     if isinstance(raw, list):
         return [
-            _rewrite_media_blocks(v, arguments, base_tool_name) for v in raw
+            await _arewrite_media_blocks(v, arguments, base_tool_name)
+            for v in raw
         ]
     return raw
 
@@ -211,9 +213,9 @@ def _wrap_mcp_result(
     raw: Any,
 ) -> str:
     """
-    Normalize ANY MCP tool output into a stable JSON envelope.
+    Normalize ANY MCP tool output into a stable JSON envelope (медиа уже
+    сохранены: ``_arewrite_media_blocks``).
     """
-    raw = _rewrite_media_blocks(raw, arguments, base_tool_name)
     formatted = format_mcp_tool_result(raw) if isinstance(raw, dict) else raw
     formatted_sanitized = _json_sanitize(formatted)
 
@@ -471,6 +473,9 @@ async def acall_mcp_tool(
     )
 
     raw = data.get("result", data) if isinstance(data, dict) else data
+    raw = await _arewrite_media_blocks(
+        raw, target.arguments_obj, target.base_tool_name
+    )
     return _wrap_mcp_result(
         full_tool_name=full_tool_name,
         server_key=target.server_key,
