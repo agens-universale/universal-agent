@@ -521,6 +521,24 @@ async def test_stop_with_reply_held_by_core_does_not_undo(tmp_path):
         assert scr._pending_orphan_cleanups == []
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reset", ["_reset_render_state", "_mark_pending_failed"]
+)
+async def test_held_ids_cleared_with_pending_widgets(tmp_path, reset):
+    """Удержанные ядром реплики забываются вместе с `_pending_user_widgets`
+    (смена треда, `/new`, пересборка, ошибка хода)."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path, admitted=True)
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert len(scr._held_client_ids) == 2
+        getattr(scr, reset)()
+        assert scr._held_client_ids == set()
+
+
 # --- пересборка ленты во время хода ------------------------------------------
 
 

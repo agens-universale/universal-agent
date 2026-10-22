@@ -2163,6 +2163,7 @@ class TraceScreen(Screen):
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
+        self._held_client_ids.clear()
         self._pending_wire_cache.clear()
         self._bang_blocks.clear()
         self._bang_open_block = None
@@ -4967,6 +4968,7 @@ class TraceScreen(Screen):
             ]
             self._write_tui_meta(tid, {"pending_user_messages": new_list})
         self._pending_user_widgets.clear()
+        self._held_client_ids.clear()
         self._refresh_queue_hint()
 
     def _begin_auto_created_task(self) -> str:
