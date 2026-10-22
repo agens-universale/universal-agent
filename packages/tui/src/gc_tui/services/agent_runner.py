@@ -391,6 +391,9 @@ class AgentRunner:
             if self._thread is not None and self._thread.is_alive():
                 return False
             self._thread_kind = "compact"
+            # Цель — сжимаемый тред: всё, что решается по цели раннера
+            # (чья ошибка, куда ход реплики после сжатия), — про него.
+            self._last_target = (thread_id, system)
 
             def _target() -> None:
                 try:
