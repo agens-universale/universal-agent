@@ -96,7 +96,7 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
         assert calls == []
         badge["v"] = "running"  # статус сменился (старт прогона)
         scr._update_terminal_title()
-        assert calls == ["✦ GigaCode ▸ p"]
+        assert calls == ["✦ GigaCode ● p"]
 
 
 @pytest.mark.asyncio

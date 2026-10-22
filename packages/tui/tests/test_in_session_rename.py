@@ -82,7 +82,7 @@ async def test_osc_title_priority_over_last_actual(tmp_path, monkeypatch):
         monkeypatch.setattr(scr, "_store", store)
 
         scr._update_terminal_title()
-        assert calls[-1] == "✦ GigaCode ▸ parser bugfix", calls
+        assert calls[-1] == "✦ GigaCode ● parser bugfix", calls
 
 
 @pytest.mark.asyncio

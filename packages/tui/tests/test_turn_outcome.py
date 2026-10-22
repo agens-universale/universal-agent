@@ -17,6 +17,7 @@ from gc_tui.services.turn_outcome import OUTCOMES, outcome_of
         ("cancelled", "■", "остановлено"),
         ("stopped", "■", "остановлено"),
         ("running", "●", "идёт"),
+        ("asking", "?", "ждёт ответа"),
     ],
 )
 def test_vocabulary(status, glyph, label):
@@ -58,6 +59,7 @@ def _meta_line(status):
         ("failed", "✕ ошибка", ERR),
         ("stopped", "■ остановлено", DIM),
         ("running", "● идёт", RUN_COLOR),
+        ("asking", "? ждёт ответа", RUN_COLOR),
     ],
 )
 def test_sessions_list_shows_labels(status, text, color):
@@ -93,3 +95,38 @@ def test_indicator_and_sessions_share_glyph(state, status):
     glyph = head._render_text().plain.split()[0]
     assert glyph == outcome_of(status).glyph
     assert glyph in _meta_line(status).plain
+
+
+#: Все слова статуса, которые доходят до заголовка вкладки: состояние
+#: раннера и вопроса, `meta.tui.status` и устаревший `meta.status`.
+_TITLE_STATUSES = (
+    "running",
+    "asking",
+    "completed",
+    "stopped",
+    "failed",
+    "unknown_failed",
+)
+
+
+@pytest.mark.parametrize("status", _TITLE_STATUSES)
+def test_title_shares_glyph_with_sessions(status):
+    from gc_tui.services.terminal_title import format_terminal_title
+
+    glyph = outcome_of(status).glyph
+    assert format_terminal_title("x", status) == f"✦ GigaCode {glyph} x"
+    assert f"{glyph} {outcome_of(status).list_label}" in (
+        _meta_line(status).plain
+    )
+
+
+def test_one_glyph_table():
+    glyphs = {s: outcome_of(s).glyph for s in _TITLE_STATUSES}
+    assert glyphs == {
+        "running": "●",
+        "asking": "?",
+        "completed": "✓",
+        "stopped": "■",
+        "failed": "✕",
+        "unknown_failed": "✕",
+    }
