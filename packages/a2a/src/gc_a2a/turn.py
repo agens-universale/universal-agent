@@ -7,8 +7,7 @@ import logging
 from typing import Any, Callable
 
 from gc_core.execution.human import HumanRequestInterrupted
-from gc_core.tools.turn.propose_plan import ProposePlan
-from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.tools.turn.turn_close import close_view, closing_reply_of
 
 from gc_a2a.store import TaskStore
 
@@ -19,17 +18,18 @@ SYSTEM = "a2a"
 
 def answer_text(agent: Any) -> str:
     last = getattr(agent, "last_answer", None)
-    # Ход, закрытый планом: пиру — текст плана. Одобрения в A2A нет:
-    # согласие пира — не согласие пользователя.
-    plan = ProposePlan.present_result(last)
-    if plan is not None:
-        return plan
-    raw = SubmitSolution.present_result(last)
-    if raw is None:
+    reply = closing_reply_of(agent)
+    # Ход, закрытый планом или turn_finish: пиру — текст плана или итог.
+    # Одобрения в A2A нет: согласие пира — не согласие пользователя.
+    close = close_view(last, reply)
+    if close is not None:
+        return close.render(markdown=False)
+    # Проза и прочие значения остаются как есть.
+    if last is None:
         return ""
-    if isinstance(raw, str):
-        return raw
-    return str(raw)
+    if isinstance(last, str):
+        return last
+    return str(last)
 
 
 # Пиру в status.message — без путей и текста исключения ядра.
