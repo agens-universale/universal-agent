@@ -320,9 +320,10 @@ def _with_env(value: Any) -> Any:
 
 _MCP_KEYS = ("command", "args", "env", "cwd", "url", "headers")
 _MCP_TRANSPORTS = {"stdio", "http", "sse", "stream_http"}
-# ``http`` у нас — устаревший клиент на requests, а ``stream_http`` — клиент
-# streamable HTTP из SDK, поэтому одноимённый тип плагина идёт туда.
-_MCP_TYPE_ALIASES = {"streamable-http": "stream_http"}
+# Наш ``http`` (на httpx) — разовый POST без рукопожатия streamable HTTP, а
+# ``stream_http`` — клиент из SDK. В ``.mcp.json`` ``http`` означает streamable
+# HTTP, поэтому оба типа плагина идут в ``stream_http``.
+_MCP_TYPE_ALIASES = {"streamable-http": "stream_http", "http": "stream_http"}
 
 
 def _mcp_entry(
@@ -330,7 +331,7 @@ def _mcp_entry(
 ) -> dict[str, Any] | None:
     """Поля ``McpServerConfig`` из записи ``.mcp.json``; ``None``, если транспорт чужой."""
     transport = str(
-        spec.get("type") or ("stdio" if spec.get("command") else "http")
+        spec.get("type") or ("stdio" if spec.get("command") else "stream_http")
     ).lower()
     transport = _MCP_TYPE_ALIASES.get(transport, transport)
     if transport not in _MCP_TRANSPORTS:
@@ -573,9 +574,9 @@ def _ap_cwd(
 def _ap_stdio_entry(
     spec: dict[str, Any], root: Path, plugin_name: str
 ) -> tuple[dict[str, Any] | None, str | None]:
-    from gc_core.plugins.installed import plugin_data_dir
+    from gc_core.plugins.installed import plugin_data_dir, plugin_data_path
 
-    data = plugin_data_dir(plugin_name)
+    data = plugin_data_path(plugin_name)
     args, env = spec.get("args", []), spec.get("env", {})
     if not _ap_str_list(args) or not _ap_str_map(env):
         return None, "args/env have wrong types"
@@ -585,6 +586,7 @@ def _ap_stdio_entry(
     cwd, cwd_reason = _ap_cwd(spec.get("cwd"), root, data)
     if command is None or cwd is None:
         return None, reason or cwd_reason
+    plugin_data_dir(plugin_name)
     return {
         "transport": "stdio",
         "command": command,
@@ -622,6 +624,18 @@ def _ap_server_entry(
     return entry, None
 
 
+def _ap_mcp_top_error(raw: Any) -> str | None:
+    if not isinstance(raw, dict):
+        return "not a JSON object or bad JSON"
+    if raw.get(_AP_SCHEMA_KEY) != _AP_MCP_SCHEMA_ID:
+        return "missing or wrong $schema"
+    if set(raw) != {_AP_SCHEMA_KEY, "mcpServers"}:
+        return "unexpected top-level key"
+    if not isinstance(raw["mcpServers"], dict):
+        return "mcpServers is not an object"
+    return None
+
+
 def _parse_ap_mcp_servers(
     raw: Any, root: Path, plugin_name: str
 ) -> dict[str, dict[str, Any]]:
@@ -631,13 +645,13 @@ def _parse_ap_mcp_servers(
     ``cwd``; остальное, включая ``${VAR}``, остаётся буквальным. Невалидная
     запись пропускается с предупреждением (имя и причина, без значений).
     """
-    if (
-        not isinstance(raw, dict)
-        or set(raw) != {_AP_SCHEMA_KEY, "mcpServers"}
-        or raw[_AP_SCHEMA_KEY] != _AP_MCP_SCHEMA_ID
-        or not isinstance(raw["mcpServers"], dict)
-    ):
-        logger.warning("plugin %s: mcp.json is invalid, MCP disabled", root)
+    top_error = _ap_mcp_top_error(raw)
+    if top_error:
+        logger.warning(
+            "plugin %s: mcp.json is invalid (%s), MCP disabled",
+            root,
+            top_error,
+        )
         return {}
     out: dict[str, dict[str, Any]] = {}
     for name, spec in raw["mcpServers"].items():

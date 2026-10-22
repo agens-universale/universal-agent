@@ -1288,3 +1288,81 @@ def test_ap_mcp_requires_schema_and_ignores_dot_mcp_json(tmp_path):
         json.dumps({"mcpServers": {"x": {"command": "y"}}}), encoding="utf-8"
     )
     assert load_plugin(root).mcp_servers == {}
+
+
+def test_claude_code_mcp_http_means_streamable_http(tmp_path):
+    root = _make_plugin(tmp_path)
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "r": {"type": "http", "url": "https://e.x/mcp"},
+                    "r2": {"url": "https://e.x/mcp"},
+                    "r3": {"type": "sse", "url": "https://e.x/sse"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    servers = load_plugin(root).mcp_servers
+    assert servers["r"]["transport"] == "stream_http"
+    assert servers["r2"]["transport"] == "stream_http"
+    assert servers["r3"]["transport"] == "sse"
+
+
+def test_ap_mcp_rejects_bad_cwd_and_command(tmp_path):
+    stdio = {"type": "stdio"}
+    root = _ap_plugin(
+        tmp_path,
+        {
+            "cwd_escape": {**stdio, "command": "n", "cwd": "./../x"},
+            "cwd_root_escape": {
+                **stdio,
+                "command": "n",
+                "cwd": "${PLUGIN_ROOT}/../x",
+            },
+            "cwd_form": {**stdio, "command": "n", "cwd": "/abs"},
+            "cmd_slash": {**stdio, "command": "bin/srv"},
+            "cmd_escape": {**stdio, "command": "./../srv"},
+            "ok": {
+                **stdio,
+                "command": "./bin/srv",
+                "cwd": "${PLUGIN_DATA}/w",
+            },
+        },
+    )
+    assert set(load_plugin(root).mcp_servers) == {"ok"}
+
+
+def test_ap_mcp_sse_accepted_and_duplicate_headers_rejected(tmp_path):
+    root = _ap_plugin(
+        tmp_path,
+        {
+            "legacy": {"type": "sse", "url": "https://e.x/sse"},
+            "dup": {
+                "type": "streamable-http",
+                "url": "https://e.x/mcp",
+                "headers": {"X-A": "1", "x-a": "2"},
+            },
+        },
+    )
+    servers = load_plugin(root).mcp_servers
+    assert set(servers) == {"legacy"}
+    assert servers["legacy"]["transport"] == "sse"
+
+
+def test_ap_mcp_data_dir_created_only_for_valid_stdio(tmp_path):
+    root = _ap_plugin(
+        tmp_path,
+        {"bad": {"type": "stdio", "command": "bin/x"}},
+        name="lazydata",
+    )
+    load_plugin(root)
+    assert not installed.plugin_data_path("lazydata").exists()
+
+
+def test_ap_mcp_invalid_file_warning_has_reason(tmp_path, caplog):
+    root = _ap_plugin(tmp_path, {}, name="noschema", schema=None)
+    with caplog.at_level("WARNING"):
+        load_plugin(root)
+    assert "missing or wrong $schema" in caplog.text
