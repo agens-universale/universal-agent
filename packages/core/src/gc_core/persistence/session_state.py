@@ -257,6 +257,11 @@ def session_from_state(
     inbox_seq = int(field(state, "inbox_seq", 0) or 0)
     if inbox_seq or "inbox_seq" in base.model_fields_set:
         values["inbox_seq"] = inbox_seq
+    # Вопрос, ждущий ответа: ход его либо задал (приостановка), либо закрыл
+    # ответом — прежний снимается первой же записью хода.
+    pending = field(state, "pending_question", None)
+    if pending or base.pending_question is not None:
+        values["pending_question"] = dict(pending) if pending else None
     last_backend = getattr(state, "last_backend_response_id", None)
     if isinstance(last_backend, str) and last_backend:
         values["last_backend_response_id"] = last_backend

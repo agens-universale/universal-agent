@@ -1982,6 +1982,33 @@ def _after_judge_stop_skip_output(call_id: Any) -> Dict[str, Any]:
     }
 
 
+async def _aappend_call_output(
+    tools_outputs: List[Dict],
+    call: Dict,
+    tool_name: str,
+    tool_arguments: str,
+    tool_res_raw: Any,
+    state: State,
+    ctx: Any,
+) -> None:
+    """Вывод исполненного вызова — в батч; длинный ужимается в
+    stored-envelope. Вызов, приостановивший ход на вопросе, вывода не
+    получает, пока не придёт ответ (следующий ход)."""
+    if _suspends_on(state, call["call_id"]):
+        return
+    tools_outputs.append(
+        await _afinish_tool_call(
+            call, tool_name, tool_arguments, tool_res_raw, state, ctx
+        )
+    )
+
+
+def _suspends_on(state: Any, call_id: Any) -> bool:
+    """Вызов ``call_id`` приостановил ход на вопросе (``ask_human_suspends``)."""
+    pending = getattr(state, "pending_question", None)
+    return bool(pending) and pending.get("call_id") == call_id
+
+
 def _batch_ended_skip_output(
     state: Any, call_id: Any
 ) -> Dict[str, Any] | None:
@@ -2496,12 +2523,14 @@ async def aprocess_tool_calls(
         unknown_in_batch += int(
             _track_repeat_errors(state, tool_name, tool_res_raw)
         )
-
-        # Длинный output ужимаем в stored-envelope; остальное оставляем как есть.
-        tools_outputs.append(
-            await _afinish_tool_call(
-                m, tool_name, tool_arguments, tool_res_raw, state, ctx
-            )
+        await _aappend_call_output(
+            tools_outputs,
+            m,
+            tool_name,
+            tool_arguments,
+            tool_res_raw,
+            state,
+            ctx,
         )
 
         # После apply: если стопнули mid-tool (envelope A от runner) — хвост batch → B.
@@ -3160,6 +3189,8 @@ class _AgentLoop:
             run_agent_func=arun_agent,
             persist_messages_callback=self.persist_messages_callback,
         )
+        if getattr(state, "pending_question", None):
+            return await self._asuspend_on_question(messages)
         if getattr(state, "plan_proposed", False):
             return await self._aclose_plan_turn(messages)
         if getattr(state, "judge_stop_reason", None):
@@ -3285,6 +3316,33 @@ class _AgentLoop:
             # показывается только по нему.
             state.terminal_outcome = "plan_proposed"
         return outcome
+
+    async def _asuspend_on_question(self, messages) -> _Outcome:
+        """Ход приостановлен на вопросе (``ask_human_suspends``).
+
+        Батч вливается в состояние и сохраняется без вывода вопроса: его
+        ответ придёт следующим ходом. Компакции конца хода и подхвата
+        очереди нет — история кончается вызовом без ответа, а ход журнала
+        намерений не закрыт: задача продолжится после ответа.
+        """
+        state = self.state
+        batch_new = filter_messages_not_in_state(
+            list(getattr(state, "messages", []) or []), messages
+        )
+        if batch_new:
+            state.messages += batch_new
+            await _maybe_persist(
+                self.persist_messages_callback, batch_new, state
+            )
+        state.steps += 1
+        clear_loop_detector(state)
+        state.terminal_outcome = "input_required"
+        return _Outcome(
+            result=json.dumps(
+                {"question": state.pending_question["question"]},
+                ensure_ascii=False,
+            )
+        )
 
     async def _astop_on_judge_unavailable(self, messages) -> _Outcome:
         """Проверка действий судьёй недоступна — прогон завершается.

@@ -131,6 +131,9 @@ class RunContext:
     # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
     ask_human: Optional[Callable[[str], Any]] = None
+    # Приостановка на вопросе (канал без живого человека, A2A): вопрос модели
+    # завершает ход, а ответ приходит следующим ходом (``arun(answer=…)``).
+    ask_human_suspends: bool = False
     # Optional: messages dropped by context compaction (not retained in State).
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = (
         None
