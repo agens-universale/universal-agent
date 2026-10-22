@@ -136,13 +136,35 @@ async def _agive_up(
 ) -> None:
     """Ход падал вместе с процессом раз за разом: задача — ``failed``,
     недоставленные входящие брошены, отметка хода снята."""
+    await afinish_abandoned(
+        surface,
+        threads,
+        record,
+        status="failed",
+        error="recovery_exhausted",
+        op="recovery-exhausted",
+    )
+
+
+async def afinish_abandoned(
+    surface: WebhookSurface,
+    threads: Threads,
+    record: ThreadRecord,
+    *,
+    status: str,
+    op: str,
+    **fields: object,
+) -> None:
+    """Итог задачи, чей ход вести некому (инстанс упал): статус,
+    недоставленные входящие брошены, отметка хода снята — восстановление
+    тред больше не поднимает."""
     from gc_core.threads import runtime_rules
     from gc_core.threads.models import SideChange
 
     key = record.key
     final = {
-        "status": "failed",
-        "error": "recovery_exhausted",
+        "status": status,
+        **fields,
         "inbox_upto": record.max_seq.get("inbox", 0),
     }
     await task_status.aset_status(threads, key, **final)
@@ -150,8 +172,7 @@ async def _agive_up(
     await threads.store.append_side(
         key,
         SideChange(
-            op_id=f"recovery-exhausted:{key.system}:{key.thread}:"
-            f"{record.revision}",
+            op_id=f"{op}:{key.system}:{key.thread}:{record.revision}",
             set_runtime=runtime,
         ),
     )
