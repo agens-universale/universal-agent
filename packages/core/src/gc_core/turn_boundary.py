@@ -18,6 +18,9 @@ from uuid import uuid4
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.levels import auto_active
 from gc_core.execution.state import ExecutionState as State
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+)
 
 
 def begin_turn(state: State, ctx: Any) -> None:
@@ -65,4 +68,23 @@ def begin_turn(state: State, ctx: Any) -> None:
     ).model
 
 
-__all__ = ["begin_turn"]
+def opening_reply_id(state: Any) -> str | None:
+    """``id`` реплики человека, открывшей текущий ход: первая нетехническая
+    ``role: user`` от границы хода (``turn_messages_start``). Граница за
+    концом истории — её переписала компакция, читается весь остаток.
+    Границы нет (ход ничего не положил в историю) или реплики нет
+    (континуация утверждённого плана) — ``None``."""
+    start = getattr(state, "turn_messages_start", None)
+    if start is None:
+        return None
+    messages = list(getattr(state, "messages", None) or [])
+    if int(start) <= len(messages):
+        messages = messages[int(start) :]
+    for message in messages:
+        if extract_real_user_message_text(message):
+            mid = message.get("id")
+            return mid if isinstance(mid, str) and mid else None
+    return None
+
+
+__all__ = ["begin_turn", "opening_reply_id"]

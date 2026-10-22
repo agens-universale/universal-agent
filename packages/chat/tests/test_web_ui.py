@@ -289,6 +289,54 @@ def test_dialogs_skip_foreign_threads_and_broken_index(tmp_path):
     assert "эфемерный" not in json.dumps(body)
 
 
+def test_turn_outcome_record_keeps_dialog_and_turn_texts(tmp_path):
+    """Запись итога хода ядра в файле треда: тред не чужой, заголовок и
+    тексты ходов — те же, что без неё."""
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_core.thread_store import append_turn_outcome_record
+
+    app, index, threads = _joint(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    first = _save(index, n=1, thread_id="rec", cwd=str(cwd), created=10)
+    _save(
+        index, n=2, thread_id="rec", cwd=str(cwd), created=20, previous=first
+    )
+    path = index.thread_path("rec")
+    _jsonl(index, "rec", [_user("первый")])
+    append_turn_outcome_record(
+        os.path.dirname(path),
+        "responses",
+        "rec",
+        TurnOutcome(
+            status="done",
+            reason=None,
+            opened_by=None,
+            started_at="2026-10-22T11:32:00.000Z",
+            ended_at="2026-10-22T11:32:12.000Z",
+            duration_sec=12.0,
+            error=None,
+        ),
+        seq=1,
+    )
+    with open(path, "a", encoding="utf-8") as handle:
+        record = {
+            "type": "message",
+            "system": "responses",
+            "seq": 2,
+            "payload": _user("второй"),
+        }
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    client = TestClient(app, base_url=LOOPBACK)
+
+    body = client.get("/v1/dialogs").json()
+    assert [(item["thread_id"], item["title"]) for item in body] == [
+        ("rec", "первый")
+    ]
+    turns = client.get("/v1/dialogs/rec").json()
+    assert [turn["text"] for turn in turns] == ["первый", "второй"]
+
+
 def _call(name: str, arguments: dict) -> dict:
     return {
         "type": "function_call",

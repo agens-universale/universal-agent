@@ -47,6 +47,11 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.persistence.turn_outcome import (
+    USER_STOP,
+    TurnOutcome,
+    TurnStatus,
+)
 from gc_core.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_REWORKING,
@@ -100,6 +105,8 @@ from gc_core.tools.subagents.sidecar import (
     mint_turn_id,
 )
 from gc_core.trace_id import trace_id_from_config
+from gc_core.turn_boundary import opening_reply_id
+from gc_core.turn_error import describe_turn_error
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_dict, build_run_usage_report
 from gc_core.utils.generate_message_id import (
@@ -117,6 +124,30 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
     "or via a review subagent when quality or risk warrants it.\n"
     "- At the start of a large task, use a planner subagent only when planning overhead is justified.\n"
 )
+
+
+#: ``State.terminal_outcome``, которыми прогон остановлен лимитом: ход
+#: закрыт исходом ``stopped`` с этой причиной.
+_LIMIT_OUTCOMES = frozenset(
+    {
+        "step_limit",
+        "tool_call_limit",
+        "token_limit",
+        "tool_errors",
+        "judge_unavailable",
+    }
+)
+
+
+def _uncancel_current_task() -> None:
+    """Снять отмену с текущей задачи, чтобы следующий ``await`` дошёл до
+    записи; вызывающий затем бросает ``CancelledError`` заново. Счётчик не
+    восстанавливается: иначе задача останется снятой даже после того, как
+    вызывающий эту ошибку поймает."""
+    task = asyncio.current_task()
+    if task is not None:
+        while task.cancelling():
+            task.uncancel()
 
 
 async def _aappend_trace_id_to_meta(
@@ -209,6 +240,16 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     reset_owner(owner_reset)
     if cancelled is not None:
         raise cancelled
+
+
+def _error_fact(exc: BaseException | None) -> dict[str, str] | None:
+    """Класс и замаскированная причина ошибки для записи итога хода."""
+    if exc is None:
+        return None
+    return {
+        "type": exc.__class__.__name__,
+        "message": describe_turn_error(exc),
+    }
 
 
 def undelivered_as_arun_args(messages: list[dict]) -> tuple[list[str], dict]:
@@ -618,6 +659,11 @@ class AgentExecutor:
             if self._stop_pending:
                 self._state.stop_requested = True
                 self._stop_pending = False
+                # Стоп лёг на ход только сейчас: часы этого хода, открытые
+                # в сборке состояния, закрываются этим моментом.
+                clock = current_turn_clock(self._ctx)
+                if clock is not None:
+                    clock.close()
             # В shared уже лежит выбор, восстановленный из сессии; явный выбор
             # этого запуска — поверх. Под тем же замком, что публикует state:
             # иначе между публикацией и наложением вклинился бы
@@ -1055,14 +1101,9 @@ class AgentExecutor:
 
         В снятой задаче следующий ``await`` сразу получает ``CancelledError``,
         и запись не начинается. Снимаем отмену и пишем. ``arun`` затем бросает
-        ``CancelledError`` заново — вызывающий её видит. Счётчик не
-        восстанавливаем: иначе задача останется снятой даже после того,
-        как вызывающий эту ошибку поймает.
+        ``CancelledError`` заново — вызывающий её видит.
         """
-        task = asyncio.current_task()
-        if task is not None:
-            while task.cancelling():
-                task.uncancel()
+        _uncancel_current_task()
         await self.aclose_run_accounting()
 
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
@@ -1323,6 +1364,7 @@ class AgentExecutor:
         )
         loop_finished = False
         teardown_cancel: BaseException | None = None
+        run_error: BaseException | None = None
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
@@ -1343,6 +1385,7 @@ class AgentExecutor:
                 # всё время суммаризации, ради которого всё и переводилось.
                 pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
+                turn_closed_hook=self._arecord_turn_outcome,
                 force_compact_hook=summary.aforce_compact_once,
                 get_pending_messages=self._take_pending_messages,
                 check_stop=self._is_stop_requested,
@@ -1363,10 +1406,19 @@ class AgentExecutor:
                 state, "terminal_outcome", None
             )
             self.last_closing_reply = getattr(state, "closing_reply", "")
+        except BaseException as exc:
+            run_error = exc
+            raise
         finally:
             state_ops.leave(state)
             state.turn_level = None
-            teardown_cancel = await self._ateardown_run(_owner_reset)
+            try:
+                # Ход, уже записанный из цикла, — no-op.
+                if isinstance(run_error, asyncio.CancelledError):
+                    _uncancel_current_task()
+                await self._arecord_turn_outcome(None, error=run_error)
+            finally:
+                teardown_cancel = await self._ateardown_run(_owner_reset)
 
         if teardown_cancel is not None:
             # Незавершённый цикл сюда не попадает: его исключение выходит из
@@ -1582,6 +1634,66 @@ class AgentExecutor:
         """Сообщения очереди с вложениями, переложенными в тред прогона: сообщение
         получает тред, когда его принимает агент, — здесь и копируем его картинки."""
         return [with_committed_attachments(m, self._ctx) for m in messages]
+
+    async def _arecord_turn_outcome(
+        self,
+        reason: Optional[str] = None,
+        *,
+        error: BaseException | None = None,
+    ) -> None:
+        """Записать итог текущего хода — не больше одного раза на ход.
+
+        Зовут хук цикла (``_aclose_turn``: финал, принятый текст, план) и
+        ``finally`` прогона (остальные выходы). Признак ``recorded`` ставится
+        до записи: повтор ничего не пишет, даже если первая запись упала.
+        Ход, не положивший в историю ни одного сообщения (стоп в сетапе),
+        записи не получает: его на диске нет. Сбой записи — предупреждение
+        в журнал прогона, ход он не роняет."""
+        clock = current_turn_clock(self._ctx)
+        state = self.get_state()
+        session = self._thread_session
+        if clock is None or clock.recorded or state is None:
+            return
+        clock.recorded = True
+        clock.close()
+        if session is None or state.turn_messages_start is None:
+            return
+        status, why = self._classify_turn_end(reason, error)
+        outcome = TurnOutcome(
+            status=status,
+            reason=why,
+            opened_by=opening_reply_id(state),
+            started_at=clock.started_at,
+            ended_at=clock.ended_at,
+            duration_sec=round(clock.elapsed(), 1),
+            error=_error_fact(error) if status == "error" else None,
+        )
+        try:
+            await session.aappend_turn_outcome(
+                outcome, discarded=is_persist_discarded(state)
+            )
+        except Exception:
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("turn_outcome_write_failed", exc_info=True)
+
+    def _classify_turn_end(
+        self, reason: Optional[str], error: BaseException | None
+    ) -> tuple[TurnStatus, Optional[str]]:
+        """Исход хода: стоп сильнее всего (исключение после запроса стопа —
+        его следствие), затем отмена, ошибка, причина из цикла, лимит."""
+        if self._is_stop_requested() or isinstance(
+            error, (asyncio.CancelledError, KeyboardInterrupt)
+        ):
+            return "stopped", USER_STOP
+        if error is not None:
+            return "error", None
+        if reason is not None:
+            return "done", reason
+        outcome = getattr(self.get_state(), "terminal_outcome", None)
+        if outcome in _LIMIT_OUTCOMES:
+            return "stopped", outcome
+        return "done", None
 
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.

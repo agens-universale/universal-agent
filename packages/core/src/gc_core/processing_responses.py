@@ -9,7 +9,17 @@ import json
 import logging
 import time
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    NoReturn,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.judge_runner import arun_pair_judge
@@ -2603,6 +2613,7 @@ class _AgentLoop:
         persist_messages_callback,
         pre_backend_compaction_hook,
         turn_end_compaction_hook,
+        turn_closed_hook,
         force_compact_hook,
         get_pending_messages,
         check_stop,
@@ -2619,6 +2630,7 @@ class _AgentLoop:
         self.persist_messages_callback = persist_messages_callback
         self.pre_backend_compaction_hook = pre_backend_compaction_hook
         self.turn_end_compaction_hook = turn_end_compaction_hook
+        self.turn_closed_hook = turn_closed_hook
         self.force_compact_hook = force_compact_hook
         self.get_pending_messages = get_pending_messages
         self.check_stop = check_stop
@@ -3272,7 +3284,8 @@ class _AgentLoop:
                     "status": str(plan.get("status") or ""),
                 },
                 ensure_ascii=False,
-            )
+            ),
+            reason="plan_proposed",
         )
         if not outcome.restart:
             # Человек дослал сообщение во время хода — ход продолжается, и
@@ -3340,8 +3353,18 @@ class _AgentLoop:
         )
         return decision
 
-    async def _aclose_turn(self, result) -> _Outcome:
-        """Конец хода: компакция turn-end и подхват pending-сообщения новым ходом."""
+    async def _aclose_turn(
+        self, result, *, reason: Optional[str] = None
+    ) -> _Outcome:
+        """Конец хода: итог хода, компакция turn-end и подхват
+        pending-сообщения новым ходом.
+
+        Итог — первым: запись встаёт за последним сообщением хода и уходит
+        в архив вместе с ним при компакции конца хода; подхват очереди
+        затем привязывает часы нового хода. ``reason`` — причина закрытия
+        из цикла (``plan_proposed``), обычный финал — ``None``."""
+        if self.turn_closed_hook is not None:
+            await self.turn_closed_hook(reason)
         if self.turn_end_compaction_hook is not None:
             await _acall_blocking_hook(self.turn_end_compaction_hook)
         # Сообщение, пришедшее во время (блокирующей) компакции, не
@@ -3491,7 +3514,7 @@ class _AgentLoop:
 # Keep the public helper/monkeypatch boundary while sharing one loop.
 
 
-async def arun_agent(
+async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     messages,
     state: State,
     ctx: Any,
@@ -3502,6 +3525,9 @@ async def arun_agent(
         Callable[[List[Dict], str], None]
     ] = None,
     turn_end_compaction_hook: Optional[Callable[[], None]] = None,
+    turn_closed_hook: Optional[
+        Callable[[Optional[str]], Awaitable[None]]
+    ] = None,
     force_compact_hook: Optional[Callable[[], None]] = None,
     get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
@@ -3516,6 +3542,7 @@ async def arun_agent(
         persist_messages_callback=persist_messages_callback,
         pre_backend_compaction_hook=pre_backend_compaction_hook,
         turn_end_compaction_hook=turn_end_compaction_hook,
+        turn_closed_hook=turn_closed_hook,
         force_compact_hook=force_compact_hook,
         get_pending_messages=get_pending_messages,
         check_stop=check_stop,

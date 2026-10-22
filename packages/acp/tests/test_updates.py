@@ -887,3 +887,65 @@ def test_history_title_path_is_relative_to_the_session_cwd():
         root="/work/app",
     )
     assert updates[1]["title"] == "fs_read_file(src/a.py)"
+
+
+def _replay_of_thread(threads_dir, *, with_outcome: bool) -> list[dict]:
+    """Проигрыш ACP с диска: тот же загрузчик, что у ``ThreadSession``."""
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_core.thread_store import (
+        append_new_thread_messages,
+        append_turn_outcome_record,
+        load_thread_messages,
+    )
+    from gc_acp.session_index import ACP_SYSTEM
+
+    turns = [
+        [
+            {"role": "user", "content": "первый", "id": "u1"},
+            {"role": "assistant", "content": "ответ раз", "id": "a1"},
+        ],
+        [
+            {"role": "user", "content": "второй", "id": "u2"},
+            {"role": "assistant", "content": "ответ два", "id": "a2"},
+        ],
+    ]
+    seq = 0
+    for turn in turns:
+        append_new_thread_messages(
+            str(threads_dir), ACP_SYSTEM, "s1", turn, set(), start_seq=seq
+        )
+        seq += len(turn)
+        if with_outcome:
+            append_turn_outcome_record(
+                str(threads_dir),
+                ACP_SYSTEM,
+                "s1",
+                TurnOutcome(
+                    status="done",
+                    reason=None,
+                    opened_by=turn[0]["id"],
+                    started_at="2026-10-22T11:32:00.000Z",
+                    ended_at="2026-10-22T11:32:12.000Z",
+                    duration_sec=12.0,
+                    error=None,
+                ),
+                seq=seq,
+            )
+    messages, _keys, _seq = load_thread_messages(
+        str(threads_dir), ACP_SYSTEM, "s1"
+    )
+    # messageId — случайный на каждый проигрыш, сравнивается остальное.
+    return [
+        {k: v for k, v in update.items() if k != "messageId"}
+        for update in history_updates(messages)
+    ]
+
+
+def test_history_ignores_turn_outcome_records(tmp_path):
+    """ACP строку итога хода не показывает: проигрыш треда с записями
+    итога ядра — тот же, что без них."""
+    plain = _replay_of_thread(tmp_path / "plain", with_outcome=False)
+    recorded = _replay_of_thread(tmp_path / "rec", with_outcome=True)
+
+    assert recorded == plain
+    assert plain
