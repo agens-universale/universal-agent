@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime
 
 import pytest
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
-from gc_tui.services.turn_outcome import kind_of, outcome_word, turn_head
+from gc_tui.services.turn_outcome import (
+    kind_of,
+    outcome_error,
+    outcome_word,
+    turn_head,
+)
 
 NOW = datetime(2026, 10, 22, 20, 0).astimezone()
 ENDED = datetime(2026, 10, 22, 14, 32).astimezone().isoformat()
@@ -91,3 +97,14 @@ def test_outcome_word_priority_and_default():
     assert word(reason="step_limit") == "stopped_steps"
     assert word(reason="plan_proposed") == "completed"
     assert word() == "completed"
+
+
+def test_outcome_error_is_reason_of_failed_record():
+    """Причина строки `└` — сообщение ошибки записи итога; без ошибки —
+    ничего."""
+    failed = dataclasses.replace(
+        _rec("error"), error={"message": "ReadTimeout"}
+    )
+    assert outcome_error(failed) == "ReadTimeout"
+    assert outcome_error(_rec("error")) is None
+    assert outcome_error(_rec("done")) is None

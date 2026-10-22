@@ -188,6 +188,7 @@ from gc_tui.services.turn_outcome import (
     indicator_state_of,
     kind_of,
     meta_status_of,
+    outcome_error,
     outcome_word,
     settled_status,
     word_of_status,
@@ -266,11 +267,6 @@ def resolve_live_terminal_indicator_state(*, status, stop_requested):
     if word == "completed" and stop_requested:
         word = "cancelled"
     return indicator_state_of(word) if word else None
-
-
-def _outcome_error(outcome: TurnOutcome) -> str | None:
-    """Причина упавшего хода из записи итога (строка `└`)."""
-    return (outcome.error or {}).get("message")
 
 
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
@@ -2702,7 +2698,7 @@ class TraceScreen(Screen):
         self._settle_turn_line()
         line = build_turn_line(outcome)
         # Причина записи хранится и у осевшей строки (освежить её снова).
-        line.freshen(None, _outcome_error(outcome))
+        line.freshen(None, outcome_error(outcome))
         if not fresh:
             line.settle()
         self._trace_mount(line, above_sent=True)
@@ -2850,7 +2846,7 @@ class TraceScreen(Screen):
         line = self._fresh_turn_line()
         if outcome is not None:
             if line is not None:
-                line.freshen(summary, _outcome_error(outcome))
+                line.freshen(summary, outcome_error(outcome))
             return
         error = self._active_run_error() if word == "failed" else None
         if line is None or line.recorded:

@@ -154,6 +154,11 @@ def kind_of(outcome: TurnOutcome) -> tuple[str, bool]:
     return _ALIASES.get(word, word), plan
 
 
+def outcome_error(outcome: TurnOutcome) -> str | None:
+    """Причина упавшего хода из записи итога (строка `└`)."""
+    return (outcome.error or {}).get("message")
+
+
 def turn_head(
     word: str,
     *,
