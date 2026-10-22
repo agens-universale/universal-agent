@@ -1133,19 +1133,6 @@ class ModelEntryForm(Vertical):
         except NoMatches:
             return self._proxy0
 
-    def _effective_proxy(self, backend: dict) -> str | None:
-        """Прокси, который уедет в файл: поле карточки, иначе ключ в YAML backend.
-
-        Поле — основное место правки. Ключ в YAML остаётся для того, кто дописал
-        `proxy:` в поле backend, не трогая карточку."""
-        field = self._proxy_value()
-        if field:
-            return field
-        raw = backend.get("proxy")
-        if isinstance(raw, str) and raw.strip():
-            return raw.strip()
-        return None
-
     def _backend_for_request(self, backend: dict) -> dict:
         """Снимок backend для пробы и списка: свой прокси поля побеждает YAML."""
         data = dict(backend)
@@ -2365,8 +2352,6 @@ class ModelEntryForm(Vertical):
         own_url = self._url_value() or backend.get("completions_url")
         if own_url:
             return own_url
-        if self._effective_proxy(backend):
-            return self._inherited_url()
         return "" if self.own_connection() else self._inherited_url()
 
     def _current_auth_value(self) -> tuple[str | None, bool]:

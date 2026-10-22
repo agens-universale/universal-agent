@@ -4157,6 +4157,58 @@ async def test_proxy_saves_without_its_own_token_or_address():
         assert "url" not in fields and "token" not in fields
 
 
+async def test_cleared_address_does_not_send_own_token_to_parent_because_of_proxy():
+    """Свой токен без адреса сохранить нельзя. Заполненный прокси не повод
+    слать этот токен на адрес родителя."""
+    seen = []
+
+    def fake_probe(endpoint, auth, verify, model, **kwargs):
+        seen.append((endpoint, auth))
+        return ProbeResult("ok", 200, None, 1, "")
+
+    form = _form(
+        initial={
+            "alias": "flash",
+            "model": "m",
+            "url": "https://own.example/v1/chat/completions",
+            "token": "sk-OWN",
+            "backend": {"proxy": "http://own-proxy:8080"},
+        },
+        existing_aliases={"flash"},
+        effective_url="https://parent.example/v1/chat/completions",
+        effective_auth="Bearer sk-PARENT",
+        probe=fake_probe,
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-url", Input).value = ""
+        await pilot.pause()
+        assert form._current_url() == ""
+        form.probe_connection()
+        for _ in range(3):
+            await pilot.pause()
+        assert seen == []
+
+
+async def test_inherited_pair_with_own_proxy_still_uses_the_parent_address():
+    form = _form(
+        initial={
+            "alias": "flash",
+            "model": "m",
+            "backend": {"proxy": "http://own-proxy:8080"},
+        },
+        existing_aliases={"flash"},
+        effective_url="https://parent.example/v1/chat/completions",
+        effective_auth="Bearer sk-PARENT",
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.own_connection() is False
+        assert (
+            form._current_url() == "https://parent.example/v1/chat/completions"
+        )
+
+
 async def test_proxy_field_strips_whitespace():
     """Пробелы по краям снимаются, строка из одних пробелов — пустое поле.
 
