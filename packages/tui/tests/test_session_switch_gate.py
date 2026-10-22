@@ -345,3 +345,24 @@ async def test_stop_then_busy_target_says_busy(tmp_path):
         assert scr._active_task_id == _A
         assert BUSY_MESSAGE in notes
         assert _status(tmp_path, _A) == "stopped"
+
+
+@pytest.mark.asyncio
+async def test_late_trip_of_stopped_run_stays_out_of_window_breaker(tmp_path):
+    """Предохранитель окна после стопа — свой объект: поздний трип
+    отвязанного хода A не попадает ни в предохранитель окна, ни в мету B."""
+    async with _app(tmp_path).run_test() as pilot:
+        app = pilot.app
+        scr, runner = await _run_in_a(pilot, slow=True)
+        old = app._circuit_breaker  # его держит исполнитель хода A
+        await _pick_b(pilot, tmp_path)
+        await pilot.press("y")
+        await pilot.pause()
+        assert scr._active_task_id == _B
+        old.trip("m-a", "поздний сбой")
+        assert app._circuit_breaker.snapshot() == {}
+        app.persist_circuit_breaker(_B)
+        b_tui = json.loads(
+            (tmp_path / f"meta_cli_{_B}.json").read_text(encoding="utf-8")
+        )["tui"]
+        assert b_tui.get("circuit_breaker") == {}

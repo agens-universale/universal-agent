@@ -1543,8 +1543,15 @@ class TuiApp(App):
 
     def detach_run_sinks(self) -> None:
         """Остановленный прогон дорабатывает в фоне, отвязанный от окна: его
-        стрим и прогресс субагентов окну больше не принадлежат. Следующая
-        сборка исполнителя заводит свои."""
+        стрим, прогресс субагентов и предохранитель окну больше не
+        принадлежат. Следующая сборка исполнителя заводит свои; у окна —
+        свой предохранитель с тем же состоянием, старый объект остаётся
+        отвязанному исполнителю (его поздние трипы — только его)."""
+        from gc_core.model_router import CircuitBreaker
+
+        self._circuit_breaker = CircuitBreaker.restore(
+            self._circuit_breaker.snapshot()
+        )
         pump = getattr(self, "_stream_pump", None)
         if pump is not None:
             pump.close()
