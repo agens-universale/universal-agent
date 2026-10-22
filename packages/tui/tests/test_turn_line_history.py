@@ -557,6 +557,34 @@ async def test_zz_late_stop_record_of_undone_reply_never_shows_a_line(
 
 
 @pytest.mark.asyncio
+async def test_late_stop_record_after_leaving_and_returning_shows_no_line(
+    tmp_path,
+):
+    """Откат, уход в другой тред и возврат, пока остановленный поток висит
+    в повторах: его поздняя запись стопа строки не даёт. Набор снятых
+    реплик треда живёт до его чистки."""
+    _prepare_one_turn(tmp_path)
+    _write_thread(tmp_path, OTHER, tui={"status": "completed"})
+    async with _app(tmp_path).run_test() as pilot:
+        scr, thread, old = await _undo_setup(pilot, tmp_path)
+        scr._cancel_with_undo()
+        await pilot.pause()
+
+        await _open(pilot, OTHER)
+        await _open(pilot, TID)
+        thread.record(2, "m_orphan", status="stopped", reason="user_stop")
+        scr._poll_trace_tail()
+        await pilot.pause()
+        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+
+        old._running = False
+        scr._run_orphan_cleanups()
+        await pilot.pause()
+        assert TID not in scr._undone_reply_ids
+        assert [line.opened_by for line in _turn_lines(scr)] == ["u1"]
+
+
+@pytest.mark.asyncio
 async def test_undo_after_record_was_tailed_removes_mounted_line(tmp_path):
     """Запись дочитана хвостом и смонтирована до отката (курсор за ней):
     откат снимает строку по `opened_by` и пересинхронизирует курсор —
