@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 pytest.importorskip("textual")
 
 from gc_core.attachments.model import chip_text
+from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.user_reply import UserReplyContainer
@@ -50,16 +53,60 @@ async def test_plain_reply_comes_back():
         assert (await _undo(pilot)).text == "привет"
 
 
+class _QueueRunner(_Runner):
+    """Идущий ход с очередью: B ложится в неё и снимается ↑."""
+
+    def __init__(self) -> None:
+        self.added: list[dict] = []
+
+    def is_child_input_active(self) -> bool:
+        return False
+
+    def add_message(self, message: dict) -> None:
+        self.added.append(message)
+
+    def withdraw_message(self, msg_id: str) -> bool:
+        return True
+
+
 @pytest.mark.asyncio
-async def test_undo_restores_the_reply_it_removes_not_a_withdrawn_one():
+async def test_undo_restores_the_reply_it_removes_not_a_withdrawn_one(
+    tmp_path,
+):
     """Отправил A, B в очередь, B забрал ↑ и очистил поле: откат снимает A
     и возвращает текст A."""
-    async with TuiApp().run_test() as pilot:
+    tid = "u" * 32
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+    meta = {"thread_id": tid, "messages_count": 0, "tui": {}}
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
         scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        runner = _QueueRunner()
+        pilot.app.active_runner = runner
         scr._mount_user_reply("A", state="pending")
-        scr._last_user_send_text = "B"  # устаревшая копия — не источник
-        inp = await _undo(pilot)
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="B", attachments=())
+        )
+        await pilot.pause()
+        assert [m["content"] for m in runner.added] == ["B"]
+        inp = pilot.app.query_one("#cmdinput", CommandTextArea)
+        inp.focus()
+        await pilot.press("up")
+        await pilot.pause()
+        assert inp.text == "B"
+        inp.text = ""
+        await pilot.press("escape")
+        await pilot.pause()
         assert inp.text == "A"
+        assert not list(scr.query(UserReplyContainer))
 
 
 @pytest.mark.asyncio

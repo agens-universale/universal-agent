@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 from gc_testkit.tui_support import tui_settings
+from gc_tui.widgets.thinking_indicator import is_terminal_indicator_state
 
 _A = "aaaa0000000000000000000000000001a"
 _B = "bbbb0000000000000000000000000002b"
@@ -33,6 +35,7 @@ class _Runner:
 
     def __init__(self, target):
         self._last_target = target
+        self.run_started_at = time.monotonic() - 7
         self._running = True
 
     def is_running(self):
@@ -80,6 +83,12 @@ async def test_failure_after_switch_stays_with_failed_thread(tmp_path):
         ).get("last_error")
         assert _meta(tmp_path, _A)["status"] == "completed"
         assert _meta(tmp_path, _B)["last_error"] == _REASON
+        assert _meta(tmp_path, _B)["last_indicator"] == {
+            "kind": "failed",
+            "elapsed": None,
+            "edits": None,
+            "plan": None,
+        }
         scr.attach_active_task(_B, is_resume=True)
         await pilot.pause()
         text = scr._thinking._render_text().plain
@@ -118,7 +127,7 @@ async def test_running_other_thread_shows_no_activity_here(tmp_path):
         runner = _Runner((_B, "cli"))
         pilot.app.active_runner = runner
         scr._poll_active()
-        assert scr._thinking._render_text().plain.startswith("✦") is False
+        assert not is_terminal_indicator_state(scr._thinking._state)
         scr.attach_active_task(_A, is_resume=True)
         scr._poll_active()
         await pilot.pause()
@@ -137,5 +146,14 @@ async def test_running_other_thread_shows_no_activity_here(tmp_path):
         scr._poll_active()
         await pilot.pause()
         assert _meta(tmp_path, _B)["status"] == "completed"
-        assert _meta(tmp_path, _A)["last_indicator"]["elapsed"] == 5
+        assert _meta(tmp_path, _B)["last_indicator"] == {
+            "kind": "done",
+            "elapsed": 7,
+            "edits": None,
+            "plan": None,
+        }
+        assert _meta(tmp_path, _A)["last_indicator"] == {
+            "kind": "done",
+            "elapsed": 5,
+        }
         assert scr._thinking._render_text().plain.startswith("✓ Выполнил")

@@ -2308,10 +2308,8 @@ class TraceScreen(Screen):
         self._live_turn_tool_calls = (
             0  # смена задачи (не stream_reset: там счётчик хода нужен)
         )
+        # Сброс снимает и индикатор: строка-итог принадлежит прежнему треду.
         self._reset_render_state()
-        if prev != task_id:
-            # Строка-итог индикатора принадлежит прежнему треду.
-            self._destroy_thinking_indicator()
         self._store = FileTaskStore(
             threads_dir=self.app._threads_dir or "",
             system=self.app._system,
