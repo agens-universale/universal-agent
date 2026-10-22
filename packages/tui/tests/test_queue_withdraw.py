@@ -498,6 +498,29 @@ async def test_pending_after_stop_reconciles_on_thread_record(tmp_path):
         assert _pending_records(tmp_path) == []
 
 
+@pytest.mark.asyncio
+async def test_stop_with_reply_held_by_core_does_not_undo(tmp_path):
+    """Реплика, которую ядро держит после конца хода (`pending`), — не
+    «ничего не выдал»: стоп не откатывает отправку и не возвращает её
+    в поле."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path, admitted=True)
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        runner.running = True  # ядро взяло удержанное новым прогоном
+        scr._events_since_last_user_send = 0
+        scr._cmd_stop()
+        await pilot.pause()
+        assert runner.events[-1] == "stop"
+        assert _inp(pilot).text == ""
+        trace = scr.query_one("#trace")
+        replies = list(trace.query(UserReplyContainer))
+        assert [r._text for r in replies] == ["первое", "второе"]
+        assert scr._pending_orphan_cleanups == []
+
+
 # --- пересборка ленты во время хода ------------------------------------------
 
 

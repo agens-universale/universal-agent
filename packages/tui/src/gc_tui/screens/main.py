@@ -595,6 +595,9 @@ class TraceScreen(Screen):
         self._ask_human_child_parent_call_id: Optional[str] = None
         # Spec 2026-05-26: pending user-replies (in-memory dict by client_id, FIFO ordered).
         self._pending_user_widgets: dict[str, UserReplyContainer] = {}
+        # client_id реплик, которые стоп или конец хода не сняли у ядра
+        # (`_withdraw_queue`): ядро их держит, пока тред их не сверит.
+        self._held_client_ids: set[str] = set()
         # id записей, уже отрисованных в трейсе: запись с таким id не
         # рисуется повторно ни на одном пути (rebuild, live-тик).
         self._rendered_ids: set[str] = set()
@@ -3112,7 +3115,15 @@ class TraceScreen(Screen):
                 withdrawn.append(reply)
             else:
                 reply.set_state("pending")
+                self._held_client_ids.add(reply.client_id)
         return withdrawn
+
+    def _has_held_replies(self) -> bool:
+        """Есть реплика, которую ядро держит после стопа или конца хода,
+        и тред её ещё не сверил."""
+        return any(
+            cid in self._held_client_ids for cid in self._pending_user_widgets
+        )
 
     def _return_queue_to_input(self, replies: list) -> None:
         """Реплики, которые ядро уже не впустит (снятые при стопе, остаток
@@ -7692,7 +7703,9 @@ class TraceScreen(Screen):
     def _can_cancel_with_undo(self) -> bool:
         """Откат отправки: агент ничего не выдал, поле пустое, очереди нет.
         С очередью откатывать нечего: последняя отправка — в очереди, её
-        с остальными вернёт в поле стоп (`_stop_and_replace_runner`)."""
+        с остальными вернёт в поле стоп (`_stop_and_replace_runner`). Нет и
+        реплик, которые ядро держит после прошлого стопа или конца хода:
+        они у агента, откатывать их нельзя."""
         input_text = ""
         try:
             input_text = self.query_one(_SEL_CMDINPUT).text
@@ -7704,6 +7717,7 @@ class TraceScreen(Screen):
             and not self._queued_tail(
                 self.query_one(_SEL_TRACE, VerticalScroll)
             )
+            and not self._has_held_replies()
         )
 
     def _stop_and_replace_runner(self) -> None:
