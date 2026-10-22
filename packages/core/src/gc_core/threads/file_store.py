@@ -21,6 +21,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -84,6 +85,8 @@ _SUBAGENTS = "subagent_events"
 _EDITS = "edits"
 _ALIASES_DIR = "aliases"
 _EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg"}
+#: Хвост имени вложения после ``<system>_<thread>_``: хеш и расширение.
+_BLOB_TAIL = re.compile(r"[0-9a-f]{16}(?:\.png|\.jpg|\.bin)")
 _SUFFIX_FORMAT = "%Y%m%d_%H%M%S"
 _JSON = ".json"
 
@@ -1227,12 +1230,16 @@ class FileThreadStore(ThreadStore):
         return BlobRef(key=key, name=name, mime=mime, location=str(path))
 
     async def get_blob(self, ref: BlobRef) -> bytes:
-        # Только вложение этого треда в каталоге вложений: путь в имени
-        # (абсолютный, ``..``) или чужой префикс — нет такого вложения, а не
-        # файл с диска (имя приходит и от песочницы через прокси треда).
+        # Только вложение этого треда — имя ровно по раскладке ``put_blob``:
+        # путь в имени (абсолютный, ``..``) или имя чужого треда (``g_t_x_…``
+        # начинается и с ``g_t_``) — нет такого вложения, а не файл с диска
+        # (имя приходит и от песочницы через прокси треда).
         name = ref.name
         prefix = f"{ref.key.system}_{ref.key.thread}_"
-        if Path(name).name != name or not name.startswith(prefix):
+        if not (
+            name.startswith(prefix)
+            and _BLOB_TAIL.fullmatch(name[len(prefix) :])
+        ):
             raise FileNotFoundError(ref.location)
         path = Path(self._dir) / layout.IMAGES_DIR / name
         if not path.exists():
