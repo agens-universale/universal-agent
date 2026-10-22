@@ -612,6 +612,40 @@ async def test_pill_counts_new_agent_replies(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_bridge_echo_not_mounted_not_counted(tmp_path):
+    from gc_tui.widgets.trace_row import TraceRow
+
+    _write_task(tmp_path, "o21b")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o21b")
+        _, pill = _overlays(scr)
+        _trace(scr).focus()
+        await _scroll(pilot, scr, 10)
+        rows = len(scr.query(TraceRow))
+        scr._render_record(
+            {
+                "payload": {
+                    "id": "e1",
+                    "role": "assistant",
+                    "content": "(tool results received)",
+                }
+            },
+            live=True,
+        )
+        await pilot.pause()
+        assert len(scr.query(TraceRow)) == rows
+        assert scr._new_replies == 0
+        assert pill.label == "↓ в конец · клик"
+        mention = "Ответ: фраза (tool results received) служебная."
+        scr._render_record(
+            {"payload": {"id": "e2", "role": "assistant", "content": mention}},
+            live=True,
+        )
+        await pilot.pause()
+        assert scr._new_replies == 1
+
+
+@pytest.mark.asyncio
 async def test_pill_counter_resets_at_bottom(tmp_path):
     _write_task(tmp_path, "o21")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:

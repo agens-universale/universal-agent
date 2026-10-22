@@ -13,6 +13,8 @@ import re
 import threading
 import time
 
+from gc_core.message_policy.chat_completions import is_bridge_echo
+
 _THINK_RE = re.compile(r"<think>(.*?)(?:</think>|$)", re.DOTALL)
 
 
@@ -103,7 +105,8 @@ def format_stream_block(*, answer: str) -> str:
     surfaced separately — `format_reasoning_line` (the StreamBlock's thinking-phase
     line) and the ThinkingIndicator counter — not here. Inline <think>...</think>
     spans (incl. an unclosed one mid-stream) are stripped."""
-    return _THINK_RE.sub("", answer).strip()
+    text = _THINK_RE.sub("", answer).strip()
+    return "" if is_bridge_echo(text) else text
 
 
 def _reasoning_tail(think: str, maxlen: int) -> str:

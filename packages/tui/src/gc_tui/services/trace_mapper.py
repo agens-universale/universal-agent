@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping, Optional
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
 from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
 from gc_core.execution.progress import tool_args_summary
+from gc_core.message_policy.chat_completions import is_bridge_echo
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -364,7 +365,9 @@ def map_message(
     # AGENT (text)  # noqa: ERA001  # описание формата, не выключенный код
     if role == "assistant":
         text = _extract_assistant_text(msg.get("content"))
-        if text:
+        # Повтор нашего моста целиком — не ответ (ядро его тоже не
+        # принимает): ни показа, ни учёта в /copy и счётчике плашки.
+        if text and not is_bridge_echo(text):
             return TraceEvent(
                 no=no,
                 event_ts_utc_iso=ts,
