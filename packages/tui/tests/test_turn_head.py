@@ -72,6 +72,9 @@ def _rec(status, reason=None):
         ("stopped", "token_limit", ("stopped_tokens", False)),
         ("stopped", "tool_errors", ("stopped_errors", False)),
         ("stopped", "judge_unavailable", ("stopped_judge", False)),
+        # Причина, которой словарь не знает, — остановка, не «Выполнил».
+        ("stopped", None, ("cancelled", False)),
+        ("stopped", "new_reason", ("cancelled", False)),
         ("error", None, ("failed", False)),
     ],
 )

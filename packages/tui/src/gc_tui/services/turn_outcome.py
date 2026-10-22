@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
+from gc_core.persistence.turn_outcome import TurnOutcome
 from rich.text import Text
 
 from gc_tui.services.duration_format import format_duration
@@ -140,10 +140,12 @@ def outcome_word(*, failed: bool, stopped: bool, reason: str | None) -> str:
 
 
 def kind_of(outcome: TurnOutcome) -> tuple[str, bool]:
-    """Слово `OUTCOMES` и флаг «ход кончился планом» по записи итога."""
+    """Слово `OUTCOMES` и флаг «ход кончился планом» по записи итога.
+    Остановка с причиной, которой словарь не знает, — остановка."""
     word = outcome_word(
         failed=outcome.status == "error",
-        stopped=outcome.status == "stopped" and outcome.reason == USER_STOP,
+        stopped=outcome.status == "stopped"
+        and outcome.reason not in _LIMIT_WORDS,
         reason=outcome.reason,
     )
     plan = outcome.status == "done" and outcome.reason == _PLAN_REASON
