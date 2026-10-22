@@ -284,11 +284,10 @@ def test_stop_run_closes_clock():
     executor.stop_run()
     mono.now += 10
     assert clock.closed is True
-    assert executor.turn_elapsed() == 4
+    assert clock.elapsed() == 4
     assert executor.turn_effective_start() == 100.0
 
 
 def test_executor_without_clock_reads_none():
     executor = AgentExecutor(SimpleNamespace())
-    assert executor.turn_elapsed() is None
     assert executor.turn_effective_start() is None

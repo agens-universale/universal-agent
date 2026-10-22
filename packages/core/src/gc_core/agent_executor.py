@@ -1712,11 +1712,6 @@ class AgentExecutor:
         clock = current_turn_clock(self._ctx)
         return clock.effective_start() if clock is not None else None
 
-    def turn_elapsed(self) -> float | None:
-        """Длительность текущего хода без ожидания человека."""
-        clock = current_turn_clock(self._ctx)
-        return clock.elapsed() if clock is not None else None
-
     async def acompact_thread(
         self, thread_id: str, system: str | None = None
     ) -> bool:
