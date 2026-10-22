@@ -5080,12 +5080,16 @@ class TraceScreen(Screen):
 
         _mcp_status_row НЕ обнуляем: колонка — часть бренд-карточки (#brand-mcp),
         переживает пересборку (_clear_trace); ссылка остаётся валидной."""
+        self._reset_run_flags()
+        self._stamp_tui_running()
+
+    def _reset_run_flags(self) -> None:
+        """Сбросить error- и stop-флаги прошлого прогона (app-уровня)."""
         self._error_shown = False
         self._mcp_status_done = False
         self.app.last_runner_error = None
         self.app.last_terminal_outcome = None
         self.app.last_stop_requested = False
-        self._stamp_tui_running()
 
     def _stamp_tui_running(self) -> None:
         """meta.tui.status=running + сброс last_indicator (новый ход, не итог
@@ -8453,8 +8457,10 @@ class TraceScreen(Screen):
         """Очистить trace и перейти в empty-state. pending_skill_id/cwd сохраняются."""
         # Сбросить терминальные error/stop-флаги app-уровня (last_runner_error и пр.):
         # иначе poll видит протухшую ошибку и репейнтит «✕ Ошибка» поверх пустой сессии.
+        # Только флаги: «running» уходящему треду писать нельзя — хода в нём
+        # нет, и исход потом никто не перезапишет.
         self._session_lock_release()
-        self._prepare_for_new_run()
+        self._reset_run_flags()
         self._copy_seq += 1  # итог /copy прошлой сессии сюда не пишется
         self._active_task_id = None
         self.app.tui_state.active_task_id = None
