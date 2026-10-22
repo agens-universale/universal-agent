@@ -6092,6 +6092,11 @@ class TraceScreen(Screen):
             )
         )
 
+    def _cmd_plugins(self) -> None:
+        from gc_tui.screens.plugins import PluginsScreen
+
+        self.app.push_screen(PluginsScreen(settings=self.app.base_settings()))
+
     def _cmd_diff(self, *, source: Optional[str] = None) -> None:
         """Экран изменений. `source` задан — открыть сразу в нём (клик по сводке)."""
         from gc_tui.screens.diff import DiffScreen
@@ -6965,6 +6970,9 @@ class TraceScreen(Screen):
             return
         if name == "mcp":
             self._cmd_mcp()
+            return
+        if name == "plugins":
+            self._cmd_plugins()
             return
         if name == "buffer":
             self.app.action_buffer()
