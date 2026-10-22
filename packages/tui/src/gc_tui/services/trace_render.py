@@ -17,7 +17,7 @@ from gc_core.constants.tool_display import (
 )
 from gc_core.utils.path_truncate import truncate_path
 
-from gc_tui.models import TraceEvent
+from gc_tui.models import ResultOutcome, TraceEvent
 from gc_tui.palette import INK
 from gc_tui.services.duration_format import format_round_int
 from gc_tui.services.skill_view import skill_input_name
@@ -123,6 +123,33 @@ def build_standalone_row(
         prefix=STANDALONE_PREFIX,
         content=text,
         kind_class=f"line-{severity} line-standalone",
+        event_no=event_no,
+    )
+
+
+def build_orphan_result_row(
+    summary: str, outcome: ResultOutcome, *, event_no: int = 0
+) -> TraceRow:
+    """Итог вызова, к которому нет строки вызова (ушла в сжатие, call_id
+    неизвестен). Ошибка — строка `!` (`ERR`); отказ и стоп — не сбой: глиф
+    `○` цветом исхода (отказ — `REFUSED`, стоп — `DIM`) и серый текст
+    «кто: почему», как у строки вызова (спека P3 §10). Один билдер для
+    живой ленты и превью."""
+    from rich.text import Text
+
+    from gc_tui.palette import DIM, REFUSED
+    from gc_tui.services.trace_glyphs import CALL_UNDONE_GLYPH
+    from gc_tui.widgets.trace_row import TraceRow
+
+    if outcome not in ("refused", "halted"):
+        return build_standalone_row(
+            summary, severity="error", event_no=event_no
+        )
+    glyph_style = REFUSED if outcome == "refused" else DIM
+    return TraceRow(
+        prefix=Text().append(f"{CALL_UNDONE_GLYPH} ", style=glyph_style),
+        content=Text().append(summary, style=DIM),
+        kind_class="line-standalone",
         event_no=event_no,
     )
 
@@ -681,8 +708,8 @@ def _dispatch_readonly(
             row.set_result(summary=ev.summary, outcome=ev.result_outcome)
         elif ev.kind == "error":
             mount_target.mount(
-                build_standalone_row(
-                    ev.summary, severity="error", event_no=ev.no
+                build_orphan_result_row(
+                    ev.summary, ev.result_outcome, event_no=ev.no
                 )
             )
         else:

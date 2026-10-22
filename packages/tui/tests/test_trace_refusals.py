@@ -404,3 +404,75 @@ async def test_live_nested_refusal_from_subagent_record():
         await pilot.pause()
         row = scr._nested_tool_rows["n1"]
         _assert_refused_row(row, "вы запретили в этой сессии", "    ")
+
+
+# --- отказ без строки-владельца ---------------------------------------------
+
+_ORPHANS = [
+    ({"type": "action_blocked", "reason": "risky"}, REFUSED),
+    ({"type": CHECK_FAILED_TYPE, "reason": "x"}, DIM),
+]
+
+
+def _row_texts(row) -> tuple[str, str]:
+    return str(row._prefix), str(row._content)
+
+
+def _assert_orphan_stop_row(row, glyph_style: str, text: str) -> None:
+    prefix, content = row._prefix, row._content
+    assert isinstance(prefix, Text)
+    assert isinstance(content, Text)
+    assert prefix.plain == "○ "
+    assert _styles_of(prefix, "○") == [glyph_style]
+    assert content.plain == text
+    assert _styles_of(content, text) == [DIM]
+    assert "line-error" not in row.classes
+    assert "line-standalone" in row.classes
+
+
+@pytest.mark.parametrize("error, glyph_style", _ORPHANS)
+def test_preview_orphan_refusal_is_hollow_circle(error, glyph_style):
+    """Отказ, к которому нет строки вызова (вызов ушёл в сжатие), — не
+    красный `!`, а `○` отказа и серый текст «кто: почему»."""
+    target = _Target()
+    ev = _output_event(error)
+    _dispatch_readonly(target, ev, {})
+    (row,) = target.children
+    _assert_orphan_stop_row(row, glyph_style, ev.summary)
+
+
+def test_preview_orphan_error_stays_red_bang():
+    target = _Target()
+    _dispatch_readonly(
+        target, _output_event({"type": "not_found", "message": "нет"}), {}
+    )
+    (row,) = target.children
+    assert str(row._prefix) == "! "
+    assert "line-error" in row.classes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error, glyph_style", _ORPHANS)
+async def test_live_orphan_refusal_matches_preview(
+    tmp_path, error, glyph_style
+):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
+
+    target = _Target()
+    _dispatch_readonly(target, _output_event(error), {})
+    (preview,) = target.children
+    app = TuiApp(threads_dir=str(tmp_path / "threads"))
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._render_event(_output_event(error))
+        await pilot.pause()
+        (live,) = [
+            r for r in scr.query(TraceRow) if "line-standalone" in r.classes
+        ]
+        _assert_orphan_stop_row(
+            live, glyph_style, _output_event(error).summary
+        )
+        assert _row_texts(live) == _row_texts(preview)
+        assert set(live.classes) == set(preview.classes)

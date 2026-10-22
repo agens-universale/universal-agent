@@ -3551,7 +3551,15 @@ class TraceScreen(Screen):
                 return
             # Fallback (call_id unknown or no matching row) — append separate line
             if ev.kind == "error":
-                self._mount_standalone(ev.summary, "error", event_no=ev.no)
+                from gc_tui.services.trace_render import (
+                    build_orphan_result_row,
+                )
+
+                self._trace_mount(
+                    build_orphan_result_row(
+                        ev.summary, ev.result_outcome, event_no=ev.no
+                    )
+                )
                 return
             self._mount_trace_row(
                 prefix="   ",
