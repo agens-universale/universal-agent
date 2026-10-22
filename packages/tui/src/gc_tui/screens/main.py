@@ -554,6 +554,8 @@ class TraceScreen(Screen):
         # event_no → тело сводки (скрыто; раскрывается кликом/Enter метки).
         self._summary_body_widgets: dict[int, CompactionBody] = {}
         self._summary_marker_widgets: dict[int, CompactionRule] = {}
+        # Итог, смонтированный при стоящем баре: ждёт его ухода (S10 §3.4).
+        self._held_widgets: list[TurnLine] = []
         # Phase 5: ask_human banner state
         self._ask_human_banner = None  # type: Optional[AskHumanBanner]
         self._ask_human_call_id: Optional[str] = None
@@ -2181,6 +2183,7 @@ class TraceScreen(Screen):
         self._response_tail = []
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
+        self._held_widgets.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
         self._held_client_ids.clear()
         self._pending_wire_cache.clear()
@@ -2696,11 +2699,19 @@ class TraceScreen(Screen):
         тогда следующий ход уже начался; прошлая оседает."""
         fresh = not self._outcome_superseded and not self._sent_reply_below()
         self._settle_turn_line()
+        # Прошлые строки осели — видны и при стоящем баре (перерисовка
+        # посреди хода): за баром ждёт только строка последнего хода.
+        self._reveal_held()
         line = build_turn_line(outcome)
         # Причина записи хранится и у осевшей строки (освежить её снова).
         line.freshen(None, outcome_error(outcome))
         if not fresh:
             line.settle()
+        if self._bar_wanted():
+            # Запись дочитана раньше спадающего фронта: встань строка сейчас,
+            # бар ушёл бы отдельно — прыжок на 2 строки (S10 §3.4).
+            line.hold()
+            self._held_widgets.append(line)
         self._trace_mount(line, above_sent=True)
 
     def _sent_reply_below(self) -> bool:
@@ -2728,6 +2739,10 @@ class TraceScreen(Screen):
         идущего прогона (ядро закрыло ход и подхватило очередь, решение
         плана 8) — у хода из очереди своя граница журнала правок."""
         settled = self._settle_turn_line()
+        # Ход из очереди впущен внутри прогона: строка прошлого — осевшей в
+        # ленте, бар остаётся (S10 §3.4, точка 2).
+        if self._reveal_held():
+            self._scroll_trace_end()
         runner = getattr(self.app, "active_runner", None)
         if (
             settled
@@ -8813,9 +8828,19 @@ class TraceScreen(Screen):
         was = bar.has_class(_BAR_TURN)
         wanted = self._bar_wanted()
         bar.set_class(wanted, _BAR_TURN)
+        # Бар уходит — придержанное встаёт на его место той же
+        # перерисовкой: бар −2, строка +2, низ на месте (S10 §3.4).
+        revealed = not wanted and self._reveal_held()
         self._sync_trace_max_height()
-        if was and not wanted:
+        if (was and not wanted) or revealed:
             self._scroll_trace_end()
+
+    def _reveal_held(self) -> bool:
+        """Раскрыть придержанное за баром; True — было что раскрыть."""
+        held, self._held_widgets = self._held_widgets, []
+        for widget in held:
+            widget.reveal()
+        return bool(held)
 
     def _handle_bang_shell(self, text: str) -> None:
         """`!command` → локальный shell в cwd TUI; результат только в трейсе."""

@@ -1145,3 +1145,34 @@ async def test_idle_gap_is_one_row(tmp_path, failed):
         assert line.region.height == (2 if failed else 1)
         input_row = scr.query_one("#input-row")
         assert input_row.region.y - line.region.bottom == 1
+
+
+@pytest.mark.asyncio
+async def test_line_held_while_bar_up(tmp_path):
+    """Запись итога дочитана раньше спадающего фронта: строка ждёт за
+    баром (`-held`); бар уходит — строка встаёт свежей в том же вызове."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    _write_thread(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        runner = _FakeRunner()
+        pilot.app.active_runner = runner
+        scr._prepare_for_new_run()
+        thread = _Thread(tmp_path)
+        thread.messages(_reply("u1"), _answer("a1"))
+        thread.record(1, "u1")
+        scr._poll_trace_tail()
+        (line,) = scr.query_one("#trace").query(TurnLine)
+        assert line.has_class("-held")
+        assert line.is_fresh
+        bar = scr.query_one("#indicator-bar")
+        assert bar.has_class("-turn")
+
+        runner._running = False
+        scr._settle_ended_run()
+        assert not bar.has_class("-turn")
+        assert not line.has_class("-held")
+        assert line.is_fresh
+        await pilot.pause()
+        assert line.display
