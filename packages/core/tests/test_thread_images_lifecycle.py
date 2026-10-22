@@ -31,18 +31,20 @@ def _png(color: str) -> bytes:
     return buf.getvalue()
 
 
-def _snap(threads_dir: str, thread_id: str, color: str):
+async def _asnap(threads_dir: str, thread_id: str, color: str):
     store = ImageStore.for_threads_dir(threads_dir)
-    return run_coro(
-        store.asnapshot(
-            normalize_image(_png(color)),
-            "cli",
-            thread_id,
-            origin=ORIGIN_USER,
-            label=user_label(1),
-            source="shot.png",
-        )
+    return await store.asnapshot(
+        normalize_image(_png(color)),
+        "cli",
+        thread_id,
+        origin=ORIGIN_USER,
+        label=user_label(1),
+        source="shot.png",
     )
+
+
+def _snap(threads_dir: str, thread_id: str, color: str):
+    return run_coro(_asnap(threads_dir, thread_id, color))
 
 
 def test_delete_thread_removes_its_images_only(tmp_path):
@@ -124,7 +126,7 @@ def test_thread_cleanup_logs_an_unreadable_images_directory(
 
 async def test_compaction_keeps_the_images(tmp_path):
     d = str(tmp_path)
-    own = _snap(d, "t1", "red")
+    own = await _asnap(d, "t1", "red")
     ts = await ThreadSession.afrom_config(
         settings=None,
         system_id="cli",
