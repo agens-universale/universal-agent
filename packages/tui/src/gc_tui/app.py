@@ -1496,6 +1496,15 @@ class TuiApp(App):
             self._threads_dir, self._system, thread_id, tui_id
         )
 
+    def session_run_is_live(self, thread_id: str) -> bool:
+        """Ход сессии жив — для показа статуса. Открытая сессия — признаком
+        главного экрана: он знает и ход, который тик ещё не закрыл.
+        Прочие — живой процесс (`thread_run_is_live`)."""
+        main = self._main_screen()
+        if main is not None and thread_id == self.tui_state.active_task_id:
+            return main.open_run_is_live()
+        return self.thread_run_is_live(thread_id)
+
     def run_thread_id(self, runner) -> Optional[str]:
         """Тред прогона раннера; None — работа не прогон (сжатие, прогрев)
         или цели нет: тогда она принадлежит открытому треду."""
