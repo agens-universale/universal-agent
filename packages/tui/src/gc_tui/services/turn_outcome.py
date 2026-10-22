@@ -33,6 +33,9 @@ OUTCOMES: dict[str, Outcome] = {
     "completed": Outcome("✓", "выполнено", DONE_LABEL),
     "failed": Outcome(ERROR_GLYPH, "ошибка", "Ошибка"),
     "cancelled": Outcome("■", "остановлено", "Отменено"),
+    # Мета говорит «идёт», а хода нет ни у одного живого процесса: процесс
+    # умер или вышел посреди хода. Глиф стопа — ход прекращён не моделью.
+    "interrupted": Outcome("■", "прервано", "Прервано"),
     "running": Outcome("●", "идёт", ""),
     "asking": Outcome("?", "ждёт ответа", ""),
     "stopped_steps": Outcome(
@@ -63,6 +66,12 @@ _ALIASES = {
     "stopped": "cancelled",
     "unknown_failed": "failed",
 }
+
+
+def settled_status(word: str | None, *, live: bool) -> str | None:
+    """Статус для показа: «running», которого не держит живой ход, —
+    «interrupted». Мету не правит: это чтение."""
+    return "interrupted" if word == "running" and not live else word
 
 
 def outcome_of(word: str | None) -> Outcome | None:

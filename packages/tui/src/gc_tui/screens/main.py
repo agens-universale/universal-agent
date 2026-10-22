@@ -172,7 +172,11 @@ from gc_tui.services.trace_retention import (
     subagent_parent_ids_from_events,
 )
 from gc_tui.services.trace_scroll import reply_above
-from gc_tui.services.turn_outcome import DONE_LABEL, DONE_LABEL_PLAN
+from gc_tui.services.turn_outcome import (
+    DONE_LABEL,
+    DONE_LABEL_PLAN,
+    settled_status,
+)
 from gc_tui.services.usage_meter import (
     compose_adaptive_footer_right,
     usage_segments,
@@ -1503,8 +1507,10 @@ class TraceScreen(Screen):
         if self._store is not None and self._active_task_id is not None:
             meta = self._tick_meta()
             tui_status = (meta.get("tui") or {}).get("status")
+            # Ход TUI держит процесс с замком сессии: «running» без него —
+            # прерванный ход. Верхний статус пишут другие writer'ы — как есть.
             if tui_status == "running":
-                return "running"
+                return settled_status("running", live=self._run_is_live())
             if tui_status in ("completed", "stopped", "failed"):
                 return tui_status
             if meta.get("status") == "running":
@@ -1514,6 +1520,20 @@ class TraceScreen(Screen):
             if meta.get("status") in ("failed", "unknown_failed"):
                 return "failed"
         return None  # исход неизвестен — не выдумываем «stopped»
+
+    def _run_is_live(self) -> bool:
+        """Ход открытого треда жив: его держит живой процесс, или его исход
+        этот экран ещё не записал (ход кончился, тик не дошёл)."""
+        tid = self._active_task_id
+        if tid is None:
+            return False
+        unsettled = self._was_running or self._run_pending
+        runner = self._watched_runner or getattr(
+            self.app, "active_runner", None
+        )
+        return (
+            unsettled and self._run_task_id(runner) == tid
+        ) or self.app.thread_run_is_live(tid)
 
     def _task_status_badge(self) -> Optional[str]:
         word = self._session_status_word()
@@ -2755,6 +2775,7 @@ class TraceScreen(Screen):
                 "completed": "done",
                 "stopped": "cancelled",
                 "failed": "failed",
+                "interrupted": "interrupted",
             }.get(self._session_status_word())
             if kind is None:
                 return

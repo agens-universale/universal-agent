@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 from gc_tui.palette import DIM, ERR, OK, RUN_COLOR
-from gc_tui.services.turn_outcome import OUTCOMES, outcome_of
+from gc_tui.services.turn_outcome import (
+    OUTCOMES,
+    outcome_of,
+    settled_status,
+)
 
 
 @pytest.mark.parametrize(
@@ -130,3 +134,21 @@ def test_one_glyph_table():
         "failed": "✕",
         "unknown_failed": "✕",
     }
+
+
+@pytest.mark.parametrize(
+    "word,live,shown",
+    [
+        ("running", False, "interrupted"),
+        ("running", True, "running"),
+        ("completed", False, "completed"),
+        (None, False, None),
+    ],
+)
+def test_running_without_live_run_reads_interrupted(word, live, shown):
+    assert settled_status(word, live=live) == shown
+
+
+def test_interrupted_shares_stop_glyph():
+    assert outcome_of("interrupted").glyph == outcome_of("stopped").glyph
+    assert outcome_of("interrupted").list_label == "прервано"

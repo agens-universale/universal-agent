@@ -36,6 +36,7 @@ from textual.screen import Screen
 from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
+from gc_tui.services.session_lock import is_held_by_other
 from gc_tui.services.stream_sink import StreamSink
 from gc_tui.services.trace_note_sink import TraceNoteSink
 from gc_tui.services.voice_notices import voice_notices
@@ -1478,6 +1479,22 @@ class TuiApp(App):
             threads_dir=self._threads_dir, system=self._system
         )
         store.update_tui_meta(task_id, to_breaker_meta_patch(snapshot))
+
+    def thread_run_is_live(self, thread_id: str) -> bool:
+        """Ход треда держит живой процесс: этот — своим раннером, другой
+        TUI — свежим замком сессии. Иначе «running» в мете — остаток
+        процесса, умершего посреди хода."""
+        runner = self.active_runner
+        if (
+            runner is not None
+            and runner.is_running()
+            and self.run_thread_id(runner) == thread_id
+        ):
+            return True
+        tui_id = getattr(self, "tui_id", "") or ""
+        return bool(self._threads_dir and tui_id) and is_held_by_other(
+            self._threads_dir, self._system, thread_id, tui_id
+        )
 
     def run_thread_id(self, runner) -> Optional[str]:
         """Тред прогона раннера; None — работа не прогон (сжатие, прогрев)

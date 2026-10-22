@@ -125,6 +125,8 @@ _STATE_COMPRESSING = "compressing"
 _STATE_PROCESSING = "processing"
 _STATE_DONE = "done"
 _STATE_CANCELLED = "cancelled"
+# Ход прервался вместе с процессом (мета «running» без живого хода).
+_STATE_INTERRUPTED = "interrupted"
 _STATE_FAILED = "failed"
 _STATE_STOPPED_STEPS = "stopped_steps"
 _STATE_STOPPED_ERRORS = "stopped_errors"
@@ -139,6 +141,7 @@ TERMINAL_INDICATOR_STATES = frozenset(
     {
         _STATE_DONE,
         _STATE_CANCELLED,
+        _STATE_INTERRUPTED,
         _STATE_FAILED,
         _STATE_STOPPED_STEPS,
         _STATE_STOPPED_ERRORS,
@@ -212,6 +215,7 @@ _TERMINAL_ENDINGS = {
     state: (OUTCOMES[state].glyph, OUTCOMES[state].sentence)
     for state in (
         _STATE_CANCELLED,
+        _STATE_INTERRUPTED,
         _STATE_FAILED,
         _STATE_STOPPED_STEPS,
         _STATE_STOPPED_ERRORS,
@@ -347,6 +351,7 @@ class ThinkingIndicator(Static):
             _STATE_PROCESSING,
             _STATE_DONE,
             _STATE_CANCELLED,
+            _STATE_INTERRUPTED,
             _STATE_FAILED,
             _STATE_STOPPED_STEPS,
             _STATE_STOPPED_ERRORS,

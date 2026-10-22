@@ -156,3 +156,77 @@ async def test_quit_mid_run_writes_stopped(tmp_path):
         app.active_runner = _Runner(TID_A)
         scr._poll_active()
     assert _status(_store(tmp_path), TID_A) == "stopped"
+
+
+# --- чтение: «running» без живого хода — «прервано» -------------------------
+
+
+def _stamp_running(tmp_path, tid):
+    _store(tmp_path).update_tui_meta(tid, {"status": "running"})
+
+
+async def _sessions_text(pilot, tmp_path):
+    from gc_tui.screens.sessions import SessionsScreen
+
+    await pilot.app.push_screen(
+        SessionsScreen(threads_dir=str(tmp_path), system="cli")
+    )
+    await pilot.pause()
+    return "\n".join(
+        str(s.render())
+        for s in pilot.app.screen.query("#sessions-list Static")
+    )
+
+
+@pytest.mark.asyncio
+async def test_sessions_stale_running_without_holder_is_interrupted(
+    tmp_path,
+):
+    app = _app(tmp_path)
+    _stamp_running(tmp_path, TID_A)
+    async with app.run_test() as pilot:
+        text = await _sessions_text(pilot, tmp_path)
+        assert "■ прервано" in text
+        assert "идёт" not in text
+
+
+@pytest.mark.asyncio
+async def test_sessions_running_held_by_live_tui_stays_running(tmp_path):
+    from gc_tui.services.session_lock import try_acquire
+
+    app = _app(tmp_path)
+    _stamp_running(tmp_path, TID_A)
+    assert try_acquire(str(tmp_path), "cli", TID_A, "other-tui")
+    async with app.run_test() as pilot:
+        text = await _sessions_text(pilot, tmp_path)
+        assert "● идёт" in text
+        assert "прервано" not in text
+
+
+@pytest.mark.asyncio
+async def test_sessions_own_run_of_other_thread_stays_running(tmp_path):
+    """Ход A идёт в этом окне, открыта B: замок A отпущен, но ход жив."""
+    app = _app(tmp_path)
+    _stamp_running(tmp_path, TID_A)
+    async with app.run_test() as pilot:
+        pilot.app.screen.attach_active_task(TID_B)
+        app.active_runner = _Runner(TID_A)
+        text = await _sessions_text(pilot, tmp_path)
+        assert "● идёт" in text
+        assert "прервано" not in text
+
+
+@pytest.mark.asyncio
+async def test_reopen_stale_running_shows_interrupted(tmp_path):
+    """Переоткрытие после рестарта: строка-итог «■ Прервано», статус —
+    «interrupted»; мету чтение не переписывает."""
+    app = _app(tmp_path)
+    _stamp_running(tmp_path, TID_A)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A, is_resume=True)
+        await pilot.pause()
+        assert scr._session_status_word() == "interrupted"
+        assert scr._thinking is not None
+        assert scr._thinking._render_text().plain.startswith("■ Прервано")
+        assert _status(scr, TID_A) == "running"

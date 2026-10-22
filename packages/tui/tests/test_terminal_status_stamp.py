@@ -222,7 +222,8 @@ async def test_rising_edge_stamps_running(tmp_path):
 
 @pytest.mark.asyncio
 async def test_session_status_word_reads_tui_running(tmp_path):
-    """meta.tui.status=running без живого runner (crash mid-run) → 'running'."""
+    """meta.tui.status=running без живого хода (crash mid-run) — ход
+    прерван: 'interrupted', а не вечное 'running'."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -238,4 +239,4 @@ async def test_session_status_word_reads_tui_running(tmp_path):
         scr.attach_active_task(tid)
         scr._store.update_tui_meta(tid, {"status": "running"})
         pilot.app.active_runner = None
-        assert scr._session_status_word() == "running"
+        assert scr._session_status_word() == "interrupted"

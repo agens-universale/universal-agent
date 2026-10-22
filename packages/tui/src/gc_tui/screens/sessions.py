@@ -32,7 +32,7 @@ from gc_tui.services.session_lock import BUSY_MESSAGE, is_held_by_other
 from gc_tui.services.session_title import display_name, task_subtitle
 from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.services.stores.file_store import FileTaskStore
-from gc_tui.services.turn_outcome import outcome_of
+from gc_tui.services.turn_outcome import outcome_of, settled_status
 from gc_tui.services.usage_meter import format_nonzero_cost
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -56,6 +56,7 @@ _STATUS_COLOR = {
     "asking": RUN_COLOR,
     "stopped": DIM,
     "cancelled": DIM,
+    "interrupted": DIM,
     "completed": OK,
     "failed": ERR,
     "unknown_failed": ERR,
@@ -243,14 +244,19 @@ class SessionsScreen(Screen):
         active_tid = (
             getattr(tui_state, "active_task_id", None) if tui_state else None
         )
-        if not active_tid or task.thread_id != active_tid:
+        if active_tid and task.thread_id == active_tid:
+            if tui_state.ask_human_state is not None:
+                return "asking"
+            runner = getattr(self.app, "active_runner", None)
+            if runner is not None and runner.is_running():
+                return "running"
+        # Правило «нет живого хода — прервано» — только для статуса TUI:
+        # его ход держит процесс с замком сессии. Верхний статус — как есть.
+        if (task.tui_meta or {}).get("status") != "running":
             return task.status
-        if tui_state.ask_human_state is not None:
-            return "asking"
-        runner = getattr(self.app, "active_runner", None)
-        if runner is not None and runner.is_running():
-            return "running"
-        return task.status
+        return settled_status(
+            task.status, live=self.app.thread_run_is_live(task.thread_id)
+        )
 
     def _title_line(self, task, *, selected: bool) -> Text:
         title = self._title_of(task)
