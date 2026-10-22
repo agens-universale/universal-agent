@@ -136,6 +136,11 @@ QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
 _PILL_HOVER_SHARE = 0.12
 PILL_HOVER_BG = _mix(FOCUS_BG, INK, _PILL_HOVER_SHARE)
 
+# Липкая реплика над лентой: подложка бледнее обычной реплики, ближе к фону
+# ленты; ховер светлит её до USER_BAND_BG. В теме auto — от фона и USER_BAND_BG.
+_STICKY_SHARE = 0.5
+STICKY_REPLY_BG = _mix(BG, USER_BAND_BG, _STICKY_SHARE)
+
 
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
 # литералами в виджетах. В теме auto их пересчитывает apply_background.
@@ -215,6 +220,7 @@ _FIXED = {
         "REFUSED",
         "QUEUE_BG",
         "PILL_HOVER_BG",
+        "STICKY_REPLY_BG",
         *_DIFF,
         *_TINTED,
         *_RAMP_PEAKS,
@@ -262,6 +268,7 @@ def _derived(bg: str) -> dict[str, object]:
         **tinted,
         "QUEUE_BG": _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
         "PILL_HOVER_BG": _mix(tinted["FOCUS_BG"], INK, _PILL_HOVER_SHARE),
+        "STICKY_REPLY_BG": _mix(bg, tinted["USER_BAND_BG"], _STICKY_SHARE),
         **ramps,
     }
 
@@ -351,6 +358,7 @@ def css_variables() -> dict[str, str]:
         "user-band-bg": USER_BAND_BG,
         "queue-bg": QUEUE_BG,
         "pill-hover-bg": PILL_HOVER_BG,
+        "sticky-reply-bg": STICKY_REPLY_BG,
         "overlay-bg": OVERLAY_BG,
         "zebra-bg": ZEBRA_BG,
         "skill": SKILL,

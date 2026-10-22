@@ -9,7 +9,15 @@ from pathlib import Path
 import pytest
 from gc_testkit.tui_support import tui_settings
 
-from gc_tui.palette import ACCENT, DIM, FOCUS_BG, INK, MUTED, USER_BAND_BG
+from gc_tui.palette import (
+    ACCENT,
+    DIM,
+    FOCUS_BG,
+    INK,
+    MUTED,
+    STICKY_REPLY_BG,
+    USER_BAND_BG,
+)
 
 LONG = "подними таймаут клиента и проверь тесты, " * 6
 
@@ -178,7 +186,29 @@ async def test_sticky_colours(tmp_path):
         assert marker.text.strip() == "›"
         assert marker.style.color.name.lower() == MUTED.lower()
         assert text.style.color.name.lower() == DIM.lower()
-        assert text.style.bgcolor.name.lower() == USER_BAND_BG.lower()
+        assert text.style.bgcolor.name.lower() == STICKY_REPLY_BG.lower()
+        assert STICKY_REPLY_BG.lower() != USER_BAND_BG.lower()
+
+
+@pytest.mark.asyncio
+async def test_sticky_hover_lightens_background(tmp_path):
+    """Ховер липкой реплики — подложка `USER_BAND_BG` на всю строку,
+    цвет текста прежний."""
+    _write_task(tmp_path, "o5h")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o5h")
+        sticky, _ = _overlays(scr)
+        first, _ = _replies(scr)
+        await _scroll(pilot, scr, first.virtual_region.y + 1)
+        assert (
+            sticky.rich_style.bgcolor.name.lower() == STICKY_REPLY_BG.lower()
+        )
+        await pilot.hover(sticky)
+        await pilot.pause()
+        assert sticky.rich_style.bgcolor.name.lower() == USER_BAND_BG.lower()
+        segments = [s for s in sticky.render_line(0) if s.text.strip()]
+        assert segments[1].style.color.name.lower() == DIM.lower()
+        assert segments[1].style.bgcolor.name.lower() == USER_BAND_BG.lower()
 
 
 @pytest.mark.asyncio

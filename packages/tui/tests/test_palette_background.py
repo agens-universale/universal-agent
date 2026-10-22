@@ -41,6 +41,7 @@ _FIXED_CSS = {
     "user-band-bg": "#282c36",
     "queue-bg": "#1c2029",
     "pill-hover-bg": "#4c505a",
+    "sticky-reply-bg": "#1b1e28",
     "overlay-bg": "#161A23",
     "zebra-bg": "#232836",
     "skill": "#afd7ff",
