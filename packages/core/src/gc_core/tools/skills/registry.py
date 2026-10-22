@@ -11,7 +11,6 @@ import yaml
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 from gc_core.bundled_assets import bundled_root
-from gc_core.plugins.manifest import is_agent_plugins_root
 from gc_core.settings import settings_of
 
 SKILL_MD = "SKILL.md"
@@ -309,14 +308,16 @@ class SkillsRegistry:
         system_root: Optional[str] = None,
         user_root: Optional[str] = None,
         project_root: Optional[str] = None,
-        plugin_roots: Optional[List[Tuple[str, str]]] = None,
+        plugin_roots: Optional[List[Tuple[str, str, Optional[str]]]] = None,
         plugin_commands: Optional[List[Tuple[str, Any]]] = None,
         disable_skills: Optional[List[str]] = None,
     ) -> None:
         self._backend = backend or LocalFsBackend()
         # (имя плагина, каталог skills/) включённых плагинов: слой между system и
         # user. Skills плагина получают id ``<плагин>:<skill>``, как в Claude Code.
-        self._plugin_roots: List[Tuple[str, str]] = list(plugin_roots or [])
+        self._plugin_roots: List[Tuple[str, str, Optional[str]]] = list(
+            plugin_roots or []
+        )
         # (имя плагина, PluginCommand): команды плагинов видны как skills пакета.
         self._plugin_commands: List[Tuple[str, Any]] = list(
             plugin_commands or []
@@ -417,7 +418,7 @@ class SkillsRegistry:
                 # else: пусто, скип  # noqa: ERA001  # описание формата, не выключенный код
 
     def _plugin_names(self) -> List[str]:
-        names = [name for name, _ in self._plugin_roots]
+        names = [name for name, _, _ in self._plugin_roots]
         names += [n for n, _ in self._plugin_commands if n not in names]
         return names
 
@@ -434,16 +435,14 @@ class SkillsRegistry:
         }
 
     async def _load_plugin_skill_dirs(
-        self, plugin_name: str, root: Optional[str]
+        self, plugin_name: str, root: Optional[str], contain: Optional[str]
     ) -> None:
         if not root or not await self._backend.is_dir(root):
             return
-        plugin_root = Path(root).parent
-        contain = is_agent_plugins_root(plugin_root)
         for entry, is_dir in await self._backend.listdir(root):
             if not is_dir:
                 continue
-            if contain and not _inside(Path(root) / entry, plugin_root):
+            if contain and not _inside(Path(root) / entry, Path(contain)):
                 logger.warning(
                     "plugin %s: skill %s resolves outside the plugin, skipped",
                     plugin_name,
@@ -476,14 +475,13 @@ class SkillsRegistry:
         Команды плагина (``commands/*.md``) добавляются в тот же пакет как
         skills ``<плагин>:<команда>``; skill с таким же именем главнее.
         """
-        roots = dict(self._plugin_roots)
+        roots = {n: (r, c) for n, r, c in self._plugin_roots}
         for plugin_name in self._plugin_names():
             if plugin_name in self._disabled:
                 continue
             self._register_plugin_pack(plugin_name)
-            await self._load_plugin_skill_dirs(
-                plugin_name, roots.get(plugin_name)
-            )
+            root, contain = roots.get(plugin_name, (None, None))
+            await self._load_plugin_skill_dirs(plugin_name, root, contain)
             self._add_plugin_command_skills(plugin_name)
 
     async def _load_skill_dir(

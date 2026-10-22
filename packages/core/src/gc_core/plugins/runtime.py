@@ -31,6 +31,7 @@ from gc_core.plugins.manifest import (
     EVENT_SESSION_START,
     EVENT_STOP,
     EVENT_USER_PROMPT_SUBMIT,
+    PLUGIN_FORMAT_AP,
     Plugin,
     load_plugin,
 )
@@ -113,8 +114,14 @@ def active_plugins(ctx: Any) -> tuple[Plugin, ...]:
     return load_plugins(paths) if paths else ()
 
 
-def plugin_skill_roots(settings: Any) -> list[tuple[str, str]]:
-    """``(имя плагина, каталог skills/)`` включённых плагинов для реестра."""
+def plugin_skill_roots(
+    settings: Any,
+) -> list[tuple[str, str, str | None]]:
+    """``(имя, каталог skills/, корень для проверки вложенности)`` для реестра.
+
+    Корень задан только у плагинов Agent Plugins: их skills за пределами
+    плагина (ссылкой) пропускаются.
+    """
     if settings is None:
         return []
     try:
@@ -127,7 +134,11 @@ def plugin_skill_roots(settings: Any) -> list[tuple[str, str]]:
     if not paths:
         return []
     return [
-        (p.name, str(p.skills_dir))
+        (
+            p.name,
+            str(p.skills_dir),
+            str(p.root) if p.format == PLUGIN_FORMAT_AP else None,
+        )
         for p in load_plugins(paths)
         if p.skills_dir is not None
     ]

@@ -452,7 +452,7 @@ async def test_plugin_skills_are_visible_between_system_and_user(tmp_path):
         system_root=str(empty),
         user_root=str(empty),
         project_root=str(empty),
-        plugin_roots=[("demo", str(root / "skills"))],
+        plugin_roots=[("demo", str(root / "skills"), None)],
     )
     skills = await reg.list_skills()
     assert "demo:demo-skill" in {
@@ -1138,7 +1138,7 @@ async def test_ap_skill_symlink_outside_root_skipped(tmp_path):
         system_root=str(empty),
         user_root=str(empty),
         project_root=str(empty),
-        plugin_roots=[("x", str(root / "skills"))],
+        plugin_roots=[("x", str(root / "skills"), str(root))],
     )
     ids = {
         s["id"] if isinstance(s, dict) else s.id
@@ -1154,9 +1154,10 @@ def test_cc_plugin_unaffected_by_ap_rules(tmp_path):
 
 
 def test_both_manifests_prefer_claude_code(tmp_path):
-    root = _make_plugin(tmp_path, name="cc")
+    root = _make_plugin(tmp_path, name="cc", with_skill=True)
     (root / "plugin.json").write_text(
-        json.dumps({"$schema": AP_SCHEMA, "name": "other"}), encoding="utf-8"
+        json.dumps({"name": "other"}), encoding="utf-8"
     )
     plugin = load_plugin(root)
     assert (plugin.format, plugin.name) == ("claude-code", "cc")
+    assert plugin.skills_dir is not None
