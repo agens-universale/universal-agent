@@ -4718,11 +4718,13 @@ class TraceScreen(Screen):
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
         self._update_mcp_indicator()
         self._pump_reasoning_stream_source()
+        # Строку целиком (с «runtime: <Тип>:» или человеческим текстом)
+        # собирает `run_error_text` в приложении.
         err = getattr(self.app, "last_runner_error", None)
         if err and not self._error_shown:
             self._mount_trace_row(
                 prefix="[!] ",
-                content=f"runtime: {err}",
+                content=err,
                 kind_class="line-error",
             )
             self._error_shown = True

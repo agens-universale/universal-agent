@@ -1683,7 +1683,7 @@ class TuiApp(App):
             self._runner_stale = False
         if self.active_runner is not None:
             return self.active_runner
-        from gc_tui.services.agent_runner import AgentRunner
+        from gc_tui.services.agent_runner import AgentRunner, run_error_text
 
         factory = self._executor_factory or self._build_real_executor
 
@@ -1704,7 +1704,7 @@ class TuiApp(App):
                 return
             if getattr(runner, "_marked_stopped", False):
                 return
-            self.last_runner_error = str(exc) or exc.__class__.__name__
+            self.last_runner_error = run_error_text(exc)
 
         def _on_runner_complete(outcome: Optional[str]) -> None:
             self._persist_breaker_after_worker()
