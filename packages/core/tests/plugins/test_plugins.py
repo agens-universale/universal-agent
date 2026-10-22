@@ -574,7 +574,7 @@ def test_git_source_is_cloned_once_into_cache_and_loaded(
     assert runtime.configured_paths(cfg) == [str(path)]
 
 
-def test_runtime_does_not_clone(tmp_path, monkeypatch):
+def test_runtime_does_not_clone(tmp_path, monkeypatch, caplog):
     from types import SimpleNamespace as NS
 
     from gc_core.plugins import sources
@@ -589,6 +589,7 @@ def test_runtime_does_not_clone(tmp_path, monkeypatch):
     cfg = NS(paths=[], sources=[src], hook_timeout_sec=10, use_installed=False)
     assert runtime.configured_paths(cfg) == []
     assert sources._resolved == {}
+    assert str(tmp_path / "repo") in caplog.text
 
 
 def test_runtime_uses_cached_source_without_fetch(tmp_path, monkeypatch):

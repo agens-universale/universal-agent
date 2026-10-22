@@ -26,6 +26,7 @@ _SHA = re.compile(r"^[0-9a-f]{7,40}$")
 _GIT_TIMEOUT_SEC = 120
 
 _resolved: dict[tuple[str, str, str], Path | None] = {}
+_warned: set[tuple[str, str, str]] = set()
 
 
 def normalize_url(git: str) -> str:
@@ -80,19 +81,31 @@ def _clone(url: str, ref: str | None, target: Path) -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _warn_not_cloned(key: tuple[str, str, str], url: str) -> None:
+    if key in _warned:
+        return
+    _warned.add(key)
+    logger.warning(
+        "plugin source %s is not cloned yet; it is loaded after "
+        "settings load (load_settings) or gc-plugin install",
+        url,
+    )
+
+
 def resolve_source(
     source: Any, *, update: bool = False, fetch: bool = True
 ) -> Path | None:
     """Каталог плагина для одного источника; ``None``, если взять не удалось.
 
-    ``fetch=False``: без клона на диске вернуть ``None`` (промах не кэшируется,
-    чтобы последующий ``fetch=True`` мог клонировать)."""
+    ``fetch=False``: без клона на диске вернуть ``None``. Промах не кэшируется,
+    чтобы последующий ``fetch=True`` мог клонировать."""
     url = normalize_url(source.git)
     key = (url, source.ref or "", source.subdir or "")
     if not update and key in _resolved:
         return _resolved[key]
     target = cache_dir(url, source.ref)
     if not fetch and not update and not (target / ".git").is_dir():
+        _warn_not_cloned(key, url)
         return None
     try:
         if update or not (target / ".git").is_dir():
