@@ -1,16 +1,24 @@
-"""Окно «ответ дан, прогон ещё жив» (soft-hide-while-running) показывает
-«сверяюсь…» вместо пустоты — объясняет статус [running]."""
+"""«сверяюсь…» — только когда ядро подняло флаг судьи ответа
+(meta.runtime.finish_gate_checking). Тишина после ответа или скрытой
+техзаметки — обычная работа модели: «думаю…»."""
+
+import json
 
 from gc_testkit.tui_support import tui_settings
-import time
-
 import pytest
 
 
-def _write_task(tmp_path, tid):
+def _write_task(tmp_path, tid, runtime=None):
+    meta = {
+        "thread_id": tid,
+        "status": "running",
+        "updated_at": "2026-06-23T12:00:00+00:00",
+        "messages_count": 1,
+    }
+    if runtime:
+        meta["runtime"] = runtime
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        f'{{"thread_id":"{tid}","status":"running","updated_at":"2026-06-23T12:00:00+00:00","messages_count":1}}',
-        encoding="utf-8",
+        json.dumps(meta), encoding="utf-8"
     )
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
@@ -23,76 +31,61 @@ class _Runner:
         pass
 
 
-@pytest.mark.asyncio
-async def test_running_after_answer_shows_processing(tmp_path):
-    pytest.importorskip("textual")
+def _app(tmp_path):
     from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+
+
+async def _indicator_text(pilot, tid):
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
+    scr = pilot.app.screen
+    scr._poll_active()
+    await pilot.pause()
+    return str(scr.query_one(ThinkingIndicator)._render_text().plain)
+
+
+@pytest.mark.asyncio
+async def test_hidden_mode_notice_after_reply_says_thinking(tmp_path):
+    """Реплика, следом скрытая техзаметка режима и тишина — идёт обычный
+    вызов модели: «думаю…», не «сверяюсь…»."""
     tid = "proc0000000000000000000000000001a"
     _write_task(tmp_path, tid)
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings(
-            {"agent.model": "M", "backend.api_mode": "chat_completions"}
-        ),
-    )
-    async with app.run_test() as pilot:
+    async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         pilot.app.active_runner = _Runner()
-        # ответ (agent) показан, ≥1.5с тишины, прогон ещё жив
-        # Показанный ответ - видимое событие: взводим гейт «сверяюсь…».
-        scr._last_event_kind = "agent"
-        scr._saw_visible_event = True
-        scr._last_event_at = time.monotonic() - 5
-        scr._poll_active()
-        await pilot.pause()
-        ind = scr.query_one(ThinkingIndicator)
-        assert "сверяюсь…" in str(ind._render_text().plain)
-
-
-@pytest.mark.asyncio
-async def test_continuation_start_says_thinking_then_processing(tmp_path):
-    """Континуация: первое событие скрытое, тишина 3 с - «думаю»;
-    после видимого ответа и тишины 2 с - «сверяюсь»."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    tid = "proc0000000000000000000000000002a"
-    _write_task(tmp_path, tid)
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings(
-            {"agent.model": "M", "backend.api_mode": "chat_completions"}
-        ),
-    )
-    async with app.run_test() as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(tid)
-        pilot.app.active_runner = _Runner()
+        scr._render_record(
+            {"payload": {"id": "u1", "role": "user", "content": "привет"}}
+        )
         scr._render_record(
             {
                 "payload": {
                     "id": "t1",
                     "role": "user",
-                    "content": '<technical type="bounce">x</technical>',
+                    "content": '<technical type="technical">режим</technical>',
                 }
             }
         )
-        scr._last_event_at = time.monotonic() - 3
-        scr._poll_active()
-        await pilot.pause()
-        ind = scr.query_one(ThinkingIndicator)
-        assert "сверяюсь…" not in str(ind._render_text().plain)
-        scr._render_record(
-            {"payload": {"id": "a1", "role": "assistant", "content": "ответ"}}
-        )
-        scr._last_event_at = time.monotonic() - 2
-        scr._poll_active()
-        await pilot.pause()
-        ind = scr.query_one(ThinkingIndicator)
-        assert "сверяюсь…" in str(ind._render_text().plain)
+        await pilot.pause(2.0)
+        text = await _indicator_text(pilot, tid)
+        assert "сверяюсь…" not in text
+        assert "думаю" in text
+
+
+@pytest.mark.asyncio
+async def test_judge_flag_from_core_says_checking(tmp_path):
+    tid = "proc0000000000000000000000000002a"
+    _write_task(tmp_path, tid, runtime={"finish_gate_checking": True})
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        pilot.app.active_runner = _Runner()
+        assert "сверяюсь…" in await _indicator_text(pilot, tid)

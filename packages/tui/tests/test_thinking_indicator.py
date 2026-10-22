@@ -270,12 +270,12 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_indicator_shows_processing_after_agent_event_with_pause(
+async def test_indicator_keeps_thinking_after_agent_event_with_pause(
     tmp_path,
 ):
-    """После event kind=agent и паузы ≥1.5с, пока runner ещё работает
-    (intent_guard/policy продолжает), индикатор НЕ прячется, а показывает
-    «сверяюсь…» — объясняет статус [running] (опция A)."""
+    """После event kind=agent и паузы, пока runner ещё работает, индикатор
+    НЕ прячется и говорит «думаю…»: «сверяюсь…» — только по флагу ядра
+    (судья реально проверяет ответ), по тишине его не угадывают."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -336,15 +336,13 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
-        import time as _time
-
         inp.text = "что нового?"
         await pilot.press("enter")
         scr = pilot.app.screen
         await pilot.pause(0.5)  # дать прогону смонтировать индикатор
 
         # Пиним «живой» runner (убираем зависимость от тайминга реального прогона на
-        # момент проверки) и симулируем agent-ответ + тишину ≥1.5с.
+        # момент проверки) и симулируем agent-ответ + тишину.
         class _LiveRunner:
             def is_running(self):
                 return True
@@ -355,12 +353,12 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(
         pilot.app.active_runner = _LiveRunner()
         scr._confirm_active = False
         scr._last_event_kind = "agent"
-        scr._last_event_at = _time.monotonic() - 5
+        await pilot.pause(2.0)
         scr._poll_active()
         ind = scr._thinking
         assert ind is not None
         assert not ind.has_class("hidden")
-        assert "сверяюсь…" in str(ind._render_text().plain)
+        assert "думаю" in str(ind._render_text().plain)
 
 
 def test_done_state_renders_vypolnil_dim_and_frozen():

@@ -100,7 +100,10 @@ from gc_core.execution.turn_clock import (
     turn_clock_sources,
 )
 from gc_core.intent_guard.guard import FinishGateGuard
-from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
+from gc_core.intent_guard.text_answer_judge import (
+    ashould_return_text_answer,
+    text_answer_goes_to_judge,
+)
 from gc_core.intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
@@ -3466,9 +3469,21 @@ class _AgentLoop:
         # не итог: напоминание вызвать тул, как при прозе без вызова.
         if is_bridge_echo(assistant_text):
             return False, None
-        decision = await ashould_return_text_answer(
-            self.ctx, self.state, assistant_text
+        # Судья текстового ответа — та же проверка ответа, что у turn_finish:
+        # «сверяюсь…» только когда он реально пойдёт, снять строго в finally.
+        checking = (
+            self.mark_finish_gate_checking is not None
+            and text_answer_goes_to_judge(self.ctx, assistant_text)
         )
+        if checking:
+            await await_callback(self.mark_finish_gate_checking(True))
+        try:
+            decision = await ashould_return_text_answer(
+                self.ctx, self.state, assistant_text
+            )
+        finally:
+            if checking:
+                await await_callback(self.mark_finish_gate_checking(False))
         return decision.accept, decision.reject_feedback
 
     def _text_reject_bounce_msg(

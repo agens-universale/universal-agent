@@ -196,3 +196,52 @@ def test_flag_absent_when_callback_not_wired():
 
     assert result is not None
     assert monkeypatch_calls == []
+
+
+def _text_answer() -> list:
+    return [{"role": "assistant", "type": "message", "content": "Ответ"}]
+
+
+def test_flag_raised_while_text_answer_judge_runs(monkeypatch):
+    """Судья текстового ответа (режим judge) — та же проверка ответа, что у
+    turn_finish: «сверяюсь…» только на время вызова, снят в finally."""
+    from types import SimpleNamespace
+
+    from gc_core.intent_guard import text_answer_judge as taj
+
+    calls: list[bool] = []
+
+    async def _judge(ctx, state, text):
+        assert calls == [True]
+        return SimpleNamespace(action="accept")
+
+    monkeypatch.setattr(taj, "ajudge_text_answer", _judge)
+
+    result = run_coro(
+        pr.arun_agent(
+            _text_answer(),
+            _make_state(),
+            _make_ctx(text_answer_mode="judge"),
+            mark_finish_gate_checking=lambda active: calls.append(active),
+        )
+    )
+
+    assert result == "Ответ"
+    assert calls == [True, False]
+
+
+def test_flag_not_raised_when_text_answer_needs_no_judge():
+    """allow — судьи нет, «сверяюсь…» не вспыхивает."""
+    calls: list[bool] = []
+
+    result = run_coro(
+        pr.arun_agent(
+            _text_answer(),
+            _make_state(),
+            _make_ctx(text_answer_mode="allow"),
+            mark_finish_gate_checking=lambda active: calls.append(active),
+        )
+    )
+
+    assert result == "Ответ"
+    assert calls == []

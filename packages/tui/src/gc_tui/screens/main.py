@@ -287,27 +287,21 @@ def select_active_substate(
     summarizing,
     finalizing,
     last_event_kind,
-    since_last,
-    soft_hide_kinds,
     finish_gate_checking=False,
-    saw_visible_event=True,
 ):
     """Под-состояние индикатора в режиме "active". Порядок = приоритет.
 
     - summarizing (компакция истории) → "compressing" (сжимаю контекст…);
-    - finish_gate_checking (судья turn_finish реально сейчас вызывается) →
-      "processing" (сверяюсь…) — ВЫШЕ защёлки _finalized/finalizing, иначе
-      «завершаю» перебивает и судья работает невидимо;
+    - finish_gate_checking (судья ответа — turn_finish или текстового —
+      реально сейчас вызывается) → "processing" (сверяюсь…) — ВЫШЕ защёлки
+      _finalized/finalizing, иначе «завершаю» перебивает и судья работает
+      невидимо;
     - finalizing (принят финальный ответ — turn_finish ИЛИ финальная проза —
       идёт запись/саммари/flush/cleanup) → "validating" (завершаю…);
-    - последнее событие скрыто (agent/system), висит ≥1.5с И в прогоне уже
-      было видимое событие (finish-gate сверяет ответ / bounce / доделка) →
-      "processing" (сверяюсь…);
     - иначе → "thinking" (думаю…).
 
-    saw_visible_event гейтит только эвристическую ветку: «сверяюсь…» не
-    может быть первым состоянием прогона (континуация одобрения плана
-    стартует скрытым техсообщением). Явный флаг судьи от гейта не зависит.
+    «сверяюсь…» — только по флагу ядра: тишина после скрытого события
+    (техзаметка режима) — обычный вызов модели, не проверка.
     """
     if summarizing:
         return "compressing"
@@ -315,12 +309,6 @@ def select_active_substate(
         return "processing"
     if finalizing or last_event_kind == "_finalized":
         return "validating"
-    if (
-        last_event_kind in soft_hide_kinds
-        and since_last >= 1.5
-        and saw_visible_event
-    ):
-        return "processing"
     return "thinking"
 
 
@@ -634,15 +622,9 @@ class TraceScreen(Screen):
         # Кумулятивный таймер «думаю…» — стартует на каждом user-send,
         # передаётся в виджет, чтобы elapsed не сбрасывался при show/hide циклах.
         self._thinking_started_at: Optional[float] = None
-        # Эвристика «скрыть после видимого ответа агента»: после event kind=agent
-        # с паузой ≥1.5с прячем индикатор (intent_guard / policy ещё работают,
-        # но юзер уже видит ответ). Следующий event снимет .hidden.
-        import time as _time
-
-        self._last_event_at: float = _time.monotonic()
+        # Вид последнего события ленты; «_finalized» — финальный ответ виден
+        # (индикатор «завершаю…»).
         self._last_event_kind: Optional[str] = None
-        # Гейт «сверяюсь…»: в этом прогоне уже было видимое событие?
-        self._saw_visible_event: bool = False
         # Bang-shell (`!cmd`): один concurrent job; эфемерно в трейсе, не в thread.
         self._bang = None  # type: Optional["BangShellController"]
         self._bang_timeout_sec: Optional[float] = None
@@ -2227,13 +2209,9 @@ class TraceScreen(Screen):
             self._thinking = None
         self._clear_stream_block()
         self._thinking_started_at = None
-        # Сброс эвристики «последнее событие — agent»: на смене задачи / stream_reset
-        # история событий обнуляется, индикатор должен начать с чистого состояния.
-        import time as _time
-
-        self._last_event_at = _time.monotonic()
+        # На смене задачи / stream_reset история событий обнуляется,
+        # индикатор должен начать с чистого состояния.
         self._last_event_kind = None
-        self._saw_visible_event = False
 
     def _session_lock_acquire(self, task_id: str) -> bool:
         """Exclusive attach: True если стали holder, иначе notify и False."""
@@ -2673,22 +2651,15 @@ class TraceScreen(Screen):
             return
         apply_payload_retention(ev, seg_in_window=in_window)
         self._append_and_render(ev, live=live)
-        # Spec 2026-05-26 + 2026-05-28: запоминаем kind + время последнего
-        # события. Для submit_solution финального ответа — sticky sentinel
+        # Spec 2026-05-26 + 2026-05-28: запоминаем kind последнего события.
+        # Для submit_solution финального ответа — sticky sentinel
         # "_finalized" вместо "agent": блокирует повторный mount в
         # _poll_active, пока не придёт новое значимое событие (gate-reject
         # [policy], новый submit_solution и т.п.).
-        import time as _time
-
-        self._last_event_at = _time.monotonic()
         if ev.kind == "agent" and ev.tool_name == "submit_solution":
             self._last_event_kind = "_finalized"
         else:
             self._last_event_kind = ev.kind
-        # Видимость - по TraceEvent.hidden, не по kind: agent-ответ видим,
-        # скрытая техграница старта континуации (system) - нет.
-        if not ev.hidden:
-            self._saw_visible_event = True
 
     def _mount_turn_line(self, outcome: TurnOutcome) -> None:
         """Строка хода — на месте его записи (через `_trace_mount`, значит
@@ -3525,16 +3496,14 @@ class TraceScreen(Screen):
     def _reset_thinking_timer(self) -> None:
         """Сбросить таймер «думаю…»: новая точка отсчёта = монотоника сейчас,
         текущий виджет удалён (следующий show создаст свежий с актуальным started_at).
-        Также сбрасываем эвристику «agent был последним» — после send юзер ждёт
-        ответ заново, индикатор должен показаться без задержки.
+        Также сбрасываем вид последнего события — после send юзер ждёт
+        ответ заново.
         Вызывается на каждом user-send (3 пути отправки)."""
         import time as _time
 
         now = _time.monotonic()
         self._thinking_started_at = now
-        self._last_event_at = now
         self._last_event_kind = None
-        self._saw_visible_event = False
         self._reasoning_clock.reset()
         self._destroy_thinking_indicator()
 
@@ -5624,12 +5593,6 @@ class TraceScreen(Screen):
             self._nested_anchor.clear()
             self._subagent_progress.reset()
         # ThinkingIndicator — пока runner работает, обычно виден внизу trace.
-        # Эвристика «видимый ответ дан»: если последнее event это agent-текст
-        # ИЛИ system-событие (think/policy — агент работает с текстом, не с
-        # инструментами) и прошло ≥1.5с без новых событий → скрываем (hide-only,
-        # не destroy). Если агент возьмёт инструмент (kind=call) — следующее
-        # событие сбросит kind, индикатор вернётся с той же анимацией.
-        _SOFT_HIDE_KINDS = {"agent", "system"}
         runner = getattr(self.app, "active_runner", None)
         is_running = runner is not None and runner.is_running()
         _kind = (
@@ -5739,24 +5702,18 @@ class TraceScreen(Screen):
             if not _frozen:
                 self._clear_stream_block()
         elif _indicator_mode == "active":
-            import time as _time
-
-            since_last = _time.monotonic() - self._last_event_at
-            # summarizing → «сжимаю контекст…»; finish_gate_checking (судья turn_finish
-            # реально сейчас вызывается) → «сверяюсь…» — ВЫШЕ защёлки _finalized, иначе
-            # судья работает невидимо под «завершаю…»; finalizing (принят финальный ответ:
-            # submit_solution ИЛИ финальная проза — идёт запись/саммари/flush/cleanup)
-            # → «✓ завершаю…»; скрытое событие ≥1.5с (finish-gate сверяет / bounce /
-            # доделка) → «сверяюсь…»; иначе «думаю…». Sentinel «_finalized» и флаг
+            # summarizing → «сжимаю контекст…»; finish_gate_checking (судья
+            # ответа реально сейчас вызывается) → «сверяюсь…» — ВЫШЕ защёлки
+            # _finalized, иначе судья работает невидимо под «завершаю…»;
+            # finalizing (принят финальный ответ: submit_solution ИЛИ
+            # финальная проза — идёт запись/саммари/flush/cleanup)
+            # → «✓ завершаю…»; иначе «думаю…». Sentinel «_finalized» и флаг
             # tui_finalizing оба дают validating (см. select_active_substate).
             substate = select_active_substate(
                 summarizing=summarizing,
                 finalizing=finalizing,
                 finish_gate_checking=finish_gate_checking,
                 last_event_kind=self._last_event_kind,
-                since_last=since_last,
-                soft_hide_kinds=_SOFT_HIDE_KINDS,
-                saw_visible_event=self._saw_visible_event,
             )
             self._show_thinking_indicator(state=substate)
             # Эфемерный StreamBlock — live-вывод текущего шага. Источник —
