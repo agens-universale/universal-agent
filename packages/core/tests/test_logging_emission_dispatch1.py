@@ -3,7 +3,7 @@
 - src/summarize/summary_logging.py: summary_started, summary_precheck,
   summary_raw_text, summary_message_body, summary_completed, summary_failed
 - src/utils/connect_backend.py: backend_request, backend_response,
-  backend_responses_json_error
+  backend_bad_response
 - src/states.py (via src/instructions/loader.py): agent_md_read_failed
 - src/agent_executor.py: system_prompt_read_failed
 - src/processing_responses.py: dialog_message
@@ -167,12 +167,12 @@ def test_backend_request_and_response_events_chat_completions(
     )
 
 
-def test_backend_responses_json_error_event(tmp_path, monkeypatch):
+def test_backend_bad_response_event(tmp_path, monkeypatch):
     from gc_core.utils import connect_backend
 
     logger, path = _make_logger(tmp_path, level="debug")
 
-    # Ответ, который не разбирается как JSON: событие backend_responses_json_error
+    # Ответ, который не разбирается как JSON: событие backend_bad_response
     # должно попасть в лог, а исключение — подняться.
     install_transport(
         monkeypatch, stream_response("data: not-json-at-all\n\n")
@@ -190,8 +190,8 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
         )
     _flush(logger)
     recs = _records(path)
-    errs = [r for r in recs if r["event"] == "backend_responses_json_error"]
-    assert errs and "not-json-at-all" in errs[0]["last_chunk"]
+    errs = [r for r in recs if r["event"] == "backend_bad_response"]
+    assert errs and "not-json-at-all" in errs[0]["body_head"]
 
 
 # ---------------------------------------------------------------------------

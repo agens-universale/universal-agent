@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 from copy import deepcopy
 from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,6 +29,7 @@ from gc_core.trace_id import (
 from gc_core.usage.context import record_usage
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.backend_errors import (
+    BackendBadResponseError,
     embedded_choice_error,
     http_status_code,
     is_auth_error,
@@ -221,7 +221,12 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
     ретраится ни в какой форме: тот же запрос её не лечит, а OpenRouter отвечает на
     картинку 404-м, SSE-ошибкой — vLLM в стриме. Отказ авторизации (401, в том
     числе событием стрима) тоже: его лечит другая форма токена или перевыпуск.
+    Пустое или не-JSON тело HTTP-200 — тоже: оно воспроизводимое, и паузы
+    10/20/40/80 с только отнимали бы у хода две с половиной минуты. Его один
+    раз и сразу повторяет `_arequest_once_more_on_bad_response`.
     """
+    if isinstance(exc, BackendBadResponseError):
+        return False
     if is_image_request_error(exc) or is_auth_error(exc):
         return False
     if is_http_status_error(exc):
@@ -377,6 +382,118 @@ async def _aread_error_text(response: httpx.Response) -> Optional[str]:
         return None
 
 
+#: Сколько символов тела плохого ответа идёт в лог: заглушку прокси или
+#: обрывок SSE по ним узнать хватает, а лог не раздувается чужим HTML.
+_BAD_BODY_LOG_CHARS = 200
+
+#: Префикс строки данных SSE.
+_SSE_DATA = "data:"
+
+
+def _looks_like_sse(text: str) -> bool:
+    """Тело — SSE: есть строка ``data:`` или комментарий ``:``.
+
+    Ложных срабатываний на JSON нет: строка JSON не начинается ни с того, ни
+    с другого, а перевод строки внутри строкового литерала JSON запрещён.
+    """
+    return any(
+        line.lstrip().startswith((_SSE_DATA, ":"))
+        for line in text.splitlines()
+    )
+
+
+def _assemble_sse_completion(lines: List[str]) -> Optional[Dict]:
+    """SSE chat/completions, пришедший на нестримовый запрос, — тем же
+    сборщиком, что стрим. ``None`` — собирать нечего."""
+    assembler = StreamAssembler()
+    for line in lines:
+        assembler.feed_line(line)
+    assembler.flush()
+    assembled = assembler.result()
+    return None if is_empty_completion(assembled) else assembled
+
+
+def _last_sse_event(lines: List[str]) -> Optional[Dict]:
+    """Последнее событие SSE режима responses (в нём ``response.completed``).
+
+    Комментарии (``: ping`` — keep-alive прокси) и строки ``event:``
+    пропускаются: раньше «последней строкой» оказывался пинг, и разбор
+    падал на нём. ``None`` — событий нет или последнее не JSON."""
+    payloads = [
+        line.strip()[len(_SSE_DATA) :].strip()
+        for line in lines
+        if line.strip().startswith(_SSE_DATA)
+    ]
+    if not payloads:
+        return None
+    try:
+        return json.loads(payloads[-1])
+    except ValueError:
+        return None
+
+
+def _bad_response(
+    text: str, response: httpx.Response, *, api_mode: str, run_logger
+) -> BackendBadResponseError:
+    """Исключение о неразборном теле и запись о нём в лог. Начало тела —
+    только в лог: пользователю оно не нужно, а диагносту без него не
+    понять, что вернул прокси."""
+    exc = BackendBadResponseError(
+        status_code=response.status_code,
+        content_type=response.headers.get("content-type", ""),
+        length=len(text.encode("utf-8")),
+        api_mode=api_mode,
+    )
+    (run_logger or logger).error(
+        "Backend %s bad response status=%s content_type=%r length=%s "
+        "body_head=%r",
+        api_mode,
+        exc.status_code,
+        exc.content_type,
+        exc.length,
+        text[:_BAD_BODY_LOG_CHARS],
+        extra={
+            "event": "backend_bad_response",
+            "api_mode": api_mode,
+            "status_code": exc.status_code,
+            "content_type": exc.content_type,
+            "length": exc.length,
+            "body_head": text[:_BAD_BODY_LOG_CHARS],
+        },
+    )
+    return exc
+
+
+def _decode_backend_body(
+    text: str,
+    response: httpx.Response,
+    *,
+    api_mode: str,
+    logger,
+    assemble_sse,
+) -> Any:
+    """Тело успешного ответа модели → объект ответа.
+
+    Общий разбор нестримового chat/completions и режима responses. SSE-тело
+    (прокси проигнорировал ``stream:false``) собирается ``assemble_sse``;
+    пустое или не-JSON — ``BackendBadResponseError`` вместо голого
+    ``JSONDecodeError``. Ошибка провайдера внутри SSE (``BackendStreamError``)
+    летит как есть: по её коду работают ретраи и смена формы авторизации.
+    """
+    if _looks_like_sse(text):
+        payload = assemble_sse(text.splitlines())
+    else:
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            payload = None
+    if payload is None:
+        raise _bad_response(
+            text, response, api_mode=api_mode, run_logger=logger
+        )
+    return payload
+
+
 async def arequest_backend_responses(
     data: Dict,
     headers: Dict,
@@ -468,23 +585,15 @@ async def _arequest_backend_responses_once(
             if line.strip():
                 chunks.append(line)
 
-    last_chunk = chunks[-1] if chunks else ""
-    try:
-        result = json.loads(re.sub("^data: +", "", last_chunk))
-    except Exception as e:
-        print(f"Error read json from backend. Last chunk: {last_chunk}")
-        if logger is not None:
-            logger.error(
-                "backend_responses_json_error",
-                extra={
-                    "event": "backend_responses_json_error",
-                    "last_chunk": last_chunk,
-                },
-            )
-        raise e
-
+    result = _decode_backend_body(
+        "\n".join(chunks),
+        r,
+        api_mode="responses",
+        logger=logger,
+        assemble_sse=_last_sse_event,
+    )
     if result.get("type") != "response.completed":
-        raise ValueError(f"wrong stream finish: {last_chunk}")
+        raise ValueError(f"wrong stream finish: {chunks[-1]}")
 
     response_obj = result["response"]
     if isinstance(response_obj, dict):
@@ -605,6 +714,40 @@ async def _arequest_with_backoff(request, headers: Dict, logger=None):
     return await request(headers=headers)
 
 
+#: Пауза перед единственным повтором плохого ответа: короткая, чтобы не
+#: задерживать ход, но не ноль — прокси, отдавший заглушку, успевает
+#: перестроить маршрут.
+_BAD_RESPONSE_RETRY_DELAY_SEC = 1.0
+
+
+async def _arequest_once_more_on_bad_response(
+    request, headers: Dict, *, use_retry: bool, run_logger
+):
+    """Запрос с ретраями транспорта и одним быстрым повтором плохого ответа.
+
+    Пустое или не-JSON тело HTTP-200 декоратор не повторяет (см.
+    `_default_should_retry_backend_exception`): ошибка воспроизводимая, и
+    пять попыток с паузами до 80 с давали тот же исход через 150 с. Один
+    повтор оставлен — разовый сбой прокси он лечит.
+    """
+    try:
+        return await _arequest_with_backoff(
+            request, headers=headers, use_retry=use_retry, logger=run_logger
+        )
+    except BackendBadResponseError as exc:
+        if not use_retry:
+            raise
+        (run_logger or logger).warning(
+            "Backend bad response, retrying once in %.1f sec: %s",
+            _BAD_RESPONSE_RETRY_DELAY_SEC,
+            exc,
+        )
+    await asyncio.sleep(_BAD_RESPONSE_RETRY_DELAY_SEC)
+    return await _arequest_with_backoff(
+        request, headers=headers, use_retry=use_retry, logger=run_logger
+    )
+
+
 async def _arequest_authorized(
     request,
     headers: Dict,
@@ -628,11 +771,11 @@ async def _arequest_authorized(
     attempts = candidates or [None]
     for index, authorization in enumerate(attempts):
         try:
-            response = await _arequest_with_backoff(
+            response = await _arequest_once_more_on_bad_response(
                 request,
-                headers=_with_authorization(headers, auth_key, authorization),
+                _with_authorization(headers, auth_key, authorization),
                 use_retry=use_retry,
-                logger=logger,
+                run_logger=logger,
             )
         except (httpx.HTTPStatusError, BackendStreamError) as exc:
             if not is_auth_error(exc) or index + 1 == len(attempts):
@@ -703,7 +846,13 @@ async def _arequest_backend_chat_completions_once(
         )
         raise
 
-    payload = r.json()
+    payload = _decode_backend_body(
+        r.text,
+        r,
+        api_mode="chat_completions",
+        logger=logger,
+        assemble_sse=_assemble_sse_completion,
+    )
     if isinstance(payload, dict):
         record_usage(payload.get("usage"), url, data.get("model"))
     _log_backend_response(logger, "chat_completions", payload)
