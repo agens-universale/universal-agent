@@ -2286,6 +2286,9 @@ class TraceScreen(Screen):
             0  # смена задачи (не stream_reset: там счётчик хода нужен)
         )
         self._reset_render_state()
+        if prev != task_id:
+            # Строка-итог индикатора принадлежит прежнему треду.
+            self._destroy_thinking_indicator()
         self._store = FileTaskStore(
             threads_dir=self.app._threads_dir or "",
             system=self.app._system,
@@ -5240,6 +5243,31 @@ class TraceScreen(Screen):
             row.pause() if human_wait else row.resume()
             row.refresh_running_elapsed()
 
+    def _active_run_error(self) -> str | None:
+        """Ошибка раннера — только если прогон был в открытом треде:
+        `last_runner_error` общий на приложение, чужая не рисуется."""
+        err = getattr(self.app, "last_runner_error", None)
+        runner = getattr(self.app, "active_runner", None)
+        target = getattr(runner, "_last_target", None)
+        if (
+            err
+            and target
+            and target
+            != (
+                self._active_task_id,
+                self.app._system,
+            )
+        ):
+            return None
+        return err
+
+    def _finished_run_task_id(self, runner) -> str | None:
+        """Тред, чей прогон закончился: цель раннера, иначе активный."""
+        target = getattr(runner, "_last_target", None)
+        if target and target[1] == self.app._system:
+            return target[0]
+        return self._active_task_id
+
     def _poll_tick(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
         # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
@@ -5263,7 +5291,7 @@ class TraceScreen(Screen):
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
         self._update_mcp_indicator()
         self._pump_reasoning_stream_source()
-        err = getattr(self.app, "last_runner_error", None)
+        err = self._active_run_error()
         if err and not self._error_shown:
             # Причина — строкой `└` под «✕ Ошибка» (индикатор). Без треда
             # индикатора нет — тогда строкой без владельца.
@@ -5374,8 +5402,11 @@ class TraceScreen(Screen):
                 and getattr(self.app, "last_terminal_outcome", None)
                 == "plan_proposed"
             )
+            # Исход принадлежит треду прогона, а не тому, что на экране:
+            # к тику окончания человек мог уйти на другую сессию.
+            _run_tid = self._finished_run_task_id(runner)
             self._write_tui_meta(
-                self._active_task_id,
+                _run_tid,
                 {
                     "status": _STATUS[outcome],
                     "last_error": (
@@ -5396,7 +5427,11 @@ class TraceScreen(Screen):
             # итог из только что записанной меты, как при переоткрытии.
             # Тик, заставший прогон, индикатор создал; если его нет, его
             # убрали намеренно (отмена-«undo») — не воскрешаем.
-            if self._thinking is None and not self._was_running:
+            if (
+                _run_tid == self._active_task_id
+                and self._thinking is None
+                and not self._was_running
+            ):
                 self._restore_terminal_indicator()
             self.app.last_stop_requested = False
             self._update_terminal_title()
