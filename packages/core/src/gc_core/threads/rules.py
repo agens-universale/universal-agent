@@ -19,6 +19,7 @@ from gc_core.threads.models import (
     Page,
     SideChange,
     ThreadInfo,
+    ThreadKey,
     ThreadQuery,
     ThreadRecord,
 )
@@ -160,13 +161,22 @@ def parse_list_cursor(cursor: str) -> tuple[datetime, str, str]:
     try:
         updated, system, thread = cursor.split("|", 2)
         moment = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-    except ValueError:
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        # Момент — в UTC сразу: на краю диапазона (0001-01-01+14:00) перевод
+        # переполняется здесь, а не в базе (500 вместо 400).
+        moment = moment.astimezone(UTC)
+        ThreadKey(system=system, thread=thread)
+    except (ValueError, OverflowError):  # ValidationError — тоже ValueError
         raise InvalidCursor(f"негодный курсор списка: {cursor!r}") from None
-    if not system or not thread:
+    # Курсор пишут хранилища по записям: тредов до 1970 года и имён с NUL не
+    # бывает — такой курсор подделан.
+    if moment < _EPOCH or "\x00" in system + thread:
         raise InvalidCursor(f"негодный курсор списка: {cursor!r}")
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
     return moment, system, thread
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _after_cursor(

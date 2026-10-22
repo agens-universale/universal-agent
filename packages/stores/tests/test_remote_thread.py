@@ -381,3 +381,45 @@ async def test_client_that_never_reads_the_reply_does_not_hold_a_slot(
         for writer in stuck:
             writer.close()
         await proxy.aclose()
+
+
+async def test_sandbox_cannot_read_host_files_through_get_blob(tmp_path):
+    """Вложение — только файл треда задачи: имя с путём (абсолютным или с
+    ``..``) песочница не подставит, чтобы прочесть файл хоста."""
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import BlobRef
+
+    secret = tmp_path / "config_server.yml"
+    secret.write_text("dsn: postgres://admin:HOSTPW@db/prod")
+    proxy, client = await _pair(FileThreadStore(str(tmp_path / "threads")))
+    try:
+        for name in (str(secret), "../../config_server.yml", "x/../../y"):
+            ref = BlobRef(key=KEY, name=name, mime="text/plain", location="")
+            with pytest.raises((PermissionError, FileNotFoundError)):
+                data = await client.get_blob(ref)
+                assert b"HOSTPW" not in data
+    finally:
+        await proxy.aclose()
+
+
+async def test_proxy_frame_is_bounded():
+    """Ревью, раунд 2 (R17): кадр прокси — не больше 16 МиБ (память
+    сервера на соединение): вложение на 4 МиБ проходит, на 13 МиБ (base64 —
+    больше кадра) — отказ, а хранилище сервера его не получает."""
+    backing = MemoryThreadStore()
+    proxy, client = await _pair(backing)
+    try:
+        await client.claim(
+            KEY, LeaseRequest(owner="sandbox", ttl=timedelta(minutes=1))
+        )
+        small = await client.put_blob(
+            KEY, b"\0" * (4 * 1024 * 1024), mime="image/png"
+        )
+        assert len(await backing.get_blob(small)) == 4 * 1024 * 1024
+        with pytest.raises(Exception):  # кадр больше предела — отказ
+            await client.put_blob(
+                KEY, b"\1" * (13 * 1024 * 1024), mime="image/png"
+            )
+        assert len(backing._blobs) == 1
+    finally:
+        await proxy.aclose()

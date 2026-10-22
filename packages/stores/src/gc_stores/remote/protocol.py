@@ -29,8 +29,11 @@ from gc_core.threads.errors import (
 from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 
-#: Предел строки запроса или ответа (вложения — base64 в той же строке).
+#: Предел строки ответа сервера (история треда, вложение в base64).
 FRAME_LIMIT = 64 * 1024 * 1024
+#: Предел строки запроса песочницы: его держит в памяти сервер, на каждое
+#: соединение (вложение до ~12 МиБ в base64).
+REQUEST_LIMIT = 16 * 1024 * 1024
 #: Тип отказа «не ваша операция или не ваш тред».
 FORBIDDEN = "Forbidden"
 

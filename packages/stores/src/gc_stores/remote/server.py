@@ -75,7 +75,7 @@ class ThreadProxy:
     async def astart(cls, store: ThreadStore, key: ThreadKey) -> ThreadProxy:
         proxy = cls(store, key)
         proxy._server = await asyncio.start_unix_server(
-            proxy._handle, path=proxy.socket_path, limit=protocol.FRAME_LIMIT
+            proxy._handle, path=proxy.socket_path, limit=protocol.REQUEST_LIMIT
         )
         return proxy
 
@@ -231,7 +231,7 @@ async def _put_blob(proxy: ThreadProxy, key: ThreadKey, args: dict) -> Any:
 
 async def _get_blob(proxy: ThreadProxy, key: ThreadKey, args: dict) -> Any:
     ref = BlobRef.model_validate(args["ref"])
-    if ref.key != key:
+    if ref.key != key or os.path.basename(ref.name) != ref.name:
         raise PermissionError("вложение не этой задачи")
     return base64.b64encode(await proxy.store.get_blob(ref)).decode("ascii")
 
