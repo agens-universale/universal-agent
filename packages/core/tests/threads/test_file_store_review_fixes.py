@@ -332,3 +332,18 @@ def test_exotic_list_cursors_are_invalid_not_store_errors():
         "s",
         "t",
     )
+
+
+async def test_blob_of_a_thread_with_a_longer_name_is_not_readable(tmp_path):
+    """Префикс имени — не граница треда: тред ``t`` не читает вложения
+    треда ``t_x`` той же системы (их имена начинаются с ``g_t_``)."""
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import BlobRef, ThreadKey
+
+    store = FileThreadStore(str(tmp_path / "threads"))
+    mine = ThreadKey(system="g", thread="t")
+    longer = ThreadKey(system="g", thread="t_x")
+    foreign = await store.put_blob(longer, b"secret", mime="image/png")
+    ref = BlobRef(key=mine, name=foreign.name, mime="image/png", location="")
+    with pytest.raises(FileNotFoundError):
+        await store.get_blob(ref)
