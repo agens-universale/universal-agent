@@ -1118,3 +1118,30 @@ async def test_live_and_reopen_turn_line_order_equal(tmp_path):
         assert "CompactionRule" in live
         scr = await _reopen(pilot, tmp_path, scr._active_task_id)
         assert _child_types(scr) == live
+
+
+# --- S10: раскладка покоя — бара нет, зазор ленты одна строка --------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_idle_gap_is_one_row(tmp_path, failed):
+    """Между низом строки итога (с `└` — низом последней `└`) и рамкой поля
+    ввода — ровно одна пустая строка: нижний зазор ленты, бара нет."""
+    _write_thread(
+        tmp_path, tui={"status": "failed" if failed else "completed"}
+    )
+    thread = _Thread(tmp_path)
+    thread.messages(_reply("u1"), _answer("a1"))
+    error = {"type": "ReadError", "message": "ReadError: boom"}
+    if failed:
+        thread.record(1, "u1", status="error", error=error)
+    else:
+        thread.record(1, "u1")
+    async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
+        scr = await _open(pilot)
+        await pilot.pause()
+        line = _fresh_line(scr)
+        assert line.region.height == (2 if failed else 1)
+        input_row = scr.query_one("#input-row")
+        assert input_row.region.y - line.region.bottom == 1

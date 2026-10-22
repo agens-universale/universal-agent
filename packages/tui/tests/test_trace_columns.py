@@ -268,7 +268,9 @@ async def test_turn_line_sits_in_agent_bullet_column(tmp_path):
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
-        pilot.app.screen._show_thinking_indicator(state="thinking")
+        scr = pilot.app.screen
+        scr._bar_wanted = lambda: True  # идёт работа: бар стоит (S10 §3.3)
+        scr._show_thinking_indicator(state="thinking")
         await pilot.pause()
         bar = pilot.app.query_one("#indicator-bar")
         indicator = bar.query_one(ThinkingIndicator)

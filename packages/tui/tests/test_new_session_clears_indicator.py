@@ -9,6 +9,7 @@ import pytest
 async def test_new_session_clears_error_indicator(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+    from gc_tui.widgets.turn_line import TurnLine
 
     async with TuiApp(
         threads_dir=str(tmp_path / "threads")
@@ -16,11 +17,13 @@ async def test_new_session_clears_error_indicator(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task("t-err")
         await pilot.pause()
-        # эмуляция упавшего рана: глобальный error-флаг → poll рисует ✗ Ошибка
+        # эмуляция упавшего рана: глобальный error-флаг → poll ставит
+        # строку «✕ Ошибка» в ленте (S10), индикатора и бара нет
         pilot.app.last_runner_error = "runtime: boom"
         scr._poll_active()
         await pilot.pause()
-        assert scr._thinking is not None and scr._thinking._state == "failed"
+        assert scr._thinking is None
+        assert [line.word for line in scr.query(TurnLine)] == ["failed"]
 
         # /new при не-running ране → empty-state
         scr._cmd_new()
@@ -32,6 +35,8 @@ async def test_new_session_clears_error_indicator(tmp_path):
         await pilot.pause()
         assert scr._active_task_id is None
         assert scr._thinking is None
+        assert list(scr.query(TurnLine)) == []
+        assert not scr.query_one("#indicator-bar").display
 
 
 @pytest.mark.asyncio

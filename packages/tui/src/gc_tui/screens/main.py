@@ -69,7 +69,6 @@ from gc_tui import branding, textual_compat
 from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import (
     CopyBlockRequest,
-    IndicatorRowsChanged,
     OpenImageRequest,
     ScrollToEnd,
     ScrollToReply,
@@ -243,6 +242,12 @@ _SEL_INDICATOR_BAR = "#indicator-bar"
 _SEL_INPUT_ROW = "#input-row"
 _SEL_ROOT = "#root"
 _SEL_TRACE = "#trace"
+# Бар индикатора (S10 §3.3): стоит только во время работы открытого треда,
+# высота постоянна — индикатор и нижний ряд (на нём плашка «в конец»).
+_BAR_TURN = "-turn"
+_BAR_HEIGHT = 2
+# Нижний зазор ленты (`margin-bottom` #trace): в `region` ленты не входит.
+_TRACE_GAP = 1
 
 
 _log = logging.getLogger(__name__)
@@ -668,6 +673,9 @@ class TraceScreen(Screen):
         # сменился при «всё ещё бежит» — хвост стартовал между тиками.
         self._watched_run_seq: Optional[int] = None
         self._run_pending: bool = False
+        # Зафиксированный прогон — пара (раннер, `run_seq`): его конец уже
+        # записан, бар ему не нужен (S10 §3.7).
+        self._settled_run: Optional[tuple] = None
         # Запись итога последнего хода открытого треда (из потока записей)
         # и признак «после неё началась реплика» — тогда последний ход
         # записи не имеет, строка — по статусу сессии.
@@ -1455,7 +1463,7 @@ class TraceScreen(Screen):
         stopped/failed — или None, если исход НЕ записан (старая сессия / прогон
         не дошёл до чистого финиша). Единый источник для бейджа трейса (в скобках),
         заголовка окна (без скобок) и строки-итога. None → ничего не выдумываем:
-        ни «stopped» в заголовке, ни строки-итога (см. _restore_terminal_indicator)."""
+        ни «stopped» в заголовке, ни строки-итога (см. _restore_latest_turn_line)."""
         # ask_human pending — агент ждёт ответа пользователя (приоритет).
         tui_state = getattr(self.app, "tui_state", None)
         if tui_state is not None and tui_state.ask_human_state is not None:
@@ -2138,7 +2146,7 @@ class TraceScreen(Screen):
         if callable(warm):
             warm()
         self._warm_skills_cache()
-        self._sync_indicator_reserve()  # пустой старт → резерв бара 2 (без лишней строки)
+        self._sync_indicator_bar()  # пустой старт: бара нет
         # Совет вставить картинку из буфера: на старте и при возвращении в окно
         # терминала — буфер меняется только снаружи; переходы внутри приложения его не
         # проверяют. Без сообщений терминала о фокусе окна — только на старте.
@@ -2347,7 +2355,7 @@ class TraceScreen(Screen):
         elif sp is not None:
             self._resumed_prompt = sp  # auto-create: не затирать свежий send
         self._update_terminal_title()  # статус + последний промпт сессии в таб
-        self._sync_indicator_reserve()  # активная задача → резерв бара 3 (отступ снизу)
+        self._sync_indicator_bar()  # бар — по прогону открытого треда
         self._mount_failed_from_meta(task_id)
         # Смена сессии: плашки буфера ввода — в последовательность этого треда.
         # Автосоздание треда под отправку (prev == task_id) номера не трогает:
@@ -2760,7 +2768,7 @@ class TraceScreen(Screen):
             # Индикатор живёт в фиксированной #indicator-bar (вне скролла) —
             # unhide/смена state не двигают вид трейса.
             self._thinking.show(state)
-            self._sync_indicator_reserve()  # строка причины ушла с «✕»
+            self._sync_indicator_bar()
             return
         stream_display = self.app.base_settings().settings.tui.stream_display
         indicator = ThinkingIndicator(
@@ -2772,6 +2780,7 @@ class TraceScreen(Screen):
         )
         self._thinking = indicator
         self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(indicator)
+        self._sync_indicator_bar()
         self._follow_turn_clock()
 
     def _restore_latest_turn_line(self) -> None:
@@ -2856,16 +2865,12 @@ class TraceScreen(Screen):
             return
         line.freshen(summary, error)
 
-    def on_indicator_rows_changed(self, event: IndicatorRowsChanged) -> None:
-        event.stop()
-        self._sync_indicator_reserve()
-
     def _hide_thinking_indicator(self) -> None:
         """Скрыть индикатор (CSS `.hidden`), не удаляя; анимация на паузе."""
         if self._thinking is None:
             return
         self._thinking.hide()
-        self._sync_indicator_reserve()
+        self._sync_indicator_bar()
 
     def _destroy_thinking_indicator(self) -> None:
         """Полностью убрать индикатор. Вызывается когда run завершён."""
@@ -2873,7 +2878,7 @@ class TraceScreen(Screen):
             return
         self._thinking.remove()
         self._thinking = None
-        self._sync_indicator_reserve()
+        self._sync_indicator_bar()
 
     def _refresh_stream_content(self) -> None:
         """Освежить контент уже смонтированного стрим-виджета из снапшота sink.
@@ -3006,8 +3011,10 @@ class TraceScreen(Screen):
         # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
         # Баннер/оверлей исключаем — их желаемую высоту считаем отдельно (иначе
         # ещё не ужатый region баннера раздувает chrome до available<=0).
-        chrome = sum(
-            c.region.height
+        # Бар — константой по классу, не замером: потолок пересчитывается в
+        # том же вызове, где бар ставят или снимают (S10 §5).
+        chrome = _TRACE_GAP + sum(
+            self._chrome_height(c)
             for c in root.children
             if c.id != "trace" and c is not overlay and c is not banner
         )
@@ -3046,6 +3053,12 @@ class TraceScreen(Screen):
         if available != self._trace_max_height:
             self._trace_max_height = available
             trace.styles.max_height = available
+
+    @staticmethod
+    def _chrome_height(widget) -> int:
+        if widget.id == _SEL_INDICATOR_BAR[1:]:
+            return _BAR_HEIGHT if widget.has_class(_BAR_TURN) else 0
+        return widget.region.height
 
     _STICK_TOL = 2
 
@@ -3112,11 +3125,17 @@ class TraceScreen(Screen):
             replies, round(trace.scroll_y), lambda r: r.virtual_region.y
         )
         sticky.show(reply, box)
-        # Запасная нижняя строка бара индикатора: ниже индикатора хода и
-        # строк причины, не поверх текста ленты. Поле ввода баннеры прячут
-        # или отодвигают — бар остаётся на месте.
-        bar = self.query_one(_SEL_INDICATOR_BAR, Vertical).region
-        pill.show(self._end_pill_label(), box, bar.bottom - 1)
+        pill.show(self._end_pill_label(), box, self._pill_row(trace))
+
+    def _pill_row(self, trace: VerticalScroll) -> int:
+        """Ряд плашки «в конец» (S10 §4.2) — над баннером или полем ввода:
+        пока бар стоит — его нижний ряд, под индикатором хода; без бара —
+        нижний зазор ленты. Поле ввода баннеры прячут, поэтому опора — не
+        оно."""
+        bar = self.query_one(_SEL_INDICATOR_BAR, Vertical)
+        if bar.has_class(_BAR_TURN):
+            return bar.region.bottom - 1
+        return trace.region.bottom
 
     def _trace_replies(self, trace: VerticalScroll) -> list:
         """Реплики верхнего уровня ленты по порядку. Кэшируется только
@@ -5207,6 +5226,7 @@ class TraceScreen(Screen):
         self._reset_run_flags()
         self._stamp_tui_running()
         self._run_pending = True
+        self._sync_indicator_bar()  # бар — вместе с репликой
         # Строка итога — уже нового хода: мигание прошлого стопа её не
         # перекрывает, даже пока поток того хода дорабатывает. Сам ход
         # начнётся после того потока: тот дописывает запись итога стопа.
@@ -5244,6 +5264,7 @@ class TraceScreen(Screen):
             self._run_pending = False
             self._watched_runner = None
             self._watched_run_seq = None
+            self._sync_indicator_bar()
 
     def _run_replaced(self, runner) -> bool:
         """Раннер бежит, но уже другим прогоном, чем застал тик: хвост из
@@ -5597,7 +5618,7 @@ class TraceScreen(Screen):
 
     def _poll_tick(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
-        # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
+        # (header/бар-константа/input/footer) → пересчёт синхронный и
         # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
         self._sync_trace_max_height()
         # Freeze UI на время app-select (§3.2 F2–F5). Пока Screen._selecting —
@@ -5673,6 +5694,9 @@ class TraceScreen(Screen):
             self._watched_run_seq = getattr(runner, "run_seq", None)
             self._follow_turn_clock()
         self._was_running = is_running
+        if not _frozen:
+            # Бар — по прогону открытого треда; догон после выделения (F2).
+            self._sync_indicator_bar()
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
         # говорит «нужен ответ». Скрываем (не destroy — анимация
@@ -5882,6 +5906,7 @@ class TraceScreen(Screen):
         последнего хода — строка из неё (стоп: время — момент стопа).
         Исход без записи уже показан спадающим фронтом; иначе — по статусу
         сессии, а неизвестный исход строку убирает."""
+        self._sync_indicator_bar()
         ind = self._thinking
         if ind is None:
             return
@@ -8748,7 +8773,7 @@ class TraceScreen(Screen):
         self._clear_trace()
         self._refresh_header()
         self._refresh_footer()
-        self._sync_indicator_reserve()
+        self._sync_indicator_bar()
         # Новая сессия — номера картинок с 1: выданное прежней несозданной — не её.
         self._image_seq_issued.pop(None, None)
         self._renumber_input_images()
@@ -8764,24 +8789,36 @@ class TraceScreen(Screen):
         if count:
             self._image_seq_issued[self._active_task_id] = first + count - 1
 
-    def _sync_indicator_reserve(self) -> None:
-        """Высота #indicator-bar: 3 при активной задаче (отступ-строка снизу под
-        индикатором), 2 на пустом старте (без задачи) — чтобы чистый экран не нёс
-        лишнюю строку. В пределах состояния высота фиксирована → нет «прыжка».
-        Строка причины под «✕ Ошибка» — ещё одна строка бара."""
+    def _bar_wanted(self) -> bool:
+        """Бар стоит, пока у открытого треда есть работа (S10 §3.3): прогон
+        бежит и не зафиксирован, поток стопа дорабатывает, ход запущен
+        отсюда и ещё не увиден тиком. `run_seq` — через `getattr`: у
+        заглушек раннера его нет."""
+        if self._active_task_id is None:
+            return False
+        if self._run_pending or self._stopping_alive():
+            return True
+        runner = getattr(self.app, "active_runner", None)
+        if runner is None or not runner.is_running():
+            return False
+        if not self._runner_is_for_active_thread():
+            return False
+        return (runner, getattr(runner, "run_seq", None)) != self._settled_run
+
+    def _sync_indicator_bar(self) -> None:
+        """Поставить или снять бар по `_bar_wanted()`; в том же вызове —
+        потолок ленты (высота бара — константа, не замер) и прижатие низа,
+        когда бар ушёл."""
         try:
             bar = self.query_one(_SEL_INDICATOR_BAR, Vertical)
         except Exception:
             return
-        height = 3 if self._active_task_id is not None else 2
-        ind = self._thinking
-        if (
-            ind is not None
-            and ind.has_error_line
-            and not ind.has_class("hidden")
-        ):
-            height += ind.error_rows
-        bar.styles.height = height
+        was = bar.has_class(_BAR_TURN)
+        wanted = self._bar_wanted()
+        bar.set_class(wanted, _BAR_TURN)
+        self._sync_trace_max_height()
+        if was and not wanted:
+            self._scroll_trace_end()
 
     def _handle_bang_shell(self, text: str) -> None:
         """`!command` → локальный shell в cwd TUI; результат только в трейсе."""
@@ -9552,7 +9589,10 @@ class TraceScreen(Screen):
         # Сброс якоря таймера: «сжимаю контекст…» должен считать с 0, а не от
         # момента прошлого хода (как и на обычном send).
         self._reset_thinking_timer()
-        runner.compact_now(tid, self.app._system)
+        if runner.compact_now(tid, self.app._system):
+            # Сжатие — работа: бар «сжимаю контекст…» (S10, решение В3).
+            self._run_pending = True
+            self._sync_indicator_bar()
 
     def _cmd_init(self) -> None:
         """/init: видимый prompt-driven прогон — агент сам пишет AGENTS.md.

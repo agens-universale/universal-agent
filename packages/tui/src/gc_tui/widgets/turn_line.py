@@ -25,7 +25,7 @@ from textual import events
 from textual.widgets import Static
 
 from gc_tui.messages import OpenEditsScreenRequest
-from gc_tui.palette import DIM
+from gc_tui.palette import DEEP_DIM, DIM
 from gc_tui.services.trace_render import consequence_lead
 from gc_tui.services.turn_outcome import (
     compose_status_line,
@@ -136,8 +136,12 @@ class TurnLine(Static):
         summary = (
             format_turn_summary(*self._summary) if self._summary else None
         )
+        # Голова — тем же `DEEP_DIM`, что у осевшей (цвет из стиля):
+        # явным стилем она не сливается в один прогон с зазором до сводки.
+        head = self.text.copy()
+        head.stylize(DEEP_DIM)
         line, self._summary_span = compose_status_line(
-            self.text.copy(),
+            head,
             summary,
             self._status_width(),
             hover=self._summary_hover,

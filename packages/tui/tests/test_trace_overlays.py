@@ -186,17 +186,96 @@ async def test_pill_clear_of_indicator_without_banner(tmp_path):
         _assert_pill_clear_of_indicator(scr, pill)
 
 
+def _bar_region(scr):
+    from textual.containers import Vertical
+
+    return scr.query_one("#indicator-bar", Vertical).region
+
+
+def _input_top(scr) -> int:
+    return scr.query_one("#input-row").region.y
+
+
 @pytest.mark.asyncio
-async def test_pill_clear_of_error_reason_rows(tmp_path):
-    _write_task(tmp_path, "o3e")
+async def test_pill_row_idle_and_running(tmp_path):
+    """Ряд плашки (S10 §4.2): в покое — нижний зазор ленты, во время хода
+    — нижний ряд бара; оба — над полем ввода."""
+    _write_task(tmp_path, "o3r")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
-        scr, pill = await _pill_with_indicator(pilot, "o3e")
-        scr._thinking.set_error("RuntimeError: " + "сбой " * 60)
-        scr._thinking.set_state("failed")
-        scr._sync_indicator_reserve()
+        scr = await _tall(pilot, "o3r")
+        _, pill = _overlays(scr)
+        await _scroll(pilot, scr, 10)
         await _relayout(pilot, scr)
-        assert scr._thinking.error_rows == 3
-        _assert_pill_clear_of_indicator(scr, pill)
+        assert _bar_region(scr).height == 0
+        assert pill.region.y == _trace(scr).region.bottom
+        assert pill.region.y == _input_top(scr) - 1
+
+        pilot.app.active_runner = _Running("o3r")
+        scr._show_thinking_indicator()
+        await _relayout(pilot, scr)
+        bar = _bar_region(scr)
+        assert bar.height == 2
+        assert pill.region.y == bar.bottom - 1
+        assert pill.region.y == _input_top(scr) - 1
+        pilot.app.active_runner = None
+
+
+async def _pill_row_above_banner(pilot, scr, pill, banner):
+    """Баннер меняет хром: потолок ленты и накладки сходятся за пару
+    перекладок — те же вызовы, что в тике опроса."""
+    for _ in range(4):
+        scr._sync_trace_max_height()
+        await _relayout(pilot, scr)
+        if pill.region.y == _bar_region(scr).bottom - 1:
+            break
+    assert pill.region.y == _bar_region(scr).bottom - 1
+    assert not pill.region.overlaps(banner.region)
+    assert pill.region.y == banner.region.y - 1
+
+
+@pytest.mark.asyncio
+async def test_pill_row_with_confirm_banner(tmp_path):
+    _write_task(tmp_path, "o3rc")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr, pill = await _pill_with_indicator(pilot, "o3rc")
+        scr.show_confirm_banner("Действие", "Разрешить?")
+        await _pill_row_above_banner(pilot, scr, pill, scr._confirm_banner)
+
+
+@pytest.mark.asyncio
+async def test_pill_row_with_plan_banner(tmp_path):
+    _write_task(tmp_path, "o3rp")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr, pill = await _pill_with_indicator(pilot, "o3rp")
+        scr._show_plan_banner()
+        await _pill_row_above_banner(pilot, scr, pill, scr._plan_banner)
+
+
+@pytest.mark.asyncio
+async def test_pill_row_with_ask_human_banner(tmp_path):
+    _write_task(tmp_path, "o3ra")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr, pill = await _pill_with_indicator(pilot, "o3ra")
+        scr._show_child_ask_human(parent_call_id="p1", prose="Какой путь?")
+        await _pill_row_above_banner(pilot, scr, pill, scr._ask_human_banner)
+
+
+@pytest.mark.asyncio
+async def test_turn_line_is_not_a_new_message(tmp_path):
+    """Строка итога в ленте не растит счётчик новых сообщений плашки."""
+    from gc_tui.services.trace_render import build_turn_line
+
+    _write_task(tmp_path, "o3n")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o3n")
+        _, pill = _overlays(scr)
+        _trace(scr).focus()
+        await _scroll(pilot, scr, 10)
+        before = pill.label
+        scr._trace_mount(build_turn_line(word="completed"), above_sent=True)
+        await pilot.pause()
+        scr._refresh_trace_overlays()
+        assert pill.label == before
 
 
 @pytest.mark.asyncio

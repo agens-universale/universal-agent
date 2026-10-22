@@ -205,16 +205,16 @@ def test_short_reason_is_one_row():
     assert ind.error_rows == 1
 
 
-async def _bar_height(scr):
+async def _bar_display(scr):
     from textual.containers import Vertical
 
-    return scr.query_one("#indicator-bar", Vertical).styles.height.value
+    return scr.query_one("#indicator-bar", Vertical).display
 
 
 @pytest.mark.asyncio
 async def test_long_reason_wraps_in_line_after_reopen(tmp_path):
     """Длинная причина — до трёх строк `└` у свежей строки; растёт лента,
-    а не бар."""
+    бара в покое нет."""
     pytest.importorskip("textual")
     _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
     async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
@@ -225,7 +225,7 @@ async def test_long_reason_wraps_in_line_after_reopen(tmp_path):
         rows = len(_rows(_line_text(scr)))
         assert 2 <= rows <= 3
         assert line.region.height == 1 + rows
-        assert await _bar_height(scr) == 3
+        assert await _bar_display(scr) is False
 
 
 @pytest.mark.asyncio

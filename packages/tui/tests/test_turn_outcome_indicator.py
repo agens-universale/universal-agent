@@ -263,9 +263,13 @@ async def _send(pilot, text="привет"):
 
 @pytest.mark.asyncio
 async def test_done_turn_line_from_record_live_and_reopen(tmp_path):
+    _write_thread(tmp_path)
     app = _app(tmp_path)
     app._executor_factory = lambda: StubExecutor(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
+        # Тред открыт до отправки: реплика сверяется с отправленной (у
+        # автосоздания треда заглушка пишет реплику раньше сверки).
+        pilot.app.screen.attach_active_task(TID, is_resume=True)
         scr = await _send(pilot)
         tid = scr._active_task_id
         head = f"✓ Выполнил за 12с · {_hm(ENDED)}"
