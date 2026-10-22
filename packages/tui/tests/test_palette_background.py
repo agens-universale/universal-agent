@@ -39,7 +39,7 @@ _FIXED_CSS = {
     "note-ink": "#a5adb8",
     "user-band-bg": "#363b47",
     "list-select-bg": "#363b47",
-    "queue-bg": "#242832",
+    "queue-bg": "#20242e",
     "highlight-bg": "#4c505a",
     "quiet-reply-ink": "#8b949e",
     "quiet-reply-mark": "#6e7681",
@@ -221,7 +221,7 @@ def test_quiet_band_below_band_below_highlight(bg):
     queue, band = palette.QUEUE_BG, palette.USER_BAND_BG
     highlight = palette.HIGHLIGHT_BG
     assert _lum(queue) < _lum(band) < _lum(highlight)
-    assert queue == palette._mix(palette.BG, band, 0.55)
+    assert queue == palette._mix(palette.BG, band, palette._QUEUE_SHARE)
     assert highlight == palette._mix(band, palette.INK, 0.12)
     assert palette.css_variables()["highlight-bg"] == highlight
 

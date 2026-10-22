@@ -134,7 +134,7 @@ REFUSED = _mix(BG, WARN, _REFUSED_SHARE)
 
 # Реплика в очереди (ждёт впуска ядром): подложка тише обычной — между фоном
 # ленты и USER_BAND_BG. В теме auto — от пересчитанных фона и USER_BAND_BG.
-_QUEUE_SHARE = 0.55
+_QUEUE_SHARE = 0.45
 QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
 
 # «Тихая реплика»: один вид у реплики в очереди и у липкой реплики над

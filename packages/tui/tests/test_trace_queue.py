@@ -139,7 +139,7 @@ def _between(low: str, mid: str, high: str) -> bool:
 
 def test_queue_bg_between_bg_and_user_band_fixed():
     assert palette.QUEUE_BG == palette._mix(
-        palette.BG, palette.USER_BAND_BG, 0.55
+        palette.BG, palette.USER_BAND_BG, palette._QUEUE_SHARE
     )
     assert _between(palette.BG, palette.QUEUE_BG, palette.USER_BAND_BG)
     assert palette.css_variables()["queue-bg"] == palette.QUEUE_BG
@@ -149,7 +149,7 @@ def test_queue_bg_recomputed_in_auto_theme():
     try:
         palette.apply_background((0x21, 0x27, 0x33))
         assert palette.QUEUE_BG == palette._mix(
-            "#212733", palette.USER_BAND_BG, 0.55
+            "#212733", palette.USER_BAND_BG, palette._QUEUE_SHARE
         )
         assert _between(palette.BG, palette.QUEUE_BG, palette.USER_BAND_BG)
         assert palette.css_variables()["queue-bg"] == palette.QUEUE_BG
