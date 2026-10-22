@@ -299,3 +299,64 @@ async def test_scroll_event_during_selection_does_not_stick(tmp_path):
         await pilot.pause()
         assert scr._stick_bottom is True
         scr._selecting = False
+
+
+@pytest.mark.asyncio
+async def test_page_up_disengages_without_poll(tmp_path):
+    """PageUp по ленте снимает липкость событием прокрутки, без опроса."""
+    pytest.importorskip("textual")
+    _write_task(tmp_path, "pg1")
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr, trace = await _setup_scrolled(pilot, "pg1")
+        scr._poll_tick = lambda: None
+        trace.focus()
+        await pilot.press("pageup")
+        await pilot.pause()
+        assert trace.scroll_offset.y < trace.max_scroll_y
+        assert scr._stick_bottom is False
+
+
+@pytest.mark.asyncio
+async def test_wheel_up_disengages_without_poll(tmp_path):
+    """Колесо вверх над лентой снимает липкость событием прокрутки."""
+    pytest.importorskip("textual")
+    from textual import events
+
+    _write_task(tmp_path, "wh1")
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr, trace = await _setup_scrolled(pilot, "wh1")
+        scr._poll_tick = lambda: None
+        for _ in range(3):
+            trace.post_message(
+                events.MouseScrollUp(
+                    trace, 1, 1, 0, -1, 0, False, False, False
+                )
+            )
+        await pilot.pause()
+        assert trace.scroll_offset.y < trace.max_scroll_y
+        assert scr._stick_bottom is False
+
+
+@pytest.mark.asyncio
+async def test_thread_switch_with_live_watch_sticks_to_new_bottom(tmp_path):
+    """Переключение треда, когда старый отскроллен вверх: наблюдатель
+    `scroll_y` жив, сброс ленты двигает offset — новый тред всё равно
+    липнет к своему низу и остаётся внизу."""
+    pytest.importorskip("textual")
+    _write_task(tmp_path, "sw1")
+    _write_task(tmp_path, "sw2")
+    big = "\n".join(f"другая {i}" for i in range(80))
+    rec = {"payload": {"id": "b1", "role": "assistant", "content": big}}
+    (Path(tmp_path) / "data_cli_sw2.jsonl").write_text(
+        json.dumps(rec, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr, trace = await _setup_scrolled(pilot, "sw1")
+        trace.scroll_to(y=0, animate=False)
+        await pilot.pause()
+        assert scr._stick_bottom is False
+        scr.attach_active_task("sw2", is_resume=True)
+        await pilot.pause(0.4)
+        assert trace.max_scroll_y > 0
+        assert scr._stick_bottom is True
+        assert trace.scroll_offset.y == trace.max_scroll_y

@@ -2923,9 +2923,10 @@ class TraceScreen(Screen):
             self._stick_bottom = True
 
     def _on_trace_scrolled(self, _value: float) -> None:
-        """Отклик на прокрутку ленты по событию, не по опросу. Прижатие остаётся
-        в _poll_tick; наш scroll_end липкость не снимает (offset не меньше
-        _last_auto_y). Во время выделения (F2) — ни детекта, ни прижатия."""
+        """Отклик на прокрутку ленты по событию, не по опросу. Прижатие
+        остаётся в _poll_tick; наш scroll_end липкость не снимает (offset не
+        меньше _last_auto_y). Во время выделения (F2) — ни детекта, ни
+        прижатия."""
         if self._ui_frozen_for_select():
             return
         self._update_stick_state()
