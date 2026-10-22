@@ -96,7 +96,6 @@ from gc_tui.services.footer_slot import (
     IMAGE_REFUSAL_EMPTY_CLIPBOARD,
     IMAGES_WITH_COMMAND_REFUSAL,
     NESTED_NO_DETAIL,
-    OTHER_SESSION_RUN_REFUSAL,
     PASTE_HINT_TEXT,
     QUEUE_ADMITTED_HINT,
     RETENTION_DETAIL_HINT,
@@ -2337,10 +2336,6 @@ class TraceScreen(Screen):
             self._session_lock_release(prev)
         if prev != task_id:
             self._copy_seq += 1  # итог /copy прошлой сессии сюда не пишется
-        if is_resume and prev != task_id:
-            # Счётчик событий после отправки — отправки прежнего вида; в
-            # открытой сессии её не было: откат по Esc выключен до новой.
-            self._events_since_last_user_send = 1
         self._active_task_id = task_id
         self.app.tui_state.active_task_id = task_id
         self._session_lock_hb_mono = 0.0
@@ -2758,11 +2753,7 @@ class TraceScreen(Screen):
         ):
             return
         runner = getattr(self.app, "active_runner", None)
-        if (
-            runner is not None
-            and runner.is_running()
-            and self._runner_is_for_active_thread()
-        ):
+        if runner is not None and runner.is_running():
             return
         tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
         last = tui.get("last_indicator")
@@ -5390,24 +5381,6 @@ class TraceScreen(Screen):
             self.app._system,
         )
 
-    def _runner_busy_elsewhere(self) -> bool:
-        """Идёт ход другой сессии. Агент один на приложение (решение 24):
-        отправка, стоп и откат открытой сессии его не трогают."""
-        runner = getattr(self.app, "active_runner", None)
-        return (
-            runner is not None
-            and runner.is_running()
-            and not self._runner_is_for_active_thread()
-        )
-
-    def _refuse_if_busy_elsewhere(self) -> bool:
-        """Ход другой сессии: отказ в слоте футера, True — действие не
-        выполнять."""
-        if not self._runner_busy_elsewhere():
-            return False
-        self._show_footer_refusal(OTHER_SESSION_RUN_REFUSAL)
-        return True
-
     def _active_run_error(self) -> str | None:
         """Ошибка раннера открытого треда; чужая не рисуется."""
         err = getattr(self.app, "last_runner_error", None)
@@ -5665,7 +5638,7 @@ class TraceScreen(Screen):
 
         _indicator_mode = select_indicator_mode(
             err=err,
-            is_running=is_running and self._runner_is_for_active_thread(),
+            is_running=is_running,
             ask_human=ask_human_active,
             confirm=self._confirm_active,
         )
@@ -6384,12 +6357,6 @@ class TraceScreen(Screen):
             # текст, а не убитый run или отменённый вопрос.
             if input_text:
                 self._show_esc_hint("clear")
-                event.stop()
-                event.prevent_default()
-                return
-
-            # Ход другой сессии: ни стопа, ни отката, ни выхода.
-            if self._refuse_if_busy_elsewhere():
                 event.stop()
                 event.prevent_default()
                 return
@@ -7187,13 +7154,6 @@ class TraceScreen(Screen):
                 return
 
         text = event.value.strip()
-        # Ход другой сессии: текст агенту не уходит и остаётся в поле.
-        if (
-            text
-            and not self._is_command_input(text)
-            and self._refuse_if_busy_elsewhere()
-        ):
-            return
         was_blank = inp.is_blank()
         inp.text = ""
         if not text:
@@ -7926,17 +7886,10 @@ class TraceScreen(Screen):
             _on_exit,
         )
 
-    def _stop_preempted(self) -> bool:
-        """Стоп агента не нужен или запрещён: идёт `!` — его отмена
-        (повторный Ctrl+C / /stop — стоп агента); идёт ход другой сессии —
-        отказ, его не трогаем (решение 24)."""
+    def _cmd_stop(self) -> None:
+        # Bang-shell: сначала cancel `!`; повторный Ctrl+C / /stop — stop агента.
         if self._bang is not None and self._bang.is_running:
             self._bang.cancel()
-            return True
-        return self._refuse_if_busy_elsewhere()
-
-    def _cmd_stop(self) -> None:
-        if self._stop_preempted():
             return
 
         runner = self.app.active_runner
@@ -8333,12 +8286,6 @@ class TraceScreen(Screen):
         return ids
 
     async def _cmd_use_skill(self, skill_id: str, *, prompt: str = "") -> None:
-        if skill_id and self._runner_busy_elsewhere():
-            # Набранное — назад в поле, в том виде, что вернул бы ↑; отказ —
-            # после: правка поля гасит отказ, поставленный раньше неё.
-            self._restore_input(f"/{skill_id} {prompt}".rstrip(), ())
-            self._refuse_if_busy_elsewhere()
-            return
         if not skill_id:
             self._mount_trace_row(
                 prefix="[!] ",

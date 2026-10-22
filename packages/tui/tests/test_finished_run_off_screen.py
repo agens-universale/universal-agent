@@ -115,13 +115,14 @@ async def test_plan_end_of_other_thread_stays_with_it(tmp_path):
         pilot.app.active_runner = runner
         scr._poll_active()  # тик застал прогон B: граница журнала правок
         _b_creates_file(tmp_path)
+        # B кончился планом между тиками, и человек сразу открыл A: идущего
+        # хода при переходе нет (решение 25), исход B тик ещё не записал.
+        runner._running = False
+        pilot.app.last_terminal_outcome = "plan_proposed"
         scr.attach_active_task(_A, is_resume=True)
         await pilot.pause()
         a_before = scr._thinking._render_text().plain
         assert a_before == "✓ Выполнил за 5с"
-        # B кончился планом, пока человек на A.
-        runner._running = False
-        pilot.app.last_terminal_outcome = "plan_proposed"
         scr._poll_active()
         await pilot.pause()
         await pilot.pause()
