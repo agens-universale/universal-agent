@@ -173,6 +173,17 @@ def test_open_request_by_call_id():
     assert req.call_id == "c42"
 
 
+def _live_row(scr, call_id: str):
+    """Строка вызова из ленты, а не из `_active_calls`: тик опроса без
+    живого прогона снимает вызовы оттуда (помечает «прервано»), и чтение
+    реестра после `pilot.pause()` зависело от того, успел ли тик."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    scr._poll_active()  # тик опроса — детерминированно, не по таймеру
+    (row,) = [r for r in scr.query(ToolCallRow) if r.call_id == call_id]
+    return row
+
+
 @pytest.mark.asyncio
 async def test_live_top_level_and_nested_have_no_wire_name():
     pytest.importorskip("textual")
@@ -200,21 +211,31 @@ async def test_live_top_level_and_nested_have_no_wire_name():
             args_summary="a.py",
         )
         await pilot.pause()
-        parent = scr._subagent_parent_rows["p1"]
-        nested = scr._nested_tool_rows["n1"]
+        parent = _live_row(scr, "p1")
+        nested = _live_row(scr, "n1")
         assert _content(parent).startswith("Agent  проверка")
         assert "subagent_worker" not in _content(parent)
         assert _content(nested).startswith("Read  a.py")
         assert "fs_read_file" not in _content(nested)
 
 
+def _app_without_warm_build():
+    """TuiApp без сборки настоящего исполнителя: фоновый прогрев на старте
+    ставит boot-снимок MCP в случайный момент теста и подменяет снимок,
+    заданный тестом (подписи шли уже из него — флап)."""
+    from gc_tui.app import TuiApp
+
+    app = TuiApp()
+    app._executor_factory = object
+    return app
+
+
 @pytest.mark.asyncio
 async def test_live_mcp_label_from_screen_snapshot():
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_tui.services.trace_mapper import map_message
 
-    app = TuiApp()
+    app = _app_without_warm_build()
     async with app.run_test() as pilot:
         app._mcp_snapshot = {
             "jira": {
@@ -240,7 +261,7 @@ async def test_live_mcp_label_from_screen_snapshot():
         )
         scr._render_event(ev)
         await pilot.pause()
-        row = scr._active_calls["m1"]
+        row = _live_row(scr, "m1")
         assert _content(row).startswith("jira · Создать задачу")
         assert "mcp_jira_create_issue" not in _content(row)
 
@@ -362,7 +383,6 @@ async def test_meta_mcp_snapshot_read_once_until_meta_changes(
     import os
 
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
 
     meta = tmp_path / "meta_cli_t1.json"
@@ -376,7 +396,7 @@ async def test_meta_mcp_snapshot_read_once_until_meta_changes(
         return real_get(task_id, system=system)
 
     monkeypatch.setattr(store, "get_task_meta", _counting_get)
-    app = TuiApp()
+    app = _app_without_warm_build()
     async with app.run_test() as pilot:
         app._mcp_snapshot = None
         scr = pilot.app.screen
@@ -460,7 +480,7 @@ async def test_live_call_shows_path_from_the_session_cwd(
         call = _read_call("c1", str(tmp_path / "README.md"))
         scr._render_records([{"ts": "", "payload": call}])
         await pilot.pause()
-        assert _content(scr._active_calls["c1"]).startswith("Read  README.md")
+        assert _content(_live_row(scr, "c1")).startswith("Read  README.md")
 
 
 @pytest.mark.asyncio
