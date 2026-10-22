@@ -171,13 +171,18 @@ class CallbacksConfig(BaseModel):
         return secrets or None
 
 
-class _ApiDocs(BaseModel):
-    """Документация API поверхности и выключенные ручки (``api_catalog``)."""
+class _DocsSwitch(BaseModel):
+    """Документация API поверхности (``api_catalog``)."""
 
     _surface: ClassVar[str]
     #: ``/docs``, ``/redoc`` и ``/openapi.json`` — только по этому ключу;
     #: открываются без токена, вызовы из Swagger — с токеном (Authorize).
     docs: bool = False
+
+
+class _ApiDocs(_DocsSwitch):
+    """Документация и выключенные ручки поверхности."""
+
     #: Группы ручек или пути (``"/v1/dialogs*"``, ``"DELETE /v1/x"``): такие
     #: ручки не обслуживаются (404) и в документацию не попадают.
     disabled_routes: list[str] = Field(default_factory=list)
@@ -264,7 +269,9 @@ class ChatConfig(_ApiDocs, _ChannelModes):
         return [item for item in value if item != "*"]
 
 
-class A2aConfig(_ChannelModes):
+class A2aConfig(_DocsSwitch, _ChannelModes):
+    # Ручки не выключаются: карточка объявляет оба интерфейса целиком.
+    _surface: ClassVar[str] = "a2a"
     port: int = Field(default=8091, ge=1, le=65535)
     #: URL в карточке; нужен, когда сервер слушает 0.0.0.0/::.
     public_url: str | None = None

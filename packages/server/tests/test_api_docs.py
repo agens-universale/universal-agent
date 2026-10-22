@@ -14,13 +14,13 @@ from importlib.metadata import version
 
 import pytest
 from fastapi.testclient import TestClient
-from gc_server.api_catalog import SURFACES
+from gc_server.api_catalog import JSON, SURFACES
 from gc_server.app import ServerRuntime, build_surface
 from gc_server.config import ServerConfig, ServerConfigError
 from gc_testkit.settings import make_settings
 from server_harness import LOOPBACK_URL
 
-_DOCUMENTED = ("webhook", "chat") + (
+_DOCUMENTED = ("webhook", "chat", "a2a") + (
     () if sys.platform == "win32" else ("swarm",)
 )
 _DOC_PATHS = ("/docs", "/redoc", "/openapi.json")
@@ -166,7 +166,26 @@ def test_unknown_disabled_entry_is_a_config_error(entry, hint):
     assert hint in str(err.value)
 
 
-def test_a2a_has_no_docs_switch():
-    """У A2A Swagger нет — описание протокола — карточка агента."""
+def test_a2a_has_docs_but_no_disabled_routes():
+    """У A2A документация есть, а выключать ручки нельзя: карточка агента
+    объявляет оба интерфейса целиком."""
+    assert ServerConfig.model_validate({"a2a": {"docs": True}}).a2a.docs
     with pytest.raises((ServerConfigError, ValueError)):
-        ServerConfig.model_validate({"a2a": {"docs": True}})
+        ServerConfig.model_validate({"a2a": {"disabled_routes": ["rpc"]}})
+
+
+def test_a2a_docs_show_the_message_body_and_rpc_methods(tmp_path):
+    client = _client(tmp_path, "a2a", docs=True, auth_token="s3cret")
+    assert client.get("/docs").status_code == 200
+    schema = client.get("/openapi.json").json()
+    assert schema["info"]["title"] == "GigaCode · A2A"
+    send = schema["paths"]["/message:send"]["post"]
+    body = send["requestBody"]["content"]["application/json"]
+    message = body["schema"]["properties"]["message"]["properties"]
+    assert {"role", "messageId", "contextId", "taskId", "parts"} <= set(
+        message
+    )
+    assert {"new", "answer"} <= set(body["examples"])
+    rpc = schema["paths"]["/rpc"]["post"]["requestBody"]["content"][JSON]
+    assert "SendMessage" in rpc["schema"]["properties"]["method"]["enum"]
+    assert client.get("/tasks").status_code == 403  # API — по токену

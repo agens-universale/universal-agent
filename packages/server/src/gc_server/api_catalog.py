@@ -94,6 +94,11 @@ def _header(name: str, description: str) -> dict:
 
 
 _NO_TASK = "Нет задачи"
+_AUTH_MISSING = (
+    "Задан `auth_token`, а заголовка `Authorization: Bearer <token>` нет "
+    "или он чужой"
+)
+_TASK_ID_EXAMPLE = "52717e9d-…"
 _BAD_BODY = "Негодное тело"
 _STR = {"type": "string"}
 _INT = {"type": "integer"}
@@ -112,8 +117,7 @@ def _described(schema: dict, description: str) -> dict:
 # --- задачи: вебхук и swarm ---------------------------------------------------
 
 _AUTH_403 = _answer(
-    "Задан `auth_token`, а заголовка `Authorization: Bearer <token>` нет или "
-    "он чужой",
+    _AUTH_MISSING,
     _object(status=_STR, detail=_STR),
     {"status": "forbidden", "detail": "invalid or missing token"},
 )
@@ -520,8 +524,7 @@ _CHAT_ERROR = _object(
     )
 )
 _CHAT_401 = _answer(
-    "Задан `auth_token`, а заголовка `Authorization: Bearer <token>` нет "
-    "или он чужой",
+    _AUTH_MISSING,
     _CHAT_ERROR,
 )
 _RESPONSE = _object(
@@ -903,12 +906,404 @@ CHAT = SurfaceDoc(
     routes=_CHAT_ROUTES,
 )
 
-#: Поверхности с документацией и выключаемыми ручками (у A2A своё описание —
-#: карточка агента и протокол A2A).
+# --- A2A -----------------------------------------------------------------------
+# Ручки — от a2a-sdk (протокол A2A 1.0): REST-привязка и JSON-RPC на /rpc.
+# Поля — JSON протобуфов, camelCase; query-параметры — тоже camelCase.
+
+_PART = _described(
+    _object(
+        text=_STR,
+        url=_described(_STR, "файл по ссылке"),
+        data=_described(_OBJ, "структурированные данные"),
+        mediaType=_STR,
+    ),
+    "Часть сообщения: агент читает `text`",
+)
+_MESSAGE = _object(
+    role=_described(_STR, "`ROLE_USER` | `ROLE_AGENT`"),
+    messageId=_described(_STR, "уникальный id сообщения (задаёт клиент)"),
+    contextId=_described(
+        _STR, "диалог; нет — новый. Задачи одного контекста делят историю"
+    ),
+    taskId=_described(
+        _STR, "только ответ задаче в `TASK_STATE_INPUT_REQUIRED`"
+    ),
+    parts={"type": "array", "items": _PART},
+    metadata=_described(
+        _object(
+            cwd=_described(
+                _STR,
+                "каталог хода: абсолютный путь внутри `a2a.launch_root`; "
+                "диалог его запоминает",
+            )
+        ),
+        "метаданные",
+    ),
+)
+_STATE = _described(
+    _STR,
+    "`TASK_STATE_SUBMITTED` (в очереди диалога) | `TASK_STATE_WORKING` | "
+    "`TASK_STATE_INPUT_REQUIRED` (агент спросил) | `TASK_STATE_COMPLETED` | "
+    "`TASK_STATE_FAILED` | `TASK_STATE_CANCELED`",
+)
+_TASK = _object(
+    id=_STR,
+    contextId=_STR,
+    status=_object(
+        state=_STATE,
+        message=_described(_OBJ, "вопрос агента или текст отказа"),
+        timestamp=_STR,
+    ),
+    artifacts=_described(
+        {"type": "array", "items": _OBJ}, "ответ: артефакт `answer`"
+    ),
+    history={"type": "array", "items": _OBJ},
+)
+_TASK_EXAMPLE = {
+    "id": _TASK_ID_EXAMPLE,
+    "contextId": "426f1d3b-…",
+    "status": {
+        "state": "TASK_STATE_COMPLETED",
+        "timestamp": "2026-10-22T12:33:11Z",
+    },
+    "artifacts": [{"name": "answer", "parts": [{"text": "14"}]}],
+}
+_SEND_BODY = {
+    "required": True,
+    **_json(
+        _object(
+            message=_MESSAGE,
+            configuration=_object(
+                returnImmediately=_described(
+                    {"type": "boolean"},
+                    "ответить сразу (`SUBMITTED`/`WORKING`), не дожидаясь хода",
+                ),
+                historyLength=_INT,
+                acceptedOutputModes={"type": "array", "items": _STR},
+                taskPushNotificationConfig=_described(
+                    _OBJ,
+                    "push по ходу задачи (нужен `a2a.push_allowed_hosts`)",
+                ),
+            ),
+            metadata=_described(
+                _OBJ, "метаданные запроса (`cwd` — как у сообщения)"
+            ),
+        ),
+        new={
+            "message": {
+                "role": "ROLE_USER",
+                "messageId": "m-1",
+                "parts": [{"text": "Сколько будет 6+6?"}],
+            }
+        },
+        same_dialog={
+            "message": {
+                "role": "ROLE_USER",
+                "messageId": "m-2",
+                "contextId": "426f1d3b-…",
+                "parts": [{"text": "а теперь умножь на 2"}],
+            }
+        },
+        answer={
+            "message": {
+                "role": "ROLE_USER",
+                "messageId": "m-3",
+                "taskId": "задача в INPUT_REQUIRED",
+                "contextId": "её contextId",
+                "parts": [{"text": "зелёный"}],
+            }
+        },
+        background={
+            "message": {
+                "role": "ROLE_USER",
+                "messageId": "m-4",
+                "parts": [{"text": "напиши рассказ про маяк"}],
+            },
+            "configuration": {"returnImmediately": True},
+        },
+    ),
+}
+_A2A_403 = _answer(_AUTH_MISSING)
+_A2A_TASK = (_path("id", "Id задачи"),)
+_A2A_VERSION = _header("A2A-Version", "Версия протокола: `1.0`.")
+_SSE = {
+    "description": "Поток событий: `task`, `statusUpdate`, `artifactUpdate`",
+    "content": {"text/event-stream": {"schema": _STR}},
+}
+_PUSH = _described(
+    _object(id=_STR, url=_STR, token=_STR, authentication=_OBJ),
+    "Настройка push; адрес — только под `a2a.push_allowed_hosts`",
+)
+_PUSH_OFF = (
+    " Без `a2a.push_allowed_hosts` push выключен: карточка объявляет "
+    "`pushNotifications: false`, ручки отвечают ошибкой."
+)
+_RPC_METHODS = (
+    "SendMessage",
+    "SendStreamingMessage",
+    "GetTask",
+    "ListTasks",
+    "CancelTask",
+    "SubscribeToTask",
+    "CreateTaskPushNotificationConfig",
+    "GetTaskPushNotificationConfig",
+    "ListTaskPushNotificationConfigs",
+    "DeleteTaskPushNotificationConfig",
+    "GetExtendedAgentCard",
+)
+
+_A2A_ROUTES: dict[tuple[str, str], RouteDoc] = {
+    ("GET", "/.well-known/agent-card.json"): RouteDoc(
+        group="card",
+        summary="Карточка агента",
+        description=(
+            "Описание агента для пира: имя, интерфейсы (JSON-RPC `…/rpc` и "
+            "HTTP+JSON), возможности, схема авторизации. Без токена."
+        ),
+        responses={"200": _answer("Карточка", _OBJ)},
+    ),
+    ("GET", "/extendedAgentCard"): RouteDoc(
+        group="card",
+        summary="Расширенная карточка",
+        description="Карточка для авторизованного пира (если объявлена).",
+        responses={"200": _answer("Карточка", _OBJ), "403": _A2A_403},
+    ),
+    ("POST", "/message:send"): RouteDoc(
+        group="messages",
+        summary="Отправить сообщение",
+        description=(
+            "Без `taskId` — новая задача (один ход агента) в диалоге "
+            "`contextId`. Диалог ведёт задачи по очереди: занят — задача "
+            "`TASK_STATE_SUBMITTED` и стартует, когда он освободится. Вопрос "
+            "модели — `TASK_STATE_INPUT_REQUIRED`: ответ — сообщение с "
+            "`taskId` и `contextId` задачи, на любом инстансе. Сообщение в "
+            "задачу, которая не ждёт ответа, — отказ. Без "
+            "`returnImmediately` запрос ждёт конца хода."
+        ),
+        body=_SEND_BODY,
+        parameters=(_A2A_VERSION,),
+        responses={
+            "200": _answer(
+                "Задача (или сообщение)",
+                _object(task=_TASK, message=_MESSAGE),
+                {"task": _TASK_EXAMPLE},
+            ),
+            "400": _answer("Негодный запрос или задача не ждёт сообщения"),
+            "403": _A2A_403,
+            "404": _answer("Нет задачи `taskId`"),
+        },
+    ),
+    ("POST", "/message:stream"): RouteDoc(
+        group="messages",
+        summary="Отправить сообщение (поток)",
+        description="То же, что `message:send`, но события хода — потоком SSE.",
+        body=_SEND_BODY,
+        parameters=(_A2A_VERSION,),
+        responses={
+            "200": _SSE,
+            "400": _answer("Негодный запрос"),
+            "403": _A2A_403,
+        },
+    ),
+    ("GET", "/tasks"): RouteDoc(
+        group="tasks",
+        summary="Список задач",
+        description="Задачи из хранилища — одинаково на любом инстансе.",
+        parameters=(
+            _query("contextId", "Только задачи этого диалога."),
+            _query("status", "Только в этом состоянии (`TASK_STATE_…`)."),
+            _query("pageSize", "Размер страницы.", _INT),
+            _query("pageToken", "Курсор следующей страницы."),
+            _query("historyLength", "Сколько сообщений истории отдать.", _INT),
+            _query(
+                "statusTimestampAfter",
+                "Только со статусом новее (RFC 3339).",
+            ),
+            _query(
+                "includeArtifacts", "Отдавать артефакты.", {"type": "boolean"}
+            ),
+        ),
+        responses={
+            "200": _answer(
+                "Страница задач",
+                _object(
+                    tasks={"type": "array", "items": _TASK},
+                    nextPageToken=_STR,
+                    pageSize=_INT,
+                    totalSize=_INT,
+                ),
+            ),
+            "403": _A2A_403,
+        },
+    ),
+    ("GET", "/tasks/{id}"): RouteDoc(
+        group="tasks",
+        summary="Задача",
+        parameters=(
+            *_A2A_TASK,
+            _query("historyLength", "Сколько сообщений истории отдать.", _INT),
+        ),
+        responses={
+            "200": _answer("Задача", _TASK, _TASK_EXAMPLE),
+            "403": _A2A_403,
+            "404": _answer(_NO_TASK),
+        },
+    ),
+    ("POST", "/tasks/{id}:cancel"): RouteDoc(
+        group="tasks",
+        summary="Отменить задачу",
+        description=(
+            "С любого инстанса: идущий ход останавливается, ожидание ответа "
+            "и место в очереди диалога снимаются. Финальную задачу отменить "
+            "нельзя."
+        ),
+        parameters=_A2A_TASK,
+        responses={
+            "200": _answer("Задача `TASK_STATE_CANCELED`", _TASK),
+            "400": _answer("Задача уже финальна"),
+            "403": _A2A_403,
+            "404": _answer(_NO_TASK),
+        },
+    ),
+    ("GET", "/tasks/{id}:subscribe"): RouteDoc(
+        group="tasks",
+        summary="Подписаться на задачу",
+        description="События идущей задачи — на инстансе, который её ведёт.",
+        parameters=_A2A_TASK,
+        responses={"200": _SSE, "403": _A2A_403, "404": _answer(_NO_TASK)},
+    ),
+    ("POST", "/tasks/{id}:subscribe"): RouteDoc(
+        group="tasks",
+        summary="Подписаться на задачу (POST)",
+        description="То же, что GET.",
+        parameters=_A2A_TASK,
+        responses={"200": _SSE, "403": _A2A_403, "404": _answer(_NO_TASK)},
+    ),
+    ("POST", "/tasks/{id}/pushNotificationConfigs"): RouteDoc(
+        group="push",
+        summary="Создать настройку push",
+        description="Куда слать события задачи." + _PUSH_OFF,
+        parameters=_A2A_TASK,
+        body={"required": True, **_json(_PUSH)},
+        responses={"200": _answer("Настройка", _PUSH), "403": _A2A_403},
+    ),
+    ("GET", "/tasks/{id}/pushNotificationConfigs"): RouteDoc(
+        group="push",
+        summary="Настройки push задачи",
+        description=_PUSH_OFF.strip(),
+        parameters=_A2A_TASK,
+        responses={"200": _answer("Настройки", _OBJ), "403": _A2A_403},
+    ),
+    ("GET", "/tasks/{id}/pushNotificationConfigs/{push_id}"): RouteDoc(
+        group="push",
+        summary="Настройка push",
+        parameters=(*_A2A_TASK, _path("push_id", "Id настройки")),
+        responses={"200": _answer("Настройка", _PUSH), "403": _A2A_403},
+    ),
+    ("DELETE", "/tasks/{id}/pushNotificationConfigs/{push_id}"): RouteDoc(
+        group="push",
+        summary="Удалить настройку push",
+        parameters=(*_A2A_TASK, _path("push_id", "Id настройки")),
+        responses={"200": _answer("Удалено"), "403": _A2A_403},
+    ),
+    ("POST", "/rpc"): RouteDoc(
+        group="rpc",
+        summary="JSON-RPC 2.0",
+        description=(
+            "Те же операции одной ручкой: `method` — "
+            + ", ".join(f"`{m}`" for m in _RPC_METHODS)
+            + ". `params` — тело соответствующей REST-ручки (для "
+            '`GetTask`/`CancelTask` — `{"id": …}`). Неизвестный метод — '
+            "ошибка `-32601`."
+        ),
+        body={
+            "required": True,
+            **_json(
+                {
+                    "type": "object",
+                    "required": ["jsonrpc", "method", "id"],
+                    "properties": {
+                        "jsonrpc": {"type": "string", "enum": ["2.0"]},
+                        "id": {"oneOf": [_STR, _INT]},
+                        "method": {
+                            "type": "string",
+                            "enum": list(_RPC_METHODS),
+                        },
+                        "params": _OBJ,
+                    },
+                },
+                send_message={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "SendMessage",
+                    "params": {
+                        "message": {
+                            "role": "ROLE_USER",
+                            "messageId": "m-1",
+                            "parts": [{"text": "привет"}],
+                        }
+                    },
+                },
+                get_task={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "GetTask",
+                    "params": {"id": _TASK_ID_EXAMPLE},
+                },
+                cancel_task={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "CancelTask",
+                    "params": {"id": _TASK_ID_EXAMPLE},
+                },
+            ),
+        },
+        parameters=(_A2A_VERSION,),
+        responses={
+            "200": _answer(
+                "`result` или `error` JSON-RPC",
+                _object(jsonrpc=_STR, id={}, result=_OBJ, error=_OBJ),
+                {"jsonrpc": "2.0", "id": 1, "result": {"task": _TASK_EXAMPLE}},
+            ),
+            "403": _A2A_403,
+        },
+    ),
+}
+
+A2A = SurfaceDoc(
+    title="GigaCode · A2A",
+    description=(
+        "Агент для других агентов по протоколу A2A 1.0 (a2a-sdk): "
+        "REST-привязка и JSON-RPC (`/rpc`). Диалог — `contextId`, задача — "
+        "один ход агента; задачи диалога идут по очереди, вопрос модели — "
+        "`TASK_STATE_INPUT_REQUIRED`, ответ — на любом инстансе. Задачи — в "
+        "хранилище тредов, одинаковые на любом инстансе.\n\n"
+        "**Авторизация.** При заданном `auth_token` каждый запрос, кроме "
+        "карточки, несёт `Authorization: Bearer <token>` (кнопка Authorize), "
+        "иначе 403. Поля — JSON протобуфов A2A, camelCase.\n\n"
+        "Подробно — docs/a2a.md и спецификация A2A."
+    ),
+    groups={
+        "messages": Group(
+            "Сообщения", "Новая задача, ответ на вопрос агента."
+        ),
+        "tasks": Group(
+            "Задачи", "Статус, список, отмена, подписка на события."
+        ),
+        "push": Group("Push-уведомления", "Куда слать события задачи."),
+        "card": Group("Карточка", "Описание агента для пира."),
+        "rpc": Group("JSON-RPC", "Все операции одной ручкой."),
+    },
+    routes=_A2A_ROUTES,
+)
+
+#: Поверхности с документацией. ``disabled_routes`` — у всех, кроме A2A: его
+#: карточка объявляет оба интерфейса целиком.
 SURFACES: dict[str, SurfaceDoc] = {
     "webhook": WEBHOOK,
     "swarm": SWARM,
     "chat": CHAT,
+    "a2a": A2A,
 }
 
 METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
@@ -944,6 +1339,7 @@ def split_route_entry(entry: str) -> tuple[str | None, str | None]:
 
 
 __all__ = [
+    "A2A",
     "CHAT",
     "SURFACES",
     "SWARM",

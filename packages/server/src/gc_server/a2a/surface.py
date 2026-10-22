@@ -181,6 +181,7 @@ class A2aSurface:
             ThreadPushConfigStore,
             ThreadTaskStore,
         )
+        from gc_server.api_docs import apply_api_docs, docs_paths
         from gc_server.chat.http_guard import install_http_guard
 
         threads = self.runtime.threads("a2a")
@@ -213,7 +214,7 @@ class A2aSurface:
             agent_card=card,
             **push,
         )
-        app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+        app = FastAPI()
         add_a2a_routes_to_fastapi(
             app,
             agent_card_routes=create_agent_card_routes(card),
@@ -226,7 +227,12 @@ class A2aSurface:
             bind_host=str(self.section.host),
             max_body_bytes=self.section.max_body_bytes,
         )
-        install_bearer(app, self.section.auth_token, public_paths=(CARD_PATH,))
+        install_bearer(
+            app,
+            self.section.auth_token,
+            public_paths=(CARD_PATH, *docs_paths(self.section)),
+        )
+        apply_api_docs(app, "a2a", self.section)
         return app
 
     async def astart(self) -> None:
