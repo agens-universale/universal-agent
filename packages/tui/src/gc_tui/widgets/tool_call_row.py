@@ -53,6 +53,7 @@ from gc_tui.services.trace_glyphs import (
     CALL_GLYPH,
     CALL_UNDONE_GLYPH,
     CALL_WAITING_GLYPH,
+    blink_on,
 )
 from gc_tui.services.trace_render import (
     CALL_TARGET_MIN_COLS,
@@ -73,10 +74,6 @@ from gc_tui.widgets.static_content import update_if_changed
 # паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
 # эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
 _PAUSE_GLYPH = "‖"
-# Ритм мигания ● в кадрах 0.1с-тика (решение владельца): 0.5с виден,
-# 0.7с скрыт.
-_BLINK_ON_TICKS = 5
-_BLINK_PERIOD_TICKS = 12
 # Пустая клетка справа у полной строки: хвост не прижат к полосе прокрутки.
 _RIGHT_GUTTER = 1
 
@@ -400,8 +397,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
                 return CALL_WAITING_GLYPH, _DIM
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
-            on = self._pulse_frame % _BLINK_PERIOD_TICKS < _BLINK_ON_TICKS
             # Мигает исчезая: в паузе — пустая клетка той же ширины.
+            on = blink_on(self._pulse_frame)
             return (CALL_GLYPH if on else " "), _RUN
         glyph, style, _line_style = _OUTCOME_LOOK[self._outcome]
         return glyph, style

@@ -49,6 +49,7 @@ from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
 from gc_tui.services.duration_format import format_compact_int, format_duration
 from gc_tui.services.plural import files_word
+from gc_tui.services.trace_glyphs import blink_on
 from gc_tui.services.turn_outcome import (
     DONE_LABEL,
     OUTCOMES,
@@ -127,6 +128,9 @@ _STATE_DONE = "done"
 _STATE_CANCELLED = "cancelled"
 # Ход прервался вместе с процессом (мета «running» без живого хода).
 _STATE_INTERRUPTED = "interrupted"
+# Стоп запрошен, ход ещё дорабатывает: мигающий глиф стопа без текста
+# (решение 26). Не итог — анимация идёт.
+_STATE_STOPPING = "stopping"
 _STATE_FAILED = "failed"
 _STATE_STOPPED_STEPS = "stopped_steps"
 _STATE_STOPPED_ERRORS = "stopped_errors"
@@ -164,6 +168,7 @@ _FALLBACK_WIDTH = 80
 #: Причина ошибки переносится не больше чем на столько строк.
 ERROR_MAX_ROWS = 3
 _DONE = OUTCOMES["completed"]
+_STOP_GLYPH = OUTCOMES["cancelled"].glyph
 
 
 def format_turn_summary(files: int, add: int, del_: int) -> str | None:
@@ -262,6 +267,8 @@ class ThinkingIndicator(Static):
             started_at if started_at is not None else clock()
         )
         self._frame: int = 0
+        # Кадр мигания «останавливаю» — свой счёт, без обёртки цикла дыхания.
+        self._blink_frame: int = 0
         self._state: str = state
         self._frozen_elapsed: int | None = frozen_elapsed
         self._turn_summary: str | None = (
@@ -351,6 +358,7 @@ class ThinkingIndicator(Static):
             _STATE_PROCESSING,
             _STATE_DONE,
             _STATE_CANCELLED,
+            _STATE_STOPPING,
             _STATE_INTERRUPTED,
             _STATE_FAILED,
             _STATE_STOPPED_STEPS,
@@ -363,6 +371,7 @@ class ThinkingIndicator(Static):
         if self._state == state:
             return
         self._state = state
+        self._blink_frame = 0
         self._sync_error_class()
         if state == _STATE_DONE and self._frozen_elapsed is None:
             self._frozen_elapsed = int(self._clock() - self._started_at)
@@ -422,6 +431,7 @@ class ThinkingIndicator(Static):
         except Exception:
             pass
         self._frame = (self._frame + 1) % _ANIM_PERIOD
+        self._blink_frame += 1
         # render() читает _frame динамически — достаточно запросить refresh.
         # Guard `is_mounted` — в юнит-тестах _tick дёргается без app-контекста.
         if self.is_mounted:
@@ -555,6 +565,11 @@ class ThinkingIndicator(Static):
         # состояниях его нет, и след прошлой отрисовки обязан пропасть вместе
         # с ним — иначе клик попал бы в пустоту на месте старых цифр.
         self._summary_span = None
+        if self._state == _STATE_STOPPING:
+            # Мигает исчезая: в паузе — пустая клетка той же ширины.
+            on = blink_on(self._blink_frame)
+            text.append(_STOP_GLYPH if on else " ", style=_DIM)
+            return text
         if self._state == _STATE_DONE:
             text.append(_DONE.glyph, style=_DIM)
             text.append(" ")

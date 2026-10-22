@@ -5769,7 +5769,10 @@ class TraceScreen(Screen):
                 status=status,
                 stop_requested=getattr(runner, "_stop_requested", False),
             )
-            if term_state is not None and self._thinking is not None:
+            if self._thinking is not None and self._stopping_alive():
+                # Стоп запрошен, ход дорабатывает — мигающий глиф стопа.
+                self._thinking.show("stopping")
+            elif term_state is not None and self._thinking is not None:
                 # show, не set_state: стоп мог прийти, пока строка была
                 # скрыта на человеко-ожидании.
                 self._thinking.show(term_state)
@@ -7837,13 +7840,12 @@ class TraceScreen(Screen):
     def _stop_run_then_switch(self, target: str | None) -> None:
         """Обычный стоп (очередь — назад в поле), вопросы хода сняты;
         переход — когда ход кончится."""
-        if self._thinking is not None:
-            self._thinking.set_state("cancelled")
         if self._confirm_active:
             self._hide_confirm_banner()
         if self.app.tui_state.ask_human_state is not None:
             self._unmount_ask_human_banner()
         self._stop_and_replace_runner()
+        self._show_stop_state()
         self._pending_switch = (target,)
         self._continue_pending_switch()
 
@@ -7853,10 +7855,8 @@ class TraceScreen(Screen):
         начаться новый ход — тогда снова вопрос)."""
         if self._pending_switch is None:
             return
-        stopping = self._stopping_runner
-        if stopping is not None and stopping.is_running():
+        if self._stopping_alive():
             return
-        self._stopping_runner = None
         (target,) = self._pending_switch
         self._pending_switch = None
         self._settle_ended_run()
@@ -7912,9 +7912,8 @@ class TraceScreen(Screen):
             self._hide_confirm_banner()
             if runner is not None and runner.is_running():
                 # live agent-run confirm → also stop the run (Ctrl+C = abort)
-                if self._thinking is not None:
-                    self._thinking.set_state("cancelled")
                 self._stop_and_replace_runner()
+                self._show_stop_state()
             else:
                 # /init (or no live runner): parked worker now unblocked → cancel/deny
                 self._mount_trace_row(
@@ -7939,9 +7938,23 @@ class TraceScreen(Screen):
 
         # Normal interrupt: индикатор → терминальное «■ Отменено» (статус
         # [stopped] уже справа на той же строке), без отдельной [stopped]-строки.
-        if self._thinking is not None:
-            self._thinking.set_state("cancelled")
         self._stop_and_replace_runner()
+        self._show_stop_state()
+
+    def _stopping_alive(self) -> bool:
+        """Остановленный ход ещё дорабатывает (стоп кооперативный)."""
+        runner = self._stopping_runner
+        if runner is not None and not runner.is_running():
+            self._stopping_runner = runner = None
+        return runner is not None
+
+    def _show_stop_state(self) -> None:
+        """Строка итога стопа (решение 26): ход ещё дорабатывает — один
+        мигающий `■`, кончился — ровный «■ Отменено»."""
+        if self._thinking is not None:
+            self._thinking.set_state(
+                "stopping" if self._stopping_alive() else "cancelled"
+            )
 
     def _can_cancel_with_undo(self) -> bool:
         """Откат отправки: агент ничего не выдал, поле пустое, очереди нет.
@@ -8016,9 +8029,8 @@ class TraceScreen(Screen):
             return
         runner.cancel_ask_human()
         self._unmount_ask_human_banner()
-        if self._thinking is not None:
-            self._thinking.set_state("cancelled")
         self._stop_and_replace_runner()
+        self._show_stop_state()
 
     def _cancel_with_undo(self) -> None:
         """Откатить последний user-send: убрать user-widget, восстановить input.

@@ -14,11 +14,13 @@ async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
         # Живой runner — ДО индикатора: иначе тик опроса на паузе видит
         # простой без задачи и убирает индикатор (флап при запуске файла).
         class _R:
+            running = True
+
             def is_running(self):
-                return True
+                return self.running
 
             def stop(self):
-                pass
+                self.running = False  # ход кончился сразу: итог ровный
 
         scr.app.active_runner = _R()
         scr.app.tui_state.active_task_id = "t1"

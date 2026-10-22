@@ -12,11 +12,13 @@ async def test_cmd_stop_sets_indicator_cancelled():
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     class _FakeRunner:
+        running = True
+
         def is_running(self) -> bool:
-            return True
+            return self.running
 
         def stop(self) -> None:
-            pass
+            self.running = False  # ход кончился сразу: итог ровный
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen

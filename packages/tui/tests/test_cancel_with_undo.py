@@ -378,11 +378,13 @@ async def test_cancel_with_undo_skipped_when_events_present():
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
+        running = True
+
         def is_running(self) -> bool:
-            return True
+            return self.running
 
         def stop(self) -> None:
-            pass
+            self.running = False  # ход кончился сразу: итог ровный
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -407,11 +409,13 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
+        running = True
+
         def is_running(self) -> bool:
-            return True
+            return self.running
 
         def stop(self) -> None:
-            pass
+            self.running = False  # ход кончился сразу: итог ровный
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen

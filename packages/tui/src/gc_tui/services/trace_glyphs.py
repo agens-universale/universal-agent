@@ -12,3 +12,13 @@ CALL_UNDONE_GLYPH = "○"
 CALL_WAITING_GLYPH = "•"
 #: Ошибка вне строки вызова: итог хода «✕ Ошибка», `└ ✕ скилл … не найден`.
 ERROR_GLYPH = "✕"
+
+#: Ритм мигания живого глифа в кадрах 0.1с-тика (решение владельца):
+#: 0.5с виден, 0.7с скрыт. Общий для идущего вызова и останавливаемого хода.
+BLINK_ON_TICKS = 5
+BLINK_PERIOD_TICKS = 12
+
+
+def blink_on(frame: int) -> bool:
+    """Виден ли мигающий глиф в кадре `frame`."""
+    return frame % BLINK_PERIOD_TICKS < BLINK_ON_TICKS
