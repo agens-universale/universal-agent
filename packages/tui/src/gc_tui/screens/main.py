@@ -2358,7 +2358,8 @@ class TraceScreen(Screen):
         """После рестарта: смонтировать виджеты failed-реплик из
         meta.tui.pending_user_messages — но только truly-orphaned (не нашли
         соответствующего user-сообщения ни в meta.user_intent_log,
-        ни в self._task_events).
+        ни в self._task_events). Реплика очереди при живом прогоне
+        (пересборка ленты посреди хода) — снова в очереди, не failed.
 
         Source of truth — meta.user_intent_log (persisted across
         summarizations; user_ask-записи); legacy meta.user_messages_log и
@@ -2371,6 +2372,7 @@ class TraceScreen(Screen):
         records = (meta.get("tui") or {}).get("pending_user_messages", [])
         if not records:
             return
+        alive = self._run_in_progress()
         # Primary source: user_intent_log в meta (intent-модель master) — user_ask записи.
         delivered_wires = {
             rec.content.strip()
@@ -2421,23 +2423,46 @@ class TraceScreen(Screen):
                 if r_ts is not None and r_ts < latest_delivered_ts:
                     continue
             truly_orphaned.append(r)
+            waits = alive and bool(r.get("message_id"))
             kept_records.append(
                 {**r, "status": "failed"}
-                if r.get("status") == "pending"
+                if r.get("status") == "pending" and not waits
                 else r
             )
         for r in truly_orphaned:
-            content = r.get("content") or ""
-            if content:
-                self._mount_user_reply(
-                    content, state="failed", images=attachments_of(r)
-                )
-        if len(kept_records) != len(records) or any(
-            r.get("status") == "pending" for r in records
-        ):
+            self._mount_orphaned_reply(r, alive=alive)
+        self._refresh_queue_hint()
+        if kept_records != records:
             self._write_tui_meta(
                 task_id, {"pending_user_messages": kept_records}
             )
+
+    def _mount_orphaned_reply(self, record: dict, *, alive: bool) -> None:
+        """Реплика из meta, которой нет в треде. Отправленная в очередь
+        (у записи есть `message_id`) при живом прогоне ещё ждёт агента —
+        снова в очереди, её сверит тред. Иначе — `failed`."""
+        content = record.get("content") or ""
+        message_id = record.get("message_id") if alive else None
+        if not (content or message_id):
+            return
+        images = attachments_of(record)
+        if not message_id:
+            self._mount_user_reply(content, state="failed", images=images)
+            return
+        client_id = record.get("client_id")
+        if client_id:
+            self._pending_wire_cache[client_id] = (
+                record.get("wire_content") or ""
+            )
+        self._mount_user_reply(
+            content,
+            state="queued",
+            client_id=client_id,
+            images=images,
+            skill=record.get("skill"),
+            message_id=message_id,
+            restore_text=record.get("restore_text") or "",
+        )
 
     def _render_segments(self, segments: list[dict]) -> None:
         """Рендер ВСЕХ сегментов сырьём — полный трейс, без схлопывания старых
@@ -4828,8 +4853,13 @@ class TraceScreen(Screen):
         display_text: str,
         wire_content: str,
         images: tuple[Attachment, ...] = (),
+        queued: Optional[dict] = None,
     ) -> str:
         """Записать pending-реплику в meta.tui + положить в `_pending_user_widgets`.
+
+        ``queued`` — поля реплики в очереди (`message_id`, `restore_text`,
+        `skill`): по ним пересборка ленты во время хода монтирует её снова
+        в очереди (`_mount_orphaned_reply`).
 
         display_text — то, что показывает виджет (как ввёл юзер).
         wire_content — то, что executor запишет в .jsonl (может отличаться при
@@ -4855,6 +4885,8 @@ class TraceScreen(Screen):
         # с подстроками (визуальный контракт §3); ключ только при картинках.
         if images:
             record["attachments"] = [att.to_dict() for att in images]
+        if queued:
+            record.update(queued)
         existing = (self._store.get_task_meta(tid).get("tui") or {}).get(
             "pending_user_messages", []
         )
@@ -8088,8 +8120,14 @@ class TraceScreen(Screen):
             # Реплики родителя нет — итог доставки не ждёт следующую.
             self._pending_skill_marker = None
             return
+        queued = {"message_id": message["id"], "restore_text": restore_text}
+        if skill is not None:
+            queued["skill"] = skill
         client_id = self._track_pending(
-            display_text=display_text, wire_content=wire, images=images
+            display_text=display_text,
+            wire_content=wire,
+            images=images,
+            queued=queued,
         )
         self._mount_user_reply(
             display_text,

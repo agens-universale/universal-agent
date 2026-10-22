@@ -461,3 +461,51 @@ async def test_turn_end_not_withdrawn_becomes_pending(tmp_path):
         scr._poll_active()
         await pilot.pause()
         assert len(runner.withdrawn) == 2
+
+
+# --- пересборка ленты во время хода ------------------------------------------
+
+
+async def _rebuilt(pilot, tmp_path) -> _BusyRunner:
+    runner = await _two_queued(pilot, tmp_path)
+    pilot.app.screen._rebuild_from_store()
+    await pilot.pause()
+    _inp(pilot).focus()
+    await pilot.pause()
+    return runner
+
+
+@pytest.mark.asyncio
+async def test_rebuild_during_turn_keeps_queue(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        runner = await _rebuilt(pilot, tmp_path)
+        assert _texts(pilot) == ["первое", "второе"]
+        assert _hint_shown(_queued(pilot)[-1])
+        records = _pending_records(tmp_path)
+        assert [r["status"] for r in records] == ["pending", "pending"]
+        await _up(pilot)
+        assert runner.withdrawn == [runner.added[1]["id"]]
+        assert _inp(pilot).text == "второе"
+        assert _texts(pilot) == ["первое"]
+
+
+@pytest.mark.asyncio
+async def test_rebuild_during_turn_stop_returns_queue(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        await _rebuilt(pilot, tmp_path)
+        pilot.app.screen._cmd_stop()
+        await pilot.pause()
+        assert _inp(pilot).text == "первое\n\nвторое"
+        assert _queued(pilot) == []
+
+
+@pytest.mark.asyncio
+async def test_rebuild_then_admit_mounts_reply_once(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        await _rebuilt(pilot, tmp_path)
+        _admit(scr, "первое", 5)
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        replies = [(r._text, r.state) for r in trace.query(UserReplyContainer)]
+        assert replies == [("первое", "normal"), ("второе", "queued")]
