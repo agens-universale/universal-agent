@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Изменено — события лога: неразборный ответ модели и ошибка хода TUI
+
+- Событие `backend_responses_json_error` переименовано в `backend_bad_response`, поле `last_chunk` — в `body_head` (начало тела ответа). Событие пишется в обоих режимах (`api_mode`: `responses`, `chat_completions`), когда успешный по статусу ответ модели пустой или не JSON, и несёт ещё `status_code`, `content_type`, `length`. Фильтры и алерты по старому имени нужно перенастроить.
+- Новое событие `tui_run_error`: исключение хода в TUI пишется в лог прогона с трейсбеком (поле `error_type` — тип исключения); раньше в лог оно не попадало вовсе.
+
 ### Breaking — Temporal на контракте хранилища тредов v2
 
 - Под Temporal ядро пишет тред через контракт `ThreadStore` v2, как локально: хранилище воркера — любое v2 (`FileThreadStore` из `gc_core.threads.file_store`, `SQLiteThreadStore` из `gc_stores.sqlite`, `PostgresThreadStore`, своё — проверка `gc_testkit.thread_store_conformance_v2`). Activities треда — `universal_agent.thread.{get,read_stream,read_archive,resolve_alias,commit,append_side,claim,release,delete}` вместо `load`/`commit`/`read_trace`.
