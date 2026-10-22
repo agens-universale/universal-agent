@@ -31,7 +31,7 @@ class _Agent:
         self.executor.last_terminal_outcome = None
         self.executor._ctx = type("C", (), {})()
 
-    async def stream(self, prompt, thread_id=None, system=None):
+    async def stream(self, prompt, thread_id=None, system=None, **_kw):
         del prompt, thread_id, system
         yield ("answer", "итог")
 

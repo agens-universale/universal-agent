@@ -32,9 +32,16 @@ class FakeAgent:
         self.executor.last_terminal_outcome = None
         self.executor._ctx = type("C", (), {})()
 
-    async def stream(self, prompt, thread_id=None, system=None):
+    async def stream(
+        self, prompt, thread_id=None, system=None, cancel_target=None
+    ):
         self.calls.append(
-            {"prompt": prompt, "thread_id": thread_id, "system": system}
+            {
+                "prompt": prompt,
+                "thread_id": thread_id,
+                "system": system,
+                "cancel_target": cancel_target,
+            }
         )
         self.started.set()
         chunks = [("answer", "кусок")] if self.chunks is None else self.chunks
@@ -370,5 +377,9 @@ async def test_cancel_of_a_turn_run_by_another_instance(tmp_path):
         thread_key(thread_id), "control"
     )
     assert [e.data["type"] for e in control] == ["cancel"]
+    # Отмена называет ответ, а ход знает свою цель: отмена, легшая пока ход
+    # собирался, его тоже остановит.
+    assert control[0].data["target"] == handle.response_id
+    assert agent.calls[0]["cancel_target"] == handle.response_id
     agent.release.set()
     await _finished(handle)

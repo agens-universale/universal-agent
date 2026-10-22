@@ -101,3 +101,48 @@ async def test_cancel_does_not_touch_a_turn_for_a_later_message(
     assert _mentions(seen[0], "отменённое") == 0
     assert not ex.get_state().stop_requested
     assert await _inbox_seq(tmp_path) == 2
+
+
+async def test_message_after_the_cancel_is_played_in_the_same_turn(
+    monkeypatch, tmp_path
+):
+    """Отмена снимает сообщения до своей границы; пришедшее после неё —
+    уже новая работа: ход её делает сам, не дожидаясь восстановления."""
+    seen = _install(monkeypatch, _finish)
+    threads = Threads(FileThreadStore(tmp_path))
+    await threads.submit(KEY, {"role": "user", "content": "отменённое"})
+    await threads.request_cancel(KEY)
+    await threads.submit(KEY, {"role": "user", "content": "следующее"})
+    ex = await _executor(tmp_path)
+    await ex.arun([], thread_id=KEY.thread, system=KEY.system)
+    assert len(seen) == 1
+    assert _mentions(seen[0], "следующее") == 1
+    assert _mentions(seen[0], "отменённое") == 0
+    assert await _inbox_seq(tmp_path) == 2
+
+
+async def test_cancel_aimed_at_the_turn_stops_it_while_it_is_built(
+    monkeypatch, tmp_path
+):
+    """Отмена ответа chat или задачи A2A с другого инстанса называет свою
+    цель: ход с этой целью останавливается, даже если отмена легла, пока он
+    собирался (сообщения хода — не входящий поток, границы у неё нет)."""
+    seen = _install(monkeypatch, _finish)
+    threads = Threads(FileThreadStore(tmp_path))
+    await threads.request_cancel(KEY, target="resp_1")
+    ex = await _executor(tmp_path)
+    await ex.arun(
+        ["сделай"],
+        thread_id=KEY.thread,
+        system=KEY.system,
+        cancel_target="resp_1",
+    )
+    assert seen == []
+    other = await _executor(tmp_path)
+    await other.arun(
+        ["сделай"],
+        thread_id=KEY.thread,
+        system=KEY.system,
+        cancel_target="resp_2",
+    )
+    assert len(seen) == 1

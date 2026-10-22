@@ -19,7 +19,7 @@ class _Agent:
         self.executor._ctx = type("C", (), {})()
         self.calls: list[dict] = []
 
-    async def stream(self, prompt, thread_id=None, system=None):
+    async def stream(self, prompt, thread_id=None, system=None, **_kw):
         self.calls.append({"prompt": prompt, "system": system})
         yield ("answer", "ответ")
 
@@ -139,7 +139,7 @@ def test_non_stream_failure_is_500(tmp_path):
     threads.mkdir()
 
     class Boom(_Agent):
-        async def stream(self, prompt, thread_id=None, system=None):
+        async def stream(self, prompt, thread_id=None, system=None, **_kw):
             raise RuntimeError("boom")
             yield ("answer", "")
 

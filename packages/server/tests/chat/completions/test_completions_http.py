@@ -22,7 +22,7 @@ class _Agent:
         self.seeded: list[str] = []
         self.last = "итог"
 
-    async def stream(self, prompt, thread_id=None, system=None):
+    async def stream(self, prompt, thread_id=None, system=None, **_kw):
         self.calls.append(
             {"prompt": prompt, "thread_id": thread_id, "system": system}
         )
