@@ -391,7 +391,11 @@ class TestToolEndResultFacts:
         pr = _patch_process(
             monkeypatch,
             apply_return=json.dumps(
-                {"ok": False, "error": {"reason": "не принят"}}
+                {
+                    "ok": False,
+                    "status": "step_limit",
+                    "error": {"type": "x", "reason": "не принят"},
+                }
             ),
         )
         sink = QueueSubagentProgressSink()
@@ -412,3 +416,6 @@ class TestToolEndResultFacts:
         (event,) = sink.drain()
         assert event.ok is False
         assert event.error_brief == "не принят"
+        # Факты исхода — только у `tool_end`: реплика — не вызов тула.
+        assert event.result_status is None
+        assert event.result_error is None
