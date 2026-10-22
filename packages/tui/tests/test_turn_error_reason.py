@@ -43,6 +43,19 @@ def test_long_reason_is_cut():
     assert reason.endswith("…")
 
 
+def test_reason_masks_secrets():
+    """Ключ в первой строке (адрес с ключом, заголовок) маскируется общим
+    редактором секретов ядра — и в meta, и на экране."""
+    from gc_core.security.log_redaction import MASK
+    from gc_tui.services.turn_error import describe_turn_error
+
+    key = "sk-" + "a1B2c3D4e5F6g7H8i9J0"
+    exc = _ReadError(f"401 for https://api.example/v1?key={key}")
+    reason = describe_turn_error(exc)
+    assert key not in reason
+    assert reason == f"_ReadError: 401 for https://api.example/v1?key={MASK}"
+
+
 def _styles_of(text, fragment: str) -> list[str]:
     return [
         str(s.style)
