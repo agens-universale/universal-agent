@@ -1,7 +1,9 @@
 """Задачи A2A и настройки push — в хранилище тредов, видны с любого инстанса.
 
-Задача лежит в состоянии фронтенда ``a2a`` треда диалога (``system="a2a"``,
-тред — ``contextId``) под ключом ``task:<id>``; ``taskId`` находит тред
+Задача — записи потока ``a2a.tasks`` треда диалога (``system="a2a"``, тред
+— ``contextId``): снимок на каждое изменение. Состояние фронтенда ``a2a``
+держит малый индекс ``task:<id>`` → ``seq`` последнего снимка (а также
+очередь диалога и его корень — ``executor``); ``taskId`` находит тред
 алиасом ``a2a-task:<id>``. Настройки push задачи приходят раньше самой
 задачи (в ``SendMessage``), поэтому лежат в своём треде ``push-<taskId>``.
 """
@@ -12,20 +14,29 @@ import uuid
 from typing import Any
 
 from a2a.server.context import ServerCallContext
-from a2a.server.tasks import InMemoryTaskStore, TaskStore
+from a2a.server.tasks import TaskStore
 from a2a.server.tasks.push_notification_config_store import (
     PushNotificationConfigStore,
     normalize_push_notification_config,
 )
 from a2a.types import a2a_pb2 as pb
+from a2a.utils.constants import DEFAULT_LIST_TASKS_PAGE_SIZE
+from a2a.utils.errors import InvalidParamsError
+from a2a.utils.task import (
+    ListTasksCursor,
+    decode_list_tasks_cursor,
+    encode_list_tasks_cursor,
+)
 from gc_core.threads.facade import Threads
-from gc_core.threads.models import SideChange, ThreadKey
+from gc_core.threads.models import SideChange, ThreadKey, ThreadRecord
 from google.protobuf.json_format import MessageToDict, ParseDict
 
 SYSTEM = "a2a"
 FRONTEND = "a2a"
+#: Снимки задач диалога.
+TASKS_STREAM = "a2a.tasks"
 _PUSH = "a2a_push"
-_TASK_PREFIX = "task:"
+TASK_PREFIX = "task:"
 
 
 def task_alias(task_id: str) -> str:
@@ -40,6 +51,16 @@ def _op(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
 
 
+def task_index(record: ThreadRecord | None) -> dict[str, Any]:
+    """Индекс задач диалога: ``task_id`` → ``seq`` последнего снимка."""
+    state = (record.frontend.get(FRONTEND) or {}) if record else {}
+    return {
+        name[len(TASK_PREFIX) :]: value
+        for name, value in state.items()
+        if name.startswith(TASK_PREFIX) and value is not None
+    }
+
+
 class ThreadTaskStore(TaskStore):
     """``TaskStore`` SDK поверх хранилища тредов."""
 
@@ -48,16 +69,21 @@ class ThreadTaskStore(TaskStore):
 
     async def save(self, task: pb.Task, context: ServerCallContext) -> None:
         del context
-        await self._threads.store.append_side(
-            dialog_key(task.context_id),
+        key = dialog_key(task.context_id)
+        receipt = await self._threads.store.append_side(
+            key,
             SideChange(
                 op_id=_op("a2a_task"),
-                patch_frontend=(
-                    FRONTEND,
-                    {_TASK_PREFIX + task.id: MessageToDict(task)},
-                ),
+                append=[(TASKS_STREAM, [MessageToDict(task)])],
                 add_aliases=[task_alias(task.id)],
             ),
+        )
+        # Индекс — отдельной записью: номер снимка известен после записи.
+        # Упади процесс между ними — индекс укажет прежний снимок задачи.
+        await self._threads.update_frontend(
+            key,
+            FRONTEND,
+            {TASK_PREFIX + task.id: receipt.max_seq.get(TASKS_STREAM)},
         )
 
     async def get(
@@ -68,30 +94,108 @@ class ThreadTaskStore(TaskStore):
         if key is None:
             return None
         record = await self._threads.get(key)
-        state = (record.frontend.get(FRONTEND) or {}) if record else {}
-        return _parse(state.get(_TASK_PREFIX + task_id))
+        return await self.at(key, task_index(record).get(task_id))
+
+    async def at(self, key: ThreadKey, position: Any) -> pb.Task | None:
+        """Снимок задачи по записи индекса (одно чтение потока)."""
+        if not isinstance(position, int) or position < 1:
+            return None
+        entries = await self._threads.store.read_stream(
+            key, TASKS_STREAM, after_seq=position - 1, limit=1
+        )
+        if not entries or entries[0].seq != position:
+            return None
+        return _parse(entries[0].data)
 
     async def list(
         self, params: pb.ListTasksRequest, context: ServerCallContext
     ) -> pb.ListTasksResponse:
-        # Фильтры и страницы — как у хранилища SDK в памяти: те же правила
-        # порядка и курсора.
-        view = InMemoryTaskStore()
-        async for record in self._threads.iter_threads(system=SYSTEM):
-            state = record.frontend.get(FRONTEND) or {}
-            for name, raw in state.items():
-                task = _parse(raw) if name.startswith(_TASK_PREFIX) else None
+        del context
+        tasks = [
+            task
+            for task in await self._tasks(params.context_id or None)
+            if _matches(task, params)
+        ]
+        # Порядок и курсор страниц — как у хранилища SDK в памяти.
+        tasks.sort(key=_sort_key, reverse=True)
+        start = _start(tasks, params.page_token)
+        size = params.page_size or DEFAULT_LIST_TASKS_PAGE_SIZE
+        page = tasks[start : start + size]
+        more = start + size < len(tasks)
+        return pb.ListTasksResponse(
+            next_page_token=(
+                encode_list_tasks_cursor(_cursor(page[-1])) if more else None
+            ),
+            tasks=page,
+            page_size=size,
+            total_size=len(tasks),
+        )
+
+    async def _tasks(self, context_id: str | None) -> list[pb.Task]:
+        """Последние снимки задач: обход индексов диалогов."""
+        if context_id is not None:
+            record = await self._threads.get(dialog_key(context_id))
+            records = [record] if record is not None else []
+        else:
+            records = [
+                record
+                async for record in self._threads.iter_threads(system=SYSTEM)
+            ]
+        tasks = []
+        for record in records:
+            for position in task_index(record).values():
+                task = await self.at(record.key, position)
                 if task is not None:
-                    await view.save(task, context)
-        return await view.list(params, context)
+                    tasks.append(task)
+        return tasks
 
     async def delete(self, task_id: str, context: ServerCallContext) -> None:
         del context
         key = await self._threads.resolve(task_alias(task_id))
         if key is not None:
             await self._threads.update_frontend(
-                key, FRONTEND, {_TASK_PREFIX + task_id: None}
+                key, FRONTEND, {TASK_PREFIX + task_id: None}
             )
+
+
+def _matches(task: pb.Task, params: pb.ListTasksRequest) -> bool:
+    if params.status and task.status.state != params.status:
+        return False
+    if params.HasField("status_timestamp_after"):
+        after = params.status_timestamp_after.ToNanoseconds()
+        stamped = task.HasField("status") and task.status.HasField("timestamp")
+        if not stamped or task.status.timestamp.ToNanoseconds() < after:
+            return False
+    return True
+
+
+def _sort_key(task: pb.Task) -> tuple[bool, int, str]:
+    stamped = task.HasField("status") and task.status.HasField("timestamp")
+    return (
+        stamped,
+        task.status.timestamp.ToNanoseconds() if stamped else 0,
+        task.id,
+    )
+
+
+def _cursor(task: pb.Task) -> ListTasksCursor:
+    stamped, timestamp_ns, task_id = _sort_key(task)
+    return ListTasksCursor(
+        timestamp_ns=timestamp_ns if stamped else None, task_id=task_id
+    )
+
+
+def _start(tasks: list[pb.Task], page_token: str) -> int:
+    if not page_token:
+        return 0
+    cursor = decode_list_tasks_cursor(page_token)
+    if cursor is None:
+        raise InvalidParamsError(message="page_token: битый курсор страницы")
+    after = cursor.sort_key()
+    return next(
+        (i for i, task in enumerate(tasks) if _sort_key(task) < after),
+        len(tasks),
+    )
 
 
 class ThreadPushConfigStore(PushNotificationConfigStore):

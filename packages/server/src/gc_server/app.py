@@ -88,11 +88,16 @@ class ServerRuntime:
         return ResponseIndex(self.threads())
 
     def agent_factory(
-        self, settings: LoadedSettings, *, surface: str | None = None
+        self,
+        settings: LoadedSettings,
+        *,
+        surface: str | None = None,
+        ask_human_suspends: bool = False,
     ) -> Callable[..., Any]:
         """Фабрика агентов фасадов chat и a2a: создание — по одному (MCP-
         дискавери не размножается), хранилища — процесса (свой агент
-        поверхности ``surface``, если задан)."""
+        поверхности ``surface``, если задан). ``ask_human_suspends`` —
+        вопрос модели завершает ход (A2A)."""
         force_legacy = cli_forces_legacy_model(settings)
 
         async def factory(
@@ -109,6 +114,7 @@ class ServerRuntime:
                     tools_cache=tools_cache,
                     os_backend=os_backend,
                     force_legacy=force_legacy,
+                    ask_human_suspends=ask_human_suspends,
                     **self.store_kwargs(surface),
                 )
 
