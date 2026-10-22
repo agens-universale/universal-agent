@@ -7,7 +7,6 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import asyncio
-import functools
 import gc
 import logging
 import threading
@@ -18,8 +17,8 @@ from typing import Any, Optional
 from gc_core.agent_edits.snapshots import purge_thread_snapshots
 from gc_core.attachments.model import Attachment, attachments_of
 from gc_core.attachments.store import (
-    commit_to_run_thread,
-    with_committed_attachments,
+    acommit_to_run_thread,
+    awith_committed_attachments,
 )
 from gc_core.auto_routing import state_ops
 from gc_core.config_modules.stored_outputs import (
@@ -211,15 +210,24 @@ def undelivered_as_arun_args(messages: list[dict]) -> tuple[list[str], dict]:
     }
 
 
-def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
-    """Вложения ``i``-го сообщения прогона — в ``msg["attachments"]`` словарями: каждое
-    проходит через ``commit`` (копия в тред прогона), ``commit=None`` — как есть, в
-    кармане. Нет вложений — ключа нет."""
+def _put_attachments(msg: dict, attachments, i: int) -> None:
+    """Вложения ``i``-го сообщения прогона — в ``msg["attachments"]`` словарями
+    (уже скопированные в тред прогона или в кармане). Нет вложений — ключа
+    нет."""
     atts = attachments[i] if attachments and i < len(attachments) else None
     if atts:
-        msg["attachments"] = [
-            (commit(a) if commit is not None else a).to_dict() for a in atts
-        ]
+        msg["attachments"] = [a.to_dict() for a in atts]
+
+
+async def _acommit_attachments(ctx: Any, attachments) -> Any:
+    """Вложения сообщений запуска — копиями в тред прогона
+    (``acommit_to_run_thread``), по сообщениям, как пришли."""
+    if not attachments:
+        return attachments
+    return [
+        [await acommit_to_run_thread(ctx, a) for a in atts] if atts else atts
+        for atts in attachments
+    ]
 
 
 #: Как часто продлевать аренду треда во время хода: треть срока — два
@@ -527,7 +535,7 @@ class AgentExecutor:
             self._pending_messages = []
             return out
 
-    def _take_pending_messages(self) -> list[dict]:
+    async def _atake_pending_messages(self) -> list[dict]:
         with self._lock:
             out = self._pending_messages[:]
             self._pending_messages.clear()
@@ -537,9 +545,9 @@ class AgentExecutor:
         # стартовое: снимает паузу судьи и посреди прогона.
         if state is not None:
             self._lift_judge_pause(state, out)
-        # Вне замка: копия картинок в тред — файловая операция, а замок ждут
-        # поток TUI и обработчик сервера.
-        return self._commit_queued(out)
+        # Вне замка: копия картинок в тред — ввод-вывод хранилища, а замок
+        # ждут поток TUI и обработчик сервера.
+        return await self._acommit_queued(out)
 
     def _is_stop_requested(self) -> bool:
         with self._lock:
@@ -1318,7 +1326,7 @@ class AgentExecutor:
         attachments — вложения по сообщениям, параллельно messages (как
         display_contents): элемент — картинки своего сообщения из кармана
         процесса (``ImageStore.stage``) или None. В тред их копирует сам ход
-        (``commit_to_run_thread``); текст сообщения остаётся строкой с
+        (``acommit_to_run_thread``); текст сообщения остаётся строкой с
         плашками ``[Изображение #N]``.
 
         Форма ОДНА. Синхронного ``run`` нет: из синхронного кода агента
@@ -1545,7 +1553,7 @@ class AgentExecutor:
         # Копия вложений в тред — здесь и при приёме очереди, и только после
         # сброса треда и привязки его адреса к контексту выше: копия, сделанная
         # до сброса, пропала бы вместе с тредом.
-        commit_attachment = functools.partial(commit_to_run_thread, self._ctx)
+        committed = await _acommit_attachments(self._ctx, request.attachments)
         # id можно задать снаружи (TUI пробрасывает свой, чтобы потом точечно
         # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
         new_user_messages = self._build_user_messages(
@@ -1554,8 +1562,7 @@ class AgentExecutor:
             display_contents=request.display_contents,
             skills_loaded=request.skills_loaded,
             gen_id=generate_message_id_func,
-            attachments=request.attachments,
-            commit=commit_attachment,
+            attachments=committed,
         )
         new_user_messages.extend(inbox_tail)
         self._seed_current_user_intent(state, new_user_messages)
@@ -1604,7 +1611,7 @@ class AgentExecutor:
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
-        queued_before_loop = self._take_pending_messages()
+        queued_before_loop = await self._atake_pending_messages()
         if queued_before_loop:
             messages = [*messages, *queued_before_loop]
         try:
@@ -1622,7 +1629,7 @@ class AgentExecutor:
                 pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
                 force_compact_hook=summary.aforce_compact_once,
-                get_pending_messages=self._take_pending_messages,
+                get_pending_messages=self._atake_pending_messages,
                 check_stop=self._is_stop_requested,
                 session_meta=(
                     thread_session.notice
@@ -1898,12 +1905,11 @@ class AgentExecutor:
         skills_loaded,
         gen_id,
         attachments=None,
-        commit=None,
     ):
         """Собрать user-сообщения с опциональными display_content/skill_loaded/attachments.
         display_content ставится только при отличии от content; skill_loaded — если задан;
-        attachments — если у сообщения есть вложения: каждое проходит через ``commit``
-        (копия в тред прогона), ``commit=None`` — вложения как есть, в кармане."""
+        attachments — если у сообщения есть вложения (уже скопированные в тред
+        прогона либо в кармане)."""
         out = []
         for i, body in enumerate(user_bodies):
             body = str(body)
@@ -1930,14 +1936,16 @@ class AgentExecutor:
             )
             if sk:
                 msg["skill_loaded"] = sk
-            _put_attachments(msg, attachments, i, commit)
+            _put_attachments(msg, attachments, i)
             out.append(msg)
         return out
 
-    def _commit_queued(self, messages: list[dict]) -> list[dict]:
+    async def _acommit_queued(self, messages: list[dict]) -> list[dict]:
         """Сообщения очереди с вложениями, переложенными в тред прогона: сообщение
         получает тред, когда его принимает агент, — здесь и копируем его картинки."""
-        return [with_committed_attachments(m, self._ctx) for m in messages]
+        return [
+            await awith_committed_attachments(m, self._ctx) for m in messages
+        ]
 
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.

@@ -31,7 +31,7 @@ from gc_core.attachments.store import (
     STAGING_DIRNAME,
     ImageStore,
     amake_attachment,
-    commit_to_run_thread,
+    acommit_to_run_thread,
 )
 from gc_core.security.media_roots import media_roots
 from gc_testkit.settings import make_settings
@@ -230,11 +230,11 @@ def test_commit_copies_into_the_thread_and_is_idempotent(tmp_path):
     assert store.commit(staged, "CLI", "t1") == committed
 
 
-def test_commit_to_run_thread_copies_into_the_bound_thread(tmp_path):
+async def test_commit_to_run_thread_copies_into_the_bound_thread(tmp_path):
     store = ImageStore(str(tmp_path), pid=111)
     staged = _stage(store)
     ctx = SimpleNamespace(image_store=store, system_id="cli", thread_id="t1")
-    assert commit_to_run_thread(ctx, staged) == store.commit(
+    assert await acommit_to_run_thread(ctx, staged) == store.commit(
         staged, "cli", "t1"
     )
 
@@ -250,11 +250,13 @@ def test_commit_to_run_thread_copies_into_the_bound_thread(tmp_path):
         },  # контекст без хранилища
     ],
 )
-def test_commit_to_run_thread_keeps_the_pocket_attachment(tmp_path, fields):
+async def test_commit_to_run_thread_keeps_the_pocket_attachment(
+    tmp_path, fields
+):
     store = ImageStore(str(tmp_path), pid=111)
     staged = _stage(store)
     ctx = SimpleNamespace(**{"image_store": store, **fields})
-    assert commit_to_run_thread(ctx, staged) == staged
+    assert await acommit_to_run_thread(ctx, staged) == staged
 
 
 def test_commit_without_the_pocket_file_keeps_the_attachment(tmp_path):

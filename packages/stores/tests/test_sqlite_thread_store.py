@@ -1,5 +1,5 @@
 """``SQLiteThreadStore`` проходит конформанс контракта v2 и набор пути хода
-(сессия агента поверх него); файлы треда живут в базе."""
+(сессия агента поверх него); картинки треда — вложения в базе."""
 
 import os
 from datetime import timedelta
@@ -7,6 +7,7 @@ from datetime import timedelta
 import pytest
 from gc_core.threads.models import LeaseRequest, ThreadKey
 from gc_stores.sqlite import SQLiteThreadStore
+from gc_stores.sqlite.database import connect
 from gc_testkit.session_checks import CHECKS as SESSION_CHECKS
 from gc_testkit.session_checks import aassert_session_works
 from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
@@ -33,15 +34,20 @@ async def test_session_over_sqlite_works(tmp_path):
     assert passed == [check.__name__ for check in SESSION_CHECKS]
 
 
-async def test_thread_files_live_in_the_database(tmp_path):
-    """Картинки ядра (``thread-file://``) — в базе треда, удаляются с ним."""
+async def test_thread_images_live_in_the_database(tmp_path):
+    """Картинки ядра — вложения треда (``put_blob``, ссылка
+    ``thread-file://``) в базе, удаляются с ним; синхронной возможности
+    файлов треда у хранилища больше нет."""
+    from gc_core.thread_files import blob_ref_of
+
     store = SQLiteThreadStore(tmp_path / "t.db")
     await store.claim(KEY, LeaseRequest(owner="a", ttl=timedelta(minutes=1)))
-    store.write_thread_file("cli", "lite", "images/a.png", b"\x89PNG")
-    assert store.read_thread_file("cli", "lite", "images/a.png") == b"\x89PNG"
-    assert store.read_thread_file("cli", "lite", "images/none.png") is None
+    ref = await store.put_blob(KEY, b"\x89PNG", mime="image/png")
+    assert await store.get_blob(blob_ref_of(ref.location)) == b"\x89PNG"
     await store.delete(KEY, op_id="d")
-    assert store.read_thread_file("cli", "lite", "images/a.png") is None
+    with pytest.raises(FileNotFoundError):
+        await store.get_blob(ref)
+    assert not hasattr(store, "write_thread_file")
 
 
 def test_protected_paths_cover_the_journals(tmp_path):
@@ -61,7 +67,7 @@ async def test_database_is_private_to_its_owner(tmp_path):
     store = SQLiteThreadStore(path)
     await store.claim(KEY, LeaseRequest(owner="a", ttl=timedelta(minutes=1)))
     # Журналы WAL живут, пока открыто соединение.
-    conn = store._connect()
+    conn = connect(store.path)
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("DELETE FROM gc_receipts WHERE 0")

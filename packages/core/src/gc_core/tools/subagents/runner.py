@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from gc_core.agent_store import Prompt, agent_store_of, aread_or_none
-from gc_core.attachments.store import with_committed_attachments
+from gc_core.attachments.store import awith_committed_attachments
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.levels import (
     auto_available,
@@ -125,6 +125,14 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
         if isinstance(content, str):
             return content
     return ""
+
+
+async def _adrain_with_attachments(scope: Any, child_ctx: Any) -> list:
+    """Реплики очереди субагента — как у родителя: картинки из кармана
+    процесса переезжают в тред."""
+    return [
+        await awith_committed_attachments(m, child_ctx) for m in scope.drain()
+    ]
 
 
 async def _drain_trace_writes(
@@ -855,8 +863,8 @@ class SubagentRunner:
                 message: Dict[str, Any], prose: str
             ) -> None:
                 payload: Dict[str, Any] = {"role": "user", "content": prose}
-                attachments = with_committed_attachments(
-                    message, child_ctx
+                attachments = (
+                    await awith_committed_attachments(message, child_ctx)
                 ).get("attachments")
                 if attachments:
                     payload["attachments"] = attachments
@@ -908,10 +916,9 @@ class SubagentRunner:
                     session_meta=child_meta,
                     # Приём реплик из очереди — как у родителя: картинки
                     # из кармана процесса переезжают в тред.
-                    get_pending_messages=lambda: [
-                        with_committed_attachments(m, child_ctx)
-                        for m in scope.drain()
-                    ],
+                    get_pending_messages=partial(
+                        _adrain_with_attachments, scope, child_ctx
+                    ),
                 )
             finally:
                 # Колбэк снимается ПЕРВЫМ делом: пока он вооружён, чужой поток
