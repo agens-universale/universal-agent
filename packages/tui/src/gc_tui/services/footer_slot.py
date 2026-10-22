@@ -51,6 +51,12 @@ IMAGE_PASTE_REFUSALS = {
 # ↑ в пустом поле: реплику из очереди ядро уже впустило (спека P3 §2.4).
 QUEUE_ADMITTED_HINT = "сообщение уже у агента — изменить нельзя"
 
+# Ход другой сессии (решение 24): агент один на приложение — Enter, Esc и
+# Ctrl+C открытой сессии его не трогают.
+OTHER_SESSION_RUN_REFUSAL = (
+    "в другой сессии идёт ход — дождитесь окончания или вернитесь в неё"
+)
+
 RETENTION_DETAIL_HINT = "детали вне окна retention; /export или архив"
 NESTED_NO_DETAIL = "нет args/output для этого nested-тула"
 
@@ -72,6 +78,7 @@ TRUNCATABLE = frozenset(
         IMAGES_WITH_COMMAND_REFUSAL,
         RETENTION_DETAIL_HINT,
         COPY_REFUSAL_BAD_N,
+        OTHER_SESSION_RUN_REFUSAL,
     }
 )
 
