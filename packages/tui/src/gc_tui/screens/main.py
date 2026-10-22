@@ -3053,6 +3053,9 @@ class TraceScreen(Screen):
         if available != self._trace_max_height:
             self._trace_max_height = available
             trace.styles.max_height = available
+            # Ряд плашки считается от потолка: она переезжает в той же
+            # перерисовке, что и лента с баром (S10 §4.2).
+            self._refresh_trace_overlays()
 
     @staticmethod
     def _chrome_height(widget) -> int:
@@ -3131,11 +3134,14 @@ class TraceScreen(Screen):
         """Ряд плашки «в конец» (S10 §4.2) — над баннером или полем ввода:
         пока бар стоит — его нижний ряд, под индикатором хода; без бара —
         нижний зазор ленты. Поле ввода баннеры прячут, поэтому опора — не
-        оно."""
+        оно. Плашка видна только у прокручиваемой ленты, её высота — потолок;
+        ряд считается от него, а не от `region` прошлой раскладки: баннер,
+        сменивший потолок, не застанет плашку на своей строке."""
         bar = self.query_one(_SEL_INDICATOR_BAR, Vertical)
-        if bar.has_class(_BAR_TURN):
-            return bar.region.bottom - 1
-        return trace.region.bottom
+        lift = _TRACE_GAP + _BAR_HEIGHT - 1 if bar.has_class(_BAR_TURN) else 0
+        if self._trace_max_height is None:
+            return trace.region.bottom + lift
+        return trace.region.y + self._trace_max_height + lift
 
     def _trace_replies(self, trace: VerticalScroll) -> list:
         """Реплики верхнего уровня ленты по порядку. Кэшируется только
@@ -4173,6 +4179,7 @@ class TraceScreen(Screen):
             parent_row.pause()
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
         self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
+        self.call_after_refresh(self._sync_trace_max_height)
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         self._sync_input_placeholder()
         inp.add_class("ask-human-mode")
