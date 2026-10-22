@@ -105,3 +105,24 @@ async def test_stop_blinks_glyph_until_run_ends(tmp_path):
         scr._poll_active()
         await pilot.pause()
         assert set(_frames(scr._thinking)) == {_DONE_LINE}
+
+
+@pytest.mark.asyncio
+async def test_next_run_outcome_not_covered_by_old_stop_blink(tmp_path):
+    """Старый поток ещё дорабатывает, а новый ход того же треда кончился:
+    строка — итог нового хода, не мигание прошлого стопа."""
+    async with _app(tmp_path).run_test() as pilot:
+        scr, old = await _run_in_a(pilot)
+        scr._cmd_stop()
+        await pilot.pause()
+        assert old.is_running()  # поток стопа ещё жив
+        scr._prepare_for_new_run()
+        scr._reset_thinking_timer()
+        new = _SlowRunner(_A)
+        pilot.app.active_runner = new
+        scr._poll_active()
+        new.running = False  # новый ход кончился сам
+        scr._poll_active()
+        await pilot.pause()
+        assert old.is_running()
+        assert scr._thinking._render_text().plain.startswith("✓ Выполнил")

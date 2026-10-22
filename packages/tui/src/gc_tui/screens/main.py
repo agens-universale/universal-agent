@@ -5143,6 +5143,9 @@ class TraceScreen(Screen):
         self._reset_run_flags()
         self._stamp_tui_running()
         self._run_pending = True
+        # Строка итога — уже нового хода: мигание прошлого стопа её не
+        # перекрывает, даже пока поток того хода дорабатывает.
+        self._stopping_runner = None
 
     def _settle_ended_run(self) -> None:
         """Прогон кончился — исход в его тред (`_on_run_finished`), ровно раз.
