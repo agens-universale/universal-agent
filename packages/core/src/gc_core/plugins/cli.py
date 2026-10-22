@@ -22,13 +22,24 @@ def _build() -> argparse.ArgumentParser:
     p.add_argument(
         "--force", action="store_true", help="заменить установленный"
     )
+    p.add_argument(
+        "--yes", "-y", action="store_true", help="не спрашивать подтверждение"
+    )
     for name, text in (
         ("uninstall", "удалить"),
         ("enable", "включить"),
         ("disable", "выключить (файлы остаются)"),
         ("update", "обновить из источника"),
     ):
-        sub.add_parser(name, help=text).add_argument("name")
+        q = sub.add_parser(name, help=text)
+        q.add_argument("name")
+        if name == "update":
+            q.add_argument(
+                "--yes",
+                "-y",
+                action="store_true",
+                help="не спрашивать подтверждение",
+            )
     sub.add_parser("list", help="список установленных")
     return parser
 
@@ -40,22 +51,44 @@ def _row(p: installed.InstalledPlugin) -> str:
     return f"{state} {p.name} {p.version}  {p.source}{ref} {pin}".rstrip()
 
 
+def _confirm(prepared: installed.PreparedInstall, yes: bool) -> bool:
+    """Показать, что плагин запускает, и спросить; без TTY нужен ``--yes``."""
+    plugin = prepared.plugin
+    print(f"плагин {plugin.name} {plugin.version} запускает:")
+    for line in prepared.summary():
+        print(f"  {line}")
+    if yes:
+        return True
+    if not sys.stdin.isatty():
+        raise ValueError("нет TTY: подтвердите установку флагом --yes")
+    return input("Установить? [y/N] ").strip().lower() in (
+        "y",
+        "yes",
+        "д",
+        "да",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build().parse_args(argv)
     try:
         if args.cmd == "install":
-            info = installed.install(
-                args.source,
-                ref=args.ref,
-                subdir=args.subdir,
-                force=args.force,
-            )
+            with installed.prepare(
+                args.source, ref=args.ref, subdir=args.subdir
+            ) as prepared:
+                if not _confirm(prepared, args.yes):
+                    print("установка отменена", file=sys.stderr)
+                    return 1
+                info = prepared.commit(args.force)
             print(f"установлен: {_row(info)}")
         elif args.cmd == "list":
             rows = installed.list_installed()
             print("\n".join(_row(p) for p in rows) or "плагинов нет")
         elif args.cmd == "update":
-            info = installed.update(installed.resolve_name(args.name))
+            info = installed.update(
+                installed.resolve_name(args.name),
+                confirm=lambda prepared: _confirm(prepared, args.yes),
+            )
             if info is None:
                 print(f"не установлен: {args.name}", file=sys.stderr)
                 return 1

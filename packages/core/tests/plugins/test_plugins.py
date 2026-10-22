@@ -864,7 +864,7 @@ def test_gc_plugin_cli_roundtrip(tmp_path, capsys):
     from gc_core.plugins import cli
 
     src = _make_plugin(tmp_path, with_skill=True, name="cli-demo")
-    assert cli.main(["install", str(src)]) == 0
+    assert cli.main(["install", "--yes", str(src)]) == 0
     assert cli.main(["list"]) == 0
     assert "cli-demo" in capsys.readouterr().out
     assert cli.main(["disable", "cli-demo"]) == 0
@@ -876,12 +876,91 @@ def test_cli_accepts_source_as_name(tmp_path, capsys):
     from gc_core.plugins import cli, installed
 
     src = _make_plugin(tmp_path, with_skill=True, name="by-src")
-    assert cli.main(["install", str(src)]) == 0
+    assert cli.main(["install", "--yes", str(src)]) == 0
     assert installed.resolve_name(str(src)) == "by-src"
     assert installed.resolve_name("by-src") == "by-src"
     assert cli.main(["disable", str(src)]) == 0
     assert cli.main(["uninstall", str(src)]) == 0
     assert installed.list_installed() == []
+
+
+def _mcp_plugin(tmp_path, name="trust"):
+    root = _make_plugin(
+        tmp_path,
+        hooks={
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "echo hi-hook"}]}
+            ]
+        },
+        name=name,
+    )
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "srv": {
+                        "command": "npx",
+                        "args": ["-y", "pkg"],
+                        "env": {"TOKEN": "s3cret"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _tty(monkeypatch, answers, is_tty=True):
+    asked = []
+    monkeypatch.setattr("sys.stdin.isatty", lambda: is_tty)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt="": asked.append(prompt) or answers.pop(0),
+    )
+    return asked
+
+
+def test_install_shows_summary_and_asks(tmp_path, monkeypatch, capsys):
+    from gc_core.plugins import cli
+
+    src = _mcp_plugin(tmp_path)
+    _tty(monkeypatch, ["n", "y"])
+    assert cli.main(["install", str(src)]) == 1
+    out = capsys.readouterr().out
+    assert "echo hi-hook" in out and "mcp srv: npx -y pkg" in out
+    assert "s3cret" not in out
+    assert installed.list_installed() == []
+    assert cli.main(["install", str(src)]) == 0
+    assert [p.name for p in installed.list_installed()] == ["trust"]
+
+
+def test_install_without_tty_requires_yes(tmp_path, monkeypatch):
+    from gc_core.plugins import cli
+
+    src = _mcp_plugin(tmp_path)
+    _tty(monkeypatch, [], is_tty=False)
+    assert cli.main(["install", str(src)]) == 1
+    assert installed.list_installed() == []
+    assert cli.main(["install", "--yes", str(src)]) == 0
+    assert len(installed.list_installed()) == 1
+
+
+def test_update_asks_only_when_hooks_or_mcp_change(tmp_path, monkeypatch):
+    from gc_core.plugins import cli
+
+    src = _mcp_plugin(tmp_path)
+    assert cli.main(["install", "--yes", str(src)]) == 0
+    asked = _tty(monkeypatch, ["y"])
+    assert cli.main(["update", "trust"]) == 0
+    assert asked == []
+    hooks = json.loads((src / "hooks" / "hooks.json").read_text())
+    hooks["hooks"]["Stop"] = [
+        {"hooks": [{"type": "command", "command": "echo new-hook"}]}
+    ]
+    (src / "hooks" / "hooks.json").write_text(json.dumps(hooks))
+    assert cli.main(["update", "trust"]) == 0
+    assert len(asked) == 1
 
 
 # --- команды и агенты плагинов -------------------------------------------

@@ -15,10 +15,12 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from gc_core.plugins.manifest import ap_manifest_errors, load_plugin
+from gc_core.plugins.manifest import Plugin, ap_manifest_errors, load_plugin
 from gc_core.plugins.sources import _clone, normalize_url
 
 logger = logging.getLogger(__name__)
@@ -116,20 +118,133 @@ def _fetch(
     return target, _commit_of(target), url
 
 
-def install(
+class PreparedInstall:
+    """Скачанный и проверенный плагин, ещё не скопированный в хранилище.
+
+    Нужен, чтобы показать пользователю, что плагин запускает, до установки.
+    Временный каталог живёт, пока открыт контекст ``prepare``.
+    """
+
+    def __init__(
+        self,
+        *,
+        plugin: Plugin,
+        plugin_dir: Path,
+        source: str,
+        ref: str | None,
+        subdir: str | None,
+        sha: str | None,
+        root: Path,
+    ) -> None:
+        self.plugin = plugin
+        self._plugin_dir = plugin_dir
+        self._source = source
+        self._ref = ref
+        self._subdir = subdir
+        self._sha = sha
+        self._root = root
+
+    def summary(self) -> list[str]:
+        """Строки для подтверждения; значения ``env`` и ``headers`` не попадают."""
+        plugin = self.plugin
+        lines = [
+            f"{event} [{m.matcher or '*'}]: {h.command}"
+            for event, matchers in plugin.hooks.items()
+            for m in matchers
+            for h in m.hooks
+        ]
+        for name, srv in plugin.mcp_servers.items():
+            if srv.get("url"):
+                lines.append(f"mcp {name}: {srv['url']}")
+            else:
+                cmd = " ".join(
+                    [
+                        str(srv.get("command", "")),
+                        *map(str, srv.get("args", [])),
+                    ]
+                )
+                lines.append(f"mcp {name}: {cmd}")
+        skills = 0
+        if plugin.skills_dir:
+            skills = sum(
+                1
+                for d in Path(plugin.skills_dir).iterdir()
+                if (d / "SKILL.md").is_file()
+            )
+        lines.append(
+            f"skills: {skills}, commands: {len(plugin.commands)}, "
+            f"agents: {len(plugin.agents)}"
+        )
+        return lines
+
+    def differs_from(self, name: str) -> bool:
+        """Отличаются ли хуки или MCP от установленной копии ``name``."""
+        old = load_plugin(self._root / _safe_name(name))
+        return old is None or _exec_surface(old) != _exec_surface(self.plugin)
+
+    def commit(self, force: bool = False) -> InstalledPlugin:
+        """Скопировать в хранилище и записать метаданные."""
+        plugin = self.plugin
+        name = _safe_name(plugin.name)
+        dest = self._root / name
+        meta = _read_meta(self._root)
+        if dest.exists() and not force:
+            raise ValueError(
+                f"плагин {name} уже установлен (--force, чтобы заменить)"
+            )
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(
+            self._plugin_dir, dest, ignore=shutil.ignore_patterns(".git")
+        )
+        info = InstalledPlugin(
+            name=name,
+            version=plugin.version,
+            source=self._source,
+            ref=self._ref,
+            subdir=self._subdir,
+            commit=self._sha,
+            enabled=True,
+        )
+        meta[name] = asdict(info)
+        _write_meta(self._root, meta)
+        return info
+
+
+def _exec_surface(plugin: Plugin) -> set[tuple]:
+    """Всё, что плагин запускает: хуки и MCP (без env/headers)."""
+    hooks = {
+        ("hook", event, m.matcher, h.command)
+        for event, matchers in plugin.hooks.items()
+        for m in matchers
+        for h in m.hooks
+    }
+    mcp = {
+        (
+            "mcp",
+            name,
+            srv.get("transport"),
+            srv.get("command"),
+            tuple(srv.get("args") or ()),
+            srv.get("url"),
+        )
+        for name, srv in plugin.mcp_servers.items()
+    }
+    return hooks | mcp
+
+
+@contextmanager
+def prepare(
     source: str,
     *,
     ref: str | None = None,
     subdir: str | None = None,
-    force: bool = False,
     root: Path | None = None,
-) -> InstalledPlugin:
-    """Установить плагин; ``ValueError``, если источник не плагин или имя занято."""
+) -> Iterator[PreparedInstall]:
+    """Скачать и проверить плагин; ``ValueError``, если источник не плагин."""
     root = root or installed_dir()
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=root) as tmp_name:
-        tmp = Path(tmp_name)
-        fetched, commit, norm = _fetch(source, ref, tmp)
+        fetched, sha, norm = _fetch(source, ref, Path(tmp_name))
         plugin_dir = fetched / subdir if subdir else fetched
         errors = ap_manifest_errors(plugin_dir)
         if errors:
@@ -148,29 +263,28 @@ def install(
                 f"{source}: нет ни skills/, commands/, agents/, "
                 "ни hooks/hooks.json, ни .mcp.json/mcp.json"
             )
-        name = _safe_name(plugin.name)
-        dest = root / name
-        meta = _read_meta(root)
-        if dest.exists() and not force:
-            raise ValueError(
-                f"плагин {name} уже установлен (--force, чтобы заменить)"
-            )
-        shutil.rmtree(dest, ignore_errors=True)
-        shutil.copytree(
-            plugin_dir, dest, ignore=shutil.ignore_patterns(".git")
-        )
-        info = InstalledPlugin(
-            name=name,
-            version=plugin.version,
+        yield PreparedInstall(
+            plugin=plugin,
+            plugin_dir=plugin_dir,
             source=norm,
             ref=ref,
             subdir=subdir,
-            commit=commit,
-            enabled=True,
+            sha=sha,
+            root=root,
         )
-        meta[name] = asdict(info)
-        _write_meta(root, meta)
-        return info
+
+
+def install(
+    source: str,
+    *,
+    ref: str | None = None,
+    subdir: str | None = None,
+    force: bool = False,
+    root: Path | None = None,
+) -> InstalledPlugin:
+    """Установить плагин без вопросов; ``ValueError``, если источник не плагин или имя занято."""
+    with prepare(source, ref=ref, subdir=subdir, root=root) as prepared:
+        return prepared.commit(force)
 
 
 def resolve_name(name: str, root: Path | None = None) -> str:
@@ -234,20 +348,27 @@ def uninstall(name: str, root: Path | None = None) -> bool:
     return existed
 
 
-def update(name: str, root: Path | None = None) -> InstalledPlugin | None:
-    """Переустановить из исходного источника с тем же ref (ветка уйдёт вперёд)."""
+def update(
+    name: str,
+    root: Path | None = None,
+    confirm: Callable[[PreparedInstall], bool] | None = None,
+) -> InstalledPlugin | None:
+    """Переустановить из исходного источника с тем же ref (ветка уйдёт вперёд).
+
+    ``confirm`` вызывается, только если хуки или MCP отличаются от установленной
+    копии; отказ даёт ``ValueError``.
+    """
     root, meta = _load_meta(root)
     rec = meta.get(name)
     if rec is None:
         return None
     was_enabled = bool(rec.get("enabled", True))
-    info = install(
-        rec["source"],
-        ref=rec.get("ref"),
-        subdir=rec.get("subdir"),
-        force=True,
-        root=root,
-    )
+    with prepare(
+        rec["source"], ref=rec.get("ref"), subdir=rec.get("subdir"), root=root
+    ) as prepared:
+        if confirm and prepared.differs_from(name) and not confirm(prepared):
+            raise ValueError("обновление отменено")
+        info = prepared.commit(force=True)
     if not was_enabled:
         disable(info.name, root)
         info.enabled = False
