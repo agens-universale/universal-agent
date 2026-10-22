@@ -38,6 +38,7 @@ _FIXED_CSS = {
     "frame-archive": "#4b525d",
     "note-ink": "#a5adb8",
     "user-band-bg": "#363b47",
+    "list-select-bg": "#363b47",
     "queue-bg": "#242832",
     "highlight-bg": "#4c505a",
     "quiet-reply-ink": "#8b949e",
@@ -62,6 +63,7 @@ _RAMPS = (
 _TINTED = (
     "CARD_SELECT_BG",
     "USER_BAND_BG",
+    "LIST_SELECT_BG",
     "OVERLAY_BG",
     "ZEBRA_BG",
     "TRACK",
@@ -183,6 +185,26 @@ def test_guards_hold_on_terminal_background(bg, guard):
 
 def _lum(color: str) -> float:
     return palette._luminance(_rgb(color))
+
+
+_LIST_SELECTORS = (
+    ".palette-row.selected",
+    ".diff-row.selected",
+    ".mcp-row-managed.selected, .mcp-action-row.selected",
+    ".onb-option.selected",
+    ".set-menurow.selected",
+    ".set-row.selected",
+)
+
+
+def test_list_select_is_own_token_used_by_list_rules():
+    from gc_testkit.paths import TUI_PKG
+
+    assert palette.LIST_SELECT_BG == "#363b47"
+    assert "LIST_SELECT_BG" not in palette._DIFF
+    css = (TUI_PKG / "styles.tcss").read_text(encoding="utf-8")
+    for selector in _LIST_SELECTORS:
+        assert f"{selector} {{ background: $list-select-bg;" in css
 
 
 def test_user_band_is_former_focus_colour():

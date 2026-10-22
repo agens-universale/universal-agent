@@ -62,9 +62,12 @@ SCREEN_SELECTION_BACKGROUND = "#1e416c"
 CARD_SELECT_BG = "#2e323d"
 FRAME_ARCHIVE = "#4b525d"  # серая рамка «архив/история» (отвеченный вопрос)
 NOTE_INK = "#a5adb8"  # ремарка: чуть светлее DIM
-# Подложка реплики; она же фон выбранной строки списков (палитра, /diff,
-# настройки, онбординг, /mcp). Светлее BAND_BG, темнее HIGHLIGHT_BG.
+# Подложка реплики. Светлее BAND_BG, темнее HIGHLIGHT_BG.
 USER_BAND_BG = "#363b47"
+# Выбранная строка списков и пикеров (палитра, /diff, настройки,
+# онбординг, /mcp). Свой токен: от подложки реплики и подсветки ленты не
+# зависит, значение пока то же, что у USER_BAND_BG.
+LIST_SELECT_BG = "#363b47"
 OVERLAY_BG = "#161A23"  # фон оверлеев (палитра, сессии, предпросмотр)
 ZEBRA_BG = "#232836"  # чётная строка зебры (справка)
 SKILL = "#afd7ff"  # имя скилла
@@ -204,6 +207,7 @@ SURFACE_TINT = "#78829b"
 _TINTED = (
     "CARD_SELECT_BG",
     "USER_BAND_BG",
+    "LIST_SELECT_BG",
     "OVERLAY_BG",
     "ZEBRA_BG",
     "TRACK",
@@ -360,6 +364,7 @@ def css_variables() -> dict[str, str]:
         "frame-archive": FRAME_ARCHIVE,
         "note-ink": NOTE_INK,
         "user-band-bg": USER_BAND_BG,
+        "list-select-bg": LIST_SELECT_BG,
         "queue-bg": QUEUE_BG,
         "highlight-bg": HIGHLIGHT_BG,
         "overlay-bg": OVERLAY_BG,
