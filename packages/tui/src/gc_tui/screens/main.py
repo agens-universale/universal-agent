@@ -170,6 +170,7 @@ from gc_tui.services.trace_render import (
     build_compaction_marker_event,
     build_compaction_widgets,
     build_nested_prose_row,
+    build_turn_line,
     level_prefix,
 )
 from gc_tui.services.trace_retention import (
@@ -231,6 +232,7 @@ from gc_tui.widgets.trace_row import (
     CompactionRule,
     TraceRow,
 )
+from gc_tui.widgets.turn_line import TURN_LINE_LATEST, TurnLine
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _PREFIX_EXPORTED = "[exported] "
@@ -2655,6 +2657,8 @@ class TraceScreen(Screen):
             # после записи не началась реплика.
             self._last_turn_outcome = parse_turn_outcome(rec)
             self._outcome_superseded = False
+            if self._last_turn_outcome is not None:
+                self._mount_turn_line(self._last_turn_outcome)
             return
         payload = rec.get("payload")
         if not isinstance(payload, dict):
@@ -2663,6 +2667,7 @@ class TraceScreen(Screen):
         # уже показал сам: важна позиция в файле, а не повтор).
         if extract_real_user_message_text(payload):
             self._outcome_superseded = True
+            self._turn_started_after_record(live=live)
         mid = payload.get("id")
         if mid is not None:
             if mid in self._rendered_ids:
@@ -2694,6 +2699,49 @@ class TraceScreen(Screen):
         # скрытая техграница старта континуации (system) - нет.
         if not ev.hidden:
             self._saw_visible_event = True
+
+    def _mount_turn_line(self, outcome: TurnOutcome) -> None:
+        """Строка хода — на месте его записи (через `_trace_mount`, значит
+        над очередью). Новая — строка последнего хода: скрыта, пока её
+        показывает индикатор; прошлая оседает."""
+        self._settle_turn_line()
+        line = build_turn_line(outcome)
+        line.add_class(TURN_LINE_LATEST)
+        self._trace_mount(line)
+
+    def _settle_turn_line(self) -> bool:
+        """Начался новый ход: строка прошлого оседает в ленте. True — было
+        чему оседать."""
+        lines = list(self.query(TurnLine).filter(f".{TURN_LINE_LATEST}"))
+        for line in lines:
+            line.remove_class(TURN_LINE_LATEST)
+        return bool(lines)
+
+    def _turn_started_after_record(self, *, live: bool) -> None:
+        """Реплика за записью итога — следующий ход. Пришла хвостом посреди
+        идущего прогона (ядро закрыло ход и подхватило очередь, решение
+        плана 8) — у хода из очереди своя граница журнала правок."""
+        settled = self._settle_turn_line()
+        runner = getattr(self.app, "active_runner", None)
+        if (
+            settled
+            and live
+            and runner is not None
+            and runner.is_running()
+            and self._runner_is_for_active_thread()
+        ):
+            self._edits_baseline_taken = False
+            self._capture_edits_baseline()
+
+    def _drop_turn_lines(self, msg_id: str) -> None:
+        """Откат реплики `msg_id`: строка её хода уходит вместе с записью
+        (запись могла быть уже дочитана хвостом и смонтирована)."""
+        for line in self.query(TurnLine):
+            if line.opened_by == msg_id:
+                line.remove()
+        last = self._last_turn_outcome
+        if last is not None and last.opened_by == msg_id:
+            self._last_turn_outcome = None
 
     def _show_thinking_indicator(self, *, state: str = "thinking") -> None:
         """Показать индикатор: смонтировать (если ещё нет) или снять `.hidden`.
@@ -2748,6 +2796,8 @@ class TraceScreen(Screen):
         if outcome is not None:
             word, plan = kind_of(outcome)
         else:
+            # Индикатор не из записи — строка последней записи в ленте.
+            self._settle_turn_line()
             word = word_of_status(self._session_status_word())
             plan = False
             if word is None:
@@ -5197,8 +5247,10 @@ class TraceScreen(Screen):
             tid, {"status": "running", "last_indicator": None}
         )
         if tid == self._active_task_id:
-            # Начался новый ход: запись итога прошлого — уже не его строка.
+            # Начался новый ход: запись итога прошлого — уже не его строка,
+            # она оседает в ленте до реплики нового.
             self._outcome_superseded = True
+            self._settle_turn_line()
 
     def _update_mcp_indicator(self) -> None:
         if self._mcp_status_done:
@@ -8145,7 +8197,8 @@ class TraceScreen(Screen):
             pass
 
     def _discard_orphan_and_resync(self, tid: str, msg_id: str) -> bool:
-        """Удалить запись реплики по id и пересинхронизировать курсор трейса.
+        """Удалить запись реплики по id (с записью итога её хода и строкой
+        хода в ленте) и пересинхронизировать курсор трейса.
 
         Без ресинка poll увидит ужавшийся data_*.jsonl как «file truncated» →
         stream_reset → полная перерисовка трейса (моргание). Здесь курсор
@@ -8160,11 +8213,12 @@ class TraceScreen(Screen):
             )
         except Exception:
             return False
-        if (
-            removed
-            and tid == self._active_task_id
-            and self._cursor is not None
-        ):
+        if not removed or tid != self._active_task_id:
+            return removed
+        self._drop_turn_lines(msg_id)
+        if self._cursor is not None:
+            # Ресинк и тогда, когда курсор уже за снятой записью: файл
+            # укоротился.
             try:
                 _records, cur = self._store.read_all_events(tid)
                 self._cursor = cur

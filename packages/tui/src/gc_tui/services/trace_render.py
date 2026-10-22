@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Optional
 
 from gc_core.constants.tool_display import (
@@ -15,7 +16,11 @@ from gc_core.constants.tool_display import (
     McpToolInfo,
     tool_display,
 )
-from gc_core.persistence.turn_outcome import is_turn_outcome_record
+from gc_core.persistence.turn_outcome import (
+    TurnOutcome,
+    is_turn_outcome_record,
+    parse_turn_outcome,
+)
 from gc_core.utils.path_truncate import truncate_path
 
 from gc_tui.models import ResultOutcome, TraceEvent
@@ -27,6 +32,7 @@ from gc_tui.services.trace_retention import (
     message_ids_in_retention_window,
     retention_window_start_index,
 )
+from gc_tui.services.turn_outcome import kind_of, turn_head
 
 if TYPE_CHECKING:
     from gc_core.tools.turn.turn_close import TurnClose
@@ -41,6 +47,7 @@ if TYPE_CHECKING:
         ConsequenceTraceRow,
         TraceRow,
     )
+    from gc_tui.widgets.turn_line import TurnLine
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
@@ -634,6 +641,24 @@ def build_finish_widgets(close: TurnClose, *, event_no: int) -> list:
     return widgets
 
 
+def build_turn_line(
+    outcome: TurnOutcome, *, now: datetime | None = None
+) -> TurnLine:
+    """Строка итога хода из записи — одна для ленты и превью: голова
+    `turn_head` без сводки правок и причины (они — у индикатора)."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    word, plan = kind_of(outcome)
+    head = turn_head(
+        word,
+        plan=plan,
+        duration_sec=outcome.duration_sec,
+        ended_at=outcome.ended_at,
+        now=now,
+    )
+    return TurnLine(head, opened_by=outcome.opened_by)
+
+
 def raw_output(ev) -> Optional[str]:
     """Поле `output` из full_payload result-event как raw string."""
     if isinstance(ev.full_payload, dict):
@@ -811,7 +836,12 @@ def _render_record_readonly(
     from gc_tui.services.trace_mapper import map_message
 
     if is_turn_outcome_record(rec):
-        return no  # итог хода — не сообщение ленты
+        # Итог хода — строка на месте записи, не событие ленты; в превью
+        # индикатора нет, поэтому видна и строка последнего хода.
+        outcome = parse_turn_outcome(rec)
+        if outcome is not None:
+            mount_target.mount(build_turn_line(outcome))
+        return no
     payload = rec.get("payload")
     if not isinstance(payload, dict):
         return no

@@ -3,7 +3,8 @@
 Запись встаёт в `data_*.jsonl` за последним сообщением хода и повторяет
 его `seq`. Читатели сообщений её как сообщение не видят: хвост ленты не
 сбрасывается, сжатие остаётся сжатием, счёт сообщений сегмента и экспорта
-— только сообщения, лента и превью — те же виджеты, что без записи.
+— только сообщения, лента и превью — те же виджеты сообщений, что без
+записи, плюс строка хода (`TurnLine`) на месте записи.
 """
 
 from __future__ import annotations
@@ -221,7 +222,21 @@ def _text(widget) -> str:
 
 
 def _widgets(root) -> list[tuple[str, str]]:
-    return [(type(w).__name__, _text(w)) for w in root.query("*")]
+    """Виджеты сообщений: строка хода — не сообщение, её считает
+    `_turn_lines`."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    return [
+        (type(w).__name__, _text(w))
+        for w in root.query("*")
+        if not isinstance(w, TurnLine)
+    ]
+
+
+def _turn_lines(root) -> int:
+    from gc_tui.widgets.turn_line import TurnLine
+
+    return len(root.query(TurnLine))
 
 
 @pytest.mark.asyncio
@@ -229,7 +244,7 @@ async def test_live_feed_ignores_record(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    seen = []
+    seen, lines = [], []
     for with_record in (False, True):
         root = tmp_path / str(with_record)
         records = _records(root, with_record=with_record)
@@ -243,8 +258,10 @@ async def test_live_feed_ignores_record(tmp_path):
             scr._render_records(records)
             await pilot.pause()
             seen.append(_widgets(scr.query_one("#trace")))
+            lines.append(_turn_lines(scr.query_one("#trace")))
     assert seen[0] == seen[1]
     assert seen[0]
+    assert lines == [0, 1]
 
 
 def _preview_app(segments: list[dict]):
@@ -266,7 +283,7 @@ def _preview_app(segments: list[dict]):
 @pytest.mark.asyncio
 async def test_preview_ignores_record(tmp_path):
     pytest.importorskip("textual")
-    seen = []
+    seen, lines = [], []
     for with_record in (False, True):
         root = tmp_path / str(with_record)
         _records(root, with_record=with_record)
@@ -274,5 +291,7 @@ async def test_preview_ignores_record(tmp_path):
         async with _preview_app(segments).run_test() as pilot:
             await pilot.pause()
             seen.append(_widgets(pilot.app.query_one("#t")))
+            lines.append(_turn_lines(pilot.app.query_one("#t")))
     assert seen[0] == seen[1]
     assert seen[0]
+    assert lines == [0, 1]

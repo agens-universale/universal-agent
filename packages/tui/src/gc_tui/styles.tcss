@@ -335,6 +335,11 @@ UserReplyContainer.-queue-hint > .queue-hint { display: block; }
    (.trace-prefix padding:0); правый отступ 1 сохраняем. */
 .thinking-indicator { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: 1; }
 .thinking-indicator.hidden { display: none; }
+/* Осевшая строка итога хода (P1b): уровень 0, глиф в колонке ●, пустая
+   строка сверху, тусклая — как строка итога индикатора. Строка последнего
+   хода в ленте скрыта (-latest), пока её показывает индикатор. */
+TurnLine { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: auto; }
+TurnLine.-latest { display: none; }
 
 /* StreamBlock — эфемерный in-progress поток текущего шага (chat_completions) */
 /* левый padding 0 — выравнивание с индикатором и колонкой буллетов трейса. */
