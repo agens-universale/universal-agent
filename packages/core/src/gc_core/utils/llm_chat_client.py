@@ -314,7 +314,10 @@ async def aprepare_chat_completion(ctx, state, *, resolved):
 async def arequest_chat_completion_once(
     ctx, state, *, prepared, messages, max_tokens, request_label
 ) -> ChatCompletionText:
-    """One pinned HTTP attempt, no adaptive retry or model fallback."""
+    """One pinned attempt at the model, no adaptive retry or model fallback.
+
+    A 401 never reaches the model, so the transport may still resend the
+    request once with the other Authorization form."""
     payload = copy.deepcopy(dict(prepared.payload_kwargs))
     token_key = (
         "max_tokens" if "max_tokens" in payload else "max_completion_tokens"
@@ -340,7 +343,6 @@ async def arequest_chat_completion_once(
             url=prepared.url,
             **prepared.network_kwargs,
             use_retry=False,
-            allow_auth_retry=False,
             logger=getattr(ctx, "logger", None),
         )
         _raise_on_embedded_choice_error(res)
@@ -422,9 +424,6 @@ async def _asend_chat_completion_text(
             ctx, state, resolved=resolved, headers=headers
         )
         await before_send(prepared)
-        from gc_core.vision.service import confirmed_route_headers
-
-        headers = confirmed_route_headers(prepared)
     url = (
         resolved.url
         if resolved is not None

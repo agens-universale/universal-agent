@@ -559,6 +559,7 @@ class AgentExecutor:
         #: Вопрос, на котором приостановлен последний ход (``{call_id,
         #: question}``), или ``None``.
         self.last_pending_question: Optional[dict] = None
+        self.last_closing_reply: str = ""
 
     def take_undelivered_messages(self) -> list[dict]:
         """Забрать всё, что отдано прогону, но до агента не дошло, — в порядке прихода.
@@ -1730,6 +1731,7 @@ class AgentExecutor:
             self.last_pending_question = getattr(
                 state, "pending_question", None
             )
+            self.last_closing_reply = getattr(state, "closing_reply", "")
         finally:
             await _stop_lease_keeper(poller)
             await _stop_lease_keeper(keeper)

@@ -267,7 +267,7 @@ async def test_finish_arguments_become_report_not_raw_json(tmp_path):
     handle = await facade.open({"model": "m", "input": "прочитай"})
     body = await _finished(handle)
     text = _output_text(body)
-    assert text == "В README одна фраза.\n\n* заметка: файл короткий"
+    assert text == "В README одна фраза.\n\n* **заметка:**\n\n  файл короткий"
     assert "solution_type" not in text
     assert "Finish gate" not in text
 
@@ -276,6 +276,7 @@ async def test_shown_report_is_not_repeated_with_a_note(tmp_path):
     agent = FakeAgent(asyncio.Event())
     agent._hold = False
     agent.chunks = [("answer", "В README одна фраза.")]
+    agent.executor.last_closing_reply = "В README одна фраза."
     agent._answer = json.dumps(
         _finish_arguments(comment="файл короткий"),
         ensure_ascii=False,
@@ -283,7 +284,88 @@ async def test_shown_report_is_not_repeated_with_a_note(tmp_path):
     facade = _facade(tmp_path, agent)
     handle = await facade.open({"model": "m", "input": "прочитай"})
     body = await _finished(handle)
-    assert _output_text(body) == "В README одна фраза."
+    assert (
+        _output_text(body)
+        == "В README одна фраза.\n\n* **заметка:**\n\n  файл короткий"
+    )
+
+
+async def test_reply_then_record_in_same_message_item(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "Пока!")]
+    agent.executor.last_closing_reply = "Пока!"
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Прочитал README."),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await _finished(handle)
+    messages = [i for i in body["output"] if i["type"] == "message"]
+    assert len(messages) == 1
+    assert messages[0]["content"][0]["text"] == (
+        "Пока!\n\n* **итог:**\n\n  Прочитал README."
+    )
+
+
+async def test_no_stream_reply_and_record(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = []
+    agent.executor.last_closing_reply = "Пока!"
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Прочитал README."),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await _finished(handle)
+    assert _output_text(body) == "Пока!\n\n* **итог:**\n\n  Прочитал README."
+
+
+async def test_prose_streamed_before_bounce_does_not_glue_to_record(
+    tmp_path,
+):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "Пока!")]
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Прочитал README."),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await _finished(handle)
+    assert _output_text(body) == "Пока!\n\nПрочитал README."
+
+
+async def test_report_equal_to_bounced_prose_is_shown_once(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "Сделал.")]
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Сделал.", comment=""),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "сделай"})
+    body = await _finished(handle)
+    assert _output_text(body) == "Сделал."
+
+
+async def test_bounced_prose_with_comment_keeps_only_the_note(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "Сделал.")]
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Сделал.", comment="проверил"),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "сделай"})
+    body = await _finished(handle)
+    assert _output_text(body) == "Сделал.\n\n* **заметка:**\n\n  проверил"
 
 
 async def test_cancel_before_second_turn_skips_the_model(tmp_path):
