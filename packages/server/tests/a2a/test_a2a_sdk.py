@@ -687,3 +687,120 @@ async def test_queue_keeps_the_order_the_peer_saw(
     )
     await _until(client, second.id, pb.TASK_STATE_COMPLETED)
     assert [call[0] for call in agent.calls] == ["первое", "второе"]
+
+
+async def test_message_to_a_working_task_is_refused(tmp_path, stores):
+    """Ревью, раунд 2 (R7): сообщение в задачу, чей ход идёт (повтор ответа),
+    — отказ запросу; второго хода той же задачи после итога нет, артефакт
+    один."""
+    hold = asyncio.Event()
+    agent = FakeAgent(("ask", "какой цвет?"), ("hold", hold))
+    surface = _surface(tmp_path, stores, [agent])
+    client = _client(surface)
+    asked = await _send(client, _message("покрась"))
+    answer = _message("синий", task_id=asked.id, context_id=asked.context_id)
+    answering = asyncio.create_task(_send(client, answer))
+    await _until(client, asked.id, pb.TASK_STATE_WORKING)
+    retry = _message("синий", task_id=asked.id, context_id=asked.context_id)
+    try:
+        with pytest.raises(Exception, match="не ждёт"):
+            await asyncio.wait_for(_send(client, retry), 5)
+    finally:
+        hold.set()
+    done = await answering
+    await asyncio.sleep(0.2)
+    after = await client.get_task(pb.GetTaskRequest(id=asked.id))
+    assert done.status.state == pb.TASK_STATE_COMPLETED
+    assert after.status.state == pb.TASK_STATE_COMPLETED
+    assert len(after.artifacts) == 1
+    assert agent.answers == ["синий"]
+
+
+async def test_answer_retried_on_another_instance_keeps_the_result(
+    tmp_path, stores
+):
+    """Ревью, раунд 2 (R6): ответ ушёл на gc1 (агент ещё создаётся), его
+    повтор — на gc2. Повтор не ставит задаче FAILED: ход gc1 доводит её до
+    COMPLETED, ответ модель получает один раз."""
+    agent = FakeAgent(("ask", "какой цвет?"))
+    first = _surface(tmp_path, stores, [agent])
+    second = _surface(tmp_path, stores, [])
+    asked = await _send(_client(first), _message("покрась"))
+    creating, gate = asyncio.Event(), asyncio.Event()
+
+    async def slow_factory(settings, **_kw):
+        creating.set()
+        await gate.wait()
+        agent.settings = settings
+        return agent
+
+    first.executor._agents.clear()  # агент создаётся заново (рестарт)
+    first.executor._agent_factory = slow_factory
+    answer = _message("синий", task_id=asked.id, context_id=asked.context_id)
+    answering = asyncio.create_task(_send(_client(first), answer))
+    await asyncio.wait_for(creating.wait(), 5)
+    retry = _message("синий", task_id=asked.id, context_id=asked.context_id)
+    try:
+        await _send(_client(second), retry)
+    except Exception:  # отказ повтору — тоже правильный исход
+        pass
+    gate.set()
+    done = await answering
+    after = await _client(second).get_task(pb.GetTaskRequest(id=asked.id))
+    assert done.status.state == pb.TASK_STATE_COMPLETED
+    assert after.status.state == pb.TASK_STATE_COMPLETED
+    assert agent.answers == ["синий"]
+
+
+async def test_snapshot_never_rolls_back_a_final_state(stores):
+    """Ревью, раунд 2 (R7): итог задачи окончателен — запоздалый снимок
+    (WORKING владельца после отмены с другого инстанса) его не откатывает."""
+    from gc_core.threads.facade import Threads
+    from gc_server.a2a.task_store import ThreadTaskStore
+
+    tasks = ThreadTaskStore(Threads(stores.threads))
+    task = pb.Task(
+        id="t-final",
+        context_id="ctx-final",
+        status=pb.TaskStatus(state=pb.TASK_STATE_WORKING),
+    )
+    await tasks.save(task, None)
+    task.status.state = pb.TASK_STATE_CANCELED
+    await tasks.save(task, None)
+    late = pb.Task()
+    late.CopyFrom(task)
+    late.status.state = pb.TASK_STATE_WORKING
+    await tasks.save(late, None)
+    stored = await tasks.get("t-final", None)
+    assert stored.status.state == pb.TASK_STATE_CANCELED
+
+
+async def test_slow_agent_start_is_not_taken_for_dead(
+    tmp_path, stores, monkeypatch
+):
+    """Ревью, раунд 2 (R16): агент создаётся дольше ``STALE_AFTER`` (медленный
+    MCP) — отметка хода живая (пульс), восстановление другого инстанса её
+    не прерывает, задача доходит до COMPLETED."""
+    from datetime import timedelta
+
+    monkeypatch.setattr(a2a_executor, "STALE_AFTER", timedelta(seconds=0.3))
+    agent = FakeAgent()
+    first = _surface(tmp_path, stores, [])
+    second = _surface(tmp_path, stores, [])
+    creating, gate = asyncio.Event(), asyncio.Event()
+
+    async def slow_factory(settings, **_kw):
+        creating.set()
+        await gate.wait()
+        agent.settings = settings
+        return agent
+
+    first.executor._agent_factory = slow_factory
+    client = _client(first)
+    task = await _send(client, _message("сделай"), return_immediately=True)
+    await asyncio.wait_for(creating.wait(), 5)
+    await asyncio.sleep(0.8)
+    assert await second.executor.arecover_once() == 0
+    gate.set()
+    done = await _until(client, task.id, pb.TASK_STATE_COMPLETED)
+    assert done.status.state == pb.TASK_STATE_COMPLETED

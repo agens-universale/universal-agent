@@ -164,9 +164,6 @@ class A2aSurface:
 
     def app(self) -> FastAPI:
         import httpx
-        from a2a.server.request_handlers.default_request_handler_v2 import (
-            DefaultRequestHandlerV2,
-        )
         from a2a.server.routes.agent_card_routes import (
             create_agent_card_routes,
         )
@@ -179,6 +176,7 @@ class A2aSurface:
         )
 
         from gc_server.a2a.card import CARD_PATH, RPC_PATH
+        from gc_server.a2a.handler import GcRequestHandler
         from gc_server.a2a.task_store import (
             ThreadPushConfigStore,
             ThreadTaskStore,
@@ -209,7 +207,7 @@ class A2aSurface:
                 ),
                 "push_url_validator": validator,
             }
-        handler = DefaultRequestHandlerV2(
+        handler = GcRequestHandler(
             agent_executor=self.executor,
             task_store=ThreadTaskStore(threads),
             agent_card=card,

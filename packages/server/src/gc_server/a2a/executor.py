@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from collections import OrderedDict
@@ -41,6 +42,7 @@ from google.protobuf.json_format import MessageToDict
 from gc_server.a2a.agent_config import prepare_agent_settings
 from gc_server.a2a.task_store import (
     CANCELED,
+    FINAL_STATES,
     FRONTEND,
     QUEUE,
     RUNNING,
@@ -59,7 +61,6 @@ logger = logging.getLogger(__name__)
 MAX_LIVE_AGENTS = 32
 # Пиру в status.message — без путей и текста исключения ядра.
 PEER_FAILURE_TEXT = "Ход не выполнен."
-NOT_WAITING_TEXT = "Задача не ждёт ответа: вопроса, на который отвечать, нет."
 INTERRUPTED_TEXT = "Ход прерван: инстанс, который вёл задачу, остановился."
 CWD_TEXT = (
     "metadata.cwd должен быть абсолютным путём внутри корня агента и "
@@ -227,6 +228,8 @@ class GcAgentExecutor(AgentExecutor):
         self._tools_cache = tools_cache
         self._os_backend = os_backend
         self._turns: dict[str, Turn] = {}
+        #: Пульс отметки хода задач этого инстанса.
+        self._pulses: dict[str, asyncio.Task] = {}
         #: Задачи этого инстанса, ждущие очереди диалога: запись очереди.
         self._waiting: dict[str, dict[str, Any]] = {}
         self._agents: OrderedDict[str, Any] = OrderedDict()
@@ -241,6 +244,10 @@ class GcAgentExecutor(AgentExecutor):
             # Ответ может прийти без contextId: диалог — у самой задачи.
             updater = TaskUpdater(event_queue, task.id, task.context_id)
             await self._aanswer(task, context.get_user_input(), updater)
+            return
+        if task is not None:
+            # Задача уже не ждёт сообщения (повтор, проскочивший проверку
+            # запроса): второго хода нет, статус не трогаем.
             return
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         try:
@@ -274,6 +281,7 @@ class GcAgentExecutor(AgentExecutor):
             await turn.cancel()
             # Запрос задачи (с ``_report``) SDK при отмене снимает: место в
             # диалоге освобождаем сами — очередь идёт сразу.
+            await self._astop_pulse(context.task_id)
             await self._afree(context_id, context.task_id)
         # Ожидание ответа, место в очереди и ход на другом инстансе снимает
         # снимок ``CANCELED`` (``ThreadTaskStore.save``) — так же, как
@@ -296,18 +304,9 @@ class GcAgentExecutor(AgentExecutor):
         task_id, context_id = context.task_id, context.context_id
         if not await self._aawait_turn(context_id, task_id):
             return  # отменена в очереди: итог записан отменой
-        try:
-            agent = await self._agent_for(context_id, cwd)
-        except Exception:
-            logger.exception("a2a agent")
-            await self._afree(context_id, task_id)
-            await updater.failed(_agent_message(updater, PEER_FAILURE_TEXT))
-            return
-        await updater.start_work()
-        turn = Turn(agent, task_id, context_id, context.get_user_input())
-        self._turns[task_id] = turn
-        turn.start()
-        await self._report(turn, updater)
+        await self._arun_claimed(
+            updater, task_id, context_id, cwd, context.get_user_input()
+        )
 
     async def _aanswer(self, task: pb.Task, text: str, updater: TaskUpdater):
         """Ответ на вопрос задачи: ход продолжается с ответом — на любом
@@ -316,23 +315,75 @@ class GcAgentExecutor(AgentExecutor):
         key = dialog_key(context_id)
         state = dialog_state(await self._threads.get(key))
         if state.get(WAITING) != task_id:
-            await updater.failed(_agent_message(updater, NOT_WAITING_TEXT))
+            # Ответ уже принят (повтор с другого инстанса) или задачу
+            # отменили: этот запрос задачу не меняет.
             return
         await self._threads.update_frontend(
             key, FRONTEND, {WAITING: None, RUNNING: self._claim(task_id)}
         )
+        await self._arun_claimed(
+            updater, task_id, context_id, state.get(_CWD_KEY), [], answer=text
+        )
+
+    async def _arun_claimed(
+        self,
+        updater: TaskUpdater,
+        task_id: str,
+        context_id: str,
+        cwd: Any,
+        prompt: Any,
+        *,
+        answer: str | None = None,
+    ) -> None:
+        """Ход задачи, занявшей диалог: агент, ход, итог. Пока агент
+        создаётся и ход идёт, отметка хода живая (пульс) — восстановление
+        другого инстанса прерывает только умершую вместе с инстансом."""
+        self._pulses[task_id] = asyncio.create_task(
+            self._apulse(context_id, task_id)
+        )
         try:
-            agent = await self._agent_for(context_id, state.get(_CWD_KEY))
-        except Exception:
-            logger.exception("a2a agent")
-            await self._afree(context_id, task_id)
-            await updater.failed(_agent_message(updater, PEER_FAILURE_TEXT))
+            try:
+                agent = await self._agent_for(context_id, cwd)
+            except Exception:
+                logger.exception("a2a agent")
+                await self._astop_pulse(task_id)
+                await self._afree(context_id, task_id)
+                await updater.failed(
+                    _agent_message(updater, PEER_FAILURE_TEXT)
+                )
+                return
+            await updater.start_work()
+            turn = Turn(agent, task_id, context_id, prompt, answer=answer)
+            self._turns[task_id] = turn
+            turn.start()
+            await turn.done.wait()
+            await self._astop_pulse(task_id)
+            await self._report(turn, updater)
+        finally:
+            await self._astop_pulse(task_id)
+
+    async def _apulse(self, context_id: str, task_id: str) -> None:
+        """Обновлять ``running.at`` своей отметки, пока она своя."""
+        key = dialog_key(context_id)
+        while True:
+            await asyncio.sleep(STALE_AFTER.total_seconds() / 3)
+            running = dialog_state(await self._threads.get(key)).get(RUNNING)
+            if not (
+                isinstance(running, dict) and running.get("task") == task_id
+            ):
+                return
+            await self._threads.update_frontend(
+                key, FRONTEND, {RUNNING: {**running, "at": _now()}}
+            )
+
+    async def _astop_pulse(self, task_id: str) -> None:
+        """Пульс — до того, как отметку снимут: иначе он вернул бы её."""
+        pulse = self._pulses.pop(task_id, None)
+        if pulse is None:
             return
-        await updater.start_work()
-        turn = Turn(agent, task_id, context_id, [], answer=text)
-        self._turns[task_id] = turn
-        turn.start()
-        await self._report(turn, updater)
+        pulse.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pulse
 
     async def _aenqueue(self, context_id: str, task_id: str, cwd: str):
         """Встать в очередь диалога (порядок — по времени приёма)."""
@@ -401,7 +452,7 @@ class GcAgentExecutor(AgentExecutor):
     async def _afinished(self, task_id: str) -> bool:
         """Задачу закрыли мимо хода (отмена с другого инстанса)."""
         task = await self._tasks.latest(task_id)
-        return task is not None and task.status.state in _FINAL_STATES
+        return task is not None and task.status.state in FINAL_STATES
 
     async def _afree(self, context_id: str, task_id: str) -> None:
         """Снять отметку хода задачи (своей) — диалог свободен."""
@@ -478,7 +529,7 @@ class GcAgentExecutor(AgentExecutor):
 
     async def _ainterrupt(self, key: ThreadKey, position: Any) -> None:
         task = await self._tasks.at(key, position)
-        if task is None or task.status.state in _FINAL_STATES:
+        if task is None or task.status.state in FINAL_STATES:
             return
         task.status.state = pb.TASK_STATE_FAILED
         task.status.message.CopyFrom(
@@ -557,16 +608,6 @@ class GcAgentExecutor(AgentExecutor):
         idle = [key for key in self._agents if key not in busy]
         for key in idle[: max(0, len(self._agents) - MAX_LIVE_AGENTS)]:
             await _safe_aclose(self._agents.pop(key))
-
-
-_FINAL_STATES = frozenset(
-    {
-        pb.TASK_STATE_COMPLETED,
-        pb.TASK_STATE_FAILED,
-        pb.TASK_STATE_CANCELED,
-        pb.TASK_STATE_REJECTED,
-    }
-)
 
 
 def _sent_cwd(context: RequestContext) -> str | None:
