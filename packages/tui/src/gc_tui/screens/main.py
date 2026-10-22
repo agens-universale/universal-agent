@@ -2635,6 +2635,7 @@ class TraceScreen(Screen):
             # Индикатор живёт в фиксированной #indicator-bar (вне скролла) —
             # unhide/смена state не двигают вид трейса.
             self._thinking.show(state)
+            self._sync_indicator_reserve()  # строка причины ушла с «✕»
             return
         stream_display = self.app.base_settings().settings.tui.stream_display
         indicator = ThinkingIndicator(
@@ -2712,6 +2713,7 @@ class TraceScreen(Screen):
         if self._thinking is None:
             return
         self._thinking.hide()
+        self._sync_indicator_reserve()
 
     def _destroy_thinking_indicator(self) -> None:
         """Полностью убрать индикатор. Вызывается когда run завершён."""
@@ -8327,7 +8329,12 @@ class TraceScreen(Screen):
         except Exception:
             return
         height = 3 if self._active_task_id is not None else 2
-        if self._thinking is not None and self._thinking.has_error_line:
+        ind = self._thinking
+        if (
+            ind is not None
+            and ind.has_error_line
+            and not ind.has_class("hidden")
+        ):
             height += 1
         bar.styles.height = height
 

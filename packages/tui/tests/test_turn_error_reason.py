@@ -158,3 +158,21 @@ async def test_new_turn_clears_reason(tmp_path):
         scr._prepare_for_new_run()
         tui = scr._store.get_task_meta(_TID)["tui"]
         assert tui["last_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_new_turn_after_failure_shrinks_indicator_bar(tmp_path):
+    """Причина ушла с новым ходом — бар снова на строку ниже."""
+    pytest.importorskip("textual")
+    from textual.containers import Vertical
+
+    _write_task(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        scr._show_thinking_indicator(state="failed")
+        scr._set_indicator_error("ReadError: boom")
+        bar = scr.query_one("#indicator-bar", Vertical)
+        assert bar.styles.height.value == 4
+        scr._show_thinking_indicator(state="thinking")
+        assert bar.styles.height.value == 3
