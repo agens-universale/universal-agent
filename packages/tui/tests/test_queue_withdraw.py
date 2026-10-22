@@ -463,6 +463,41 @@ async def test_turn_end_not_withdrawn_becomes_pending(tmp_path):
         assert len(runner.withdrawn) == 2
 
 
+@pytest.mark.asyncio
+async def test_pending_after_turn_end_reconciles_on_thread_record(tmp_path):
+    """Не снятая на конце хода реплика (`pending`) становится обычной,
+    когда её запись приходит в тред."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path, admitted=True)
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        _admit(scr, "первое", 5)
+        _admit(scr, "второе", 6)
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        replies = list(trace.query(UserReplyContainer))
+        assert [r.state for r in replies] == ["normal", "normal"]
+        assert _pending_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_pending_after_stop_reconciles_on_thread_record(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path)
+        runner.admitted_ids = {runner.added[1]["id"]}
+        scr._cmd_stop()
+        await pilot.pause()
+        _admit(scr, "второе", 5)
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        (left,) = trace.query(UserReplyContainer)
+        assert (left._text, left.state) == ("второе", "normal")
+        assert _pending_records(tmp_path) == []
+
+
 # --- пересборка ленты во время хода ------------------------------------------
 
 
