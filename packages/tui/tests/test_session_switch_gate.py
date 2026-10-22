@@ -325,3 +325,23 @@ async def test_switch_forgets_undo_of_previous_send(tmp_path, path):
         assert scr._active_task_id == _TARGET[path]
         assert scr._last_user_message_id is None
         assert scr._can_cancel_with_undo() is False
+
+
+@pytest.mark.asyncio
+async def test_stop_then_busy_target_says_busy(tmp_path):
+    """Цель успели занять другим окном: ход уже остановлен, переход не
+    состоялся — человек видит «сессия занята», а не тишину."""
+    from gc_tui.services.session_lock import BUSY_MESSAGE, try_acquire
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _run_in_a(pilot)
+        notes = []
+        pilot.app.notify = lambda msg, **kw: notes.append(msg)
+        assert try_acquire(str(tmp_path), "cli", _B, "other-tui")
+        scr.request_thread_switch(_B)
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        assert scr._active_task_id == _A
+        assert BUSY_MESSAGE in notes
+        assert _status(tmp_path, _A) == "stopped"
