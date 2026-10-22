@@ -2958,7 +2958,10 @@ class TraceScreen(Screen):
             replies, round(trace.scroll_y), lambda r: r.virtual_region.y
         )
         sticky.show(reply, box)
-        pill.show(self._end_pill_label(), box)
+        # Строкой над рамкой поля ввода — ниже индикатора хода, не поверх
+        # текста ленты.
+        input_top = self.query_one(_SEL_INPUT_ROW, Horizontal).region.y
+        pill.show(self._end_pill_label(), box, input_top - 1)
 
     def _trace_replies(self, trace: VerticalScroll) -> list:
         """Реплики верхнего уровня ленты по порядку. Кэшируется только

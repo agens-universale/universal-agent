@@ -1,7 +1,7 @@
 """Накладки над лентой, когда она не внизу (спека P3 §2.6).
 
 `StickyReply` — первая строка ленты: ближайшая реплика выше верхнего края.
-`ScrollEndPill` — по центру последней строки ленты: «в конец».
+`ScrollEndPill` — по центру ленты, строкой над рамкой поля ввода: «в конец».
 Обе — `overlay: screen` с абсолютной позицией по `#trace.content_region`:
 высоты ленты не занимают, фокус и выделение не берут."""
 
@@ -104,14 +104,14 @@ class StickyReply(_Overlay):
 
 
 class ScrollEndPill(_Overlay, Static):
-    """`↓ в конец · …` по центру последней строки; клик — к низу."""
+    """`↓ в конец · …` по центру ленты строкой `y`; клик — к низу."""
 
     def __init__(self, scroll_target: Widget, **kwargs) -> None:
         super().__init__(scroll_target, "", markup=False, **kwargs)
         self.label = ""
 
-    def show(self, label: Optional[str], box: Region) -> None:
-        """Показать подпись `label` по центру последней строки `box`;
+    def show(self, label: Optional[str], box: Region, y: int = 0) -> None:
+        """Показать подпись `label` по центру `box` в строке экрана `y`;
         `None` — скрыть."""
         if label is None:
             self.display = False
@@ -121,7 +121,7 @@ class ScrollEndPill(_Overlay, Static):
             self.update(f" {label} ")
         width = cell_len(label) + 2
         x = box.x + (box.width - width) // 2
-        self._place(x, box.bottom - 1, width)
+        self._place(x, y, width)
 
     def _click_message(self) -> ScrollToEnd:
         return ScrollToEnd()

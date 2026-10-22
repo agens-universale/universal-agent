@@ -125,15 +125,18 @@ async def test_pill_label_follows_input(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_pill_centred_on_last_trace_row(tmp_path):
+async def test_pill_centred_one_row_above_input(tmp_path):
+    """Плашка — строкой над рамкой поля ввода: между ней и текстом поля
+    только рамка, индикатор хода выше не перекрывается."""
     _write_task(tmp_path, "o3")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _tall(pilot, "o3")
         _, pill = _overlays(scr)
         await _scroll(pilot, scr, 10)
         box = _trace(scr).content_region
+        input_row = scr.query_one("#input-row")
         region = pill.region
-        assert region.y == box.bottom - 1
+        assert region.y == input_row.region.y - 1
         assert region.height == 1
         left = region.x - box.x
         right = box.right - region.right
