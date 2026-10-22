@@ -644,3 +644,37 @@ def test_stopped_runner_confirm_does_not_present():
     runner.stop()
     assert confirm(title="t", question="q", fields=[]) == "deny_once"
     assert shown == []
+
+
+class _TailExecutor(_ClockExecutor):
+    """Первый ход отдаёт хвост очереди: воркер доигрывает его вторым
+    ходом того же прогона; часы первого хода закрыты."""
+
+    def __init__(self):
+        super().__init__()
+        self.tail = [{"role": "user", "content": "хвост", "id": "m_tail"}]
+        self.seen_in_tail: list = []
+        self.runner = None
+
+    def take_undelivered_messages(self):
+        tail, self.tail = self.tail, []
+        return tail
+
+    async def arun(self, messages, **kwargs):
+        if messages == ["хвост"]:
+            self.seen_in_tail.append(self.runner.turn_effective_start())
+            return None
+        self.start = time.monotonic()  # часы первого хода
+        time.sleep(0.01)
+        return None
+
+
+def test_tail_turn_does_not_count_from_closed_clock_of_previous():
+    """Хвост из очереди — второй ход того же прогона: часы первого хода
+    уже не его, счёт ждёт часов нового хода."""
+    fake = _TailExecutor()
+    runner = AgentRunner(executor=fake)
+    fake.runner = runner
+    runner.start(query="x", thread_id="t1")
+    runner.wait(timeout=2.0)
+    assert fake.seen_in_tail == [None]

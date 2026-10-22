@@ -2737,7 +2737,7 @@ class TraceScreen(Screen):
             return
         stream_display = self.app.base_settings().settings.tui.stream_display
         indicator = ThinkingIndicator(
-            started_at=self._live_turn_start(),
+            started_at=self._thinking_started_at,
             state=state,
             sink=getattr(self.app, "_stream_sink", None),
             reasoning_tag=stream_display != "answer_reasoning",
@@ -2745,6 +2745,7 @@ class TraceScreen(Screen):
         )
         self._thinking = indicator
         self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(indicator)
+        self._follow_turn_clock()
 
     def _restore_terminal_indicator(self) -> None:
         """На resume сессии: смонтировать строку-итог прошлого хода. Только если
@@ -2820,14 +2821,6 @@ class TraceScreen(Screen):
             ind.set_error((outcome.error or {}).get("message"))
         ind.show(state)
         self._sync_indicator_reserve()
-
-    def _live_turn_start(self) -> Optional[float]:
-        """Старт живого счёта: часы хода ядра (без ожидания человека); пока
-        ядро их не завело (и для `/compact`) — момент отправки."""
-        runner = getattr(self.app, "active_runner", None)
-        probe = getattr(runner, "turn_effective_start", None)
-        start = probe() if probe is not None else None
-        return start if start is not None else self._thinking_started_at
 
     def on_indicator_rows_changed(self, event: IndicatorRowsChanged) -> None:
         event.stop()
@@ -5618,8 +5611,7 @@ class TraceScreen(Screen):
         if is_running:
             self._watched_runner = runner
             self._watched_run_seq = getattr(runner, "run_seq", None)
-            if _kind == "run":
-                self._follow_turn_clock()
+            self._follow_turn_clock()
         self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
@@ -5867,11 +5859,21 @@ class TraceScreen(Screen):
             ind.show(state)
 
     def _follow_turn_clock(self) -> None:
-        """Живой счёт индикатора — от часов хода ядра: ожидание человека в
-        него не входит, ответ на вопрос агента его не обнуляет."""
-        start = self._live_turn_start()
-        if self._thinking is not None and start is not None:
-            self._thinking.set_started_at(start)
+        """Живой счёт индикатора хода — от часов хода ядра: ожидание
+        человека в него не входит, ответ на вопрос агента его не обнуляет.
+        Пока часов нет (сборка исполнителя, хвост из очереди до нового
+        хода) — счёта нет. Не ход (`/compact`) или раннер без часов — счёт
+        от отправки, как был."""
+        runner = getattr(self.app, "active_runner", None)
+        probe = getattr(runner, "turn_effective_start", None)
+        if (
+            self._thinking is None
+            or probe is None
+            or not runner.is_running()
+            or getattr(runner, "_thread_kind", "run") != "run"
+        ):
+            return
+        self._thinking.set_started_at(probe())
 
     def _poll_trace_tail(self) -> None:
         """Дочитать и отрисовать хвост записей активного треда."""

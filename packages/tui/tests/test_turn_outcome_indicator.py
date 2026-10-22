@@ -211,6 +211,16 @@ def test_live_count_follows_started_at_setter():
     assert "(5с)" in ind._render_text().plain
 
 
+def test_no_count_until_turn_clock_exists():
+    """Часов хода ещё нет — счёта нет (а не счёт от отправки, который
+    потом откатился бы к нулю)."""
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(started_at=0.0, clock=lambda: 50.0)
+    ind.set_started_at(None)
+    assert ind._render_text().plain.endswith("…")
+
+
 # --- ход через раннер и заглушку исполнителя -------------------------------
 
 
@@ -407,6 +417,28 @@ async def test_answer_keeps_turn_clock_and_duration_without_wait(tmp_path):
         scr._poll_active()
         await pilot.pause()
         assert _text(scr).startswith(f"✓ Выполнил за 12с · {_hm(ENDED)}")
+
+
+@pytest.mark.asyncio
+async def test_live_count_waits_for_core_clock(tmp_path):
+    """Сборка исполнителя (MCP) идёт, часов хода ядра нет: индикатор без
+    счёта; часы появились — счёт от них."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply("u1"))
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID)
+        scr._prepare_for_new_run()
+        scr._reset_thinking_timer()
+        runner = _ClockRunner(TID)
+        pilot.app.active_runner = runner
+        scr._poll_active()
+        assert scr._thinking._started_at is None
+        assert "с)" not in _text(scr)
+        runner.clock, _now = _fake_clock()
+        scr._poll_active()
+        assert scr._thinking._started_at == 100.0
 
 
 @pytest.mark.asyncio

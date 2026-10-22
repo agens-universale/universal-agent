@@ -250,7 +250,8 @@ class ThinkingIndicator(Static):
         self._sink = sink
         self._reasoning_tag = reasoning_tag
         self._reasoning_clock = reasoning_clock
-        self._started_at: float = (
+        # None — счёта нет: часов хода ядра ещё нет (`set_started_at`).
+        self._started_at: float | None = (
             started_at if started_at is not None else clock()
         )
         self._frame: int = 0
@@ -340,8 +341,10 @@ class ThinkingIndicator(Static):
         if self.is_mounted:
             self.refresh()
 
-    def set_started_at(self, started_at: float) -> None:
-        """Старт живого счёта: часы хода ядра, без ожидания человека."""
+    def set_started_at(self, started_at: float | None) -> None:
+        """Старт живого счёта: часы хода ядра, без ожидания человека;
+        None — часов ещё нет, счёт не показывается (иначе счёт от отправки
+        откатился бы к нулю, когда они появятся)."""
         self._started_at = started_at
 
     def set_turn_summary(self, summary: tuple[int, int, int] | None) -> None:
@@ -614,27 +617,37 @@ class ThinkingIndicator(Static):
             text.append(glyph, style=color)
             text.append(" ")
             text.append(f"{self._rotator.current()}…", style=_ACCENT)
-        elapsed = int(self._clock() - self._started_at)
-        parens = f" ({format_duration(elapsed)}"
-        if self._state == _STATE_THINKING:
-            units = (
-                self._sink.progress_units() if self._sink is not None else 0
-            )
-            if units > 0:
-                parens += f" · ↓ {format_compact_int(units)} токенов"
-            clk = self._reasoning_clock
-            if clk is not None:
-                if clk.live() and self._reasoning_tag:
-                    parens += " · размышление"
-                elif not clk.live():
-                    secs = clk.episode()
-                    if secs > 0:
-                        if round(secs) == 0:
-                            parens += " · обдумал"  # <0.5с → без «за 0с»
-                        else:
-                            parens += (
-                                f" · обдумал за {format_duration(round(secs))}"
-                            )
-        parens += ")"
-        text.append(parens)
+        parts = self._live_parts()
+        if parts:
+            text.append(f" ({' · '.join(parts)})")
         return text
+
+    def _live_parts(self) -> list[str]:
+        """Скобки живой строки: счёт хода (если часы есть), у «думаю» —
+        токены стрима и размышление."""
+        parts: list[str] = []
+        if self._started_at is not None:
+            elapsed = int(self._clock() - self._started_at)
+            parts.append(format_duration(elapsed))
+        if self._state != _STATE_THINKING:
+            return parts
+        units = self._sink.progress_units() if self._sink is not None else 0
+        if units > 0:
+            parts.append(f"↓ {format_compact_int(units)} токенов")
+        clk = self._reasoning_clock
+        if clk is None:
+            return parts
+        if clk.live():
+            if self._reasoning_tag:
+                parts.append("размышление")
+            return parts
+        secs = clk.episode()
+        if secs > 0:
+            # <0.5с → без «за 0с»
+            rounded = round(secs)
+            parts.append(
+                f"обдумал за {format_duration(rounded)}"
+                if rounded
+                else "обдумал"
+            )
+        return parts
