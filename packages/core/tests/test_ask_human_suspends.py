@@ -160,3 +160,44 @@ async def test_subagent_does_not_suspend_the_parent_turn():
     assert out["ok"] is False
     assert out["error"]["type"] == "question_unavailable"
     assert state.pending_question is None
+
+
+async def test_answer_is_not_replayed_into_the_tail_turn(
+    tmp_path, monkeypatch
+):
+    """Хвост хода с ответом (``send`` на излёте) доигрывается своим ходом
+    без ответа: вопроса уже нет, повтор ответа уронил бы весь ``run``."""
+    import importlib
+
+    ae = importlib.import_module("gc_core.agent_executor")
+    cfg = parity_config(tmp_path, monkeypatch)
+    install(monkeypatch, ScriptedBackend([ASK]))
+    store = MemoryThreadStore()
+    async with await _agent(cfg, store) as agent:
+        await agent.run("выбери вариант", thread_id=KEY.thread)
+        tail_finish = assistant_tool_call(
+            "turn_finish",
+            {
+                "solution_type": "direct_answer",
+                "task_report": "и это сделано",
+                "handoff": "{}",
+            },
+            call_id="fin2",
+        )
+        backend = install(
+            monkeypatch,
+            ScriptedBackend(
+                [FINISH, judge_accept(), tail_finish, judge_accept()]
+            ),
+        )
+        real_teardown = ae._aclose_mcp_and_release
+        late = [{"role": "user", "content": "и ещё", "id": "m-tail"}]
+
+        async def teardown(owner_reset):
+            if late:
+                agent.send(late.pop())
+            await real_teardown(owner_reset)
+
+        monkeypatch.setattr(ae, "_aclose_mcp_and_release", teardown)
+        await agent.run([], answer="B", thread_id=KEY.thread)
+    backend.assert_clean()
