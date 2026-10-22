@@ -76,6 +76,23 @@ async def test_new_from_idle_session_keeps_its_outcome(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_new_during_run_writes_stopped_to_run_thread(tmp_path):
+    """`/new` посреди хода: стоп — исход «stopped» в тред прогона."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A)
+        scr._prepare_for_new_run()
+        app.active_runner = _Runner(TID_A)
+        scr._poll_active()  # тик застал прогон
+        scr._stop_and_replace_runner()
+        scr._switch_to_empty_state()
+        scr._poll_active()
+        await pilot.pause()
+        assert _status(_store(tmp_path), TID_A) == "stopped"
+
+
+@pytest.mark.asyncio
 async def test_rising_edge_stamps_run_thread_not_open_one(tmp_path):
     """Переход в B до первого тика: «running» — треду прогона A, не B."""
     app = _app(tmp_path)
@@ -88,3 +105,41 @@ async def test_rising_edge_stamps_run_thread_not_open_one(tmp_path):
         scr._poll_active()
         assert _status(scr, TID_B) is None
         assert _status(scr, TID_A) == "running"
+
+
+@pytest.mark.asyncio
+async def test_new_run_before_tick_settles_previous_run(tmp_path):
+    """Ход A кончился, тик ещё не видел; Enter в B запускает новый ход
+    тем же раннером — исход A всё равно в A."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A)
+        scr._prepare_for_new_run()
+        runner = _Runner(TID_A)
+        app.active_runner = runner
+        scr._poll_active()  # тик застал ход A
+        scr.attach_active_task(TID_B, is_resume=True)
+        runner._running = False  # ход A кончился между тиками
+        scr._prepare_for_new_run()  # Enter в B
+        runner._last_target = (TID_B, "cli")
+        runner._running = True
+        scr._poll_active()
+        assert _status(scr, TID_A) == "completed"
+        assert _status(scr, TID_B) == "running"
+
+
+@pytest.mark.asyncio
+async def test_instant_failure_after_switch_lands_in_run_thread(tmp_path):
+    """Ход A упал сразу (предохранитель), тик его бегущим не застал, а
+    открыт уже B: исход «failed» — в A."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID_A)
+        scr._prepare_for_new_run()
+        app.active_runner = _Runner(TID_A, running=False)
+        app.last_runner_error = "алиас в предохранителе"
+        scr.attach_active_task(TID_B, is_resume=True)
+        scr._poll_active()
+        assert _status(scr, TID_A) == "failed"

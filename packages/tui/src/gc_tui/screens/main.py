@@ -711,6 +711,11 @@ class TraceScreen(Screen):
         self._pending_orphan_cleanups: list[tuple] = []
         # Флаг состояния runner на предыдущем тике — для детекта спадающего фронта.
         self._was_running: bool = False
+        # Прогон, чей исход ещё не записан: раннер, которого тик застал
+        # бегущим, и отметка «ход запущен отсюда» (быстрый ход тик может не
+        # застать). Раннер держим сами: стоп и пересборка снимают его с app.
+        self._watched_runner = None
+        self._run_pending: bool = False
         self._was_summarizing: bool = (
             False  # для baseline last_compact_msg_count
         )
@@ -5080,8 +5085,30 @@ class TraceScreen(Screen):
 
         _mcp_status_row НЕ обнуляем: колонка — часть бренд-карточки (#brand-mcp),
         переживает пересборку (_clear_trace); ссылка остаётся валидной."""
+        # Сначала конец прошлого хода: кончился между тиками — его исход
+        # пишется с его флагами, до сброса.
+        self._settle_ended_run()
         self._reset_run_flags()
         self._stamp_tui_running()
+        self._run_pending = True
+
+    def _settle_ended_run(self) -> None:
+        """Прогон кончился — исход в его тред (`_on_run_finished`), ровно раз.
+
+        Прогон — тот, что тик застал бегущим, иначе запущенный отсюда и ещё
+        не увиденный. Кончился — его раннер не бежит или снят с app (стоп,
+        пересборка, новый раннер)."""
+        if not (self._was_running or self._run_pending):
+            return
+        current = getattr(self.app, "active_runner", None)
+        runner = self._watched_runner or current
+        if runner is current and runner is not None and runner.is_running():
+            return
+        kind = getattr(runner, "_thread_kind", "run") if runner else "run"
+        self._on_run_finished(runner, kind)
+        self._was_running = False
+        self._run_pending = False
+        self._watched_runner = None
 
     def _reset_run_flags(self) -> None:
         """Сбросить error- и stop-флаги прошлого прогона (app-уровня)."""
@@ -5500,23 +5527,16 @@ class TraceScreen(Screen):
             if runner is not None
             else "run"
         )
+        # Спадающий фронт — первым: новый ход того же раннера не прячет
+        # конец прошлого.
+        self._settle_ended_run()
         # Восходящий фронт: прогон стартовал → running (страховочная сетка к
         # _prepare_for_new_run; ловит любой путь, где prepare не вызвали).
         # Тред — прогона: к первому тику человек мог уйти в другую сессию.
         if (not self._was_running) and is_running and _kind != "compact":
             self._stamp_tui_running(self._run_task_id(runner))
-        # Ход уложился между тиками: бегущим его не застал ни один тик, но
-        # мета ещё «running» — конец хода тот же, что у спадающего фронта.
-        _finished_before_poll = (
-            runner is not None
-            and _kind != "compact"
-            and getattr(runner, "_last_target", None)
-            == (self._active_task_id, self.app._system)
-            and self._store is not None
-            and (self._tick_meta().get("tui") or {}).get("status") == "running"
-        )
-        if (self._was_running or _finished_before_poll) and not is_running:
-            self._on_run_finished(runner, _kind)
+        if is_running:
+            self._watched_runner = runner
         self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
@@ -8462,7 +8482,9 @@ class TraceScreen(Screen):
         # Сбросить терминальные error/stop-флаги app-уровня (last_runner_error и пр.):
         # иначе poll видит протухшую ошибку и репейнтит «✕ Ошибка» поверх пустой сессии.
         # Только флаги: «running» уходящему треду писать нельзя — хода в нём
-        # нет, и исход потом никто не перезапишет.
+        # нет, и исход потом никто не перезапишет. Остановленный ход
+        # (`/new` посреди него) закрываем до ухода: тред прогона — в стор.
+        self._settle_ended_run()
         self._session_lock_release()
         self._reset_run_flags()
         self._copy_seq += 1  # итог /copy прошлой сессии сюда не пишется
