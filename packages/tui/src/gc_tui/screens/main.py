@@ -2783,8 +2783,15 @@ class TraceScreen(Screen):
 
     def _latest_turn_outcome(self) -> Optional[TurnOutcome]:
         """Запись итога последнего хода открытого треда; после неё началась
-        реплика (ход идёт или оборван без записи) — None."""
-        return None if self._outcome_superseded else self._last_turn_outcome
+        реплика (ход идёт или оборван без записи) — None. Ход оборван без
+        записи (статус «running» без живого хода: процесс убит) — тоже
+        None: запись — прошлого хода, даже если реплики после неё нет
+        (континуация плана открывается технической)."""
+        if self._outcome_superseded:
+            return None
+        if self._session_status_word() == "interrupted":
+            return None
+        return self._last_turn_outcome
 
     def _show_turn_outcome(
         self,

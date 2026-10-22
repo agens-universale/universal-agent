@@ -539,6 +539,49 @@ async def test_running_thread_without_live_turn_is_interrupted(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_plan_continuation_cut_off_is_interrupted(tmp_path):
+    """Ход с планом записан, континуация (только техническая реплика)
+    оборвана без записи: статус «running» без живого хода — «■ Прервано»,
+    а не «✓ План готов» прошлого хода."""
+    from gc_core.message_policy.user_message_policy import (
+        wrap_technical_user_content,
+    )
+
+    _write_thread(tmp_path, tui={"status": "running"})
+    _messages(tmp_path, _reply("u1"), _answer("a1"))
+    _record(tmp_path, seq=2, reason="plan_proposed")
+    continuation = {
+        "id": "t1",
+        "role": "user",
+        "content": wrap_technical_user_content(
+            "план утверждён", technical_type="technical"
+        ),
+    }
+    _messages(tmp_path, continuation, start_seq=2)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID, is_resume=True)
+        await pilot.pause()
+        assert _text(scr) == "■ Прервано"
+
+
+@pytest.mark.asyncio
+async def test_quit_without_record_reopens_as_cancelled(tmp_path):
+    """Выход посреди хода, ядро не успело записать итог: ход закончил
+    пользователь — «■ Отменено» (статус «stopped» пишет выход), не
+    «■ Прервано»; «прервано» — только для убитого процесса."""
+    _write_thread(tmp_path, tui={"status": "stopped"})
+    _messages(tmp_path, _reply("u1"), _answer("a1"))
+    _record(tmp_path, seq=2)
+    _messages(tmp_path, _reply("u2"), start_seq=2)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID, is_resume=True)
+        await pilot.pause()
+        assert _text(scr) == "■ Отменено"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("status", "line"),
     [("completed", "✓ Выполнил"), ("failed", "✕ Ошибка")],
