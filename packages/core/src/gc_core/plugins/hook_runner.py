@@ -20,6 +20,9 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+import signal
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +32,7 @@ from gc_core.plugins.manifest import HookCommand, Plugin
 logger = logging.getLogger(__name__)
 
 _DENY_WORDS = frozenset({"deny", "block"})
+_bash_warned = False
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,32 @@ def _parse_stdout(plugin: str, stdout: str) -> HookResult:
     )
 
 
+def _find_bash() -> str | None:
+    """Оболочка для хуков: ``/bin/bash`` в POSIX, иначе bash из PATH."""
+    if sys.platform != "win32" and os.path.exists("/bin/bash"):
+        return "/bin/bash"
+    return shutil.which("bash")
+
+
+def _warn_no_bash_once() -> None:
+    global _bash_warned
+    if not _bash_warned:
+        _bash_warned = True
+        logger.warning("plugin hooks need bash in PATH")
+
+
+async def _terminate(proc: asyncio.subprocess.Process) -> None:
+    """Убить хук вместе с потомками и дождаться завершения."""
+    try:
+        if sys.platform == "win32":
+            proc.kill()
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    await proc.wait()
+
+
 async def run_hook(
     plugin: Plugin,
     hook: HookCommand,
@@ -78,6 +108,10 @@ async def run_hook(
     cwd: str,
     default_timeout_sec: int,
 ) -> HookResult:
+    shell = _find_bash()
+    if shell is None:
+        _warn_no_bash_once()
+        return HookResult(plugin=plugin.name, failed=True)
     env = {
         **os.environ,
         "GC_PLUGIN_ROOT": str(plugin.root),
@@ -88,7 +122,7 @@ async def run_hook(
     workdir = cwd if Path(cwd).is_dir() else str(plugin.root)
     try:
         proc = await asyncio.create_subprocess_exec(
-            "/bin/bash",
+            shell,
             "-c",
             hook.command,
             stdin=asyncio.subprocess.PIPE,
@@ -96,7 +130,12 @@ async def run_hook(
             stderr=asyncio.subprocess.PIPE,
             env=env,
             cwd=workdir,
+            start_new_session=sys.platform != "win32",
         )
+    except OSError as exc:
+        logger.warning("plugin %s hook did not start: %s", plugin.name, exc)
+        return HookResult(plugin=plugin.name, failed=True)
+    try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(json.dumps(payload).encode("utf-8")),
             timeout=timeout,
@@ -108,13 +147,14 @@ async def run_hook(
             timeout,
             hook.command,
         )
-        try:
-            proc.kill()
-        except (ProcessLookupError, UnboundLocalError):
-            pass
+        await _terminate(proc)
         return HookResult(plugin=plugin.name, failed=True)
+    except asyncio.CancelledError:
+        await asyncio.shield(_terminate(proc))
+        raise
     except OSError as exc:
-        logger.warning("plugin %s hook did not start: %s", plugin.name, exc)
+        logger.warning("plugin %s hook failed: %s", plugin.name, exc)
+        await _terminate(proc)
         return HookResult(plugin=plugin.name, failed=True)
 
     if proc.returncode == 2:

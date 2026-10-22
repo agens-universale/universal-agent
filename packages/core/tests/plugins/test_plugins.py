@@ -1,7 +1,12 @@
 """Песочница плагинов: манифест, запуск хуков, фасад для цикла и skills."""
 
+import asyncio
 import json
+import logging
+import os
+import shutil
 import sys
+import time
 
 import pytest
 from types import SimpleNamespace
@@ -182,6 +187,70 @@ async def test_hook_failure_and_timeout_fail_open(tmp_path):
         plugin, slow, {}, cwd=str(tmp_path), default_timeout_sec=10
     )
     assert res.failed and not res.blocked
+
+
+_posix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="группы процессов только в POSIX"
+)
+
+
+def _pid_command(pid_file) -> str:
+    return f"sleep 600 & echo $! > {pid_file}; sleep 600"
+
+
+async def _wait_dead(pid: int, limit: float = 2.0) -> bool:
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+@_posix_only
+async def test_timeout_kills_process_group(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(command=_pid_command(pid_file), timeout_sec=1)
+    res = await run_hook(
+        plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
+    )
+    assert res.failed
+    assert await _wait_dead(int(pid_file.read_text()))
+
+
+@_posix_only
+async def test_cancel_kills_hook(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(command=_pid_command(pid_file))
+    task = asyncio.create_task(
+        run_hook(plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30)
+    )
+    await asyncio.sleep(0.5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await _wait_dead(int(pid_file.read_text()))
+
+
+async def test_no_bash_fails_open(tmp_path, monkeypatch, caplog):
+    from gc_core.plugins import hook_runner
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(hook_runner, "_bash_warned", False)
+    plugin = load_plugin(_make_plugin(tmp_path))
+    hook = HookCommand(command="true")
+    with caplog.at_level(logging.WARNING):
+        for _ in range(2):
+            res = await run_hook(
+                plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
+            )
+            assert res.failed
+    assert caplog.text.count("plugin hooks need bash in PATH") == 1
 
 
 async def test_pre_tool_call_blocks_and_rewrites(tmp_path, monkeypatch):
