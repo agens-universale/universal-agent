@@ -3960,3 +3960,28 @@ async def test_entry_saved_without_endpoint_path_warns_with_full_address(
 
         assert "https://routerai.ru/api/v1" in cfg_file.read_text()
         assert "https://routerai.ru/api/v1/responses" in _notice(scr)
+
+
+def test_profile_form_judges_address_by_the_profile_api_mode(tmp_path):
+    """Профиль со своим режимом API: адрес записи судится путём режима
+    профиля, а не основного конфига (там `responses`)."""
+    from gc_core.config import AppConfig
+
+    from gc_tui.editors.models_section import ModelsSectionEditor
+
+    profile = tmp_path / "work.yml"
+    profile.write_text(
+        "backend:\n  api_mode: chat_completions\n"
+        "models:\n  r:\n    model: m\n    url: https://h/v1\n",
+        encoding="utf-8",
+    )
+    editor = ModelsSectionEditor(
+        target=str(profile),
+        template="",
+        is_profile=True,
+        global_config=AppConfig.model_validate(
+            {"backend": {"api_mode": "responses"}}
+        ),
+    )
+
+    assert editor._endpoint_path_hint("r") == "https://h/v1/chat/completions"

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gc_core.config_modules.backend import endpoint_path_hint
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.model_registry import (
     LEVEL_FALLBACK,
@@ -55,7 +56,6 @@ from gc_tui.editors.model_entry_form import (
 )
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
-from gc_tui.services.endpoint_path import endpoint_path_hint
 from gc_tui.widgets.action_row import ActionRow
 
 # Виджеты подтверждения в секции моделей.
@@ -2545,13 +2545,25 @@ class ModelsSectionEditor(Vertical):
 
     def _endpoint_path_hint(self, alias: str) -> str | None:
         """Полный адрес, если СВОЙ адрес записи не оканчивается путём
-        эндпоинта режима бэкенда (`endpoint_path`); иначе None."""
-        if self._global_config is None:
+        эндпоинта режима бэкенда (`endpoint_path_hint`); иначе None."""
+        api_mode = self._api_mode()
+        if api_mode is None:
             return None
         return endpoint_path_hint(
-            entry_address(self._entry(alias), ""),
-            settings_of(self._global_config).backend.api_mode,
+            entry_address(self._entry(alias), ""), api_mode
         )
+
+    def _api_mode(self) -> str | None:
+        """Режим API, которым пойдут записи цели. Профиль — верхний файловый
+        слой своего стека: его `backend.api_mode` решает, если задан; иначе —
+        конфиг стека (`global_config`)."""
+        backend = self._document.get("backend") if self._is_profile else None
+        own = backend.get("api_mode") if isinstance(backend, dict) else None
+        if own:
+            return str(own).strip().lower()
+        if self._global_config is None:
+            return None
+        return settings_of(self._global_config).backend.api_mode
 
     def _warn_literal_tokens(self, pending: str | None = None) -> None:
         """Предупреждение секрет-политики — рядом с итогом записи и по ИТОГОВОМУ

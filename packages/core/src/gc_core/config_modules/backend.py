@@ -12,6 +12,27 @@ from gc_core.config_modules.field_meta import gc_meta, masked_repr_args
 
 DEFAULT_REQUEST_TIMEOUT_SEC = 600
 
+#: Путь эндпоинта режима API. Запрос идёт ровно по адресу записи, путь
+#: ядро не дописывает: адрес без пути режима даёт 404, похожий на
+#: недоступную модель.
+ENDPOINT_PATHS = {
+    "chat_completions": "/chat/completions",
+    "responses": "/responses",
+}
+
+
+def endpoint_path_hint(url: str, api_mode: str) -> str | None:
+    """Полный адрес, если ``url`` не оканчивается путём эндпоинта режима
+    ``api_mode``; иначе (и для ссылки на переменную окружения) — None."""
+    suffix = ENDPOINT_PATHS.get(api_mode)
+    url = (url or "").strip()
+    if not suffix or not url or "${" in url:
+        return None
+    base = url.rstrip("/")
+    if base.endswith(suffix):
+        return None
+    return base + suffix
+
 
 def parse_chat_completions_max_tokens(raw: Any, *, default: int = 8096) -> int:
     if raw is None:

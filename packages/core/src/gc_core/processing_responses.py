@@ -55,6 +55,10 @@ from gc_core.auto_routing.policy import (
 from gc_core.auto_routing.reroute import floor_verdict
 from gc_core.auto_routing.response import discarded_answer
 from gc_core.config import parse_chat_completions_max_tokens
+from gc_core.config_modules.backend import (
+    ENDPOINT_PATHS,
+    endpoint_path_hint,
+)
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.images import read_images_config
 from gc_core.config_modules.strip_tags_projection import (
@@ -448,19 +452,24 @@ def _mode_requires_backend_call(mode: str) -> bool:
     return mode in {"user_ask", "function_call_output"}
 
 
-_ENDPOINT_PATHS = ("/chat/completions", "/responses")
 _ENDPOINT_PATH_HINT = (
     "Если адрес задан вручную, проверьте адрес: обычно он оканчивается "
-    "на /chat/completions."
+    "на {path}."
 )
 
 
-def _missing_endpoint_path(url: Any, exc: BaseException) -> bool:
-    """404 по адресу без пути эндпоинта: запрос ушёл ровно по адресу
-    записи, и «модель недоступна» — скорее неполный адрес."""
+def _endpoint_path_advice(
+    ctx: Any, url: Any, exc: BaseException
+) -> Optional[str]:
+    """Совет проверить адрес при 404 по адресу без пути эндпоинта режима:
+    запрос ушёл ровно по адресу записи, и «модель недоступна» — скорее
+    неполный адрес."""
     if http_status_code(exc) != 404:
-        return False
-    return not str(url or "").rstrip("/").endswith(_ENDPOINT_PATHS)
+        return None
+    api_mode = _get_backend_api_mode(ctx)
+    if endpoint_path_hint(str(url or ""), api_mode) is None:
+        return None
+    return _ENDPOINT_PATH_HINT.format(path=ENDPOINT_PATHS[api_mode])
 
 
 def _raise_honest_main_unavailable(
@@ -483,8 +492,9 @@ def _raise_honest_main_unavailable(
         f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
         f"{resolved.url}: {reason}. Переключите уровень /level или профиль /profiles."
     )
-    if _missing_endpoint_path(resolved.url, source_exc):
-        message += f" {_ENDPOINT_PATH_HINT}"
+    advice = _endpoint_path_advice(ctx, resolved.url, source_exc)
+    if advice:
+        message += f" {advice}"
     logger = getattr(ctx, "logger", None) or _fallback_logger
     logger.error(message)
     raise MainModelUnavailable(message) from source_exc

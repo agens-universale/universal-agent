@@ -1,7 +1,7 @@
 """Подсказка полного адреса модели: адрес без пути эндпоинта режима
 (`/chat/completions`, `/responses`) принимается, но с предупреждением."""
 
-from gc_tui.services.endpoint_path import endpoint_path_hint
+from gc_core.config_modules.backend import endpoint_path_hint
 
 
 def test_base_address_gets_chat_completions_hint():
