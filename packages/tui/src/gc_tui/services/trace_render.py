@@ -663,7 +663,9 @@ def build_turn_line(
         head = turn_head(
             word, plan=plan, duration_sec=None, ended_at=None, now=now
         )
-        return TurnLine(head, opened_by=opened_by)
+        return TurnLine(
+            head, opened_by=opened_by, word=word, plan=plan, recorded=False
+        )
     word, plan = kind_of(outcome)
     head = turn_head(
         word,
@@ -672,7 +674,13 @@ def build_turn_line(
         ended_at=outcome.ended_at,
         now=now,
     )
-    return TurnLine(head, opened_by=outcome.opened_by)
+    return TurnLine(
+        head,
+        opened_by=outcome.opened_by,
+        word=word,
+        plan=plan,
+        recorded=True,
+    )
 
 
 def raw_output(ev) -> Optional[str]:

@@ -954,3 +954,117 @@ def test_finished_turn_summary_survives_a_busy_snapshot_index():
     )
 
     assert TraceScreen._finished_turn_summary(screen) is None
+
+
+# --- клик по сводке свежей строки итога в ленте (S10) -----------------------
+
+
+async def _line_app_requests(line, gestures):
+    """Свежая строка со сводкой в тестовом приложении: жесты по ней и
+    запросы экрана изменений, которые до приложения дошли."""
+    from gc_tui.messages import OpenEditsScreenRequest
+
+    from test_turn_line_widget import LineApp
+
+    class _App(LineApp):
+        def __init__(self, line) -> None:
+            super().__init__(line)
+            self.requests: list = []
+
+        def on_open_edits_screen_request(self, message) -> None:
+            assert isinstance(message, OpenEditsScreenRequest)
+            self.requests.append(message.source)
+
+    app = _App(line)
+    async with app.run_test(size=(80, 10)) as pilot:
+        line.freshen((2, 14, 3), None)
+        await pilot.pause()
+        line.render()
+        await gestures(pilot, line)
+        await pilot.pause()
+        return app.requests
+
+
+def _fresh_line():
+    return build_turn_line(word="completed")
+
+
+@pytest.mark.asyncio
+async def test_click_on_fresh_line_summary_sends_one_turn_request():
+    from gc_tui.services.edits_view import SOURCE_TURN
+
+    async def click(pilot, line):
+        await _gesture(pilot, line, line.summary_span[0] + 1)
+
+    assert await _line_app_requests(_fresh_line(), click) == [SOURCE_TURN]
+
+
+@pytest.mark.asyncio
+async def test_double_click_on_fresh_line_summary_sends_one_request():
+    async def double(pilot, line):
+        x = line.summary_span[0] + 1
+        _post_gesture(pilot, line, x)
+        _post_gesture(pilot, line, x)  # тот же пиксель → chain 2
+        await pilot.pause()
+
+    assert len(await _line_app_requests(_fresh_line(), double)) == 1
+
+
+@pytest.mark.asyncio
+async def test_right_click_on_fresh_line_summary_sends_nothing():
+    async def right(pilot, line):
+        await _gesture(pilot, line, line.summary_span[0] + 1, button=3)
+
+    assert await _line_app_requests(_fresh_line(), right) == []
+
+
+@pytest.mark.asyncio
+async def test_selection_drag_from_head_to_summary_sends_nothing():
+    async def drag(pilot, line):
+        await _gesture(pilot, line, 0, line.summary_span[0] + 1)
+
+    assert await _line_app_requests(_fresh_line(), drag) == []
+
+
+@pytest.mark.asyncio
+async def test_leaving_line_between_press_and_release_sends_nothing():
+    from textual.events import Leave
+
+    async def leave(pilot, line):
+        from textual.events import MouseDown, MouseUp
+
+        x = line.region.x + line.summary_span[0] + 1
+        y = line.region.y
+        kw = dict(
+            x=x,
+            y=y,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=False,
+            screen_x=x,
+            screen_y=y,
+        )
+        pilot.app.post_message(MouseDown(line, **kw))
+        await pilot.pause()
+        line.post_message(Leave(line))
+        await pilot.pause()
+        pilot.app.post_message(MouseUp(line, **kw))
+        await pilot.pause()
+
+    assert await _line_app_requests(_fresh_line(), leave) == []
+
+
+@pytest.mark.asyncio
+async def test_settled_line_click_sends_nothing():
+    async def settle_then_click(pilot, line):
+        x = line.summary_span[0] + 1
+        line.settle()
+        await pilot.pause()
+        line.render()
+        assert line.summary_span is None
+        await _gesture(pilot, line, x)
+
+    assert await _line_app_requests(_fresh_line(), settle_then_click) == []
