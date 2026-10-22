@@ -8173,6 +8173,20 @@ class TraceScreen(Screen):
         self._history_draft = None
         self._history_last_programmatic_text = None
 
+    def _history_step(self, step) -> tuple[int, str] | None:
+        """Шаг по истории мимо записей, равных тексту поля или исходному
+        тексту навигации (решение 28): такой шаг на экране ничего не меняет
+        — например, реплика, снятая ↑ из очереди, уже лежит в истории."""
+        try:
+            current = self.query_one(_SEL_CMDINPUT).text
+        except Exception:
+            current = ""
+        same = {current, self._history_draft or ""}
+        result = step(self._history_index)
+        while result is not None and result[1] in same:
+            result = step(result[0])
+        return result
+
     def _history_prev(self) -> None:
         """Шаг назад по истории. На первый вызов — сохранить draft."""
         if self._history is None or self._history.size == 0:
@@ -8184,7 +8198,7 @@ class TraceScreen(Screen):
             except Exception:
                 self._history_draft = ""
             self._history_index = self._history.size
-        result = self._history.prev(self._history_index)
+        result = self._history_step(self._history.prev)
         if result is None:
             return
         new_index, text = result
@@ -8201,7 +8215,7 @@ class TraceScreen(Screen):
         """Шаг вперёд по истории. За newest — вернуть draft."""
         if self._history is None or self._history_index is None:
             return
-        result = self._history.next(self._history_index)
+        result = self._history_step(self._history.next)
         if result is None:
             draft_text = self._history_draft or ""
             # Возврат к draft: технически это «выход» из навигации,

@@ -661,3 +661,18 @@ async def test_send_during_compact_no_duplicate(tmp_path):
         assert runner.added == []
         trace = scr.query_one("#trace")
         assert list(trace.query(UserReplyContainer)) == []
+
+
+@pytest.mark.asyncio
+async def test_up_after_withdraw_skips_same_text_in_history(tmp_path):
+    """Решение 28: снятая ↑ реплика уже в истории — следующее ↑ сразу даёт
+    предыдущую запись, а ↓ возвращает снятый текст."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        await _two_queued(pilot, tmp_path)
+        await _up(pilot)
+        assert _inp(pilot).text == "второе"
+        await _up(pilot)
+        assert _inp(pilot).text == "первое"
+        await pilot.press("down")
+        await pilot.pause()
+        assert _inp(pilot).text == "второе"
