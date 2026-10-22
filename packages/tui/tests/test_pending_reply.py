@@ -16,6 +16,15 @@ def _read_pending(tmp_path, tid):
     return (meta.get("tui") or {}).get("pending_user_messages", [])
 
 
+def _core_meta(tmp_path, tid, **fields):
+    """Запись меты исполнителем: секция `tui` принадлежит TUI и остаётся
+    (владение ключами меты), как у настоящего ядра."""
+    p = Path(tmp_path) / f"meta_cli_{tid}.json"
+    meta = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    meta.update({"thread_id": tid, **fields})
+    p.write_text(json.dumps(meta), encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_send_records_pending_in_meta(tmp_path):
     pytest.importorskip("textual")
@@ -23,10 +32,7 @@ async def test_send_records_pending_in_meta(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -66,10 +72,7 @@ async def test_pending_widget_mounted_with_pending_state(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -196,10 +199,7 @@ async def test_pending_cap_drops_oldest(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=30.0)
 
@@ -266,10 +266,7 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             raise RuntimeError("model unavailable")
 
         def stop_run(self):
@@ -312,10 +309,7 @@ async def test_error_shown_resets_between_runs(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             call["n"] += 1
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             raise RuntimeError(f"fail #{call['n']}")
 
         def stop_run(self):

@@ -5210,6 +5210,9 @@ class TraceScreen(Screen):
         )
         # /new и автосоздание: новый тред наследует то, с чем работаем сейчас.
         self.app.persist_session_overrides()
+        # Тред открыт до старта хода: перестройка ленты не застанет реплику,
+        # уже записанную быстрым исполнителем, без её отправленной копии.
+        self.attach_active_task(tid)
         return tid
 
     def _prepare_for_new_run(self) -> None:
@@ -7427,6 +7430,12 @@ class TraceScreen(Screen):
             full_query, patch = await self._consume_pending_prefix(text)
             display_query, skill_loaded = self._skill_display_args(text)
             technical = self._build_attachment_technical(text)
+            client_id = self._track_pending(
+                display_text=text, wire_content=full_query, images=images
+            )
+            self._mount_user_reply(
+                text, state="pending", client_id=client_id, images=images
+            )
             self._prepare_for_new_run()
             self._reset_thinking_timer()
             self._on_user_text_submitted(text, images)
@@ -7440,7 +7449,6 @@ class TraceScreen(Screen):
                 skill_loaded=skill_loaded,
                 attachments=images,
             )
-            self.attach_active_task(tid)
             if patch:
                 self._write_tui_meta(tid, patch)
             branch = current_branch(self._current_cwd())
@@ -7454,15 +7462,6 @@ class TraceScreen(Screen):
                 ppath = ""
             if ppath:
                 self._write_tui_meta(tid, {"project_path": ppath})
-            # _track_pending — после attach_active_task (которое чистит
-            # _pending_user_widgets через _reset_render_state) и после
-            # потенциальной первой записи meta исполнителем.
-            client_id = self._track_pending(
-                display_text=text, wire_content=full_query, images=images
-            )
-            self._mount_user_reply(
-                text, state="pending", client_id=client_id, images=images
-            )
             return
 
         if runner.is_running():
@@ -8696,6 +8695,12 @@ class TraceScreen(Screen):
             # AUTO-CREATE: зеркалим порядок auto-create в on_command_text_area_submitted.
             tid = self._begin_auto_created_task()
             runner = self.app.get_runner()
+            client_id = self._track_pending(
+                display_text=prompt, wire_content=full_query
+            )
+            self._mount_user_reply(
+                prompt, state="pending", client_id=client_id
+            )
             self._prepare_for_new_run()
             self._reset_thinking_timer()
             self._on_user_text_submitted(prompt)
@@ -8707,18 +8712,7 @@ class TraceScreen(Screen):
                 display_query=prompt,
                 skill_loaded=skill_loaded,
             )
-            # attach_active_task — после start, как в реальном auto-create;
-            # сбрасывает _pending_user_widgets через _reset_render_state.
-            self.attach_active_task(tid)
-            # _track_pending и _mount_user_reply — ПОСЛЕ attach_active_task,
-            # иначе _reset_render_state вычистит только что добавленный widget.
             self._record_skill_meta(skill_loaded)
-            client_id = self._track_pending(
-                display_text=prompt, wire_content=full_query
-            )
-            self._mount_user_reply(
-                prompt, state="pending", client_id=client_id
-            )
             return
 
         # Задача есть, но run не идёт — продолжаем тот же thread.
@@ -9619,16 +9613,6 @@ class TraceScreen(Screen):
         if self.app.tui_state.active_task_id is None:
             tid = self._begin_auto_created_task()
             runner = self.app.get_runner()
-            self._prepare_for_new_run()
-            self._reset_thinking_timer()
-            self._on_user_text_submitted(display)
-            runner.start(
-                query=wire,
-                thread_id=tid,
-                system=self.app._system,
-                message_id=msg_id,
-            )
-            self.attach_active_task(tid)
             client_id = self._track_pending(
                 display_text=display, wire_content=wire
             )
@@ -9639,6 +9623,15 @@ class TraceScreen(Screen):
                 prefix="",
                 content="/init: запускаю агента",
                 kind_class="line-meta",
+            )
+            self._prepare_for_new_run()
+            self._reset_thinking_timer()
+            self._on_user_text_submitted(display)
+            runner.start(
+                query=wire,
+                thread_id=tid,
+                system=self.app._system,
+                message_id=msg_id,
             )
             return
 
