@@ -809,6 +809,10 @@ class AgentRunner:
         ) -> str:
             self._confirm_event.clear()
             self._confirm_choice = "deny_once"
+            # Остановленный прогон дорабатывает отвязанным: его вопрос встал
+            # бы баннером в чужой открытой сессии — fail-closed без показа.
+            if self._stop_requested or self._marked_stopped:
+                return "deny_once"
             try:
                 mounted = call_with_optional(
                     present,

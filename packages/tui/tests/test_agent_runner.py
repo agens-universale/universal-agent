@@ -581,3 +581,19 @@ def test_stop_releases_run_waiting_for_human_answer():
     runner.stop()
     runner.wait(timeout=2.0)
     assert not runner.is_running()
+
+
+def test_stopped_runner_confirm_does_not_present():
+    """Остановленный (отвязанный) прогон: вопрос подтверждения не
+    показывается — баннер встал бы в чужой сессии, ответ ушёл бы в
+    никуда. Ответ — fail-closed."""
+    from gc_tui.services.agent_runner import AgentRunner
+
+    shown = []
+    runner = AgentRunner(executor_factory=lambda: None)
+    confirm = runner.make_tui_confirm(
+        lambda *a, **kw: shown.append(a) or True, timeout_sec=0.1
+    )
+    runner.stop()
+    assert confirm(title="t", question="q", fields=[]) == "deny_once"
+    assert shown == []
