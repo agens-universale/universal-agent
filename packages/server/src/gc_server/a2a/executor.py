@@ -1,11 +1,19 @@
 """Исполнитель задач A2A для SDK: диалог — тред ``system="a2a"``
 (``contextId`` — id треда), ход агента — в фоне.
 
-Вопрос агента человеку (``turn_ask_human``) становится вопросом задачи:
-``INPUT_REQUIRED``, ``execute`` возвращается, а ход ждёт ответа. Следующее
-сообщение с тем же ``taskId`` снова вызывает ``execute`` — ответ уходит в
-ждущий ход. Ход живёт на инстансе, который его начал: продолжение,
-пришедшее на другой инстанс, — отказ задачи.
+Вопрос агента человеку (``turn_ask_human``) завершает ход — приостановка
+ядра (``ask_human_suspends``): задача ``INPUT_REQUIRED``, тред свободен,
+агент ничего не ждёт. Ответ — следующее сообщение с тем же ``taskId`` на
+любом инстансе: ход продолжается с ответом.
+
+Диалог ведёт задачи по очереди. Новая задача в занятом диалоге (идёт ход,
+или задача ждёт ответа на вопрос) — ``SUBMITTED``: она в очереди диалога
+(``frontend.a2a``, записи ``q:<taskId>``, порядок — по времени приёма) и
+ждёт в том же запросе (``execute``): события задачи идут в его очередь
+событий SDK — статусы и push как у обычной задачи. Отмена из очереди —
+``CANCELED``. Восстановление (``arecover_once``) переводит в ``FAILED``
+задачи, чей ход или ожидание очереди умерли вместе с инстансом, — очередь
+диалога идёт дальше.
 """
 
 from __future__ import annotations
@@ -14,21 +22,30 @@ import asyncio
 import logging
 import os
 from collections import OrderedDict
+from datetime import timedelta
 from typing import Any
 
 from a2a.helpers.proto_helpers import new_task_from_user_message
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.tasks import TaskUpdater
 from a2a.types import a2a_pb2 as pb
-from gc_core.execution.human import HumanRequestInterrupted
+from gc_core.execution.environment import utc_now
 from gc_core.threads.facade import Threads
+from gc_core.threads.instance import instance_id
+from gc_core.threads.models import ThreadKey, ThreadRecord
+from gc_core.threads.rules import lease_expired
 from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.tools.turn.submit_solution import SubmitSolution
 from google.protobuf.json_format import MessageToDict
 
 from gc_server.a2a.agent_config import prepare_agent_settings
-from gc_server.a2a.ask_human import bind_ask_human
-from gc_server.a2a.task_store import SYSTEM, dialog_key
+from gc_server.a2a.task_store import (
+    FRONTEND,
+    SYSTEM,
+    ThreadTaskStore,
+    dialog_key,
+    task_index,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +54,8 @@ logger = logging.getLogger(__name__)
 MAX_LIVE_AGENTS = 32
 # Пиру в status.message — без путей и текста исключения ядра.
 PEER_FAILURE_TEXT = "Ход не выполнен."
-BUSY_TEXT = "Диалог занят: в нём идёт другая задача."
-ELSEWHERE_TEXT = (
-    "Ход этой задачи идёт на другом инстансе или прерван: ответ на вопрос "
-    "принять некому."
-)
+NOT_WAITING_TEXT = "Задача не ждёт ответа: вопроса, на который отвечать, нет."
+INTERRUPTED_TEXT = "Ход прерван: инстанс, который вёл задачу, остановился."
 CWD_TEXT = (
     "metadata.cwd должен быть абсолютным путём внутри корня агента и "
     "совпадать с диалогом."
@@ -51,8 +65,21 @@ CWD_TEXT = (
 _STOPS = frozenset(
     {"step_limit", "token_limit", "tool_call_limit", "judge_unavailable"}
 )
-#: Корень диалога в состоянии фронтенда ``a2a`` треда.
+#: Ключи состояния фронтенда ``a2a`` треда диалога.
 _CWD_KEY = "cwd"
+#: Задача, чей ход идёт: ``{task, instance, at}``.
+_RUNNING = "running"
+#: Задача, ждущая ответа на вопрос (держит очередь диалога).
+_WAITING = "waiting"
+#: Очередь диалога: ``q:<taskId>`` → ``{at, seen, instance}``.
+_QUEUE = "q:"
+#: Отменённая в очереди задача: ``x:<taskId>`` → ``true``.
+_CANCELED = "x:"
+#: Как часто ждущая в очереди задача проверяет диалог (и отмечается живой).
+QUEUE_POLL_SECONDS = 2.0
+#: Сколько молчит ожидание или ход умершего инстанса, прежде чем
+#: восстановление сочтёт его мёртвым.
+STALE_AFTER = timedelta(seconds=60)
 
 
 def answer_text(agent: Any) -> str:
@@ -80,65 +107,86 @@ class _CwdError(ValueError):
     pass
 
 
-class Turn:
-    """Ход задачи в фоне. Исходы — в очередь: вопрос пиру или конец."""
+def _now() -> str:
+    return utc_now().isoformat()
 
-    def __init__(self, agent: Any, task_id: str, context_id: str, prompt: str):
+
+def _stale(stamp: Any) -> bool:
+    from datetime import datetime
+
+    try:
+        moment = datetime.fromisoformat(str(stamp))
+    except ValueError:
+        return True
+    return utc_now() - moment > STALE_AFTER
+
+
+def _dialog_state(record: ThreadRecord | None) -> dict[str, Any]:
+    return dict((record.frontend.get(FRONTEND) or {}) if record else {})
+
+
+def _queue(state: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Очередь диалога по времени приёма: ``(taskId, запись)``."""
+    entries = [
+        (name[len(_QUEUE) :], value)
+        for name, value in state.items()
+        if name.startswith(_QUEUE) and isinstance(value, dict)
+    ]
+    return sorted(entries, key=lambda item: (str(item[1].get("at")), item[0]))
+
+
+def _lease_live(record: ThreadRecord | None) -> bool:
+    lease = record.lease if record is not None else None
+    return lease is not None and not lease_expired(lease, utc_now())
+
+
+class Turn:
+    """Ход задачи в фоне: новый запрос или продолжение с ответом."""
+
+    def __init__(
+        self,
+        agent: Any,
+        task_id: str,
+        context_id: str,
+        prompt: Any,
+        *,
+        answer: str | None = None,
+    ):
         self.agent = agent
         self.task_id = task_id
         self.context_id = context_id
         self._prompt = prompt
-        self._outcomes: asyncio.Queue = asyncio.Queue()
-        self._answer: asyncio.Future | None = None
+        self._answer = answer
         self.cancel_requested = False
+        self.failed: BaseException | None = None
         self.done = asyncio.Event()
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
 
-    async def ask(self, question: str) -> str:
-        if self.cancel_requested:
-            raise HumanRequestInterrupted()
-        self._answer = asyncio.get_running_loop().create_future()
-        await self._outcomes.put(("question", question))
-        try:
-            return await self._answer
-        except asyncio.CancelledError as exc:
-            raise HumanRequestInterrupted() from exc
-
-    def answer(self, text: str) -> None:
-        if self._answer is not None and not self._answer.done():
-            self._answer.set_result(text)
-
     async def cancel(self) -> None:
         self.cancel_requested = True
-        if self._answer is not None and not self._answer.done():
-            self._answer.cancel()
         stop = getattr(self.agent, "stop", None)
         if stop is not None:
             stop()
         await self.done.wait()
 
-    async def next_outcome(self) -> tuple[str, Any]:
-        return await self._outcomes.get()
-
     async def _run(self) -> None:
-        failed: BaseException | None = None
         try:
             await self._forward()
         except asyncio.CancelledError:
             self.cancel_requested = True
         except Exception as exc:
             if not self.cancel_requested:
-                failed = exc
+                self.failed = exc
                 logger.exception("a2a turn")
-        await self._outcomes.put(("done", failed))
         self.done.set()
 
     async def _forward(self) -> None:
+        extra = {} if self._answer is None else {"answer": self._answer}
         stream = self.agent.stream(
-            self._prompt, thread_id=self.context_id, system=SYSTEM
+            self._prompt, thread_id=self.context_id, system=SYSTEM, **extra
         )
         try:
             async for _kind, _text in stream:
@@ -169,91 +217,204 @@ class GcAgentExecutor(AgentExecutor):
         self._settings = settings
         self._agent_factory = agent_factory
         self._threads = threads
+        self._tasks = ThreadTaskStore(threads)
         self._launch_root = launch_root
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
         self._turns: dict[str, Turn] = {}
+        #: Задачи этого инстанса, ждущие очереди диалога.
+        self._waiting: set[str] = set()
         self._agents: OrderedDict[str, Any] = OrderedDict()
         self._create_lock = asyncio.Lock()
 
     async def execute(self, context: RequestContext, event_queue: Any) -> None:
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        turn = self._turns.get(context.task_id)
-        if turn is not None:
-            turn.answer(context.get_user_input())
-            await self._report(turn, updater)
-            return
         task = context.current_task
+        if (
+            task is not None
+            and task.status.state == pb.TASK_STATE_INPUT_REQUIRED
+        ):
+            # Ответ может прийти без contextId: диалог — у самой задачи.
+            updater = TaskUpdater(event_queue, task.id, task.context_id)
+            await self._aanswer(task, context.get_user_input(), updater)
+            return
+        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         if task is None:
             await event_queue.enqueue_event(
                 new_task_from_user_message(context.message)
             )
-        elif task.status.state == pb.TASK_STATE_INPUT_REQUIRED:
-            await updater.failed(_agent_message(updater, ELSEWHERE_TEXT))
-            return
-        await self._begin(context, updater)
+        await self._abegin(context, updater)
 
     async def cancel(self, context: RequestContext, event_queue: Any) -> None:
-        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        task = context.current_task
+        context_id = (
+            task.context_id if task is not None else context.context_id
+        )
+        updater = TaskUpdater(event_queue, context.task_id, context_id)
         turn = self._turns.get(context.task_id)
         if turn is not None:
             await turn.cancel()
         else:
-            # Ход на другом инстансе: отмена — через поток control треда.
-            await self._threads.request_cancel(dialog_key(context.context_id))
+            await self._acancel_elsewhere(context_id, context.task_id)
         await updater.cancel()
 
+    async def _acancel_elsewhere(self, context_id: str, task_id: str) -> None:
+        """Задача ждёт ответа — диалог свободен (вопрос закроет следующий
+        ход); в очереди — снимается с неё; ход на другом инстансе — отмена
+        через поток control треда."""
+        key = dialog_key(context_id)
+        state = _dialog_state(await self._threads.get(key))
+        if state.get(_WAITING) == task_id:
+            await self._threads.update_frontend(
+                key, FRONTEND, {_WAITING: None}
+            )
+        elif _QUEUE + task_id in state:
+            await self._threads.update_frontend(
+                key,
+                FRONTEND,
+                {_QUEUE + task_id: None, _CANCELED + task_id: True},
+            )
+        else:
+            await self._threads.request_cancel(key)
+
     async def shutdown(self) -> None:
+        # Остановка сервера — прерывание: задачи остаются как есть, их
+        # подберёт восстановление другого инстанса.
         for turn in list(self._turns.values()):
             await turn.cancel()
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()
 
-    async def _begin(self, context: RequestContext, updater: TaskUpdater):
+    async def _abegin(self, context: RequestContext, updater: TaskUpdater):
         try:
             cwd = await self._cwd_for(context)
         except _CwdError:
             await updater.failed(_agent_message(updater, CWD_TEXT))
             return
-        if self._busy(context.context_id) or await self._threads.busy_owner(
-            dialog_key(context.context_id)
-        ):
-            await updater.failed(_agent_message(updater, BUSY_TEXT))
-            return
+        task_id, context_id = context.task_id, context.context_id
+        if not await self._aawait_turn(context_id, task_id, cwd):
+            return  # отменена в очереди: итог — cancel()
         try:
-            agent = await self._agent_for(context.context_id, cwd)
+            agent = await self._agent_for(context_id, cwd)
         except Exception:
             logger.exception("a2a agent")
+            await self._afree(context_id, task_id)
             await updater.failed(_agent_message(updater, PEER_FAILURE_TEXT))
             return
-        turn = Turn(
-            agent,
-            context.task_id,
-            context.context_id,
-            context.get_user_input(),
-        )
-        bind_ask_human(agent, turn.ask)
-        self._turns[context.task_id] = turn
-        await self._threads.update_frontend(
-            dialog_key(context.context_id), "a2a", {_CWD_KEY: cwd}
-        )
         await updater.start_work()
+        turn = Turn(agent, task_id, context_id, context.get_user_input())
+        self._turns[task_id] = turn
         turn.start()
         await self._report(turn, updater)
 
-    async def _report(self, turn: Turn, updater: TaskUpdater) -> None:
-        """Ждать исхода хода: вопрос — ``INPUT_REQUIRED`` (ход ждёт ответа),
-        конец — итог задачи."""
-        kind, value = await turn.next_outcome()
-        if kind == "question":
-            await updater.requires_input(_agent_message(updater, value))
+    async def _aanswer(self, task: pb.Task, text: str, updater: TaskUpdater):
+        """Ответ на вопрос задачи: ход продолжается с ответом — на любом
+        инстансе (тред и вопрос — в хранилище)."""
+        task_id, context_id = task.id, task.context_id
+        key = dialog_key(context_id)
+        state = _dialog_state(await self._threads.get(key))
+        if state.get(_WAITING) != task_id:
+            await updater.failed(_agent_message(updater, NOT_WAITING_TEXT))
             return
+        await self._threads.update_frontend(
+            key, FRONTEND, {_WAITING: None, _RUNNING: self._claim(task_id)}
+        )
+        try:
+            agent = await self._agent_for(context_id, state.get(_CWD_KEY))
+        except Exception:
+            logger.exception("a2a agent")
+            await self._afree(context_id, task_id)
+            await updater.failed(_agent_message(updater, PEER_FAILURE_TEXT))
+            return
+        await updater.start_work()
+        turn = Turn(agent, task_id, context_id, [], answer=text)
+        self._turns[task_id] = turn
+        turn.start()
+        await self._report(turn, updater)
+
+    async def _aawait_turn(self, context_id: str, task_id: str, cwd: str):
+        """Встать в очередь диалога и дождаться своей очереди: диалог
+        свободен (нет хода, никто не ждёт ответа) и задача первая. ``False``
+        — задачу отменили в очереди."""
+        key = dialog_key(context_id)
+        entry = {"at": _now(), "instance": instance_id()}
+        await self._threads.update_frontend(
+            key,
+            FRONTEND,
+            {_CWD_KEY: cwd, _QUEUE + task_id: {**entry, "seen": _now()}},
+        )
+        self._waiting.add(task_id)
+        try:
+            while True:
+                record = await self._threads.get(key)
+                state = _dialog_state(record)
+                if state.get(_CANCELED + task_id):
+                    return False
+                if self._free(record, state) and _queue(state)[:1] == [
+                    (task_id, state[_QUEUE + task_id])
+                ]:
+                    await self._threads.update_frontend(
+                        key,
+                        FRONTEND,
+                        {
+                            _QUEUE + task_id: None,
+                            _RUNNING: self._claim(task_id),
+                        },
+                    )
+                    return True
+                await asyncio.sleep(QUEUE_POLL_SECONDS)
+                await self._threads.update_frontend(
+                    key,
+                    FRONTEND,
+                    {_QUEUE + task_id: {**entry, "seen": _now()}},
+                )
+        finally:
+            self._waiting.discard(task_id)
+
+    @staticmethod
+    def _claim(task_id: str) -> dict[str, Any]:
+        return {"task": task_id, "instance": instance_id(), "at": _now()}
+
+    @staticmethod
+    def _free(record: ThreadRecord | None, state: dict[str, Any]) -> bool:
+        """Диалог свободен: хода нет (ни отметки, ни живой аренды) и никто
+        не ждёт ответа на вопрос."""
+        return (
+            not state.get(_RUNNING)
+            and not state.get(_WAITING)
+            and not _lease_live(record)
+        )
+
+    async def _afree(self, context_id: str, task_id: str) -> None:
+        """Снять отметку хода задачи (своей) — диалог свободен."""
+        key = dialog_key(context_id)
+        running = _dialog_state(await self._threads.get(key)).get(_RUNNING)
+        if isinstance(running, dict) and running.get("task") == task_id:
+            await self._threads.update_frontend(
+                key, FRONTEND, {_RUNNING: None}
+            )
+
+    async def _report(self, turn: Turn, updater: TaskUpdater) -> None:
+        """Исход хода: вопрос — ``INPUT_REQUIRED`` (тред свободен, задача
+        держит очередь диалога), иначе итог задачи."""
+        await turn.done.wait()
         self._turns.pop(turn.task_id, None)
+        key = dialog_key(turn.context_id)
         if turn.cancel_requested:
-            return  # итог — cancel()
-        if value is not None or stop_outcome(turn.agent) is not None:
+            await self._afree(turn.context_id, turn.task_id)
+            return  # итог — cancel() (или остановка сервера)
+        question = getattr(turn.agent, "pending_question", None)
+        if turn.failed is None and question:
+            await self._threads.update_frontend(
+                key, FRONTEND, {_RUNNING: None, _WAITING: turn.task_id}
+            )
+            await updater.requires_input(
+                _agent_message(updater, str(question.get("question") or ""))
+            )
+            return
+        await self._afree(turn.context_id, turn.task_id)
+        if turn.failed is not None or stop_outcome(turn.agent) is not None:
             await updater.failed(_agent_message(updater, PEER_FAILURE_TEXT))
             return
         await updater.add_artifact(
@@ -261,8 +422,60 @@ class GcAgentExecutor(AgentExecutor):
         )
         await updater.complete()
 
-    def _busy(self, context_id: str) -> bool:
-        return any(t.context_id == context_id for t in self._turns.values())
+    # --- восстановление ------------------------------------------------
+
+    async def arecover_once(self) -> int:
+        """Задачи, чей ход или ожидание очереди умерли вместе с инстансом, —
+        ``FAILED`` (прерваны); их место в диалоге освобождается. Возвращает,
+        сколько задач прервано."""
+        failed = 0
+        async for record in self._threads.iter_threads(system=SYSTEM):
+            failed += await self._arecover_dialog(record)
+        return failed
+
+    async def _arecover_dialog(self, record: ThreadRecord) -> int:
+        state = _dialog_state(record)
+        dead: list[str] = []
+        patch: dict[str, Any] = {}
+        running = state.get(_RUNNING)
+        if (
+            isinstance(running, dict)
+            and running.get("task") not in self._turns
+            and not _lease_live(record)
+            and _stale(running.get("at"))
+        ):
+            dead.append(str(running.get("task")))
+            patch[_RUNNING] = None
+        for task_id, entry in _queue(state):
+            if task_id not in self._waiting and _stale(entry.get("seen")):
+                dead.append(task_id)
+                patch[_QUEUE + task_id] = None
+        if not dead:
+            return 0
+        await self._threads.update_frontend(record.key, FRONTEND, patch)
+        index = task_index(record)
+        for task_id in dead:
+            await self._ainterrupt(record.key, index.get(task_id))
+        return len(dead)
+
+    async def _ainterrupt(self, key: ThreadKey, position: Any) -> None:
+        task = await self._tasks.at(key, position)
+        if task is None or task.status.state in _FINAL_STATES:
+            return
+        task.status.state = pb.TASK_STATE_FAILED
+        task.status.message.CopyFrom(
+            pb.Message(
+                role=pb.ROLE_AGENT,
+                message_id=f"interrupted-{task.id}",
+                task_id=task.id,
+                context_id=task.context_id,
+                parts=[pb.Part(text=INTERRUPTED_TEXT)],
+            )
+        )
+        task.status.timestamp.GetCurrentTime()
+        await self._tasks.save(task, None)
+
+    # --- корень хода и агенты -------------------------------------------
 
     async def _cwd_for(self, context: RequestContext) -> str:
         sent = _sent_cwd(context)
@@ -295,12 +508,12 @@ class GcAgentExecutor(AgentExecutor):
 
     async def _dialog_cwd(self, context_id: str) -> str | None:
         """Корень диалога — из прошлых задач контекста (на любом инстансе)."""
-        record = await self._threads.get(dialog_key(context_id))
-        state = (record.frontend.get("a2a") or {}) if record else {}
-        cwd = state.get(_CWD_KEY)
+        cwd = _dialog_state(
+            await self._threads.get(dialog_key(context_id))
+        ).get(_CWD_KEY)
         return cwd if isinstance(cwd, str) and cwd else None
 
-    async def _agent_for(self, context_id: str, cwd: str) -> Any:
+    async def _agent_for(self, context_id: str, cwd: Any) -> Any:
         cached = self._agents.get(context_id)
         if cached is not None:
             self._agents.move_to_end(context_id)
@@ -310,7 +523,9 @@ class GcAgentExecutor(AgentExecutor):
             if cached is not None:
                 return cached
             agent = await self._agent_factory(
-                prepare_agent_settings(self._settings, cwd=cwd),
+                prepare_agent_settings(
+                    self._settings, cwd=str(cwd or self._root())
+                ),
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
                 os_backend=self._os_backend,
@@ -324,6 +539,16 @@ class GcAgentExecutor(AgentExecutor):
         idle = [key for key in self._agents if key not in busy]
         for key in idle[: max(0, len(self._agents) - MAX_LIVE_AGENTS)]:
             await _safe_aclose(self._agents.pop(key))
+
+
+_FINAL_STATES = frozenset(
+    {
+        pb.TASK_STATE_COMPLETED,
+        pb.TASK_STATE_FAILED,
+        pb.TASK_STATE_CANCELED,
+        pb.TASK_STATE_REJECTED,
+    }
+)
 
 
 def _sent_cwd(context: RequestContext) -> str | None:

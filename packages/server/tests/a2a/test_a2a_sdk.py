@@ -1,8 +1,8 @@
 """Поверхность a2a на ``a2a-sdk``: проверка клиентом SDK.
 
 Задачи лежат в хранилище тредов (SQLite): их видит любой инстанс. Агент —
-двойник с управляемым ходом (вопрос пиру, удержание), а один сквозной тест —
-настоящий агент на скриптованной модели.
+двойник с управляемым ходом (вопрос пиру — приостановка хода, удержание), а
+один сквозной тест — настоящий агент на скриптованной модели.
 """
 
 import asyncio
@@ -15,7 +15,9 @@ import httpx
 import pytest
 from a2a.client import ClientConfig, ClientFactory
 from a2a.types import a2a_pb2 as pb
-from gc_server.a2a.executor import BUSY_TEXT
+from gc_server.a2a import executor as a2a_executor
+from gc_server.a2a.executor import INTERRUPTED_TEXT
+from gc_server.a2a.task_store import TASKS_STREAM, dialog_key
 from gc_server.a2a.surface import A2aSurface
 from gc_server.app import ServerRuntime
 from gc_server.config import ServerConfig, ServerConfigError
@@ -27,8 +29,9 @@ BASE = "http://127.0.0.1:8091"
 
 
 class FakeAgent:
-    """Ход по сценарию: ``("ask", вопрос)`` — вопрос пиру, ``("hold",
-    событие)`` — ждать события."""
+    """Ход по сценарию: ``("ask", вопрос)`` — вопрос пиру (ход
+    приостанавливается, как с ``ask_human_suspends``; ответ — следующим
+    ходом с ``answer=``), ``("hold", событие)`` — ждать события."""
 
     def __init__(self, *script, answer="готово"):
         self.script = list(script)
@@ -41,13 +44,22 @@ class FakeAgent:
             _ctx=SimpleNamespace(), last_terminal_outcome=None
         )
         self.last_answer = None
+        self.pending_question = None
+        self._step = 0
 
-    async def stream(self, prompt, thread_id=None, system=None):
+    async def stream(self, prompt, thread_id=None, system=None, answer=None):
         self.calls.append((prompt, thread_id, system))
-        for kind, value in self.script:
+        if answer is not None:
+            self.answers.append(answer)
+        self.pending_question = None
+        while self._step < len(self.script):
+            kind, value = self.script[self._step]
+            self._step += 1
             if kind == "ask":
-                self.answers.append(await self.executor._ctx.ask_human(value))
-            elif kind == "hold":
+                self.pending_question = {"call_id": "q", "question": value}
+                yield ("answer", "кусок")
+                return
+            if kind == "hold":
                 stopped = asyncio.create_task(self.stopped.wait())
                 held = asyncio.create_task(value.wait())
                 await asyncio.wait(
@@ -88,6 +100,22 @@ def _settings(tmp_path):
 #: Поверхности теста: их ходы и задачи SDK гасятся до закрытия хранилища —
 #: операция с закрытой SQLite не завершается, и цикл событий не закрылся бы.
 _LIVE: list = []
+
+
+@pytest.fixture(autouse=True)
+def _fast_queue(monkeypatch):
+    monkeypatch.setattr(a2a_executor, "QUEUE_POLL_SECONDS", 0.02)
+
+
+async def _until(client, task_id, state):
+    for _ in range(400):
+        task = await client.get_task(pb.GetTaskRequest(id=task_id))
+        if task.status.state == state:
+            return task
+        await asyncio.sleep(0.01)
+    raise AssertionError(
+        f"задача {task_id}: {task.status.state}, ждали {state}"
+    )
 
 
 @pytest.fixture()
@@ -362,21 +390,132 @@ async def test_push_notification_reaches_the_receiver(tmp_path, stores):
     assert [c.url for c in configs.configs] == ["https://hooks.example/a2a"]
 
 
-async def test_busy_context_fails_the_new_task(tmp_path, stores):
+async def test_new_task_waits_its_turn_in_the_dialog(tmp_path, stores):
+    """Диалог ведёт задачи по очереди: новая задача в занятом диалоге —
+    ``SUBMITTED`` и стартует, когда предыдущая закончилась."""
     hold = asyncio.Event()
-    surface = _surface(tmp_path, stores, [FakeAgent(("hold", hold))])
+    agent = FakeAgent(("hold", hold))
+    surface = _surface(tmp_path, stores, [agent])
     client = _client(surface)
     first = await _send(client, _message("долго"), return_immediately=True)
-    second = await _send(client, _message("ещё", context_id=first.context_id))
-    assert second.status.state == pb.TASK_STATE_FAILED
-    assert _text(second.status.message) == BUSY_TEXT
+    second = await _send(
+        client,
+        _message("ещё", context_id=first.context_id),
+        return_immediately=True,
+    )
+    assert second.status.state == pb.TASK_STATE_SUBMITTED
     hold.set()
-    for _ in range(200):
-        done = await client.get_task(pb.GetTaskRequest(id=first.id))
-        if done.status.state == pb.TASK_STATE_COMPLETED:
-            break
-        await asyncio.sleep(0.01)
+    await _until(client, first.id, pb.TASK_STATE_COMPLETED)
+    await _until(client, second.id, pb.TASK_STATE_COMPLETED)
+    assert [call[0] for call in agent.calls] == ["долго", "ещё"]
+
+
+async def test_question_holds_the_dialog_until_answered(tmp_path, stores):
+    """Задача, ждущая ответа, держит очередь диалога: новая задача стартует
+    после ответа (а не перебивает вопрос)."""
+    agent = FakeAgent(("ask", "какой цвет?"))
+    surface = _surface(tmp_path, stores, [agent])
+    client = _client(surface)
+    asked = await _send(client, _message("покрась"))
+    assert asked.status.state == pb.TASK_STATE_INPUT_REQUIRED
+    queued = await _send(
+        client,
+        _message("и ещё", context_id=asked.context_id),
+        return_immediately=True,
+    )
+    await asyncio.sleep(0.1)
+    still = await client.get_task(pb.GetTaskRequest(id=queued.id))
+    assert still.status.state == pb.TASK_STATE_SUBMITTED
+    done = await _send(client, _message("синий", task_id=asked.id))
     assert done.status.state == pb.TASK_STATE_COMPLETED
+    await _until(client, queued.id, pb.TASK_STATE_COMPLETED)
+    assert agent.answers == ["синий"]
+
+
+async def test_answer_continues_the_task_on_another_instance(tmp_path, stores):
+    """Ход не ждёт ответа в памяти инстанса: ответ, пришедший на другой
+    инстанс, продолжает задачу там."""
+    first = _surface(tmp_path, stores, [FakeAgent(("ask", "какой цвет?"))])
+    other_agent = FakeAgent()
+    second = _surface(tmp_path, stores, [other_agent])
+    asked = await _send(_client(first), _message("покрась"))
+    assert asked.status.state == pb.TASK_STATE_INPUT_REQUIRED
+    # Продолжая задачу, пир называет её диалог (contextId): другой инстанс
+    # её в памяти не держит.
+    done = await _send(
+        _client(second),
+        _message("синий", task_id=asked.id, context_id=asked.context_id),
+    )
+    assert done.status.state == pb.TASK_STATE_COMPLETED
+    assert other_agent.answers == ["синий"]
+    assert other_agent.calls[0][0] == []
+
+
+async def test_cancel_removes_the_task_from_the_queue(tmp_path, stores):
+    hold = asyncio.Event()
+    agent = FakeAgent(("hold", hold))
+    surface = _surface(tmp_path, stores, [agent])
+    client = _client(surface)
+    first = await _send(client, _message("долго"), return_immediately=True)
+    queued = await _send(
+        client,
+        _message("ещё", context_id=first.context_id),
+        return_immediately=True,
+    )
+    canceled = await client.cancel_task(pb.CancelTaskRequest(id=queued.id))
+    assert canceled.status.state == pb.TASK_STATE_CANCELED
+    hold.set()
+    await _until(client, first.id, pb.TASK_STATE_COMPLETED)
+    await asyncio.sleep(0.1)
+    assert [call[0] for call in agent.calls] == ["долго"]
+
+
+async def test_canceling_a_waiting_task_frees_the_dialog(tmp_path, stores):
+    agent = FakeAgent(("ask", "какой цвет?"))
+    surface = _surface(tmp_path, stores, [agent])
+    client = _client(surface)
+    asked = await _send(client, _message("покрась"))
+    queued = await _send(
+        client,
+        _message("и ещё", context_id=asked.context_id),
+        return_immediately=True,
+    )
+    canceled = await client.cancel_task(pb.CancelTaskRequest(id=asked.id))
+    assert canceled.status.state == pb.TASK_STATE_CANCELED
+    await _until(client, queued.id, pb.TASK_STATE_COMPLETED)
+
+
+async def test_recovery_fails_the_task_of_a_dead_instance(
+    tmp_path, stores, monkeypatch
+):
+    """Ход на инстансе, который умер (отметка хода молчит, аренды нет), —
+    задача ``FAILED`` с причиной; диалог свободен для очереди."""
+    from datetime import timedelta
+
+    monkeypatch.setattr(a2a_executor, "STALE_AFTER", timedelta(0))
+    dying = _surface(tmp_path, stores, [FakeAgent(("hold", asyncio.Event()))])
+    survivor = _surface(tmp_path, stores, [])
+    task = await _send(
+        _client(dying), _message("долго"), return_immediately=True
+    )
+    await _until(_client(dying), task.id, pb.TASK_STATE_WORKING)
+    assert await survivor.executor.arecover_once() == 1
+    failed = await _client(survivor).get_task(pb.GetTaskRequest(id=task.id))
+    assert failed.status.state == pb.TASK_STATE_FAILED
+    assert _text(failed.status.message) == INTERRUPTED_TEXT
+
+
+async def test_task_snapshots_live_in_the_dialog_stream(tmp_path, stores):
+    """Задача — снимки в потоке ``a2a.tasks``; в состоянии фронтенда —
+    только номер последнего снимка."""
+    surface = _surface(tmp_path, stores, [FakeAgent()])
+    task = await _send(_client(surface), _message("сделай"))
+    key = dialog_key(task.context_id)
+    snapshots = await stores.threads.read_stream(key, TASKS_STREAM)
+    assert len(snapshots) >= 2
+    record = await stores.threads.get_thread(key)
+    index = record.frontend["a2a"]["task:" + task.id]
+    assert index == snapshots[-1].seq
 
 
 async def test_real_agent_answers_through_a2a(tmp_path, stores, monkeypatch):

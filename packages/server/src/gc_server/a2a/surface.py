@@ -7,11 +7,14 @@
 
 Канал объявляет о себе: человека нет — подтверждение отказывает само;
 слова пира — запрос внешней системы. ``turn_ask_human`` остаётся: его текст —
-вопрос задачи (``INPUT_REQUIRED``).
+вопрос задачи (``INPUT_REQUIRED``), ход на нём завершается. Восстановление
+раз в ``RECOVERY_INTERVAL_SECONDS`` прерывает задачи упавших инстансов.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
@@ -32,7 +35,11 @@ from gc_server.surface import install_bearer
 if TYPE_CHECKING:
     from gc_server.app import ServerRuntime
 
+logger = logging.getLogger(__name__)
+
 _CHANNEL_HIDDEN_TOOLS = (INTERMEDIATE_REPLY_TOOL_NAME,)
+#: Как часто восстановление ищет задачи упавших инстансов (как у вебхука).
+RECOVERY_INTERVAL_SECONDS = 30.0
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 NO_SDK = (
     "поверхность a2a работает на a2a-sdk: установите gc-server[a2a] "
@@ -122,6 +129,7 @@ class A2aSurface:
         self._push_url_validator = push_url_validator
         self._own_push_client = False
         self.executor = self._executor()
+        self._recovery: asyncio.Task | None = None
 
     def _executor(self):
         from gc_server.a2a.executor import GcAgentExecutor
@@ -130,7 +138,7 @@ class A2aSurface:
         return GcAgentExecutor(
             settings=self.settings,
             agent_factory=self.runtime.agent_factory(
-                self.settings, surface="a2a"
+                self.settings, surface="a2a", ask_human_suspends=True
             ),
             threads=self.runtime.threads("a2a"),
             launch_root=self.section.launch_root,
@@ -224,9 +232,22 @@ class A2aSurface:
         return app
 
     async def astart(self) -> None:
-        return None
+        self._recovery = asyncio.get_running_loop().create_task(
+            self._arecover_loop()
+        )
+
+    async def _arecover_loop(self) -> None:
+        while True:
+            try:
+                await self.executor.arecover_once()
+            except Exception:
+                logger.exception("a2a: восстановление задач")
+            await asyncio.sleep(RECOVERY_INTERVAL_SECONDS)
 
     async def astop(self) -> None:
+        recovery, self._recovery = self._recovery, None
+        if recovery is not None:
+            recovery.cancel()
         await self.executor.shutdown()
         if self._own_push_client and self._push_client is not None:
             await self._push_client.aclose()
