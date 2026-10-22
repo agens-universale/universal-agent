@@ -193,6 +193,7 @@ from gc_core.utils.backend_errors import (
     classify_finish_kind,
     finish_blocks_final,
     finish_prevents_text_final,
+    http_status_code,
     is_auth_error,
     is_context_overflow_error,
     is_image_request_error,
@@ -447,6 +448,21 @@ def _mode_requires_backend_call(mode: str) -> bool:
     return mode in {"user_ask", "function_call_output"}
 
 
+_ENDPOINT_PATHS = ("/chat/completions", "/responses")
+_ENDPOINT_PATH_HINT = (
+    "Если адрес задан вручную, проверьте адрес: обычно он оканчивается "
+    "на /chat/completions."
+)
+
+
+def _missing_endpoint_path(url: Any, exc: BaseException) -> bool:
+    """404 по адресу без пути эндпоинта: запрос ушёл ровно по адресу
+    записи, и «модель недоступна» — скорее неполный адрес."""
+    if http_status_code(exc) != 404:
+        return False
+    return not str(url or "").rstrip("/").endswith(_ENDPOINT_PATHS)
+
+
 def _raise_honest_main_unavailable(
     ctx: Any, resolved: Any, reason: str, source_exc: BaseException
 ) -> NoReturn:
@@ -467,6 +483,8 @@ def _raise_honest_main_unavailable(
         f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
         f"{resolved.url}: {reason}. Переключите уровень /level или профиль /profiles."
     )
+    if _missing_endpoint_path(resolved.url, source_exc):
+        message += f" {_ENDPOINT_PATH_HINT}"
     logger = getattr(ctx, "logger", None) or _fallback_logger
     logger.error(message)
     raise MainModelUnavailable(message) from source_exc

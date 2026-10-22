@@ -3935,3 +3935,28 @@ async def test_empty_summary_trigger_shows_the_threshold_from_the_config_file(
             ).placeholder == (
                 "не задан · действует общий порог для всех моделей: 60 000"
             )
+
+
+async def test_entry_saved_without_endpoint_path_warns_with_full_address(
+    tmp_path,
+):
+    """Адрес без пути эндпоинта режима записывается (у прокси бывает свой
+    путь), но итог записи предупреждает и называет полный адрес: иначе 404
+    по такому адресу выглядит недоступной моделью. Режим бэкенда конфига
+    этого теста — `responses`."""
+    async with _section(tmp_path) as (pilot, scr, cfg_file):
+        from textual.widgets import Input
+
+        editor = scr._models_editor()
+        editor._open_form(None)
+        await pilot.pause()
+        form = editor._form
+        form.query_one("#mef-alias", Input).value = "router"
+        form.query_one("#mef-model", Input).value = "m-r"
+        form.query_one("#mef-url", Input).value = "https://routerai.ru/api/v1"
+        form.query_one("#mef-token", Input).value = "sk-R"
+        editor._submit_form()
+        await pilot.pause()
+
+        assert "https://routerai.ru/api/v1" in cfg_file.read_text()
+        assert "https://routerai.ru/api/v1/responses" in _notice(scr)

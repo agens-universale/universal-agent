@@ -42,6 +42,7 @@ from gc_core.config_modules.model_registry import (
     resolve_entry_address,
 )
 from gc_core.config_modules.model_sections_validation import SUBAGENT_NAMES
+from gc_core.settings import settings_of
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -54,6 +55,7 @@ from gc_tui.editors.model_entry_form import (
 )
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
+from gc_tui.services.endpoint_path import endpoint_path_hint
 from gc_tui.widgets.action_row import ActionRow
 
 # Виджеты подтверждения в секции моделей.
@@ -300,6 +302,11 @@ _NOTICE_REMOVE_RACED = "✗ не удалено: записи «{alias}» бол
 # честного no-op секции (`settings._save_legacy_model`, Enter без правок).
 _NOTICE_NO_CHANGE = "ничего не изменено"
 _NOTICE_ENTRY_SAVED = "Запись «{alias}» сохранена — {file}"
+# Адрес записи без пути эндпоинта режима: сохраняется (у прокси бывает свой
+# путь), но 404 по нему выглядел бы недоступной моделью.
+_ENDPOINT_PATH_HINT = (
+    "адрес обычно оканчивается путём эндпоинта — проверьте: {full}"
+)
 # Секрет-политика проектных профилей (docs/configuration.md, спека §3.5): файл
 # лежит в РЕПОЗИТОРИИ, и литеральный токен в нём — секрет, уезжающий в git.
 # Текст — ДОСЛОВНО тот, что печатает загрузчик (`profiles.load_profile_document`,
@@ -2513,7 +2520,13 @@ class ModelsSectionEditor(Vertical):
         self._reload()
         self._cursor_to(alias)
         self._refresh_rows()
-        if not self._entry_address(alias):
+        path_hint = self._endpoint_path_hint(alias)
+        if path_hint is not None:
+            self._warn_literal_tokens(
+                f"⚠ запись «{alias}» сохранена в {Path(self._target).name}, "
+                + _ENDPOINT_PATH_HINT.format(full=path_hint)
+            )
+        elif not self._entry_address(alias):
             # Оба предупреждения (адрес и литеральный токен) едут каналом `ok=None`
             # — ОДНИМ виджетом (`_singleton`), и второй вызов подряд его не
             # дополняет, а замещает. Склеены здесь, а не по два отдельных вызова
@@ -2529,6 +2542,16 @@ class ModelsSectionEditor(Vertical):
                 ok=True,
             )
             self._warn_literal_tokens()
+
+    def _endpoint_path_hint(self, alias: str) -> str | None:
+        """Полный адрес, если СВОЙ адрес записи не оканчивается путём
+        эндпоинта режима бэкенда (`endpoint_path`); иначе None."""
+        if self._global_config is None:
+            return None
+        return endpoint_path_hint(
+            entry_address(self._entry(alias), ""),
+            settings_of(self._global_config).backend.api_mode,
+        )
 
     def _warn_literal_tokens(self, pending: str | None = None) -> None:
         """Предупреждение секрет-политики — рядом с итогом записи и по ИТОГОВОМУ
