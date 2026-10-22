@@ -253,6 +253,28 @@ async def test_pill_row_with_plan_banner(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_pill_row_idle_with_plan_banner(tmp_path):
+    """Покой с баннером плана (ход кончился планом, бара нет): плашка — в
+    нижнем зазоре ленты, это ряд над баннером, и на баннер не ложится."""
+    _write_task(tmp_path, "o3ri")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _tall(pilot, "o3ri")
+        _, pill = _overlays(scr)
+        await _scroll(pilot, scr, 10)
+        scr._show_plan_banner()
+        await pilot.pause()
+        scr._refresh_trace_overlays()
+        scr._sync_trace_max_height()
+        await pilot.pause()
+        banner = scr._plan_banner
+        assert _bar_region(scr).height == 0
+        assert pill.display is True
+        assert pill.region.y == _trace(scr).region.bottom
+        assert pill.region.y == banner.region.y - 1
+        assert not pill.region.overlaps(banner.region)
+
+
+@pytest.mark.asyncio
 async def test_pill_row_with_ask_human_banner(tmp_path):
     _write_task(tmp_path, "o3ra")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
