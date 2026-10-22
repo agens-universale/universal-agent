@@ -219,7 +219,14 @@ class _Server(uvicorn.Server):
 
 def _asgi(surfaces: list[Surface]) -> Any:
     apps = [s.app() for s in surfaces]
-    return apps[0] if len(apps) == 1 else Dispatcher(apps)
+    if len(apps) == 1:
+        return apps[0]
+    from gc_server.api_docs import combined_docs
+
+    # Общий Swagger адреса — первым: его /docs и /openapi.json выигрывают у
+    # документации отдельных поверхностей.
+    docs = combined_docs(apps)
+    return Dispatcher(apps if docs is None else [docs, *apps])
 
 
 def _announce(app: Any, host: str, port: int) -> None:
