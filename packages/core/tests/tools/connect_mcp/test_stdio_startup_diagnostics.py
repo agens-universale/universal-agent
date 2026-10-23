@@ -77,7 +77,7 @@ async def test_crash_before_initialize_names_the_real_cause():
     reason = status["reason"]
     assert "сервер завершился при старте" in reason, reason
     assert _CRASH_LINE in reason, reason
-    log_path = transport._stderr_log_path(_cfg(_CRASH_SCRIPT))
+    log_path = transport._stderr_log_path(_cfg(_CRASH_SCRIPT), "ddg")
     assert str(log_path) in reason, reason
     assert _CRASH_LINE in log_path.read_text(encoding="utf-8")
 
@@ -92,7 +92,9 @@ async def test_persistent_crash_before_initialize_names_the_real_cause(
     assert status["status"] == "failed"
     assert "сервер завершился при старте" in status["reason"], status
     assert _CRASH_LINE in status["reason"], status
-    assert str(transport._stderr_log_path(cfg)) in status["reason"], status
+    assert (
+        str(transport._stderr_log_path(cfg, "ddg_persist")) in status["reason"]
+    ), status
 
 
 async def test_silent_crash_keeps_the_old_reason():
@@ -121,7 +123,9 @@ async def test_chatty_stderr_does_not_block_a_persistent_server(
 
     assert status["status"] == "connected", status
     assert [t["name"] for t in tools] == ["ping"]
-    log_text = transport._stderr_log_path(cfg).read_text(encoding="utf-8")
+    log_text = transport._stderr_log_path(cfg, "chatty").read_text(
+        encoding="utf-8"
+    )
     assert len(log_text) > 1024 * 1024
 
 
@@ -153,7 +157,7 @@ async def test_secret_in_stderr_is_redacted_in_the_reason():
 async def test_stderr_log_is_private_to_the_owner(tmp_path, monkeypatch):
     """Лог stderr может держать секреты — только владельцу: 0600, каталог 0700."""
     log_path = tmp_path / "mcp" / "server.stderr.log"
-    monkeypatch.setattr(transport, "_stderr_log_path", lambda _cfg: log_path)
+    monkeypatch.setattr(transport, "_stderr_log_path", lambda *_a: log_path)
 
     with transport._stderr_log(_cfg("pass")) as (_stderr, path):
         assert path == log_path
@@ -168,7 +172,7 @@ async def test_stale_world_readable_log_is_tightened(tmp_path, monkeypatch):
     log_path = tmp_path / "server.stderr.log"
     log_path.write_text("old\n", encoding="utf-8")
     log_path.chmod(0o644)
-    monkeypatch.setattr(transport, "_stderr_log_path", lambda _cfg: log_path)
+    monkeypatch.setattr(transport, "_stderr_log_path", lambda *_a: log_path)
 
     with transport._stderr_log(_cfg("pass")):
         pass
@@ -184,7 +188,7 @@ async def test_symlinked_log_is_not_followed(tmp_path, monkeypatch):
     victim.write_text("keep\n", encoding="utf-8")
     log_path = tmp_path / "server.stderr.log"
     log_path.symlink_to(victim)
-    monkeypatch.setattr(transport, "_stderr_log_path", lambda _cfg: log_path)
+    monkeypatch.setattr(transport, "_stderr_log_path", lambda *_a: log_path)
 
     with transport._stderr_log(_cfg("pass")) as (stderr, path):
         assert stderr == subprocess.DEVNULL

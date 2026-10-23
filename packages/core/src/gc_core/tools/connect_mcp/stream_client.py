@@ -14,6 +14,7 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import McpError
+from mcp.types import CONNECTION_CLOSED
 
 from gc_core.mcp_runtime.env import mcp_stdio_env
 from gc_core.mcp_session_owner import current_owner
@@ -21,7 +22,11 @@ from gc_core.tools.connect_mcp.durable_scope import (
     call_tool_with_progress,
     require_no_reconnect,
 )
-from gc_core.tools.connect_mcp.transport import _resolve_command
+from gc_core.tools.connect_mcp.transport import (
+    _exit_error_from_log,
+    _resolve_command,
+    _stderr_log,
+)
 from gc_core.utils.async_http import build_ssl_context
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
 from gc_core.utils.url_addr import is_loopback
@@ -1053,9 +1058,39 @@ async def acall_tool_stream_http(
         return await _stateless()
 
 
+def _raise_if_stdio_closed_at_start(
+    exc: BaseException, log_path: Optional[Any]
+) -> None:
+    """Сервер закрыл соединение до ответа на ``initialize`` — дать причину.
+
+    SDK ``stdio_client`` процесса наружу не отдаёт, поэтому «умер при
+    старте» здесь — это ``McpError`` с ``CONNECTION_CLOSED`` на
+    ``initialize``: stdout сервера закрыт, а живых серверов с закрытым
+    stdout не бывает. Причину собирает то же ``_exit_error_from_log``, что и
+    у остальных stdio-путей; пустой stderr или другая ошибка — молча, и
+    вызывающий бросает исходное.
+    """
+    if isinstance(exc, McpError) and exc.error.code == CONNECTION_CLOSED:
+        exited = _exit_error_from_log(True, log_path)
+        if exited is not None:
+            raise exited from exc
+
+
+async def _ainitialize_stdio(
+    session: ClientSession, log_path: Optional[Any]
+) -> None:
+    """``initialize`` SDK-сессии stdio; падение при старте — с причиной."""
+    try:
+        await session.initialize()
+    except McpError as exc:
+        _raise_if_stdio_closed_at_start(exc, log_path)
+        raise
+
+
 async def _list_tools_stream_stdio_async(
     server_cfg: Dict[str, Any],
     timeout: float,
+    server_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Асинхронный список тулов через stdio транспорт MCP (через SDK).
@@ -1072,43 +1107,51 @@ async def _list_tools_stream_stdio_async(
         cwd=server_cfg.get("cwd") or None,
     )
 
-    async with (
-        stdio_client(params) as (read_stream, write_stream),
-        ClientSession(
-            read_stream,
-            write_stream,
-            read_timeout_seconds=timedelta(seconds=timeout),
-        ) as session,
-    ):
-        await session.initialize()
-        tools_result = await session.list_tools()
+    # stderr сервера — в его приватный лог, а не в stderr родителя (у SDK
+    # ``errlog=sys.stderr`` по умолчанию): под TUI тот теряется.
+    with _stderr_log(server_cfg, server_name) as (errlog, log_path):
+        async with (
+            stdio_client(params, errlog=errlog) as (read_stream, write_stream),
+            ClientSession(
+                read_stream,
+                write_stream,
+                read_timeout_seconds=timedelta(seconds=timeout),
+            ) as session,
+        ):
+            await _ainitialize_stdio(session, log_path)
+            tools_result = await session.list_tools()
 
-        tools: List[Dict[str, Any]] = []
-        for tool in tools_result.tools:
-            if hasattr(tool, "model_dump"):
-                tool_dict = tool.model_dump(
-                    by_alias=True, mode="json", exclude_unset=True
-                )
-            elif isinstance(tool, dict):
-                tool_dict = tool
-            else:
-                tool_dict = {
-                    "name": getattr(tool, "name", ""),
-                    "description": getattr(tool, "description", "") or "",
-                }
-            tools.append(tool_dict)
+    tools: List[Dict[str, Any]] = []
+    for tool in tools_result.tools:
+        if hasattr(tool, "model_dump"):
+            tool_dict = tool.model_dump(
+                by_alias=True, mode="json", exclude_unset=True
+            )
+        elif isinstance(tool, dict):
+            tool_dict = tool
+        else:
+            tool_dict = {
+                "name": getattr(tool, "name", ""),
+                "description": getattr(tool, "description", "") or "",
+            }
+        tools.append(tool_dict)
 
-        return tools
+    return tools
 
 
 async def alist_tools_stream_stdio(
     server_cfg: Dict[str, Any],
     timeout: float = 10.0,
+    server_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Список тулов по stdio (через SDK), не занимая поток."""
+    """Список тулов по stdio (через SDK), не занимая поток.
+
+    ``server_name`` — только для имени лога stderr сервера.
+    """
     return await _list_tools_stream_stdio_async(
         server_cfg=server_cfg,
         timeout=timeout,
+        server_name=server_name,
     )
 
 
@@ -1117,6 +1160,7 @@ async def _call_tool_stream_stdio_async(
     timeout: float,  # noqa: ARG001  # единый API транспорта; долгий stdio-тул ждём без таймаута
     tool_name: str,
     arguments: Dict[str, Any],
+    server_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Асинхронный вызов конкретного MCP-тула через stdio транспорт (через SDK).
@@ -1133,31 +1177,32 @@ async def _call_tool_stream_stdio_async(
         cwd=server_cfg.get("cwd") or None,
     )
 
-    async with (
-        stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream) as session,
-    ):
-        await session.initialize()
+    with _stderr_log(server_cfg, server_name) as (errlog, log_path):
+        async with (
+            stdio_client(params, errlog=errlog) as (read_stream, write_stream),
+            ClientSession(read_stream, write_stream) as session,
+        ):
+            await _ainitialize_stdio(session, log_path)
 
-        result = await call_tool_with_progress(session, tool_name, arguments)
+            result = await call_tool_with_progress(
+                session, tool_name, arguments
+            )
 
-        content_items: List[Any] = []
-        for item in getattr(result, "content", []) or []:
-            if hasattr(item, "model_dump"):
-                content_items.append(
-                    item.model_dump(
-                        by_alias=True, mode="json", exclude_unset=True
-                    )
-                )
-            else:
-                content_items.append(item)
+    content_items: List[Any] = []
+    for item in getattr(result, "content", []) or []:
+        if hasattr(item, "model_dump"):
+            content_items.append(
+                item.model_dump(by_alias=True, mode="json", exclude_unset=True)
+            )
+        else:
+            content_items.append(item)
 
-        is_error = bool(getattr(result, "isError", False))
+    is_error = bool(getattr(result, "isError", False))
 
-        return {
-            "content": content_items,
-            "isError": is_error,
-        }
+    return {
+        "content": content_items,
+        "isError": is_error,
+    }
 
 
 async def _call_tool_stream_stdio_persistent(
@@ -1166,6 +1211,7 @@ async def _call_tool_stream_stdio_persistent(
     timeout: float,  # noqa: ARG001  # единый API транспорта; долгий stdio-тул ждём без таймаута
     tool_name: str,
     arguments: Dict[str, Any],
+    server_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Persistent вариант: держим stdio MCP-сервер живым (один subprocess +
@@ -1184,8 +1230,16 @@ async def _call_tool_stream_stdio_persistent(
             env=mcp_stdio_env(server_cfg.get("env") or None),
             cwd=server_cfg.get("cwd") or None,
         )
-        transport_cm = stdio_client(params)
-        new_session, cm_stack = await _enter_session(transport_cm)
+        # Лог открыт до конца входа: процесс спавнится внутри него, а
+        # ``initialize`` в ``_enter_session`` — последний шаг входа.
+        with _stderr_log(server_cfg, server_name) as (errlog, log_path):
+            try:
+                new_session, cm_stack = await _enter_session(
+                    stdio_client(params, errlog=errlog)
+                )
+            except McpError as exc:
+                _raise_if_stdio_closed_at_start(exc, log_path)
+                raise
         _SESSION_MANAGER.set_session(server_key, new_session, cm_stack)
         return new_session
 
@@ -1223,8 +1277,12 @@ async def acall_tool_stream_stdio(
     timeout: float,
     tool_name: str,
     arguments: Dict[str, Any],
+    server_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Вызов тула по stdio (через SDK), не занимая поток.
+
+    ``server_name`` — только для имени лога stderr сервера: сессию persistent
+    по-прежнему делят серверы с одной командой и аргументами.
 
     При persistent_session=true субпроцесс и ClientSession держатся живыми
     между вызовами (одна Chromium-сессия на весь цикл работы агента).
@@ -1245,6 +1303,7 @@ async def acall_tool_stream_stdio(
                 timeout=timeout,
                 tool_name=tool_name,
                 arguments=arguments,
+                server_name=server_name,
             )
         except Exception:
             await _SESSION_MANAGER.ainvalidate(server_key)
@@ -1255,6 +1314,7 @@ async def acall_tool_stream_stdio(
         timeout=timeout,
         tool_name=tool_name,
         arguments=arguments,
+        server_name=server_name,
     )
 
 

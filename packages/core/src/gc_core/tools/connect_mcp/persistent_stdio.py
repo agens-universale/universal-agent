@@ -292,8 +292,12 @@ class PersistentStdioSession:
     запросы из нескольких потоков.
     """
 
-    def __init__(self, server_cfg: Dict[str, Any]) -> None:
+    def __init__(
+        self, server_cfg: Dict[str, Any], server_name: Optional[str] = None
+    ) -> None:
         self._server_cfg = server_cfg
+        # Только для имени лога stderr (``transport._stderr_log_path``).
+        self._server_name = server_name
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         # id=1 зарезервирован за initialize; пользовательские запросы начинаются со 2.
@@ -332,7 +336,10 @@ class PersistentStdioSession:
             except Exception:
                 pass
 
-        with _stderr_log(self._server_cfg) as (stderr, log_path):
+        with _stderr_log(self._server_cfg, self._server_name) as (
+            stderr,
+            log_path,
+        ):
             self._proc = _spawn_detached_stdio_process(
                 self._server_cfg, stderr
             )
@@ -716,7 +723,7 @@ class PersistentStdioRegistry:
         with self._lock:
             session = self._sessions.get(key)
             if session is None:
-                session = PersistentStdioSession(server_cfg)
+                session = PersistentStdioSession(server_cfg, server_key)
                 self._sessions[key] = session
             return session
 

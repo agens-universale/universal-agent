@@ -464,8 +464,10 @@ def _stdio_command(
 # (``ModuleNotFoundError`` в его venv), выглядел на экране ``/mcp`` как
 # «нет соединения с ddgs-mcp» — без единого слова о причине. Теперь stderr
 # пишется в лог сервера в каталоге состояния gc, перезаписываемый на каждом
-# старте. Именно файл, а не ``PIPE``: непрочитанный pipe переполняется, и
-# долгоживущий сервер встаёт на записи в stderr. Буфер с фоновым читателем
+# старте. Пока процесс жив, лог только растёт: ни потолка, ни ротации нет —
+# у долгоживущего болтливого сервера он большой. Именно файл, а не
+# ``PIPE``: непрочитанный pipe переполняется, и долгоживущий сервер встаёт
+# на записи в stderr. Буфер с фоновым читателем
 # тоже годился бы, но пути к логу у него нет, а лог целиком бывает нужен.
 
 #: Сколько хвоста лога читать в поисках последней строки: причина падения —
@@ -494,14 +496,32 @@ class McpServerExitedError(ConnectionError):
         )
 
 
-def _stderr_log_path(server_cfg: Dict[str, Any]) -> Path:
-    """Лог stderr: ``<state>/mcp/<команда>[-<хэш args>].stderr.log``.
+#: Потолок имени файла лога: имя сервера приходит из конфига как есть.
+_LOG_NAME_MAX = 100
 
-    Имени сервера на этом уровне нет — транспорт видит только его конфиг.
-    Хэш аргументов разводит серверы с одной командой (``python -m …``).
+
+def _stderr_log_path(
+    server_cfg: Dict[str, Any], server_name: Optional[str] = None
+) -> Path:
+    """Лог stderr: ``<state>/mcp/<имя сервера>.stderr.log``.
+
+    Имя сервера (ключ в ``mcp-servers``) передают вниз дискавери и вызов
+    тула: по команде два сервера с одной командой и разным env/cwd делили
+    бы один файл. Без имени (прямой вызов транспорта) — как раньше,
+    ``<команда>[-<хэш args>]``: хэш разводит хотя бы разные аргументы.
+    Имя санитизируется для ФС: всё, кроме букв, цифр, ``.``/``_``/``-``,
+    становится ``_`` — разделителю каталога в имени не бывать.
     """
     from gc_core.config_modules.env_vars import gc_paths
 
+    name = _sanitize_log_name(server_name) if server_name else ""
+    if not name:
+        name = _sanitize_log_name(_command_log_name(server_cfg))
+    return gc_paths()["state"] / "mcp" / f"{name}.stderr.log"
+
+
+def _command_log_name(server_cfg: Dict[str, Any]) -> str:
+    """``<команда>[-<хэш args>]`` — имя лога, когда имени сервера нет."""
     command = str(server_cfg.get("command") or "server")
     name = Path(command).name or "server"
     args = server_cfg.get("args")
@@ -511,21 +531,27 @@ def _stderr_log_path(server_cfg: Dict[str, Any]) -> Path:
         )
         digest = hashlib.sha1(argv.encode("utf-8"), usedforsecurity=False)
         name = f"{name}-{digest.hexdigest()[:8]}"
-    name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
-    return gc_paths()["state"] / "mcp" / f"{name}.stderr.log"
+    return name
+
+
+def _sanitize_log_name(name: str) -> str:
+    """Имя для файла в каталоге логов: без разделителей и прочего мусора."""
+    return re.sub(r"[^\w.-]", "_", str(name))[:_LOG_NAME_MAX]
 
 
 @contextlib.contextmanager
 def _stderr_log(
-    server_cfg: Dict[str, Any],
+    server_cfg: Dict[str, Any], server_name: Optional[str] = None
 ) -> Iterator[Tuple[Any, Optional[Path]]]:
     """``(куда писать stderr, путь лога)`` на время запуска процесса.
 
     Наш дескриптор закрывается сразу после спавна: у процесса своя копия.
+    Ограничение: потолка размера и ротации нет — пока процесс жив, лог
+    растёт; обрезается он только на следующем старте того же сервера.
     Лог не открылся (каталог только на чтение) — ``DEVNULL`` и пути нет:
     диагностика не повод не запустить сервер.
     """
-    path = _stderr_log_path(server_cfg)
+    path = _stderr_log_path(server_cfg, server_name)
     try:
         handle = _open_private_log(path)
     except OSError:
@@ -593,19 +619,21 @@ def _last_stderr_line(path: Path) -> str:
 
 
 def _exit_error_from_log(
-    returncode: Optional[int], log_path: Optional[Path]
+    exited: bool, log_path: Optional[Path]
 ) -> Optional[McpServerExitedError]:
     """Ошибка «сервер завершился при старте», если её есть чем подкрепить.
 
-    Общая часть двух ожиданий выхода — асинхронного (одноразовый обмен) и
-    блокирующего (долгоживущая сессия); имя нарочно не ``_startup_exit_error``:
+    Общая часть всех stdio-путей: асинхронного и блокирующего ожиданий
+    выхода (одноразовый обмен, долгоживущая сессия) и SDK-транспорта
+    ``stream_stdio``, где процесса не видно и «умер» — это закрытое
+    соединение до ``initialize``; имя нарочно не ``_startup_exit_error``:
     рядом с ``_astartup_exit_error`` это был бы новый sync/async-двойник
     (``tests/test_sync_async_pairs.py``), а тут не двойник, а общее ядро.
 
-    Процесс жив (``returncode is None``) или stderr пуст — ``None``, и
+    Процесс жив (``exited`` ложно) или stderr пуст — ``None``, и
     вызывающий оставляет прежнее поведение.
     """
-    if returncode is None or log_path is None:
+    if not exited or log_path is None:
         return None
     line = _last_stderr_line(log_path)
     return McpServerExitedError(line, log_path) if line else None
@@ -618,7 +646,7 @@ async def _astartup_exit_error(
     deadline = time.monotonic() + _STARTUP_EXIT_GRACE_SEC
     while proc.returncode is None and time.monotonic() < deadline:
         await asyncio.sleep(0.01)
-    return _exit_error_from_log(proc.returncode, log_path)
+    return _exit_error_from_log(proc.returncode is not None, log_path)
 
 
 def _wait_startup_exit_error(
@@ -629,7 +657,7 @@ def _wait_startup_exit_error(
         proc.wait(timeout=_STARTUP_EXIT_GRACE_SEC)
     except subprocess.TimeoutExpired:
         return None
-    return _exit_error_from_log(proc.returncode, log_path)
+    return _exit_error_from_log(proc.returncode is not None, log_path)
 
 
 # Потолок строки JSON-RPC у asyncio-подпроцесса. Дефолт ``StreamReader`` —
@@ -719,6 +747,7 @@ async def _astdio_exchange(
     server_cfg: Dict[str, Any],
     timeout: float,
     steps: List[Tuple[Dict[str, Any], bool]],
+    server_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Один процесс на обмен, без потоков.
 
@@ -727,8 +756,10 @@ async def _astdio_exchange(
     поток (``_LineReader``): прервать блокирующий ``readline`` на pipe иначе
     было нечем, и ``selectors`` на Windows с pipe не работает. Корутину
     прервать можно, поэтому поток на этом пути больше не нужен.
+
+    ``server_name`` — только для имени лога stderr (``_stderr_log_path``).
     """
-    with _stderr_log(server_cfg) as (stderr, log_path):
+    with _stderr_log(server_cfg, server_name) as (stderr, log_path):
         proc = await _aspawn_stdio_process(server_cfg, stderr)
     results: List[Dict[str, Any]] = []
     try:
@@ -817,7 +848,7 @@ async def _akill_process(proc) -> None:
 
 
 def _arequest_stdio(
-    server_cfg: Dict[str, Any],
+    server_cfg: Dict[str, Any], server_name: Optional[str] = None
 ) -> Callable[..., Any]:
     """Асинхронный двойник :func:`_request_stdio`.
 
@@ -837,7 +868,7 @@ def _arequest_stdio(
         method = (json_payload or {}).get("method")
         if method == "initialize":
             responses = await _astdio_exchange(
-                cfg, timeout, [(json_payload, True)]
+                cfg, timeout, [(json_payload, True)], server_name
             )
             return (
                 {"mcp-session-id": "stdio"},
@@ -845,7 +876,10 @@ def _arequest_stdio(
             )
         if method == "notifications/initialized":
             await _astdio_exchange(
-                cfg, timeout, [(_INIT_PAYLOAD, True), (json_payload, False)]
+                cfg,
+                timeout,
+                [(_INIT_PAYLOAD, True), (json_payload, False)],
+                server_name,
             )
             return ({}, {})
         responses = await _astdio_exchange(
@@ -856,13 +890,16 @@ def _arequest_stdio(
                 (_INITIALIZED_PAYLOAD, False),
                 (json_payload, True),
             ],
+            server_name,
         )
         return ({}, responses[2] if len(responses) > 2 else {})
 
     return arequest_fn
 
 
-def aget_transport(server_cfg: Dict[str, Any]) -> Callable[..., Any]:
+def aget_transport(
+    server_cfg: Dict[str, Any], server_name: Optional[str] = None
+) -> Callable[..., Any]:
     """Асинхронный двойник :func:`get_transport`.
 
     Та же единая сигнатура, только корутинная::
@@ -872,6 +909,8 @@ def aget_transport(server_cfg: Dict[str, Any]) -> Callable[..., Any]:
     Легаси-транспорты (``http``/``sse``) ходят через ``httpx``, а у него есть
     ``AsyncClient`` — то есть нативная форма у них была всё это время, просто
     не использовалась, и порт клиента уводил их в поток.
+
+    ``server_name`` нужен только stdio — для имени лога stderr сервера.
     """
     transport = (server_cfg or {}).get("transport")
 
@@ -897,7 +936,7 @@ def aget_transport(server_cfg: Dict[str, Any]) -> Callable[..., Any]:
         return arequest_sse
 
     if transport == "stdio":
-        return _arequest_stdio(server_cfg)
+        return _arequest_stdio(server_cfg, server_name)
 
     raise ValueError(
         f"Invalid or missing 'transport' in MCP server config. Expected 'http', 'sse' or 'stdio', got: {transport!r}"
