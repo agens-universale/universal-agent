@@ -246,6 +246,7 @@ def tool_args_summary(
     *,
     limit: int = _ARGS_SUMMARY_MAX,
     root: Optional[str] = None,
+    nested: bool = False,
 ) -> str:
     """Однострочная сводка аргументов вызова тула (спека P1a §2.5).
 
@@ -253,6 +254,8 @@ def tool_args_summary(
     ``key=preview``. Длина сводки не превышает ``limit``. ``root`` — корень
     проекта: путь тула ядра показывается от него (``display_path``),
     у команды снята приставка ``cd <корень> &&``; без корня — как записаны.
+    ``nested`` — вызов субагента: таблица — с вложенным контекстом
+    (``tool_display(..., nested=True)``).
     Только показ: аргументы вызова не меняются."""
     data: Any = arguments
     if isinstance(arguments, str):
@@ -270,7 +273,7 @@ def tool_args_summary(
         return ""
     if root is not None and name in TOOL_DISPLAY:
         data = _rooted_command(name, _rooted_path(data, root), root)
-    primary = _primary_summary(name, data, limit) if name else None
+    primary = _primary_summary(name, data, limit, nested) if name else None
     if primary:
         return _clip(primary, limit)
     return _pairs_summary(data, limit)
@@ -355,9 +358,11 @@ def _clip(text: str, limit: int) -> str:
     return flat[: max(limit - 1, 0)].rstrip() + "…"
 
 
-def _primary_summary(name: str, data: Dict[str, Any], limit: int) -> str:
+def _primary_summary(
+    name: str, data: Dict[str, Any], limit: int, nested: bool
+) -> str:
     """Сводка по главному аргументу; пустая строка — главного нет."""
-    shown = tool_display(name)
+    shown = tool_display(name, nested=nested)
     if shown.category is DisplayCategory.MCP:
         return _first_scalar(data)
     key = shown.primary_arg

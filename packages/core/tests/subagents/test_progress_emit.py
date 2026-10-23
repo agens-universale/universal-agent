@@ -622,3 +622,15 @@ class TestToolEndOutput:
             subagent_progress_sink=NOOP_SUBAGENT_PROGRESS_SINK,
         )
         emit_progress(ctx, _state(), "tool_end", output='{"ok": true}')
+
+
+def test_child_finish_start_summary_is_solution_type():
+    """Сводка вызова субагента — по вложенной таблице отображения: у
+    сдачи — `solution_type`."""
+    from gc_core import processing_responses as pr
+
+    sink = QueueSubagentProgressSink()
+    args = json.dumps({"solution_type": "full_solution", "task": "сверить"})
+    pr._emit_tool_start(_child_ctx(sink), _state(), "turn_finish", args, "f1")
+    (start,) = sink.drain()
+    assert start.args_summary == "full_solution"

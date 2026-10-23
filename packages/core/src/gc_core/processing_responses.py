@@ -2083,7 +2083,7 @@ def _emit_tool_start(
         tool_name=tool_name,
         tool_call_id=call_id_str,
         args_summary=tool_args_summary(
-            tool_name, tool_arguments, root=ctx.workspace.root
+            tool_name, tool_arguments, root=ctx.workspace.root, nested=True
         ),
         todo_items=todo_items,
         command=run_command_text(tool_name, tool_arguments),

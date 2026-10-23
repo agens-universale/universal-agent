@@ -122,7 +122,7 @@ TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
     EXEC_CALCULATOR_NAME: _d(_C.CALC, "expression"),
     EXEC_SLEEP_NAME: _d(_C.WAIT, "seconds"),
     SUBAGENT_SPECIAL_AGENT_NAME: _d(_C.AGENT, "role"),
-    FINISH_TOOL_NAME: _d(_C.HIDDEN, "solution_type"),
+    FINISH_TOOL_NAME: _d(_C.HIDDEN, None),
     ASK_HUMAN_TOOL_NAME: _d(_C.HIDDEN, None),
     INTERMEDIATE_REPLY_TOOL_NAME: _d(_C.HIDDEN, None),
     PROPOSE_PLAN_TOOL_NAME: _d(_C.HIDDEN, None),

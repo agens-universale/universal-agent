@@ -154,6 +154,7 @@ def plan_sidecar_nested_actions(
                             str(name) if name else None,
                             payload.get("arguments"),
                             root=root,
+                            nested=True,
                         ),
                         command=run_command_text(
                             str(name) if name else None,
@@ -407,7 +408,7 @@ def trace_events_from_nested_detail(
         raise ValueError("detail.call required")
     name = str(call_payload.get("name") or "")
     args_summary = tool_args_summary(
-        name or None, call_payload.get("arguments"), root=root
+        name or None, call_payload.get("arguments"), root=root, nested=True
     )
     call_ev = TraceEvent(
         no=0,

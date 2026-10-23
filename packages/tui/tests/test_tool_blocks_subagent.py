@@ -99,7 +99,7 @@ def _progress(steps: list[tuple], pid: str = AGENT) -> list:
             )
             continue
         _kind, call_id, name, args, *own = step
-        summary = tool_args_summary(name, json.dumps(args))
+        summary = tool_args_summary(name, json.dumps(args), nested=True)
         start = dict(tool_name=name, tool_call_id=call_id, **base)
         out.append(
             SubagentProgressEvent(
