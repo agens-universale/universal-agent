@@ -353,6 +353,29 @@ def test_turn_stopped_only_this_turn():
     assert fold.header("block:1").glyph == "halted"
 
 
+def test_turn_stopped_skips_limit_halted_member():
+    """`○` ставит только исход стопа: член, остановленный лимитом, в
+    законченном блоке остановленного хода глиф заголовка не меняет."""
+    model, fold, _ = _model()
+    _reads(model, fold, 1)
+    fold(model.member_added("h", C.READ, waiting=False))
+    fold(model.started("h"))
+    fold(model.result("h", "halted", reason="лимит вызовов", executed=None))
+    fold(model.turn_stopped())
+    assert fold.header().glyph == "ok"
+
+
+def test_turn_stopped_marks_block_by_stop_outcome():
+    """Исходы стопа ядра (`отменено`, `не запущено (стоп)`) ставят `○`."""
+    for reason in ("отменено", "не запущено (стоп)"):
+        model, fold, _ = _model()
+        _reads(model, fold, 1)
+        fold(model.member_added("s", C.READ, waiting=False))
+        fold(model.result("s", "halted", reason=reason, executed=None))
+        fold(model.turn_stopped())
+        assert fold.header().glyph == "halted", reason
+
+
 def test_stopped_turn_interrupted_member_cancelled():
     """Остановка хода: идущий член без исхода — `└ отменено`, в каком бы
     порядке ни пришли стоп и перевод."""

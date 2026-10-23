@@ -477,8 +477,15 @@ class _Member:
         return not (self.done or self.waiting)
 
     @property
-    def halted(self) -> bool:
-        return self.interrupted or self.outcome == "halted"
+    def stopped(self) -> bool:
+        """Оборван остановкой хода: идёт, без исхода или с исходом стопа
+        (`отменено` / `не запущено (стоп)`); остановка лимитом — нет."""
+        return (
+            not self.done
+            or self.interrupted
+            or self.not_started
+            or (self.outcome == "halted" and self.reason == CANCELLED_REASON)
+        )
 
 
 @dataclass
@@ -671,11 +678,12 @@ class ToolBlocks:
 
     def turn_stopped(self) -> list[Decision]:
         """Ход остановлен пользователем: блоки хода, где член ещё идёт,
-        оборвался или остановлен, — `halted`, в том числе уже закрытые;
-        законченные блоки не меняются."""
+        оборвался или получил исход стопа, — `halted`, в том числе уже
+        закрытые; законченные блоки и член, остановленный лимитом, глиф
+        не меняют."""
         out: list[Decision] = []
         for block in self._blocks[self._turn_from :]:
-            if any(not m.done or m.halted for m in block.members):
+            if any(m.stopped for m in block.members):
                 block.stopped = True
                 out += self._render(block)
         return out
