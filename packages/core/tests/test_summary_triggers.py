@@ -1,4 +1,3 @@
-import importlib
 import json
 import logging
 import os
@@ -14,25 +13,35 @@ from unittest.mock import patch
 from gc_testkit.paths import module_dir
 
 
+# Модули и имена `processing_responses`, которые файл подменяет на время
+# прогона. Teardown возвращает ИМЕННО ЭТИ объекты, а не импортирует пакет
+# заново: соседи по прогону держат ссылки на исходные модули, взятые при
+# сборке, и свежая копия в sys.modules развела бы их monkeypatch и код.
+_SAVED_MODULES: dict[str, types.ModuleType] = {}
+_SAVED_PR_NAMES: dict[str, object] = {}
+_PR_NAMES = ("aapply_tool", "WrongFunctionArgumentsException")
+
+
+def _is_gc_module(name: str) -> bool:
+    # gc_testkit — тоже: его хелперы, впервые загруженные здесь, держали бы
+    # ссылки на снятые модули ядра.
+    return name.split(".", 1)[0] in ("gc_core", "gc_testkit")
+
+
 def teardown_module(_module) -> None:
-    # Полные имена: после переезда ключи в sys.modules — "gc_core.agent_executor"
-    # и "gc_core.run_summary_coordinator". Кодмод сплита правит узлы import и
-    # одиночные строковые литералы, а строки ВНУТРИ кортежа не тронул — сетка
-    # module_literals их тоже не ловила (оговорено в её докстринге), и pop стал
-    # no-op: модули, загруженные под подменённым gc_core.tools, доживали до конца
-    # сессии и доставались следующим тестам.
-    for mod in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
-        sys.modules.pop(mod, None)
     for name in list(sys.modules):
-        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
+        if _is_gc_module(name) and name not in _SAVED_MODULES:
             sys.modules.pop(name, None)
-    real_tools = importlib.import_module("gc_core.tools")
-    proc = sys.modules.get("gc_core.processing_responses")
-    if proc is not None:
-        proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+    sys.modules.update(_SAVED_MODULES)
+    # Атрибут пакета-родителя — тоже: `import gc_core.tools.x as m` идёт по
+    # атрибутам, и повторный импорт под подменой их переставил.
+    for name, mod in _SAVED_MODULES.items():
+        parent, _, child = name.rpartition(".")
+        if parent in _SAVED_MODULES:
+            setattr(_SAVED_MODULES[parent], child, mod)
+    proc = _SAVED_MODULES.get("gc_core.processing_responses")
+    for attr, value in _SAVED_PR_NAMES.items():
+        setattr(proc, attr, value)
 
 
 agent_executor_module = None
@@ -41,6 +50,12 @@ run_summary_coordinator_module = None
 
 def setup_module(_module) -> None:
     global agent_executor_module, run_summary_coordinator_module
+    _SAVED_MODULES.update(
+        (name, mod) for name, mod in sys.modules.items() if _is_gc_module(name)
+    )
+    proc = _SAVED_MODULES.get("gc_core.processing_responses")
+    if proc is not None:
+        _SAVED_PR_NAMES.update((n, getattr(proc, n)) for n in _PR_NAMES)
     _stub_tools_modules()
     tools_pkg = sys.modules["gc_core.tools"]
     from gc_core import processing_responses as pr
