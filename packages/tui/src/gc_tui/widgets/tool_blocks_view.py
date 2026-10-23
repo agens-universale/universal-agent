@@ -175,6 +175,8 @@ class ToolBlocksView:
         self._edits: dict[str, BlockEdit] = {}
         self._command_hidden: dict[str, int] = {}
         self._event_count = 0
+        # Скрытая решением строка в фокусе — фокус переносит `apply`.
+        self._unfocused: Optional[str] = None
 
     # --- выданные виджеты --------------------------------------------------
 
@@ -362,8 +364,12 @@ class ToolBlocksView:
     # --- решения → виджеты ---------------------------------------------------
 
     def apply(self, decisions: list[Decision]) -> None:
+        self._unfocused = None
         for decision in decisions:
             _HANDLERS[type(decision)](self, decision)
+        # Фокус — после всех решений: заголовок могут скрыть следом.
+        if self._unfocused is not None:
+            self._refocus(self._unfocused)
 
     def _anchor(self, key: Optional[str]) -> Optional[Widget]:
         """Виджет ключа; диффа нет (записи не было) — его строка."""
@@ -422,9 +428,17 @@ class ToolBlocksView:
                 widget.set_class(not d.visible, HIDDEN_CLASS)
         widget = self._widgets.get(d.key)
         if not d.visible and widget is not None and widget.has_focus:
-            header = self._widgets.get(self.model.block_of(d.key) or "")
-            if header is not None:
-                header.focus()
+            self._unfocused = d.key
+
+    def _refocus(self, key: str) -> None:
+        """Фокус со скрытой строки — на заголовок её блока; скрыт и он
+        (окно `Agent`) или заголовка нет — на строку `Agent` уровня
+        (§8.1)."""
+        target = self._widgets.get(self.model.block_of(key) or "")
+        if target is None or target.has_class(HIDDEN_CLASS):
+            target = self._widgets.get(AGENT_WINDOW)
+        if target is not None:
+            target.focus()
 
     def _set_header(self, d: SetHeader) -> None:
         header = self._widgets[d.block]

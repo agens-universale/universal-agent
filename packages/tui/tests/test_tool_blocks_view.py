@@ -324,6 +324,36 @@ async def test_hidden_focused_row_moves_focus_to_header():
 
 
 @pytest.mark.asyncio
+async def test_hidden_by_agent_window_moves_focus_to_agent_row():
+    """Окно `Agent` скрыло вложенный блок вместе с заголовком: фокус —
+    на ближайший видимый уровень, строку `Agent` (§8.1)."""
+    from textual.widgets import Static
+
+    app = _App()
+    async with app.run_test(size=(80, 30)) as pilot:
+        top = app.view()
+        _read(top, "c0")
+        agent = _row("a1", label="Agent", target="проверка")
+        top.add_call(agent, C.AGENT, waiting=False)
+        trace = app.query_one("#trace", VerticalScroll)
+        model = ToolBlocks(app.timers, agent_window=True)
+        nested = ToolBlocksView(_Host(trace), model, level="a1", depth=1)
+        nested.set_owner(agent)
+        app.views["a1"] = nested
+        row = _read(nested, "n0")
+        await pilot.pause()
+        row.focus()
+        await pilot.pause()
+        assert app.focused is row
+        for i in range(3):
+            prose = Static(f"проза {i}")
+            await trace.mount(prose)
+            nested.event_added(prose)
+        await pilot.pause()
+        assert app.focused is agent
+
+
+@pytest.mark.asyncio
 async def test_phrase_not_in_tab_chain_and_hover_accent():
     app = _App()
     async with app.run_test(size=(80, 24)) as pilot:
