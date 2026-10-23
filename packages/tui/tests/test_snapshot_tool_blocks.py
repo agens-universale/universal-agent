@@ -31,6 +31,8 @@ from gc_core.thread_store import (
 _SYS = "cli"
 _TID = "7f3a9b1c"
 _SIZE = (100, 40)
+# Кадр `p4-21-turn` выше: ход целиком — от реплики до строки итога.
+_TURN_SIZE = (100, 56)
 _ORIGIN = 1
 _ASK = "почему клиент не ретраит 503? почини и проверь тестами"
 _PYTEST = "uv run pytest tests/test_client.py -q"
@@ -440,7 +442,7 @@ def _grid_rows(app) -> list:
     return rows[start:]
 
 
-def _snap(snap_compare, monkeypatch, tmp_path, write) -> bool:
+def _snap(snap_compare, monkeypatch, tmp_path, write, size=_SIZE) -> bool:
     from gc_testkit.trace_grid import assert_trace_grid
 
     from gc_tui.screens.main import TraceScreen
@@ -463,11 +465,11 @@ def _snap(snap_compare, monkeypatch, tmp_path, write) -> bool:
         await pilot.pause(0.5)
         assert_trace_grid(_grid_rows(pilot.app), origin=_ORIGIN)
 
-    return snap_compare(_app(tmp_path), terminal_size=_SIZE, run_before=setup)
+    return snap_compare(_app(tmp_path), terminal_size=size, run_before=setup)
 
 
 def test_tool_blocks_turn_snapshot(snap_compare, tmp_path, monkeypatch):
-    assert _snap(snap_compare, monkeypatch, tmp_path, _turn)
+    assert _snap(snap_compare, monkeypatch, tmp_path, _turn, _TURN_SIZE)
 
 
 def test_tool_blocks_subagent_snapshot(snap_compare, tmp_path, monkeypatch):
