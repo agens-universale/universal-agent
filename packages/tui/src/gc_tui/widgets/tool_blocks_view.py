@@ -185,7 +185,7 @@ class ToolBlocksView:
         *,
         compact: bool = False,
     ) -> None:
-        """Исход вызова; правка — до исхода: её глагол решает группу."""
+        """Исход вызова вместе с правкой: её глагол решает группу."""
         key = row.call_id
         if edit is not None:
             self._edits[key] = edit
@@ -194,11 +194,12 @@ class ToolBlocksView:
             # Хвост файла задаёт модель; строка берёт только ❐.
             row.set_edit_tail(Text())
             row.set_edit_counts(edit.add, edit.rem, copy_text=edit.copy_text)
-            self.apply(self.model.edit_counts(key, edit))
         outcome = ev.result_outcome
         row.set_result(summary=ev.summary, outcome=outcome)
         self.apply(
-            self.model.result(key, outcome, reason=ev.summary, executed=None)
+            self.model.result(
+                key, outcome, reason=ev.summary, executed=None, edit=edit
+            )
         )
 
     def interrupted(self, row: ToolCallRow, *, started: bool) -> None:

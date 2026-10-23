@@ -582,9 +582,7 @@ def _edit(key, *, verb="Edited", add=1, rem=0, lines=10, size=None):
 def _apply(model, fold, key, edit=None, *, outcome="ok", reason=""):
     fold(model.member_added(key, C.EDIT, waiting=False))
     fold(model.started(key))
-    if edit is not None:
-        fold(model.edit_counts(key, edit))
-    fold(model.result(key, outcome, reason=reason, executed=None))
+    fold(model.result(key, outcome, reason=reason, executed=None, edit=edit))
 
 
 @pytest.mark.parametrize(
@@ -665,6 +663,24 @@ def test_single_edit_share():
     assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
 
 
+def test_edit_comes_with_result():
+    """Правка приходит вместе с исходом — одним событием; отдельного
+    позднего события счётчиков нет."""
+    model, _ = _edits_model()
+    model.member_added("a", C.EDIT, waiting=False)
+    out = model.result(
+        "a",
+        "ok",
+        reason="",
+        executed=True,
+        edit=_edit("a", verb="Added", add=3, lines=3),
+    )
+    assert SetWord("a", "Added") in out
+    tail = ((" (", "dim"), ("+3", "ok"), (")", "dim"))
+    assert SetEditTail("a", tail) in out
+    assert not hasattr(ToolBlocks, "edit_counts")
+
+
 def test_single_edit_fits_no_phrase():
     model, fold = _edits_model()
     _apply(model, fold, "a", _edit("a", lines=5))
@@ -678,8 +694,15 @@ def test_single_to_block_transition():
     _apply(model, fold, "a", _edit("a", add=4, rem=2, lines=6))
     fold(model.member_added("b", C.EDIT, waiting=False))
     fold(model.started("b"))
-    fold(model.edit_counts("b", _edit("b", add=1, rem=1, lines=6)))
-    model_out = fold(model.result("b", "ok", reason="", executed=None))
+    model_out = fold(
+        model.result(
+            "b",
+            "ok",
+            reason="",
+            executed=None,
+            edit=_edit("b", add=1, rem=1, lines=6),
+        )
+    )
     assert MountHeader("block:0", before="a") in model_out
     assert SetMode("a", "member", lead=True) in model_out
     assert SetMode("b", "member", gap=True) in model_out
@@ -963,9 +986,7 @@ def _pending(model, fold, key, category=C.EDIT):
 
 
 def _done(model, fold, key, edit=None, *, outcome="ok"):
-    if edit is not None:
-        fold(model.edit_counts(key, edit))
-    fold(model.result(key, outcome, reason="", executed=None))
+    fold(model.result(key, outcome, reason="", executed=None, edit=edit))
 
 
 def test_place_edit_after_read_not_in_earlier_edit():

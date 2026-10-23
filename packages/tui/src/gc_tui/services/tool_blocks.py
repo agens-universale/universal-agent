@@ -595,29 +595,21 @@ class ToolBlocks:
         *,
         reason: str,
         executed: Optional[bool],
+        edit: Optional[BlockEdit] = None,
     ) -> list[Decision]:
         """Исход вызова. ``executed`` — исполнялся ли; `None` — решают
-        старт строки и реестр таймеров (после переоткрытия)."""
+        старт строки и реестр таймеров (после переоткрытия). ``edit`` —
+        запись журнала правки вызова: приходит вместе с исходом, её
+        глагол решает, в какую группу правка встанет."""
         member = self._members.get(call_id)
         if member is None:
             return []
+        member.edit = edit
         member.outcome = outcome
         member.reason = reason
         member.executed = executed
         member.waiting = False
         return self._settle(member)
-
-    def edit_counts(self, call_id: str, edit: BlockEdit) -> list[Decision]:
-        """Запись журнала правки вызова. Подаётся до `result` того же
-        вызова: глагол решает, в какую группу он встанет; после —
-        обновляет только счётчики и дифф."""
-        member = self._members.get(call_id)
-        if member is None:
-            return []
-        member.edit = edit
-        if not member.done:
-            return []
-        return self._render(self._block_of[call_id])
 
     def ran_parts(
         self,
