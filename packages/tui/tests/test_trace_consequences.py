@@ -489,3 +489,28 @@ async def test_live_unanswered_question_one_frame_with_line(tmp_path):
         assert question.content_region.contains_region(line.region)
         texts = [str(w._content) for w in scr.query(TraceRow)]
         assert not any("спрашивал" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_slot_redraws_on_style_only_change():
+    """Тот же текст другим цветом — другое тело: слот перерисовывает
+    строку (причина члена блока от модели меняет только цвет)."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.consequence_line import (
+        ConsequenceLine,
+        ConsequenceSlot,
+    )
+    from textual.containers import VerticalScroll
+
+    app = TuiApp()
+    async with app.run_test(size=(60, 10)) as pilot:
+        trace = pilot.app.screen.query_one("#trace", VerticalScroll)
+        slot = ConsequenceSlot(0)
+        trace.mount(slot)
+        slot.set_bodies([Text("отказ", style=DIM)])
+        await pilot.pause()
+        slot.set_bodies([Text("отказ", style=ERR)])
+        await pilot.pause()
+        (line,) = slot.query(ConsequenceLine)
+        assert str(line.body.style) == ERR

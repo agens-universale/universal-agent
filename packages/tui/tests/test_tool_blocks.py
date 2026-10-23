@@ -333,7 +333,7 @@ def test_failures_turn_stopped():
     assert fold.header() == SetHeader("block:0", "Explored", "halted", ())
     fold(model.result("c1", "halted", reason="отменено", executed=None))
     assert fold.consequence("c1") == SetConsequence("c1", "отменено", "dim")
-    assert fold.timer("c1") == SetTimer("c1", None, live=False)
+    assert fold.timer("c1") == SetTimer("c1", None)
     assert fold.header().glyph == "halted"
 
 
@@ -480,7 +480,7 @@ def test_toggle_unknown_key():
 def test_timer_live_freezes_own_clock():
     model, fold, _ = _model()
     _reads(model, fold, 1)
-    assert fold.timer("c0") == SetTimer("c0", None, live=False)
+    assert fold.timer("c0") == SetTimer("c0", None)
     assert ("SetTimer", "block:0") not in fold.state
 
 
@@ -489,7 +489,7 @@ def test_timers_registry_before_result():
     timers.update({"c1": 2.0})
     fold(model.member_added("c1", C.READ, waiting=False))
     fold(model.result("c1", "ok", reason="", executed=None))
-    assert fold.timer("c1") == SetTimer("c1", 2.0, live=False)
+    assert fold.timer("c1") == SetTimer("c1", 2.0)
 
 
 def test_timers_registry_after_result():
@@ -499,7 +499,7 @@ def test_timers_registry_after_result():
     fold(model.result("c1", "ok", reason="", executed=None))
     assert fold.timer("c1") is None
     timers.update({"c1": 3.0, "other": 1.0})
-    assert model.timers_updated() == [SetTimer("c1", 3.0, live=False)]
+    assert model.timers_updated() == [SetTimer("c1", 3.0)]
     assert model.timers_updated() == []
 
 
@@ -753,7 +753,7 @@ def test_failed_edit_joins_single():
     assert fold.tail("b") == ""
     assert fold.share("b") is None
     # Таймер — у исполнявшегося упавшего вызова.
-    assert fold.timer("b") == SetTimer("b", None, live=False)
+    assert fold.timer("b") == SetTimer("b", None)
 
 
 def test_failed_edit_two_in_row():

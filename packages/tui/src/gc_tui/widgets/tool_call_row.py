@@ -350,12 +350,10 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._word = word
         self._update()
 
-    def set_elapsed(self, seconds: Optional[float], *, live: bool) -> None:
-        """Таймер строки: живой — часы строки; застывший — ``seconds``
-        или, если `None`, часы строки на конце исполнения."""
-        if live:
-            self._frozen = None
-        elif seconds is not None:
+    def set_elapsed(self, seconds: Optional[float]) -> None:
+        """Застывший таймер: ``seconds`` или, если `None`, часы строки на
+        конце исполнения."""
+        if seconds is not None:
             self._frozen = seconds
         else:
             self._frozen = float(self._elapsed_s(until=self._ended_at))

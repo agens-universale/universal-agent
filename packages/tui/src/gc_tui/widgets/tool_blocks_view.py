@@ -302,7 +302,7 @@ class ToolBlocksView:
     def _set_timer(self, d: SetTimer) -> None:
         row = self._row(d.key)
         if row is not None:
-            row.set_elapsed(d.seconds, live=d.live)
+            row.set_elapsed(d.seconds)
 
     def _set_consequence(self, d: SetConsequence) -> None:
         row = self._row(d.key)

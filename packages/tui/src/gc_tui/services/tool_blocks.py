@@ -317,12 +317,11 @@ class SetPhrase:
 
 @dataclass(frozen=True)
 class SetTimer:
-    """Таймер строки. ``live`` — идёт по часам строки; застывший —
-    ``seconds`` из записи хода или, если `None`, застывшие часы строки."""
+    """Застывший таймер законченного вызова: ``seconds`` из записи хода
+    или, если `None`, часы строки на конце исполнения."""
 
     key: str
     seconds: Optional[float]
-    live: bool
 
     @property
     def ident(self) -> tuple:
@@ -1028,7 +1027,7 @@ class ToolBlocks:
             executed = member.started or member.key in self._timers
         if not executed:
             return None
-        return SetTimer(member.key, self._timers.get(member.key), live=False)
+        return SetTimer(member.key, self._timers.get(member.key))
 
 
 def _edit_word(member: _Member) -> str:
