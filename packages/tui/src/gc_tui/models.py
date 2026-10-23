@@ -105,6 +105,14 @@ class CommandOutput:
         return failed or self.timed_out or self.background
 
 
+@dataclass(frozen=True)
+class AgentHead:
+    """Заголовок вызова субагента: короткая роль и задача (пусто — нет)."""
+
+    role: str
+    task: str
+
+
 @dataclass
 class TraceEvent:
     """Событие ленты трейса (tui3 §521, tui3_impl §4.2)."""
@@ -144,6 +152,9 @@ class TraceEvent:
     # retention (спека P4 §8.2).
     command_lines: tuple[str, ...] = ()
     command: Optional[CommandOutput] = None
+    # Заголовок вызова субагента (kind="call"): роль и задача из сырых
+    # аргументов — до облегчения retention (решение владельца 2026-10-23).
+    agent: Optional[AgentHead] = None
 
     @property
     def result_outcome(self) -> ResultOutcome:

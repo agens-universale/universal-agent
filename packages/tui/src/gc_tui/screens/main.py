@@ -3889,6 +3889,7 @@ class TraceScreen(Screen):
                 waiting=live,
                 mcp_tools=mcp_tools,
                 mcp_servers=mcp_servers,
+                agent=ev.agent,
             )
             self._active_calls[row.call_id] = row
             # Durable anchor for nested (reopen / after parent result pop).

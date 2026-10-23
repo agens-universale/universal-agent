@@ -434,7 +434,7 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     texts = [text for text, _ in preview]
     assert any("Edited 3 файла (+18 −0)" in t for t in texts)
     assert any(t.startswith("     Added gen.py (+4 −0)") for t in texts)
-    assert any("Agent  проверка" in t for t in texts)
+    assert any("Agent  Worker" in t for t in texts)
     ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
     assert texts[ran + 1 : ran + 4] == [
         "   └ код выхода 1",

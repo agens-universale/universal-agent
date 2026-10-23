@@ -24,7 +24,7 @@ from gc_core.persistence.turn_outcome import (
 )
 from gc_core.utils.path_truncate import truncate_path
 
-from gc_tui.models import ResultOutcome, TraceEvent
+from gc_tui.models import AgentHead, ResultOutcome, TraceEvent
 from gc_tui.palette import INK
 from gc_tui.services.duration_format import format_round_int
 from gc_tui.services.trace_retention import (
@@ -564,13 +564,18 @@ def build_call_row(
     waiting: bool = False,
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
+    agent: AgentHead | None = None,
 ) -> ToolCallRow:
-    """Строка вызова — один билдер для живой ленты, превью и вложенных."""
+    """Строка вызова — один билдер для живой ленты, превью и вложенных.
+
+    ``agent`` — заголовок вызова субагента: объект строки — его роль."""
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     label, target = _call_caption(
         wire_name, args_summary, mcp_tools, mcp_servers
     )
+    if agent is not None:
+        target = agent.role
     shown = tool_display(
         wire_name, mcp_tools=mcp_tools, mcp_servers=mcp_servers
     )
@@ -829,6 +834,7 @@ def _dispatch_readonly(
             event_no=ev.no,
             mcp_tools=mcp_tools,
             mcp_servers=mcp_servers,
+            agent=ev.agent,
         )
         calls[row.call_id] = row
         category, _ = tool_caption(wire_name, mcp_tools, mcp_servers)

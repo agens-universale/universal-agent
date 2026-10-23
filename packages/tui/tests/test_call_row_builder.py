@@ -213,7 +213,7 @@ async def test_live_top_level_and_nested_have_no_wire_name():
         await pilot.pause()
         parent = _live_row(scr, "p1")
         nested = _live_row(scr, "n1")
-        assert _content(parent).startswith("Agent  проверка")
+        assert _content(parent).startswith("Agent  Worker")
         assert "subagent_worker" not in _content(parent)
         assert _content(nested).startswith("Read  a.py")
         assert "fs_read_file" not in _content(nested)
@@ -336,7 +336,7 @@ async def test_preview_and_sidecar_nested_have_no_wire_name():
             if r.mode != "header"
         ]
         texts = [_content(r) for r in rows]
-        assert texts[0].startswith("Agent  проверка")
+        assert texts[0].startswith("Agent  Worker")
         assert texts[1].startswith("Read  a.py")
         assert texts[2].startswith("jira · Создать задачу  PROJ-1")
         for wire in ("subagent_worker", "fs_read_file", "mcp_jira"):

@@ -129,6 +129,17 @@ TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
     SESSION_COMPACT_TOOL_NAME: _d(_C.HIDDEN, None),
 }
 
+#: Короткая роль встроенного субагента — объект заголовка `Agent` во
+#: фронтендах; кастомный и неизвестный — суффикс имени (`subagent_role`).
+SUBAGENT_ROLES: Mapping[str, str] = {
+    "subagent_worker": "Worker",
+    "subagent_planner": "Planner",
+    "subagent_code_planner": "Code planner",
+    "subagent_code_generator": "Coder",
+    "subagent_code_reviewer": "Reviewer",
+    "subagent_critic": "Critic",
+}
+
 # Старое имя тула (до переименования, для чтения старых тредов) -> текущее.
 LEGACY_TOOL_NAMES: Mapping[str, str] = {
     "ask_human": ASK_HUMAN_TOOL_NAME,
@@ -179,6 +190,18 @@ def tool_display(
     if name.startswith(_MCP_PREFIX):
         return _mcp_display(name, mcp_tools, mcp_servers)
     return ToolDisplay(_C.CALLED, _C.CALLED.value, None, wire_name)
+
+
+def subagent_role(wire_name: str) -> str:
+    """Короткая роль субагента по имени тула: из `SUBAGENT_ROLES`, иначе
+    суффикс после `subagent_` словами (`security_audit` → `Security
+    audit`). Роль `subagent_special_agent` — его аргумент `role`: её
+    берёт фронтенд из аргументов вызова."""
+    known = SUBAGENT_ROLES.get(wire_name)
+    if known is not None:
+        return known
+    suffix = wire_name.removeprefix(_SUBAGENT_PREFIX).replace("_", " ")
+    return suffix.strip().capitalize() or wire_name
 
 
 def _snapshot_tools(server: str, entry: object) -> dict[str, McpToolInfo]:

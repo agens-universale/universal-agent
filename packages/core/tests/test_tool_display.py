@@ -5,6 +5,7 @@ import pytest
 from gc_core.constants.tool_display import (
     DisplayCategory,
     ToolDisplay,
+    subagent_role,
     tool_display,
 )
 
@@ -102,3 +103,19 @@ def test_module_does_not_import_tools():
         " assert 'gc_core.tools' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+@pytest.mark.parametrize(
+    ("name", "role"),
+    [
+        ("subagent_worker", "Worker"),
+        ("subagent_planner", "Planner"),
+        ("subagent_code_planner", "Code planner"),
+        ("subagent_code_generator", "Coder"),
+        ("subagent_code_reviewer", "Reviewer"),
+        ("subagent_critic", "Critic"),
+        ("subagent_security_audit", "Security audit"),
+    ],
+)
+def test_subagent_role(name, role):
+    assert subagent_role(name) == role

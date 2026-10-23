@@ -307,7 +307,7 @@ async def test_p418_live_equals_reopen(tmp_path):
         preview = _rows(pilot)
     assert live == reopen == preview
     assert _agent_rows(live) == [
-        "● Agent  проверка клиента · 2с",
+        "● Agent  Worker · 2с",
         "  └ … ещё 1",
         "  ● Explored",
         "    └ … ещё 1",

@@ -21,6 +21,7 @@ from gc_core.vision.errors import (
 )
 
 from gc_tui.models import ResultOutcome, TraceEvent
+from gc_tui.services.agent_head import agent_head
 from gc_tui.services.command_output import (
     command_lines,
     parse_command_output,
@@ -956,6 +957,7 @@ def _map_function_event(
             command_lines=command_lines(
                 wire_name, msg.get("arguments"), root=root
             ),
+            agent=agent_head(wire_name, msg.get("arguments")),
         )
 
     if typ == "function_call_output":
