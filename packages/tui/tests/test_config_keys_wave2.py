@@ -12,14 +12,14 @@ from gc_core.config_modules.root import AppConfig
 
 def test_agent_edits_wave2_keys_defaults():
     cfg = AgentEditsConfig()
-    assert cfg.trace_inline_max_lines == 12
+    assert cfg.trace_inline_max_lines == 3
     assert cfg.replay_expanded_turns == 20
     assert cfg.turn_summary_in_status is True
 
 
 def test_app_config_includes_agent_edits_wave2_keys():
     app = AppConfig()
-    assert app.agent_edits.trace_inline_max_lines == 12
+    assert app.agent_edits.trace_inline_max_lines == 3
     assert app.agent_edits.replay_expanded_turns == 20
     assert app.agent_edits.turn_summary_in_status is True
 

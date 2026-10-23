@@ -307,10 +307,7 @@ def _app(tmp_path, *, replay: int = 20):
         settings=tui_settings(
             {
                 "agent.model": "M",
-                "agent_edits": {
-                    "trace_inline_max_lines": 12,
-                    "replay_expanded_turns": replay,
-                },
+                "agent_edits": {"replay_expanded_turns": replay},
             }
         ),
     )

@@ -215,12 +215,7 @@ def _app(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings(
-            {
-                "agent.model": "M",
-                "agent_edits": {"trace_inline_max_lines": 12},
-            }
-        ),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._subagent_progress_sink = QueueSubagentProgressSink()
     return app

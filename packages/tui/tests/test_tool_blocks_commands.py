@@ -129,11 +129,7 @@ def _app(tmp_path):
     return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        # Превью диффа одиночной правки — 12 рядов (спека §6.3), не
-        # дефолт конфига.
-        settings=tui_settings(
-            {"agent.model": "M", "agent_edits": {"trace_inline_max_lines": 12}}
-        ),
+        settings=tui_settings({"agent.model": "M"}),
     )
 
 
@@ -430,9 +426,9 @@ async def test_ran_files_one_phrase(tmp_path):
             line.startswith("    Added new.py (+10 −0)") for line in lines
         )
         assert "    Deleted gone.py" in lines
-        # Одна фраза — в самом низу: 7 строк вывода и 2 строки скрытого
-        # a.py; дифф new.py (10 изменённых) влез в превью целиком.
-        assert lines[-1] == "    + ещё 9 строк"
+        # Одна фраза — в самом низу: 7 строк вывода, 7 строк new.py сверх
+        # превью в 3 изменённые и 2 строки скрытого a.py.
+        assert lines[-1] == "    + ещё 16 строк"
         assert sum("+ ещё" in line for line in lines) == 1
         trace = scr.query_one("#trace", VerticalScroll)
         files = [
