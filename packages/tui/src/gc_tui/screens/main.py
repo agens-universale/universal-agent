@@ -4498,13 +4498,10 @@ class TraceScreen(Screen):
         max_source_bytes, hunk_context_lines = diff_limits(cfg)
         key = (*identity, launch_root, max_source_bytes, hunk_context_lines)
         if self._edits_lookup_key != key:
-            from gc_tui.services.edits_lookup import EditsLookup
+            from gc_tui.services.edits_lookup import lookup_for_settings
 
-            self._edits_lookup = EditsLookup(
-                *identity,
-                launch_root=launch_root,
-                max_diff_source_bytes=max_source_bytes,
-                hunk_context_lines=hunk_context_lines,
+            self._edits_lookup = lookup_for_settings(
+                *identity, cfg, launch_root=launch_root
             )
             self._edits_lookup_key = key
         return self._edits_lookup

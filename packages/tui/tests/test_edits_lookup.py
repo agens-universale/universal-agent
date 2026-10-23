@@ -554,3 +554,23 @@ def test_command_paths_of(tmp_path):
     assert lookup.command_paths_of("c1") == 6
     assert lookup.command_paths_of("c2") is None
     assert lookup.command_paths_of("nope") is None
+
+
+def test_lookup_for_settings_takes_limits_from_agent_edits(tmp_path):
+    """Одна фабрика журнала правок для ленты и превью: лимиты диффа — из
+    секции `agent_edits` настроек (`edits_view.diff_limits`)."""
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.services.edits_lookup import lookup_for_settings
+
+    settings = tui_settings(
+        {
+            "agent_edits.hunk_context_lines": 1,
+            "agent_edits.max_diff_source_bytes": 1000,
+        }
+    )
+    lookup = lookup_for_settings(
+        str(tmp_path), "cli", "th1", settings, launch_root=str(tmp_path)
+    )
+    assert lookup._hunk_context_lines == 1
+    assert lookup._max_source_bytes == 1000
+    assert lookup._launch_root == str(tmp_path)

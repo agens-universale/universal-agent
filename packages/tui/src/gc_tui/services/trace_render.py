@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Iterable, Mapping
 from datetime import datetime
@@ -53,6 +54,8 @@ if TYPE_CHECKING:
         TraceRow,
     )
     from gc_tui.widgets.turn_line import TurnLine
+
+_log = logging.getLogger(__name__)
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
@@ -742,7 +745,8 @@ def _readonly_result(
     blocks: PreviewBlocks, view: ToolBlocksView, row, ev
 ) -> None:
     """Исход вызова превью — через модель уровня, с правкой из журнала
-    треда тем же билдером, что вживую; сбой журнала — без правки."""
+    треда тем же билдером, что вживую; сбой журнала — без правки, причина
+    — в лог."""
     from gc_tui.services.block_edits import call_edit, ran_result_of
     from gc_tui.services.tool_blocks import BlockKind
 
@@ -753,7 +757,8 @@ def _readonly_result(
         ran = None
         if view.model.kind_of(row.call_id) == BlockKind.RAN:
             ran = ran_result_of(lookup, ev, window=window)
-    except Exception:
+    except Exception as exc:
+        _log.warning("правки вызова %s не прочитаны: %r", ev.call_id, exc)
         edit, compact, ran = None, False, None
     view.result(row, ev, edit, compact=compact, ran=ran)
 

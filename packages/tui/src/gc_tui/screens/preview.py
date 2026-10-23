@@ -110,8 +110,7 @@ class PreviewScreen(Screen[bool]):
         `edits_view.diff_limits`) и долями из `agent_edits` (спека P4
         §9.10а): правки и доли — как вживую."""
         from gc_tui.services.block_edits import edit_settings
-        from gc_tui.services.edits_lookup import EditsLookup
-        from gc_tui.services.edits_view import diff_limits
+        from gc_tui.services.edits_lookup import lookup_for_settings
         from gc_tui.widgets.tool_blocks_view import PreviewBlocks
 
         settings = getattr(self.app, "base_settings", None)
@@ -125,14 +124,8 @@ class PreviewScreen(Screen[bool]):
         threads_dir = getattr(self.app, "_threads_dir", None)
         system_id = getattr(self.app, "_system", None)
         if threads_dir and system_id and self._thread_id:
-            max_source_bytes, hunk_context_lines = diff_limits(cfg)
-            lookup = EditsLookup(
-                threads_dir,
-                system_id,
-                self._thread_id,
-                launch_root=None,
-                max_diff_source_bytes=max_source_bytes,
-                hunk_context_lines=hunk_context_lines,
+            lookup = lookup_for_settings(
+                threads_dir, system_id, self._thread_id, cfg
             )
         return PreviewBlocks(
             edits_lookup=lookup, diff_preview=preview, expanded_turns=window

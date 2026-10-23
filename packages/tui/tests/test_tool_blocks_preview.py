@@ -432,6 +432,33 @@ async def test_preview_without_journal_edit_has_no_counts(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_preview_journal_failure_is_logged(
+    tmp_path, monkeypatch, caplog
+):
+    """Сбой чтения журнала правок в превью — правка без счётчиков, причина
+    — предупреждением в лог, не молча."""
+    import logging
+
+    from gc_tui.services import block_edits
+
+    def broken(*_a, **_kw):
+        raise OSError("журнал недоступен")
+
+    monkeypatch.setattr(block_edits, "call_edit", broken)
+    thread = _Thread(tmp_path, status="stopped")
+    thread.add(*_edit(0))
+    caplog.set_level(logging.WARNING, logger="gc_tui.services.trace_render")
+    async with _app(tmp_path).run_test(size=SIZE) as pilot:
+        await _open_preview(pilot)
+        texts = [text for text, _ in _frame(pilot)]
+    assert " ● Edited e0.py" in texts
+    (record,) = [
+        r for r in caplog.records if r.name == "gc_tui.services.trace_render"
+    ]
+    assert "журнал недоступен" in record.getMessage()
+
+
+@pytest.mark.asyncio
 async def test_preview_enter_opens_thread_and_space_toggles(tmp_path):
     """Enter в превью — открыть тред (`priority`), пробел на заголовке —
     раскрыть блок; одинаковые `block:0` верхнего уровня и субагента не

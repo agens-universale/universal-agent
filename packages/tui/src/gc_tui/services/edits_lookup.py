@@ -244,3 +244,27 @@ class EditsLookup:
         self._by_command = _command_index(records)
         self._turn_ids = list(turns)
         self._indexed_signature = signature
+
+
+def lookup_for_settings(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    settings: Any,
+    *,
+    launch_root: Optional[str] = None,
+) -> EditsLookup:
+    """Журнал правок треда с лимитами диффа секции `agent_edits`
+    настроек ``settings`` — одна фабрика для ленты и превью."""
+    # `edits_view` сам импортирует этот модуль — здесь лениво.
+    from gc_tui.services.edits_view import diff_limits
+
+    max_source_bytes, hunk_context_lines = diff_limits(settings)
+    return EditsLookup(
+        threads_dir,
+        system_id,
+        thread_id,
+        launch_root=launch_root,
+        max_diff_source_bytes=max_source_bytes,
+        hunk_context_lines=hunk_context_lines,
+    )
