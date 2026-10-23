@@ -23,8 +23,8 @@ from gc_core.constants.tool_names import (
     TURN_FINALIZING_TOOLS,
 )
 from gc_core.execution.progress import (
-    brief_args_summary,
     parse_tool_result_status,
+    tool_args_summary,
 )
 
 _CALL = "function_call"
@@ -295,7 +295,7 @@ def _preview_text(output: Any) -> str | None:
 
 
 def _title(name: str, arguments: Any) -> str:
-    preview = brief_args_summary(arguments, tool_name=name)
+    preview = tool_args_summary(name, arguments)
     if preview == "":
         return name
     return f"{name}({preview})"

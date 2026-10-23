@@ -19,8 +19,8 @@ from gc_core.constants.tool_names import (
     SESSION_THINK_TOOL_NAME,
 )
 from gc_core.execution.progress import (
-    brief_args_summary,
     parse_tool_result_status,
+    tool_args_summary,
 )
 
 _CALL = "function_call"
@@ -151,7 +151,7 @@ def _output_report(
 
 
 def _title(name: str, arguments: Any) -> str:
-    preview = brief_args_summary(arguments, tool_name=name)
+    preview = tool_args_summary(name, arguments)
     if preview == "":
         return name
     return f"{name}({preview})"

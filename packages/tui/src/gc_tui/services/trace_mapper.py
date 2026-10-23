@@ -9,6 +9,7 @@ from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
 from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
+from gc_core.utils.path_truncate import truncate_path
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -20,7 +21,6 @@ from gc_core.vision.errors import (
 
 from gc_tui.models import TraceEvent
 from gc_tui.services.image_chips import images_mentioned
-from gc_tui.services.path_display import truncate_path
 from gc_tui.services.tool_identity import tool_id
 
 #: Сводки строки fs_view_image в ленте (визуальный контракт картинок §4): модель

@@ -41,4 +41,4 @@ def test_card_line_omits_arguments_and_hides_turn_finish(tmp_path):
     mapper.finish("готово")
     assert "turn_finish" not in mapper.content
     assert "сырой json" not in mapper.content
-    assert "read_file(path='src/app.py') — in_progress" in mapper.content
+    assert "read_file(src/app.py) — in_progress" in mapper.content

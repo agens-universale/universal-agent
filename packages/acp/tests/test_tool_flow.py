@@ -56,7 +56,7 @@ def test_poll_skips_bytes_already_on_disk_and_hides_bookkeeping(tmp_path):
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "c1",
-            "title": "exec_command(command='pytest -q')",
+            "title": "exec_command(pytest -q)",
             "status": "in_progress",
             "name": "exec_command",
             "rawInput": {"command": "pytest -q"},
@@ -123,7 +123,7 @@ def test_poll_after_compaction_rewrites_shorter_file(tmp_path):
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "after",
-            "title": "exec_command(command='ls')",
+            "title": "exec_command(ls)",
             "status": "in_progress",
             "name": "exec_command",
             "rawInput": {"command": "ls"},
@@ -220,7 +220,7 @@ def test_poll_places_subagent_tools_between_call_and_result(tmp_path):
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub",
-            "title": "subagent_explore(task='найти')",
+            "title": "subagent_explore(найти)",
             "status": "in_progress",
             "name": "subagent_explore",
             "rawInput": {"task": "найти"},
@@ -228,7 +228,7 @@ def test_poll_places_subagent_tools_between_call_and_result(tmp_path):
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub:c1",
-            "title": "fs_read_file(path='a.py')",
+            "title": "fs_read_file(a.py)",
             "status": "in_progress",
             "name": "fs_read_file",
             "rawInput": {"path": "a.py"},
@@ -289,7 +289,7 @@ def test_poll_reads_sidecar_created_after_start(tmp_path):
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub:c1",
-            "title": "exec_command(command='ls')",
+            "title": "exec_command(ls)",
             "status": "in_progress",
             "name": "exec_command",
             "rawInput": {"command": "ls"},
@@ -592,7 +592,7 @@ def test_call_card_is_the_signature_without_kind_or_content():
     assert report == {
         "sessionUpdate": "tool_call",
         "toolCallId": "c1",
-        "title": "fs_read_file(path='a.py', offset=10)",
+        "title": "fs_read_file(a.py)",
         "status": "in_progress",
         "name": "fs_read_file",
         "rawInput": {"path": "a.py", "offset": 10},
