@@ -1453,3 +1453,23 @@ def test_agent_row_word_role():
     model, fold, _ = _model()
     fold(model.member_added("a", C.AGENT, waiting=False))
     assert fold.state[("SetWord", "a")] == SetWord("a", "Agent", role="agent")
+
+
+@pytest.mark.parametrize(
+    ("outcome", "word"),
+    [
+        ("ok", "Finished"),
+        ("error", "Finish"),
+        ("refused", "Finish"),
+        ("halted", "Finish"),
+    ],
+)
+def test_finish_word_from_outcome(outcome, word):
+    """Сдача: `Finished` — только принятая; со сбоем (отвергнута гейтом,
+    плохие аргументы) — `Finish`, как `Edit путь` у правки (§6.1, §7)."""
+    model, fold, _ = _model()
+    fold(model.member_added("f", C.FINISH, waiting=False))
+    assert fold.word("f") == "Finishing"
+    fold(model.started("f"))
+    fold(model.result("f", outcome, reason="нет", executed=True))
+    assert fold.word("f") == word

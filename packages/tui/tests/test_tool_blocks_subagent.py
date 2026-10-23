@@ -31,6 +31,7 @@ from gc_testkit.trace_grid import assert_trace_grid, trace_rows
 from gc_testkit.tui_support import tui_settings
 from textual.containers import VerticalScroll
 
+from gc_tui.palette import ERR
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.tool_blocks_view import BlockAction
 from gc_tui.widgets.tool_call_row import ToolCallRow
@@ -97,22 +98,42 @@ def _progress(steps: list[tuple], pid: str = AGENT) -> list:
                 )
             )
             continue
-        _kind, call_id, name, args = step
+        _kind, call_id, name, args, *own = step
         summary = tool_args_summary(name, json.dumps(args))
-        for kind in ("tool_start", "tool_end"):
-            out.append(
-                SubagentProgressEvent(
-                    kind=kind,
-                    elapsed_ms=0,
-                    tool_name=name,
-                    tool_call_id=call_id,
-                    args_summary=summary,
-                    ok=True if kind == "tool_end" else None,
-                    output=_output(name) if kind == "tool_end" else None,
-                    **base,
-                )
+        start = dict(tool_name=name, tool_call_id=call_id, **base)
+        out.append(
+            SubagentProgressEvent(
+                kind="tool_start", elapsed_ms=0, args_summary=summary, **start
             )
+        )
+        out.append(_tool_end(start, summary, own[0] if own else None))
     return out
+
+
+def _tool_end(start: dict, summary: str, output) -> SubagentProgressEvent:
+    """Конец вызова: свой вывод — с исходом, как у ядра; без него — успех."""
+    if output is None:
+        return SubagentProgressEvent(
+            kind="tool_end",
+            elapsed_ms=0,
+            args_summary=summary,
+            ok=True,
+            output=_output(start["tool_name"]),
+            **start,
+        )
+    ok, brief = parse_tool_result_status(output)
+    status, fields = result_facts(output)
+    return SubagentProgressEvent(
+        kind="tool_end",
+        elapsed_ms=0,
+        args_summary=summary,
+        ok=ok,
+        error_brief=brief,
+        result_status=status,
+        result_error=fields,
+        output=output,
+        **start,
+    )
 
 
 def _sidecar(tmp_path, steps: list[tuple], pid: str = AGENT) -> None:
@@ -122,7 +143,10 @@ def _sidecar(tmp_path, steps: list[tuple], pid: str = AGENT) -> None:
         elif step[0] == "user":
             records = [("user", {"content": step[1]})]
         else:
-            _kind, call_id, name, args = step
+            _kind, call_id, name, args, *own = step
+            output = own[0] if own else _output(name)
+            # Как ядро: неуспех — запись `error`, успех — `result`.
+            failed = parse_tool_result_status(output)[0] is False
             records = [
                 (
                     "call",
@@ -134,11 +158,11 @@ def _sidecar(tmp_path, steps: list[tuple], pid: str = AGENT) -> None:
                     },
                 ),
                 (
-                    "result",
+                    "error" if failed else "result",
                     {
                         "type": "function_call_output",
                         "call_id": call_id,
-                        "output": _output(name),
+                        "output": output,
                     },
                 ),
             ]
@@ -395,6 +419,62 @@ async def test_nested_finish_row_last_event(tmp_path):
         "    └ Read  client/m0.py · 2с",
         "  ● Готово.",
         "  ● Finished  full_solution",
+    ]
+
+
+def _fg(row, at: int) -> str:
+    """Цвет текста клетки ``at`` строки (последний спан побеждает)."""
+    from rich.style import Style
+
+    colour = ""
+    for span in row.spans:
+        style = span.style
+        if isinstance(style, str):
+            style = Style.parse(style)
+        if span.start <= at < span.end and style and style.color:
+            colour = style.color.get_truecolor().hex.lower()
+    return colour
+
+
+_REJECTED = json.dumps(
+    {
+        "ok": False,
+        "status": "rejected_by_finish_gate",
+        "message": "нет прогона тестов",
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_nested_finish_attempts_each_own_row(tmp_path):
+    """Каждая исполненная сдача — своя строка: отвергнутая гейтом —
+    `Finish  <solution_type>` с причиной `└`, принятая — `Finished`
+    (владелец 2026-10-23); вживую, после возврата и в превью одинаково."""
+    rejected = ("call", "f0", *_FINISH[2:], _REJECTED)
+    steps = [rejected, _FINISH]
+    calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
+    live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
+    live_dir.mkdir()
+    reopen_dir.mkdir()
+    async with _app(live_dir).run_test(size=(100, 40)) as pilot:
+        live = await _live(pilot, live_dir, steps, calls=calls)
+    _write_reopen(reopen_dir, steps, calls=calls)
+    async with _app(reopen_dir).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        reopen = _rows(pilot)
+        styled = trace_rows(pilot.app, exclude=(TurnLine,))
+        await _push_preview(pilot, scr)
+        preview = _rows(pilot)
+    assert live == reopen == preview
+    head = next(r for r in styled if "● Finish " in r.plain)
+    reason = next(r for r in styled if "└ нет прогона" in r.plain)
+    assert _fg(head, head.plain.index("●")) == ERR.lower()
+    assert _fg(reason, reason.plain.index("нет")) == ERR.lower()
+    assert _agent_rows(live)[1:] == [
+        "  └ проверка клиента",
+        "  ● Finish  full_solution · 2с",
+        "    └ нет прогона тестов",
+        "  ● Finished  full_solution · 2с",
     ]
 
 

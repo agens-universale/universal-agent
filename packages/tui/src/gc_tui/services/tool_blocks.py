@@ -102,6 +102,9 @@ _WORDS: dict[BlockKind, tuple[str, str]] = {
     BlockKind.AGENT: ("Agent", "Agent"),
     BlockKind.FINISH: ("Finishing", "Finished"),
 }
+#: Слово законченного вызова со сбоем — без времени глагола, как
+#: `Edit путь` у правки (§6.1): `Finish` — сдача не принята (§7).
+_FAILED_WORDS: dict[BlockKind, str] = {BlockKind.FINISH: "Finish"}
 #: Одиночные строки со своим словом вместо подписи и его роль.
 _WORD_ROLES: dict[BlockKind, WordRole] = {
     BlockKind.AGENT: "agent",
@@ -1041,7 +1044,9 @@ class ToolBlocks:
         out: list[Decision] = [SetMode(member.key, "single")]
         role = _WORD_ROLES.get(block.kind)
         if role is not None:
-            word = header_word(block.kind, live=not member.done)
+            failed = member.done and member.outcome != "ok"
+            verb = _FAILED_WORDS.get(block.kind) if failed else None
+            word = header_word(block.kind, live=not member.done, verb=verb)
             out.append(SetWord(member.key, word, role=role))
         return out + self._outcome_of(member)
 
