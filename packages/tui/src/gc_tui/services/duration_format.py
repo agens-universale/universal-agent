@@ -44,3 +44,14 @@ def format_round_int(n: int) -> str:
     if n >= 1000:
         return f"{n // 1000}k"
     return str(n)
+
+
+def format_size(n_bytes: int) -> str:
+    """Размер файла для ленты: 512 → "512 Б", 12288 → "12 КБ",
+    3565158 → "3,4 МБ" (килобайты целыми, мегабайты с одним знаком)."""
+    if n_bytes < 1024:
+        return f"{n_bytes} Б"
+    if n_bytes < 1024 * 1024:
+        return f"{round(n_bytes / 1024)} КБ"
+    megabytes = f"{n_bytes / (1024 * 1024):.1f}".replace(".", ",")
+    return f"{megabytes} МБ"

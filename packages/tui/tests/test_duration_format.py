@@ -5,6 +5,7 @@ from gc_tui.services.duration_format import (
     format_compact_int,
     format_duration,
     format_round_int,
+    format_size,
 )
 
 
@@ -58,3 +59,16 @@ def test_format_compact_int(n, expected):
 )
 def test_format_round_int(n, expected):
     assert format_round_int(n) == expected
+
+
+@pytest.mark.parametrize(
+    "n,expected",
+    [
+        (0, "0 Б"),
+        (512, "512 Б"),
+        (12_288, "12 КБ"),
+        (3_565_158, "3,4 МБ"),
+    ],
+)
+def test_format_size(n, expected):
+    assert format_size(n) == expected

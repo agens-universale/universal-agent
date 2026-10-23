@@ -15,12 +15,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal, Mapping, Optional, Union
+from typing import Literal, Mapping, Optional, Sequence, Union
 
+from gc_core.config_modules.agent_edits import DEFAULT_TRACE_INLINE_MAX_LINES
 from gc_core.constants.tool_display import DisplayCategory
 
 from gc_tui.models import ResultOutcome
-from gc_tui.services.plural import errors_word, lines_word, refusals_word
+from gc_tui.services.duration_format import format_size
+from gc_tui.services.plural import (
+    errors_word,
+    files_word,
+    lines_word,
+    refusals_word,
+)
 
 #: Видимых элементов в окне блока: членов, файлов, событий субагента.
 WINDOW = 3
@@ -39,6 +46,8 @@ Look = Literal[
     "run", "ok", "error", "refused", "halted", "dim", "ink", "muted"
 ]
 RowMode = Literal["single", "header", "member"]
+#: Колонка диффа: одиночная правка (2) или член блока (4).
+DiffColumn = Literal["single", "member"]
 Parts = tuple[tuple[str, Look], ...]
 
 
@@ -124,6 +133,55 @@ def failure_tail(errors: int, refusals: int) -> str:
     return "".join(text for text, _ in _failure_parts(errors, refusals))
 
 
+def edit_verb(op: Optional[str], *, failed: bool) -> str:
+    """Глагол правки тула по результату (§6.1): сбой или отказ —
+    `Edit`; создан файл — `Added`; иначе `Edited`. Идущая — `Editing`
+    (`header_word`)."""
+    if failed:
+        return "Edit"
+    return "Added" if op == "create" else "Edited"
+
+
+def command_file_verb(op: Optional[str]) -> str:
+    """Глагол файла под командой: `Added` / `Deleted` / `Edited`."""
+    return {"create": "Added", "delete": "Deleted"}.get(op or "", "Edited")
+
+
+def diff_rows(n_applied: int, preview: int) -> int:
+    """Экранных рядов диффа на файл (§6.3): одиночная правка — `preview`,
+    блок из `n` файлов — `max(3, preview // n)`."""
+    if n_applied <= 1:
+        return preview
+    return max(MIN_DIFF_ROWS_PER_FILE, preview // n_applied)
+
+
+def counts_text(add: int, rem: int) -> Parts:
+    """Счётчики правки ` (+a −r)`; нулевая часть опускается, обе
+    нулевые — пусто."""
+    nums: list[tuple[str, Look]] = []
+    if add:
+        nums.append((f"+{add}", "ok"))
+    if rem:
+        nums.append((f"−{rem}", "error"))
+    if not nums:
+        return ()
+    parts: list[tuple[str, Look]] = [(" (", "dim"), nums[0]]
+    if len(nums) == 2:
+        parts += [(" ", "dim"), nums[1]]
+    parts.append((")", "dim"))
+    return tuple(parts)
+
+
+def diff_key(key: str) -> str:
+    """Ключ виджета диффа строки (файла) ``key``."""
+    return f"{key}:diff"
+
+
+def phrase_key(block: str, slot: str) -> str:
+    """Ключ виджета фразы ``slot`` блока ``block``."""
+    return f"{block}:{slot}"
+
+
 def block_glyph(*, running: bool, stopped: bool, any_ok: bool) -> GlyphLook:
     """Глиф заголовка (§3.3): стоп — `halted`; идёт — `run`; закончился —
     `ok`, если хоть один вызов прошёл, иначе `error`."""
@@ -132,6 +190,38 @@ def block_glyph(*, running: bool, stopped: bool, any_ok: bool) -> GlyphLook:
     if running:
         return "run"
     return "ok" if any_ok else "error"
+
+
+@dataclass(frozen=True)
+class BlockEdit:
+    """Что модель знает о правке файла: из записи журнала правок."""
+
+    key: str
+    path: str
+    verb: str
+    add: int
+    rem: int
+    #: Логических строк диффа; 0 — диффа нет (бинарь, удаление).
+    diff_lines: int
+    size_bytes: Optional[int]
+    has_record: bool
+
+    @property
+    def has_diff(self) -> bool:
+        return self.has_record and self.diff_lines > 0
+
+
+def _edit_tail(edit: Optional[BlockEdit]) -> Parts:
+    """Хвост строки файла: ` (+a −r)`, у бинаря — ` · 12 КБ`."""
+    if edit is None or not edit.has_record or edit.verb == "Deleted":
+        return ()
+    if edit.diff_lines == 0 and edit.size_bytes is not None:
+        return ((" · ", "dim"), (format_size(edit.size_bytes), "dim"))
+    return counts_text(edit.add, edit.rem)
+
+
+def _lines(edit: Optional[BlockEdit]) -> int:
+    return edit.diff_lines if edit is not None and edit.has_diff else 0
 
 
 # --- решения -------------------------------------------------------------
@@ -167,12 +257,14 @@ class MountPhrase:
 @dataclass(frozen=True)
 class SetMode:
     """Режим строки. ``lead`` — `└ ` перед текстом члена (первый видимый
-    элемент блока); ``current`` — член идёт (`INK`)."""
+    элемент блока); ``current`` — член идёт (`INK`); ``gap`` — пустая
+    строка сверху (между файлами блока правок)."""
 
     key: str
     mode: RowMode
     lead: bool = False
     current: bool = False
+    gap: bool = False
 
     @property
     def ident(self) -> tuple:
@@ -243,6 +335,57 @@ class SetConsequence:
         return ("SetConsequence", self.key)
 
 
+@dataclass(frozen=True)
+class SetWord:
+    """Глагол одиночной строки правки: `Editing` / `Added` / `Edited` /
+    `Edit`."""
+
+    key: str
+    word: str
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetWord", self.key)
+
+
+@dataclass(frozen=True)
+class SetEditTail:
+    """Хвост строки файла после пути: счётчики или размер бинаря."""
+
+    key: str
+    parts: Parts
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetEditTail", self.key)
+
+
+@dataclass(frozen=True)
+class SetDiffShare:
+    """Дифф файла: ``rows`` экранных рядов превью (`None` — целиком) в
+    колонке ``column``. Смонтировать при первом решении."""
+
+    key: str
+    rows: Optional[int]
+    column: DiffColumn
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetDiffShare", self.key)
+
+
+@dataclass(frozen=True)
+class SetExpanded:
+    """Блок `Ran` раскрыт: вся команда и весь вывод."""
+
+    block: str
+    expanded: bool
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetExpanded", self.block)
+
+
 Decision = Union[
     MountHeader,
     MountPhrase,
@@ -252,6 +395,10 @@ Decision = Union[
     SetPhrase,
     SetTimer,
     SetConsequence,
+    SetWord,
+    SetEditTail,
+    SetDiffShare,
+    SetExpanded,
 ]
 
 
@@ -291,6 +438,16 @@ class _Member:
     # Без результата: процесс оборвался или стоп до старта.
     interrupted: bool = False
     not_started: bool = False
+    edit: Optional[BlockEdit] = None
+
+    @property
+    def applied(self) -> Optional[BlockEdit]:
+        """Правка вызова, если он прошёл."""
+        return self.edit if self.outcome == "ok" else None
+
+    @property
+    def verb(self) -> str:
+        return self.edit.verb if self.edit is not None else "Edited"
 
     @property
     def done(self) -> bool:
@@ -312,6 +469,11 @@ class _Block:
     members: list[_Member] = field(default_factory=list)
     expanded: bool = False
     stopped: bool = False
+    # Правки: строка ещё идёт и в группу не встала; глагол группы
+    # (`None` — в группе одни сбои).
+    pending: bool = False
+    verb: Optional[str] = None
+    parts: Optional[_RanParts] = None
 
     @property
     def headed(self) -> bool:
@@ -329,11 +491,54 @@ class _Block:
         return self.headed and len(self.shown()) > WINDOW
 
 
-class ToolBlocks:
-    """Модель блоков одного уровня ленты: верхнего или субагента."""
+@dataclass(frozen=True)
+class _RanParts:
+    command_hidden: int
+    output_hidden: int
+    files: tuple[BlockEdit, ...]
+    unrecorded: int
 
-    def __init__(self, timers: CallTimers) -> None:
+
+@dataclass(frozen=True)
+class _Layout:
+    """Окно файлов блока и счёт скрытого."""
+
+    window: tuple[str, ...]
+    #: Рядов диффа на видимый файл; `None` — раскрыт, целиком.
+    rows: Optional[int]
+    #: Скрытых файлов над окном сейчас (`… ещё M`).
+    more: int
+    #: Скрытых логических строк в свёрнутом виде (`+ ещё N строк`).
+    lines: int
+    expandable: bool
+
+
+def _accepts(group: Optional[_Block], member: _Member) -> bool:
+    """Встаёт ли законченная правка в открытую группу (решение плана 4):
+    сбой — в любую группу правок; успешная — в группу своего глагола с
+    хотя бы одной применившейся."""
+    if group is None or group.kind != BlockKind.EDITS or group.pending:
+        return False
+    if member.outcome != "ok":
+        return True
+    return group.verb == member.verb
+
+
+class ToolBlocks:
+    """Модель блоков одного уровня ленты: верхнего или субагента.
+
+    ``diff_preview`` — экранных рядов превью диффа одиночной правки
+    (`agent_edits.trace_inline_max_lines`)."""
+
+    def __init__(
+        self,
+        timers: CallTimers,
+        *,
+        diff_preview: int = DEFAULT_TRACE_INLINE_MAX_LINES,
+    ) -> None:
         self._timers = timers
+        self._preview = diff_preview
+        self._count = 0
         self._blocks: list[_Block] = []
         self._block_of: dict[str, _Block] = {}
         self._members: dict[str, _Member] = {}
@@ -352,12 +557,19 @@ class ToolBlocks:
             return []
         member = _Member(call_id, waiting=waiting)
         self._members[call_id] = member
-        block = self._open
-        if block is None or block.kind != kind or kind not in _GROUPED:
+        opened = self._open
+        if kind in _GROUPED and opened is not None and opened.kind == kind:
+            block = opened
+        else:
             block = self._new_block(kind)
+            # Правка встаёт в группу по результату (§6.4).
+            block.pending = kind == BlockKind.EDITS
         block.members.append(member)
         self._block_of[call_id] = block
-        self._open = block if kind in _GROUPED else None
+        if kind in _GROUPED:
+            self._open = block
+        elif not (block.pending and _accepts_edits(opened)):
+            self._open = None
         return self._render(block)
 
     def started(self, call_id: str) -> list[Decision]:
@@ -385,7 +597,38 @@ class ToolBlocks:
         member.reason = reason
         member.executed = executed
         member.waiting = False
+        return self._render(self._settle(member))
+
+    def edit_counts(self, call_id: str, edit: BlockEdit) -> list[Decision]:
+        """Запись журнала правки вызова. Подаётся до `result` того же
+        вызова: глагол решает, в какую группу он встанет; после —
+        обновляет только счётчики и дифф."""
+        member = self._members.get(call_id)
+        if member is None:
+            return []
+        member.edit = edit
+        if not member.done:
+            return []
         return self._render(self._block_of[call_id])
+
+    def ran_parts(
+        self,
+        call_id: str,
+        *,
+        command_hidden: int,
+        output_hidden: int,
+        files: Sequence[BlockEdit],
+        unrecorded: int,
+    ) -> list[Decision]:
+        """Части блока `Ran` (§4.0, §4.2): скрытые строки команды и
+        вывода, правки команды и число её незаписанных файлов."""
+        block = self._block_of.get(call_id)
+        if block is None or block.kind != BlockKind.RAN:
+            return []
+        block.parts = _RanParts(
+            command_hidden, output_hidden, tuple(files), unrecorded
+        )
+        return self._render(block)
 
     def interrupted(self, call_id: str, *, started: bool) -> list[Decision]:
         """Вызов закончился без результата. ``started=False`` — стоп до
@@ -397,7 +640,7 @@ class ToolBlocks:
         member.interrupted = True
         member.not_started = not (started or member.started)
         member.waiting = False
-        return self._render(self._block_of[call_id])
+        return self._render(self._settle(member))
 
     def turn_stopped(self) -> list[Decision]:
         """Ход остановлен: все блоки уровня с незавершёнными членами —
@@ -431,7 +674,7 @@ class ToolBlocks:
         block = self._block_of.get(key) or self._block_of.get(
             key.rsplit(":", 1)[0]
         )
-        if block is None or not block.expandable():
+        if block is None or not self._expandable(block):
             return []
         block.expanded = not block.expanded
         return self._render(block)
@@ -447,17 +690,94 @@ class ToolBlocks:
     # --- отрисовка -------------------------------------------------------
 
     def _new_block(self, kind: BlockKind) -> _Block:
-        block = _Block(f"block:{len(self._blocks)}", kind)
+        block = _Block(f"block:{self._count}", kind)
+        self._count += 1
         self._blocks.append(block)
         self._block_of[block.key] = block
+        return block
+
+    def _settle(self, member: _Member) -> _Block:
+        """Законченная правка встаёт в открытую группу или открывает свою;
+        у прочих вызовов блок не меняется."""
+        block = self._block_of[member.key]
+        if not block.pending:
+            return block
+        group = self._open
+        if _accepts(group, member):
+            self._blocks.remove(block)
+            del self._block_of[block.key]
+            group.members.append(member)
+            self._block_of[member.key] = group
+            return group
+        block.pending = False
+        block.verb = member.verb if member.outcome == "ok" else None
+        self._open = block
         return block
 
     def _render(self, block: _Block) -> list[Decision]:
         if block.headed:
             wanted = self._grouped(block)
+        elif block.kind == BlockKind.EDITS:
+            wanted = self._edits(block)
+        elif block.kind == BlockKind.RAN:
+            wanted = self._ran(block)
         else:
             wanted = self._single(block)
         return self._diff(wanted)
+
+    def _expandable(self, block: _Block) -> bool:
+        if block.headed:
+            return block.expandable()
+        if block.kind == BlockKind.EDITS:
+            return self._edits_layout(block).expandable
+        if block.kind == BlockKind.RAN and block.parts is not None:
+            return self._ran_layout(block).expandable
+        return False
+
+    def _layout(
+        self,
+        files: Sequence[tuple[str, int]],
+        *,
+        expanded: bool,
+        extra_lines: int = 0,
+        extra_more: int = 0,
+    ) -> _Layout:
+        """Окно из последних `WINDOW` файлов, доля диффа (§6.3) и счёт
+        скрытого: строки видимых сверх доли и все строки скрытых."""
+        rows = diff_rows(sum(1 for _, n in files if n), self._preview)
+        tail = files[-WINDOW:]
+        in_tail = {key for key, _ in tail}
+        lines = extra_lines + sum(max(0, n - rows) for _, n in tail)
+        lines += sum(n for key, n in files if key not in in_tail)
+        more = len(files) - len(tail) + extra_more
+        expandable = bool(lines or more)
+        if expanded and expandable:
+            keys = tuple(key for key, _ in files)
+            return _Layout(keys, None, 0, lines, True)
+        keys = tuple(key for key, _ in tail)
+        return _Layout(keys, rows, more, lines, expandable)
+
+    def _edits_layout(self, block: _Block) -> _Layout:
+        files = [(m.key, _lines(m.applied)) for m in block.members]
+        return self._layout(files, expanded=block.expanded)
+
+    def _ran_layout(self, block: _Block) -> _Layout:
+        parts = block.parts
+        assert parts is not None
+        return self._layout(
+            [(f.key, _lines(f)) for f in parts.files],
+            expanded=block.expanded,
+            extra_lines=parts.command_hidden + parts.output_hidden,
+            extra_more=parts.unrecorded,
+        )
+
+    def _bottom(self, block: _Block, layout: _Layout) -> Optional[str]:
+        """Единственная фраза раскрытия внизу блока."""
+        if not layout.expandable:
+            return None
+        if block.expanded:
+            return COLLAPSE_PHRASE
+        return more_lines_phrase(layout.lines) if layout.lines else None
 
     def _diff(self, wanted: list[Decision]) -> list[Decision]:
         out: list[Decision] = []
@@ -504,7 +824,86 @@ class ToolBlocks:
         )
         return out
 
-    def _head(self, block: _Block) -> SetHeader:
+    def _edits(self, block: _Block) -> list[Decision]:
+        """Одиночная правка или блок `Added N` / `Edited N` (§6.2)."""
+        members = block.members
+        single = len(members) == 1
+        layout = self._edits_layout(block)
+        out: list[Decision] = []
+        if not single:
+            n = len(members)
+            prefix: Parts = ((f" {n} {files_word(n)}", "ink"),)
+            added = [m.applied for m in members if m.applied is not None]
+            prefix += counts_text(
+                sum(e.add for e in added), sum(e.rem for e in added)
+            )
+            first = members[0].key
+            out += [
+                MountHeader(block.key, before=first),
+                self._head(block, prefix),
+            ]
+        more = more_phrase(layout.more) if layout.more else None
+        out += self._phrase(block, "top", more, after=block.key)
+        for member in members:
+            out += self._edit_row(member, layout, single=single)
+        last = members[-1]
+        out += self._phrase(
+            block,
+            "bottom",
+            self._bottom(block, layout),
+            after=_after_file(last.key, last.applied),
+        )
+        return out
+
+    def _edit_row(
+        self, member: _Member, layout: _Layout, *, single: bool
+    ) -> list[Decision]:
+        if single:
+            out: list[Decision] = [
+                SetMode(member.key, "single"),
+                SetWord(member.key, _edit_word(member)),
+            ]
+        else:
+            out = [_file_mode(member.key, layout)]
+        visible = member.key in layout.window
+        out.append(SetVisible(member.key, visible))
+        column: DiffColumn = "single" if single else "member"
+        out += _file_parts(member.key, member.applied, layout, column)
+        return out + self._outcome_of(member)
+
+    def _ran(self, block: _Block) -> list[Decision]:
+        """Строка `Ran` и её части: окно правок команды, одна фраза внизу
+        блока (§4.0, §4.2)."""
+        out = self._single(block)
+        parts = block.parts
+        if parts is None:
+            return out
+        layout = self._ran_layout(block)
+        key = block.members[0].key
+        files = parts.files
+        more = more_phrase(layout.more) if layout.more else None
+        if files:
+            out += self._phrase(block, "files", more, before=files[0].key)
+        else:
+            out += self._phrase(block, "files", more, after=key)
+        for edit in files:
+            out.append(_file_mode(edit.key, layout, lead=False))
+            out.append(SetVisible(edit.key, edit.key in layout.window))
+            out += _file_parts(edit.key, edit, layout, "member")
+        last = _after_file(files[-1].key, files[-1]) if files else key
+        k = parts.unrecorded
+        unrecorded = None
+        if block.expanded and k:
+            unrecorded = f"ещё {k} {files_word(k)} не записано"
+        out += self._phrase(block, "unrecorded", unrecorded, after=last)
+        if unrecorded is not None:
+            last = phrase_key(block.key, "unrecorded")
+        bottom = self._bottom(block, layout)
+        out += self._phrase(block, "bottom", bottom, after=last)
+        out.append(SetExpanded(block.key, block.expanded))
+        return out
+
+    def _head(self, block: _Block, prefix: Parts = ()) -> SetHeader:
         members = block.members
         running = any(m.live for m in members)
         stopped = block.stopped or any(
@@ -517,11 +916,12 @@ class ToolBlocks:
         )
         errors = sum(m.outcome == "error" for m in members)
         refusals = sum(m.outcome == "refused" for m in members)
+        live = running and not stopped
         return SetHeader(
             block.key,
-            header_word(block.kind, live=running and not stopped),
+            header_word(block.kind, live=live, verb=block.verb),
             glyph,
-            _failure_parts(errors, refusals),
+            prefix + _failure_parts(errors, refusals),
         )
 
     def _phrase(
@@ -530,13 +930,14 @@ class ToolBlocks:
         slot: str,
         text: Optional[str],
         *,
-        after: str,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
     ) -> list[Decision]:
         """Фраза нужна — смонтировать (переставить) и задать текст; не
         нужна, но уже выдана — скрыть."""
         if text is not None:
             return [
-                MountPhrase(block.key, slot, after=after),
+                MountPhrase(block.key, slot, after=after, before=before),
                 SetPhrase(block.key, slot, text),
             ]
         if ("SetPhrase", block.key, slot) in self._issued:
@@ -574,6 +975,60 @@ class ToolBlocks:
         return SetTimer(member.key, self._timers.get(member.key), live=False)
 
 
+def _accepts_edits(group: Optional[_Block]) -> bool:
+    """Открыта группа правок, в которую может встать идущая правка."""
+    return group is not None and group.kind == BlockKind.EDITS
+
+
+def _edit_word(member: _Member) -> str:
+    if not member.done:
+        return header_word(BlockKind.EDITS, live=True)
+    if member.outcome != "ok":
+        return edit_verb(None, failed=True)
+    return member.verb
+
+
+def _file_mode(key: str, layout: _Layout, *, lead: bool = True) -> SetMode:
+    """Файл блока: `└ ` у первого видимого без маркера окна (у файлов
+    `Ran` его нет — `└` там у вывода); пустая строка — между видимыми
+    файлами, не перед первым."""
+    first = layout.window[0] if layout.window else None
+    visible = key in layout.window
+    return SetMode(
+        key,
+        "member",
+        lead=lead and key == first and not layout.more,
+        gap=visible and key != first,
+    )
+
+
+def _file_parts(
+    key: str,
+    edit: Optional[BlockEdit],
+    layout: _Layout,
+    column: DiffColumn,
+) -> list[Decision]:
+    """Хвост файла и доля диффа видимому файлу; скрытому дифф не
+    монтируется до первого раскрытия."""
+    out: list[Decision] = [SetEditTail(key, _edit_tail(edit))]
+    if edit is not None and edit.has_diff and key in layout.window:
+        out.append(SetDiffShare(key, layout.rows, column))
+    return out
+
+
+def _after_file(key: str, edit: Optional[BlockEdit]) -> str:
+    """Последний виджет файла: его дифф или сама строка."""
+    if edit is not None and edit.has_diff:
+        return diff_key(key)
+    return key
+
+
 def _is_default(decision: Decision) -> bool:
     """Решение совпадает с видом только что смонтированной строки."""
-    return isinstance(decision, SetVisible) and decision.visible
+    if isinstance(decision, SetVisible):
+        return decision.visible
+    if isinstance(decision, SetEditTail):
+        return not decision.parts
+    if isinstance(decision, SetExpanded):
+        return not decision.expanded
+    return False
