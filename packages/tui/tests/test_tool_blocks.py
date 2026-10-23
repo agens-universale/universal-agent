@@ -350,6 +350,7 @@ def test_turn_stopped_only_this_turn():
     model.turn_ended()
     _reads(model, fold, 1, start=2, done=False)
     fold(model.turn_stopped())
+    fold(model.interrupted("c2", started=True))
     assert fold.header("block:0").glyph == "ok"
     assert fold.header("block:1").glyph == "halted"
 
@@ -402,8 +403,10 @@ def test_failures_turn_stopped():
     _reads(model, fold, 1, start=1, done=False)
     assert fold.header().glyph == "run"
     fold(model.turn_stopped())
-    assert fold.header() == SetHeader("block:0", "Explored", "halted", ())
+    # Член ещё идёт: заголовок ждёт его перевода (§2.2).
+    assert fold.header() == SetHeader("block:0", "Exploring", "run", ())
     fold(model.result("c1", "halted", reason="отменено", executed=None))
+    assert fold.header() == SetHeader("block:0", "Explored", "halted", ())
     assert fold.consequence("c1") == SetConsequence("c1", "отменено", "dim")
     assert fold.timer("c1") == SetTimer("c1", None)
     assert fold.header().glyph == "halted"
@@ -415,6 +418,7 @@ def test_turn_stopped_reaches_closed_block():
     _reads(model, fold, 1, done=False)
     model.event_closing()
     fold(model.turn_stopped())
+    fold(model.interrupted("c0", started=True))
     assert fold.header().glyph == "halted"
 
 

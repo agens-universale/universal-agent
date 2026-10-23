@@ -562,6 +562,9 @@ async def test_stop_mid_exploring(tmp_path):
         assert "Отменено" in line.text.plain
         assert line.has_class("-held")
         assert _row(scr, "r1")._block_consequence is None
+        # Пока поток стопа жив, заголовок идёт: `○` — в тике выхода.
+        (header,) = _headers(scr)
+        assert header._header[:2] == ("Exploring", "run")
         runner.running = False
         _meta(tmp_path, tui={"status": "stopped"})
         scr._poll_active()  # поток вышел: один тик

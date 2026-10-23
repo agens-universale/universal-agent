@@ -342,11 +342,22 @@ class ToolBlocksView:
             head = self._widgets.get(self.model.first_call(block) or "")
         return head
 
-    def turn_ended(self, *, stopped: bool) -> None:
-        """Запись итога хода; ``stopped`` — ход остановлен пользователем."""
+    def turn_ended(self, *, stopped: bool, settled: bool = False) -> None:
+        """Запись итога хода; ``stopped`` — ход остановлен пользователем.
+        ``settled`` — поток хода давно вышел (превью, уровень, домонтированный
+        после записи): строки хода без исхода оборвались, как в тике выхода
+        потока вживую (§2.2)."""
         if stopped:
             self.apply(self.model.turn_stopped())
+            if settled:
+                self._interrupt_unsettled()
         self.apply(self.model.turn_ended())
+
+    def _interrupt_unsettled(self) -> None:
+        for key in self.model.turn_calls():
+            row = self._row(key)
+            if row is not None:
+                self.interrupted(row, started=not row.waiting)
 
     # --- решения → виджеты ---------------------------------------------------
 
@@ -530,7 +541,7 @@ class BlockViews(dict[str, ToolBlocksView]):
         вживую (§2.2, §7): после домонтирования вложенных записей."""
         for level, view in list(self.items()):
             if level in self._stopped:
-                view.turn_ended(stopped=True)
+                view.turn_ended(stopped=True, settled=True)
 
     def route(
         self, message: BlockToggle
@@ -551,10 +562,13 @@ class BlockViews(dict[str, ToolBlocksView]):
         return view, key
 
 
-def end_turn(views: BlockViews, timers: CallTimers, outcome: Any) -> None:
+def end_turn(
+    views: BlockViews, timers: CallTimers, outcome: Any, *, settled: bool
+) -> None:
     """Запись итога хода — моделям всех уровней: время вызовов хода
     (`outcome.calls`) — застывшим таймерам; остановка пользователем
-    ставит `○` блокам этого хода. Одно правило для живой ленты и превью."""
+    ставит `○` блокам этого хода. Одно правило для живой ленты и превью;
+    ``settled`` — у превью: поток хода давно вышел (`turn_ended`)."""
     from gc_tui.services.turn_outcome import kind_of
 
     timers.update(outcome.calls or {})
@@ -562,7 +576,7 @@ def end_turn(views: BlockViews, timers: CallTimers, outcome: Any) -> None:
     views.note_turn(stopped=stopped)
     for view in list(views.values()):
         view.timers_updated()
-        view.turn_ended(stopped=stopped)
+        view.turn_ended(stopped=stopped, settled=settled)
 
 
 def nested_tail(

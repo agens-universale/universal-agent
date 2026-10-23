@@ -22,7 +22,7 @@ from gc_core.execution.progress import (
     run_command_text,
     tool_args_summary,
 )
-from gc_core.persistence.turn_outcome import TurnOutcome
+from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
 from gc_core.thread_store import (
     append_new_thread_messages,
     append_subagent_trace_record,
@@ -655,3 +655,38 @@ async def test_live_equals_reopen_after_undo(tmp_path):
     texts = [text for text, _ in live]
     assert " ● Explored" in texts
     assert "отменяю" not in "".join(texts)
+
+
+@pytest.mark.asyncio
+async def test_preview_stopped_orphan_call_equals_reopen(tmp_path):
+    """Стоп, вызов без исхода: превью = переоткрытию — поток стопа давно
+    вышел, член `└ отменено`, заголовок `○ Explored` (§2.2, §9.7)."""
+    thread = _Thread(tmp_path, status="stopped")
+    thread.add(*_read(0), _read(1)[0])
+    outcome = TurnOutcome(
+        status="stopped",
+        reason=USER_STOP,
+        opened_by="u1",
+        started_at="2026-10-22T11:30:00Z",
+        ended_at="2026-10-22T11:30:12Z",
+        duration_sec=12.0,
+        error=None,
+        calls=None,
+    )
+    append_turn_outcome_record(thread.dir, "cli", TID, outcome, seq=thread.seq)
+    async with _app(tmp_path).run_test(size=SIZE) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID, is_resume=True)
+        await pilot.pause()
+        await _ticks(pilot, 1)  # тик опроса: поток не жив — обрыв
+        reopen = _frame(pilot)
+        await _open_preview(pilot)
+        preview = _frame(pilot)
+    assert [text for text, _ in reopen] == [
+        " › почини ретраи",
+        " ○ Explored",
+        "   └ Read  client/m0.py · 10 строк",
+        "     Read  client/m1.py",
+        "       └ отменено",
+    ]
+    assert preview == reopen

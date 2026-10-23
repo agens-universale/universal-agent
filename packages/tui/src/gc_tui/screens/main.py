@@ -4070,7 +4070,7 @@ class TraceScreen(Screen):
 
     def _end_turn_blocks(self, outcome: TurnOutcome) -> None:
         """Итог хода — моделям блоков всех уровней (таймеры, стоп)."""
-        end_turn(self._block_views, self._call_timers, outcome)
+        end_turn(self._block_views, self._call_timers, outcome, settled=False)
 
     def on_block_toggle(self, message: BlockToggle) -> None:
         """Раскрыть / свернуть блок (§9.3): внизу — остаться внизу; иначе

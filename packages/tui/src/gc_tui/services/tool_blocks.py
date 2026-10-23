@@ -1143,9 +1143,12 @@ class ToolBlocks:
     def _head(self, block: _Block, prefix: Parts = ()) -> SetHeader:
         members = block.members
         running = any(m.live for m in members)
-        # `○` — остановка хода или член без исхода; исход «остановлен»
-        # (лимит) у члена сам `○` не ставит.
-        stopped = block.stopped or any(m.interrupted for m in members)
+        # `○` — остановка хода, когда живых членов не осталось (их
+        # переводит выход потока стопа, §2.2), или член без исхода; исход
+        # «остановлен» (лимит) у члена сам `○` не ставит.
+        stopped = (block.stopped and not running) or any(
+            m.interrupted for m in members
+        )
         glyph = block_glyph(
             running=running,
             stopped=stopped,

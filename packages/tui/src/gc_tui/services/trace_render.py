@@ -949,7 +949,7 @@ def _render_record_readonly(
         outcome = parse_turn_outcome(rec)
         if outcome is not None:
             mount_target.mount(build_turn_line(outcome))
-            end_turn(blocks.views, blocks.timers, outcome)
+            end_turn(blocks.views, blocks.timers, outcome, settled=True)
         return no
     payload = rec.get("payload")
     if not isinstance(payload, dict):

@@ -624,3 +624,41 @@ async def test_stop_mid_nested_explored_live_reopen_preview(tmp_path):
     # `calls` его нет (спека §3.4, «Непокрыто»); остальное — одно.
     assert reopen == preview
     assert reopen == [line.replace("m9.py · 0с", "m9.py") for line in live]
+
+
+@pytest.mark.asyncio
+async def test_stopped_nested_orphan_call_reopen_preview(tmp_path):
+    """Стоп, вложенный вызов без исхода: уровень домонтирован после
+    записи итога — член оборвался (`└ отменено`), `○ Explored`; после
+    возврата и в превью одинаково (§2.2, §7)."""
+    thread = _Thread(tmp_path, status="stopped")
+    thread.add(_agent_call(), _agent_done())
+    thread.record({}, stopped=True)
+    _sidecar(tmp_path, [_read(0)])
+    call = {
+        "type": "function_call",
+        "name": "fs_read_file",
+        "arguments": json.dumps({"path": "client/m9.py"}),
+        "call_id": "n9",
+    }
+    append_subagent_trace_record(
+        str(tmp_path),
+        "cli",
+        TID,
+        parent_call_id=AGENT,
+        child_run_id="c",
+        kind="call",
+        payload=call,
+    )
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        reopen = _agent_rows(_rows(pilot))
+        await _push_preview(pilot, scr)
+        preview = _agent_rows(_rows(pilot))
+    assert reopen[1:] == [
+        "  ○ Explored",
+        "    └ Read  client/m0.py",
+        "      Read  client/m9.py",
+        "        └ отменено",
+    ]
+    assert preview == reopen
