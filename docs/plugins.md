@@ -14,8 +14,8 @@
 означает Claude Code; только `plugin.json` в корне означает Agent Plugins.
 
 - Agent Plugins читается строго: обязательны `$schema`
-  (`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`) и `name` по
-  шаблону спеки. Неизвестные поля верхнего уровня игнорируются с предупреждением.
+  (`https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`) и `name`
+  (строчные латиница, цифры, `.` и `-`, до 64 символов). Неизвестные поля верхнего уровня игнорируются с предупреждением.
   Неверный плагин не загружается, `gc-plugin install` его отклоняет.
 - Каталоги skills Agent Plugins, выходящие за корень плагина (ссылкой),
   пропускаются.
@@ -183,12 +183,11 @@ argument-hint: <файл>
 - Пути к компонентам в `plugin.json` (`skills`, `commands`, `agents`, `hooks`,
   `mcpServers`) не учитываются: читаются только стандартные каталоги. Например,
   `mattpocock/skills` ставится с 0 skills.
-- Не поддерживается специфика Claude Code (сознательно, не баг): `marketplace.json`
+- Из формата Claude Code не поддерживаются: `marketplace.json`
   и установка `плагин@маркетплейс` (ставьте через `--subdir`), хуки типов `http` /
   `prompt` / `agent` и поля `if` / `async`, выполнение `` !`команда` `` в командах,
   `model` у агентов, `userConfig`, LSP-серверы, output styles, OAuth для MCP.
-  `extensions` Agent Plugins (например, `com.github.awesome-copilot`) игнорируются,
-  как требует спека.
+  `extensions` Agent Plugins (например, `com.github.awesome-copilot`) игнорируются.
 
 ## Пример
 
@@ -231,7 +230,7 @@ argument-hint: <файл>
 
 ### `mcp.json` Agent Plugins
 
-Читается строго по спеке: `$schema`, варианты `stdio`, `streamable-http`, `sse` (как `stream_sse`).
+Обязательны `$schema` и `mcpServers`, у сервера один из вариантов `stdio`, `streamable-http`, `sse` (как `stream_sse`).
 `${PLUGIN_ROOT}` и `${PLUGIN_DATA}` раскрываются только в `args`, `env`, `cwd`, другие
 подстановки не выполняются. Серверу `stdio` задаются `PLUGIN_ROOT` и `PLUGIN_DATA` в
 окружении; каталог данных `<gc_data>/plugins/data/<имя>`. Для адресов вне loopback нужен HTTPS.
