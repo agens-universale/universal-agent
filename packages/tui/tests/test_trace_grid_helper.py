@@ -168,6 +168,19 @@ P4_18_AGENT_EXPANDED = [
     _prose("Субагент подтвердил: таймаут и ретраи работают."),
 ]
 
+# Ханки правки не подряд — между ними разделитель `⋮` под номерами строк.
+P4_14_HUNK_GAP = [
+    _head(OK, "Edited", " 2 файла (+3 −1)"),
+    _file("client/http.py", " (+2 −1) · 1с          ❐", lead=True),
+    _diff(2, "-", "from client.transport import send", 4),
+    _diff(2, "+", "from client.retry import with_retry", 4),
+    _r(f"{_pad(0)}{'⋮':>{4 + 3}}"),
+    _diff(43, "+", "        resp = with_retry(send, req,", 4),
+    BLANK,
+    _file("client/config.py", " (+1) · 1с        ❐"),
+    _diff(12, "+", "TIMEOUT_SEC = 30", 4),
+]
+
 P4_19_FAILURES = [
     _prose("Посмотрю конфиг клиента и настройки окружения."),
     BLANK,
@@ -211,6 +224,7 @@ P4_22_EDIT_IN_GROUP = [
         P4_07_RAN,
         P4_10_RAN_FILES,
         P4_14_EDITED_3,
+        P4_14_HUNK_GAP,
         P4_18_AGENT,
         P4_18_AGENT_EXPANDED,
         P4_19_FAILURES,
@@ -221,6 +235,7 @@ P4_22_EDIT_IN_GROUP = [
         "p4-07",
         "p4-10",
         "p4-14",
+        "p4-14-hunk-gap",
         "p4-18",
         "p4-18-expanded",
         "p4-19",

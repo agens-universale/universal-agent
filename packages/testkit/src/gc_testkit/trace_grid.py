@@ -4,7 +4,8 @@
 считаются от колонки ``●`` своего уровня: 0 — глиф события и заголовка
 блока; 2 — текст заголовка и ``└`` первого члена (у одиночной строки — и её
 ``└ следствие``); 4 — члены группы, управление (``… ещё N``, ``+ ещё N
-строк``, ``− свернуть``), диффы членов, продолжение превью; 6 — ``└
+строк``, ``− свернуть``), диффы членов (и разделитель ханков ``⋮`` под
+номерами), продолжение превью; 6 — ``└
 следствие`` члена. После ``Agent`` в колонке ``c`` вложенные глифы и ``└ …
 ещё N`` стоят в ``c + 2``, и база сетки сдвигается туда же.
 
@@ -22,6 +23,8 @@ _DONE_WORDS = frozenset(
     {"Explored", "Ran", "Added", "Edited", "Deleted", "Fetched"}
 )
 _DIFF = re.compile(r"^( *)(\d+) ([+\- ]|$)")
+# Разделитель ханков диффа — под последней клеткой колонки номеров.
+_HUNK_GAP = re.compile(r"^( *)(⋮)$")
 _CTL = ("+ ", "− свернуть", "… ещё")
 _EXPAND = re.compile(r"\+ ещё (\d+) (\w+)")
 _TIMER = re.compile(r"· \d+[чмс]( \d+[мс])?$")
@@ -137,7 +140,7 @@ class _Grid:
         text = body[col:]
         if is_event:
             self._event(n, row, body, col)
-        elif _DIFF.match(body):
+        elif _DIFF.match(body) or _HUNK_GAP.match(body):
             self._diff(n, body)
         elif text.startswith("└ "):
             self._branch(n, row, text[2:], col)
@@ -172,7 +175,8 @@ class _Grid:
         self._prev = ("event", col)
 
     def _diff(self, n: int, body: str) -> None:
-        match = _DIFF.match(body)
+        match = _DIFF.match(body) or _HUNK_GAP.match(body)
+        # Колонка диффа — начало колонки номеров (ширина 3, прижата вправо).
         dcol = len(match.group(1)) + len(match.group(2)) - 3
         if dcol not in (self._base + 2, self._base + 4):
             want = f"{self._base + 2}/{self._base + 4}"
