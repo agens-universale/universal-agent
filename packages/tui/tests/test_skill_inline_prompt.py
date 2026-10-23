@@ -156,3 +156,101 @@ async def test_picker_closes_when_id_plus_prompt(tmp_path):
         inp.text = "/skill coder почини"  # id + пробел + текст → picker закрыт
         await pilot.pause(0.1)
         assert scr._skill_picker is None
+
+
+@pytest.mark.asyncio
+async def test_picker_closes_when_short_name_plus_prompt(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "supercoder:brainstorming"}]
+        inp = pilot.app.query_one("#cmdinput")
+
+        inp.text = "/skill brainstorming"
+        await pilot.pause(0.1)
+        assert scr._skill_picker is not None
+
+        inp.text = "/skill brainstorming почини"
+        await pilot.pause(0.1)
+        assert scr._skill_picker is None
+
+
+_BRAIN_CACHE = [{"id": "supercoder:brainstorming", "pack_id": "supercoder"}]
+
+
+async def _wire_of(tmp_path, command: str) -> list:
+    """Что уходит агенту по набранной строке (тот же _Fake, что выше)."""
+    from gc_tui.app import TuiApp
+
+    captured = {}
+
+    class _Fake:
+        async def arun(self, messages, **kw):
+            captured["messages"] = list(messages)
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    app._executor_factory = lambda: _Fake()
+    async with app.run_test() as pilot:
+        pilot.app.screen._skills_cache = list(_BRAIN_CACHE)
+        await pilot.app.screen._handle_command(command)
+        await pilot.pause(0.3)
+        assert app.tui_state.pending_skill_id is None
+    return captured["messages"]
+
+
+@pytest.mark.asyncio
+async def test_slash_short_name_delivers_like_skill_command(tmp_path):
+    """`/brainstorming текст` ≡ `/skill supercoder:brainstorming текст`."""
+    pytest.importorskip("textual")
+    by_name = await _wire_of(tmp_path / "a", "brainstorming придумай")
+    by_skill = await _wire_of(
+        tmp_path / "b", "skill supercoder:brainstorming придумай"
+    )
+    assert by_name == by_skill
+    assert by_name[0].startswith("Use skill `supercoder:brainstorming`.")
+
+
+@pytest.mark.asyncio
+async def test_skill_command_accepts_short_name(tmp_path):
+    pytest.importorskip("textual")
+    by_short = await _wire_of(tmp_path / "a", "skill brainstorming придумай")
+    by_id = await _wire_of(
+        tmp_path / "b", "skill supercoder:brainstorming придумай"
+    )
+    assert by_short == by_id
+
+
+@pytest.mark.asyncio
+async def test_skill_command_short_name_without_prompt_pends_full_id(
+    tmp_path,
+):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        pilot.app.screen._skills_cache = list(_BRAIN_CACHE)
+        await pilot.app.screen._handle_command("skill brainstorming")
+        await pilot.pause(0.1)
+        assert app.tui_state.pending_skill_id == "supercoder:brainstorming"

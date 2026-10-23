@@ -151,7 +151,7 @@ def test_typed_level_auto_when_available_keeps_the_info_hint(
 
     run_coro(scr._dispatch_command("level auto"))
 
-    assert len(hints) == 1 and "текущее значение: default" in hints[0]
+    assert len(hints) == 1 and "/level: default" in hints[0]
 
 
 @pytest.mark.parametrize(

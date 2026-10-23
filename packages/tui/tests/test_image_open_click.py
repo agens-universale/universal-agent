@@ -625,7 +625,7 @@ async def test_open_image_request_for_a_missing_file_is_refused(
         await pilot.pause()
         assert opened == []
         assert (
-            str(scr.query_one("#footer-left").render()) == "✗ файл недоступен"
+            str(scr.query_one("#footer-slot").render()) == "✗ файл недоступен"
         )
 
 
@@ -640,6 +640,6 @@ async def test_open_image_request_is_refused_when_the_viewer_fails(
         scr = pilot.app.screen
         scr.on_open_image_request(OpenImageRequest(att.path))
         await pilot.pause()
-        assert str(scr.query_one("#footer-left").render()) == (
+        assert str(scr.query_one("#footer-slot").render()) == (
             "✗ не удалось открыть просмотрщик изображений"
         )

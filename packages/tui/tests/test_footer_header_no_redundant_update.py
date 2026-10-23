@@ -16,7 +16,13 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.services.notices_ui import WARN_GLYPH
 from rich.text import Text
 
-_FIELDS = ("#header-left", "#header-right", "#footer-left", "#footer-right")
+_FIELDS = (
+    "#header-left",
+    "#header-right",
+    "#footer-mode",
+    "#footer-slot",
+    "#footer-right",
+)
 
 
 def _plain(scr, sel):
@@ -121,10 +127,10 @@ async def test_notice_badge_reaches_footer(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         _refresh(scr)
-        assert WARN_GLYPH not in _plain(scr, "#footer-left")
+        assert WARN_GLYPH not in _plain(scr, "#footer-slot")
         push_runtime_notice(Notice("warning", "w1", "тест"))
         _refresh(scr)
-        assert f"{WARN_GLYPH} 1" in _plain(scr, "#footer-left")
+        assert f"{WARN_GLYPH} 1" in _plain(scr, "#footer-slot")
     clear_runtime_notices()
 
 
@@ -142,10 +148,10 @@ async def test_repeat_notices_refresh_keeps_same_object(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._refresh_notices_footer()
-        before = scr.query_one("#footer-left").content
-        assert f"{WARN_GLYPH} 1" in _plain(scr, "#footer-left")
+        before = scr.query_one("#footer-slot").content
+        assert f"{WARN_GLYPH} 1" in _plain(scr, "#footer-slot")
         scr._refresh_notices_footer()
-        assert scr.query_one("#footer-left").content is before
+        assert scr.query_one("#footer-slot").content is before
     clear_runtime_notices()
 
 
@@ -161,11 +167,11 @@ async def test_hint_expiry_restores_commands(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         _refresh(scr)
-        before = _plain(scr, "#footer-left")
+        before = _plain(scr, "#footer-slot")
         scr._show_footer_hint("ПОДСКАЗКА", seconds=60)
-        assert _plain(scr, "#footer-left") == "ПОДСКАЗКА"
+        assert _plain(scr, "#footer-slot") == "ПОДСКАЗКА"
         scr._clear_footer_hint()
-        assert _plain(scr, "#footer-left") == before
+        assert _plain(scr, "#footer-slot") == before
 
 
 @pytest.mark.asyncio
@@ -184,10 +190,10 @@ async def test_running_toggles_stop_hint(tmp_path):
         scr._active_task_id = "t1"
         app.active_runner = SimpleNamespace(is_running=lambda: flag[0])
         _refresh(scr)
-        assert "Ctrl+C/stop" in _plain(scr, "#footer-left")
+        assert "Ctrl+C/stop" in _plain(scr, "#footer-mode")
         flag[0] = False
         _refresh(scr)
-        assert "Ctrl+C/stop" not in _plain(scr, "#footer-left")
+        assert "Ctrl+C/stop" not in _plain(scr, "#footer-mode")
 
 
 @pytest.mark.asyncio
@@ -202,13 +208,12 @@ async def test_refusal_then_run_shows_stop(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._show_footer_refusal("✗ не сохранено: причина")
-        assert "не сохранено" in _plain(scr, "#footer-left")
+        assert "не сохранено" in _plain(scr, "#footer-slot")
         app.tui_state.active_task_id = "t2"
         app.active_runner = SimpleNamespace(is_running=lambda: True)
         _refresh(scr)
-        left = _plain(scr, "#footer-left")
-        assert "не сохранено" not in left
-        assert "Ctrl+C/stop" in left
+        assert "не сохранено" not in _plain(scr, "#footer-slot")
+        assert "Ctrl+C/stop" in _plain(scr, "#footer-mode")
 
 
 @pytest.mark.asyncio
@@ -225,7 +230,7 @@ async def test_voice_stage_then_idle_restores_commands(tmp_path, monkeypatch):
         monkeypatch.setattr(scr, "_voice_footer_render", lambda: Text("REC"))
         scr._voice = SimpleNamespace(state="recording")
         _refresh(scr)
-        assert "REC" in _plain(scr, "#footer-left")
+        assert "REC" in _plain(scr, "#footer-mode")
         scr._voice = SimpleNamespace(state="idle")
         _refresh(scr)
-        assert "REC" not in _plain(scr, "#footer-left")
+        assert "REC" not in _plain(scr, "#footer-mode")

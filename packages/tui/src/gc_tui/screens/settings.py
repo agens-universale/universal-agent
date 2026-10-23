@@ -33,6 +33,7 @@ from gc_tui.form_frame import (
     scroll_body,
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
+from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
@@ -111,7 +112,7 @@ _FOOTERS = {
     # «Обновить версию», а не просто «обновить»: Ctrl+U ставит пакет заново (меняет
     # систему), а Alt+↓ только перечитывает — одним словом на двоих они неразличимы (§5.4).
     _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · Esc",
-    _MODES: "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню",
+    _MODES: "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню",
     _UPDATE: "↑/↓ · Enter — выполнить · Esc — меню",
     # Раскладка — решение юзера В1 (`docs/specs/2026-08-10-profiles-b-plan.md`),
     # выведенное из канона базы: Enter = «войти внутрь» (меню «открыть», MCP
@@ -379,7 +380,7 @@ _PROFILE_NONE_NOTHING_TO_OPEN = "открывать нечего — это не
 # словам, и длинный сегмент («Ctrl+Space — проверить связь») роняет строку раньше, чем
 # счётчик символов это заметит. 64 — самое узкое окно из тех, на которых гоняются
 # экраны форм (сторож test_all_footers_fit_the_two_line_budget).
-_FOOTER_MIN_COLS = 64
+_FOOTER_MIN_COLS = MAIN_FOOTER_MIN_COLS
 _TITLE_NOTE_SEC = 3.0  # «ничего не изменено» у заголовка гаснет само
 
 
@@ -4108,7 +4109,7 @@ class SettingsScreen(Screen):
         return self._profiles_base_path().resolve()
 
     def _modes_apply(self, direction: int) -> None:
-        """←/→/Enter на строке тоггла (канон §1/§3): мгновенно записать
+        """←/→ на строке тоггла (канон §1/§3): мгновенно записать
         переключённое ГЛОБАЛЬНОЕ значение в config.yml (Settings = глобальный
         дефолт, дизайн 2026-07-21 §3). Цикл значения — от ТЕКУЩЕГО глобального
         состояния, по составу базы (`base_toggle_names` — статика
@@ -7347,7 +7348,8 @@ class SettingsScreen(Screen):
                 return
         if event.key in ("left", "right", "enter") and self._view == _MODES:
             event.stop()
-            self._modes_apply(-1 if event.key == "left" else 1)
+            if event.key != "enter":  # Enter на ручке — ничего
+                self._modes_apply(-1 if event.key == "left" else 1)
             return
         if self._view == _PROFILES:
             self._profiles_disk_cache = {}  # нажатие — свежий взгляд на диск

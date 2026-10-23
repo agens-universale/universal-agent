@@ -4,6 +4,13 @@ Toggle-подвал (/gate, /answers — спека 2026-07-16-palette-toggles-g
 §4): докнутый вне скролла блок toggle-строк внизу списка, перед ним разделитель.
 Состояние тоггла палитра не знает сама — получает инъекцией через `toggle_state`
 (провайдер `name -> str`, отсутствует — если тоггл не инъецирован); запись/reload — вне палитры (tui/toggles.py).
+
+Строки скиллов (спека P5 §3.1): после команд, с первой буквы фильтра;
+совпадение — по короткому имени (по полному id — только если в фильтре есть
+`:`). Бюджет строк общий: скиллам достаются строки, не занятые командами и
+подвалом, но не меньше `_SKILL_ROWS_MIN`; остаток — невыбираемая строка
+«… ещё N» (N >= 2: единственный скрытый скилл показывается). Список скиллов —
+инъекция `skills` (провайдер без I/O, в проде — прогретый кэш экрана).
 """
 
 from __future__ import annotations
@@ -14,14 +21,27 @@ from rich.text import Text
 from textual._context import NoActiveAppError
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
+from textual.css.scalar import Unit
 from textual.widgets import Rule, Static
 
 from gc_tui import palette as _pal
 from gc_tui.commands import Command, CommandRegistry
 from gc_tui.toggles import _HINT_KEYS_TOGGLE, TOGGLES, _fit_hint, padded_track
+from gc_tui.widgets.palette_layout import (
+    fit_name,
+    fit_text,
+    fold,
+    name_col_w,
+    overlay_content_width,
+    skill_name_key,
+    skill_short,
+)
 
 _HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc закрыть"
 _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
+# Enter на строке скилла вставляет `/имя ` — текст дописывают (спека P5 §3.2).
+_HINT_SKILL = "↑↓ выбрать · Enter ввести запрос · Esc закрыть"
+_SKILL_ROWS_MIN = 5  # пол строк скиллов, даже когда команды заняли всё
 
 
 def _slider_width(n_values: int) -> int:
@@ -52,6 +72,20 @@ def _matches(cmd: Command, prefix: str) -> bool:
     return any(alias.startswith(prefix) for alias in cmd.aliases)
 
 
+def _skill_label(skill: dict) -> str:
+    """`/имя` для колонки: запускаемый вид от провайдера (`input_name`)."""
+    return "/" + str(skill.get("input_name") or skill_short(skill))
+
+
+def _skill_matches(skill: dict, prefix: str) -> bool:
+    """Начало короткого имени; полного id — только при `:` в фильтре.
+    Регистр не важен ни у фильтра, ни у имени (`fold` с обеих сторон)."""
+    prefix = fold(prefix)
+    if ":" in prefix:
+        return fold(str(skill.get("id", ""))).startswith(prefix)
+    return fold(skill_short(skill)).startswith(prefix)
+
+
 class CommandPalette(VerticalScroll):
     """Filtered overlay-список команд из реестра (§2.7) + toggle-подвал (§4)."""
 
@@ -66,6 +100,7 @@ class CommandPalette(VerticalScroll):
         toggle_custom_hint: Optional[Callable[[str], str]] = None,
         toggle_dynamic_hint: Optional[Callable[[str, str], str]] = None,
         toggle_values: Optional[Callable[[str], tuple]] = None,
+        skills: Optional[Callable[[], list[dict]]] = None,
     ) -> None:
         super().__init__(classes="palette")
         self._registry = registry
@@ -81,6 +116,7 @@ class CommandPalette(VerticalScroll):
         # name -> ToggleValue-кортеж; не инъецирован (юнит-тесты без app) →
         # `_values_for` берёт статический `TOGGLES[name].values`.
         self._toggle_values = toggle_values
+        self._skills = skills
         # Состав значений тогглов на время ОДНОГО рендера подвала (`_build_footer`):
         # раскладка и строки спрашивают его много раз, провайдер (/level) должен
         # отработать один. None — вне рендера, кэша нет.
@@ -134,7 +170,10 @@ class CommandPalette(VerticalScroll):
                 else "palette-row"
             )
             yield Static(self._format_row(cmd), classes=classes, markup=False)
-        footer, _ = self._build_footer(offset=len(rows))
+        skill_widgets, _ = self._skill_widgets(offset=len(rows))
+        yield from skill_widgets
+        offset = len(rows) + len(self._visible_skill_rows())
+        footer, _ = self._build_footer(offset=offset)
         yield footer
 
     def _group_sep_count(self, toggles: list[Command]) -> int:
@@ -194,7 +233,15 @@ class CommandPalette(VerticalScroll):
         эвристика недосчитывает высоту подвала и main.py отдаёт трейсу лишнее
         место, выдавливая нижнюю рамку палитры за экран."""
         rows_count = len(self._visible_rows())
-        return rows_count + self._footer_reserved_height() + 2  # +2 — рамка
+        skills_count = len(self._visible_skill_rows())
+        more = 1 if self._skill_more_count() else 0
+        return (
+            rows_count
+            + skills_count
+            + more
+            + self._footer_reserved_height()
+            + 2  # рамка
+        )
 
     def _build_footer(self, offset: int) -> tuple[Vertical, Optional[Static]]:
         """Докнутый подвал: разделитель + toggle-строки (только если есть toggle-команды
@@ -236,39 +283,30 @@ class CommandPalette(VerticalScroll):
                 if idx == self._selected:
                     selected_row = row
                 children.append(row)
-        sel = self.selected_command()
-        hint_text = (
-            self._toggle_hint(sel)
-            if sel is not None and sel.is_toggle
-            else _hint_for(sel)
-        )
         children.append(
             Static(
-                hint_text, classes="palette-hint palette-keys", markup=False
+                self._selected_hint(),
+                classes="palette-hint palette-keys",
+                markup=False,
             )
         )
         return Vertical(*children, classes="palette-footer"), selected_row
 
+    def _selected_hint(self) -> str:
+        """Подсказка клавиш для выбранной строки: тоггл, скилл, команда."""
+        sel = self.selected_command()
+        if sel is not None and sel.is_toggle:
+            return self._toggle_hint(sel)
+        if self.selected_skill() is not None:
+            return _HINT_SKILL
+        return _hint_for(sel)
+
     def _content_width(self) -> int:
-        """Ширина контента `.palette` (за вычетом рамки), известная ДО первого
-        layout-прохода: `self.size` у ещё не смонтированного/не уложенного
-        виджета — Size(0, 0) (Textual резолвит его только после arrange),
-        поэтому усечение по `self.size.width` на первом `compose()` молчит
-        (avail=0 → guard пропускает усечение) и toggle-строка рендерится
-        нетронутой длины — переносится на 2 строки в реальном рендере, а
-        `desired_height`/`_footer_reserved_height()` считали 1 строку на
-        тоггл → подвал недосчитан, палитра/футер уезжают за экран (регрессия).
-        `.palette` всегда занимает всю ширину `#root` (= ширина экрана,
-        см. `_mount_input_overlay`), поэтому ширина известна заранее из
-        `self.app.size`, а не из собственного ещё не уложенного `self.size`.
-        Юнит-тесты собирают `CommandPalette` без монтирования в приложение
-        (нет активного `App`) — тогда ширина неизвестна, как и раньше у
-        `self.size.width` на несмонтированном виджете (0)."""
-        try:
-            app_width = self.app.size.width
-        except NoActiveAppError:
-            return 0
-        return app_width - 2  # -2 — рамка .palette (round border)
+        """Ширина контента `.palette` до первой раскладки (см.
+        `overlay_content_width`): усечение по `self.size.width` на первом
+        `compose()` молчало бы (Size(0, 0)), toggle-строка переносилась на
+        2 строки, а `desired_height` считал одну — подвал уезжал за экран."""
+        return overlay_content_width(self)
 
     def _toggle_hint(self, cmd: Command) -> str:
         """Hint выделенной toggle-строки (спека §6): значение + его смысл из
@@ -285,10 +323,7 @@ class CommandPalette(VerticalScroll):
         «значение — …  ·  клавиши»: цикла без позиций нет, обёртка была бы
         бессмысленной (канон §12.1 — текст пустого состояния дословно)."""
         spec = TOGGLES[cmd.name]
-        if self._toggle_state is not None:
-            current = self._toggle_state(cmd.name)
-        else:
-            current = spec.names[0] if spec.names else ""
+        current = self._current(cmd.name)
         width = self._content_width() - 4 if self._content_width() else 0
         if (
             spec.hint_provider is not None
@@ -308,14 +343,14 @@ class CommandPalette(VerticalScroll):
         return _fit_hint(current, hint, _HINT_KEYS_TOGGLE, width)
 
     def _name_col_w(self) -> int:
-        """Ширина имени-колонки (спека 2026-07-18 §4): описания ВСЕХ строк
-        палитры (обычных и тоггловых) начинаются в общей колонке — имя
-        `/{cmd.name}` паддируется до самого длинного имени среди видимых
-        строк ОБЕИХ зон (обычные команды + тогглы) + 3 пробела."""
-        cmds = self._visible_rows() + self._visible_toggle_rows()
-        if not cmds:
-            return 0
-        return max(len(f"/{c.name}") for c in cmds) + 3
+        """Ширина имени-колонки, ОБЩЕЙ для команд, тогглов и скиллов (спека
+        2026-07-18 §4): самое длинное видимое имя (`/имя`; у скилла — его
+        запускаемый вид), не шире `SKILL_NAME_MAX`, + 3 пробела. Описания
+        всех строк начинаются в одной колонке."""
+        labels = [f"/{c.name}" for c in self._visible_rows()]
+        labels += [f"/{c.name}" for c in self._visible_toggle_rows()]
+        labels += [_skill_label(s) for s in self._visible_skill_rows()]
+        return name_col_w(labels)
 
     def _row_head(self, cmd: Command, name_w: Optional[int] = None) -> str:
         """Строка "имя-колонка + описание" с общей шириной имени-колонки (§4).
@@ -328,28 +363,87 @@ class CommandPalette(VerticalScroll):
         return f" {f'/{cmd.name}'.ljust(name_w)}{cmd.description}"
 
     def _hotkey_col_w(self) -> int:
-        """Колонка, с которой начинаются хоткеи, или 0 — их нет ни у одной видимой
-        строки. Считается по самому длинному видимому описанию (тот же приём, что у
-        имени): иначе хоткеи вставали бы в хвост строк разной длины лесенкой.
+        """Ширина колонки хоткеев — самый длинный видимый хоткей, или 0, если
+        их нет ни у одной видимой строки. Колонка прижата к правому краю
+        строки (`_line_width`), хоткей не обрезается никогда."""
+        return max((len(c.hotkey) for c in self._visible_rows()), default=0)
 
-        Зазор +3, как и у колонки описаний (§4): было +2, и на строке с самым длинным
-        описанием рядом оказывались два разных зазора — 3 слева от описания и 2 справа.
-        На одной строке это видно глазом (находка живой приёмки)."""
-        rows = list(self._visible_rows())
-        if not any(c.hotkey for c in rows):
-            return 0
-        # По ВСЕМ видимым описаниям, а не только по строкам с хоткеем: у длинного
-        # описания без клавиши иначе не осталось бы зазора вовсе.
-        return max(len(c.description) for c in rows) + 3
+    def _line_width(self) -> int:
+        """Ширина текста строки (внутри рамки и паддинга). Палитра вне
+        приложения (юнит-тесты) её не знает — тогда берётся естественная
+        ширина: самое длинное описание без усечения."""
+        if self._content_width():
+            return self._content_width() - 2  # -2 — padding строки
+        rows = self._visible_rows()
+        skills = self._visible_skill_rows()
+        longest = max(
+            [len(c.description) for c in rows]
+            + [len(str(s.get("description") or "")) for s in skills],
+            default=0,
+        )
+        return self._desc_start() + longest + self._hotkey_tail()
+
+    def _desc_start(self) -> int:
+        return 1 + self._name_col_w()  # ведущий пробел + имя-колонка
+
+    def _hotkey_tail(self) -> int:
+        """Ширина правого края строки: зазор 3 + колонка хоткеев (или 0)."""
+        col = self._hotkey_col_w()
+        return col + 3 if col else 0
+
+    def _fit_desc(self, text: str, tail: int) -> str:
+        """Описание, обрезанное «…» до места между колонкой имён и правым
+        краем строки с хвостом шириной `tail`."""
+        width = max(1, self._line_width() - self._desc_start() - tail)
+        return fit_text(text, width)
 
     def _format_row(self, cmd: Command) -> str:
-        head = self._row_head(cmd)
-        col = self._hotkey_col_w()
-        if not col or not cmd.hotkey:
-            return (
-                head  # колонку держит паддинг соседей, пустой хвост не нужен
+        head = f" {fit_name(f'/{cmd.name}').ljust(self._name_col_w())}"
+        tail = self._hotkey_tail()
+        desc = self._fit_desc(cmd.description, tail)
+        if not tail or not cmd.hotkey:
+            return head + desc  # хвост не нужен, колонку держат соседи
+        gap = self._line_width() - len(head) - len(desc) - self._hotkey_col_w()
+        return head + desc + " " * gap + cmd.hotkey.rjust(self._hotkey_col_w())
+
+    def _format_skill_row(self, skill: dict) -> Text:
+        """Строка скилла: запускаемое `/имя` в общей колонке имён (цвет —
+        классом `.palette-skill-row`), длиннее `SKILL_NAME_MAX` — с
+        многоточием; затем серым описание."""
+        name = fit_name(_skill_label(skill))
+        text = Text(f" {name.ljust(self._name_col_w())}")
+        desc = self._fit_desc(
+            str(skill.get("description") or ""), self._hotkey_tail()
+        )
+        text.append(desc, style=_pal.DIM)
+        return text
+
+    def _skill_widgets(
+        self, offset: int
+    ) -> tuple[list[Static], Optional[Static]]:
+        """Виджеты строк скиллов (+ «ещё N») и выделенная строка или None."""
+        widgets: list[Static] = []
+        selected: Optional[Static] = None
+        for j, skill in enumerate(self._visible_skill_rows()):
+            is_sel = offset + j == self._selected
+            classes = "palette-row palette-skill-row"
+            row = Static(
+                self._format_skill_row(skill),
+                classes=f"{classes} selected" if is_sel else classes,
+                markup=False,
             )
-        return head + " " * (col - len(cmd.description)) + cmd.hotkey
+            if is_sel:
+                selected = row
+            widgets.append(row)
+        if self._skill_more_count():
+            widgets.append(
+                Static(
+                    self._skill_more_text(),
+                    classes="palette-skill-more",
+                    markup=False,
+                )
+            )
+        return widgets, selected
 
     def _my_base_w(self, name: str) -> int:
         """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва),
@@ -383,6 +477,32 @@ class CommandPalette(VerticalScroll):
         )
         return 3 if extra is not None else 0
 
+    def _current(self, name: str) -> str:
+        """Применённое значение тоггла `name` (без инъекции — первое)."""
+        if self._toggle_state is not None:
+            return self._toggle_state(name)
+        names = TOGGLES[name].names
+        return names[0] if names else ""
+
+    def _value_text(self, name: str) -> str:
+        """Подпись значения в строке: пустое — словами спеки («без
+        профиля»), не прочерк."""
+        return self._current(name) or TOGGLES[name].empty_value_text
+
+    def _toggle_block_w(
+        self, toggles: list[Command], track_w: int, label_w: int
+    ) -> int:
+        """Ширина правого блока тоггл-строк от общей колонки `col`: трек +
+        2 + подпись, у trackless (/profiles) — само значение. Общая для всех
+        строк — значение /profiles начинается там же, где треки."""
+        widths = [
+            track_w + 2 + label_w
+            if TOGGLES[c.name].show_track
+            else len(self._value_text(c.name))
+            for c in toggles
+        ]
+        return max(widths)
+
     def _toggle_columns(self) -> tuple[int, int, int, int]:
         """(col, base_w, extra_w, label_w) — общая раскладка тоггл-подвала
         (спека 2026-07-18 §4, выравнивание — ревизия 5 §6). `col` — колонка,
@@ -399,15 +519,30 @@ class CommandPalette(VerticalScroll):
         видимых тогглов (не только текущей строки) — иначе усечение узкого
         терминала в `_format_toggle_row` считает РАЗНЫЙ head_w на разных
         строках и слайдеры съезжают по колонкам между ними (находка ревью
-        Task 2)."""
+        Task 2). Окно уже раскладки — `col` сдвигается влево (описание
+        усекается), правый блок (`_toggle_block_w`) не режется никогда."""
         toggles = self._visible_toggle_rows()
         name_w = self._name_col_w()
         col = max(len(self._row_head(c, name_w)) for c in toggles) + 3
         base_w = max(self._my_base_w(c.name) for c in toggles)
         extra_w = max(self._my_extra_w(c.name) for c in toggles)
         label_w = max(
-            (len(n) for c in toggles for n in TOGGLES[c.name].names), default=0
+            (
+                len(n)
+                for c in toggles
+                if TOGGLES[c.name].show_track
+                for n in (
+                    *(v.value for v in self._values_for(c.name)),
+                    self._current(c.name),
+                )
+            ),
+            default=0,
         )
+        block_w = self._toggle_block_w(toggles, base_w + extra_w, label_w)
+        if self._content_width():
+            # имя-колонка + хотя бы 1 символ описания + зазор 3
+            floor = 1 + name_w + 1 + 3
+            col = max(floor, min(col, self._line_width() - block_w))
         return col, base_w, extra_w, label_w
 
     def _format_toggle_row(self, cmd: Command) -> Text:
@@ -426,57 +561,22 @@ class CommandPalette(VerticalScroll):
         никакого другого акцента); трек/подпись в тех же общих колонках, что
         и у всех тоггл-строк."""
         spec = TOGGLES[cmd.name]
-        if self._toggle_state is not None:
-            current = self._toggle_state(cmd.name)
-        else:
-            current = spec.names[0] if spec.names else ""
-
-        name_w = self._name_col_w()
-        col, base_w, extra_w, label_w = self._toggle_columns()
+        current = self._current(cmd.name)
+        col, base_w, extra_w, _ = self._toggle_columns()
         is_child = self._owning_preset(cmd.name) is not None
-        head = self._row_head(cmd, name_w)
+        head = self._row_head(cmd)
+        if len(head) > col - 3:  # окно уже раскладки — режется описание
+            head = head[: col - 4] + "…"
 
         if not spec.show_track:
             # Trackless (спека §12.1, /profiles): без шкалы — сразу значение-имя
-            # на месте начала общей колонки трека (`col`), без слайдера/резерва
-            # (произвольное число профилей — шкала не имеет смысла). Пустое
-            # значение — словами спеки («без профиля»), не прочерк.
-            value_text = current or spec.empty_value_text
-            avail = self._content_width() - 2 if self._content_width() else 0
-            need = col + len(value_text)
-            if avail and need > avail:
-                prefix_floor = 1 + name_w + 1
-                head_w = max(prefix_floor, avail - len(value_text) - 3)
-                if len(head) > head_w:
-                    head = head[: head_w - 1] + "…"
-                col = head_w + 3
+            # в общей колонке трека (`col`), без слайдера/резерва
+            # (произвольное число профилей — шкала не имеет смысла).
             text = Text(head.ljust(col))
-            text.append(value_text)
+            text.append(self._value_text(cmd.name))
             if is_child:
                 text.stylize(_pal.SUB_INK)
             return text
-
-        track_w = base_w + extra_w
-
-        # Узкий терминал (§4): слайдер+подпись не жертвуются — усекаем описание.
-        # head_w/col считаем от ОБЩИХ track_w/label_w и общего prefix_floor
-        # (не от этой строки) — тогда усечённый col тоже общий для всех
-        # тоггл-строк подвала (раньше label_w брался из spec.names ТЕКУЩЕЙ
-        # команды, и head_w/col получались per-row — треки съезжали по
-        # колонкам между строками, находка ревью Task 2). Имя-колонка теперь
-        # общая по обеим зонам (`_name_col_w`), поэтому отступ до описания
-        # (" " + имя.ljust(name_w)) одинаков для всех тоггл-строк — floor
-        # константен, не считается per-row.
-        avail = self._content_width() - 2 if self._content_width() else 0
-        need = col + track_w + 2 + label_w
-        if avail and need > avail:
-            prefix_floor = (
-                1 + name_w + 1
-            )  # имя-колонка + хотя бы 1 символ описания
-            head_w = max(prefix_floor, avail - (track_w + 2 + label_w) - 3)
-            if len(head) > head_w:
-                head = head[: head_w - 1] + "…"
-            col = head_w + 3
 
         text = Text(head.ljust(col))
         if is_child:
@@ -511,6 +611,55 @@ class CommandPalette(VerticalScroll):
     def _visible_toggle_rows(self) -> list[Command]:
         """Toggle-подвал: только is_toggle-команды."""
         return self._filtered(toggle=True)
+
+    def _matched_skills(self) -> list[dict]:
+        """Все скиллы под фильтр (голый `/` — ни одного); скилл, чьё короткое
+        имя занято командой или алиасом, не показывается. Порядок — по
+        короткому имени (`skill_name_key`), как в пикере /skill."""
+        f = self._filter.lower()
+        if not f or self._skills is None:
+            return []
+        matched = [
+            s
+            for s in self._skills()
+            if _skill_matches(s, f)
+            and self._registry.lookup(skill_short(s)) is None
+        ]
+        return sorted(matched, key=skill_name_key)
+
+    def _list_rows_cap(self) -> int:
+        """Сколько строк списка палитра показывает без прокрутки: потолок
+        высоты (`styles.max_height` в клетках — его выставляет main.py под
+        экран; до этого — половина экрана, как там) минус рамка и подвал."""
+        cap = self.styles.max_height
+        if cap is not None and cap.unit == Unit.CELLS:
+            height = int(cap.value)
+        else:
+            try:
+                height = self.app.size.height // 2
+            except NoActiveAppError:
+                height = 0
+        return height - 2 - self._footer_reserved_height()
+
+    def _visible_skill_rows(self) -> list[dict]:
+        """Строки скиллов после команд в рамках общего бюджета. При
+        переполнении одна строка бюджета отдана под «ещё N», но не меньше
+        пола; единственный скрытый скилл показывается вместо «ещё 1»."""
+        matched = self._matched_skills()
+        free = self._list_rows_cap() - len(self._visible_rows())
+        if len(matched) <= free:
+            return matched
+        shown = max(_SKILL_ROWS_MIN, free - 1)
+        if len(matched) - shown == 1:
+            return matched
+        return matched[:shown]
+
+    def _skill_more_count(self) -> int:
+        return len(self._matched_skills()) - len(self._visible_skill_rows())
+
+    def _skill_more_text(self) -> str:
+        n = self._skill_more_count()
+        return f"… ещё {n} — /skill {self._filter}"
 
     def _filtered(self, *, toggle: bool) -> list[Command]:
         f = self._filter.lower()
@@ -570,10 +719,20 @@ class CommandPalette(VerticalScroll):
                 injected.add(child_name)
         return result
 
-    def _selectable_rows(self) -> list[Command]:
-        """Сквозной список для навигации/выбора: команды, затем тогглы (разделитель
-        не участвует — он не выбираем)."""
-        return self._visible_rows() + self._visible_toggle_rows()
+    def _selectable_rows(self) -> list[Command | dict]:
+        """Сквозной список для навигации/выбора: команды, скиллы, затем тогглы
+        (разделитель и «ещё N» не участвуют — они не выбираемы)."""
+        return (
+            self._visible_rows()
+            + self._visible_skill_rows()
+            + self._visible_toggle_rows()
+        )
+
+    def _selected_row(self) -> Command | dict | None:
+        rows = self._selectable_rows()
+        if not rows:
+            return None
+        return rows[max(0, min(self._selected, len(rows) - 1))]
 
     def set_filter(self, prefix: str) -> None:
         self._filter = prefix
@@ -588,11 +747,14 @@ class CommandPalette(VerticalScroll):
         self._rebuild()
 
     def selected_command(self) -> Optional[Command]:
-        rows = self._selectable_rows()
-        if not rows:
-            return None
-        idx = max(0, min(self._selected, len(rows) - 1))
-        return rows[idx]
+        """Выбранная команда; на строке скилла — None."""
+        row = self._selected_row()
+        return row if isinstance(row, Command) else None
+
+    def selected_skill(self) -> Optional[dict]:
+        """Запись выбранного скилла; на строке команды — None."""
+        row = self._selected_row()
+        return row if isinstance(row, dict) else None
 
     def refresh_toggle_state(self) -> None:
         """Перерисовать строки после мгновенного применения тоггла (§1): конфиг
@@ -617,10 +779,14 @@ class CommandPalette(VerticalScroll):
             if i == self._selected:
                 selected_widget = w
             new_widgets.append(w)
-        footer, footer_selected = self._build_footer(offset=len(rows))
+        skill_widgets, skill_selected = self._skill_widgets(offset=len(rows))
+        new_widgets.extend(skill_widgets)
+        offset = len(rows) + len(self._visible_skill_rows())
+        footer, footer_selected = self._build_footer(offset=offset)
         new_widgets.append(footer)
-        if footer_selected is not None:
-            selected_widget = footer_selected
+        for candidate in (skill_selected, footer_selected):
+            if candidate is not None:
+                selected_widget = candidate
         self._apply_size()
         self.remove_children()
         self.mount_all(new_widgets)

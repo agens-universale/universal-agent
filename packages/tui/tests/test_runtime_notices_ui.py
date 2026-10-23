@@ -36,7 +36,7 @@ async def test_runtime_notice_appears_in_card(tmp_path):
         card = str(scr._mcp_status_row.render())
         assert f"{WARN_GLYPH} 1" in card
         assert "F4/notices" in card
-        footer = str(scr.query_one("#footer-left").render())
+        footer = str(scr.query_one("#footer-slot").render())
         assert f"{WARN_GLYPH} 1" in footer
         assert "F4/notices" in footer
 

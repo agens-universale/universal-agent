@@ -1,25 +1,19 @@
 """main() без textual должен дать понятный stderr и exit 1, без трейсбэка."""
 
-import builtins
-import sys
+import importlib.util
 
 
 def test_main_without_textual_returns_1_and_prints_to_stderr(
     monkeypatch, capsys
 ):
-    real_import = builtins.__import__
+    real_find_spec = importlib.util.find_spec
 
-    def fake_import(name, *args, **kwargs):
-        if name == "textual" or name.startswith("textual."):
-            raise ImportError("No module named 'textual'")
-        return real_import(name, *args, **kwargs)
+    def fake_find_spec(name, *args, **kwargs):
+        if name == "textual":
+            return None
+        return real_find_spec(name, *args, **kwargs)
 
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-    # Remove cached tui.app
-    for mod in list(sys.modules):
-        if mod.startswith("gc_tui.app") or mod == "tui.app":
-            sys.modules.pop(mod, None)
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
 
     from gc_tui import main
 

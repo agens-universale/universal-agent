@@ -8,23 +8,32 @@ from rich.text import Text
 from textual.widgets import Static
 
 
+def text_key(text: Text | None) -> tuple | None:
+    """Неизменяемый ключ вида ``text``: всё, что влияет на вывод.
+
+    ``Text.__eq__`` сравнивает только ``plain`` и ``spans``; базовый стиль
+    и параметры вывода тоже меняют картинку, поэтому входят в ключ."""
+    if text is None:
+        return None
+    return (
+        text.plain,
+        tuple(text.spans),
+        str(text.style),
+        text.justify,
+        text.overflow,
+        text.no_wrap,
+        text.end,
+    )
+
+
 def same_content(old: object, new: object) -> bool:
     """Равны ли содержимое двух обновлений Static.
 
-    ``Text.__eq__`` сравнивает только ``plain`` и ``spans``, поэтому
-    базовый стиль и параметры вывода сверяются здесь. Смешанные типы и
+    Rich ``Text`` сравнивается по ``text_key``. Смешанные типы и
     неизвестные объекты считаются изменившимися.
     """
     if isinstance(old, Text) and isinstance(new, Text):
-        return (
-            old.plain == new.plain
-            and old.spans == new.spans
-            and old.style == new.style
-            and old.justify == new.justify
-            and old.overflow == new.overflow
-            and old.no_wrap == new.no_wrap
-            and old.end == new.end
-        )
+        return text_key(old) == text_key(new)
     if isinstance(old, str) and isinstance(new, str):
         return old == new
     return False

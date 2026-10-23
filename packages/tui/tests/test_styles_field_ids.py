@@ -1,5 +1,8 @@
-"""Каждый Input с id обязан быть перечислен в CSS — иначе Textual рисует дефолтную
-рамку глифами, которых нет в консольных шрифтах (баг поля «Прокси», смок 2026-08-02)."""
+"""Вид полей формы задаёт класс, а не id: плоское правило `.form-field` и
+его состояния (`:focus`, `.set-framed`, `.set-readonly`) лежат в styles.tcss,
+id полей в селекторах не перечисляются. Без плоского правила Input рисует
+дефолтную рамку глифами, которых нет в консольных шрифтах (баг поля
+«Прокси», смок 2026-08-02)."""
 
 # Путь — из gc_testkit.paths: исходники TUI лежат в packages/tui/src/gc_tui,
 # и арифметика уровней от __file__ здесь уже ломалась.
@@ -7,8 +10,8 @@ from gc_testkit.paths import TUI_PKG
 
 _STYLES = TUI_PKG / "styles.tcss"
 
-# id полей, которые обязаны иметь и плоский, и framed-стиль
-_FRAMED_FIELD_IDS = (
+# id полей ввода, которых в tcss быть не должно: вид задаёт класс form-field
+_OLD_FIELD_IDS = (
     "conn-url",
     "conn-token",
     "conn-proxy",
@@ -33,49 +36,76 @@ def _css() -> str:
     return _STYLES.read_text(encoding="utf-8")
 
 
-def test_every_framed_field_has_flat_rule():
+def _rule_lines(selector: str) -> list[str]:
+    return [
+        ln for ln in _css().splitlines() if ln.lstrip().startswith(selector)
+    ]
+
+
+def test_form_field_flat_rule():
     """Плоское правило: без него Input несёт дефолтную tall-рамку."""
-    css = _css()
-    flat = [
-        ln
-        for ln in css.splitlines()
-        if "border: none" in ln and "height: 1" in ln
-    ]
-    joined = " ".join(flat)
-    missing = [fid for fid in _FRAMED_FIELD_IDS if f"#{fid}" not in joined]
-    assert missing == [], f"нет плоского правила у: {missing}"
+    lines = _rule_lines(".form-field {")
+    assert any("border: none" in ln and "height: 1" in ln for ln in lines)
 
 
-def test_every_framed_field_has_framed_rule():
-    """Framed-правило: рамка round $run-color вместо дефолтной."""
+def test_form_field_state_rules_exist():
+    for sel in (
+        ".form-field:focus {",
+        ".form-field.set-framed {",
+        ".form-field.set-framed:focus {",
+        ".form-field.set-readonly {",
+    ):
+        assert _rule_lines(sel), f"нет правила {sel}"
+
+
+def test_framed_rule_has_round_border():
+    lines = _rule_lines(".form-field.set-framed {")
+    assert any("round $run-color" in ln for ln in lines)
+
+
+def test_no_field_id_selectors():
+    """Вид полей — по классу; id полей в селекторах не перечисляем."""
     css = _css()
-    framed = [ln for ln in css.splitlines() if ".set-framed" in ln]
-    joined = " ".join(framed)
-    missing = [
-        fid for fid in _FRAMED_FIELD_IDS if f"#{fid}.set-framed" not in joined
-    ]
-    assert missing == [], f"нет framed-правила у: {missing}"
+    found = [fid for fid in _OLD_FIELD_IDS if f"#{fid}" in css]
+    assert found == [], f"id полей в tcss: {found}"
 
 
 def test_disabled_token_border_is_dimmed():
-    """«Без авторизации» замораживает поле токена — рамка приглушается до $deep-dim,
-    иначе замороженное поле читается как активное.
+    """Замороженное поле (без авторизации) — рамка $deep-dim, по :disabled."""
+    lines = _rule_lines(".form-field.set-framed.set-muted:disabled")
+    assert lines, "нет правила замороженного поля"
+    assert all("$deep-dim" in ln for ln in lines)
+    assert not _rule_lines(".form-field.set-framed:disabled")
 
-    Полей токена столько же, сколько форм с галкой «без авторизации», и сторож
-    обходит их СПИСКОМ: правило, записанное для «Подключения», молча не
-    распространяется на форму записи реестра — её пропажу прежний сторож не видел."""
-    css = _css()
-    for field in ("conn-token", "mef-token"):
-        line = next(
-            (
-                ln
-                for ln in css.splitlines()
-                if f"#{field}.set-framed:disabled" in ln
-            ),
-            None,
-        )
-        assert line is not None, f"нет правила для замороженного #{field}"
-        assert "$deep-dim" in line, f"рамка #{field} не приглушена: {line}"
+
+async def test_voice_fact_field_keeps_run_color_border(tmp_path):
+    """Поле-факт голоса (disabled + set-readonly) рамку не приглушает."""
+    from gc_testkit.tui_support import tui_settings
+    from textual.screen import Screen
+
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.paste_input import PasteInput
+
+    class _S(Screen):
+        def compose(self):
+            yield PasteInput(
+                id="f", disabled=True, classes="set-framed set-readonly"
+            )
+            yield PasteInput(
+                id="t", disabled=True, classes="set-framed set-muted"
+            )
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
+    async with app.run_test() as pilot:
+        await app.push_screen(_S())
+        await pilot.pause()
+        scr = app.screen
+        fact = scr.query_one("#f").styles.border_top
+        muted = scr.query_one("#t").styles.border_top
+        assert fact[0] == "round"
+        assert fact[1] != muted[1]
 
 
 def test_dropdown_scroll_rule_exists():
