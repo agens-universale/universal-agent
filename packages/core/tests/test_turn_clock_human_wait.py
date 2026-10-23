@@ -126,9 +126,12 @@ async def test_stdin_wait_is_subtracted(monkeypatch):
         mono.now += _THINK
         return "да"
 
-    import gc_core.tools.turn.ask_human as ask_human
-
-    monkeypatch.setattr(ask_human, "_read_stdin_lines", read)
+    # Пространство имён самой функции, а не модуль из sys.modules: соседи по
+    # прогону подменяют пакет тулов и заново импортируют его, и повторный
+    # импорт отдал бы копию, которую `_aread_human_response` не читает.
+    monkeypatch.setitem(
+        _aread_human_response.__globals__, "_read_stdin_lines", read
+    )
     assert await _aread_human_response(ctx, "?") == "да"
     assert clock.elapsed() == 0
 
