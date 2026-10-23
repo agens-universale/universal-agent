@@ -1802,9 +1802,10 @@ async def _write_literal_token_entry(pilot, scr):
     form = scr.query(ModelEntryForm).last()
     form.query_one("#mef-alias", Input).value = "sec"
     form.query_one("#mef-model", Input).value = "prov/model-x"
-    form.query_one(
-        "#mef-url", Input
-    ).value = "http://own-host/v1/chat/completions"
+    # Стек экрана — в режиме схемы по умолчанию (`responses`): адрес с путём
+    # этого режима, иначе итог записи ушёл бы подсказкой пути эндпоинта, а не
+    # плашкой «сохранена».
+    form.query_one("#mef-url", Input).value = "http://own-host/v1/responses"
     form.query_one("#mef-token", Input).value = "sk-LITERAL-SECRET-999"
     form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
     await pilot.pause()
