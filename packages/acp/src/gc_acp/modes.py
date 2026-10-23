@@ -1,8 +1,12 @@
-"""Режим разрешений сессии ACP: опция ``mode`` и ``modes``.
+"""Режим разрешений сессии ACP: опция ``mode`` и поле ``modes``.
 
 Режим — выбор сессии ядра (``executor.set_permission_mode``), тот же путь,
-что у TUI и CLI. Клиент с ``configOptions`` видит опцию ``mode``, старый
-клиент — ``modes``; оба вида строятся здесь из одного значения.
+что у TUI и CLI. ``configOptions`` (``category: "mode"``) стоит рядом с
+моделью: так рисует клиент, который показывает каждую select-опцию.
+Поле ``modes`` — тот же список для клиента, который режим берёт только
+оттуда. ``current_mode_update`` не шлём: такой клиент читает в нём
+``modeId`` и затирает текущий режим. ``session/set_mode`` принимается и
+отвечает ``config_option_update``.
 """
 
 from __future__ import annotations
@@ -40,7 +44,7 @@ def mode_config_option(mode: str) -> dict:
 
 
 def session_modes(mode: str) -> dict:
-    """Поле ``modes`` ответа сессии — для клиентов без ``configOptions``."""
+    """Поле ``modes`` ответа сессии: текущий режим и весь список."""
     return {
         "currentModeId": mode,
         "availableModes": [
@@ -60,10 +64,9 @@ def mode_choice(value: Any) -> str | None:
     return mode.value
 
 
-def mode_updates(mode: str, config_options: list[dict]) -> list[dict]:
-    """Уведомления о смене режима — в обоих видах, чтобы они не разошлись."""
+def mode_updates(config_options: list[dict]) -> list[dict]:
+    """Смена режима — полный список опций, тем же видом, что и модель."""
     return [
-        {"sessionUpdate": "current_mode_update", "currentModeId": mode},
         {
             "sessionUpdate": "config_option_update",
             "configOptions": config_options,

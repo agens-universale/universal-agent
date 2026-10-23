@@ -20,6 +20,12 @@ from gc_core.backends.protocol import (
     FsBackend,
 )
 from gc_core.backends.walk_util import WalkEntry, pruned_dir_predicate
+from gc_core.user_stop import (
+    INTERRUPTED_CODE,
+    UserStopInterrupt,
+    current_user_stop,
+    interrupted_code,
+)
 from gc_core.utils.file_text import (
     encode_text_for_append,
     encode_text_for_write,
@@ -332,6 +338,7 @@ class LocalFsBackend(FsBackend):
             env=merged_env,
             stdin_text=None,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
+            backend_name=type(self).__name__,
         )
 
     async def aexec_argv(
@@ -357,6 +364,7 @@ class LocalFsBackend(FsBackend):
             env=merged_env,
             stdin_text=stdin,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
+            backend_name=type(self).__name__,
         )
 
     async def arun_python(
@@ -376,6 +384,7 @@ class LocalFsBackend(FsBackend):
             env=_sanitize_env(env),
             stdin_text=code,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
+            backend_name=type(self).__name__,
         )
 
     async def aspawn_background(
@@ -500,6 +509,10 @@ _KILL_GRACE_SEC = 0.5
 #: Сигнал послан, речь о миллисекундах; потолок здесь — от зависшего в
 #: непрерываемом системном вызове процесса, а не от нормального случая.
 _KILL_EXIT_GRACE_SEC = 1.0
+
+#: Потолок на `taskkill` (Windows): снятие дерева — доли секунды, зависший
+#: вызов не должен держать стоп.
+_TASKKILL_TIMEOUT_SEC = 5
 
 #: Запущенные фоном процессы. Держим ссылку, чтобы дожать вышедших: иначе они
 #: остаются зомби до конца жизни агента — своя сессия не делает процесс чужим,
@@ -678,21 +691,70 @@ async def _adrain_stream(stream, sink: "_Capture") -> None:
     sink.publish()
 
 
-async def _astop_process(proc) -> None:
+def _taskkill_path() -> str:
+    """Полный путь: по одному имени Windows ищет exe сначала в текущем
+    каталоге — а это может быть открытый проект."""
+    return os.path.join(
+        os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe"
+    )
+
+
+async def _akill_tree_nt(proc) -> bool:
+    """Windows: снять процесс со всеми потомками (`taskkill /T /F`).
+
+    Дерево `taskkill` строит по родителю, поэтому зовём его, пока корень жив.
+    Вышедший процесс не трогаем: его pid Windows может отдать чужому.
+    ``False`` — дерево не снято, остаётся удар по одному pid.
+    """
+    if proc.returncode is not None:
+        return False
+    import subprocess
+
+    try:
+        killer = await asyncio.create_subprocess_exec(
+            _taskkill_path(),
+            "/T",
+            "/F",
+            "/PID",
+            str(proc.pid),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+    except OSError:
+        return False
+    try:
+        code = await asyncio.wait_for(killer.wait(), _TASKKILL_TIMEOUT_SEC)
+    except (TimeoutError, asyncio.CancelledError):
+        return False
+    return code == 0
+
+
+async def _astop_process(proc, os_name: str = os.name) -> None:
     """Остановить команду: сначала попросить, потом убить.
 
     `SIGTERM` → грация → `SIGKILL` вместо одного KILL. Разница не в том, умрёт
     ли команда — умрёт в обоих случаях, — а в том, что она успеет сделать перед
     смертью: снять `.git/index.lock`, дописать архив, закрыть транзакцию.
     KILL такого шанса не даёт вовсе, потому что не перехватывается.
+
+    На Windows групп и вежливой просьбы нет: `terminate()` — тот же
+    TerminateProcess, и гасит он один `cmd`, а команда доживала до конца.
+    Там сразу снимаем дерево (`_akill_tree_nt`).
     """
-    if _terminate_quietly(proc):
+    if os_name == "nt" and await _akill_tree_nt(proc):
+        try:
+            await _await_process_exit(proc, _KILL_EXIT_GRACE_SEC)
+        except (TimeoutError, asyncio.CancelledError):
+            pass
+        return
+    if _terminate_quietly(proc, os_name):
         try:
             await _await_process_exit(proc, _KILL_GRACE_SEC)
             return  # вышла сама, убивать некого
         except (TimeoutError, asyncio.CancelledError):
             pass
-    _kill_quietly(proc)
+    _kill_quietly(proc, os_name)
     try:
         await _await_process_exit(proc, _KILL_EXIT_GRACE_SEC)
     except (TimeoutError, asyncio.CancelledError):
@@ -724,6 +786,74 @@ async def _await_process_exit(proc, timeout: Optional[float]):
     return proc.returncode
 
 
+async def _release_stopped_process(proc, stop_release: Optional[Callable]):
+    """Снять команду: свой release бэкенда либо локальный TERM/KILL.
+
+    Возврат release проходит наверх: ``STOP_WAIT_ONLY`` значит, что сигнал
+    до команды не дошёл.
+    """
+    if stop_release is not None:
+        return await stop_release(proc)
+    await _astop_process(proc)
+
+
+async def _await_exit_then_drop_stdin(proc, timeout, stdin_task) -> tuple:
+    """Дождаться выхода и отменить недописанный stdin.
+
+    Отмена — в ``finally``: нормальный выход, таймаут и стоп не должны
+    оставлять писателя висеть на трубе.
+    """
+    try:
+        return await _await_exit_or_stop(proc, timeout)
+    finally:
+        if stdin_task is not None and not stdin_task.done():
+            stdin_task.cancel()
+
+
+async def _await_exec_or_user_stop(
+    proc,
+    timeout,
+    stdin_task,
+    *,
+    backend_name: str,
+    arm_stop: bool,
+    stop_release: Optional[Callable],
+    stop_unkillable: bool,
+) -> tuple:
+    """(return_code, timed_out, stopped_by_user)."""
+    stopped_by_user = False
+    stop = current_user_stop() if arm_stop else None
+
+    if stop is None:
+        return_code, timed_out = await _await_exit_then_drop_stdin(
+            proc, timeout, stdin_task
+        )
+    else:
+
+        async def _release():
+            return await _release_stopped_process(proc, stop_release)
+
+        try:
+            async with stop.arm(
+                kind="exec",
+                backend=backend_name,
+                release=_release,
+                unkillable=stop_unkillable,
+            ) as armed:
+                return_code, timed_out = await _await_exit_then_drop_stdin(
+                    proc, timeout, stdin_task
+                )
+                stopped_by_user = armed.fired
+        except UserStopInterrupt:
+            await _astop_process(proc)
+            return_code, timed_out = INTERRUPTED_CODE, False
+            stopped_by_user = True
+    if stopped_by_user:
+        timed_out = False
+        return_code = interrupted_code(return_code)
+    return return_code, timed_out, stopped_by_user
+
+
 async def _arun_bounded_process(
     args,
     *,
@@ -733,6 +863,10 @@ async def _arun_bounded_process(
     env: Optional[Dict[str, str]],
     stdin_text: Optional[str],
     capture_max_chars: int,
+    backend_name: str = "",
+    arm_stop: bool = True,
+    stop_release: Optional[Callable] = None,
+    stop_unkillable: bool = False,
 ) -> ExecResult:
     """Запустить процесс с ограниченным буфером, не занимая ни одного потока."""
     from gc_core.utils.win_console import preserve_console_mode
@@ -745,7 +879,8 @@ async def _arun_bounded_process(
     # Своя группа процессов. Без неё `proc.kill()` на таймауте убивал ТОЛЬКО
     # шелл: потомки `sh -c "a; b"` продолжали работать, унаследовав pipe'ы, и
     # переживали и таймаут, и отмену. С группой убиваем всю команду разом
-    # (см. `_kill_quietly`). На Windows группы нет — там поведение прежнее.
+    # (см. `_kill_quietly`). На Windows групп нет — там `_astop_process`
+    # снимает дерево процессов.
     spawn_kwargs = {"start_new_session": True} if os.name != "nt" else {}
 
     with preserve_console_mode():
@@ -795,12 +930,19 @@ async def _arun_bounded_process(
 
     cancelled = False
     try:
-        try:
-            return_code, timed_out = await _await_exit_or_stop(proc, timeout)
-        finally:
-            # Ребёнок мёртв или дочитан — писать больше некому и незачем.
-            if stdin_task is not None and not stdin_task.done():
-                stdin_task.cancel()
+        (
+            return_code,
+            timed_out,
+            stopped_by_user,
+        ) = await _await_exec_or_user_stop(
+            proc,
+            timeout,
+            stdin_task,
+            backend_name=backend_name,
+            arm_stop=arm_stop,
+            stop_release=stop_release,
+            stop_unkillable=stop_unkillable,
+        )
 
         # Потомок вышел — читателям пора дойти до EOF. Ждём ОГРАНИЧЕННО: EOF
         # наступает, когда трубу закрыл ПОСЛЕДНИЙ писатель, а фоновый внук с
@@ -821,6 +963,7 @@ async def _arun_bounded_process(
     return ExecResult(
         return_code=return_code,
         timed_out=timed_out,
+        stopped_by_user=stopped_by_user,
         stdout_stream=out_sink.stream,
         stderr_stream=err_sink.stream,
     )
@@ -1023,7 +1166,7 @@ def _close_transport(proc) -> None:
         pass
 
 
-def _terminate_quietly(proc) -> bool:
+def _terminate_quietly(proc, os_name: str = os.name) -> bool:
     """Попросить команду завершиться самой: SIGTERM всей её группе.
 
     Ходит парой с `_kill_quietly`: сначала просим, через `_KILL_GRACE_SEC`
@@ -1035,7 +1178,7 @@ def _terminate_quietly(proc) -> bool:
     ``False`` — послать было некому: ждать грацию незачем, идём убивать сразу.
     """
     pid = getattr(proc, "pid", None)
-    if pid and os.name != "nt":
+    if pid and os_name != "nt":
         try:
             os.killpg(os.getpgid(pid), signal.SIGTERM)
             return True
@@ -1071,7 +1214,7 @@ async def _await_exit_or_stop(proc, timeout: Optional[int]) -> tuple:
         return None, True
 
 
-def _kill_quietly(proc) -> None:
+def _kill_quietly(proc, os_name: str = os.name) -> None:
     """Снять команду ЦЕЛИКОМ, а не только её шелл.
 
     `proc.kill()` бьёт по одному pid. Для `sh -c "a; b"` это шелл, а его
@@ -1080,7 +1223,7 @@ def _kill_quietly(proc) -> None:
     (`start_new_session=True`), поэтому здесь бьём по группе.
     """
     pid = getattr(proc, "pid", None)
-    if pid and os.name != "nt":
+    if pid and os_name != "nt":
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
             return

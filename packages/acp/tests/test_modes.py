@@ -1,4 +1,4 @@
-"""Режимы разрешений сессии ACP: опция mode, modes, смена и уведомления."""
+"""Режимы разрешений сессии ACP: опция mode рядом с моделью."""
 
 import pytest
 from gc_acp.modes import (
@@ -32,7 +32,7 @@ async def _session(facade, writer, request_id=2):
     return _by_id(writer, request_id)["result"]["sessionId"]
 
 
-def test_option_and_modes_list_every_mode_in_cycle_order():
+def test_mode_option_lists_every_mode_in_cycle_order():
     option = mode_config_option("plan")
     assert option == {
         "id": "mode",
@@ -68,10 +68,9 @@ def test_protocol_value_must_be_an_exact_mode_id(value, expected):
     assert mode_choice(value) == expected
 
 
-def test_mode_change_is_announced_in_both_views():
+def test_mode_change_is_announced_as_config_options():
     options = [mode_config_option("auto")]
-    assert mode_updates("auto", options) == [
-        {"sessionUpdate": "current_mode_update", "currentModeId": "auto"},
+    assert mode_updates(options) == [
         {"sessionUpdate": "config_option_update", "configOptions": options},
     ]
 
@@ -121,10 +120,9 @@ async def test_set_config_option_switches_the_executor_and_notifies(
     assert _mode_option(result)["currentValue"] == "plan"
     assert agents[0].executor.modes == ["plan"]
     updates = _updates(writer)
-    assert {
-        "sessionUpdate": "current_mode_update",
-        "currentModeId": "plan",
-    } in updates
+    assert all(
+        item["sessionUpdate"] != "current_mode_update" for item in updates
+    )
     option_update = next(
         item
         for item in updates
@@ -147,10 +145,9 @@ async def test_set_mode_switches_the_executor_and_notifies(tmp_path):
     assert _by_id(writer, 3)["result"] == {}
     assert agents[0].executor.modes == ["auto"]
     updates = _updates(writer)
-    assert {
-        "sessionUpdate": "current_mode_update",
-        "currentModeId": "auto",
-    } in updates
+    assert all(
+        item["sessionUpdate"] != "current_mode_update" for item in updates
+    )
     option_update = next(
         item
         for item in updates
@@ -222,7 +219,9 @@ async def test_load_and_resume_take_the_mode_saved_in_the_session(tmp_path):
             4,
         )
     )
-    assert _by_id(writer2, 4)["result"]["modes"]["currentModeId"] == "plan"
+    resumed = _by_id(writer2, 4)["result"]
+    assert resumed["modes"]["currentModeId"] == "plan"
+    assert _mode_option(resumed)["currentValue"] == "plan"
     await restored.shutdown()
 
 

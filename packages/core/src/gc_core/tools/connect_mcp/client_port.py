@@ -41,6 +41,60 @@ _SUPPORTED_TRANSPORTS = (
 )
 
 
+async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
+    """Снять текущий вызов. Процесс сервера сессии не трогаем."""
+    import asyncio
+
+    from gc_core.user_stop import (
+        STOP_WAIT_ONLY,
+        UserStopInterrupt,
+        await_cancelled,
+        current_tool_call,
+        current_user_stop,
+    )
+
+    stop = current_user_stop()
+    if stop is None:
+        return await body()
+    if stop.requested:
+        raise UserStopInterrupt(kind="mcp", started=False)
+    _, call_id = current_tool_call()
+    task = asyncio.create_task(body())
+
+    async def _release():
+        # Сессию не закрываем. Для долгоживущего stdio сигнал — уведомление
+        # ``notifications/cancelled`` с id запроса; поздний ответ этого id
+        # сессия сама не примет. ``False`` — запрос был, записать не удалось:
+        # оборвано ожидание, не вызов. Прочие транспорты снимает отмена задачи
+        # (SDK шлёт то же уведомление, streamable HTTP закрывает поток).
+        outcome = None
+        cancel = getattr(client, "cancel_inflight_request", None)
+        if callable(cancel):
+            outcome = cancel()
+        if not task.done():
+            task.cancel()
+        if outcome is False:
+            return STOP_WAIT_ONLY
+
+    try:
+        async with stop.arm(
+            kind="mcp",
+            tool=tool_name,
+            call_id=call_id,
+            mcp_server=str(getattr(client, "server_name", "") or ""),
+            release=_release,
+        ):
+            return await task
+    except UserStopInterrupt as exc:
+        if not exc.started:
+            await await_cancelled(task)
+        raise
+    except asyncio.CancelledError:
+        if stop.requested:
+            raise UserStopInterrupt(kind="mcp", started=True)
+        raise
+
+
 class McpClientPort(ABC):
     """Один MCP-сервер, две операции. Обе корутинные.
 
@@ -139,10 +193,11 @@ class AgentRuntimeClient(McpClientPort):
                 f"MCP server '{self.server_name}': синхронная форма осталась "
                 "только для persistent stdio; остальное — alist_tools/acall_tool"
             )
-        session = PersistentStdioRegistry.instance().get_or_create(
-            self.server_name, self.server_cfg
-        )
-        resp = session.call("tools/list", {}, timeout)
+        session = self._bind_stdio_session()
+        try:
+            resp = session.call("tools/list", {}, timeout)
+        finally:
+            self._unbind_stdio_session(session)
         result = resp.get("result") if isinstance(resp, dict) else None
         tools = result.get("tools", []) if isinstance(result, dict) else []
         return tools if isinstance(tools, list) else []
@@ -157,12 +212,38 @@ class AgentRuntimeClient(McpClientPort):
                 f"MCP server '{self.server_name}': синхронная форма осталась "
                 "только для persistent stdio; остальное — alist_tools/acall_tool"
             )
+        session = self._bind_stdio_session()
+        try:
+            return session.call(
+                "tools/call",
+                {"name": tool_name, "arguments": arguments},
+                timeout,
+            )
+        finally:
+            self._unbind_stdio_session(session)
+
+    def cancel_inflight_request(self) -> "bool | None":
+        """Снять текущий запрос долгоживущего stdio, если он уже отправлен.
+
+        ``None`` — этой сессии снимать нечего (другой транспорт или запрос
+        ещё не ушёл). Отмена задачи тогда сама доводит сигнал: SDK пишет
+        ``notifications/cancelled``, streamable HTTP закрывает поток ответа.
+        """
+        session = getattr(self, "_stdio_session", None)
+        if session is None:
+            return None
+        return session.cancel_inflight()
+
+    def _bind_stdio_session(self):
         session = PersistentStdioRegistry.instance().get_or_create(
             self.server_name, self.server_cfg
         )
-        return session.call(
-            "tools/call", {"name": tool_name, "arguments": arguments}, timeout
-        )
+        self._stdio_session = session
+        return session
+
+    def _unbind_stdio_session(self, session: Any) -> None:
+        if getattr(self, "_stdio_session", None) is session:
+            self._stdio_session = None
 
     async def alist_tools(self, *, timeout: float) -> List[Dict[str, Any]]:
         transport = self._require_transport()
@@ -226,6 +307,23 @@ class AgentRuntimeClient(McpClientPort):
             )
 
     async def acall_tool(
+        self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
+    ) -> Any:
+        from gc_core.user_stop import current_user_stop
+
+        if current_user_stop() is None:
+            return await self._acall_tool_unstopped(
+                tool_name, arguments, timeout=timeout
+            )
+        return await _mcp_call_under_stop(
+            self,
+            tool_name,
+            lambda: self._acall_tool_unstopped(
+                tool_name, arguments, timeout=timeout
+            ),
+        )
+
+    async def _acall_tool_unstopped(
         self, tool_name: str, arguments: Dict[str, Any], *, timeout: float
     ) -> Any:
         transport = self._require_transport()
