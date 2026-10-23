@@ -2167,7 +2167,25 @@ async def _aexecute_tool_call(
                 error_brief=error_brief,
             )
             return tool_res_raw, was_invalid, ok
-        if emit_tool_row:
+        if persist_tool_trace:
+            out_text = (
+                tool_res_raw
+                if isinstance(tool_res_raw, str)
+                else json.dumps(tool_res_raw, ensure_ascii=False)
+            )
+            # Sidecar-запись результата — ДО события конца: вывод длиннее
+            # потолка события TUI читает оттуда.
+            await apersist_subagent_trace(
+                ctx,
+                kind="error" if ok is False else "result",
+                payload={
+                    "type": "function_call_output",
+                    "call_id": tool_call_id,
+                    "output": out_text,
+                },
+            )
+            trace_open = False
+            # Строка ленты = вызов с sidecar-записью (`emit_tool_row`).
             # Время вызова в записи итога хода — без ожидания человека.
             record_call_time(ctx, call_id_str, elapsed, waited_at_start)
             status, fields = (
@@ -2184,23 +2202,8 @@ async def _aexecute_tool_call(
                 error_brief=error_brief,
                 result_status=status,
                 result_error=fields,
+                output=out_text,
             )
-        if persist_tool_trace:
-            out_text = (
-                tool_res_raw
-                if isinstance(tool_res_raw, str)
-                else json.dumps(tool_res_raw, ensure_ascii=False)
-            )
-            await apersist_subagent_trace(
-                ctx,
-                kind="error" if ok is False else "result",
-                payload={
-                    "type": "function_call_output",
-                    "call_id": tool_call_id,
-                    "output": out_text,
-                },
-            )
-            trace_open = False
         return tool_res_raw, was_invalid, ok
     finally:
         await _aclose_sidecar_call(ctx, tool_call_id, trace_open)

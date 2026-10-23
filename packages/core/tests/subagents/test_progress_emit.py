@@ -504,3 +504,121 @@ class TestToolStartCommand:
             )
         )
         assert sink.drain() == []
+
+
+class TestToolEndOutput:
+    """Сырой вывод вложенного вызова — в событии конца, целиком или никак."""
+
+    def _run(self, monkeypatch, output, *, ctx_factory=None):
+        pr = _patch_process(monkeypatch, apply_return=output)
+        sink = QueueSubagentProgressSink()
+        ctx = (ctx_factory or _child_ctx)(sink)
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc("exec_command", "c1", json.dumps({"command": "ls"}))
+                ],
+                state=_state(),
+                ctx=ctx,
+                run_agent_func=None,
+            )
+        )
+        return sink.drain()
+
+    def test_short_output_rides_whole(self, monkeypatch):
+        envelope = json.dumps(
+            {"ok": True, "exit_code": 0, "stdout": {"content": "a\nb\n"}}
+        )
+        end = self._run(monkeypatch, envelope)[-1]
+        assert end.kind == "tool_end"
+        assert end.output == envelope
+        assert json.loads(end.output)["stdout"]["content"] == "a\nb\n"
+
+    def test_output_at_the_cap_rides_whole(self, monkeypatch):
+        from gc_core.execution.progress import TOOL_END_OUTPUT_MAX
+
+        frame = '{"ok": true, "pad": ""}'
+        pad = "x" * (TOOL_END_OUTPUT_MAX - len(frame))
+        envelope = '{"ok": true, "pad": "' + pad + '"}'
+        assert len(envelope) == TOOL_END_OUTPUT_MAX
+        end = self._run(monkeypatch, envelope)[-1]
+        assert end.output == envelope
+
+    def test_output_over_the_cap_is_none(self, monkeypatch):
+        from gc_core.execution.progress import TOOL_END_OUTPUT_MAX
+
+        envelope = '{"ok": true, "pad": "' + "x" * TOOL_END_OUTPUT_MAX + '"}'
+        end = self._run(monkeypatch, envelope)[-1]
+        assert end.output is None
+
+    def test_tool_start_has_no_output(self, monkeypatch):
+        start = self._run(monkeypatch, '{"ok": true}')[0]
+        assert start.output is None
+
+    def test_sidecar_result_is_written_before_tool_end(self, monkeypatch):
+        pr = _patch_process(monkeypatch, apply_return='{"ok": true}')
+        order: list[str] = []
+        persisted: list[dict] = []
+
+        async def _persist(ctx, *, kind, payload):
+            order.append(f"persist:{kind}")
+            persisted.append(payload)
+
+        class _Sink:
+            def emit(self, event):
+                order.append(f"emit:{event.kind}")
+
+        monkeypatch.setattr(pr, "apersist_subagent_trace", _persist)
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc("exec_command", "c1", json.dumps({"command": "ls"}))
+                ],
+                state=_state(),
+                ctx=_child_ctx(_Sink()),
+                run_agent_func=None,
+            )
+        )
+        assert order.index("persist:result") < order.index("emit:tool_end")
+        assert persisted[-1]["output"] == '{"ok": true}'
+
+    def test_sidecar_keeps_full_output_over_the_cap(self, monkeypatch):
+        from gc_core.execution.progress import TOOL_END_OUTPUT_MAX
+
+        envelope = '{"ok": true, "pad": "' + "x" * TOOL_END_OUTPUT_MAX + '"}'
+        pr = _patch_process(monkeypatch, apply_return=envelope)
+        persisted: list[dict] = []
+
+        async def _persist(ctx, *, kind, payload):
+            persisted.append(payload)
+
+        monkeypatch.setattr(pr, "apersist_subagent_trace", _persist)
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc("exec_command", "c1", json.dumps({"command": "ls"}))
+                ],
+                state=_state(),
+                ctx=_child_ctx(QueueSubagentProgressSink()),
+                run_agent_func=None,
+            )
+        )
+        assert persisted[-1]["output"] == envelope
+
+    def test_top_level_emits_nothing(self, monkeypatch):
+        events = self._run(
+            monkeypatch, '{"ok": true}', ctx_factory=_parent_ctx
+        )
+        assert events == []
+
+    def test_noop_sink_does_not_fail(self):
+        from gc_core.execution.progress import (
+            NOOP_SUBAGENT_PROGRESS_SINK,
+            emit_progress,
+        )
+
+        ctx = fake_ctx(
+            parent_call_id="p",
+            subagent_progress_sink=NOOP_SUBAGENT_PROGRESS_SINK,
+        )
+        emit_progress(ctx, _state(), "tool_end", output='{"ok": true}')

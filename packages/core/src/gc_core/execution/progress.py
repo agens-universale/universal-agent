@@ -64,6 +64,10 @@ _ARGS_SUMMARY_MAX = 80
 # Потолок сырого текста команды в событии начала вложенного вызова: длиннее —
 # поле пустое, и потребитель читает команду из sidecar-записи вызова.
 TOOL_START_COMMAND_MAX = 4_096
+# Потолок сырого вывода в событии конца вложенного вызова: длиннее — поле
+# пустое, и потребитель читает вывод из sidecar-записи результата. Обрезки
+# нет: разбор конверта вывода требует целой строки.
+TOOL_END_OUTPUT_MAX = 16_384
 # Аргументы Run-тула, которые несут исполняемый текст (команда, код).
 _RAW_COMMAND_ARGS = ("command", "code")
 
@@ -103,6 +107,11 @@ class SubagentProgressEvent:
     # sidecar-записи вызова (она пишется до события). Внутрипроцессное поле:
     # не сохраняется и в модель не уходит.
     command: Optional[str] = None
+    # Сырой вывод тула (``tool_end``) — целиком, если не длиннее
+    # ``TOOL_END_OUTPUT_MAX``; иначе ``None``, и вывод читается из
+    # sidecar-записи результата (она пишется до события). Внутрипроцессное
+    # поле: не сохраняется и в модель не уходит.
+    output: Optional[str] = None
 
 
 @runtime_checkable
@@ -536,18 +545,18 @@ def emit_progress(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     result_status: Optional[str] = None,
     result_error: Optional[Dict[str, str]] = None,
     command: Optional[str] = None,
+    output: Optional[str] = None,
 ) -> None:
     """Emit a progress event when running as a child with a sink; else no-op.
 
-    ``command`` длиннее ``TOOL_START_COMMAND_MAX`` не обрезается, а уходит
-    ``None``: потребитель берёт команду из sidecar."""
+    ``command`` и ``output`` сверх своих потолков (``TOOL_START_COMMAND_MAX``,
+    ``TOOL_END_OUTPUT_MAX``) не обрезаются, а уходят ``None``: потребитель
+    берёт их из sidecar."""
     if not child_progress_enabled(ctx):
         return
     sink = ctx.subagent_progress_sink
     if error_brief is not None:
         error_brief = _truncate_error_brief(error_brief)
-    if command is not None and len(command) > TOOL_START_COMMAND_MAX:
-        command = None
     sink.emit(
         SubagentProgressEvent(
             parent_call_id=str(ctx.parent_call_id),
@@ -567,9 +576,17 @@ def emit_progress(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
             attachments=attachments,
             result_status=result_status,
             result_error=result_error,
-            command=command,
+            command=_within(command, TOOL_START_COMMAND_MAX),
+            output=_within(output, TOOL_END_OUTPUT_MAX),
         )
     )
+
+
+def _within(text: Optional[str], limit: int) -> Optional[str]:
+    """Текст целиком, если не длиннее потолка; иначе ``None``."""
+    if text is None or len(text) > limit:
+        return None
+    return text
 
 
 __all__ = [
