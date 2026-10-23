@@ -139,6 +139,9 @@ def test_trace_queue_snapshot(snap_compare, tmp_path, monkeypatch):
         pilot.app.active_runner = _BusyRunner()
         for payload in _turn():
             scr._render_record({"payload": payload}, live=True)
+            if payload.get("call_id") == "c1" and "name" in payload:
+                # Чтение исполнялось: застывший таймер — не «0с».
+                clock.now += 2
         clock.now += 4
         await pilot.pause()
         for text in _QUEUED:
