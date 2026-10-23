@@ -447,6 +447,78 @@ async def test_bar_through_scripted_turn(tmp_path):
         assert all(not f[0] for f in frames[edge:])
 
 
+class _QuickEndExecutor(_ScriptedExecutor):
+    """Ответ, один шаг, затем запись итога — и сразу выход прогона."""
+
+    STEPS = 1
+
+    async def arun(self, messages, *, thread_id, message_ids=None, **_kw):
+        mid = (message_ids or [None])[0]
+        self._messages(
+            thread_id, {"id": mid, "role": "user", "content": "первый"}
+        )
+        self._messages(thread_id, self._answer("ответ"))
+        self._wait(0)
+        self._record(thread_id, mid, 1)
+
+
+def _layout_frame(scr):
+    """Кадр раскладки: бар поднят, верх поля ввода, видна ли строка."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    lines = list(scr.query_one("#trace").query(TurnLine))
+    return (
+        scr.query_one("#indicator-bar").has_class("-turn"),
+        scr.query_one("#input-row").region.y,
+        any(w.display and w.region.height > 0 for w in lines),
+    )
+
+
+@pytest.mark.asyncio
+async def test_turn_end_one_movement_per_layout_frame(tmp_path):
+    """Конец хода — одно движение в каждом кадре раскладки: от последнего
+    кадра с поднятым баром низ на месте, и нет кадра «бар снят, строки
+    ещё нет» (S10 §3.4)."""
+    from gc_testkit.tui_support import wait_until
+
+    _write_task(tmp_path, SCRIPT_TID)
+    ex = _QuickEndExecutor(tmp_path)
+    app = _app(tmp_path)
+    app._executor_factory = lambda: ex
+    frames: list[tuple] = []
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(SCRIPT_TID, is_resume=True)
+        layout = scr._refresh_layout
+
+        def recorded_layout(*args, **kwargs):
+            layout(*args, **kwargs)
+            frames.append(_layout_frame(scr))
+
+        scr._refresh_layout = recorded_layout
+        try:
+            pilot.app.query_one("#cmdinput").text = "первый"
+            await pilot.press("enter")
+            await wait_until(pilot, lambda: ex.at == 0, "шаг")
+            await pilot.pause(0.3)
+            ex.release[0].set()
+            await wait_until(
+                pilot,
+                lambda: not pilot.app.active_runner.is_running(),
+                "прогон вышел",
+            )
+            await wait_until(
+                pilot, lambda: frames and frames[-1][2], "строка видна"
+            )
+            await pilot.pause(0.6)
+        finally:
+            ex.stop_run()
+        last_up = max(i for i, f in enumerate(frames) if f[0])
+        tail = frames[last_up:]
+        assert {y for _up, y, _shown in tail} == {tail[0][1]}
+        assert not [f for f in tail if not f[0] and not f[2]]
+
+
 # --- S10 §3.7: ошибка до конца раннера — прогон фиксируется парой -----------
 
 
