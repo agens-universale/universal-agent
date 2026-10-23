@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, Mapping, Optional, Sequence, Union
 
+from gc_core.agent_edits.journal import EditRecord
 from gc_core.config_modules.agent_edits import DEFAULT_TRACE_INLINE_MAX_LINES
 from gc_core.constants.tool_display import DisplayCategory
 
@@ -205,6 +206,12 @@ class BlockEdit:
     diff_lines: int
     size_bytes: Optional[int]
     has_record: bool
+    #: Что кладёт в буфер ❐ строки файла; пусто — кнопки нет.
+    copy_text: str = ""
+    #: Запись журнала — для `DiffBlock` исполнителя; модель её не читает.
+    record: Optional[EditRecord] = field(
+        default=None, compare=False, repr=False
+    )
 
     @property
     def has_diff(self) -> bool:

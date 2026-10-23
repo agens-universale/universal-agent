@@ -197,6 +197,12 @@ BlockPanel:focus, TodoBlock:focus {
     margin: 0 0 0 2;
 }
 .diff-block.diff-nested { margin: 0 0 0 4; }  /* правка субагента (уровень 1) */
+/* Дифф под блоком P4: колонка 2 (одиночная правка) или 4 (член блока) от
+   глифа своего уровня; у субагента — на 2 глубже. */
+.diff-block.diff-single { margin: 0 0 0 2; }
+.diff-block.diff-member { margin: 0 0 0 4; }
+.diff-block.diff-nested.diff-single { margin: 0 0 0 4; }
+.diff-block.diff-nested.diff-member { margin: 0 0 0 6; }
 .diff-block .block-body,
 .diff-block .diff-more { background: $block-bg; }
 .diff-more { color: $dim; }

@@ -148,6 +148,11 @@ def render_hunks(
     )
 
 
+def diff_line_count(hunks: str) -> int:
+    """Логических строк тела диффа (без заголовков) — без отрисовки."""
+    return sum(1 for row in _parse(hunks or "") if row.kind != "sep")
+
+
 def copyable_hunks(hunks: str, *, path: str) -> str:
     """Хэнки, пригодные для `git apply`/`patch` (Ж5 батча 4).
 

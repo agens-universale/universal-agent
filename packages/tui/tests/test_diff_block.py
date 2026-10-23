@@ -526,3 +526,98 @@ async def test_body_starts_at_block_column(tui_app_factory):
                 app.query_one(selector, Static).region.x
                 == block.content_region.x
             ), selector
+
+
+# --- дифф под блоком ленты (спека P4 §5, §6.4) -----------------------------
+
+
+def _in_block(record: EditRecord, *, limit: int = 12, **kw) -> DiffBlock:
+    return DiffBlock.for_record(
+        record,
+        event_no=7,
+        collapsed_max_lines=limit,
+        in_block=True,
+        column="single",
+        **kw,
+    )
+
+
+@pytest.mark.asyncio
+async def test_in_block_has_no_own_tail():
+    app = _Host(_in_block(_record(_long_hunks(40))))
+    async with app.run_test(size=(70, 60)):
+        assert _body_lines(app) == 12
+        assert not app.query(".diff-more")
+
+
+@pytest.mark.asyncio
+async def test_set_collapsed_max_lines_rerenders_body(monkeypatch):
+    import gc_tui.widgets.diff_block as module
+
+    calls = []
+    real = module.render_hunks
+
+    def counting(*args, **kwargs):
+        calls.append(kwargs.get("max_lines"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "render_hunks", counting)
+    block = _in_block(_record(_long_hunks(40)))
+    app = _Host(block)
+    async with app.run_test(size=(70, 60)) as pilot:
+        body = app.query_one(".block-body", Static)
+        block.set_collapsed_max_lines(6)
+        await pilot.pause()
+        assert _body_lines(app) == 6
+        assert app.query_one(".block-body", Static) is body
+        assert block.hidden_lines() == 34
+        before = len(calls)
+        block.set_collapsed_max_lines(6)
+        assert len(calls) == before
+
+
+@pytest.mark.asyncio
+async def test_set_expanded_shows_whole_body():
+    block = _in_block(_record(_long_hunks(40)), limit=6)
+    app = _Host(block)
+    async with app.run_test(size=(70, 60)) as pilot:
+        block.set_expanded(True)
+        await pilot.pause()
+        assert _body_lines(app) == 40
+        assert not app.query(".diff-more")
+        block.set_expanded(False)
+        await pilot.pause()
+        assert _body_lines(app) == 6
+
+
+@pytest.mark.asyncio
+async def test_set_column_switches_class_in_place():
+    block = _in_block(_record(SHORT_HUNKS))
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)) as pilot:
+        assert block.has_class("diff-single")
+        block.set_column("member")
+        await pilot.pause()
+        assert block.has_class("diff-member")
+        assert not block.has_class("diff-single")
+        assert app.query_one(DiffBlock) is block
+
+
+@pytest.mark.asyncio
+async def test_in_block_compact_body_waits_for_expand():
+    block = _in_block(_record(_long_hunks(40)), compact=True)
+    app = _Host(block)
+    async with app.run_test(size=(70, 60)) as pilot:
+        assert not app.query(".block-body")
+        assert block.hidden_lines() == 40
+        block.set_expanded(True)
+        await pilot.pause()
+        assert _body_lines(app) == 40
+
+
+@pytest.mark.asyncio
+async def test_short_in_block_hides_nothing():
+    block = _in_block(_record(SHORT_HUNKS))
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)):
+        assert block.hidden_lines() == 0

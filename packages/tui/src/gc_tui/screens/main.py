@@ -4448,22 +4448,15 @@ class TraceScreen(Screen):
         кнопки ❐ (спека P3 §10). None — монтировать нечего: нет call_id,
         журнала или записи по нему (не файловый тул). Исключения не гасит:
         их ловят вызывающие."""
-        if not call_id:
-            return None
-        lookup = self._edits_lookup_for_thread()
-        if lookup is None:
-            return None
-        record = lookup.by_call_id(call_id)
-        if record is None:
-            return None
-        from gc_tui.services.diff_render import copyable_hunks
+        from gc_tui.services.block_edits import edit_of_call
         from gc_tui.widgets.diff_block import DiffBlock
 
-        row.set_edit_counts(
-            record.add,
-            record.del_,
-            copy_text=copyable_hunks(record.hunks, path=record.path),
-        )
+        lookup = self._edits_lookup_for_thread()
+        edit = edit_of_call(lookup, call_id)
+        if edit is None or edit.record is None:
+            return None
+        record = edit.record
+        row.set_edit_counts(edit.add, edit.rem, copy_text=edit.copy_text)
         return DiffBlock.for_record(
             record,
             event_no=event_no,
