@@ -621,6 +621,47 @@ async def test_late_stop_record_after_leaving_and_returning_shows_no_line(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stop", [False, True])
+async def test_backstop_after_resend_keeps_unread_new_turn_records(
+    tmp_path, stop
+):
+    """Откат, повтор; старый поток дописал запись стопа снятой реплики во
+    время нового хода. Backstop чистит её на тике конца нового хода —
+    ответ и запись итога нового хода, ещё не дочитанные, не теряются."""
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, thread, old = await _undo_setup(pilot, tmp_path)
+        scr._cancel_with_undo()
+        await pilot.pause()
+        new = _FakeRunner()
+        pilot.app.active_runner = new
+        scr._prepare_for_new_run()
+        scr._last_user_message_id = "u2"
+        thread.messages(_reply("u2", "повтор"))
+        scr._mount_user_reply("повтор", state="normal")
+        thread.record(2, "m_orphan", status="stopped", reason="user_stop")
+        old._running = False
+        for _ in range(2):
+            scr._poll_tick()
+            await pilot.pause()
+        thread.messages(_answer("a2"))
+        if stop:
+            scr._stop_and_replace_runner()
+            thread.record(3, "u2", status="stopped", reason="user_stop")
+        else:
+            thread.record(3, "u2")
+        new._running = False
+        for _ in range(3):
+            scr._poll_tick()
+            await pilot.pause()
+
+        line = _fresh_line(scr)
+        assert (line.recorded, line.opened_by) == (True, "u2")
+        lines = _trace_lines(scr.query_one("#trace"))
+        assert lines[-3:-1] == ["› повтор", "●"]
+
+
+@pytest.mark.asyncio
 async def test_undo_after_record_was_tailed_removes_mounted_line(tmp_path):
     """Запись дочитана хвостом и смонтирована до отката (курсор за ней):
     откат снимает строку по `opened_by` и пересинхронизирует курсор —

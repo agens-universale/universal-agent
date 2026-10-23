@@ -224,16 +224,32 @@ class FileTaskStore:
         *,
         tags: Sequence[str] = (),
         strip_think: bool = True,
-    ) -> bool:
-        """Удалить одно сообщение из треда по id (откат осиротевшей реплики)."""
+        cursor: Optional[TaskCursor] = None,
+    ) -> tuple[bool, Optional[TaskCursor]]:
+        """Удалить одно сообщение из треда по id (откат осиротевшей реплики).
+
+        Возвращает (удалено ли, курсор). Курсор хвоста этого треда
+        переносится в переписанный файл: за ним остаётся ровно то, что не
+        было прочитано, кроме снятых записей."""
         sys_ = system or self._system
-        return discard_message_by_id(
+        offset = int(cursor.position_token or 0) if cursor else 0
+        read = self._read_live(task_id, sys_)[:offset]
+        removed = discard_message_by_id(
             str(self._dir),
             sys_,
             task_id,
             message_id,
             tags=tags,
             strip_think=strip_think,
+        )
+        if cursor is None or not removed:
+            return removed, cursor
+        live = self._read_live(task_id, sys_)
+        end = _rebased_offset(read, live)
+        return removed, replace(
+            cursor,
+            position_token=end,
+            ordering_key=_max_seq(self._parse_chunk(live[:end])),
         )
 
     def read_subagent_trace(
@@ -624,3 +640,16 @@ def _payload_ids(records: list[dict]) -> frozenset[str]:
 def _max_seq(records: list[dict]) -> int:
     seqs = [r.get("seq") for r in records]
     return max((s for s in seqs if isinstance(s, int)), default=0)
+
+
+def _rebased_offset(read: bytes, live: bytes) -> int:
+    """Смещение в переписанном файле, до которого лежит прочитанное.
+
+    Снятие записей только выбрасывает строки, порядок прочих тот же, а
+    судьба строки задана её содержимым: строки прочитанной части, что
+    стоят в новом файле подряд с начала, — пережившие снятие."""
+    end = 0
+    for line in read.splitlines(keepends=True):
+        if live.startswith(line, end):
+            end += len(line)
+    return end

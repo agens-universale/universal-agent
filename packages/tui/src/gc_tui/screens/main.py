@@ -8421,29 +8421,27 @@ class TraceScreen(Screen):
         хода в ленте) и пересинхронизировать курсор трейса.
 
         Без ресинка poll увидит ужавшийся data_*.jsonl как «file truncated» →
-        stream_reset → полная перерисовка трейса (моргание). Здесь курсор
-        сдвигается на новый конец файла, поэтому тик ничего не перерисовывает —
-        виджет уже снят точечно."""
+        stream_reset → полная перерисовка трейса (моргание). Курсор
+        переносится в переписанный файл на то же прочитанное: тик ничего не
+        перерисовывает (виджет уже снят точечно) и дочитывает то, что легло
+        после курсора, — ответ и запись итога нового хода не теряются."""
         if self._store is None:
             return False
+        own = tid == self._active_task_id
         try:
             tags, strip_think = self._projection_from_app_config()
-            removed = self._store.discard_message_by_id(
-                tid, msg_id, tags=tags, strip_think=strip_think
+            removed, cursor = self._store.discard_message_by_id(
+                tid,
+                msg_id,
+                tags=tags,
+                strip_think=strip_think,
+                cursor=self._cursor if own else None,
             )
         except Exception:
             return False
-        if not removed or tid != self._active_task_id:
-            return removed
-        self._drop_turn_lines(msg_id)
-        if self._cursor is not None:
-            # Ресинк и тогда, когда курсор уже за снятой записью: файл
-            # укоротился.
-            try:
-                _records, cur = self._store.read_all_events(tid)
-                self._cursor = cur
-            except Exception:
-                pass
+        if removed and own:
+            self._cursor = cursor
+            self._drop_turn_lines(msg_id)
         return removed
 
     def _run_orphan_cleanups(self) -> None:
@@ -8455,6 +8453,10 @@ class TraceScreen(Screen):
         active = getattr(self.app, "active_runner", None)
         active_tid = self.app.tui_state.active_task_id
         active_running = active is not None and active.is_running()
+        # Остановленный ход тоже пишет файл треда, пока его поток жив.
+        stopping = self._stopping_runner
+        if stopping is not None and stopping.is_running():
+            active_running = True
         still_pending: list[tuple] = []
         for old_runner, tid, msg_id in self._pending_orphan_cleanups:
             old_busy = old_runner is not None and old_runner.is_running()
