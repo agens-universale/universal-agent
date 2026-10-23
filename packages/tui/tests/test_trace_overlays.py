@@ -228,7 +228,7 @@ async def _pill_row_above_banner(pilot, scr, pill, banner):
     зазоре ленты, это ряд над баннером."""
     await pilot.pause()
     scr._refresh_trace_overlays()
-    scr._sync_trace_max_height()
+    scr._sync_chrome_caps()
     await pilot.pause()
     assert _bar_region(scr).height == 0
     assert pill.region.y == _trace(scr).region.bottom
@@ -266,7 +266,7 @@ async def test_pill_row_idle_with_plan_banner(tmp_path):
         scr._show_plan_banner()
         await pilot.pause()
         scr._refresh_trace_overlays()
-        scr._sync_trace_max_height()
+        scr._sync_chrome_caps()
         await pilot.pause()
         banner = scr._plan_banner
         assert _bar_region(scr).height == 0
@@ -990,3 +990,20 @@ async def test_sticky_matches_reply_band_with_scrollbar(tmp_path):
         assert sticky.display is True
         assert sticky.region.x == band.x
         assert sticky.region.right == band.right
+
+
+@pytest.mark.asyncio
+async def test_pill_above_open_list(tmp_path):
+    """Список из поля встаёт над вводом и поднимает бар индикатора:
+    плашка в его запасной строке — над списком, не поверх него."""
+    _write_task(tmp_path, "o3l")
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr, pill = await _pill_with_indicator(pilot, "o3l")
+        input_y = scr.query_one("#input-row").region.y
+        scr._open_palette(prefix="")
+        await _relayout(pilot, scr)
+        palette = scr._palette.region
+        assert scr.query_one("#input-row").region.y == input_y
+        assert palette.bottom == input_y
+        _assert_pill_clear_of_indicator(scr, pill)
+        assert pill.region.bottom <= palette.y

@@ -411,14 +411,23 @@ class AgentRunRegistry:
             run.executor.add_message(make_message(content))
         return True
 
-    def stop(self, *, system: str, task_id: str) -> bool:
+    async def stop(self, *, system: str, task_id: str) -> bool:
+        """Снять прогон. True — когда текущая работа снята.
+
+        Звать из корутины цикла прогона: ожидание отдаёт цикл.
+        Потолок — ``TimeoutError``, не True.
+        """
         key = _make_registry_key(system, task_id)
         with self._lock:
             run = self._runs.get(key)
             if run is None or run.done:
                 return False
             run.stop_requested = True
-        run.executor.stop_run()
+            executor = run.executor
+        executor.stop_run()
+        gate = getattr(executor, "user_stop", None)
+        if gate is not None:
+            await gate.await_settled()
         return True
 
 

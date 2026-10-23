@@ -31,6 +31,7 @@ from gc_core.backends.runtime_probe import (
     RuntimeProbeCache,
 )
 from gc_core.backends.walk_util import FlatWalkMixin
+from gc_core.user_stop import current_user_stop
 
 # Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
 # иначе пропускает bashrc (``[ -z "$PS1" ] && return``). Потоки профиля
@@ -220,6 +221,40 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         return scope(on_output), accumulators
 
     # --- shell ---
+    async def _aexec_watching(self, full, *, timeout):
+        """Дождаться ``env.exec``. Его ``timeout_sec`` и есть срок жизни команды.
+
+        Стоп хода посреди этого ожидания команду не снимает и строку не
+        переписывает. Регистрация без записи в лог нужна, чтобы отмена тула
+        не оборвала уже идущий ``env.exec``: жест остаётся здесь, пока команда
+        сама не выйдет.
+        """
+
+        async def _drive():
+            return await self._aawait(
+                self._env.exec(full, timeout_sec=timeout)
+            )
+
+        stop = current_user_stop()
+        if stop is None:
+            return await _drive()
+
+        finished = asyncio.Event()
+
+        async def _release() -> None:
+            await finished.wait()
+
+        async with stop.arm(
+            kind="exec",
+            backend=type(self).__name__,
+            release=_release,
+            log_event=False,
+        ):
+            try:
+                return await _drive()
+            finally:
+                finished.set()
+
     @staticmethod
     def _timed_out_result(streamed: dict, cap: int) -> ExecResult:
         """Таймаут = частичное выполнение: то, что команда успела напечатать.
@@ -279,9 +314,7 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         scope, streamed = self._output_capture(cap)
         try:
             with scope:
-                res = await self._aawait(
-                    self._env.exec(full, timeout_sec=timeout)
-                )
+                res = await self._aexec_watching(full, timeout=timeout)
         except Exception as exc:
             if not self._is_exec_timeout(exc):
                 raise

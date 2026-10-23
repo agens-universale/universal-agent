@@ -211,21 +211,30 @@ async def test_bar_rule_tolerates_runner_without_run_seq(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_trace_ceiling_follows_bar(tmp_path):
-    """Потолок #trace пересчитан в том же вызове, где бар показан или
-    снят: высота бара — константа, не замер."""
+async def test_trace_height_follows_bar(tmp_path):
+    """Бар встаёт — лента ниже на его две строки, уходит — возвращает их;
+    поле ввода прижато к низу и не двигается."""
     _write_task(tmp_path, "ceil1")
     async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("ceil1")
         await pilot.pause()
-        idle = scr._trace_max_height
+        trace = scr.query_one("#trace")
+        idle, input_y = trace.region.height, _input_y(scr)
         scr._run_pending = True
         scr._sync_indicator_bar()
-        assert scr._trace_max_height == idle - 2
+        await pilot.pause()
+        assert trace.region.height == idle - 2
+        assert _input_y(scr) == input_y
         scr._run_pending = False
         scr._sync_indicator_bar()
-        assert scr._trace_max_height == idle
+        await pilot.pause()
+        assert trace.region.height == idle
+        assert _input_y(scr) == input_y
+
+
+def _input_y(scr) -> int:
+    return scr.query_one("#input-row").region.y
 
 
 # --- S10 §3.4: сквозной ход — бар 2 строки до спадающего фронта -------------
@@ -622,18 +631,20 @@ async def _turn_with_bar(pilot, tid):
 @pytest.mark.parametrize("kind", ["ask", "confirm", "plan"])
 async def test_banner_mid_turn_one_empty_row_above_it(tmp_path, kind):
     """Баннер посреди хода: бар снят, между лентой и рамкой баннера — один
-    пустой ряд, как над полем ввода в покое."""
+    пустой ряд (нижний зазор ленты), как над полем ввода в покое; короткая
+    лента ниже себя оставляет пустоту — ввод прижат к низу."""
     tid = f"gap{kind}"
     _write_task(tmp_path, tid)
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr = await _turn_with_bar(pilot, tid)
         banner = _show_banner(scr, kind)
         await pilot.pause()
-        scr._sync_trace_max_height()
+        scr._sync_chrome_caps()
         await pilot.pause()
         trace = scr.query_one("#trace")
         last = [w for w in trace.children if w.display][-1]
-        assert banner.region.y - last.region.bottom == 1
+        assert last.region.bottom <= trace.region.bottom
+        assert banner.region.y - trace.region.bottom == 1
         assert _bar(pilot).display is False
         pilot.app.active_runner = None
 

@@ -255,7 +255,7 @@ def skills_warm(_no_skills_warm, monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_terminal_probe(monkeypatch):
     """Тесты не опрашивают настоящий терминал (OSC 11 при старте `main()`) и
-    после себя возвращают палитру к теме fixed: apply_background меняет
+    после себя возвращают палитру к теме gigacode: apply_background меняет
     глобалы модуля. Тесты пробы держат ссылку на настоящую функцию,
     взятую при импорте, поэтому подмена атрибута модуля им не мешает."""
     from gc_tui import palette

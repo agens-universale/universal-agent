@@ -1,7 +1,7 @@
 """SkillPicker integration в TraceScreen: триггер, фильтр, mutex с командной палитрой."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 class _FakeReg:
@@ -234,7 +234,7 @@ async def test_skills_loaded_only_once_per_session(tmp_path, monkeypatch):
 
     from gc_core.tools.skills import registry as reg_mod
 
-    def factory(cfg=None):
+    def factory(cfg=None):  # noqa: ARG001  # сигнатура фабрики реестра
         calls["n"] += 1
         return _FakeReg()
 
@@ -267,7 +267,7 @@ async def test_hint_has_keys_margin_and_honest_desired_height(
     tmp_path, monkeypatch
 ):
     """Hint SkillPicker — докнутый footer (.palette-footer) с воздухом (.palette-keys),
-    desired_height включает строку margin (шов main.py::_sync_trace_max_height)."""
+    desired_height включает строку margin (это min-height пикера)."""
     pytest.importorskip("textual")
     _patch_registry(monkeypatch)
     from gc_tui.app import TuiApp
@@ -430,10 +430,9 @@ async def test_first_skill_of_group_shows_its_header(tmp_path, monkeypatch):
 async def test_pack_header_colour_is_note_ink(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     _patch_registry(monkeypatch)
-    from textual.color import Color
-
     from gc_tui.app import TuiApp
     from gc_tui.palette import NOTE_INK
+    from textual.color import Color
 
     app = TuiApp(
         threads_dir=str(tmp_path),

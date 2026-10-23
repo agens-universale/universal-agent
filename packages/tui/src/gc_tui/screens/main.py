@@ -656,7 +656,6 @@ class TraceScreen(Screen):
         self._suppress_picker_reopen: bool = False
         # Spec 2026-05-26: ThinkingIndicator state.
         self._thinking = None  # type: Optional["ThinkingIndicator"]
-        self._trace_max_height = None  # type: Optional[int]
         self._stick_bottom = (
             True  # автоскролл-намерение «липнуть к низу» трейса
         )
@@ -869,7 +868,7 @@ class TraceScreen(Screen):
     def on_resize(self, event) -> None:
         self._refresh_header()  # пересчитать усечение пути под новую ширину
         self._refresh_footer()  # адаптивная вёрстка usage (стек сессии) под новую ширину
-        self._sync_trace_max_height()  # потолок #trace под новую высоту экрана
+        self._sync_chrome_caps()  # потолки хрома под новую высоту экрана
         # Раскладка бренд-карточки выбиралась только при сборке: сузив окно уже после
         # старта, человек получал колонку статусов в пару символов шириной — слова
         # рвались по буквам («подк / люче / ны»), а совсем узко она схлопывалась в ноль.
@@ -3035,7 +3034,7 @@ class TraceScreen(Screen):
             self._sync_indicator_bar()
 
         self.call_later(_sync_bar_when_mounted)
-        self.call_after_refresh(self._sync_trace_max_height)
+        self.call_after_refresh(self._sync_chrome_caps)
 
     def _cap_sticky_banner(self, banner, *, chrome: int) -> int:
         """Потолок sticky-баннера: длинный вопрос не выдавливает input/footer.
@@ -3087,24 +3086,22 @@ class TraceScreen(Screen):
             return region_h
         return min(estimated, cap)
 
-    def _sync_trace_max_height(self) -> None:
-        """Потолок #trace = экран минус хром #root.
+    def _sync_chrome_caps(self) -> None:
+        """Потолки хрома #root, чтобы ввод и подвал оставались на экране.
 
-        Без оверлея: #trace `auto` сам сжимается до контента, хром ниже (индикатор/
-        ввод/футер) следует за концом контента (Claude-style), пустота — внизу под
-        футером; потолок лишь включает скролл при заполнении экрана. БЕЗ замера высоты
-        контента → нет покадровой гонки (она давала «прыжок»).
+        #trace — `1fr`: забирает всё, что осталось над хромом, поэтому ввод и
+        подвал всегда прижаты к низу экрана, а пустота пустой сессии — между
+        бренд-карточкой и вводом. Своего потолка у ленты нет.
 
-        С открытым input-оверлеем (палитра/пикер): #trace ужимается под его ЖЕЛАЕМУЮ
-        высоту (`virtual_size` — полный контент, а НЕ зажатый `region`: region зависит
-        от #trace, #trace — от него → петля, оверлей оставался бы вжатым в остаток),
-        оставляя оверлею место и min строк трейса; сам оверлей — со своим потолком.
+        Открытый input-оверлей (палитра/пикер) стоит в раскладке над вводом и
+        получает потолок: не больше половины экрана и оставляет ленте min строк;
+        дальше — его скролл. Свою высоту оверлей держит сам (min-height из
+        `desired_height`), лента берёт остаток.
 
         Sticky-баннер (ask_human/confirm) тоже капается: иначе длинный вопрос
         раздувает chrome и выдавливает поле ввода за край экрана."""
         try:
             root = self.query_one(_SEL_ROOT, Vertical)
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return
         overlay = self._open_overlay_widget()
@@ -3112,8 +3109,8 @@ class TraceScreen(Screen):
         # region.height включает бордеры; скрытые виджеты (display:none) дают 0.
         # Баннер/оверлей исключаем — их желаемую высоту считаем отдельно (иначе
         # ещё не ужатый region баннера раздувает chrome до available<=0).
-        # Бар — константой по классу, не замером: потолок пересчитывается в
-        # том же вызове, где бар ставят или снимают (S10 §5).
+        # Бар — константой по классу, не замером: потолки считаются в том
+        # же вызове, где бар ставят или снимают (S10 §5).
         chrome = _TRACE_GAP + sum(
             self._chrome_height(c)
             for c in root.children
@@ -3122,41 +3119,19 @@ class TraceScreen(Screen):
         banner_h = 0
         if banner is not None:
             banner_h = self._cap_sticky_banner(banner, chrome=chrome)
-        chrome_with_banner = chrome + banner_h
-        if overlay is not None:
-            # Оверлей ≤ половины экрана (дальше — его скролл) и оставляет ≥ min строк
-            # трейса. На малых экранах вторая граница жёстче, на больших — половина.
-            cap = min(
-                self.size.height // 2,
-                self.size.height
-                - chrome_with_banner
-                - self._MIN_TRACE_WITH_OVERLAY,
-            )
-            if cap <= 0:
-                return
-            overlay.styles.max_height = (
-                cap  # потолок оверлея → дальше его скролл
-            )
-            # Желаемая высота: все наши оверлеи (CommandPalette, SkillPicker,
-            # ArgPicker, FilePicker) отдают честный `desired_height` (дети +
-            # margin hint'а + рамка; у палитры — ещё докнутый подвал). Фолбэк
-            # `len(children)+2` — только для гипотетического оверлея без свойства.
-            # len(children) обновляется при фильтре сразу, а virtual_size залипает.
-            desired = min(
-                getattr(overlay, "desired_height", len(overlay.children) + 2),
-                cap,
-            )
-            available = self.size.height - chrome_with_banner - desired
-        else:
-            available = self.size.height - chrome_with_banner
-        if available <= 0:
+        if overlay is None:
             return
-        if available != self._trace_max_height:
-            self._trace_max_height = available
-            trace.styles.max_height = available
-            # Ряд плашки считается от потолка: она переезжает в той же
-            # перерисовке, что и лента с баром (S10 §4.2).
-            self._refresh_trace_overlays()
+        # Оверлей ≤ половины экрана (дальше — его скролл) и оставляет ≥ min строк
+        # трейса. На малых экранах вторая граница жёстче, на больших — половина.
+        cap = min(
+            self.size.height // 2,
+            self.size.height
+            - chrome
+            - banner_h
+            - self._MIN_TRACE_WITH_OVERLAY,
+        )
+        if cap > 0:
+            overlay.styles.max_height = cap  # потолок оверлея → дальше скролл
 
     @staticmethod
     def _chrome_height(widget) -> int:
@@ -3181,16 +3156,18 @@ class TraceScreen(Screen):
         контент растёт вниз, offset при этом не двигается, поэтому добавление контента
         липкость не роняет — её снимает только реальный уход юзера вверх. Возврат к
         низу — возвращает. Вызывать ПЕРЕД прижатием (детект всегда предшествует
-        скроллу → юзера не «дёргает» назад при уходе вверх)."""
+        скроллу → юзера не «дёргает» назад при уходе вверх). Offset ниже прижатого,
+        но лента у низа — это не уход вверх: выросшая лента (снят баннер, сжался
+        или закрыт список над вводом) сама срезала прокрутку до нового низа."""
         try:
             trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return
         if self._stick_bottom:
-            # Низ поднялся (лента выросла в высоту) — offset прижат к нему,
-            # это не уход вверх: порог — не выше нынешнего низа.
-            pinned = min(self._last_auto_y, trace.max_scroll_y)
-            if trace.scroll_offset.y < pinned - self._STICK_TOL:
+            if (
+                trace.scroll_offset.y < self._last_auto_y - self._STICK_TOL
+                and not self._trace_is_at_bottom()
+            ):
                 self._stick_bottom = False
         elif self._trace_is_at_bottom():
             self._stick_bottom = True
@@ -3232,17 +3209,19 @@ class TraceScreen(Screen):
         pill.show(self._end_pill_label(), box, self._pill_row(trace))
 
     def _pill_row(self, trace: VerticalScroll) -> int:
-        """Ряд плашки «в конец» (S10 §4.2) — над баннером или полем ввода:
-        пока бар стоит — его нижний ряд, под индикатором хода; без бара —
-        нижний зазор ленты. Поле ввода баннеры прячут, поэтому опора — не
-        оно. Плашка видна только у прокручиваемой ленты, её высота — потолок;
-        ряд считается от него, а не от `region` прошлой раскладки: баннер,
-        сменивший потолок, не застанет плашку на своей строке."""
+        """Ряд плашки «в конец» (S10 §4.2) — ряд прямо над баннером, списком
+        из поля или полем ввода: пока бар стоит — его нижний ряд, под
+        индикатором хода; без бара — нижний зазор ленты. Ввод прижат к низу,
+        поэтому этот ряд от бара не зависит: бар встаёт и уходит, плашка на
+        месте. Баннер или список, сменившие высоту, сдвигают её следующей
+        перерисовкой накладок."""
+        root = self.query_one(_SEL_ROOT, Vertical)
         bar = self.query_one(_SEL_INDICATOR_BAR, Vertical)
-        lift = _TRACE_GAP + _BAR_HEIGHT - 1 if bar.has_class(_BAR_TURN) else 0
-        if self._trace_max_height is None:
-            return trace.region.bottom + lift
-        return trace.region.y + self._trace_max_height + lift
+        below = root.children[root.children.index(bar) + 1 :]
+        for widget in below:
+            if widget.display and widget.region.height > 0:
+                return widget.region.y - 1
+        return trace.region.bottom
 
     def _trace_replies(self, trace: VerticalScroll) -> list:
         """Реплики верхнего уровня ленты по порядку. Кэшируется только
@@ -4753,7 +4732,7 @@ class TraceScreen(Screen):
                 pass
             self._confirm_banner = None
         self._sync_indicator_bar()
-        self._settle_trace_after_banner()
+        self._keep_trace_bottom()
 
     def _return_focus_to_input(self) -> None:
         """Вернуть поле ввода и фокус в него — ДО снятия баннера. Фокус стоит
@@ -4775,14 +4754,15 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
-    def _settle_trace_after_banner(self) -> None:
-        """Баннер снят: место под ним отдаётся ленте, и её низ сдвигается на
-        высоту баннера. Опрос принял бы сдвиг за уход человека вверх и снял
-        бы липкость — лента, прижатая к низу до снятия, туда и возвращается."""
+    def _keep_trace_bottom(self) -> None:
+        """Хром над вводом сменил высоту (снят баннер, открыт, отфильтрован
+        или закрыт список из поля): высота ленты сдвигается, и сжатие прячет её
+        хвост за список. Лента, прижатая к низу до перемены, туда и
+        возвращается."""
         sticky = self._stick_bottom
 
         def _settle() -> None:
-            self._sync_trace_max_height()
+            self._sync_chrome_caps()
             if sticky:
                 self._stick_bottom = True
                 self._scroll_trace_end()
@@ -4828,7 +4808,7 @@ class TraceScreen(Screen):
             self._sync_input_placeholder()
         except Exception:
             pass
-        self._settle_trace_after_banner()
+        self._keep_trace_bottom()
 
     def _session_plan(self) -> Optional[dict]:
         """План открытой сессии из её меты — то, что загрузит следующий прогон
@@ -5890,10 +5870,8 @@ class TraceScreen(Screen):
         )
 
     def _poll_tick(self) -> None:
-        # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
-        # (header/бар-константа/input/footer) → пересчёт синхронный и
-        # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
-        self._sync_trace_max_height()
+        # Потолки списка над вводом и sticky-баннера: ввод и подвал на экране.
+        self._sync_chrome_caps()
         # Freeze UI на время app-select (§3.2 F2–F5). Пока Screen._selecting —
         # точечно глушим UI-мутации трейса (stick/scroll/stream paint/wipe),
         # но НЕ весь poll: footer/OSC/title/runner-логика/orphan/tail-события
@@ -7012,6 +6990,8 @@ class TraceScreen(Screen):
             current_text = event.text_area.text
             if current_text != self._history_last_programmatic_text:
                 self._reset_history_navigation()
+        if self._open_overlay_widget() is not None:
+            self._keep_trace_bottom()  # фильтр меняет высоту списка над вводом
         # Для палитры/пикера важна только первая строка (команды без переносов).
         val = event.text_area.text.split("\n", 1)[0]
 
@@ -7170,15 +7150,14 @@ class TraceScreen(Screen):
         )
 
     def _mount_input_overlay(self, widget) -> None:
-        """Смонтировать input-оверлей (палитра / skill/arg/file-picker) СРАЗУ ПОД
-        полем ввода — список раскрывается ВНИЗ (новая раскладка: ввод следует за
-        контентом, под ним есть место). Потолок оверлея и ужатие #trace под его
-        желаемую высоту считает _sync_trace_max_height (по virtual_size оверлея);
-        отложенный вызов даёт это сразу, не дожидаясь poll-тика."""
+        """Смонтировать input-оверлей (палитра / skill/arg/file-picker) СРАЗУ НАД
+        полем ввода — список раскрывается ВВЕРХ: ввод прижат к низу экрана и не
+        двигается, список поднимает ленту, а не накрывает её. Потолок оверлея
+        считает _sync_chrome_caps, хвост ленты держит _keep_trace_bottom."""
         self.query_one(_SEL_ROOT, Vertical).mount(
-            widget, after=self.query_one(_SEL_INPUT_ROW, Horizontal)
+            widget, before=self.query_one(_SEL_INPUT_ROW, Horizontal)
         )
-        self.call_after_refresh(self._sync_trace_max_height)
+        self._keep_trace_bottom()
 
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
@@ -7204,6 +7183,7 @@ class TraceScreen(Screen):
             return
         self._palette.remove()
         self._palette = None
+        self._keep_trace_bottom()
 
     async def _open_skill_picker(self, *, prefix: str) -> None:
         if self._skill_picker is not None:
@@ -7221,6 +7201,7 @@ class TraceScreen(Screen):
             return
         self._skill_picker.remove()
         self._skill_picker = None
+        self._keep_trace_bottom()
 
     def _open_arg_picker(
         self,
@@ -7254,6 +7235,7 @@ class TraceScreen(Screen):
             return
         self._arg_picker.remove()
         self._arg_picker = None
+        self._keep_trace_bottom()
 
     def _project_root(self) -> str:
         """Корень обзора @-аттача = текущий cwd проекта (корень FS-тулов агента)."""
@@ -7379,6 +7361,7 @@ class TraceScreen(Screen):
             if self._file_picker is not None:
                 self._file_picker.remove()
                 self._file_picker = None
+                self._keep_trace_bottom()
             return
         if self._file_picker is None:
             from gc_tui.widgets.file_picker import FilePicker
@@ -7392,6 +7375,7 @@ class TraceScreen(Screen):
             self._file_picker.set_entries(
                 entries, truncated=truncated, searching=searching, total=total
             )
+            self._keep_trace_bottom()
 
     def _close_file_picker(self) -> None:
         # Конец сеанса: результат поиска в полёте устарел, поток сеанса больше не нужен.
@@ -7409,6 +7393,7 @@ class TraceScreen(Screen):
             return
         self._file_picker.remove()
         self._file_picker = None
+        self._keep_trace_bottom()
 
     def _complete_file_picker(self) -> None:
         """Достроить выбранный путь в открытом файловом пикере — два контекста,
@@ -9114,7 +9099,7 @@ class TraceScreen(Screen):
 
     def _sync_indicator_bar(self) -> None:
         """Поставить или снять бар по `_bar_wanted()`; в том же вызове —
-        потолок ленты (высота бара — константа, не замер) и прижатие низа,
+        потолки хрома (высота бара — константа, не замер) и прижатие низа,
         когда бар ушёл. Пока стоит sticky-баннер, бар скрыт и при идущей
         работе (§4.12): над баннером один пустой ряд, как над вводом.
         Работа при этом не кончилась — придержанное не раскрывается."""
@@ -9134,7 +9119,7 @@ class TraceScreen(Screen):
         # Бар уходит — придержанное встаёт на его место той же
         # перерисовкой: бар −2, строка +2, низ на месте (S10 §3.4).
         revealed = not wanted and self._reveal_held()
-        self._sync_trace_max_height()
+        self._sync_chrome_caps()
         if (was and not shown) or revealed:
             self._scroll_trace_end()
 

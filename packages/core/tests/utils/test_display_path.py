@@ -5,7 +5,7 @@ import ntpath
 import pytest
 
 from gc_core.utils import path_display
-from gc_core.utils.path_display import display_path
+from gc_core.utils.path_display import display_path, home_path
 
 ROOT = "/home/dmitry/work/project"
 HOME = "/home/dmitry"
@@ -41,6 +41,17 @@ def test_display_path_sibling_with_the_same_prefix_is_not_inside():
         display_path(f"{ROOT}-old/shot.png", ROOT, HOME)
         == "~/work/project-old/shot.png"
     )
+
+
+def test_home_path_shows_home_as_tilde_even_inside_the_project():
+    assert (
+        home_path(f"{ROOT}/.gc/config.yml", HOME)
+        == "~/work/project/.gc/config.yml"
+    )
+
+
+def test_home_path_elsewhere_is_absolute():
+    assert home_path("/etc/gc/config.yml", HOME) == "/etc/gc/config.yml"
 
 
 @pytest.fixture

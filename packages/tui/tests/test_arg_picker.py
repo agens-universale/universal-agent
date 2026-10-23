@@ -1,9 +1,9 @@
 """ArgPicker integration в TraceScreen: триггер на /export <space>, фильтр, Tab,
 Enter (выполняет export), Esc, mutex с командной палитрой."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.stores.file_store import FileTaskStore
 
 
@@ -169,7 +169,7 @@ async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
 @pytest.mark.asyncio
 async def test_hint_visible_on_open_with_small_screen_no_scroll(tmp_path):
     """Регрессия c0622c9a на маленьком экране: /export с 4 опциями на 16-строчном
-    экране упирается в клэмп overlay (main.py::_sync_trace_max_height режет
+    экране упирается в потолок overlay (main.py::_sync_chrome_caps режет
     picker.region до 4 строк — 2 border + 2 контента) — hint видна СРАЗУ при
     открытии, без скролла (докнутый .palette-footer, а не последний FLOW-ребёнок)."""
     pytest.importorskip("textual")
@@ -219,8 +219,8 @@ async def _picker_with_hint(pilot, hint: str):
 @pytest.mark.parametrize("width", (120, 100, 80, 60))
 @pytest.mark.asyncio
 async def test_desired_height_covers_a_wrapping_hint(tmp_path, width):
-    """`desired_height` — БЮДЖЕТ, который `main.py::_sync_trace_max_height` вычитает
-    из экрана. Занизив его, пикер рисуется выше выданного места: подвал накрывает
+    """`desired_height` — БЮДЖЕТ: min-height пикера, остаток экрана берёт
+    трейс. Занизив его, пикер рисуется выше выданного места: подвал накрывает
     хвост списка, а нижняя рамка уезжает за край.
 
     У `.palette-row` намеренно `text-wrap: nowrap`, у `.palette-hint` — нет, и

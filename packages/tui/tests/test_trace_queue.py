@@ -483,3 +483,23 @@ async def test_mid_run_skill_without_text_is_queued(tmp_path, _skills):
         (message,) = runner.added
         assert message["content"] == "DELIVERY[coder]"
         assert message["id"] and reply.message_id == message["id"]
+
+
+@pytest.mark.asyncio
+async def test_list_opens_between_queue_and_input(tmp_path):
+    """Очередь — хвост ленты: список из поля встаёт под ней, прямо над
+    вводом; ввод на месте, очередь видна над списком."""
+    async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
+        scr = pilot.app.screen
+        await _busy(pilot, tmp_path)
+        await _send(pilot, "и добавь тест")
+        await pilot.pause(0.4)
+        input_y = scr.query_one("#input-row").region.y
+        scr._open_palette(prefix="")
+        await pilot.pause(0.4)
+        (reply,) = _replies(pilot)
+        palette = scr._palette.region
+        assert scr.query_one("#input-row").region.y == input_y
+        assert palette.bottom == input_y
+        assert reply.region.height > 0
+        assert reply.region.bottom <= palette.y

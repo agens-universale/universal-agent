@@ -155,14 +155,15 @@ async def test_execution_mode_runs_the_plan_in_the_same_prompt(tmp_path, mode):
     assert _answers(writer) == [_PLAN, "\n\nГотово."]
     updates = _updates(writer)
     assert all(item["sessionUpdate"] != "plan" for item in updates)
-    mode_at = updates.index(
-        {"sessionUpdate": "current_mode_update", "currentModeId": mode}
+    assert all(
+        item["sessionUpdate"] != "current_mode_update" for item in updates
     )
     option_update = next(
         item
         for item in updates
         if item["sessionUpdate"] == "config_option_update"
     )
+    mode_at = updates.index(option_update)
     mode_option = next(
         item for item in option_update["configOptions"] if item["id"] == "mode"
     )
@@ -189,10 +190,19 @@ async def test_rework_keeps_plan_mode_and_waits_for_remarks(tmp_path):
     assert agent.executor.modes == ["plan"]
     card_id = msg["params"]["toolCall"]["toolCallId"]
     assert _card_closed(writer, card_id, "completed")
-    assert {
-        "sessionUpdate": "current_mode_update",
-        "currentModeId": "plan",
-    } in _updates(writer)
+    updates = _updates(writer)
+    assert all(
+        item["sessionUpdate"] != "current_mode_update" for item in updates
+    )
+    option_update = next(
+        item
+        for item in updates
+        if item["sessionUpdate"] == "config_option_update"
+    )
+    mode_option = next(
+        item for item in option_update["configOptions"] if item["id"] == "mode"
+    )
+    assert mode_option["currentValue"] == "plan"
     assert _answers(writer) == [_PLAN, "\n\n" + REWORK_HINT]
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()

@@ -148,7 +148,7 @@ def _entry_carries_own_connection(entry: Dict[str, Any]) -> bool:
     же определением судят Router и правило атомарной пары. Своё прочтение ключей
     ошибалось бы в обе стороны: `url: ""` — это «своего адреса нет, пара
     наследуется», а не заданный адрес; своё подключение вдобавок пишется вторым
-    равноправным написанием (`backend.completions_url` / `backend.proxy` /
+    равноправным написанием (`backend.completions_url` /
     `backend.chat_completion_headers.Authorization`), и заполненный по документации
     реестр объявлялся бы ненастроенным.
 
@@ -170,7 +170,6 @@ def _entry_carries_own_connection(entry: Dict[str, Any]) -> bool:
             url=entry.get("url"),
             token=entry.get("authorization_header"),
             completions_url=overrides.get("completions_url"),
-            proxy=overrides.get("proxy"),
             authorization=headers.get("Authorization"),
         )
     )

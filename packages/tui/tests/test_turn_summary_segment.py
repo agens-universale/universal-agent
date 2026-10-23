@@ -528,9 +528,9 @@ async def _turn_with_edits(pilot, tmp_path, tid):
     сводки."""
     scr = pilot.app.screen
     await _falling_edge(pilot, scr, tid)
-    # Потолок ленты считается от хрома прошлой раскладки: досчитать до
+    # Потолки хрома считаются от прошлой раскладки: досчитать до
     # жестов, иначе тик опроса сдвинет строку под указателем.
-    scr._sync_trace_max_height()
+    scr._sync_chrome_caps()
     await pilot.pause()
     ind = _fresh(scr)
     assert ind._summary_span is not None

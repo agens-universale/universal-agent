@@ -734,6 +734,10 @@ async def arun_native_grep(
             hit_capture_cap=False,
             failure="native_error",
         )
+    if getattr(res, "stopped_by_user", False):
+        from gc_core.user_stop import UserStopInterrupt
+
+        raise UserStopInterrupt(kind="exec")
 
     return _grep_result(
         res,

@@ -1090,7 +1090,7 @@ class ModelsSectionEditor(Vertical):
 
         Хвост — про СВОЁ ПОДКЛЮЧЕНИЕ записи, и судит его ядровое определение §2
         (`connection_parts`), а не один ключ `url`: второе написание
-        (`backend.completions_url`, `proxy`) — тоже своё, и запись, задавшая адрес
+        (`backend.completions_url`) — тоже своё, и запись, задавшая адрес
         так, показывала свой хост И хвост «из «Подключения»» разом. Своего
         определения у витрины быть не должно — им же считают пару обе точки
         валидации и форма записи.
@@ -1117,7 +1117,6 @@ class ModelsSectionEditor(Vertical):
             token=None,
             authorization=None,
             completions_url=backend.get("completions_url"),
-            proxy=backend.get("proxy"),
         )
         if own_address or self._entry_origin(alias) == "base":
             return address_host(address)

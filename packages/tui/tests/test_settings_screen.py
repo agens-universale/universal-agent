@@ -226,7 +226,7 @@ async def test_settings_enter_opens_section_and_esc_returns():
 
 async def test_settings_ctrl_pgup_pgdn_switch_sections():
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import _MCP, _MODES, _UPDATE, _VOICE
+    from gc_tui.screens.settings import _LOOK, _MCP, _MODES, _UPDATE, _VOICE
 
     app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
@@ -239,12 +239,14 @@ async def test_settings_ctrl_pgup_pgdn_switch_sections():
         assert scr._view == _VOICE
         await pilot.press("ctrl+pagedown")  # → Режимы работы
         assert scr._view == _MODES
-        await pilot.press("ctrl+pagedown")  # → Обновление (6/6)
+        await pilot.press("ctrl+pagedown")  # → Внешний вид
+        assert scr._view == _LOOK
+        await pilot.press("ctrl+pagedown")  # → Обновление (последняя)
         assert scr._view == _UPDATE
         await pilot.press("ctrl+pagedown")  # край: остаёмся (без wrap)
         assert scr._view == _UPDATE
         await pilot.press("ctrl+pageup")
-        assert scr._view == _MODES
+        assert scr._view == _LOOK
 
 
 async def test_ctrl_pgdn_works_with_focus_in_input():
@@ -3418,8 +3420,9 @@ async def test_save_without_session_does_not_warn_about_counters(tmp_path):
 
 
 def test_sections_composition_merged():
-    """7 секций: «Подключение» первая, «Профили» сразу за «Моделями», «Голосовой
-    ввод» между MCP и «Режимами работы», «Режимы работы» перед «Обновлением».
+    """8 секций: «Подключение» первая, «Профили» сразу за «Моделями», «Голосовой
+    ввод» между MCP и «Режимами работы», за ними «Внешний вид», последним —
+    «Обновление».
 
     Волна B: легаси-«Модель» поглощена секцией «Модели», и та вышла из save-машины
     — редакторная теперь одна (`{conn}`), probe — тоже (`{conn}`). Гейт записи
@@ -3433,6 +3436,7 @@ def test_sections_composition_merged():
         "MCP-серверы",
         "Голосовой ввод",
         "Режимы работы",
+        "Внешний вид",
         "Обновление",
     )
     assert (
@@ -3442,7 +3446,8 @@ def test_sections_composition_merged():
         and s._MCP == 3
         and s._VOICE == 4
         and s._MODES == 5
-        and s._UPDATE == 6
+        and s._LOOK == 6
+        and s._UPDATE == 7
     )
     assert {s._CONNECTION} == s._EDITOR_SECTIONS
     assert {s._CONNECTION} == s._PROBE_SECTIONS
@@ -3459,6 +3464,7 @@ def test_sections_order_contains_modes():
         "MCP-серверы",
         "Голосовой ввод",
         "Режимы работы",
+        "Внешний вид",
         "Обновление",
     )
 

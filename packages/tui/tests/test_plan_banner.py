@@ -328,6 +328,20 @@ class _ApprovingRunner(_Runner):
         return super().start(**kwargs)
 
 
+class _ApprovingRunner(_Runner):
+    """Продолжение, как у исполнителя: в начале прогона принятый план
+    становится утверждённым в мете сессии."""
+
+    def __init__(self, tmp_path) -> None:
+        super().__init__()
+        self._tmp_path = tmp_path
+
+    def start(self, **kwargs):
+        mode, _thread_id = self.transitions[-1]
+        _save_plan(self._tmp_path, status="approved", mode=mode)
+        return super().start(**kwargs)
+
+
 async def test_plan_frame_changes_colour_once_the_plan_is_accepted(tmp_path):
     """Серая рамка — план ждёт решения; цвета режима plan — принят, идёт
     реализация. Возврат в обсуждение снова делает её серой."""
@@ -408,7 +422,18 @@ async def test_closing_the_banner_returns_a_following_trace_to_the_bottom(
         assert scrolled  # опрос потом может прижать ещё раз
         assert screen._stick_bottom is True
 
+        # Ушла вверх по-настоящему: лента у низа экрана (`1fr`) при снятии
+        # баннера растёт, и короткая целиком «у низа» — опрос вернул бы липкость.
+        from textual.containers import VerticalScroll
+        from textual.widgets import Static
+
+        for i in range(80):
+            screen._trace_mount(Static(f"строка плана {i}"), scroll=False)
         screen._show_plan_banner()
+        await pilot.pause()
+        screen.query_one("#trace", VerticalScroll).scroll_to(
+            y=0, animate=False
+        )
         await pilot.pause()
         scrolled.clear()
         screen._stick_bottom = False
