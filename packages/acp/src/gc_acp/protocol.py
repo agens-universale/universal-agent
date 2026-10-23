@@ -10,10 +10,11 @@ import asyncio
 import json
 import re
 import sys
+import threading
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
-from typing import Any, TextIO
+from typing import Any, BinaryIO, TextIO
 
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -25,11 +26,14 @@ SESSION_NOT_FOUND = -32002
 _ID_STRING = re.compile(r'"id"\s*:\s*"((?:\\.|[^"\\])*)"')
 _ID_NUMBER = re.compile(r'"id"\s*:\s*(-?\d+)')
 
-# asyncio.StreamReader по умолчанию — 64 KiB; длинный JSON-RPC (промпт IDE) роняет
-# readline() и весь процесс gc-acp. 16 MiB хватает для типичных session/prompt.
+# Дефолтный потолок построчного чтения — 64 КиБ; длинный JSON-RPC (промпт IDE)
+# должен доходить целиком. 16 МиБ хватает типичному session/prompt.
 _STDIN_LINE_LIMIT = 16 * 1024 * 1024
 # Префикс слишком длинной строки — только чтобы _salvage_id ответил -32700.
 _OVERSIZE_SALVAGE = 256 * 1024
+# Сколько байт за раз забирает блокирующий читатель. Меньше лимита строки:
+# перевод строки ищется в накопленном буфере, а не в одном read.
+_STDIN_READ_CHUNK = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -129,32 +133,131 @@ class StdoutWriter:
         self._stream.flush()
 
 
-async def _read_stdin_line(reader: asyncio.StreamReader) -> bytes:
-    """Одна строка протокола (до \\n). Не readline(): при превышении limit он
-    выбрасывает строку из буфера без возврата вызывающему."""
-    try:
-        return await reader.readuntil(b"\n")
-    except asyncio.IncompleteReadError as exc:
-        return exc.partial
-    except asyncio.LimitOverrunError as exc:
-        isep = exc.consumed
-        if not isinstance(isep, int):
-            raise
-        line = await reader.read(isep + 1)
-        if len(line) <= _OVERSIZE_SALVAGE:
-            return line
-        return line[:_OVERSIZE_SALVAGE]
+def _read_available(stream: BinaryIO) -> bytes:
+    """Один кусок из канала: сколько уже есть, без добора до размера.
+
+    ``BufferedReader.read(n)`` на пайпе (это не tty) повторяет чтение,
+    пока не наберёт n байт или EOF. Редактор пишет одну строку и stdin
+    не закрывает — такой read ждёт 64 КиБ, и ответ на ``initialize``
+    не уходит. ``read1`` делает не больше одного системного вызова.
+    """
+    read1 = getattr(stream, "read1", None)
+    reader = read1 if read1 is not None else stream.read
+    chunk = reader(_STDIN_READ_CHUNK)
+    return chunk or b""
+
+
+def _discard_through_newline(stream: BinaryIO, pending: bytearray) -> bool:
+    """Выбросить байты до ближайшего \\n включительно.
+
+    False — EOF раньше перевода строки. Хвост после \\n остаётся в pending.
+    """
+    newline_at = pending.find(b"\n")
+    if newline_at != -1:
+        del pending[: newline_at + 1]
+        return True
+    pending.clear()
+    while True:
+        chunk = _read_available(stream)
+        if not chunk:
+            return False
+        newline_at = chunk.find(b"\n")
+        if newline_at == -1:
+            continue
+        pending.extend(chunk[newline_at + 1 :])
+        return True
+
+
+def _line_exceeds_limit(newline_at: int, pending_len: int) -> bool:
+    """``newline_at < 0`` — перевода строки в буфере ещё нет."""
+    if newline_at < 0:
+        return pending_len > _STDIN_LINE_LIMIT
+    return newline_at > _STDIN_LINE_LIMIT
+
+
+def _pop_pending_line(pending: bytearray) -> tuple[bytes, bool] | None:
+    """Снять одну строку. None — надо дочитать поток.
+
+    True во втором элементе: отдан только префикс слишком длинной строки,
+    хвост до ``\\n`` ещё лежит в буфере или во входном потоке.
+    """
+    newline_at = pending.find(b"\n")
+    if _line_exceeds_limit(newline_at, len(pending)):
+        return bytes(pending[:_OVERSIZE_SALVAGE]), True
+    if newline_at < 0:
+        return None
+    end = newline_at + 1
+    line = bytes(pending[:end])
+    del pending[:end]
+    return line, False
+
+
+def _read_chunk(stream: BinaryIO, pending: bytearray) -> bool:
+    """Дописать кусок в буфер. False — EOF, новых байт нет."""
+    chunk = _read_available(stream)
+    if not chunk:
+        return False
+    pending.extend(chunk)
+    return True
+
+
+def _blocking_stdin_lines(stream: BinaryIO) -> Iterator[bytes]:
+    """Строки из бинарного stdin. Вызов блокируется и цикл не занимает.
+
+    Обычная строка — байты до ``\\n`` включительно. Хвост без ``\\n`` на EOF
+    тоже отдаётся. Длиннее ``_STDIN_LINE_LIMIT`` — только префикс
+    ``_OVERSIZE_SALVAGE``, остаток до ``\\n`` к следующей строке не клеится.
+    """
+    pending = bytearray()
+    while True:
+        ready = _pop_pending_line(pending)
+        if ready is None:
+            if _read_chunk(stream, pending):
+                continue
+            if pending:
+                yield bytes(pending)
+            return
+        line, discard_tail = ready
+        yield line
+        if discard_tail and not _discard_through_newline(stream, pending):
+            return
 
 
 async def stdin_lines() -> AsyncIterator[str]:
-    """Читать stdin до EOF, не ожидая конца хода."""
+    """Строки stdin до EOF, не занимая цикл.
+
+    Один поток процесса читает ``sys.stdin.buffer``. ``connect_read_pipe``
+    на Windows регистрирует дескриптор в порте завершения: канал редактора
+    для этого не открыт, и чтение падает с WinError 6. Политику цикла не
+    меняем — Proactor нужен последующим subprocess.
+    """
     loop = asyncio.get_running_loop()
-    reader = asyncio.StreamReader(limit=_STDIN_LINE_LIMIT)
-    protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+    queued: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    def post(item: bytes | None) -> None:
+        try:
+            loop.call_soon_threadsafe(queued.put_nowait, item)
+        except RuntimeError:
+            return
+
+    def worker() -> None:
+        try:
+            stream = sys.stdin.buffer
+            for raw in _blocking_stdin_lines(stream):
+                post(raw)
+        except OSError:
+            print(
+                "gc-acp: stdin read error",
+                file=sys.stderr,
+                flush=True,
+            )
+        finally:
+            post(None)
+
+    threading.Thread(target=worker, name="gc-acp-stdin", daemon=True).start()
     while True:
-        raw = await _read_stdin_line(reader)
-        if not raw:
+        raw = await queued.get()
+        if raw is None:
             break
         line = _decode_line(raw)
         if line is None:

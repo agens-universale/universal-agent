@@ -4,8 +4,8 @@ Verify that TuiApp shows OnboardingScreen when _onboarding_mode is set,
 and TraceScreen otherwise.
 """
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 # Marker: these tests require the textual extra (dev-tui).
 textual = pytest.importorskip("textual")
@@ -121,9 +121,9 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
         "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
         "agent.model": "m",
     }
-    from gc_core.config_modules.profiles import ProfileMeta
     from dataclasses import replace
 
+    from gc_core.config_modules.profiles import ProfileMeta
     from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
@@ -150,7 +150,8 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(unconf)
     )
     app._onboarding_mode = "auto"
-    app._onboarding_config_path = str(tmp_path / "config.yml")
+    # Как в main(): путь записи онбординга — Path (user_config_path).
+    app._onboarding_config_path = tmp_path / "config.yml"
 
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -160,6 +161,8 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
         assert isinstance(
             app.screen, TraceScreen
         )  # перешли на главный без краха
+        # Экраны (/config) читают путь строкой: Path ронял /config на startswith.
+        assert app._config_path == str(tmp_path / "config.yml")
 
 
 # ---------------------------------------------------------------------------
@@ -185,9 +188,9 @@ async def test_finish_onboarding_review_switches_to_main(
         "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
         "agent.model": "m",
     }
-    from gc_core.config_modules.profiles import ProfileMeta
     from dataclasses import replace
 
+    from gc_core.config_modules.profiles import ProfileMeta
     from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(

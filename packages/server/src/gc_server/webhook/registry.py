@@ -230,11 +230,19 @@ class AgentRunRegistry:
         # Итог, который уже пишется, не прерывается — его дожидаются.
         return self.live_tasks()
 
-    def stop(self, *, system: str, task_id: str) -> bool:
+    async def stop(self, *, system: str, task_id: str) -> bool:
+        """Снять свой прогон. True — когда текущая работа хода снята.
+
+        Звать из корутины цикла прогона: ожидание отдаёт цикл.
+        Потолок — ``TimeoutError``, не True.
+        """
         key = _make_registry_key(system, task_id)
         with self._lock:
             run = self._runs.get(key)
         if run is None:
             return False
         run.executor.stop_run()
+        gate = getattr(run.executor, "user_stop", None)
+        if gate is not None:
+            await gate.await_settled()
         return True

@@ -559,6 +559,11 @@ class AgentExecutor:
         #: Вопрос, на котором приостановлен последний ход (``{call_id,
         #: question}``), или ``None``.
         self.last_pending_question: Optional[dict] = None
+
+        from gc_core.user_stop import UserStop
+
+        self.user_stop = UserStop()
+
         self.last_closing_reply: str = ""
 
     def take_undelivered_messages(self) -> list[dict]:
@@ -1467,6 +1472,11 @@ class AgentExecutor:
             self._state = None
             self._accounting_closed = False
         settings = settings_of(self._ctx)
+        # Неверный persist отбит ещё в ``arun`` — раньше стопа: ход, который
+        # не начнётся, снятие не вооружает.
+        self.user_stop.prepare_run(
+            asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
+        )
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else settings.agent.verbose
@@ -1693,6 +1703,10 @@ class AgentExecutor:
         queued_before_loop = await self._atake_pending_messages()
         if queued_before_loop:
             messages = [*messages, *queued_before_loop]
+        from gc_core.user_stop import bind_user_stop
+
+        _stop_bound = bind_user_stop(self.user_stop)
+        _stop_bound.__enter__()
         try:
             response = await arun_agent(
                 messages,
@@ -1733,6 +1747,7 @@ class AgentExecutor:
             )
             self.last_closing_reply = getattr(state, "closing_reply", "")
         finally:
+            _stop_bound.__exit__(None, None, None)
             await _stop_lease_keeper(poller)
             await _stop_lease_keeper(keeper)
             state_ops.leave(state)
@@ -2053,6 +2068,8 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+            run_logger = getattr(self._ctx, "logger", None)
+        self.user_stop.request(run_logger)
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

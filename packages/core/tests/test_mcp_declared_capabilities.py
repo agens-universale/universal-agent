@@ -73,16 +73,23 @@ def test_client_has_no_incoming_request_handler():
             f"{module.__name__}: похоже, обработчик roots появился — пересмотреть _UNIMPLEMENTED"
         )
 
-    # Читатель ответов отбирает строки по совпадению id и молча пропускает
-    # всё остальное — то есть входящий запрос сервера просто теряется.
+    # Разбор строки общий: без id это не ответ на наш запрос, и его
+    # пропускают. Входящий запрос сервера (тоже без нашего id) теряется.
     import inspect
 
     body = inspect.getsource(
+        persistent_stdio.PersistentStdioSession._match_line
+    )
+    assert 'if "id" not in obj' in body and "return False, {}" in body, (
+        "_match_line изменился — проверить, не появилась ли обработка "
+        "серверных запросов (тогда capabilities можно расширять)"
+    )
+    reader = inspect.getsource(
         persistent_stdio.PersistentStdioSession._read_matching
     )
-    assert 'if "id" not in obj' in body and "continue" in body, (
-        "_read_matching изменился — проверить, не появилась ли обработка "
-        "серверных запросов (тогда capabilities можно расширять)"
+    assert "_match_response" in reader and '"method"' not in reader, (
+        "_read_matching сам разбирает метод — проверить обработчик "
+        "входящих запросов"
     )
 
 

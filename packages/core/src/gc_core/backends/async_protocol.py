@@ -16,10 +16,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import threading
 from typing import Any, Optional, Protocol, runtime_checkable
 
 from gc_core.backends.protocol import ExecResult
+from gc_core.user_stop import (
+    UserStopInterrupt,
+    await_cancelled,
+    current_user_stop,
+    interrupted_code,
+)
 
 
 @runtime_checkable
@@ -100,7 +108,9 @@ class SyncExecAdapter:
         return self._backend
 
     async def aexec(self, command: str, **kwargs: Any) -> ExecResult:
-        return await self._off_loop(self._backend.exec, command, **kwargs)
+        return await self._aexec_stopping(
+            self._backend.exec, command, **kwargs
+        )
 
     async def aexec_raw(self, command: str, **kwargs: Any) -> ExecResult:
         # `exec_raw`, если чужой бэкенд его знает, иначе `exec`: у хоста
@@ -108,13 +118,54 @@ class SyncExecAdapter:
         fn = getattr(self._backend, "exec_raw", None)
         if not callable(fn):
             fn = self._backend.exec
-        return await self._off_loop(fn, command, **kwargs)
+        return await self._aexec_stopping(fn, command, **kwargs)
 
     async def aexec_argv(self, argv: list, **kwargs: Any) -> ExecResult:
-        return await self._off_loop(self._backend.exec_argv, argv, **kwargs)
+        return await self._aexec_stopping(
+            self._backend.exec_argv, argv, **kwargs
+        )
 
     async def arun_python(self, code: str, **kwargs: Any) -> ExecResult:
-        return await self._off_loop(self._backend.run_python, code, **kwargs)
+        return await self._aexec_stopping(
+            self._backend.run_python, code, **kwargs
+        )
+
+    def _killer(self) -> Any:
+        for name in ("astop", "stop_exec"):
+            fn = getattr(self._backend, name, None)
+            if callable(fn):
+                return fn
+        return None
+
+    async def _aexec_stopping(
+        self, fn: Any, *args: Any, **kwargs: Any
+    ) -> ExecResult:
+        """Чужой порт: снять, если он это умеет, иначе оборвать ожидание сразу."""
+        stop = current_user_stop()
+        if stop is None:
+            return await self._off_loop(fn, *args, **kwargs)
+        if stop.requested:
+            return _stopped_before_start()
+        killer = self._killer()
+        task = asyncio.create_task(self._off_loop(fn, *args, **kwargs))
+
+        try:
+            async with stop.arm(
+                kind="exec",
+                backend=type(self._backend).__name__,
+                release=lambda: _release_sync_exec(task, killer),
+                unkillable=killer is None,
+            ) as armed:
+                result = await task
+            _mark_user_stop(result, armed.fired)
+            return result
+        except UserStopInterrupt:
+            await await_cancelled(task)
+            return _stopped_before_start()
+        except asyncio.CancelledError:
+            if stop.requested:
+                return _stopped_before_start()
+            raise
 
     @staticmethod
     async def _off_loop(fn: Any, *args: Any, **kwargs: Any) -> ExecResult:
@@ -123,6 +174,32 @@ class SyncExecAdapter:
         return await run_abandonable_in(
             _EXEC_SLOTS, fn, *args, _thread_name="sync-exec", **kwargs
         )
+
+
+async def _release_sync_exec(task: asyncio.Task, killer: Any) -> None:
+    if killer is not None:
+        result = killer()
+        if inspect.isawaitable(result):
+            await result
+    if not task.done():
+        task.cancel()
+
+
+def _mark_user_stop(result: ExecResult, fired: bool) -> None:
+    if fired and not getattr(result, "stopped_by_user", False):
+        result.stopped_by_user = True
+        result.timed_out = False
+        result.return_code = interrupted_code(result.return_code)
+
+
+def _stopped_before_start() -> ExecResult:
+    """Вызов не стартовал: пустой вывод, в лог ничего не пишем."""
+    return ExecResult(
+        return_code=interrupted_code(None),
+        stdout="",
+        stderr="",
+        stopped_by_user=True,
+    )
 
 
 def aexec_port(backend: Any) -> AsyncExecPort:

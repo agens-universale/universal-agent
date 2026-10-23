@@ -115,7 +115,12 @@ class ResponsesFacade:
                     thread_key(record.thread_id), target=response_id
                 )
             return record.response if record is not None else {}
-        await live.request_stop()
+        try:
+            await live.request_stop()
+        except TimeoutError as exc:
+            raise ApiError(
+                500, "server_error", str(exc) or "user stop did not settle"
+            ) from exc
         await live.done.wait()
         return await live.result()
 

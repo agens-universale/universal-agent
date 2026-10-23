@@ -16,9 +16,10 @@ from gc_server.chat.errors import ApiError, error_payload
 from gc_server.chat.tool_flow import ToolFlow
 from gc_server.chat.turn_common import (
     TurnLifecycle,
+    astop_agent,
     error_message,
+    log_forgotten_stop,
     outcome_of,
-    stop_agent,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,12 +73,13 @@ class TurnRun(TurnLifecycle):
             if self.sealed:
                 return
             self.cancel_requested = True
-        stop_agent(self.agent)
+        await astop_agent(self.agent)
 
     def stop_if_open(self) -> None:
         if self.sealed or self.cancel_requested:
             return
-        asyncio.get_running_loop().create_task(self.request_stop())
+        task = asyncio.get_running_loop().create_task(self.request_stop())
+        task.add_done_callback(log_forgotten_stop)
 
     async def _forward(self) -> None:
         if self.cancel_requested:
