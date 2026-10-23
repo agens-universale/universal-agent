@@ -292,7 +292,8 @@ def _write_reopen(tmp_path, steps, *, calls) -> None:
 async def test_p418_live_equals_reopen(tmp_path):
     """`p4-18-agent`: вживую, после возврата и в превью — один список
     строк; под заголовком-ролью — задача `└` (часть блока, не событие),
-    окно 3 последних события, `… ещё 1` — под текстом задачи."""
+    окно 3 последних события, `… ещё 1` — в колонке вложенных глифов,
+    без `└` (владелец 2026-10-23)."""
     steps = _p418()
     calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
     live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
@@ -310,7 +311,7 @@ async def test_p418_live_equals_reopen(tmp_path):
     assert _agent_rows(live) == [
         "● Agent  Worker · 2с",
         "  └ проверка клиента",
-        "    … ещё 1",
+        "  … ещё 1",
         "  ● Explored",
         "    └ … ещё 1",
         "      Read  client/m1.py · 2с",
@@ -319,6 +320,38 @@ async def test_p418_live_equals_reopen(tmp_path):
         "  ● Ran  uv run pytest -q · 2с",
         "  ● Клиент читает таймаут из конфига.",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("output", "reason"),
+    [("failed", "сбой субагента"), ("cancelled", "отменено")],
+)
+async def test_failed_agent_marker_below_consequences(
+    tmp_path, output, reason
+):
+    """`Agent` со сбоем или стопом: под заголовком `└ задача` и
+    `└ причина`, маркер окна — ниже всех следствий, в колонке вложенных
+    глифов."""
+    stopped = output == "cancelled"
+    thread = _Thread(tmp_path, status="stopped")
+    done = _CANCELLED if stopped else _FAILED
+    thread.add(_agent_call(), dict(_agent_done(), output=done))
+    thread.record({}, stopped=stopped)
+    _sidecar(tmp_path, _p418())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        lines = _agent_rows(_rows(pilot))
+    assert lines[1:4] == [
+        "  └ проверка клиента",
+        f"  └ {reason}",
+        "  … ещё 1",
+    ]
+
+
+_FAILED = json.dumps(
+    {"ok": False, "error": {"code": "failed", "message": "сбой субагента"}}
+)
 
 
 _FINISH = (
@@ -357,7 +390,7 @@ async def test_nested_finish_row_last_event(tmp_path):
     assert live == reopen == preview
     assert _agent_rows(live)[1:] == [
         "  └ проверка клиента",
-        "    … ещё 1",
+        "  … ещё 1",
         "  ● Explored",
         "    └ Read  client/m0.py · 2с",
         "  ● Готово.",
@@ -406,7 +439,7 @@ async def test_agent_window_expands_on_click(tmp_path):
         await pilot.click(collapse)
         await pilot.pause()
         lines = _agent_rows(_rows(pilot))
-        assert lines[2] == "    … ещё 1"
+        assert lines[2] == "  … ещё 1"
         assert "  ● Смотрю, где клиент берёт таймаут." not in lines
         assert not any("свернуть" in line for line in lines)
 

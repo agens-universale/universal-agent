@@ -7,8 +7,10 @@
 строк``, ``− свернуть``), диффы членов (и разделитель ханков ``⋮`` под
 номерами), продолжение превью; 6 — ``└ следствие`` члена. После ``Agent``
 в колонке ``c``: ``└ задача`` — в ``c + 2`` (перенос — в ``c + 4``),
-маркер окна ``… ещё N`` и ``− свернуть`` раскрытого окна — в ``c + 4``,
-вложенные глифы — в ``c + 2``, и база сетки сдвигается туда же.
+маркер окна ``… ещё N`` — без ``└``, в ``c + 2`` (колонка вложенных
+глифов, под всеми следствиями ``Agent``), ``− свернуть`` раскрытого окна —
+в ``c + 4``, вложенные глифы — в ``c + 2``, и база сетки сдвигается туда
+же.
 
 ``rich`` и ``gc_tui`` импортируются лениво: тест-кит от них не зависит.
 """
@@ -29,7 +31,8 @@ _DONE_WORDS = frozenset(
 _DIFF = re.compile(r"^( *)(\d+) ([+\- ]|$)")
 # Разделитель ханков диффа — под последней клеткой колонки номеров.
 _HUNK_GAP = re.compile(r"^( *)(⋮)$")
-_CTL = ("+ ", "− свернуть", "… ещё")
+_MORE = "… ещё"
+_CTL = ("+ ", "− свернуть", _MORE)
 _EXPAND = re.compile(r"\+ ещё (\d+) (\w+)")
 _TIMER = re.compile(r"· \d+[чмс]( \d+[мс])?$")
 
@@ -190,6 +193,8 @@ class _Grid:
         self._prev = ("diff", dcol)
 
     def _branch(self, n: int, row: Any, text: str, col: int) -> None:
+        if self._agent_level() and text.startswith(_MORE):
+            self._fail(n, "маркер окна `Agent` с `└`")
         reason = self._fg(row, col + 2)
         self._check_timer(n, text, reason, col)
         self._check_reason_colour(n, reason, col)
@@ -235,6 +240,12 @@ class _Grid:
             self._fail(n, "причина одиночного вызова не цветом исхода")
 
     def _control(self, n: int, text: str, col: int) -> None:
+        if self._agent_level() and text.startswith(_MORE):
+            if col != self._nest:
+                want = f"в колонке {col}, ждали {self._nest}"
+                self._fail(n, f"маркер окна `Agent` {want}")
+            self._prev = ("ctl", col)
+            return
         if col != self._base + 4 and not self._agent_collapse(text, col):
             want = self._base + 4
             self._fail(n, f"управление в колонке {col}, ждали {want}")
@@ -243,6 +254,10 @@ class _Grid:
                 self._fail(n, "фраза раскрытия не «+ ещё N строк»")
             self._pending = n
         self._prev = ("ctl", col)
+
+    def _agent_level(self) -> bool:
+        """Строки под самим ``Agent`` — до его первого вложенного события."""
+        return self._ev_word == "Agent" and self._nest == self._base + 2
 
     def _agent_collapse(self, text: str, col: int) -> bool:
         """``− свернуть`` раскрытого окна ``Agent`` — последняя строка его

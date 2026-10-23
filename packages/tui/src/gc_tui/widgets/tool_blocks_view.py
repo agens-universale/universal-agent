@@ -124,8 +124,9 @@ class BlockHost(Protocol):
 
 class BlockAction(NoSelectStatic):
     """Фраза блока: `… ещё N`, `+ ещё N строк`, `− свернуть`. Маркер окна
-    над членами — с `└ ` в колонке 2, прочие — в колонке 4; клик — тогл.
-    Строка незаписанных файлов кликом ничего не делает."""
+    над членами — с `└ ` в колонке 2, прочие — в колонке 4; маркер окна
+    `Agent` — без `└`, в колонке его вложенных глифов (`mark` пуст); клик
+    — тогл. Строка незаписанных файлов кликом ничего не делает."""
 
     DEFAULT_CSS = "BlockAction { height: auto; width: 1fr; }"
     can_focus = False
@@ -139,7 +140,7 @@ class BlockAction(NoSelectStatic):
         level: str,
         key: str,
         depth: int,
-        lead: bool,
+        mark: str,
         clickable: bool = True,
     ) -> None:
         classes = "trace-action block-action" if clickable else "block-note"
@@ -148,13 +149,13 @@ class BlockAction(NoSelectStatic):
         self.key = key
         self.phrase = ""
         self._depth = depth
-        self._lead = lead
+        self._mark = mark
         self._clickable = clickable
 
     def set_phrase(self, phrase: str) -> None:
         self.phrase = phrase
         text = Text(level_prefix(self._depth + 1))
-        text.append("└ " if self._lead else "  ", style=DIM)
+        text.append(self._mark, style=DIM)
         # Цвет фразы — от CSS (`.block-action`, ховер `.trace-action:hover`).
         text.append(phrase)
         self.update(text)
@@ -418,14 +419,20 @@ class ToolBlocksView:
             if phrase.parent is not None and (before or after) is not phrase:
                 phrase.parent.move_child(phrase, before=before, after=after)
             return
-        # Фраза окна субагента — от колонки глифа его событий, без `└`:
-        # `└` под `Agent` — у строки задачи (§7).
+        # Фразы окна субагента — от колонки глифа его событий (§7):
+        # маркер — в ней же и без `└` (`└` под `Agent` — у строки задачи),
+        # `− свернуть` — на шаг глубже.
         window = d.block == AGENT_WINDOW
+        top = d.slot == "top"
+        if window:
+            mark = "" if top else "  "
+        else:
+            mark = "└ " if top else "  "
         phrase = BlockAction(
             level=self.level,
             key=key,
             depth=self.depth - 1 if window else self.depth,
-            lead=d.slot == "top" and not window,
+            mark=mark,
             clickable=d.slot != "unrecorded",
         )
         self.register(key, phrase)

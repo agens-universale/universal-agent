@@ -141,8 +141,10 @@ P4_14_EDITED_3 = [
 P4_18_AGENT = [
     _prose("Поручу проверку клиента субагенту."),
     BLANK,
-    _head(OK, "Agent", "  worker · «проверка клиента» · 1м 12с"),
-    _lead_ctl("… ещё 1"),
+    _head(OK, "Agent", "  Worker · 1м 12с"),
+    _lead_ctl("Проверь, где клиент берёт таймаут, и прогони"),
+    _r(f"{_pad(4)}тесты пакета…"),
+    _r(f"{_pad(2)}… ещё 1", ("… ещё 1", MUTED)),
     _head(OK, "Explored", x=2),
     _lead_ctl("… ещё 1", x=2),
     _member("Read", "client/config.py · 40 строк", "1с", x=2),
@@ -151,6 +153,7 @@ P4_18_AGENT = [
     _head(OK, "Ran", "  uv run pytest tests -q · 11с", x=2),
     _out("42 passed in 3.10s", lead=True, x=2),
     _prose("Клиент читает таймаут из конфига, тесты проходят.", x=2),
+    _head(OK, "Finished", "  full_solution", x=2),
     BLANK,
     _prose("Субагент подтвердил: таймаут и ретраи работают."),
 ]
@@ -291,10 +294,26 @@ VIOLATIONS = {
     "nested-glyph-in-c-plus-4": (
         [
             _head(OK, "Agent", "  worker · 1с"),
-            _lead_ctl("… ещё 1"),
+            _lead_ctl("задача"),
             _r("     ● Explored", ("●", OK)),
         ],
         "строка 3: глиф в колонке 4",
+    ),
+    "agent-marker-in-c-plus-4": (
+        [
+            _head(OK, "Agent", "  Worker · 1с"),
+            _lead_ctl("задача"),
+            _ctl("… ещё 1"),
+        ],
+        "строка 3: маркер окна `Agent` в колонке 4, ждали 2",
+    ),
+    "agent-marker-with-branch": (
+        [
+            _head(OK, "Agent", "  Worker · 1с"),
+            _lead_ctl("задача"),
+            _lead_ctl("… ещё 1"),
+        ],
+        "строка 3: маркер окна `Agent` с `└`",
     ),
     "agent-expand-phrase-in-c-plus-4": (
         [
