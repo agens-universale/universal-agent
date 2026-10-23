@@ -128,3 +128,38 @@ def test_a_junction_is_recognised_by_its_reparse_tag(monkeypatch, tmp_path):
 
     assert paths_mod.goes_through_link(str(tmp_path), "j/a.py")
     assert not paths_mod.goes_through_link(str(tmp_path), "cloud/a.py")
+
+
+# --- собственные данные gc -------------------------------------------------
+
+
+def test_own_data_inside_project_is_not_tracked(launch_root):
+    """Каталог данных gc внутри проекта отсекается целиком, файл данных — сам
+    по себе: соседний одноимённого префикса файл остаётся правкой проекта."""
+    own = [str(launch_root / "threads"), str(launch_root / "hist.jsonl")]
+    (launch_root / "threads").mkdir()
+
+    def key(rel):
+        return canonical_path_key(
+            str(launch_root / rel), str(launch_root), own_data=own
+        )
+
+    assert key("threads/edits_cli_th1.jsonl") is None
+    assert key("threads/nested/new.txt") is None
+    assert key("hist.jsonl") is None
+    assert key("hist.jsonl.bak") == "hist.jsonl.bak"
+    assert key("threads_old/a.txt") == "threads_old/a.txt"
+    assert key("src/foo.py") == "src/foo.py"
+
+
+def test_own_data_dir_holding_the_project_does_not_swallow_it(
+    launch_root,
+):
+    """Каталог данных, внутри которого лежит сам проект, не исключается: иначе
+    отслеживание правок умерло бы целиком."""
+    key = canonical_path_key(
+        str(launch_root / "src" / "foo.py"),
+        str(launch_root),
+        own_data=[str(launch_root.parent), str(launch_root)],
+    )
+    assert key == "src/foo.py"

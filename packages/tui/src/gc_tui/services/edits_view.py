@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from gc_core.agent_edits import git_ops
-from gc_core.agent_edits.ctx import section_limit
+from gc_core.agent_edits.ctx import own_data_paths, section_limit
 from gc_core.agent_edits.deltas import (
     EMPTY_DELTA,
     FileDelta,
@@ -63,7 +63,7 @@ from gc_core.agent_edits.ladder import (
     session_step,
 )
 from gc_core.agent_edits.mode import resolve_mode
-from gc_core.agent_edits.paths import is_external_key
+from gc_core.agent_edits.paths import is_external_key, is_own_data
 from gc_core.agent_edits.revert import RevertOutcome, revert_paths
 from gc_core.agent_edits.snapshots import (
     SnapshotStore,
@@ -620,6 +620,13 @@ class EditsView:
         self._max_source_bytes, self._hunk_context_lines = diff_limits(
             settings
         )
+        # Собственные данные gc в проекте (журнал, треды, логи, история
+        # ввода) — не правки агента. Новые записи о них не появляются
+        # (`agent_edits.paths.is_own_data`), но журнал, записанный раньше,
+        # их знает: без фильтра экран показал бы их, а откат «Сессии»
+        # вернул бы журнал к началу сессии. Решение — на ключ, один раз.
+        self._own_data = own_data_paths(settings, threads_dir)
+        self._own_data_keys: Dict[str, bool] = {}
         self._mode: Optional[str] = None
         # Ключ включает ревизию HEAD (см. `session_view`): без неё коммит,
         # сделанный при открытом экране, не был бы виден. Читается она ФАЙЛАМИ
@@ -1388,10 +1395,27 @@ class EditsView:
             turn_id = self._last_turn_id_with_local_edits()
             if not turn_id:
                 return [], None
-            return self._journal.turn_records(turn_id), turn_id
+            return self._agent_records(
+                self._journal.turn_records(turn_id)
+            ), turn_id
         if source != SOURCE_SESSION:
             raise ValueError(f"неизвестный источник правок: {source!r}")
-        return self._journal.read_all(), None
+        return self._agent_records(self._journal.read_all()), None
+
+    def _agent_records(self, records: List[EditRecord]) -> List[EditRecord]:
+        """Записи без собственных данных gc (см. ``self._own_data``)."""
+        return [rec for rec in records if not self._is_own_data(rec.path)]
+
+    def _is_own_data(self, path_key: str) -> bool:
+        known = self._own_data_keys.get(path_key)
+        if known is None:
+            known = is_own_data(
+                abs_path_for_key(self._launch_root, path_key),
+                self._launch_root,
+                self._own_data,
+            )
+            self._own_data_keys[path_key] = known
+        return known
 
     def _last_turn_id_with_local_edits(self) -> Optional[str]:
         """turn_id последнего хода, у которого есть хоть одна НЕ внешняя запись.
@@ -1407,7 +1431,9 @@ class EditsView:
         дойти до экрана.
         """
         for rec in reversed(self._journal.read_all()):
-            if not is_external_key(rec.path):
+            if not is_external_key(rec.path) and not self._is_own_data(
+                rec.path
+            ):
                 return rec.turn_id
         return None
 

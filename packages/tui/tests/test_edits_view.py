@@ -3604,3 +3604,46 @@ def test_view_after_a_commit_asks_git_status_only_about_journal_paths(
         assert tail and all(
             "p" in spec and "unrelated" not in spec for spec in tail
         ), args
+
+
+# --- собственные данные gc внутри проекта -----------------------------------
+
+
+def test_gc_own_data_in_journal_is_neither_shown_nor_reverted(tmp_path):
+    """Журнал, записанный до фикса, мог унести в «правки» собственные данные
+    gc, лежащие в проекте: сам журнал правок (каталог тредов) и лог прогона.
+    Экран их не показывает, а откат «Сессии» их не трогает — иначе журнал
+    вернулся бы к началу сессии. Правка файла проекта рядом откатывается."""
+    root = tmp_path / "proj"
+    threads_dir = root / "threads"
+    logs_dir = root / "logs"
+    logs_dir.mkdir(parents=True)
+    threads_dir.mkdir()
+    journal_key = "threads/edits_cli_th1.jsonl"
+    journal = EditsJournal(edits_journal_path(str(threads_dir), "cli", "th1"))
+    store = SnapshotStore(snapshots_root(str(root)), "cli_th1", threads_dir)
+    (root / "a.py").write_text("АГЕНТ\n", encoding="utf-8")
+    (logs_dir / "run.log").write_text("лог\n", encoding="utf-8")
+    store.capture_session("a.py", "ДО\n".encode())
+    store.capture_session(journal_key, b"")
+    store.capture_session("logs/run.log", b"")
+    for path in ("a.py", journal_key, "logs/run.log"):
+        journal.append(_rec(path))
+    journal_bytes = (root / journal_key).read_bytes()
+    view = EditsView(
+        str(threads_dir),
+        "cli",
+        "th1",
+        str(root),
+        as_settings({"paths.logs_dump_dir": str(logs_dir)}),
+    )
+
+    rows = view.session_view(SOURCE_SESSION).active
+    assert [row.entry.path for row in rows] == ["a.py"]
+    outcome = view.revert(
+        SOURCE_SESSION, ["a.py", journal_key, "logs/run.log"]
+    )
+
+    assert outcome.restored == ["a.py"]
+    assert (root / journal_key).read_bytes() == journal_bytes
+    assert (logs_dir / "run.log").read_text(encoding="utf-8") == "лог\n"

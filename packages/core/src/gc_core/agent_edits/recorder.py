@@ -26,6 +26,7 @@ from gc_core.agent_edits.ctx import (
     identity_from_ctx,
     launch_root_from_ctx,
     limit,
+    own_data_from_ctx,
     protected_extra_from_ctx,
     recording_enabled,
 )
@@ -243,6 +244,7 @@ def _path_key_for(ctx: Any, abs_path: str, launch_root: str) -> str | None:
         abs_path,
         launch_root,
         protected_extra=protected_extra_from_ctx(ctx),
+        own_data=own_data_from_ctx(ctx),
     )
 
 
