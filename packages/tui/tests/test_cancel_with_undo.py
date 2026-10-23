@@ -307,7 +307,7 @@ async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
 @pytest.mark.asyncio
 async def test_cancel_with_undo_skipped_when_events_present():
     """Ядро отметило вывод прогона → НЕ cancel-with-undo, нормальная
-    отмена: индикатор → cancelled."""
+    отмена: откат не заказан, исхода в индикаторе нет (S10 §3.3)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -332,15 +332,14 @@ async def test_cancel_with_undo_skipped_when_events_present():
         scr._show_thinking_indicator(state="thinking")
         scr._cmd_stop()
         await pilot.pause(0.5)
-        # Индикатор остаётся в терминальном состоянии cancelled.
-        ind = scr._thinking
-        assert ind is not None
-        assert ind._state == "cancelled"
+        assert scr._pending_orphan_cleanups == []
+        assert scr._thinking is None
 
 
 @pytest.mark.asyncio
 async def test_cancel_with_undo_skipped_when_input_not_empty():
-    """input.text != "" → НЕ cancel-with-undo, нормальная отмена: индикатор → cancelled."""
+    """input.text != "" → НЕ cancel-with-undo, нормальная отмена: откат не
+    заказан, исхода в индикаторе нет (S10 §3.3)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -366,10 +365,8 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         scr._show_thinking_indicator(state="thinking")
         scr._cmd_stop()
         await pilot.pause(0.5)
-        # Индикатор остаётся в терминальном состоянии cancelled.
-        ind = scr._thinking
-        assert ind is not None
-        assert ind._state == "cancelled"
+        assert scr._pending_orphan_cleanups == []
+        assert scr._thinking is None
 
 
 class _OutputRunner:

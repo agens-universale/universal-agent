@@ -2,7 +2,10 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
+async def test_instant_stop_leaves_no_indicator(tmp_path, monkeypatch):
+    """Стоп хода, который тут же кончился: исхода в индикаторе нет (S10
+    §3.3) — индикатор и бар уходят в том же вызове, строка итога — в
+    ленте (`test_stopping_indicator`)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -32,9 +35,8 @@ async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
 
         scr._cmd_stop()
         await pilot.pause()
-        assert scr._thinking is not None
-        assert scr._thinking._state == "cancelled"
-        assert scr._thinking._render_text().plain == "■ Отменено"
+        assert scr._thinking is None
+        assert not scr.query_one("#indicator-bar").has_class("-turn")
 
 
 @pytest.mark.asyncio

@@ -222,8 +222,8 @@ from pathlib import Path
 @pytest.mark.asyncio
 async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
     """После прямой остановки runner-а (runner.stop() без /stop → last_stop_requested
-    не выставляется, но runner._stop_requested=True) индикатор не уничтожается,
-    а переходит в состояние «cancelled» — прямой stop не «completed»."""
+    не выставляется, но runner._stop_requested=True) итог хода — строка
+    «■ Отменено» в ленте (S10), а не «completed»; индикатора нет."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
@@ -264,9 +264,12 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
         pilot.app.active_runner.stop()
         await pilot.pause(0.5)
 
-        assert len(pilot.app.query(ThinkingIndicator)) == 1
-        ind = pilot.app.query_one(ThinkingIndicator)
-        assert ind._state == "cancelled"  # прямой stop → stopped → cancelled
+        from gc_tui.widgets.turn_line import TurnLine
+
+        assert len(pilot.app.query(ThinkingIndicator)) == 0
+        # прямой stop → stopped → «■ Отменено»
+        lines = [line.text.plain for line in pilot.app.query(TurnLine)]
+        assert lines == ["■ Отменено"]
 
 
 @pytest.mark.asyncio

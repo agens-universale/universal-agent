@@ -65,7 +65,8 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
     """Esc в live ask_human → clean stop треда:
     - runner.stop() вызван (флаг stop_requested выставлен);
     - banner снят, ask_human_state сброшен;
-    - ThinkingIndicator переходит в состояние «cancelled» (вместо [stopped]-строки в трейсе);
+    - ход кончился сразу — индикатора и бара нет (исход — строкой итога в
+      ленте, S10 §4.4);
     - active_runner обнулён (clean-restart pattern)."""
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
@@ -120,13 +121,9 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
         assert app.active_runner is None, (
             "active_runner должен быть обнулён (clean-restart pattern)"
         )
-        # Индикатор в состоянии cancelled (вместо [stopped]-строки в трейсе).
-        assert screen._thinking is not None, (
-            "ThinkingIndicator должен остаться (cancelled-state)"
-        )
-        assert screen._thinking._state == "cancelled", (
-            f"ThinkingIndicator должен быть в состоянии 'cancelled', got {screen._thinking._state!r}"
-        )
+        # Исход — не в индикаторе: ход кончился, индикатора и бара нет.
+        assert screen._thinking is None
+        assert not screen.query_one("#indicator-bar").has_class("-turn")
 
 
 @pytest.mark.asyncio

@@ -4,9 +4,9 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_cmd_stop_sets_indicator_cancelled():
-    """После _cmd_stop (при живом индикаторе) индикатор переходит в состояние
-    «cancelled» («■ Отменено») — отдельная [stopped]-строка в трейсе не добавляется."""
+async def test_cmd_stop_of_ended_run_drops_indicator():
+    """После _cmd_stop хода, который тут же кончился, индикатора нет: исход
+    — строкой итога в ленте (S10 §3.3), не состоянием индикатора."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
@@ -30,10 +30,7 @@ async def test_cmd_stop_sets_indicator_cancelled():
 
         scr._cmd_stop()
         await pilot.pause()
-        # Индикатор остаётся, но в терминальном состоянии «cancelled».
-        assert len(scr.query(ThinkingIndicator)) == 1
-        ind = scr.query_one(ThinkingIndicator)
-        assert ind._state == "cancelled"
+        assert len(scr.query(ThinkingIndicator)) == 0
 
 
 @pytest.mark.asyncio

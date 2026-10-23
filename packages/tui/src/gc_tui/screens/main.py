@@ -2703,13 +2703,21 @@ class TraceScreen(Screen):
         (§3.2), если под ней нет отправленной незаписанной реплики, —
         тогда следующий ход уже начался; прошлая оседает."""
         fresh = not self._outcome_superseded and not self._sent_reply_below()
+        summary = None
+        stale = self._fallback_line_for(outcome.opened_by)
+        if stale is not None:
+            # Запись хода, у которого уже стоит строка без записи (§3.6):
+            # одна строка на ход — запись заменяет её; осевшая остаётся
+            # осевшей, у свежей — её сводка.
+            fresh, summary = fresh and stale.is_fresh, stale.summary
+            stale.remove()
         self._settle_turn_line()
         # Прошлые строки осели — видны и при стоящем баре (перерисовка
         # посреди хода): за баром ждёт только строка последнего хода.
         self._reveal_held()
         line = build_turn_line(outcome)
         # Причина записи хранится и у осевшей строки (освежить её снова).
-        line.freshen(None, outcome_error(outcome))
+        line.freshen(summary, outcome_error(outcome))
         if not fresh:
             line.settle()
         if self._bar_wanted():
@@ -2718,6 +2726,29 @@ class TraceScreen(Screen):
             line.hold()
             self._held_reveals.append(line.reveal)
         self._trace_mount(line, above_sent=True)
+
+    def _fallback_line_for(self, opened_by: Optional[str]):
+        """Строка без записи того же хода (запасной исход раннера или
+        статус сессии), если после неё ход не сменился: ниже — только
+        очередь и отправленное. Пустой `opened_by` у записи или у строки —
+        самая новая такая строка; иначе — строка той же реплики."""
+        from gc_tui.widgets.user_reply import UserReplyContainer
+
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        tail = self._queued_tail(trace, sent=True)
+        for widget in reversed(trace.children):
+            if widget in tail:
+                continue
+            if isinstance(widget, UserReplyContainer):
+                return None
+            if isinstance(widget, TurnLine):
+                if widget.recorded:
+                    return None
+                ids = (opened_by, widget.opened_by)
+                if None in ids or opened_by == widget.opened_by:
+                    return widget
+                return None
+        return None
 
     def _sent_reply_below(self) -> bool:
         """В хвосте ленты — отправленная реплика, ещё не записанная ядром."""
@@ -5270,7 +5301,9 @@ class TraceScreen(Screen):
         if not (self._was_running or self._run_pending):
             return
         current = getattr(self.app, "active_runner", None)
-        runner = self._watched_runner or current
+        # Стоп раньше первого тика, увидевшего прогон: прогон — тот, что
+        # дорабатывает, а не сменный раннер (S10 §4.4).
+        runner = self._watched_runner or self._stopping_runner or current
         if (
             runner is current
             and runner is not None
@@ -5790,23 +5823,11 @@ class TraceScreen(Screen):
                     pass
         self._was_summarizing = summarizing
 
-        # Инвариант: нет активной задачи (пустое состояние) → никакого активного
-        # индикатора. Терминальные исходы персистентны до следующего user-send —
-        # не гасим их здесь (/_stop, Esc в ask_human).
+        # Инвариант: нет активной задачи (пустое состояние) → индикатора нет.
+        # Без открытого треда нет и бара; итог встанет строкой по записи,
+        # когда тред откроют (S10 §4.4).
         if self._active_task_id is None:
-            ask_human_active = (
-                getattr(self.app, "tui_state", None) is not None
-                and self.app.tui_state.ask_human_state is not None
-            )
-            # При живом ask_human индикатор может быть смонтирован до появления
-            # active_task_id (или после unmount task-switch), поэтому в этой
-            # ветке не уничтожаем его, а даём _stop_for_ask_human перевести
-            # в terminal-state (cancelled).
-            if not ask_human_active and (
-                self._thinking is None
-                or not is_terminal_indicator_state(self._thinking._state)
-            ):
-                self._destroy_thinking_indicator()
+            self._destroy_thinking_indicator()
             if not _frozen:
                 self._clear_stream_block()
             self._refresh_footer()
@@ -8160,12 +8181,15 @@ class TraceScreen(Screen):
         return runner is not None
 
     def _show_stop_state(self) -> None:
-        """Строка итога стопа (решение 26): ход ещё дорабатывает — один
-        мигающий `■`, кончился — ровный «■ Отменено»."""
-        if self._thinking is not None:
-            self._thinking.set_state(
-                "stopping" if self._stopping_alive() else "cancelled"
-            )
+        """Стоп хода (решение 26, S10 §4.4): поток дорабатывает — в баре
+        один мигающий `■`; уже вышел — строка итога стопа (из записи, без
+        неё — запасная «■ Отменено») и уход бара в этом же вызове."""
+        if self._stopping_alive():
+            self._show_thinking_indicator(state="stopping")
+            return
+        self._settle_ended_run()
+        # Работы нет: индикатор и бар уходят и без застанного тиком прогона.
+        self._destroy_thinking_indicator()
 
     def _can_cancel_with_undo(self) -> bool:
         """Откат отправки: агент ничего не выдал, поле пустое, очереди нет.

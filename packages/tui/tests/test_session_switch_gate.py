@@ -331,7 +331,12 @@ async def test_new_thread_line_does_not_blink_for_old_stop(tmp_path):
         scr._poll_active()
         await pilot.pause()
         assert scr._active_task_id == _B
-        assert scr._thinking._render_text().plain == "✓ Выполнил за 3с"
+        # Итог — строкой в ленте (S10), мигания чужого стопа нет.
+        from gc_tui.widgets.turn_line import TurnLine
+
+        assert scr._thinking is None
+        (line,) = scr.query(TurnLine).filter(".-latest")
+        assert line.text.plain == "✓ Выполнил за 3с"
 
 
 @pytest.mark.asyncio

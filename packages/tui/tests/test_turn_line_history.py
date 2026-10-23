@@ -1291,3 +1291,54 @@ async def test_bar_removal_deferred_under_select_freeze(tmp_path):
         assert not bar.has_class("-turn")
         assert not _held(line)
         assert line.is_fresh
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fallback_by", "record_by"),
+    [("u2", "u2"), (None, "u2"), ("u2", None)],
+)
+async def test_runner_fallback_line_replaced_by_late_record(
+    tmp_path, fallback_by, record_by
+):
+    """Запасная строка хода без записи (спадающий фронт раньше записи):
+    запись, дочитанная позже, заменяет её — один ход, одна строка. Пустой
+    `opened_by` у одной из двух — заменяется самая новая строка без
+    записи; свежесть сохраняется."""
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        thread = _Thread(tmp_path)
+        thread.seq = 2
+        thread.messages(_reply("u2"), _answer("a2"))
+        scr._poll_trace_tail()
+        scr._last_user_message_id = fallback_by
+        scr._show_turn_outcome("completed", False, None)
+        assert [line.recorded for line in _turn_lines(scr)] == [True, False]
+
+        thread.record(2, record_by)
+        scr._poll_trace_tail()
+        await pilot.pause()
+        first, second = _turn_lines(scr)
+        assert second.recorded
+        assert second.text.plain == _done_line(2)
+        assert second is _fresh_line(scr)
+        assert not first.is_fresh
+
+
+@pytest.mark.asyncio
+async def test_quit_mid_run_reopen_shows_line_at_end(tmp_path):
+    """`/quit` посреди хода, запись стопа не успела: при переоткрытии —
+    «■ Отменено» без времени по статусу `stopped`, в конце ленты."""
+    _write_thread(tmp_path, tui={"status": "stopped"})
+    thread = _Thread(tmp_path)
+    thread.turn(1)
+    thread.messages(_reply("u2"), _answer("a2"))
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        first, last = _turn_lines(scr)
+        assert scr.query_one("#trace").children[-1] is last
+        assert last is _fresh_line(scr)
+        assert last.text.plain == "■ Отменено"
+        assert last.recorded is False
+        assert not first.is_fresh
