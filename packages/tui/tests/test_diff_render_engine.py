@@ -935,3 +935,28 @@ def test_diff_changed_count():
 
     assert diff_changed_count(CTX_HUNKS) == 7
     assert diff_changed_count("") == 0
+
+
+def _accent_cells(render, line: int) -> list[int]:
+    """Клетки строки ``line`` с внутристрочным акцентом."""
+    row = render.text.plain.split("\n")[line]
+    hl = {Color.parse(DIFF_DEL_HL), Color.parse(DIFF_ADD_HL)}
+    return [i for i in range(len(row)) if _bg_at(render, line, i) in hl]
+
+
+def test_changed_only_pairs_accents_like_full_hunk():
+    """Пары «удалено / добавлено» для акцентов — по полному хэнку: удаление,
+    контекст, затем пара −/+ — свёрнуто подсвечено как раскрыто."""
+    hunks = (
+        "--- \n+++ \n@@ -1,4 +1,3 @@\n"
+        "-total = 3\n keep = 0\n-total = 1\n+total = 2\n"
+    )
+    full = render_hunks(hunks, path="a.py", syntax=False)
+    short = render_hunks(hunks, path="a.py", syntax=False, changed_only=True)
+    # Свёрнуто: строки 0, 1, 2 — это строки 0, 2, 3 полного тела.
+    for short_line, full_line in ((0, 0), (1, 2), (2, 3)):
+        assert _accent_cells(short, short_line) == _accent_cells(
+            full, full_line
+        )
+    assert _accent_cells(full, 0) == []
+    assert _accent_cells(full, 2) != []

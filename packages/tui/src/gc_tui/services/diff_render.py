@@ -28,6 +28,7 @@ from bisect import bisect_right
 from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from itertools import pairwise
 
 from gc_core.utils.file_text import split_lines_lf
 from rich.style import Style
@@ -256,8 +257,11 @@ class HunkBody:
             default=1,
         )
         self._gutter_w = max(self._gutter_w, min_gutter)
+        # Строки, перед которыми выброшен контекст: на них рвётся группа
+        # «удалено / добавлено» — пары акцентов те же, что в полном хэнке.
+        after_gap: set[int] = set()
         if changed_only:
-            rows = [row for row in rows if row.kind != "ctx"]
+            rows, after_gap = _drop_context(rows)
         total = sum(1 for row in rows if row.kind != "sep")
         # Перенос — ЯВНЫЙ, а не следствие известной ширины: ширину передают и
         # экраны правок, но там строка не переносится (по дизайну у них
@@ -337,7 +341,8 @@ class HunkBody:
             else None
         )
         self._code_spans: list | None = None
-        self._groups = _replace_groups(self.kinds)
+        breaks = [i for i, row in enumerate(self.rows) if id(row) in after_gap]
+        self._groups = _split_groups(self.kinds, breaks)
         self._group_ends = [end for _start, end in self._groups]
         self._done: set[int] = set()
         self._accents: dict[int, list[tuple[int, int]]] = {}
@@ -579,6 +584,36 @@ def _take(
     while taken and taken[-1].kind == "sep":
         taken.pop()
     return taken
+
+
+def _drop_context(rows: list[_Row]) -> tuple[list[_Row], set[int]]:
+    """Тело без строк контекста и `id` строк, перед которыми он был."""
+    kept: list[_Row] = []
+    after_gap: set[int] = set()
+    dropped = False
+    for row in rows:
+        if row.kind == "ctx":
+            dropped = True
+            continue
+        if dropped:
+            after_gap.add(id(row))
+        dropped = False
+        kept.append(row)
+    return kept, after_gap
+
+
+def _split_groups(
+    kinds: list[str], breaks: list[int]
+) -> list[tuple[int, int]]:
+    """Группы `_replace_groups`, разорванные перед позициями ``breaks``."""
+    groups: list[tuple[int, int]] = []
+    edges = [0, *breaks, len(kinds)]
+    for start, end in pairwise(edges):
+        groups += [
+            (start + a, start + b)
+            for a, b in _replace_groups(kinds[start:end])
+        ]
+    return groups
 
 
 def _replace_groups(kinds: list[str]) -> list[tuple[int, int]]:
