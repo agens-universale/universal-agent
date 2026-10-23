@@ -726,6 +726,12 @@ def _row_state_call(node) -> bool:
     )
 
 
-def test_rows_only_through_model():
-    owners = _row_state_calls(TUI_PKG / "screens" / "main.py")
+@pytest.mark.parametrize(
+    "module",
+    ["screens/main.py", "services/trace_render.py", "screens/preview.py"],
+)
+def test_rows_only_through_model(module):
+    """Живая лента, превью и общий рендер записей: состояние строки
+    вызова меняет только исполнитель блоков."""
+    owners = _row_state_calls(TUI_PKG / module)
     assert owners == set(), sorted(owners)

@@ -29,7 +29,6 @@ from gc_core.thread_store import (
     append_turn_outcome_record,
     edits_journal_path,
 )
-from gc_testkit.paths import TUI_PKG
 from gc_testkit.trace_grid import assert_trace_grid, trace_rows
 from gc_testkit.tui_support import tui_settings
 from rich.style import Style
@@ -538,32 +537,6 @@ async def test_preview_timers_from_outcome_calls(tmp_path):
         texts = [text for text, _ in _frame(pilot)]
     assert any("Read  client/x.py · 7 строк · 1с" in t for t in texts)
     assert any("Read  client/m3.py · 13 строк · 1с" in t for t in texts)
-
-
-def test_trace_render_rows_only_through_model():
-    """Страж: в `trace_render.py` нет прямых вызовов методов состояния
-    строки вызова — только через модель блоков."""
-    import ast
-
-    names = {
-        "set_result",
-        "mark_interrupted",
-        "set_active",
-        "pause",
-        "resume",
-        "set_edit_counts",
-    }
-    tree = ast.parse(
-        (TUI_PKG / "services" / "trace_render.py").read_text(encoding="utf-8")
-    )
-    calls = [
-        node.func.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in names
-    ]
-    assert calls == []
 
 
 class _FakeRunner:
