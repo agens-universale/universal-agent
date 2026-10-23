@@ -100,6 +100,16 @@ def output_texts(ran: RanResult) -> Optional[tuple[Text, Text]]:
     return collapsed, _lines_text(head, out.lines)
 
 
+def _reason(ev: TraceEvent, ran: Optional[RanResult]) -> str:
+    """Причина `└` исхода: у ошибки команды, чей вывод сам выражает исход
+    (код выхода, таймаут, фон), — пусто, без дубля общей ошибки тула."""
+    output = ran.output if ran is not None else None
+    own = output is not None and output.own_outcome
+    if ev.result_outcome == "error" and own:
+        return ""
+    return ev.summary
+
+
 class BlockHost(Protocol):
     """Куда исполнитель монтирует свои виджеты; удаления нет (§9.4)."""
 
@@ -252,7 +262,11 @@ class ToolBlocksView:
         row.set_result(summary=ev.summary, outcome=outcome)
         self.apply(
             self.model.result(
-                key, outcome, reason=ev.summary, executed=None, edit=edit
+                key,
+                outcome,
+                reason=_reason(ev, ran),
+                executed=None,
+                edit=edit,
             )
         )
         if ran is not None and self.model.kind_of(key) == BlockKind.RAN:

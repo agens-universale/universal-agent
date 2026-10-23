@@ -276,6 +276,53 @@ async def test_ran_failed_exit_code(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_ran_failed_one_reason(tmp_path):
+    """Упавшая команда: причина — одна строка `код выхода N`, общий
+    текст ошибки тула её не повторяет (§4)."""
+    thread = _Thread(tmp_path)
+    out = json.dumps(
+        {
+            "tool": "exec_python",
+            "ok": False,
+            "return_code": 1,
+            "timed_out": False,
+            "error": {
+                "type": "non_zero_exit",
+                "message": "Process exited with status 1",
+            },
+            "stdout": _channel(""),
+            "stderr": _channel("ls: no such dir\n"),
+        }
+    )
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        call = _run("x1", "ls /nope", name="exec_python")
+        await _tail(pilot, thread, call, _out("x1", out, "exec_python"))
+        lines = _rows(pilot)
+        assert lines[2:] == ["  └ код выхода 1", "    ls: no such dir"]
+
+
+@pytest.mark.asyncio
+async def test_ran_error_without_exit_code_keeps_reason(tmp_path):
+    """Ошибка до исполнения (кода выхода нет) — причина остаётся."""
+    thread = _Thread(tmp_path)
+    out = json.dumps(
+        {
+            "tool": "exec_command",
+            "ok": False,
+            "error": {"type": "invalid_args", "message": "bad cwd"},
+        }
+    )
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(pilot, thread, _run("x1", "ls"), _out("x1", out))
+        lines = _rows(pilot)
+        assert len(lines[2:]) == 1
+        assert lines[2].startswith("  └ ")
+        assert "bad cwd" in lines[2]
+
+
+@pytest.mark.asyncio
 async def test_ran_timeout(tmp_path):
     thread = _Thread(tmp_path)
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:

@@ -87,7 +87,12 @@ def _envelope(stdout: str, exit_code: int = 0) -> str:
             "command": "x",
             "exit_code": exit_code,
             "timed_out": False,
-            "error": None,
+            "error": None
+            if exit_code == 0
+            else {
+                "type": "non_zero_exit",
+                "message": f"Command exited with status {exit_code}",
+            },
             "stdout": {"content": stdout},
             "stderr": {"content": ""},
         },
@@ -430,6 +435,14 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert any("Edited 3 файла (+18 −0)" in t for t in texts)
     assert any(t.startswith("     Added gen.py (+4 −0)") for t in texts)
     assert any("Agent  проверка" in t for t in texts)
+    ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
+    assert texts[ran + 1 : ran + 4] == [
+        "   └ код выхода 1",
+        "     F",
+        "     failed 1",
+    ]
+    assert texts[ran + 4].startswith(" ")
+    assert "└" not in texts[ran + 4]
     start = texts.index(" ● Memory")
     assert texts[start : start + 5] == [
         " ● Memory",

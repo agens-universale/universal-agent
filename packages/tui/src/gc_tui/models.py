@@ -97,6 +97,13 @@ class CommandOutput:
     #: Строк записи за пределами превью; строка пропуска не считается.
     hidden: int
 
+    @property
+    def own_outcome(self) -> bool:
+        """Исход выражен самим выводом: код выхода, таймаут или фон —
+        общая причина ошибки тула его не повторяет."""
+        failed = self.exit_code not in (None, 0)
+        return failed or self.timed_out or self.background
+
 
 @dataclass
 class TraceEvent:

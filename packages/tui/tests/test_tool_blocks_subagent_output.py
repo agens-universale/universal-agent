@@ -60,7 +60,12 @@ def _envelope(stdout: str, *, exit_code: int = 0) -> str:
             "command": "x",
             "exit_code": exit_code,
             "timed_out": False,
-            "error": None,
+            "error": None
+            if exit_code == 0
+            else {
+                "type": "non_zero_exit",
+                "message": f"Command exited with status {exit_code}",
+            },
             "stdout": _channel(stdout),
             "stderr": _channel(""),
         },
