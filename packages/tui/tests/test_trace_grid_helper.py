@@ -184,6 +184,17 @@ P4_14_HUNK_GAP = [
     _diff(12, "+", "TIMEOUT_SEC = 30", 4),
 ]
 
+# Раскрытый дифф — с контекстом; пустая строка контекста — один номер.
+P4_14_OPEN_CONTEXT = [
+    _head(OK, "Edited", " 1 файл (+1 −1)"),
+    _file("client/config.py", " (+1 −1) · 1с        ❐", lead=True),
+    _r(f"{_pad(0)}{10:>{4 + 3}}   RETRIES = 3"),
+    _r(f"{_pad(0)}{11:>{4 + 3}}"),
+    _diff(12, "-", "TIMEOUT_SEC = 10", 4),
+    _diff(12, "+", "TIMEOUT_SEC = 30", 4),
+    _ctl("− свернуть"),
+]
+
 P4_19_FAILURES = [
     _prose("Посмотрю конфиг клиента и настройки окружения."),
     BLANK,
@@ -228,6 +239,7 @@ P4_22_EDIT_IN_GROUP = [
         P4_10_RAN_FILES,
         P4_14_EDITED_3,
         P4_14_HUNK_GAP,
+        P4_14_OPEN_CONTEXT,
         P4_18_AGENT,
         P4_18_AGENT_EXPANDED,
         P4_19_FAILURES,
@@ -239,6 +251,7 @@ P4_22_EDIT_IN_GROUP = [
         "p4-10",
         "p4-14",
         "p4-14-hunk-gap",
+        "p4-14-open-context",
         "p4-18",
         "p4-18-expanded",
         "p4-19",

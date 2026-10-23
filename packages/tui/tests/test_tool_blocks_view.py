@@ -212,7 +212,7 @@ def _record(call_id: str, lines: int, *, context: bool = False) -> EditRecord:
     body = "".join(f"+line {i}\n" for i in range(lines))
     head = f"@@ -0,0 +1,{lines} @@\n"
     if context:
-        head = f"@@ -1,3 +1,{lines + 3} @@\n ctx 1\n ctx 2\n ctx 3\n"
+        head = f"@@ -1,3 +1,{lines + 3} @@\n ctx 1\n \n ctx 3\n"
     return EditRecord(
         path=f"{call_id}.py",
         turn_id="t1",
@@ -276,7 +276,7 @@ async def test_group_preview_changed_lines_then_full_diff():
         rows = trace_rows(app)
         assert_trace_grid(rows, origin=ORIGIN)
         lines = _plain(rows)
-        assert sum("ctx" in line for line in lines) == 6
+        assert sum("ctx" in line for line in lines) == 4
         assert sum("+line" in line for line in lines) == 6
 
 

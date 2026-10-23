@@ -28,7 +28,8 @@ _LIVE_WORDS = frozenset(
 _DONE_WORDS = frozenset(
     {"Explored", "Ran", "Added", "Edited", "Deleted", "Fetched", "Finished"}
 )
-_DIFF = re.compile(r"^( *)(\d+) ([+\- ]|$)")
+# Строка диффа: номер и маркер; у пустой строки контекста — только номер.
+_DIFF = re.compile(r"^( *)(\d+)(?: [+\- ]|$)")
 # Разделитель ханков диффа — под последней клеткой колонки номеров.
 _HUNK_GAP = re.compile(r"^( *)(⋮)$")
 _MORE = "… ещё"
