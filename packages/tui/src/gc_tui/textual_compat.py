@@ -64,6 +64,12 @@ def apply_textual_patches() -> bool:
     return True
 
 
+def is_being_removed(widget: Widget) -> bool:
+    """Виджет снят `remove()`, но ещё в DOM до следующего такта: `query()`
+    его находит."""
+    return bool(getattr(widget, "_pruning", False))
+
+
 def is_selecting(screen: Screen) -> bool:
     """Идёт ли выделение мышью на экране."""
     return bool(getattr(screen, "_selecting", False))

@@ -760,6 +760,47 @@ async def test_undo_reopen_equals_live(tmp_path):
         assert live[0][1] is True
 
 
+@pytest.mark.asyncio
+async def test_undo_after_held_record_freshens_previous_line(tmp_path):
+    """Запись откатанного хода уже дочитана и стоит за баром: откат в том
+    же обработчике снимает её строку и освежает строку прошлого хода, а не
+    снимаемую. Живой вид — как после переоткрытия."""
+    _prepare_one_turn_with_edits(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, thread, runner = await _undo_setup(pilot, tmp_path)
+        thread.record(2, "m_orphan", status="stopped", reason="user_stop")
+        scr._poll_trace_tail()
+        assert _turn_lines(scr)[-1].has_class("-held")
+
+        scr._cancel_with_undo()  # без паузы: снятая строка ещё в query
+        await pilot.pause()
+
+        line = _fresh_line(scr)
+        assert line.opened_by == "u1"
+        assert line.summary == (2, 14, 3)
+        live = _line_view(scr)
+        runner._running = False
+        scr._run_orphan_cleanups()
+        scr = await _reopen(pilot, tmp_path)
+        assert _line_view(scr) == live
+
+
+@pytest.mark.asyncio
+async def test_no_undo_for_settled_run(tmp_path):
+    """Ошибка закрыла прогон при живом потоке (строка «✕» стоит): отката
+    у зафиксированного прогона нет — Esc его не откатывает."""
+    _prepare_one_turn_with_edits(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, _thread, runner = await _undo_setup(pilot, tmp_path)
+        runner.produced_output = lambda: False
+        scr._poll_tick()
+        pilot.app.last_runner_error = "ReadTimeout: сервер не ответил"
+        scr._poll_tick()
+        await pilot.pause()
+        assert _turn_lines(scr)[-1].word == "failed"
+        assert scr._can_cancel_with_undo() is False
+
+
 # --- история треда ----------------------------------------------------------
 
 

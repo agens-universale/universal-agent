@@ -8243,6 +8243,8 @@ class TraceScreen(Screen):
         return (
             self._last_user_message_id is not None
             and runner is not None
+            # Зафиксированный прогон (ошибка при живом потоке) уже закрыт.
+            and not self._run_settled(runner)
             and not runner.produced_output()
             and not input_text
             and not self._queued_tail(
@@ -8370,9 +8372,9 @@ class TraceScreen(Screen):
         if tid is not None and msg_id:
             self._discard_orphan_and_resync(tid, msg_id)
         # НЕ монтируем [stopped] — это и есть "undo".
-        self._close_undone_run(old_runner)
+        self._close_undone_run(old_runner, msg_id)
 
-    def _close_undone_run(self, runner) -> None:
+    def _close_undone_run(self, runner, msg_id: str | None) -> None:
         """Откатанный прогон зафиксирован без исхода: фронты его не видят,
         строки и записи меты от него не будет. Прошлый ход снова последний
         — его строка свежая, мета открытого треда — как до отправки (§3.8).
@@ -8385,7 +8387,12 @@ class TraceScreen(Screen):
         self._watched_runner = None
         self._watched_run_seq = None
         self._outcome_superseded = False
-        lines = list(self.query(TurnLine))
+        # Строка снятой реплики снята в этом же обработчике и ещё в `query`.
+        lines = [
+            w
+            for w in self.query(TurnLine)
+            if w.opened_by != msg_id and not textual_compat.is_being_removed(w)
+        ]
         if lines:
             lines[-1].freshen(lines[-1].summary, lines[-1].error)
         snapshot, self._pre_run_tui_meta = self._pre_run_tui_meta, None
