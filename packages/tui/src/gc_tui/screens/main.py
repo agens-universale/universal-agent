@@ -2294,7 +2294,7 @@ class TraceScreen(Screen):
         self._live_turn_tool_calls = (
             0  # смена задачи (не stream_reset: там счётчик хода нужен)
         )
-        # Сброс снимает и индикатор: строка-итог принадлежит прежнему треду.
+        # Сброс снимает и индикатор: его работа — прежнего треда.
         self._reset_render_state()
         self._store = FileTaskStore(
             threads_dir=self.app._threads_dir or "",
@@ -5744,8 +5744,9 @@ class TraceScreen(Screen):
         self._pump_reasoning_stream_source()
         err = self._active_run_error()
         if err and not self._error_shown:
-            # Причина — строкой `└` под «✕ Ошибка» (индикатор). Без треда
-            # индикатора нет — тогда строкой без владельца.
+            # Причина — строкой `└` под «✕ Ошибка» свежей строки итога в
+            # ленте. Без треда строки итога нет — тогда строкой без
+            # владельца.
             if self._active_task_id is None:
                 self._mount_standalone(f"runtime: {err}", "error")
             self._error_shown = True
@@ -5960,10 +5961,8 @@ class TraceScreen(Screen):
             # анимация стоит и вернётся, когда агент продолжит.
             self._hide_thinking_indicator()
         else:  # terminal
-            # Idle. Терминальный исход прогона держим как строку-итог индикатора
-            # (done → «✓ Выполнил за N», cancelled → «■ Отменено», failed →
-            # «✕ Ошибка») — персистентно до следующего user-send (его _reset
-            # уничтожит индикатор). Свежий/неизвестный исход → уничтожаем.
+            # Idle. Исход прогона — строка итога в ленте (S10 §3.3), бар и
+            # индикатор уходят; мигающий «■» стопа — пока поток жив.
             self._show_idle_indicator(runner, frozen=_frozen)
             if not _frozen:
                 self._clear_stream_block()
@@ -5991,12 +5990,12 @@ class TraceScreen(Screen):
                 self._return_queue_to_input(self._withdraw_queue(runner))
 
     def _show_idle_indicator(self, runner, *, frozen: bool) -> None:
-        """Idle: строка-итог последнего хода до следующей отправки.
+        """Idle: бар уходит, исход — строкой итога в ленте.
 
         Остановленный ход дорабатывает — мигающий «■». Запись итога
         последнего хода — строка из неё (стоп: время — момент стопа).
         Исход без записи уже показан спадающим фронтом; иначе — по статусу
-        сессии, а неизвестный исход строку убирает."""
+        сессии; неизвестный исход строки не даёт, индикатор уходит."""
         self._sync_indicator_bar()
         ind = self._thinking
         if ind is None:
@@ -8201,8 +8200,8 @@ class TraceScreen(Screen):
             self._cancel_with_undo()
             return
 
-        # Normal interrupt: индикатор → терминальное «■ Отменено» (статус
-        # [stopped] уже справа на той же строке), без отдельной [stopped]-строки.
+        # Обычный стоп: пока поток жив — мигающий «■» в баре, исход —
+        # строкой «■ Отменено» в ленте (S10 §4.4), без [stopped]-строки.
         self._stop_and_replace_runner()
         self._show_stop_state()
 
