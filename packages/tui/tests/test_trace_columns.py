@@ -115,33 +115,22 @@ _SEGMENTS = [
     }
 ]
 
-# Ожидаемая раскладка обоих путей: (тип виджета, plain префикса).
+# Ожидаемая раскладка обоих путей: (тип виджета, plain префикса). Вызовы
+# собраны в блоки (P4): чтение — заголовок `Explored` и член без глифа, и
+# наверху, и у субагента (заголовок на +2).
 _EXPECTED = [
     ("UserReplyContainer", ""),
     ("TraceRow", "● "),
     ("TodoBlock", ""),
     ("ToolCallRow", "● "),
+    ("ToolCallRow", "  └ "),
     ("ToolCallRow", "● "),
     ("ConsequenceTraceRow", "  ● "),
     ("ToolCallRow", "  ● "),
+    ("ToolCallRow", "    └ "),
     ("NestedUserReply", "  › "),
     ("TodoBlock", "  "),
     ("TraceRow", "● "),
-]
-
-
-# Живая лента собирает вызовы в блоки (P4): чтение — заголовок `Explored`
-# и член без глифа, и наверху, и у субагента (заголовок на +2). Превью
-# идёт через модель блоков отдельным шагом — до него раскладки путей
-# расходятся ровно в этом.
-_EXPECTED_LIVE = [
-    *_EXPECTED[:3],
-    ("ToolCallRow", "● "),
-    ("ToolCallRow", "  └ "),
-    *_EXPECTED[4:6],
-    ("ToolCallRow", "  ● "),
-    ("ToolCallRow", "    └ "),
-    *_EXPECTED[7:],
 ]
 
 
@@ -224,8 +213,8 @@ def test_tool_call_row_prefix_is_level_plus_glyph(level):
 
 @pytest.mark.asyncio
 async def test_live_and_preview_share_layout(tmp_path):
-    """Одни и те же записи живой лентой и превью — одна раскладка (кроме
-    блоков вызовов живой ленты, `_EXPECTED_LIVE`)."""
+    """Одни и те же записи живой лентой и превью — одна раскладка
+    (модель блоков вызовов одна на оба пути)."""
     from textual.app import App
     from textual.containers import VerticalScroll
 
@@ -250,7 +239,7 @@ async def test_live_and_preview_share_layout(tmp_path):
         await pilot.pause()
         preview = _layout(pilot.app.query_one("#t", VerticalScroll))
 
-    assert live == _EXPECTED_LIVE
+    assert live == _EXPECTED
     assert preview == _EXPECTED
 
 
@@ -376,7 +365,11 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
     async with _styled(_Preview)().run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         trace = pilot.app.query_one("#t", VerticalScroll)
-        rows = list(trace.query(ToolCallRow))
+        rows = [r for r in trace.query(ToolCallRow) if r.mode != "member"]
         assert {r._level for r in rows} == {0, 1}
-        assert [r.styles.margin.top for r in rows] == [1] * len(rows)
+        assert [r.styles.margin.top for r in rows] == [
+            0 if r._level else 1 for r in rows
+        ]
+        members = [r for r in trace.query(ToolCallRow) if r.mode == "member"]
+        assert [r.styles.margin.top for r in members] == [0, 0]
         assert not trace.query(".tool-group-start")

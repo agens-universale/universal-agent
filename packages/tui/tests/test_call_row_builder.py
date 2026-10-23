@@ -329,7 +329,12 @@ async def test_preview_and_sidecar_nested_have_no_wire_name():
             merge_nested_readonly(trace, records, calls, mcp_tools=_JIRA)
 
     async with _A().run_test() as pilot:
-        rows = list(pilot.app.screen.query(ToolCallRow))
+        # Заголовки блоков (P4) — не строки вызовов: подписи — у строк.
+        rows = [
+            r
+            for r in pilot.app.screen.query(ToolCallRow)
+            if r.mode != "header"
+        ]
         texts = [_content(r) for r in rows]
         assert texts[0].startswith("Agent  проверка")
         assert texts[1].startswith("Read  a.py")
@@ -512,7 +517,11 @@ async def test_preview_shows_path_from_the_project_root(tmp_path):
         )
         await pilot.app.push_screen(screen)
         await pilot.pause()
-        texts = [_content(r) for r in screen.query(ToolCallRow)]
+        texts = [
+            _content(r)
+            for r in screen.query(ToolCallRow)
+            if r.mode != "header"
+        ]
         assert texts[0].startswith("Read  README.md")
 
 

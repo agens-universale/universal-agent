@@ -16,22 +16,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Callable, Optional, Protocol, Sequence
+from typing import Any, Callable, Optional, Protocol, Sequence
 
+from gc_core.config_modules.agent_edits import (
+    DEFAULT_REPLAY_EXPANDED_TURNS,
+    DEFAULT_TRACE_INLINE_MAX_LINES,
+)
 from rich.text import Text
 from textual import events
 from textual.widget import Widget
 
 from gc_tui.messages import BlockToggle
-from gc_tui.models import CommandOutput, TraceEvent
+from gc_tui.models import TraceEvent
 from gc_tui.palette import DIM, ERR, INK, MUTED, OK, REFUSED, RUN_COLOR
-from gc_tui.services.block_edits import diff_block_for
+from gc_tui.services.block_edits import RanResult, diff_block_for
 from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.tool_blocks import (
     AGENT_WINDOW,
     COMMAND_PREVIEW_LINES,
     BlockEdit,
     BlockKind,
+    CallTimers,
     Decision,
     MountHeader,
     MountPhrase,
@@ -68,20 +73,6 @@ _LOOK: dict[str, str] = {
 }
 #: Класс скрытого виджета блока (`display: none`): вне окна, ждущий.
 HIDDEN_CLASS = "-block-hidden"
-
-
-@dataclass(frozen=True)
-class RanResult:
-    """Что знает лента о законченной команде: разобранный вывод, правки
-    команды из журнала, незаписанные файлы сверх потолка путей."""
-
-    output: Optional[CommandOutput]
-    files: Sequence[BlockEdit] = ()
-    unrecorded: int = 0
-    #: Запись вне окна retention: всего вывода при раскрытии нет.
-    light: bool = False
-    #: Ключи файлов с компактным диффом (ход вне раскрытых).
-    compact: frozenset[str] = field(default_factory=frozenset)
 
 
 def _lines_text(head: Optional[Text], lines: Sequence[str]) -> Text:
@@ -554,3 +545,44 @@ class BlockViews(dict[str, ToolBlocksView]):
             view, key = nested, AGENT_WINDOW
         view.toggle(key)
         return view, key
+
+
+def end_turn(views: BlockViews, timers: CallTimers, outcome: Any) -> None:
+    """Запись итога хода — моделям всех уровней: время вызовов хода
+    (`outcome.calls`) — застывшим таймерам; остановка пользователем
+    ставит `○` блокам этого хода. Одно правило для живой ленты и превью."""
+    from gc_tui.services.turn_outcome import kind_of
+
+    timers.update(outcome.calls or {})
+    stopped = kind_of(outcome)[0] == "cancelled"
+    for view in list(views.values()):
+        view.timers_updated()
+        view.turn_ended(stopped=stopped)
+
+
+def nested_tail(
+    children: Sequence[Widget], level: Sequence[Widget], parent: Widget
+) -> Widget:
+    """Последний в ленте виджет уровня субагента (заголовки, фразы и
+    диффы — тоже, §9.1); у уровня без виджетов — строка `Agent`."""
+    if not level:
+        return parent
+    mine = {id(w) for w in level}
+    for widget in reversed(children):
+        if id(widget) in mine:
+            return widget
+    return parent
+
+
+@dataclass
+class PreviewBlocks:
+    """Блоки превью `/sessions` (спека P4 §9.7, §9.10а): исполнители
+    уровней, реестр застывших таймеров и журнал правок треда (только
+    чтение) — общие для `render_segments_readonly` и
+    `merge_nested_readonly`."""
+
+    views: BlockViews = field(default_factory=BlockViews)
+    timers: CallTimers = field(default_factory=CallTimers)
+    edits_lookup: Any = None
+    diff_preview: int = DEFAULT_TRACE_INLINE_MAX_LINES
+    expanded_turns: int = DEFAULT_REPLAY_EXPANDED_TURNS

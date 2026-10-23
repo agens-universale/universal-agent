@@ -394,7 +394,8 @@ def _output(lines, **kw):
 def test_output_texts_light_shows_retention_hint():
     """Вне окна retention раскрытие — превью и подсказка, не весь вывод."""
     from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
-    from gc_tui.widgets.tool_blocks_view import RanResult, output_texts
+    from gc_tui.services.block_edits import RanResult
+    from gc_tui.widgets.tool_blocks_view import output_texts
 
     out = _output(["a", "b", "c", "d"])
     collapsed, expanded = output_texts(RanResult(output=out, light=True))
@@ -403,7 +404,8 @@ def test_output_texts_light_shows_retention_hint():
 
 
 def test_output_texts_head_lines():
-    from gc_tui.widgets.tool_blocks_view import RanResult, output_texts
+    from gc_tui.services.block_edits import RanResult
+    from gc_tui.widgets.tool_blocks_view import output_texts
 
     failed, _ = output_texts(RanResult(output=_output([], exit_code=2)))
     assert failed.plain == "код выхода 2"
@@ -416,7 +418,7 @@ def test_output_texts_head_lines():
 @pytest.mark.asyncio
 async def test_ran_file_row_opens_command_detail():
     """Enter на строке файла под командой — экран деталей самой команды."""
-    from gc_tui.widgets.tool_blocks_view import RanResult
+    from gc_tui.services.block_edits import RanResult
 
     app = _App()
     async with app.run_test(size=(80, 24)) as pilot:

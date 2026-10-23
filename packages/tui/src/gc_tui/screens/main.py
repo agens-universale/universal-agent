@@ -23,12 +23,9 @@ if TYPE_CHECKING:
 
     from gc_tui.widgets.user_reply import UserReplyContainer
 
-from gc_core.agent_edits.ctx import section_limit
 from gc_core.attachments.model import Attachment, attachments_of
 from gc_core.attachments.numbering import read_image_seq
 from gc_core.config_modules.agent_edits import (
-    DEFAULT_REPLAY_EXPANDED_TURNS,
-    DEFAULT_TRACE_INLINE_MAX_LINES,
     DEFAULT_TURN_SUMMARY_IN_STATUS,
 )
 from gc_core.config_modules.images import read_images_config
@@ -79,7 +76,6 @@ from gc_tui.models import (
     CompactionStep,
     ResultOutcome,
     TaskCursor,
-    TraceEvent,
 )
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
@@ -91,12 +87,14 @@ from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.answer_flow import AnswerFlow
-from gc_tui.services.block_edits import edit_of_call, ran_files_of
-from gc_tui.services.clipboard_ops import copy_out
-from gc_tui.services.command_output import (
-    parse_command_output,
-    split_command,
+from gc_tui.services.block_edits import (
+    RanResult,
+    call_edit,
+    edit_settings,
+    ran_result_of,
 )
+from gc_tui.services.clipboard_ops import copy_out
+from gc_tui.services.command_output import split_command
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import agent_answers, export_thread
 from gc_tui.services.footer_slot import (
@@ -160,6 +158,7 @@ from gc_tui.services.subagent_sidecar_mapper import (
     CHILD_SUMMARY_LABEL,
     apply_sidecar_nested_actions,
     nested_raw_texts,
+    nested_result_event,
     plan_sidecar_nested_actions,
     resolve_nested_tool_detail,
     trace_events_from_nested_detail,
@@ -181,7 +180,6 @@ from gc_tui.services.trace_mapper import (
     coerce_args,
     collect_render_context,
     map_message,
-    output_summary,
     response_tail,
     with_closing_replies,
 )
@@ -241,8 +239,9 @@ from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from gc_tui.widgets.tool_blocks_view import (
     BlockViews,
-    RanResult,
     ToolBlocksView,
+    end_turn,
+    nested_tail,
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_overlays import (
@@ -4047,50 +4046,31 @@ class TraceScreen(Screen):
         """Правка вызова из журнала и «ход вне окна раскрытых» (компактный
         дифф). Сбой журнала — без правки: лента важнее диффа."""
         try:
-            lookup = self._edits_lookup_for_thread()
-            edit = edit_of_call(lookup, call_id or "")
-            if edit is None or edit.record is None:
-                return edit, False
-            turn_id = edit.record.turn_id
-            return edit, self._is_stale_edit_turn(lookup, turn_id)
+            return call_edit(
+                self._edits_lookup_for_thread(),
+                call_id or "",
+                window=self._replay_expanded_turns(),
+            )
         except Exception as exc:
             self.log.warning(f"правка вызова не прочитана: {exc!r}")
             return None, False
 
     def _ran_result(self, ev) -> RanResult:
-        """Законченная команда: вывод из события (разобран до облегчения
-        retention) и правки команды из журнала. Сбой журнала — без правок:
-        лента важнее."""
-        light = is_light_payload(ev)
+        """Законченная команда: вывод из события и правки команды из
+        журнала. Сбой журнала — без правок: лента важнее."""
         try:
-            lookup = self._edits_lookup_for_thread()
-            files, unrecorded = ran_files_of(lookup, ev.call_id or "")
-            compact = frozenset(
-                f.key
-                for f in files
-                if f.record is not None
-                and self._is_stale_edit_turn(lookup, f.record.turn_id)
+            return ran_result_of(
+                self._edits_lookup_for_thread(),
+                ev,
+                window=self._replay_expanded_turns(),
             )
         except Exception as exc:
             self.log.warning(f"правки команды не прочитаны: {exc!r}")
-            return RanResult(output=ev.command, light=light)
-        return RanResult(
-            output=ev.command,
-            files=files,
-            unrecorded=unrecorded,
-            light=light,
-            compact=compact,
-        )
+            return RanResult(output=ev.command, light=is_light_payload(ev))
 
     def _end_turn_blocks(self, outcome: TurnOutcome) -> None:
-        """Итог хода — моделям блоков всех уровней: время вызовов хода
-        (`outcome.calls`) — застывшим таймерам; остановка пользователем
-        ставит `○` блокам этого хода."""
-        self._call_timers.update(outcome.calls or {})
-        stopped = kind_of(outcome)[0] == "cancelled"
-        for view in list(self._block_views.values()):
-            view.timers_updated()
-            view.turn_ended(stopped=stopped)
+        """Итог хода — моделям блоков всех уровней (таймеры, стоп)."""
+        end_turn(self._block_views, self._call_timers, outcome)
 
     def on_block_toggle(self, message: BlockToggle) -> None:
         """Раскрыть / свернуть блок (§9.3): внизу — остаться внизу; иначе
@@ -4195,19 +4175,6 @@ class TraceScreen(Screen):
             self._block_views[parent_call_id] = view
         return view
 
-    def _nested_tail(self, parent_call_id: str, parent):
-        """Последний в ленте виджет уровня субагента (включая заголовки,
-        фразы и диффы); у уровня без виджетов — строка `Agent`."""
-        level = self._nested_widgets_by_parent.get(parent_call_id)
-        if not level:
-            return parent
-        mine = {id(w) for w in level}
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        for widget in reversed(trace.children):
-            if id(widget) in mine:
-                return widget
-        return parent
-
     def _nested_mount_after(
         self, parent_call_id: str, widget, after=None, before=None
     ) -> None:
@@ -4226,7 +4193,10 @@ class TraceScreen(Screen):
             if before is not None:
                 trace.mount(widget, before=before)
             else:
-                anchor = after or self._nested_tail(parent_call_id, parent)
+                level = self._nested_widgets_by_parent.get(parent_call_id)
+                anchor = after or nested_tail(
+                    trace.children, level or (), parent
+                )
                 trace.mount(widget, after=anchor)
         except Exception:
             # Якоря нет в ленте — в конец, но над очередью; группы верхнего
@@ -4310,20 +4280,12 @@ class TraceScreen(Screen):
         is_run = view.model.kind_of(tool_call_id) == BlockKind.RAN
         if output is None and is_run:
             output = self._nested_sidecar_texts(tool_call_id)[1]
-        if outcome is None and output is not None:
-            summary = output_summary(output, error=not ok)
-        else:
-            summary = "" if ok else (error_brief or "error")
-        ev = TraceEvent(
-            no=0,
-            event_ts_utc_iso="",
-            kind="result" if ok else "error",
-            title="",
-            summary=summary,
-            full_payload={},
-            call_id=tool_call_id,
-            outcome=outcome or ("ok" if ok else "error"),
-            command=parse_command_output(output),
+        ev = nested_result_event(
+            tool_call_id,
+            ok=ok,
+            error_brief=error_brief,
+            outcome=outcome,
+            output=output,
         )
         edit, compact = self._block_edit(tool_call_id)
         ran = self._ran_result(ev) if is_run else None
@@ -4545,38 +4507,19 @@ class TraceScreen(Screen):
             self._edits_lookup_key = key
         return self._edits_lookup
 
-    def _agent_edits_limit(self, key: str, default: int) -> int:
-        """Числовой порог секции `agent_edits` — общим правилом ядра.
-
-        Мусор (0, отрицательное, `true`) даёт дефолт, а не пустое тело с
-        хвостом «… ещё N строк» — сломанный вид вместо диффа."""
-        return section_limit(self._agent_edits_section(), key, default)
-
     def _agent_edits_section(self) -> dict:
-        """Секция `agent_edits` базовых настроек окна — словарём для `section_limit`."""
+        """Секция `agent_edits` базовых настроек окна — словарём."""
         return self.app.base_settings().settings.agent_edits.model_dump()
 
     def _trace_inline_max_lines(self) -> int:
         """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
-        return self._agent_edits_limit(
-            "trace_inline_max_lines", DEFAULT_TRACE_INLINE_MAX_LINES
-        )
+        return edit_settings(self._agent_edits_section())[0]
 
     def _replay_expanded_turns(self) -> int:
-        """Сколько последних ходов показывают дифф телом — `agent_edits.replay_expanded_turns`.
-
-        Ровно `0` — «без ограничения»: разворачиваются все ходы (вернём -1 как
-        признак «окно не режем», см. `_is_stale_edit_turn`). Прочий мусор
-        (отрицательное, `true`, строка) даёт дефолт — общим правилом."""
-        section = self._agent_edits_section()
-        raw = section.get(
-            "replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS
-        )
-        if isinstance(raw, int) and not isinstance(raw, bool) and raw == 0:
-            return -1
-        return self._agent_edits_limit(
-            "replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS
-        )
+        """Сколько последних ходов показывают дифф телом —
+        `agent_edits.replay_expanded_turns`; `-1` — окно не режем
+        (`edit_settings`)."""
+        return edit_settings(self._agent_edits_section())[1]
 
     def _turn_summary_in_status(self) -> bool:
         """Показывать ли сводку правок в строке-итоге — `agent_edits.turn_summary_in_status`."""
@@ -4674,18 +4617,6 @@ class TraceScreen(Screen):
         except (TypeError, ValueError):
             return None
         return (files, add, del_) if files > 0 else None
-
-    def _is_stale_edit_turn(self, lookup, turn_id: str) -> bool:
-        """Ход вне окна последних `replay_expanded_turns` — блок стартует компактным.
-
-        Окно считается по журналу, поэтому правило одно для реплея и живой
-        сессии: свежий ход всегда последний в журнале и в окно попадает.
-        Правки без записи в журнале сюда не доходят — блока у них нет."""
-        window = self._replay_expanded_turns()
-        if window < 0:  # `replay_expanded_turns: 0` — окно не режем
-            return False
-        recent = lookup.turn_ids()[-window:]
-        return turn_id not in recent
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from gc_tui.widgets.ask_human_banner import AskHumanBanner

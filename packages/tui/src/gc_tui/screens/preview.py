@@ -12,7 +12,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_tui.messages import CopyBlockRequest, OpenImageRequest
+from gc_tui.messages import BlockToggle, CopyBlockRequest, OpenImageRequest
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.image_open import open_image
 from gc_tui.services.skill_view import truncate_path_left
@@ -46,6 +46,8 @@ class PreviewScreen(Screen[bool]):
         self._subagent_records = subagent_records
         # Снимок MCP треда (meta.runtime.mcp_tools) — подписи MCP-вызовов.
         self._mcp_snapshot = mcp_snapshot
+        # Блоки вызовов превью (P4): исполнители уровней и маршрут тогла.
+        self._blocks = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -81,11 +83,13 @@ class PreviewScreen(Screen[bool]):
         trace = self.query_one("#trace", VerticalScroll)
         segments = self._segments
         records = self._subagent_records
+        self._blocks = self._preview_blocks()
         opts = {
             "mcp_tools": mcp_tools_from_snapshot(self._mcp_snapshot),
             "mcp_servers": mcp_servers_of(self._mcp_snapshot),
             # корень из шапки превью: пути в подписях вызовов — от него
             "root": self._project_path or None,
+            "blocks": self._blocks,
         }
         calls = render_segments_readonly(trace, segments, **opts)
         if records:
@@ -100,6 +104,46 @@ class PreviewScreen(Screen[bool]):
         # короткий трейс, тяжёлые tool output / nested вне окна не нужны.
         self._segments = []
         self._subagent_records = []
+
+    def _preview_blocks(self):
+        """Блоки превью с журналом правок треда (только чтение; лимиты —
+        `edits_view.diff_limits`) и долями из `agent_edits` (спека P4
+        §9.10а): правки и доли — как вживую."""
+        from gc_tui.services.block_edits import edit_settings
+        from gc_tui.services.edits_lookup import EditsLookup
+        from gc_tui.services.edits_view import diff_limits
+        from gc_tui.widgets.tool_blocks_view import PreviewBlocks
+
+        settings = getattr(self.app, "base_settings", None)
+        if settings is None:
+            # Хост без настроек и тредов (превью вне приложения) — доли по
+            # умолчанию, без журнала правок.
+            return PreviewBlocks()
+        cfg = settings()
+        preview, window = edit_settings(cfg.settings.agent_edits.model_dump())
+        lookup = None
+        threads_dir = getattr(self.app, "_threads_dir", None)
+        system_id = getattr(self.app, "_system", None)
+        if threads_dir and system_id and self._thread_id:
+            max_source_bytes, hunk_context_lines = diff_limits(cfg)
+            lookup = EditsLookup(
+                threads_dir,
+                system_id,
+                self._thread_id,
+                launch_root=None,
+                max_diff_source_bytes=max_source_bytes,
+                hunk_context_lines=hunk_context_lines,
+            )
+        return PreviewBlocks(
+            edits_lookup=lookup, diff_preview=preview, expanded_turns=window
+        )
+
+    def on_block_toggle(self, message: BlockToggle) -> None:
+        """Пробел на строке блока и клик по фразе — раскрыть / свернуть
+        блок своего уровня (Enter остаётся «открыть тред»)."""
+        message.stop()
+        if self._blocks is not None:
+            self._blocks.views.route(message)
 
     def action_resume(self) -> None:
         self.dismiss(True)

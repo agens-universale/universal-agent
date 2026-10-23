@@ -187,7 +187,8 @@ async def test_preview_row_fits_one_line(width):
         await pilot.pause()
         row = pilot.app.query_one(ToolCallRow)
         line = _first_line(row)
-        assert line.startswith("Run  cd /Users/")
+        # Превью — через модель блоков, как живая лента: `Ran` (P4 §4).
+        assert line.startswith("Ran  cd /Users/")
         assert line.endswith("… · 188 строк")
         assert _line_height(row) == 1
 

@@ -27,7 +27,8 @@ from gc_core.execution.progress import (
 )
 
 from gc_tui.models import ResultOutcome, TraceEvent
-from gc_tui.services.trace_mapper import result_stop
+from gc_tui.services.command_output import parse_command_output
+from gc_tui.services.trace_mapper import output_summary, result_stop
 
 CHILD_SUMMARY_LABEL = "контекст субагента сжат"
 
@@ -326,6 +327,35 @@ def detail_from_sidecar_records(
     return out
 
 
+def nested_result_event(
+    call_id: str,
+    *,
+    ok: bool,
+    error_brief: Optional[str],
+    outcome: Optional[ResultOutcome],
+    output: Optional[str],
+) -> TraceEvent:
+    """Исход вложенного вызова событием ленты (спека P4 §7): сводка и
+    вывод команды — из сырого вывода тем же маппером, что у верхнего
+    уровня; стоп, лимит и отказ — причина из фактов исхода. Один билдер
+    для живой ленты, возврата в сессию и превью."""
+    if outcome is None and output is not None:
+        summary = output_summary(output, error=not ok)
+    else:
+        summary = "" if ok else (error_brief or "error")
+    return TraceEvent(
+        no=0,
+        event_ts_utc_iso="",
+        kind="result" if ok else "error",
+        title="",
+        summary=summary,
+        full_payload={},
+        call_id=call_id,
+        outcome=outcome or ("ok" if ok else "error"),
+        command=parse_command_output(output),
+    )
+
+
 def nested_raw_texts(
     records: Sequence[Dict[str, Any]], call_id: str
 ) -> Tuple[Optional[str], Optional[str]]:
@@ -399,6 +429,7 @@ __all__ = [
     "apply_sidecar_nested_actions",
     "detail_from_sidecar_records",
     "nested_raw_texts",
+    "nested_result_event",
     "plan_sidecar_nested_actions",
     "resolve_nested_tool_detail",
     "trace_events_from_nested_detail",

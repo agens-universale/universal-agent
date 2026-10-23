@@ -130,16 +130,18 @@ async def test_render_thread_readonly_kinds():
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
         assert len(scr.query(UserReplyContainer)) == 1
-        # call→result спарены в одну ToolCallRow (output не отдельной строкой)
-        assert len(scr.query(ToolCallRow)) == 1
+        # call→result спарены в одну строку (output не отдельной строкой);
+        # чтение — член блока `Explored` под своим заголовком (P4 §2.1).
+        assert [r.mode for r in scr.query(ToolCallRow)] == ["header", "member"]
         body = "\n".join(str(w.render()) for w in scr.query())
         assert "ответ агента" in body
 
 
 @pytest.mark.asyncio
 async def test_render_thread_readonly_call_row_shows_label():
-    """Спека P3 §2.1: превью рисует подпись ядра (`Write  x.py`), как живая
-    лента; wire-имя остаётся в строке только для отладки."""
+    """Спека P3 §2.1: превью рисует подпись, как живая лента (у идущей
+    правки — `Editing путь`, P4 §6.1); wire-имя остаётся в строке только
+    для отладки."""
     pytest.importorskip("textual")
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App
@@ -170,7 +172,7 @@ async def test_render_thread_readonly_call_row_shows_label():
     async with _A().run_test() as pilot:
         row = pilot.app.screen.query_one(ToolCallRow)
         content = row._render_content().plain
-        assert content.startswith("Write  x.py")
+        assert content.startswith("Editing x.py")
         assert "append" not in content
         assert row.wire_name == "fs_append_file"
 
@@ -604,7 +606,7 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
         def mount(self, w, **kw):
             mounted.append(w)
 
-    _dispatch_readonly(_Target(), ev, calls={})
+    _dispatch_readonly(_Target(), ev, calls={}, blocks=_blocks_on(_Target()))
     # v5: один блок-виджет; строки внутри — заголовок + строка на пункт.
     assert len(mounted) == 1
     rows = mounted[0]._rows
@@ -619,6 +621,19 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     assert rows[2]._content.plain == "Шаг два"
     # Tab-стоп один — сам блок; строки внутри не фокусируются.
     assert mounted[0].can_focus and not any(r.can_focus for r in rows)
+
+
+def _blocks_on(target):
+    """Блоки превью с исполнителем верхнего уровня на ``target`` (строки
+    вызовов превью идут через модель блоков, P4 Task 18)."""
+    from gc_tui.services.tool_blocks import ToolBlocks
+    from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
+
+    blocks = PreviewBlocks()
+    blocks.views[""] = ToolBlocksView(
+        target, ToolBlocks(blocks.timers), level="", depth=0
+    )
+    return blocks
 
 
 def test_readonly_error_msg_finalizes_its_call_row():
@@ -640,6 +655,7 @@ def test_readonly_error_msg_finalizes_its_call_row():
             mounted.append(w)
 
     calls: dict = {}
+    blocks = _blocks_on(_Target())
     call_ev = TraceEvent(
         no=1,
         event_ts_utc_iso="",
@@ -650,7 +666,7 @@ def test_readonly_error_msg_finalizes_its_call_row():
         call_id="c1",
         tool_name="session_todo",
     )
-    _dispatch_readonly(_Target(), call_ev, calls)
+    _dispatch_readonly(_Target(), call_ev, calls, blocks=blocks)
     err_ev = TraceEvent(
         no=2,
         event_ts_utc_iso="",
@@ -660,7 +676,7 @@ def test_readonly_error_msg_finalizes_its_call_row():
         full_payload={},
         call_id="c1",
     )
-    _dispatch_readonly(_Target(), err_ev, calls)
+    _dispatch_readonly(_Target(), err_ev, calls, blocks=blocks)
 
     assert len(mounted) == 1, "ошибка не должна добавлять отдельную [!]-строку"
     row = mounted[0]
@@ -689,7 +705,7 @@ def test_readonly_error_msg_without_call_row_still_shown():
         full_payload={},
         call_id="unknown",
     )
-    _dispatch_readonly(_Target(), ev, {})
+    _dispatch_readonly(_Target(), ev, {}, blocks=_blocks_on(_Target()))
     assert len(mounted) == 1
 
 

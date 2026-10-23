@@ -288,8 +288,8 @@ def _write_reopen(tmp_path, steps, *, calls) -> None:
 
 @pytest.mark.asyncio
 async def test_p418_live_equals_reopen(tmp_path):
-    """`p4-18-agent`: вживую и после возврата — один список строк; окно
-    3 последних события, `└ … ещё 1` на +2 от глифа `Agent`."""
+    """`p4-18-agent`: вживую, после возврата и в превью — один список
+    строк; окно 3 последних события, `└ … ещё 1` на +2 от глифа `Agent`."""
     steps = _p418()
     calls = {cid: 0.0 for cid in [AGENT, *_call_ids(steps)]}
     live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
@@ -299,9 +299,11 @@ async def test_p418_live_equals_reopen(tmp_path):
         live = await _live(pilot, live_dir, steps, calls=calls)
     _write_reopen(reopen_dir, steps, calls=calls)
     async with _app(reopen_dir).run_test(size=(100, 40)) as pilot:
-        await _open(pilot)
+        scr = await _open(pilot)
         reopen = _rows(pilot)
-    assert live == reopen
+        await _push_preview(pilot, scr)
+        preview = _rows(pilot)
+    assert live == reopen == preview
     assert _agent_rows(live) == [
         "● Agent  проверка клиента · 0с",
         "  └ … ещё 1",
@@ -364,9 +366,11 @@ async def test_nested_order_matches_preview(tmp_path):
         live_order = _order(pilot)
     _write_reopen(reopen_dir, steps, calls=calls)
     async with _app(reopen_dir).run_test(size=(100, 40)) as pilot:
-        await _open(pilot)
+        scr = await _open(pilot)
         reopen_order = _order(pilot)
-    assert live_order == reopen_order
+        await _push_preview(pilot, scr)
+        preview_order = _order(pilot)
+    assert live_order == reopen_order == preview_order
     assert _agent_rows(live)[1:] == [
         "  ● Explored",
         "    └ … ещё 2",
@@ -376,6 +380,20 @@ async def test_nested_order_matches_preview(tmp_path):
         "  ● Ran  uv run pytest -q · 0с",
         "  › и тесты",
     ]
+
+
+async def _push_preview(pilot, scr) -> None:
+    from gc_tui.screens.preview import PreviewScreen
+
+    await pilot.app.push_screen(
+        PreviewScreen(
+            segments=scr._store.read_segments(TID),
+            thread_id=TID,
+            project_path="",
+            subagent_records=scr._store.read_subagent_trace(TID),
+        )
+    )
+    await pilot.pause()
 
 
 def _order(pilot) -> list[str]:

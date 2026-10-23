@@ -334,20 +334,26 @@ class _Target:
     def __init__(self):
         self.children: list = []
 
-    def mount(self, widget, after=None):
-        if after is None:
+    def mount(self, widget, after=None, before=None):
+        if before is not None:
+            self.children.insert(self.children.index(before), widget)
+        elif after is None:
             self.children.append(widget)
         else:
             self.children.insert(self.children.index(after) + 1, widget)
 
 
-def _preview_views(records: list, pid: str) -> list:
+def _preview_views(records: list, pid: str, calls: dict) -> list:
+    """Превью тех же записей; ``calls`` — время вызовов записи итога."""
     from gc_tui.services.trace_render import merge_nested_readonly
+    from gc_tui.widgets.tool_blocks_view import PreviewBlocks
 
     target = _Target()
     parent = ToolCallRow(call_id=pid, label="Agent", target="")
     target.mount(parent)
-    merge_nested_readonly(target, records, {pid: parent})
+    blocks = PreviewBlocks()
+    blocks.timers.update(calls)
+    merge_nested_readonly(target, records, {pid: parent}, blocks=blocks)
     return [_view(w) for w in target.children[1:]]
 
 
@@ -360,9 +366,8 @@ _RECORDS = {"call": _call_records, "prose": _prose_records}
 
 @pytest.mark.asyncio
 async def test_live_nested_outcome_equals_rebuild_and_preview(monkeypatch):
-    """Для каждого исхода: вживую = возврат в сессию (с временем вызовов
-    из записи итога хода, P4 §3.4). Превью идёт через модель блоков
-    отдельным шагом (план P4, Task 18)."""
+    """Для каждого исхода: вживую = возврат в сессию = превью (с временем
+    вызовов из записи итога хода, P4 §3.4)."""
     from functools import partial
     from types import SimpleNamespace
 
@@ -399,9 +404,8 @@ async def test_live_nested_outcome_equals_rebuild_and_preview(monkeypatch):
                 scr._active_calls[pid] = parent
         await pilot.pause()
         # Запись итога хода: время каждого вложенного вызова — 0 с.
-        scr._call_timers.update(
-            {f"rebuild_call_{case}_n": 0.0 for case in _CALL_CASES}
-        )
+        calls = {f"rebuild_call_{case}_n": 0.0 for case in _CALL_CASES}
+        scr._call_timers.update(calls)
         for what, case in _ALL:
             for ev in _EVENTS[what](f"live_{what}_{case}", case):
                 sink.emit(ev)
@@ -429,7 +433,12 @@ async def test_live_nested_outcome_equals_rebuild_and_preview(monkeypatch):
                     f"rebuild_{what}_{case}", []
                 )
             ]
-            assert live == rebuilt, (what, case)
+            preview = _preview_views(
+                _RECORDS[what](f"rebuild_{what}_{case}", case),
+                f"rebuild_{what}_{case}",
+                calls,
+            )
+            assert live == rebuilt == preview, (what, case)
             _assert_look(what, case, live)
 
 
