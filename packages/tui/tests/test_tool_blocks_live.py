@@ -501,26 +501,68 @@ async def test_copy_through_collapsed_block_skips_hidden_rows(tmp_path):
 # --- стоп и переоткрытие ----------------------------------------------------
 
 
+class _SlowRunner:
+    """Стоп кооперативный: поток жив, пока тест не доведёт ход до конца."""
+
+    _thread_kind = "run"
+
+    def __init__(self):
+        self._last_target = (TID, "cli")
+        self._stop_requested = False
+        self.running = True
+        self.run_seq = 1
+
+    def is_running(self):
+        return self.running
+
+    def stop(self):
+        self._stop_requested = True
+
+    def cancel_confirm(self):
+        pass
+
+    def cancel_ask_human(self):
+        pass
+
+    def withdraw_message(self, msg_id):
+        return False
+
+    def follow(self, _other):
+        pass
+
+    def turn_effective_start(self):
+        return None
+
+
 @pytest.mark.asyncio
 async def test_stop_mid_exploring(tmp_path):
-    """Запись стопа дочитана, пока вызовы без исхода, — блок стоит с `○`;
-    поток вышел — члены переведены: идущий `└ отменено`, ждущий
-    `└ не запущено (стоп)`; под блоком строка «■ Отменено»."""
+    """Запись стопа дочитана, пока поток жив, — строка «■ Отменено»
+    придержана за баром, члены ещё без исхода; поток вышел — в одном тике
+    члены переведены (идущий `└ отменено`, ждущий `└ не запущено
+    (стоп)`) и строка раскрыта под блоком (§2.2)."""
     thread = _Thread(tmp_path)
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         scr = await _open(pilot)
+        runner = _SlowRunner()
+        pilot.app.active_runner = runner
+        scr._prepare_for_new_run()
+        scr._reset_thinking_timer()
+        scr._last_user_message_id = None  # без отката: ход что-то выдал
+        scr._poll_active()
+        await pilot.pause()
         await _tail(pilot, thread, _read(0), _read_out(0))
         await _tail(pilot, thread, _read(1), _read(2))
-        thread.stop()
-        _meta(tmp_path, tui={"status": "stopped"})
-        scr._poll_trace_tail()
+        scr._cmd_stop()
         await pilot.pause()
+        thread.stop()
+        scr._poll_active()  # запись стопа дочитана, поток ещё жив
         (line,) = scr.query(TurnLine)
         assert "Отменено" in line.text.plain
+        assert line.has_class("-held")
         assert _row(scr, "r1")._block_consequence is None
-        # Один тик: перевод членов и раскрытая строка «■ Отменено» — в нём
-        # же, без промежуточного кадра.
-        scr._poll_tick()
+        runner.running = False
+        _meta(tmp_path, tui={"status": "stopped"})
+        scr._poll_active()  # поток вышел: один тик
         assert line.display and not line.has_class("-held")
         assert _row(scr, "r1")._block_consequence.plain == "отменено"
         assert _row(scr, "r2")._block_consequence.plain == "не запущено (стоп)"
