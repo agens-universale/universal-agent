@@ -5589,22 +5589,25 @@ class TraceScreen(Screen):
     def _active_run_error(self) -> str | None:
         """Ошибка наблюдаемого прогона открытого треда; чужая и ошибка
         прошлого прогона того же раннера не рисуются."""
-        err = getattr(self.app, "last_runner_error", None)
-        if err is None or not self._runner_is_for_active_thread():
+        if not self._runner_is_for_active_thread():
             return None
-        owner = getattr(self.app, "last_runner_error_run", None)
-        return err if owner == self._observed_run() else None
-
-    def _observed_run(self) -> tuple:
-        """Пара «раннер и `run_seq`» прогона, который наблюдает экран: тот,
-        что застал тик, иначе текущий прогон активного раннера."""
         runner = self._watched_runner or getattr(
             self.app, "active_runner", None
         )
-        seq = self._watched_run_seq
+        return self._run_error_of(runner)
+
+    def _run_error_of(self, runner) -> str | None:
+        """Ошибка прогона раннера: пара «раннер и `run_seq`» прогона —
+        застанного тиком, иначе текущего — совпадает с парой, в которой
+        ошибка случилась. Ошибка прошлого прогона не наследуется."""
+        err = getattr(self.app, "last_runner_error", None)
+        if err is None:
+            return None
+        seq = self._watched_run_seq if runner is self._watched_runner else None
         if seq is None:
             seq = getattr(runner, "run_seq", None)
-        return runner, seq
+        owner = getattr(self.app, "last_runner_error_run", None)
+        return err if owner == (runner, seq) else None
 
     def _run_task_id(self, runner) -> str | None:
         """Тред прогона раннера: его цель, иначе активный."""
@@ -5694,7 +5697,7 @@ class TraceScreen(Screen):
         причине ядра; True — ход кончился предложенным планом."""
         reason = getattr(self.app, "last_terminal_outcome", None)
         word = outcome_word(
-            failed=bool(getattr(self.app, "last_runner_error", None)),
+            failed=self._run_error_of(runner) is not None,
             stopped=bool(getattr(self.app, "last_stop_requested", False)),
             reason=reason,
         )

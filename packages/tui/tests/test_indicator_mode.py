@@ -168,3 +168,56 @@ async def test_queued_run_after_settled_error_not_closed_by_stale_error(
         assert finished == []
         bar = scr.query_one("#indicator-bar")
         assert bar.has_class("-turn")
+
+
+@pytest.mark.asyncio
+async def test_stale_error_does_not_leak_into_next_run_outcome(tmp_path):
+    """Прогон 2 того же раннера кончился без записи итога и без ошибки:
+    его запасной исход — «выполнено», а не ошибка прогона 1."""
+    import json
+
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.turn_line import TurnLine
+
+    tid = "qerr000000000000000000000000003c"
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8"
+    )
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+
+    class _Run:
+        _thread_kind = "run"
+        _last_target = (tid, "cli")
+        run_seq = 1
+        running = True
+
+        def is_running(self):
+            return self.running
+
+        def turn_effective_start(self):
+            return None
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid, is_resume=True)
+        runner = _Run()
+        pilot.app.active_runner = runner
+        scr._prepare_for_new_run()
+        scr._poll_tick()
+        pilot.app.last_runner_error = "ReadTimeout: сервер не ответил"
+        scr._poll_tick()  # ошибка закрыла прогон 1
+
+        runner.run_seq = 2  # add_message: прогон 2 без _reset_run_flags
+        scr._poll_tick()
+        runner.running = False
+        scr._poll_tick()
+        await pilot.pause()
+
+        lines = list(scr.query_one("#trace").query(TurnLine))
+        assert [w.word for w in lines] == ["failed", "completed"]
