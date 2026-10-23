@@ -525,11 +525,15 @@ def _call_caption(
 ) -> tuple[str, str]:
     """(подпись, объект) строки вызова: тул без подписи (неизвестный или
     скрытый, но всё же дошедший до ленты) — `Called` и сырое имя в
-    объекте."""
+    объекте; память — глагол из действия и цель (`Write  goal`)."""
     category, name = tool_caption(wire_name, mcp_tools, mcp_servers)
     if category in (DisplayCategory.CALLED, DisplayCategory.HIDDEN):
         target = " ".join(p for p in (name, args_summary) if p)
         return DisplayCategory.CALLED.value, target
+    if category == DisplayCategory.MEMORY and args_summary:
+        # Сводка ядра — `действие цель`: глагол члена блока Memory.
+        action, _, target = args_summary.partition(" ")
+        return action.capitalize(), target
     return name, args_summary
 
 

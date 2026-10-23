@@ -591,3 +591,50 @@ def test_skills_list_pack_target_keeps_usual_colour():
     assert _target_styles(row, "  core") == [INK]
     row.set_result(summary="", outcome="ok")
     assert _target_styles(row, "  core") == [SUB_INK]
+
+
+_MEMORY_CALLS = [
+    *(
+        ("session_memory", {"action": a, "register": r}, verb, r)
+        for a, verb in (
+            ("write", "Write"),
+            ("append", "Append"),
+            ("read", "Read"),
+        )
+        for r in ("goal", "constraints", "state", "knowledge")
+    ),
+    ("session_memory", {"action": "list", "register": "goal"}, "List", ""),
+    *(
+        ("project_memory", {"action": a}, verb, "project")
+        for a, verb in (
+            ("write", "Write"),
+            ("append", "Append"),
+            ("read", "Read"),
+        )
+    ),
+]
+
+
+@pytest.mark.parametrize(("wire", "args", "verb", "target"), _MEMORY_CALLS)
+def test_memory_caption_verb_and_target(wire, args, verb, target):
+    """Член блока Memory: глагол из действия, объект — регистр или
+    `project`; содержимое не показывается."""
+    from gc_core.execution.progress import tool_args_summary
+
+    from gc_tui.services.trace_render import build_call_row
+
+    summary = tool_args_summary(wire, {**args, "content": "секрет"})
+    row = build_call_row(
+        call_id="c1", wire_name=wire, args_summary=summary, level=0
+    )
+    caption = f"{verb}  {target}" if target else verb
+    assert _content(row).split(" · ")[0] == caption
+
+
+def test_memory_caption_without_summary_keeps_category():
+    from gc_tui.services.trace_render import build_call_row
+
+    row = build_call_row(
+        call_id="c1", wire_name="session_memory", args_summary="", level=0
+    )
+    assert _content(row).split(" · ")[0] == "Memory"
