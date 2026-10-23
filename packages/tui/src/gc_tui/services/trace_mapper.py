@@ -25,6 +25,7 @@ from gc_tui.services.command_output import (
     command_lines,
     parse_command_output,
 )
+from gc_tui.services.duration_format import format_size
 from gc_tui.services.image_chips import images_mentioned
 from gc_tui.services.plural import plural_form
 from gc_tui.services.tool_identity import tool_id
@@ -914,8 +915,8 @@ def _result_bits(data: dict) -> list[str]:
         count = len(entries) if isinstance(entries, list) else "?"
     if count is not None:
         bits.append(_counted(count, "запись", "записи", "записей"))
-    if "bytes" in data:
-        bits.append(_counted(data["bytes"], "байт", "байта", "байт"))
+    if isinstance(data.get("bytes"), int):
+        bits.append(format_size(data["bytes"]))
     if "source" in data:
         bits.append(f"источник {data['source']}")
     return bits

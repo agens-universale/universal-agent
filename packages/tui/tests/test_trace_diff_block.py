@@ -557,7 +557,8 @@ async def test_collapse_threshold_comes_from_config(tmp_path):
 
 @pytest.mark.asyncio
 async def test_collapse_threshold_defaults_without_config(tmp_path):
-    """Без ключа в конфиге — дефолт 30 логических строк (P4 §6.3).
+    """Без ключа в конфиге — дефолт 12 рядов у одиночной правки (P4 §6.3,
+    §9.13): правка на 40 строк — 12 строк превью.
 
     Строк берём заведомо больше дефолта: иначе тест не отличил бы работающий
     лимит от отсутствующего."""
@@ -576,7 +577,7 @@ async def test_collapse_threshold_defaults_without_config(tmp_path):
     )
 
     async with _screen(tmp_path, tid) as scr:
-        assert _body_lines(scr.query_one(DiffBlock)) == 30
+        assert _body_lines(scr.query_one(DiffBlock)) == 12
 
 
 # --- фокус: клик по диффу не трогает позицию Tab -----------------------------
@@ -601,7 +602,7 @@ def _focus_fixture(tmp_path, tid: str) -> None:
     )
     # Строк заведомо больше лимита: тестам нужна сноска «ещё N строк» — по ней
     # они и кликают. Лимит эти тесты задают СВОЙ, маленький (`_FOCUS_CONFIG`):
-    # с дефолтными 30 рядами блок вырастает так, что кнопка копирования уходит
+    # с дефолтным лимитом блок может вырасти так, что кнопка копирования уйдёт
     # за кадр, и клик промахивается мимо экрана.
     _write_journal(
         tmp_path, tid, [_record("c1", hunks=_long_hunks(40), add=40, del_=0)]

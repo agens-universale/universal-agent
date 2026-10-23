@@ -511,6 +511,12 @@ def test_entries_with_count_stay_entries():
     assert _tail({"entries": ["a", "b"], "count": 2}) == "2 записи"
 
 
+def test_fetch_size_in_kilobytes():
+    """Размер ответа Fetch — `12 КБ`, не `N байт` (спека P4 §9.13)."""
+    assert _tail({"bytes": 12288}) == "12 КБ"
+    assert _tail({"bytes": 512}) == "512 Б"
+
+
 def test_summarize_output_empty_when_no_known_keys():
     """Если нет распознаваемых ключей — summary пустой (строка без хвоста)."""
     msg = {

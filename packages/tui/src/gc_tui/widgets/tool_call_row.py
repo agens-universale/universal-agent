@@ -13,7 +13,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 при смене ширины или содержимого, не на тике дыхания). Длинный хвост
 (сводка, живой статус) режется `…`, когда объект дошёл до своего минимума
 (`CALL_TARGET_MIN_COLS`); таймер и счётчики правки не режутся.
-У строки правки (`set_edit_counts`) после объекта — счётчики `+N −M`, а в конце
+У строки правки (`set_edit_counts`) после объекта — счётчики `(+a −r)`, в конце
 строки справа — кнопка ❐ копирования её диффа (спека P3 §10).
 
 Фазы:
@@ -67,7 +67,12 @@ from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import SUB_INK as _SUB_INK
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
-from gc_tui.services.tool_blocks import COMMAND_PREVIEW_LINES, WordRole
+from gc_tui.services.tool_blocks import (
+    COMMAND_PREVIEW_LINES,
+    Parts,
+    WordRole,
+    counts_text,
+)
 from gc_tui.services.trace_glyphs import (
     CALL_GLYPH,
     CALL_UNDONE_GLYPH,
@@ -106,8 +111,28 @@ _OUTCOME_LOOK: dict[str, tuple[str, str, str]] = {
     "ok": (CALL_GLYPH, _OK, _OK),
     "error": (CALL_GLYPH, _ERR, _ERR),
     "halted": (CALL_UNDONE_GLYPH, _DIM, _DIM),
-    "refused": (CALL_UNDONE_GLYPH, _REFUSED, _DIM),
+    "refused": (CALL_UNDONE_GLYPH, _REFUSED, _REFUSED),
 }
+
+#: Вид цвета модели блоков (`tool_blocks.Look`) → токен палитры.
+LOOK_STYLE: dict[str, str] = {
+    "run": _RUN,
+    "ok": _OK,
+    "error": _ERR,
+    "refused": _REFUSED,
+    "halted": _DIM,
+    "dim": _DIM,
+    "ink": _INK,
+    "muted": _MUTED,
+}
+
+
+def parts_text(parts: Parts) -> Text:
+    """Части текста модели блоков — `Text` цветами палитры."""
+    text = Text()
+    for chunk, look in parts:
+        text.append(chunk, style=LOOK_STYLE[look])
+    return text
 
 
 #: Глиф заголовка блока по виду (`tool_blocks.GlyphLook`); `run` мигает.
@@ -411,7 +436,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._update()
 
     def set_edit_tail(self, tail: Text) -> None:
-        """Хвост файла после объекта (счётчики, размер) — вместо `+N −M`."""
+        """Хвост файла после объекта (счётчики, размер) — вместо `(+a −r)`."""
         self._edit_tail = tail
         self._update()
 
@@ -502,7 +527,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     def set_edit_counts(
         self, add: int, removed: int, *, copy_text: str
     ) -> None:
-        """Строка правки: ` +N −M` после объекта и ❐ в конце строки.
+        """Строка правки: ` (+a −r)` после объекта (нулевая часть
+        опускается) и ❐ в конце строки.
 
         `copy_text` — что кладёт в буфер ❐: весь дифф правки, как и двойной
         клик по телу блока под строкой; пусто — ❐ нет, счётчики есть."""
@@ -690,11 +716,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._append_frozen_timer(text)
             return text
         if self._edit_counts is not None:
-            add, removed = self._edit_counts
-            text.append(" ")
-            text.append(f"+{add}", style=_OK)
-            text.append(" ")
-            text.append(f"−{removed}", style=_ERR)
+            text.append_text(parts_text(counts_text(*self._edit_counts)))
         if self._result and not self._ends_with_line:
             note = _fit_note(f" · {self._result}", room, text.cell_len)
             text.append(note, style=self._summary_style)

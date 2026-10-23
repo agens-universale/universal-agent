@@ -1,8 +1,9 @@
 """Отказ вызова в ленте — не ошибка (спека P3 §10, смоук P3a).
 
 Язык глифов ленты — круги. Отказ политики, режима, судьи или человека:
-глиф `○` приглушённым оранжевым (`REFUSED`), строка `└` серым (`DIM`) и
-начинается с того, кто отказал. Успех — `●` `OK`, ошибка — `●` и `ERR`,
+глиф `○` приглушённым оранжевым (`REFUSED`), строка `└` тем же цветом
+отказа (спека P4 §9.13) и начинается с того, кто отказал; отказ без строки
+вызова — `○ кто: почему` серым. Успех — `●` `OK`, ошибка — `●` и `ERR`,
 стоп и лимит — `○` серым; несостоявшаяся проверка судьи — не отказ, а
 остановка `○`. Каждый путь одинаково: вживую, превью, вложенный вызов
 из записи субагента."""
@@ -251,11 +252,11 @@ def test_classify_stop_without_facts_is_plain_error():
 # --- строка вызова -----------------------------------------------------------
 
 
-def test_refused_row_is_warn_glyph_and_dim_line():
+def test_refused_row_is_refused_glyph_and_line():
     row = ToolCallRow(call_id="c1", label="Write", target="a.txt")
     row.set_result(summary="вы отклонили", outcome="refused")
     assert row._render_content().plain == "Write  a.txt"
-    _assert_refused_row(row, "вы отклонили", "  ")
+    _assert_refused_row(row, "вы отклонили", "  ", reason=REFUSED)
 
 
 def test_ok_row_is_green_circle():

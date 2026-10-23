@@ -637,19 +637,31 @@ def _edit_row():
 
 
 def test_edit_counts_follow_the_object():
-    """` +N −M` — сразу после объекта, до хвоста результата; `+N` — OK,
-    `−M` — ERR."""
-    from gc_tui.palette import ERR, OK
+    """` (+a −r)` — сразу после объекта, до хвоста результата; `+a` — OK,
+    `−r` — ERR, скобки — DIM (спека P4 §9.13)."""
+    from gc_tui.palette import DIM, ERR, OK
 
     row = _edit_row()
     row.set_edit_counts(12, 3, copy_text="diff")
     content = row._render_content()
-    assert content.plain == "Edit  a.py +12 −3 · ok"
+    assert content.plain == "Edit  a.py (+12 −3) · ok"
     styles = {
         content.plain[s.start : s.end]: str(s.style) for s in content.spans
     }
     assert styles["+12"] == OK
     assert styles["−3"] == ERR
+    assert styles[" ("] == DIM
+
+
+@pytest.mark.parametrize(
+    "add, removed, tail",
+    [(4, 2, " (+4 −2)"), (37, 0, " (+37)"), (0, 3, " (−3)"), (0, 0, "")],
+)
+def test_edit_counts_drop_zero_part(add, removed, tail):
+    """Нулевая часть счётчиков опускается; обе нулевые — счётчиков нет."""
+    row = _edit_row()
+    row.set_edit_counts(add, removed, copy_text="diff")
+    assert row._render_content().plain == f"Edit  a.py{tail} · ok"
 
 
 def test_row_without_edit_has_no_counts():
@@ -716,7 +728,7 @@ async def test_no_copy_button_without_diff_text():
         row.set_edit_counts(2, 0, copy_text="")
         await pilot.pause()
         assert not row.query_one(".block-copy", Static).display
-        assert "+2 −0" in row._render_content().plain
+        assert "(+2)" in row._render_content().plain
 
 
 @pytest.mark.asyncio

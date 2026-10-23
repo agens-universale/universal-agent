@@ -28,7 +28,7 @@ from textual.widget import Widget
 
 from gc_tui.messages import BlockToggle
 from gc_tui.models import TraceEvent
-from gc_tui.palette import DIM, ERR, INK, MUTED, OK, REFUSED, RUN_COLOR
+from gc_tui.palette import DIM, ERR
 from gc_tui.services.block_edits import RanResult, diff_block_for
 from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.tool_blocks import (
@@ -40,7 +40,6 @@ from gc_tui.services.tool_blocks import (
     Decision,
     MountHeader,
     MountPhrase,
-    Parts,
     SetConsequence,
     SetDiffShare,
     SetEditTail,
@@ -58,19 +57,8 @@ from gc_tui.services.tool_blocks import (
 )
 from gc_tui.services.trace_render import level_prefix
 from gc_tui.widgets.no_select import NoSelectStatic
-from gc_tui.widgets.tool_call_row import ToolCallRow
+from gc_tui.widgets.tool_call_row import LOOK_STYLE, ToolCallRow, parts_text
 
-#: Вид цвета модели → токен палитры.
-_LOOK: dict[str, str] = {
-    "run": RUN_COLOR,
-    "ok": OK,
-    "error": ERR,
-    "refused": REFUSED,
-    "halted": DIM,
-    "dim": DIM,
-    "ink": INK,
-    "muted": MUTED,
-}
 #: Класс скрытого виджета блока (`display: none`): вне окна, ждущий.
 HIDDEN_CLASS = "-block-hidden"
 
@@ -110,13 +98,6 @@ def output_texts(ran: RanResult) -> Optional[tuple[Text, Text]]:
         full = (*out.preview, RETENTION_DETAIL_HINT)
         return collapsed, _lines_text(head, full)
     return collapsed, _lines_text(head, out.lines)
-
-
-def _text(parts: Parts) -> Text:
-    text = Text()
-    for chunk, look in parts:
-        text.append(chunk, style=_LOOK[look])
-    return text
 
 
 class BlockHost(Protocol):
@@ -437,7 +418,7 @@ class ToolBlocksView:
     def _set_header(self, d: SetHeader) -> None:
         header = self._widgets[d.block]
         assert isinstance(header, ToolCallRow)
-        header.set_header(d.word, glyph=d.glyph, tail=_text(d.tail))
+        header.set_header(d.word, glyph=d.glyph, tail=parts_text(d.tail))
 
     def _set_phrase(self, d: SetPhrase) -> None:
         phrase = self._widgets.get(phrase_key(d.block, d.slot))
@@ -459,7 +440,7 @@ class ToolBlocksView:
     def _set_consequence(self, d: SetConsequence) -> None:
         row = self._row(d.key)
         if row is not None:
-            row.set_consequence(Text(d.text, style=_LOOK[d.look]))
+            row.set_consequence(Text(d.text, style=LOOK_STYLE[d.look]))
 
     def _set_word(self, d: SetWord) -> None:
         row = self._row(d.key)
@@ -469,7 +450,7 @@ class ToolBlocksView:
     def _set_edit_tail(self, d: SetEditTail) -> None:
         row = self._row(d.key)
         if row is not None:
-            row.set_edit_tail(_text(d.parts))
+            row.set_edit_tail(parts_text(d.parts))
 
     def _set_diff_share(self, d: SetDiffShare) -> None:
         """Дифф файла: смонтировать при первой доле, дальше — перерасчёт
