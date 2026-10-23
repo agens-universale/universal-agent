@@ -33,28 +33,16 @@ def _finish_facts(
     return ok, stop[1], stop[0]
 
 
-def reconcile_batch_phases(rows: Sequence[Any]) -> None:
-    """Среди незавершённых строк batch: первая → active, остальные → waiting.
-
-    Одинаково для любых тулов (не special-case subagent). rows — в порядке
-    появления в batch (insertion order _active_calls).
-    """
-    pending = [
-        r
-        for r in rows
-        if getattr(r, "_result", None) is None
-        and not getattr(r, "_interrupted", False)
-    ]
-    if not pending:
-        return
-    first, *rest = pending
-    set_active = getattr(first, "set_active", None)
-    if callable(set_active):
-        set_active()
-    for row in rest:
-        set_waiting = getattr(row, "set_waiting", None)
-        if callable(set_waiting):
-            set_waiting()
+def first_pending(rows: Sequence[Any]) -> Optional[Any]:
+    """Батч исполняется по порядку: первая незавершённая строка — та, что
+    стартовала; остальные ждут. Одинаково для любых тулов. ``rows`` — в
+    порядке появления в батче (порядок вставки `_active_calls`)."""
+    for row in rows:
+        if getattr(row, "_result", None) is None and not getattr(
+            row, "_interrupted", False
+        ):
+            return row
+    return None
 
 
 class SubagentProgressConsumer:

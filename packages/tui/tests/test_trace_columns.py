@@ -130,6 +130,17 @@ _EXPECTED = [
 ]
 
 
+# Живая лента собирает вызовы в блоки (P4): чтение — заголовок `Explored`
+# и член без глифа. Превью идёт через модель блоков отдельным шагом —
+# до него раскладки путей расходятся ровно в этом.
+_EXPECTED_LIVE = [
+    *_EXPECTED[:3],
+    ("ToolCallRow", "● "),
+    ("ToolCallRow", "  └ "),
+    *_EXPECTED[4:],
+]
+
+
 class _Store:
     def read_subagent_trace(self, task_id):  # noqa: ARG002
         return _SIDECAR
@@ -209,7 +220,8 @@ def test_tool_call_row_prefix_is_level_plus_glyph(level):
 
 @pytest.mark.asyncio
 async def test_live_and_preview_share_layout(tmp_path):
-    """Одни и те же записи живой лентой и превью — одна раскладка."""
+    """Одни и те же записи живой лентой и превью — одна раскладка (кроме
+    блоков вызовов живой ленты, `_EXPECTED_LIVE`)."""
     from textual.app import App
     from textual.containers import VerticalScroll
 
@@ -234,19 +246,20 @@ async def test_live_and_preview_share_layout(tmp_path):
         await pilot.pause()
         preview = _layout(pilot.app.query_one("#t", VerticalScroll))
 
-    assert live == _EXPECTED
+    assert live == _EXPECTED_LIVE
     assert preview == _EXPECTED
 
 
 @pytest.mark.asyncio
 async def test_live_glyph_columns_step_two_per_level(tmp_path):
     """Глиф вызова уровня 0 — в колонке `●`, уровня 1 и вложенной реплики —
-    на +2; вложенная реплика субагента — серый `●`."""
+    на +2; вложенная реплика субагента — серый `●`. У члена блока глифа
+    нет (P4 §3.1) — его колонку держит заголовок."""
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
         agent = next(w for w in trace.children if isinstance(w, TraceRow))
         col = _glyph_x(agent.query_one(".trace-prefix"), "● ")
-        rows = list(trace.query(ToolCallRow))
+        rows = [r for r in trace.query(ToolCallRow) if r.mode != "member"]
         top = [r for r in rows if r._level == 0]
         nested = [r for r in rows if r._level == 1]
         for row in top + nested:
@@ -316,7 +329,8 @@ def _styled(app_cls):
 async def test_blank_line_before_every_call_on_both_paths(tmp_path):
     """Интервал (§2.1): пустая строка перед каждым вызовом — верхним и
     вложенным, подряд идущим тоже; класса `tool-group-start` нет ни вживую,
-    ни в превью."""
+    ни в превью. Вживую (P4 §3.1) — перед каждым блоком: у члена блока
+    пустой строки сверху нет."""
     from textual.app import App
     from textual.containers import VerticalScroll
 
@@ -327,9 +341,11 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
-        rows = list(trace.query(ToolCallRow))
+        rows = [r for r in trace.query(ToolCallRow) if r.mode != "member"]
         assert {r._level for r in rows} == {0, 1}
         assert [r.styles.margin.top for r in rows] == [1] * len(rows)
+        members = [r for r in trace.query(ToolCallRow) if r.mode == "member"]
+        assert [r.styles.margin.top for r in members] == [0]
         assert not trace.query(".tool-group-start")
         lines = [
             "".join(seg.text for seg in strip).rstrip()

@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from collections import namedtuple
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -84,6 +85,7 @@ from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.answer_flow import AnswerFlow
+from gc_tui.services.block_edits import edit_of_call
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import agent_answers, export_thread
@@ -141,8 +143,8 @@ from gc_tui.services.skill_view import skill_input_name
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.subagent_progress import (
     SubagentProgressConsumer,
+    first_pending,
     format_parent_live_status,
-    reconcile_batch_phases,
 )
 from gc_tui.services.subagent_sidecar_mapper import (
     CHILD_SUMMARY_LABEL,
@@ -155,6 +157,7 @@ from gc_tui.services.terminal_title import (
     format_terminal_title,
     set_terminal_title,
 )
+from gc_tui.services.tool_blocks import BlockEdit, CallTimers, ToolBlocks
 from gc_tui.services.trace_mapper import (
     PROPOSE_PLAN_ID,
     RenderContext,
@@ -171,6 +174,7 @@ from gc_tui.services.trace_render import (
     build_nested_prose_row,
     build_turn_line,
     level_prefix,
+    tool_caption,
 )
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
@@ -217,6 +221,7 @@ from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+from gc_tui.widgets.tool_blocks_view import BlockViews, ToolBlocksView
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_overlays import (
     ScrollEndPill,
@@ -437,6 +442,18 @@ def _truncate_middle(name: str, max_cols: int) -> str:
     return f"{head}…{tail}"
 
 
+class _TraceBlockHost:
+    """Хост блоков верхнего уровня живой ленты (спека P4 §8.1): в конец —
+    через `_trace_mount` (правило очереди), рядом с виджетом блока —
+    прямой `trace.mount`."""
+
+    def __init__(self, screen: TraceScreen) -> None:
+        self._screen = screen
+
+    def mount(self, widget, *, before=None, after=None) -> None:
+        self._screen._mount_block_widget(widget, before=before, after=after)
+
+
 class TraceScreen(Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
 
@@ -514,6 +531,10 @@ class TraceScreen(Screen):
         self._last_mcp_card_line: Optional[str] = None
         # Phase 2: tool-row mutation state
         self._active_calls: dict[str, ToolCallRow] = {}
+        # Блоки вызовов (P4): застывшие таймеры — один реестр на ленту,
+        # исполнители моделей — по уровню (`""` — верхний).
+        self._call_timers = CallTimers()
+        self._block_views = BlockViews()
         # Nested progress под subagent_*: live sink + reopen из data_subagents_*.
         self._subagent_progress = SubagentProgressConsumer()
         self._nested_tool_rows: dict[
@@ -2167,6 +2188,8 @@ class TraceScreen(Screen):
         )
         self._last_auto_y = 0
         self._active_calls.clear()
+        self._call_timers.clear()
+        self._block_views.clear()
         self._subagent_progress.reset()
         self._nested_tool_rows.clear()
         self._nested_widgets_by_parent.clear()
@@ -2642,6 +2665,7 @@ class TraceScreen(Screen):
                 return
             self._last_turn_outcome = outcome
             self._outcome_superseded = False
+            self._end_turn_blocks(outcome)
             self._mount_turn_line(outcome)
             return
         payload = rec.get("payload")
@@ -3801,13 +3825,16 @@ class TraceScreen(Screen):
                 # Не-когнитивный тул = действие в мире → рвёт эпизод раздумья.
                 self._reasoning_clock.interrupt()
             mcp_tools, mcp_servers = self._mcp_tool_info()
+            wire_name = ev.wire_name or ev.tool_name or "<tool>"
+            # Вживую строка ждёт очереди батча (`•`), пока исполнение до неё
+            # не дошло; в перерисовке старта вживую не было — не ждёт.
             row = build_call_row(
                 call_id=ev.call_id or f"_anon_{ev.no}",
-                wire_name=ev.wire_name or ev.tool_name or "<tool>",
+                wire_name=wire_name,
                 args_summary=ev.args_summary,
                 level=0,
                 event_no=ev.no,
-                waiting=True,  # batch: · пока очередь execute не дошла
+                waiting=live,
                 mcp_tools=mcp_tools,
                 mcp_servers=mcp_servers,
             )
@@ -3815,7 +3842,8 @@ class TraceScreen(Screen):
             # Durable anchor for nested (reopen / after parent result pop).
             if (ev.tool_name or "").startswith("subagent_") and row.call_id:
                 self._subagent_parent_rows[row.call_id] = row
-            self._trace_mount(row)
+            category, _ = tool_caption(wire_name, mcp_tools, mcp_servers)
+            self._top_blocks().add_call(row, category, waiting=live)
             self._reconcile_active_tool_phases()
             return
 
@@ -3829,8 +3857,8 @@ class TraceScreen(Screen):
             # Mutate existing row in place
             row = self._active_calls.get(ev.call_id) if ev.call_id else None
             if row is not None:
-                row.set_result(summary=ev.summary, outcome=ev.result_outcome)
-                self._mount_inline_diff(ev, row)
+                edit, compact = self._block_edit(ev.call_id)
+                self._top_blocks().result(row, ev, edit, compact=compact)
                 # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✕).
                 self._active_calls.pop(ev.call_id, None)
                 self._reconcile_active_tool_phases()
@@ -3914,7 +3942,7 @@ class TraceScreen(Screen):
         `!` без владельца."""
         row = self._active_calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
-            row.set_result(summary=ev.summary, outcome="error")
+            self._top_blocks().result(row, replace(ev, outcome="error"), None)
             # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✕).
             self._active_calls.pop(ev.call_id, None)
             self._reconcile_active_tool_phases()
@@ -3922,8 +3950,60 @@ class TraceScreen(Screen):
         self._mount_standalone(ev.summary, "error", event_no=ev.no)
 
     def _reconcile_active_tool_phases(self) -> None:
-        """В незавершённом batch: первая строка active (▸), остальные waiting (·)."""
-        reconcile_batch_phases(list(self._active_calls.values()))
+        """Батч исполняется по порядку: первая незавершённая строка, если
+        ещё ждёт, — стартовала (через модель блоков)."""
+        row = first_pending(list(self._active_calls.values()))
+        if row is not None and row.waiting:
+            self._top_blocks().started(row)
+
+    def _top_blocks(self) -> ToolBlocksView:
+        """Исполнитель блоков верхнего уровня ленты; после сброса ленты —
+        новый, с новой моделью."""
+        view = self._block_views.get("")
+        if view is None:
+            model = ToolBlocks(
+                self._call_timers,
+                diff_preview=self._trace_inline_max_lines(),
+            )
+            view = ToolBlocksView(
+                _TraceBlockHost(self), model, level="", depth=0
+            )
+            self._block_views[""] = view
+        return view
+
+    def _mount_block_widget(self, widget, *, before=None, after=None) -> None:
+        """Виджет блока: в конец ленты — по правилу очереди, рядом со своим
+        виджетом — прямо (якорь — прямой ребёнок `#trace`)."""
+        if before is None and after is None:
+            self._trace_mount(widget)
+            return
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        trace.mount(widget, before=before, after=after)
+        if self._stick_bottom:
+            self._scroll_trace_end()
+
+    def _block_edit(
+        self, call_id: Optional[str]
+    ) -> tuple[Optional[BlockEdit], bool]:
+        """Правка вызова из журнала и «ход вне окна раскрытых» (компактный
+        дифф). Сбой журнала — без правки: лента важнее диффа."""
+        try:
+            lookup = self._edits_lookup_for_thread()
+            edit = edit_of_call(lookup, call_id or "")
+            if edit is None or edit.record is None:
+                return edit, False
+            turn_id = edit.record.turn_id
+            return edit, self._is_stale_edit_turn(lookup, turn_id)
+        except Exception as exc:
+            self.log.warning(f"правка вызова не прочитана: {exc!r}")
+            return None, False
+
+    def _end_turn_blocks(self, outcome: TurnOutcome) -> None:
+        """Итог хода — моделям блоков всех уровней: остановка
+        пользователем ставит `○` блокам этого хода."""
+        stopped = kind_of(outcome)[0] == "cancelled"
+        for view in list(self._block_views.values()):
+            view.turn_ended(stopped=stopped)
 
     def _drain_subagent_progress(self) -> None:
         """Слить live-события субагента из app-очереди и отрисовать nested."""
@@ -4222,7 +4302,7 @@ class TraceScreen(Screen):
         # Пауза тикера корневого субагента на время ответа.
         parent_row = self._active_calls.get(parent_call_id)
         if parent_row is not None:
-            parent_row.pause()
+            self._top_blocks().paused(parent_row)
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
         self._mount_sticky_banner(banner, inp_row)
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
@@ -4240,7 +4320,7 @@ class TraceScreen(Screen):
             self._active_calls.get(parent_call_id) if parent_call_id else None
         )
         if parent_row is not None:
-            parent_row.resume()
+            self._top_blocks().resumed(parent_row)
         self._unmount_ask_human_banner()
 
     def _diff_thread_identity(
@@ -4448,7 +4528,6 @@ class TraceScreen(Screen):
         кнопки ❐ (спека P3 §10). None — монтировать нечего: нет call_id,
         журнала или записи по нему (не файловый тул). Исключения не гасит:
         их ловят вызывающие."""
-        from gc_tui.services.block_edits import edit_of_call
         from gc_tui.widgets.diff_block import DiffBlock
 
         lookup = self._edits_lookup_for_thread()
@@ -4463,22 +4542,6 @@ class TraceScreen(Screen):
             collapsed_max_lines=self._trace_inline_max_lines(),
             compact=self._is_stale_edit_turn(lookup, record.turn_id),
         )
-
-    def _mount_inline_diff(self, ev, row: ToolCallRow) -> None:
-        """Дифф правки под строкой её тула — если по call_id есть запись журнала.
-
-        Монтируем `after=row`, а не в конец ленты: в незавершённом batch за
-        строкой уже стоят соседние вызовы. Записи нет (не файловый тул, журнала
-        нет) — молча ничего не монтируем; любой сбой гасим: лента важнее диффа."""
-        try:
-            block = self._inline_diff_block(ev.call_id, row, event_no=ev.no)
-            if block is None:
-                return
-            self.query_one(_SEL_TRACE, VerticalScroll).mount(block, after=row)
-            if self._stick_bottom:
-                self._scroll_trace_end()
-        except Exception as exc:
-            self.log.warning(f"инлайн-дифф не построен: {exc!r}")
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from gc_tui.widgets.ask_human_banner import AskHumanBanner
@@ -5577,9 +5640,15 @@ class TraceScreen(Screen):
         Вложенные строки субагента тоже: тул субагента может стоять на
         подтверждении, пока корень ждёт. Завершённые строки — no-op.
         """
+        view = self._top_blocks()
         for row in self._active_calls.values():
-            row.pause() if human_wait else row.resume()
+            view.paused(row) if human_wait else view.resumed(row)
             row.refresh_running_elapsed()
+        self._pause_nested_rows(human_wait)
+
+    def _pause_nested_rows(self, human_wait: bool) -> None:
+        """Вложенные строки субагента — пока прежним путём (их модели
+        блоков — отдельный шаг)."""
         for row in self._nested_tool_rows.values():
             row.pause() if human_wait else row.resume()
             row.refresh_running_elapsed()
@@ -5774,8 +5843,9 @@ class TraceScreen(Screen):
             "[running]",
             "[asking]",
         ):
+            view = self._top_blocks()
             for row in self._active_calls.values():
-                row.mark_interrupted()
+                view.interrupted(row, started=not row.waiting)
             for widgets in self._nested_widgets_by_parent.values():
                 for w in widgets:
                     mark = getattr(w, "mark_interrupted", None)
@@ -7486,7 +7556,7 @@ class TraceScreen(Screen):
                     )
                     parent_row = self._active_calls.get(child_pid)
                     if parent_row is not None:
-                        parent_row.resume()
+                        self._top_blocks().resumed(parent_row)
                 else:
                     client_id = self._track_pending(
                         display_text=text, wire_content=text, images=images

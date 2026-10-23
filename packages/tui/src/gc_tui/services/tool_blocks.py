@@ -39,6 +39,8 @@ MIN_DIFF_ROWS_PER_FILE = 3
 
 COLLAPSE_PHRASE = "− свернуть"
 NOT_STARTED_REASON = "не запущено (стоп)"
+#: Причина идущего члена, оборванного остановкой хода.
+CANCELLED_REASON = "отменено"
 
 #: Вид глифа заголовка блока.
 GlyphLook = Literal["run", "ok", "error", "halted"]
@@ -563,6 +565,8 @@ class ToolBlocks:
         # Строки уровня по порядку монтирования; `None` — закрывающее
         # событие ленты. Группу строки решает то, что стоит над ней.
         self._order: list[Optional[_Member]] = []
+        # Первый блок текущего хода: остановка хода трогает только его.
+        self._turn_from = 0
         self._issued: dict[tuple, Decision] = {}
 
     # --- события ---------------------------------------------------------
@@ -618,6 +622,11 @@ class ToolBlocks:
         member.reason = reason
         member.executed = executed
         member.waiting = False
+        # Исход стопа «не запущено» — вызов не исполнялся, как и не
+        # начатый при переводе стопом.
+        member.not_started = (
+            outcome == "halted" and reason == NOT_STARTED_REASON
+        )
         return self._settle(member)
 
     def ran_parts(
@@ -652,14 +661,20 @@ class ToolBlocks:
         return self._settle(member)
 
     def turn_stopped(self) -> list[Decision]:
-        """Ход остановлен: все блоки уровня с незавершёнными членами —
-        `halted`, в том числе уже закрытые."""
+        """Ход остановлен пользователем: блоки хода, где член ещё идёт,
+        оборвался или остановлен, — `halted`, в том числе уже закрытые;
+        законченные блоки не меняются."""
         out: list[Decision] = []
-        for block in self._blocks:
-            if any(not m.done for m in block.members):
+        for block in self._blocks[self._turn_from :]:
+            if any(not m.done or m.halted for m in block.members):
                 block.stopped = True
                 out += self._render(block)
         return out
+
+    def turn_ended(self) -> list[Decision]:
+        """Запись итога хода: следующие блоки — уже другого хода."""
+        self._turn_from = len(self._blocks)
+        return []
 
     def paused(self, call_id: str) -> list[Decision]:
         """Ожидание человека: пауза — часы самой строки, блок не меняется."""
@@ -961,9 +976,9 @@ class ToolBlocks:
     def _head(self, block: _Block, prefix: Parts = ()) -> SetHeader:
         members = block.members
         running = any(m.live for m in members)
-        stopped = block.stopped or any(
-            m.halted or m.not_started for m in members
-        )
+        # `○` — остановка хода или член без исхода; исход «остановлен»
+        # (лимит) у члена сам `○` не ставит.
+        stopped = block.stopped or any(m.interrupted for m in members)
         glyph = block_glyph(
             running=running,
             stopped=stopped,
@@ -1001,6 +1016,10 @@ class ToolBlocks:
 
     def _member(self, member: _Member, *, lead: bool) -> list[Decision]:
         mode = SetMode(member.key, "member", lead=lead, current=member.live)
+        block = self._block_of[member.key]
+        if block.stopped and member.interrupted and not member.not_started:
+            reason = SetConsequence(member.key, CANCELLED_REASON, "dim")
+            return [mode, reason, *self._outcome_of(member)]
         return [mode, *self._outcome_of(member)]
 
     def _outcome_of(self, member: _Member) -> list[Decision]:

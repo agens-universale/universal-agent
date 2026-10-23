@@ -321,7 +321,54 @@ def test_failures_stop_result_not_started():
         "w", "не запущено (стоп)", "dim"
     )
     assert fold.timer("w") is None
+    # Исход «остановлен» сам `○` не ставит — только остановка хода.
+    assert fold.header().glyph == "ok"
+    fold(model.turn_stopped())
     assert fold.header().glyph == "halted"
+
+
+def test_limit_halted_member_keeps_glyph():
+    """Член, остановленный лимитом, — `└` серым, заголовок без `○`."""
+    model, fold, _ = _model()
+    _reads(model, fold, 1)
+    fold(model.member_added("h", C.READ, waiting=False))
+    fold(model.started("h"))
+    fold(model.result("h", "halted", reason="лимит вызовов", executed=None))
+    assert fold.consequence("h") == SetConsequence("h", "лимит вызовов", "dim")
+    assert fold.header().glyph == "ok"
+
+
+def test_turn_stopped_only_this_turn():
+    """Остановка хода не трогает блоки прошлых ходов."""
+    model, fold, _ = _model()
+    _reads(model, fold, 1)
+    fold(model.member_added("h", C.READ, waiting=False))
+    fold(model.result("h", "halted", reason="лимит вызовов", executed=None))
+    model.event_closing()
+    model.turn_ended()
+    _reads(model, fold, 1, start=2, done=False)
+    fold(model.turn_stopped())
+    assert fold.header("block:0").glyph == "ok"
+    assert fold.header("block:1").glyph == "halted"
+
+
+def test_stopped_turn_interrupted_member_cancelled():
+    """Остановка хода: идущий член без исхода — `└ отменено`, в каком бы
+    порядке ни пришли стоп и перевод."""
+    for stop_first in (True, False):
+        model, fold, _ = _model()
+        _reads(model, fold, 1)
+        _reads(model, fold, 1, start=1, done=False)
+        steps = [
+            model.turn_stopped,
+            lambda: model.interrupted("c1", started=True),
+        ]
+        for step in steps if stop_first else steps[::-1]:
+            fold(step())
+        assert fold.consequence("c1") == SetConsequence(
+            "c1", "отменено", "dim"
+        )
+        assert fold.header().glyph == "halted"
 
 
 def test_failures_turn_stopped():
@@ -1137,3 +1184,15 @@ def test_ran_share_counts_binary_not_deleted():
         )
     )
     assert fold.share("x:f0") == SetDiffShare("x:f0", 6, "member")
+
+
+def test_not_started_result_has_no_timer():
+    """Исход «не запущено (стоп)» — без таймера, даже если строка успела
+    стартовать вживую (очередь батча)."""
+    model, fold, _ = _model()
+    fold(model.member_added("w", C.READ, waiting=False))
+    fold(model.started("w"))
+    reason = "не запущено (стоп)"
+    fold(model.result("w", "halted", reason=reason, executed=None))
+    assert fold.consequence("w") == SetConsequence("w", reason, "dim")
+    assert fold.timer("w") is None

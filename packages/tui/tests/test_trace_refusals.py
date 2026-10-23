@@ -154,13 +154,15 @@ def _output_event(error: dict) -> TraceEvent:
     return map_message(msg, no=2, ts="")
 
 
-def _assert_refused_row(row: ToolCallRow, text: str, indent: str) -> None:
+def _assert_refused_row(
+    row: ToolCallRow, text: str, indent: str, *, reason=DIM
+) -> None:
     prefix = row._render_prefix()
     assert _styles_of(prefix, "○") == [REFUSED]
     assert "●" not in prefix.plain
     line = _lines(row)
     assert line.plain == f"{indent}└ {text}"
-    assert _styles_of(line, text) == [DIM]
+    assert _styles_of(line, text) == [reason]
 
 
 # --- маппер: классификация в одном месте ------------------------------------
@@ -366,7 +368,11 @@ async def test_live_refusal_row(tmp_path):
         )
         await pilot.pause()
         (row,) = [r for r in scr.query(ToolCallRow) if r.call_id == "c1"]
-        _assert_refused_row(row, "отклонил судья auto: risky", "  ")
+        # Живая лента идёт через модель блоков: причина отказа — цветом
+        # исхода (P4 §3.3, §9.13); превью и вложенные — пока прежним видом.
+        _assert_refused_row(
+            row, "отклонил судья auto: risky", "  ", reason=REFUSED
+        )
 
 
 @pytest.mark.asyncio

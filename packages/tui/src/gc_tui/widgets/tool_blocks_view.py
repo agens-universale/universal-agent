@@ -100,6 +100,9 @@ class BlockAction(NoSelectStatic):
 
     DEFAULT_CSS = "BlockAction { height: auto; width: 1fr; }"
     can_focus = False
+    # Клик по фразе фокус не двигает: ни на ленту, ни на строку
+    # (`click_model.focus_target_at`).
+    FOCUS_ON_CLICK = False
 
     def __init__(
         self,
@@ -216,6 +219,12 @@ class ToolBlocksView:
 
     def toggle(self, key: str) -> None:
         self.apply(self.model.toggle(key))
+
+    def turn_ended(self, *, stopped: bool) -> None:
+        """Запись итога хода; ``stopped`` — ход остановлен пользователем."""
+        if stopped:
+            self.apply(self.model.turn_stopped())
+        self.apply(self.model.turn_ended())
 
     # --- решения → виджеты ---------------------------------------------------
 
@@ -334,6 +343,7 @@ class ToolBlocksView:
                 rows=d.rows or 0,
                 column=d.column,
                 compact=d.key in self._compact,
+                event_no=getattr(owner, "event_no", 0),
             )
             self.register(key, diff)
             self._host.mount(diff, after=owner)

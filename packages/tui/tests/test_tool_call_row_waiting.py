@@ -88,28 +88,16 @@ def test_set_live_status_on_running_row():
     assert "last=fs_read_file" in content
 
 
-def test_reconcile_batch_phases_first_active_rest_waiting():
-    from gc_tui.services.subagent_progress import reconcile_batch_phases
+def test_first_pending_is_first_unfinished():
+    """Батч исполняется по порядку: стартовала первая незавершённая
+    строка; сама функция строк не меняет (фазы — через модель блоков)."""
+    from gc_tui.services.subagent_progress import first_pending
 
     a = ToolCallRow(call_id="a", label="t1", target="", waiting=True)
     b = ToolCallRow(call_id="b", label="t2", target="", waiting=True)
-    c = ToolCallRow(call_id="c", label="t3", target="", waiting=True)
-    reconcile_batch_phases([a, b, c])
-    assert "●" in str(a._render_prefix())
-    assert "•" in str(b._render_prefix()) and "прервано" not in str(
-        b._render_content()
-    )
-    assert "•" in str(c._render_prefix()) and "прервано" not in str(
-        c._render_content()
-    )
-
-
-def test_reconcile_after_first_done_promotes_second():
-    from gc_tui.services.subagent_progress import reconcile_batch_phases
-
-    a = ToolCallRow(call_id="a", label="t1", target="", waiting=True)
-    b = ToolCallRow(call_id="b", label="t2", target="", waiting=True)
-    reconcile_batch_phases([a, b])
+    assert first_pending([a, b]) is a
+    assert "•" in str(a._render_prefix())
     a.set_result(summary="ok", outcome="ok")
-    reconcile_batch_phases([b])  # a already done / removed from active
-    assert "●" in str(b._render_prefix())
+    assert first_pending([a, b]) is b
+    b.mark_interrupted()
+    assert first_pending([a, b]) is None

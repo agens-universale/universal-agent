@@ -161,8 +161,9 @@ async def test_long_tool_args_wrap_inside_content_column():
 
 @pytest.mark.asyncio
 async def test_call_row_shows_label_not_wire_name():
-    """Спека P3 §2.1: живая строка вызова — подпись ядра по wire-имени
-    (`Write  x.py`); ни wire-имени, ни канонического id в строке нет."""
+    """Спека P3 §2.1: живая строка вызова — подпись по wire-имени; у
+    правки (P4 §6.1) — глагол правки: идёт `Editing`, без исхода `Edit`;
+    ни wire-имени, ни канонического id в строке нет."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
@@ -186,7 +187,7 @@ async def test_call_row_shows_label_not_wire_name():
         await pilot.pause()
         row = scr.query_one(ToolCallRow)
         content = row._render_content().plain
-        assert content.startswith("Write  x.py")
+        assert content.startswith(("Editing x.py", "Edit x.py"))
         assert "append" not in content
         assert row.wire_name == "fs_append_file"
 

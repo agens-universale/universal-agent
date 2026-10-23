@@ -310,6 +310,15 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return self._mode
 
     @property
+    def waiting(self) -> bool:
+        """Ждёт своей очереди в батче (`•`): исполнение не началось."""
+        return self._waiting
+
+    @property
+    def event_no(self) -> int:
+        return self._event_no
+
+    @property
     def detail_call_id(self) -> str:
         """Чей экран деталей открывает Enter: у заголовка — последнего
         члена блока."""
@@ -657,9 +666,11 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     ) -> None:
         """Хвост строки без результата: прервано / elapsed (+ step/last).
 
-        Waiting — без хвоста: только подпись и объект."""
+        Waiting — без хвоста: только подпись и объект. У члена блока
+        «прервано» не пишется: обрыв видно по `○` заголовка."""
         if self._interrupted:
-            text.append(" · прервано", style=_DIM)
+            if self._mode != "member":
+                text.append(" · прервано", style=_DIM)
             return
         if self._waiting:
             return
