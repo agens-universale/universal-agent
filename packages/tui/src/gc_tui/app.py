@@ -393,7 +393,7 @@ class TuiApp(App):
         # писатель — set_permission_mode.
         self._permission_mode: Optional[str] = None
         self._permission_mode_locked = False  # режим задан флагом запуска
-        self.last_runner_error: Optional[str] = None
+        self.last_runner_error = None
         self._session_log_path: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
         self.last_stop_requested: bool = (
@@ -1063,6 +1063,19 @@ class TuiApp(App):
         НЕ для рендера — effective_settings() (база + сессионные
         переопределения) зовётся на каждый кадр; здесь — только база."""
         return self._settings
+
+    @property
+    def last_runner_error(self) -> Optional[str]:
+        """Ошибка прогона активного раннера (текст для строки «└»)."""
+        return self._last_runner_error
+
+    @last_runner_error.setter
+    def last_runner_error(self, err: Optional[str]) -> None:
+        # Ошибка принадлежит прогону, в котором случилась: пара «раннер и
+        # run_seq». Следующий прогон того же раннера её не наследует.
+        self._last_runner_error = err
+        runner = self.active_runner
+        self.last_runner_error_run = (runner, getattr(runner, "run_seq", None))
 
     @property
     def image_store(self) -> ImageStore:

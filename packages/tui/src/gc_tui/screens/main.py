@@ -5576,9 +5576,24 @@ class TraceScreen(Screen):
         )
 
     def _active_run_error(self) -> str | None:
-        """Ошибка раннера открытого треда; чужая не рисуется."""
+        """Ошибка наблюдаемого прогона открытого треда; чужая и ошибка
+        прошлого прогона того же раннера не рисуются."""
         err = getattr(self.app, "last_runner_error", None)
-        return err if self._runner_is_for_active_thread() else None
+        if err is None or not self._runner_is_for_active_thread():
+            return None
+        owner = getattr(self.app, "last_runner_error_run", None)
+        return err if owner == self._observed_run() else None
+
+    def _observed_run(self) -> tuple:
+        """Пара «раннер и `run_seq`» прогона, который наблюдает экран: тот,
+        что застал тик, иначе текущий прогон активного раннера."""
+        runner = self._watched_runner or getattr(
+            self.app, "active_runner", None
+        )
+        seq = self._watched_run_seq
+        if seq is None:
+            seq = getattr(runner, "run_seq", None)
+        return runner, seq
 
     def _run_task_id(self, runner) -> str | None:
         """Тред прогона раннера: его цель, иначе активный."""
@@ -9679,9 +9694,6 @@ class TraceScreen(Screen):
         # Сброс якоря таймера: «сжимаю контекст…» должен считать с 0, а не от
         # момента прошлого хода (как и на обычном send).
         self._reset_thinking_timer()
-        # Ошибка прошлого прогона — не ошибка сжатия: иначе она закрыла бы
-        # его на первом тике (S10 §3.7).
-        self._reset_run_flags()
         if runner.compact_now(tid, self.app._system):
             # Сжатие — работа: бар «сжимаю контекст…» (S10, решение В3).
             self._run_pending = True

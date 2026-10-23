@@ -111,3 +111,60 @@ async def test_error_then_quick_send_settles_above_reply(tmp_path):
         assert not line.is_fresh
         assert line.display
         assert kids.index(line) < kids.index(reply)
+
+
+@pytest.mark.asyncio
+async def test_queued_run_after_settled_error_not_closed_by_stale_error(
+    tmp_path,
+):
+    """Ошибка закрыла прогон при живом потоке; отправка из поля стартует
+    следующий прогон того же раннера без сброса флагов. Ошибка прошлого
+    прогона новый не закрывает: бар стоит, исход второй раз не пишется."""
+    import json
+
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.app import TuiApp
+
+    tid = "qerr000000000000000000000000002b"
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8"
+    )
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+
+    class _Run:
+        _thread_kind = "run"
+        _last_target = (tid, "cli")
+        run_seq = 1
+
+        def is_running(self):
+            return True
+
+        def turn_effective_start(self):
+            return None
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid, is_resume=True)
+        runner = _Run()
+        pilot.app.active_runner = runner
+        scr._prepare_for_new_run()
+        scr._poll_tick()
+        pilot.app.last_runner_error = "ReadTimeout: сервер не ответил"
+        scr._poll_tick()  # ошибка закрыла прогон 1
+
+        finished = []
+        orig = scr._on_run_finished
+        scr._on_run_finished = lambda r, k: (finished.append(k), orig(r, k))
+        runner.run_seq = 2  # add_message: прогон 2 без _reset_run_flags
+        scr._poll_tick()
+        scr._poll_tick()
+        await pilot.pause()
+
+        assert finished == []
+        bar = scr.query_one("#indicator-bar")
+        assert bar.has_class("-turn")
