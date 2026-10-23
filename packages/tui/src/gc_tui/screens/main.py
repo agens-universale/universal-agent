@@ -679,6 +679,9 @@ class TraceScreen(Screen):
         # Зафиксированный прогон — пара (раннер, `run_seq`): его конец уже
         # записан, бар ему не нужен (S10 §3.7).
         self._settled_run: Optional[tuple] = None
+        # Снимок `tui` открытого треда до записи «running» новым ходом —
+        # `(тред, {status, last_indicator})`: откат его возвращает (§3.8).
+        self._pre_run_tui_meta: Optional[tuple[str, dict]] = None
         # Запись итога последнего хода открытого треда (из потока записей)
         # и признак «после неё началась реплика» — тогда последний ход
         # записи не имеет, строка — по статусу сессии.
@@ -2901,8 +2904,6 @@ class TraceScreen(Screen):
             return
         error = self._active_run_error() if word == "failed" else None
         if line is None or line.recorded:
-            if self._is_undone_reply(self._last_user_message_id):
-                return  # откатанная реплика строки хода не даёт (§3.8)
             self._settle_turn_line()
             line = build_turn_line(
                 word=word, plan=plan, opened_by=self._last_user_message_id
@@ -5371,6 +5372,8 @@ class TraceScreen(Screen):
         tid = task_id or self._active_task_id
         if self._store is None or tid is None:
             return
+        if tid == self._active_task_id:
+            self._snapshot_pre_run_tui(tid)
         self._write_tui_meta(
             tid, {"status": "running", "last_indicator": None}
         )
@@ -5380,6 +5383,17 @@ class TraceScreen(Screen):
             self._outcome_superseded = True
             self._closed_turn_summary = None
             self._settle_turn_line()
+
+    def _snapshot_pre_run_tui(self, tid: str) -> None:
+        """Снимок `tui` треда до «running» нового хода — его вернёт откат.
+        Уже «running» — ход отмечен (отправкой; восходящий фронт — повтор):
+        снимок до него не переписывается."""
+        tui = self._store.get_task_meta(tid).get("tui") or {}
+        if tui.get("status") != "running":
+            self._pre_run_tui_meta = (
+                tid,
+                {k: tui.get(k) for k in ("status", "last_indicator")},
+            )
 
     def _update_mcp_indicator(self) -> None:
         if self._mcp_status_done:
@@ -8366,6 +8380,28 @@ class TraceScreen(Screen):
         if tid is not None and msg_id:
             self._discard_orphan_and_resync(tid, msg_id)
         # НЕ монтируем [stopped] — это и есть "undo".
+        self._close_undone_run(old_runner)
+
+    def _close_undone_run(self, runner) -> None:
+        """Откатанный прогон зафиксирован без исхода: фронты его не видят,
+        строки и записи меты от него не будет. Прошлый ход снова последний
+        — его строка свежая, мета открытого треда — как до отправки (§3.8).
+        """
+        if runner is not None:
+            self._settled_run = (runner, getattr(runner, "run_seq", None))
+        self._stopping_runner = None
+        self._run_pending = False
+        self._was_running = False
+        self._watched_runner = None
+        self._watched_run_seq = None
+        self._outcome_superseded = False
+        lines = list(self.query(TurnLine))
+        if lines:
+            lines[-1].freshen(lines[-1].summary, lines[-1].error)
+        snapshot, self._pre_run_tui_meta = self._pre_run_tui_meta, None
+        if snapshot is not None and snapshot[0] == self._active_task_id:
+            self._write_tui_meta(*snapshot)
+        self._sync_indicator_bar()
 
     def _restore_input(
         self, text: str, images: tuple[Attachment, ...] = ()

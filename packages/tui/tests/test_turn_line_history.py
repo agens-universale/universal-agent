@@ -532,7 +532,8 @@ async def test_undo_with_record_before_discard_leaves_no_line(tmp_path):
 
         assert _outcome_openers(tmp_path) == ["u1"]
         assert _record_openers(scr) == ["u1"]
-        assert not _turn_lines(scr)[0].has_class(LATEST)
+        # Прошлый ход снова последний (S10 §3.8, В2).
+        assert _turn_lines(scr)[0].has_class(LATEST)
 
 
 @pytest.mark.asyncio
@@ -643,6 +644,120 @@ async def test_undo_after_record_was_tailed_removes_mounted_line(tmp_path):
         assert tail.stream_reset is False
         scr._poll_trace_tail()
         assert rebuilt == []
+
+
+# --- S10 §3.8 (В2): откат до вывода возвращает свежесть ---------------------
+
+_PRE_TUI = {
+    "status": "completed",
+    "last_indicator": {"state": "done", "edits": [2, 14, 3]},
+}
+
+
+def _tui_meta(tmp_path, tid=TID) -> dict:
+    meta = json.loads((tmp_path / f"meta_cli_{tid}.json").read_text())
+    return meta.get("tui") or {}
+
+
+def _prepare_one_turn_with_edits(tmp_path):
+    _write_thread(tmp_path, tui=dict(_PRE_TUI))
+    _Thread(tmp_path).turn(1)
+
+
+def _line_view(scr):
+    return [(w.text.plain, w.is_fresh, w.summary) for w in _turn_lines(scr)]
+
+
+@pytest.mark.asyncio
+async def test_undo_restores_previous_line_freshness(tmp_path):
+    """Откат отправки: прошлая строка снова свежая с прежней сводкой, мета
+    — как до отправки, бара нет."""
+    _prepare_one_turn_with_edits(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        before = _fresh_line(scr).summary
+        assert before == (2, 14, 3)
+        scr, _thread, _runner = await _undo_setup(pilot, tmp_path)
+        assert not _turn_lines(scr)[0].is_fresh
+        assert _tui_meta(tmp_path)["status"] == "running"
+
+        scr._cancel_with_undo()
+        await pilot.pause()
+
+        line = _fresh_line(scr)
+        assert line.opened_by == "u1"
+        assert line.summary == before
+        tui = _tui_meta(tmp_path)
+        assert tui["status"] == _PRE_TUI["status"]
+        assert tui["last_indicator"] == _PRE_TUI["last_indicator"]
+        assert not scr.query_one("#indicator-bar").has_class("-turn")
+
+
+@pytest.mark.asyncio
+async def test_undo_on_first_turn_restores_meta_snapshot(tmp_path):
+    """Первый ход откатан: строки нет, мета без «running» — как до
+    отправки."""
+    _write_thread(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        from gc_tui.widgets.user_reply import UserReplyContainer
+
+        scr = await _open(pilot)
+        pilot.app.tui_state.active_task_id = TID
+        pilot.app.active_runner = _FakeRunner()
+        scr._prepare_for_new_run()
+        _Thread(tmp_path).messages(_reply("m_first", "первый"))
+        scr._last_user_message_id = "m_first"
+        scr._trace_mount(UserReplyContainer("первый", event_no=0))
+        await pilot.pause()
+
+        scr._cancel_with_undo()
+        await pilot.pause()
+
+        assert _turn_lines(scr) == []
+        tui = _tui_meta(tmp_path)
+        assert tui.get("status") is None
+        assert tui.get("last_indicator") is None
+        assert not scr.query_one("#indicator-bar").has_class("-turn")
+
+
+@pytest.mark.asyncio
+async def test_undo_run_never_finishes(tmp_path):
+    """Поток откатанного прогона выходит позже: исход его прогона не
+    ставится и в мету не пишется, бар не возвращается."""
+    _prepare_one_turn_with_edits(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, _thread, runner = await _undo_setup(pilot, tmp_path)
+        scr._poll_tick()  # тик застал прогон
+        finished = []
+        scr._on_run_finished = lambda r, k: finished.append(k)
+        scr._cancel_with_undo()
+        await pilot.pause()
+        runner._running = False
+        for _ in range(3):
+            scr._poll_tick()
+            await pilot.pause()
+
+        assert finished == []
+        assert _tui_meta(tmp_path)["status"] == _PRE_TUI["status"]
+        assert _record_openers(scr) == ["u1"]
+        assert [w.opened_by for w in _turn_lines(scr)] == ["u1"]
+        assert _fresh_line(scr).opened_by == "u1"
+        assert not scr.query_one("#indicator-bar").has_class("-turn")
+
+
+@pytest.mark.asyncio
+async def test_undo_reopen_equals_live(tmp_path):
+    _prepare_one_turn_with_edits(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, _thread, runner = await _undo_setup(pilot, tmp_path)
+        scr._cancel_with_undo()
+        await pilot.pause()
+        live = _line_view(scr)
+        runner._running = False
+        scr._run_orphan_cleanups()
+        scr = await _reopen(pilot, tmp_path)
+        assert _line_view(scr) == live
+        assert live[0][1] is True
 
 
 # --- история треда ----------------------------------------------------------
