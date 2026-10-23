@@ -19,6 +19,7 @@ from unittest.mock import patch
 from gc_core.agent_executor import AgentExecutor
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.develop_files import read_subagent_trace
 from gc_testkit.settings import fake_ctx
 
 
@@ -67,12 +68,13 @@ def _ctx():
     )
 
 
-def _child_ctx() -> SimpleNamespace:
+def _child_ctx(**extra) -> SimpleNamespace:
     return SimpleNamespace(
         run_id="run_c1",
         parent_call_id="call_sub",
         subagent_progress_sink=None,
         logger=None,
+        **extra,
     )
 
 
@@ -80,9 +82,10 @@ def _msg(text: str) -> dict:
     return {"role": "user", "content": text, "id": f"m_{text}"}
 
 
-async def _arun_child(ctx, fake_run_agent) -> None:
+async def _arun_child(ctx, fake_run_agent, child_ctx=None) -> None:
     runner = SubagentRunner(ctx, _orchestrator_state(), _cfg())
-    with patch.object(runner, "_build_child_ctx", return_value=_child_ctx()):
+    child_ctx = child_ctx or _child_ctx()
+    with patch.object(runner, "_build_child_ctx", return_value=child_ctx):
         await runner.arun(
             "subagent_worker",
             {"task": "test"},
@@ -143,3 +146,32 @@ def test_late_enqueue_through_stale_scope_reaches_parent_in_order():
         "опоздавшая",
         "после",
     ]
+
+
+def test_message_handed_to_parent_is_not_in_child_trace(tmp_path):
+    """Трасса ребёнка — только то, что он забрал.
+
+    Запись в трассу делалась при ПОСТАНОВКЕ в очередь, поэтому реплика из окна
+    завершения оставалась в треде ребёнка как обращённая к нему — без ответа,
+    висящей при возобновлении, — хотя досталась родителю.
+    """
+    ctx = _ctx()
+    ex = AgentExecutor(ctx)
+    child_ctx = _child_ctx(
+        threads_dir=str(tmp_path), system_id="cli", thread_id="task-left"
+    )
+
+    async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        ex.add_message(_msg("ребёнку"))
+        await kwargs["get_pending_messages"]()
+        ex.add_message(_msg("в окно"))
+        return "done"
+
+    asyncio.run(_arun_child(ctx, fake_run_agent, child_ctx))
+
+    rows = read_subagent_trace(str(tmp_path), "cli", "task-left")
+    assert [
+        r["payload"]["content"] for r in rows if r.get("kind") == "user"
+    ] == ["ребёнку"], "реплика, ушедшая родителю, записана за субагентом"
+    next_step = asyncio.run(ex._atake_pending_messages())
+    assert [m["content"] for m in next_step] == ["в окно"]

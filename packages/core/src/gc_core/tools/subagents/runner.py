@@ -1,8 +1,5 @@
-import asyncio
 import json
 import logging
-import threading
-from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -129,57 +126,36 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
 
 async def _adrain_with_attachments(scope: Any, child_ctx: Any) -> list:
     """Реплики очереди субагента — как у родителя: картинки из кармана
-    процесса переезжают в тред."""
-    return [
-        await awith_committed_attachments(m, child_ctx) for m in scope.drain()
-    ]
+    процесса переезжают в тред.
 
-
-async def _drain_trace_writes(
-    futures: List[Any], lock: "threading.Lock"
-) -> None:
-    """Дождаться записей трассы, поставленных в очередь из чужого потока.
-
-    Без этого прогон возвращался бы раньше своих же записей, и `asyncio.run`
-    вызывающего снимал бы их отменой — трасса терялась бы молча, тем тише чем
-    позже пришло сообщение. Отказ каждой записи логируется отдельно: возврат
-    ``apersist_subagent_trace`` не читает ни один вызывающий, и другого следа
-    у ошибки нет.
-
-    Цикл, а не один снимок. Первая редакция снимала список ОДИН раз, и этого
-    мало по двум причинам: колбэк всё ещё вооружён (его снимает вызывающий
-    перед дренажом), а чужой поток мог добавить future между снимком и
-    `clear()`. Выходим, когда список пуст, — тогда добавлять больше некому.
-
-    Про отмену. Если нас отменили, каждое следующее ожидание бросит сразу, и
-    дожидаться нечем: записи уже стоят на ЭТОМ loop и могут доехать сами, а
-    могут быть сняты вместе с ним. Гарантии тут нет — поэтому остаток
-    пересчитывается и попадает в лог ЧИСЛОМ. Молчаливая потеря — ровно то, от
-    чего дренаж и вводился.
+    Здесь же — запись реплики в трассу ребёнка: при заборе, а не при
+    постановке в очередь. Реплика, не забранная до конца его работы, уходит
+    родителю (``activate_child_input``) и за субагентом остаться не должна —
+    иначе в его треде висит обращение, на которое он не ответил.
     """
-    logger = logging.getLogger("gc_core.subagents")
-    while True:
-        with lock:
-            pending = futures[:]
-            futures.clear()
-        if not pending:
-            return
-        for index, future in enumerate(pending):
-            try:
-                await asyncio.wrap_future(future)
-            except asyncio.CancelledError:
-                left = len(pending) - index
-                with lock:
-                    left += len(futures)
-                logger.warning(
-                    "subagent_trace_writes_unconfirmed left=%d: прогон отменён "
-                    "во время дренажа; записи поставлены на loop, но их "
-                    "завершение не подтверждено",
-                    left,
-                )
-                raise
-            except Exception:
-                logger.warning("subagent_trace_write_failed", exc_info=True)
+    out = []
+    for message in scope.drain():
+        message = await awith_committed_attachments(message, child_ctx)
+        await _apersist_child_user(message, child_ctx)
+        out.append(message)
+    return out
+
+
+async def _apersist_child_user(
+    message: Dict[str, Any], child_ctx: Any
+) -> None:
+    """Строка ``user`` трассы ребёнка; техническая реплика без прозы — нет."""
+    prose = extract_real_user_message_text(message)
+    if not prose:
+        return
+    payload: Dict[str, Any] = {"role": "user", "content": prose}
+    attachments = message.get("attachments")
+    if attachments:
+        payload["attachments"] = attachments
+    msg_id = message.get("id")
+    if isinstance(msg_id, str) and msg_id:
+        payload["id"] = msg_id
+    await apersist_subagent_trace(child_ctx, kind="user", payload=payload)
 
 
 class SubagentRunner:
@@ -838,43 +814,11 @@ class SubagentRunner:
         with self._input_scope_factory(
             self._ctx, parent_call_id=self._parent_call_id
         ) as scope:
-            # Колбэк enqueue приходит из ЧУЖОГО потока: его дёргает
-            # `AgentExecutor.add_message`, которую зовёт TUI, и loop'а там нет.
-            # Поэтому запись трассы уезжает на loop ЭТОГО прогона, а не делается
-            # на месте. Синхронной формы у операции больше нет, и это к лучшему:
-            # прежняя ОТКАЗЫВАЛАСЬ писать в асинхронное хранилище (лог-варнинг и
-            # `return None`), то есть у встраивающего с redis/postgres история
-            # вызовов субагента не писалась вовсе, а сами субагенты работали —
-            # заметить было нечего.
-            loop = asyncio.get_running_loop()
-            # Планировать и забыть нельзя: `asyncio.run` вызывающего снимает
-            # незавершённые задачи ОТМЕНОЙ при закрытии loop, и запись,
-            # поставленную в очередь последним сообщением, теряло молча
-            # (проверено: CancelledError в done-колбэке). Поэтому futures
-            # собираются и дожидаются на границе прогона. Лок — потому что
-            # добавляет их чужой поток, а разбирает loop.
-            trace_writes: list = []
-            thread_safe = getattr(scope, "thread_safe", True)
-            trace_writes_lock = (
-                threading.Lock() if thread_safe else nullcontext()
-            )
-
-            async def _apersist_child_user(
-                message: Dict[str, Any], prose: str
-            ) -> None:
-                payload: Dict[str, Any] = {"role": "user", "content": prose}
-                attachments = (
-                    await awith_committed_attachments(message, child_ctx)
-                ).get("attachments")
-                if attachments:
-                    payload["attachments"] = attachments
-                msg_id = message.get("id")
-                if isinstance(msg_id, str) and msg_id:
-                    payload["id"] = msg_id
-                await apersist_subagent_trace(
-                    child_ctx, kind="user", payload=payload
-                )
-
+            # Колбэк enqueue приходит из ЧУЖОГО потока (`add_message` зовёт
+            # TUI), поэтому здесь только строка ленты. Запись в трассу и копия
+            # картинок в тред — при заборе реплики ребёнком
+            # (`_adrain_with_attachments`): не забранная им реплика уходит
+            # родителю и в трассе субагента остаться не должна.
             def _on_child_user_enqueue(message: Dict[str, Any]) -> None:
                 prose = extract_real_user_message_text(message)
                 if not prose:
@@ -887,17 +831,6 @@ class SubagentRunner:
                     prose=prose,
                     attachments=message.get("attachments"),
                 )
-                # Копия в тред и запись трассы — на loop ребёнка, а не в потоке
-                # постановки (UI TUI): там же, где приём из очереди, — копии не
-                # гоняются, повторная идемпотентна.
-                write = _apersist_child_user(message, prose)
-                future = (
-                    asyncio.run_coroutine_threadsafe(write, loop)
-                    if thread_safe
-                    else asyncio.create_task(write)
-                )
-                with trace_writes_lock:
-                    trace_writes.append(future)
 
             scope.set_on_enqueue(_on_child_user_enqueue)
             # run_agent_func обязана быть корутинной — это arun_agent. Раньше здесь
@@ -921,15 +854,9 @@ class SubagentRunner:
                     ),
                 )
             finally:
-                # Колбэк снимается ПЕРВЫМ делом: пока он вооружён, чужой поток
-                # добавляет futures, и дренаж гонялся бы за собственным хвостом.
+                # Реплика после конца работы ребёнка — уже не ему: строки в
+                # его ленте для неё не нужно.
                 scope.set_on_enqueue(None)
-                if thread_safe:
-                    await _drain_trace_writes(trace_writes, trace_writes_lock)
-                # Signals and the child loop share one event loop. Await all
-                # sidecar writes before returning; storage failure propagates.
-                elif trace_writes:
-                    await asyncio.gather(*trace_writes)
 
     def _maybe_pin_fallback(
         self,

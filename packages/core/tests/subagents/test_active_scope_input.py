@@ -299,9 +299,11 @@ class TestRunnerWiresPending:
         barrier = threading.Event()
         release = threading.Event()
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             barrier.set()
             release.wait(timeout=2)
+            # Ребёнок забирает реплику — в его трассу она пишется именно здесь.
+            await kwargs["get_pending_messages"]()
             return "done"
 
         child_ctx = SimpleNamespace(
@@ -351,12 +353,8 @@ class TestRunnerWiresPending:
         release.set()
         t.join(timeout=5)
 
-        # Запись трассы уехала на loop прогона (см. `SubagentRunner`: колбэк
-        # enqueue приходит из чужого потока и своей синхронной формы у операции
-        # больше нет), поэтому смотрим её ПОСЛЕ того, как прогон закончился.
-        # Здесь `fake_run_agent` держит loop в `release.wait`, то есть до
-        # `release.set()` очередь loop'а не двигалась вовсе; в проде на его
-        # месте `arun_agent`, который отдаёт управление на каждом await.
+        # Строка в трассе ребёнка появляется при заборе реплики из очереди,
+        # а не при постановке: не забранная им реплика уходит родителю.
         rows = read_subagent_trace(str(tmp_path), "cli", "task-steer")
         user_rows = [r for r in rows if r.get("kind") == "user"]
         assert len(user_rows) == 1
@@ -396,9 +394,11 @@ class TestParentPendingUnchangedWithoutChild:
         barrier = threading.Event()
         release = threading.Event()
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             barrier.set()
             release.wait(timeout=2)
+            # Ребёнок забирает реплику — в его трассу она пишется именно здесь.
+            await kwargs["get_pending_messages"]()
             return "done"
 
         child_ctx = SimpleNamespace(
