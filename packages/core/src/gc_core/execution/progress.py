@@ -35,6 +35,8 @@ from gc_core.constants.tool_names import (
     FS_FILE_INFO_NAME,
     FS_FIND_IN_FILES_NAME,
     FS_LIST_FILES_NAME,
+    PROJECT_MEMORY_TOOL_NAME,
+    SESSION_MEMORY_TOOL_NAME,
     SESSION_TODO_TOOL_NAME,
     SKILLS_READ_ASSET_NAME,
     SKILLS_READ_REFERENCE_NAME,
@@ -409,7 +411,21 @@ def _skill_file(skill_id: str, data: Dict[str, Any], _limit: int) -> str:
     return skill_id
 
 
+def _session_memory(action: str, data: Dict[str, Any], _limit: int) -> str:
+    """`действие регистр`; у `list` регистра нет (тул его игнорирует)."""
+    register = data.get("register")
+    if action == "list" or not isinstance(register, str):
+        return action
+    return f"{action} {register}".strip()
+
+
+def _project_memory(action: str, _data: Dict[str, Any], _limit: int) -> str:
+    return f"{action} project"
+
+
 _PRIMARY_RULES: Dict[str, Callable[[str, Dict[str, Any], int], str]] = {
+    SESSION_MEMORY_TOOL_NAME: _session_memory,
+    PROJECT_MEMORY_TOOL_NAME: _project_memory,
     FS_FIND_IN_FILES_NAME: _find_in_files,
     FS_LIST_FILES_NAME: _list_files,
     FS_FILE_INFO_NAME: _file_info,

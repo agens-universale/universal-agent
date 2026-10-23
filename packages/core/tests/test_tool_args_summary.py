@@ -355,3 +355,30 @@ def test_summary_of_multiline_command_is_unchanged(command, summary):
     """Сводка — по-прежнему одна строка: значения зафиксированы по базе."""
     out = tool_args_summary("exec_command", {"command": command}, root="/proj")
     assert out == summary
+
+
+@pytest.mark.parametrize("action", ["write", "append", "read"])
+@pytest.mark.parametrize(
+    "register", ["goal", "constraints", "state", "knowledge"]
+)
+def test_session_memory_shows_action_and_register(action, register):
+    out = tool_args_summary(
+        "session_memory",
+        {"action": action, "register": register, "content": "секрет"},
+    )
+    assert out == f"{action} {register}"
+
+
+def test_session_memory_list_has_no_target():
+    out = tool_args_summary(
+        "session_memory", {"action": "list", "register": "goal"}
+    )
+    assert out == "list"
+
+
+@pytest.mark.parametrize("action", ["write", "append", "read"])
+def test_project_memory_shows_action_and_project(action):
+    out = tool_args_summary(
+        "project_memory", {"action": action, "content": "секрет"}
+    )
+    assert out == f"{action} project"
