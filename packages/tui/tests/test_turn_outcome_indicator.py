@@ -188,38 +188,10 @@ def _fake_clock():
 # --- голова индикатора: время из записи -----------------------------------
 
 
-def test_indicator_head_carries_clock_time():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="done", frozen_elapsed=12.0, ended_at=ENDED)
-    assert ind._render_text().plain == f"✓ Выполнил за 12с · {_hm(ENDED)}"
-    ind.set_ended_at(None)
-    assert ind._render_text().plain == "✓ Выполнил за 12с"
-
-
-def test_indicator_done_without_duration_does_not_count_itself():
-    """Нет длительности из записи — «Выполнил» без «за N»: свой счёт
-    индикатора длительностью хода не становится."""
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(started_at=0.0, clock=lambda: 100.0)
-    ind.set_state("done")
-    assert ind._render_text().plain == "✓ Выполнил"
-
-
-def test_indicator_plan_head():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(
-        state="done", frozen_elapsed=40.0, ended_at=ENDED, plan=True
-    )
-    assert ind._render_text().plain == f"✓ План готов за 40с · {_hm(ENDED)}"
-
-
 def test_stopping_blink_has_no_time():
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
-    ind = ThinkingIndicator(state="stopping", ended_at=ENDED)
+    ind = ThinkingIndicator(state="stopping")
     assert ind._render_text().plain == "■"
 
 
@@ -236,8 +208,8 @@ def test_indicator_state_is_public():
 
     ind = ThinkingIndicator(state="stopping")
     assert ind.state == "stopping"
-    ind.set_state("cancelled")
-    assert ind.state == "cancelled"
+    ind.set_state("thinking")
+    assert ind.state == "thinking"
 
 
 def test_no_count_until_turn_clock_exists():

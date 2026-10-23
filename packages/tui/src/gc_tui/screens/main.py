@@ -185,7 +185,6 @@ from gc_tui.services.trace_retention import (
 )
 from gc_tui.services.trace_scroll import reply_above
 from gc_tui.services.turn_outcome import (
-    indicator_state_of,
     kind_of,
     meta_status_of,
     outcome_error,
@@ -217,10 +216,7 @@ from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.static_content import text_key, update_if_changed
-from gc_tui.widgets.thinking_indicator import (
-    ThinkingIndicator,
-    is_terminal_indicator_state,
-)
+from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_overlays import (
     ScrollEndPill,
@@ -261,16 +257,6 @@ _log = logging.getLogger(__name__)
 _DIALOG_CONTINUATION_KINDS = frozenset(
     {"user", "agent", "call", "result", "error", "error_msg"}
 )
-
-
-def resolve_live_terminal_indicator_state(*, status, stop_requested):
-    """Состояние строки-итога в idle-фазе живого прогона: статус сессии
-    из meta (`tui.status`) с guard прямого stop в обход _cmd_stop;
-    лимитного исхода статус не различает."""
-    word = word_of_status(status)
-    if word == "completed" and stop_requested:
-        word = "cancelled"
-    return indicator_state_of(word) if word else None
 
 
 def select_indicator_mode(*, err, is_running, ask_human, confirm):
@@ -2621,10 +2607,7 @@ class TraceScreen(Screen):
         # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
         # _poll_active). Sticky-маркер sentinel выставляется в
         # _render_records, чтобы пережить _last_event_kind = ev.kind.
-        # Ход, закрытый в этом же тике, уже показал строку-итог.
-        if self._thinking is not None and not is_terminal_indicator_state(
-            self._thinking._state
-        ):
+        if self._thinking is not None:
             self._thinking.set_state("validating")
 
     def _drop_finish_attempts(self) -> None:
@@ -6025,19 +6008,23 @@ class TraceScreen(Screen):
         if outcome is not None:
             self._show_turn_outcome(*kind_of(outcome), outcome)
             return
-        if is_terminal_indicator_state(ind.state):
-            return
+        word = self._idle_status_word(runner)
+        if word is None:
+            self._destroy_thinking_indicator()
+        else:
+            self._show_turn_outcome(word, False, None)
+
+    def _idle_status_word(self, runner) -> str | None:
+        """Слово исхода без записи по статусу сессии (`tui.status`), с
+        guard прямого stop в обход `_cmd_stop`; лимитного исхода статус не
+        различает."""
         status = None
         if self._store is not None and self._active_task_id is not None:
             status = (self._tick_meta().get("tui") or {}).get("status")
-        state = resolve_live_terminal_indicator_state(
-            status=status,
-            stop_requested=getattr(runner, "_stop_requested", False),
-        )
-        if state is None:
-            self._destroy_thinking_indicator()
-        else:
-            self._show_turn_outcome(state, False, None)
+        word = word_of_status(status)
+        if word == "completed" and getattr(runner, "_stop_requested", False):
+            word = "cancelled"
+        return word
 
     def _follow_turn_clock(self) -> None:
         """Живой счёт индикатора хода — от часов хода ядра: ожидание

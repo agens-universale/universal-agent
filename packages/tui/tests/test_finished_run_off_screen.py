@@ -101,6 +101,14 @@ def _meta(tmp_path, tid):
     return json.loads(path.read_text(encoding="utf-8"))["tui"]
 
 
+def _fresh(scr):
+    """Свежая строка итога последнего хода открытого треда."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    (line,) = scr.query(TurnLine).filter(".-latest")
+    return line
+
+
 class _Runner:
     """Прогон треда B."""
 
@@ -145,13 +153,13 @@ async def test_plan_end_of_other_thread_stays_with_it(tmp_path):
         pilot.app.last_terminal_outcome = "plan_proposed"
         scr.attach_active_task(_A, is_resume=True)
         await pilot.pause()
-        a_before = scr._thinking._render_text().plain
-        assert a_before == "✓ Выполнил за 5с"
+        a_before = _fresh(scr).render().plain
+        assert a_before.startswith("✓ Выполнил за 5с")
         scr._poll_active()
         await pilot.pause()
         await pilot.pause()
-        assert scr._thinking._render_text().plain == a_before
-        assert scr._thinking._summary_span is None
+        assert _fresh(scr).render().plain == a_before
+        assert _fresh(scr).summary_span is None
         assert scr._plan_banner is None
         assert _meta(tmp_path, _A)["last_indicator"] == {"edits": None}
         b = _meta(tmp_path, _B)
@@ -159,6 +167,6 @@ async def test_plan_end_of_other_thread_stays_with_it(tmp_path):
         assert b["last_indicator"] == {"edits": [1, 2, 0]}
         scr.attach_active_task(_B, is_resume=True)
         await pilot.pause()
-        plain = scr._thinking._render_text().plain
+        plain = _fresh(scr).render().plain
         assert plain.startswith(f"✓ {DONE_LABEL_PLAN} за 42с")
         assert plain.endswith("изменено 1 файл · +2 −0")

@@ -303,12 +303,15 @@ async def test_plan_stands_in_a_titled_frame_and_feedback_leaves_a_trace_line(
 
 
 def test_turn_that_ended_with_a_plan_is_not_called_done():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.services.turn_outcome import turn_head
 
-    plain = ThinkingIndicator(state="done", frozen_elapsed=6)
-    assert "Выполнил за 6с" in plain._render_text().plain
-    plan = ThinkingIndicator(state="done", frozen_elapsed=6, plan=True)
-    assert "План готов за 6с" in plan._render_text().plain
+    def head(plan):
+        return turn_head(
+            "completed", plan=plan, duration_sec=6, ended_at=None
+        ).plain
+
+    assert "Выполнил за 6с" in head(False)
+    assert "План готов за 6с" in head(True)
 
 
 class _ApprovingRunner(_Runner):

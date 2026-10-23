@@ -27,7 +27,6 @@ from gc_tui.services.turn_outcome import (
     compose_status_line,
     format_turn_summary,
 )
-from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from rich.text import Text
 
 
@@ -257,41 +256,6 @@ def test_hover_speaks_the_same_color_as_every_hover_rule_of_the_base():
     assert styles == {css_variables()[token] for token in tokens}
 
 
-def test_indicator_remembers_the_span_it_rendered():
-    ind = ThinkingIndicator(
-        state="done",
-        frozen_elapsed=12,
-        clock=lambda: 0.0,
-        turn_summary=(2, 5, 6),
-    )
-    plain = ind._render_text().plain
-    start, end = ind._summary_span
-    assert plain[start:end] == "изменено 2 файла · +5 −6"
-
-
-def test_indicator_forgets_the_span_without_summary():
-    ind = ThinkingIndicator(state="done", frozen_elapsed=12, clock=lambda: 0.0)
-    ind._render_text()
-    assert ind._summary_span is None
-
-
-def test_indicator_done_without_summary_unchanged():
-    ind = ThinkingIndicator(state="done", frozen_elapsed=12, clock=lambda: 0.0)
-    assert ind._render_text().plain == "✓ Выполнил за 12с"
-
-
-def test_indicator_done_with_summary_shows_segment():
-    ind = ThinkingIndicator(
-        state="done",
-        frozen_elapsed=12,
-        clock=lambda: 0.0,
-        turn_summary=(2, 5, 6),
-    )
-    plain = ind._render_text().plain
-    assert plain.startswith("✓ Выполнил за 12с")
-    assert plain.endswith("изменено 2 файла · +5 −6")
-
-
 @pytest.mark.parametrize(
     "state, head",
     [
@@ -306,19 +270,18 @@ def test_indicator_done_with_summary_shows_segment():
         ),
     ],
 )
-def test_every_terminal_state_shows_the_edits_summary(state, head):
+def test_every_outcome_line_shows_the_edits_summary(state, head):
     """Ход, упавший или остановленный, файлы уже менял — и об этом строка говорит.
 
     Сводку сохраняли для любого исхода, а рисовали только у «Выполнил»: после
     ошибки пользователь видел одно «Ошибка», хотя именно тогда ему важнее всего
     знать, что файлы тронуты (ревью PR, находка 7)."""
-    ind = ThinkingIndicator(
-        state=state, clock=lambda: 0.0, turn_summary=(1, 1, 1)
-    )
-    plain = ind._render_text().plain
+    line = build_turn_line(word=state)
+    line.freshen((1, 1, 1), None)
+    plain = line.render().plain
     assert plain.startswith(head)
     assert plain.endswith("изменено 1 файл · +1 −1")
-    assert ind._summary_span is not None
+    assert line.summary_span is not None
 
 
 # --- проводка спадающего фронта --------------------------------------------

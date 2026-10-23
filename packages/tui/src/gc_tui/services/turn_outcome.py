@@ -86,8 +86,6 @@ def settled_status(word: str | None, *, live: bool) -> str | None:
 _FINISHED_WORDS = frozenset(
     {"completed", "cancelled", "failed", "interrupted"}
 )
-#: Слово → состояние строки-итога индикатора; остальные совпадают.
-_INDICATOR_STATES = {"completed": "done", "stopped": "cancelled"}
 
 
 def word_of_status(status: str | None) -> str | None:
@@ -95,11 +93,6 @@ def word_of_status(status: str | None) -> str | None:
     `status`, «interrupted» чтения); живой или неизвестный — None."""
     word = _ALIASES.get(status, status) if status else None
     return word if word in _FINISHED_WORDS else None
-
-
-def indicator_state_of(word: str) -> str:
-    """Состояние строки-итога индикатора по слову исхода хода."""
-    return _INDICATOR_STATES.get(word, word)
 
 
 def meta_status_of(word: str) -> str:

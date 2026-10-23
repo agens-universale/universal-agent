@@ -364,21 +364,6 @@ async def test_indicator_keeps_thinking_after_agent_event_with_pause(
         assert "думаю" in str(ind._render_text().plain)
 
 
-def test_done_state_renders_vypolnil_dim_and_frozen():
-    """Длительность «Выполнил за N» — снаружи (запись итога хода), свой счёт
-    индикатора её не подменяет: время идёт, N стоит."""
-    from gc_tui.widgets import thinking_indicator as ti
-
-    clock = {"t": 100.0}
-    ind = ti.ThinkingIndicator(started_at=0.0, clock=lambda: clock["t"])
-    ind.set_state("done")
-    ind.freeze_elapsed(100.0)
-    clock["t"] = 999.0  # время идёт дальше
-    txt = ind._render_text()
-    s = txt.plain
-    assert s == "✓ Выполнил за 1м 40с"
-
-
 @pytest.mark.asyncio
 async def test_esc_stops_running_run(tmp_path):
     """Esc на главном экране при running + пустой выделение → stop_run."""
@@ -420,3 +405,16 @@ async def test_esc_stops_running_run(tmp_path):
         await pilot.press("escape")
         await pilot.pause(0.3)
         assert stopped["flag"] is True
+
+
+@pytest.mark.parametrize(
+    "outcome", ["done", "cancelled", "failed", "interrupted", "stopped_steps"]
+)
+def test_indicator_ignores_outcome_states(outcome):
+    """Индикатор показывает только работу (S10 §3.3): исход хода — не его
+    состояние, `set_state` молча его пропускает."""
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(state="thinking", clock=lambda: 0.0)
+    ind.set_state(outcome)
+    assert ind.state == "thinking"

@@ -17,34 +17,8 @@ from gc_core.thread_store import (
     append_turn_outcome_record,
 )
 from gc_testkit.tui_support import tui_settings
-from gc_tui.palette import DIM
 
 _TID = "lerr0000000000000000000000000001a"
-
-
-def _styles_of(text, fragment: str) -> list[str]:
-    return [
-        str(s.style)
-        for s in text.spans
-        if fragment in text.plain[s.start : s.end]
-    ]
-
-
-def test_failed_indicator_shows_reason_line():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="failed", error="ReadError: boom")
-    text = ind._render_text()
-    assert text.plain == "✕ Ошибка\n  └ ReadError: boom"
-    assert _styles_of(text, "ReadError: boom") == [DIM]
-
-
-def test_failed_indicator_without_reason_is_one_line():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    assert ThinkingIndicator(state="failed")._render_text().plain == (
-        "✕ Ошибка"
-    )
 
 
 def _write_task(tmp_path, tui: dict | None = None, reason: str = ""):
@@ -175,34 +149,6 @@ _LONG = "MainModelUnavailable: " + "модель недоступна " * 8  # ~
 
 def _rows(text: str) -> list[str]:
     return text.split("\n")[1:]
-
-
-def test_long_reason_wraps_under_text_column():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="failed", error=_LONG)
-    rows = _rows(ind._render_text().plain)
-    assert 2 <= len(rows) <= 3
-    assert rows[0].startswith("  └ ")
-    assert all(r.startswith("    ") and r[4] != " " for r in rows[1:])
-    assert not rows[-1].endswith("…")
-    assert ind.error_rows == len(rows)
-
-
-def test_reason_beyond_three_rows_is_cut():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="failed", error="слово " * 80)
-    rows = _rows(ind._render_text().plain)
-    assert len(rows) == 3
-    assert rows[-1].endswith("…")
-
-
-def test_short_reason_is_one_row():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="failed", error="ReadError: boom")
-    assert ind.error_rows == 1
 
 
 async def _bar_display(scr):
