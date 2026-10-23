@@ -980,8 +980,12 @@ class FileThreadStore(ThreadStore):
                     "owner_id": granted.owner,
                     "owner_epoch": granted.epoch,
                 }
+            # Запись для ответа читается до записи аренды: упади чтение
+            # (битый meta) — control не тронут, и тред не остаётся «занятым»
+            # до истечения аренды (бессрочной у durable — навсегда).
+            record = self._record(key, v2)
             self._save_control(key, control, v2)
-            return self._record(key, v2)
+            return record
 
     async def release(self, key: ThreadKey, lease: Lease) -> None:
         with self._scope(key):
