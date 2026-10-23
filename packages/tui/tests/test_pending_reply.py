@@ -299,10 +299,16 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
 
 @pytest.mark.asyncio
 async def test_error_shown_resets_between_runs(tmp_path):
-    """Две ошибки подряд → у каждой своя причина под «✕ Ошибка» (флаг
-    сбрасывается): `└ <класс>: <текст>`."""
+    """Две ошибки подряд → у каждой своя причина под «✕ Ошибка» свежей
+    строки итога (флаг сбрасывается): `└ <класс>: <текст>`."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
+    from gc_tui.widgets.turn_line import TurnLine
+
+    def fresh_text(scr):
+        lines = [w for w in scr.query(TurnLine) if w.is_fresh]
+        return lines[0].render().plain if len(lines) == 1 else ""
 
     call = {"n": 0}
 
@@ -329,17 +335,13 @@ async def test_error_shown_resets_between_runs(tmp_path):
         scr = pilot.app.screen
         inp.text = "первая"
         await pilot.press("enter")
-        await pilot.pause(0.5)
-        first = scr._thinking._render_text().plain
+        await wait_until(pilot, lambda: "fail #1" in fresh_text(scr), "#1")
+        assert fresh_text(scr).endswith("└ RuntimeError: fail #1")
 
         inp.text = "вторая"
         await pilot.press("enter")
-        await pilot.pause(0.5)
-
-        assert first.endswith("└ RuntimeError: fail #1")
-        assert scr._thinking._render_text().plain.endswith(
-            "└ RuntimeError: fail #2"
-        )
+        await wait_until(pilot, lambda: "fail #2" in fresh_text(scr), "#2")
+        assert fresh_text(scr).endswith("└ RuntimeError: fail #2")
 
 
 @pytest.mark.asyncio
