@@ -59,6 +59,9 @@ from gc_tui.widgets.click_model import ClickModelMixin
 from gc_tui.widgets.no_select import NoSelectStatic
 
 COLLAPSE_LABEL = "свернуть"
+#: Колонка номеров диффа под блоком ленты: номер прижат вправо к третьей
+#: клетке колонки диффа (спека P4 §6.2, сетка §3.1).
+_BLOCK_GUTTER = 3
 
 
 class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
@@ -234,6 +237,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
                 max_lines=max_lines,
                 fill_width=fill,
                 wrap=True,
+                min_gutter=_BLOCK_GUTTER if self._in_block else 1,
             )
             self._cache[key] = cached
         return cached

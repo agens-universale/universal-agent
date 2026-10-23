@@ -110,6 +110,7 @@ def render_hunks(
     syntax: bool = True,
     fill_width: int | None = None,
     wrap: bool = False,
+    min_gutter: int = 1,
 ) -> DiffRender:
     """Хэнки журнала правок → `rich.Text` с номерами строк и подсветкой.
 
@@ -128,6 +129,9 @@ def render_hunks(
     первый же `Resize` вызывающего. Содержимое шире целевой ширины не режется:
     обрезкой занимается CSS виджета.
 
+    `min_gutter` — ширина колонки номеров не меньше: под блоком ленты P4
+    номер прижат вправо к третьей клетке колонки диффа (спека P4 §6.2).
+
     Рисует тело ЦЕЛИКОМ — этого и хочет блок ленты. Тому, кто рисует его
     участками, нужен `HunkBody`: там та же картинка, но по заказанным строкам.
     """
@@ -138,6 +142,7 @@ def render_hunks(
         syntax=syntax,
         fill_width=fill_width,
         wrap=wrap,
+        min_gutter=min_gutter,
     )
     return DiffRender(
         body.render(),
@@ -216,6 +221,7 @@ class HunkBody:
         syntax: bool = True,
         fill_width: int | None = None,
         wrap: bool = False,
+        min_gutter: int = 1,
     ) -> None:
         rows = _parse(hunks or "")
         total = sum(1 for row in rows if row.kind != "sep")
@@ -230,6 +236,7 @@ class HunkBody:
             ),
             default=1,
         )
+        self._gutter_w = max(self._gutter_w, min_gutter)
         # Перенос — ЯВНЫЙ, а не следствие известной ширины: ширину передают и
         # экраны правок, но там строка не переносится (по дизайну у них
         # прокрутка вбок, а на нерасползающейся высоте держится ленивое тело).

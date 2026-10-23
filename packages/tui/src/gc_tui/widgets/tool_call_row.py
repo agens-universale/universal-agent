@@ -24,12 +24,24 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 - done     — есть result: ● зелёным / красным; стоп или лимит (`halted`) —
   ○ серым, отказ (`refused`) — ○ цветом REFUSED, строка `└` серым;
 - interrupted — стоп/обрыв до output: ○ серым + «прервано».
+
+Режимы блока P4 (`set_mode`, решения модели `gc_tui.services.tool_blocks`):
+- single — одиночная строка, как выше;
+- header — заголовок блока: глиф вида блока и жирное слово `INK`, хвост из
+  решения модели, без таймера; Enter — экран последнего члена
+  (`detail_call_id`);
+- member — член блока: без глифа, текст в колонке 4 (`└ ` в колонке 2 у
+  первого видимого), глагол `DIM`, объект и хвост `MUTED`, идущий — `INK`;
+  `└` следствия — на шаг глубже текста.
+Застывший таймер (`set_elapsed`; имя `set_timer` занято
+таймерами Textual) появляется только по решению модели: строка
+без модели выглядит как прежде.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import Callable, Literal, Optional
 
 from rich.text import Text
 from textual import events
@@ -43,6 +55,8 @@ from gc_tui import textual_compat
 from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
+from gc_tui.palette import INK as _INK
+from gc_tui.palette import MUTED as _MUTED
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
@@ -86,6 +100,16 @@ _OUTCOME_LOOK: dict[str, tuple[str, str, str]] = {
     "halted": (CALL_UNDONE_GLYPH, _DIM, _DIM),
     "refused": (CALL_UNDONE_GLYPH, _REFUSED, _DIM),
 }
+
+
+#: Глиф заголовка блока по виду (`tool_blocks.GlyphLook`); `run` мигает.
+_HEADER_GLYPH: dict[str, tuple[str, str]] = {
+    "ok": (CALL_GLYPH, _OK),
+    "error": (CALL_GLYPH, _ERR),
+    "halted": (CALL_UNDONE_GLYPH, _DIM),
+}
+
+RowMode = Literal["single", "header", "member"]
 
 
 def _fit_note(note: str, room: Optional[int], used: int) -> str:
@@ -223,6 +247,20 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         # Пауза тикера на время человеко-ожидания (confirm / ask_human).
         self._paused_at: Optional[float] = None
         self._paused_total: float = 0.0
+        # Конец исполнения — для застывших часов строки (`set_elapsed`).
+        self._ended_at: Optional[float] = None
+        # Режим блока P4 и то, что задаёт модель блоков.
+        self._mode: RowMode = "single"
+        self._lead = False
+        self._current = False
+        self._word: Optional[str] = None
+        self._header: Optional[tuple[str, str, Text]] = None
+        self._frozen: Optional[float] = None
+        self._block_consequence: Optional[Text] = None
+        self._edit_tail: Optional[Text] = None
+        self._detail: Optional[Callable[[], Optional[str]]] = None
+        #: `(уровень, ключ)` строки в модели блоков — для пробела.
+        self.block_key: Optional[tuple[str, str]] = None
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -256,13 +294,90 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._waiting or self._result is not None or self._interrupted
         )
 
+    @property
+    def _blinking(self) -> bool:
+        """Мигает ли глиф: у члена глифа нет, у заголовка — вид `run`."""
+        if self._mode == "header":
+            return self._header is not None and self._header[1] == "run"
+        if self._mode == "member":
+            return False
+        return self._is_live and self._paused_at is None
+
+    # --- режимы блока ------------------------------------------------------
+
+    @property
+    def mode(self) -> RowMode:
+        return self._mode
+
+    @property
+    def detail_call_id(self) -> str:
+        """Чей экран деталей открывает Enter: у заголовка — последнего
+        члена блока."""
+        detail = self._detail() if self._detail is not None else None
+        return detail or self.call_id
+
+    def set_detail_source(self, source: Callable[[], Optional[str]]) -> None:
+        self._detail = source
+
+    def set_mode(
+        self,
+        mode: RowMode,
+        *,
+        lead: bool,
+        current: bool = False,
+        gap: bool = False,
+    ) -> None:
+        """Режим строки в блоке: одиночная, заголовок или член."""
+        self._mode = mode
+        self._lead = lead
+        self._current = current
+        self.set_class(mode == "member", "-member")
+        self.set_class(gap, "-gap")
+        depth = 2 if mode == "member" else 0
+        self._consequence_slot.set_level(self._level + depth)
+        self._sync_pulse()
+        self._update()
+
+    def set_header(self, word: str, *, glyph: str, tail: Text) -> None:
+        """Заголовок блока: слово, вид глифа (`run` / `ok` / `error` /
+        `halted`) и хвост."""
+        self._header = (word, glyph, tail)
+        self._sync_pulse()
+        self._update()
+
+    def set_word(self, word: str) -> None:
+        """Глагол вместо подписи категории; пусто — без глагола."""
+        self._word = word
+        self._update()
+
+    def set_elapsed(self, seconds: Optional[float], *, live: bool) -> None:
+        """Таймер строки: живой — часы строки; застывший — ``seconds``
+        или, если `None`, часы строки на конце исполнения."""
+        if live:
+            self._frozen = None
+        elif seconds is not None:
+            self._frozen = seconds
+        else:
+            self._frozen = float(self._elapsed_s(until=self._ended_at))
+        self._update()
+
+    def set_consequence(self, body: Text) -> None:
+        """Строка `└` исхода от модели — вместо строки по результату."""
+        self._block_consequence = body
+        self._update()
+
+    def set_edit_tail(self, tail: Text) -> None:
+        """Хвост файла после объекта (счётчики, размер) — вместо `+N −M`."""
+        self._edit_tail = tail
+        self._update()
+
     def _sync_pulse(self) -> None:
         """Таймер мигания ● есть только у запущенной running-строки.
 
         Waiting, результат, прерывание, пауза на человеко-ожидании или
         виджет ещё не запущен (рендер истории) — без таймера. Идемпотентно.
         """
-        if self._is_live and self._paused_at is None and self.is_running:
+        if self._blinking and self.is_running:
             if self._pulse_timer is None:
                 self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
         elif self._pulse_timer is not None:
@@ -277,7 +392,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
                 return
         except Exception:
             pass
-        if not self._is_live:
+        if not self._blinking:
             return
         self._pulse_frame += 1
         if self._prefix_static is not None:
@@ -331,6 +446,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._outcome = outcome
         self._waiting = False
         self._live_status = None
+        self._ended_at = self._ended_at or time.monotonic()
         self._sync_pulse()
         self._update()
 
@@ -358,6 +474,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._interrupted = True
         self._waiting = False
         self._live_status = None
+        self._ended_at = self._ended_at or time.monotonic()
         self._sync_pulse()
         self._update()
 
@@ -381,15 +498,17 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._update()
         self._sync_pulse()
 
-    def _elapsed_s(self) -> int:
-        now = (
-            self._paused_at
-            if self._paused_at is not None
-            else time.monotonic()
-        )
+    def _elapsed_s(self, until: Optional[float] = None) -> int:
+        now = self._paused_at or until or time.monotonic()
         return int(now - self._start_monotonic - self._paused_total)
 
     def _status_glyph(self) -> tuple[str, str]:
+        if self._mode == "header":
+            look = self._header[1] if self._header is not None else "ok"
+            if look == "run":
+                on = blink_on(self._pulse_frame)
+                return (CALL_GLYPH if on else " "), _RUN
+            return _HEADER_GLYPH[look]
         if self._result is None:
             if self._interrupted:
                 return CALL_UNDONE_GLYPH, _DIM
@@ -406,30 +525,58 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     def _render_prefix(self) -> Text:
         text = Text()
         text.append(level_prefix(self._level), style=_DIM)
+        if self._mode == "member":
+            text.append("  " + ("└ " if self._lead else "  "), style=_DIM)
+            return text
         glyph, color = self._status_glyph()
         text.append(glyph, style=color)
         text.append(" ")
         return text
 
     def _render_content(self) -> Text:
+        if self._mode == "header":
+            word, _glyph, tail = self._header or ("", "", Text())
+            text = Text()
+            text.append(word, style=f"bold {_INK}")
+            text.append_text(tail)
+            return text
+        label = self._label if self._word is None else self._word
+        label_style, target_style = self._caption_styles()
         text = Text()
-        text.append(self._label, style=_TOOL_NAME)
-        tail = self._render_tail(self._tail_room(text.cell_len))
+        text.append(label, style=label_style)
+        sep = self._caption_sep()
+        tail = self._render_tail(self._tail_room(text.cell_len, len(sep)))
         target = self._fit_target(
-            text.cell_len + tail.cell_len + 2 + _RIGHT_GUTTER
+            text.cell_len + tail.cell_len + len(sep) + _RIGHT_GUTTER
         )
         if target:
-            start = len(text.plain) + 2
-            text.append(f"  {target}", style=_DIM)
+            start = len(text.plain) + len(sep)
+            text.append(f"{sep}{target}", style=target_style)
             if self._skill_target:
                 text.stylize(_SKILL, start, start + len(target))
         text.append_text(tail)
         return text
 
+    def _caption_sep(self) -> str:
+        """Между подписью и объектом: два пробела; у глагола правки —
+        один (`Edited путь`); без глагола — ничего."""
+        if self._word is None:
+            return "  "
+        return " " if self._word else ""
+
+    def _caption_styles(self) -> tuple[str, str]:
+        """Цвет подписи и объекта: у члена — `DIM` / `MUTED`, у идущего —
+        `INK`; путь члена-правки (без глагола) — `INK`."""
+        if self._mode != "member":
+            return _TOOL_NAME, _DIM
+        if self._current:
+            return _INK, _INK
+        return _DIM, (_INK if self._word == "" else _MUTED)
+
     def _content_width(self) -> int:
         return self._content_static.size.width if self._content_static else 0
 
-    def _tail_room(self, label_cols: int) -> Optional[int]:
+    def _tail_room(self, label_cols: int, sep: int = 2) -> Optional[int]:
         """Сколько клеток хвосту, когда объект сжат до своего минимума
         (`CALL_TARGET_MIN_COLS`); колонка ещё без ширины — без предела."""
         width = self._content_width()
@@ -437,7 +584,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             return None
         room = width - label_cols - _RIGHT_GUTTER
         if self._target:
-            room -= 2 + min(len(self._target), CALL_TARGET_MIN_COLS)
+            room -= sep + min(len(self._target), CALL_TARGET_MIN_COLS)
         return room
 
     def _fit_target(self, used: int) -> str:
@@ -461,6 +608,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         text = Text()
         if self._result is None:
             self._append_pending_tail(text, room)
+            self._append_frozen_timer(text)
+            return text
+        if self._edit_tail is not None:
+            # Хвост файла от модели блоков заменяет и счётчики, и сводку.
+            text.append_text(self._edit_tail)
+            self._append_frozen_timer(text)
             return text
         if self._edit_counts is not None:
             add, removed = self._edit_counts
@@ -470,8 +623,20 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             text.append(f"−{removed}", style=_ERR)
         if self._result and not self._ends_with_line:
             note = _fit_note(f" · {self._result}", room, text.cell_len)
-            text.append(note, style=_DIM)
+            text.append(note, style=self._summary_style)
+        self._append_frozen_timer(text)
         return text
+
+    @property
+    def _summary_style(self) -> str:
+        return _MUTED if self._mode == "member" else _DIM
+
+    def _append_frozen_timer(self, text: Text) -> None:
+        """Застывший таймер законченного вызова — ` · 2с` `DIM`."""
+        if self._frozen is None or self._is_live or self._waiting:
+            return
+        text.append(" · ", style=_DIM)
+        text.append(format_duration(self._frozen), style=_DIM)
 
     @property
     def _ends_with_line(self) -> bool:
@@ -482,7 +647,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         """Тела строк `└` под вызовом: ошибка (`ERR`), стоп/лимит или
         отказ (`DIM`), затем пометки."""
         bodies = list(self._consequences)
-        if self._ends_with_line and self._result:
+        if self._block_consequence is not None:
+            bodies.insert(0, self._block_consequence)
+        elif self._ends_with_line and self._result:
             style = _OUTCOME_LOOK[self._outcome][2]
             bodies.insert(0, Text(self._result, style=style))
         return bodies
@@ -530,4 +697,4 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         # Клик/Enter → детальный экран call + output.
         from gc_tui.messages import OpenToolCallDetailRequest
 
-        return OpenToolCallDetailRequest(self.call_id)
+        return OpenToolCallDetailRequest(self.detail_call_id)

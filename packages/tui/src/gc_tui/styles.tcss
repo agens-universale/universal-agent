@@ -260,6 +260,16 @@ ScrollEndPill:hover { background: $highlight-bg; }
 .line-tool      { color: $dim; }       /* |- механика тула */
 /* Пустая строка перед каждым вызовом — верхним и вложенным (спека P3 §2.1). */
 ToolCallRow { margin-top: 1; }
+/* Блоки P4: члены и строки внутри блока субагента — без пустой строки
+   сверху; между видимыми файлами блока правок — есть (спека P4 §3.1). */
+ToolCallRow.-member, ToolCallRow.-in-agent { margin-top: 0; }
+ToolCallRow.-gap { margin-top: 1; }
+/* Скрытое блоком: вне окна, ждущий вызов группы, скрытая фраза. */
+.-block-hidden { display: none; }
+/* Фразы блока: управляющие — MUTED (ховер — .trace-action:hover), строка
+   незаписанных файлов — DIM. */
+.block-action { color: $muted; }
+.block-note { color: $dim; }
 .line-think     { color: $muted; text-style: italic; margin-top: 1; }
 .line-intermediate { color: $ink; margin-top: 1; }  /* промежуточная реплика — фаза хода */
 /* Промежуточная реплика (основного агента и субагента): глиф `●` своего

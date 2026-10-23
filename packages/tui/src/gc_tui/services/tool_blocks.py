@@ -694,6 +694,20 @@ class ToolBlocks:
                 out += self._render(block)
         return out
 
+    # --- запросы исполнителя ---------------------------------------------
+
+    def block_of(self, key: str) -> Optional[str]:
+        """Ключ блока строки ``key``."""
+        block = self._block_of.get(key)
+        return block.key if block is not None else None
+
+    def last_call(self, block: str) -> Optional[str]:
+        """Последний член блока — его экран открывает Enter на заголовке."""
+        found = self._block_of.get(block)
+        if found is None or not found.members:
+            return None
+        return found.members[-1].key
+
     # --- отрисовка -------------------------------------------------------
 
     def _new_block(self, kind: BlockKind) -> _Block:
@@ -871,7 +885,8 @@ class ToolBlocks:
                 SetWord(member.key, _edit_word(member)),
             ]
         else:
-            out = [_file_mode(member.key, layout)]
+            # Член блока правок — путь без глагола: `└ путь (+a −r)`.
+            out = [_file_mode(member.key, layout), SetWord(member.key, "")]
         visible = member.key in layout.window
         out.append(SetVisible(member.key, visible))
         column: DiffColumn = "single" if single else "member"
