@@ -380,7 +380,7 @@ class SetEditTail:
 
 @dataclass(frozen=True)
 class SetDiffShare:
-    """Дифф файла: ``rows`` экранных рядов превью (`None` — целиком) в
+    """Дифф файла: ``rows`` логических строк превью (`None` — целиком) в
     колонке ``column``. Смонтировать при первом решении."""
 
     key: str
