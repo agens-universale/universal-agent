@@ -557,7 +557,7 @@ async def test_collapse_threshold_comes_from_config(tmp_path):
 
 @pytest.mark.asyncio
 async def test_collapse_threshold_defaults_without_config(tmp_path):
-    """Без ключа в конфиге — дефолт 30 ЭКРАННЫХ рядов.
+    """Без ключа в конфиге — дефолт 30 логических строк (P4 §6.3).
 
     Строк берём заведомо больше дефолта: иначе тест не отличил бы работающий
     лимит от отсутствующего."""
@@ -702,22 +702,17 @@ async def test_text_selection_in_block_still_works(tmp_path):
         assert pilot.app.screen.get_selected_text()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "P4: под блоком хвоста у диффа нет, а фраза блока считает "
-        "логические строки без переноса — открытый вопрос владельцу"
-    ),
-)
 @pytest.mark.asyncio
 async def test_tail_follows_the_width(tmp_path):
-    """Хвост «… ещё N строк» пересобирается под ширину.
+    """Под блоком ленты доля диффа — в логических строках (спека P4 §6.3).
 
-    Бюджет свёрнутого блока считается в ЭКРАННЫХ рядах, значит и факт усечения,
-    и число скрытых строк зависят от ширины. Хвост, собранный один раз до
-    раскладки, протухал бы; а если усечение появлялось только после неё —
-    хвоста не было вовсе, и блок нельзя было развернуть.
+    Строк меньше доли, но они длинные: и на узком окне, где каждая
+    переносится, и на широком показаны все, а фразы раскрытия нет — скрытых
+    логических строк нет. Хвост по ширине — только у диффа вне ленты
+    (`test_diff_block.py`).
     """
+    from gc_tui.widgets.tool_blocks_view import BlockAction
+
     tid = "tail_width"
     _write_thread(
         tmp_path,
@@ -728,8 +723,6 @@ async def test_tail_follows_the_width(tmp_path):
             _output("c1", "fs_write_file"),
         ],
     )
-    # Строк меньше лимита, но они длинные: на узком окне перенос съест бюджет
-    # рядов, и усечение появится там, где на широком его не было.
     long_hunks = "@@ -1,8 +1,8 @@" + "".join(
         "\n+" + "y" * 200 for _ in range(8)
     )
@@ -742,18 +735,16 @@ async def test_tail_follows_the_width(tmp_path):
         tid,
         {"agent.model": "M", "agent_edits": {"trace_inline_max_lines": 30}},
     ) as pilot:
-        block = pilot.app.screen.query_one(DiffBlock)
-
-        await pilot.resize_terminal(40, 30)
-        await pilot.pause()
-        await pilot.pause()
-        assert list(block.query(".diff-more")), (
-            "на узком окне усечение есть, а хвоста нет"
-        )
-
-        await pilot.resize_terminal(240, 30)
-        await pilot.pause()
-        await pilot.pause()
-        assert not list(block.query(".diff-more")), (
-            "на широком усечения нет, а хвост остался"
-        )
+        scr = pilot.app.screen
+        block = scr.query_one(DiffBlock)
+        for width in (40, 240):
+            await pilot.resize_terminal(width, 30)
+            await pilot.pause()
+            await pilot.pause()
+            body = block.query_one(".block-body", Static).visual.plain
+            numbered = [
+                row for row in body.split("\n") if row.strip()[:1].isdigit()
+            ]
+            assert len(numbered) == 8, width
+            assert not scr.query(BlockAction), width
+            assert not block.query(".diff-more"), width

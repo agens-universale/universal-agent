@@ -621,3 +621,54 @@ async def test_short_in_block_hides_nothing():
     app = _Host(block)
     async with app.run_test(size=(70, 20)):
         assert block.hidden_lines() == 0
+
+
+def _wide_hunks(count: int = 8, width: int = 200) -> str:
+    """`count` строк по `width` символов: на узком окне каждая переносится."""
+    return f"@@ -1,{count} +1,{count} @@" + "".join(
+        "\n+" + "y" * width for _ in range(count)
+    )
+
+
+def _numbered_rows(app: App) -> int:
+    """Логических строк в теле: номер стоит только у первого ряда строки."""
+    plain = app.query_one(".block-body", Static).visual.plain
+    return sum(1 for row in plain.split("\n") if row.strip()[:1].isdigit())
+
+
+@pytest.mark.asyncio
+async def test_in_block_budget_counts_logical_lines():
+    """Под блоком доля — в логических строках (спека P4 §6.3): на узком окне
+    перенос делает превью выше, но строки не срезаются, а скрытое — ровно
+    `N` модели (строки сверх доли)."""
+    block = _in_block(_record(_wide_hunks(8)), limit=6)
+    app = _Host(block)
+    async with app.run_test(size=(40, 80)) as pilot:
+        await pilot.pause()
+        assert _numbered_rows(app) == 6
+        assert _body_lines(app) > 6
+        assert block.hidden_lines() == 2
+
+
+@pytest.mark.asyncio
+async def test_in_block_long_lines_within_share_hide_nothing():
+    block = _in_block(_record(_wide_hunks(8)), limit=30)
+    app = _Host(block)
+    async with app.run_test(size=(40, 80)) as pilot:
+        await pilot.pause()
+        assert _numbered_rows(app) == 8
+        assert block.hidden_lines() == 0
+
+
+@pytest.mark.asyncio
+async def test_tail_follows_the_width_outside_trace_block():
+    """Вне блока ленты бюджет прежний — экранные ряды: хвост «… ещё N
+    строк» появляется на узком окне и уходит на широком."""
+    app = _Host(_block(_record(_wide_hunks(8)), limit=30))
+    async with app.run_test(size=(40, 80)) as pilot:
+        await pilot.pause()
+        assert app.query(".diff-more")
+        await pilot.resize_terminal(240, 80)
+        await pilot.pause()
+        await pilot.pause()
+        assert not app.query(".diff-more")

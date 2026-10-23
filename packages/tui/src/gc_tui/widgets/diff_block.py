@@ -31,11 +31,12 @@ get_selection()->None) — иначе в буфер попадала бы его
 * в буфер уходят сырые хэнки записи, а не `.plain` отрендеренного текста — в
   нём номера строк, маркеры и хвостовые пробелы фоновой заливки.
 
-Под блоком ленты (`in_block=True`, спека P4 §5, §6.4) дифф подчиняется
-блоку: своего хвоста нет, раскрытие задаёт блок (`set_expanded`), долю рядов
-— модель (`set_collapsed_max_lines`), колонку — класс `diff-single` /
-`diff-member` (`set_column`); всё без перемонтирования. Скрытое блок
-считает по `hidden_lines`.
+Под блоком ленты (`in_block=True`, спека P4 §5, §6.3, §6.4) дифф подчиняется
+блоку: своего хвоста нет, раскрытие задаёт блок (`set_expanded`), долю
+логических строк — модель (`set_collapsed_max_lines`), колонку — класс
+`diff-single` / `diff-member` (`set_column`); всё без перемонтирования.
+Строки не режутся по рядам: на узком окне превью выше, а скрытое
+(`hidden_lines`) — ровно строки сверх доли, то же `N`, что у модели.
 """
 
 from __future__ import annotations
@@ -152,7 +153,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         return self._in_block
 
     def set_collapsed_max_lines(self, n: int) -> None:
-        """Новая доля рядов свёрнутого тела; тот же `n` — без перерасчёта.
+        """Новая доля строк свёрнутого тела; тот же `n` — без перерасчёта.
         Компактный блок держит тело пустым до раскрытия."""
         n = 0 if self._compact else n
         if n == self._collapsed_max_lines:
@@ -238,6 +239,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
                 fill_width=fill,
                 wrap=True,
                 min_gutter=_BLOCK_GUTTER if self._in_block else 1,
+                logical=self._in_block,
             )
             self._cache[key] = cached
         return cached

@@ -111,6 +111,7 @@ def render_hunks(
     fill_width: int | None = None,
     wrap: bool = False,
     min_gutter: int = 1,
+    logical: bool = False,
 ) -> DiffRender:
     """Хэнки журнала правок → `rich.Text` с номерами строк и подсветкой.
 
@@ -132,6 +133,10 @@ def render_hunks(
     `min_gutter` — ширина колонки номеров не меньше: под блоком ленты P4
     номер прижат вправо к третьей клетке колонки диффа (спека P4 §6.2).
 
+    `logical` — бюджет `max_lines` в ЛОГИЧЕСКИХ строках (под блоком ленты
+    P4, §6.3): строка не режется по рядам, перенос делает превью выше, и
+    скрытое — ровно строки сверх бюджета.
+
     Рисует тело ЦЕЛИКОМ — этого и хочет блок ленты. Тому, кто рисует его
     участками, нужен `HunkBody`: там та же картинка, но по заказанным строкам.
     """
@@ -143,6 +148,7 @@ def render_hunks(
         fill_width=fill_width,
         wrap=wrap,
         min_gutter=min_gutter,
+        logical=logical,
     )
     return DiffRender(
         body.render(),
@@ -222,6 +228,7 @@ class HunkBody:
         fill_width: int | None = None,
         wrap: bool = False,
         min_gutter: int = 1,
+        logical: bool = False,
     ) -> None:
         rows = _parse(hunks or "")
         total = sum(1 for row in rows if row.kind != "sep")
@@ -249,14 +256,18 @@ class HunkBody:
         # логических строк нельзя: бюджет считается в рядах, и перенесённая
         # строка «не влезала» бы, исчезая целиком.
         limit = None if max_lines is None else max(0, max_lines)
-        self.rows = _take(rows, limit, self._wrap_w)
+        # `logical` — бюджет в строках файла: ряды переноса не считаются,
+        # и строка целиком (потолка рядов нет).
+        self.rows = _take(rows, limit, None if logical else self._wrap_w)
         # Потолок рядов на СТРОКУ. `_take` берёт первую строку всегда — пустое
         # тело с одной сноской бесполезнее переполненного, — но одна длинная
         # строка переполняла бюджет не «на ряд», как я закладывал, а в десять
         # раз: бюджет 30 рядов давал 310. Рез по границе логической строки
         # остаётся правилом; это исключение ровно для того случая, когда сама
         # строка в бюджет не влезает.
-        self._row_cap = limit if (limit and self._wrap_w) else None
+        self._row_cap = (
+            limit if (limit and self._wrap_w and not logical) else None
+        )
         self.kinds = [row.kind for row in self.rows]
         self.total_lines = total
 
