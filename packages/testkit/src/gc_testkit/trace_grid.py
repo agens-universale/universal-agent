@@ -18,7 +18,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_GLYPHS = "●○•■✓›"
+# `*` — глиф записи итога и заметки после ответа (`* итог:`, `* заметка:`).
+_GLYPHS = "●○•■✓›*"
 _LIVE_WORDS = frozenset({"Exploring", "Running", "Editing", "Fetching"})
 _DONE_WORDS = frozenset(
     {"Explored", "Ran", "Added", "Edited", "Deleted", "Fetched"}
@@ -71,23 +72,28 @@ def _rows_of(screen: Any, types: tuple[type, ...]) -> set[int]:
     return rows
 
 
-def assert_trace_grid(rows: list[Any], *, origin: int) -> None:
+def assert_trace_grid(
+    rows: list[Any], *, origin: int, timed: bool = True
+) -> None:
     """Строки ``rich.text.Text`` ленты укладываются в сетку колонок P4.
 
-    ``origin`` — колонка ``●`` верхнего уровня. Нарушение —
+    ``origin`` — колонка ``●`` верхнего уровня. ``timed=False`` — время
+    вызовов неизвестно (тред без записи итога хода с ``calls``): таймер у
+    исполненного упавшего вызова не требуется (спека P4 §3.4). Нарушение —
     ``AssertionError`` с номером строки (с единицы) и её текстом.
     """
-    _Grid(rows, origin).walk()
+    _Grid(rows, origin, timed=timed).walk()
 
 
 class _Grid:
     """Обход строк сверху вниз с состоянием текущего блока."""
 
-    def __init__(self, rows: list[Any], origin: int) -> None:
+    def __init__(self, rows: list[Any], origin: int, *, timed: bool) -> None:
         from gc_tui import palette
 
         self._rows = rows
         self._origin = origin
+        self._timed = timed
         self._run = palette.RUN_COLOR.lower()
         self._err = palette.ERR.lower()
         self._refused = palette.REFUSED.lower()
@@ -212,7 +218,8 @@ class _Grid:
         ran_fail = reason == self._err and not text.startswith("код выхода")
         if never and timed:
             self._fail(n, "у неисполненного вызова есть таймер")
-        if ran_fail and not timed and self._ev_word != "Ran":
+        missing = ran_fail and self._timed and not timed
+        if missing and self._ev_word != "Ran":
             self._fail(n, "у исполненного упавшего вызова нет таймера")
 
     def _check_reason_colour(self, n: int, reason: str, col: int) -> None:

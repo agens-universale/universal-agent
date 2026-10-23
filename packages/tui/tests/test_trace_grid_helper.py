@@ -408,3 +408,10 @@ async def test_trace_rows_without_scrollbar_columns():
     assert {row.cell_len for row in rows} == {width}
     assert width == 38
     assert len(rows) == height
+
+
+def test_untimed_thread_allows_failure_without_timer():
+    """Время вызовов неизвестно (тред без записи итога хода с `calls`) —
+    упавший исполненный член законно без таймера (§3.4)."""
+    rows, _ = VIOLATIONS["no-timer-on-executed-failure"]
+    assert_trace_grid(rows, origin=ORIGIN, timed=False)
