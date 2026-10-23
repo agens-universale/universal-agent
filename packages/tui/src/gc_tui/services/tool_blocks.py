@@ -62,6 +62,7 @@ Parts = tuple[tuple[str, Look], ...]
 class BlockKind(StrEnum):
     EXPLORED = "explored"
     FETCHED = "fetched"
+    MEMORY = "memory"
     EDITS = "edits"
     RAN = "ran"
     AGENT = "agent"
@@ -76,15 +77,24 @@ _KIND_OF: dict[DisplayCategory, BlockKind] = {
     DisplayCategory.EDIT: BlockKind.EDITS,
     DisplayCategory.WRITE: BlockKind.EDITS,
     DisplayCategory.FETCH: BlockKind.FETCHED,
+    DisplayCategory.MEMORY: BlockKind.MEMORY,
     DisplayCategory.RUN: BlockKind.RAN,
     DisplayCategory.AGENT: BlockKind.AGENT,
 }
 #: Виды, у которых подряд идущие вызовы сворачиваются в одну группу.
-_GROUPED = frozenset({BlockKind.EXPLORED, BlockKind.FETCHED})
+_GROUPED = frozenset(
+    {
+        BlockKind.EXPLORED,
+        BlockKind.FETCHED,
+        BlockKind.MEMORY,
+    }
+)
 
 _WORDS: dict[BlockKind, tuple[str, str]] = {
     BlockKind.EXPLORED: ("Exploring", "Explored"),
     BlockKind.FETCHED: ("Fetching", "Fetched"),
+    # Без времён глагола: идёт — мигает только глиф, как у `Agent`.
+    BlockKind.MEMORY: ("Memory", "Memory"),
     BlockKind.RAN: ("Running", "Ran"),
     BlockKind.EDITS: ("Editing", "Edited"),
     BlockKind.AGENT: ("Agent", "Agent"),

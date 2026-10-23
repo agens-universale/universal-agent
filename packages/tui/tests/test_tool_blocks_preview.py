@@ -117,6 +117,19 @@ def _edit(i):
     return [_call(f"e{i}", name, {"path": f"e{i}.py"}), _out(f"e{i}", name)]
 
 
+def _memory(call_id, name, args):
+    return [_call(call_id, name, args), _out(call_id, name)]
+
+
+#: Память подряд: session_memory и project_memory — один блок `Memory`.
+_MEMORY = (
+    ("m0", "session_memory", {"action": "write", "register": "goal"}),
+    ("m1", "project_memory", {"action": "read"}),
+    ("m2", "session_memory", {"action": "append", "register": "state"}),
+    ("m3", "session_memory", {"action": "list", "register": "goal"}),
+)
+
+
 _SCRIPT = "python - <<'EOF'\nimport json\nprint(1)\nprint(2)\nEOF"
 _NESTED_READ = json.dumps({"tool": "fs_read_file", "ok": True, "lines": 7})
 
@@ -126,6 +139,7 @@ def _before_agent() -> list[dict]:
         _say("a1", "Посмотрю клиент."),
         *[p for i in range(4) for p in _read(i)],
         *_run("x1", "uv run pytest -q", "F\nfailed 1\n", exit_code=1),
+        *[p for m in _MEMORY for p in _memory(*m)],
         _say("a2", "Поправлю."),
         *[p for i in range(3) for p in _edit(i)],
         *_run("x2", "python gen.py", "ok\n"),
@@ -143,7 +157,7 @@ def _after_agent() -> list[dict]:
 
 def _calls() -> dict:
     ids = [f"r{i}" for i in range(4)] + [f"e{i}" for i in range(3)]
-    ids += ["x1", "x2", "x3", AGENT, "n0"]
+    ids += ["x1", "x2", "x3", AGENT, "n0", "m0", "m1", "m2", "m3"]
     return {cid: 1.0 for cid in ids}
 
 
@@ -416,6 +430,14 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert any("Edited 3 файла (+18 −0)" in t for t in texts)
     assert any(t.startswith("     Added gen.py (+4 −0)") for t in texts)
     assert any("Agent  проверка" in t for t in texts)
+    start = texts.index(" ● Memory")
+    assert texts[start : start + 5] == [
+        " ● Memory",
+        "   └ … ещё 1",
+        "     Read  project · 1с",
+        "     Append  state · 1с",
+        "     List · 1с",
+    ]
 
 
 @pytest.mark.asyncio

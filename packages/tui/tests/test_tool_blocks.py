@@ -114,7 +114,7 @@ def test_block_kind_table():
         C.FETCH: BlockKind.FETCHED,
         C.RUN: BlockKind.RAN,
         C.AGENT: BlockKind.AGENT,
-        C.MEMORY: BlockKind.SINGLE,
+        C.MEMORY: BlockKind.MEMORY,
         C.THINK: BlockKind.SINGLE,
         C.SKILL: BlockKind.SINGLE,
         C.CALC: BlockKind.SINGLE,
@@ -135,6 +135,8 @@ def test_header_words():
     assert header_word(BlockKind.RAN, live=False) == "Ran"
     assert header_word(BlockKind.AGENT, live=True) == "Agent"
     assert header_word(BlockKind.AGENT, live=False) == "Agent"
+    assert header_word(BlockKind.MEMORY, live=True) == "Memory"
+    assert header_word(BlockKind.MEMORY, live=False) == "Memory"
     assert header_word(BlockKind.EDITS, live=True) == "Editing"
     assert header_word(BlockKind.EDITS, live=False, verb="Added") == "Added"
 
@@ -239,10 +241,10 @@ def test_grouping_rule_kinds():
 
 def test_single_rows_do_not_group():
     model, fold, _ = _model()
-    assert model.member_added("m0", C.MEMORY, waiting=True) == [
+    assert model.member_added("m0", C.THINK, waiting=True) == [
         SetMode("m0", "single"),
     ]
-    fold(model.member_added("m1", C.MEMORY, waiting=False))
+    fold(model.member_added("m1", C.THINK, waiting=False))
     assert fold.mode("m1") == SetMode("m1", "single")
     assert not any(k[0] == "MountHeader" for k in fold.state)
 
@@ -647,6 +649,91 @@ def test_fetched_like_explored(cat):
     # Fetch и Read — разные виды: Read открывает новый блок.
     fold(model.member_added("r", C.READ, waiting=False))
     assert ("MountHeader", "block:1") in fold.state
+
+
+# --- память (решение владельца 2026-10-23) ------------------------------
+
+
+def _memory(model, fold, key, outcome="ok", reason=""):
+    fold(model.member_added(key, C.MEMORY, waiting=False))
+    fold(model.started(key))
+    if outcome is not None:
+        fold(model.result(key, outcome, reason=reason, executed=None))
+
+
+def test_memory_single_call_is_block():
+    model, fold, _ = _model()
+    assert model.member_added("m0", C.MEMORY, waiting=False) == [
+        MountHeader("block:0", before="m0"),
+        SetHeader("block:0", "Memory", "run", ()),
+        SetMode("m0", "member", lead=True, current=True),
+    ]
+    fold(model.started("m0"))
+    fold(model.result("m0", "ok", reason="", executed=None))
+    assert fold.header() == SetHeader("block:0", "Memory", "ok", ())
+
+
+def test_memory_session_and_project_one_block_window():
+    """Подряд идущие вызовы session_memory и project_memory (обе —
+    категория Memory) — один блок; окно — 3 последних, над ними
+    `… ещё N`; пробел раскрывает и сворачивает."""
+    model, fold, _ = _model()
+    for i in range(5):
+        _memory(model, fold, f"m{i}", outcome=None)
+    assert fold.header() == SetHeader("block:0", "Memory", "run", ())
+    for i in range(5):
+        fold(model.result(f"m{i}", "ok", reason="", executed=None))
+    assert ("MountHeader", "block:1") not in fold.state
+    assert fold.header() == SetHeader("block:0", "Memory", "ok", ())
+    assert fold.phrase("block:0", "top") == "… ещё 2"
+    assert [fold.visible(f"m{i}") for i in range(5)] == [
+        False,
+        False,
+        True,
+        True,
+        True,
+    ]
+    fold(model.toggle("block:0"))
+    assert all(fold.visible(f"m{i}") for i in range(5))
+    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    fold(model.toggle("block:0"))
+    assert fold.visible("m0") is False
+
+
+def test_memory_failure_and_refusal():
+    model, fold, _ = _model()
+    _memory(model, fold, "m0")
+    _memory(model, fold, "e", "error", "регистр переполнен")
+    _memory(model, fold, "r", "refused", "отказ")
+    assert fold.head_text() == "Memory · 1 ошибка · 1 отказ"
+    assert fold.header().glyph == "ok"
+    assert fold.consequence("e") == SetConsequence(
+        "e", "регистр переполнен", "error"
+    )
+    assert fold.consequence("r") == SetConsequence("r", "отказ", "refused")
+    assert fold.mode("e").mode == fold.mode("r").mode == "member"
+    assert fold.timer("r") is None
+
+
+def test_memory_all_failed_glyph():
+    model, fold, _ = _model()
+    _memory(model, fold, "e", "error", "сбой")
+    assert fold.header() == SetHeader(
+        "block:0",
+        "Memory",
+        "error",
+        ((" · ", "dim"), ("1 ошибка", "error")),
+    )
+
+
+def test_memory_closed_by_other_kind():
+    model, fold, _ = _model()
+    _memory(model, fold, "m0")
+    _reads(model, fold, 1)
+    _memory(model, fold, "m1")
+    assert fold.state[("MountHeader", "block:2")] == MountHeader(
+        "block:2", before="m1"
+    )
 
 
 # --- правки (Task 8) -----------------------------------------------------
