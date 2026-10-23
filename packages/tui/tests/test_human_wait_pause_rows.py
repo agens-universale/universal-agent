@@ -15,18 +15,33 @@ def _app(tmp_path):
     )
 
 
+async def _nested_run(pilot) -> ToolCallRow:
+    """Строка `Agent` в ленте и идущий вложенный вызов под ней — через
+    модель уровня субагента (P4 Task 15)."""
+    scr = pilot.app.screen
+    root = ToolCallRow(call_id="r", label="subagent_x", target="")
+    await scr.query_one("#trace").mount(root)
+    # Опора вложенных — строка `Agent`, которую тик опроса не чистит.
+    scr._subagent_parent_rows["r"] = root
+    scr._mount_nested_tool(
+        parent_call_id="r",
+        tool_name="exec_command",
+        tool_call_id="n",
+        args_summary="",
+    )
+    await pilot.pause()
+    return root
+
+
 @pytest.mark.asyncio
 async def test_human_wait_pauses_nested_rows(tmp_path):
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        root = ToolCallRow(call_id="r", label="subagent_x", target="")
-        nested = ToolCallRow(call_id="n", label="exec_run", target="", level=1)
-        await scr.mount(root)
-        await scr.mount(nested)
+        root = await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
         # Дальше без await: живой тик опроса без раннера чистит строки.
         scr._active_calls["r"] = root
-        scr._nested_tool_rows["n"] = nested
         scr._apply_human_wait(True)
         assert nested._pulse_timer is None
         assert "‖" in nested._prefix_static.content.plain
@@ -43,13 +58,12 @@ async def test_human_wait_ticks_nested_elapsed(tmp_path, monkeypatch):
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        nested = ToolCallRow(call_id="n", label="exec_run", target="", level=1)
-        await scr.mount(nested)
+        await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
         ticks = []
         monkeypatch.setattr(
             nested, "refresh_running_elapsed", lambda: ticks.append(1)
         )
-        scr._nested_tool_rows["n"] = nested
         scr._apply_human_wait(False)
         assert ticks == [1]
 

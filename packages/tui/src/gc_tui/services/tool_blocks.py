@@ -40,6 +40,9 @@ COMMAND_PREVIEW_LINES = 3
 MIN_DIFF_ROWS_PER_FILE = 3
 
 COLLAPSE_PHRASE = "− свернуть"
+#: Ключ окна субагента в модели его уровня (спека §7): фраза окна
+#: `└ … ещё N` и строка `Agent` у исполнителя.
+AGENT_WINDOW = "agent"
 NOT_STARTED_REASON = "не запущено (стоп)"
 #: Причина идущего члена, оборванного остановкой хода.
 CANCELLED_REASON = "отменено"
@@ -345,8 +348,8 @@ class SetConsequence:
         return ("SetConsequence", self.key)
 
 
-#: Роль слова строки: глагол правки или слово команды.
-WordRole = Literal["edit", "command"]
+#: Роль слова строки: глагол правки, слово команды или `Agent`.
+WordRole = Literal["edit", "command", "agent"]
 
 
 @dataclass(frozen=True)
@@ -563,14 +566,18 @@ def _accepts(group: Optional[_Block], member: _Member) -> bool:
 class ToolBlocks:
     """Модель блоков одного уровня ленты: верхнего или субагента.
 
-    ``diff_preview`` — экранных рядов превью диффа одиночной правки
-    (`agent_edits.trace_inline_max_lines`)."""
+    ``diff_preview`` — логических строк превью диффа одиночной правки
+    (`agent_edits.trace_inline_max_lines`). ``agent_window`` — уровень
+    субагента: окно последних `WINDOW` событий (блок — одно событие), над
+    ним `└ … ещё N`; строка видна, если видна и в своём блоке, и в окне
+    (§7)."""
 
     def __init__(
         self,
         timers: CallTimers,
         *,
         diff_preview: int = DEFAULT_TRACE_INLINE_MAX_LINES,
+        agent_window: bool = False,
     ) -> None:
         self._timers = timers
         self._preview = diff_preview
@@ -584,6 +591,13 @@ class ToolBlocks:
         # Первый блок текущего хода: остановка хода трогает только его.
         self._turn_from = 0
         self._issued: dict[tuple, Decision] = {}
+        # Окно субагента: события уровня по порядку (ключ блока или
+        # события ленты) и выданная им видимость.
+        self._window = (
+            _Block(AGENT_WINDOW, BlockKind.AGENT) if agent_window else None
+        )
+        self._events: list[str] = []
+        self._event_shown: dict[str, bool] = {}
 
     # --- события ---------------------------------------------------------
 
@@ -607,7 +621,7 @@ class ToolBlocks:
             block.pending = kind == BlockKind.EDITS
         block.members.append(member)
         self._block_of[call_id] = block
-        return self._render(block)
+        return self._render(block) + self._window_changes()
 
     def started(self, call_id: str) -> list[Decision]:
         member = self._members.get(call_id)
@@ -706,13 +720,24 @@ class ToolBlocks:
             self._order.append(None)
         return []
 
+    def event_added(self, key: str) -> list[Decision]:
+        """Событие уровня не из блоков (проза, чек-лист, реплика) с ключом
+        ``key``: закрывает группу; у субагента — событие окна."""
+        out = self.event_closing()
+        if self._window is None:
+            return out
+        self._events.append(key)
+        return out + self._window_changes()
+
     def queued_admitted(self) -> list[Decision]:
         """Реплика из очереди впущена ядром — закрывает группу."""
         return self.event_closing()
 
     def toggle(self, key: str) -> list[Decision]:
-        """Раскрыть / свернуть блок по ключу блока, фразы или члена;
-        нечего скрывать — решений нет."""
+        """Раскрыть / свернуть блок по ключу блока, фразы или члена (или
+        окно субагента); нечего скрывать — решений нет."""
+        if self._is_window(key):
+            return self._toggle_window()
         block = self._resolve(key)
         if block is None or not self._expandable(block):
             return []
@@ -736,6 +761,8 @@ class ToolBlocks:
 
     def block_of(self, key: str) -> Optional[str]:
         """Ключ блока по ключу блока, его фразы или строки."""
+        if self._is_window(key):
+            return AGENT_WINDOW
         block = self._resolve(key)
         return block.key if block is not None else None
 
@@ -766,7 +793,81 @@ class ToolBlocks:
         self._count += 1
         self._blocks.append(block)
         self._block_of[block.key] = block
+        if self._window is not None:
+            self._events.append(block.key)
         return block
+
+    # --- окно субагента ----------------------------------------------------
+
+    def _is_window(self, key: str) -> bool:
+        return self._window is not None and (
+            key.split(":", 1)[0] == AGENT_WINDOW
+        )
+
+    def _toggle_window(self) -> list[Decision]:
+        assert self._window is not None
+        if len(self._events) <= WINDOW:
+            return []
+        self._window.expanded = not self._window.expanded
+        return self._window_changes()
+
+    def _shown_events(self) -> list[str]:
+        assert self._window is not None
+        if self._window.expanded:
+            return self._events
+        return self._events[-WINDOW:]
+
+    def _shown(self, key: str) -> bool:
+        return self._window is None or key in self._shown_events()
+
+    def _window_changes(self) -> list[Decision]:
+        """Окно сдвинулось или раскрыто: события, сменившие видимость, —
+        заново; фраза окна над событиями."""
+        if self._window is None:
+            return []
+        shown = set(self._shown_events())
+        out: list[Decision] = []
+        for key in self._events:
+            visible = key in shown
+            if self._event_shown.get(key, True) == visible:
+                continue
+            self._event_shown[key] = visible
+            block = self._block_of.get(key)
+            if block is not None:
+                out += self._render(block)
+            else:
+                out += self._diff([SetVisible(key, visible)])
+        hidden = len(self._events) - len(shown)
+        text = more_phrase(hidden) if hidden else None
+        if self._window.expanded and len(self._events) > WINDOW:
+            text = COLLAPSE_PHRASE
+        decisions = self._phrase(self._window, "top", text, after=AGENT_WINDOW)
+        return out + self._diff(decisions)
+
+    def _windowed(
+        self, block: _Block, wanted: list[Decision]
+    ) -> list[Decision]:
+        """Видимость в окне субагента: блок вне окна скрыт целиком —
+        заголовок, строки, файлы и фразы (конъюнкция с окном блока)."""
+        if self._window is None:
+            return wanted
+        shown = self._shown(block.key)
+        keys = [m.key for m in block.members]
+        if block.parts is not None:
+            keys += [f.key for f in block.parts.files]
+        out: list[Decision] = []
+        covered: set[str] = set()
+        for decision in wanted:
+            if isinstance(decision, SetVisible):
+                covered.add(decision.key)
+                if not shown:
+                    decision = SetVisible(decision.key, False)
+            elif isinstance(decision, SetPhrase) and not shown:
+                decision = SetPhrase(decision.block, decision.slot, None)
+            out.append(decision)
+        out += [SetVisible(k, shown) for k in keys if k not in covered]
+        out.append(SetVisible(block.key, shown))
+        return out
 
     def _block_above(self, member: _Member) -> Optional[_Block]:
         """Блок строки, стоящей прямо над ``member``; над ней закрывающее
@@ -805,9 +906,12 @@ class ToolBlocks:
         out += self._phrase(block, "bottom", None)
         self._blocks.remove(block)
         del self._block_of[block.key]
+        if block.key in self._events:
+            self._events.remove(block.key)
+            self._event_shown.pop(block.key, None)
         above.members.append(member)
         self._block_of[member.key] = above
-        return self._diff(out) + self._render(above)
+        return self._diff(out) + self._render(above) + self._window_changes()
 
     def _render(self, block: _Block) -> list[Decision]:
         if block.headed:
@@ -818,7 +922,7 @@ class ToolBlocks:
             wanted = self._ran(block)
         else:
             wanted = self._single(block)
-        return self._diff(wanted)
+        return self._diff(self._windowed(block, wanted))
 
     def _expandable(self, block: _Block) -> bool:
         if block.headed:
@@ -896,7 +1000,11 @@ class ToolBlocks:
 
     def _single(self, block: _Block) -> list[Decision]:
         member = block.members[0]
-        return [SetMode(member.key, "single"), *self._outcome_of(member)]
+        out: list[Decision] = [SetMode(member.key, "single")]
+        if block.kind == BlockKind.AGENT:
+            word = header_word(BlockKind.AGENT, live=False)
+            out.append(SetWord(member.key, word, role="agent"))
+        return out + self._outcome_of(member)
 
     def _grouped(self, block: _Block) -> list[Decision]:
         shown = block.shown()

@@ -11,6 +11,7 @@ import pytest
 from gc_core.constants.tool_display import DisplayCategory as C
 
 from gc_tui.services.tool_blocks import (
+    AGENT_WINDOW,
     COLLAPSE_PHRASE,
     BlockEdit,
     BlockKind,
@@ -1220,3 +1221,81 @@ def test_not_started_result_has_no_timer():
     fold(model.result("w", "halted", reason=reason, executed=None))
     assert fold.consequence("w") == SetConsequence("w", reason, "dim")
     assert fold.timer("w") is None
+
+
+# --- окно субагента (спека §7, план Task 15) -------------------------------
+
+
+def _agent_model() -> tuple[ToolBlocks, _Fold]:
+    return ToolBlocks(CallTimers(), agent_window=True), _Fold()
+
+
+def test_agent_window_counts_events():
+    """Блок из 5 чтений + проза + `Ran` + реплика = 4 события: окно 3,
+    `… ещё 1` у окна субагента; члены блока событиями не считаются."""
+    model, fold = _agent_model()
+    _reads(model, fold, 5)
+    fold(model.event_added("prose"))
+    fold(model.member_added("x", C.RUN, waiting=False))
+    fold(model.started("x"))
+    fold(model.result("x", "ok", reason="", executed=None))
+    assert fold.phrase(AGENT_WINDOW, "top") is None
+    fold(model.event_added("reply"))
+    assert fold.phrase(AGENT_WINDOW, "top") == "… ещё 1"
+    assert fold.state[("MountPhrase", AGENT_WINDOW, "top")] == MountPhrase(
+        AGENT_WINDOW, "top", after=AGENT_WINDOW
+    )
+    assert not fold.visible("block:0")
+    assert not any(fold.visible(f"c{i}") for i in range(5))
+    assert all(fold.visible(k) for k in ("prose", "x", "reply"))
+
+
+def test_agent_visibility_conjunction():
+    """Член видим, только если виден и в своём блоке, и в окне субагента."""
+    model, fold = _agent_model()
+    _reads(model, fold, 5)
+    # Блок в окне: видны 3 последних члена, старшие — нет.
+    assert [fold.visible(f"c{i}") for i in range(5)] == [
+        False, False, True, True, True,
+    ]  # fmt: skip
+    for key in ("e1", "e2", "e3"):
+        fold(model.event_added(key))
+    # Блок вне окна субагента: скрыты и видимые в блоке члены.
+    assert not any(fold.visible(f"c{i}") for i in range(5))
+    # Раскрыли окно субагента — члены снова по окну своего блока.
+    fold(model.toggle(AGENT_WINDOW))
+    assert [fold.visible(f"c{i}") for i in range(5)] == [
+        False, False, True, True, True,
+    ]  # fmt: skip
+    assert fold.phrase(AGENT_WINDOW, "top") == COLLAPSE_PHRASE
+    # Раскрыли блок — видны все его члены; свернули окно — снова скрыты.
+    fold(model.toggle("block:0"))
+    assert all(fold.visible(f"c{i}") for i in range(5))
+    fold(model.toggle(AGENT_WINDOW))
+    assert not any(fold.visible(f"c{i}") for i in range(5))
+    assert fold.phrase(AGENT_WINDOW, "top") == "… ещё 1"
+
+
+def test_agent_window_event_closes_group():
+    """Событие субагента закрывает его открытую группу."""
+    model, fold = _agent_model()
+    _reads(model, fold, 1)
+    fold(model.event_added("prose"))
+    _reads(model, fold, 1, start=1)
+    assert model.block_of("c1") != model.block_of("c0")
+
+
+def test_top_level_has_no_agent_window():
+    model, fold, _ = _model()
+    _reads(model, fold, 1)
+    for key in ("e1", "e2", "e3", "e4"):
+        fold(model.event_added(key))
+    assert ("SetPhrase", AGENT_WINDOW, "top") not in fold.state
+    assert fold.visible("c0")
+
+
+def test_agent_row_word_role():
+    """Строка `Agent` — своё слово: имя субагента `INK` (§10)."""
+    model, fold, _ = _model()
+    fold(model.member_added("a", C.AGENT, waiting=False))
+    assert fold.state[("SetWord", "a")] == SetWord("a", "Agent", role="agent")

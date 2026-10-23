@@ -131,13 +131,17 @@ _EXPECTED = [
 
 
 # Живая лента собирает вызовы в блоки (P4): чтение — заголовок `Explored`
-# и член без глифа. Превью идёт через модель блоков отдельным шагом —
-# до него раскладки путей расходятся ровно в этом.
+# и член без глифа, и наверху, и у субагента (заголовок на +2). Превью
+# идёт через модель блоков отдельным шагом — до него раскладки путей
+# расходятся ровно в этом.
 _EXPECTED_LIVE = [
     *_EXPECTED[:3],
     ("ToolCallRow", "● "),
     ("ToolCallRow", "  └ "),
-    *_EXPECTED[4:],
+    *_EXPECTED[4:6],
+    ("ToolCallRow", "  ● "),
+    ("ToolCallRow", "    └ "),
+    *_EXPECTED[7:],
 ]
 
 
@@ -254,9 +258,12 @@ async def test_live_and_preview_share_layout(tmp_path):
 async def test_live_glyph_columns_step_two_per_level(tmp_path):
     """Глиф вызова уровня 0 — в колонке `●`, уровня 1 и вложенной реплики —
     на +2; вложенная реплика субагента — серый `●`. У члена блока глифа
-    нет (P4 §3.1) — его колонку держит заголовок."""
+    нет (P4 §3.1) — его колонку держит заголовок. Реплика субагента — за
+    окном `Agent` (4 события): окно раскрыто."""
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
+        pilot.app.screen._block_views["sub1"].toggle("agent")
+        await pilot.pause()
         agent = next(w for w in trace.children if isinstance(w, TraceRow))
         col = _glyph_x(agent.query_one(".trace-prefix"), "● ")
         rows = [r for r in trace.query(ToolCallRow) if r.mode != "member"]
@@ -329,8 +336,8 @@ def _styled(app_cls):
 async def test_blank_line_before_every_call_on_both_paths(tmp_path):
     """Интервал (§2.1): пустая строка перед каждым вызовом — верхним и
     вложенным, подряд идущим тоже; класса `tool-group-start` нет ни вживую,
-    ни в превью. Вживую (P4 §3.1) — перед каждым блоком: у члена блока
-    пустой строки сверху нет."""
+    ни в превью. Вживую (P4 §3.1, §7) — перед каждым блоком верхнего
+    уровня: у члена блока и внутри блока субагента пустых строк нет."""
     from textual.app import App
     from textual.containers import VerticalScroll
 
@@ -343,9 +350,11 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
         trace = await _live_trace(pilot)
         rows = [r for r in trace.query(ToolCallRow) if r.mode != "member"]
         assert {r._level for r in rows} == {0, 1}
-        assert [r.styles.margin.top for r in rows] == [1] * len(rows)
+        assert [r.styles.margin.top for r in rows] == [
+            0 if r._level else 1 for r in rows
+        ]
         members = [r for r in trace.query(ToolCallRow) if r.mode == "member"]
-        assert [r.styles.margin.top for r in members] == [0]
+        assert [r.styles.margin.top for r in members] == [0, 0]
         assert not trace.query(".tool-group-start")
         lines = [
             "".join(seg.text for seg in strip).rstrip()

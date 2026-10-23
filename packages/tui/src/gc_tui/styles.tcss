@@ -264,6 +264,11 @@ ToolCallRow { margin-top: 1; }
    сверху; между видимыми файлами блока правок — есть (спека P4 §3.1). */
 ToolCallRow.-member, ToolCallRow.-in-agent { margin-top: 0; }
 ToolCallRow.-gap { margin-top: 1; }
+/* Внутри блока субагента пустых строк нет совсем (спека P4 §3.1, §7):
+   ни перед событиями, ни между файлами правок. */
+ToolCallRow.-in-agent.-gap { margin-top: 0; }
+.line-intermediate.-in-agent { margin-top: 0; }
+.todo-block-nested.-in-agent { margin: 0; }
 /* Скрытое блоком: вне окна, ждущий вызов группы, скрытая фраза. */
 .-block-hidden { display: none; }
 /* Фразы блока: управляющие — MUTED (ховер — .trace-action:hover), строка

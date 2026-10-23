@@ -649,16 +649,6 @@ _ROW_STATE_CALLS = frozenset(
         "set_edit_counts",
     }
 )
-#: Вложенные строки субагента переводит на модель Task 15; до тех пор —
-#: прежним путём, только в этих функциях.
-_NESTED_UNTIL_TASK_15 = frozenset(
-    {
-        "_finish_nested_tool",
-        "_inline_diff_block",
-        "_interrupt_nested_rows",
-        "_pause_nested_rows",
-    }
-)
 
 
 def _row_state_calls(path) -> set[str]:
@@ -692,6 +682,4 @@ def _row_state_call(node) -> bool:
 
 def test_rows_only_through_model():
     owners = _row_state_calls(TUI_PKG / "screens" / "main.py")
-    assert owners <= _NESTED_UNTIL_TASK_15, sorted(
-        owners - _NESTED_UNTIL_TASK_15
-    )
+    assert owners == set(), sorted(owners)

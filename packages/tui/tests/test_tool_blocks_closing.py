@@ -352,7 +352,10 @@ async def test_nested_fallback_does_not_close_top(tmp_path):
         scr = await _open(pilot)
         await _tail(pilot, thread, agent, done)
         await _tail(pilot, thread, *_reads(0))
-        scr._nested_anchor["a1"] = Static("якоря в ленте нет")
+        # Якоря (строки `Agent`) в ленте нет — запасной путь.
+        trace = scr.query_one("#trace", VerticalScroll)
+        next(r for r in trace.query(ToolCallRow) if r.call_id == "a1").remove()
+        await pilot.pause()
         nested = Static("вложенное")
         scr._nested_mount_after("a1", nested)
         await pilot.pause()

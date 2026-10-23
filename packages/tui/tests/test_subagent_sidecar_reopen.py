@@ -297,7 +297,8 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
 @pytest.mark.asyncio
 async def test_reopen_shows_rejected_reply_and_stopped_call(tmp_path):
     """Возврат в сессию: не принятый ответ субагента — `└ · не принят — …`,
-    вложенный вызов на лимите — серый `○` и `└ лимит шагов`."""
+    вложенный вызов на лимите — член блока `Explored` без глифа (P4 §3.3)
+    и `└ лимит шагов`."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import ConsequenceTraceRow
@@ -342,10 +343,10 @@ async def test_reopen_shows_rejected_reply_and_stopped_call(tmp_path):
         assert scr.attach_active_task(tid, is_resume=True) is True
         await pilot.pause(0.3)
 
-        prose, call = scr._nested_widgets_by_parent["call_sub_1"]
+        prose, call, header = scr._nested_widgets_by_parent["call_sub_1"]
         assert isinstance(prose, ConsequenceTraceRow)
         assert [b.plain for b in prose._consequences] == [
             "· не принят — нет плана"
         ]
-        assert "○" in call._render_prefix().plain
+        assert header.mode == "header" and call.mode == "member"
         assert [b.plain for b in call._consequence_bodies()] == ["лимит шагов"]

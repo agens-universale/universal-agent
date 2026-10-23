@@ -28,6 +28,7 @@ from gc_tui.palette import DIM, ERR, INK, MUTED, OK, REFUSED, RUN_COLOR
 from gc_tui.services.block_edits import diff_block_for
 from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.tool_blocks import (
+    AGENT_WINDOW,
     COMMAND_PREVIEW_LINES,
     BlockEdit,
     BlockKind,
@@ -212,6 +213,7 @@ class ToolBlocksView:
         self._edits: dict[str, BlockEdit] = {}
         self._compact: set[str] = set()
         self._command_hidden: dict[str, int] = {}
+        self._event_count = 0
 
     # --- выданные виджеты --------------------------------------------------
 
@@ -222,6 +224,18 @@ class ToolBlocksView:
     def register(self, key: str, widget: Widget) -> None:
         self._widgets[key] = widget
         self._issued.add(widget)
+
+    def set_owner(self, row: Widget) -> None:
+        """Строка `Agent` уровня субагента: под ней — фраза окна."""
+        self._widgets[AGENT_WINDOW] = row
+
+    def event_added(self, widget: Widget) -> None:
+        """Смонтированное событие уровня не из блоков (проза, чек-лист,
+        реплика): закрывает группу; у субагента — событие окна."""
+        key = f"event:{self._event_count}"
+        self._event_count += 1
+        self._widgets[key] = widget
+        self.apply(self.model.event_added(key))
 
     # --- события строк: событие → модель → решения -------------------------
 
@@ -408,10 +422,12 @@ class ToolBlocksView:
             if phrase.parent is not None and (before or after) is not phrase:
                 phrase.parent.move_child(phrase, before=before, after=after)
             return
+        # Фраза окна субагента — в колонке глифа его событий (§7).
+        window = d.block == AGENT_WINDOW
         phrase = BlockAction(
             level=self.level,
             key=key,
-            depth=self.depth,
+            depth=self.depth - 1 if window else self.depth,
             lead=d.slot == "top",
             clickable=d.slot != "unrecorded",
         )
@@ -488,6 +504,9 @@ class ToolBlocksView:
                 compact=d.key in self._compact,
                 event_no=getattr(owner, "event_no", 0),
             )
+            # Колонка субагента — на 2 глубже; видимость — как у строки.
+            diff.set_class(self.depth > 0, "diff-nested")
+            diff.set_class(owner.has_class(HIDDEN_CLASS), HIDDEN_CLASS)
             self.register(key, diff)
             self._host.mount(diff, after=owner)
         diff.set_expanded(d.rows is None)

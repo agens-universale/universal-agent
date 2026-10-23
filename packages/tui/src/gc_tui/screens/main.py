@@ -74,7 +74,12 @@ from gc_tui.messages import (
     ScrollToEnd,
     ScrollToReply,
 )
-from gc_tui.models import CompactionStep, ResultOutcome, TaskCursor
+from gc_tui.models import (
+    CompactionStep,
+    ResultOutcome,
+    TaskCursor,
+    TraceEvent,
+)
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
@@ -464,6 +469,20 @@ class _TraceBlockHost:
         self._screen._mount_block_widget(widget, before=before, after=after)
 
 
+class _NestedBlockHost:
+    """Хост блоков уровня субагента: монтирование под строкой `Agent`
+    (`_nested_mount_after`), в конец — за последним виджетом уровня."""
+
+    def __init__(self, screen: TraceScreen, parent_call_id: str) -> None:
+        self._screen = screen
+        self._parent = parent_call_id
+
+    def mount(self, widget, *, before=None, after=None) -> None:
+        self._screen._nested_mount_after(
+            self._parent, widget, after=after, before=before
+        )
+
+
 class TraceScreen(Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
 
@@ -553,9 +572,6 @@ class TraceScreen(Screen):
         self._nested_widgets_by_parent: dict[
             str, list
         ] = {}  # parent_call_id → widgets
-        self._nested_anchor: dict[
-            str, Widget
-        ] = {}  # parent_call_id → last mounted nested
         # Durable parent rows for subagent_* (survive pop from _active_calls on result).
         self._subagent_parent_rows: dict[str, ToolCallRow] = {}
         # Подписи MCP для строк вызовов: (ключ источника, wire→инфо,
@@ -2203,7 +2219,6 @@ class TraceScreen(Screen):
         self._subagent_progress.reset()
         self._nested_tool_rows.clear()
         self._nested_widgets_by_parent.clear()
-        self._nested_anchor.clear()
         self._subagent_parent_rows.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
@@ -4142,7 +4157,7 @@ class TraceScreen(Screen):
         )
         apply_sidecar_nested_actions(
             actions,
-            mount_nested_tool=self._mount_nested_tool,
+            mount_nested_tool=partial(self._mount_nested_tool, live=False),
             finish_nested_tool=self._finish_nested_tool,
             mount_nested_prose=self._mount_nested_prose,
             mount_nested_summary=self._mount_nested_child_summary,
@@ -4150,34 +4165,71 @@ class TraceScreen(Screen):
             mount_nested_todo=self._mount_nested_todo,
         )
 
-    def _nested_mount_after(
-        self, parent_call_id: str, widget, after=None
-    ) -> None:
-        """Смонтировать nested-виджет сразу после parent или последнего nested.
-
-        `after` — явный якорь (строка своего тула): дифф правки встаёт под ней,
-        даже если в незавершённом batch за строкой уже стоят соседние вызовы.
-        Хвостовой якорь при этом не двигаем — иначе следующий nested-виджет
-        встал бы в середину."""
-        from textual.containers import VerticalScroll
-
+    def _nested_blocks(self, parent_call_id: str) -> Optional[ToolBlocksView]:
+        """Исполнитель блоков уровня субагента (ключ — строка `Agent`);
+        строки `Agent` в ленте нет — уровня нет."""
         parent = self._nested_parent_row(parent_call_id)
         if parent is None:
-            return
+            return None
+        view = self._block_views.get(parent_call_id)
+        if view is None:
+            model = ToolBlocks(
+                self._call_timers,
+                diff_preview=self._trace_inline_max_lines(),
+                agent_window=True,
+            )
+            view = ToolBlocksView(
+                _NestedBlockHost(self, parent_call_id),
+                model,
+                level=parent_call_id,
+                depth=1,
+            )
+            view.set_owner(parent)
+            self._block_views[parent_call_id] = view
+        return view
+
+    def _nested_tail(self, parent_call_id: str, parent):
+        """Последний в ленте виджет уровня субагента (включая заголовки,
+        фразы и диффы); у уровня без виджетов — строка `Agent`."""
+        level = self._nested_widgets_by_parent.get(parent_call_id)
+        if not level:
+            return parent
+        mine = {id(w) for w in level}
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        tail = self._nested_anchor.get(parent_call_id, parent)
-        anchor = tail if after is None else after
+        for widget in reversed(trace.children):
+            if id(widget) in mine:
+                return widget
+        return parent
+
+    def _nested_mount_after(
+        self, parent_call_id: str, widget, after=None, before=None
+    ) -> None:
+        """Смонтировать виджет уровня субагента: рядом с явным якорем
+        (``after`` / ``before`` — виджеты блока) или в конец уровня — за
+        его последним виджетом в ленте (§9.1). Внутри субагента пустых
+        строк нет (`-in-agent`); виджет не из модели блоков — событие
+        уровня: закрывает группу и сдвигает окно `Agent`."""
+        view = self._nested_blocks(parent_call_id)
+        if view is None:
+            return
+        parent = self._nested_parent_row(parent_call_id)
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        widget.add_class("-in-agent")
         try:
-            trace.mount(widget, after=anchor)
+            if before is not None:
+                trace.mount(widget, before=before)
+            else:
+                anchor = after or self._nested_tail(parent_call_id, parent)
+                trace.mount(widget, after=anchor)
         except Exception:
             # Якоря нет в ленте — в конец, но над очередью; группы верхнего
             # уровня вложенный виджет не закрывает.
             self._trace_mount(widget, scroll=False, close_groups=False)
-        if anchor is tail:
-            self._nested_anchor[parent_call_id] = widget
         self._nested_widgets_by_parent.setdefault(parent_call_id, []).append(
             widget
         )
+        if not view.issued(widget):
+            view.event_added(widget)
 
     def _mount_nested_tool(
         self,
@@ -4188,9 +4240,14 @@ class TraceScreen(Screen):
         args_summary: str,
         step: int = 0,
         max_steps: int = 0,
+        live: bool = True,
         **_kw,
     ) -> None:
-        if self._nested_parent_row(parent_call_id) is None:
+        """Строка вложенного вызова — через модель уровня субагента;
+        ``live`` — событие прогресса: вызов уже исполняется (у записи
+        sidecar старта не было — время из реестра таймеров)."""
+        view = self._nested_blocks(parent_call_id)
+        if view is None:
             return
         # tool_name здесь уже wire-имя как есть: и subagent_progress.py
         # (live-polling, tools/subagents/progress.py::emit_progress), и
@@ -4210,7 +4267,10 @@ class TraceScreen(Screen):
         )
         if tool_call_id:
             self._nested_tool_rows[tool_call_id] = row
-        self._nested_mount_after(parent_call_id, row)
+        category, _ = tool_caption(tool_name, mcp_tools, mcp_servers)
+        view.add_call(row, category, waiting=False)
+        if live:
+            view.started(row)
 
     def _finish_nested_tool(
         self,
@@ -4222,36 +4282,26 @@ class TraceScreen(Screen):
         outcome: ResultOutcome | None = None,
         **_kw,
     ) -> None:
+        """Исход вложенного вызова — через модель уровня субагента, с
+        правкой из журнала (у субагента свой `call_id`)."""
         row = (
             self._nested_tool_rows.get(tool_call_id) if tool_call_id else None
         )
-        if row is None:
+        view = self._block_views.get(parent_call_id)
+        if row is None or view is None:
             return
-        summary = "" if ok else (error_brief or "error")
-        row.set_result(
-            summary=summary, outcome=outcome or ("ok" if ok else "error")
+        ev = TraceEvent(
+            no=0,
+            event_ts_utc_iso="",
+            kind="result" if ok else "error",
+            title="",
+            summary="" if ok else (error_brief or "error"),
+            full_payload={},
+            call_id=tool_call_id,
+            outcome=outcome or ("ok" if ok else "error"),
         )
-        self._mount_nested_inline_diff(parent_call_id, tool_call_id, row)
-
-    def _mount_nested_inline_diff(
-        self, parent_call_id: str, tool_call_id: str, row: ToolCallRow
-    ) -> None:
-        """Дифф правки субагента под строкой её вложенного тула.
-
-        Правки субагента журнал треда пишет ходом родителя, но со СВОИМ call_id
-        (`SubagentRunner._build_child_ctx`), поэтому запись ищется тем же
-        `by_call_id`, а блок собирается общим хелпером — отличается только
-        монтирование: в иерархию под своей nested-строкой."""
-        try:
-            block = self._inline_diff_block(tool_call_id, row, event_no=0)
-            if block is None:
-                return
-            block.add_class("diff-nested")
-            self._nested_mount_after(parent_call_id, block, after=row)
-            if self._stick_bottom:
-                self._scroll_trace_end()
-        except Exception as exc:
-            self.log.warning(f"инлайн-дифф субагента не построен: {exc!r}")
+        edit, compact = self._block_edit(tool_call_id)
+        view.result(row, ev, edit, compact=compact)
 
     def _mount_nested_prose(
         self,
@@ -4600,30 +4650,6 @@ class TraceScreen(Screen):
             return False
         recent = lookup.turn_ids()[-window:]
         return turn_id not in recent
-
-    def _inline_diff_block(
-        self, call_id: str, row: ToolCallRow, *, event_no: int
-    ):
-        """Готовый `DiffBlock` по call_id или None — общее тело обеих точек.
-
-        Та же запись журнала даёт строке вызова счётчики `+N −M` и payload
-        кнопки ❐ (спека P3 §10). None — монтировать нечего: нет call_id,
-        журнала или записи по нему (не файловый тул). Исключения не гасит:
-        их ловят вызывающие."""
-        from gc_tui.widgets.diff_block import DiffBlock
-
-        lookup = self._edits_lookup_for_thread()
-        edit = edit_of_call(lookup, call_id)
-        if edit is None or edit.record is None:
-            return None
-        record = edit.record
-        row.set_edit_counts(edit.add, edit.rem, copy_text=edit.copy_text)
-        return DiffBlock.for_record(
-            record,
-            event_no=event_no,
-            collapsed_max_lines=self._trace_inline_max_lines(),
-            compact=self._is_stale_edit_turn(lookup, record.turn_id),
-        )
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from gc_tui.widgets.ask_human_banner import AskHumanBanner
@@ -5730,20 +5756,25 @@ class TraceScreen(Screen):
             row.refresh_running_elapsed()
         self._pause_nested_rows(human_wait)
 
-    def _pause_nested_rows(self, human_wait: bool) -> None:
-        """Вложенные строки субагента — пока прежним путём (их модели
-        блоков — отдельный шаг)."""
+    def _nested_rows(self):
+        """Вложенные строки вызовов с исполнителем своего уровня."""
         for row in self._nested_tool_rows.values():
-            row.pause() if human_wait else row.resume()
+            level = row.block_key[0] if row.block_key else None
+            view = self._block_views.get(level) if level else None
+            if view is not None:
+                yield view, row
+
+    def _pause_nested_rows(self, human_wait: bool) -> None:
+        """Вложенные строки субагента — через модель своего уровня."""
+        for view, row in self._nested_rows():
+            view.paused(row) if human_wait else view.resumed(row)
             row.refresh_running_elapsed()
 
     def _interrupt_nested_rows(self) -> None:
-        """Инвариант «прервано» для вложенных строк субагента — пока прежним
-        путём (их модели блоков — отдельный шаг)."""
-        for widgets in self._nested_widgets_by_parent.values():
-            for w in widgets:
-                if isinstance(w, ToolCallRow):
-                    w.mark_interrupted()
+        """Инвариант «прервано» для вложенных строк субагента — через
+        модель своего уровня."""
+        for view, row in list(self._nested_rows()):
+            view.interrupted(row, started=not row.waiting)
 
     def _runner_is_for_active_thread(self) -> bool:
         """Раннер работал (работает) в открытом треде. Раннер и его
@@ -5941,8 +5972,6 @@ class TraceScreen(Screen):
             self._interrupt_nested_rows()
             self._active_calls.clear()
             self._nested_tool_rows.clear()
-            self._nested_widgets_by_parent.clear()
-            self._nested_anchor.clear()
             self._subagent_progress.reset()
         # ThinkingIndicator — пока runner работает, обычно виден внизу trace.
         runner = getattr(self.app, "active_runner", None)

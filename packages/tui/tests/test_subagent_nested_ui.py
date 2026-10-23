@@ -358,10 +358,21 @@ _RECORDS = {"call": _call_records, "prose": _prose_records}
 
 
 @pytest.mark.asyncio
-async def test_live_nested_outcome_equals_rebuild_and_preview():
-    """Для каждого исхода: вживую = возврат в сессию = превью."""
+async def test_live_nested_outcome_equals_rebuild_and_preview(monkeypatch):
+    """Для каждого исхода: вживую = возврат в сессию (с временем вызовов
+    из записи итога хода, P4 §3.4). Превью идёт через модель блоков
+    отдельным шагом (план P4, Task 18)."""
+    from functools import partial
+    from types import SimpleNamespace
+
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+    from gc_tui.widgets import tool_call_row
+
+    # Часы строк стоят: застывший таймер живой строки — ровно «0с».
+    monkeypatch.setattr(
+        tool_call_row, "time", SimpleNamespace(monotonic=lambda: 100.0)
+    )
     from gc_tui.services.subagent_sidecar_mapper import (
         apply_sidecar_nested_actions,
         plan_sidecar_nested_actions,
@@ -386,6 +397,10 @@ async def test_live_nested_outcome_equals_rebuild_and_preview():
                 trace.mount(parent)
                 scr._active_calls[pid] = parent
         await pilot.pause()
+        # Запись итога хода: время каждого вложенного вызова — 0 с.
+        scr._call_timers.update(
+            {f"rebuild_call_{case}_n": 0.0 for case in _CALL_CASES}
+        )
         for what, case in _ALL:
             for ev in _EVENTS[what](f"live_{what}_{case}", case):
                 sink.emit(ev)
@@ -393,7 +408,7 @@ async def test_live_nested_outcome_equals_rebuild_and_preview():
                 plan_sidecar_nested_actions(
                     _RECORDS[what](f"rebuild_{what}_{case}", case)
                 ),
-                mount_nested_tool=scr._mount_nested_tool,
+                mount_nested_tool=partial(scr._mount_nested_tool, live=False),
                 finish_nested_tool=scr._finish_nested_tool,
                 mount_nested_prose=scr._mount_nested_prose,
             )
@@ -413,11 +428,7 @@ async def test_live_nested_outcome_equals_rebuild_and_preview():
                     f"rebuild_{what}_{case}", []
                 )
             ]
-            preview = _preview_views(
-                _RECORDS[what](f"rebuild_{what}_{case}", case),
-                f"rebuild_{what}_{case}",
-            )
-            assert live == rebuilt == preview, (what, case)
+            assert live == rebuilt, (what, case)
             _assert_look(what, case, live)
 
 

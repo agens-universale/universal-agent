@@ -370,8 +370,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def set_word(self, word: str, *, role: WordRole = "edit") -> None:
         """Слово вместо подписи категории; ``role`` задаёт его вид: глагол
-        правки — через пробел, слово команды — через два, по §10. Пусто —
-        без слова."""
+        правки — через пробел, слово команды и `Agent` — через два, по
+        §10. Пусто — без слова."""
         self._word = word
         self._word_role = role
         self._update()
@@ -617,7 +617,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     def _caption_sep(self) -> str:
         """Между подписью и объектом: два пробела; у слова — его
         разделитель (`Edited путь`, `Ran  команда`); без слова — ничего."""
-        if self._word is None or self._word_role == "command":
+        if self._word is None or self._word_role != "edit":
             return _CAPTION_SEP
         return " " if self._word else ""
 
@@ -628,6 +628,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         if self._mode != "member":
             if self._word and self._word_role == "command":
                 return self._command_styles()
+            if self._word and self._word_role == "agent":
+                # `Agent`: слово `INK` жирным, имя субагента `INK` всегда.
+                return f"bold {_INK}", _INK
             return _TOOL_NAME, _DIM
         if self._current:
             return _INK, _INK

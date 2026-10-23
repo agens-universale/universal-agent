@@ -806,3 +806,17 @@ def test_edit_word_role_keeps_caption_look():
     assert content.plain.startswith("Edited a.py")
     assert _style_at(content, "Edited") == TOOL_NAME
     assert _style_at(content, "a.py") == DIM
+
+
+def test_agent_word_role_name_is_ink():
+    """`Agent`: слово `INK` жирным, имя субагента `INK` и после конца."""
+    from gc_tui.palette import INK
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="a1", label="Agent", target="worker")
+    row.set_result(summary="", outcome="ok")
+    row.set_word("Agent", role="agent")
+    content = row._render_content()
+    assert content.plain.startswith("Agent  worker")
+    assert _style_at(content, "Agent") == f"bold {INK}"
+    assert _style_at(content, "worker") == INK

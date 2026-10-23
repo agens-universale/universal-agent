@@ -23,6 +23,7 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.services.diff_render import copyable_hunks
 from gc_tui.widgets.diff_block import DiffBlock
+from gc_tui.widgets.tool_blocks_view import BlockAction
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from textual.containers import VerticalScroll
 from textual.widgets import Static
@@ -217,7 +218,7 @@ async def test_nested_edit_gets_block_under_its_own_row(tmp_path):
         assert seq[1].call_id == "call_child_9" and seq[1]._level
         assert _path(seq[2]) == "a.py"
         assert not seq[2].query(".block-label")  # ветки нет
-        assert "a.py +1 −1" in seq[1]._render_content().plain
+        assert "Edited a.py (+1 −1)" in seq[1]._render_content().plain
         assert seq[1].query_one(".block-copy", Static).display
         assert seq[1]._copy_text == copyable_hunks(SHORT_HUNKS, path="a.py")
 
@@ -237,7 +238,8 @@ async def test_no_block_for_nested_tool_without_journal_record(tmp_path):
 
 @pytest.mark.asyncio
 async def test_plain_and_two_nested_edits_each_get_own_block(tmp_path):
-    """Обычная правка + субагент с двумя правками → три блока по своим строкам."""
+    """Обычная правка + субагент с двумя правками → дифф под каждой
+    строкой; две правки субагента — блок `Edited 2 файла` (P4 §6.2)."""
     tid = "mixed"
     _delegating_thread(
         tmp_path,
@@ -265,14 +267,16 @@ async def test_plain_and_two_nested_edits_each_get_own_block(tmp_path):
             "ToolCallRow",
             "DiffBlock",  # обычная правка
             "ToolCallRow",  # subagent_*
+            "ToolCallRow",  # заголовок блока правок субагента
             "ToolCallRow",
             "DiffBlock",  # первая вложенная
             "ToolCallRow",
             "DiffBlock",  # вторая вложенная
         ]
+        assert seq[3].mode == "header"
         assert _path(seq[1]) == "plain.py"
-        assert _path(seq[4]) == "a.py"
-        assert _path(seq[6]) == "b.py"
+        assert _path(seq[5]) == "a.py"
+        assert _path(seq[7]) == "b.py"
 
 
 @pytest.mark.asyncio
@@ -300,7 +304,9 @@ async def test_nested_batch_blocks_land_under_own_rows(tmp_path):
     )
 
     async with _screen(tmp_path, tid) as scr:
-        seq = _rows_and_blocks(scr)[1:]  # без строки самого subagent_*
+        # Без строки самого subagent_* и заголовка блока правок.
+        header, *seq = _rows_and_blocks(scr)[1:]
+        assert header.mode == "header"
         assert [
             w.call_id if isinstance(w, ToolCallRow) else _path(w) for w in seq
         ] == ["child_1", "a.py", "child_2", "b.py", "child_3", "c.py"]
@@ -309,7 +315,8 @@ async def test_nested_batch_blocks_land_under_own_rows(tmp_path):
 @pytest.mark.asyncio
 async def test_nested_block_keeps_nested_indent_and_tie(tmp_path):
     """У вложенного блока тело — сразу под СВОЕЙ nested-строкой, на +2 от её
-    глифа; прижат к ней без отступов, как и обычный."""
+    глифа (номер прижат вправо к третьей клетке колонки диффа, P4 §6.2);
+    прижат к ней без отступов, как и обычный."""
     tid = "nested_indent"
     _delegating_thread(tmp_path, tid)
     _write_sidecar_edit(tmp_path, tid, "call_child_9", "a.py")
@@ -326,16 +333,19 @@ async def test_nested_block_keeps_nested_indent_and_tie(tmp_path):
             "".join(seg.text for seg in strip).rstrip()
             for strip in scr.app.screen._compositor.render_strips()
         ]
-        indent = lambda s: len(s) - len(s.lstrip(" "))
-        row = next(i for i, s in enumerate(lines) if "Write  a.py" in s)
+        row = next(i for i, s in enumerate(lines) if "Edited a.py" in s)
         body = next(i for i, s in enumerate(lines) if "def f():" in s)
         assert body == row + 1
-        assert indent(lines[body]) - indent(lines[row]) == 2
+        nested = scr.query_one("#trace").query(ToolCallRow)[1]
+        assert block.region.x - nested.region.x == 4
+        x = block.region.x
+        assert lines[body][x : x + 3] == "  1"
 
 
 @pytest.mark.asyncio
 async def test_nested_collapse_threshold_comes_from_config(tmp_path):
-    """Порог свёртки у вложенного блока — тот же ключ конфига."""
+    """Порог свёртки у вложенного блока — тот же ключ конфига; своего
+    хвоста у диффа под блоком нет — одна фраза блока (P4 §4.0)."""
     tid = "nested_threshold"
     _delegating_thread(tmp_path, tid)
     _write_sidecar_edit(tmp_path, tid, "call_child_9", "a.py")
@@ -359,10 +369,9 @@ async def test_nested_collapse_threshold_comes_from_config(tmp_path):
         block = scr.query_one(DiffBlock)
         body = block.query_one(".block-body", Static).visual.plain
         assert body.count("\n") + 1 == 3
-        assert (
-            block.query_one(".diff-more", Static).visual.plain
-            == "… ещё 27 строк"
-        )
+        assert not block.query(".diff-more")
+        (phrase,) = scr.query(BlockAction)
+        assert phrase.phrase == "+ ещё 27 строк"
 
 
 @pytest.mark.asyncio
