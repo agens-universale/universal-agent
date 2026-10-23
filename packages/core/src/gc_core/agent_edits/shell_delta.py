@@ -974,6 +974,7 @@ class ShellDelta:
                 before_sha256=before_sha256,
                 after_sha256=after_sha256,
                 flags=["no_diff"],
+                size_bytes=st.st_size,
             )
             return record, None
 
@@ -997,6 +998,7 @@ class ShellDelta:
                 before_sha256=before_sha256,
                 after_sha256=sha256_hex_of_bytes(after_bytes),
                 flags=["no_diff"],
+                size_bytes=len(after_bytes),
             )
             return record, None
 
@@ -1010,6 +1012,7 @@ class ShellDelta:
                 before_sha256=before_sha256,
                 after_sha256=sha256_hex_of_bytes(after_bytes),
                 flags=["no_diff"],
+                size_bytes=len(after_bytes),
             )
             return record, None
 
@@ -1359,21 +1362,14 @@ class ShellDelta:
         # правки при этом остаётся своим: затирая его бинарностью, запись
         # теряла создание файла, а с ним право на откат удалением (пятый раунд
         # ревью, находка 5).
-        if file.binary:
+        if file.binary or file.size > _max_diff_source_bytes(self._ctx):
             return _edit_record(
                 key,
                 turn_id,
                 op="create" if created else "shell",
                 after_sha256=after_sha256,
                 flags=["no_diff"],
-            )
-        if file.size > _max_diff_source_bytes(self._ctx):
-            return _edit_record(
-                key,
-                turn_id,
-                op="create" if created else "shell",
-                after_sha256=after_sha256,
-                flags=["no_diff"],
+                size_bytes=file.size,
             )
 
         if hunks is None:
@@ -1529,6 +1525,7 @@ def _edit_record(
     before_sha256: str | None = None,
     after_sha256: str | None = None,
     flags: list[str] | None = None,
+    size_bytes: int | None = None,
 ) -> EditRecord:
     """Запись канала: ``call_id`` тут не заполняется, ``before_sha256`` — по
     возможности.
@@ -1563,6 +1560,7 @@ def _edit_record(
         before_sha256=before_sha256,
         after_sha256=after_sha256,
         flags=list(flags or []),
+        size_bytes=size_bytes,
     )
 
 

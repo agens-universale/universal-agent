@@ -84,6 +84,10 @@ class EditRecord:
     # какой вызов команды сделал правку. ``None`` — запись fs-тула, команда
     # вне вызова тула или журнал до поля.
     command_call_id: Optional[str] = None
+    # Размер файла после правки у записи без диффа (флаг ``no_diff``: бинарь
+    # или файл сверх капа исходника). ``None`` — запись с диффом, удаление,
+    # файл пропал между пробами или журнал до поля.
+    size_bytes: Optional[int] = None
 
     def to_json_obj(self) -> Dict[str, Any]:
         obj = {
@@ -103,6 +107,8 @@ class EditRecord:
             obj["command_paths"] = self.command_paths
         if self.command_call_id is not None:
             obj["command_call_id"] = self.command_call_id
+        if self.size_bytes is not None:
+            obj["size_bytes"] = self.size_bytes
         return obj
 
     @classmethod
@@ -121,6 +127,7 @@ class EditRecord:
             flags=list(obj.get("flags") or []),
             command_paths=obj.get("command_paths"),
             command_call_id=obj.get("command_call_id"),
+            size_bytes=obj.get("size_bytes"),
         )
 
 
