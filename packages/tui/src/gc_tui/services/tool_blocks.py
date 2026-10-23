@@ -159,13 +159,14 @@ def diff_rows(n_applied: int, preview: int) -> int:
 
 
 def counts_text(add: int, rem: int) -> Parts:
-    """Счётчики правки ` (+a −r)` — всегда обе части, нулевая тоже."""
+    """Счётчики правки ` (+a −r)` — всегда обе части, нулевая тоже;
+    скобки — цветом объекта слева (`INK`)."""
     return (
-        (" (", "dim"),
+        (" (", "ink"),
         (f"+{add}", "ok"),
         (" ", "dim"),
         (f"−{rem}", "error"),
-        (")", "dim"),
+        (")", "ink"),
     )
 
 

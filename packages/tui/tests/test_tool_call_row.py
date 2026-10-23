@@ -638,8 +638,8 @@ def _edit_row():
 
 def test_edit_counts_follow_the_object():
     """` (+a −r)` — сразу после объекта, до хвоста результата; `+a` — OK,
-    `−r` — ERR, скобки — DIM (спека P4 §9.13)."""
-    from gc_tui.palette import DIM, ERR, OK
+    `−r` — ERR, скобки — INK, как объект слева (спека P4 §10)."""
+    from gc_tui.palette import ERR, INK, OK
 
     row = _edit_row()
     row.set_edit_counts(12, 3, copy_text="diff")
@@ -650,7 +650,8 @@ def test_edit_counts_follow_the_object():
     }
     assert styles["+12"] == OK
     assert styles["−3"] == ERR
-    assert styles[" ("] == DIM
+    assert styles[" ("] == INK
+    assert styles[")"] == INK
 
 
 @pytest.mark.parametrize(

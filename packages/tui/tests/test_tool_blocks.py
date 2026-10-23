@@ -719,25 +719,25 @@ def test_diff_rows_preview_30():
 
 def test_counts_text():
     assert counts_text(4, 2) == (
-        (" (", "dim"),
+        (" (", "ink"),
         ("+4", "ok"),
         (" ", "dim"),
         ("−2", "error"),
-        (")", "dim"),
+        (")", "ink"),
     )
     assert counts_text(5, 0) == (
-        (" (", "dim"),
+        (" (", "ink"),
         ("+5", "ok"),
         (" ", "dim"),
         ("−0", "error"),
-        (")", "dim"),
+        (")", "ink"),
     )
     assert counts_text(0, 0) == (
-        (" (", "dim"),
+        (" (", "ink"),
         ("+0", "ok"),
         (" ", "dim"),
         ("−0", "error"),
-        (")", "dim"),
+        (")", "ink"),
     )
 
 
