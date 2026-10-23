@@ -1168,7 +1168,7 @@ async def test_next_turn_settles_line(tmp_path):
             await pilot.pause()
             assert not line.is_fresh
             line.render()
-            assert line.summary_span is None
+            assert "изменено" not in line.render().plain
             assert line.region.height == 1
             kids = list(scr.query_one("#trace").children)
             (reply,) = [

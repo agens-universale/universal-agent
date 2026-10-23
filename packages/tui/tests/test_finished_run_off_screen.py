@@ -159,7 +159,7 @@ async def test_plan_end_of_other_thread_stays_with_it(tmp_path):
         await pilot.pause()
         await pilot.pause()
         assert _fresh(scr).render().plain == a_before
-        assert _fresh(scr).summary_span is None
+        assert "изменено" not in _fresh(scr).render().plain
         assert scr._plan_banner is None
         assert _meta(tmp_path, _A)["last_indicator"] == {"edits": None}
         b = _meta(tmp_path, _B)

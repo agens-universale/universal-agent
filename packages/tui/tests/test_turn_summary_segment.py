@@ -281,7 +281,7 @@ def test_every_outcome_line_shows_the_edits_summary(state, head):
     plain = line.render().plain
     assert plain.startswith(head)
     assert plain.endswith("изменено 1 файл · +1 −1")
-    assert line.summary_span is not None
+    assert "изменено" in line.render().plain
 
 
 # --- проводка спадающего фронта --------------------------------------------
@@ -983,12 +983,17 @@ def _fresh_line():
     return build_turn_line(word="completed")
 
 
+def _summary_x(line) -> int:
+    """Первая клетка сегмента сводки в отрисованной строке."""
+    return line.render().plain.index("изменено")
+
+
 @pytest.mark.asyncio
 async def test_click_on_fresh_line_summary_sends_one_turn_request():
     from gc_tui.services.edits_view import SOURCE_TURN
 
     async def click(pilot, line):
-        await _gesture(pilot, line, line.summary_span[0] + 1)
+        await _gesture(pilot, line, _summary_x(line) + 1)
 
     assert await _line_app_requests(_fresh_line(), click) == [SOURCE_TURN]
 
@@ -996,7 +1001,7 @@ async def test_click_on_fresh_line_summary_sends_one_turn_request():
 @pytest.mark.asyncio
 async def test_double_click_on_fresh_line_summary_sends_one_request():
     async def double(pilot, line):
-        x = line.summary_span[0] + 1
+        x = _summary_x(line) + 1
         _post_gesture(pilot, line, x)
         _post_gesture(pilot, line, x)  # тот же пиксель → chain 2
         await pilot.pause()
@@ -1007,7 +1012,7 @@ async def test_double_click_on_fresh_line_summary_sends_one_request():
 @pytest.mark.asyncio
 async def test_right_click_on_fresh_line_summary_sends_nothing():
     async def right(pilot, line):
-        await _gesture(pilot, line, line.summary_span[0] + 1, button=3)
+        await _gesture(pilot, line, _summary_x(line) + 1, button=3)
 
     assert await _line_app_requests(_fresh_line(), right) == []
 
@@ -1015,7 +1020,7 @@ async def test_right_click_on_fresh_line_summary_sends_nothing():
 @pytest.mark.asyncio
 async def test_selection_drag_from_head_to_summary_sends_nothing():
     async def drag(pilot, line):
-        await _gesture(pilot, line, 0, line.summary_span[0] + 1)
+        await _gesture(pilot, line, 0, _summary_x(line) + 1)
 
     assert await _line_app_requests(_fresh_line(), drag) == []
 
@@ -1027,7 +1032,7 @@ async def test_leaving_line_between_press_and_release_sends_nothing():
     async def leave(pilot, line):
         from textual.events import MouseDown, MouseUp
 
-        x = line.region.x + line.summary_span[0] + 1
+        x = line.region.x + _summary_x(line) + 1
         y = line.region.y
         kw = dict(
             x=x,
@@ -1054,11 +1059,11 @@ async def test_leaving_line_between_press_and_release_sends_nothing():
 @pytest.mark.asyncio
 async def test_settled_line_click_sends_nothing():
     async def settle_then_click(pilot, line):
-        x = line.summary_span[0] + 1
+        x = _summary_x(line) + 1
         line.settle()
         await pilot.pause()
         line.render()
-        assert line.summary_span is None
+        assert "изменено" not in line.render().plain
         await _gesture(pilot, line, x)
 
     assert await _line_app_requests(_fresh_line(), settle_then_click) == []

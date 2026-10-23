@@ -95,10 +95,6 @@ class TurnLine(Static):
         return self._error
 
     @property
-    def summary_span(self) -> tuple[int, int] | None:
-        return self._summary_span
-
-    @property
     def is_fresh(self) -> bool:
         return self.has_class(TURN_LINE_LATEST)
 

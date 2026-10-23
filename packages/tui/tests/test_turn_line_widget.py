@@ -63,13 +63,13 @@ async def test_fresh_line_shows_summary_and_settled_keeps_data():
         await pilot.pause()
         assert line.is_fresh
         assert line.render().plain.endswith("изменено 2 файла · +14 −3")
-        assert line.summary_span is not None
+        assert "изменено" in line.render().plain
 
         line.settle()
         await pilot.pause()
         assert not line.is_fresh
         assert line.render().plain == "✓ Выполнил"
-        assert line.summary_span is None
+        assert "изменено" not in line.render().plain
         assert line.summary == (2, 14, 3)
 
 
@@ -111,4 +111,4 @@ async def test_narrow_line_hides_the_whole_segment():
         line.freshen((2, 14, 3), None)
         await pilot.pause()
         assert line.render().plain == "✓ Выполнил"
-        assert line.summary_span is None
+        assert "изменено" not in line.render().plain
