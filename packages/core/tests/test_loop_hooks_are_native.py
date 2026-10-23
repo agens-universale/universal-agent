@@ -86,8 +86,9 @@ def test_compaction_hooks_arrive_as_coroutines():
     offenders = [
         f"{arg}={value}"
         for arg, value in passed.items()
-        # Корутинные двойники в этом коде именуются приставкой `a`.
-        if not value.rsplit(".", 1)[-1].startswith("a")
+        # Корутинные двойники в этом коде именуются приставкой `a`, у
+        # приватных методов — после подчёркивания (`_arecord_turn_outcome`).
+        if not value.rsplit(".", 1)[-1].lstrip("_").startswith("a")
     ]
     assert offenders == [], (
         "в цикл переданы синхронные имена хуков компакции — каждое означает "
