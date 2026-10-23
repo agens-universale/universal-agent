@@ -216,7 +216,24 @@ def _write_subagent(tmp_path) -> None:
         {
             "type": "function_call_output",
             "call_id": "call_child_1",
-            "output": "ok",
+            "output": json.dumps(
+                {
+                    "tool": "fs_read_file",
+                    "ok": True,
+                    "path": "client.py",
+                    "sha256": "0" * 64,
+                    "encoding_used": "utf-8",
+                    "file_size_bytes": 3120,
+                    "start_line": 1,
+                    "end_line": 120,
+                    "total_lines": 120,
+                    "truncated": False,
+                    "next_offset": None,
+                    "returned_chars": 3120,
+                    "error": None,
+                    "content": "import httpx\n",
+                }
+            ),
         },
     )
     _sidecar(
