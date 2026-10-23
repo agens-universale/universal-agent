@@ -9,7 +9,9 @@ from gc_core.execution.tool_call_context import (
 )
 from gc_core.execution.tool_effects import execute_native_tool_effect
 from gc_core.tools import aapply_tool
+from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_core.user_stop import UserStop, bind_user_stop
 from gc_testkit.helpers.tool_ctx import local_ctx
 
 
@@ -95,3 +97,53 @@ async def test_aapply_tool_binds_call_in_effect_port_branch(tmp_path):
     assert json.loads(output)["ok"] is True
     assert seen == [(name, "call-b")]
     assert current_tool_call() == ("", "")
+
+
+class _StopLog:
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+
+    def info(self, msg, *args, extra=None) -> None:
+        del msg, args
+        self.records.append(dict(extra or {}))
+
+    def events(self, name: str) -> list[dict]:
+        return [r for r in self.records if r.get("event") == name]
+
+
+def _exec_registry():
+    name = ExecuteCommand.registered_tool_name()
+    return name, {
+        name: {
+            "tool_fabric": ExecuteCommand,
+            "spec": ExecuteCommand.tool_description(),
+        }
+    }
+
+
+async def test_stop_event_of_command_carries_bound_call(tmp_path):
+    """Снятие команды пишет её тул и ``call_id``: ``UserStop.arm`` читает
+    ту же переменную, что ставит ``aapply_tool``."""
+    name, registry = _exec_registry()
+    ctx = local_ctx({"launch_root": str(tmp_path)})
+    ctx.tools_data = registry
+    log = _StopLog()
+    gate = UserStop()
+    gate.prepare_run(asyncio.get_running_loop(), log)
+
+    async def _work():
+        with bind_user_stop(gate):
+            return await aapply_tool(
+                name, {"command": "sleep 30"}, ctx=ctx, call_id="call-s"
+            )
+
+    task = asyncio.create_task(_work())
+    await asyncio.sleep(0.5)
+    gate.request(log)
+    await asyncio.wait_for(task, 10)
+    (killed,) = log.events("user_stop_killed")
+    assert (killed["kind"], killed["tool"], killed["call_id"]) == (
+        "exec",
+        name,
+        "call-s",
+    )
