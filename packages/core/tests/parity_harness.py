@@ -469,8 +469,19 @@ def run_thread_dump(
     path = Path(data_path)
     if not path.exists():
         return []
-    return [
-        strip_volatile(json.loads(line))
+    rows = [
+        json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    return [strip_volatile(row) for row in thread_messages(rows)]
+
+
+def thread_messages(rows: list[dict]) -> list[dict]:
+    """Сообщения треда — то, по чему сняты эталоны паритета.
+
+    Прочие записи файла треда (итог хода ``turn_outcome``) — факт ядра,
+    которого в эталонах develop нет; их форму проверяют собственные тесты
+    хранилища, а сравнение с эталоном идёт только по сообщениям.
+    """
+    return [row for row in rows if row.get("type") == "message"]
