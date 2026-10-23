@@ -32,14 +32,18 @@ def trace_rows(
 ) -> list[Any]:
     """Строки области виджета ``selector`` со стилями сегментов в спанах.
 
-    Берутся из кадра композитора и обрезаются по региону виджета; ряды,
+    Берутся из кадра композитора и обрезаются по региону виджета без
+    колонок полосы прокрутки (левый отступ остаётся — от него считается
+    ``origin``); ряды,
     попавшие в регион видимого виджета одного из типов ``exclude``,
     выбрасываются (строка итога хода сеткой блоков не описывается).
     """
     from rich.text import Text
 
     screen = app.screen
-    region = screen.query_one(selector).region
+    widget = screen.query_one(selector)
+    region = widget.region
+    right = widget.scrollable_content_region.right
     skipped = _rows_of(screen, exclude)
     strips = screen._compositor.render_strips()
     rows = []
@@ -47,7 +51,7 @@ def trace_rows(
         if y in skipped:
             continue
         row = Text()
-        for segment in strips[y].crop(region.x, region.right):
+        for segment in strips[y].crop(region.x, right):
             row.append(segment.text, segment.style)
         rows.append(row)
     return rows

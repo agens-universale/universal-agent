@@ -346,3 +346,19 @@ async def test_trace_rows_exclude_drops_rows_of_that_type():
     plains = [r.plain.rstrip() for r in rows]
     assert plains[:2] == ["первая", "вторая"]
     assert all("итог" not in p for p in plains)
+
+
+async def test_trace_rows_without_scrollbar_columns():
+    """Строка — область содержимого ленты: колонок полосы прокрутки в
+    ней нет."""
+    app = _TraceApp(*[_Keep(f"строка {i}") for i in range(20)])
+    async with app.run_test(size=(40, 5)):
+        trace = app.screen.query_one("#trace")
+        assert trace.scrollbar_size_vertical > 0
+        rows = trace_rows(app)
+        width = trace.scrollable_content_region.right - trace.region.x
+        height = trace.region.height
+
+    assert {row.cell_len for row in rows} == {width}
+    assert width == 38
+    assert len(rows) == height
