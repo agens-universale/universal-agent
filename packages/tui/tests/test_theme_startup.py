@@ -89,14 +89,14 @@ def _run_main_until_app_import(tmp_path) -> dict:
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
-def test_fixed_does_not_probe():
+def test_gigacode_does_not_probe():
     def probe():
-        raise AssertionError("в fixed терминал не опрашивается")
+        raise AssertionError("в gigacode терминал не опрашивается")
 
-    assert select_palette("fixed", probe) is None
+    assert select_palette("gigacode", probe) is None
 
 
-def test_auto_without_answer_is_fixed():
+def test_auto_without_answer_is_gigacode():
     assert select_palette("auto", lambda: None) is None
 
 
@@ -107,7 +107,7 @@ def _rgb(hex_color):
 @pytest.mark.parametrize(
     "bg", ["#224fbc", "#13773d", "#929292", "#ffffff", "#b0b0b0"]
 )
-def test_auto_background_unreadable_for_text_is_fixed(bg):
+def test_auto_background_unreadable_for_text_is_gigacode(bg):
     assert select_palette("auto", lambda: _rgb(bg)) is None
 
 

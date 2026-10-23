@@ -320,6 +320,11 @@ class AgentExecutor:
         # он реально отправит сообщение.
         self._plan_rework_thread: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
+
+        from gc_core.user_stop import UserStop
+
+        self.user_stop = UserStop()
+
         self.last_closing_reply: str = ""
 
     def take_undelivered_messages(self) -> list[dict]:
@@ -1153,7 +1158,12 @@ class AgentExecutor:
             self._state = None
             self._accounting_closed = False
         settings = settings_of(self._ctx)
+        # Раньше стопа: неверный persist не должен падать на отсутствии
+        # ``user_stop`` и не вооружает снятие хода, который не начнётся.
         _require_supported_persist_mode(settings, self._ctx)
+        self.user_stop.prepare_run(
+            asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
+        )
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else settings.agent.verbose
@@ -1328,6 +1338,10 @@ class AgentExecutor:
         queued_before_loop = self._take_pending_messages()
         if queued_before_loop:
             messages = [*messages, *queued_before_loop]
+        from gc_core.user_stop import bind_user_stop
+
+        _stop_bound = bind_user_stop(self.user_stop)
+        _stop_bound.__enter__()
         try:
             response = await arun_agent(
                 messages,
@@ -1363,6 +1377,7 @@ class AgentExecutor:
             )
             self.last_closing_reply = getattr(state, "closing_reply", "")
         finally:
+            _stop_bound.__exit__(None, None, None)
             state_ops.leave(state)
             state.turn_level = None
             teardown_cancel = await self._ateardown_run(_owner_reset)
@@ -1592,6 +1607,8 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+            run_logger = getattr(self._ctx, "logger", None)
+        self.user_stop.request(run_logger)
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

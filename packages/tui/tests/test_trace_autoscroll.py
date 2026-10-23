@@ -3,8 +3,8 @@
 Пока агент работает и юзер отскроллил вверх читать — новые события НЕ дёргают
 вид вниз. Отправка своего сообщения (pending) форсит скролл вниз (re-engage)."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 @pytest.mark.asyncio
@@ -265,9 +265,9 @@ async def test_user_send_force_scrolls_to_very_bottom(tmp_path):
         assert (
             trace.scroll_offset.y >= trace.max_scroll_y - 1
         )  # (1) доехали до низа
-        # старт прогона: индикатор появляется → _sync_trace_max_height меняет потолок
+        # старт прогона: индикатор появляется → высота ленты меняется
         scr._show_thinking_indicator(state="thinking")
-        await pilot.pause(0.5)  # poll → пересчёт потолка
+        await pilot.pause(0.5)
         assert (
             trace.scroll_offset.y >= trace.max_scroll_y - 1
         )  # (2) остались у низа

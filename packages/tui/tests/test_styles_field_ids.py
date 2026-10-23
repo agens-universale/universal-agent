@@ -21,6 +21,7 @@ _OLD_FIELD_IDS = (
     "mef-model",
     "mef-url",
     "mef-token",
+    "mef-proxy",
     "mef-summary-chars",
     "mef-summary-tokens",
     "set-profile-name",

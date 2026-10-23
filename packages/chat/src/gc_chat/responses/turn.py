@@ -24,6 +24,16 @@ _TOOL_POLL_S = 0.05
 SYSTEM = "responses"
 
 
+def _log_forgotten_stop(task: asyncio.Task) -> None:
+    """Забрать ошибку стопа, который никто не ждёт."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    logger.exception("user stop did not settle", exc_info=exc)
+
+
 def outcome_of(agent: Any) -> str | None:
     executor = getattr(agent, "executor", None)
     if executor is None:
@@ -107,15 +117,15 @@ class TurnRun:
             if self.sealed:
                 return
             self.cancel_requested = True
-        async with self._seal_lock:
-            if self.sealed:
-                return
-        _stop_agent(self.agent)
+        from gc_core.user_stop import await_agent_stop
+
+        await await_agent_stop(self.agent)
 
     def _stop_if_open(self) -> None:
         if self.sealed or self.cancel_requested:
             return
-        asyncio.get_running_loop().create_task(self.request_stop())
+        task = asyncio.get_running_loop().create_task(self.request_stop())
+        task.add_done_callback(_log_forgotten_stop)
 
     async def _run(self) -> None:
         failed: BaseException | None = None
@@ -243,12 +253,6 @@ async def _join(task: asyncio.Task) -> None:
         raise
     except Exception:
         logger.exception("responses tool watch")
-
-
-def _stop_agent(agent: Any) -> None:
-    stop = getattr(agent, "stop", None)
-    if stop is not None:
-        stop()
 
 
 async def _disconnected(request: Any) -> bool:

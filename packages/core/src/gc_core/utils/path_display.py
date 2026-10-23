@@ -17,14 +17,17 @@ def _inside(path: str, base: str) -> bool:
         return False
 
 
+def home_path(path: str, home: str) -> str:
+    """Внутри `home` — через `~`, иначе как есть."""
+    if _path.isabs(path) and _inside(path, home):
+        return _path.join("~", _path.relpath(path, home))
+    return path
+
+
 def display_path(path: str, root: str, home: str) -> str:
     """Внутри `root` — от него, иначе внутри `home` — через `~`, иначе
     полностью. Не абсолютный (уже от корня или имя из старой сессии) — как
     есть."""
-    if not _path.isabs(path):
-        return path
-    if _inside(path, root):
+    if _path.isabs(path) and _inside(path, root):
         return _path.relpath(path, root)
-    if _inside(path, home):
-        return _path.join("~", _path.relpath(path, home))
-    return path
+    return home_path(path, home)

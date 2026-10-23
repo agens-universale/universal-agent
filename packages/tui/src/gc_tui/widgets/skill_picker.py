@@ -178,8 +178,8 @@ class SkillPicker(PaletteRowsMixin, VerticalScroll):
         """Честная желаемая высота: строки списка с шапками пакетов (или одна
         no-match-строка) + докнутый footer (margin-top hint'а(1) + строка
         hint'а(1)) + рамка .palette(2).
-        main.py::_sync_trace_max_height берёт это значение напрямую — недосчёт
-        выдавливал бы нижнюю рамку пикера за экран."""
+        `_apply_size` ставит его в min-height — недосчёт выдавливал бы нижнюю
+        рамку пикера за экран."""
         groups = self._visible_groups()
         flow = sum(bool(p) + len(g) for p, g in groups) if groups else 1
         return flow + 2 + 2

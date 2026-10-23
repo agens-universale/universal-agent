@@ -5315,3 +5315,79 @@ async def test_list_hints_stand_under_every_field_from_the_first_frame(
         assert _lang_hint(scr) == LIST_CLOSED_HINT
         # Сетевой список обещает свой глагол и до первой загрузки: клавиша идёт на сервер.
         assert _model_hint(scr) == _MODEL_RELOAD_HINT
+
+
+# --- плашка «сохранено, применится со следующего запуска» — успех ------------
+
+
+def _no_reload():
+    raise RuntimeError("конфиг не перечитан")
+
+
+@pytest.mark.asyncio
+async def test_local_language_saved_for_next_start_is_ok(tmp_path):
+    """Записано, но перечитать не вышло — это успех со сроком, не ошибка:
+    зелёная плашка ✓."""
+    from gc_tui.app import TuiApp
+    from textual.widgets import Input, Static
+
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
+    async with app.run_test() as pilot:
+        scr, _ = _mk_screen(tmp_path, LOCAL, on_apply=_no_reload)
+        await _open_voice(app, scr, pilot)
+        await _to_field(pilot)
+        scr.query_one("#voice-lang", Input).value = "en"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        flash = scr.query_one("#set-flash", Static)
+        assert flash.has_class("set-flash-ok")
+        assert str(flash.render()) == (
+            "✓ сохранено, применится со следующего запуска"
+        )
+
+
+@pytest.mark.asyncio
+async def test_endpoint_saved_for_next_start_is_ok(tmp_path):
+    from gc_tui.app import TuiApp
+    from textual.widgets import Input, Static
+
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
+    async with app.run_test() as pilot:
+        scr, _ = _mk_screen(tmp_path, OFF, on_apply=_no_reload)
+        await _open_cloud(app, scr, pilot)
+        scr.query_one("#voice-url", Input).value = _URL
+        scr.query_one("#voice-token", Input).value = "sk"
+        scr.query_one("#voice-model", Input).value = "wh"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        flash = scr.query_one("#set-flash", Static)
+        assert flash.has_class("set-flash-ok")
+        assert str(flash.render()) == (
+            "✓ сохранено, применится со следующего запуска"
+        )
+
+
+@pytest.mark.asyncio
+async def test_endpoint_not_saved_stays_warn(tmp_path):
+    """Настоящий провал записи — по-прежнему янтарная ⚠."""
+    from gc_tui.app import TuiApp
+    from textual.widgets import Input, Static
+
+    def _refuse(*_args, **_kwargs):
+        raise OSError("No space left on device")
+
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
+    async with app.run_test() as pilot:
+        scr, fake = _mk_screen(tmp_path, OFF)
+        fake.wire_cloud = _refuse
+        await _open_cloud(app, scr, pilot)
+        scr.query_one("#voice-url", Input).value = _URL
+        scr.query_one("#voice-token", Input).value = "sk"
+        scr.query_one("#voice-model", Input).value = "wh"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        flash = scr.query_one("#set-flash", Static)
+        assert flash.has_class("set-flash-warn")
+        assert str(flash.render()) == (
+            "⚠ не сохранено: No space left on device"
+        )

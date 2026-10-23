@@ -145,8 +145,8 @@ tui:
   # answer_reasoning — + строка-мысль «⠇ …».
   stream_display: minimal
   # Тема TUI: auto — фон терминала берётся, если на нём читается текст
-  # палитры (основной и серый); иначе — fixed; fixed — собственная тёмная
-  # палитра.
+  # палитры (основной и серый); иначе — gigacode; gigacode — собственная
+  # тёмная палитра.
   theme: auto
   # adaptive bounce (только TUI): как поступать с текст-ответом без тула.
   #   deny  — всегда требовать tool-call (как CLI/server/swarm);

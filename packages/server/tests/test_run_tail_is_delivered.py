@@ -186,7 +186,7 @@ async def test_stopped_or_failed_run_does_not_replay_its_tail(
             system="s", task_id="t", make_message=_msg, content="вдогонку"
         )
         if ending == "stop":
-            registry.stop(system="s", task_id="t")
+            await registry.stop(system="s", task_id="t")
 
     env.teardown_steps.append(_message_then_end)
     env.fail = ending == "failure"

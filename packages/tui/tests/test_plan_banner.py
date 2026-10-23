@@ -391,7 +391,18 @@ async def test_closing_the_banner_returns_a_following_trace_to_the_bottom(
         assert scrolled  # опрос потом может прижать ещё раз
         assert screen._stick_bottom is True
 
+        # Ушла вверх по-настоящему: лента у низа экрана (`1fr`) при снятии
+        # баннера растёт, и короткая целиком «у низа» — опрос вернул бы липкость.
+        from textual.containers import VerticalScroll
+        from textual.widgets import Static
+
+        for i in range(80):
+            screen._trace_mount(Static(f"строка плана {i}"), scroll=False)
         screen._show_plan_banner()
+        await pilot.pause()
+        screen.query_one("#trace", VerticalScroll).scroll_to(
+            y=0, animate=False
+        )
         await pilot.pause()
         scrolled.clear()
         screen._stick_bottom = False

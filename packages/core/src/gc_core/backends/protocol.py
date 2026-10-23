@@ -77,6 +77,8 @@ class ExecResult:
     stderr: str = ""
     return_code: Any = _MISSING
     timed_out: bool = False
+    #: Команду снял стоп хода, не таймаут и не её собственный выход.
+    stopped_by_user: bool = False
     # Сохранён для потребителей вне exec (fs-поиск, MCP-обёртка): им
     # нужен только факт «поток обрезан», а не края. Выводится из потока.
     stdout_hit_capture_cap: bool = False
@@ -132,6 +134,7 @@ def bound_exec_result(result: ExecResult, max_chars: int) -> ExecResult:
     return ExecResult(
         return_code=result.return_code,
         timed_out=result.timed_out,
+        stopped_by_user=bool(getattr(result, "stopped_by_user", False)),
         stdout_stream=stdout_stream,
         stderr_stream=stderr_stream,
     )

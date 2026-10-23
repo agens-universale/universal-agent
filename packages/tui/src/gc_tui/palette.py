@@ -199,13 +199,13 @@ VALIDATING_SHADES = [
 
 
 # ── Тема auto: палитра от фона терминала ───────────────────────────────────
-# Всё выше — тема fixed (литералы, снапшоты неизменны). apply_background
+# Всё выше — тема gigacode (литералы, снапшоты неизменны). apply_background
 # подменяет фон и зависящие от него токены; reset возвращает литералы.
 
 # Тон синеватых поверхностей (подложка реплики, карточки, оверлеи, трек
 # метра). Один параметр: "#ffffff" даёт нейтральные поверхности той же
-# светлоты. Подобран так, что при фоне fixed каждая поверхность расходится
-# с литералом <= 2.
+# светлоты. Подобран так, что при фоне gigacode каждая поверхность
+# расходится с литералом <= 2.
 SURFACE_TINT = "#78829b"
 _TINTED = (
     "CARD_SELECT_BG",
@@ -225,7 +225,7 @@ _RAMP_PEAKS = {
     "PROCESSING_SHADES": DEEP_DIM,
     "VALIDATING_SHADES": CODE_BLOCK,
 }
-_FIXED = {
+_GIGACODE = {
     name: globals()[name]
     for name in (
         "BG",
@@ -242,8 +242,8 @@ _FIXED = {
 
 
 def _weight(color: str, anchor: str) -> float:
-    """Доля anchor в color при фоне fixed: проекция color−BG на anchor−BG."""
-    bg = _rgb(_FIXED["BG"])
+    """Доля anchor в color при фоне gigacode: проекция color−BG на anchor−BG."""
+    bg = _rgb(_GIGACODE["BG"])
     to_anchor = [a - b for a, b in zip(_rgb(anchor), bg)]
     to_color = [c - b for c, b in zip(_rgb(color), bg)]
     dot = sum(x * y for x, y in zip(to_anchor, to_color))
@@ -251,25 +251,25 @@ def _weight(color: str, anchor: str) -> float:
 
 
 def _shift(color: str, bg: str, share: float = 1.0) -> str:
-    """Сдвигает color на share сдвига фона от fixed к bg."""
-    old, new = _rgb(_FIXED["BG"]), _rgb(bg)
+    """Сдвигает color на share сдвига фона от gigacode к bg."""
+    old, new = _rgb(_GIGACODE["BG"]), _rgb(bg)
     moved = (c + share * (n - o) for c, n, o in zip(_rgb(color), new, old))
     return _hex(moved)
 
 
 def _rebase(stops: list[str], peak: str, bg: str) -> list[str]:
     """Стопы рампы на новом фоне: доля фона в стопе (1 − вес пика) едет
-    вместе с фоном, остальное остаётся. При фоне fixed — ровно литералы."""
+    вместе с фоном, остальное остаётся. При фоне gigacode — ровно литералы."""
     return [_shift(stop, bg, 1 - _weight(stop, peak)) for stop in stops]
 
 
 def _derived(bg: str) -> dict[str, object]:
     tinted = {
-        name: _mix(bg, SURFACE_TINT, _weight(_FIXED[name], SURFACE_TINT))
+        name: _mix(bg, SURFACE_TINT, _weight(_GIGACODE[name], SURFACE_TINT))
         for name in _TINTED
     }
     ramps = {
-        name: _rebase(_FIXED[name], peak, bg)
+        name: _rebase(_GIGACODE[name], peak, bg)
         for name, peak in _RAMP_PEAKS.items()
     }
     return {
@@ -277,7 +277,7 @@ def _derived(bg: str) -> dict[str, object]:
         "BAND_BG": _mix(bg, INK, 0.075),
         "BLOCK_BG": _mix(bg, INK, 0.042),
         "REFUSED": _mix(bg, WARN, _REFUSED_SHARE),
-        **{name: _shift(_FIXED[name], bg) for name in _DIFF},
+        **{name: _shift(_GIGACODE[name], bg) for name in _DIFF},
         **tinted,
         "QUEUE_BG": _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
         "HIGHLIGHT_BG": _mix(tinted["USER_BAND_BG"], INK, _HIGHLIGHT_SHARE),
@@ -287,7 +287,7 @@ def _derived(bg: str) -> dict[str, object]:
 
 # Фон терминала годится, если на нём читается текст палитры (основной и
 # серый) с контрастом WCAG не ниже 3; светлые и цветные средней яркости —
-# fixed.
+# gigacode.
 _TEXT = (INK, DIM)
 MIN_TEXT_CONTRAST = 3.0
 
@@ -299,8 +299,8 @@ def apply_background(rgb: tuple[int, int, int]) -> None:
 
 
 def reset() -> None:
-    """Возврат к теме fixed (литералы)."""
-    globals().update(_FIXED)
+    """Возврат к теме gigacode (литералы)."""
+    globals().update(_GIGACODE)
 
 
 def _luminance(rgb: tuple[int, int, int]) -> float:
@@ -322,10 +322,10 @@ def contrast(
 def select_palette(
     theme: str, probe: Callable[[], tuple[int, int, int] | None]
 ) -> tuple[int, int, int] | None:
-    """Фон, от которого строить палитру, или None — тема fixed.
+    """Фон, от которого строить палитру, или None — тема gigacode.
 
     `probe` спрашивает фон терминала и зовётся только в теме auto. Нет
-    ответа или на фоне нечитаем текст палитры — fixed.
+    ответа или на фоне нечитаем текст палитры — gigacode.
     """
     if theme != "auto":
         return None

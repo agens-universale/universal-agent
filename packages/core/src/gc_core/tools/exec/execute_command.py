@@ -12,6 +12,7 @@ from gc_core.config_modules.agent import (
     exec_timeout_from_config_dict,
 )
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME
+from gc_core.message_policy.user_stop import cancelled_by_user_output
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
 from gc_core.tools.exec.exec_envelope import (
@@ -19,6 +20,7 @@ from gc_core.tools.exec.exec_envelope import (
     build_exec_envelope,
 )
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.user_stop import UserStopInterrupt
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -404,6 +406,8 @@ Important Usage Rules:
             )
         except RuntimeUnavailable as exc:
             return self._runtime_unavailable(plan, exc)
+        except UserStopInterrupt:
+            raise
         except Exception as exc:
             return self._exec_failed(plan, exc)
         return self._finish(res, plan)
@@ -563,6 +567,15 @@ Important Usage Rules:
         stderr_stream = as_captured_stream(
             getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
         )
+
+        if getattr(res, "stopped_by_user", False):
+            return cancelled_by_user_output(
+                ExecuteCommand.registered_tool_name(),
+                meta={
+                    "stdout": getattr(res, "stdout", "") or "",
+                    "stderr": getattr(res, "stderr", "") or "",
+                },
+            )
 
         if res.timed_out:
             return self._result(
