@@ -69,6 +69,7 @@ from textual.widgets import Static, TextArea
 from gc_tui import branding, textual_compat
 from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import (
+    BlockToggle,
     CopyBlockRequest,
     OpenImageRequest,
     ScrollToEnd,
@@ -239,7 +240,6 @@ from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from gc_tui.widgets.tool_blocks_view import (
-    BlockToggle,
     BlockViews,
     RanResult,
     ToolBlocksView,
@@ -4096,15 +4096,15 @@ class TraceScreen(Screen):
         """Раскрыть / свернуть блок (§9.3): внизу — остаться внизу; иначе
         после перекладки довести верх блока до видимости."""
         message.stop()
-        view = self._block_views.get(message.level)
-        if view is None:
-            return
         at_bottom = self._stick_bottom
-        view.toggle(message.key)
+        routed = self._block_views.route(message)
+        if routed is None:
+            return
+        view, key = routed
         if at_bottom:
             self.call_after_refresh(self._scroll_trace_end)
             return
-        head = view.head_widget(message.key)
+        head = view.head_widget(key)
         if head is not None:
             self.call_after_refresh(head.scroll_visible, animate=False)
 

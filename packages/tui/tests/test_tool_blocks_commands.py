@@ -21,7 +21,7 @@ from textual.containers import VerticalScroll
 from gc_tui.palette import DIM, ERR, INK, REFUSED, SUB_INK
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.diff_block import DiffBlock
-from gc_tui.widgets.tool_blocks_view import BlockToggle
+from gc_tui.messages import BlockToggle
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.turn_line import TurnLine
 

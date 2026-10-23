@@ -422,7 +422,7 @@ def test_top_mounts_go_through_closing_point():
 
 
 async def _toggle(pilot, scr, key):
-    from gc_tui.widgets.tool_blocks_view import BlockToggle
+    from gc_tui.messages import BlockToggle
 
     scr.post_message(BlockToggle("", key))
     await pilot.pause()

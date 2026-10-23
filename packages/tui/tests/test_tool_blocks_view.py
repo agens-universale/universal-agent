@@ -17,13 +17,13 @@ from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 
 from gc_tui import palette
+from gc_tui.messages import BlockToggle
 from gc_tui.models import TraceEvent
 from gc_tui.services.tool_blocks import BlockEdit, CallTimers, ToolBlocks
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.diff_block import DiffBlock
 from gc_tui.widgets.tool_blocks_view import (
     BlockAction,
-    BlockToggle,
     BlockViews,
     ToolBlocksView,
 )
@@ -411,3 +411,23 @@ def test_output_texts_head_lines():
     empty, _ = output_texts(RanResult(output=_output([])))
     assert empty.plain == "(нет вывода)"
     assert output_texts(RanResult(output=None)) is None
+
+
+@pytest.mark.asyncio
+async def test_ran_file_row_opens_command_detail():
+    """Enter на строке файла под командой — экран деталей самой команды."""
+    from gc_tui.widgets.tool_blocks_view import RanResult
+
+    app = _App()
+    async with app.run_test(size=(80, 24)) as pilot:
+        view = app.view()
+        row = _row("x1", label="Run", target="make")
+        view.add_call(row, C.RUN, waiting=False)
+        view.started(row)
+        edit = _edit_of(_record("x1:gen.py", 2))
+        view.result(row, _ev("x1"), None, ran=RanResult(None, files=(edit,)))
+        await pilot.pause()
+        file_row = next(
+            r for r in app.query(ToolCallRow) if r.call_id == "x1:gen.py"
+        )
+        assert file_row.detail_call_id == "x1"

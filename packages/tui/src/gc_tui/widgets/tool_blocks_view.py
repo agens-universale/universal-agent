@@ -20,9 +20,9 @@ from typing import Callable, Optional, Protocol, Sequence
 
 from rich.text import Text
 from textual import events
-from textual.message import Message
 from textual.widget import Widget
 
+from gc_tui.messages import BlockToggle
 from gc_tui.models import CommandOutput, TraceEvent
 from gc_tui.palette import DIM, ERR, INK, MUTED, OK, REFUSED, RUN_COLOR
 from gc_tui.services.block_edits import diff_block_for
@@ -138,16 +138,6 @@ class BlockHost(Protocol):
         before: Optional[Widget] = None,
         after: Optional[Widget] = None,
     ) -> None: ...
-
-
-class BlockToggle(Message):
-    """Раскрыть / свернуть блок ``key`` модели уровня ``level`` (`""` —
-    верхний уровень, иначе `parent_call_id` субагента)."""
-
-    def __init__(self, level: str, key: str) -> None:
-        super().__init__()
-        self.level = level
-        self.key = key
 
 
 class BlockAction(NoSelectStatic):
@@ -321,6 +311,8 @@ class ToolBlocksView:
             path_target=True,
         )
         line.block_key = (self.level, row.call_id)
+        # Enter на строке файла — экран деталей самой команды.
+        line.set_detail_source(lambda: row.call_id)
         line.set_word(file.verb)
         line.set_result(summary="", outcome="ok")
         if file.verb != command_file_verb("delete") and file.copy_text:
@@ -544,8 +536,20 @@ _HANDLERS: dict[type, Callable[[ToolBlocksView, Decision], None]] = {
 class BlockViews(dict[str, ToolBlocksView]):
     """Исполнители уровней ленты: `""` — верхний, иначе `parent_call_id`."""
 
-    def route(self, message: BlockToggle) -> None:
-        """Тогл — в модель своего уровня."""
+    def route(
+        self, message: BlockToggle
+    ) -> Optional[tuple[ToolBlocksView, str]]:
+        """Тогл — в модель своего уровня; строка `Agent` раскрывает окно
+        своего субагента (§7). Возвращает исполнитель и ключ тогла."""
         view = self.get(message.level)
-        if view is not None:
-            view.toggle(message.key)
+        if view is None:
+            return None
+        key = message.key
+        if view.model.kind_of(key) == BlockKind.AGENT:
+            agent = view.model.first_call(view.model.block_of(key) or "")
+            nested = self.get(agent or "")
+            if nested is None:
+                return None
+            view, key = nested, AGENT_WINDOW
+        view.toggle(key)
+        return view, key

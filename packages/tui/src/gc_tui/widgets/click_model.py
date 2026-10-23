@@ -73,7 +73,7 @@ def focus_target_at(
     return default
 
 
-from gc_tui.messages import OpenImageRequest
+from gc_tui.messages import BlockToggle, OpenImageRequest
 
 
 def confirm_is_active(widget) -> bool:
@@ -158,6 +158,15 @@ class ClickModelMixin:
             self.focus(scroll_visible=False)
 
     def on_key(self, event: events.Key) -> None:
+        if event.key == "space":
+            # Пробел на строке блока вызовов — раскрыть / свернуть свой блок
+            # (спека P4 §5); у строки вне блоков пробел не обрабатывается.
+            block_key = getattr(self, "block_key", None)
+            if block_key is not None:
+                event.stop()
+                event.prevent_default()
+                self.post_message(BlockToggle(*block_key))
+            return
         if event.key == "enter":
             # Confirm-баннер перехватывает Enter на Screen, но focused-строка
             # получает Key раньше (bubble). Не открывать detail/viewer, пока
