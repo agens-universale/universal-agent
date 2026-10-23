@@ -33,6 +33,9 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 - member — член блока: без глифа, текст в колонке 4 (`└ ` в колонке 2 у
   первого видимого), глагол `DIM`, объект и хвост `MUTED`, идущий — `INK`;
   `└` следствия — на шаг глубже текста.
+`Ran` (`set_command`, `set_output`, `set_parts_expanded`): продолжение
+команды — строками под первой (колонка 4), вывод — первым следствием `└`;
+раскрытие — вся команда и весь вывод.
 Застывший таймер (`set_elapsed`; имя `set_timer` занято
 таймерами Textual) появляется только по решению модели: строка
 без модели выглядит как прежде.
@@ -61,8 +64,10 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import SKILL as _SKILL
+from gc_tui.palette import SUB_INK as _SUB_INK
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
+from gc_tui.services.tool_blocks import COMMAND_PREVIEW_LINES
 from gc_tui.services.trace_glyphs import (
     CALL_GLYPH,
     CALL_UNDONE_GLYPH,
@@ -90,6 +95,9 @@ from gc_tui.widgets.static_content import update_if_changed
 _PAUSE_GLYPH = "‖"
 # Пустая клетка справа у полной строки: хвост не прижат к полосе прокрутки.
 _RIGHT_GUTTER = 1
+# Между подписью и объектом; слово с тем же разделителем (`Running` /
+# `Ran`) — подпись команды.
+_CAPTION_SEP = "  "
 
 #: Итог вызова: глиф, его цвет и цвет строки `└` итога. Стоп и лимит —
 #: не сбой (K4), отказ — не сбой, а решение политики или человека: цветом
@@ -258,6 +266,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._frozen: Optional[float] = None
         self._block_consequence: Optional[Text] = None
         self._edit_tail: Optional[Text] = None
+        self._word_sep = " "
+        # `Ran`: продолжение команды (строки после первой) и вывод
+        # (свёрнутый, раскрытый) — следствием под строкой.
+        self._command_rest: tuple[str, ...] = ()
+        self._output: Optional[tuple[Text, Text]] = None
+        self._parts_expanded = False
         self._detail: Optional[Callable[[], Optional[str]]] = None
         #: `(уровень, ключ)` строки в модели блоков — для пробела.
         self.block_key: Optional[tuple[str, str]] = None
@@ -354,9 +368,31 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._sync_pulse()
         self._update()
 
-    def set_word(self, word: str) -> None:
-        """Глагол вместо подписи категории; пусто — без глагола."""
+    def set_word(self, word: str, *, sep: str = " ") -> None:
+        """Слово вместо подписи категории (``sep`` — до объекта); пусто —
+        без слова."""
         self._word = word
+        self._word_sep = sep
+        self._update()
+
+    def set_command(self, lines: tuple[str, ...]) -> None:
+        """Команда `Ran` построчно: первая — объект строки, остальные —
+        продолжение под ней (колонка 4)."""
+        if not lines:
+            return
+        self._target = lines[0]
+        self._fitted = (-1, lines[0])
+        self._command_rest = tuple(lines[1:])
+        self._update()
+
+    def set_output(self, collapsed: Text, expanded: Text) -> None:
+        """Вывод `Ran` — первое следствие под строкой: превью и весь."""
+        self._output = (collapsed, expanded)
+        self._update()
+
+    def set_parts_expanded(self, expanded: bool) -> None:
+        """Блок `Ran` раскрыт: вся команда и весь вывод."""
+        self._parts_expanded = expanded
         self._update()
 
     def set_elapsed(self, seconds: Optional[float]) -> None:
@@ -562,23 +598,50 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             if self._skill_target:
                 text.stylize(_SKILL, start, start + len(target))
         text.append_text(tail)
+        self._append_command_rest(text, target_style)
         return text
 
+    def _append_command_rest(self, text: Text, style: str) -> None:
+        """Продолжение команды под строкой: в свёрнутом виде — до двух
+        строк (§4.0), раскрытом — все; длинная строка — `…` по ширине."""
+        rest = self._command_rest
+        if not self._parts_expanded:
+            rest = rest[: COMMAND_PREVIEW_LINES - 1]
+        width = self._content_width()
+        for line in rest:
+            if width > 2:
+                line = fit_call_target(line, width - 2, path=False)
+            text.append("\n  " + line, style=style)
+
     def _caption_sep(self) -> str:
-        """Между подписью и объектом: два пробела; у глагола правки —
-        один (`Edited путь`); без глагола — ничего."""
+        """Между подписью и объектом: два пробела; у слова — его
+        разделитель (`Edited путь`, `Ran  команда`); без слова — ничего."""
         if self._word is None:
-            return "  "
-        return " " if self._word else ""
+            return _CAPTION_SEP
+        return self._word_sep if self._word else ""
 
     def _caption_styles(self) -> tuple[str, str]:
         """Цвет подписи и объекта: у члена — `DIM` / `MUTED`, у идущего —
-        `INK`; путь члена-правки (без глагола) — `INK`."""
+        `INK`; путь члена-правки (без глагола) — `INK`; файл под командой
+        — `SUB_INK` / `INK`; `Running` / `Ran` — по §10."""
         if self._mode != "member":
+            if self._word and self._word_sep == _CAPTION_SEP:
+                return self._command_styles()
             return _TOOL_NAME, _DIM
         if self._current:
             return _INK, _INK
+        if self._word:
+            # Файл под командой: `Added путь` — глагол `SUB_INK`, путь `INK`.
+            return _SUB_INK, _INK
         return _DIM, (_INK if self._word == "" else _MUTED)
+
+    def _command_styles(self) -> tuple[str, str]:
+        """`Running` / `Ran` (§10): слово `INK` жирным; команда идущей —
+        `INK`, законченной — `SUB_INK`."""
+        word = f"bold {_INK}"
+        if self._is_live or self._waiting:
+            return word, _INK
+        return word, _SUB_INK
 
     def _content_width(self) -> int:
         return self._content_static.size.width if self._content_static else 0
@@ -656,9 +719,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         bodies = list(self._consequences)
         if self._block_consequence is not None:
             bodies.insert(0, self._block_consequence)
-        elif self._ends_with_line and self._result:
+        elif self._ends_with_line and self._result and self._output is None:
             style = _OUTCOME_LOOK[self._outcome][2]
             bodies.insert(0, Text(self._result, style=style))
+        if self._output is not None:
+            collapsed, expanded = self._output
+            bodies.insert(0, expanded if self._parts_expanded else collapsed)
         return bodies
 
     def _append_pending_tail(

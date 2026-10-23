@@ -827,3 +827,18 @@ def test_finish_event_carries_reply_of_same_response():
 
     assert context.closing_replies == {"f1": "Пока! 👋"}
     assert ev.full_payload["_submit_reply"] == "Пока! 👋"
+
+
+def test_exit_code_is_not_in_result_tail():
+    """Код выхода — строкой `└ код выхода N` блока `Ran` (P4 §4.1), не
+    хвостом ` · код выхода N`."""
+    ev = map_message(
+        {
+            "type": "function_call_output",
+            "call_id": "x1",
+            "output": json.dumps({"ok": True, "exit": 2, "lines": 3}),
+        },
+        no=1,
+        ts="t",
+    )
+    assert ev.summary == "3 строки"

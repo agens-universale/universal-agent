@@ -304,7 +304,7 @@ async def test_body_right_under_tool_row(tmp_path):
         lines = _screen_lines(scr)
         tool = next(i for i, s in enumerate(lines) if "Edited src/app.py" in s)
         body = next(i for i, s in enumerate(lines) if "def f():" in s)
-        next_tool = next(i for i, s in enumerate(lines) if "Run  python" in s)
+        next_tool = next(i for i, s in enumerate(lines) if "Ran  " in s)
 
         assert body == tool + 1
         diff = scr.query_one(DiffBlock)

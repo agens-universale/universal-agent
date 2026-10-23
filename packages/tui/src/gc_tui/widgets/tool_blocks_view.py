@@ -15,18 +15,22 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Protocol
+from dataclasses import dataclass, field
+from typing import Callable, Optional, Protocol, Sequence
 
 from rich.text import Text
 from textual import events
 from textual.message import Message
 from textual.widget import Widget
 
-from gc_tui.models import TraceEvent
+from gc_tui.models import CommandOutput, TraceEvent
 from gc_tui.palette import DIM, ERR, INK, MUTED, OK, REFUSED, RUN_COLOR
 from gc_tui.services.block_edits import diff_block_for
+from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.tool_blocks import (
+    COMMAND_PREVIEW_LINES,
     BlockEdit,
+    BlockKind,
     Decision,
     MountHeader,
     MountPhrase,
@@ -42,6 +46,7 @@ from gc_tui.services.tool_blocks import (
     SetVisible,
     SetWord,
     ToolBlocks,
+    command_file_verb,
     diff_key,
     phrase_key,
 )
@@ -62,6 +67,57 @@ _LOOK: dict[str, str] = {
 }
 #: Класс скрытого виджета блока (`display: none`): вне окна, ждущий.
 HIDDEN_CLASS = "-block-hidden"
+
+
+@dataclass(frozen=True)
+class RanResult:
+    """Что знает лента о законченной команде: разобранный вывод, правки
+    команды из журнала, незаписанные файлы сверх потолка путей."""
+
+    output: Optional[CommandOutput]
+    files: Sequence[BlockEdit] = ()
+    unrecorded: int = 0
+    #: Запись вне окна retention: всего вывода при раскрытии нет.
+    light: bool = False
+    #: Ключи файлов с компактным диффом (ход вне раскрытых).
+    compact: frozenset[str] = field(default_factory=frozenset)
+
+
+def _lines_text(head: Optional[Text], lines: Sequence[str]) -> Text:
+    text = Text()
+    if head is not None:
+        text.append_text(head)
+    for line in lines:
+        if text.plain:
+            text.append("\n")
+        text.append(line, style=DIM)
+    return text
+
+
+def output_texts(ran: RanResult) -> Optional[tuple[Text, Text]]:
+    """Следствие `Ran` (§4.1): свёрнутое и раскрытое. Первая строка —
+    код выхода или таймаут (`ERR`) сверх превью; фон — одна строка; нет
+    вывода — `(нет вывода)`. Вне окна retention раскрытие — превью и
+    подсказка. Не конверт exec — следствия от вывода нет."""
+    out = ran.output
+    if out is None:
+        return None
+    if out.background:
+        line = Text("запущено в фоне · вывод не сохраняется", style=DIM)
+        return line, line
+    head = None
+    if out.timed_out:
+        head = Text("превышено время ожидания", style=ERR)
+    elif out.exit_code not in (None, 0):
+        head = Text(f"код выхода {out.exit_code}", style=ERR)
+    if head is None and not out.lines:
+        line = Text("(нет вывода)", style=DIM)
+        return line, line
+    collapsed = _lines_text(head, out.preview)
+    if ran.light:
+        full = (*out.preview, RETENTION_DETAIL_HINT)
+        return collapsed, _lines_text(head, full)
+    return collapsed, _lines_text(head, out.lines)
 
 
 def _text(parts: Parts) -> Text:
@@ -155,6 +211,7 @@ class ToolBlocksView:
         self._issued: set[Widget] = set()
         self._edits: dict[str, BlockEdit] = {}
         self._compact: set[str] = set()
+        self._command_hidden: dict[str, int] = {}
 
     # --- выданные виджеты --------------------------------------------------
 
@@ -168,13 +225,28 @@ class ToolBlocksView:
 
     # --- события строк: событие → модель → решения -------------------------
 
-    def add_call(self, row: ToolCallRow, category, *, waiting: bool) -> None:
+    def add_call(
+        self,
+        row: ToolCallRow,
+        category,
+        *,
+        waiting: bool,
+        command: tuple[str, ...] = (),
+    ) -> None:
+        """Строка вызова; ``command`` — команда `Ran` построчно: длинная
+        раскрывается и пока идёт (§4.0)."""
         row.block_key = (self.level, row.call_id)
         self.register(row.call_id, row)
         self._host.mount(row)
-        self.apply(
-            self.model.member_added(row.call_id, category, waiting=waiting)
-        )
+        key = row.call_id
+        self.apply(self.model.member_added(key, category, waiting=waiting))
+        if self.model.kind_of(key) != BlockKind.RAN or not command:
+            return
+        row.set_command(command)
+        hidden = max(0, len(command) - COMMAND_PREVIEW_LINES)
+        self._command_hidden[key] = hidden
+        if self._command_hidden[key]:
+            self._ran_parts(key, RanResult(output=None))
 
     def started(self, row: ToolCallRow) -> None:
         row.set_active()
@@ -187,8 +259,10 @@ class ToolBlocksView:
         edit: Optional[BlockEdit],
         *,
         compact: bool = False,
+        ran: Optional[RanResult] = None,
     ) -> None:
-        """Исход вызова вместе с правкой: её глагол решает группу."""
+        """Исход вызова вместе с правкой: её глагол решает группу; у
+        `Ran` — вывод и правки команды (``ran``)."""
         key = row.call_id
         if edit is not None:
             self._edits[key] = edit
@@ -202,6 +276,55 @@ class ToolBlocksView:
         self.apply(
             self.model.result(
                 key, outcome, reason=ev.summary, executed=None, edit=edit
+            )
+        )
+        if ran is not None and self.model.kind_of(key) == BlockKind.RAN:
+            self._ran_result(row, ran)
+
+    def _ran_result(self, row: ToolCallRow, ran: RanResult) -> None:
+        """Вывод — следствием строки; файлы команды — строками под ней (до
+        решений модели: окно и фразы ставятся по ним)."""
+        texts = output_texts(ran)
+        if texts is not None:
+            row.set_output(*texts)
+        anchor: Widget = row
+        for file in ran.files:
+            anchor = self._mount_file(row, file, after=anchor)
+            if file.key in ran.compact:
+                self._compact.add(file.key)
+        self._ran_parts(row.call_id, ran)
+
+    def _mount_file(
+        self, row: ToolCallRow, file: BlockEdit, *, after: Widget
+    ) -> ToolCallRow:
+        """Строка файла под командой: `Added / Edited / Deleted путь`."""
+        line = ToolCallRow(
+            call_id=file.key,
+            label=file.verb,
+            target=file.path,
+            event_no=row.event_no,
+            level=self.depth,
+            path_target=True,
+        )
+        line.block_key = (self.level, row.call_id)
+        line.set_word(file.verb)
+        line.set_result(summary="", outcome="ok")
+        if file.verb != command_file_verb("delete") and file.copy_text:
+            line.set_edit_counts(file.add, file.rem, copy_text=file.copy_text)
+        self._edits[file.key] = file
+        self.register(file.key, line)
+        self._host.mount(line, after=after)
+        return line
+
+    def _ran_parts(self, key: str, ran: RanResult) -> None:
+        output = ran.output
+        self.apply(
+            self.model.ran_parts(
+                key,
+                command_hidden=self._command_hidden.get(key, 0),
+                output_hidden=output.hidden if output is not None else 0,
+                files=ran.files,
+                unrecorded=ran.unrecorded,
             )
         )
 
@@ -341,7 +464,7 @@ class ToolBlocksView:
     def _set_word(self, d: SetWord) -> None:
         row = self._row(d.key)
         if row is not None:
-            row.set_word(d.word)
+            row.set_word(d.word, sep=d.sep)
 
     def _set_edit_tail(self, d: SetEditTail) -> None:
         row = self._row(d.key)
@@ -373,8 +496,10 @@ class ToolBlocksView:
         diff.set_column(d.column)
 
     def _set_expanded(self, d: SetExpanded) -> None:
-        """Раскрытие частей `Ran` (команда, вывод) — их виджеты появятся с
-        превью вывода команды; до тех пор раскрывать нечего."""
+        """Раскрытие частей `Ran`: вся команда и весь вывод."""
+        row = self._row(self.model.first_call(d.block) or "")
+        if row is not None:
+            row.set_parts_expanded(d.expanded)
 
 
 def _last_call(model: ToolBlocks, block: str) -> Callable[[], Optional[str]]:

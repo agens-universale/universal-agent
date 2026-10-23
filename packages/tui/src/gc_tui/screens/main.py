@@ -85,7 +85,7 @@ from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.answer_flow import AnswerFlow
-from gc_tui.services.block_edits import edit_of_call
+from gc_tui.services.block_edits import edit_of_call, ran_files_of
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import agent_answers, export_thread
@@ -157,7 +157,12 @@ from gc_tui.services.terminal_title import (
     format_terminal_title,
     set_terminal_title,
 )
-from gc_tui.services.tool_blocks import BlockEdit, CallTimers, ToolBlocks
+from gc_tui.services.tool_blocks import (
+    BlockEdit,
+    BlockKind,
+    CallTimers,
+    ToolBlocks,
+)
 from gc_tui.services.trace_mapper import (
     PROPOSE_PLAN_ID,
     RenderContext,
@@ -224,6 +229,7 @@ from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from gc_tui.widgets.tool_blocks_view import (
     BlockToggle,
     BlockViews,
+    RanResult,
     ToolBlocksView,
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
@@ -3868,7 +3874,9 @@ class TraceScreen(Screen):
             if (ev.tool_name or "").startswith("subagent_") and row.call_id:
                 self._subagent_parent_rows[row.call_id] = row
             category, _ = tool_caption(wire_name, mcp_tools, mcp_servers)
-            self._top_blocks().add_call(row, category, waiting=live)
+            self._top_blocks().add_call(
+                row, category, waiting=live, command=ev.command_lines
+            )
             self._reconcile_active_tool_phases()
             return
 
@@ -3883,7 +3891,11 @@ class TraceScreen(Screen):
             row = self._active_calls.get(ev.call_id) if ev.call_id else None
             if row is not None:
                 edit, compact = self._block_edit(ev.call_id)
-                self._top_blocks().result(row, ev, edit, compact=compact)
+                view = self._top_blocks()
+                ran = None
+                if view.model.kind_of(row.call_id) == BlockKind.RAN:
+                    ran = self._ran_result(ev)
+                view.result(row, ev, edit, compact=compact, ran=ran)
                 # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✕).
                 self._active_calls.pop(ev.call_id, None)
                 self._reconcile_active_tool_phases()
@@ -4022,6 +4034,31 @@ class TraceScreen(Screen):
         except Exception as exc:
             self.log.warning(f"правка вызова не прочитана: {exc!r}")
             return None, False
+
+    def _ran_result(self, ev) -> RanResult:
+        """Законченная команда: вывод из события (разобран до облегчения
+        retention) и правки команды из журнала. Сбой журнала — без правок:
+        лента важнее."""
+        light = is_light_payload(ev)
+        try:
+            lookup = self._edits_lookup_for_thread()
+            files, unrecorded = ran_files_of(lookup, ev.call_id or "")
+            compact = frozenset(
+                f.key
+                for f in files
+                if f.record is not None
+                and self._is_stale_edit_turn(lookup, f.record.turn_id)
+            )
+        except Exception as exc:
+            self.log.warning(f"правки команды не прочитаны: {exc!r}")
+            return RanResult(output=ev.command, light=light)
+        return RanResult(
+            output=ev.command,
+            files=files,
+            unrecorded=unrecorded,
+            light=light,
+            compact=compact,
+        )
 
     def _end_turn_blocks(self, outcome: TurnOutcome) -> None:
         """Итог хода — моделям блоков всех уровней: время вызовов хода

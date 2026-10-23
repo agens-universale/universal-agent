@@ -371,3 +371,43 @@ async def test_set_result_without_model_keeps_old_row():
         await pilot.pause()
         line = _line(trace_rows(app), "a.py")
         assert line.plain.rstrip().endswith("a.py · 12 строк")
+
+
+# --- следствие `Ran` -------------------------------------------------------
+
+
+def _output(lines, **kw):
+    from gc_tui.models import CommandOutput
+
+    preview = tuple(lines[:3])
+    return CommandOutput(
+        lines=tuple(lines),
+        omitted_chars=0,
+        exit_code=kw.get("exit_code", 0),
+        timed_out=kw.get("timed_out", False),
+        background=kw.get("background", False),
+        preview=preview,
+        hidden=len(lines) - len(preview),
+    )
+
+
+def test_output_texts_light_shows_retention_hint():
+    """Вне окна retention раскрытие — превью и подсказка, не весь вывод."""
+    from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
+    from gc_tui.widgets.tool_blocks_view import RanResult, output_texts
+
+    out = _output(["a", "b", "c", "d"])
+    collapsed, expanded = output_texts(RanResult(output=out, light=True))
+    assert collapsed.plain == "a\nb\nc"
+    assert expanded.plain == f"a\nb\nc\n{RETENTION_DETAIL_HINT}"
+
+
+def test_output_texts_head_lines():
+    from gc_tui.widgets.tool_blocks_view import RanResult, output_texts
+
+    failed, _ = output_texts(RanResult(output=_output([], exit_code=2)))
+    assert failed.plain == "код выхода 2"
+    assert str(failed.spans[0].style) == palette.ERR
+    empty, _ = output_texts(RanResult(output=_output([])))
+    assert empty.plain == "(нет вывода)"
+    assert output_texts(RanResult(output=None)) is None

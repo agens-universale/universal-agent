@@ -34,6 +34,8 @@ from gc_tui.services.plural import (
 WINDOW = 3
 #: Строк превью вывода команды.
 OUTPUT_PREVIEW_LINES = 3
+#: Строк команды `Ran` в свёрнутом виде: первая в строке и продолжение.
+COMMAND_PREVIEW_LINES = 3
 #: Экранных рядов диффа на файл в блоке правок — не меньше.
 MIN_DIFF_ROWS_PER_FILE = 3
 
@@ -345,11 +347,13 @@ class SetConsequence:
 
 @dataclass(frozen=True)
 class SetWord:
-    """Глагол одиночной строки правки: `Editing` / `Added` / `Edited` /
-    `Edit`."""
+    """Слово одиночной строки вместо подписи категории: глагол правки
+    (`Editing` / `Added` / `Edited` / `Edit`, через пробел) или `Running` /
+    `Ran` (через два, как подпись)."""
 
     key: str
     word: str
+    sep: str = " "
 
     @property
     def ident(self) -> tuple:
@@ -712,6 +716,11 @@ class ToolBlocks:
 
     # --- запросы исполнителя ---------------------------------------------
 
+    def kind_of(self, key: str) -> Optional[BlockKind]:
+        """Вид блока строки ``key``."""
+        block = self._resolve(key)
+        return block.kind if block is not None else None
+
     def block_of(self, key: str) -> Optional[str]:
         """Ключ блока по ключу блока, его фразы или строки."""
         block = self._resolve(key)
@@ -953,9 +962,11 @@ class ToolBlocks:
         return out + self._outcome_of(member)
 
     def _ran(self, block: _Block) -> list[Decision]:
-        """Строка `Ran` и её части: окно правок команды, одна фраза внизу
-        блока (§4.0, §4.2)."""
-        out = self._single(block)
+        """Строка `Running` / `Ran` и её части: окно правок команды, одна
+        фраза внизу блока (§4.0, §4.2)."""
+        member = block.members[0]
+        word = header_word(BlockKind.RAN, live=not member.done)
+        out = [*self._single(block), SetWord(member.key, word, sep="  ")]
         parts = block.parts
         if parts is None:
             return out

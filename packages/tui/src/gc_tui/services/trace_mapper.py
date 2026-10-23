@@ -909,8 +909,6 @@ def _result_bits(data: dict) -> list[str]:
         bits.append(_counted(count, "запись", "записи", "записей"))
     if "bytes" in data:
         bits.append(_counted(data["bytes"], "байт", "байта", "байт"))
-    if "exit" in data:
-        bits.append(f"код выхода {data['exit']}")
     if "source" in data:
         bits.append(f"источник {data['source']}")
     return bits
