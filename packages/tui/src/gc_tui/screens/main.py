@@ -221,7 +221,11 @@ from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-from gc_tui.widgets.tool_blocks_view import BlockViews, ToolBlocksView
+from gc_tui.widgets.tool_blocks_view import (
+    BlockToggle,
+    BlockViews,
+    ToolBlocksView,
+)
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_overlays import (
     ScrollEndPill,
@@ -3314,6 +3318,7 @@ class TraceScreen(Screen):
         scroll: bool = True,
         force_scroll: bool = False,
         above_sent: bool = False,
+        close_groups: bool = True,
     ) -> None:
         """Смонтировать widget в #trace (индикатор живёт отдельно в #indicator-bar).
 
@@ -3327,9 +3332,14 @@ class TraceScreen(Screen):
 
         above_sent=True — запись о прошлом (итог хода): встаёт и над
         отправленной репликой, которую ядро ещё не записало (`pending`), —
-        в файле треда она будет после."""
+        в файле треда она будет после.
+
+        close_groups=False — виджет не событие верхнего уровня (вложенный
+        без якоря): группы блоков он не закрывает."""
         from gc_tui.widgets.user_reply import is_queued
 
+        if close_groups:
+            self._note_top_event(widget)
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         if force_scroll:
             self._stick_bottom = True  # отправка своего сообщения = re-engage
@@ -3344,6 +3354,20 @@ class TraceScreen(Screen):
             trace.mount(widget)
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
+
+    def _note_top_event(self, widget) -> None:
+        """Единственная точка закрытия групп верхнего уровня (решение
+        плана 10): событие ленты не из группы закрывает открытую группу.
+        Не закрывают: виджеты модели блоков, живой стрим, реплика в
+        очереди."""
+        from gc_tui.widgets.user_reply import is_queued
+
+        view = self._block_views.get("")
+        if view is None or view.issued(widget) or is_queued(widget):
+            return
+        if widget is self._stream_answer_row or widget is self._stream_block:
+            return
+        view.event_closing()
 
     @staticmethod
     def _queued_tail(trace, *, sent: bool = False) -> list:
@@ -3699,6 +3723,7 @@ class TraceScreen(Screen):
             for cid, widget in list(self._pending_user_widgets.items()):
                 if self._pending_wire_match(cid, polled_wire):
                     widget.set_state("normal")
+                    self._top_blocks().queued_admitted()
                     widget.set_event_no(ev.no)
                     # Картинки из треда — копии, закоммиченные ядром; у pending-реплики
                     # пути кармана процесса, который чистится на выходе (дизайн картинок §3).
@@ -3999,11 +4024,30 @@ class TraceScreen(Screen):
             return None, False
 
     def _end_turn_blocks(self, outcome: TurnOutcome) -> None:
-        """Итог хода — моделям блоков всех уровней: остановка
-        пользователем ставит `○` блокам этого хода."""
+        """Итог хода — моделям блоков всех уровней: время вызовов хода
+        (`outcome.calls`) — застывшим таймерам; остановка пользователем
+        ставит `○` блокам этого хода."""
+        self._call_timers.update(outcome.calls or {})
         stopped = kind_of(outcome)[0] == "cancelled"
         for view in list(self._block_views.values()):
+            view.timers_updated()
             view.turn_ended(stopped=stopped)
+
+    def on_block_toggle(self, message: BlockToggle) -> None:
+        """Раскрыть / свернуть блок (§9.3): внизу — остаться внизу; иначе
+        после перекладки довести верх блока до видимости."""
+        message.stop()
+        view = self._block_views.get(message.level)
+        if view is None:
+            return
+        at_bottom = self._stick_bottom
+        view.toggle(message.key)
+        if at_bottom:
+            self.call_after_refresh(self._scroll_trace_end)
+            return
+        head = view.head_widget(message.key)
+        if head is not None:
+            self.call_after_refresh(head.scroll_visible, animate=False)
 
     def _drain_subagent_progress(self) -> None:
         """Слить live-события субагента из app-очереди и отрисовать nested."""
@@ -4089,8 +4133,9 @@ class TraceScreen(Screen):
         try:
             trace.mount(widget, after=anchor)
         except Exception:
-            # Якоря нет в ленте — в конец, но над очередью.
-            self._trace_mount(widget, scroll=False)
+            # Якоря нет в ленте — в конец, но над очередью; группы верхнего
+            # уровня вложенный виджет не закрывает.
+            self._trace_mount(widget, scroll=False, close_groups=False)
         if anchor is tail:
             self._nested_anchor[parent_call_id] = widget
         self._nested_widgets_by_parent.setdefault(parent_call_id, []).append(
@@ -4821,8 +4866,10 @@ class TraceScreen(Screen):
         if live is not None and live.parent is trace:
             # Идёт потоковый ответ: копия встаёт ПЕРЕД ним, иначе готовый
             # ответ потом перепрыгнул бы через план.
+            self._note_top_event(panel)
             trace.mount(panel, before=live)
         elif anchor is not None:
+            self._note_top_event(panel)
             trace.mount(panel, before=anchor)
         else:
             self._trace_mount(panel)

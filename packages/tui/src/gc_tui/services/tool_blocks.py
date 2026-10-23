@@ -696,9 +696,7 @@ class ToolBlocks:
     def toggle(self, key: str) -> list[Decision]:
         """Раскрыть / свернуть блок по ключу блока, фразы или члена;
         нечего скрывать — решений нет."""
-        block = self._block_of.get(key) or self._block_of.get(
-            key.rsplit(":", 1)[0]
-        )
+        block = self._resolve(key)
         if block is None or not self._expandable(block):
             return []
         block.expanded = not block.expanded
@@ -715,9 +713,16 @@ class ToolBlocks:
     # --- запросы исполнителя ---------------------------------------------
 
     def block_of(self, key: str) -> Optional[str]:
-        """Ключ блока строки ``key``."""
-        block = self._block_of.get(key)
+        """Ключ блока по ключу блока, его фразы или строки."""
+        block = self._resolve(key)
         return block.key if block is not None else None
+
+    def first_call(self, block: str) -> Optional[str]:
+        """Первый член блока — верх блока без заголовка."""
+        found = self._block_of.get(block)
+        if found is None or not found.members:
+            return None
+        return found.members[0].key
 
     def last_call(self, block: str) -> Optional[str]:
         """Последний член блока — его экран открывает Enter на заголовке."""
@@ -727,6 +732,12 @@ class ToolBlocks:
         return found.members[-1].key
 
     # --- отрисовка -------------------------------------------------------
+
+    def _resolve(self, key: str) -> Optional[_Block]:
+        """Блок ключа строки, блока или фразы (`<блок>:<место>`)."""
+        return self._block_of.get(key) or self._block_of.get(
+            key.rsplit(":", 1)[0]
+        )
 
     def _new_block(self, kind: BlockKind) -> _Block:
         block = _Block(f"block:{self._count}", kind)

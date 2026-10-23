@@ -220,6 +220,26 @@ class ToolBlocksView:
     def toggle(self, key: str) -> None:
         self.apply(self.model.toggle(key))
 
+    def event_closing(self) -> None:
+        self.apply(self.model.event_closing())
+
+    def queued_admitted(self) -> None:
+        self.apply(self.model.queued_admitted())
+
+    def timers_updated(self) -> None:
+        self.apply(self.model.timers_updated())
+
+    def head_widget(self, key: str) -> Optional[Widget]:
+        """Верх блока ключа ``key`` (блока, фразы или члена): заголовок, у
+        блока без заголовка — его первая строка."""
+        block = self.model.block_of(key)
+        if block is None:
+            return None
+        head = self._widgets.get(block)
+        if head is None:
+            head = self._widgets.get(self.model.first_call(block) or "")
+        return head
+
     def turn_ended(self, *, stopped: bool) -> None:
         """Запись итога хода; ``stopped`` — ход остановлен пользователем."""
         if stopped:

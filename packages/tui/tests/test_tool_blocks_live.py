@@ -79,14 +79,20 @@ class _Thread:
         self.seq += len(payloads)
 
     def stop(self, opened_by="u1"):
+        self.record(opened_by, status="stopped", reason=USER_STOP)
+
+    def record(
+        self, opened_by="u1", *, status="done", reason=None, calls=None
+    ):
         outcome = TurnOutcome(
-            status="stopped",
-            reason=USER_STOP,
+            status=status,
+            reason=reason,
             opened_by=opened_by,
             started_at="2026-10-22T11:30:00Z",
             ended_at="2026-10-22T11:30:12Z",
             duration_sec=12.0,
             error=None,
+            calls=calls,
         )
         append_turn_outcome_record(self.dir, "cli", TID, outcome, seq=self.seq)
 
@@ -410,6 +416,65 @@ async def test_failed_edit_rows(tmp_path):
         assert "● Edited 2 файла (+4 −2) · 1 ошибка" in lines
         assert any(line.startswith("    b.py") for line in lines)
         assert "      └ не найден фрагмент" in lines
+
+
+# --- застывшие таймеры -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_frozen_timers_live_and_reopen(tmp_path):
+    """Застывшие таймеры вживую и после переоткрытия равны — из
+    `outcome.calls`; отказ — без таймера."""
+    thread = _Thread(tmp_path)
+    refused = {
+        "tool": "fs_read_file",
+        "ok": False,
+        "error": {"type": "action_blocked", "reason": "risky"},
+    }
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        await _tail(
+            pilot, thread, _read(0), _read_out(0), _read(1), _read_out(1)
+        )
+        await _tail(
+            pilot, thread, _read(2), _out("r2", "fs_read_file", refused)
+        )
+        thread.record(calls={"r0": 3.0, "r1": 72.0, "r2": 1.0})
+        await _tail(pilot, thread)
+        _rows(pilot)
+        live = _timer_tails(scr)
+        assert live["r0"].endswith(" · 3с")
+        assert live["r1"].endswith(" · 1м 12с")
+        # Отказ таймера не получает, даже если ядро его время записало.
+        assert not live["r2"].endswith(" · 1с")
+        other = "blocks00000000000000000000000002"
+        (tmp_path / f"meta_cli_{other}.json").write_text(
+            json.dumps({"thread_id": other, "system_id": "cli"}),
+            encoding="utf-8",
+        )
+        (tmp_path / f"data_cli_{other}.jsonl").write_text("")
+        scr.attach_active_task(other, is_resume=True)
+        scr.attach_active_task(TID, is_resume=True)
+        await pilot.pause()
+        assert _timer_tails(scr) == live
+
+
+def _timer_tails(scr) -> dict[str, str]:
+    trace = scr.query_one("#trace", VerticalScroll)
+    return {
+        r.call_id: r._render_content().plain
+        for r in trace.query(ToolCallRow)
+        if r.mode != "header"
+    }
+
+
+@pytest.mark.asyncio
+async def test_reopen_without_record_no_timers(tmp_path):
+    thread = _Thread(tmp_path)
+    thread.add(_read(0), _read_out(0))
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        assert not _timer_tails(scr)["r0"].endswith("с")
 
 
 # --- стоп и переоткрытие ----------------------------------------------------
