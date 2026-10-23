@@ -134,6 +134,40 @@ async def test_restart_loses_owner_as_recoverable_tool_feedback(tmp_path):
     await host.close(ref)
 
 
+# Дольше этого шага тест не ждёт. Иначе застрявшие дискавери, call_tool
+# SDK-сессии и process.wait держат весь прогон: у них своего потолка нет.
+_MCP_STEP_SEC = 20
+
+
+async def _await_step(awaitable, seconds=_MCP_STEP_SEC):
+    return await asyncio.wait_for(awaitable, seconds)
+
+
+async def _stop_mcp_fixture(process):
+    if process is None or process.returncode is not None:
+        return
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), 5)
+    except TimeoutError:
+        process.kill()
+        await asyncio.wait_for(process.wait(), 5)
+
+
+async def _close_host(host, ref):
+    if ref is None:
+        return
+    try:
+        await asyncio.wait_for(host.close(ref), _MCP_STEP_SEC)
+    except TimeoutError:
+        owner = host._owners.get(ref.owner_id)
+        task = None if owner is None else owner._task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.wait({task}, timeout=5)
+        raise
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("transport", ["stdio", "stream_sse", "stream_http"])
 async def test_real_mcp_registry_reuses_live_session_across_effects(
@@ -187,7 +221,12 @@ async def test_real_mcp_registry_reuses_live_session_across_effects(
             "persistent_session": True,
             "url": f"http://127.0.0.1:{port}",
         }
-    config = {"launch_root": str(tmp_path), "mcp.servers": {"counter": server}}
+    config = {
+        "launch_root": str(tmp_path),
+        # Иначе stdio-чтение сидит до request_timeout_sec (600 с).
+        "mcp.meta.request_timeout_sec": 15,
+        "mcp.servers": {"counter": server},
+    }
     host = WorkerResourceHost("worker")
     registry = {}
 
@@ -201,7 +240,7 @@ async def test_real_mcp_registry_reuses_live_session_across_effects(
 
     ref = None
     try:
-        ref = await host.open("session", str(tmp_path), bootstrap)
+        ref = await _await_step(host.open("session", str(tmp_path), bootstrap))
         increment = next(
             name for name in registry if name.endswith("increment")
         )
@@ -216,9 +255,9 @@ async def test_real_mcp_registry_reuses_live_session_across_effects(
                 arguments_digest(arguments),
             )
 
-        first = await host.execute(ref, effect("first"))
-        replay = await host.execute(ref, effect("first"))
-        second = await host.execute(ref, effect("second"))
+        first = await _await_step(host.execute(ref, effect("first")))
+        replay = await _await_step(host.execute(ref, effect("first")))
+        second = await _await_step(host.execute(ref, effect("second")))
 
         def counter(value):
             payload = json.loads(value.result.output)["result"]
@@ -234,11 +273,13 @@ async def test_real_mcp_registry_reuses_live_session_across_effects(
         assert one["session"] == two["session"]
         assert one["pid"] == two["pid"]
     finally:
-        if ref is not None:
-            await host.close(ref)
-        if process is not None:
-            process.terminate()
-            await process.wait()
+        # open мог создать владельца и не успеть вернуть ref.
+        if ref is None and "session" in host._owners:
+            ref = host._owners["session"].ref
+        try:
+            await _close_host(host, ref)
+        finally:
+            await _stop_mcp_fixture(process)
 
 
 @pytest.mark.asyncio
