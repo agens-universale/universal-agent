@@ -510,6 +510,10 @@ _KILL_GRACE_SEC = 0.5
 #: непрерываемом системном вызове процесса, а не от нормального случая.
 _KILL_EXIT_GRACE_SEC = 1.0
 
+#: Потолок на `taskkill` (Windows): снятие дерева — доли секунды, зависший
+#: вызов не должен держать стоп.
+_TASKKILL_TIMEOUT_SEC = 5
+
 #: Запущенные фоном процессы. Держим ссылку, чтобы дожать вышедших: иначе они
 #: остаются зомби до конца жизни агента — своя сессия не делает процесс чужим,
 #: он остаётся нашим ПРЯМЫМ потомком. Выметаем на следующем запуске.
@@ -687,21 +691,70 @@ async def _adrain_stream(stream, sink: "_Capture") -> None:
     sink.publish()
 
 
-async def _astop_process(proc) -> None:
+def _taskkill_path() -> str:
+    """Полный путь: по одному имени Windows ищет exe сначала в текущем
+    каталоге — а это может быть открытый проект."""
+    return os.path.join(
+        os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe"
+    )
+
+
+async def _akill_tree_nt(proc) -> bool:
+    """Windows: снять процесс со всеми потомками (`taskkill /T /F`).
+
+    Дерево `taskkill` строит по родителю, поэтому зовём его, пока корень жив.
+    Вышедший процесс не трогаем: его pid Windows может отдать чужому.
+    ``False`` — дерево не снято, остаётся удар по одному pid.
+    """
+    if proc.returncode is not None:
+        return False
+    import subprocess
+
+    try:
+        killer = await asyncio.create_subprocess_exec(
+            _taskkill_path(),
+            "/T",
+            "/F",
+            "/PID",
+            str(proc.pid),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+    except OSError:
+        return False
+    try:
+        code = await asyncio.wait_for(killer.wait(), _TASKKILL_TIMEOUT_SEC)
+    except (TimeoutError, asyncio.CancelledError):
+        return False
+    return code == 0
+
+
+async def _astop_process(proc, os_name: str = os.name) -> None:
     """Остановить команду: сначала попросить, потом убить.
 
     `SIGTERM` → грация → `SIGKILL` вместо одного KILL. Разница не в том, умрёт
     ли команда — умрёт в обоих случаях, — а в том, что она успеет сделать перед
     смертью: снять `.git/index.lock`, дописать архив, закрыть транзакцию.
     KILL такого шанса не даёт вовсе, потому что не перехватывается.
+
+    На Windows групп и вежливой просьбы нет: `terminate()` — тот же
+    TerminateProcess, и гасит он один `cmd`, а команда доживала до конца.
+    Там сразу снимаем дерево (`_akill_tree_nt`).
     """
-    if _terminate_quietly(proc):
+    if os_name == "nt" and await _akill_tree_nt(proc):
+        try:
+            await _await_process_exit(proc, _KILL_EXIT_GRACE_SEC)
+        except (TimeoutError, asyncio.CancelledError):
+            pass
+        return
+    if _terminate_quietly(proc, os_name):
         try:
             await _await_process_exit(proc, _KILL_GRACE_SEC)
             return  # вышла сама, убивать некого
         except (TimeoutError, asyncio.CancelledError):
             pass
-    _kill_quietly(proc)
+    _kill_quietly(proc, os_name)
     try:
         await _await_process_exit(proc, _KILL_EXIT_GRACE_SEC)
     except (TimeoutError, asyncio.CancelledError):
@@ -826,7 +879,8 @@ async def _arun_bounded_process(
     # Своя группа процессов. Без неё `proc.kill()` на таймауте убивал ТОЛЬКО
     # шелл: потомки `sh -c "a; b"` продолжали работать, унаследовав pipe'ы, и
     # переживали и таймаут, и отмену. С группой убиваем всю команду разом
-    # (см. `_kill_quietly`). На Windows группы нет — там поведение прежнее.
+    # (см. `_kill_quietly`). На Windows групп нет — там `_astop_process`
+    # снимает дерево процессов.
     spawn_kwargs = {"start_new_session": True} if os.name != "nt" else {}
 
     with preserve_console_mode():
@@ -1112,7 +1166,7 @@ def _close_transport(proc) -> None:
         pass
 
 
-def _terminate_quietly(proc) -> bool:
+def _terminate_quietly(proc, os_name: str = os.name) -> bool:
     """Попросить команду завершиться самой: SIGTERM всей её группе.
 
     Ходит парой с `_kill_quietly`: сначала просим, через `_KILL_GRACE_SEC`
@@ -1124,7 +1178,7 @@ def _terminate_quietly(proc) -> bool:
     ``False`` — послать было некому: ждать грацию незачем, идём убивать сразу.
     """
     pid = getattr(proc, "pid", None)
-    if pid and os.name != "nt":
+    if pid and os_name != "nt":
         try:
             os.killpg(os.getpgid(pid), signal.SIGTERM)
             return True
@@ -1160,7 +1214,7 @@ async def _await_exit_or_stop(proc, timeout: Optional[int]) -> tuple:
         return None, True
 
 
-def _kill_quietly(proc) -> None:
+def _kill_quietly(proc, os_name: str = os.name) -> None:
     """Снять команду ЦЕЛИКОМ, а не только её шелл.
 
     `proc.kill()` бьёт по одному pid. Для `sh -c "a; b"` это шелл, а его
@@ -1169,7 +1223,7 @@ def _kill_quietly(proc) -> None:
     (`start_new_session=True`), поэтому здесь бьём по группе.
     """
     pid = getattr(proc, "pid", None)
-    if pid and os.name != "nt":
+    if pid and os_name != "nt":
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
             return
