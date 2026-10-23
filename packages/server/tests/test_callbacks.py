@@ -185,6 +185,21 @@ def test_allowed_callback_compares_origin_and_path(url, ok):
     assert allowed_callback(url, ["https://hooks.example/a2a/"]) is ok
 
 
+@pytest.mark.parametrize(
+    ("url", "ok"),
+    [
+        ("https://hooks.example/cb", True),
+        ("https://hooks.example/cb/t4", True),
+        ("https://hooks.example/cb-admin/purge", False),
+        ("https://hooks.example/cbx", False),
+    ],
+)
+def test_allowed_prefix_is_whole_path_segments(url, ok):
+    """Находка ревью: ``/cb`` в allowed_urls — путь ``/cb`` и всё под
+    ним, а не любой путь, начинающийся со строки «/cb»."""
+    assert allowed_callback(url, ["https://hooks.example/cb"]) is ok
+
+
 async def test_sender_gives_up_after_max_attempts():
     got, client = _receiver([503])
     pauses: list = []

@@ -33,7 +33,8 @@ _MAX_PAUSE = 16
 
 def allowed_callback(url: str, allowed: list[str]) -> bool:
     """``url`` под одним из префиксов: схема, хост и порт — точно, путь —
-    началом; логина в адресе, сегментов «.» и «..» (в том числе
+    целыми сегментами (``/cb`` — это ``/cb`` и ``/cb/…``, но не
+    ``/cb-admin``); логина в адресе, сегментов «.» и «..» (в том числе
     закодированных) и обратных слешей быть не должно — получатель
     нормализует путь, и префикс обходился бы. Разбор — ``httpx.URL``, тем
     же, что потом отправит запрос: другой парсер видел бы другой адрес."""
@@ -52,9 +53,13 @@ def allowed_callback(url: str, allowed: list[str]) -> bool:
             base.port,
         ):
             continue
-        if target.path.startswith(base.path or "/"):
+        if _under(target.path, base.path):
             return True
     return False
+
+
+def _under(path: str, base: str) -> bool:
+    return path == base or path.startswith(base.rstrip("/") + "/")
 
 
 def _parse(url: str) -> httpx.URL | None:
