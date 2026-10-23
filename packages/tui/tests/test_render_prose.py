@@ -1,3 +1,4 @@
+from gc_tui.palette import ACCENT, CODE, INK
 from gc_tui.services.markdown_render import render_prose
 
 
@@ -32,24 +33,32 @@ def test_empty_text_empty():
     assert render_prose("").plain == ""
 
 
-def test_heading_is_accent_bold():
+def _style_of(t, part: str) -> str:
+    i = t.plain.index(part)
+    (span,) = [s for s in t.spans if s.start <= i < s.end]
+    return str(span.style)
+
+
+def test_heading_is_ink_bold_without_accent():
+    """Заголовок — цветом строки (`INK`) жирным; акцента нет (решение
+    владельца 2026-10-23: всё выделение — `INK` жирный)."""
     t = render_prose("# Заголовок")
     assert t.plain == "Заголовок"
-    assert any(
-        "54b3a6" in str(s.style).lower() and "bold" in str(s.style).lower()
-        for s in t.spans
-    )
+    assert _style_of(t, "Заголовок") == f"{INK} bold"
 
 
-def test_para_bold_and_code_styled_spans():
+def test_para_bold_ink_and_code_styled_spans():
     t = render_prose("есть **bold** и `code`")
     assert "**" not in t.plain and "`" not in t.plain
-    assert any(
-        "54b3a6" in str(s.style).lower() for s in t.spans
-    )  # accent (bold)
-    assert any(
-        "afbdff" in str(s.style).lower() for s in t.spans
-    )  # code (slate)
+    assert _style_of(t, "bold") == f"{INK} bold"
+    assert ACCENT.lower() not in str(t.spans).lower()
+    assert _style_of(t, "code") == CODE
+
+
+def test_bold_without_own_colour_when_css_owns_line():
+    """`ink=""` — цвет задаёт CSS строки: жирный без своего цвета."""
+    t = render_prose("**жирно**", ink="")
+    assert _style_of(t, "жирно") == "bold"
 
 
 def test_prose_fence_state_ignores_inner_fence_with_info_string():

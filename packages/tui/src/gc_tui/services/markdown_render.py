@@ -5,8 +5,9 @@ API:
 - `render_prose`   — рендерит прозовый прогон построчно с inline-стилями.
 
 Семантика соответствует canon §3.2:
-- `**bold**`        → accent (без `**`)
-- `# heading`       → accent bold (без `#`)
+- `**bold**`        → ink bold (без `**`): выделение — цвет строки жирным,
+  акцента в прозе нет
+- `# heading`       → ink bold (без `#`)
 - inline `` `code` `` → slate code (без бэктиков)
 - списки `- item`   → ink, маркер `• `
 - fenced ``` блок ``` → code-block (мягкий серый); закрывает блок только голая
@@ -238,9 +239,10 @@ def _apply_inline_styles(text: Text, line: str, ink: str = _INK) -> None:
 
 
 def _bold_style(ink: str) -> str:
-    """Жирный и заголовок: акцент; при ``ink=""`` (приглушённая запись,
-    цвет задаёт CSS строки) — просто bold, без своего цвета."""
-    return f"{_ACC} bold" if ink else "bold"
+    """Жирный и заголовок: цвет строки ``ink`` жирным, без акцента; при
+    ``ink=""`` (приглушённая запись, цвет задаёт CSS строки) — просто
+    bold, без своего цвета."""
+    return f"{ink} bold" if ink else "bold"
 
 
 _PROSE_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")

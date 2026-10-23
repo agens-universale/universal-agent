@@ -288,9 +288,9 @@ ToolCallRow.-in-agent.-gap { margin-top: 0; }
 .line-warn      { color: $warn; }   /* строка `!` без владельца — предупреждение */
 .line-standalone { margin-top: 1; }  /* строка `!` без владельца — своё событие */
 .line-code      { color: $code; }      /* inline-код/путь */
-.line-bold      { color: $accent; text-style: bold; }
-.line-heading-1 { color: $accent; text-style: bold; }
-.line-heading-2 { color: $accent; text-style: bold; }      /* вес легче — render-A */
+.line-bold      { color: $ink; text-style: bold; }
+.line-heading-1 { color: $ink; text-style: bold; }
+.line-heading-2 { color: $ink; text-style: bold; }      /* вес легче — render-A */
 .line-block     { color: $code-block; }
 .line-ok        { color: $ok; }
 .line-run       { color: $run-color; }

@@ -298,3 +298,17 @@ def test_prose_render_keeps_a_top_level_indented_fence_as_prose():
     """На верхнем уровне сдвинутые кавычки ограду не открывают и в прозе."""
     plain = render_prose("Пример:\n\n    ```\n- пункт").plain
     assert "• пункт" in plain
+
+
+def test_bold_and_heading_lines_are_ink_bold_in_css():
+    """Строки-выделения прозы (`.line-bold`, заголовки) — `$ink` жирным,
+    без акцента (решение владельца 2026-10-23)."""
+    import re
+
+    from gc_testkit.paths import TUI_PKG
+
+    css = (TUI_PKG / "styles.tcss").read_text(encoding="utf-8")
+    for cls in ("line-bold", "line-heading-1", "line-heading-2"):
+        (rule,) = re.findall(rf"^\.{cls}\s*\{{([^}}]*)\}}", css, re.M)
+        assert "color: $ink;" in rule
+        assert "text-style: bold;" in rule

@@ -911,8 +911,10 @@ async def test_summary_row_styled_like_note_in_italic(tmp_path):
 
 
 def test_summary_bold_and_heading_have_no_accent_colour():
+    """Ни в сводке, ни в ответе акцента у выделения нет: ответ — `INK`
+    жирным (решение владельца 2026-10-23)."""
     pytest.importorskip("textual")
-    from gc_tui.palette import ACCENT
+    from gc_tui.palette import ACCENT, INK
     from gc_tui.services.trace_render import (
         build_agent_widgets,
         build_summary_widgets,
@@ -925,7 +927,8 @@ def test_summary_bold_and_heading_have_no_accent_colour():
     assert not any(ACCENT in st for st in styles)
     (agent,) = build_agent_widgets(text, event_no=1)
     agent_styles = {str(sp.style) for sp in agent._content.spans}
-    assert f"{ACCENT} bold" in agent_styles
+    assert f"{INK} bold" in agent_styles
+    assert not any(ACCENT in st for st in agent_styles)
 
 
 def _summary_rows(note: str, comment: str) -> list:
