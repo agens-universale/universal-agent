@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional, Protocol, Sequence
 
 from rich.text import Text
@@ -201,7 +201,6 @@ class ToolBlocksView:
         self._widgets: dict[str, Widget] = {}
         self._issued: set[Widget] = set()
         self._edits: dict[str, BlockEdit] = {}
-        self._compact: set[str] = set()
         self._command_hidden: dict[str, int] = {}
         self._event_count = 0
 
@@ -266,12 +265,12 @@ class ToolBlocksView:
         ran: Optional[RanResult] = None,
     ) -> None:
         """Исход вызова вместе с правкой: её глагол решает группу; у
-        `Ran` — вывод и правки команды (``ran``)."""
+        `Ran` — вывод и правки команды (``ran``). ``compact`` — ход вне
+        окна раскрытых: тело диффа ждёт раскрытия."""
         key = row.call_id
         if edit is not None:
+            edit = replace(edit, compact=compact)
             self._edits[key] = edit
-            if compact:
-                self._compact.add(key)
             # Хвост файла задаёт модель; строка берёт только ❐.
             row.set_edit_tail(Text())
             row.set_edit_counts(edit.add, edit.rem, copy_text=edit.copy_text)
@@ -291,12 +290,14 @@ class ToolBlocksView:
         texts = output_texts(ran)
         if texts is not None:
             row.set_output(*texts)
+        files = tuple(
+            replace(file, compact=file.key in ran.compact)
+            for file in ran.files
+        )
         anchor: Widget = row
-        for file in ran.files:
+        for file in files:
             anchor = self._mount_file(row, file, after=anchor)
-            if file.key in ran.compact:
-                self._compact.add(file.key)
-        self._ran_parts(row.call_id, ran)
+        self._ran_parts(row.call_id, replace(ran, files=files))
 
     def _mount_file(
         self, row: ToolCallRow, file: BlockEdit, *, after: Widget
@@ -493,7 +494,7 @@ class ToolBlocksView:
                 edit.record,
                 rows=d.rows or 0,
                 column=d.column,
-                compact=d.key in self._compact,
+                compact=edit.compact,
                 event_no=getattr(owner, "event_no", 0),
             )
             # Колонка субагента — на 2 глубже; видимость — как у строки.

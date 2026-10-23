@@ -735,6 +735,35 @@ def test_single_edit_share():
     assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
 
 
+def test_compact_edit_phrase_counts_all_lines():
+    """Ход вне окна раскрытых (§6.3): тело не монтируется, фраза блока
+    считает все строки диффа — по ней блок раскрывается."""
+    from dataclasses import replace
+
+    model, fold = _edits_model()
+    edit = replace(_edit("a", lines=3), compact=True)
+    _apply(model, fold, "a", edit)
+    assert fold.phrase("block:0", "bottom") == "+ ещё 3 строки"
+    fold(model.toggle("a"))
+    assert fold.share("a") == SetDiffShare("a", None, "single")
+    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+
+
+def test_compact_ran_file_counts_all_lines():
+    from dataclasses import replace
+
+    model, fold = _edits_model()
+    fold(model.member_added("x", C.RUN, waiting=False))
+    fold(model.result("x", "ok", reason="", executed=True))
+    files = [replace(_edit("x:a", lines=2), compact=True)]
+    fold(
+        model.ran_parts(
+            "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
+        )
+    )
+    assert fold.phrase("block:0", "bottom") == "+ ещё 2 строки"
+
+
 def test_edit_comes_with_result():
     """Правка приходит вместе с исходом — одним событием; отдельного
     позднего события счётчиков нет."""

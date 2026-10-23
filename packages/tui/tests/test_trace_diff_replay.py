@@ -15,6 +15,7 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.widgets.diff_block import DiffBlock
+from gc_tui.widgets.tool_blocks_view import BlockAction
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from textual import events
 from textual.containers import VerticalScroll
@@ -134,6 +135,10 @@ def _blocks(scr) -> list[DiffBlock]:
     ]
 
 
+def _path_of(block: DiffBlock) -> str:
+    return block._record.path
+
+
 def _has_body(block: DiffBlock) -> bool:
     return bool(block.query(".block-body"))
 
@@ -142,10 +147,18 @@ def _body_lines(block: DiffBlock) -> int:
     return block.query_one(".block-body", Static).visual.plain.count("\n") + 1
 
 
+def _phrase(scr, block: str) -> BlockAction:
+    """Фраза раскрытия внизу блока ``block`` верхнего уровня (P4 §4.0)."""
+    return next(
+        w for w in scr.query(BlockAction) if w.key == f"{block}:bottom"
+    )
+
+
 def _turns_thread(
     tmp_path, tid: str, turns: int, *, hunks: str = SHORT_HUNKS
 ) -> None:
-    """Тред с одной правкой на ход: turns вызовов, turns записей журнала."""
+    """Тред с одной правкой на ход: turns вызовов, turns записей журнала.
+    Между правками — ответ агента: каждая правка — свой блок (P4 §2.2)."""
     payloads: list[dict] = [{"id": "u1", "role": "user", "content": "правь"}]
     records: list[EditRecord] = []
     for i in range(1, turns + 1):
@@ -153,6 +166,9 @@ def _turns_thread(
             _call(f"c{i}", "fs_apply_file_edits", {"path": f"f{i}.py"})
         )
         payloads.append(_output(f"c{i}", "fs_apply_file_edits"))
+        payloads.append(
+            {"id": f"a{i}", "role": "assistant", "content": f"готово {i}"}
+        )
         records.append(
             _record(f"c{i}", turn_id=f"t{i}", path=f"f{i}.py", hunks=hunks)
         )
@@ -178,11 +194,10 @@ async def test_replay_expands_only_last_turns(tmp_path):
             True,
             True,
         ]
-        # компактный блок — только шапка и хвост-разворот
-        assert (
-            blocks[0].query_one(".diff-more", Static).visual.plain
-            == "… ещё 3 строки"
-        )
+        # Компактный блок — без тела; своего хвоста под блоком нет, все
+        # его строки считает фраза блока (P4 §6.3).
+        assert not blocks[0].query(".diff-more")
+        assert _phrase(pilot.app.screen, "block:0").phrase == "+ ещё 3 строки"
 
 
 @pytest.mark.asyncio
@@ -200,7 +215,7 @@ async def test_replay_limit_one_expands_only_last_turn(tmp_path):
 
 @pytest.mark.asyncio
 async def test_compact_block_expands_on_click(tmp_path):
-    """Клик по хвосту компактного блока разворачивает тело целиком."""
+    """Клик по фразе компактного блока разворачивает тело целиком."""
     tid = "expand_click"
     _turns_thread(tmp_path, tid, 2, hunks=_long_hunks(30))
 
@@ -209,10 +224,10 @@ async def test_compact_block_expands_on_click(tmp_path):
     ) as pilot:
         block = _blocks(pilot.app.screen)[0]
         assert not _has_body(block)
-        tail = block.query_one(".diff-more", Static)
-        block.on_click(
+        phrase = _phrase(pilot.app.screen, "block:0")
+        phrase.on_click(
             events.Click(
-                widget=tail,
+                widget=phrase,
                 x=0,
                 y=0,
                 delta_x=0,
@@ -265,7 +280,8 @@ async def test_replay_window_counts_only_turns_with_blocks(tmp_path):
 
 @pytest.mark.asyncio
 async def test_replay_edit_without_journal_record_has_no_block(tmp_path):
-    """Правка без записи в журнале при реплее → блока нет."""
+    """Правка без записи в журнале при реплее → диффа нет; две правки
+    подряд — блок `Edited 2 файла` (P4 §6.2)."""
     tid = "no_record"
     _write_thread(
         tmp_path,
@@ -283,8 +299,11 @@ async def test_replay_edit_without_journal_record_has_no_block(tmp_path):
     )
 
     async with _pilot(tmp_path, tid) as pilot:
-        assert len(pilot.app.screen.query(ToolCallRow)) == 2
-        assert len(_blocks(pilot.app.screen)) == 1
+        rows = list(pilot.app.screen.query(ToolCallRow))
+        assert [r.mode for r in rows] == ["header", "member", "member"]
+        assert [_path_of(b) for b in _blocks(pilot.app.screen)] == [
+            "src/other.py"
+        ]
 
 
 async def _open_detail(pilot) -> None:

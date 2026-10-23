@@ -215,6 +215,9 @@ class BlockEdit:
     has_record: bool
     #: Что кладёт в буфер ❐ строки файла; пусто — кнопки нет.
     copy_text: str = ""
+    #: Ход вне окна раскрытых (§6.3): тела нет до раскрытия, скрыты все
+    #: строки диффа.
+    compact: bool = False
     #: Запись журнала — для `DiffBlock` исполнителя; модель её не читает.
     record: Optional[EditRecord] = field(
         default=None, compare=False, repr=False
@@ -531,11 +534,17 @@ class _RanParts:
 @dataclass(frozen=True)
 class _File:
     """Файл блока для окна и доли: строк диффа и применился ли (входит
-    в `n` формулы §6.3; упавшие и `Deleted` — нет)."""
+    в `n` формулы §6.3; упавшие и `Deleted` — нет); у компактного тело
+    не показано — скрыты все строки."""
 
     key: str
     lines: int
     applied: bool
+    compact: bool = False
+
+    def hidden(self, rows: int) -> int:
+        """Строк сверх показанного превью в ``rows`` строк."""
+        return self.lines if self.compact else max(0, self.lines - rows)
 
 
 @dataclass(frozen=True)
@@ -947,7 +956,7 @@ class ToolBlocks:
         rows = diff_rows(sum(f.applied for f in files), self._preview)
         tail = files[-WINDOW:]
         in_tail = {f.key for f in tail}
-        lines = extra_lines + sum(max(0, f.lines - rows) for f in tail)
+        lines = extra_lines + sum(f.hidden(rows) for f in tail)
         lines += sum(f.lines for f in files if f.key not in in_tail)
         more = len(files) - len(tail) + extra_more
         expandable = bool(lines or more)
@@ -959,7 +968,12 @@ class ToolBlocks:
 
     def _edits_layout(self, block: _Block) -> _Layout:
         files = [
-            _File(m.key, _lines(m.applied), m.outcome == "ok")
+            _File(
+                m.key,
+                _lines(m.applied),
+                m.outcome == "ok",
+                m.applied is not None and m.applied.compact,
+            )
             for m in block.members
         ]
         return self._layout(files, expanded=block.expanded)
@@ -969,7 +983,7 @@ class ToolBlocks:
         assert parts is not None
         return self._layout(
             [
-                _File(f.key, _lines(f), f.verb != "Deleted")
+                _File(f.key, _lines(f), f.verb != "Deleted", f.compact)
                 for f in parts.files
             ],
             expanded=block.expanded,
