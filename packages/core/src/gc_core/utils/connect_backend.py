@@ -17,6 +17,7 @@ from gc_core.config_modules.backend import (
     BackendConfig,
 )
 from gc_core.config_modules.model_registry import effective_completion_kwargs
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.message_policy.chat_completions import (
     prepare_chat_completion_messages_for_api,
 )
@@ -28,6 +29,11 @@ from gc_core.trace_id import (
     trace_id_from_config,
 )
 from gc_core.usage.context import record_usage
+from gc_core.user_stop import (
+    UserStopInterrupt,
+    await_cancelled,
+    current_user_stop,
+)
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.backend_errors import (
     embedded_choice_error,
@@ -54,6 +60,9 @@ from gc_core.utils.ssl_config import get_backend_client_cert
 from gc_core.utils.stream_assembler import StreamAssembler
 
 logger = logging.getLogger(__name__)
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_MODEL_REQUEST_STOPPED = "Ход остановлен"
 
 # Сентинел «оверрайда нет» — отличим от легального override-значения None/"" в
 # ResolvedModel.backend_overrides (см. backend_override_value).
@@ -221,7 +230,11 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
     ретраится ни в какой форме: тот же запрос её не лечит, а OpenRouter отвечает на
     картинку 404-м, SSE-ошибкой — vLLM в стриме. Отказ авторизации (401, в том
     числе событием стрима) тоже: его лечит другая форма токена или перевыпуск.
+
+    Обрыв стопом — не транспорт и не повод для backoff.
     """
+    if isinstance(exc, (ModelRequestStopped, UserStopInterrupt)):
+        return False
     if is_image_request_error(exc) or is_auth_error(exc):
         return False
     if is_http_status_error(exc):
@@ -368,6 +381,86 @@ async def _aiter_utf8_lines(response: httpx.Response):
         yield buf.decode("utf-8", errors="replace")
 
 
+def _raise_if_model_stopped() -> None:
+    """Обрыв стопом не дочитывает стрим и не возвращает недособранный ответ."""
+    stop = current_user_stop()
+    if stop is not None and stop.requested:
+        raise ModelRequestStopped(_MODEL_REQUEST_STOPPED)
+
+
+async def _aread_model_response(response: Any, read):
+    """Читать HTTP, пока стоп не закрыл поток."""
+    stop = current_user_stop()
+    if stop is None:
+        return await read(response)
+
+    async def _release() -> None:
+        closer = getattr(response, "aclose", None)
+        if closer is None:
+            return
+        result = closer()
+        if hasattr(result, "__await__"):
+            await result
+
+    try:
+        async with stop.arm(kind="model", release=_release):
+            return await read(response)
+    except UserStopInterrupt:
+        raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
+    except ModelRequestStopped:
+        raise
+    except Exception:
+        if stop.requested:
+            raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
+        raise
+
+
+async def _aguard_model_call(factory):
+    """Стоп отменяет запрос к модели. Отмена — не повод его повторять."""
+    stop = current_user_stop()
+    if stop is None:
+        return await factory()
+    if stop.requested:
+        raise ModelRequestStopped(_MODEL_REQUEST_STOPPED)
+    task = asyncio.create_task(factory())
+
+    async def _release() -> None:
+        if not task.done():
+            task.cancel()
+
+    try:
+        async with stop.arm(kind="model", release=_release):
+            return await task
+    except UserStopInterrupt as exc:
+        if not exc.started:
+            await await_cancelled(task)
+        raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
+    except asyncio.CancelledError:
+        if stop.requested:
+            raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
+        raise
+    except ModelRequestStopped:
+        raise
+    except Exception:
+        if stop.requested:
+            raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
+        raise
+
+
+async def _aopen_model_stream(client, *args, read, **kwargs):
+    """Стрим под стопом с самого ``client.stream``, ещё до заголовков.
+
+    Пока заголовков нет, читать нечего. Вооружать стоп только на теле
+    значило бы досиживать таймаут попытки, а затем и все повторы.
+    """
+
+    async def _open():
+        async with client.stream(*args, **kwargs) as response:
+            return await _aread_model_response(response, read)
+
+    return await _aguard_model_call(_open)
+
+
 async def _aread_error_text(response: httpx.Response) -> Optional[str]:
     """Тело ответа-ошибки. У стримового ответа оно недоступно до aread()."""
     try:
@@ -407,6 +500,37 @@ async def arequest_backend_responses(
     )
 
 
+async def _aread_responses_body(r, url: str, logger, chunks: List[str]):
+    """Заголовки ответа и непустые строки SSE в ``chunks``."""
+    try:
+        r.raise_for_status()
+    except httpx.HTTPStatusError:
+        # Тело у потокового ответа не прочитано, и исключение улетало с
+        # пустым `response.text`. Для 4xx это ровно та строка, в которой
+        # бэкенд объясняет причину (неизвестная модель, превышен лимит):
+        # в лог попадал голый код, и разбираться было не с чем. Путь
+        # chat/completions это уже делал — здесь была асимметрия.
+        err_text = await _aread_error_text(r)
+        if logger is not None:
+            logger.error(
+                "Backend responses HTTP error status=%s url=%s body=%s",
+                r.status_code,
+                url,
+                (err_text or "")[:2000],
+            )
+        raise
+    async for line in _aiter_utf8_lines(r):
+        _raise_if_model_stopped()
+        # Пустые строки — разделители событий SSE. requests.iter_lines их
+        # проглатывал, httpx.aiter_lines отдаёт: без фильтра «последним
+        # чанком» оказался бы пустой разделитель, и режим responses падал
+        # бы на разборе JSON.
+        if line.strip():
+            chunks.append(line)
+    _raise_if_model_stopped()
+    return r.headers
+
+
 async def _arequest_backend_responses_once(
     data: Dict,
     headers: Dict,
@@ -439,34 +563,19 @@ async def _arequest_backend_responses_once(
         )
 
     chunks: List[str] = []
-    async with client.stream(
-        "POST", url, json=data, headers=headers, timeout=timeout
-    ) as r:
-        try:
-            r.raise_for_status()
-        except httpx.HTTPStatusError:
-            # Тело у потокового ответа не прочитано, и исключение улетало с
-            # пустым `response.text`. Для 4xx это ровно та строка, в которой
-            # бэкенд объясняет причину (неизвестная модель, превышен лимит):
-            # в лог попадал голый код, и разбираться было не с чем. Путь
-            # chat/completions это уже делал — здесь была асимметрия.
-            err_text = await _aread_error_text(r)
-            if logger is not None:
-                logger.error(
-                    "Backend responses HTTP error status=%s url=%s body=%s",
-                    r.status_code,
-                    url,
-                    (err_text or "")[:2000],
-                )
-            raise
-        r_headers = r.headers
-        async for line in _aiter_utf8_lines(r):
-            # Пустые строки — разделители событий SSE. requests.iter_lines их
-            # проглатывал, httpx.aiter_lines отдаёт: без фильтра «последним
-            # чанком» оказался бы пустой разделитель, и режим responses падал
-            # бы на разборе JSON.
-            if line.strip():
-                chunks.append(line)
+
+    async def _read_responses(r):
+        return await _aread_responses_body(r, url, logger, chunks)
+
+    r_headers = await _aopen_model_stream(
+        client,
+        "POST",
+        url,
+        json=data,
+        headers=headers,
+        timeout=timeout,
+        read=_read_responses,
+    )
 
     last_chunk = chunks[-1] if chunks else ""
     try:
@@ -511,9 +620,7 @@ async def _astream_chat_completions(
     stream_data["stream_options"] = {"include_usage": True}
     _log_backend_request(logger, "chat_completions", url, stream_data)
 
-    async with client.stream(
-        "POST", url, json=stream_data, headers=headers, timeout=timeout
-    ) as r:
+    async def _read(r):
         try:
             r.raise_for_status()
         except httpx.HTTPStatusError:
@@ -536,6 +643,7 @@ async def _astream_chat_completions(
 
         assembler = StreamAssembler(on_delta=on_delta)
         async for line in _aiter_utf8_lines(r):
+            _raise_if_model_stopped()
             assembler.feed_line(line)
             if assembler.done:
                 # `[DONE]` — ответ кончился, и дочитывать тело до закрытия
@@ -546,6 +654,7 @@ async def _astream_chat_completions(
                 # Синхронный путь до переезда выходил здесь же —
                 # `iter_sse_data_lines` делала на маркере `return`.
                 break
+        _raise_if_model_stopped()
         assembler.flush()
         assembled = assembler.result()
 
@@ -558,6 +667,16 @@ async def _astream_chat_completions(
             record_usage(assembled.get("usage"), url, data.get("model"))
         _log_backend_response(logger, "chat_completions", assembled)
         return assembled
+
+    return await _aopen_model_stream(
+        client,
+        "POST",
+        url,
+        json=stream_data,
+        headers=headers,
+        timeout=timeout,
+        read=_read,
+    )
 
 
 async def arequest_backend_chat_completions(
@@ -685,7 +804,13 @@ async def _arequest_backend_chat_completions_once(
         )
 
     _log_backend_request(logger, "chat_completions", url, data)
-    r = await client.post(url, json=data, headers=headers, timeout=timeout)
+
+    async def _post():
+        return await client.post(
+            url, json=data, headers=headers, timeout=timeout
+        )
+
+    r = await _aguard_model_call(_post)
     try:
         r.raise_for_status()
     except httpx.HTTPStatusError:
