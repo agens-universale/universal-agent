@@ -22,7 +22,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
   (+ опциональный live_status);
   на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
 - done     — есть result: ● зелёным / красным; стоп или лимит (`halted`) —
-  ○ серым, отказ (`refused`) — ○ цветом REFUSED, строка `└` серым;
+  ○ серым, отказ (`refused`) — ○ и строка `└` цветом REFUSED;
 - interrupted — стоп/обрыв до output: ○ серым + «прервано».
 
 Режимы блока P4 (`set_mode`, решения модели `gc_tui.services.tool_blocks`):
@@ -65,7 +65,6 @@ from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import SUB_INK as _SUB_INK
-from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
 from gc_tui.services.tool_blocks import (
     COMMAND_PREVIEW_LINES,
@@ -181,7 +180,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     Цветовые зоны через rich.Text:
     - prefix: статус-глиф — RUN (пульс) / OK / ERR / DIM.
-    - content: подпись → TOOL_NAME, объект/хвост → DIM, elapsed → RUN.
+    - content: одиночная строка — слово `INK` жирным, объект `INK` /
+      `SUB_INK` после конца (§10); хвост → DIM, elapsed → RUN.
 
     Контракт focus-handler: если в `_on_focus`/`_on_blur` synchronously читаешь
     `self.has_focus` — вызови `super()` ПЕРВЫМ, иначе прочитаешь stale Reactive-
@@ -650,14 +650,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     def _caption_styles(self) -> tuple[str, str]:
         """Цвет подписи и объекта: у члена — `DIM` / `MUTED`, у идущего —
         `INK`; путь члена-правки (без глагола) — `INK`; файл под командой
-        — `SUB_INK` / `INK`; `Running` / `Ran` — по §10."""
+        — `SUB_INK` / `INK`; одиночная строка — по §10."""
         if self._mode != "member":
-            if self._word and self._word_role == "command":
-                return self._command_styles()
-            if self._word and self._word_role == "agent":
-                # `Agent`: слово `INK` жирным, имя субагента `INK` всегда.
-                return f"bold {_INK}", _INK
-            return _TOOL_NAME, _DIM
+            return self._single_styles()
         if self._current:
             return _INK, _INK
         if self._word:
@@ -665,10 +660,13 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             return _SUB_INK, _INK
         return _DIM, (_INK if self._word == "" else _MUTED)
 
-    def _command_styles(self) -> tuple[str, str]:
-        """`Running` / `Ran` (§10): слово `INK` жирным; команда идущей —
-        `INK`, законченной — `SUB_INK`."""
+    def _single_styles(self) -> tuple[str, str]:
+        """Одиночная строка (§10): слово `INK` жирным; объект идущей —
+        `INK`, законченной — `SUB_INK` (`Ran  команда`, MCP, `Skill`);
+        имя субагента и путь правки — `INK` всегда (§6.2, §7)."""
         word = f"bold {_INK}"
+        if self._word and self._word_role in ("agent", "edit"):
+            return word, _INK
         if self._is_live or self._waiting:
             return word, _INK
         return word, _SUB_INK

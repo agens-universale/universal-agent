@@ -577,7 +577,9 @@ def test_skill_name_target_uses_skill_colour():
 
 
 def test_skills_list_pack_target_keeps_usual_colour():
-    from gc_tui.palette import DIM
+    """Имя пака — не имя скилла: цвет объекта одиночной строки (§10),
+    идущей — `INK`, законченной — `SUB_INK`."""
+    from gc_tui.palette import INK, SUB_INK
     from gc_tui.services.trace_render import build_call_row
 
     row = build_call_row(
@@ -586,4 +588,6 @@ def test_skills_list_pack_target_keeps_usual_colour():
         args_summary="core",
         level=0,
     )
-    assert _target_styles(row, "  core") == [DIM]
+    assert _target_styles(row, "  core") == [INK]
+    row.set_result(summary="", outcome="ok")
+    assert _target_styles(row, "  core") == [SUB_INK]

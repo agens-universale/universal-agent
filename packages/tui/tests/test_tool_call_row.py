@@ -1,11 +1,6 @@
 """ToolCallRow — один виджет, который мутирует от running к ok/err."""
 
 import pytest
-from gc_tui.palette import TOOL_NAME
-
-_TOOL_NAME_HEX = TOOL_NAME[
-    1:
-].lower()  # '#XXXXXX' → 'xxxxxx' для substring-проверок в span.style
 
 
 def _shown_lines(row) -> str:
@@ -210,38 +205,19 @@ async def test_tool_call_row_ok_state_uses_styled_text():
         assert any("●" in seg for seg in green), f"spans={prefix.spans}"
 
 
-@pytest.mark.asyncio
-async def test_tool_call_row_tool_name_uses_tool_name_color():
-    """Имя тула (без скобок) красится palette.TOOL_NAME — primary-сигнал в строке;
-    скобки/args/путь — DIM (один общий тон обвеса)."""
-    pytest.importorskip("textual")
+@pytest.mark.parametrize("live", [True, False])
+def test_single_row_word_ink_bold_object_by_state(live):
+    """Одиночная строка (MCP, Skill, прочие одиночные категории, §10):
+    слово `INK` жирным; объект идущей — `INK`, законченной — `SUB_INK`."""
+    from gc_tui.palette import INK, SUB_INK
     from gc_tui.widgets.tool_call_row import ToolCallRow
-    from rich.text import Text
-    from textual.app import App, ComposeResult
 
-    class _App(App):
-        def compose(self) -> ComposeResult:
-            yield ToolCallRow(
-                call_id="c1",
-                label="read_file",
-                target="path='src/thread_store.py'",
-            )
-
-    async with _App().run_test() as pilot:
-        row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="312 строк", outcome="ok")
-        await pilot.pause()
-        rendered = row._render_content()
-        assert isinstance(rendered, Text)
-        tool_name_spans = [
-            rendered.plain[s.start : s.end]
-            for s in rendered.spans
-            if _TOOL_NAME_HEX in str(s.style).lower()
-        ]
-        assert "read_file" in tool_name_spans, (
-            f"No TOOL_NAME-colored span equal to 'read_file'; spans="
-            f"{[(rendered.plain[s.start : s.end], str(s.style)) for s in rendered.spans]}"
-        )
+    row = ToolCallRow(call_id="m1", label="Jira", target="search  KEY-1")
+    if not live:
+        row.set_result(summary="", outcome="ok")
+    content = row._render_content()
+    assert _style_at(content, "Jira") == f"bold {INK}"
+    assert _style_at(content, "KEY-1") == (INK if live else SUB_INK)
 
 
 @pytest.mark.asyncio
@@ -807,8 +783,10 @@ def test_command_word_role_decides_look():
     assert _style_at(content, "make docs") == SUB_INK
 
 
-def test_edit_word_role_keeps_caption_look():
-    from gc_tui.palette import DIM
+def test_single_edit_word_ink_bold_path_ink():
+    """Одиночная правка (§6.2, §10): слово `INK` жирным через пробел,
+    путь `INK` — и после конца."""
+    from gc_tui.palette import INK
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     row = ToolCallRow(call_id="e1", label="Edit", target="a.py")
@@ -816,8 +794,8 @@ def test_edit_word_role_keeps_caption_look():
     row.set_word("Edited", role="edit")
     content = row._render_content()
     assert content.plain.startswith("Edited a.py")
-    assert _style_at(content, "Edited") == TOOL_NAME
-    assert _style_at(content, "a.py") == DIM
+    assert _style_at(content, "Edited") == f"bold {INK}"
+    assert _style_at(content, "a.py") == INK
 
 
 def test_agent_word_role_name_is_ink():
