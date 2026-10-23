@@ -1212,3 +1212,5 @@ def merge_nested_readonly(
         mount_nested_summary=_child_summary,
         mount_nested_todo=_todo,
     )
+    # Исход хода родителя — уровням, домонтированным после записи итога.
+    blocks.views.settle_levels()

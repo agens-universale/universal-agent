@@ -4151,6 +4151,8 @@ class TraceScreen(Screen):
             mount_nested_user=self._mount_nested_user,
             mount_nested_todo=self._mount_nested_todo,
         )
+        # Исход хода родителя — уровням, домонтированным после записи итога.
+        self._block_views.settle_levels()
 
     def _nested_blocks(self, parent_call_id: str) -> Optional[ToolBlocksView]:
         """Исполнитель блоков уровня субагента (ключ — строка `Agent`);

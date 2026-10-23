@@ -17,9 +17,11 @@ pytest.importorskip("textual")
 from gc_core.execution.progress import (
     QueueSubagentProgressSink,
     SubagentProgressEvent,
+    parse_tool_result_status,
+    result_facts,
     tool_args_summary,
 )
-from gc_core.persistence.turn_outcome import TurnOutcome
+from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
 from gc_core.thread_store import (
     append_new_thread_messages,
     append_subagent_trace_record,
@@ -178,10 +180,10 @@ class _Thread:
         )
         self.seq += len(payloads)
 
-    def record(self, calls):
+    def record(self, calls, *, stopped=False):
         outcome = TurnOutcome(
-            status="done",
-            reason=None,
+            status="stopped" if stopped else "done",
+            reason=USER_STOP if stopped else None,
             opened_by="u1",
             started_at="2026-10-22T11:30:00Z",
             ended_at="2026-10-22T11:30:12Z",
@@ -523,3 +525,102 @@ async def test_reopen_two_turns_nested_timers(tmp_path):
         lines = _rows(pilot)
     assert "    └ Read  client/m0.py · 1с" in lines
     assert "    └ Read  client/m1.py · 2с" in lines
+
+
+# --- стоп посреди вложенного блока -------------------------------------------
+
+_CANCELLED = json.dumps(
+    {
+        "ok": False,
+        "status": "cancelled_by_user",
+        "error": {"code": "cancelled_by_user", "message": "stop"},
+    }
+)
+
+
+def _cancelled_progress(call_id: str) -> list:
+    """Вложенное чтение, оборванное стопом: событие прогресса ядра."""
+    ok, brief = parse_tool_result_status(_CANCELLED)
+    status, fields = result_facts(_CANCELLED)
+    base = dict(
+        parent_call_id=AGENT, child_run_id="c", step=1, max_steps=9,
+        elapsed_ms=0, tool_name="fs_read_file", tool_call_id=call_id,
+    )  # fmt: skip
+    summary = tool_args_summary(
+        "fs_read_file", json.dumps({"path": "client/m9.py"})
+    )
+    return [
+        SubagentProgressEvent(kind="tool_start", args_summary=summary, **base),
+        SubagentProgressEvent(
+            kind="tool_end",
+            ok=ok,
+            error_brief=brief,
+            result_status=status,
+            result_error=fields,
+            output=_CANCELLED,
+            **base,
+        ),
+    ]
+
+
+def _cancelled_sidecar(tmp_path, call_id: str) -> None:
+    call = {
+        "type": "function_call",
+        "name": "fs_read_file",
+        "arguments": json.dumps({"path": "client/m9.py"}),
+        "call_id": call_id,
+    }
+    end = {"call_id": call_id, "output": _CANCELLED}
+    for kind, payload in (("call", call), ("error", end)):
+        append_subagent_trace_record(
+            str(tmp_path),
+            "cli",
+            TID,
+            parent_call_id=AGENT,
+            child_run_id="c",
+            kind=kind,
+            payload=payload,
+        )
+
+
+@pytest.mark.asyncio
+async def test_stop_mid_nested_explored_live_reopen_preview(tmp_path):
+    """Стоп посреди вложенного `Explored`: исход хода родителя (стоп)
+    доходит и до уровня субагента — `○ Explored` вживую, после возврата
+    и в превью (уровень субагента домонтирован после записи итога)."""
+    steps = [_read(i) for i in range(2)]
+    calls = {cid: 0.0 for cid in [AGENT, *_call_ids(steps)]}
+    live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
+    live_dir.mkdir()
+    reopen_dir.mkdir()
+    async with _app(live_dir).run_test(size=(100, 40)) as pilot:
+        thread = _Thread(live_dir)
+        await _open(pilot)
+        await _tail(pilot, thread, _agent_call())
+        await _emit(pilot, _progress(steps) + _cancelled_progress("n9"))
+        await _tail(pilot, thread, _agent_done())
+        thread.record(calls, stopped=True)
+        pilot.app.screen._poll_trace_tail()
+        await pilot.pause()
+        live = _agent_rows(_rows(pilot))
+    thread = _Thread(reopen_dir, status="stopped")
+    thread.add(_agent_call(), _agent_done())
+    thread.record(calls, stopped=True)
+    _sidecar(reopen_dir, steps)
+    _cancelled_sidecar(reopen_dir, "n9")
+    async with _app(reopen_dir).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        reopen = _agent_rows(_rows(pilot))
+        await _push_preview(pilot, scr)
+        preview = _agent_rows(_rows(pilot))
+    assert live[1:] == [
+        "  ○ Explored",
+        "    └ Read  client/m0.py · 0с",
+        "      Read  client/m1.py · 0с",
+        "      Read  client/m9.py · 0с",
+        "        └ отменено",
+    ]
+    # Остановленный посреди вызов после переоткрытия — без таймера: в
+    # `calls` его нет (спека §3.4, «Непокрыто»); остальное — одно.
+    assert reopen == preview
+    assert reopen == [line.replace("m9.py · 0с", "m9.py") for line in live]

@@ -526,7 +526,30 @@ _HANDLERS: dict[type, Callable[[ToolBlocksView, Decision], None]] = {
 
 
 class BlockViews(dict[str, ToolBlocksView]):
-    """Исполнители уровней ленты: `""` — верхний, иначе `parent_call_id`."""
+    """Исполнители уровней ленты: `""` — верхний, иначе `parent_call_id`.
+    Помнит вызовы остановленных ходов: уровень субагента, домонтированный
+    после записи итога (возврат, превью), получает исход хода родителя."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._stopped: set[str] = set()
+
+    def clear(self) -> None:
+        super().clear()
+        self._stopped.clear()
+
+    def note_turn(self, *, stopped: bool) -> None:
+        """Запись итога хода — до `turn_ended` уровней."""
+        if stopped:
+            for view in self.values():
+                self._stopped.update(view.model.turn_calls())
+
+    def settle_levels(self) -> None:
+        """Уровни субагентов остановленных ходов — `○` их блокам, как
+        вживую (§2.2, §7): после домонтирования вложенных записей."""
+        for level, view in list(self.items()):
+            if level in self._stopped:
+                view.turn_ended(stopped=True)
 
     def route(
         self, message: BlockToggle
@@ -555,6 +578,7 @@ def end_turn(views: BlockViews, timers: CallTimers, outcome: Any) -> None:
 
     timers.update(outcome.calls or {})
     stopped = kind_of(outcome)[0] == "cancelled"
+    views.note_turn(stopped=stopped)
     for view in list(views.values()):
         view.timers_updated()
         view.turn_ended(stopped=stopped)

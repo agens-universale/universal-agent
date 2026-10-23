@@ -711,6 +711,13 @@ class ToolBlocks:
                 out += self._render(block)
         return out
 
+    def turn_calls(self) -> list[str]:
+        """Ключи строк текущего хода (до `turn_ended`)."""
+        return [
+            m.key for block in self._blocks[self._turn_from :]
+            for m in block.members
+        ]  # fmt: skip
+
     def turn_ended(self) -> list[Decision]:
         """Запись итога хода: следующие блоки — уже другого хода."""
         self._turn_from = len(self._blocks)
