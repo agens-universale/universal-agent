@@ -4271,8 +4271,8 @@ class TraceScreen(Screen):
     ) -> None:
         """Исход вложенного вызова — через модель уровня субагента, с
         правкой из журнала (у субагента свой `call_id`). ``output`` —
-        сырой вывод: сводка и превью тем же маппером, что наверху; у
-        Run-тула сверх потолка события — из записи sidecar (§9.14 п. 5)."""
+        сырой вывод: сводка и превью тем же маппером, что наверху; сверх
+        потолка события — из записи sidecar у любого тула (§9.14 п. 5)."""
         row = (
             self._nested_tool_rows.get(tool_call_id) if tool_call_id else None
         )
@@ -4280,7 +4280,7 @@ class TraceScreen(Screen):
         if row is None or view is None:
             return
         is_run = view.model.kind_of(tool_call_id) == BlockKind.RAN
-        if output is None and is_run:
+        if output is None:
             output = self._nested_sidecar_texts(tool_call_id)[1]
         ev = nested_result_event(
             tool_call_id,

@@ -337,6 +337,43 @@ async def test_nested_read_summary_live_and_reopen(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_nested_read_over_cap_keeps_summary(tmp_path):
+    """Вывод `Read` сверх потолка события (`output=None`) — сводка
+    ` · N строк` из записи sidecar: вживую, после возврата и в превью."""
+    output = json.dumps({"tool": "fs_read_file", "ok": True, "lines": 40})
+    call = _Call("r1", "fs_read_file", {"path": "a.py"}, output)
+    live_dir, reopen_dir = _dirs(tmp_path)
+    live = await _live(live_dir, call, output_cap=True)
+    reopen, preview = await _reopen_and_preview(reopen_dir, call)
+    assert live == reopen == preview
+    assert live == ["  ● Explored", "    └ Read  a.py · 40 строк"]
+
+
+async def _reopen_and_preview(tmp_path, call: _Call) -> tuple[list, list]:
+    from gc_tui.screens.preview import PreviewScreen
+
+    thread = _Thread(tmp_path, status="stopped")
+    thread.add(_AGENT_CALL, _AGENT_DONE)
+    thread.record({AGENT: 0.0, call.call_id: 0.0})
+    call.sidecar(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID, is_resume=True)
+        await pilot.pause()
+        reopen = _agent_rows(_rows(pilot))
+        await pilot.app.push_screen(
+            PreviewScreen(
+                segments=scr._store.read_segments(TID),
+                thread_id=TID,
+                project_path="",
+                subagent_records=scr._store.read_subagent_trace(TID),
+            )
+        )
+        await pilot.pause()
+        return reopen, _agent_rows(_rows(pilot))
+
+
+@pytest.mark.asyncio
 async def test_nested_ran_with_edits(tmp_path):
     """Правки вложенной команды — по `command_call_id` вложенного вызова
     тем же билдером, что наверху: `Added путь` под выводом."""
