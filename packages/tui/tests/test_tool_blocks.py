@@ -237,7 +237,7 @@ def test_grouping_rule_kinds():
     fold(model.member_added("r0", C.READ, waiting=False))
     assert model.member_added("x0", C.RUN, waiting=False) == [
         SetMode("x0", "single"),
-        SetWord("x0", "Running", sep="  "),
+        SetWord("x0", "Running", role="command"),
     ]
     fold(model.member_added("r1", C.READ, waiting=False))
     assert fold.state[("MountHeader", "block:2")] == MountHeader(

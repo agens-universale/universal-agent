@@ -768,3 +768,41 @@ async def test_copy_button_keeps_hover_canon(tui_app_factory):
             app.query_one(".block-copy", Static).styles.color.hex
             == palette.ACCENT.upper()
         )
+
+
+# ---- слово строки: роль задаёт вид (P4 §10) ----
+
+
+def _style_at(content, fragment: str) -> str:
+    """Стиль спана, на который приходится начало ``fragment``."""
+    at = content.plain.index(fragment)
+    (span,) = [s for s in content.spans if s.start <= at < s.end]
+    return str(span.style)
+
+
+def test_command_word_role_decides_look():
+    """Слово команды — явная роль: `Ran  команда` через два пробела, слово
+    `INK` жирным, законченная команда `SUB_INK`."""
+    from gc_tui.palette import INK, SUB_INK
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="x1", label="Run", target="make docs")
+    row.set_result(summary="", outcome="ok")
+    row.set_word("Ran", role="command")
+    content = row._render_content()
+    assert content.plain.startswith("Ran  make docs")
+    assert _style_at(content, "Ran") == f"bold {INK}"
+    assert _style_at(content, "make docs") == SUB_INK
+
+
+def test_edit_word_role_keeps_caption_look():
+    from gc_tui.palette import DIM
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="e1", label="Edit", target="a.py")
+    row.set_result(summary="", outcome="ok")
+    row.set_word("Edited", role="edit")
+    content = row._render_content()
+    assert content.plain.startswith("Edited a.py")
+    assert _style_at(content, "Edited") == TOOL_NAME
+    assert _style_at(content, "a.py") == DIM

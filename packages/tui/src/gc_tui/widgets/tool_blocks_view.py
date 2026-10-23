@@ -464,7 +464,7 @@ class ToolBlocksView:
     def _set_word(self, d: SetWord) -> None:
         row = self._row(d.key)
         if row is not None:
-            row.set_word(d.word, sep=d.sep)
+            row.set_word(d.word, role=d.role)
 
     def _set_edit_tail(self, d: SetEditTail) -> None:
         row = self._row(d.key)

@@ -345,15 +345,20 @@ class SetConsequence:
         return ("SetConsequence", self.key)
 
 
+#: Роль слова строки: глагол правки или слово команды.
+WordRole = Literal["edit", "command"]
+
+
 @dataclass(frozen=True)
 class SetWord:
     """Слово одиночной строки вместо подписи категории: глагол правки
-    (`Editing` / `Added` / `Edited` / `Edit`, через пробел) или `Running` /
-    `Ran` (через два, как подпись)."""
+    (`edit`: `Editing` / `Added` / `Edited` / `Edit`) или слово команды
+    (`command`: `Running` / `Ran`); вид слова и объекта строка берёт из
+    роли."""
 
     key: str
     word: str
-    sep: str = " "
+    role: WordRole = "edit"
 
     @property
     def ident(self) -> tuple:
@@ -966,7 +971,7 @@ class ToolBlocks:
         фраза внизу блока (§4.0, §4.2)."""
         member = block.members[0]
         word = header_word(BlockKind.RAN, live=not member.done)
-        out = [*self._single(block), SetWord(member.key, word, sep="  ")]
+        out = [*self._single(block), SetWord(member.key, word, role="command")]
         parts = block.parts
         if parts is None:
             return out

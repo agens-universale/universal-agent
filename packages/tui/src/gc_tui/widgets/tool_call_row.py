@@ -67,7 +67,7 @@ from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import SUB_INK as _SUB_INK
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
-from gc_tui.services.tool_blocks import COMMAND_PREVIEW_LINES
+from gc_tui.services.tool_blocks import COMMAND_PREVIEW_LINES, WordRole
 from gc_tui.services.trace_glyphs import (
     CALL_GLYPH,
     CALL_UNDONE_GLYPH,
@@ -266,7 +266,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._frozen: Optional[float] = None
         self._block_consequence: Optional[Text] = None
         self._edit_tail: Optional[Text] = None
-        self._word_sep = " "
+        self._word_role: WordRole = "edit"
         # `Ran`: продолжение команды (строки после первой) и вывод
         # (свёрнутый, раскрытый) — следствием под строкой.
         self._command_rest: tuple[str, ...] = ()
@@ -368,11 +368,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._sync_pulse()
         self._update()
 
-    def set_word(self, word: str, *, sep: str = " ") -> None:
-        """Слово вместо подписи категории (``sep`` — до объекта); пусто —
+    def set_word(self, word: str, *, role: WordRole = "edit") -> None:
+        """Слово вместо подписи категории; ``role`` задаёт его вид: глагол
+        правки — через пробел, слово команды — через два, по §10. Пусто —
         без слова."""
         self._word = word
-        self._word_sep = sep
+        self._word_role = role
         self._update()
 
     def set_command(self, lines: tuple[str, ...]) -> None:
@@ -616,16 +617,16 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     def _caption_sep(self) -> str:
         """Между подписью и объектом: два пробела; у слова — его
         разделитель (`Edited путь`, `Ran  команда`); без слова — ничего."""
-        if self._word is None:
+        if self._word is None or self._word_role == "command":
             return _CAPTION_SEP
-        return self._word_sep if self._word else ""
+        return " " if self._word else ""
 
     def _caption_styles(self) -> tuple[str, str]:
         """Цвет подписи и объекта: у члена — `DIM` / `MUTED`, у идущего —
         `INK`; путь члена-правки (без глагола) — `INK`; файл под командой
         — `SUB_INK` / `INK`; `Running` / `Ran` — по §10."""
         if self._mode != "member":
-            if self._word and self._word_sep == _CAPTION_SEP:
+            if self._word and self._word_role == "command":
                 return self._command_styles()
             return _TOOL_NAME, _DIM
         if self._current:
