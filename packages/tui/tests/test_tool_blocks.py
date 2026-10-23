@@ -952,3 +952,116 @@ def test_ran_parts_deleted_file():
     assert fold.tail(key) == ""
     assert fold.visible(key) is True
     assert ("SetPhrase", "block:0", "bottom") not in fold.state
+
+
+# --- группа по месту строки (порядок монтирования) ---------------------
+
+
+def _pending(model, fold, key, category=C.EDIT):
+    fold(model.member_added(key, category, waiting=False))
+    fold(model.started(key))
+
+
+def _done(model, fold, key, edit=None, *, outcome="ok"):
+    if edit is not None:
+        fold(model.edit_counts(key, edit))
+    fold(model.result(key, outcome, reason="", executed=None))
+
+
+def test_place_edit_after_read_not_in_earlier_edit():
+    """Батч [e1, r1, e2]: над e2 стоит чтение — в группу e1 она не
+    входит."""
+    model, fold = _edits_model()
+    for key, cat in (("e1", C.EDIT), ("r1", C.READ), ("e2", C.EDIT)):
+        _pending(model, fold, key, cat)
+    _done(model, fold, "e1", _edit("e1"))
+    _done(model, fold, "r1")
+    _done(model, fold, "e2", _edit("e2"))
+    assert model.block_of("e2") != model.block_of("e1")
+    assert fold.mode("e2") == SetMode("e2", "single")
+    assert fold.word("e2") == "Edited"
+    assert not any(
+        k[0] == "MountHeader" and fold.state[k].before == "e1"
+        for k in fold.state
+    )
+
+
+def test_place_read_joins_block_right_above():
+    """[r1, e1, r2], e1 закончилась, пришёл r3: над r3 стоит r2 — r3 в
+    блоке r2."""
+    model, fold = _edits_model()
+    _pending(model, fold, "r1", C.READ)
+    _pending(model, fold, "e1")
+    _pending(model, fold, "r2", C.READ)
+    _done(model, fold, "e1", _edit("e1"))
+    fold(model.member_added("r3", C.READ, waiting=False))
+    assert model.block_of("r3") == model.block_of("r2")
+    assert model.block_of("r2") != model.block_of("r1")
+
+
+def test_place_results_out_of_order_keep_mount_order():
+    """После группы g результаты пришли не по порядку (e2 раньше e1):
+    члены, `gap` и нижняя фраза — по порядку монтирования."""
+    model, fold = _edits_model()
+    _pending(model, fold, "g1")
+    _done(model, fold, "g1", _edit("g1", lines=10))
+    _pending(model, fold, "e1")
+    _pending(model, fold, "e2")
+    _done(model, fold, "e2", _edit("e2", lines=10))
+    _done(model, fold, "e1", _edit("e1", lines=10))
+    block = model.block_of("g1")
+    assert model.block_of("e1") == block
+    assert model.block_of("e2") == block
+    assert model.last_call(block) == "e2"
+    assert fold.mode("g1") == SetMode("g1", "member", lead=True)
+    assert fold.mode("e1") == SetMode("e1", "member", gap=True)
+    assert fold.mode("e2") == SetMode("e2", "member", gap=True)
+    # Фраза — под последним по месту файлом, не между файлами.
+    assert fold.state[("MountPhrase", block, "bottom")] == MountPhrase(
+        block, "bottom", after=diff_key("e2")
+    )
+    assert fold.phrase(block, "bottom") == "+ ещё 18 строк"
+    assert fold.head_text(block) == "Edited 3 файла (+3)"
+
+
+def test_place_out_of_order_window_by_mount():
+    """Окно — последние по месту: результат первого из ждущих пришёл
+    последним, он всё равно не последний в блоке."""
+    model, fold = _edits_model()
+    for key in ("g1", "g2", "g3"):
+        _pending(model, fold, key)
+        _done(model, fold, key, _edit(key, lines=2))
+    _pending(model, fold, "e1")
+    _pending(model, fold, "e2")
+    _done(model, fold, "e2", _edit("e2", lines=2))
+    _done(model, fold, "e1", _edit("e1", lines=2))
+    block = model.block_of("g1")
+    keys = ["g1", "g2", "g3", "e1", "e2"]
+    assert [fold.visible(k) for k in keys] == [False, False, True, True, True]
+    assert fold.mode("g3") == SetMode("g3", "member")
+    assert fold.mode("e1") == SetMode("e1", "member", gap=True)
+    assert fold.state[("MountPhrase", block, "bottom")] == MountPhrase(
+        block, "bottom", after=diff_key("e2")
+    )
+
+
+def test_place_deferred_single_phrase_hidden_on_join():
+    """Ждавшая правка успела показаться одиночной (своя фраза) — при
+    входе в группу её фраза прячется."""
+    model, fold = _edits_model()
+    _pending(model, fold, "g1")
+    _done(model, fold, "g1", _edit("g1", lines=2))
+    _pending(model, fold, "e1")
+    _pending(model, fold, "e2")
+    _done(model, fold, "e2", _edit("e2", lines=40))
+    own = ("SetPhrase",)
+    phrases = [k for k in fold.state if k[:1] == own and k[2] == "bottom"]
+    assert any(fold.state[k].text for k in phrases)
+    _done(model, fold, "e1", _edit("e1", lines=2))
+    block = model.block_of("g1")
+    visible = [
+        k
+        for k in fold.state
+        if k[:1] == own and fold.state[k].text is not None
+    ]
+    assert visible == [("SetPhrase", block, "bottom")]

@@ -438,6 +438,8 @@ class CallTimers:
 class _Member:
     key: str
     waiting: bool
+    #: Место строки на уровне по порядку монтирования.
+    pos: int = 0
     started: bool = False
     outcome: Optional[ResultOutcome] = None
     reason: str = ""
@@ -521,7 +523,7 @@ class _Layout:
 
 
 def _accepts(group: Optional[_Block], member: _Member) -> bool:
-    """Встаёт ли законченная правка в открытую группу (решение плана 4):
+    """Встаёт ли законченная правка в группу над ней (решение плана 4):
     сбой — в любую группу правок; успешная — в группу своего глагола с
     хотя бы одной применившейся."""
     if group is None or group.kind != BlockKind.EDITS or group.pending:
@@ -549,7 +551,9 @@ class ToolBlocks:
         self._blocks: list[_Block] = []
         self._block_of: dict[str, _Block] = {}
         self._members: dict[str, _Member] = {}
-        self._open: Optional[_Block] = None
+        # Строки уровня по порядку монтирования; `None` — закрывающее
+        # событие ленты. Группу строки решает то, что стоит над ней.
+        self._order: list[Optional[_Member]] = []
         self._issued: dict[tuple, Decision] = {}
 
     # --- события ---------------------------------------------------------
@@ -557,26 +561,23 @@ class ToolBlocks:
     def member_added(
         self, call_id: str, category: DisplayCategory, *, waiting: bool
     ) -> list[Decision]:
-        """Строка вызова смонтирована: в открытую группу своего вида или
-        в новый блок."""
+        """Строка вызова смонтирована: в группу своего вида, если она
+        стоит прямо над строкой, иначе в новый блок."""
         kind = block_kind(category)
         if kind is None:
             return []
-        member = _Member(call_id, waiting=waiting)
+        member = _Member(call_id, waiting=waiting, pos=len(self._order))
+        above = self._block_above(member)
+        self._order.append(member)
         self._members[call_id] = member
-        opened = self._open
-        if kind in _GROUPED and opened is not None and opened.kind == kind:
-            block = opened
+        if kind in _GROUPED and above is not None and above.kind == kind:
+            block = above
         else:
             block = self._new_block(kind)
             # Правка встаёт в группу по результату (§6.4).
             block.pending = kind == BlockKind.EDITS
         block.members.append(member)
         self._block_of[call_id] = block
-        if kind in _GROUPED:
-            self._open = block
-        elif not (block.pending and _accepts_edits(opened)):
-            self._open = None
         return self._render(block)
 
     def started(self, call_id: str) -> list[Decision]:
@@ -604,7 +605,7 @@ class ToolBlocks:
         member.reason = reason
         member.executed = executed
         member.waiting = False
-        return self._render(self._settle(member))
+        return self._settle(member)
 
     def edit_counts(self, call_id: str, edit: BlockEdit) -> list[Decision]:
         """Запись журнала правки вызова. Подаётся до `result` того же
@@ -647,7 +648,7 @@ class ToolBlocks:
         member.interrupted = True
         member.not_started = not (started or member.started)
         member.waiting = False
-        return self._render(self._settle(member))
+        return self._settle(member)
 
     def turn_stopped(self) -> list[Decision]:
         """Ход остановлен: все блоки уровня с незавершёнными членами —
@@ -668,7 +669,8 @@ class ToolBlocks:
 
     def event_closing(self) -> list[Decision]:
         """Событие ленты не из группы закрыло открытую группу."""
-        self._open = None
+        if self._order and self._order[-1] is not None:
+            self._order.append(None)
         return []
 
     def queued_admitted(self) -> list[Decision]:
@@ -717,23 +719,46 @@ class ToolBlocks:
         self._block_of[block.key] = block
         return block
 
-    def _settle(self, member: _Member) -> _Block:
-        """Законченная правка встаёт в открытую группу или открывает свою;
-        у прочих вызовов блок не меняется."""
-        block = self._block_of[member.key]
-        if not block.pending:
-            return block
-        group = self._open
-        if _accepts(group, member):
-            self._blocks.remove(block)
-            del self._block_of[block.key]
-            group.members.append(member)
-            self._block_of[member.key] = group
-            return group
-        block.pending = False
-        block.verb = member.verb if member.outcome == "ok" else None
-        self._open = block
-        return block
+    def _block_above(self, member: _Member) -> Optional[_Block]:
+        """Блок строки, стоящей прямо над ``member``; над ней закрывающее
+        событие или ничего — `None`."""
+        above = self._order[member.pos - 1] if member.pos else None
+        return self._block_of[above.key] if above is not None else None
+
+    def _settle(self, member: _Member) -> list[Decision]:
+        """Законченная правка встаёт в группу правок прямо над ней или
+        открывает свою; строка над ней ещё не встала — ждёт её. Встав,
+        тянет за собой ждавшие правки под ней. У прочих вызовов блок не
+        меняется."""
+        out: list[Decision] = []
+        current: Optional[_Member] = member
+        while current is not None and current.done:
+            block = self._block_of[current.key]
+            above = self._block_above(current)
+            if not block.pending or (above is not None and above.pending):
+                out += self._render(block)
+                break
+            out += self._place(current, block, above)
+            nxt = current.pos + 1
+            current = self._order[nxt] if nxt < len(self._order) else None
+        return out
+
+    def _place(
+        self, member: _Member, block: _Block, above: Optional[_Block]
+    ) -> list[Decision]:
+        """Правка ``member`` из своего ждущего блока — в группу ``above``
+        (фразы ждущего блока прячутся) или в свой блок."""
+        if above is None or not _accepts(above, member):
+            block.pending = False
+            block.verb = member.verb if member.outcome == "ok" else None
+            return self._render(block)
+        out = self._phrase(block, "top", None)
+        out += self._phrase(block, "bottom", None)
+        self._blocks.remove(block)
+        del self._block_of[block.key]
+        above.members.append(member)
+        self._block_of[member.key] = above
+        return self._diff(out) + self._render(above)
 
     def _render(self, block: _Block) -> list[Decision]:
         if block.headed:
@@ -995,11 +1020,6 @@ class ToolBlocks:
         if not executed:
             return None
         return SetTimer(member.key, self._timers.get(member.key), live=False)
-
-
-def _accepts_edits(group: Optional[_Block]) -> bool:
-    """Открыта группа правок, в которую может встать идущая правка."""
-    return group is not None and group.kind == BlockKind.EDITS
 
 
 def _edit_word(member: _Member) -> str:
