@@ -270,17 +270,22 @@ async def test_live_glyph_columns_step_two_per_level(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_turn_line_sits_in_agent_bullet_column(tmp_path):
+async def test_turn_line_sits_in_agent_bullet_column(tmp_path, monkeypatch):
     """Место строки хода (§2.9): глиф индикатора в #indicator-bar — в той же
     колонке, что `●` реплики агента в #trace."""
+    from gc_tui.screens.main import TraceScreen
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
+    # Треда нет: тик опроса (250 мс) по инварианту снимает индикатор, и
+    # тест зависел бы от часов — в нагруженном прогоне тик успевал между
+    # показом и замером. Проверяется только место индикатора.
+    monkeypatch.setattr(TraceScreen, "_poll_active", lambda self: None)
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
         scr = pilot.app.screen
         scr._bar_wanted = lambda: True  # идёт работа: бар стоит (S10 §3.3)
         scr._show_thinking_indicator(state="thinking")
-        await pilot.pause()
+        await pilot.pause(0.3)  # дольше тика опроса
         bar = pilot.app.query_one("#indicator-bar")
         indicator = bar.query_one(ThinkingIndicator)
         agent = next(w for w in trace.children if isinstance(w, TraceRow))
