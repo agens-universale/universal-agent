@@ -421,7 +421,14 @@ class WebhookSurface:
         settled = status is None or status["status"] in FINAL
         if settled and not await self._aundelivered(key):
             return None if status is None else {"status": status["status"]}
-        self.registry.stop(system=key.system, task_id=key.thread)
+        try:
+            await self.registry.stop(system=key.system, task_id=key.thread)
+        except TimeoutError:
+            # Флаг стопа ход уже получил, работа снимается дольше потолка:
+            # ответ — «отменяется», не успех.
+            logger.warning(
+                "снятие своего прогона %s не уложилось в потолок", key
+            )
         threads = self.threads()
         await threads.request_cancel(key)
         if settled:

@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -159,13 +160,19 @@ def test_owner_loop_shutdown_releases_other_loop():
 
     def owner():
         async def drive():
-            asyncio.create_task(registry.ensure(KEY, turn_key="a", run=run))
+            # Keep a strong reference until shutdown can cancel the task.
+            # The loop itself only holds weak references to pending tasks.
+            task = asyncio.create_task(
+                registry.ensure(KEY, turn_key="a", run=run)
+            )
             assert await asyncio.to_thread(stop.wait, 2)
+            assert not task.done()
 
         asyncio.run(drive())  # shutdown cancels and drains the owner's task
 
     def waiter():
         assert started.wait(2)
+        gc.collect()
 
         async def drive():
             task = asyncio.create_task(

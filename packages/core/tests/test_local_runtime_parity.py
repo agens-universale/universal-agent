@@ -34,7 +34,7 @@ from parity_harness import (
 )
 
 REFERENCE = (
-    Path(__file__).parent / "fixtures/local_runtime_reference_17818896.json"
+    Path(__file__).parent / "fixtures/local_runtime_reference_320ed0b19.json"
 )
 
 #: Ключи meta, которые добавляет хранилище v2 (спека

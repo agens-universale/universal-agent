@@ -678,3 +678,52 @@ async def test_cancelled_run_records_its_inbox_boundary(monkeypatch, tmp_path):
         await stores.aclose()
     assert status["status"] == "cancelled" and status["inbox_upto"] == 1
     assert taken == [] and seen == []
+
+
+async def test_cancel_whose_stop_does_not_settle_still_cancels(
+    monkeypatch, tmp_path
+):
+    """Слияние develop: ``registry.stop`` ждёт, пока работа хода снята, с
+    потолком. Не уложилось — отмена всё равно ложится в поток ``control``,
+    ответ — «отменяется»: не ошибка и не успех."""
+    from gc_core.threads.models import CONTROL
+    from gc_core.user_stop import UserStop
+    from gc_server.webhook.registry import ActiveRun
+
+    monkeypatch.setattr("gc_core.user_stop._SETTLE_SEC", 0.05)
+    _install(monkeypatch)
+    gate = UserStop()
+    gate._settled.clear()
+    stopped: list = []
+
+    class _Executor:
+        user_stop = gate
+
+        def stop_run(self) -> None:
+            stopped.append(True)
+
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        threads = Threads(stores.threads)
+        await task_status.asubmit(
+            threads, KEY, {"id": "u1", "role": "user", "content": "x"}
+        )
+        await task_status.aset_status(
+            threads, KEY, status="running", run_id="r1"
+        )
+        surface.registry._runs["generic:t"] = ActiveRun(
+            key="generic:t",
+            system=KEY.system,
+            task_id=KEY.thread,
+            executor=_Executor(),
+            started_at=0.0,
+        )
+        reply = await surface.acancel(KEY)
+        control = await stores.threads.read_stream(KEY, CONTROL)
+    finally:
+        surface.registry._runs.clear()
+        await stores.aclose()
+    assert reply == {"status": "cancelling"}
+    assert stopped == [True]
+    assert [entry.data["type"] for entry in control] == ["cancel"]
