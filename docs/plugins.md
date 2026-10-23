@@ -183,6 +183,12 @@ argument-hint: <файл>
 - Пути к компонентам в `plugin.json` (`skills`, `commands`, `agents`, `hooks`,
   `mcpServers`) не учитываются: читаются только стандартные каталоги. Например,
   `mattpocock/skills` ставится с 0 skills.
+- Не поддерживается специфика Claude Code (сознательно, не баг): `marketplace.json`
+  и установка `плагин@маркетплейс` (ставьте через `--subdir`), хуки типов `http` /
+  `prompt` / `agent` и поля `if` / `async`, выполнение `` !`команда` `` в командах,
+  `model` у агентов, `userConfig`, LSP-серверы, output styles, OAuth для MCP.
+  `extensions` Agent Plugins (например, `com.github.awesome-copilot`) игнорируются,
+  как требует спека.
 
 ## Пример
 
