@@ -1,7 +1,7 @@
 """Палитра команд: фильтрация, ↑↓, Tab/Enter/Esc."""
 
-from gc_testkit.tui_support import tui_settings, wait_until
 import pytest
+from gc_testkit.tui_support import tui_settings, wait_until
 
 
 def test_palette_shows_all_commands_no_limit():
@@ -424,7 +424,7 @@ async def test_palette_keys_hint_has_air_above(tmp_path):
 @pytest.mark.asyncio
 async def test_long_description_row_stays_one_line(tmp_path):
     """Геометрия палитры держится на «одна команда — одна строка»: `desired_height`
-    (строки + подвал + рамка) отдаётся в main.py::_sync_trace_max_height, и трейс
+    (строки + подвал + рамка) становится min-height палитры, и трейс
     получает ровно остаток экрана. Описание, не влезающее в ширину терминала,
     переносилось на вторую строку — фактическая высота палитры оказывалась больше
     заявленной, и нижняя рамка/футер уезжали за край экрана (тем сильнее, чем
@@ -713,10 +713,9 @@ def test_cold_skills_cache_shows_no_skills():
 @pytest.mark.asyncio
 async def test_skill_rows_rendered_after_commands_in_skill_color(tmp_path):
     pytest.importorskip("textual")
-    from textual.color import Color
-
     from gc_tui import palette as _pal
     from gc_tui.app import TuiApp
+    from textual.color import Color
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
@@ -789,7 +788,9 @@ def test_command_row_selected_has_no_skill():
 
 @pytest.mark.asyncio
 async def test_palette_shows_skills_from_warmed_screen_cache(
-    tmp_path, monkeypatch, skills_warm
+    tmp_path,
+    monkeypatch,
+    skills_warm,  # noqa: ARG001  # фикстура-прогрев
 ):
     """Прод-провайдер: палитра берёт скиллы из прогретого кэша экрана."""
     pytest.importorskip("textual")

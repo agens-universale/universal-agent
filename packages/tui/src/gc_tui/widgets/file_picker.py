@@ -119,8 +119,8 @@ class FilePicker(VerticalScroll):
         докнутый footer (margin-top hint'а(1) + строка hint'а(1), при обрезанном
         индексе или обрезанном потолком строк листинге — ещё margin(1) +
         строка-подсказка(1)) + рамка .palette(2).
-        main.py::_sync_trace_max_height берёт это значение напрямую — недосчёт
-        выдавливал бы нижнюю рамку пикера за экран."""
+        `_apply_size` ставит его в min-height — недосчёт выдавливал бы нижнюю
+        рамку пикера за экран."""
         flow = len(self._entries) if self._entries else 1
         footer = 2 + (2 if self._note_text() else 0)
         return flow + footer + 2

@@ -225,13 +225,10 @@ class CommandPalette(VerticalScroll):
     @property
     def desired_height(self) -> int:
         """Честная желаемая высота контейнера (строки + докнутый подвал + рамка) —
-        та же формула, что и в `_apply_size` (min-height). Публично наружу для
-        main.py::_sync_trace_max_height: там `len(children)+2` — эвристика для
-        плоских оверлеев (SkillPicker/ArgPicker/FilePicker, где каждый ребёнок —
-        строка), но для палитры дети overlay = N строк + ОДИН докнутый
-        `.palette-footer`-контейнер (внутри — несколько строк подвала), поэтому
-        эвристика недосчитывает высоту подвала и main.py отдаёт трейсу лишнее
-        место, выдавливая нижнюю рамку палитры за экран."""
+        та же формула, что и в `_apply_size` (min-height). Считать по детям
+        нельзя: у палитры дети = N строк + ОДИН докнутый `.palette-footer`
+        (внутри — несколько строк подвала), и недосчёт подвала выдавливал
+        нижнюю рамку палитры за экран."""
         rows_count = len(self._visible_rows())
         skills_count = len(self._visible_skill_rows())
         more = 1 if self._skill_more_count() else 0

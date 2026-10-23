@@ -1,9 +1,8 @@
 """/view <query>: авто-открытие файлового пикера (Command.arg_file)."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
-
 from file_search_harness import settled
+from gc_testkit.tui_support import tui_settings
 
 
 def _mk(tmp_path):
@@ -328,8 +327,8 @@ async def test_at_segment_empty_matches_hide_picker(tmp_path):
 @pytest.mark.asyncio
 async def test_hint_has_keys_margin_and_honest_desired_height(tmp_path):
     """Hint FilePicker — докнутый footer (.palette-footer) с воздухом (.palette-keys),
-    desired_height включает строку margin (шов main.py::_sync_trace_max_height:
-    недосчёт = рамка за экраном)."""
+    desired_height включает строку margin (это min-height пикера: недосчёт =
+    рамка за экраном)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -383,7 +382,7 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path):
         inp.insert("/view agents/agent")
         await pilot.pause()
         await settled(scr._file_search)
-        # Клэмп оверлея ставит _sync_trace_max_height (call_after_refresh + poll-тик
+        # Клэмп оверлея ставит _sync_chrome_caps (call_after_refresh + poll-тик
         # экрана ~0.25 с): ассерты ниже про раскладку, ждём дольше одного тика.
         await pilot.pause(0.3)
         picker = scr._file_picker

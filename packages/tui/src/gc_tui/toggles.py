@@ -449,9 +449,7 @@ def _cached_assembly_error(app: Any, name: str) -> str:
     (`profile_picker_hint`): какая из них первой спросила про имя, та и платит
     единственную полную сборку (`probe_profile_assembly` → `load_settings`,
     ~6 мс), вторая берёт готовый ответ. Без этого хинт пересобирал конфиг
-    заново на каждый highlight и на каждый тик поллинга главного экрана
-    (`ArgPicker.desired_height`, 0.25 с) — 4 раза в секунду на UI-потоке, пока
-    список просто открыт, никто не нажал ни одной клавиши."""
+    заново на каждый highlight."""
     key = _profile_verdict_key(app, name)
     cache: Dict[str, tuple] = (
         getattr(app, "_profile_assembly_cache", None) or {}
@@ -488,9 +486,8 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     спросил. Сам этот провайдер зовётся один раз на открытие (`main.py`,
     ветка `if self._arg_picker is None`) — стрелки и фильтр идут через
     `set_filter` по готовым опциям; хинт, в отличие от них, спрашивается на
-    каждый highlight И на каждый тик поллинга (`ArgPicker.desired_height`) —
-    без общего кэша с этим провайдером он звал бы пробу заново 4 раза в
-    секунду, пока список просто открыт."""
+    каждый highlight — без общего кэша с этим провайдером он звал бы пробу
+    заново на каждом."""
     refs = _discovered_profiles(app)
     effective = runtime_of(_effective_settings(app)).active_profile or ""
     base_pointer = runtime_of(_global_settings(app)).active_profile or ""
