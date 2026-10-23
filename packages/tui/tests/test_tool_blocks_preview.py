@@ -548,7 +548,6 @@ def test_trace_render_rows_only_through_model():
     names = {
         "set_result",
         "mark_interrupted",
-        "set_waiting",
         "set_active",
         "pause",
         "resume",

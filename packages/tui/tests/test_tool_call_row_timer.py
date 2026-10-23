@@ -82,15 +82,6 @@ async def test_set_active_starts_timer():
 
 
 @pytest.mark.asyncio
-async def test_set_waiting_stops_timer():
-    async with _make_app().run_test() as pilot:
-        row = pilot.app.query_one(ToolCallRow)
-        row.set_waiting()
-        await pilot.pause()
-        assert row._pulse_timer is None
-
-
-@pytest.mark.asyncio
 async def test_pause_stops_timer_and_resume_restarts():
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -119,16 +110,6 @@ async def test_pause_shows_pause_glyph_and_resume_restores():
         row.resume()
         await pilot.pause()
         assert "●" in row._prefix_static.content.plain
-
-
-@pytest.mark.asyncio
-async def test_waiting_then_active_keeps_timer():
-    async with _make_app().run_test() as pilot:
-        row = pilot.app.query_one(ToolCallRow)
-        row.set_waiting()
-        row.set_active()
-        await pilot.pause()
-        assert row._pulse_timer is not None
 
 
 @pytest.mark.asyncio

@@ -54,14 +54,6 @@ def test_set_active_promotes_waiting_to_running():
     assert "·" in str(row._render_content())  # elapsed · Ns
 
 
-def test_set_waiting_demotes_running():
-    row = ToolCallRow(call_id="c1", label="fs_read_file", target="x")
-    assert "●" in str(row._render_prefix())
-    row.set_waiting()
-    assert "•" in str(row._render_prefix())
-    assert "прервано" not in str(row._render_content())
-
-
 def test_refresh_elapsed_noop_while_waiting():
     row = ToolCallRow(
         call_id="c1",
@@ -71,13 +63,6 @@ def test_refresh_elapsed_noop_while_waiting():
     )
     row.refresh_running_elapsed()
     assert "· 0с" not in str(row._render_content())
-
-
-def test_set_waiting_noop_after_result():
-    row = ToolCallRow(call_id="c1", label="t", target="x")
-    row.set_result(summary="ok", outcome="ok")
-    row.set_waiting()
-    assert "●" in str(row._render_prefix())
 
 
 def test_set_live_status_on_running_row():

@@ -36,8 +36,8 @@ get_selection()->None) — иначе в буфер попадала бы его
 блоку: своего хвоста нет, раскрытие задаёт блок (`set_expanded`), долю
 логических строк — модель (`set_collapsed_max_lines`), колонку — класс
 `diff-single` / `diff-member` (`set_column`); всё без перемонтирования.
-Строки не режутся по рядам: на узком окне превью выше, а скрытое
-(`hidden_lines`) — ровно строки сверх доли, то же `N`, что у модели.
+Строки не режутся по рядам: на узком окне превью выше, а скрытое — ровно
+строки сверх доли, то же `N`, что у модели.
 """
 
 from __future__ import annotations
@@ -175,11 +175,6 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         self._expanded = expanded
         if self.is_mounted:
             self._sync_body()
-
-    def hidden_lines(self) -> int:
-        """Логических строк за пределами свёрнутого превью."""
-        collapsed = self._diff_render(expanded=False)
-        return collapsed.total_lines - collapsed.shown_lines
 
     # --- сборка ------------------------------------------------------------
 

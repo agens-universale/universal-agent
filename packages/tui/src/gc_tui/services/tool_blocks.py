@@ -136,11 +136,6 @@ def _failure_parts(errors: int, refusals: int) -> Parts:
     return tuple(parts)
 
 
-def failure_tail(errors: int, refusals: int) -> str:
-    """Счётчик сбоев заголовка: ` · 1 ошибка · 2 отказа`."""
-    return "".join(text for text, _ in _failure_parts(errors, refusals))
-
-
 def edit_verb(op: Optional[str], *, failed: bool) -> str:
     """Глагол правки тула по результату (§6.1): сбой или отказ —
     `Edit`; создан файл — `Added`; иначе `Edited`. Идущая — `Editing`

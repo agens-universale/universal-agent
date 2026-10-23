@@ -689,7 +689,6 @@ _ROW_STATE_CALLS = frozenset(
     {
         "set_result",
         "mark_interrupted",
-        "set_waiting",
         "set_active",
         "pause",
         "resume",

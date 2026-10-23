@@ -124,5 +124,4 @@ def test_diff_block_for_is_under_block():
         _rec(), rows=6, column="member", compact=False, event_no=3
     )
     assert block.has_class("diff-member")
-    assert block.hidden_lines() == 0
     assert block.in_block is True

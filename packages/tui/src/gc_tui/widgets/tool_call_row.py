@@ -477,17 +477,6 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self.set_class(bool(bodies), "has-consequence")
         self._consequence_slot.set_bodies(bodies)
 
-    def set_waiting(self) -> None:
-        """Перевести в waiting (·, без elapsed). После result/interrupt — no-op."""
-        if self._result is not None or self._interrupted:
-            return
-        if self._waiting:
-            return
-        self._waiting = True
-        self._live_status = None
-        self._sync_pulse()
-        self._update()
-
     def set_active(self) -> None:
         """Снять waiting → running (● + elapsed). После result/interrupt — no-op."""
         if self._result is not None or self._interrupted:

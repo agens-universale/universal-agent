@@ -570,7 +570,6 @@ async def test_set_collapsed_max_lines_rerenders_body(monkeypatch):
         await pilot.pause()
         assert _body_lines(app) == 6
         assert app.query_one(".block-body", Static) is body
-        assert block.hidden_lines() == 34
         before = len(calls)
         block.set_collapsed_max_lines(6)
         assert len(calls) == before
@@ -609,7 +608,6 @@ async def test_in_block_compact_body_waits_for_expand():
     app = _Host(block)
     async with app.run_test(size=(70, 60)) as pilot:
         assert not app.query(".block-body")
-        assert block.hidden_lines() == 40
         block.set_expanded(True)
         await pilot.pause()
         assert _body_lines(app) == 40
@@ -620,7 +618,8 @@ async def test_short_in_block_hides_nothing():
     block = _in_block(_record(SHORT_HUNKS))
     app = _Host(block)
     async with app.run_test(size=(70, 20)):
-        assert block.hidden_lines() == 0
+        assert _body_lines(app) == 3  # все три строки диффа
+        assert not app.query(".diff-more")
 
 
 def _wide_hunks(count: int = 8, width: int = 200) -> str:
@@ -647,7 +646,6 @@ async def test_in_block_budget_counts_logical_lines():
         await pilot.pause()
         assert _numbered_rows(app) == 6
         assert _body_lines(app) > 6
-        assert block.hidden_lines() == 2
 
 
 @pytest.mark.asyncio
@@ -657,7 +655,6 @@ async def test_in_block_long_lines_within_share_hide_nothing():
     async with app.run_test(size=(40, 80)) as pilot:
         await pilot.pause()
         assert _numbered_rows(app) == 8
-        assert block.hidden_lines() == 0
 
 
 @pytest.mark.asyncio

@@ -36,7 +36,6 @@ from gc_tui.services.tool_blocks import (
     diff_key,
     diff_rows,
     edit_verb,
-    failure_tail,
     header_word,
     more_lines_phrase,
     more_phrase,
@@ -146,14 +145,6 @@ def test_phrases_and_plurals():
     assert more_lines_phrase(3) == "+ ещё 3 строки"
     assert more_lines_phrase(14) == "+ ещё 14 строк"
     assert COLLAPSE_PHRASE == "− свернуть"
-    assert failure_tail(1, 0) == " · 1 ошибка"
-    assert failure_tail(2, 0) == " · 2 ошибки"
-    assert failure_tail(5, 0) == " · 5 ошибок"
-    assert failure_tail(0, 1) == " · 1 отказ"
-    assert failure_tail(0, 2) == " · 2 отказа"
-    assert failure_tail(0, 5) == " · 5 отказов"
-    assert failure_tail(1, 1) == " · 1 ошибка · 1 отказ"
-    assert failure_tail(0, 0) == ""
 
 
 def test_block_glyph_rule():
