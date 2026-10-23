@@ -554,6 +554,8 @@ async def test_stop_mid_exploring(tmp_path):
         await _tail(pilot, thread, _read(1), _read(2))
         scr._cmd_stop()
         await pilot.pause()
+        scr._poll_active()  # тик после стопа: поток жив, записи стопа нет
+        assert _row(scr, "r1")._block_consequence is None
         thread.stop()
         scr._poll_active()  # запись стопа дочитана, поток ещё жив
         (line,) = scr.query(TurnLine)

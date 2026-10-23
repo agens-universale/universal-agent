@@ -5929,9 +5929,12 @@ class TraceScreen(Screen):
         # runner / ask_human). Любой НЕ-live статус — стоп, обрыв runner'а, resume
         # брошенного треда или неизвестный исход (бейдж None) → осиротевшие вызовы
         # финализируются «прервано». Критерий «жива» = бейдж среди live-состояний.
-        if self._active_calls and self._task_status_badge() not in (
-            "[running]",
-            "[asking]",
+        # Остановленный поток ещё дорабатывает — ждём его выхода: перевод
+        # членов и строка «■ Отменено» встают одним тиком выхода (§2.2).
+        if (
+            self._active_calls
+            and not self._stopping_alive()
+            and self._task_status_badge() not in ("[running]", "[asking]")
         ):
             view = self._top_blocks()
             for row in self._active_calls.values():
