@@ -221,3 +221,44 @@ async def test_stale_error_does_not_leak_into_next_run_outcome(tmp_path):
 
         lines = list(scr.query_one("#trace").query(TurnLine))
         assert [w.word for w in lines] == ["failed", "completed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "stop_requested", "word"),
+    [
+        ("completed", False, "completed"),
+        ("completed", True, "cancelled"),
+        ("stopped", False, "cancelled"),
+        (None, False, None),
+    ],
+)
+async def test_idle_status_word_guards_direct_stop(
+    tmp_path, status, stop_requested, word
+):
+    """Исход без записи — по статусу сессии; прямой стоп в обход
+    `_cmd_stop` (статус ещё «completed») — «cancelled»."""
+    import json
+    from types import SimpleNamespace
+
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.app import TuiApp
+
+    tid = "qerr000000000000000000000000004d"
+    meta = {"thread_id": tid, "system_id": "cli"}
+    if status is not None:
+        meta["tui"] = {"status": status}
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid, is_resume=True)
+        runner = SimpleNamespace(_stop_requested=stop_requested)
+        assert scr._idle_status_word(runner) == word
