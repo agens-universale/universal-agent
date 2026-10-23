@@ -498,8 +498,8 @@ class ToolBlocksView:
             row.set_edit_tail(parts_text(d.parts))
 
     def _set_diff_share(self, d: SetDiffShare) -> None:
-        """Дифф файла: смонтировать при первой доле, дальше — перерасчёт
-        доли и колонки без перемонтирования."""
+        """Дифф файла: смонтировать при первом решении, дальше — раскрытие
+        и колонка без перемонтирования."""
         key = diff_key(d.key)
         diff = self._widgets.get(key)
         if diff is None:

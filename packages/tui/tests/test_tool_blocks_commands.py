@@ -430,9 +430,9 @@ async def test_ran_files_one_phrase(tmp_path):
             line.startswith("    Added new.py (+10 −0)") for line in lines
         )
         assert "    Deleted gone.py" in lines
-        # Одна фраза — в самом низу: 7 строк вывода, 6 скрытых строк
-        # диффа new.py (доля 4 из 10) и 2 строки скрытого a.py.
-        assert lines[-1] == "    + ещё 15 строк"
+        # Одна фраза — в самом низу: 7 строк вывода и 2 строки скрытого
+        # a.py; дифф new.py (10 изменённых) влез в превью целиком.
+        assert lines[-1] == "    + ещё 9 строк"
         assert sum("+ ещё" in line for line in lines) == 1
         trace = scr.query_one("#trace", VerticalScroll)
         files = [
@@ -443,6 +443,27 @@ async def test_ran_files_one_phrase(tmp_path):
         assert [r.styles.margin.top for r in files] == [0, 1, 1]
         diffs = [d for d in trace.query(DiffBlock) if d.display]
         assert len(diffs) == 2
+
+
+@pytest.mark.asyncio
+async def test_ran_file_preview_is_changed_lines_only(tmp_path):
+    """Файл под `Ran` — правило превью то же (решение 2026-10-23): в
+    свёрнутом виде только изменённые строки, фраза считает и контекст,
+    раскрытие показывает дифф целиком."""
+    thread = _Thread(tmp_path)
+    hunks = "@@ -1,7 +1,7 @@\n a\n b\n c\n-old\n+new\n e\n f\n g\n"
+    _journal(tmp_path, _shell_record("a.py", hunks=hunks))
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(pilot, thread, _run("x1", "make"), _out("x1", ""))
+        lines = _rows(pilot)
+        assert lines[3:] == [
+            "      4 -old",
+            "      4 +new",
+            "    + ещё 6 строк",
+        ]
+        await _toggle(pilot)
+        assert "      1  a" in _rows(pilot)
 
 
 @pytest.mark.asyncio

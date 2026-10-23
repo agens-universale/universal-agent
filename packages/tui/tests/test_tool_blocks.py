@@ -34,7 +34,6 @@ from gc_tui.services.tool_blocks import (
     command_file_verb,
     counts_text,
     diff_key,
-    diff_rows,
     edit_verb,
     header_word,
     more_lines_phrase,
@@ -742,12 +741,16 @@ def test_memory_closed_by_other_kind():
 # --- правки (Task 8) -----------------------------------------------------
 
 
-def _edits_model(preview: int = 12):
+def _edits_model(preview: int = 3):
     timers = CallTimers()
     return ToolBlocks(timers, diff_preview=preview), _Fold()
 
 
-def _edit(key, *, verb="Edited", add=1, rem=0, lines=10, size=None):
+def _edit(
+    key, *, verb="Edited", add=1, rem=0, lines=10, changed=None, size=None
+):
+    """Правка: ``lines`` строк диффа с контекстом, из них ``changed``
+    изменённых (`None` — все)."""
     return BlockEdit(
         key=key,
         path=f"{key}.py",
@@ -755,6 +758,7 @@ def _edit(key, *, verb="Edited", add=1, rem=0, lines=10, size=None):
         add=add,
         rem=rem,
         diff_lines=lines,
+        changed_lines=lines if changed is None else changed,
         size_bytes=size,
         has_record=True,
     )
@@ -795,18 +799,6 @@ def test_command_file_verb(op, verb):
     assert command_file_verb(op) == verb
 
 
-@pytest.mark.parametrize(
-    "n,preview,rows",
-    [(1, 12, 12), (2, 12, 6), (3, 12, 4), (4, 12, 3), (10, 12, 3)],
-)
-def test_diff_rows(n, preview, rows):
-    assert diff_rows(n, preview) == rows
-
-
-def test_diff_rows_preview_30():
-    assert diff_rows(2, 30) == 15
-
-
 def test_counts_text():
     assert counts_text(4, 2) == (
         (" (", "ink"),
@@ -844,8 +836,8 @@ def test_single_edit_share():
     _apply(model, fold, "a", _edit("a", verb="Added", add=37, lines=37))
     assert fold.word("a") == "Added"
     assert fold.tail("a") == " (+37 −0)"
-    assert fold.share("a") == SetDiffShare("a", 12, "single")
-    assert fold.phrase("block:0", "bottom") == "+ ещё 25 строк"
+    assert fold.share("a") == SetDiffShare("a", 3, "single")
+    assert fold.phrase("block:0", "bottom") == "+ ещё 34 строки"
     assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
         "block:0", "bottom", after=diff_key("a")
     )
@@ -902,11 +894,40 @@ def test_edit_comes_with_result():
 
 
 def test_single_edit_fits_no_phrase():
+    """Раскрытие не добавит ни строки — фразы нет, пробел ничего не
+    делает."""
     model, fold = _edits_model()
-    _apply(model, fold, "a", _edit("a", lines=5))
-    assert fold.share("a") == SetDiffShare("a", 12, "single")
+    _apply(model, fold, "a", _edit("a", lines=2))
+    assert fold.share("a") == SetDiffShare("a", 3, "single")
     assert ("SetPhrase", "block:0", "bottom") not in fold.state
     assert model.toggle("a") == []
+
+
+def test_one_changed_line_phrase_counts_context():
+    """Одна изменённая строка — два ряда (− и +); фраза — строки, которые
+    добавит раскрытие, контекст в их числе (решение 2026-10-23)."""
+    model, fold = _edits_model()
+    _apply(model, fold, "a", _edit("a", lines=8, changed=2))
+    assert fold.share("a") == SetDiffShare("a", 3, "single")
+    assert fold.phrase("block:0", "bottom") == "+ ещё 6 строк"
+    fold(model.toggle("a"))
+    assert fold.share("a") == SetDiffShare("a", None, "single")
+
+
+def test_five_changed_lines_show_three():
+    model, fold = _edits_model()
+    _apply(model, fold, "a", _edit("a", lines=11, changed=5))
+    assert fold.phrase("block:0", "bottom") == "+ ещё 8 строк"
+
+
+def test_preview_setting_is_changed_lines_per_file():
+    """`trace_inline_max_lines` — изменённых строк на файл, и в блоке
+    тоже: доли нет."""
+    model, fold = _edits_model(preview=5)
+    for key in "abc":
+        _apply(model, fold, key, _edit(key, lines=12, changed=6))
+    assert [fold.share(k).rows for k in "abc"] == [5, 5, 5]
+    assert fold.phrase("block:0", "bottom") == "+ ещё 21 строка"
 
 
 def test_single_to_block_transition():
@@ -926,21 +947,29 @@ def test_single_to_block_transition():
     assert MountHeader("block:0", before="a") in model_out
     assert SetMode("a", "member", lead=True) in model_out
     assert SetMode("b", "member", gap=True) in model_out
-    assert fold.share("a") == SetDiffShare("a", 6, "member")
-    assert fold.share("b") == SetDiffShare("b", 6, "member")
+    assert fold.share("a") == SetDiffShare("a", 3, "member")
+    assert fold.share("b") == SetDiffShare("b", 3, "member")
     assert fold.head_text() == "Edited 2 файла (+5 −3)"
     assert fold.header().glyph == "ok"
     assert fold.tail("a") == " (+4 −2)"
 
 
-def test_three_files_share_4():
+def test_three_files_each_full_preview():
     model, fold = _edits_model()
     for key in "abc":
-        _apply(model, fold, key, _edit(key, lines=4))
-    assert [fold.share(k).rows for k in "abc"] == [4, 4, 4]
+        _apply(model, fold, key, _edit(key, lines=7, changed=3))
+    assert [fold.share(k).rows for k in "abc"] == [3, 3, 3]
     assert [fold.mode(k).gap for k in "abc"] == [False, True, True]
     assert [fold.mode(k).lead for k in "abc"] == [True, False, False]
     assert fold.head_text() == "Edited 3 файла (+3 −0)"
+    # Контекст каждого файла (3 × 4) — то, что добавит раскрытие.
+    assert fold.phrase("block:0", "bottom") == "+ ещё 12 строк"
+
+
+def test_group_without_hidden_lines_has_no_phrase():
+    model, fold = _edits_model()
+    for key in "abc":
+        _apply(model, fold, key, _edit(key, lines=2))
     assert ("SetPhrase", "block:0", "bottom") not in fold.state
 
 
@@ -1066,11 +1095,29 @@ def _files(*specs):
             add=lines,
             rem=0,
             diff_lines=lines,
+            changed_lines=lines,
             size_bytes=None,
             has_record=True,
         )
         for i, (verb, lines) in enumerate(specs)
     ]
+
+
+def test_ran_files_phrase_counts_context():
+    """Файл под `Ran` — то же правило: превью из изменённых строк, фраза
+    считает и контекст."""
+    from dataclasses import replace
+
+    model, fold = _edits_model()
+    _ran(model, fold)
+    files = [replace(f, changed_lines=2) for f in _files(("Edited", 8))]
+    fold(
+        model.ran_parts(
+            "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
+        )
+    )
+    assert fold.share("x:f0") == SetDiffShare("x:f0", 3, "member")
+    assert fold.phrase("block:0", "bottom") == "+ ещё 6 строк"
 
 
 def test_ran_parts_command_only():
@@ -1261,7 +1308,7 @@ def test_place_results_out_of_order_keep_mount_order():
     assert fold.state[("MountPhrase", block, "bottom")] == MountPhrase(
         block, "bottom", after=diff_key("e2")
     )
-    assert fold.phrase(block, "bottom") == "+ ещё 18 строк"
+    assert fold.phrase(block, "bottom") == "+ ещё 21 строка"
     assert fold.head_text(block) == "Edited 3 файла (+3 −0)"
 
 
@@ -1308,24 +1355,18 @@ def test_place_deferred_single_phrase_hidden_on_join():
     assert visible == [("SetPhrase", block, "bottom")]
 
 
-# --- доля диффа: бинарь применился (макет p4.py, исключён только Deleted)
+# --- превью не зависит от числа файлов (решение 2026-10-23) ---------------
 
 
-def test_share_counts_binary_as_applied():
+def test_preview_ignores_binary_and_failed_neighbours():
     model, fold = _edits_model()
     _apply(model, fold, "a", _edit("a", lines=20))
     _apply(model, fold, "img", _edit("img", lines=0, size=512))
-    assert fold.share("a") == SetDiffShare("a", 6, "member")
-
-
-def test_share_skips_failed_edit():
-    model, fold = _edits_model()
-    _apply(model, fold, "a", _edit("a", lines=20))
     _apply(model, fold, "b", outcome="error", reason="не найден")
-    assert fold.share("a") == SetDiffShare("a", 12, "member")
+    assert fold.share("a") == SetDiffShare("a", 3, "member")
 
 
-def test_ran_share_counts_binary_not_deleted():
+def test_ran_preview_ignores_binary_and_deleted():
     model, fold = _edits_model()
     _ran(model, fold)
     files = [
@@ -1337,6 +1378,7 @@ def test_ran_share_counts_binary_not_deleted():
             add=0,
             rem=0,
             diff_lines=0,
+            changed_lines=0,
             size_bytes=12,
             has_record=True,
         ),
@@ -1347,6 +1389,7 @@ def test_ran_share_counts_binary_not_deleted():
             add=0,
             rem=0,
             diff_lines=0,
+            changed_lines=0,
             size_bytes=None,
             has_record=True,
         ),
@@ -1356,7 +1399,7 @@ def test_ran_share_counts_binary_not_deleted():
             "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
         )
     )
-    assert fold.share("x:f0") == SetDiffShare("x:f0", 6, "member")
+    assert fold.share("x:f0") == SetDiffShare("x:f0", 3, "member")
 
 
 def test_not_started_result_has_no_timer():

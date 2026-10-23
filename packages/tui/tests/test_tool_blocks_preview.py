@@ -167,7 +167,9 @@ def _calls() -> dict:
 
 
 def _hunks(n: int) -> str:
-    return f"@@ -0,0 +1,{n} @@\n" + "".join(f"+v{i}\n" for i in range(n))
+    """``n`` добавленных строк между двумя строками контекста."""
+    body = "".join(f"+v{i}\n" for i in range(n))
+    return f"@@ -1,2 +1,{n + 2} @@\n ctx\n{body} ctx\n"
 
 
 def _journal(tmp_path) -> None:
@@ -435,6 +437,8 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert any("Edited 3 файла (+18 −0)" in t for t in texts)
     assert any(t.startswith("     Added gen.py (+4 −0)") for t in texts)
     assert any("Agent  Worker" in t for t in texts)
+    # Свёрнутые диффы — только изменённые строки, контекста нет.
+    assert not any(t.endswith(" ctx") for t in texts)
     ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
     assert texts[ran + 1 : ran + 4] == [
         "   └ код выхода 1",
@@ -560,7 +564,7 @@ async def test_preview_old_turn_compact(tmp_path):
         diffs = list(preview.query(DiffBlock))
         assert [bool(d.query(".block-body")) for d in diffs] == [False, True]
         texts = [text for text, _ in _frame(pilot)]
-        assert "     + ещё 5 строк" in texts
+        assert "     + ещё 7 строк" in texts
 
 
 @pytest.mark.asyncio

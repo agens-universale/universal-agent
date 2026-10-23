@@ -883,3 +883,55 @@ def test_crlf_line_endings_are_not_line_content():
     filled = [r for r in rows if r[2:3] in ("+", "-")]
     assert len(filled) == 3
     assert len({len(r) for r in filled}) == 1, filled
+
+
+# --- свёрнутое превью под блоком ленты: только изменённые строки ----------
+# (решение владельца 2026-10-23, спека P4 §6.3)
+
+CTX_HUNKS = (
+    "--- \n+++ \n"
+    "@@ -1,7 +1,7 @@\n a\n b\n c\n-d\n+D\n e\n f\n g\n"
+    "@@ -40,5 +40,6 @@\n x\n y\n-z1\n-z2\n+Z1\n+Z2\n+Z3\n w\n"
+)
+
+
+def _shown(render) -> list[str]:
+    return [row.rstrip() for row in render.text.plain.split("\n")]
+
+
+def test_changed_only_drops_context():
+    render = render_hunks(CTX_HUNKS, path="a.txt", changed_only=True)
+    assert _shown(render) == [
+        " 4 -d",
+        " 4 +D",
+        " ⋮",
+        "42 -z1",
+        "43 -z2",
+        "42 +Z1",
+        "43 +Z2",
+        "44 +Z3",
+    ]
+
+
+def test_changed_only_budget_counts_changed_lines():
+    render = render_hunks(
+        CTX_HUNKS, path="a.txt", changed_only=True, max_lines=3, logical=True
+    )
+    assert _shown(render) == [" 4 -d", " 4 +D", " ⋮", "42 -z1"]
+    assert render.shown_lines == 3
+
+
+def test_changed_only_gutter_matches_full_body():
+    """Колонка номеров — по всему телу: раскрытие её не сдвигает."""
+    short = (
+        "--- \n+++ \n@@ -1,3 +1,3 @@\n-a\n+b\n c\n@@ -99,2 +99,2 @@\n x\n y\n"
+    )
+    render = render_hunks(short, path="a.txt", changed_only=True)
+    assert _shown(render) == ["  1 -a", "  1 +b"]
+
+
+def test_diff_changed_count():
+    from gc_tui.services.diff_render import diff_changed_count
+
+    assert diff_changed_count(CTX_HUNKS) == 7
+    assert diff_changed_count("") == 0

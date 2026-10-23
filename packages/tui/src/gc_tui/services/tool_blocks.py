@@ -36,8 +36,6 @@ WINDOW = 3
 OUTPUT_PREVIEW_LINES = 3
 #: Строк команды `Ran` в свёрнутом виде: первая в строке и продолжение.
 COMMAND_PREVIEW_LINES = 3
-#: Экранных рядов диффа на файл в блоке правок — не меньше.
-MIN_DIFF_ROWS_PER_FILE = 3
 
 COLLAPSE_PHRASE = "− свернуть"
 #: Ключ окна субагента в модели его уровня (спека §7): фраза окна
@@ -171,14 +169,6 @@ def command_file_verb(op: Optional[str]) -> str:
     return {"create": "Added", "delete": "Deleted"}.get(op or "", "Edited")
 
 
-def diff_rows(n_applied: int, preview: int) -> int:
-    """Экранных рядов диффа на файл (§6.3): одиночная правка — `preview`,
-    блок из `n` файлов — `max(3, preview // n)`."""
-    if n_applied <= 1:
-        return preview
-    return max(MIN_DIFF_ROWS_PER_FILE, preview // n_applied)
-
-
 def counts_text(add: int, rem: int) -> Parts:
     """Счётчики правки ` (+a −r)` — всегда обе части, нулевая тоже;
     скобки — цветом объекта слева (`INK`)."""
@@ -220,8 +210,11 @@ class BlockEdit:
     verb: str
     add: int
     rem: int
-    #: Логических строк диффа; 0 — диффа нет (бинарь, удаление).
+    #: Логических строк диффа с контекстом; 0 — диффа нет (бинарь,
+    #: удаление).
     diff_lines: int
+    #: Из них изменённых (`+` и `-`): из них свёрнутое превью (§6.3).
+    changed_lines: int
     size_bytes: Optional[int]
     has_record: bool
     #: Что кладёт в буфер ❐ строки файла; пусто — кнопки нет.
@@ -250,6 +243,10 @@ def _edit_tail(edit: Optional[BlockEdit]) -> Parts:
 
 def _lines(edit: Optional[BlockEdit]) -> int:
     return edit.diff_lines if edit is not None and edit.has_diff else 0
+
+
+def _changed(edit: Optional[BlockEdit]) -> int:
+    return edit.changed_lines if edit is not None and edit.has_diff else 0
 
 
 # --- решения -------------------------------------------------------------
@@ -397,8 +394,9 @@ class SetEditTail:
 
 @dataclass(frozen=True)
 class SetDiffShare:
-    """Дифф файла: ``rows`` логических строк превью (`None` — целиком) в
-    колонке ``column``. Смонтировать при первом решении."""
+    """Дифф файла: ``rows`` изменённых строк превью (`None` — раскрыт,
+    целиком с контекстом) в колонке ``column``. Смонтировать при первом
+    решении."""
 
     key: str
     rows: Optional[int]
@@ -545,18 +543,21 @@ class _RanParts:
 
 @dataclass(frozen=True)
 class _File:
-    """Файл блока для окна и доли: строк диффа и применился ли (входит
-    в `n` формулы §6.3; упавшие и `Deleted` — нет); у компактного тело
-    не показано — скрыты все строки."""
+    """Файл блока для окна и счёта скрытого: строк диффа с контекстом и
+    изменённых из них; у компактного тело не показано — скрыты все
+    строки."""
 
     key: str
     lines: int
-    applied: bool
+    changed: int
     compact: bool = False
 
     def hidden(self, rows: int) -> int:
-        """Строк сверх показанного превью в ``rows`` строк."""
-        return self.lines if self.compact else max(0, self.lines - rows)
+        """Строк, которые добавит раскрытие: превью — первые ``rows``
+        изменённых, раскрытый — весь дифф с контекстом (§6.3)."""
+        if self.compact:
+            return self.lines
+        return self.lines - min(self.changed, rows)
 
 
 @dataclass(frozen=True)
@@ -564,7 +565,8 @@ class _Layout:
     """Окно файлов блока и счёт скрытого."""
 
     window: tuple[str, ...]
-    #: Рядов диффа на видимый файл; `None` — раскрыт, целиком.
+    #: Изменённых строк превью на видимый файл; `None` — раскрыт,
+    #: целиком.
     rows: Optional[int]
     #: Скрытых файлов над окном сейчас (`… ещё M`).
     more: int
@@ -587,7 +589,7 @@ def _accepts(group: Optional[_Block], member: _Member) -> bool:
 class ToolBlocks:
     """Модель блоков одного уровня ленты: верхнего или субагента.
 
-    ``diff_preview`` — логических строк превью диффа одиночной правки
+    ``diff_preview`` — изменённых строк свёрнутого превью диффа на файл
     (`agent_edits.trace_inline_max_lines`). ``agent_window`` — уровень
     субагента: окно последних `WINDOW` событий (блок — одно событие), над
     ним `└ … ещё N`; строка видна, если видна и в своём блоке, и в окне
@@ -977,10 +979,9 @@ class ToolBlocks:
         extra_lines: int = 0,
         extra_more: int = 0,
     ) -> _Layout:
-        """Окно из последних `WINDOW` файлов, доля диффа (§6.3) — по
-        применившимся, бинарь в их числе — и счёт скрытого: строки видимых
-        сверх доли и все строки скрытых."""
-        rows = diff_rows(sum(f.applied for f in files), self._preview)
+        """Окно из последних `WINDOW` файлов и счёт скрытого (§6.3):
+        строки, которые раскрытие добавит видимым, и все строки скрытых."""
+        rows = self._preview
         tail = files[-WINDOW:]
         in_tail = {f.key for f in tail}
         lines = extra_lines + sum(f.hidden(rows) for f in tail)
@@ -998,7 +999,7 @@ class ToolBlocks:
             _File(
                 m.key,
                 _lines(m.applied),
-                m.outcome == "ok",
+                _changed(m.applied),
                 m.applied is not None and m.applied.compact,
             )
             for m in block.members
@@ -1010,7 +1011,7 @@ class ToolBlocks:
         assert parts is not None
         return self._layout(
             [
-                _File(f.key, _lines(f), f.verb != "Deleted", f.compact)
+                _File(f.key, _lines(f), _changed(f), f.compact)
                 for f in parts.files
             ],
             expanded=block.expanded,
@@ -1272,7 +1273,7 @@ def _file_parts(
     layout: _Layout,
     column: DiffColumn,
 ) -> list[Decision]:
-    """Хвост файла и доля диффа видимому файлу; скрытому дифф не
+    """Хвост файла и превью диффа видимому файлу; скрытому дифф не
     монтируется до первого раскрытия."""
     out: list[Decision] = [SetEditTail(key, _edit_tail(edit))]
     if edit is not None and edit.has_diff and key in layout.window:

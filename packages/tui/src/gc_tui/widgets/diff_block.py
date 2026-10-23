@@ -33,11 +33,11 @@ get_selection()->None) — иначе в буфер попадала бы его
   нём номера строк, маркеры и хвостовые пробелы фоновой заливки.
 
 Под блоком ленты (`in_block=True`, спека P4 §5, §6.3, §6.4) дифф подчиняется
-блоку: своего хвоста нет, раскрытие задаёт блок (`set_expanded`), долю
-логических строк — модель (`set_collapsed_max_lines`), колонку — класс
+блоку: своего хвоста нет, раскрытие задаёт блок (`set_expanded`), число
+изменённых строк превью — модель (`set_collapsed_max_lines`), колонку — класс
 `diff-single` / `diff-member` (`set_column`); всё без перемонтирования.
-Строки не режутся по рядам: на узком окне превью выше, а скрытое — ровно
-строки сверх доли, то же `N`, что у модели.
+Свёрнутый — только первые изменённые строки, без контекста; раскрытый — дифф
+журнала целиком. Строки не режутся по рядам: на узком окне превью выше.
 """
 
 from __future__ import annotations
@@ -154,7 +154,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         return self._in_block
 
     def set_collapsed_max_lines(self, n: int) -> None:
-        """Новая доля строк свёрнутого тела; тот же `n` — без перерасчёта.
+        """Новый бюджет строк свёрнутого тела; тот же `n` — без перерасчёта.
         Компактный блок держит тело пустым до раскрытия."""
         n = 0 if self._compact else n
         if n == self._collapsed_max_lines:
@@ -169,7 +169,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         self.set_class(column == "member", "diff-member")
 
     def set_expanded(self, expanded: bool) -> None:
-        """Раскрытие задаёт блок: всё тело или доля."""
+        """Раскрытие задаёт блок: весь дифф или превью."""
         if expanded == self._expanded:
             return
         self._expanded = expanded
@@ -236,6 +236,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
                 wrap=True,
                 min_gutter=_BLOCK_GUTTER if self._in_block else 1,
                 logical=self._in_block,
+                changed_only=self._in_block and not expanded,
             )
             self._cache[key] = cached
         return cached

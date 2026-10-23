@@ -76,6 +76,7 @@ _SYNTAX_MAX_LINES = 400
 # сосед по идее, `_INTRALINE_MAX_LINE_CHARS`, стоит на 1000.
 _SYNTAX_MAX_LINE_CHARS = 2000
 _HUNK_SEPARATOR = "⋮"
+_CHANGED = frozenset({"add", "del"})
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
@@ -112,6 +113,7 @@ def render_hunks(
     wrap: bool = False,
     min_gutter: int = 1,
     logical: bool = False,
+    changed_only: bool = False,
 ) -> DiffRender:
     """Хэнки журнала правок → `rich.Text` с номерами строк и подсветкой.
 
@@ -137,6 +139,10 @@ def render_hunks(
     P4, §6.3): строка не режется по рядам, перенос делает превью выше, и
     скрытое — ровно строки сверх бюджета.
 
+    `changed_only` — только строки `+` и `-`, без контекста: свёрнутое
+    превью под блоком ленты (решение 2026-10-23). Разделитель хэнков `⋮`
+    остаётся между хэнками, как в полном теле.
+
     Рисует тело ЦЕЛИКОМ — этого и хочет блок ленты. Тому, кто рисует его
     участками, нужен `HunkBody`: там та же картинка, но по заказанным строкам.
     """
@@ -149,6 +155,7 @@ def render_hunks(
         wrap=wrap,
         min_gutter=min_gutter,
         logical=logical,
+        changed_only=changed_only,
     )
     return DiffRender(
         body.render(),
@@ -162,6 +169,11 @@ def render_hunks(
 def diff_line_count(hunks: str) -> int:
     """Логических строк тела диффа (без заголовков) — без отрисовки."""
     return sum(1 for row in _parse(hunks or "") if row.kind != "sep")
+
+
+def diff_changed_count(hunks: str) -> int:
+    """Изменённых строк тела диффа (`+` и `-`) — без отрисовки."""
+    return sum(1 for row in _parse(hunks or "") if row.kind in _CHANGED)
 
 
 def copyable_hunks(hunks: str, *, path: str) -> str:
@@ -229,9 +241,9 @@ class HunkBody:
         wrap: bool = False,
         min_gutter: int = 1,
         logical: bool = False,
+        changed_only: bool = False,
     ) -> None:
         rows = _parse(hunks or "")
-        total = sum(1 for row in rows if row.kind != "sep")
         # Ширина колонки номеров — по ВСЕМУ телу, а не по отобранной части:
         # от неё зависит ширина реза, а рез решает, что отбирать. Заодно
         # колонка перестаёт прыгать при разворачивании блока.
@@ -244,6 +256,9 @@ class HunkBody:
             default=1,
         )
         self._gutter_w = max(self._gutter_w, min_gutter)
+        if changed_only:
+            rows = [row for row in rows if row.kind != "ctx"]
+        total = sum(1 for row in rows if row.kind != "sep")
         # Перенос — ЯВНЫЙ, а не следствие известной ширины: ширину передают и
         # экраны правок, но там строка не переносится (по дизайну у них
         # прокрутка вбок, а на нерасползающейся высоте держится ленивое тело).

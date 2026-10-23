@@ -618,8 +618,62 @@ async def test_short_in_block_hides_nothing():
     block = _in_block(_record(SHORT_HUNKS))
     app = _Host(block)
     async with app.run_test(size=(70, 20)):
-        assert _body_lines(app) == 3  # все три строки диффа
+        assert _body_lines(app) == 2  # обе изменённые строки, без контекста
         assert not app.query(".diff-more")
+
+
+# Правка в одну строку посреди контекста (`hunk_context_lines: 3`).
+ONE_LINE_HUNKS = (
+    "--- \n+++ \n@@ -7,7 +7,7 @@\n"
+    " c7\n c8\n c9\n-old\n+new\n c11\n c12\n c13\n"
+)
+
+
+def _body_plain(app: App) -> list[str]:
+    plain = app.query_one(".block-body", Static).visual.plain
+    return [row.rstrip() for row in plain.split("\n")]
+
+
+@pytest.mark.asyncio
+async def test_in_block_collapsed_shows_changed_lines_only():
+    """Свёрнутое превью — только строки `+` и `−` (решение 2026-10-23):
+    одна изменённая строка — два ряда, контекста нет."""
+    block = _in_block(_record(ONE_LINE_HUNKS), limit=3)
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)):
+        assert _body_plain(app) == [" 10 -old", " 10 +new"]
+
+
+@pytest.mark.asyncio
+async def test_in_block_collapsed_takes_first_changed_lines():
+    hunks = "--- \n+++ \n@@ -1,7 +1,7 @@\n c1\n-a\n-b\n-c\n+A\n+B\n c5\n"
+    block = _in_block(_record(hunks), limit=3)
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)):
+        assert _body_plain(app) == ["  2 -a", "  3 -b", "  4 -c"]
+
+
+@pytest.mark.asyncio
+async def test_in_block_expanded_shows_context():
+    """Раскрытие — дифф журнала целиком, с контекстом."""
+    block = _in_block(_record(ONE_LINE_HUNKS), limit=3)
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)) as pilot:
+        block.set_expanded(True)
+        await pilot.pause()
+        assert _body_plain(app) == [
+            "  7  c7",
+            "  8  c8",
+            "  9  c9",
+            " 10 -old",
+            " 10 +new",
+            " 11  c11",
+            " 12  c12",
+            " 13  c13",
+        ]
+        block.set_expanded(False)
+        await pilot.pause()
+        assert _body_plain(app) == [" 10 -old", " 10 +new"]
 
 
 def _wide_hunks(count: int = 8, width: int = 200) -> str:

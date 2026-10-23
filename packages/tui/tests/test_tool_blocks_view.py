@@ -19,6 +19,7 @@ from textual.containers import VerticalScroll
 from gc_tui import palette
 from gc_tui.messages import BlockToggle
 from gc_tui.models import TraceEvent
+from gc_tui.services.diff_render import diff_changed_count, diff_line_count
 from gc_tui.services.tool_blocks import BlockEdit, CallTimers, ToolBlocks
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.diff_block import DiffBlock
@@ -58,7 +59,7 @@ class _App(App):
 
     def view(self, level: str = "", depth: int = 0) -> ToolBlocksView:
         trace = self.query_one("#trace", VerticalScroll)
-        model = ToolBlocks(self.timers, diff_preview=12)
+        model = ToolBlocks(self.timers, diff_preview=3)
         view = ToolBlocksView(_Host(trace), model, level=level, depth=depth)
         self.views[level] = view
         return view
@@ -205,15 +206,20 @@ async def test_failed_member_reason_and_timer():
         assert "· 1 ошибка · 1 отказ" in head.plain
 
 
-def _record(call_id: str, lines: int) -> EditRecord:
+def _record(call_id: str, lines: int, *, context: bool = False) -> EditRecord:
+    """``lines`` добавленных строк; ``context`` — с тремя строками
+    контекста сверху, как в журнале (`hunk_context_lines: 3`)."""
     body = "".join(f"+line {i}\n" for i in range(lines))
+    head = f"@@ -0,0 +1,{lines} @@\n"
+    if context:
+        head = f"@@ -1,3 +1,{lines + 3} @@\n ctx 1\n ctx 2\n ctx 3\n"
     return EditRecord(
         path=f"{call_id}.py",
         turn_id="t1",
         ts=0.0,
         call_id=call_id,
         op="edit",
-        hunks=f"@@ -0,0 +1,{lines} @@\n{body}",
+        hunks=head + body,
         add=lines,
         del_=0,
         before_sha256=None,
@@ -229,7 +235,8 @@ def _edit_of(record: EditRecord) -> BlockEdit:
         verb="Edited",
         add=record.add,
         rem=record.del_,
-        diff_lines=record.add,
+        diff_lines=diff_line_count(record.hunks),
+        changed_lines=diff_changed_count(record.hunks),
         size_bytes=None,
         has_record=True,
         copy_text="diff",
@@ -237,13 +244,40 @@ def _edit_of(record: EditRecord) -> BlockEdit:
     )
 
 
-def _apply_edit(view, key: str, lines: int):
-    record = _record(key, lines)
+def _apply_edit(view, key: str, lines: int, *, context: bool = False):
+    record = _record(key, lines, context=context)
     row = _row(key, label="Edit", target=record.path, depth=view.depth)
     view.add_call(row, C.EDIT, waiting=False)
     view.started(row)
     view.result(row, _ev(key, "готово"), _edit_of(record))
     return row
+
+
+@pytest.mark.asyncio
+async def test_group_preview_changed_lines_then_full_diff():
+    """Блок `Edited 2 файла`: свёрнуто — у каждого файла первые 3
+    изменённые строки без контекста, фраза считает и контекст; раскрыто —
+    дифф целиком. Сетка колонок — в обоих видах."""
+    app = _App()
+    async with app.run_test(size=(80, 40)) as pilot:
+        view = app.view()
+        _apply_edit(view, "a", 1, context=True)
+        _apply_edit(view, "b", 5, context=True)
+        await pilot.pause()
+        rows = trace_rows(app)
+        assert_trace_grid(rows, origin=ORIGIN)
+        lines = [line for line in _plain(rows) if line]
+        assert not any("ctx" in line for line in lines)
+        assert sum("+line" in line for line in lines) == 4
+        # a: 3 строки контекста; b: 3 контекста и 2 изменённые сверх 3.
+        assert lines[-1] == "     + ещё 8 строк"
+        view.toggle("a")
+        await pilot.pause()
+        rows = trace_rows(app)
+        assert_trace_grid(rows, origin=ORIGIN)
+        lines = _plain(rows)
+        assert sum("ctx" in line for line in lines) == 6
+        assert sum("+line" in line for line in lines) == 6
 
 
 @pytest.mark.asyncio
@@ -268,7 +302,7 @@ async def test_single_to_block_keeps_same_diffblock():
         lines = _plain(rows)
         assert " ● Edited 2 файла (+16 −0)" in lines
         assert any(line.startswith("   └ a.py (+8 −0)  ") for line in lines)
-        assert [line for line in lines if line][-1] == "     + ещё 4 строки"
+        assert [line for line in lines if line][-1] == "     + ещё 10 строк"
 
 
 @pytest.mark.asyncio
