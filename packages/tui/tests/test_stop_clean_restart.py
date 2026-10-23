@@ -1,10 +1,12 @@
 """TraceScreen._cmd_stop — индикатор → «■ Отменено» + replace runner для clean restart."""
 
+import json
+
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_cmd_stop_of_ended_run_drops_indicator():
+async def test_cmd_stop_of_ended_run_drops_indicator(tmp_path):
     """После _cmd_stop хода, который тут же кончился, индикатора нет: исход
     — строкой итога в ленте (S10 §3.3), не состоянием индикатора."""
     pytest.importorskip("textual")
@@ -20,9 +22,17 @@ async def test_cmd_stop_of_ended_run_drops_indicator():
         def stop(self) -> None:
             self.running = False  # ход кончился сразу: итог ровный
 
-    async with TuiApp().run_test() as pilot:
+    async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
         scr = pilot.app.screen
+        # Ход открытого треда: строка итога встаёт в его ленте.
+        tid = "stop0000000000000000000000000001"
+        (tmp_path / f"meta_cli_{tid}.json").write_text(
+            json.dumps({"thread_id": tid}), encoding="utf-8"
+        )
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+        scr.attach_active_task(tid, is_resume=True)
         pilot.app.active_runner = _FakeRunner()
+        scr._prepare_for_new_run()
         # Смонтировать индикатор
         scr._show_thinking_indicator()
         await pilot.pause()
@@ -31,6 +41,11 @@ async def test_cmd_stop_of_ended_run_drops_indicator():
         scr._cmd_stop()
         await pilot.pause()
         assert len(scr.query(ThinkingIndicator)) == 0
+        from gc_tui.widgets.turn_line import TurnLine
+
+        (line,) = scr.query_one("#trace").query(TurnLine)
+        assert line.text.plain == "■ Отменено"
+        assert line.display
 
 
 @pytest.mark.asyncio

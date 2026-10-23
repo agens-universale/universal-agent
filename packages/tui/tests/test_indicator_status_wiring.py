@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 
@@ -9,9 +11,9 @@ async def test_instant_stop_leaves_no_indicator(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(
-        threads_dir=str(tmp_path / "threads")
-    ).run_test() as pilot:
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    async with TuiApp(threads_dir=str(threads)).run_test() as pilot:
         scr = pilot.app.screen
 
         # Живой runner — ДО индикатора: иначе тик опроса на паузе видит
@@ -25,9 +27,15 @@ async def test_instant_stop_leaves_no_indicator(tmp_path, monkeypatch):
             def stop(self):
                 self.running = False  # ход кончился сразу: итог ровный
 
+        # Ход открытого треда: строка итога встаёт в его ленте.
+        tid = "stop0000000000000000000000000001"
+        (threads / f"meta_cli_{tid}.json").write_text(
+            json.dumps({"thread_id": tid}), encoding="utf-8"
+        )
+        (threads / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+        scr.attach_active_task(tid, is_resume=True)
         scr.app.active_runner = _R()
-        scr.app.tui_state.active_task_id = "t1"
-        scr._active_task_id = "t1"
+        scr._prepare_for_new_run()
         # смонтировать индикатор как при живом прогоне
         scr._thinking_started_at = 0.0
         scr._show_thinking_indicator(state="thinking")
@@ -37,6 +45,11 @@ async def test_instant_stop_leaves_no_indicator(tmp_path, monkeypatch):
         await pilot.pause()
         assert scr._thinking is None
         assert not scr.query_one("#indicator-bar").has_class("-turn")
+        from gc_tui.widgets.turn_line import TurnLine
+
+        (line,) = scr.query_one("#trace").query(TurnLine)
+        assert line.text.plain == "■ Отменено"
+        assert line.display
 
 
 @pytest.mark.asyncio

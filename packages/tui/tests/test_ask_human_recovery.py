@@ -97,8 +97,16 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
                     "submit_ask_human_reply не должен вызываться при Esc-stop"
                 )
 
+        # Ход открытого треда: строка итога встаёт в его ленте.
+        tid = "stop0000000000000000000000000001"
+        (tmp_path / f"meta_cli_{tid}.json").write_text(
+            json.dumps({"thread_id": tid}), encoding="utf-8"
+        )
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+        screen.attach_active_task(tid, is_resume=True)
         runner = _LiveStoppable()
         app.active_runner = runner
+        screen._prepare_for_new_run()
         # Смонтировать индикатор (как при живом прогоне) и banner.
         screen._show_thinking_indicator(state="thinking")
         _mount_zombie_banner(screen)
@@ -124,6 +132,11 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
         # Исход — не в индикаторе: ход кончился, индикатора и бара нет.
         assert screen._thinking is None
         assert not screen.query_one("#indicator-bar").has_class("-turn")
+        from gc_tui.widgets.turn_line import TurnLine
+
+        (line,) = screen.query_one("#trace").query(TurnLine)
+        assert line.text.plain == "■ Отменено"
+        assert line.display
 
 
 @pytest.mark.asyncio

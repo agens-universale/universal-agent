@@ -255,6 +255,28 @@ async def test_stop_for_ask_human_same_outcome(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_esc_on_live_ask_human_gives_stop_line_in_place(tmp_path):
+    """Esc клавишей на живом вопросе агента: стоп хода, строка
+    «■ Отменено · ЧЧ:ММ» — на месте записи стопа, сразу за репликой хода."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _start_in_a(pilot)
+        scr._show_child_ask_human(parent_call_id="p", prose="Какой путь?")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert runner._stop_requested
+        assert scr._ask_human_banner is None
+        _stop_record(tmp_path)
+        await _assert_stop_line_after_exit(pilot, scr, runner)
+        kids = list(scr.query_one("#trace").children)
+        (line,) = _lines(scr)
+        reply = [w for w in kids if isinstance(w, UserReplyContainer)][-1]
+        assert kids.index(line) == kids.index(reply) + 1
+
+
+@pytest.mark.asyncio
 async def test_stop_then_switch_and_back(tmp_path):
     """Стоп и переключение: у открытой сессии бара нет; поток стопа
     дописал своё в прежнюю — при возврате строка стопа на месте."""

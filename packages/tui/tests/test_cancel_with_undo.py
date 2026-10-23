@@ -2,6 +2,8 @@
 вывод прогона (`produced_output` раннера)."""
 
 from gc_testkit.tui_support import tui_settings
+import json
+
 import pytest
 
 
@@ -305,7 +307,7 @@ async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cancel_with_undo_skipped_when_events_present():
+async def test_cancel_with_undo_skipped_when_events_present(tmp_path):
     """Ядро отметило вывод прогона → НЕ cancel-with-undo, нормальная
     отмена: откат не заказан, исхода в индикаторе нет (S10 §3.3)."""
     pytest.importorskip("textual")
@@ -323,9 +325,17 @@ async def test_cancel_with_undo_skipped_when_events_present():
         def stop(self) -> None:
             self.running = False  # ход кончился сразу: итог ровный
 
-    async with TuiApp().run_test() as pilot:
+    async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
         scr = pilot.app.screen
+        # Ход открытого треда: строка итога встаёт в его ленте.
+        tid = "stop0000000000000000000000000001"
+        (tmp_path / f"meta_cli_{tid}.json").write_text(
+            json.dumps({"thread_id": tid}), encoding="utf-8"
+        )
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+        scr.attach_active_task(tid, is_resume=True)
         pilot.app.active_runner = _FakeRunner()
+        scr._prepare_for_new_run()
         scr._on_user_text_submitted("запрос")
         scr._last_user_message_id = "m_1"
         # Без паузы до стопа: тик без треда убрал бы индикатор «думаю».
@@ -334,10 +344,15 @@ async def test_cancel_with_undo_skipped_when_events_present():
         await pilot.pause(0.5)
         assert scr._pending_orphan_cleanups == []
         assert scr._thinking is None
+        from gc_tui.widgets.turn_line import TurnLine
+
+        (line,) = scr.query_one("#trace").query(TurnLine)
+        assert line.text.plain == "■ Отменено"
+        assert line.display
 
 
 @pytest.mark.asyncio
-async def test_cancel_with_undo_skipped_when_input_not_empty():
+async def test_cancel_with_undo_skipped_when_input_not_empty(tmp_path):
     """input.text != "" → НЕ cancel-with-undo, нормальная отмена: откат не
     заказан, исхода в индикаторе нет (S10 §3.3)."""
     pytest.importorskip("textual")
@@ -355,9 +370,17 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         def stop(self) -> None:
             self.running = False  # ход кончился сразу: итог ровный
 
-    async with TuiApp().run_test() as pilot:
+    async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
         scr = pilot.app.screen
+        # Ход открытого треда: строка итога встаёт в его ленте.
+        tid = "stop0000000000000000000000000001"
+        (tmp_path / f"meta_cli_{tid}.json").write_text(
+            json.dumps({"thread_id": tid}), encoding="utf-8"
+        )
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+        scr.attach_active_task(tid, is_resume=True)
         pilot.app.active_runner = _FakeRunner()
+        scr._prepare_for_new_run()
         scr._on_user_text_submitted("первый запрос")
         scr._last_user_message_id = "m_1"
         scr.query_one("#cmdinput").text = "новая печать"
@@ -367,6 +390,11 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         await pilot.pause(0.5)
         assert scr._pending_orphan_cleanups == []
         assert scr._thinking is None
+        from gc_tui.widgets.turn_line import TurnLine
+
+        (line,) = scr.query_one("#trace").query(TurnLine)
+        assert line.text.plain == "■ Отменено"
+        assert line.display
 
 
 class _OutputRunner:
