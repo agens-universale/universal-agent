@@ -587,8 +587,6 @@ async def test_live_equals_reopen_after_undo(tmp_path):
     """Откат отправки до вывода, затем ход с вызовами: живой вид =
     переоткрытию — чистка снятой реплики с курсором не теряет записей
     хода (ee2144256)."""
-    from gc_tui.widgets.user_reply import UserReplyContainer
-
     thread = _Thread(tmp_path, status="stopped")
     thread.add(_say("a0", "привет"))
     _turn_record(thread, "u1", {})
@@ -602,8 +600,12 @@ async def test_live_equals_reopen_after_undo(tmp_path):
         scr._prepare_for_new_run()
         thread.add({"id": "m_orphan", "role": "user", "content": "отменяю"})
         scr._last_user_message_id = "m_orphan"
-        scr._trace_mount(UserReplyContainer("отменяю", event_no=0))
-        await pilot.pause()
+        # Отправка — как у поля ввода: pending-реплика сверяется с записью
+        # треда. Тик до отката: запись уже прочитана опросом — так всегда,
+        # а не по таймеру 250 мс.
+        cid = scr._track_pending("отменяю", "отменяю")
+        scr._mount_user_reply("отменяю", state="pending", client_id=cid)
+        await _ticks(pilot, 1)
         scr._cancel_with_undo()
         await pilot.pause()
         new = _FakeRunner()
