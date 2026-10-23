@@ -288,14 +288,6 @@ VIOLATIONS = {
         [*_EXPLORED_LEAD, _cons("отказ: защита путей", REFUSED)],
         "строка 3: у неисполненного вызова есть таймер",
     ),
-    "no-timer-on-executed-failure": (
-        [
-            _head(ERR, "Explored"),
-            _member("Read", "a.py", lead=True),
-            _cons("не найден", ERR),
-        ],
-        "строка 3: у исполненного упавшего вызова нет таймера",
-    ),
     "nested-glyph-in-c-plus-4": (
         [
             _head(OK, "Agent", "  worker · 1с"),
@@ -410,8 +402,12 @@ async def test_trace_rows_without_scrollbar_columns():
     assert len(rows) == height
 
 
-def test_untimed_thread_allows_failure_without_timer():
-    """Время вызовов неизвестно (тред без записи итога хода с `calls`) —
-    упавший исполненный член законно без таймера (§3.4)."""
-    rows, _ = VIOLATIONS["no-timer-on-executed-failure"]
-    assert_trace_grid(rows, origin=ORIGIN, timed=False)
+def test_executed_failure_may_have_no_timer():
+    """Упавший исполненный член без таймера законен: вызов быстрее секунды
+    или время вызовов неизвестно (§3.4)."""
+    rows = [
+        _head(ERR, "Explored"),
+        _member("Read", "a.py", lead=True),
+        _cons("не найден", ERR),
+    ]
+    assert_trace_grid(rows, origin=ORIGIN)

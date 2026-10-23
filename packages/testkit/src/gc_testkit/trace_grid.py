@@ -72,28 +72,25 @@ def _rows_of(screen: Any, types: tuple[type, ...]) -> set[int]:
     return rows
 
 
-def assert_trace_grid(
-    rows: list[Any], *, origin: int, timed: bool = True
-) -> None:
+def assert_trace_grid(rows: list[Any], *, origin: int) -> None:
     """Строки ``rich.text.Text`` ленты укладываются в сетку колонок P4.
 
-    ``origin`` — колонка ``●`` верхнего уровня. ``timed=False`` — время
-    вызовов неизвестно (тред без записи итога хода с ``calls``): таймер у
-    исполненного упавшего вызова не требуется (спека P4 §3.4). Нарушение —
-    ``AssertionError`` с номером строки (с единицы) и её текстом.
+    ``origin`` — колонка ``●`` верхнего уровня. Таймер не обязателен ни
+    одному вызову (быстрее секунды его нет, спека P4 §3.4); запрещён он
+    у неисполненного. Нарушение — ``AssertionError`` с номером строки (с
+    единицы) и её текстом.
     """
-    _Grid(rows, origin, timed=timed).walk()
+    _Grid(rows, origin).walk()
 
 
 class _Grid:
     """Обход строк сверху вниз с состоянием текущего блока."""
 
-    def __init__(self, rows: list[Any], origin: int, *, timed: bool) -> None:
+    def __init__(self, rows: list[Any], origin: int) -> None:
         from gc_tui import palette
 
         self._rows = rows
         self._origin = origin
-        self._timed = timed
         self._run = palette.RUN_COLOR.lower()
         self._err = palette.ERR.lower()
         self._refused = palette.REFUSED.lower()
@@ -207,7 +204,7 @@ class _Grid:
             self._fail(n, f"`└` в колонке {col}")
 
     def _check_timer(self, n: int, text: str, reason: str, col: int) -> None:
-        """Таймер — только у вызова, который исполнялся."""
+        """У неисполненного вызова таймера нет."""
         if col not in (self._base + 2, self._base + 6):
             return
         if not self._prev or self._prev[0] not in ("event", "member"):
@@ -215,12 +212,8 @@ class _Grid:
         owner = self._rows[n - 1].plain.rstrip().rstrip("❐").rstrip()
         timed = bool(_TIMER.search(owner))
         never = reason == self._refused or text.startswith("не запущено")
-        ran_fail = reason == self._err and not text.startswith("код выхода")
         if never and timed:
             self._fail(n, "у неисполненного вызова есть таймер")
-        missing = ran_fail and self._timed and not timed
-        if missing and self._ev_word != "Ran":
-            self._fail(n, "у исполненного упавшего вызова нет таймера")
 
     def _check_reason_colour(self, n: int, reason: str, col: int) -> None:
         if col == self._base + 6 and reason not in (

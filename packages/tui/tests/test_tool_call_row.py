@@ -477,6 +477,30 @@ def test_trace_timer_tail_has_no_space_before_unit():
     assert row._render_content().plain.endswith("· 2с")
 
 
+@pytest.mark.parametrize(
+    "seconds, tail",
+    [(0.0, ""), (0.9, ""), (1.0, " · 1с"), (72.0, " · 1м 12с")],
+)
+def test_frozen_timer_only_from_one_second(seconds, tail):
+    """Застывший таймер — только у вызова от 1 с; быстрее — без таймера,
+    без «· 0с» (владелец 2026-10-23)."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="c1", label="Read", target="a.py")
+    row.set_result(summary="", outcome="ok")
+    row.set_elapsed(seconds)
+    assert row._render_content().plain == f"Read  a.py{tail}"
+
+
+def test_live_timer_shows_zero_seconds():
+    """Идущий вызов — амберный таймер с самого старта, и «· 0с» тоже."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="c1", label="t", target="")
+    row._elapsed_s = lambda: 0
+    assert row._render_content().plain.endswith("· 0с")
+
+
 def test_pulse_tick_advances_pulse_while_running():
     """Пульс ▸ двигается на собственном 0.1с-тике (_pulse_tick), пока running."""
     from gc_tui.widgets.tool_call_row import ToolCallRow

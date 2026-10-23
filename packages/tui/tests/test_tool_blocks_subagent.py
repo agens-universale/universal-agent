@@ -293,7 +293,7 @@ async def test_p418_live_equals_reopen(tmp_path):
     """`p4-18-agent`: вживую, после возврата и в превью — один список
     строк; окно 3 последних события, `└ … ещё 1` на +2 от глифа `Agent`."""
     steps = _p418()
-    calls = {cid: 0.0 for cid in [AGENT, *_call_ids(steps)]}
+    calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
     live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
     live_dir.mkdir()
     reopen_dir.mkdir()
@@ -307,14 +307,14 @@ async def test_p418_live_equals_reopen(tmp_path):
         preview = _rows(pilot)
     assert live == reopen == preview
     assert _agent_rows(live) == [
-        "● Agent  проверка клиента · 0с",
+        "● Agent  проверка клиента · 2с",
         "  └ … ещё 1",
         "  ● Explored",
         "    └ … ещё 1",
-        "      Read  client/m1.py · 0с",
-        "      Read  client/m2.py · 0с",
-        "      Read  client/m3.py · 0с",
-        "  ● Ran  uv run pytest -q · 0с",
+        "      Read  client/m1.py · 2с",
+        "      Read  client/m2.py · 2с",
+        "      Read  client/m3.py · 2с",
+        "  ● Ran  uv run pytest -q · 2с",
         "  ● Клиент читает таймаут из конфига.",
     ]
 
@@ -402,10 +402,10 @@ async def test_nested_order_matches_preview(tmp_path):
     assert _agent_rows(live)[1:] == [
         "  ● Explored",
         "    └ … ещё 2",
-        "      Read  client/m2.py · 0с",
-        "      Read  client/m3.py · 0с",
-        "      Read  client/m4.py · 0с",
-        "  ● Ran  uv run pytest -q · 0с",
+        "      Read  client/m2.py",
+        "      Read  client/m3.py",
+        "      Read  client/m4.py",
+        "  ● Ran  uv run pytest -q",
         "  › и тесты",
     ]
 
@@ -589,7 +589,7 @@ async def test_stop_mid_nested_explored_live_reopen_preview(tmp_path):
     доходит и до уровня субагента — `○ Explored` вживую, после возврата
     и в превью (уровень субагента домонтирован после записи итога)."""
     steps = [_read(i) for i in range(2)]
-    calls = {cid: 0.0 for cid in [AGENT, *_call_ids(steps)]}
+    calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
     live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
     live_dir.mkdir()
     reopen_dir.mkdir()
@@ -615,15 +615,15 @@ async def test_stop_mid_nested_explored_live_reopen_preview(tmp_path):
         preview = _agent_rows(_rows(pilot))
     assert live[1:] == [
         "  ○ Explored",
-        "    └ Read  client/m0.py · 0с",
-        "      Read  client/m1.py · 0с",
-        "      Read  client/m9.py · 0с",
+        "    └ Read  client/m0.py · 2с",
+        "      Read  client/m1.py · 2с",
+        "      Read  client/m9.py",
         "        └ отменено",
     ]
     # Остановленный посреди вызов после переоткрытия — без таймера: в
     # `calls` его нет (спека §3.4, «Непокрыто»); остальное — одно.
     assert reopen == preview
-    assert reopen == [line.replace("m9.py · 0с", "m9.py") for line in live]
+    assert reopen == live
 
 
 @pytest.mark.asyncio

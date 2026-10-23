@@ -175,7 +175,10 @@ async def test_failed_member_reason_and_timer():
     async with app.run_test(size=(80, 24)) as pilot:
         view = app.view()
         _read(view, "c0")
-        _read(view, "e", summary="не найден", outcome="error")
+        failing = _read(view, "e", done=False)
+        # Исполнялся 2 с: застывший таймер есть только от секунды.
+        failing._start_monotonic -= 2
+        view.result(failing, _ev("e", "не найден", "error"), None)
         _read(view, "r", summary="отказ: защита путей", outcome="refused")
         await pilot.pause()
         rows = trace_rows(app)
@@ -188,7 +191,7 @@ async def test_failed_member_reason_and_timer():
         assert _colour(failed, failed.plain.index("e.py")) == (
             palette.MUTED.lower()
         )
-        assert failed.plain.rstrip().endswith("· 0с")
+        assert failed.plain.rstrip().endswith("· 2с")
         assert _colour(failed, len(failed.plain.rstrip()) - 1) == (
             palette.DIM.lower()
         )
@@ -254,7 +257,7 @@ async def test_single_to_block_keeps_same_diffblock():
         assert diff.has_class("diff-single")
         rows = trace_rows(app)
         assert_trace_grid(rows, origin=ORIGIN)
-        assert _plain(rows)[1].startswith(" ● Edited a.py (+8 −0) · 0с  ")
+        assert _plain(rows)[1].startswith(" ● Edited a.py (+8 −0)  ")
         _apply_edit(view, "b", 8)
         await pilot.pause()
         diffs = list(app.query(DiffBlock))
@@ -264,9 +267,7 @@ async def test_single_to_block_keeps_same_diffblock():
         assert_trace_grid(rows, origin=ORIGIN)
         lines = _plain(rows)
         assert " ● Edited 2 файла (+16 −0)" in lines
-        assert any(
-            line.startswith("   └ a.py (+8 −0) · 0с  ") for line in lines
-        )
+        assert any(line.startswith("   └ a.py (+8 −0)  ") for line in lines)
         assert [line for line in lines if line][-1] == "     + ещё 4 строки"
 
 

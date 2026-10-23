@@ -280,7 +280,7 @@ def _dirs(tmp_path):
 
 
 _RAN_5 = [
-    "  ● Ran  make test · 0с",
+    "  ● Ran  make test",
     "    └ line 0",
     "      line 1",
     "      line 2",
@@ -313,7 +313,7 @@ async def test_nested_ran_failed_exit_code(tmp_path):
     live = await _live(live_dir, call)
     assert live == await _reopen(reopen_dir, call)
     assert live == [
-        "  ● Ran  make test · 0с",
+        "  ● Ran  make test",
         "    └ код выхода 2",
         "      err 0",
     ]
@@ -328,7 +328,7 @@ async def test_nested_read_summary_live_and_reopen(tmp_path):
     live_dir, reopen_dir = _dirs(tmp_path)
     live = await _live(live_dir, call)
     assert live == await _reopen(reopen_dir, call)
-    assert live == ["  ● Explored", "    └ Read  a.py · 40 строк · 0с"]
+    assert live == ["  ● Explored", "    └ Read  a.py · 40 строк"]
 
 
 @pytest.mark.asyncio
@@ -357,7 +357,7 @@ async def test_nested_ran_with_edits(tmp_path):
     call = _ran(output=_envelope("ok\n"))
     live = await _live(live_dir, call)
     assert live == await _reopen(reopen_dir, call)
-    assert live[:2] == ["  ● Ran  make test · 0с", "    └ ok"]
+    assert live[:2] == ["  ● Ran  make test", "    └ ok"]
     # Строка файла кончается кнопкой копирования диффа.
     assert live[2].startswith("      Added gen.py (+2 −0) ")
 
@@ -376,7 +376,7 @@ async def test_nested_multiline_command_live(tmp_path):
     live = await _live(live_dir, call)
     assert live == await _reopen(reopen_dir, call)
     assert live == [
-        "  ● Ran  python - <<'EOF' · 0с",
+        "  ● Ran  python - <<'EOF'",
         "      import json",
         "      print(1)",
         "    └ 1",

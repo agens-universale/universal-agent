@@ -38,7 +38,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
 раскрытие — вся команда и весь вывод.
 Застывший таймер (`set_elapsed`; имя `set_timer` занято
 таймерами Textual) появляется только по решению модели: строка
-без модели выглядит как прежде.
+без модели выглядит как прежде. Вызов быстрее секунды — без таймера.
 """
 
 from __future__ import annotations
@@ -99,6 +99,8 @@ from gc_tui.widgets.static_content import update_if_changed
 _PAUSE_GLYPH = "‖"
 # Пустая клетка справа у полной строки: хвост не прижат к полосе прокрутки.
 _RIGHT_GUTTER = 1
+#: Застывший таймер — с этой длительности; быстрее — без таймера.
+_FROZEN_TIMER_MIN_S = 1.0
 # Между подписью и объектом; слово с тем же разделителем (`Running` /
 # `Ran`) — подпись команды.
 _CAPTION_SEP = "  "
@@ -715,8 +717,11 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return _MUTED if self._mode == "member" else _DIM
 
     def _append_frozen_timer(self, text: Text) -> None:
-        """Застывший таймер законченного вызова — ` · 2с` `DIM`."""
+        """Застывший таймер законченного вызова — ` · 2с` `DIM`; вызов
+        быстрее секунды — без таймера."""
         if self._frozen is None or self._is_live or self._waiting:
+            return
+        if self._frozen < _FROZEN_TIMER_MIN_S:
             return
         text.append(" · ", style=_DIM)
         text.append(format_duration(self._frozen), style=_DIM)

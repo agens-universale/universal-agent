@@ -49,12 +49,10 @@ def test_main_full_dialog_snapshot(snap_compare, tmp_path, monkeypatch):
         # без мигания курсор виден всегда (приём `test_snapshot_forms`).
         pilot.app.screen.query_one("#cmdinput").cursor_blink = False
         await pilot.pause(0.5)
-        # Тред без записи итога хода — времени вызовов нет, упавший вызов
-        # законно без таймера (P4 §3.4); сетку кадр проходит.
         rows = trace_rows(pilot.app, exclude=(TurnLine,))
         start = next(
             i for i, r in enumerate(rows) if r.plain[1:2] in ("›", "●")
         )
-        assert_trace_grid(rows[start:], origin=1, timed=False)
+        assert_trace_grid(rows[start:], origin=1)
 
     assert snap_compare(app, terminal_size=(120, 40), run_before=setup)
