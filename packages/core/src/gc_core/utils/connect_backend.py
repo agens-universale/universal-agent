@@ -416,7 +416,7 @@ async def _aread_model_response(response: Any, read):
 
 
 async def _aguard_model_call(factory):
-    """Нестримовый POST: стоп отменяет запрос и не повторяет его."""
+    """Стоп отменяет запрос к модели. Отмена — не повод его повторять."""
     stop = current_user_stop()
     if stop is None:
         return await factory()
@@ -445,6 +445,20 @@ async def _aguard_model_call(factory):
         if stop.requested:
             raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
         raise
+
+
+async def _aopen_model_stream(client, *args, read, **kwargs):
+    """Стрим под стопом с самого ``client.stream``, ещё до заголовков.
+
+    Пока заголовков нет, читать нечего. Вооружать стоп только на теле
+    значило бы досиживать таймаут попытки, а затем и все повторы.
+    """
+
+    async def _open():
+        async with client.stream(*args, **kwargs) as response:
+            return await _aread_model_response(response, read)
+
+    return await _aguard_model_call(_open)
 
 
 async def _aread_error_text(response: httpx.Response) -> Optional[str]:
@@ -553,10 +567,15 @@ async def _arequest_backend_responses_once(
     async def _read_responses(r):
         return await _aread_responses_body(r, url, logger, chunks)
 
-    async with client.stream(
-        "POST", url, json=data, headers=headers, timeout=timeout
-    ) as r:
-        r_headers = await _aread_model_response(r, _read_responses)
+    r_headers = await _aopen_model_stream(
+        client,
+        "POST",
+        url,
+        json=data,
+        headers=headers,
+        timeout=timeout,
+        read=_read_responses,
+    )
 
     last_chunk = chunks[-1] if chunks else ""
     try:
@@ -649,10 +668,15 @@ async def _astream_chat_completions(
         _log_backend_response(logger, "chat_completions", assembled)
         return assembled
 
-    async with client.stream(
-        "POST", url, json=stream_data, headers=headers, timeout=timeout
-    ) as r:
-        return await _aread_model_response(r, _read)
+    return await _aopen_model_stream(
+        client,
+        "POST",
+        url,
+        json=stream_data,
+        headers=headers,
+        timeout=timeout,
+        read=_read,
+    )
 
 
 async def arequest_backend_chat_completions(

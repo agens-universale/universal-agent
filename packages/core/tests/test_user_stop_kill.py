@@ -37,6 +37,8 @@ from gc_core.user_stop import (
 from gc_core.utils.connect_backend import (
     _astream_chat_completions,
     _default_should_retry_backend_exception,
+    arequest_backend_chat_completions,
+    arequest_backend_responses,
 )
 from gc_core.utils.native_fs_search import arun_native_grep
 from gc_core.utils.pattern_native_gate import NativeGrepPlan
@@ -167,6 +169,84 @@ async def test_model_stream_aborts_without_a_partial_reply():
     assert killed[0]["tool"] == ""
     assert killed[0]["backend"] == ""
     assert "hi" not in str(killed[0])
+
+
+class _HeadersNeverArrive:
+    """Стрим, который так и не получает заголовки ответа."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+        self.entered = asyncio.Event()
+
+    def stream(self, *args, **kwargs):
+        del args, kwargs
+        self.attempts += 1
+        return self
+
+    async def __aenter__(self):
+        self.entered.set()
+        await asyncio.sleep(600)
+        raise AssertionError("stream waited out the header timeout")
+
+    async def __aexit__(self, *args):
+        return None
+
+
+async def _stop_while_headers_hang(monkeypatch, request):
+    log = _Log()
+    gate = _stop(log)
+    client = _HeadersNeverArrive()
+    monkeypatch.setattr(
+        "gc_core.utils.connect_backend.get_async_client",
+        lambda *args, **kwargs: client,
+    )
+
+    async def _run():
+        with bind_user_stop(gate):
+            return await request()
+
+    task = asyncio.create_task(_run())
+    await asyncio.wait_for(client.entered.wait(), timeout=2)
+    started = time.monotonic()
+    gate.request(log)
+    with pytest.raises(ModelRequestStopped):
+        await asyncio.wait_for(task, timeout=3)
+    assert time.monotonic() - started < 3
+    assert client.attempts == 1
+    killed = log.events("user_stop_killed")
+    assert len(killed) == 1
+    assert killed[0]["kind"] == "model"
+
+
+async def test_stop_while_chat_stream_waits_for_headers_is_not_retried(
+    monkeypatch,
+):
+    await _stop_while_headers_hang(
+        monkeypatch,
+        lambda: arequest_backend_chat_completions(
+            {"model": "m", "messages": []},
+            {},
+            "http://model/v1/chat/completions",
+            use_retry=True,
+            on_delta=lambda kind, text: None,
+            timeout=600,
+        ),
+    )
+
+
+async def test_stop_while_responses_stream_waits_for_headers_is_not_retried(
+    monkeypatch,
+):
+    await _stop_while_headers_hang(
+        monkeypatch,
+        lambda: arequest_backend_responses(
+            {"model": "m"},
+            {},
+            "http://model/v1/responses",
+            use_retry=True,
+            timeout=600,
+        ),
+    )
 
 
 async def _stopped_exec(backend, command: str, log: _Log, **kwargs):
