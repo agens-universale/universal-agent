@@ -2967,6 +2967,21 @@ class TraceScreen(Screen):
             self._ask_human_banner or self._confirm_banner or self._plan_banner
         )
 
+    def _mount_sticky_banner(self, banner, inp_row: Horizontal) -> None:
+        """Баннер — в `#root` над полем ввода. Бар уходит, когда баннер
+        смонтирован (§4.12): его ряды появляются в той же раскладке, что
+        и уход бара, — без кадра, где нет ни того, ни другого."""
+        mounted = self.query_one(_SEL_ROOT, Vertical).mount(
+            banner, before=inp_row
+        )
+
+        async def _sync_bar_when_mounted() -> None:
+            await mounted
+            self._sync_indicator_bar()
+
+        self.call_later(_sync_bar_when_mounted)
+        self.call_after_refresh(self._sync_trace_max_height)
+
     def _cap_sticky_banner(self, banner, *, chrome: int) -> int:
         """Потолок sticky-баннера: длинный вопрос не выдавливает input/footer.
 
@@ -4209,8 +4224,7 @@ class TraceScreen(Screen):
         if parent_row is not None:
             parent_row.pause()
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
-        self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
-        self.call_after_refresh(self._sync_trace_max_height)
+        self._mount_sticky_banner(banner, inp_row)
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         self._sync_input_placeholder()
         inp.add_class("ask-human-mode")
@@ -4514,8 +4528,7 @@ class TraceScreen(Screen):
         # mount banner before #input-row; потолок высоты — после layout
         # (_cap_sticky_banner), иначе длинный вопрос выдавливает input/footer.
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
-        self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
-        self.call_after_refresh(self._sync_trace_max_height)
+        self._mount_sticky_banner(banner, inp_row)
         # switch input to ask-human mode
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         self._sync_input_placeholder()
@@ -4540,6 +4553,7 @@ class TraceScreen(Screen):
             self._ask_human_question_row = None
         self._ask_human_banner.remove()
         self._ask_human_banner = None
+        self._sync_indicator_bar()
         self._ask_human_call_id = None
         self.app.tui_state.ask_human_state = None
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
@@ -4581,8 +4595,7 @@ class TraceScreen(Screen):
         self._confirm_banner = banner
         self._confirm_active = True
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
-        self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
-        self.call_after_refresh(self._sync_trace_max_height)
+        self._mount_sticky_banner(banner, inp_row)
         inp_row.add_class("hidden")
         # Инпут на время confirm: СИНХРОННО disabled (иначе «y» утекает в TextArea).
         # Фокус — на сам баннер, не set_focus(None): при None следующий Tab/клик
@@ -4606,6 +4619,7 @@ class TraceScreen(Screen):
             except Exception:
                 pass
             self._confirm_banner = None
+        self._sync_indicator_bar()
         self._settle_trace_after_banner()
 
     def _return_focus_to_input(self) -> None:
@@ -4655,8 +4669,7 @@ class TraceScreen(Screen):
         banner = PlanApprovalBanner(resumed=resumed)
         self._plan_banner = banner
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
-        self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
-        self.call_after_refresh(self._sync_trace_max_height)
+        self._mount_sticky_banner(banner, inp_row)
         inp_row.add_class("hidden")
         try:
             self.query_one(_SEL_CMDINPUT, CommandTextArea).disabled = True
@@ -4677,6 +4690,7 @@ class TraceScreen(Screen):
         except Exception:
             pass
         self._plan_banner = None
+        self._sync_indicator_bar()
         try:
             self._sync_input_placeholder()
         except Exception:
@@ -8949,7 +8963,9 @@ class TraceScreen(Screen):
     def _sync_indicator_bar(self) -> None:
         """Поставить или снять бар по `_bar_wanted()`; в том же вызове —
         потолок ленты (высота бара — константа, не замер) и прижатие низа,
-        когда бар ушёл."""
+        когда бар ушёл. Пока стоит sticky-баннер, бар скрыт и при идущей
+        работе (§4.12): над баннером один пустой ряд, как над вводом.
+        Работа при этом не кончилась — придержанное не раскрывается."""
         try:
             bar = self.query_one(_SEL_INDICATOR_BAR, Vertical)
         except Exception:
@@ -8960,12 +8976,14 @@ class TraceScreen(Screen):
             # Выделение (F2): снятие бара и раскрытие — только вместе,
             # после него; догоняет тик опроса (S10 §4.14).
             return
-        bar.set_class(wanted, _BAR_TURN)
+        banner = self._sticky_banner_widget()
+        shown = wanted and not (banner is not None and banner.is_mounted)
+        bar.set_class(shown, _BAR_TURN)
         # Бар уходит — придержанное встаёт на его место той же
         # перерисовкой: бар −2, строка +2, низ на месте (S10 §3.4).
         revealed = not wanted and self._reveal_held()
         self._sync_trace_max_height()
-        if (was and not wanted) or revealed:
+        if (was and not shown) or revealed:
             self._scroll_trace_end()
 
     def _reveal_held(self) -> bool:

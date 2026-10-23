@@ -367,17 +367,20 @@ class _ScriptedExecutor:
 
 def _frame(scr):
     """Кадр прошлого тика (его раскладка уже применена): бар, его высота,
-    верх поля ввода, видна ли свежая строка итога, видна ли осевшая."""
+    верх поля ввода, видна ли свежая строка итога, видна ли осевшая, стоит
+    ли sticky-баннер."""
     from gc_tui.widgets.turn_line import TurnLine
 
     bar = scr.query_one("#indicator-bar")
     lines = list(scr.query_one("#trace").query(TurnLine))
+    banner = scr._sticky_banner_widget()
     return (
         bar.display,
         bar.region.height,
         scr.query_one("#input-row").region.y,
         any(w.display and w.is_fresh for w in lines),
         any(w.display and not w.is_fresh for w in lines),
+        banner is not None and banner.region.height > 0,
     )
 
 
@@ -436,12 +439,15 @@ async def test_bar_through_scripted_turn(tmp_path):
             await pilot.pause(0.6)
         finally:
             ex.stop_run()
-        edge = next(i for i, f in enumerate(frames) if not f[0])
+        # Пока стоит баннер, бар снят (§4.12): спадающий фронт — первый
+        # кадр без бара и без баннера.
+        edge = next(i for i, f in enumerate(frames) if not f[0] and not f[5])
         assert edge > 0
-        for bar_up, height, _y, fresh_shown, _settled in frames[:edge]:
-            assert bar_up is True
-            assert height == 2
-            assert fresh_shown is False
+        assert any(f[5] for f in frames[:edge])
+        for bar_up, height, _y, fresh, _settled, banner in frames[:edge]:
+            assert bar_up is not banner
+            assert height == (0 if banner else 2)
+            assert fresh is False
         assert frames[edge][2] == frames[edge - 1][2]
         assert frames[edge][3] is True
         assert all(not f[0] for f in frames[edge:])
@@ -576,3 +582,89 @@ async def test_error_rising_edge_ignored_for_settled_run(tmp_path):
         assert statuses == ["failed"]
         tui = scr._store.get_task_meta(tid)["tui"]
         assert tui["status"] == "failed"
+
+
+# --- §4.12: баннер посреди хода снимает бар ----------------------------------
+
+
+def _show_banner(scr, kind):
+    if kind == "confirm":
+        scr.show_confirm_banner("Действие", "Разрешить?")
+        return scr._confirm_banner
+    if kind == "plan":
+        scr._show_plan_banner()
+        return scr._plan_banner
+    scr._show_child_ask_human(parent_call_id="p1", prose="Какой путь?")
+    return scr._ask_human_banner
+
+
+def _hide_banner(scr, kind):
+    if kind == "confirm":
+        scr._hide_confirm_banner()
+    elif kind == "plan":
+        scr._hide_plan_banner()
+    else:
+        scr._unmount_ask_human_banner()
+
+
+async def _turn_with_bar(pilot, tid):
+    scr = pilot.app.screen
+    scr.attach_active_task(tid)
+    scr._mount_user_reply("первая")
+    pilot.app.active_runner = _Run(tid)
+    scr._show_thinking_indicator()
+    scr._sync_indicator_bar()
+    await pilot.pause()
+    return scr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["ask", "confirm", "plan"])
+async def test_banner_mid_turn_one_empty_row_above_it(tmp_path, kind):
+    """Баннер посреди хода: бар снят, между лентой и рамкой баннера — один
+    пустой ряд, как над полем ввода в покое."""
+    tid = f"gap{kind}"
+    _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _turn_with_bar(pilot, tid)
+        banner = _show_banner(scr, kind)
+        await pilot.pause()
+        scr._sync_trace_max_height()
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        last = [w for w in trace.children if w.display][-1]
+        assert banner.region.y - last.region.bottom == 1
+        assert _bar(pilot).display is False
+        pilot.app.active_runner = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["ask", "confirm", "plan"])
+async def test_bar_returns_in_frame_banner_leaves(tmp_path, kind):
+    """Баннер снят посреди хода: бар встаёт в том же кадре раскладки, в
+    котором баннер ушёл, — нет кадра ни без обоих, ни с обоими."""
+    tid = f"ret{kind}"
+    _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _turn_with_bar(pilot, tid)
+        banner = _show_banner(scr, kind)
+        await pilot.pause()
+        frames: list[tuple] = []
+        layout = scr._refresh_layout
+
+        def recorded_layout(*args, **kwargs):
+            layout(*args, **kwargs)
+            frames.append(
+                (
+                    _bar(pilot).has_class("-turn"),
+                    banner.region.height > 0,
+                )
+            )
+
+        scr._refresh_layout = recorded_layout
+        _hide_banner(scr, kind)
+        await pilot.pause()
+        await pilot.pause()
+        assert frames
+        assert set(frames) == {(True, False)}
+        pilot.app.active_runner = None

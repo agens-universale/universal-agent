@@ -221,15 +221,17 @@ async def test_pill_row_idle_and_running(tmp_path):
 
 
 async def _pill_row_above_banner(pilot, scr, pill, banner):
-    """Баннер меняет хром. Накладки переставлены раньше потолка ленты (тик
-    опроса бывает и до, и после раскладки с баннером): потолок, став под
-    баннер, сам переставляет плашку — в той же перерисовке, без
-    догоняющих перекладок."""
+    """Баннер меняет хром и снимает бар (§4.12). Накладки переставлены
+    раньше потолка ленты (тик опроса бывает и до, и после раскладки с
+    баннером): потолок, став под баннер, сам переставляет плашку — в той
+    же перерисовке, без догоняющих перекладок. Без бара плашка — в нижнем
+    зазоре ленты, это ряд над баннером."""
     await pilot.pause()
     scr._refresh_trace_overlays()
     scr._sync_trace_max_height()
     await pilot.pause()
-    assert pill.region.y == _bar_region(scr).bottom - 1
+    assert _bar_region(scr).height == 0
+    assert pill.region.y == _trace(scr).region.bottom
     assert not pill.region.overlaps(banner.region)
     assert pill.region.y == banner.region.y - 1
 
