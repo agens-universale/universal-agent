@@ -1342,3 +1342,108 @@ async def test_quit_mid_run_reopen_shows_line_at_end(tmp_path):
         assert last.text.plain == "■ Отменено"
         assert last.recorded is False
         assert not first.is_fresh
+
+
+# --- S10 §3.5: рамка плана над свежей строкой ------------------------------
+
+
+def _write_plan_thread(tmp_path, text):
+    """Тред TID, в мете — предложенный план сессии."""
+    from gc_core.execution.state import SharedStateData
+    from gc_core.persistence.schema import serialize_shared_block
+    from gc_core.plan_store import new_plan_block
+
+    _write_thread(tmp_path)
+    shared = SharedStateData(plan=new_plan_block(text), permission_mode="plan")
+    meta = json.loads((tmp_path / f"meta_cli_{TID}.json").read_text())
+    meta["shared"] = serialize_shared_block(shared)
+    (tmp_path / f"meta_cli_{TID}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+
+
+async def _plan_turn(pilot, tmp_path, text, *, with_call):
+    """Ход, кончившийся «План готов». `with_call` — план предложен в этом
+    ходе (рамка из истории), иначе агент предъявил сохранённый заново."""
+    scr = await _open(pilot)
+    runner = _FakeRunner()
+    pilot.app.active_runner = runner
+    scr._prepare_for_new_run()
+    scr._poll_tick()
+    thread = _Thread(tmp_path)
+    thread.messages(_reply("u1"))
+    if with_call:
+        args = json.dumps({"plan": text})
+        thread.messages(
+            {
+                "type": "function_call",
+                "name": "turn_propose_plan",
+                "call_id": "c1",
+                "arguments": args,
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": json.dumps(
+                    {"tool": "turn_propose_plan", "ok": True}
+                ),
+            },
+        )
+    thread.record(1, "u1", reason="plan_proposed")
+    runner._running = False
+    scr._poll_tick()
+    await pilot.pause()
+    await pilot.pause()
+    return scr
+
+
+def _plan_order(scr):
+    from gc_tui.widgets.plan_panel import PlanPanel
+    from gc_tui.widgets.turn_line import TurnLine
+
+    kids = list(scr.query_one("#trace").children)
+    (line,) = [w for w in kids if isinstance(w, TurnLine)]
+    panels = [kids.index(w) for w in kids if isinstance(w, PlanPanel)]
+    return kids, line, panels
+
+
+@pytest.mark.asyncio
+async def test_plan_panel_above_fresh_line_only_from_present(tmp_path):
+    """«План готов»: рамка над свежей строкой, не задвоена. `/plan` —
+    рамка и строка пути под строкой, строка свежая. Переоткрытие — тот же
+    порядок, что вживую после хода."""
+    text = "1. шаг\n2. проверка"
+    _write_plan_thread(tmp_path, text)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _plan_turn(pilot, tmp_path, text, with_call=True)
+        kids, line, panels = _plan_order(scr)
+        assert len(panels) == 1
+        assert panels[0] < kids.index(line)
+        assert line.is_fresh
+        live = _child_types(scr)
+
+        scr._hide_plan_banner()
+        scr._cmd_plan()
+        await pilot.pause()
+        kids, line, panels = _plan_order(scr)
+        assert len(panels) == 2
+        assert panels[0] < kids.index(line) < panels[1]
+        assert kids[-1] is not line
+        assert line.is_fresh
+
+        scr = await _reopen(pilot, tmp_path)
+        assert _child_types(scr) == live
+
+
+@pytest.mark.asyncio
+async def test_present_plan_copy_lands_above_fresh_line(tmp_path):
+    """Агент предъявил сохранённый план заново: копия рамки встаёт над
+    свежей строкой своего хода, а не под ней."""
+    text = "1. шаг"
+    _write_plan_thread(tmp_path, text)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _plan_turn(pilot, tmp_path, text, with_call=False)
+        kids, line, panels = _plan_order(scr)
+        assert len(panels) == 1
+        assert panels[0] < kids.index(line)
+        assert line.is_fresh

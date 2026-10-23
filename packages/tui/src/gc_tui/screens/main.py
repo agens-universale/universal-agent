@@ -4730,10 +4730,15 @@ class TraceScreen(Screen):
         for panel in self._plan_panels():
             panel.set_accepted(plan_is_accepted(plan, panel.plan_text))
 
-    def _ensure_plan_panel_last(self, plan: dict) -> None:
+    def _ensure_plan_panel_last(
+        self, plan: dict, *, above_fresh_line: bool = False
+    ) -> None:
         """Рамка плана сессии стоит последней в ленте (над очередью): если
         нет — показать копию. Копия — локальный рендер, в историю не
-        пишется."""
+        пишется.
+
+        ``above_fresh_line`` — рамка по итогу хода «План готов»: её место
+        над свежей строкой этого хода (S10 §3.5)."""
         from gc_tui.services.trace_render import build_block_widgets
 
         text = str(plan.get("text") or "")
@@ -4742,6 +4747,13 @@ class TraceScreen(Screen):
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         # Последний — без очереди: она прижата к низу и рамку не хоронит.
         children = [w for w in trace.children if not is_queued(w)]
+        anchor = None
+        if (
+            above_fresh_line
+            and children
+            and children[-1] is self._fresh_turn_line()
+        ):
+            anchor = children.pop()
         last = children[-1] if children else None
         if isinstance(last, PlanPanel) and last.shows(text):
             return
@@ -4756,6 +4768,8 @@ class TraceScreen(Screen):
             # Идёт потоковый ответ: копия встаёт ПЕРЕД ним, иначе готовый
             # ответ потом перепрыгнул бы через план.
             trace.mount(panel, before=live)
+        elif anchor is not None:
+            trace.mount(panel, before=anchor)
         else:
             self._trace_mount(panel)
         panel.set_accepted(plan_is_accepted(plan, text))
@@ -4766,7 +4780,7 @@ class TraceScreen(Screen):
         plan = self._session_plan()
         if plan is None:
             return
-        self._ensure_plan_panel_last(plan)
+        self._ensure_plan_panel_last(plan, above_fresh_line=True)
         self._sync_plan_panel_with_session()
         self._show_plan_banner(resumed=plan_is_accepted(plan))
 
