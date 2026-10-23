@@ -21,6 +21,10 @@ from gc_core.vision.errors import (
 )
 
 from gc_tui.models import ResultOutcome, TraceEvent
+from gc_tui.services.command_output import (
+    command_lines,
+    parse_command_output,
+)
 from gc_tui.services.image_chips import images_mentioned
 from gc_tui.services.plural import plural_form
 from gc_tui.services.tool_identity import tool_id
@@ -943,6 +947,9 @@ def _map_function_event(
             call_id=call_id,
             tool_name=name,
             wire_name=wire_name,
+            command_lines=command_lines(
+                wire_name, msg.get("arguments"), root=root
+            ),
         )
 
     if typ == "function_call_output":
@@ -962,6 +969,7 @@ def _map_function_event(
             call_id=call_id,
             tool_name=name,
             outcome=stop[0] if stop else None,
+            command=parse_command_output(output),
         )
 
     return None

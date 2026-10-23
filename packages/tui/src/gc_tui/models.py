@@ -78,6 +78,26 @@ class TaskSummary:
     )
 
 
+@dataclass(frozen=True)
+class CommandOutput:
+    """Вывод команды для превью `Ran` (спека P4 §4.1); разбирает
+    `services.command_output.parse_command_output`."""
+
+    #: Всё, что есть в записи: `stdout`, затем `stderr`; у обрезанного
+    #: канала — голова, строка пропуска, хвост.
+    lines: tuple[str, ...]
+    omitted_chars: int
+    #: `exit_code`, у `exec_python` — `return_code`.
+    exit_code: Optional[int]
+    timed_out: bool
+    #: Фоновый запуск: вывод не сохраняется.
+    background: bool
+    #: Первые строки превью — без строки пропуска.
+    preview: tuple[str, ...]
+    #: Строк записи за пределами превью; строка пропуска не считается.
+    hidden: int
+
+
 @dataclass
 class TraceEvent:
     """Событие ленты трейса (tui3 §521, tui3_impl §4.2)."""
@@ -112,6 +132,11 @@ class TraceEvent:
     # Скилл реплики (kind="user"): id из `skill_loaded` записи — рисуется
     # именем первым словом реплики (спека P3 §2.3).
     skill: Optional[str] = None
+    # Сырая команда Run-тула построчно (kind="call") и разобранный вывод
+    # (результат Run-тула): считаются при маппинге, до облегчения
+    # retention (спека P4 §8.2).
+    command_lines: tuple[str, ...] = ()
+    command: Optional[CommandOutput] = None
 
     @property
     def result_outcome(self) -> ResultOutcome:
