@@ -20,6 +20,8 @@ from typing import (
 )
 
 from gc_core.attachments.model import Attachment, attachments_of
+from gc_core.constants.tool_display import DisplayCategory, tool_display
+from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.execution.progress import (
     parse_tool_result_status,
     run_command_text,
@@ -73,6 +75,15 @@ def _raw_output(payload: Dict[str, Any]) -> Optional[str]:
     return json.dumps(output, ensure_ascii=False)
 
 
+def nested_call_row(wire_name: str) -> bool:
+    """Строка ли вложенный вызов — то же правило, что наверху: скрытый тул
+    (`Hidden` таблицы ядра) строкой не бывает; чек-лист с битыми
+    аргументами — бывает: его сбой должен быть виден."""
+    if wire_name == SESSION_TODO_TOOL_NAME:
+        return True
+    return tool_display(wire_name).category is not DisplayCategory.HIDDEN
+
+
 def _seq_key(record: Dict[str, Any]) -> int:
     seq = record.get("seq")
     return seq if isinstance(seq, int) else 0
@@ -86,7 +97,6 @@ def plan_sidecar_nested_actions(
     """Group by parent_call_id, order by seq; skip finished/HITL-like noise.
 
     ``root`` — корень проекта: пути в подписях вызовов от него."""
-    from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
     from gc_core.execution.progress import todo_items_from_arguments
 
     by_parent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -130,6 +140,8 @@ def plan_sidecar_nested_actions(
                             )
                         )
                         continue
+                if not nested_call_row(str(name or "")):
+                    continue
                 actions.append(
                     SidecarNestedAction(
                         kind="mount_nested_tool",

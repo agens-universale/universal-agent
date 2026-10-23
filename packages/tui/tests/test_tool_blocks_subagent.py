@@ -320,6 +320,39 @@ async def test_p418_live_equals_reopen(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_nested_hidden_tool_not_rendered(tmp_path):
+    """Вложенный `turn_finish` — скрытый тул, как наверху: строки нет ни
+    вживую, ни после возврата, ни в превью; событием окна `Agent` он не
+    считается — три события видны без `… ещё N`."""
+    finish = (
+        "call",
+        "f1",
+        "turn_finish",
+        {"solution_type": "full_solution", "task": "прочитать"},
+    )
+    steps = [("prose", "Смотрю."), _read(0), ("prose", "Готово."), finish]
+    calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
+    live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
+    live_dir.mkdir()
+    reopen_dir.mkdir()
+    async with _app(live_dir).run_test(size=(100, 40)) as pilot:
+        live = await _live(pilot, live_dir, steps, calls=calls)
+    _write_reopen(reopen_dir, steps, calls=calls)
+    async with _app(reopen_dir).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        reopen = _rows(pilot)
+        await _push_preview(pilot, scr)
+        preview = _rows(pilot)
+    assert live == reopen == preview
+    assert _agent_rows(live)[1:] == [
+        "  ● Смотрю.",
+        "  ● Explored",
+        "    └ Read  client/m0.py · 2с",
+        "  ● Готово.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_agent_window_expands_on_click(tmp_path):
     """Клик по `… ещё N` окна `Agent` — видны все события, маркер ушёл,
     `− свернуть` — последней строкой блока `Agent` в колонке 4 (одна фраза

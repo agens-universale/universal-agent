@@ -15,6 +15,7 @@ from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.execution.progress import SubagentProgressEvent
 
 from gc_tui.models import ResultOutcome
+from gc_tui.services.subagent_sidecar_mapper import nested_call_row
 from gc_tui.services.trace_mapper import classify_stop
 from gc_tui.services.trace_render import tool_caption
 
@@ -86,7 +87,7 @@ class SubagentProgressConsumer:
                         todo_items=ev.todo_items,
                     )
                     routed_todo = True
-                if not routed_todo:
+                if not routed_todo and nested_call_row(ev.tool_name or ""):
                     mount_nested_tool(
                         parent_call_id=pid,
                         tool_name=ev.tool_name or "<tool>",
