@@ -1,4 +1,4 @@
-from gc_tui.services.path_display import display_path, fit_path
+from gc_tui.services.path_display import display_path, fit_path, home_path
 
 # ---- путь картинки под репликой: от проекта / через ~ / полный ----
 
@@ -31,6 +31,17 @@ def test_display_path_sibling_with_the_same_prefix_is_not_inside():
         display_path(f"{ROOT}-old/shot.png", ROOT, HOME)
         == "~/work/project-old/shot.png"
     )
+
+
+def test_home_path_shows_home_as_tilde_even_inside_the_project():
+    assert (
+        home_path(f"{ROOT}/.gc/config.yml", HOME)
+        == "~/work/project/.gc/config.yml"
+    )
+
+
+def test_home_path_elsewhere_is_absolute():
+    assert home_path("/etc/gc/config.yml", HOME) == "/etc/gc/config.yml"
 
 
 def test_fit_path_keeps_a_path_that_fits():

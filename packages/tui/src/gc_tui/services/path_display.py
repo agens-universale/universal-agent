@@ -18,16 +18,19 @@ def _inside(path: str, base: str) -> bool:
         return False
 
 
+def home_path(path: str, home: str) -> str:
+    """Путь внутри `home` — через `~`, иначе как есть."""
+    if os.path.isabs(path) and _inside(path, home):
+        return os.path.join("~", os.path.relpath(path, home))
+    return path
+
+
 def display_path(path: str, root: str, home: str) -> str:
     """Путь для показа: внутри `root` — от него, иначе внутри `home` — через `~`,
     иначе полностью. Не абсолютный (одно имя из старой сессии) — как есть."""
-    if not os.path.isabs(path):
-        return path
-    if _inside(path, root):
+    if os.path.isabs(path) and _inside(path, root):
         return os.path.relpath(path, root)
-    if _inside(path, home):
-        return os.path.join("~", os.path.relpath(path, home))
-    return path
+    return home_path(path, home)
 
 
 def fit_path(path: str, max_cols: int) -> str:

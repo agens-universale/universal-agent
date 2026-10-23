@@ -144,15 +144,23 @@ async def test_write_adds_missing_key_and_keeps_others(tmp_path):
         assert data["tui"]["finish_gate_mode"] == "smart"
 
 
-async def test_write_says_it_applies_at_next_start(tmp_path):
+async def test_write_is_success_that_applies_at_next_start(
+    tmp_path, monkeypatch
+):
+    """Сохранено, действует со следующего запуска — это успех: зелёная ✓,
+    путь файла — через `~`."""
+    monkeypatch.setenv("HOME", str(tmp_path))
     app, _ = _app_with_config(tmp_path, "tui:\n  theme: auto\n")
     async with app.run_test() as pilot:
         scr = await _open_look(pilot)
         await pilot.press("right")
         await pilot.pause(0.1)
-        flash = " ".join(_texts(scr, ".set-flash-warn"))
-        assert "«Тема» — GigaCode" in flash
-        assert "применится со следующего запуска" in flash
+        flash = scr.query_one("#set-flash", Static)
+        assert flash.has_class("set-flash-ok")
+        assert str(flash.render()) == (
+            "✓ «Тема» — GigaCode, записано в ~/config.yml; "
+            "применится со следующего запуска"
+        )
 
 
 async def test_footer_offers_only_working_keys(tmp_path):

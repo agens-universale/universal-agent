@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import replace
 
@@ -34,6 +35,7 @@ from gc_tui.form_frame import (
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
 from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
+from gc_tui.services.path_display import home_path
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
@@ -444,6 +446,11 @@ def fit_overlay_suffix(names: list[str], width: int) -> str:
         else:
             break
     return ("".join(f"+{x}" for x in out) + tail) if out else "+…"
+
+
+def _shown_path(path) -> str:
+    """Путь файла в репликах экрана: домашний каталог — через `~`."""
+    return home_path(str(path), os.path.expanduser("~"))
 
 
 def _without_path_prefix(message: str, path) -> str:
@@ -3417,9 +3424,7 @@ class SettingsScreen(Screen):
         if reloaded:
             self._flash(f"язык распознавания: {language}")
         else:
-            self._flash(
-                f"сохранено, {_MSG_APPLIES_NEXT_START}", outcome="warn"
-            )
+            self._flash(f"сохранено, {_MSG_APPLIES_NEXT_START}")
 
     def _voice_enable_local(self) -> None:
         """Enter на «Локальном сервисе»: нет батарейки — поставить (и включить), есть, но
@@ -3772,9 +3777,7 @@ class SettingsScreen(Screen):
         if reloaded:
             self._flash("свой endpoint подключён")
         else:
-            self._flash(
-                f"сохранено, {_MSG_APPLIES_NEXT_START}", outcome="warn"
-            )
+            self._flash(f"сохранено, {_MSG_APPLIES_NEXT_START}")
 
     # --- секция «Режимы работы» (дизайн 2026-07-18-settings-work-modes-design §3-4) ---
     def _modes_is_child(self, name: str) -> bool:
@@ -4237,7 +4240,8 @@ class SettingsScreen(Screen):
         effective = toggle_state_base(self.app, name)
         if effective != new_value:
             self._notice(
-                f"записано в {target}, но действует «{effective}» — "
+                f"записано в {_shown_path(target)}, "
+                f"но действует «{effective}» — "
                 f"значение перекрыто {self._overriding_layer_name(values)}"
             )
             return
@@ -4245,7 +4249,8 @@ class SettingsScreen(Screen):
         # (проектный перехватывает ключ, который сам задаёт), и «сохранено» без
         # имени оставляло бы человека гадать, где искать результат.
         self._flash(
-            f"«{self._modes_head(name)}» — {new_value}, записано в {target}"
+            f"«{self._modes_head(name)}» — {new_value}, "
+            f"записано в {_shown_path(target)}"
         )
 
     # --- секция «Внешний вид»: тема `tui.theme` ---
@@ -4291,15 +4296,14 @@ class SettingsScreen(Screen):
             return
         if self._theme_value() != new_value:
             self._notice(
-                f"записано в {target}, но действует "
+                f"записано в {_shown_path(target)}, но действует "
                 f"«{self._theme_name()}» — значение перекрыто "
                 f"{self._overriding_layer_name(values)}"
             )
             return
         self._flash(
             f"«{_THEME_LABEL}» — {THEME_NAMES[new_value]}, записано в "
-            f"{target}; {_MSG_APPLIES_NEXT_START}",
-            outcome="warn",
+            f"{_shown_path(target)}; {_MSG_APPLIES_NEXT_START}"
         )
 
     # --- секция «Профили» (витрина обоих корней + единое правило записи) ---
@@ -4502,7 +4506,10 @@ class SettingsScreen(Screen):
             self._on_apply()
             self._pull_base_from_app()
         except Exception as exc:
-            self._notice(f"записано в {target}, но конфиг не перечитан: {exc}")
+            self._notice(
+                f"записано в {_shown_path(target)}, "
+                f"но конфиг не перечитан: {exc}"
+            )
             return
         self._raw = self._read_raw()
         self._origins = self._read_origins()
@@ -4513,7 +4520,7 @@ class SettingsScreen(Screen):
         else:
             effect = self._launch_profile_effect("") or _MSG_APPLIES_NEXT_TURN
         self._render_view()
-        self._flash(f"Профиль деактивирован — {target}. {effect}")
+        self._flash(f"Профиль деактивирован — {_shown_path(target)}. {effect}")
 
     def _activate_profile(self, name: str, ref) -> None:
         """Space на строке профиля (клавиша перевешена решением В1 волны B). «Уже
@@ -4545,7 +4552,10 @@ class SettingsScreen(Screen):
             self._on_apply()
             self._pull_base_from_app()
         except Exception as exc:
-            self._notice(f"записано в {target}, но конфиг не перечитан: {exc}")
+            self._notice(
+                f"записано в {_shown_path(target)}, "
+                f"но конфиг не перечитан: {exc}"
+            )
             return
         self._raw = self._read_raw()
         self._origins = self._read_origins()
@@ -4558,7 +4568,9 @@ class SettingsScreen(Screen):
                 self._launch_profile_effect(name) or _MSG_APPLIES_NEXT_TURN
             )
         self._render_view()
-        self._flash(f"Профиль «{name}» активирован — {target}. {effect}")
+        self._flash(
+            f"Профиль «{name}» активирован — {_shown_path(target)}. {effect}"
+        )
 
     # --- CRUD файлов профилей (волна B, Task 5) ---
     def _profiles_base_root(self):
