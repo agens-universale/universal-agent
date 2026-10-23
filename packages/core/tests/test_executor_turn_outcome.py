@@ -35,6 +35,7 @@ from gc_core.thread_store import (
     load_thread_messages,
 )
 from gc_core.thread_store_file import FileThreadStore
+from gc_core.utils.connect_backend import _aguard_model_call
 from gc_core.utils.logging_module import release_run_logger
 
 _SYS = "test"
@@ -376,6 +377,33 @@ async def test_stop_mid_turn_writes_user_stop_at_stop_moment(run, discard):
     assert outcome.ended_at == stopped_at["ended"]
     assert outcome.duration_sec == 4.0
     assert len(run.records()) == 1
+
+
+async def test_stop_interrupting_model_request_writes_its_time(run):
+    """Стоп рвёт ожидание ответа модели (снятие хода): прогон выходит сразу,
+    и итог «stopped» пишется с моментом стопа — у «■ Отменено» есть время."""
+
+    async def _hang():
+        run.mono.now += 3.0
+
+        async def _never():
+            await asyncio.sleep(30)
+
+        return await _aguard_model_call(_never)
+
+    async def _stop_soon():
+        await asyncio.sleep(0.2)
+        run.ex.stop_run()
+
+    run.script = [_hang]
+    stopper = asyncio.create_task(_stop_soon())
+    await asyncio.wait_for(run.arun(), 10)
+    await stopper
+
+    (outcome,) = _only_outcomes(run)
+    assert (outcome.status, outcome.reason) == ("stopped", USER_STOP)
+    assert outcome.ended_at is not None
+    assert outcome.duration_sec == 3.0
 
 
 async def test_discarded_stop_does_not_flush_deferred(run, monkeypatch):
