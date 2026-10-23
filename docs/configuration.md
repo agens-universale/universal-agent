@@ -97,6 +97,9 @@
     Пример профиля — `packages/acp/profiles/acp.yml`. Гайд по процессу — [acp.md](acp.md).
   - `tui.file_view.enabled` / `max_file_bytes` / `page_lines` (`null` = авто по высоте)
     — постраничный просмотр `/view` в TUI (см. [tui.md](tui.md#просмотр-файла-view)).
+  - `tui.theme` (`auto | gigacode`, по умолчанию `auto`) — тема TUI: `auto` берёт фон
+    терминала, если на нём читается текст палитры, иначе — `gigacode`, собственная тёмная
+    палитра. Выбирается при старте (см. [tui-design-code.md](tui-design-code.md)).
 - **Правки агента**: секция `agent_edits` — журнал правок, снимки для отката, дифф в ленте
   и экран изменений. Журнал ведётся по режиму запуска: `agent_edits.record.tui` (по умолчанию
   `true`), `record.cli` и `record.server` (по умолчанию `false` — включите, чтобы правки из

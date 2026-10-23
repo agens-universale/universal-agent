@@ -1,6 +1,6 @@
 """Палитра от фона терминала: `apply_background` пересчитывает фон и
 зависящие от него поверхности (тема auto), `reset` возвращает литералы
-темы fixed. Без вызова `apply_background` палитра — ровно литералы."""
+темы gigacode. Без вызова `apply_background` палитра — ровно литералы."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import test_palette_sync as sync_guards
 
 from gc_tui import palette
 
-# Снимок темы fixed: то, что видят все, кто не вызвал apply_background.
+# Снимок темы gigacode: то, что видят все, кто не вызвал apply_background.
 _FIXED_CSS = {
     "bg": "#0E1119",
     "ink": "#ebe9e6",
@@ -84,7 +84,7 @@ def _channel_gap(a: str, b: str) -> int:
     return max(abs(x - y) for x, y in zip(_rgb(a), _rgb(b)))
 
 
-def _fixed_snapshot() -> dict[str, object]:
+def _gigacode_snapshot() -> dict[str, object]:
     snapshot: dict[str, object] = dict(palette.css_variables())
     snapshot["TRACK"] = palette.TRACK
     for name in _RAMPS:
@@ -92,21 +92,21 @@ def _fixed_snapshot() -> dict[str, object]:
     return snapshot
 
 
-def _expected_fixed() -> dict[str, object]:
+def _expected_gigacode() -> dict[str, object]:
     expected: dict[str, object] = dict(_FIXED_CSS)
     expected["TRACK"] = _FIXED_TRACK
     expected.update(sync_guards._PREVIOUS_RAMPS)
     return expected
 
 
-def test_without_apply_palette_is_fixed_literals():
-    assert _fixed_snapshot() == _expected_fixed()
+def test_without_apply_palette_is_gigacode_literals():
+    assert _gigacode_snapshot() == _expected_gigacode()
 
 
-def test_reset_restores_fixed_literals():
+def test_reset_restores_gigacode_literals():
     palette.apply_background((0x21, 0x27, 0x33))
     palette.reset()
-    assert _fixed_snapshot() == _expected_fixed()
+    assert _gigacode_snapshot() == _expected_gigacode()
 
 
 def test_apply_background_sets_bg_everywhere():
@@ -127,7 +127,7 @@ def test_apply_background_recomputes_surfaces():
     assert palette.css_variables()["band-bg"] == BAND_BG
 
 
-def test_bg_derived_exact_at_fixed_background():
+def test_bg_derived_exact_at_gigacode_background():
     palette.apply_background(_FIXED_BG)
     css = palette.css_variables()
     exact = ("band-bg", "block-bg", "diff-add-bg", "diff-del-bg")
@@ -136,19 +136,19 @@ def test_bg_derived_exact_at_fixed_background():
 
 
 @pytest.mark.parametrize("name", _TINTED)
-def test_tinted_surfaces_close_at_fixed_background(name):
-    fixed = getattr(palette, name)
+def test_tinted_surfaces_close_at_gigacode_background(name):
+    gigacode = getattr(palette, name)
     palette.apply_background(_FIXED_BG)
-    assert _channel_gap(getattr(palette, name), fixed) <= 3
+    assert _channel_gap(getattr(palette, name), gigacode) <= 3
 
 
-def test_pending_edge_close_at_fixed_background():
+def test_pending_edge_close_at_gigacode_background():
     palette.apply_background(_FIXED_BG)
     assert _channel_gap(palette.USER_PENDING_EDGE, "#3a7a72") <= 3
 
 
 @pytest.mark.parametrize("name", _RAMPS)
-def test_ramps_close_at_fixed_background(name):
+def test_ramps_close_at_gigacode_background(name):
     palette.apply_background(_FIXED_BG)
     expected = sync_guards._PREVIOUS_RAMPS[name]
     ramp = getattr(palette, name)

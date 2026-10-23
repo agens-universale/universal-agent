@@ -48,8 +48,8 @@ class TuiConfig(BaseModel):
         "minimal"
     )
     # Тема TUI: auto — фон от терминала (при отсутствии ответа на запрос
-    # или светлом фоне — fixed); fixed — собственная тёмная палитра.
-    theme: Literal["auto", "fixed"] = "auto"
+    # или светлом фоне — gigacode); gigacode — собственная тёмная палитра.
+    theme: Literal["auto", "gigacode"] = "auto"
     # adaptive bounce: как поступать с текст-ответом без тула.
     # deny — всегда bounce (как CLI); judge — судья intent_guard решает;
     # allow — всегда принять текст (ни bounce, ни судьи).
