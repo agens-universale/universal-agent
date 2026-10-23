@@ -500,8 +500,9 @@ async def test_nested_finishing_live(tmp_path):
 @pytest.mark.asyncio
 async def test_agent_window_expands_on_click(tmp_path):
     """Клик по `… ещё N` окна `Agent` — видны все события, маркер ушёл,
-    `− свернуть` — последней строкой блока `Agent` в колонке 4 (одна фраза
-    — последняя строка блока); клик по ней — снова окно."""
+    `− свернуть` — последней строкой блока `Agent` в колонке маркера
+    `… ещё N` (колонка вложенных глифов, без `└`); клик по ней — снова
+    окно."""
     steps = _p418()
     _write_reopen(tmp_path, steps, calls={})
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
@@ -513,7 +514,7 @@ async def test_agent_window_expands_on_click(tmp_path):
         lines = _agent_rows(_rows(pilot))
         assert lines[1] == "  └ проверка клиента"
         assert lines[2] == "  ● Смотрю, где клиент берёт таймаут."
-        assert lines[-1] == "    − свернуть"
+        assert lines[-1] == "  − свернуть"
         assert not any("└ − свернуть" in line for line in lines)
         (collapse,) = _window_phrases(scr, "bottom")
         await pilot.click(collapse)
@@ -547,7 +548,7 @@ async def test_agent_collapse_stays_last_on_new_event(tmp_path):
         await pilot.pause()
         await _emit(pilot, _progress([("prose", "Ещё одно событие.")]))
         lines = _agent_rows(_rows(pilot))
-        assert lines[-2:] == ["  ● Ещё одно событие.", "    − свернуть"]
+        assert lines[-2:] == ["  ● Ещё одно событие.", "  − свернуть"]
 
 
 @pytest.mark.asyncio

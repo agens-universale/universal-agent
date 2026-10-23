@@ -124,7 +124,7 @@ class BlockHost(Protocol):
 
 class BlockAction(NoSelectStatic):
     """Фраза блока: `… ещё N`, `+ ещё N строк`, `− свернуть`. Маркер окна
-    над членами — с `└ ` в колонке 2, прочие — в колонке 4; маркер окна
+    над членами — с `└ ` в колонке 2, прочие — в колонке 4; обе фразы окна
     `Agent` — без `└`, в колонке его вложенных глифов (`mark` пуст); клик
     — тогл. Строка незаписанных файлов кликом ничего не делает."""
 
@@ -419,15 +419,13 @@ class ToolBlocksView:
             if phrase.parent is not None and (before or after) is not phrase:
                 phrase.parent.move_child(phrase, before=before, after=after)
             return
-        # Фразы окна субагента — от колонки глифа его событий (§7):
-        # маркер — в ней же и без `└` (`└` под `Agent` — у строки задачи),
-        # `− свернуть` — на шаг глубже.
+        # Фразы окна субагента — в колонке глифа его событий и без `└`
+        # (§7; `└` под `Agent` — у строки задачи).
         window = d.block == AGENT_WINDOW
-        top = d.slot == "top"
         if window:
-            mark = "" if top else "  "
+            mark = ""
         else:
-            mark = "└ " if top else "  "
+            mark = "└ " if d.slot == "top" else "  "
         phrase = BlockAction(
             level=self.level,
             key=key,
