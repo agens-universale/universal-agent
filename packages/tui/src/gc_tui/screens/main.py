@@ -5737,6 +5737,14 @@ class TraceScreen(Screen):
             row.pause() if human_wait else row.resume()
             row.refresh_running_elapsed()
 
+    def _interrupt_nested_rows(self) -> None:
+        """Инвариант «прервано» для вложенных строк субагента — пока прежним
+        путём (их модели блоков — отдельный шаг)."""
+        for widgets in self._nested_widgets_by_parent.values():
+            for w in widgets:
+                if isinstance(w, ToolCallRow):
+                    w.mark_interrupted()
+
     def _runner_is_for_active_thread(self) -> bool:
         """Раннер работал (работает) в открытом треде. Раннер и его
         `last_runner_error` общие на приложение: решения о том, что рисовать
@@ -5930,11 +5938,7 @@ class TraceScreen(Screen):
             view = self._top_blocks()
             for row in self._active_calls.values():
                 view.interrupted(row, started=not row.waiting)
-            for widgets in self._nested_widgets_by_parent.values():
-                for w in widgets:
-                    mark = getattr(w, "mark_interrupted", None)
-                    if callable(mark):
-                        mark()
+            self._interrupt_nested_rows()
             self._active_calls.clear()
             self._nested_tool_rows.clear()
             self._nested_widgets_by_parent.clear()

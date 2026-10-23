@@ -628,6 +628,7 @@ _NESTED_UNTIL_TASK_15 = frozenset(
     {
         "_finish_nested_tool",
         "_inline_diff_block",
+        "_interrupt_nested_rows",
         "_pause_nested_rows",
     }
 )
@@ -640,13 +641,26 @@ def _row_state_calls(path) -> set[str]:
         if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for node in ast.walk(func):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in _ROW_STATE_CALLS
-            ):
+            if _row_state_call(node):
                 owners.add(func.name)
     return owners
+
+
+def _row_state_call(node) -> bool:
+    """Вызов метода состояния строки — и прямой, и по имени-строке
+    (`getattr(w, "mark_interrupted")`): обход стража тоже вызов."""
+    if not isinstance(node, ast.Call):
+        return False
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr in _ROW_STATE_CALLS
+    return (
+        isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and any(
+            isinstance(arg, ast.Constant) and arg.value in _ROW_STATE_CALLS
+            for arg in node.args[1:2]
+        )
+    )
 
 
 def test_rows_only_through_model():
