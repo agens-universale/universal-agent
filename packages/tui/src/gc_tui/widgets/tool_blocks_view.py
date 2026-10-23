@@ -564,10 +564,17 @@ def nested_tail(
     children: Sequence[Widget], level: Sequence[Widget], parent: Widget
 ) -> Widget:
     """Последний в ленте виджет уровня субагента (заголовки, фразы и
-    диффы — тоже, §9.1); у уровня без виджетов — строка `Agent`."""
+    диффы — тоже, §9.1); у уровня без виджетов — строка `Agent`.
+    `− свернуть` окна `Agent` хвостом не считается: новое событие встаёт
+    над ним, фраза остаётся последней строкой блока."""
     if not level:
         return parent
-    mine = {id(w) for w in level}
+    collapse = phrase_key(AGENT_WINDOW, "bottom")
+    mine = {
+        id(w)
+        for w in level
+        if not (isinstance(w, BlockAction) and w.key == collapse)
+    }
     for widget in reversed(children):
         if id(widget) in mine:
             return widget

@@ -319,28 +319,54 @@ async def test_p418_live_equals_reopen(tmp_path):
 
 @pytest.mark.asyncio
 async def test_agent_window_expands_on_click(tmp_path):
-    """Клик по `… ещё N` окна `Agent` — видны все события, `− свернуть`
-    на месте маркера; ещё клик — снова окно."""
+    """Клик по `… ещё N` окна `Agent` — видны все события, маркер ушёл,
+    `− свернуть` — последней строкой блока `Agent` в колонке 4 (одна фраза
+    — последняя строка блока); клик по ней — снова окно."""
     steps = _p418()
     _write_reopen(tmp_path, steps, calls={})
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         scr = await _open(pilot)
-        (phrase,) = [
-            w
-            for w in scr.query(BlockAction)
-            if w.level == AGENT and w.key == "agent:top"
-        ]
+        (phrase,) = _window_phrases(scr, "top")
         assert phrase.phrase == "… ещё 1"
         await pilot.click(phrase)
         await pilot.pause()
         lines = _agent_rows(_rows(pilot))
-        assert "  └ − свернуть" in lines
-        assert "  ● Смотрю, где клиент берёт таймаут." in lines
-        await pilot.click(phrase)
+        assert lines[1] == "  ● Смотрю, где клиент берёт таймаут."
+        assert lines[-1] == "    − свернуть"
+        assert not any("└ − свернуть" in line for line in lines)
+        (collapse,) = _window_phrases(scr, "bottom")
+        await pilot.click(collapse)
         await pilot.pause()
         lines = _agent_rows(_rows(pilot))
-        assert "  └ … ещё 1" in lines
+        assert lines[1] == "  └ … ещё 1"
         assert "  ● Смотрю, где клиент берёт таймаут." not in lines
+        assert not any("свернуть" in line for line in lines)
+
+
+def _window_phrases(scr, slot: str) -> list:
+    return [
+        w
+        for w in scr.query(BlockAction)
+        if w.level == AGENT and w.key == f"agent:{slot}"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_collapse_stays_last_on_new_event(tmp_path):
+    """Окно раскрыто, субагент идёт: новое событие встаёт над
+    `− свернуть` — фраза остаётся последней строкой блока `Agent`."""
+    steps = _p418()
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        thread = _Thread(tmp_path)
+        scr = await _open(pilot)
+        await _tail(pilot, thread, _agent_call())
+        await _emit(pilot, _progress(steps))
+        (phrase,) = _window_phrases(scr, "top")
+        await pilot.click(phrase)
+        await pilot.pause()
+        await _emit(pilot, _progress([("prose", "Ещё одно событие.")]))
+        lines = _agent_rows(_rows(pilot))
+        assert lines[-2:] == ["  ● Ещё одно событие.", "    − свернуть"]
 
 
 @pytest.mark.asyncio

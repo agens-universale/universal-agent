@@ -228,7 +228,7 @@ class _Grid:
             self._fail(n, "причина одиночного вызова не цветом исхода")
 
     def _control(self, n: int, text: str, col: int) -> None:
-        if col != self._base + 4:
+        if col != self._base + 4 and not self._agent_collapse(text, col):
             want = self._base + 4
             self._fail(n, f"управление в колонке {col}, ждали {want}")
         if text.startswith("+ "):
@@ -236,6 +236,15 @@ class _Grid:
                 self._fail(n, "фраза раскрытия не «+ ещё N строк»")
             self._pending = n
         self._prev = ("ctl", col)
+
+    def _agent_collapse(self, text: str, col: int) -> bool:
+        """``− свернуть`` раскрытого окна ``Agent`` — последняя строка его
+        блока, в колонке ``Agent`` + 4 (после вложенных строк)."""
+        return (
+            self._nest is not None
+            and col == self._nest + 2
+            and text.startswith("− свернуть")
+        )
 
     def _member(self, n: int, row: Any, col: int) -> None:
         if self._fg(row, col) in (self._err, self._refused):

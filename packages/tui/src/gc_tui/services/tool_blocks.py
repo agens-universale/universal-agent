@@ -831,7 +831,7 @@ class ToolBlocks:
 
     def _window_changes(self) -> list[Decision]:
         """Окно сдвинулось или раскрыто: события, сменившие видимость, —
-        заново; фраза окна над событиями."""
+        заново; маркер окна над событиями, `− свернуть` — под ними."""
         if self._window is None:
             return []
         shown = set(self._shown_events())
@@ -847,10 +847,13 @@ class ToolBlocks:
             else:
                 out += self._diff([SetVisible(key, visible)])
         hidden = len(self._events) - len(shown)
-        text = more_phrase(hidden) if hidden else None
-        if self._window.expanded and len(self._events) > WINDOW:
-            text = COLLAPSE_PHRASE
-        decisions = self._phrase(self._window, "top", text, after=AGENT_WINDOW)
+        more = more_phrase(hidden) if hidden else None
+        expanded = self._window.expanded and len(self._events) > WINDOW
+        collapse = COLLAPSE_PHRASE if expanded else None
+        # Маркер — под строкой `Agent`; `− свернуть` — последней строкой
+        # блока `Agent`: в конце уровня, его держит там хвост уровня.
+        decisions = self._phrase(self._window, "top", more, after=AGENT_WINDOW)
+        decisions += self._phrase(self._window, "bottom", collapse)
         return out + self._diff(decisions)
 
     def _windowed(

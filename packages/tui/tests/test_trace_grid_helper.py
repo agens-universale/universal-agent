@@ -155,6 +155,19 @@ P4_18_AGENT = [
     _prose("Субагент подтвердил: таймаут и ретраи работают."),
 ]
 
+# Раскрытое окно `Agent`: маркера нет, `− свернуть` — последней строкой
+# блока `Agent`, в его колонке c + 4 (решение партии E).
+P4_18_AGENT_EXPANDED = [
+    _head(OK, "Agent", "  worker · «проверка клиента» · 1м 12с"),
+    _prose("Смотрю, где клиент берёт таймаут.", x=2),
+    _head(OK, "Ran", "  uv run pytest tests -q · 11с", x=2),
+    _out("42 passed in 3.10s", lead=True, x=2),
+    _prose("Клиент читает таймаут из конфига, тесты проходят.", x=2),
+    _ctl("− свернуть"),
+    BLANK,
+    _prose("Субагент подтвердил: таймаут и ретраи работают."),
+]
+
 P4_19_FAILURES = [
     _prose("Посмотрю конфиг клиента и настройки окружения."),
     BLANK,
@@ -199,10 +212,20 @@ P4_22_EDIT_IN_GROUP = [
         P4_10_RAN_FILES,
         P4_14_EDITED_3,
         P4_18_AGENT,
+        P4_18_AGENT_EXPANDED,
         P4_19_FAILURES,
         P4_22_EDIT_IN_GROUP,
     ],
-    ids=["p4-03", "p4-07", "p4-10", "p4-14", "p4-18", "p4-19", "p4-22"],
+    ids=[
+        "p4-03",
+        "p4-07",
+        "p4-10",
+        "p4-14",
+        "p4-18",
+        "p4-18-expanded",
+        "p4-19",
+        "p4-22",
+    ],
 )
 def test_mockup_passes(rows):
     assert assert_trace_grid(rows, origin=ORIGIN) is None
@@ -265,6 +288,14 @@ VIOLATIONS = {
             _r("     ● Explored", ("●", OK)),
         ],
         "строка 3: глиф в колонке 4",
+    ),
+    "agent-expand-phrase-in-c-plus-4": (
+        [
+            _head(OK, "Agent", "  worker · 1с"),
+            _prose("Смотрю.", x=2),
+            _ctl("+ ещё 3 строки"),
+        ],
+        "строка 3: управление в колонке 4, ждали 6",
     ),
     "expand-phrase-not-last": (
         [*_EXPLORED_LEAD, _ctl("+ ещё 3 строки"), _member("Read", "b", "1с")],

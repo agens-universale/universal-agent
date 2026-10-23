@@ -1296,13 +1296,19 @@ def test_agent_visibility_conjunction():
     assert [fold.visible(f"c{i}") for i in range(5)] == [
         False, False, True, True, True,
     ]  # fmt: skip
-    assert fold.phrase(AGENT_WINDOW, "top") == COLLAPSE_PHRASE
+    # `− свернуть` окна — последней строкой блока `Agent`, в конце уровня.
+    assert fold.phrase(AGENT_WINDOW, "top") is None
+    assert fold.phrase(AGENT_WINDOW, "bottom") == COLLAPSE_PHRASE
+    assert fold.state[("MountPhrase", AGENT_WINDOW, "bottom")] == (
+        MountPhrase(AGENT_WINDOW, "bottom")
+    )
     # Раскрыли блок — видны все его члены; свернули окно — снова скрыты.
     fold(model.toggle("block:0"))
     assert all(fold.visible(f"c{i}") for i in range(5))
     fold(model.toggle(AGENT_WINDOW))
     assert not any(fold.visible(f"c{i}") for i in range(5))
     assert fold.phrase(AGENT_WINDOW, "top") == "… ещё 1"
+    assert fold.phrase(AGENT_WINDOW, "bottom") is None
 
 
 def test_agent_window_event_closes_group():
