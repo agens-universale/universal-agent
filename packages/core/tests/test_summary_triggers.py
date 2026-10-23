@@ -10,35 +10,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from gc_testkit.module_snapshot import restore_gc_modules, save_gc_modules
 from gc_testkit.paths import module_dir
 
-
-# Модули и имена `processing_responses`, которые файл подменяет на время
-# прогона. Teardown возвращает ИМЕННО ЭТИ объекты, а не импортирует пакет
-# заново: соседи по прогону держат ссылки на исходные модули, взятые при
-# сборке, и свежая копия в sys.modules развела бы их monkeypatch и код.
+# Имена `processing_responses`, которые файл подменяет на время прогона;
+# модули ядра teardown возвращает снимком тест-кита.
 _SAVED_MODULES: dict[str, types.ModuleType] = {}
 _SAVED_PR_NAMES: dict[str, object] = {}
 _PR_NAMES = ("aapply_tool", "WrongFunctionArgumentsException")
 
 
-def _is_gc_module(name: str) -> bool:
-    # gc_testkit — тоже: его хелперы, впервые загруженные здесь, держали бы
-    # ссылки на снятые модули ядра.
-    return name.split(".", 1)[0] in ("gc_core", "gc_testkit")
-
-
 def teardown_module(_module) -> None:
-    for name in list(sys.modules):
-        if _is_gc_module(name) and name not in _SAVED_MODULES:
-            sys.modules.pop(name, None)
-    sys.modules.update(_SAVED_MODULES)
-    # Атрибут пакета-родителя — тоже: `import gc_core.tools.x as m` идёт по
-    # атрибутам, и повторный импорт под подменой их переставил.
-    for name, mod in _SAVED_MODULES.items():
-        parent, _, child = name.rpartition(".")
-        if parent in _SAVED_MODULES:
-            setattr(_SAVED_MODULES[parent], child, mod)
+    restore_gc_modules(_SAVED_MODULES)
     proc = _SAVED_MODULES.get("gc_core.processing_responses")
     for attr, value in _SAVED_PR_NAMES.items():
         setattr(proc, attr, value)
@@ -50,9 +33,7 @@ run_summary_coordinator_module = None
 
 def setup_module(_module) -> None:
     global agent_executor_module, run_summary_coordinator_module
-    _SAVED_MODULES.update(
-        (name, mod) for name, mod in sys.modules.items() if _is_gc_module(name)
-    )
+    _SAVED_MODULES.update(save_gc_modules())
     proc = _SAVED_MODULES.get("gc_core.processing_responses")
     if proc is not None:
         _SAVED_PR_NAMES.update((n, getattr(proc, n)) for n in _PR_NAMES)

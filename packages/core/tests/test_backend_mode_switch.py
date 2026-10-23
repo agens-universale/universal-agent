@@ -1,4 +1,3 @@
-import importlib
 import logging
 import os
 import sys
@@ -8,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from gc_testkit.module_snapshot import restore_gc_modules, save_gc_modules
 from gc_testkit.paths import module_dir
 from gc_testkit.settings import fake_ctx, make_settings
 
@@ -19,40 +19,9 @@ def _switch_mode(ctx, config_dict: dict, mode: str) -> None:
     ctx.settings, ctx.runtime = loaded.settings, loaded.runtime
 
 
-def _restore_tools_and_dependents() -> None:
-    dependents = []
-    for name in list(sys.modules):
-        # Полные имена: ключ в sys.modules — "gc_core.agent_executor". Старые
-        # плоские имена пережили переезд внутри кортежа, и pop был no-op.
-        if name in (
-            "gc_core.agent_executor",
-            "gc_core.run_summary_coordinator",
-        ):
-            sys.modules.pop(name, None)
-            dependents.append(name)
-        elif name == "gc_core.tools" or name.startswith("gc_core.tools."):
-            sys.modules.pop(name, None)
-    real_tools = importlib.import_module("gc_core.tools")
-    # Вернуть снятые модули СРАЗУ. `sys.modules.pop` не убирает одноимённый
-    # атрибут с родительского пакета, и `gc_core.agent_executor` продолжает
-    # указывать на снятый модуль. Кто патчит по строковому пути
-    # ("gc_core.agent_executor.AgentExecutor"), приходит туда через
-    # `getattr(gc_core, "agent_executor")` — то есть в ОСИРОТЕВШУЮ копию, — а
-    # прод затем импортирует модуль заново и получает настоящий класс: подмена
-    # бьёт мимо, и следующий тест молча гоняет живой агент вместо заглушки.
-    for name in dependents:
-        importlib.import_module(name)
-    proc = sys.modules.get("gc_core.processing_responses")
-    if proc is not None:
-        proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
-
-
 def _stub_tools_modules() -> None:
     # Верхнеуровневый `tools` конфликтует с другими окружениями — минимальный stub
-    # только на время этого теста (см. _restore_tools_and_dependents).
+    # только на время этого теста (снимок модулей — в самом тесте).
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
@@ -107,6 +76,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
     # Корутинные тесты: `unittest.TestCase` их не запускает — метод
     # просто возвращает корутину, и проверка молча не выполняется.
     async def test_switch_responses_completions_responses_same_thread(self):
+        saved_modules = save_gc_modules()
         _stub_tools_modules()
         try:
             from gc_core import agent_executor as agent_executor_module
@@ -116,7 +86,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                 resolve_threads_dir,
             )
         except Exception:
-            _restore_tools_and_dependents()
+            restore_gc_modules(saved_modules)
             raise
 
         responses_calls = []
@@ -357,7 +327,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                         meta,
                     )
         finally:
-            _restore_tools_and_dependents()
+            restore_gc_modules(saved_modules)
 
 
 if __name__ == "__main__":
