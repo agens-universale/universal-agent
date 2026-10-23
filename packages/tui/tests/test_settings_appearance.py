@@ -46,6 +46,13 @@ def _texts(scr, selector=Static):
     return [str(w.render()) for w in scr.query(selector)]
 
 
+_AUTO_HINT = (
+    "Подстраивается под фон вашего терминала и проверяет контраст текста. "
+    "Если он слишком низкий, включается тема GigaCode."
+)
+_GIGACODE_HINT = "Фирменная тёмная тема. Выглядит одинаково в любом терминале."
+
+
 def _theme_in_file(cfg_file):
     return yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["tui"]["theme"]
 
@@ -86,11 +93,7 @@ async def test_row_shows_theme_name_and_explanation(tmp_path):
         assert rows[0].startswith("▸ Тема")
         assert rows[0].rstrip().endswith("◂ Автоматическая ▸")
         assert "●" not in rows[0] and "○" not in rows[0]
-        hints = _texts(scr, ".set-hint")
-        assert (
-            "цвета от фона терминала; если текст читается плохо — GigaCode"
-            in hints
-        )
+        assert _texts(scr, ".set-hint") == [_AUTO_HINT]
 
 
 async def test_arrows_cycle_names_and_write_config(tmp_path):
@@ -107,6 +110,25 @@ async def test_arrows_cycle_names_and_write_config(tmp_path):
         await pilot.press("left")
         await pilot.pause(0.1)
         assert _theme_in_file(cfg_file) == "gigacode"
+
+
+async def test_gigacode_row_shows_its_own_hint(tmp_path):
+    app, _ = _app_with_config(tmp_path, "tui:\n  theme: gigacode\n")
+    async with app.run_test() as pilot:
+        scr = await _open_look(pilot)
+        assert _texts(scr, ".set-hint") == [_GIGACODE_HINT]
+
+
+async def test_hint_follows_value_on_arrows(tmp_path):
+    app, _ = _app_with_config(tmp_path, "tui:\n  theme: auto\n")
+    async with app.run_test() as pilot:
+        scr = await _open_look(pilot)
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        assert _texts(scr, ".set-hint") == [_GIGACODE_HINT]
+        await pilot.press("left")
+        await pilot.pause(0.1)
+        assert _texts(scr, ".set-hint") == [_AUTO_HINT]
 
 
 async def test_write_adds_missing_key_and_keeps_others(tmp_path):

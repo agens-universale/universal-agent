@@ -79,12 +79,20 @@ _CONNECTION, _MODELS, _PROFILES, _MCP, _VOICE, _MODES, _LOOK, _UPDATE = (
     6,
     7,
 )
-# Секция «Внешний вид»: имя каждой темы `tui.theme` в порядке схемы. Тема
-# выбирается при старте до импорта приложения, поэтому запись действует
-# со следующего запуска.
+# Секция «Внешний вид»: имя каждой темы `tui.theme` в порядке схемы и
+# пояснение под строкой для каждого значения. Тема выбирается при старте до
+# импорта приложения, поэтому запись действует со следующего запуска.
 THEME_NAMES = {"auto": "Автоматическая", "gigacode": "GigaCode"}
+_THEME_HINTS = {
+    "auto": (
+        "Подстраивается под фон вашего терминала и проверяет контраст "
+        "текста. Если он слишком низкий, включается тема GigaCode."
+    ),
+    "gigacode": (
+        "Фирменная тёмная тема. Выглядит одинаково в любом терминале."
+    ),
+}
 _THEME_LABEL = "Тема"
-_THEME_HINT = "цвета от фона терминала; если текст читается плохо — GigaCode"
 _EDITOR_SECTIONS = {
     _CONNECTION
 }  # редакторные: writable, dirty-tracked, submit
@@ -4262,7 +4270,12 @@ class SettingsScreen(Screen):
         t.append(self._theme_name(), style=INK)
         t.append(" ▸", style=SUB_INK)
         frame.mount(Static(t, classes="set-row set-dyn" + _CLS_SELECTED))
-        frame.mount(Static(_THEME_HINT, classes="set-hint set-dyn"))
+        frame.mount(
+            Static(
+                _THEME_HINTS[self._theme_value()],
+                classes="set-hint set-dyn",
+            )
+        )
 
     def _look_apply(self, direction: int) -> None:
         """←/→ — следующая тема по кругу, мгновенная запись `tui.theme` тем же
