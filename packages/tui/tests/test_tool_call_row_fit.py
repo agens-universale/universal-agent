@@ -108,7 +108,7 @@ async def test_edit_row_keeps_counts_and_copy_button(width):
         line = _first_line(row)
         # путь серединой в `…`: имя файла цело
         assert line.startswith("Edit  packages/")
-        assert line.endswith("…/tool_call_row.py +12 −3")
+        assert line.endswith("…/tool_call_row.py (+12 −3)")
         assert row.query_one(".block-copy").display
         assert _line_height(row) == 1
 
