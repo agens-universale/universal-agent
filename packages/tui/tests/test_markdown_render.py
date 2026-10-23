@@ -91,9 +91,11 @@ def test_build_markdown_table_column_count_and_justify():
 
 
 def test_build_markdown_table_header_style():
-    """Each column header_style is accent (#54B3A6) bold."""
+    """Заголовок колонки — `INK` жирный: всё выделение — INK жирный."""
+    from gc_tui.palette import INK
+
     t = build_markdown_table(["Col"], [["val"]], ["left"])
-    assert t.columns[0].header_style == "#54B3A6 bold"
+    assert t.columns[0].header_style == f"{INK} bold"
 
 
 def test_build_markdown_table_inline_code_cell():

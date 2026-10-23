@@ -27,7 +27,6 @@ from rich.text import Text
 if TYPE_CHECKING:
     from rich.table import Table
 
-from gc_tui.palette import ACCENT as _ACC
 from gc_tui.palette import CODE as _CODE
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import INK as _INK
@@ -289,7 +288,7 @@ def build_markdown_table(
     headers: list[str], rows: list[list[str]], aligns: list[str]
 ) -> Table:
     """Структура таблицы → rich.Table (полная сетка box.SQUARE, рамка dim,
-    заголовок accent-bold, в ячейках — inline-разметка). Ширину не фиксируем
+    заголовок INK жирный, в ячейках — inline-разметка). Ширину не фиксируем
     здесь: её задаёт вызывающий `table_render.table_to_text(..., width=)`,
     которым пользуется `BlockPanel._refresh_body`."""
     import rich.box as _box
@@ -304,7 +303,7 @@ def build_markdown_table(
         pad_edge=True,
     )
     for h, a in zip(headers, aligns):
-        table.add_column(h, justify=a, header_style=f"{_ACC} bold")
+        table.add_column(h, justify=a, header_style=f"{_INK} bold")
     for row in rows:
         cells: list[_Text] = []
         for cell in row:
