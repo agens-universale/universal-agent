@@ -68,6 +68,7 @@ class DisplayCategory(StrEnum):
     CALC = "Calc"
     WAIT = "Wait"
     MCP = "MCP"
+    FINISH = "Finish"
     HIDDEN = "Hidden"
     CALLED = "Called"
 
@@ -121,12 +122,19 @@ TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
     EXEC_CALCULATOR_NAME: _d(_C.CALC, "expression"),
     EXEC_SLEEP_NAME: _d(_C.WAIT, "seconds"),
     SUBAGENT_SPECIAL_AGENT_NAME: _d(_C.AGENT, "role"),
-    FINISH_TOOL_NAME: _d(_C.HIDDEN, None),
+    FINISH_TOOL_NAME: _d(_C.HIDDEN, "solution_type"),
     ASK_HUMAN_TOOL_NAME: _d(_C.HIDDEN, None),
     INTERMEDIATE_REPLY_TOOL_NAME: _d(_C.HIDDEN, None),
     PROPOSE_PLAN_TOOL_NAME: _d(_C.HIDDEN, None),
     SESSION_TODO_TOOL_NAME: _d(_C.HIDDEN, None),
     SESSION_COMPACT_TOOL_NAME: _d(_C.HIDDEN, None),
+}
+
+#: Вложенный контекст (вызовы субагента): тулы, видимые только там. Сдача
+#: ребёнка — последнее событие блока `Agent`; наверху её показывает конец
+#: хода (решение владельца 2026-10-23).
+NESTED_TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
+    FINISH_TOOL_NAME: _d(_C.FINISH, "solution_type"),
 }
 
 #: Короткая роль встроенного субагента — объект заголовка `Agent` во
@@ -178,11 +186,16 @@ def _mcp_display(
 def tool_display(
     wire_name: str,
     *,
+    nested: bool = False,
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
 ) -> ToolDisplay:
+    """Отображение тула; ``nested`` — вызов субагента: сначала
+    `NESTED_TOOL_DISPLAY`."""
     name = LEGACY_TOOL_NAMES.get(wire_name, wire_name)
-    shown = TOOL_DISPLAY.get(name)
+    shown = (NESTED_TOOL_DISPLAY.get(name) if nested else None) or (
+        TOOL_DISPLAY.get(name)
+    )
     if shown is not None:
         return shown
     if name.startswith(_SUBAGENT_PREFIX):

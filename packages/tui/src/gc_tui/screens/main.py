@@ -4250,7 +4250,9 @@ class TraceScreen(Screen):
         )
         if tool_call_id:
             self._nested_tool_rows[tool_call_id] = row
-        category, _ = tool_caption(tool_name, mcp_tools, mcp_servers)
+        category, _ = tool_caption(
+            tool_name, mcp_tools, mcp_servers, nested=True
+        )
         is_run = block_kind(category) == BlockKind.RAN
         if command is None and is_run and tool_call_id:
             command = self._nested_sidecar_texts(tool_call_id)[0]

@@ -503,13 +503,19 @@ def tool_caption(
     wire_name: str,
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
+    *,
+    nested: bool = False,
 ) -> tuple[DisplayCategory, str]:
     """Категория и имя тула для ленты по отображению ядра (спека P3 §2.1).
 
     MCP — `сервер · тул`; тул без подписи (неизвестный или скрытый
-    политикой) — сырое wire-имя; остальные — подпись ядра."""
+    политикой) — сырое wire-имя; остальные — подпись ядра. ``nested`` —
+    вызов субагента (вложенная таблица ядра)."""
     shown = tool_display(
-        wire_name, mcp_tools=mcp_tools, mcp_servers=mcp_servers
+        wire_name,
+        nested=nested,
+        mcp_tools=mcp_tools,
+        mcp_servers=mcp_servers,
     )
     if shown.category is DisplayCategory.MCP:
         return shown.category, f"{shown.label} · {shown.detail}"
@@ -523,11 +529,14 @@ def _call_caption(
     args_summary: str,
     mcp_tools: Mapping[str, McpToolInfo] | None,
     mcp_servers: Iterable[str],
+    nested: bool,
 ) -> tuple[str, str]:
     """(подпись, объект) строки вызова: тул без подписи (неизвестный или
     скрытый, но всё же дошедший до ленты) — `Called` и сырое имя в
     объекте; память — глагол из действия и цель (`Write  goal`)."""
-    category, name = tool_caption(wire_name, mcp_tools, mcp_servers)
+    category, name = tool_caption(
+        wire_name, mcp_tools, mcp_servers, nested=nested
+    )
     if category in (DisplayCategory.CALLED, DisplayCategory.HIDDEN):
         target = " ".join(p for p in (name, args_summary) if p)
         return DisplayCategory.CALLED.value, target
@@ -593,7 +602,7 @@ def build_call_row(
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     label, target = _call_caption(
-        wire_name, args_summary, mcp_tools, mcp_servers
+        wire_name, args_summary, mcp_tools, mcp_servers, level > 0
     )
     if agent is not None:
         target = agent.role
@@ -1187,7 +1196,9 @@ def merge_nested_readonly(
         )
         if tool_call_id:
             nested_rows[tool_call_id] = row
-        category, _ = tool_caption(tool_name, mcp_tools, mcp_servers)
+        category, _ = tool_caption(
+            tool_name, mcp_tools, mcp_servers, nested=True
+        )
         lines = split_command(command, root=root)
         view.add_call(row, category, waiting=False, command=lines)
 

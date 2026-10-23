@@ -66,6 +66,7 @@ class BlockKind(StrEnum):
     EDITS = "edits"
     RAN = "ran"
     AGENT = "agent"
+    FINISH = "finish"
     SINGLE = "single"
 
 
@@ -80,6 +81,7 @@ _KIND_OF: dict[DisplayCategory, BlockKind] = {
     DisplayCategory.MEMORY: BlockKind.MEMORY,
     DisplayCategory.RUN: BlockKind.RAN,
     DisplayCategory.AGENT: BlockKind.AGENT,
+    DisplayCategory.FINISH: BlockKind.FINISH,
 }
 #: Виды, у которых подряд идущие вызовы сворачиваются в одну группу.
 _GROUPED = frozenset(
@@ -98,6 +100,12 @@ _WORDS: dict[BlockKind, tuple[str, str]] = {
     BlockKind.RAN: ("Running", "Ran"),
     BlockKind.EDITS: ("Editing", "Edited"),
     BlockKind.AGENT: ("Agent", "Agent"),
+    BlockKind.FINISH: ("Finishing", "Finished"),
+}
+#: Одиночные строки со своим словом вместо подписи и его роль.
+_WORD_ROLES: dict[BlockKind, WordRole] = {
+    BlockKind.AGENT: "agent",
+    BlockKind.FINISH: "finish",
 }
 
 #: Цвет причины `└` по исходу вызова.
@@ -351,8 +359,9 @@ class SetConsequence:
         return ("SetConsequence", self.key)
 
 
-#: Роль слова строки: глагол правки, слово команды или `Agent`.
-WordRole = Literal["edit", "command", "agent"]
+#: Роль слова строки: глагол правки, слово команды, `Agent` или сдача
+#: субагента (`Finishing` / `Finished`: объект — только после конца).
+WordRole = Literal["edit", "command", "agent", "finish"]
 
 
 @dataclass(frozen=True)
@@ -1030,9 +1039,10 @@ class ToolBlocks:
     def _single(self, block: _Block) -> list[Decision]:
         member = block.members[0]
         out: list[Decision] = [SetMode(member.key, "single")]
-        if block.kind == BlockKind.AGENT:
-            word = header_word(BlockKind.AGENT, live=False)
-            out.append(SetWord(member.key, word, role="agent"))
+        role = _WORD_ROLES.get(block.kind)
+        if role is not None:
+            word = header_word(block.kind, live=not member.done)
+            out.append(SetWord(member.key, word, role=role))
         return out + self._outcome_of(member)
 
     def _grouped(self, block: _Block) -> list[Decision]:

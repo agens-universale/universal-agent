@@ -119,3 +119,33 @@ def test_module_does_not_import_tools():
 )
 def test_subagent_role(name, role):
     assert subagent_role(name) == role
+
+
+def test_finish_visible_only_nested():
+    """Сдача субагента — строка его блока; наверху `turn_finish` скрыт."""
+    assert tool_display("turn_finish").category == DisplayCategory.HIDDEN
+    nested = tool_display("turn_finish", nested=True)
+    assert nested == ToolDisplay(
+        DisplayCategory.FINISH, "Finish", "solution_type"
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["turn_ask_human", "turn_intermediate_reply", "session_compact"]
+)
+def test_other_hidden_stay_hidden_nested(name):
+    shown = tool_display(name, nested=True)
+    assert shown.category == DisplayCategory.HIDDEN
+
+
+def test_nested_regular_tool_unchanged():
+    assert tool_display("fs_read_file", nested=True) == tool_display(
+        "fs_read_file"
+    )
+
+
+def test_finish_summary_is_solution_type():
+    from gc_core.execution.progress import tool_args_summary
+
+    args = {"solution_type": "full_solution", "task": "сверить таблицу"}
+    assert tool_args_summary("turn_finish", args) == "full_solution"

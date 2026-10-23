@@ -20,9 +20,11 @@ from typing import Any
 
 # `*` — глиф записи итога и заметки после ответа (`* итог:`, `* заметка:`).
 _GLYPHS = "●○•■✓›*"
-_LIVE_WORDS = frozenset({"Exploring", "Running", "Editing", "Fetching"})
+_LIVE_WORDS = frozenset(
+    {"Exploring", "Running", "Editing", "Fetching", "Finishing"}
+)
 _DONE_WORDS = frozenset(
-    {"Explored", "Ran", "Added", "Edited", "Deleted", "Fetched"}
+    {"Explored", "Ran", "Added", "Edited", "Deleted", "Fetched", "Finished"}
 )
 _DIFF = re.compile(r"^( *)(\d+) ([+\- ]|$)")
 # Разделитель ханков диффа — под последней клеткой колонки номеров.

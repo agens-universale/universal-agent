@@ -321,19 +321,28 @@ async def test_p418_live_equals_reopen(tmp_path):
     ]
 
 
+_FINISH = (
+    "call",
+    "f1",
+    "turn_finish",
+    {"solution_type": "full_solution", "task": "прочитать"},
+)
+
+
 @pytest.mark.asyncio
-async def test_nested_hidden_tool_not_rendered(tmp_path):
-    """Вложенный `turn_finish` — скрытый тул, как наверху: строки нет ни
-    вживую, ни после возврата, ни в превью; событием окна `Agent` он не
-    считается — три события видны без `… ещё N`."""
-    finish = (
-        "call",
-        "f1",
-        "turn_finish",
-        {"solution_type": "full_solution", "task": "прочитать"},
-    )
-    steps = [("prose", "Смотрю."), _read(0), ("prose", "Готово."), finish]
-    calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
+async def test_nested_finish_row_last_event(tmp_path):
+    """Сдача субагента — строка `Finished  <solution_type>` его блока,
+    последнее событие окна `Agent` (решение владельца 2026-10-23); вживую,
+    после возврата и в превью одинаково. Остальные скрытые тулы — нет."""
+    ask = ("call", "h1", "turn_ask_human", {"question": "?"})
+    steps = [
+        ("prose", "Смотрю."),
+        _read(0),
+        ask,
+        ("prose", "Готово."),
+        _FINISH,
+    ]
+    calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)] if cid != "f1"}
     live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
     live_dir.mkdir()
     reopen_dir.mkdir()
@@ -348,11 +357,31 @@ async def test_nested_hidden_tool_not_rendered(tmp_path):
     assert live == reopen == preview
     assert _agent_rows(live)[1:] == [
         "  └ проверка клиента",
-        "  ● Смотрю.",
+        "    … ещё 1",
         "  ● Explored",
         "    └ Read  client/m0.py · 2с",
         "  ● Готово.",
+        "  ● Finished  full_solution",
     ]
+
+
+@pytest.mark.asyncio
+async def test_nested_finishing_live(tmp_path):
+    """Сдача идёт: `● Finishing` с мигающим глифом, без объекта."""
+    from gc_tui.palette import RUN_COLOR
+
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(pilot, thread, _agent_call())
+        await _emit(pilot, _progress([_FINISH])[:1])
+        rows = trace_rows(pilot.app, exclude=(TurnLine,))
+        lines = _rows(pilot)
+    assert _agent_rows(lines)[-1] == "  ● Finishing · 0с"
+    row = next(r for r in rows if "Finishing" in r.plain)
+    glyph = row.plain.index("●")
+    styles = [s.style for s in row.spans if s.start <= glyph < s.end]
+    assert any(RUN_COLOR.lower() in str(st).lower() for st in styles)
 
 
 @pytest.mark.asyncio

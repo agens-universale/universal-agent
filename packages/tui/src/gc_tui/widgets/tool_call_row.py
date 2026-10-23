@@ -683,7 +683,10 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def _fit_target(self, used: int) -> str:
         """Объект под остаток ширины content-колонки после подписи, двух
-        пробелов и хвоста; колонка ещё без ширины — объект целиком."""
+        пробелов и хвоста; колонка ещё без ширины — объект целиком. У
+        идущей сдачи субагента (`Finishing`) объекта нет."""
+        if self._word_role == "finish" and self._is_live:
+            return ""
         width = self._content_width()
         if width <= 0:
             return self._target

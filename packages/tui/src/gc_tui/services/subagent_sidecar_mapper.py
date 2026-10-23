@@ -76,12 +76,14 @@ def _raw_output(payload: Dict[str, Any]) -> Optional[str]:
 
 
 def nested_call_row(wire_name: str) -> bool:
-    """Строка ли вложенный вызов — то же правило, что наверху: скрытый тул
-    (`Hidden` таблицы ядра) строкой не бывает; чек-лист с битыми
-    аргументами — бывает: его сбой должен быть виден."""
+    """Строка ли вложенный вызов — по вложенной таблице ядра: скрытый тул
+    (`Hidden`) строкой не бывает, сдача субагента — бывает (последнее
+    событие `Agent`); чек-лист с битыми аргументами — тоже: его сбой
+    должен быть виден."""
     if wire_name == SESSION_TODO_TOOL_NAME:
         return True
-    return tool_display(wire_name).category is not DisplayCategory.HIDDEN
+    shown = tool_display(wire_name, nested=True)
+    return shown.category is not DisplayCategory.HIDDEN
 
 
 def _seq_key(record: Dict[str, Any]) -> int:

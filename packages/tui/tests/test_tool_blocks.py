@@ -121,6 +121,7 @@ def test_block_kind_table():
         C.WAIT: BlockKind.SINGLE,
         C.MCP: BlockKind.SINGLE,
         C.CALLED: BlockKind.SINGLE,
+        C.FINISH: BlockKind.FINISH,
         C.HIDDEN: None,
     }
     assert {c: block_kind(c) for c in C} == table
@@ -133,6 +134,8 @@ def test_header_words():
     assert header_word(BlockKind.FETCHED, live=False) == "Fetched"
     assert header_word(BlockKind.RAN, live=True) == "Running"
     assert header_word(BlockKind.RAN, live=False) == "Ran"
+    assert header_word(BlockKind.FINISH, live=True) == "Finishing"
+    assert header_word(BlockKind.FINISH, live=False) == "Finished"
     assert header_word(BlockKind.AGENT, live=True) == "Agent"
     assert header_word(BlockKind.AGENT, live=False) == "Agent"
     assert header_word(BlockKind.MEMORY, live=True) == "Memory"
