@@ -477,6 +477,27 @@ async def test_reopen_without_record_no_timers(tmp_path):
         assert not _timer_tails(scr)["r0"].endswith("с")
 
 
+@pytest.mark.asyncio
+async def test_copy_through_collapsed_block_skips_hidden_rows(tmp_path):
+    """Выделение мышью через свёрнутый блок (§9.8): скрытые окном члены
+    не выделяются и в буфер не попадают, видимые — попадают."""
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        for i in range(5):
+            await _tail(pilot, thread, _read(i), _read_out(i))
+        (header,) = _headers(scr)
+        last = _row(scr, "r4")
+        await pilot.mouse_down(header, offset=(0, 0))
+        await pilot.hover(last, offset=(30, 0))
+        await pilot.mouse_up(last, offset=(30, 0))
+        await pilot.pause()
+        selected = scr.get_selected_text() or ""
+        assert "f2.py" in selected and "f4.py" in selected
+        assert "f0.py" not in selected
+        assert "f1.py" not in selected
+
+
 # --- стоп и переоткрытие ----------------------------------------------------
 
 
@@ -494,16 +515,22 @@ async def test_stop_mid_exploring(tmp_path):
         _meta(tmp_path, tui={"status": "stopped"})
         scr._poll_trace_tail()
         await pilot.pause()
+        (line,) = scr.query(TurnLine)
+        assert "Отменено" in line.text.plain
+        assert _row(scr, "r1")._block_consequence is None
+        # Один тик: перевод членов и раскрытая строка «■ Отменено» — в нём
+        # же, без промежуточного кадра.
         scr._poll_tick()
+        assert line.display and not line.has_class("-held")
+        assert _row(scr, "r1")._block_consequence.plain == "отменено"
+        assert _row(scr, "r2")._block_consequence.plain == "не запущено (стоп)"
         await pilot.pause()
         lines = _rows(pilot)
         assert "○ Explored" in lines
         assert "      └ отменено" in lines
         assert "      └ не запущено (стоп)" in lines
         assert not any("прервано" in line for line in lines)
-        (line,) = scr.query(TurnLine)
-        assert "Отменено" in line.text.plain
-        assert line.region.y > _row(scr, "r2").region.y or not line.display
+        assert line.region.y > _row(scr, "r2").region.y
 
 
 @pytest.mark.asyncio

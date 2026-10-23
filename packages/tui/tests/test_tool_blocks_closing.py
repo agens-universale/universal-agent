@@ -132,6 +132,17 @@ def _blocks(scr) -> list[str]:
     return [r.call_id for r in trace.query(ToolCallRow) if r.mode == "header"]
 
 
+def _above_turn_line(scr):
+    """Видимый виджет ленты прямо над строкой итога хода."""
+    shown = [
+        w
+        for w in scr.query_one("#trace", VerticalScroll).children
+        if w.display and not w.has_class("-block-hidden")
+    ]
+    at = next(i for i, w in enumerate(shown) if isinstance(w, TurnLine))
+    return shown[at - 1]
+
+
 def _block_of(scr, call_id) -> str:
     return scr._top_blocks().model.block_of(call_id)
 
@@ -482,10 +493,12 @@ async def test_stop_closed_block_still_interrupted(tmp_path):
 
 
 class _ReadsExecutor:
-    """Ход: реплика, два чтения, шаг, запись итога — выход."""
+    """Ход: реплика, два чтения, шаг, запись итога — выход. ``answer`` —
+    проза между блоком и строкой итога; без неё блок — последний."""
 
-    def __init__(self, threads_dir):
+    def __init__(self, threads_dir, *, answer: bool = True):
         self.dir = str(threads_dir)
+        self.answer = answer
         self.seq = 0
         self.at = -1
         self.release = threading.Event()
@@ -502,7 +515,8 @@ class _ReadsExecutor:
             thread_id, {"id": mid, "role": "user", "content": "первый"}
         )
         self._messages(thread_id, *_reads(0, 1))
-        self._messages(thread_id, _answer("a1", "готово"))
+        if self.answer:
+            self._messages(thread_id, _answer("a1", "готово"))
         self.at = 0
         self.release.wait(10)
         outcome = TurnOutcome(
@@ -535,13 +549,15 @@ class _ReadsExecutor:
 
 
 @pytest.mark.asyncio
-async def test_end_of_turn_one_move_with_blocks(tmp_path):
+@pytest.mark.parametrize("answer", [True, False], ids=["prose", "block_last"])
+async def test_end_of_turn_one_move_with_blocks(tmp_path, answer):
     """Ход с блоком `Explored`: на спадающем фронте поле ввода на месте,
-    кадра «бар снят, строки нет» нет (S10)."""
+    кадра «бар снят, строки нет» нет (S10) — и когда блок стоит последним
+    прямо над строкой итога, без прозы между ними."""
     meta = {"thread_id": TID, "status": "running", "messages_count": 0}
     (tmp_path / f"meta_cli_{TID}.json").write_text(json.dumps(meta))
     (tmp_path / f"data_cli_{TID}.jsonl").write_text("")
-    ex = _ReadsExecutor(tmp_path)
+    ex = _ReadsExecutor(tmp_path, answer=answer)
     app = _app(tmp_path)
     app._executor_factory = lambda: ex
     frames: list[tuple] = []
@@ -578,8 +594,12 @@ async def test_end_of_turn_one_move_with_blocks(tmp_path):
                 pilot, lambda: frames and frames[-1][2], "строка видна"
             )
             await pilot.pause(0.6)
+            above = _above_turn_line(scr)
         finally:
             ex.stop_run()
+        if not answer:
+            assert isinstance(above, ToolCallRow), above
+            assert _block_of(scr, above.call_id) == "block:0"
         last_up = max(i for i, f in enumerate(frames) if f[0])
         tail = frames[last_up:]
         assert {y for _up, y, _shown in tail} == {tail[0][1]}
