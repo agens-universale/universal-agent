@@ -7,6 +7,7 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import asyncio
+import contextlib
 import gc
 import logging
 import threading
@@ -562,7 +563,12 @@ class AgentExecutor:
 
         from gc_core.user_stop import UserStop
 
-        self.user_stop = UserStop()
+        #: Снятие идущей работы по стопу. Под Temporal его нет: ход workflow
+        #: останавливает свой стоп (модель, субагенты; тул дорабатывает), а
+        #: примитивы потоков песочница workflow не пускает.
+        self.user_stop: Optional[UserStop] = (
+            None if getattr(ctx, "durable_execution", False) else UserStop()
+        )
 
         self.last_closing_reply: str = ""
 
@@ -1474,9 +1480,10 @@ class AgentExecutor:
         settings = settings_of(self._ctx)
         # Неверный persist отбит ещё в ``arun`` — раньше стопа: ход, который
         # не начнётся, снятие не вооружает.
-        self.user_stop.prepare_run(
-            asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
-        )
+        if self.user_stop is not None:
+            self.user_stop.prepare_run(
+                asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
+            )
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else settings.agent.verbose
@@ -1703,9 +1710,7 @@ class AgentExecutor:
         queued_before_loop = await self._atake_pending_messages()
         if queued_before_loop:
             messages = [*messages, *queued_before_loop]
-        from gc_core.user_stop import bind_user_stop
-
-        _stop_bound = bind_user_stop(self.user_stop)
+        _stop_bound = self._user_stop_scope()
         _stop_bound.__enter__()
         try:
             response = await arun_agent(
@@ -2058,6 +2063,14 @@ class AgentExecutor:
             await awith_committed_attachments(m, self._ctx) for m in messages
         ]
 
+    def _user_stop_scope(self) -> contextlib.AbstractContextManager:
+        """Снятие ``user_stop`` на время хода; под Temporal его нет."""
+        if self.user_stop is None:
+            return contextlib.nullcontext()
+        from gc_core.user_stop import bind_user_stop
+
+        return bind_user_stop(self.user_stop)
+
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.
 
@@ -2069,7 +2082,8 @@ class AgentExecutor:
             else:
                 self._stop_pending = True
             run_logger = getattr(self._ctx, "logger", None)
-        self.user_stop.request(run_logger)
+        if self.user_stop is not None:
+            self.user_stop.request(run_logger)
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None
