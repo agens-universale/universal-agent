@@ -53,3 +53,13 @@ def files_word_genitive(n: int) -> str:
 def lines_word(n: int) -> str:
     """«строка / строки / строк» под число `n`."""
     return plural_form(n, "строка", "строки", "строк")
+
+
+def errors_word(n: int) -> str:
+    """«ошибка / ошибки / ошибок» под число `n`."""
+    return plural_form(n, "ошибка", "ошибки", "ошибок")
+
+
+def refusals_word(n: int) -> str:
+    """«отказ / отказа / отказов» под число `n`."""
+    return plural_form(n, "отказ", "отказа", "отказов")
