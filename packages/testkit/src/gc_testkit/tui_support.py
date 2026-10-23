@@ -16,7 +16,19 @@ conftest. После разделения наборов по пакетам т�
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional
+import os
+import time
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Iterator, Mapping, Optional
+
+#: Пояс эталонов TUI: постоянный UTC+2, без перехода на летнее время.
+SNAPSHOT_TZ = "Etc/GMT-2"
+#: «Сейчас» эталонов: в день записей итога фикстур (`ended_at` 11:32 UTC —
+#: «13:32» сегодня), чтобы строка итога не становилась «вчера» и датой.
+SNAPSHOT_NOW = datetime(
+    2026, 10, 22, 13, 40, tzinfo=timezone(timedelta(hours=2))
+)
 
 
 async def wait_until(
@@ -100,3 +112,31 @@ def span_style(text, needle: str) -> str:
         if span.start <= start < span.end:
             return str(span.style)
     return ""
+
+
+@contextmanager
+def pinned_snapshot_clock(monkeypatch) -> Iterator[None]:
+    """Часы кадра эталона: местный пояс `SNAPSHOT_TZ` и «сейчас»
+    `SNAPSHOT_NOW` (часы хода `relative_time._now_local`). Время строки
+    итога в кадре не зависит от даты и пояса машины. Пояс процесса
+    возвращается на выходе; без `time.tzset` (Windows) пояс не меняется."""
+    from gc_tui.services import relative_time
+
+    before = os.environ.get("TZ")
+    os.environ["TZ"] = SNAPSHOT_TZ
+    _tzset()
+    monkeypatch.setattr(relative_time, "_now_local", lambda: SNAPSHOT_NOW)
+    try:
+        yield
+    finally:
+        if before is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = before
+        _tzset()
+
+
+def _tzset() -> None:
+    tzset = getattr(time, "tzset", None)
+    if tzset is not None:
+        tzset()

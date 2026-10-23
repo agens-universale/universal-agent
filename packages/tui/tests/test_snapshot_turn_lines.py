@@ -16,7 +16,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import SNAPSHOT_NOW, tui_settings
 
 pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
@@ -29,7 +29,9 @@ from gc_core.thread_store import (
 
 _SYS = "cli"
 _TID = "7f3a9b1c"
-_DAY = datetime(2026, 10, 22).astimezone()
+# День — в поясе эталонов (`pinned_snapshot_clock`), а не машины: модуль
+# импортируется до закрепления часов.
+_DAY = datetime(2026, 10, 22, tzinfo=SNAPSHOT_NOW.tzinfo)
 
 
 def _utc_iso(moment: datetime) -> str:

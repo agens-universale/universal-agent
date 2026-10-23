@@ -3,8 +3,8 @@
 
 Тред пишется настоящими функциями `gc_core.thread_store`: ход закрыт
 записью итога, затем сжатие, как у ядра (живой файл — в архив, новый —
-со сводкой, мета с эпохой сжатия). Время закреплено: конец хода — на
-местных часах, «сейчас» — подмена `relative_time._now_local`.
+со сводкой, мета с эпохой сжатия). Часы и пояс кадра — общие для
+эталонов (`pinned_snapshot_clock`).
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import SNAPSHOT_NOW, tui_settings
 
 pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
@@ -29,7 +29,8 @@ from gc_core.thread_store import (
 
 _SYS = "cli"
 _TID = "7f3a9b1c"
-_ENDED = datetime(2026, 10, 22, 14, 32).astimezone()
+# Конец хода — за 8 минут до «сейчас» эталонов (`pinned_snapshot_clock`).
+_ENDED = SNAPSHOT_NOW - timedelta(minutes=8)
 _SUFFIX = "20261022_143500"
 
 
@@ -96,13 +97,10 @@ def _compact(tmp_path) -> None:
 def test_turn_line_compaction_snapshot(snap_compare, tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import TraceScreen
-    from gc_tui.services import relative_time
 
     monkeypatch.setattr(
         TraceScreen, "_current_cwd", lambda self: "/work/demo-project"
     )
-    now = _ENDED + timedelta(minutes=5)
-    monkeypatch.setattr(relative_time, "_now_local", lambda: now)
     _write_thread(tmp_path)
 
     app = TuiApp(

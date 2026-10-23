@@ -51,6 +51,20 @@ def _snapshot_color_mode(request, monkeypatch):
         monkeypatch.delenv("NO_COLOR", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _snapshot_clock(request, monkeypatch):
+    """Часы эталонов — одни на все кадры (`pinned_snapshot_clock`): время
+    строки итога не зависит от даты и пояса машины. Тест со своим
+    «сейчас» подменяет его поверх."""
+    if "snap_compare" not in request.fixturenames:
+        yield
+        return
+    from gc_testkit.tui_support import pinned_snapshot_clock
+
+    with pinned_snapshot_clock(monkeypatch):
+        yield
+
+
 def pytest_configure(config):
     """Скрыть от syrupy наши `.svg`-копии эталонов.
 

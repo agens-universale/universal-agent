@@ -5,14 +5,15 @@
 `↓ в конец · клик или Enter` (поле ввода в фокусе и пустое).
 
 Ход закрыт записью итога: кадр — покой после хода, строка итога внизу
-ленты (S10, В1). Её время — на местных часах, «сейчас» подменено.
+ленты (S10, В1). Часы и пояс кадра — общие для эталонов
+(`pinned_snapshot_clock`).
 """
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, timedelta
 
 import pytest
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import SNAPSHOT_NOW, tui_settings
 
 pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
@@ -24,7 +25,8 @@ _ASK = (
 )
 # Реплика (две строки) целиком выше верхнего края ленты.
 _SCROLL_Y = 17
-_ENDED = datetime(2026, 10, 22, 14, 32).astimezone()
+# Конец хода — за 8 минут до «сейчас» эталонов (`pinned_snapshot_clock`).
+_ENDED = SNAPSHOT_NOW - timedelta(minutes=8)
 
 
 def _call(call_id: str, name: str, args: dict, output: dict) -> list[dict]:
@@ -128,14 +130,11 @@ def _record_outcome(tmp_path, *, seq: int) -> None:
 def test_trace_scrolled_snapshot(snap_compare, tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens.main import TraceScreen
-    from gc_tui.services import relative_time
 
     # Папку в шапке фиксируем — иначе снапшот стал бы машинно-зависимым.
     monkeypatch.setattr(
         TraceScreen, "_current_cwd", lambda self: "/work/demo-project"
     )
-    now = _ENDED + timedelta(minutes=5)
-    monkeypatch.setattr(relative_time, "_now_local", lambda: now)
     _write_thread(tmp_path)
 
     app = TuiApp(
