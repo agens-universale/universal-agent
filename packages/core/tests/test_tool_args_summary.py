@@ -382,3 +382,10 @@ def test_project_memory_shows_action_and_project(action):
         "project_memory", {"action": action, "content": "секрет"}
     )
     assert out == f"{action} project"
+
+
+@pytest.mark.parametrize("name", ["session_memory", "project_memory"])
+def test_memory_without_action_has_no_summary(name):
+    """Сводка памяти — только от действия: без `action` она пуста, пар
+    `key=value` нет (из них фронтенд не выводит глагол)."""
+    assert tool_args_summary(name, {"register": "goal"}) == ""

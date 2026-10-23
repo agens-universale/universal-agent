@@ -631,6 +631,22 @@ def test_memory_caption_verb_and_target(wire, args, verb, target):
     assert _content(row).split(" · ")[0] == caption
 
 
+@pytest.mark.parametrize("wire", ["session_memory", "project_memory"])
+@pytest.mark.parametrize("args", [{}, {"register": "goal"}])
+def test_memory_without_action_is_called_whatever_args(wire, args):
+    """Без `action` член блока Memory — `Called`, какие бы ни были прочие
+    аргументы: глагол не выводится из пар `key=value`."""
+    from gc_core.execution.progress import tool_args_summary
+
+    from gc_tui.services.trace_render import build_call_row
+
+    summary = tool_args_summary(wire, args)
+    row = build_call_row(
+        call_id="c1", wire_name=wire, args_summary=summary, level=0
+    )
+    assert _content(row).split(" · ")[0] == f"Called  {wire}"
+
+
 def test_memory_caption_without_action_is_called():
     """Память без действия: член блока `Memory` словом `Memory` повторял
     бы заголовок — `Called` и сырое имя, как у тула без подписи."""

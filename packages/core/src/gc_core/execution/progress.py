@@ -276,6 +276,16 @@ def tool_args_summary(
     primary = _primary_summary(name, data, limit, nested) if name else None
     if primary:
         return _clip(primary, limit)
+    return _fallback_summary(name, data, limit)
+
+
+def _fallback_summary(
+    name: Optional[str], data: Dict[str, Any], limit: int
+) -> str:
+    """Главного аргумента нет: пары ``key=preview``; у памяти — пусто,
+    её сводка только от действия (глагол из пар не выводится)."""
+    if name and tool_display(name).category is DisplayCategory.MEMORY:
+        return ""
     return _pairs_summary(data, limit)
 
 
