@@ -53,6 +53,7 @@ _KEY_CTRL_DOWN = "ctrl+down"
 _KEY_CTRL_SPACE = "ctrl+space"
 _KEY_CTRL_U = "ctrl+u"
 _MSG_APPLIES_NEXT_TURN = "применится со следующего хода агента"
+_MSG_APPLIES_NEXT_START = "применится со следующего запуска"
 _SEL_SET_FRAME = "#set-frame"
 _SEL_SET_MENUROW = ".set-menurow"
 
@@ -64,10 +65,11 @@ SECTIONS = (
     "MCP-серверы",
     "Голосовой ввод",
     "Режимы работы",
+    "Внешний вид",
     "Обновление",
 )
 
-_CONNECTION, _MODELS, _PROFILES, _MCP, _VOICE, _MODES, _UPDATE = (
+_CONNECTION, _MODELS, _PROFILES, _MCP, _VOICE, _MODES, _LOOK, _UPDATE = (
     0,
     1,
     2,
@@ -75,7 +77,14 @@ _CONNECTION, _MODELS, _PROFILES, _MCP, _VOICE, _MODES, _UPDATE = (
     4,
     5,
     6,
+    7,
 )
+# Секция «Внешний вид»: имя каждой темы `tui.theme` в порядке схемы. Тема
+# выбирается при старте до импорта приложения, поэтому запись действует
+# со следующего запуска.
+THEME_NAMES = {"auto": "Автоматическая", "gigacode": "GigaCode"}
+_THEME_LABEL = "Тема"
+_THEME_HINT = "цвета от фона терминала; если текст читается плохо — GigaCode"
 _EDITOR_SECTIONS = {
     _CONNECTION
 }  # редакторные: writable, dirty-tracked, submit
@@ -113,6 +122,8 @@ _FOOTERS = {
     # систему), а Alt+↓ только перечитывает — одним словом на двоих они неразличимы (§5.4).
     _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · Esc",
     _MODES: "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню",
+    # Строка одна — ↑/↓ не обещаем.
+    _LOOK: "←/→ — изменить · PgUp/PgDn — секции · Esc — меню",
     _UPDATE: "↑/↓ · Enter — выполнить · Esc — меню",
     # Раскладка — решение юзера В1 (`docs/specs/2026-08-10-profiles-b-plan.md`),
     # выведенное из канона базы: Enter = «войти внутрь» (меню «открыть», MCP
@@ -1121,6 +1132,8 @@ class SettingsScreen(Screen):
             v.append(
                 fit_mode_pairs(pairs, self._modes_preview_width()), style=DIM
             )
+        elif i == _LOOK:
+            v.append(f"{_THEME_LABEL}: {self._theme_name()}", style=DIM)
         else:
             v.append(self._version_text().split("·", 1)[-1].strip(), style=DIM)
         return v
@@ -2127,6 +2140,8 @@ class SettingsScreen(Screen):
             self._mount_voice_section(frame)
         elif section == _MODES:
             self._mount_modes_section(frame)
+        elif section == _LOOK:
+            self._mount_look_section(frame)
         elif section == _UPDATE:
             self._mount_update_section(frame)
         else:
@@ -3395,7 +3410,7 @@ class SettingsScreen(Screen):
             self._flash(f"язык распознавания: {language}")
         else:
             self._flash(
-                "сохранено, применится со следующего запуска", outcome="warn"
+                f"сохранено, {_MSG_APPLIES_NEXT_START}", outcome="warn"
             )
 
     def _voice_enable_local(self) -> None:
@@ -3750,7 +3765,7 @@ class SettingsScreen(Screen):
             self._flash("свой endpoint подключён")
         else:
             self._flash(
-                "сохранено, применится со следующего запуска", outcome="warn"
+                f"сохранено, {_MSG_APPLIES_NEXT_START}", outcome="warn"
             )
 
     # --- секция «Режимы работы» (дизайн 2026-07-18-settings-work-modes-design §3-4) ---
@@ -4108,40 +4123,14 @@ class SettingsScreen(Screen):
             return self._project_config_candidate_path()
         return self._profiles_base_path().resolve()
 
-    def _modes_apply(self, direction: int) -> None:
-        """←/→ на строке тоггла (канон §1/§3): мгновенно записать
-        переключённое ГЛОБАЛЬНОЕ значение в config.yml (Settings = глобальный
-        дефолт, дизайн 2026-07-21 §3). Цикл значения — от ТЕКУЩЕГО глобального
-        состояния, по составу базы (`base_toggle_names` — статика
-        или `values_provider`, спека автороутинга §3: `/level` цикл включает
-        `auto`, когда фича доступна, тем же generic путём, каким пресет всегда
-        цикл по низкий/средний/высокий — без разбора по имени тоггла). Guard
-        записи — как у остальных секций (_writable): пакетный шаблон не пишем.
-        Ошибка — флеш, значение не меняется. Сессионные переопределения НЕ
-        трогаем — их перекрытие показывает пометка §6.2."""
+    def _write_section_keys(self, values: dict):
+        """Мгновенная запись ключей секции в config.yml «всё или ничего»:
+        цель по `_keys_write_target`, гейт пакетного шаблона, перечитка через
+        `_on_apply` и перерисовка. Возвращает путь записи или None — отказ уже
+        сказан репликой."""
         from gc_core import onboarding_config_writer as w
         from gc_core.config import _default_config_path, validate_config_text
 
-        from gc_tui.toggles import (
-            PRESETS,
-            TOGGLES,
-            base_toggle_names,
-            cycle_in,
-            modes_section_names,
-            toggle_state_base,
-        )
-
-        names = modes_section_names()
-        name = names[self._modes_idx]
-        spec = TOGGLES[name]
-        current = toggle_state_base(self.app, name)
-        cycle_names = base_toggle_names(self.app, name)
-        new_value = cycle_in(cycle_names, current, direction)
-        values = (
-            PRESETS[new_value]
-            if spec.preset_keys
-            else {spec.dotted: new_value}
-        )
         target = self._keys_write_target(values)
         # Гейт пакетного шаблона — ОДИН и по ЦЕЛИ, как у соседних записей секции
         # «Профили». Прежняя предпроверка по пути запуска стояла раньше него и
@@ -4149,7 +4138,7 @@ class SettingsScreen(Screen):
         # и запрещать запись туда из-за пакетной базы было не за что.
         if not self._target_writable(target):
             self._notice(self._TEMPLATE_WRITE_REFUSAL)
-            return
+            return None
         anchors = [key for key in values if "." not in key]
         # Снимок ДО якорей: `ensure_pointer_anchor` — отдельная запись на диск и
         # валидации не знает, а `write_values` ниже отвергает итог целиком. Без
@@ -4177,7 +4166,7 @@ class SettingsScreen(Screen):
             if not restored:
                 message += f"; конфиг остался изменённым: {target}"
             self._notice(message)
-            return
+            return None
         if missing:
             # Файл не тронут (запись «всё или ничего») — молчать нельзя, иначе слайдер
             # покажет новое значение, которого в конфиге нет (находка ревью коллеги).
@@ -4186,7 +4175,7 @@ class SettingsScreen(Screen):
             if not restored:
                 message += f"; конфиг остался изменённым: {target}"
             self._notice(message)
-            return
+            return None
         # Хвост записи — как у соседних секций (_do_save): перечитать сырые значения
         # файла и применить через инъектированный _on_apply, а не звать reload мимо него.
         self._raw = self._read_raw()
@@ -4195,8 +4184,44 @@ class SettingsScreen(Screen):
             self._pull_base_from_app()
         except Exception as exc:
             self._notice(f"сохранено, но конфиг не перечитан: {exc}")
-            return
+            return None
         self._render_view()
+        return target
+
+    def _modes_apply(self, direction: int) -> None:
+        """←/→ на строке тоггла (канон §1/§3): мгновенно записать
+        переключённое ГЛОБАЛЬНОЕ значение в config.yml (Settings = глобальный
+        дефолт, дизайн 2026-07-21 §3). Цикл значения — от ТЕКУЩЕГО глобального
+        состояния, по составу базы (`base_toggle_names` — статика
+        или `values_provider`, спека автороутинга §3: `/level` цикл включает
+        `auto`, когда фича доступна, тем же generic путём, каким пресет всегда
+        цикл по низкий/средний/высокий — без разбора по имени тоггла). Guard
+        записи — как у остальных секций (_writable): пакетный шаблон не пишем.
+        Ошибка — флеш, значение не меняется. Сессионные переопределения НЕ
+        трогаем — их перекрытие показывает пометка §6.2."""
+        from gc_tui.toggles import (
+            PRESETS,
+            TOGGLES,
+            base_toggle_names,
+            cycle_in,
+            modes_section_names,
+            toggle_state_base,
+        )
+
+        names = modes_section_names()
+        name = names[self._modes_idx]
+        spec = TOGGLES[name]
+        current = toggle_state_base(self.app, name)
+        cycle_names = base_toggle_names(self.app, name)
+        new_value = cycle_in(cycle_names, current, direction)
+        values = (
+            PRESETS[new_value]
+            if spec.preset_keys
+            else {spec.dotted: new_value}
+        )
+        target = self._write_section_keys(values)
+        if target is None:
+            return
         # Записанное значение может быть перекрыто слоем выше (файл профиля —
         # туда секция не пишет вовсе, и выбором целевого файла случай не
         # закрывается). Честнее сказать, что действует, чем оставить трек стоять
@@ -4213,6 +4238,51 @@ class SettingsScreen(Screen):
         # имени оставляло бы человека гадать, где искать результат.
         self._flash(
             f"«{self._modes_head(name)}» — {new_value}, записано в {target}"
+        )
+
+    # --- секция «Внешний вид»: тема `tui.theme` ---
+    def _theme_value(self) -> str:
+        from gc_core.settings import settings_of
+
+        return settings_of(self._settings).tui.theme
+
+    def _theme_name(self) -> str:
+        return THEME_NAMES[self._theme_value()]
+
+    def _mount_look_section(self, frame: Vertical) -> None:
+        """Одна строка «Тема» с именем темы — как значения строк «Режимов
+        работы», но без трека: имя и есть вся шкала. Под ней — пояснение."""
+        label_w = len(_THEME_LABEL) + 3
+        t = Text()
+        t.append("▸ ", style=ACCENT)
+        t.append(_THEME_LABEL.ljust(label_w), style=INK)
+        t.append(self._theme_name(), style=INK)
+        frame.mount(Static(t, classes="set-row set-dyn" + _CLS_SELECTED))
+        frame.mount(Static(_THEME_HINT, classes="set-hint set-dyn"))
+
+    def _look_apply(self, direction: int) -> None:
+        """←/→ — следующая тема по кругу, мгновенная запись `tui.theme` тем же
+        путём, что у «Режимов работы». Палитра выбирается до импорта
+        приложения, поэтому плашка говорит, что тема сменится при следующем
+        запуске."""
+        from gc_tui.toggles import cycle_in
+
+        new_value = cycle_in(list(THEME_NAMES), self._theme_value(), direction)
+        values = {"tui.theme": new_value}
+        target = self._write_section_keys(values)
+        if target is None:
+            return
+        if self._theme_value() != new_value:
+            self._notice(
+                f"записано в {target}, но действует "
+                f"«{self._theme_name()}» — значение перекрыто "
+                f"{self._overriding_layer_name(values)}"
+            )
+            return
+        self._flash(
+            f"«{_THEME_LABEL}» — {THEME_NAMES[new_value]}, записано в "
+            f"{target}; {_MSG_APPLIES_NEXT_START}",
+            outcome="warn",
         )
 
     # --- секция «Профили» (витрина обоих корней + единое правило записи) ---
@@ -7350,6 +7420,10 @@ class SettingsScreen(Screen):
             event.stop()
             if event.key != "enter":  # Enter на ручке — ничего
                 self._modes_apply(-1 if event.key == "left" else 1)
+            return
+        if event.key in ("left", "right") and self._view == _LOOK:
+            event.stop()
+            self._look_apply(-1 if event.key == "left" else 1)
             return
         if self._view == _PROFILES:
             self._profiles_disk_cache = {}  # нажатие — свежий взгляд на диск

@@ -973,8 +973,8 @@ def test_settings_description_is_short():
     from gc_tui.commands import build_default_registry
 
     cmd = build_default_registry().lookup("settings")
-    assert (
-        cmd.description == "Подключение, модели, профили, MCP, голос, режимы"
+    assert cmd.description == (
+        "Подключение, модели, профили, MCP, голос, режимы, внешний вид"
     )
 
 
