@@ -74,6 +74,7 @@ async def test_menu_preview_names_the_theme(tmp_path):
         rows = _texts(scr, ".set-menurow .set-rowtext")
         look = next(r for r in rows if "Внешний вид" in r)
         assert "Тема: GigaCode" in look
+        assert "◂" not in look and "▸" not in look
 
 
 async def test_row_shows_theme_name_and_explanation(tmp_path):
@@ -83,7 +84,7 @@ async def test_row_shows_theme_name_and_explanation(tmp_path):
         rows = _texts(scr, ".set-row")
         assert len(rows) == 1
         assert rows[0].startswith("▸ Тема")
-        assert rows[0].rstrip().endswith("Автоматическая")
+        assert rows[0].rstrip().endswith("◂ Автоматическая ▸")
         assert "●" not in rows[0] and "○" not in rows[0]
         hints = _texts(scr, ".set-hint")
         assert (
@@ -99,7 +100,7 @@ async def test_arrows_cycle_names_and_write_config(tmp_path):
         await pilot.press("right")
         await pilot.pause(0.1)
         assert _theme_in_file(cfg_file) == "gigacode"
-        assert _texts(scr, ".set-row")[0].rstrip().endswith("GigaCode")
+        assert _texts(scr, ".set-row")[0].rstrip().endswith("◂ GigaCode ▸")
         await pilot.press("right")
         await pilot.pause(0.1)
         assert _theme_in_file(cfg_file) == "auto"

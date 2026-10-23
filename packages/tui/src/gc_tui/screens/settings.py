@@ -4250,13 +4250,17 @@ class SettingsScreen(Screen):
         return THEME_NAMES[self._theme_value()]
 
     def _mount_look_section(self, frame: Vertical) -> None:
-        """Одна строка «Тема» с именем темы — как значения строк «Режимов
-        работы», но без трека: имя и есть вся шкала. Под ней — пояснение."""
+        """Одна строка «Тема» с переключателем `◂ имя ▸`: без трека, имя и
+        есть вся шкала, а стрелки (тусклее имени) говорят, что значение
+        листается ←/→. Строка в секции одна и всегда выделена, поэтому
+        стрелки видны всегда. Под ней — пояснение."""
         label_w = len(_THEME_LABEL) + 3
         t = Text()
         t.append("▸ ", style=ACCENT)
         t.append(_THEME_LABEL.ljust(label_w), style=INK)
+        t.append("◂ ", style=SUB_INK)
         t.append(self._theme_name(), style=INK)
+        t.append(" ▸", style=SUB_INK)
         frame.mount(Static(t, classes="set-row set-dyn" + _CLS_SELECTED))
         frame.mount(Static(_THEME_HINT, classes="set-hint set-dyn"))
 
