@@ -5323,9 +5323,11 @@ class TraceScreen(Screen):
             # причина — в лог.
             _log.exception("run_settle_failed kind=%s", kind)
         finally:
-            # Прогон зафиксирован: его пару фронты больше не видят.
+            # Прогон зафиксирован: его пару фронты больше не видят, а
+            # снимок меты до него откату уже не вернуть.
             if runner is not None:
                 self._settled_run = (runner, seq)
+            self._pre_run_tui_meta = None
             self._was_running = False
             self._run_pending = False
             self._watched_runner = None

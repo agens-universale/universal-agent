@@ -801,6 +801,22 @@ async def test_no_undo_for_settled_run(tmp_path):
         assert scr._can_cancel_with_undo() is False
 
 
+@pytest.mark.asyncio
+async def test_settled_run_drops_pre_run_snapshot(tmp_path):
+    """Прогон кончился обычным путём: снимок меты до него больше не нужен
+    и не может вернуться в мету при позднем откате."""
+    _prepare_one_turn_with_edits(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, thread, runner = await _undo_setup(pilot, tmp_path)
+        assert scr._pre_run_tui_meta is not None
+        scr._poll_tick()
+        thread.record(2, "m_orphan")
+        runner._running = False
+        scr._poll_tick()
+        await pilot.pause()
+        assert scr._pre_run_tui_meta is None
+
+
 # --- история треда ----------------------------------------------------------
 
 
