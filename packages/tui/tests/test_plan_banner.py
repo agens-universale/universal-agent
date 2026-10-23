@@ -302,7 +302,7 @@ async def test_plan_stands_in_a_titled_frame_and_feedback_leaves_a_trace_line(
         assert _rework_lines(screen) == 1
 
 
-def test_turn_that_ended_with_a_plan_is_not_called_done():
+async def test_turn_that_ended_with_a_plan_is_not_called_done():
     from gc_tui.services.turn_outcome import turn_head
 
     def head(plan):
@@ -352,7 +352,7 @@ async def test_plan_frame_changes_colour_once_the_plan_is_accepted(tmp_path):
         assert str(panel.border_title) == "☰ предложенный план"
 
 
-def test_only_the_current_accepted_plan_counts_as_accepted():
+async def test_only_the_current_accepted_plan_counts_as_accepted():
     from gc_core.plan_store import new_plan_block, plan_is_accepted
 
     plan = new_plan_block("1. шаг")
