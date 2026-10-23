@@ -153,8 +153,9 @@ def _task_body(callbacks: bool) -> dict:
         "system": _described(
             _STR,
             "Система задачи; нет — `webhook.default_system` (`generic`). "
-            "Системы других поверхностей и интерактивных сессий "
-            "(`a2a`, `responses`, `completions`, `acp`, `cli`, `tui`) — 400.",
+            "Системы других поверхностей, интерактивных сессий и SDK "
+            "(`a2a`, `responses`, `completions`, `acp`, `cli`, `tui`, "
+            "`sdk`) — 400.",
         ),
         "task_id": _described(
             _STR,
@@ -282,8 +283,9 @@ def _task_routes(*, callbacks: bool, runner: str) -> dict:
                 "401": _answer("Нет подписи или она чужая (signing_secret)"),
                 "403": _AUTH_403,
                 "409": _answer(
-                    "Тред чужой поверхности или задача занята запросом с "
-                    "другим `callback_url`",
+                    "Тред не задача вебхука (другой поверхности или "
+                    "приложения) или задача занята запросом с другим "
+                    "`callback_url`",
                     _TASK_ERROR,
                 ),
                 "413": _answer("Тело больше `max_body_bytes`"),

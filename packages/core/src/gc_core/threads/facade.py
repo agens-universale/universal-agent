@@ -246,11 +246,13 @@ class Threads:
         *,
         op_id: str | None = None,
         source: str = "api",
+        patch: tuple[str, JsonObject] | None = None,
     ) -> Receipt:
         """Сообщение пользователя во входящий поток треда — без аренды:
         идущий ход заберёт его опросом, следующий — в начале. ``id`` нет —
         выдаётся здесь, чтобы повторное чтение потока давало то же сообщение.
-        ``max_seq["inbox"]`` квитанции — номер сообщения в потоке."""
+        ``max_seq["inbox"]`` квитанции — номер сообщения в потоке; слияние
+        ``patch`` в состояние фронтенда — той же записью."""
         entry = {**message, "source": source}
         entry.setdefault("role", "user")
         if not entry.get("id"):
@@ -258,7 +260,9 @@ class Threads:
         return await self.store.append_side(
             key,
             SideChange(
-                op_id=op_id or _op_id(INBOX), append=[(INBOX, [entry])]
+                op_id=op_id or _op_id(INBOX),
+                append=[(INBOX, [entry])],
+                patch_frontend=patch,
             ),
         )
 
