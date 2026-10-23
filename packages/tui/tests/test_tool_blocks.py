@@ -574,9 +574,33 @@ def test_timers_registry_after_result():
     fold(model.member_added("c1", C.READ, waiting=False))
     fold(model.result("c1", "ok", reason="", executed=None))
     assert fold.timer("c1") is None
-    timers.update({"c1": 3.0, "other": 1.0})
-    assert model.timers_updated() == [SetTimer("c1", 3.0)]
-    assert model.timers_updated() == []
+    calls = {"c1": 3.0, "other": 1.0}
+    timers.update(calls)
+    assert model.timers_updated(calls) == [SetTimer("c1", 3.0)]
+    assert model.timers_updated(calls) == []
+
+
+def test_timers_updated_renders_only_blocks_of_new_calls():
+    """Запись итога хода N перерисовывает только блоки с вызовами из её
+    `calls`, не все блоки прошлых ходов (иначе конец хода квадратичен)."""
+    model, fold, timers = _model()
+    for turn in range(3):
+        _reads(model, fold, 2, start=2 * turn)
+        model.event_closing()
+        model.turn_ended()
+    rendered: list[str] = []
+    render = model._render
+
+    def counting(block):
+        rendered.append(block.key)
+        return render(block)
+
+    model._render = counting
+    calls = {"c4": 1.0, "c5": 2.0}
+    timers.update(calls)
+    fold(model.timers_updated(calls))
+    assert rendered == ["block:2"]
+    assert fold.timer("c5") == SetTimer("c5", 2.0)
 
 
 def test_timers_refused_never():
@@ -586,7 +610,7 @@ def test_timers_refused_never():
     fold(model.started("r"))
     fold(model.result("r", "refused", reason="отказ", executed=None))
     assert fold.timer("r") is None
-    assert model.timers_updated() == []
+    assert model.timers_updated({"r": 1.0}) == []
 
 
 def test_timers_not_executed_explicit():

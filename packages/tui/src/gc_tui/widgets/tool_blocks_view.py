@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Optional, Protocol, Sequence
+from typing import Any, Callable, Iterable, Optional, Protocol, Sequence
 
 from gc_core.config_modules.agent_edits import (
     DEFAULT_REPLAY_EXPANDED_TURNS,
@@ -328,8 +328,8 @@ class ToolBlocksView:
     def queued_admitted(self) -> None:
         self.apply(self.model.queued_admitted())
 
-    def timers_updated(self) -> None:
-        self.apply(self.model.timers_updated())
+    def timers_updated(self, calls: Iterable[str]) -> None:
+        self.apply(self.model.timers_updated(calls))
 
     def head_widget(self, key: str) -> Optional[Widget]:
         """Верх блока ключа ``key`` (блока, фразы или члена): заголовок, у
@@ -571,11 +571,12 @@ def end_turn(
     ``settled`` — у превью: поток хода давно вышел (`turn_ended`)."""
     from gc_tui.services.turn_outcome import kind_of
 
-    timers.update(outcome.calls or {})
+    calls = outcome.calls or {}
+    timers.update(calls)
     stopped = kind_of(outcome)[0] == "cancelled"
     views.note_turn(stopped=stopped)
     for view in list(views.values()):
-        view.timers_updated()
+        view.timers_updated(calls)
         view.turn_ended(stopped=stopped, settled=settled)
 
 

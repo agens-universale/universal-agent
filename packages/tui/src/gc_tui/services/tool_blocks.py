@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal, Mapping, Optional, Sequence, Union
+from typing import Iterable, Literal, Mapping, Optional, Sequence, Union
 
 from gc_core.agent_edits.journal import EditRecord
 from gc_core.config_modules.agent_edits import DEFAULT_TRACE_INLINE_MAX_LINES
@@ -760,12 +760,17 @@ class ToolBlocks:
         block.expanded = not block.expanded
         return self._render(block)
 
-    def timers_updated(self) -> list[Decision]:
-        """Реестр таймеров пополнился — застывшие таймеры строкам."""
+    def timers_updated(self, calls: Iterable[str]) -> list[Decision]:
+        """Реестр таймеров пополнился вызовами ``calls`` — застывшие
+        таймеры строкам; перерисовываются только их блоки."""
+        blocks = {
+            block.key: block
+            for block in map(self._block_of.get, calls)
+            if block is not None
+        }
         out: list[Decision] = []
-        for block in self._blocks:
-            if any(m.key in self._timers for m in block.members):
-                out += self._render(block)
+        for block in blocks.values():
+            out += self._render(block)
         return out
 
     # --- запросы исполнителя ---------------------------------------------
