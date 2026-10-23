@@ -364,3 +364,55 @@ def test_apply_passes_reply_outcome_to_prose_hook():
             "error_brief": "нет",
         }
     ]
+
+
+# --- вывод и команда вложенного вызова (спека P4 §7, план Task 16) -------
+
+
+def _call_and_result(output, *, kind="result", name="exec_command"):
+    args = json.dumps({"command": "make\ntest"})
+    return [
+        {
+            "seq": 1,
+            "parent_call_id": "p1",
+            "kind": "call",
+            "payload": {"name": name, "arguments": args, "call_id": "c1"},
+        },
+        {
+            "seq": 2,
+            "parent_call_id": "p1",
+            "kind": kind,
+            "payload": {"call_id": "c1", "output": output},
+        },
+    ]
+
+
+def test_plan_reads_output_on_success():
+    """Успешный результат больше не игнорирует вывод: экран строит
+    сводку и превью тем же маппером, что верхний уровень."""
+    mount, finish = plan_sidecar_nested_actions(_call_and_result("x = 1"))
+    assert mount.command == "make\ntest"
+    assert finish.output == "x = 1"
+
+
+def test_plan_error_output_and_non_string_as_json():
+    out = {"ok": False, "exit_code": 2}
+    (_mount, finish) = plan_sidecar_nested_actions(
+        _call_and_result(out, kind="error")
+    )
+    assert finish.output == json.dumps(out, ensure_ascii=False)
+
+
+def test_plan_non_run_tool_has_no_command():
+    mount, _finish = plan_sidecar_nested_actions(
+        _call_and_result("ok", name="fs_read_file")
+    )
+    assert mount.command is None
+
+
+def test_nested_raw_texts_from_records():
+    from gc_tui.services.subagent_sidecar_mapper import nested_raw_texts
+
+    records = _call_and_result("x = 1")
+    assert nested_raw_texts(records, "c1") == ("make\ntest", "x = 1")
+    assert nested_raw_texts(records, "nope") == (None, None)

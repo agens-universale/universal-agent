@@ -69,6 +69,11 @@ def _p418() -> list[tuple]:
     ]
 
 
+def _output(name: str) -> str:
+    """Вывод вызова — конверт тула без сводки: хвоста у строки нет."""
+    return json.dumps({"tool": name, "ok": True})
+
+
 def _progress(steps: list[tuple], pid: str = AGENT) -> list:
     base = dict(parent_call_id=pid, child_run_id="c", step=1, max_steps=9)
     out = []
@@ -101,6 +106,7 @@ def _progress(steps: list[tuple], pid: str = AGENT) -> list:
                     tool_call_id=call_id,
                     args_summary=summary,
                     ok=True if kind == "tool_end" else None,
+                    output=_output(name) if kind == "tool_end" else None,
                     **base,
                 )
             )
@@ -130,7 +136,7 @@ def _sidecar(tmp_path, steps: list[tuple], pid: str = AGENT) -> None:
                     {
                         "type": "function_call_output",
                         "call_id": call_id,
-                        "output": "ok",
+                        "output": _output(name),
                     },
                 ),
             ]

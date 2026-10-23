@@ -125,7 +125,14 @@ def command_lines(
     """Сырой текст Run-тула построчно, без `cd <корень> &&` и пустых
     хвостовых строк; не Run-тул или аргументов нет — `()`. Ширину не режет:
     это делает строка."""
-    text = run_command_text(wire_name, arguments)
+    return split_command(run_command_text(wire_name, arguments), root=root)
+
+
+def split_command(
+    text: Optional[str], *, root: Optional[str]
+) -> tuple[str, ...]:
+    """Сырой текст команды построчно, без `cd <корень> &&` и пустых
+    хвостовых строк; текста нет — `()`."""
     if not text:
         return ()
     if root:

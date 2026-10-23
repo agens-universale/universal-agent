@@ -835,6 +835,13 @@ def classify_stop(
     return None
 
 
+def output_summary(output: Any, *, error: bool) -> str:
+    """Хвост строки вызова по сырому выводу тула: сводка успеха
+    (`40 строк`) или причина ошибки; один маппер для ленты верхнего
+    уровня и вложенных вызовов субагента."""
+    return _summarize_output(output, error=error)
+
+
 def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(output, str):
         return ""

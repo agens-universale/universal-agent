@@ -94,6 +94,7 @@ class SubagentProgressConsumer:
                         args_summary=ev.args_summary or "",
                         step=ev.step,
                         max_steps=ev.max_steps,
+                        command=ev.command,
                     )
                 parent_heartbeat(
                     parent_call_id=pid,
@@ -114,6 +115,7 @@ class SubagentProgressConsumer:
                     outcome=outcome,
                     step=ev.step,
                     max_steps=ev.max_steps,
+                    output=ev.output,
                 )
                 parent_heartbeat(
                     parent_call_id=pid,

@@ -270,6 +270,7 @@ def _live_call_events(pid: str, case: str) -> list:
             error_brief=brief,
             result_status=status,
             result_error=fields,
+            output=output or "ok",
             **base,
         ),
     ]

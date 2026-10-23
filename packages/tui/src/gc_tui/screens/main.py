@@ -92,6 +92,10 @@ from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.block_edits import edit_of_call, ran_files_of
 from gc_tui.services.clipboard_ops import copy_out
+from gc_tui.services.command_output import (
+    parse_command_output,
+    split_command,
+)
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import agent_answers, export_thread
 from gc_tui.services.footer_slot import (
@@ -154,6 +158,7 @@ from gc_tui.services.subagent_progress import (
 from gc_tui.services.subagent_sidecar_mapper import (
     CHILD_SUMMARY_LABEL,
     apply_sidecar_nested_actions,
+    nested_raw_texts,
     plan_sidecar_nested_actions,
     resolve_nested_tool_detail,
     trace_events_from_nested_detail,
@@ -167,6 +172,7 @@ from gc_tui.services.tool_blocks import (
     BlockKind,
     CallTimers,
     ToolBlocks,
+    block_kind,
 )
 from gc_tui.services.trace_mapper import (
     PROPOSE_PLAN_ID,
@@ -174,6 +180,7 @@ from gc_tui.services.trace_mapper import (
     coerce_args,
     collect_render_context,
     map_message,
+    output_summary,
     response_tail,
     with_closing_replies,
 )
@@ -4241,11 +4248,14 @@ class TraceScreen(Screen):
         step: int = 0,
         max_steps: int = 0,
         live: bool = True,
+        command: Optional[str] = None,
         **_kw,
     ) -> None:
         """Строка вложенного вызова — через модель уровня субагента;
         ``live`` — событие прогресса: вызов уже исполняется (у записи
-        sidecar старта не было — время из реестра таймеров)."""
+        sidecar старта не было — время из реестра таймеров). ``command``
+        — сырой текст команды Run-тула; сверх потолка события — из записи
+        sidecar `call` (§4.0, §9.14 п. 7)."""
         view = self._nested_blocks(parent_call_id)
         if view is None:
             return
@@ -4268,7 +4278,11 @@ class TraceScreen(Screen):
         if tool_call_id:
             self._nested_tool_rows[tool_call_id] = row
         category, _ = tool_caption(tool_name, mcp_tools, mcp_servers)
-        view.add_call(row, category, waiting=False)
+        is_run = block_kind(category) == BlockKind.RAN
+        if command is None and is_run and tool_call_id:
+            command = self._nested_sidecar_texts(tool_call_id)[0]
+        lines = split_command(command, root=self._current_cwd())
+        view.add_call(row, category, waiting=False, command=lines)
         if live:
             view.started(row)
 
@@ -4280,28 +4294,50 @@ class TraceScreen(Screen):
         ok: bool = True,
         error_brief: str | None = None,
         outcome: ResultOutcome | None = None,
+        output: Optional[str] = None,
         **_kw,
     ) -> None:
         """Исход вложенного вызова — через модель уровня субагента, с
-        правкой из журнала (у субагента свой `call_id`)."""
+        правкой из журнала (у субагента свой `call_id`). ``output`` —
+        сырой вывод: сводка и превью тем же маппером, что наверху; у
+        Run-тула сверх потолка события — из записи sidecar (§9.14 п. 5)."""
         row = (
             self._nested_tool_rows.get(tool_call_id) if tool_call_id else None
         )
         view = self._block_views.get(parent_call_id)
         if row is None or view is None:
             return
+        is_run = view.model.kind_of(tool_call_id) == BlockKind.RAN
+        if output is None and is_run:
+            output = self._nested_sidecar_texts(tool_call_id)[1]
+        if outcome is None and output is not None:
+            summary = output_summary(output, error=not ok)
+        else:
+            summary = "" if ok else (error_brief or "error")
         ev = TraceEvent(
             no=0,
             event_ts_utc_iso="",
             kind="result" if ok else "error",
             title="",
-            summary="" if ok else (error_brief or "error"),
+            summary=summary,
             full_payload={},
             call_id=tool_call_id,
             outcome=outcome or ("ok" if ok else "error"),
+            command=parse_command_output(output),
         )
         edit, compact = self._block_edit(tool_call_id)
-        view.result(row, ev, edit, compact=compact)
+        ran = self._ran_result(ev) if is_run else None
+        view.result(row, ev, edit, compact=compact, ran=ran)
+
+    def _nested_sidecar_texts(
+        self, call_id: str
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Команда и вывод вложенного вызова из sidecar открытого треда
+        (записаны до события прогресса)."""
+        if self._store is None or not self._active_task_id:
+            return None, None
+        records = self._store.read_subagent_trace(self._active_task_id)
+        return nested_raw_texts(records or [], call_id)
 
     def _mount_nested_prose(
         self,

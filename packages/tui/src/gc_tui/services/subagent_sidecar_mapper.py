@@ -5,6 +5,7 @@ Display/audit only — does not touch agent state or parent LLM history.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import (
@@ -21,6 +22,7 @@ from typing import (
 from gc_core.attachments.model import Attachment, attachments_of
 from gc_core.execution.progress import (
     parse_tool_result_status,
+    run_command_text,
     tool_args_summary,
 )
 
@@ -54,6 +56,20 @@ class SidecarNestedAction:
     todo_items: Optional[List[Dict[str, str]]] = None
     # Картинки реплики человека ребёнку (``mount_nested_user``).
     images: tuple[Attachment, ...] = ()
+    # Сырой текст команды Run-тула (``mount_nested_tool``) и сырой вывод
+    # тула (``finish_nested_tool``) — как в событиях прогресса (спека P4
+    # §7): строки команды, сводку и превью строит экран одним маппером.
+    command: Optional[str] = None
+    output: Optional[str] = None
+
+
+def _raw_output(payload: Dict[str, Any]) -> Optional[str]:
+    """Вывод записи результата как текст: не строка — `json.dumps`, как
+    в событии `tool_end` (решение плана 12)."""
+    output = payload.get("output")
+    if output is None or isinstance(output, str):
+        return output
+    return json.dumps(output, ensure_ascii=False)
 
 
 def _seq_key(record: Dict[str, Any]) -> int:
@@ -124,6 +140,10 @@ def plan_sidecar_nested_actions(
                             payload.get("arguments"),
                             root=root,
                         ),
+                        command=run_command_text(
+                            str(name) if name else None,
+                            payload.get("arguments"),
+                        ),
                     )
                 )
             elif kind == "result":
@@ -134,6 +154,7 @@ def plan_sidecar_nested_actions(
                         parent_call_id=pid,
                         tool_call_id=str(call_id) if call_id else "",
                         ok=True,
+                        output=_raw_output(payload),
                     )
                 )
             elif kind == "error":
@@ -150,6 +171,7 @@ def plan_sidecar_nested_actions(
                         ok=False,
                         error_brief=stop[1] if stop else brief,
                         outcome=stop[0] if stop else None,
+                        output=_raw_output(payload),
                     )
                 )
             elif kind == "intermediate_reply":
@@ -212,6 +234,7 @@ def apply_sidecar_nested_actions(
                 tool_name=act.tool_name or "",
                 tool_call_id=act.tool_call_id or "",
                 args_summary=act.args_summary or "",
+                command=act.command,
             )
         elif act.kind == "finish_nested_tool":
             finish_nested_tool(
@@ -220,6 +243,7 @@ def apply_sidecar_nested_actions(
                 ok=bool(act.ok) if act.ok is not None else True,
                 error_brief=act.error_brief,
                 outcome=act.outcome,
+                output=act.output,
             )
         elif act.kind == "mount_nested_prose":
             mount_nested_prose(
@@ -302,6 +326,25 @@ def detail_from_sidecar_records(
     return out
 
 
+def nested_raw_texts(
+    records: Sequence[Dict[str, Any]], call_id: str
+) -> Tuple[Optional[str], Optional[str]]:
+    """Сырой текст команды Run-тула и сырой вывод вложенного вызова из
+    записей sidecar — когда событие прогресса их не донесло (сверх
+    потолка); записи нет — `(None, None)`."""
+    detail = detail_from_sidecar_records(records, call_id)
+    if detail is None:
+        return None, None
+    call = detail["call"]
+    name = call.get("name")
+    command = run_command_text(
+        str(name) if name else None, call.get("arguments")
+    )
+    result = detail.get("result")
+    output = _raw_output(result) if isinstance(result, dict) else None
+    return command, output
+
+
 def resolve_nested_tool_detail(
     call_id: str, *, sidecar_records: Sequence[Dict[str, Any]] | None = None
 ) -> Optional[Dict[str, Any]]:
@@ -355,6 +398,7 @@ __all__ = [
     "SidecarNestedAction",
     "apply_sidecar_nested_actions",
     "detail_from_sidecar_records",
+    "nested_raw_texts",
     "plan_sidecar_nested_actions",
     "resolve_nested_tool_detail",
     "trace_events_from_nested_detail",
