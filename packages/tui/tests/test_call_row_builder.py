@@ -631,10 +631,12 @@ def test_memory_caption_verb_and_target(wire, args, verb, target):
     assert _content(row).split(" · ")[0] == caption
 
 
-def test_memory_caption_without_summary_keeps_category():
+def test_memory_caption_without_action_is_called():
+    """Память без действия: член блока `Memory` словом `Memory` повторял
+    бы заголовок — `Called` и сырое имя, как у тула без подписи."""
     from gc_tui.services.trace_render import build_call_row
 
     row = build_call_row(
         call_id="c1", wire_name="session_memory", args_summary="", level=0
     )
-    assert _content(row).split(" · ")[0] == "Memory"
+    assert _content(row).split(" · ")[0] == "Called  session_memory"
