@@ -50,6 +50,9 @@ class TurnClock:
         self.ended_at: str | None = None
         #: Запись итога хода уже начата (ставит писатель записи).
         self.recorded = False
+        # Время завершившихся вызовов хода без ожидания человека. Карта —
+        # транзиентная часть часов; персистентная истина — запись итога.
+        self._calls: dict[str, float] = {}
 
     @classmethod
     def start(cls, *, mono: Mono, wall: Wall) -> "TurnClock":
@@ -83,6 +86,22 @@ class TurnClock:
                 self._wait_from = None
             self._ended = now
             self.ended_at = _utc_iso(self._wall())
+
+    def waited(self) -> float:
+        """Сумма ожиданий человека на «сейчас»: открытое — до текущего момента."""
+        with self._lock:
+            return self._waited_until(self._now())
+
+    def record_call(self, call_id: str, seconds: float) -> None:
+        """Время завершившегося вызова; после закрытия хода — ничего."""
+        with self._lock:
+            if self._ended is None and call_id:
+                self._calls[call_id] = seconds
+
+    def calls(self) -> dict[str, float]:
+        """Копия карты ``{call_id: секунды}``, округление до 0,1."""
+        with self._lock:
+            return {k: round(v, 1) for k, v in self._calls.items()}
 
     def elapsed(self) -> float:
         """Время работы: до закрытия — по «сейчас»; ожидания вычтены."""
@@ -126,6 +145,23 @@ def current_turn_clock(ctx: Any) -> TurnClock | None:
     """Часы текущего хода, если привязаны."""
     clock = getattr(ctx, "turn_clock", None)
     return clock if isinstance(clock, TurnClock) else None
+
+
+def turn_waited(ctx: Any) -> float:
+    """Ожидания человека текущего хода на «сейчас»; часов нет — 0."""
+    clock = current_turn_clock(ctx)
+    return clock.waited() if clock is not None else 0.0
+
+
+def record_call_time(
+    ctx: Any, call_id: str | None, elapsed: float, waited_at_start: float
+) -> None:
+    """Время вызова — в часы хода, без ожиданий человека за время вызова
+    (``waited_at_start`` — ``turn_waited`` на его старте)."""
+    clock = current_turn_clock(ctx)
+    if clock is not None:
+        waited = clock.waited() - waited_at_start
+        clock.record_call(call_id or "", elapsed - waited)
 
 
 @contextmanager

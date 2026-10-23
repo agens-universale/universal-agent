@@ -169,3 +169,56 @@ def test_sources_take_wall_from_execution_environment():
     _, wall = turn_clock_sources(SimpleNamespace())
     with execution_environment(new_id=lambda p: p, now=lambda: fixed):
         assert wall() == fixed
+
+
+# ---- время вызовов хода (P4: карта `calls` записи итога) -----------------
+
+
+def test_record_call_lands_in_calls_rounded():
+    clock, _ = _clock()
+    clock.record_call("c1", 1.26)
+    clock.record_call("c2", 0.04)
+
+    assert clock.calls() == {"c1": 1.3, "c2": 0.0}
+
+
+def test_calls_returns_a_copy():
+    clock, _ = _clock()
+    clock.record_call("c1", 2.0)
+    clock.calls()["c1"] = 99.0
+
+    assert clock.calls() == {"c1": 2.0}
+
+
+def test_record_call_after_close_is_noop():
+    clock, _ = _clock()
+    clock.close()
+    clock.record_call("c1", 2.0)
+
+    assert clock.calls() == {}
+
+
+def test_record_call_without_call_id_is_noop():
+    clock, _ = _clock()
+    clock.record_call("", 2.0)
+
+    assert clock.calls() == {}
+
+
+def test_waited_grows_while_wait_is_open():
+    clock, mono = _clock()
+    clock.begin_wait()
+    mono.now += 4
+    assert clock.waited() == 4
+    mono.now += 6
+    assert clock.waited() == 10
+
+
+def test_waited_is_fixed_after_end_wait():
+    clock, mono = _clock()
+    clock.begin_wait()
+    mono.now += 4
+    clock.end_wait()
+    mono.now += 6
+
+    assert clock.waited() == 4

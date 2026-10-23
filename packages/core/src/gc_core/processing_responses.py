@@ -102,7 +102,9 @@ from gc_core.execution.progress import (
 from gc_core.execution.turn_clock import (
     TurnClock,
     bind_turn_clock,
+    record_call_time,
     turn_clock_sources,
+    turn_waited,
 )
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import (
@@ -2105,6 +2107,7 @@ async def _aexecute_tool_call(
     operations = port(ctx, "operations")
     clock = operations.monotonic if operations is not None else time.monotonic
     started_at = clock()
+    waited_at_start = turn_waited(ctx)
 
     # Live-прогресс субагента: «тул пошёл». На обычном parent-прогоне — no-op.
     # Sidecar persist параллельно (нужен thread identity; sink не требуется).
@@ -2148,7 +2151,8 @@ async def _aexecute_tool_call(
             tool_res_raw = exc.to_tool_output()
         # Live-прогресс: тул закончил — или текст intermediate_reply.
         # В историю треда это не пишется.
-        elapsed_ms = int((clock() - started_at) * 1000)
+        elapsed = clock() - started_at
+        elapsed_ms = int(elapsed * 1000)
         ok, error_brief = parse_tool_result_status(tool_res_raw)
         if is_intermediate:
             await _aemit_intermediate_reply(
@@ -2164,6 +2168,8 @@ async def _aexecute_tool_call(
             )
             return tool_res_raw, was_invalid, ok
         if emit_tool_row:
+            # Время вызова в записи итога хода — без ожидания человека.
+            record_call_time(ctx, call_id_str, elapsed, waited_at_start)
             status, fields = (
                 result_facts(tool_res_raw) if ok is False else (None, None)
             )

@@ -714,3 +714,154 @@ async def test_recorded_clock_is_not_written_twice(run):
     await run.ex._arecord_turn_outcome(None)
 
     assert len(run.records()) == 1
+
+
+# ---- время вызовов хода в записи (P4: `outcome.calls`) --------------------
+
+
+def _read(call_id: str) -> dict:
+    return _call("fs_read_file", call_id, {"path": "a.txt"})
+
+
+def _timed_tools(run: _Run, steps: dict) -> None:
+    """Вызов тула двигает часы на `steps[call_id]`; остальное — настоящее.
+
+    Монотоника вызова (`processing_responses.time`) — та же подменная, что у
+    часов хода: в рантайме у них один источник."""
+    run.monkeypatch.setattr(pr, "time", SimpleNamespace(monotonic=run.mono))
+    original = pr._ainvoke_tool
+
+    async def _invoke(name, arguments, state, ctx, run_agent_func, call_id):
+        step = steps.get(call_id)
+        if callable(step):
+            return await step(ctx)
+        run.mono.now += step or 0.0
+        return await original(
+            name, arguments, state, ctx, run_agent_func, call_id
+        )
+
+    run.monkeypatch.setattr(pr, "_ainvoke_tool", _invoke)
+    (run.tmp_path / "a.txt").write_text("hello\n", encoding="utf-8")
+
+
+async def test_calls_of_the_turn_are_recorded(run):
+    _timed_tools(run, {"r1": 2.0, "r2": 0.5})
+    run.script = [[_read("r1"), _read("r2")], [_finish()]]
+    await run.arun()
+
+    (outcome,) = _only_outcomes(run)
+    # Финал — тоже завершившийся вызов; не пишутся только промежуточная
+    # реплика и вопрос агента.
+    assert outcome.calls == {"r1": 2.0, "r2": 0.5, "finish": 0.0}
+    assert run.records()[0]["outcome"]["v"] == 1
+
+
+async def test_confirmation_wait_is_not_in_call_time(run):
+    async def _confirmed(ctx):
+        run.mono.now += 1.0
+        with turn_clock.human_wait(ctx):
+            run.mono.now += 30.0
+        run.mono.now += 1.0
+        return '{"ok": true}', False
+
+    _timed_tools(run, {"r1": _confirmed})
+    run.script = [[_read("r1")], [_finish()]]
+    await run.arun()
+
+    (outcome,) = _only_outcomes(run)
+    assert outcome.calls == {"r1": 2.0, "finish": 0.0}
+
+
+async def test_call_stopped_midway_is_absent(run):
+    async def _stopped(_ctx):
+        run.mono.now += 3.0
+        run.ex.stop_run()
+        run.mono.now += 3.0
+        return '{"ok": true}', False
+
+    _timed_tools(run, {"r1": 1.0, "r2": _stopped})
+    run.script = [[_read("r1"), _read("r2")], [_finish()]]
+    await run.arun()
+
+    (outcome,) = _only_outcomes(run)
+    assert outcome.status == "stopped"
+    assert outcome.calls == {"r1": 1.0}
+
+
+async def test_refused_call_is_recorded_by_core(run):
+    """Ядро пишет время и отказа: таймер не рисует фронтенд, по исходу."""
+
+    async def _refused(_ctx):
+        run.mono.now += 0.2
+        refusal = {"ok": False, "status": "refused", "error": {"type": "x"}}
+        return json.dumps(refusal), False
+
+    _timed_tools(run, {"r1": _refused})
+    run.script = [[_read("r1")], [_finish()]]
+    await run.arun()
+
+    (outcome,) = _only_outcomes(run)
+    assert outcome.calls == {"r1": 0.2, "finish": 0.0}
+
+
+async def test_turn_without_calls_has_no_calls_key(tmp_path, monkeypatch):
+    run = await _Run(tmp_path, monkeypatch).build(text_answer_mode="allow")
+    run.script = [
+        [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Ответ"}],
+            }
+        ]
+    ]
+    await run.arun()
+
+    assert "calls" not in run.records()[0]["outcome"]
+    assert _only_outcomes(run)[0].calls is None
+
+
+async def test_nested_call_lands_in_parent_clock(run, monkeypatch):
+    """Ребёнок исполняет вызов на ctx с часами родителя — время в их карте."""
+    monkeypatch.setattr(pr, "time", SimpleNamespace(monotonic=run.mono))
+    parent = TurnClock.start(mono=run.mono, wall=turn_clock.utc_now)
+    turn_clock.bind_turn_clock(run.ctx, parent)
+
+    async def _invoke(name, arguments, state, ctx, run_agent_func, call_id):
+        run.mono.now += 4.0
+        return '{"ok": true}', False
+
+    monkeypatch.setattr(pr, "_ainvoke_tool", _invoke)
+    run.ctx.parent_call_id = "parent_fc"
+    child = State(
+        verbose=False,
+        model="mid",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=10,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+        parent_state_id="parent",
+    )
+    await pr.aprocess_tool_calls(
+        messages=[_read("nested")],
+        state=child,
+        ctx=run.ctx,
+        run_agent_func=None,
+    )
+
+    assert parent.calls() == {"nested": 4.0}
+
+
+async def test_ask_human_is_not_a_timed_call(run):
+    def _answer(_question):
+        run.mono.now += 30.0
+        return "a.py"
+
+    run.ctx.ask_human = _answer
+    run.script = [[_ask()], [_finish()]]
+    await run.arun()
+
+    (outcome,) = _only_outcomes(run)
+    assert "ask" not in (outcome.calls or {})

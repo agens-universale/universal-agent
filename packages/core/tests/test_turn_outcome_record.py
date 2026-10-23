@@ -1,3 +1,4 @@
+import pytest
 from gc_core.persistence.turn_outcome import (
     TURN_OUTCOME_TYPE,
     TURN_OUTCOME_VERSION,
@@ -139,3 +140,44 @@ def test_is_turn_outcome_record():
     assert is_turn_outcome_record({"type": TURN_OUTCOME_TYPE}) is True
     assert is_turn_outcome_record({"type": "message"}) is False
     assert is_turn_outcome_record({}) is False
+
+
+# ---- карта `calls`: время вызовов хода (P4) -------------------------------
+
+
+def test_round_trip_with_calls():
+    outcome = _outcome(calls={"c1": 1.2, "c2": 0.0})
+    payload = outcome.to_payload()
+
+    assert payload["calls"] == {"c1": 1.2, "c2": 0.0}
+    assert payload["v"] == 1
+    assert parse_turn_outcome(_envelope(payload)) == outcome
+
+
+def test_payload_without_calls_has_no_key():
+    assert "calls" not in _outcome().to_payload()
+    assert "calls" not in _outcome(calls={}).to_payload()
+
+
+def test_old_record_without_calls_parses():
+    parsed = parse_turn_outcome(_envelope(_outcome().to_payload()))
+
+    assert parsed is not None
+    assert parsed.calls is None
+
+
+@pytest.mark.parametrize(
+    "calls", ["x", {"c": -1}, {"c": "1"}, {"c": True}, [1, 2], {1: 1.0}]
+)
+def test_broken_calls_is_dropped_record_kept(calls):
+    payload = _outcome().to_payload() | {"calls": calls}
+    parsed = parse_turn_outcome(_envelope(payload))
+
+    assert parsed == _outcome()
+    assert parsed.calls is None
+
+
+def test_unknown_key_next_to_calls_is_ignored():
+    payload = _outcome(calls={"c1": 3}).to_payload() | {"later": 1}
+
+    assert parse_turn_outcome(_envelope(payload)).calls == {"c1": 3}

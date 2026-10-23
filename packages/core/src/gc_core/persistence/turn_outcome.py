@@ -34,10 +34,13 @@ class TurnOutcome:
     ended_at: str
     duration_sec: float
     error: Mapping[str, str] | None
+    # Время завершившихся вызовов хода без ожидания человека, вложенные
+    # субагента — в той же карте. Необязательное поле той же версии.
+    calls: Mapping[str, float] | None = None
 
     def to_payload(self) -> dict[str, Any]:
         """Значение ключа ``outcome`` записи (с версией схемы)."""
-        return {
+        payload = {
             "v": TURN_OUTCOME_VERSION,
             "status": self.status,
             "reason": self.reason,
@@ -47,6 +50,9 @@ class TurnOutcome:
             "duration_sec": self.duration_sec,
             "error": None if self.error is None else dict(self.error),
         }
+        if self.calls:
+            payload["calls"] = dict(self.calls)
+        return payload
 
 
 def is_turn_outcome_record(record: Mapping[str, Any]) -> bool:
@@ -70,7 +76,19 @@ def parse_turn_outcome(record: Mapping[str, Any]) -> TurnOutcome | None:
         ended_at=payload["ended_at"],
         duration_sec=float(payload["duration_sec"]),
         error=None if error is None else dict(error),
+        calls=_calls_or_none(payload.get("calls")),
     )
+
+
+def _calls_or_none(value: Any) -> dict[str, float] | None:
+    """Карта ``calls``; кривое значение — как отсутствующее (запись живёт)."""
+    if not isinstance(value, Mapping) or not value:
+        return None
+    valid = all(
+        isinstance(k, str) and _is_number(v) and v >= 0
+        for k, v in value.items()
+    )
+    return dict(value) if valid else None
 
 
 def _is_valid(payload: Mapping[str, Any]) -> bool:

@@ -1663,6 +1663,7 @@ class AgentExecutor:
                 ended_at=clock.ended_at,
                 duration_sec=round(clock.elapsed(), 1),
                 error=_error_fact(error) if status == "error" else None,
+                calls=clock.calls() or None,
             )
             await session.aappend_turn_outcome(
                 outcome, discarded=is_persist_discarded(state)
