@@ -324,9 +324,12 @@ class ShellDelta:
         seen: dict[str, tuple[str, tuple[int, int] | None]] | None = None,
         pocket_cache: dict[Path, tuple[tuple[int, int], list[str]]]
         | None = None,
+        command_call_id: str | None = None,
     ) -> None:
         self._launch_root = launch_root
         self._ctx = ctx
+        # Вызов команды — на каждую запись канала (`_edit_record`); "" → None.
+        self._command_call_id = command_call_id or None
         self._seen = seen if seen is not None else {}
         self._pocket_cache = pocket_cache if pocket_cache is not None else {}
         self._before: dict[str, _StatusEntry] | None = None
@@ -347,6 +350,7 @@ class ShellDelta:
         seen: dict[str, tuple[str, tuple[int, int] | None]] | None = None,
         pocket_cache: dict[Path, tuple[tuple[int, int], list[str]]]
         | None = None,
+        command_call_id: str | None = None,
     ) -> ShellDelta | None:
         """Снимок «до» команды. ``None`` — канал неактивен целиком, звать нечего.
 
@@ -361,6 +365,9 @@ class ShellDelta:
         Объект живёт одну команду, поэтому обе обязан держать вызывающий, на
         чём-то, что переживает команды (обёртка backend'а — одна на ctx). Без
         них дедупликации/кэша между командами нет.
+
+        ``command_call_id`` — вызов тула, запустивший команду: ложится на
+        каждую запись канала (``EditRecord.command_call_id``); пустой — ``None``.
         """
         try:
             if not is_recording(ctx) or not _shell_tracking_enabled(ctx):
@@ -368,7 +375,13 @@ class ShellDelta:
             launch_root = launch_root_from_ctx(ctx)
             if not launch_root:
                 return None
-            delta = cls(launch_root, ctx, seen, pocket_cache)
+            delta = cls(
+                launch_root,
+                ctx,
+                seen,
+                pocket_cache,
+                command_call_id=command_call_id,
+            )
             # Порядок обязателен: карманный снимок берёт кандидатов из
             # git-статуса (пути, чьё «до» индекс представить не может), поэтому
             # статус снимается ПЕРВЫМ. Чтение файлов их не меняет, так что
@@ -701,6 +714,7 @@ class ShellDelta:
             if record is None:
                 continue
             record.command_paths = command_paths
+            record.command_call_id = self._command_call_id
             journal.append(record)
             self._remember(record)
             if record.op == "create":
@@ -897,6 +911,7 @@ class ShellDelta:
                 record, base_bytes = self._pocket_record(key, entry, turn_id)
                 if record is None:
                     continue
+                record.command_call_id = self._command_call_id
                 journal.append(record)
                 self._remember(record)
                 recorded.add(key)
@@ -1524,13 +1539,18 @@ def _edit_record(
     хэш передаёт: цепочка целостности пути идёт сквозь его записи, а не
     рвётся на них (пятый раунд ревью).
 
-    ``call_id`` пустой сознательно, а не по забывчивости: делту снимает
+    ``call_id=None`` — признак шелл-канала, и пустой он сознательно, а не по
+    забывчивости: делту снимает
     обёртка вокруг запуска команды — слой ниже инструментов, — и привязывать
     инлайн-блок в ленте не к чему (см. спеку §5). Соседние агентские оболочки
     решают так же или хуже: правки через шелл у них либо не показываются вовсе,
     либо не привязываются к строке команды. Причина содержательная: одна команда
     трогает десятки файлов, инлайн-блоки залили бы ленту. Shell-правки живут в
-    сводном слое: журнал, счётчики хода, экран обзора."""
+    сводном слое: журнал, счётчики хода, экран обзора.
+
+    Какой вызов команды трогал файл, говорит ``command_call_id``: его ставит
+    объект делты на каждую запись перед дописыванием в журнал (``call_id``
+    и признак канала он не трогает)."""
     return EditRecord(
         path=path,
         turn_id=turn_id,

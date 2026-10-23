@@ -645,6 +645,7 @@ async def _aapply_tool_text(
             f"Tool {tool_name!r} ({type(tool).__name__}) has no acall(); the tool contract is async-only"
         )
     try:
+        from gc_core.execution.tool_call_context import bind_tool_call
         from gc_core.execution.tool_effects import (
             invoke_native_tool,
             uses_leaf_effect,
@@ -653,21 +654,24 @@ async def _aapply_tool_text(
         from gc_core.security.permission_gate import permission_gate_flow
 
         async def _invoke() -> Any:
+            call_id = str(kwargs.get("call_id") or "")
             if callable(port(ctx, "tool_effect")) and uses_leaf_effect(tool):
-                return await invoke_native_tool(
-                    tool,
-                    tool_name,
-                    args,
-                    ctx=ctx,
-                    state=kwargs.get("state"),
-                    call_id=kwargs.get("call_id"),
-                    operation_id=kwargs.get("tool_operation_id")
-                    or str(kwargs.get("call_id") or "tool"),
-                )
+                with bind_tool_call(tool_name, call_id):
+                    return await invoke_native_tool(
+                        tool,
+                        tool_name,
+                        args,
+                        ctx=ctx,
+                        state=kwargs.get("state"),
+                        call_id=kwargs.get("call_id"),
+                        operation_id=kwargs.get("tool_operation_id")
+                        or str(kwargs.get("call_id") or "tool"),
+                    )
             from gc_core.tools.connect_mcp.api import media_sink_scope
 
             with media_sink_scope(ctx):
-                return await acall(**args)
+                with bind_tool_call(tool_name, call_id):
+                    return await acall(**args)
 
         # Гейт режима разрешений — только для ИЗВЕСТНЫХ имён (неизвестное уже
         # ушло выше со списком доступных тулов: отказ режима на выдуманном
