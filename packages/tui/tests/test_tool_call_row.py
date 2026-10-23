@@ -631,10 +631,15 @@ def test_edit_counts_follow_the_object():
 
 @pytest.mark.parametrize(
     "add, removed, tail",
-    [(4, 2, " (+4 −2)"), (37, 0, " (+37)"), (0, 3, " (−3)"), (0, 0, "")],
+    [
+        (4, 2, " (+4 −2)"),
+        (37, 0, " (+37 −0)"),
+        (0, 3, " (+0 −3)"),
+        (0, 0, " (+0 −0)"),
+    ],
 )
-def test_edit_counts_drop_zero_part(add, removed, tail):
-    """Нулевая часть счётчиков опускается; обе нулевые — счётчиков нет."""
+def test_edit_counts_keep_zero_part(add, removed, tail):
+    """Счётчики всегда в обе части, нулевая тоже (владелец 2026-10-23)."""
     row = _edit_row()
     row.set_edit_counts(add, removed, copy_text="diff")
     assert row._render_content().plain == f"Edit  a.py{tail} · ok"
@@ -704,7 +709,7 @@ async def test_no_copy_button_without_diff_text():
         row.set_edit_counts(2, 0, copy_text="")
         await pilot.pause()
         assert not row.query_one(".block-copy", Static).display
-        assert "(+2)" in row._render_content().plain
+        assert "(+2 −0)" in row._render_content().plain
 
 
 @pytest.mark.asyncio

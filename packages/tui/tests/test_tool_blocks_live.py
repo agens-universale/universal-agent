@@ -322,8 +322,8 @@ async def test_added_two_same_diffblock(tmp_path):
             _out("e2", "fs_write_file"),
         )
         lines = _rows(pilot)
-        assert "● Added 2 файла (+2)" in lines
-        assert any(line.startswith("  └ a.py (+1)") for line in lines)
+        assert "● Added 2 файла (+2 −0)" in lines
+        assert any(line.startswith("  └ a.py (+1 −0)") for line in lines)
         diffs = list(scr.query(DiffBlock))
         assert diffs[0] is first
         assert first.has_class("diff-member")

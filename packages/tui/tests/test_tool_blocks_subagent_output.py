@@ -359,7 +359,7 @@ async def test_nested_ran_with_edits(tmp_path):
     assert live == await _reopen(reopen_dir, call)
     assert live[:2] == ["  ● Ran  make test · 0с", "    └ ok"]
     # Строка файла кончается кнопкой копирования диффа.
-    assert live[2].startswith("      Added gen.py (+2) ")
+    assert live[2].startswith("      Added gen.py (+2 −0) ")
 
 
 # --- многострочная команда ----------------------------------------------------

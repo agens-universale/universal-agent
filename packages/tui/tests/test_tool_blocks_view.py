@@ -254,7 +254,7 @@ async def test_single_to_block_keeps_same_diffblock():
         assert diff.has_class("diff-single")
         rows = trace_rows(app)
         assert_trace_grid(rows, origin=ORIGIN)
-        assert _plain(rows)[1].startswith(" ● Edited a.py (+8) · 0с  ")
+        assert _plain(rows)[1].startswith(" ● Edited a.py (+8 −0) · 0с  ")
         _apply_edit(view, "b", 8)
         await pilot.pause()
         diffs = list(app.query(DiffBlock))
@@ -263,8 +263,10 @@ async def test_single_to_block_keeps_same_diffblock():
         rows = trace_rows(app)
         assert_trace_grid(rows, origin=ORIGIN)
         lines = _plain(rows)
-        assert " ● Edited 2 файла (+16)" in lines
-        assert any(line.startswith("   └ a.py (+8) · 0с  ") for line in lines)
+        assert " ● Edited 2 файла (+16 −0)" in lines
+        assert any(
+            line.startswith("   └ a.py (+8 −0) · 0с  ") for line in lines
+        )
         assert [line for line in lines if line][-1] == "     + ещё 4 строки"
 
 

@@ -159,20 +159,14 @@ def diff_rows(n_applied: int, preview: int) -> int:
 
 
 def counts_text(add: int, rem: int) -> Parts:
-    """Счётчики правки ` (+a −r)`; нулевая часть опускается, обе
-    нулевые — пусто."""
-    nums: list[tuple[str, Look]] = []
-    if add:
-        nums.append((f"+{add}", "ok"))
-    if rem:
-        nums.append((f"−{rem}", "error"))
-    if not nums:
-        return ()
-    parts: list[tuple[str, Look]] = [(" (", "dim"), nums[0]]
-    if len(nums) == 2:
-        parts += [(" ", "dim"), nums[1]]
-    parts.append((")", "dim"))
-    return tuple(parts)
+    """Счётчики правки ` (+a −r)` — всегда обе части, нулевая тоже."""
+    return (
+        (" (", "dim"),
+        (f"+{add}", "ok"),
+        (" ", "dim"),
+        (f"−{rem}", "error"),
+        (")", "dim"),
+    )
 
 
 def diff_key(key: str) -> str:
@@ -1067,10 +1061,15 @@ class ToolBlocks:
         if not single:
             n = len(members)
             prefix: Parts = ((f" {n} {files_word(n)}", "ink"),)
-            added = [m.applied for m in members if m.applied is not None]
-            prefix += counts_text(
-                sum(e.add for e in added), sum(e.rem for e in added)
-            )
+            added = [
+                m.applied
+                for m in members
+                if m.applied is not None and m.applied.has_record
+            ]
+            if added:
+                prefix += counts_text(
+                    sum(e.add for e in added), sum(e.rem for e in added)
+                )
             first = members[0].key
             out += [
                 MountHeader(block.key, before=first),

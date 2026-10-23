@@ -379,7 +379,9 @@ async def test_ran_files_one_phrase(tmp_path):
         lines = _rows(pilot)
         assert lines[2:5] == ["  └ line 0", "    line 1", "    line 2"]
         assert lines[5] == "    … ещё 1"
-        assert any(line.startswith("    Added new.py (+10)") for line in lines)
+        assert any(
+            line.startswith("    Added new.py (+10 −0)") for line in lines
+        )
         assert "    Deleted gone.py" in lines
         # Одна фраза — в самом низу: 7 строк вывода, 6 скрытых строк
         # диффа new.py (доля 4 из 10) и 2 строки скрытого a.py.

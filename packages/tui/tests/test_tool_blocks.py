@@ -725,9 +725,20 @@ def test_counts_text():
         ("−2", "error"),
         (")", "dim"),
     )
-    assert counts_text(5, 0) == ((" (", "dim"), ("+5", "ok"), (")", "dim"))
-    assert counts_text(0, 3) == ((" (", "dim"), ("−3", "error"), (")", "dim"))
-    assert counts_text(0, 0) == ()
+    assert counts_text(5, 0) == (
+        (" (", "dim"),
+        ("+5", "ok"),
+        (" ", "dim"),
+        ("−0", "error"),
+        (")", "dim"),
+    )
+    assert counts_text(0, 0) == (
+        (" (", "dim"),
+        ("+0", "ok"),
+        (" ", "dim"),
+        ("−0", "error"),
+        (")", "dim"),
+    )
 
 
 def test_editing_row_is_single():
@@ -742,7 +753,7 @@ def test_single_edit_share():
     model, fold = _edits_model()
     _apply(model, fold, "a", _edit("a", verb="Added", add=37, lines=37))
     assert fold.word("a") == "Added"
-    assert fold.tail("a") == " (+37)"
+    assert fold.tail("a") == " (+37 −0)"
     assert fold.share("a") == SetDiffShare("a", 12, "single")
     assert fold.phrase("block:0", "bottom") == "+ ещё 25 строк"
     assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
@@ -796,8 +807,7 @@ def test_edit_comes_with_result():
         edit=_edit("a", verb="Added", add=3, lines=3),
     )
     assert SetWord("a", "Added") in out
-    tail = ((" (", "dim"), ("+3", "ok"), (")", "dim"))
-    assert SetEditTail("a", tail) in out
+    assert SetEditTail("a", counts_text(3, 0)) in out
     assert not hasattr(ToolBlocks, "edit_counts")
 
 
@@ -840,7 +850,7 @@ def test_three_files_share_4():
     assert [fold.share(k).rows for k in "abc"] == [4, 4, 4]
     assert [fold.mode(k).gap for k in "abc"] == [False, True, True]
     assert [fold.mode(k).lead for k in "abc"] == [True, False, False]
-    assert fold.head_text() == "Edited 3 файла (+3)"
+    assert fold.head_text() == "Edited 3 файла (+3 −0)"
     assert ("SetPhrase", "block:0", "bottom") not in fold.state
 
 
@@ -898,7 +908,7 @@ def test_failed_edit_refused_in_added():
     model, fold = _edits_model()
     _apply(model, fold, "a", _edit("a", verb="Added", add=18))
     _apply(model, fold, "b", outcome="refused", reason="отказ: защита путей")
-    assert fold.head_text() == "Added 2 файла (+18) · 1 отказ"
+    assert fold.head_text() == "Added 2 файла (+18 −0) · 1 отказ"
     assert fold.consequence("b") == SetConsequence(
         "b", "отказ: защита путей", "refused"
     )
@@ -1046,7 +1056,7 @@ def test_ran_parts_files():
     assert fold.share(keys[0]) is None
     assert [fold.mode(k).gap for k in keys[1:]] == [False, True, True]
     assert not any(fold.mode(k).lead for k in keys)
-    assert fold.tail(keys[1]) == " (+4)"
+    assert fold.tail(keys[1]) == " (+4 −0)"
     # Одна фраза внизу: 10 строк вывода + 3 × 1 видимых + 4 скрытого.
     assert fold.phrase("block:0", "bottom") == "+ ещё 17 строк"
     assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
@@ -1162,7 +1172,7 @@ def test_place_results_out_of_order_keep_mount_order():
         block, "bottom", after=diff_key("e2")
     )
     assert fold.phrase(block, "bottom") == "+ ещё 18 строк"
-    assert fold.head_text(block) == "Edited 3 файла (+3)"
+    assert fold.head_text(block) == "Edited 3 файла (+3 −0)"
 
 
 def test_place_out_of_order_window_by_mount():
