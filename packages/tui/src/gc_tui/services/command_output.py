@@ -10,6 +10,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from gc_core.constants.tool_names import (
+    EXEC_COMMAND_NAME,
+    EXEC_PYTHON_NAME,
+    SKILLS_RUN_SCRIPT_NAME,
+)
 from gc_core.execution.progress import run_command_text, strip_root_cd
 from rich.text import Text
 
@@ -17,6 +22,14 @@ from gc_tui.models import CommandOutput
 from gc_tui.services.plural import plural_form
 from gc_tui.services.tool_blocks import OUTPUT_PREVIEW_LINES
 from gc_tui.services.tool_preview import unwrap_tool_output_dict
+
+#: Конверты exec-тулов по ключу `tool`: где лежат каналы и код — в самом
+#: конверте (`None`) или под ключом.
+_BODY_OF: dict[str, Optional[str]] = {
+    EXEC_COMMAND_NAME: None,
+    EXEC_PYTHON_NAME: None,
+    SKILLS_RUN_SCRIPT_NAME: "result",
+}
 
 
 def omitted_line(chars: int) -> str:
@@ -64,12 +77,25 @@ def _exit_code(data: dict) -> Optional[int]:
     return None
 
 
+def _exec_body(output: Any) -> Optional[dict]:
+    """Каналы и код конверта exec-тула; конверт узнаётся по `tool`."""
+    data = unwrap_tool_output_dict(output if isinstance(output, str) else "")
+    tool = data.get("tool") if data else None
+    if not isinstance(tool, str) or tool not in _BODY_OF:
+        return None
+    key = _BODY_OF[tool]
+    body = data if key is None else data.get(key)
+    if not isinstance(body, dict) or not all(
+        isinstance(body.get(name), dict) for name in ("stdout", "stderr")
+    ):
+        return None
+    return body
+
+
 def parse_command_output(output: Any) -> Optional[CommandOutput]:
     """Конверт exec-тула → `CommandOutput`; не конверт exec → `None`."""
-    data = unwrap_tool_output_dict(output if isinstance(output, str) else "")
-    if not data or not all(
-        isinstance(data.get(key), dict) for key in ("stdout", "stderr")
-    ):
+    data = _exec_body(output)
+    if data is None:
         return None
     content: list[str] = []
     lines: list[str] = []

@@ -126,6 +126,36 @@ def test_not_an_exec_envelope():
     assert parse_command_output(None) is None
 
 
+def test_envelope_known_by_tool_key():
+    """Конверт узнаётся по ключу `tool`, не по форме: чужой конверт с
+    теми же каналами — не вывод команды."""
+    other = json.loads(_envelope("x\n"))
+    other["tool"] = "exec_fetch_url"
+    assert parse_command_output(json.dumps(other)) is None
+    no_tool = json.loads(_envelope("x\n"))
+    del no_tool["tool"]
+    assert parse_command_output(json.dumps(no_tool)) is None
+
+
+def test_skills_run_script_channels_in_result():
+    """У `skills_run_script` каналы и код — внутри `result`."""
+    inner = json.loads(_envelope("hello\n", exit_code=3))
+    envelope = {
+        "tool": "skills_run_script",
+        "ok": True,
+        "script_ok": False,
+        "result": {
+            key: inner[key]
+            for key in ("exit_code", "timed_out", "stdout", "stderr")
+        },
+    }
+    parsed = parse_command_output(json.dumps(envelope))
+    assert parsed.lines == ("hello",)
+    assert parsed.exit_code == 3
+    failed = {"tool": "skills_run_script", "ok": False, "result": None}
+    assert parse_command_output(json.dumps(failed)) is None
+
+
 def test_command_lines_strip_root_cd_and_split():
     args = json.dumps({"command": "cd /proj && a\nb\n"})
     assert command_lines("exec_command", args, root="/proj") == ("a", "b")
