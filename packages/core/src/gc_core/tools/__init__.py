@@ -14,6 +14,7 @@ from gc_core.execution.contracts import (
     ToolResult,
 )
 from gc_core.execution.reducers import apply_state_delta, tool_state_view
+from gc_core.execution.tool_call_context import bind_tool_call
 from gc_core.execution.tool_schema import apply_openai_strict_parameters
 from gc_core.security.call_scope import call_scope, current_call
 from gc_core.security.permission_mode import OFFERED_IN_MODE_KEY
@@ -645,7 +646,6 @@ async def _aapply_tool_text(
             f"Tool {tool_name!r} ({type(tool).__name__}) has no acall(); the tool contract is async-only"
         )
     try:
-        from gc_core.execution.tool_call_context import bind_tool_call
         from gc_core.execution.tool_effects import (
             invoke_native_tool,
             uses_leaf_effect,
