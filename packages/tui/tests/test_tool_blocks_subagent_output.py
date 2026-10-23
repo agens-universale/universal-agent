@@ -235,9 +235,11 @@ def _rows(pilot) -> list[str]:
 
 
 def _agent_rows(lines: list[str]) -> list[str]:
+    """Вложенные строки `Agent` — после заголовка и строки задачи."""
     at = next(i for i, line in enumerate(lines) if "Agent  " in line)
+    assert lines[at + 1] == "  └ проверка"
     block = []
-    for line in lines[at + 1 :]:
+    for line in lines[at + 2 :]:
         if not line.startswith("  "):
             break
         block.append(line)

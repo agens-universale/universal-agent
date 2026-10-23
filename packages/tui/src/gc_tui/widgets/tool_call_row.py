@@ -79,8 +79,10 @@ from gc_tui.services.trace_glyphs import (
     blink_on,
 )
 from gc_tui.services.trace_render import (
+    AGENT_TASK_LINES,
     CALL_TARGET_MIN_COLS,
     fit_call_target,
+    fit_lines,
     level_prefix,
 )
 from gc_tui.widgets.block_panel import (
@@ -229,6 +231,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         level: int = 0,
         path_target: bool = False,
         skill_target: bool = False,
+        task: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -241,6 +244,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._path_target = path_target
         # Объект — имя скилла: цветом скилла, как в палитре и реплике.
         self._skill_target = skill_target
+        # Задача субагента — первой строкой `└` под `Agent` (§7).
+        self._agent_task = task
         # Последнее сокращение объекта: (ширина, текст) — без пересчёта на
         # тиках таймера, пока ширина под объект та же.
         self._fitted: tuple[int, str] = (-1, target)
@@ -324,9 +329,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._sync_pulse()
 
     def on_resize(self, _event: events.Resize) -> None:
-        """Новая ширина — объект первой строки сокращается заново."""
-        if self._content_static is not None:
-            update_if_changed(self._content_static, self._render_content())
+        """Новая ширина — объект первой строки и задача субагента
+        сокращаются заново."""
+        self._update()
 
     @property
     def _is_live(self) -> bool:
@@ -732,8 +737,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return self._outcome != "ok"
 
     def _consequence_bodies(self) -> list[Text]:
-        """Тела строк `└` под вызовом: ошибка (`ERR`), стоп/лимит или
-        отказ (`DIM`), затем пометки."""
+        """Тела строк `└` под вызовом: задача субагента (`DIM`, до двух
+        строк), ошибка (`ERR`), стоп/лимит или отказ (`DIM`), затем
+        пометки."""
         bodies = list(self._consequences)
         if self._block_consequence is not None:
             bodies.insert(0, self._block_consequence)
@@ -743,6 +749,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         if self._output is not None:
             collapsed, expanded = self._output
             bodies.insert(0, expanded if self._parts_expanded else collapsed)
+        if self._agent_task:
+            # Тело `└` — на 4 правее глифа; ширина — от самой строки: её
+            # Resize приходит раньше раскладки колонок.
+            cols = self.size.width - len(level_prefix(self._level)) - 4
+            task = fit_lines(self._agent_task, cols, AGENT_TASK_LINES)
+            bodies.insert(0, Text(task, style=_DIM))
         return bodies
 
     def _append_pending_tail(

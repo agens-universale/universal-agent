@@ -291,7 +291,8 @@ def _write_reopen(tmp_path, steps, *, calls) -> None:
 @pytest.mark.asyncio
 async def test_p418_live_equals_reopen(tmp_path):
     """`p4-18-agent`: вживую, после возврата и в превью — один список
-    строк; окно 3 последних события, `└ … ещё 1` на +2 от глифа `Agent`."""
+    строк; под заголовком-ролью — задача `└` (часть блока, не событие),
+    окно 3 последних события, `… ещё 1` — под текстом задачи."""
     steps = _p418()
     calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
     live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
@@ -308,7 +309,8 @@ async def test_p418_live_equals_reopen(tmp_path):
     assert live == reopen == preview
     assert _agent_rows(live) == [
         "● Agent  Worker · 2с",
-        "  └ … ещё 1",
+        "  └ проверка клиента",
+        "    … ещё 1",
         "  ● Explored",
         "    └ … ещё 1",
         "      Read  client/m1.py · 2с",
@@ -345,6 +347,7 @@ async def test_nested_hidden_tool_not_rendered(tmp_path):
         preview = _rows(pilot)
     assert live == reopen == preview
     assert _agent_rows(live)[1:] == [
+        "  └ проверка клиента",
         "  ● Смотрю.",
         "  ● Explored",
         "    └ Read  client/m0.py · 2с",
@@ -366,14 +369,15 @@ async def test_agent_window_expands_on_click(tmp_path):
         await pilot.click(phrase)
         await pilot.pause()
         lines = _agent_rows(_rows(pilot))
-        assert lines[1] == "  ● Смотрю, где клиент берёт таймаут."
+        assert lines[1] == "  └ проверка клиента"
+        assert lines[2] == "  ● Смотрю, где клиент берёт таймаут."
         assert lines[-1] == "    − свернуть"
         assert not any("└ − свернуть" in line for line in lines)
         (collapse,) = _window_phrases(scr, "bottom")
         await pilot.click(collapse)
         await pilot.pause()
         lines = _agent_rows(_rows(pilot))
-        assert lines[1] == "  └ … ещё 1"
+        assert lines[2] == "    … ещё 1"
         assert "  ● Смотрю, где клиент берёт таймаут." not in lines
         assert not any("свернуть" in line for line in lines)
 
@@ -433,6 +437,7 @@ async def test_nested_order_matches_preview(tmp_path):
         preview_order = _order(pilot)
     assert live_order == reopen_order == preview_order
     assert _agent_rows(live)[1:] == [
+        "  └ проверка клиента",
         "  ● Explored",
         "    └ … ещё 2",
         "      Read  client/m2.py",
@@ -647,6 +652,7 @@ async def test_stop_mid_nested_explored_live_reopen_preview(tmp_path):
         await _push_preview(pilot, scr)
         preview = _agent_rows(_rows(pilot))
     assert live[1:] == [
+        "  └ проверка клиента",
         "  ○ Explored",
         "    └ Read  client/m0.py · 2с",
         "      Read  client/m1.py · 2с",
@@ -689,6 +695,7 @@ async def test_stopped_nested_orphan_call_reopen_preview(tmp_path):
         await _push_preview(pilot, scr)
         preview = _agent_rows(_rows(pilot))
     assert reopen[1:] == [
+        "  └ проверка клиента",
         "  ○ Explored",
         "    └ Read  client/m0.py",
         "      Read  client/m9.py",

@@ -275,3 +275,61 @@ async def test_long_live_status_keeps_timer():
         assert _line_height(row) == 1
         assert line.endswith("… · 0с")
         assert len(_shown_target(line, "Run")) >= CALL_TARGET_MIN_COLS
+
+
+_TASK = (
+    "Review the changes in client/retry.py for correctness and edge "
+    "cases, check the retry table against the policy and report every "
+    "mismatch with a short reason and the line it is on"
+)
+
+
+def _agent_row(task: str):
+    from gc_tui.models import AgentHead
+    from gc_tui.services.trace_render import build_call_row
+
+    return build_call_row(
+        call_id="a1",
+        wire_name="subagent_code_reviewer",
+        args_summary=task,
+        level=0,
+        agent=AgentHead("Reviewer", task),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", (40, 60, 80))
+async def test_agent_task_line_two_rows_then_ellipsis(width):
+    """Задача субагента — `└` под заголовком: не больше двух строк,
+    дальше `…`; заголовок — роль в одну строку."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with _app(lambda t: t.mount(_agent_row(_TASK))).run_test(
+        size=(width, 20)
+    ) as pilot:
+        await pilot.pause()
+        row = pilot.app.query_one(ToolCallRow)
+        assert _first_line(row).startswith("Agent  Reviewer")
+        assert row.size.height == 3
+        body = str(row.query_one(".consequence-body").render())
+        assert body.startswith("Review the changes")
+        assert body.endswith("…")
+        assert len(body.split("\n")) == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_short_task_one_row():
+    pytest.importorskip("textual")
+    from gc_tui.palette import DIM
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with _app(lambda t: t.mount(_agent_row("проверь клиент"))).run_test(
+        size=(80, 20)
+    ) as pilot:
+        await pilot.pause()
+        row = pilot.app.query_one(ToolCallRow)
+        assert row.size.height == 2
+        body = str(row.query_one(".consequence-body").render())
+        assert body == "проверь клиент"
+        assert row._consequence_bodies()[0].style == DIM

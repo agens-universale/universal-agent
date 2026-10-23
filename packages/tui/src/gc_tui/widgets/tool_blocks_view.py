@@ -418,13 +418,14 @@ class ToolBlocksView:
             if phrase.parent is not None and (before or after) is not phrase:
                 phrase.parent.move_child(phrase, before=before, after=after)
             return
-        # Фраза окна субагента — в колонке глифа его событий (§7).
+        # Фраза окна субагента — от колонки глифа его событий, без `└`:
+        # `└` под `Agent` — у строки задачи (§7).
         window = d.block == AGENT_WINDOW
         phrase = BlockAction(
             level=self.level,
             key=key,
             depth=self.depth - 1 if window else self.depth,
-            lead=d.slot == "top",
+            lead=d.slot == "top" and not window,
             clickable=d.slot != "unrecorded",
         )
         self.register(key, phrase)

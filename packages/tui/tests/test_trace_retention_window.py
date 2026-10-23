@@ -375,6 +375,8 @@ async def test_render_segments_keeps_prose_and_lights_tools_outside_window(
         assert rows["call_old"].wire_name == "read_file"
         assert rows["call_sub_old"].wire_name == "subagent_worker"
         assert rows["call_sub_old"]._target == "Worker"
+        task = rows["call_sub_old"].query_one(".consequence-body").render()
+        assert "старая задача" in str(task)
         assert "call_live" in rows
 
         # Вложенные строки вызовов; заголовки блоков (P4) — не вызовы.

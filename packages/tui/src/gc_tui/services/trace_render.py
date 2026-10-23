@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import textwrap
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Optional
@@ -554,6 +555,25 @@ def fit_call_target(target: str, cols: int, *, path: bool) -> str:
     return target[: cols - 1].rstrip() + "…"
 
 
+#: Строк задачи субагента под заголовком `Agent`; дальше — `…`.
+AGENT_TASK_LINES = 2
+
+
+def fit_lines(text: str, cols: int, max_lines: int) -> str:
+    """Текст переносом по словам в ``cols`` колонок, не больше
+    ``max_lines`` строк (через `\\n`); не влез — конец последней `…`.
+    Колонка ещё без ширины — текст одной строкой целиком."""
+    flat = " ".join(text.split())
+    if cols <= 1:
+        return flat
+    lines = textwrap.wrap(flat, cols)
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    kept = lines[:max_lines]
+    kept[-1] = kept[-1][: cols - 1].rstrip() + "…"
+    return "\n".join(kept)
+
+
 def build_call_row(
     *,
     call_id: str,
@@ -568,7 +588,8 @@ def build_call_row(
 ) -> ToolCallRow:
     """Строка вызова — один билдер для живой ленты, превью и вложенных.
 
-    ``agent`` — заголовок вызова субагента: объект строки — его роль."""
+    ``agent`` — заголовок вызова субагента: объект строки — его роль,
+    задача — строкой `└` под ней."""
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     label, target = _call_caption(
@@ -589,6 +610,7 @@ def build_call_row(
         event_no=event_no,
         waiting=waiting,
         level=level,
+        task=agent.task if agent is not None else "",
     )
 
 
