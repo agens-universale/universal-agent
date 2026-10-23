@@ -509,6 +509,16 @@ class _RanParts:
 
 
 @dataclass(frozen=True)
+class _File:
+    """Файл блока для окна и доли: строк диффа и применился ли (входит
+    в `n` формулы §6.3; упавшие и `Deleted` — нет)."""
+
+    key: str
+    lines: int
+    applied: bool
+
+
+@dataclass(frozen=True)
 class _Layout:
     """Окно файлов блока и счёт скрытого."""
 
@@ -774,36 +784,43 @@ class ToolBlocks:
 
     def _layout(
         self,
-        files: Sequence[tuple[str, int]],
+        files: Sequence[_File],
         *,
         expanded: bool,
         extra_lines: int = 0,
         extra_more: int = 0,
     ) -> _Layout:
-        """Окно из последних `WINDOW` файлов, доля диффа (§6.3) и счёт
-        скрытого: строки видимых сверх доли и все строки скрытых."""
-        rows = diff_rows(sum(1 for _, n in files if n), self._preview)
+        """Окно из последних `WINDOW` файлов, доля диффа (§6.3) — по
+        применившимся, бинарь в их числе — и счёт скрытого: строки видимых
+        сверх доли и все строки скрытых."""
+        rows = diff_rows(sum(f.applied for f in files), self._preview)
         tail = files[-WINDOW:]
-        in_tail = {key for key, _ in tail}
-        lines = extra_lines + sum(max(0, n - rows) for _, n in tail)
-        lines += sum(n for key, n in files if key not in in_tail)
+        in_tail = {f.key for f in tail}
+        lines = extra_lines + sum(max(0, f.lines - rows) for f in tail)
+        lines += sum(f.lines for f in files if f.key not in in_tail)
         more = len(files) - len(tail) + extra_more
         expandable = bool(lines or more)
         if expanded and expandable:
-            keys = tuple(key for key, _ in files)
+            keys = tuple(f.key for f in files)
             return _Layout(keys, None, 0, lines, True)
-        keys = tuple(key for key, _ in tail)
+        keys = tuple(f.key for f in tail)
         return _Layout(keys, rows, more, lines, expandable)
 
     def _edits_layout(self, block: _Block) -> _Layout:
-        files = [(m.key, _lines(m.applied)) for m in block.members]
+        files = [
+            _File(m.key, _lines(m.applied), m.outcome == "ok")
+            for m in block.members
+        ]
         return self._layout(files, expanded=block.expanded)
 
     def _ran_layout(self, block: _Block) -> _Layout:
         parts = block.parts
         assert parts is not None
         return self._layout(
-            [(f.key, _lines(f)) for f in parts.files],
+            [
+                _File(f.key, _lines(f), f.verb != "Deleted")
+                for f in parts.files
+            ],
             expanded=block.expanded,
             extra_lines=parts.command_hidden + parts.output_hidden,
             extra_more=parts.unrecorded,

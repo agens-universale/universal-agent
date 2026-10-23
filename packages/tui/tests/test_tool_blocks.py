@@ -1086,3 +1086,54 @@ def test_place_deferred_single_phrase_hidden_on_join():
         if k[:1] == own and fold.state[k].text is not None
     ]
     assert visible == [("SetPhrase", block, "bottom")]
+
+
+# --- доля диффа: бинарь применился (макет p4.py, исключён только Deleted)
+
+
+def test_share_counts_binary_as_applied():
+    model, fold = _edits_model()
+    _apply(model, fold, "a", _edit("a", lines=20))
+    _apply(model, fold, "img", _edit("img", lines=0, size=512))
+    assert fold.share("a") == SetDiffShare("a", 6, "member")
+
+
+def test_share_skips_failed_edit():
+    model, fold = _edits_model()
+    _apply(model, fold, "a", _edit("a", lines=20))
+    _apply(model, fold, "b", outcome="error", reason="не найден")
+    assert fold.share("a") == SetDiffShare("a", 12, "member")
+
+
+def test_ran_share_counts_binary_not_deleted():
+    model, fold = _edits_model()
+    _ran(model, fold)
+    files = [
+        *_files(("Edited", 20)),
+        BlockEdit(
+            key="x:img",
+            path="img.png",
+            verb="Added",
+            add=0,
+            rem=0,
+            diff_lines=0,
+            size_bytes=12,
+            has_record=True,
+        ),
+        BlockEdit(
+            key="x:old",
+            path="old.py",
+            verb="Deleted",
+            add=0,
+            rem=0,
+            diff_lines=0,
+            size_bytes=None,
+            has_record=True,
+        ),
+    ]
+    fold(
+        model.ran_parts(
+            "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
+        )
+    )
+    assert fold.share("x:f0") == SetDiffShare("x:f0", 6, "member")
