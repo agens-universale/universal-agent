@@ -61,6 +61,11 @@ ProgressKind = Literal[
 
 _ERROR_BRIEF_MAX = 120
 _ARGS_SUMMARY_MAX = 80
+# Потолок сырого текста команды в событии начала вложенного вызова: длиннее —
+# поле пустое, и потребитель читает команду из sidecar-записи вызова.
+TOOL_START_COMMAND_MAX = 4_096
+# Аргументы Run-тула, которые несут исполняемый текст (команда, код).
+_RAW_COMMAND_ARGS = ("command", "code")
 
 # Приставка `cd <каталог> && ` / `cd <каталог>; ` в начале команды: каталог
 # в двойных, одинарных кавычках или без них.
@@ -93,6 +98,11 @@ class SubagentProgressEvent:
     # как есть и скалярные поля ``error``. Отказ или ошибка — решает потребитель.
     result_status: Optional[str] = None
     result_error: Optional[Dict[str, str]] = None
+    # Сырой текст команды Run-тула (``tool_start``) — целиком, если не длиннее
+    # ``TOOL_START_COMMAND_MAX``; иначе ``None``, и команда читается из
+    # sidecar-записи вызова (она пишется до события). Внутрипроцессное поле:
+    # не сохраняется и в модель не уходит.
+    command: Optional[str] = None
 
 
 @runtime_checkable
@@ -276,12 +286,47 @@ def _rooted_command(
         command, str
     ):
         return data
-    flat = command.strip()
-    match = _CD_PREFIX.match(flat)
-    rest = flat[match.end() :] if match else ""
-    if not rest or not _same_dir(match.group("dq", "sq", "bare"), root):
+    rest = strip_root_cd(command, root)
+    if rest == command:
         return data
     return {**data, "command": rest}
+
+
+def strip_root_cd(command: str, root: str) -> str:
+    """Команда без `cd <корень проекта> &&` / `;` / перевода строки в начале.
+
+    Переход в любой другой каталог остаётся: он что-то говорит о команде.
+    Переводы строк и длину остатка не трогает — им пользуются и однострочная
+    сводка, и построчный показ команды. Снимать нечего — та же строка."""
+    match = _CD_PREFIX.match(command.lstrip())
+    if match is None:
+        return command
+    rest = command.lstrip()[match.end() :]
+    if not rest.strip() or not _same_dir(
+        match.group("dq", "sq", "bare"), root
+    ):
+        return command
+    return rest
+
+
+def run_command_text(
+    wire_name: Optional[str], arguments: Any
+) -> Optional[str]:
+    """Сырой исполняемый текст Run-тула (команда, код); у прочих — ``None``."""
+    name = LEGACY_TOOL_NAMES.get(wire_name, wire_name) if wire_name else None
+    shown = TOOL_DISPLAY.get(name) if name else None
+    if shown is None or shown.category is not DisplayCategory.RUN:
+        return None
+    if shown.primary_arg not in _RAW_COMMAND_ARGS:
+        return None
+    data = arguments
+    if isinstance(arguments, str):
+        try:
+            data = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError:
+            return None
+    value = data.get(shown.primary_arg) if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
 
 
 def _same_dir(groups: tuple[Optional[str], ...], root: str) -> bool:
@@ -490,13 +535,19 @@ def emit_progress(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     attachments: Optional[List[Dict[str, Any]]] = None,
     result_status: Optional[str] = None,
     result_error: Optional[Dict[str, str]] = None,
+    command: Optional[str] = None,
 ) -> None:
-    """Emit a progress event when running as a child with a sink; else no-op."""
+    """Emit a progress event when running as a child with a sink; else no-op.
+
+    ``command`` длиннее ``TOOL_START_COMMAND_MAX`` не обрезается, а уходит
+    ``None``: потребитель берёт команду из sidecar."""
     if not child_progress_enabled(ctx):
         return
     sink = ctx.subagent_progress_sink
     if error_brief is not None:
         error_brief = _truncate_error_brief(error_brief)
+    if command is not None and len(command) > TOOL_START_COMMAND_MAX:
+        command = None
     sink.emit(
         SubagentProgressEvent(
             parent_call_id=str(ctx.parent_call_id),
@@ -516,6 +567,7 @@ def emit_progress(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
             attachments=attachments,
             result_status=result_status,
             result_error=result_error,
+            command=command,
         )
     )
 
@@ -533,5 +585,7 @@ __all__ = [
     "parse_tool_result_status",
     "resolve_progress_sink",
     "result_facts",
+    "run_command_text",
+    "strip_root_cd",
     "tool_args_summary",
 ]

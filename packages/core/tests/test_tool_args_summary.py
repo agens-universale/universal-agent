@@ -309,3 +309,49 @@ def test_real_arguments_are_not_changed():
     args = {"command": f"cd {ROOT} && ls"}
     tool_args_summary("exec_command", args, root=ROOT)
     assert args == {"command": f"cd {ROOT} && ls"}
+
+
+# ---- снятие `cd <корень>` для сырой команды (TUI рисует её построчно) ----
+
+_HEREDOC = "python - <<'EOF'\nprint(1)\nEOF"
+
+
+def test_strip_root_cd_keeps_line_breaks():
+    from gc_core.execution.progress import strip_root_cd
+
+    assert strip_root_cd(f"cd /proj && {_HEREDOC}", "/proj") == _HEREDOC
+
+
+def test_strip_root_cd_keeps_other_directory():
+    from gc_core.execution.progress import strip_root_cd
+
+    command = f"cd /other && {_HEREDOC}"
+    assert strip_root_cd(command, "/proj") == command
+
+
+def test_strip_root_cd_keeps_bare_cd():
+    from gc_core.execution.progress import strip_root_cd
+
+    assert strip_root_cd("cd /proj && ", "/proj") == "cd /proj && "
+
+
+def test_strip_root_cd_without_prefix_is_unchanged():
+    from gc_core.execution.progress import strip_root_cd
+
+    assert strip_root_cd(_HEREDOC, "/proj") == _HEREDOC
+
+
+@pytest.mark.parametrize(
+    ("command", "summary"),
+    [
+        (f"cd /proj && {_HEREDOC}", "python - <<'EOF' print(1) EOF"),
+        ("cd /other && ls -la", "cd /other && ls -la"),
+        ("cd /proj\nmake test\n  && echo ok", "make test && echo ok"),
+        ('  cd "/proj" ; git status  ', "git status"),
+        ("cd /proj && ", "cd /proj &&"),
+    ],
+)
+def test_summary_of_multiline_command_is_unchanged(command, summary):
+    """Сводка — по-прежнему одна строка: значения зафиксированы по базе."""
+    out = tool_args_summary("exec_command", {"command": command}, root="/proj")
+    assert out == summary

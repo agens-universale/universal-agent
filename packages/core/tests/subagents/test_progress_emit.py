@@ -419,3 +419,88 @@ class TestToolEndResultFacts:
         # Факты исхода — только у `tool_end`: реплика — не вызов тула.
         assert event.result_status is None
         assert event.result_error is None
+
+
+class TestToolStartCommand:
+    """Сырой текст команды Run-тула — в событии начала вложенного вызова."""
+
+    def _start(self, monkeypatch, name, arguments):
+        pr = _patch_process(monkeypatch)
+        sink = QueueSubagentProgressSink()
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[_fc(name, "c1", json.dumps(arguments))],
+                state=_state(),
+                ctx=_child_ctx(sink),
+                run_agent_func=None,
+            )
+        )
+        return sink.drain()[0]
+
+    def test_multiline_command_rides_whole(self, monkeypatch):
+        command = f"cd {_ROOT} && python - <<'EOF'\nprint(1)\nEOF"
+        start = self._start(monkeypatch, "exec_command", {"command": command})
+        assert start.kind == "tool_start"
+        assert start.command == command
+
+    def test_python_code_rides_whole(self, monkeypatch):
+        code = "import json\nprint(json.dumps({'ok': 1}))\n"
+        start = self._start(monkeypatch, "exec_python", {"code": code})
+        assert start.command == code
+
+    def test_command_at_the_cap_rides_whole(self, monkeypatch):
+        from gc_core.execution.progress import TOOL_START_COMMAND_MAX
+
+        command = "x" * TOOL_START_COMMAND_MAX
+        start = self._start(monkeypatch, "exec_command", {"command": command})
+        assert start.command == command
+
+    def test_command_over_the_cap_is_none(self, monkeypatch):
+        from gc_core.execution.progress import TOOL_START_COMMAND_MAX
+
+        command = "x" * (TOOL_START_COMMAND_MAX + 1)
+        start = self._start(monkeypatch, "exec_command", {"command": command})
+        assert start.command is None
+
+    def test_non_run_tool_has_no_command(self, monkeypatch):
+        start = self._start(monkeypatch, "fs_read_file", {"path": "a.py"})
+        assert start.command is None
+
+    def test_sidecar_call_is_written_before_tool_start(self, monkeypatch):
+        pr = _patch_process(monkeypatch)
+        order: list[str] = []
+
+        async def _persist(ctx, *, kind, payload):
+            order.append(f"persist:{kind}")
+
+        class _Sink:
+            def emit(self, event):
+                order.append(f"emit:{event.kind}")
+
+        monkeypatch.setattr(pr, "apersist_subagent_trace", _persist)
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc("exec_command", "c1", json.dumps({"command": "ls"}))
+                ],
+                state=_state(),
+                ctx=_child_ctx(_Sink()),
+                run_agent_func=None,
+            )
+        )
+        assert order.index("persist:call") < order.index("emit:tool_start")
+
+    def test_top_level_emits_nothing(self, monkeypatch):
+        pr = _patch_process(monkeypatch)
+        sink = QueueSubagentProgressSink()
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc("exec_command", "c1", json.dumps({"command": "ls"}))
+                ],
+                state=_state(),
+                ctx=_parent_ctx(sink),
+                run_agent_func=None,
+            )
+        )
+        assert sink.drain() == []

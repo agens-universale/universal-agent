@@ -95,6 +95,7 @@ from gc_core.execution.progress import (
     extract_intermediate_prose,
     parse_tool_result_status,
     result_facts,
+    run_command_text,
     todo_items_from_arguments,
     tool_args_summary,
 )
@@ -2083,6 +2084,7 @@ def _emit_tool_start(
             tool_name, tool_arguments, root=ctx.workspace.root
         ),
         todo_items=todo_items,
+        command=run_command_text(tool_name, tool_arguments),
     )
 
 
@@ -2112,10 +2114,12 @@ async def _aexecute_tool_call(
         not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
     )
     emit_tool_row = persist_tool_trace
-    if emit_tool_row:
-        _emit_tool_start(ctx, state, tool_name, tool_arguments, call_id_str)
+    # Sidecar-запись вызова — ДО события начала: команду длиннее потолка
+    # события TUI читает оттуда, и к приходу события запись обязана быть.
     if persist_tool_trace:
         await apersist_subagent_trace(ctx, kind="call", payload=dict(m))
+    if emit_tool_row:
+        _emit_tool_start(ctx, state, tool_name, tool_arguments, call_id_str)
     was_invalid = False
     # Исключение мимо WrongFunctionArgumentsException не доходит до записи
     # result/error ниже. Открытый call в sidecar потом прилипает к confirm.
