@@ -9,8 +9,10 @@
 ему задачу. Последний вызов тула прерванного хода может повториться
 (at-least-once).
 
-Треды других поверхностей и интерактивных сессий (резерв ``system``) и
-задачи swarm (их песочницы ведёт монитор swarm) не трогаются.
+Берутся только задачи вебхука — треды с его статусом (``webhook.status``).
+Треды других поверхностей, интерактивных сессий и SDK-приложений на общем
+хранилище (какой бы ни был ``system``) и задачи swarm (их песочницы ведёт
+монитор swarm) не трогаются.
 """
 
 from __future__ import annotations
@@ -83,7 +85,11 @@ async def arecover_forever(surface: WebhookSurface) -> None:
 
 
 def _orphaned(record: ThreadRecord, now: datetime) -> bool:
-    if record.key.system in RESERVED_SYSTEMS or _SWARM in record.frontend:
+    if (
+        record.key.system in RESERVED_SYSTEMS
+        or not task_status.is_task(record)
+        or _SWARM in record.frontend
+    ):
         return False
     if record.lease is not None and not lease_expired(record.lease, now):
         return False

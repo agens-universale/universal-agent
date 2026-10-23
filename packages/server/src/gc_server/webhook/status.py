@@ -1,6 +1,10 @@
 """Статус задачи вебхука — в хранилище, в состоянии фронтенда ``webhook``
 треда: ``/runs`` отвечает одинаково на любом инстансе.
 
+Это же состояние — метка задачи: тред без него вебхуку чужой (SDK-приложение
+или другой процесс на общем хранилище), какой бы ни был ``system``. Метку
+ставит первая же запись задачи — сообщение во входящий поток.
+
 Поля: ``status`` (``running`` | ``completed`` | ``failed`` | ``cancelled``),
 ``run_id`` (прогон, который его записал), ``instance``, ``started_at``,
 ``finished_at``, ``result``, ``error``. Время — секунды эпохи, как раньше
@@ -14,7 +18,7 @@ from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 from gc_core.threads.facade import Threads
-from gc_core.threads.models import ThreadKey, ThreadRecord
+from gc_core.threads.models import Receipt, ThreadKey, ThreadRecord
 
 FRONTEND = "webhook"
 
@@ -22,6 +26,25 @@ FRONTEND = "webhook"
 async def aset_status(threads: Threads, key: ThreadKey, **fields: Any) -> None:
     """Слить поля в статус задачи (атомарно в хранилище)."""
     await threads.update_frontend(key, FRONTEND, jsonable_encoder(fields))
+
+
+async def asubmit(
+    threads: Threads,
+    key: ThreadKey,
+    message: dict,
+    *,
+    op_id: str | None = None,
+) -> Receipt:
+    """Сообщение задачи во входящий поток; тред той же записью помечается
+    задачей вебхука — принятое до захвата треда найдёт восстановление."""
+    return await threads.submit(
+        key, message, op_id=op_id, source=FRONTEND, patch=(FRONTEND, {})
+    )
+
+
+def is_task(record: ThreadRecord | None) -> bool:
+    """Тред — задача вебхука: в нём есть состояние фронтенда вебхука."""
+    return record is not None and FRONTEND in record.frontend
 
 
 def status_of(record: ThreadRecord | None) -> dict | None:

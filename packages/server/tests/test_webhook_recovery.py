@@ -10,6 +10,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 from gc_core.execution.environment import utc_now
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import RuntimeStatus, ThreadKey
@@ -76,9 +77,9 @@ async def _surface(tmp_path, stores, recovery=None):
     )
 
 
-async def _crashed_run(store, key=KEY):
+async def _crashed_turn(store, key):
     """Ход умер посреди работы: история записана, отметка хода стоит,
-    аренды нет (истекла), статус задачи — running прежнего инстанса."""
+    аренды нет (истекла)."""
     dead = SessionWriter(store, key, owner="dead/1/deadbeef")
     await dead.aclaim()
     await dead.acommit(
@@ -86,6 +87,12 @@ async def _crashed_run(store, key=KEY):
     )
     await dead.aside(set_runtime=RuntimeStatus(turn="running"))
     await dead.arelease()
+
+
+async def _crashed_run(store, key=KEY):
+    """Ход задачи вебхука умер посреди работы: статус задачи — running
+    прежнего инстанса."""
+    await _crashed_turn(store, key)
     await task_status.aset_status(
         Threads(store), key, status="running", run_id="dead:1", started_at=1.0
     )
@@ -158,8 +165,10 @@ async def test_undelivered_inbox_without_owner_is_played(
     stores = await aopen_process_stores(_settings(tmp_path))
     surface = await _surface(tmp_path, stores)
     try:
-        await Threads(stores.threads).submit(
-            KEY, {"role": "user", "content": "никто не забрал"}
+        await task_status.asubmit(
+            Threads(stores.threads),
+            KEY,
+            {"role": "user", "content": "никто не забрал"},
         )
         taken = await arecover_once(surface, now=utc_now())
         await _settled(surface)
@@ -207,6 +216,62 @@ async def test_threads_of_other_surfaces_are_not_touched(
     finally:
         await stores.aclose()
     assert taken == [] and seen == []
+
+
+async def test_threads_of_other_applications_are_not_touched(
+    monkeypatch, tmp_path
+):
+    """Находка ревью: SDK-приложение на общем хранилище убито посреди хода
+    (отметка хода стоит, аренда истекла) или оставило недоставленное во
+    входящем — это не задача вебхука, какой бы system ни был: восстановление
+    её не продолжает ходом с настройками и тулами вебхука."""
+    seen = _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        for system in ("sdk", "myapp"):
+            await _crashed_turn(
+                stores.threads, ThreadKey(system=system, thread="crash-1")
+            )
+        await Threads(stores.threads).submit(
+            ThreadKey(system="myapp", thread="inbox"),
+            {"role": "user", "content": "чужое"},
+        )
+        taken = await arecover_once(surface, now=utc_now())
+        await _settled(surface)
+    finally:
+        await stores.aclose()
+    assert taken == [] and seen == []
+
+
+async def test_task_accepted_before_a_crash_is_recovered(
+    monkeypatch, tmp_path
+):
+    """Инстанс принял задачу (сообщение во входящем) и умер до захвата
+    треда: тред помечен задачей вебхука той же записью, что и сообщение, —
+    восстановление другого инстанса его поднимает."""
+    from gc_server.webhook.surface import make_user_message
+
+    seen = _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    dying = await _surface(tmp_path, stores)
+
+    async def crash(*_args, **_kwargs):
+        raise RuntimeError("процесс умер")
+
+    monkeypatch.setattr(dying, "_start_run", crash)
+    survivor = await _surface(tmp_path, stores)
+    try:
+        with pytest.raises(RuntimeError):
+            await dying.asubmit(
+                KEY, make_user_message("принято"), op_id=None, trace_id=None
+            )
+        taken = await arecover_once(survivor, now=utc_now())
+        await _settled(survivor)
+    finally:
+        await stores.aclose()
+    assert taken == [KEY]
+    assert _mentions(seen[0], "принято")
 
 
 async def test_recovery_switch(tmp_path):

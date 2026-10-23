@@ -329,12 +329,12 @@ class WebhookSurface:
         if _foreign(await self.threads().get(key)):
             raise http_error(
                 409,
-                "task belongs to the swarm surface",
+                "thread belongs to another surface or application",
                 system=key.system,
                 task_id=key.thread,
             )
-        receipt = await self.threads().submit(
-            key, message, op_id=op_id, source="webhook"
+        receipt = await task_status.asubmit(
+            self.threads(), key, message, op_id=op_id
         )
         seq = receipt.max_seq.get("inbox")
         if op_id is not None and await self._delivered(key, seq):
@@ -679,13 +679,17 @@ def _task_entry(record: ThreadRecord) -> dict:
 
 
 def _is_task(record: ThreadRecord) -> bool:
-    """Тред — задача вебхука (не интерактивная сессия, не swarm)."""
+    """Тред — задача вебхука (не интерактивная сессия, не SDK, не swarm)."""
     return record.key.system not in RESERVED_SYSTEMS and not _foreign(record)
 
 
 def _foreign(record: ThreadRecord | None) -> bool:
-    """Тред задачи swarm в общей базе — его ведёт песочница, а не вебхук."""
-    return record is not None and "swarm" in record.frontend
+    """Тред есть, но вебхуку чужой: без статуса вебхука (SDK-приложение
+    или другой процесс на общем хранилище) или задача swarm (её ведёт
+    песочница)."""
+    return record is not None and (
+        not task_status.is_task(record) or "swarm" in record.frontend
+    )
 
 
 def _pending(record: ThreadRecord | None) -> int:

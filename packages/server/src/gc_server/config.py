@@ -36,10 +36,12 @@ logger = logging.getLogger(__name__)
 CONFIG_NAME = "config_server.yml"
 SURFACES = ("webhook", "chat", "a2a", "swarm")
 SurfaceName = Literal["webhook", "chat", "a2a", "swarm"]
-#: system других поверхностей и интерактивных сессий (gc-cli, TUI): вебхук и
-#: swarm их треды не читают и в них не пишут.
+#: system других поверхностей, интерактивных сессий (gc-cli, TUI) и SDK по
+#: умолчанию: вебхук и swarm их треды не читают и в них не пишут. Задача
+#: вебхука к тому же — только тред с его статусом (``webhook.status``): у
+#: SDK system свой у каждого приложения.
 RESERVED_SYSTEMS = frozenset(
-    {"a2a", "responses", "completions", "acp", "cli", "tui"}
+    {"a2a", "responses", "completions", "acp", "cli", "tui", "sdk"}
 )
 #: Адрес по умолчанию у фасадов, собранных без конфига (тесты, встраивание).
 LOOPBACK = "127.0.0.1"

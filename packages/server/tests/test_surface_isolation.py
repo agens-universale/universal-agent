@@ -36,33 +36,39 @@ def test_moved_section_in_config_yml_refuses_the_surface(
     assert "auth_token" in text
 
 
-def _seed(threads_dir, system: str, thread: str) -> None:
+def _seed(threads_dir, system: str, thread: str, *, task=False) -> None:
+    """Тред в общем хранилище; ``task`` — задача вебхука (его статус)."""
+    threads = Threads(FileThreadStore(str(threads_dir)))
+    key = ThreadKey(system=system, thread=thread)
     run_sync(
-        Threads(FileThreadStore(str(threads_dir))).append_messages(
-            ThreadKey(system=system, thread=thread),
-            [{"role": "user", "content": "секрет", "id": f"m-{system}"}],
+        threads.append_messages(
+            key, [{"role": "user", "content": "секрет", "id": f"m-{system}"}]
         )
     )
+    if task:
+        run_sync(threads.update_frontend(key, "webhook", {"status": "x"}))
 
 
 @pytest.fixture
 def client(tmp_path):
     threads = tmp_path / "threads"
+    _seed(threads, "generic", "t1", task=True)
     for system in (
-        "generic",
         "responses",
         "a2a",
         "completions",
         "acp",
         "cli",
         "tui",
+        "sdk",
+        "myapp",
     ):
         _seed(threads, system, "t1")
     return TestClient(make_webhook(tmp_path).app(), base_url=LOOPBACK_URL)
 
 
 @pytest.mark.parametrize(
-    "system", ["responses", "a2a", "completions", "acp", "cli", "tui"]
+    "system", ["responses", "a2a", "completions", "acp", "cli", "tui", "sdk"]
 )
 def test_webhook_does_not_read_foreign_threads(client, system):
     assert client.get(f"/v1/tasks/{system}/t1/messages").status_code == 400
@@ -80,6 +86,26 @@ def test_webhook_lists_only_its_own_threads(client):
 def test_webhook_does_not_write_into_interactive_sessions(client):
     resp = client.post("/v1/tasks", json={"system": "cli", "task_id": "t"})
     assert resp.status_code == 400
+
+
+def test_webhook_does_not_touch_threads_of_other_applications(
+    client, tmp_path
+):
+    """Находка ревью: тред приложения на SDK со своим system в общем
+    хранилище — не задача вебхука (нет статуса вебхука): его не видно в
+    списке, он не читается, не отменяется и не получает сообщений."""
+    assert client.get("/v1/tasks/myapp/t1/messages").status_code == 404
+    assert client.get("/v1/tasks/myapp/t1").status_code == 404
+    cancel = client.post("/v1/tasks/myapp/t1/cancel", json={})
+    assert cancel.status_code == 404
+    resp = client.post(
+        "/v1/tasks", json={"system": "myapp", "task_id": "t1", "message": "x"}
+    )
+    assert resp.status_code == 409
+    store = FileThreadStore(str(tmp_path / "threads"))
+    key = ThreadKey(system="myapp", thread="t1")
+    assert run_sync(store.read_stream(key, "inbox")) == []
+    assert run_sync(store.read_stream(key, "control")) == []
 
 
 @pytest.mark.parametrize(
