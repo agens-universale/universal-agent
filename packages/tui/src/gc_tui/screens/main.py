@@ -5228,8 +5228,9 @@ class TraceScreen(Screen):
         return widget
 
     def _drain_trace_notes(self) -> None:
-        """Пометки ленты из очереди — строкой `└ ! …` под владельцем
-        (спека P3 §10, ответ 4); владельца нет на экране — строка `!` `WARN`.
+        """Пометки ленты из очереди — строкой `└ …` под владельцем по тону
+        пометки (спека P3 §10, ответ 4); владельца нет на экране — строка `!`
+        `WARN` (только `warn`).
 
         Ядро кормит очередь из рабочего потока через on_trace_note; строка
         монтируется здесь, на UI-потоке. Только вживую и только своего треда: в тред
@@ -5247,11 +5248,12 @@ class TraceScreen(Screen):
         for note, ticks in waiting + fresh:
             owner = self._trace_note_owner(note)
             if owner is not None:
-                owner.add_consequence(note_consequence(note.text))
+                owner.add_consequence(note_consequence(note))
             elif note.owner == "call" and ticks > 0:
                 # Строка вызова ещё не в ленте — ждём её несколько тиков.
                 self._waiting_notes.append((tid, note, ticks - 1))
-            else:
+            elif note.tone == "warn":
+                # Нейтральной пометке без владельца нечего сообщать отдельно.
                 self._mount_standalone(note.text, "warn")
 
     def _trace_note_owner(self, note):

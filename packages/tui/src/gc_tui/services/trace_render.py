@@ -38,6 +38,7 @@ from gc_tui.services.turn_outcome import kind_of, turn_head
 
 if TYPE_CHECKING:
     from gc_core.tools.turn.turn_close import TurnClose
+    from gc_core.vision.notes import TraceNote
     from rich.text import Text
     from textual.widget import Widget
 
@@ -171,15 +172,20 @@ def build_orphan_result_row(
     )
 
 
-def note_consequence(text: str) -> Text:
-    """Тело следствия-пометки под владельцем: `! текст` цветом `WARN`
-    (строку `└` дорисует владелец — `add_consequence`)."""
+def note_consequence(note: TraceNote) -> Text:
+    """Тело следствия-пометки под владельцем по тону пометки: `warn` —
+    `! текст` цветом `WARN`, `info` — серый текст `DIM` без `!` (строку `└`
+    дорисует владелец — `add_consequence`)."""
     from rich.text import Text
 
-    from gc_tui.palette import WARN
+    from gc_tui.palette import DIM, WARN
 
+    prefix, style = {
+        "warn": (STANDALONE_PREFIX, WARN),
+        "info": ("", DIM),
+    }[note.tone]
     body = Text()
-    body.append(STANDALONE_PREFIX + text, style=WARN)
+    body.append(prefix + note.text, style=style)
     return body
 
 

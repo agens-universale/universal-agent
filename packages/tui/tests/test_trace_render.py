@@ -754,9 +754,23 @@ def test_note_consequence_is_bang_text_in_warn():
     from gc_tui.palette import WARN
     from gc_tui.services.trace_render import note_consequence
 
-    body = note_consequence("не просмотрено")
+    from gc_core.vision.notes import TraceNote
+
+    body = note_consequence(TraceNote("не просмотрено", "reply"))
     assert body.plain == "! не просмотрено"
     assert {str(s.style) for s in body.spans} == {WARN}
+
+
+def test_info_note_consequence_is_grey_text_without_bang():
+    from gc_core.vision.notes import TraceNote
+    from gc_tui.palette import DIM
+    from gc_tui.services.trace_render import note_consequence
+
+    body = note_consequence(
+        TraceNote("glm не принимает изображения", "reply", tone="info")
+    )
+    assert body.plain == "glm не принимает изображения"
+    assert {str(s.style) for s in body.spans} == {DIM}
 
 
 def _readonly_orphan(kind: str):
