@@ -127,6 +127,35 @@ def compute_audience(
     )
 
 
+def viewing_eyes(
+    ctx: Any, state: Any, blind: ResolvedModel
+) -> ResolvedModel | None:
+    """Модель для зрения, которой агент посмотрит картинку за модель
+    ``blind``, или None: тул ``fs_view_image`` в наборе запуска, модель
+    зрения назначена другим маршрутом, не заявлена слепой и её проба не
+    провалена (нет результата, подтверждена или временный сбой)."""
+    router = getattr(ctx, "model_router", None)
+    tools = getattr(state, "tools", None) or []
+    if router is None or not view_tool_in_set(tools):
+        return None
+    eyes = _resolve_eyes(router)
+    if (
+        eyes is None
+        or route_id(eyes) == route_id(blind)
+        or _declared_blind(eyes, ctx)
+    ):
+        return None
+    routes = getattr(state, "vision_routes", None) or {}
+    key = routes.get(route_id(eyes))
+    result = process_vision_probes().peek(key) if key is not None else None
+    if result is None or result.status in _EYES_USABLE:
+        return eyes
+    return None
+
+
+_EYES_USABLE = (ProbeStatus.CONFIRMED, ProbeStatus.TRANSIENT)
+
+
 def route_id(resolved):
     return resolved.alias, resolved.model, resolved.url
 

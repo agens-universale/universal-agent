@@ -19,6 +19,8 @@ from typing import Any, Literal
 
 from gc_core.model_router import ResolvedModel
 from gc_core.security.call_scope import current_call
+from gc_core.vision.audience import viewing_eyes
+from gc_core.vision.probe import ProbeStatus
 
 NOTE_MAIN_BLIND = (
     "{alias} не работает с изображениями — изображение не просмотрено. "
@@ -28,16 +30,23 @@ NOTE_EYES_BLIND = (
     "Модель для зрения {alias} не работает с изображениями — изображение не "
     "просмотрено. Выберите другую в /settings → Модели."
 )
+# Модель запроса не принимает картинки, но агент посмотрит их тулом зрения —
+# не сбой, а факт про реплику (решение владельца 2026-10-24).
+NOTE_MAIN_VIA_EYES = (
+    "{alias} не принимает изображения · агент посмотрит через {eyes}"
+)
 
 
 @dataclass(frozen=True)
 class TraceNote:
     """Пометка ленты с владельцем: `call` — вызов тула `call_id`, `reply` —
-    ответ хода (пометка вне вызова тула)."""
+    ответ хода (пометка вне вызова тула). `tone`: `warn` — сбой, `info` —
+    нейтральный факт."""
 
     text: str
     owner: Literal["reply", "call"]
     call_id: str | None = None
+    tone: Literal["warn", "info"] = "warn"
 
 
 _logger = logging.getLogger(__name__)
@@ -61,9 +70,16 @@ def note_blind(
     )
 
 
-def emit_trace_note(ctx: Any, text: str, *, logger: Any = None) -> None:
+def emit_trace_note(
+    ctx: Any,
+    text: str,
+    *,
+    logger: Any = None,
+    tone: Literal["warn", "info"] = "warn",
+) -> None:
     """Отдать пометку хуку `ctx.on_trace_note` как `TraceNote`; хука нет —
-    `warning` с тем же текстом в переданный логгер, иначе в `ctx.logger`.
+    тот же текст в переданный логгер, иначе в `ctx.logger` (`warn` —
+    `warning`, `info` — `info`).
     Владелец — вызов тула, внутри которого пометка возникла (привязка
     `current_call()` с `call_id`), иначе ответ."""
     hook = getattr(ctx, "on_trace_note", None)
@@ -71,9 +87,10 @@ def emit_trace_note(ctx: Any, text: str, *, logger: Any = None) -> None:
         scope = current_call()
         call_id = scope.call_id if scope is not None else None
         owner = "call" if call_id else "reply"
-        hook(TraceNote(text, owner, call_id))
+        hook(TraceNote(text, owner, call_id, tone))
         return
-    (logger or getattr(ctx, "logger", None) or _logger).warning(text)
+    log = logger or getattr(ctx, "logger", None) or _logger
+    (log.warning if tone == "warn" else log.info)(text)
 
 
 PROBE_REASON_RU = {
@@ -97,8 +114,18 @@ def note_probe(ctx, state, key, resolved, result):
         if identity in notices:
             return
         notices.add(identity)
+    alias = note_alias(resolved)
+    eyes = (
+        viewing_eyes(ctx, state, resolved)
+        if result.status is ProbeStatus.UNSUPPORTED
+        else None
+    )
+    if eyes is not None:
+        text = NOTE_MAIN_VIA_EYES.format(alias=alias, eyes=note_alias(eyes))
+        emit_trace_note(ctx, text, tone="info")
+        return
     reason = PROBE_REASON_RU.get(result.reason, "зрение не подтверждено")
     emit_trace_note(
         ctx,
-        f"{note_alias(resolved)}: {reason}. Пользовательское изображение не отправлено.",
+        f"{alias}: {reason}. Пользовательское изображение не отправлено.",
     )

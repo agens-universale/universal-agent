@@ -15,6 +15,7 @@ from gc_core import run_context as rc
 from gc_core.model_router import ResolvedModel
 from gc_core.security.call_scope import call_scope
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.vision.probe import ProbeStatus
 from gc_core.vision.notes import (
     NOTE_EYES_BLIND,
     NOTE_MAIN_BLIND,
@@ -188,7 +189,9 @@ def test_probe_note_inside_a_tool_call_belongs_to_that_call():
     notes: list = []
     ctx = SimpleNamespace(on_trace_note=notes.append)
     state = SimpleNamespace(vision_probe_turn="root")
-    result = SimpleNamespace(reason="image_unsupported")
+    result = SimpleNamespace(
+        status=ProbeStatus.UNSUPPORTED, reason="image_unsupported"
+    )
 
     with call_scope(state=None, call_id="c1", tool_name="fs_view_image"):
         note_probe(ctx, state, "key", _resolved("qwen", "qwen-vl"), result)
@@ -242,7 +245,9 @@ async def test_admitted_request_failure_notes_the_probe_in_the_tool_call(
     monkeypatch.setattr(
         "gc_core.vision.registry.process_vision_probes",
         lambda: SimpleNamespace(
-            peek=lambda key: SimpleNamespace(reason="image_unsupported")
+            peek=lambda key: SimpleNamespace(
+                status=ProbeStatus.UNSUPPORTED, reason="image_unsupported"
+            )
         ),
     )
     notes: list = []
@@ -384,3 +389,81 @@ async def test_subagent_notes_owner_through_the_real_dispatcher(
     )
 
     assert _call_ids(notes) == [("call", "launch"), ("call", "child")]
+
+
+def _eyes_router(assign: dict) -> "ModelRouter":
+    from gc_core.config_modules.root import AppConfig
+    from gc_core.model_router import ModelRouter
+
+    snapshot = AppConfig.model_validate(
+        {
+            "models": {
+                "deepseek": {
+                    "model": "deepseek-v4-flash",
+                    "url": "http://ds/v1/chat/completions",
+                    "token": "",
+                },
+                "gemini": {
+                    "model": "gemini-3.5-flash",
+                    "url": "http://gm/v1/chat/completions",
+                    "token": "",
+                },
+            },
+            "slots": {"default": "deepseek"},
+            "assign": assign,
+        }
+    )
+    return ModelRouter(snapshot, level_provider=lambda: "default")
+
+
+def _probe_note(*, assign: dict, tools: list) -> list:
+    from gc_core.vision.probe import ProbeResult
+
+    notes: list = []
+    router = _eyes_router(assign)
+    ctx = SimpleNamespace(
+        on_trace_note=notes.append,
+        model_router=router,
+        settings=make_settings(),
+    )
+    state = SimpleNamespace(vision_probe_turn="root", tools=tools)
+    result = ProbeResult(ProbeStatus.UNSUPPORTED, "image_unsupported")
+
+    note_probe(ctx, state, "key", router.resolve("main"), result)
+    return notes
+
+
+_VIEW_TOOL = [{"name": "fs_view_image"}]
+
+
+def test_probe_note_is_neutral_when_the_agent_views_through_the_eyes():
+    """Владелец 2026-10-24: тул зрения есть — не сбой, а серая пометка
+    с именами основной модели и модели зрения."""
+    notes = _probe_note(assign={"vision": "gemini"}, tools=_VIEW_TOOL)
+
+    assert notes == [
+        TraceNote(
+            "deepseek не принимает изображения · агент посмотрит через gemini",
+            "reply",
+            None,
+            "info",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "assign, tools",
+    [({}, _VIEW_TOOL), ({"vision": "gemini"}, [])],
+    ids=["no-eyes-assigned", "view-tool-off"],
+)
+def test_probe_note_stays_a_warning_without_the_vision_tool(assign, tools):
+    notes = _probe_note(assign=assign, tools=tools)
+
+    assert notes == [
+        TraceNote(
+            "deepseek: маршрут отказал в поддержке изображений. "
+            "Пользовательское изображение не отправлено.",
+            "reply",
+        )
+    ]
+    assert notes[0].tone == "warn"
