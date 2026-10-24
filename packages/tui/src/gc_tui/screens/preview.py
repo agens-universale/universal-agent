@@ -1,7 +1,8 @@
 """PreviewScreen — read-only превью сессии реальными виджетами трейса.
 
 Esc → dismiss(False) (назад). Enter → dismiss(True) (продолжить сессию).
-Лента — как живая (`TraceFollowMixin`): открывается у низа.
+Лента — как живая (`TraceFollowMixin`): открывается у низа, «не внизу» —
+плашка «в конец» (клик или End — к низу).
 Шапка: слева «превью · сессия <id>», справа — путь проекта. Футер — подсказки клавиш.
 Промпт сессии виден в самом трейсе ниже, поэтому в шапку не дублируется."""
 
@@ -15,13 +16,17 @@ from textual.widgets import Static
 
 from gc_tui import textual_compat
 from gc_tui.messages import BlockToggle, CopyBlockRequest, OpenImageRequest
-from gc_tui.screens.trace_follow import TraceFollowMixin
+from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.image_open import open_image
 from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.services.trace_retention import subagent_parent_ids_in_window
 
 _PATH_MAXLEN = 48
+_FOOTER_HINTS = (
+    "[Esc] назад  ·  [Enter] продолжить сессию  ·  "
+    "[↑↓ / PgUp PgDn] прокрутка  ·  [End] в конец"
+)
 
 
 class PreviewScreen(TraceFollowMixin, Screen[bool]):
@@ -31,6 +36,7 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
     BINDINGS = [
         Binding("enter", "resume", "продолжить сессию", priority=True),
         Binding("escape", "back", "назад", priority=True),
+        Binding("end", "to_end", "в конец", show=False, priority=True),
     ]
 
     def __init__(
@@ -67,11 +73,8 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
                 )
             trace = textual_compat.AnchoredScroll(id="trace")
             yield trace
-            yield Static(
-                "[Esc] назад  ·  [Enter] продолжить сессию  ·  [↑↓ / PgUp PgDn] прокрутка",
-                id="preview-footer",
-                markup=False,
-            )
+            yield Static(_FOOTER_HINTS, id="preview-footer", markup=False)
+        yield from trace_overlays(trace)
 
     def on_mount(self) -> None:
         from gc_core.constants.tool_display import (
@@ -112,6 +115,9 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
         self._watch_trace_follow()
         self._scroll_trace_end()
 
+    def on_resize(self, _event) -> None:
+        self.call_after_refresh(self._refresh_trace_overlays)
+
     def _preview_blocks(self):
         """Блоки превью с журналом правок треда (только чтение; лимиты —
         `edits_view.diff_limits`) и долями из `agent_edits` (спека P4
@@ -147,6 +153,9 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
 
     def action_resume(self) -> None:
         self.dismiss(True)
+
+    def action_to_end(self) -> None:
+        self._scroll_to_bottom()
 
     def action_back(self) -> None:
         self.dismiss(False)
