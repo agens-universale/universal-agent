@@ -184,11 +184,11 @@ async def test_reply_note_sits_under_the_reply_with_images_and_only_live(
     pytest.importorskip("textual")
     from image_helpers import make_attachment
 
-    from gc_core.vision.notes import NOTE_MAIN_BLIND
+    from gc_core.vision.notes import unsupported_note
     from gc_tui.palette import WARN
     from gc_tui.widgets.user_reply import UserReplyContainer
 
-    note = NOTE_MAIN_BLIND.format(alias="glm")
+    note = unsupported_note("glm")[0]
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID)

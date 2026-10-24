@@ -17,13 +17,12 @@ from gc_core.security.call_scope import call_scope
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.vision.probe import ProbeStatus
 from gc_core.vision.notes import (
-    NOTE_EYES_BLIND,
-    NOTE_MAIN_BLIND,
     TraceNote,
     emit_trace_note,
     note_alias,
     note_blind,
     note_probe,
+    unsupported_note,
 )
 from gc_testkit import as_coro
 
@@ -128,15 +127,28 @@ def test_emit_prefers_the_logger_it_was_given():
     assert ctx.logger.warnings == []
 
 
-def test_note_texts_name_the_model_and_the_way_out():
-    assert NOTE_MAIN_BLIND.format(alias="glm") == (
-        "glm не работает с изображениями — изображение не просмотрено. "
-        "Модель для зрения можно выбрать в /settings → Модели."
+# Решение владельца 2026-10-24: «модель не принимает изображения» — один
+# факт одним текстом на обоих путях (проба и реальный отказ); различается
+# только окончание.
+_VIA_EYES = "deepseek не принимает изображения · агент посмотрит через gemini"
+_MAIN_NOBODY = (
+    "deepseek не принимает изображения · изображение не просмотрено · "
+    "выберите модель с поддержкой изображений или назначьте модель для "
+    "зрения в настройках"
+)
+_EYES_BLIND = (
+    "gemini не принимает изображения · изображение не просмотрено · "
+    "назначьте другую модель для зрения в настройках"
+)
+
+
+def test_unsupported_note_texts_and_tones():
+    assert unsupported_note("deepseek", viewer="gemini") == (
+        _VIA_EYES,
+        "info",
     )
-    assert NOTE_EYES_BLIND.format(alias="qwen") == (
-        "Модель для зрения qwen не работает с изображениями — изображение не "
-        "просмотрено. Выберите другую в /settings → Модели."
-    )
+    assert unsupported_note("deepseek") == (_MAIN_NOBODY, "warn")
+    assert unsupported_note("gemini", eyes_role=True) == (_EYES_BLIND, "warn")
 
 
 def test_note_names_the_registry_alias_or_the_legacy_model_id():
@@ -145,15 +157,17 @@ def test_note_names_the_registry_alias_or_the_legacy_model_id():
 
 
 @pytest.mark.parametrize(
-    "eyes, template", [(False, NOTE_MAIN_BLIND), (True, NOTE_EYES_BLIND)]
+    "eyes, alias, text",
+    [(False, "deepseek", _MAIN_NOBODY), (True, "gemini", _EYES_BLIND)],
 )
-def test_note_blind_names_the_blind_model_in_its_role(eyes, template):
+def test_note_blind_names_the_blind_model_in_its_role(eyes, alias, text):
     notes: list = []
     ctx = SimpleNamespace(on_trace_note=notes.append)
 
-    note_blind(ctx, _resolved("glm", "glm-5.1"), eyes=eyes)
+    note_blind(ctx, _resolved(alias, "m"), eyes=eyes)
 
-    assert notes == [TraceNote(template.format(alias="glm"), "reply")]
+    assert notes == [TraceNote(text, "reply")]
+    assert notes[0].tone == "warn"
 
 
 def test_note_blind_without_a_hook_warns_in_the_given_logger():
@@ -161,12 +175,12 @@ def test_note_blind_without_a_hook_warns_in_the_given_logger():
 
     note_blind(
         SimpleNamespace(),
-        _resolved(None, "legacy-model"),
+        _resolved(None, "deepseek"),
         eyes=False,
         logger=given,
     )
 
-    assert given.warnings == [NOTE_MAIN_BLIND.format(alias="legacy-model")]
+    assert given.warnings == [_MAIN_NOBODY]
 
 
 def _call_ids(notes):
@@ -178,11 +192,9 @@ def test_eyes_note_inside_a_tool_call_belongs_to_that_call():
     ctx = SimpleNamespace(on_trace_note=notes.append)
 
     with call_scope(state=None, call_id="c1", tool_name="fs_view_image"):
-        note_blind(ctx, _resolved("qwen", "qwen-vl"), eyes=True)
+        note_blind(ctx, _resolved("gemini", "gemini-vl"), eyes=True)
 
-    assert notes == [
-        TraceNote(NOTE_EYES_BLIND.format(alias="qwen"), "call", "c1")
-    ]
+    assert notes == [TraceNote(_EYES_BLIND, "call", "c1")]
 
 
 def test_probe_note_inside_a_tool_call_belongs_to_that_call():
@@ -416,7 +428,9 @@ def _eyes_router(assign: dict) -> "ModelRouter":
     return ModelRouter(snapshot, level_provider=lambda: "default")
 
 
-def _probe_note(*, assign: dict, tools: list) -> list:
+def _probe_note(
+    *, assign: dict, tools: list, blind: str = "main", result=None
+) -> list:
     from gc_core.vision.probe import ProbeResult
 
     notes: list = []
@@ -427,9 +441,10 @@ def _probe_note(*, assign: dict, tools: list) -> list:
         settings=make_settings(),
     )
     state = SimpleNamespace(vision_probe_turn="root", tools=tools)
-    result = ProbeResult(ProbeStatus.UNSUPPORTED, "image_unsupported")
+    if result is None:
+        result = ProbeResult(ProbeStatus.UNSUPPORTED, "image_unsupported")
 
-    note_probe(ctx, state, "key", router.resolve("main"), result)
+    note_probe(ctx, state, "key", router.resolve(blind), result)
     return notes
 
 
@@ -441,14 +456,7 @@ def test_probe_note_is_neutral_when_the_agent_views_through_the_eyes():
     с именами основной модели и модели зрения."""
     notes = _probe_note(assign={"vision": "gemini"}, tools=_VIEW_TOOL)
 
-    assert notes == [
-        TraceNote(
-            "deepseek не принимает изображения · агент посмотрит через gemini",
-            "reply",
-            None,
-            "info",
-        )
-    ]
+    assert notes == [TraceNote(_VIA_EYES, "reply", None, "info")]
 
 
 @pytest.mark.parametrize(
@@ -457,13 +465,75 @@ def test_probe_note_is_neutral_when_the_agent_views_through_the_eyes():
     ids=["no-eyes-assigned", "view-tool-off"],
 )
 def test_probe_note_stays_a_warning_without_the_vision_tool(assign, tools):
+    """Тот же текст, что у пометки после реального отказа (`note_blind`)."""
     notes = _probe_note(assign=assign, tools=tools)
+
+    assert notes == [TraceNote(_MAIN_NOBODY, "reply")]
+    assert notes[0].tone == "warn"
+
+
+def test_probe_note_of_the_vision_model_itself_names_the_eyes():
+    """Отказ пробы маршрута «глаз» (не модели запроса) — вариант 3."""
+    notes = _probe_note(
+        assign={"vision": "gemini"}, tools=_VIEW_TOOL, blind="vision"
+    )
+
+    assert notes == [TraceNote(_EYES_BLIND, "reply")]
+
+
+@pytest.mark.parametrize(
+    "status, reason, text",
+    [
+        (
+            ProbeStatus.TRANSIENT,
+            "network",
+            "временный сетевой сбой проверки; повтор возможен в новом ходе "
+            "после паузы",
+        ),
+        (
+            ProbeStatus.INSUFFICIENT_BUDGET,
+            "output_limit",
+            "ответ на проверку усечён по лимиту 512 токенов",
+        ),
+        (
+            ProbeStatus.UNCONFIRMED,
+            "code_mismatch",
+            "модель не прочитала проверочную картинку",
+        ),
+        (
+            ProbeStatus.BLOCKED,
+            "access_denied",
+            "ошибка доступа при проверке зрения",
+        ),
+        (
+            ProbeStatus.BLOCKED,
+            "route_configuration",
+            "ошибка настроек маршрута при проверке зрения",
+        ),
+        (
+            ProbeStatus.TRANSIENT,
+            "probe_cancelled",
+            "проверка зрения отменена",
+        ),
+        (
+            ProbeStatus.BLOCKED,
+            "probe_payload_rejected",
+            "маршрут отклонил даже маленькую проверочную картинку (413)",
+        ),
+    ],
+)
+def test_other_probe_reasons_keep_their_texts(status, reason, text):
+    from gc_core.vision.probe import ProbeResult
+
+    notes = _probe_note(
+        assign={"vision": "gemini"},
+        tools=_VIEW_TOOL,
+        result=ProbeResult(status, reason),
+    )
 
     assert notes == [
         TraceNote(
-            "deepseek: маршрут отказал в поддержке изображений. "
-            "Пользовательское изображение не отправлено.",
+            f"deepseek: {text}. Пользовательское изображение не отправлено.",
             "reply",
         )
     ]
-    assert notes[0].tone == "warn"

@@ -1,8 +1,9 @@
-"""Пометка «изображение не просмотрено» (спека изображений §10).
+"""Пометка «модель не принимает изображения» и сбоев проверки зрения (спека
+изображений §10).
 
-Показывается, только когда модель только что оказалась слепой (новая пометка
-`ImageRejects.mark`) и после этого смотреть некому (`Audience.nobody`). Зовут
-двое: контроллер (отказ модели запроса) и тул `fs_view_image` (отказ «глаз»).
+Пути два: проба маршрута (`note_probe`) и реальный отказ модели запроса
+(`note_blind`, только когда смотреть некому — `Audience.nobody`); текст про
+неприём изображений у них один (`unsupported_note`).
 Канал — хук `RunContext.on_trace_note(TraceNote)`: TUI рисует `└ !` под
 владельцем пометки — вызовом тула (`owner="call"`, его `call_id`) или ответом
 (`owner="reply"`). Хука нет (CLI, сервер, SDK) — предупреждение в журнал
@@ -19,22 +20,23 @@ from typing import Any, Literal
 
 from gc_core.model_router import ResolvedModel
 from gc_core.security.call_scope import current_call
-from gc_core.vision.audience import viewing_eyes
+from gc_core.vision.audience import route_id, viewing_eyes
 from gc_core.vision.probe import ProbeStatus
 
-NOTE_MAIN_BLIND = (
-    "{alias} не работает с изображениями — изображение не просмотрено. "
-    "Модель для зрения можно выбрать в /settings → Модели."
+# «Модель не принимает изображения» — один факт одним текстом на обоих путях
+# (проба `note_probe` и реальный отказ `note_blind`); различается только
+# окончание (решение владельца 2026-10-24). Собирает `unsupported_note`.
+NOTE_UNSUPPORTED = "{alias} не принимает изображения"
+NOTE_VIA_EYES = "агент посмотрит через {eyes}"
+NOTE_NOT_VIEWED = "изображение не просмотрено"
+NOTE_HINT_MAIN = (
+    "выберите модель с поддержкой изображений или назначьте модель для "
+    "зрения в настройках"
 )
-NOTE_EYES_BLIND = (
-    "Модель для зрения {alias} не работает с изображениями — изображение не "
-    "просмотрено. Выберите другую в /settings → Модели."
-)
-# Модель запроса не принимает картинки, но агент посмотрит их тулом зрения —
-# не сбой, а факт про реплику (решение владельца 2026-10-24).
-NOTE_MAIN_VIA_EYES = (
-    "{alias} не принимает изображения · агент посмотрит через {eyes}"
-)
+NOTE_HINT_EYES = "назначьте другую модель для зрения в настройках"
+_NOTE_SEP = " · "
+
+Tone = Literal["warn", "info"]
 
 
 @dataclass(frozen=True)
@@ -46,7 +48,7 @@ class TraceNote:
     text: str
     owner: Literal["reply", "call"]
     call_id: str | None = None
-    tone: Literal["warn", "info"] = "warn"
+    tone: Tone = "warn"
 
 
 _logger = logging.getLogger(__name__)
@@ -58,16 +60,29 @@ def note_alias(resolved: ResolvedModel) -> str:
     return resolved.alias or resolved.model
 
 
+def unsupported_note(
+    alias: str, *, viewer: str | None = None, eyes_role: bool = False
+) -> tuple[str, Tone]:
+    """Текст и тон пометки «``alias`` не принимает изображения»: смотрит
+    модель зрения ``viewer`` — нейтральный `info`; иначе `warn` с выходом для
+    модели запроса или (``eyes_role``) для самой модели зрения."""
+    head = NOTE_UNSUPPORTED.format(alias=alias)
+    if viewer is not None:
+        return _NOTE_SEP.join(
+            (head, NOTE_VIA_EYES.format(eyes=viewer))
+        ), "info"
+    hint = NOTE_HINT_EYES if eyes_role else NOTE_HINT_MAIN
+    return _NOTE_SEP.join((head, NOTE_NOT_VIEWED, hint)), "warn"
+
+
 def note_blind(
     ctx: Any, resolved: ResolvedModel, *, eyes: bool, logger: Any = None
 ) -> None:
     """Пометка про только что помеченную слепую модель: модель запроса
-    (`eyes=False`, `NOTE_MAIN_BLIND`) или модель для зрения (`eyes=True`,
-    `NOTE_EYES_BLIND`). Звать, только если пометка новая и смотреть некому."""
-    template = NOTE_EYES_BLIND if eyes else NOTE_MAIN_BLIND
-    emit_trace_note(
-        ctx, template.format(alias=note_alias(resolved)), logger=logger
-    )
+    (`eyes=False`) или модель для зрения (`eyes=True`). Звать, только если
+    пометка новая и смотреть некому."""
+    text, tone = unsupported_note(note_alias(resolved), eyes_role=eyes)
+    emit_trace_note(ctx, text, logger=logger, tone=tone)
 
 
 def emit_trace_note(
@@ -75,7 +90,7 @@ def emit_trace_note(
     text: str,
     *,
     logger: Any = None,
-    tone: Literal["warn", "info"] = "warn",
+    tone: Tone = "warn",
 ) -> None:
     """Отдать пометку хуку `ctx.on_trace_note` как `TraceNote`; хука нет —
     тот же текст в переданный логгер, иначе в `ctx.logger` (`warn` —
@@ -96,7 +111,6 @@ def emit_trace_note(
 PROBE_REASON_RU = {
     "code_mismatch": "модель не прочитала проверочную картинку",
     "output_limit": "ответ на проверку усечён по лимиту 512 токенов",
-    "image_unsupported": "маршрут отказал в поддержке изображений",
     "network": "временный сетевой сбой проверки; повтор возможен в новом ходе после паузы",
     "probe_payload_rejected": "маршрут отклонил даже маленькую проверочную картинку (413)",
     "access_denied": "ошибка доступа при проверке зрения",
@@ -115,17 +129,29 @@ def note_probe(ctx, state, key, resolved, result):
             return
         notices.add(identity)
     alias = note_alias(resolved)
-    eyes = (
-        viewing_eyes(ctx, state, resolved)
-        if result.status is ProbeStatus.UNSUPPORTED
-        else None
-    )
-    if eyes is not None:
-        text = NOTE_MAIN_VIA_EYES.format(alias=alias, eyes=note_alias(eyes))
-        emit_trace_note(ctx, text, tone="info")
+    if result.status is ProbeStatus.UNSUPPORTED:
+        text, tone = _unsupported_probe_note(ctx, state, resolved)
+        emit_trace_note(ctx, text, tone=tone)
         return
     reason = PROBE_REASON_RU.get(result.reason, "зрение не подтверждено")
     emit_trace_note(
         ctx,
         f"{alias}: {reason}. Пользовательское изображение не отправлено.",
+    )
+
+
+def _unsupported_probe_note(ctx, state, resolved) -> tuple[str, Tone]:
+    """Картинки идут только модели запроса и модели зрения: маршрут не
+    модели запроса — это «глаза»."""
+    router = getattr(ctx, "model_router", None)
+    if router is not None:
+        main = router.resolve_main_at_level(
+            getattr(state, "_call_level", None), check_breaker=False
+        )
+        if route_id(main) != route_id(resolved):
+            return unsupported_note(note_alias(resolved), eyes_role=True)
+    eyes = viewing_eyes(ctx, state, resolved)
+    return unsupported_note(
+        note_alias(resolved),
+        viewer=note_alias(eyes) if eyes is not None else None,
     )
