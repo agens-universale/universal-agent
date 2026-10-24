@@ -445,6 +445,92 @@ async def test_expand_at_bottom_stays_bottom(tmp_path):
         assert trace.scroll_y == trace.max_scroll_y
 
 
+async def _two_blocks(pilot, thread):
+    """Два блока чтений, разделённые ответом; лента у низа."""
+    scr = await _open(pilot)
+    await _tail(pilot, thread, *_reads(*range(8)))
+    await _tail(pilot, thread, _answer("a1", "Посмотрю ещё."))
+    await _tail(pilot, thread, *_reads(*range(10, 18)))
+    for _ in range(4):
+        await pilot.pause()
+    return scr
+
+
+def _header_of(scr, block):
+    trace = scr.query_one("#trace", VerticalScroll)
+    return next(
+        r
+        for r in trace.query(ToolCallRow)
+        if r.mode == "header" and r.call_id == f"/{block}"
+    )
+
+
+async def _toggle_frames(pilot, monkeypatch, scr, key, header):
+    """Кадры после переключения блока: (scroll_y ленты, ряд заголовка)
+    на каждой отрисовке экрана."""
+    from textual.app import App
+
+    from gc_tui.messages import BlockToggle
+
+    trace = scr.query_one("#trace", VerticalScroll)
+    frames: list[tuple[int, int]] = []
+    display = App._display
+
+    def recorded(app, screen, renderable):
+        frames.append((round(trace.scroll_y), header.region.y))
+        return display(app, screen, renderable)
+
+    monkeypatch.setattr(App, "_display", recorded)
+    scr.post_message(BlockToggle("", key))
+    for _ in range(8):
+        await pilot.pause()
+    monkeypatch.setattr(App, "_display", display)
+    return frames
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ends", [("top",), ("top", "bottom")])
+async def test_toggle_at_bottom_one_movement(tmp_path, monkeypatch, ends):
+    """Лента у низа: раскрытие и свёртка последнего блока — одно движение,
+    первый кадр после переключения уже итоговый и прижат к низу."""
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 20)) as pilot:
+        scr = await _two_blocks(pilot, thread)
+        trace = scr.query_one("#trace", VerticalScroll)
+        block = _block_of(scr, "r10")
+        header = _header_of(scr, block)
+        for end in ends:
+            frames = await _toggle_frames(
+                pilot, monkeypatch, scr, f"{block}:{end}", header
+            )
+        assert frames
+        assert set(frames) == {frames[-1]}
+        assert frames[0][0] == trace.max_scroll_y
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ends", [("top",), ("top", "bottom")])
+async def test_toggle_scrolled_up_header_stays(tmp_path, monkeypatch, ends):
+    """Лента прокручена вверх: прокрутка не меняется, заголовок блока —
+    на своём ряду в каждом кадре."""
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 20)) as pilot:
+        scr = await _two_blocks(pilot, thread)
+        trace = scr.query_one("#trace", VerticalScroll)
+        block = _block_of(scr, "r0")
+        header = _header_of(scr, block)
+        trace.scroll_to(y=header.virtual_region.y - 6, animate=False)
+        for _ in range(3):
+            await pilot.pause()
+        assert scr._stick_bottom is False
+        before = (round(trace.scroll_y), header.region.y)
+        for end in ends:
+            frames = await _toggle_frames(
+                pilot, monkeypatch, scr, f"{block}:{end}", header
+            )
+        assert set(frames) <= {before}
+
+
 @pytest.mark.asyncio
 async def test_collapse_brings_header_into_view(tmp_path):
     thread = _Thread(tmp_path)

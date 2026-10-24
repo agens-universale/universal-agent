@@ -534,6 +534,76 @@ async def test_turn_end_one_movement_per_layout_frame(tmp_path):
         assert not [f for f in tail if not f[0] and not f[2]]
 
 
+def _history(tmp_path, tid, n):
+    """`n` пар реплика-ответ в треде: лента выше окна."""
+    from gc_core.thread_store import append_new_thread_messages
+
+    rows = []
+    for i in range(n):
+        rows.append({"id": f"u{i}", "role": "user", "content": f"вопрос {i}"})
+        rows.append(
+            {
+                "id": f"a{i}",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": f"ответ {i}"}],
+            }
+        )
+    append_new_thread_messages(
+        str(tmp_path), "cli", tid, rows, set(), start_seq=0
+    )
+    return len(rows)
+
+
+def _start_frame(scr):
+    """Кадр начала хода: высота бара, прокрутка ленты, верх поля ввода."""
+    return (
+        scr.query_one("#indicator-bar").region.height,
+        round(scr.query_one("#trace").scroll_y),
+        _input_y(scr),
+    )
+
+
+@pytest.mark.asyncio
+async def test_turn_start_one_movement_per_frame(tmp_path, monkeypatch):
+    """Начало хода у низа: реплика и бар встают одним движением — первый
+    кадр с переменой уже итоговый: лента у низа, реплика последней строкой
+    прямо над баром, поле ввода на месте."""
+    from gc_testkit.tui_support import wait_until
+    from textual.app import App
+
+    _write_task(tmp_path, SCRIPT_TID)
+    ex = _ScriptedExecutor(tmp_path)
+    ex.seq = _history(tmp_path, SCRIPT_TID, 12)
+    app = _app(tmp_path)
+    app._executor_factory = lambda: ex
+    frames: list[tuple] = []
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(SCRIPT_TID, is_resume=True)
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        before = _start_frame(scr)
+        display = App._display
+
+        def recorded(app, screen, renderable):
+            frames.append(_start_frame(scr))
+            return display(app, screen, renderable)
+
+        monkeypatch.setattr(App, "_display", recorded)
+        try:
+            pilot.app.query_one("#cmdinput").text = "первый"
+            await pilot.press("enter")
+            await wait_until(pilot, lambda: ex.at == 0, "думаю")
+            await pilot.pause(0.6)
+        finally:
+            ex.stop_run()
+        after = (2, trace.max_scroll_y, before[2])
+        states = [f for k, f in enumerate(frames) if frames[k - 1 : k] != [f]]
+        assert states in ([after], [before, after])
+        assert trace.children[-1].region.bottom == trace.region.bottom
+
+
 # --- S10 §3.7: ошибка до конца раннера — прогон фиксируется парой -----------
 
 

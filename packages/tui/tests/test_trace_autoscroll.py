@@ -25,6 +25,30 @@ async def test_at_bottom_true_when_no_overflow(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_short_trace_stays_top_aligned(tmp_path):
+    """Лента ниже окна прижата к низу якорем, но прокрутка не уходит
+    в минус: контент стоит сверху."""
+    from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=(80, 40)) as pilot:
+        scr = pilot.app.screen
+        scr._mount_trace_row(
+            prefix="x ", content="новое", kind_class="line-meta"
+        )
+        await pilot.pause()
+        await pilot.pause()
+        trace = scr.query_one("#trace", VerticalScroll)
+        assert trace.max_scroll_y == 0
+        assert trace.scroll_y == 0
+
+
+@pytest.mark.asyncio
 async def test_autoscroll_skipped_when_scrolled_up(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp

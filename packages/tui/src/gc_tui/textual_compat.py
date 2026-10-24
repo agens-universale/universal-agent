@@ -9,6 +9,14 @@
 прибавляет сдвиг прокрутки контейнера вместо вычитания — при прокрутке во
 время выделения его начало уезжает. Стенды — `test_textual_compat.py`
 (перенос `repro.py` и `repro2.py` из решений захода TUI 2026-10-20).
+
+Ошибки якоря Textual 8.2.8: раскладка ставит якорному контейнеру
+`scroll_y` = низ контента − высота окна через `set_reactive`, мимо
+валидатора, и высоту берёт из прошлой раскладки (`container_size`
+обновляется после). Лента сменила высоту (бар, баннер, список у ввода) —
+низ уезжает на разницу до следующего кадра; контент ниже окна — прокрутка
+уходит в минус, контент прижат к низу окна. `AnchoredScroll` считает
+якорную прокрутку от высоты той же раскладки, не ниже нуля.
 """
 
 from __future__ import annotations
@@ -17,9 +25,10 @@ import logging
 
 import textual
 from textual import selection
-from textual.geometry import Offset
+from textual.containers import VerticalScroll
+from textual.geometry import Offset, Size
 from textual.screen import Screen
-from textual.widget import Widget
+from textual.widget import AwaitMount, Widget
 
 PATCHED_TEXTUAL = "8.2.8"
 
@@ -62,6 +71,30 @@ def apply_textual_patches() -> bool:
         return False
     selection.SelectStart.pointer_start_offset = _PATCHED_PROPERTY
     return True
+
+
+class AnchoredScroll(VerticalScroll):
+    """Прокрутка с якорем Textual: низ — по высоте текущей раскладки."""
+
+    _anchor_y = 0
+
+    def arrange(self, size: Size, optimal: bool = False):
+        result = super().arrange(size, optimal)
+        if not optimal:
+            bottom = result.spatial_map.total_region.bottom
+            self._anchor_y = max(0, bottom - size.height)
+        return result
+
+    def set_reactive(self, reactive, value) -> None:
+        scroll = reactive in (Widget.scroll_y, Widget.scroll_target_y)
+        if scroll and self._anchored and not self._anchor_released:
+            value = self._anchor_y
+        super().set_reactive(reactive, value)
+
+
+async def mounted(widget: Widget) -> None:
+    """Дождаться монтирования виджета, уже отданного `mount()`."""
+    await AwaitMount(widget.parent, [widget])
 
 
 def is_being_removed(widget: Widget) -> bool:

@@ -656,9 +656,7 @@ class TraceScreen(Screen):
         self._suppress_picker_reopen: bool = False
         # Spec 2026-05-26: ThinkingIndicator state.
         self._thinking = None  # type: Optional["ThinkingIndicator"]
-        self._stick_bottom = (
-            True  # автоскролл-намерение «липнуть к низу» трейса
-        )
+        self._stick = True  # намерение «липнуть к низу» (_stick_bottom)
         self._last_auto_y = 0  # куда мы в прошлый раз программно прижали трейс
         # Кэш реплик ленты для липкой реплики (_trace_replies).
         self._trace_replies_key: Optional[tuple] = None
@@ -817,7 +815,7 @@ class TraceScreen(Screen):
             with Horizontal(id="header"):
                 yield Static(left_text, id="header-left", markup=False)
                 yield Static(right_text, id="header-right", markup=False)
-            trace = VerticalScroll(id="trace")
+            trace = textual_compat.AnchoredScroll(id="trace")
             yield trace
             yield Vertical(id="indicator-bar")
             with Horizontal(id="input-row"):
@@ -2201,6 +2199,7 @@ class TraceScreen(Screen):
             self._on_trace_scrolled,
             init=False,
         )
+        self.watch(self, "_selecting", self._on_select_freeze)
         self.watch(self, "focused", self._on_focus_moved_overlays, init=False)
         self._check_clipboard_tip()
 
@@ -2214,9 +2213,7 @@ class TraceScreen(Screen):
         self._answer_flow.new_turn()
         self._reset_new_replies()
         self._next_no = 1
-        self._stick_bottom = (
-            True  # новый/переключённый трейс → показываем низ (latest)
-        )
+        self._stick_bottom = True  # новый трейс → показываем низ (latest)
         self._last_auto_y = 0
         self._active_calls.clear()
         self._call_timers.clear()
@@ -3287,35 +3284,48 @@ class TraceScreen(Screen):
         self._stick_bottom = True
         self._scroll_trace_end()
 
+    @property
+    def _stick_bottom(self) -> bool:
+        return self._stick
+
+    @_stick_bottom.setter
+    def _stick_bottom(self, stick: bool) -> None:
+        """Единственная точка смены липкости: флаг и якорь ленты вместе."""
+        self._stick = stick
+        self._sync_trace_anchor()
+
+    def _on_select_freeze(self, selecting: bool) -> None:
+        """Выделение (F2) снимает якорь; по его концу ушедшую вверх ленту
+        к низу не тянем — сначала детект, потом якорь."""
+        if not selecting:
+            self._update_stick_state()
+        self._sync_trace_anchor()
+
+    def _sync_trace_anchor(self) -> None:
+        """Якорь Textual держит ленту у низа в том же проходе раскладки,
+        что и перемена (рост, свёртка, хром у ввода), — одно движение.
+        Стоит, пока лента липнет к низу и нет выделения (F2): выделение
+        его снимает, конец выделения — возвращает."""
+        trace = self.query_one_optional(_SEL_TRACE, VerticalScroll)
+        wanted = self._stick and not self._ui_frozen_for_select()
+        if trace is not None and trace.is_anchored is not wanted:
+            trace.anchor(wanted)
+
     def _scroll_trace_end(self) -> None:
-        """Прижать трейс к низу ПОСЛЕ раскладки (height:auto → scroll_end сразу после
-        mount() не достаёт до нового низа) и запомнить позицию для _update_stick_state.
+        """Прижать трейс к низу: вернуть якорь (его мог снять ручной
+        скролл, оставшийся в допуске). Сам низ ставит раскладка, в том же
+        проходе; после неё — запомнить позицию для _update_stick_state."""
+        if not self._stick_bottom or self._ui_frozen_for_select():
+            return
+        trace = self.query_one_optional(_SEL_TRACE, VerticalScroll)
+        if trace is not None:
+            trace.anchor()
+            self.call_after_refresh(self._note_auto_y, trace)
 
-        Отсрочки две: экрана и самой ленты (та же, что у `scroll_end`
-        Textual, — новый низ готов только после неё). Флаг проверяется
-        перед каждой: ушедшего вверх между заказом и прокруткой назад не
-        тянем; законные прижатия ставят флаг до заказа."""
-
-        def _trace() -> Optional[VerticalScroll]:
-            if not self._stick_bottom or self._ui_frozen_for_select():
-                return None
-            try:
-                return self.query_one(_SEL_TRACE, VerticalScroll)
-            except Exception:
-                return None
-
-        def _end() -> None:
-            trace = _trace()
-            if trace is not None:
-                self._last_auto_y = trace.max_scroll_y
-                trace.scroll_end(animate=False, immediate=True)
-
-        def _do() -> None:
-            trace = _trace()
-            if trace is not None:
-                trace.call_after_refresh(_end)
-
-        self.call_after_refresh(_do)
+    def _note_auto_y(self, trace: VerticalScroll) -> None:
+        """Низ после раскладки — пока лента всё ещё липнет к нему."""
+        if self._stick_bottom:
+            self._last_auto_y = trace.max_scroll_y
 
     def _trace_mount(
         self,
@@ -4062,7 +4072,7 @@ class TraceScreen(Screen):
             return
         view, key = routed
         if at_bottom:
-            self.call_after_refresh(self._scroll_trace_end)
+            self._scroll_trace_end()
             return
         head = view.head_widget(key)
         if head is not None:
@@ -7693,8 +7703,10 @@ class TraceScreen(Screen):
             client_id = self._track_pending(
                 display_text=text, wire_content=full_query, images=images
             )
-            self._mount_user_reply(
-                text, state="pending", client_id=client_id, images=images
+            await textual_compat.mounted(
+                self._mount_user_reply(
+                    text, state="pending", client_id=client_id, images=images
+                )
             )
             self._prepare_for_new_run()
             self._reset_thinking_timer()
@@ -7748,8 +7760,10 @@ class TraceScreen(Screen):
         client_id = self._track_pending(
             display_text=text, wire_content=full_query, images=images
         )
-        self._mount_user_reply(
-            text, state="pending", client_id=client_id, images=images
+        await textual_compat.mounted(
+            self._mount_user_reply(
+                text, state="pending", client_id=client_id, images=images
+            )
         )
         self._prepare_for_new_run()
         self._reset_thinking_timer()
@@ -8992,8 +9006,10 @@ class TraceScreen(Screen):
             client_id = self._track_pending(
                 display_text=prompt, wire_content=full_query
             )
-            self._mount_user_reply(
-                prompt, state="pending", client_id=client_id
+            await textual_compat.mounted(
+                self._mount_user_reply(
+                    prompt, state="pending", client_id=client_id
+                )
             )
             self._prepare_for_new_run()
             self._reset_thinking_timer()
@@ -9015,7 +9031,11 @@ class TraceScreen(Screen):
         client_id = self._track_pending(
             display_text=prompt, wire_content=full_query
         )
-        self._mount_user_reply(prompt, state="pending", client_id=client_id)
+        await textual_compat.mounted(
+            self._mount_user_reply(
+                prompt, state="pending", client_id=client_id
+            )
+        )
         self._prepare_for_new_run()
         self._reset_thinking_timer()
         self._on_user_text_submitted(prompt)
