@@ -250,10 +250,11 @@ def tool_args_summary(
 ) -> str:
     """Однострочная сводка аргументов вызова тула (спека P1a §2.5).
 
-    Главный аргумент — по таблице отображения ядра; его нет — до трёх пар
-    ``key=preview``. Длина сводки не превышает ``limit``. ``root`` — корень
-    проекта: путь тула ядра показывается от него (``display_path``),
-    у команды снята приставка ``cd <корень> &&``; без корня — как записаны.
+    Главный аргумент — по таблице отображения ядра; его нет — у тула ядра
+    пусто, у MCP и неизвестного — до трёх пар ``key=preview``. Длина
+    сводки не превышает ``limit``. ``root`` — корень проекта: путь тула
+    ядра показывается от него (``display_path``), у команды снята
+    приставка ``cd <корень> &&``; без корня — как записаны.
     ``nested`` — вызов субагента: таблица — с вложенным контекстом
     (``tool_display(..., nested=True)``).
     Только показ: аргументы вызова не меняются."""
@@ -268,7 +269,7 @@ def tool_args_summary(
         items = todo_items_from_arguments(data)
         if items is not None:
             return _todo_args_summary(items, limit=limit)
-        # битые аргументы — генерик-превью, «чек-лист очищен» не врём
+        # битые аргументы — общая ветка, «чек-лист очищен» не врём
     if not isinstance(data, dict) or not data:
         return ""
     if root is not None and name in TOOL_DISPLAY:
@@ -279,12 +280,16 @@ def tool_args_summary(
     return _fallback_summary(name, data, limit)
 
 
+#: Тулы вне таблицы отображения: их сводка без главного — пары.
+_UNLISTED = frozenset({DisplayCategory.MCP, DisplayCategory.CALLED})
+
+
 def _fallback_summary(
     name: Optional[str], data: Dict[str, Any], limit: int
 ) -> str:
-    """Главного аргумента нет: пары ``key=preview``; у памяти — пусто,
-    её сводка только от действия (глагол из пар не выводится)."""
-    if name and tool_display(name).category is DisplayCategory.MEMORY:
+    """Главного аргумента нет: пары ``key=preview`` — только у тула, которого
+    таблица не знает (MCP, неизвестный); у тула ядра сводка пуста."""
+    if name and tool_display(name).category not in _UNLISTED:
         return ""
     return _pairs_summary(data, limit)
 

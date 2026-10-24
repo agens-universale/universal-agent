@@ -147,13 +147,11 @@ def test_nested_regular_tool_unchanged():
 
 def test_finish_summary_solution_type_only_nested():
     """Главный аргумент сдачи — только во вложенной таблице: наверху
-    контракт сводки прежний (пары аргументов)."""
+    главного нет, а пары — только у тулов вне таблицы, сводка пуста."""
     from gc_core.execution.progress import tool_args_summary
 
     args = {"solution_type": "full_solution", "task": "сверить таблицу"}
     assert TOOL_DISPLAY["turn_finish"].primary_arg is None
     nested = tool_args_summary("turn_finish", args, nested=True)
     assert nested == "full_solution"
-    assert tool_args_summary("turn_finish", args) == (
-        "solution_type='full_solution', task='сверить таблицу'"
-    )
+    assert tool_args_summary("turn_finish", args) == ""

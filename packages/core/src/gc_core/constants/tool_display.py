@@ -116,7 +116,7 @@ TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
     FS_VIEW_IMAGE_NAME: _d(_C.VIEW, "path"),
     SESSION_MEMORY_TOOL_NAME: _d(_C.MEMORY, "action"),
     PROJECT_MEMORY_TOOL_NAME: _d(_C.MEMORY, "action"),
-    SESSION_THINK_TOOL_NAME: _d(_C.THINK, None),
+    SESSION_THINK_TOOL_NAME: _d(_C.THINK, "thoughts"),
     SKILLS_LIST_NAME: _d(_C.SKILL, "pack"),
     SKILLS_LOAD_NAME: _d(_C.SKILL, "skill_id"),
     EXEC_CALCULATOR_NAME: _d(_C.CALC, "expression"),

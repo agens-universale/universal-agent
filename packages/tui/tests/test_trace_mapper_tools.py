@@ -36,7 +36,7 @@ def test_write_to_file_shows_path():
     assert ev.summary == "report.md"
 
 
-def test_search_files_query_or_pattern():
+def test_search_files_without_pattern_has_empty_summary():
     ev = map_message(
         {
             "type": "function_call",
@@ -46,7 +46,9 @@ def test_search_files_query_or_pattern():
         no=3,
         ts="t",
     )
-    assert "AgentExecutor" in ev.summary
+    # Главный аргумент поиска — `pattern`; старого `query` у тула ядра
+    # нет — сводка пуста (пары — только у тулов вне таблицы).
+    assert ev.summary == ""
 
 
 def test_execute_command_shows_command():
@@ -725,9 +727,9 @@ def test_content_arguments_are_not_retold():
 
 def test_search_and_replace_missing_path_does_not_crash():
     """path отсутствует (сырой, ещё не провалидированный tool-call) — строка не
-    падает, search/replace остаются видны парами."""
+    падает, сводка пуста: пары — только у тулов вне таблицы."""
     ev = _call("search_and_replace", {"search": "x", "replace": "y"})
-    assert ev.summary == "search='x', replace='y'"
+    assert ev.summary == ""
 
 
 @pytest.mark.parametrize(
@@ -753,7 +755,7 @@ def test_search_and_replace_non_string_path_does_not_crash():
     ev = _call(
         "search_and_replace", {"path": 42, "search": "x", "replace": "y"}
     )
-    assert "path=42" in ev.summary
+    assert ev.summary == ""
 
 
 # --- Длинный путь режется по-путевому (сводка ядра): имя файла остаётся. ---

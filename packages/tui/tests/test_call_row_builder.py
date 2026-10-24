@@ -81,6 +81,23 @@ def test_unknown_tool_called_with_raw_name_in_target():
     assert _content(row).startswith("Called  my_tool x=1")
 
 
+def test_think_row_shows_start_of_thought_without_key():
+    from gc_core.execution.progress import tool_args_summary
+    from gc_tui.services.trace_render import build_call_row
+
+    summary = tool_args_summary(
+        "session_think", {"thoughts": "The user wants a list"}
+    )
+    row = build_call_row(
+        call_id="c1",
+        wire_name="session_think",
+        args_summary=summary,
+        level=0,
+    )
+    row.set_result(summary="", outcome="ok")
+    assert _content(row) == "Think  The user wants a list"
+
+
 def test_mapper_puts_core_args_summary_into_call_event():
     from gc_tui.services.trace_mapper import map_message
 

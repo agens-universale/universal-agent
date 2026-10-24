@@ -1,7 +1,8 @@
 """Одна сводка аргументов вызова тула: главный аргумент по таблице отображения.
 
 Формат — спека P1a §2.5: путь сохраняет имя файла, `code` — число строк,
-поиск — `"pattern" in path`; главного нет — до трёх пар `key=preview`.
+поиск — `"pattern" in path`; главного нет — у тула ядра пусто, у MCP и
+неизвестного — до трёх пар `key=preview`.
 """
 
 from __future__ import annotations
@@ -112,8 +113,24 @@ def test_legacy_name_uses_current_rules():
     assert tool_args_summary("read_file", {"path": "a.py"}) == "a.py"
 
 
-def test_primary_not_string_falls_back_to_pairs():
-    assert tool_args_summary("fs_read_file", {"path": None}) == "path=None"
+def test_known_tool_without_primary_has_empty_summary():
+    """Пары `key=value` — только для тулов вне таблицы (MCP, неизвестные):
+    у тула ядра без главного аргумента сводка пуста."""
+    assert tool_args_summary("fs_read_file", {"path": None}) == ""
+    assert tool_args_summary("turn_ask_human", {"question": "Да?"}) == ""
+
+
+def test_think_shows_start_of_thought():
+    assert tool_args_summary("session_think", {"thoughts": "x"}) == "x"
+
+
+def test_think_without_thoughts_has_empty_summary():
+    assert tool_args_summary("session_think", {"doubts": "x"}) == ""
+
+
+def test_mcp_without_scalar_falls_back_to_pairs():
+    summary = tool_args_summary("mcp_office_read", {"pages": [1, 2]})
+    assert summary == "pages=<list 2>"
 
 
 def test_unknown_tool_falls_back_to_pairs():
