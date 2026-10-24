@@ -137,6 +137,10 @@ async def test_restart_loses_owner_as_recoverable_tool_feedback(tmp_path):
 # Дольше этого шага тест не ждёт. Иначе застрявшие дискавери, call_tool
 # SDK-сессии и process.wait держат весь прогон: у них своего потолка нет.
 _MCP_STEP_SEC = 20
+# Весь сценарий живёт в своём loop. Иначе задача владельца, которую anyio
+# не отпускает по отмене, остаётся на loop pytest, и его закрытие ждёт её
+# уже без всякого таймаута.
+_MCP_CASE_SEC = 60
 
 
 async def _await_step(awaitable, seconds=_MCP_STEP_SEC):
@@ -168,11 +172,7 @@ async def _close_host(host, ref):
         raise
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("transport", ["stdio", "stream_sse", "stream_http"])
-async def test_real_mcp_registry_reuses_live_session_across_effects(
-    tmp_path, transport
-):
+async def _real_mcp_registry_case(tmp_path, transport):
     import json
     import socket
     import sys
@@ -280,6 +280,33 @@ async def test_real_mcp_registry_reuses_live_session_across_effects(
             await _close_host(host, ref)
         finally:
             await _stop_mcp_fixture(process)
+
+
+@pytest.mark.parametrize("transport", ["stdio", "stream_sse", "stream_http"])
+def test_real_mcp_registry_reuses_live_session_across_effects(
+    tmp_path, transport
+):
+    import threading
+
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            asyncio.run(_real_mcp_registry_case(tmp_path, transport))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(
+        target=run, name="mcp-resource-host", daemon=True
+    )
+    worker.start()
+    worker.join(_MCP_CASE_SEC)
+    if worker.is_alive():
+        raise AssertionError(
+            f"MCP resource host did not finish in {_MCP_CASE_SEC}s"
+        )
+    if errors:
+        raise errors[0]
 
 
 @pytest.mark.asyncio
