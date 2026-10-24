@@ -16,7 +16,8 @@
 обновляется после). Лента сменила высоту (бар, баннер, список у ввода) —
 низ уезжает на разницу до следующего кадра; контент ниже окна — прокрутка
 уходит в минус, контент прижат к низу окна. `AnchoredScroll` считает
-якорную прокрутку от высоты той же раскладки, не ниже нуля.
+якорную прокрутку от высоты той же раскладки, не ниже нуля; на иной
+версии Textual — обычный якорь.
 """
 
 from __future__ import annotations
@@ -74,7 +75,12 @@ def apply_textual_patches() -> bool:
 
 
 class AnchoredScroll(VerticalScroll):
-    """Прокрутка с якорем Textual: низ — по высоте текущей раскладки."""
+    """Прокрутка с якорем Textual и поправкой двух его ошибок 8.2.8:
+    якорная прокрутка считается от высоты окна прошлой раскладки (лента
+    сменила высоту — низ уезжает на разницу до следующего кадра) и ставится
+    мимо валидатора (контент ниже окна — прокрутка в минус). Здесь — от
+    высоты той же раскладки, не ниже нуля. Только для `PATCHED_TEXTUAL`:
+    на иной версии — обычный якорь Textual."""
 
     _anchor_y = 0
 
@@ -87,9 +93,12 @@ class AnchoredScroll(VerticalScroll):
 
     def set_reactive(self, reactive, value) -> None:
         scroll = reactive in (Widget.scroll_y, Widget.scroll_target_y)
-        if scroll and self._anchored and not self._anchor_released:
+        if scroll and self._anchor_held() and textual_is_patched_version():
             value = self._anchor_y
         super().set_reactive(reactive, value)
+
+    def _anchor_held(self) -> bool:
+        return self._anchored and not self._anchor_released
 
 
 async def mounted(parent: Widget, widgets: list[Widget]) -> None:

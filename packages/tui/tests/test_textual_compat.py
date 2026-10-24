@@ -147,6 +147,41 @@ def test_other_version_without_private_module_imports(monkeypatch):
     importlib.import_module("gc_tui.app")
     fresh = importlib.import_module("gc_tui.textual_compat")
     assert fresh.apply_textual_patches() is False
+    assert issubclass(fresh.AnchoredScroll, VerticalScroll)
+
+
+class _Anchored(App):
+    """Якорная лента ниже окна: три строки в окне на десять."""
+
+    CSS = "#a {height: 10;} Static {height: 1;}"
+
+    def compose(self):
+        with textual_compat.AnchoredScroll(id="a"):
+            for i in range(3):
+                yield Static(f"line {i}")
+
+    def on_mount(self) -> None:
+        self.query_one("#a").anchor()
+
+
+async def _anchored_scroll_y() -> float:
+    app = _Anchored()
+    async with app.run_test(size=(40, 20)) as pilot:
+        await pilot.pause()
+        return app.query_one("#a").scroll_y
+
+
+@pytest.mark.asyncio
+async def test_anchored_scroll_not_negative():
+    assert await _anchored_scroll_y() == 0
+
+
+@pytest.mark.asyncio
+async def test_other_version_anchored_scroll_is_plain_anchor(monkeypatch):
+    """На чужой версии Textual поправки якоря не ставятся: лента ведёт
+    себя как обычный якорь Textual (здесь — его прокрутка в минус)."""
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    assert await _anchored_scroll_y() < 0
 
 
 class _BelowScreenApp(_Lines):
