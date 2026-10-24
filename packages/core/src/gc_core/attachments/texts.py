@@ -38,6 +38,8 @@ STUB_NOBODY = "[{label} · {wh} · not viewed: no available model can work with 
 STUB_FILE_MISSING = "[{label} · file unavailable: {path}]"
 # Тот же файл приложен пикселями в другом месте истории — здесь только записка.
 STUB_SHOWN_ELSEWHERE = "[{label} · {wh} · the same image is attached elsewhere in this conversation]"
+# Подпись перед частью с пикселями — та же форма, что у записок.
+STUB_ATTACHED_INLINE = "[{label} · {wh} · attached inline]"
 
 TECH_LINE_TOOL = TOOL_LABEL + ": {source} · {wh}"
 TECH_LINE_ASK = "{label} from the user's answer to turn_ask_human · {wh}"

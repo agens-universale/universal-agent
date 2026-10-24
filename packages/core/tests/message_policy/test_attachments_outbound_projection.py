@@ -20,6 +20,7 @@ from gc_core.attachments.model import (
 from gc_core.attachments.normalize import NormalizedImage
 from gc_core.attachments.store import ImageStore
 from gc_core.attachments.texts import (
+    STUB_ATTACHED_INLINE,
     STUB_FILE_MISSING,
     STUB_MODEL_BLIND,
     STUB_NOBODY,
@@ -111,6 +112,12 @@ def _image_part(data: bytes = PNG) -> dict:
     }
 
 
+def _pixels(att: Attachment, data: bytes = PNG) -> list[dict]:
+    """Подпись картинки и её пиксели — две части подряд."""
+    label = {"type": "text", "text": _note(STUB_ATTACHED_INLINE, att)}
+    return [label, _image_part(data)]
+
+
 def test_message_without_attachments_is_the_same_object():
     message = {"role": "user", "id": "m1", "content": "привет"}
     [projected] = project_outbound(
@@ -136,13 +143,35 @@ def test_live_image_goes_as_image_part_before_the_text():
         "role": "user",
         "id": "m1",
         "content": [
-            _image_part(),
+            *_pixels(att),
             {
                 "type": "text",
                 "text": "[Изображение #1] почему кнопка съехала?",
             },
         ],
     }
+
+
+def test_pixels_go_right_after_a_label_with_number_and_size():
+    """Пиксели без подписи модель не связывает с номером в тексте: перед частью
+    ``image_url`` — подпись в форме записок (решение владельца 2026-10-24)."""
+    from dataclasses import replace
+
+    att = replace(_attachment(8), width=1200, height=800)
+    [projected] = project_outbound(
+        [_message("m1", "[Изображение #8] что тут?", att)],
+        audience=SEES,
+        live_ids=frozenset({att.id}),
+        api_mode=CHAT,
+        read_bytes=_read,
+    )
+    assert projected["content"][:2] == [
+        {
+            "type": "text",
+            "text": "[Изображение #8 · png 1200×800 · attached inline]",
+        },
+        _image_part(),
+    ]
 
 
 def test_same_image_goes_as_pixels_once_in_its_latest_place():
@@ -164,7 +193,7 @@ def test_same_image_goes_as_pixels_once_in_its_latest_place():
     assert first["content"] == "\n".join(
         [_note(STUB_SHOWN_ELSEWHERE, att), "[Изображение #1] что тут?"]
     )
-    assert again["content"][0] == _image_part()
+    assert again["content"][:2] == _pixels(att)
 
 
 def test_unreadable_latest_place_falls_back_to_an_earlier_readable_one():
@@ -184,7 +213,7 @@ def test_unreadable_latest_place_falls_back_to_an_earlier_readable_one():
         api_mode=CHAT,
         read_bytes=lambda att: None if att.path == late.path else PNG,
     )
-    assert first["content"][0] == _image_part()
+    assert first["content"][:2] == _pixels(early)
     assert again["content"] == "\n".join(
         [_note(STUB_SHOWN_ELSEWHERE, late), "[Изображение #1] и снова"]
     )
@@ -201,7 +230,7 @@ def test_dead_attachment_of_a_mixed_message_is_a_text_note_in_its_place():
     )
     assert projected["content"] == [
         {"type": "text", "text": _note(STUB_OUT_OF_CONTEXT, old)},
-        _image_part(),
+        *_pixels(fresh),
         {"type": "text", "text": "[Изображение #1] [Изображение #2]"},
     ]
 
@@ -407,7 +436,7 @@ def test_chat_form_drops_type_message_so_image_parts_reach_the_wire():
     assert format_message_chat_completions_to_send_backend(projected) == {
         "role": "user",
         "content": [
-            _image_part(),
+            *_pixels(att),
             {"type": "text", "text": "[Изображение #1]"},
         ],
     }
@@ -434,7 +463,7 @@ def test_technical_message_with_a_tool_image_keeps_its_technical_text_last():
     assert projected == {
         "role": "user",
         "id": "t1",
-        "content": [_image_part(), {"type": "text", "text": technical}],
+        "content": [*_pixels(att), {"type": "text", "text": technical}],
     }
 
 

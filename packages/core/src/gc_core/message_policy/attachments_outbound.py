@@ -20,6 +20,7 @@ from gc_core.attachments.model import (
     wh_text,
 )
 from gc_core.attachments.texts import (
+    STUB_ATTACHED_INLINE,
     STUB_FILE_MISSING,
     STUB_MODEL_BLIND,
     STUB_MODEL_REJECTS_NOBODY,
@@ -332,12 +333,16 @@ def _project_message(
     shown: frozenset[str],
     api_mode: str,
 ) -> dict[str, Any]:
-    """Одно сообщение с вложениями: часть на вложение, затем текст сообщения.
-    ``message_key`` — ключ сообщения в ``places``."""
+    """Одно сообщение с вложениями: часть на вложение (пикселям предшествует
+    подпись), затем текст сообщения. ``message_key`` — ключ в ``places``."""
     parts: list[dict[str, Any]] = []
     for j, att in enumerate(attachments_of(message)):
         place = places.get(att.id)
         if place is not None and place[:2] == (message_key, j):
+            label = STUB_ATTACHED_INLINE.format(
+                label=att.label, wh=wh_text(att)
+            )
+            parts.append({"type": "text", "text": label})
             parts.append(
                 {
                     "type": "image_url",
