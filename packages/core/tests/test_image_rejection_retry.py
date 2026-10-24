@@ -24,6 +24,8 @@ from gc_core.attachments.normalize import NormalizedImage
 from gc_core.attachments.store import ImageStore
 from gc_core.attachments.texts import (
     STUB_MODEL_BLIND,
+    STUB_MODEL_REJECTS_NOBODY,
+    STUB_MODEL_REJECTS_VIEW,
     STUB_NOBODY,
     STUB_PROBE_FAILED,
 )
@@ -189,11 +191,8 @@ def test_image_rejection_marks_the_model_and_retries_once_without_images(
     assert _users(spy.requests[1]) == [
         {
             "role": "user",
-            "content": STUB_PROBE_FAILED.format(
-                label=att.label,
-                wh=wh_text(att),
-                reason="image_unsupported",
-                path=att.path,
+            "content": STUB_MODEL_REJECTS_NOBODY.format(
+                label=att.label, wh=wh_text(att), alias="blind-model"
             )
             + "\n[Изображение #1] что тут?",
         }
@@ -234,8 +233,8 @@ def test_with_assigned_eyes_the_retry_points_to_the_view_tool_and_stays_silent(
     assert _users(spy.requests[1]) == [
         {
             "role": "user",
-            "content": STUB_MODEL_BLIND.format(
-                label=att.label, wh=wh_text(att), path=att.path
+            "content": STUB_MODEL_REJECTS_VIEW.format(
+                label=att.label, wh=wh_text(att), alias="blind", path=att.path
             )
             + "\n[Изображение #1] что тут?",
         }

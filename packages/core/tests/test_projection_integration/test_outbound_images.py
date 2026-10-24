@@ -17,6 +17,7 @@ from gc_core.attachments.normalize import NormalizedImage
 from gc_core.attachments.store import ImageStore
 from gc_core.attachments.texts import (
     STUB_MODEL_BLIND,
+    STUB_MODEL_REJECTS_NOBODY,
     STUB_NOBODY,
     STUB_PROBE_FAILED,
     STUB_OUT_OF_CONTEXT,
@@ -305,8 +306,8 @@ def test_blind_request_model_gets_notes_and_no_view_tool(
     assert _user_wire(capture_outbound["messages"]) == [
         {
             "role": "user",
-            "content": STUB_PROBE_FAILED.format(
-                label=att.label, wh=wh_text(att), reason="image_unsupported"
+            "content": STUB_MODEL_REJECTS_NOBODY.format(
+                label=att.label, wh=wh_text(att), alias=MODEL
             )
             + "\n"
             + message["content"],
@@ -335,7 +336,11 @@ def test_a_model_declared_text_only_gets_notes_without_a_rejection(
     assert _user_wire(capture_outbound["messages"]) == [
         {
             "role": "user",
-            "content": _note(STUB_NOBODY, att) + "\n" + message["content"],
+            "content": STUB_MODEL_REJECTS_NOBODY.format(
+                label=att.label, wh=wh_text(att), alias=MODEL
+            )
+            + "\n"
+            + message["content"],
         }
     ]
     assert _tool_names(capture_outbound["payload"]) == ["fs_read_file"]

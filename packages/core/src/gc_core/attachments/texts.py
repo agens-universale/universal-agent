@@ -9,6 +9,7 @@
 """
 
 from gc_core.attachments.model import TOOL_LABEL
+from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 
 STUB_OUT_OF_CONTEXT = "[{label} · {wh} · not in context · file {path} · view it with fs_view_image]"
 # Слепой модели при живых «глазах»: без «другая модель опишет» слабая модель читает
@@ -16,6 +17,20 @@ STUB_OUT_OF_CONTEXT = "[{label} · {wh} · not in context · file {path} · view
 STUB_MODEL_BLIND = (
     "[{label} · {wh} · you cannot see this image yourself · call fs_view_image"
     " path={path} — another model will describe it for you]"
+)
+# Модель запроса известна слепой (проба или `vision: false`): ``alias`` — её
+# имя; окончание — по наличию тула просмотра (решение владельца 2026-10-24).
+_STUB_NOT_SENT = (
+    "[{label} · {wh} · this image was not sent with this request: the"
+    " selected model {alias} does not accept images · "
+)
+STUB_MODEL_REJECTS_VIEW = (
+    _STUB_NOT_SENT + "call " + FS_VIEW_IMAGE_NAME + " path={path}"
+    " — another model will describe it for you]"
+)
+STUB_MODEL_REJECTS_NOBODY = (
+    _STUB_NOT_SENT + "tell the user that a model with image support is"
+    " needed, or ask them to describe it in words]"
 )
 STUB_UNCHECKED = "[{label} · {wh} · vision not checked · file {path} · fs_view_image can check an available model before viewing; do not use OCR or shell workarounds]"
 STUB_PROBE_FAILED = "[{label} · {wh} · image not viewed: vision check {reason} · do not retry viewing or use OCR or shell workarounds in this turn; ask the user to describe it in words]"

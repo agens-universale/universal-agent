@@ -23,12 +23,15 @@ from gc_core.vision.registry import process_vision_probes
 class Audience:
     """`native` — модель запроса, если она увидит картинку сама; `eyes` —
     модель для зрения, если на неё можно рассчитывать; `tool_visible` — тул
-    `fs_view_image` в наборе запроса и смотреть есть кому."""
+    `fs_view_image` в наборе запроса и смотреть есть кому; `blind_alias` —
+    имя модели запроса, когда известно, что она не принимает изображения
+    (проба `UNSUPPORTED` или `vision: false`; только `chat_completions`)."""
 
     native: ResolvedModel | None
     eyes: ResolvedModel | None
     tool_visible: bool
     probe_reason: str | None = None
+    blind_alias: str | None = None
 
     @property
     def nobody(self) -> bool:
@@ -47,6 +50,21 @@ def _declared_blind(resolved: ResolvedModel, settings: Any) -> bool:
     if value is NO_BACKEND_OVERRIDE:
         value = settings_of(settings).backend.vision
     return value is False
+
+
+def _blind_alias(
+    resolved: ResolvedModel, result: Any, api_mode: str, settings: Any
+) -> str | None:
+    """Имя модели запроса, если известно, что она не принимает изображения:
+    проба `UNSUPPORTED` или `vision: false`. Только в `chat_completions` —
+    в `responses` записки прежние."""
+    if api_mode != "chat_completions":
+        return None
+    if _declared_blind(resolved, settings) or (
+        result is not None and result.status is ProbeStatus.UNSUPPORTED
+    ):
+        return resolved.alias or resolved.model
+    return None
 
 
 def _resolve_eyes(router: ModelRouter) -> ResolvedModel | None:
@@ -111,6 +129,7 @@ def compute_audience(
     candidate = _resolve_eyes(router)
     eyes = candidate if candidate is not None and sees(candidate) else None
     result = result_for(request_resolved)
+    blind_alias = _blind_alias(request_resolved, result, api_mode, settings)
     if result is None and candidate is not None:
         result = result_for(candidate)
     return Audience(
@@ -124,6 +143,7 @@ def compute_audience(
         probe_reason=result.reason
         if result is not None and result.status is not ProbeStatus.CONFIRMED
         else None,
+        blind_alias=blind_alias,
     )
 
 

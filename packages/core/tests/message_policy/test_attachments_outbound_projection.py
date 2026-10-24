@@ -7,6 +7,8 @@ import copy
 import os
 import tempfile
 
+import pytest
+
 from gc_core.attachments.model import (
     ORIGIN_TOOL,
     ORIGIN_USER,
@@ -253,6 +255,52 @@ def test_blind_request_model_with_eyes_gets_the_model_blind_note():
     assert (
         projected["content"]
         == _note(STUB_MODEL_BLIND, att) + "\n[Изображение #1]"
+    )
+
+
+#: Модель запроса известна слепой (проба UNSUPPORTED или `vision: false`).
+REJECTS_WITH_EYES = Audience(
+    native=None, eyes=MODEL, tool_visible=True, blind_alias="deepseek"
+)
+REJECTS_NOBODY = Audience(
+    native=None, eyes=None, tool_visible=False, blind_alias="deepseek"
+)
+
+
+@pytest.mark.parametrize("origin", [ORIGIN_USER, ORIGIN_TOOL])
+def test_known_blind_model_with_the_view_tool_is_told_to_call_it(origin):
+    """Картинки пользователя и тулов (в том числе MCP) — одна записка."""
+    att = _attachment(1, origin=origin)
+    [projected] = project_outbound(
+        [_message("m1", "текст", att)],
+        audience=REJECTS_WITH_EYES,
+        live_ids=frozenset({att.id}),
+        api_mode=CHAT,
+        read_bytes=_read,
+    )
+    assert projected["content"] == (
+        f"[{att.label} · {wh_text(att)} · this image was not sent with this "
+        "request: the selected model deepseek does not accept images · call "
+        f"fs_view_image path={att.path} — another model will describe it for "
+        "you]\nтекст"
+    )
+
+
+@pytest.mark.parametrize("origin", [ORIGIN_USER, ORIGIN_TOOL])
+def test_known_blind_model_without_the_view_tool_asks_the_user(origin):
+    att = _attachment(1, origin=origin)
+    [projected] = project_outbound(
+        [_message("m1", "текст", att)],
+        audience=REJECTS_NOBODY,
+        live_ids=frozenset({att.id}),
+        api_mode=CHAT,
+        read_bytes=_read,
+    )
+    assert projected["content"] == (
+        f"[{att.label} · {wh_text(att)} · this image was not sent with this "
+        "request: the selected model deepseek does not accept images · tell "
+        "the user that a model with image support is needed, or ask them to "
+        "describe it in words]\nтекст"
     )
 
 
