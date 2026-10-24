@@ -104,19 +104,38 @@ def test_ran_files_of_verbs_and_unrecorded(tmp_path):
     )
     files, unrecorded = ran_files_of(lookup, "x1")
     assert [(f.path, f.verb) for f in files] == [
+        ("gone.py", "Deleted"),
         ("new.py", "Added"),
         ("old.py", "Edited"),
-        ("gone.py", "Deleted"),
     ]
     assert [f.key for f in files] == [
+        "x1:gone.py",
         "x1:new.py",
         "x1:old.py",
-        "x1:gone.py",
     ]
     assert unrecorded == 3
     assert ran_files_of(lookup, "x2")[1] == 0
     assert ran_files_of(None, "x1") == ([], 0)
     assert ran_files_of(lookup, "nope") == ([], 0)
+
+
+def test_ran_files_of_sorted_by_path(tmp_path):
+    """Файлы одной команды — по пути, не в порядке перечисления дельты
+    шелла: один порядок у живой ленты, переоткрытия и превью."""
+    lookup = _lookup(
+        tmp_path,
+        [
+            _rec(p, call_id=None, op="delete", command_call_id="x1")
+            for p in ("p4c.txt", "p4b.txt", "sub/a.txt", "p4a.txt")
+        ],
+    )
+    files, _ = ran_files_of(lookup, "x1")
+    assert [f.path for f in files] == [
+        "p4a.txt",
+        "p4b.txt",
+        "p4c.txt",
+        "sub/a.txt",
+    ]
 
 
 def test_diff_block_for_is_under_block():

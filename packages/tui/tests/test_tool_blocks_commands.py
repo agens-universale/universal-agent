@@ -436,7 +436,14 @@ async def test_ran_files_one_phrase(tmp_path):
             for r in trace.query(ToolCallRow)
             if r.call_id.startswith("x1:") and r.display
         ]
-        assert [r.styles.margin.top for r in files] == [0, 1, 1]
+        # По пути: a.py (скрыт), b.py, gone.py, new.py; после `Deleted`
+        # тела нет — new.py без пустой строки.
+        assert [r.call_id for r in files] == [
+            "x1:b.py",
+            "x1:gone.py",
+            "x1:new.py",
+        ]
+        assert [r.styles.margin.top for r in files] == [0, 1, 0]
         diffs = [d for d in trace.query(DiffBlock) if d.display]
         assert len(diffs) == 2
 

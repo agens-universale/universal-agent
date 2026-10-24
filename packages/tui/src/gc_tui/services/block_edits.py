@@ -140,17 +140,20 @@ def ran_result_of(
 def ran_files_of(
     lookup: Optional[EditsLookup], call_id: str
 ) -> tuple[list[BlockEdit], int]:
-    """Файлы, тронутые командой ``call_id``, и число незаписанных сверх
-    потолка путей (`command_paths`)."""
+    """Файлы, тронутые командой ``call_id``, по пути, и число незаписанных
+    сверх потолка путей (`command_paths`). Порядок перечисления дельты
+    шелла случаен — путь даёт один порядок живой ленте, переоткрытию и
+    превью; правки разных вызовов идут в порядке вызовов."""
     if lookup is None or not call_id:
         return [], 0
+    records = sorted(lookup.by_command(call_id), key=lambda r: r.path)
     files = [
         _edit_of(
             record,
             key=f"{call_id}:{record.path}",
             verb=command_file_verb(record.op),
         )
-        for record in lookup.by_command(call_id)
+        for record in records
     ]
     total = lookup.command_paths_of(call_id)
     unrecorded = max(0, total - len(files)) if total else 0

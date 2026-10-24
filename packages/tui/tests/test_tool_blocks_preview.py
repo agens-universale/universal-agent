@@ -176,9 +176,11 @@ def _journal(tmp_path) -> None:
     journal = EditsJournal(edits_journal_path(str(tmp_path), "cli", TID))
     for i in range(3):
         journal.append(_record(f"e{i}", f"e{i}.py", n=5 + i))
-    journal.append(
-        _record(None, "gen.py", n=4, op="create", command_call_id="x2")
-    )
+    # Дельта шелла перечисляет файлы не по пути: порядок — билдера.
+    for path, n in (("gen.py", 4), ("a_gen.py", 1)):
+        journal.append(
+            _record(None, path, n=n, op="create", command_call_id="x2")
+        )
 
 
 def _record(
@@ -432,7 +434,8 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert live_heads == reopen_heads == preview_heads
     texts = [text for text, _ in preview]
     assert any("Edited 3 файла (+18 −0)" in t for t in texts)
-    assert any(t.startswith("     Added gen.py (+4 −0)") for t in texts)
+    added = [t.split()[1] for t in texts if t.startswith("     Added ")]
+    assert added == ["a_gen.py", "gen.py"]
     assert any("Agent  Worker" in t for t in texts)
     # Свёрнутые диффы — только изменённые строки, контекста нет.
     assert not any(t.endswith(" ctx") for t in texts)
