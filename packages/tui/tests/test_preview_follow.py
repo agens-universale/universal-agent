@@ -1,5 +1,5 @@
 """Превью сессии ведёт себя как живая лента: открывается у низа, «не внизу»
-показывает плашку «в конец» (клик и End — к низу).
+показывает плашку «в конец» (клик и End — к низу) и липкую реплику.
 Enter остаётся «продолжить сессию»."""
 
 import pytest
@@ -129,3 +129,17 @@ async def test_preview_enter_still_resumes_when_scrolled_up(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
     assert result["v"] is True
+
+
+@pytest.mark.asyncio
+async def test_preview_sticky_reply_when_reply_above_edge(tmp_path):
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _open(pilot, {})
+        second = list(_trace(scr).query(UserReplyContainer))[1]
+        await _scroll(pilot, scr, second.virtual_region.y + 3)
+        sticky, _ = _overlays(scr)
+        assert sticky.display is True
+        assert sticky.reply is second
+        assert sticky.region.y == _trace(scr).region.y
