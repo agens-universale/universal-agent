@@ -69,8 +69,6 @@ from gc_tui.messages import (
     BlockToggle,
     CopyBlockRequest,
     OpenImageRequest,
-    ScrollToEnd,
-    ScrollToReply,
 )
 from gc_tui.models import (
     CompactionStep,
@@ -85,6 +83,7 @@ from gc_tui.palette import INK as _INK
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
 from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.block_edits import (
@@ -203,7 +202,6 @@ from gc_tui.services.trace_retention import (
     retention_window_start_index,
     subagent_parent_ids_from_events,
 )
-from gc_tui.services.trace_scroll import reply_above
 from gc_tui.services.turn_outcome import (
     kind_of,
     meta_status_of,
@@ -244,11 +242,7 @@ from gc_tui.widgets.tool_blocks_view import (
     nested_tail,
 )
 from gc_tui.widgets.tool_call_row import ToolCallRow
-from gc_tui.widgets.trace_overlays import (
-    ScrollEndPill,
-    StickyReply,
-    pill_label,
-)
+from gc_tui.widgets.trace_overlays import pill_label
 from gc_tui.widgets.trace_row import (
     CompactionBody,
     CompactionRule,
@@ -489,7 +483,7 @@ class _NestedBlockHost:
         )
 
 
-class TraceScreen(Screen):
+class TraceScreen(TraceFollowMixin, Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
 
     # Ctrl+A — select-all в #cmdinput (CommandTextArea); git add всего — только на /diff.
@@ -656,11 +650,6 @@ class TraceScreen(Screen):
         self._suppress_picker_reopen: bool = False
         # Spec 2026-05-26: ThinkingIndicator state.
         self._thinking = None  # type: Optional["ThinkingIndicator"]
-        self._stick = True  # намерение «липнуть к низу» (_stick_bottom)
-        self._last_auto_y = 0  # куда мы в прошлый раз программно прижали трейс
-        # Кэш реплик ленты для липкой реплики (_trace_replies).
-        self._trace_replies_key: Optional[tuple] = None
-        self._trace_replies_cache: list = []
         # Freeze UI на время app-select (§3.2 F1): time.monotonic() последней
         # активности выделения (сторож F5); None когда не selecting.
         self._select_freeze_since: Optional[float] = None
@@ -834,8 +823,7 @@ class TraceScreen(Screen):
                     id="footer-right",
                     markup=False,
                 )
-        yield StickyReply(trace, id="trace-sticky-reply")
-        yield ScrollEndPill(trace, id="trace-end-pill")
+        yield from trace_overlays(trace)
 
     def _compose_header_segments(self) -> tuple[str, str]:
         """Return (left_text, right_text) for header.
@@ -2193,13 +2181,7 @@ class TraceScreen(Screen):
         # терминала — буфер меняется только снаружи; переходы внутри приложения его не
         # проверяют. Без сообщений терминала о фокусе окна — только на старте.
         self.watch(self.app, "app_focus", self._on_terminal_focus, init=False)
-        self.watch(
-            self.query_one(_SEL_TRACE, VerticalScroll),
-            "scroll_y",
-            self._on_trace_scrolled,
-            init=False,
-        )
-        self.watch(self, "_selecting", self._on_select_freeze)
+        self._watch_trace_follow()
         self.watch(self, "focused", self._on_focus_moved_overlays, init=False)
         self._check_clipboard_tip()
 
@@ -3136,74 +3118,12 @@ class TraceScreen(Screen):
             return _BAR_HEIGHT if widget.has_class(_BAR_TURN) else 0
         return widget.region.height
 
-    _STICK_TOL = 2
-
-    def _trace_is_at_bottom(self) -> bool:
-        """Сырой замер: трейс прокручен в самый низ (с допуском). Используется в
-        _update_stick_state для повторного «прилипания», когда юзер вернулся к низу."""
-        try:
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        except Exception:
-            return True
-        return trace.scroll_offset.y >= trace.max_scroll_y - self._STICK_TOL
-
-    def _update_stick_state(self) -> None:
-        """Поддержать намерение «липнуть к низу» (_stick_bottom). Сравниваем offset с
-        местом, куда сами в прошлый раз прижали (_last_auto_y), а НЕ с max_scroll_y:
-        контент растёт вниз, offset при этом не двигается, поэтому добавление контента
-        липкость не роняет — её снимает только реальный уход юзера вверх. Возврат к
-        низу — возвращает. Вызывать ПЕРЕД прижатием (детект всегда предшествует
-        скроллу → юзера не «дёргает» назад при уходе вверх). Offset ниже прижатого,
-        но лента у низа — это не уход вверх: выросшая лента (снят баннер, сжался
-        или закрыт список над вводом) сама срезала прокрутку до нового низа."""
-        try:
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        except Exception:
-            return
-        if self._stick_bottom:
-            if (
-                trace.scroll_offset.y < self._last_auto_y - self._STICK_TOL
-                and not self._trace_is_at_bottom()
-            ):
-                self._stick_bottom = False
-        elif self._trace_is_at_bottom():
-            self._stick_bottom = True
-
-    def _on_trace_scrolled(self, _value: float) -> None:
-        """Отклик на прокрутку ленты по событию, не по опросу. Прижатие
-        остаётся в _poll_tick; наш scroll_end липкость не снимает (offset не
-        меньше _last_auto_y). Во время выделения (F2) — ни детекта, ни
-        прижатия."""
-        if self._ui_frozen_for_select():
-            return
-        self._update_stick_state()
-        self._refresh_trace_overlays()
-
     def _refresh_trace_overlays(self) -> None:
-        """Накладки над лентой (спека P3 §2.6): «не внизу» — липкая реплика
-        (ближайшая выше края) и плашка «в конец»; внизу — обе скрыты.
-        Зовётся на каждый шаг прокрутки: реплики ищутся по кэшу верхних
-        реплик (`_trace_replies`), без обхода ленты."""
-        try:
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
-            sticky = self.query_one("#trace-sticky-reply", StickyReply)
-            pill = self.query_one("#trace-end-pill", ScrollEndPill)
-        except NoMatches:
-            return
-        # Коробка накладок — ширина подложки реплики в ленте: без колонки
-        # скроллбара (решение 27). Плашка центруется по ней же.
-        box = trace.scrollable_content_region
+        """Накладки — общим путём; у низа счётчик новых реплик плашки
+        обнуляется."""
         if self._stick_bottom:
             self._reset_new_replies()
-            sticky.show(None, box)
-            pill.show(None, box)
-            return
-        replies = self._trace_replies(trace)
-        reply = reply_above(
-            replies, round(trace.scroll_y), lambda r: r.virtual_region.y
-        )
-        sticky.show(reply, box)
-        pill.show(self._end_pill_label(), box, self._pill_row(trace))
+        super()._refresh_trace_overlays()
 
     def _pill_row(self, trace: VerticalScroll) -> int:
         """Ряд плашки «в конец» (S10 §4.2) — ряд прямо над баннером, списком
@@ -3219,25 +3139,6 @@ class TraceScreen(Screen):
             if widget.display and widget.region.height > 0:
                 return widget.region.y - 1
         return trace.region.bottom
-
-    def _trace_replies(self, trace: VerticalScroll) -> list:
-        """Реплики верхнего уровня ленты по порядку. Кэшируется только
-        состав; верх каждой читается живым при поиске, поэтому сдвиг
-        реплик кэш не портит. Ключ — число детей и первый с последним:
-        точный ключ (все дети) стоил бы столько же, сколько пересборка;
-        этот ловит и снятие с монтированием в конец за один такт."""
-        from gc_tui.widgets.user_reply import UserReplyContainer
-
-        children = trace.children
-        key = (len(children), children[0], children[-1]) if children else ()
-        if key != self._trace_replies_key:
-            self._trace_replies_key = key
-            self._trace_replies_cache = [
-                child
-                for child in trace.children
-                if isinstance(child, UserReplyContainer)
-            ]
-        return self._trace_replies_cache
 
     def _count_new_reply(self, following: bool) -> bool:
         """Реплика агента смонтирована: не у низа — она новая для плашки.
@@ -3267,65 +3168,6 @@ class TraceScreen(Screen):
 
     def _on_focus_moved_overlays(self, _focused: Optional[Widget]) -> None:
         self._refresh_trace_overlays()
-
-    def on_scroll_to_reply(self, message: ScrollToReply) -> None:
-        """Клик по липкой реплике — она наверху видимой области."""
-        if not message.reply.is_attached:
-            return  # реплику успели снять
-        trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        trace.scroll_to_widget(message.reply, animate=False, top=True)
-
-    def on_scroll_to_end(self, _message: ScrollToEnd) -> None:
-        """Клик по плашке «в конец» — тот же путь, что Enter в пустом поле."""
-        self._scroll_to_bottom()
-
-    def _scroll_to_bottom(self) -> None:
-        """Одно действие «к низу» для Enter в пустом поле и клика по плашке."""
-        self._stick_bottom = True
-        self._scroll_trace_end()
-
-    @property
-    def _stick_bottom(self) -> bool:
-        return self._stick
-
-    @_stick_bottom.setter
-    def _stick_bottom(self, stick: bool) -> None:
-        """Единственная точка смены липкости: флаг и якорь ленты вместе."""
-        self._stick = stick
-        self._sync_trace_anchor()
-
-    def _on_select_freeze(self, selecting: bool) -> None:
-        """Выделение (F2) снимает якорь; по его концу ушедшую вверх ленту
-        к низу не тянем — сначала детект, потом якорь."""
-        if not selecting:
-            self._update_stick_state()
-        self._sync_trace_anchor()
-
-    def _sync_trace_anchor(self) -> None:
-        """Якорь Textual держит ленту у низа в том же проходе раскладки,
-        что и перемена (рост, свёртка, хром у ввода), — одно движение.
-        Стоит, пока лента липнет к низу и нет выделения (F2): выделение
-        его снимает, конец выделения — возвращает."""
-        trace = self.query_one_optional(_SEL_TRACE, VerticalScroll)
-        wanted = self._stick and not self._ui_frozen_for_select()
-        if trace is not None and trace.is_anchored is not wanted:
-            trace.anchor(wanted)
-
-    def _scroll_trace_end(self) -> None:
-        """Прижать трейс к низу: вернуть якорь (его мог снять ручной
-        скролл, оставшийся в допуске). Сам низ ставит раскладка, в том же
-        проходе; после неё — запомнить позицию для _update_stick_state."""
-        if not self._stick_bottom or self._ui_frozen_for_select():
-            return
-        trace = self.query_one_optional(_SEL_TRACE, VerticalScroll)
-        if trace is not None:
-            trace.anchor()
-            self.call_after_refresh(self._note_auto_y, trace)
-
-    def _note_auto_y(self, trace: VerticalScroll) -> None:
-        """Низ после раскладки — пока лента всё ещё липнет к нему."""
-        if self._stick_bottom:
-            self._last_auto_y = trace.max_scroll_y
 
     def _trace_mount(
         self,
@@ -5656,10 +5498,6 @@ class TraceScreen(Screen):
             self._reasoning_clock.start("stream")
         else:
             self._reasoning_clock.stop("stream")
-
-    def _ui_frozen_for_select(self) -> bool:
-        """F1: заморожен ли UI из-за app-select. Сигнал — Screen._selecting."""
-        return textual_compat.is_selecting(self)
 
     def _check_auto_scroll(
         self, select_widget, mouse_coordinate, delta_y
