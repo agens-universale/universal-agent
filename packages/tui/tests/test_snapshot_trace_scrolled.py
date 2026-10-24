@@ -73,7 +73,7 @@ def _payloads() -> list[dict]:
         *_call(
             "c4",
             "fs_find_in_files",
-            {"query": "503", "path": "client/"},
+            {"pattern": "503", "path": "client/"},
             {"ok": True, "count": 1},
         ),
         {"id": "a2", "role": "assistant", "content": answer},
