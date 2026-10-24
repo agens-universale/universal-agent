@@ -564,16 +564,36 @@ def _start_frame(scr):
     )
 
 
+class _IdleExecutor(_ScriptedExecutor):
+    """Ход стоит на первом шаге, в тред не пишет."""
+
+    STEPS = 1
+
+    async def arun(self, messages, *, thread_id, message_ids=None, **_kw):
+        self._wait(0)
+
+
+async def _send_enter(pilot):
+    pilot.app.query_one("#cmdinput").text = "первый"
+    await pilot.press("enter")
+
+
+async def _send_init(pilot):
+    pilot.app.query_one("#cmdinput").text = "/init"
+    await pilot.press("enter")
+
+
 @pytest.mark.asyncio
-async def test_turn_start_one_movement_per_frame(tmp_path, monkeypatch):
-    """Начало хода у низа: реплика и бар встают одним движением — первый
-    кадр с переменой уже итоговый: лента у низа, реплика последней строкой
-    прямо над баром, поле ввода на месте."""
+@pytest.mark.parametrize("send", [_send_enter, _send_init])
+async def test_turn_start_one_movement_per_frame(tmp_path, monkeypatch, send):
+    """Начало хода у низа: строки запуска и бар встают одним движением —
+    первый кадр с переменой уже итоговый: лента у низа, последняя строка
+    прямо над баром, поле ввода на месте. И Enter, и синхронный /init."""
     from gc_testkit.tui_support import wait_until
     from textual.app import App
 
     _write_task(tmp_path, SCRIPT_TID)
-    ex = _ScriptedExecutor(tmp_path)
+    ex = _IdleExecutor(tmp_path)
     ex.seq = _history(tmp_path, SCRIPT_TID, 12)
     app = _app(tmp_path)
     app._executor_factory = lambda: ex
@@ -592,8 +612,7 @@ async def test_turn_start_one_movement_per_frame(tmp_path, monkeypatch):
 
         monkeypatch.setattr(App, "_display", recorded)
         try:
-            pilot.app.query_one("#cmdinput").text = "первый"
-            await pilot.press("enter")
+            await send(pilot)
             await wait_until(pilot, lambda: ex.at == 0, "думаю")
             await pilot.pause(0.6)
         finally:
@@ -602,6 +621,29 @@ async def test_turn_start_one_movement_per_frame(tmp_path, monkeypatch):
         states = [f for k, f in enumerate(frames) if frames[k - 1 : k] != [f]]
         assert states in ([after], [before, after])
         assert trace.children[-1].region.bottom == trace.region.bottom
+
+
+@pytest.mark.asyncio
+async def test_start_run_raises_bar_after_rows_mount(tmp_path):
+    """Шаг начала прогона: бар поднимается, когда строки запуска уже
+    смонтированы, и экран не рисует между ними."""
+    _write_task(tmp_path, SCRIPT_TID)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(SCRIPT_TID, is_resume=True)
+        await pilot.pause()
+        reply = scr._mount_user_reply("первый", state="pending")
+        seen = []
+        prepare = scr._prepare_for_new_run
+
+        def recorded():
+            seen.append((reply.is_mounted, pilot.app._batch_count > 0))
+            prepare()
+
+        scr._prepare_for_new_run = recorded
+        await scr._start_run()
+        assert seen == [(True, True)]
+        assert _bar(pilot).has_class("-turn")
 
 
 # --- S10 §3.7: ошибка до конца раннера — прогон фиксируется парой -----------

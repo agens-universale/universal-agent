@@ -5037,14 +5037,14 @@ class TraceScreen(Screen):
         self._help_hint_spent = True
         self._sync_input_placeholder()
 
-    def _apply_plan_choice(self, choice: str) -> None:
+    async def _apply_plan_choice(self, choice: str) -> None:
         """Выбран вариант баннера: режим исполнения либо «Обсудить и доработать»."""
         from gc_tui.widgets.plan_banner import PLAN_CHOICE_REWORK
 
         if choice == PLAN_CHOICE_REWORK:
             self._rework_plan()
         else:
-            self._accept_plan(choice)
+            await self._accept_plan(choice)
 
     def _rework_plan(self) -> None:
         """«Обсудить и доработать»: вернуть поле ввода и режим plan.
@@ -5067,7 +5067,7 @@ class TraceScreen(Screen):
         self.on_permission_mode_changed(Mode.PLAN.value)
         self._sync_input_placeholder()
 
-    def _accept_plan(self, mode: str) -> None:
+    async def _accept_plan(self, mode: str) -> None:
         """План утверждён: режим, статус и автоматическое продолжение."""
         # Признак «утверждён повторно» живёт на баннере — читается ДО снятия.
         resumed = bool(getattr(self._plan_banner, "resumed", False))
@@ -5104,7 +5104,7 @@ class TraceScreen(Screen):
             ),
             kind_class="line-meta line-plan-accepted",
         )
-        self._prepare_for_new_run()
+        await self._start_run()
         self._reset_thinking_timer()
         (query,) = accepted_plan_messages(mode, resumed=resumed)
         runner.start(
@@ -5407,6 +5407,19 @@ class TraceScreen(Screen):
         # уже записанную быстрым исполнителем, без её отправленной копии.
         self.attach_active_task(tid)
         return tid
+
+    async def _start_run(self) -> None:
+        """Единственный шаг начала прогона для всех путей запуска: строки,
+        уже отданные ленте (реплика, пометка запуска), сначала смонтированы,
+        потом поднят бар — обе перемены в одной раскладке, одно движение
+        ленты. Пока шаг ждёт монтирования, экран не рисует (`batch_update`):
+        от монтирования строк до шага в путях запуска ожиданий нет."""
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        rows = [row for row in trace.children if not row.is_mounted]
+        with self.app.batch_update():
+            if rows:
+                await textual_compat.mounted(trace, rows)
+            self._prepare_for_new_run()
 
     def _prepare_for_new_run(self) -> None:
         """Подготовить TUI к новому запуску runner.start:
@@ -6614,13 +6627,15 @@ class TraceScreen(Screen):
             elif key == "down":
                 banner.move_selection(1)
             elif key == "enter":
-                self._apply_plan_choice(banner.selected_choice())
+                self.call_next(
+                    self._apply_plan_choice, banner.selected_choice()
+                )
             elif key == "escape":
                 self._hide_plan_banner()
             elif not banner.scroll_body(key):
                 direct = banner.choice_for_key(key)
                 if direct is not None:
-                    self._apply_plan_choice(direct)
+                    self.call_next(self._apply_plan_choice, direct)
             # иначе — проглотить без действия (нет случайного ввода)
             event.stop()
             event.prevent_default()
@@ -7703,12 +7718,10 @@ class TraceScreen(Screen):
             client_id = self._track_pending(
                 display_text=text, wire_content=full_query, images=images
             )
-            await textual_compat.mounted(
-                self._mount_user_reply(
-                    text, state="pending", client_id=client_id, images=images
-                )
+            self._mount_user_reply(
+                text, state="pending", client_id=client_id, images=images
             )
-            self._prepare_for_new_run()
+            await self._start_run()
             self._reset_thinking_timer()
             self._on_user_text_submitted(text, images)
             runner.start(
@@ -7760,12 +7773,10 @@ class TraceScreen(Screen):
         client_id = self._track_pending(
             display_text=text, wire_content=full_query, images=images
         )
-        await textual_compat.mounted(
-            self._mount_user_reply(
-                text, state="pending", client_id=client_id, images=images
-            )
+        self._mount_user_reply(
+            text, state="pending", client_id=client_id, images=images
         )
-        self._prepare_for_new_run()
+        await self._start_run()
         self._reset_thinking_timer()
         self._on_user_text_submitted(text, images)
         technical = self._build_attachment_technical(text)
@@ -9006,12 +9017,10 @@ class TraceScreen(Screen):
             client_id = self._track_pending(
                 display_text=prompt, wire_content=full_query
             )
-            await textual_compat.mounted(
-                self._mount_user_reply(
-                    prompt, state="pending", client_id=client_id
-                )
+            self._mount_user_reply(
+                prompt, state="pending", client_id=client_id
             )
-            self._prepare_for_new_run()
+            await self._start_run()
             self._reset_thinking_timer()
             self._on_user_text_submitted(prompt)
             runner.start(
@@ -9031,12 +9040,8 @@ class TraceScreen(Screen):
         client_id = self._track_pending(
             display_text=prompt, wire_content=full_query
         )
-        await textual_compat.mounted(
-            self._mount_user_reply(
-                prompt, state="pending", client_id=client_id
-            )
-        )
-        self._prepare_for_new_run()
+        self._mount_user_reply(prompt, state="pending", client_id=client_id)
+        await self._start_run()
         self._reset_thinking_timer()
         self._on_user_text_submitted(prompt)
         runner.start(
@@ -9421,7 +9426,7 @@ class TraceScreen(Screen):
             self._cmd_status(arg)
             return
         if name == "init":
-            self._cmd_init()
+            await self._cmd_init()
             return
         if name == "compact":
             self._cmd_compact()
@@ -9926,7 +9931,7 @@ class TraceScreen(Screen):
             self._run_pending = True
             self._sync_indicator_bar()
 
-    def _cmd_init(self) -> None:
+    async def _cmd_init(self) -> None:
         """/init: видимый prompt-driven прогон — агент сам пишет AGENTS.md.
 
         Зеркалит _deliver_skill_with_prompt: init-промпт идёт как ОБЫЧНОЕ user-сообщение
@@ -9962,7 +9967,7 @@ class TraceScreen(Screen):
                 content="/init: запускаю агента",
                 kind_class="line-meta",
             )
-            self._prepare_for_new_run()
+            await self._start_run()
             self._reset_thinking_timer()
             self._on_user_text_submitted(display)
             runner.start(
@@ -9981,7 +9986,7 @@ class TraceScreen(Screen):
         self._mount_trace_row(
             prefix="", content="/init: запускаю агента", kind_class="line-meta"
         )
-        self._prepare_for_new_run()
+        await self._start_run()
         self._reset_thinking_timer()
         self._on_user_text_submitted(display)
         runner.start(

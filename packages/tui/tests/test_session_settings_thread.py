@@ -84,7 +84,7 @@ async def test_init_auto_create_inherits_session_overrides(tmp_path):
     app.get_runner = lambda: rec
     async with app.run_test() as pilot:
         app.set_session_override("tui.finish_gate_mode", "off")
-        pilot.app.screen._cmd_init()
+        await pilot.app.screen._cmd_init()
         await pilot.pause(0.1)
         tid = app.tui_state.active_task_id
         assert tid is not None

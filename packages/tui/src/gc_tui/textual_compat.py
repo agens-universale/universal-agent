@@ -92,9 +92,9 @@ class AnchoredScroll(VerticalScroll):
         super().set_reactive(reactive, value)
 
 
-async def mounted(widget: Widget) -> None:
-    """Дождаться монтирования виджета, уже отданного `mount()`."""
-    await AwaitMount(widget.parent, [widget])
+async def mounted(parent: Widget, widgets: list[Widget]) -> None:
+    """Дождаться монтирования детей, уже отданных `parent.mount()`."""
+    await AwaitMount(parent, widgets)
 
 
 def is_being_removed(widget: Widget) -> bool:
