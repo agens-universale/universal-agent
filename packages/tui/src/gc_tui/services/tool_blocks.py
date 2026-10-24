@@ -559,6 +559,13 @@ class _File:
             return self.lines
         return self.lines - min(self.changed, rows)
 
+    def body(self, rows: Optional[int]) -> bool:
+        """Есть ли под файлом тело сейчас: раскрытый — весь дифф, свёрнутый
+        — превью изменённых строк; у компактного превью нет."""
+        if rows is None:
+            return self.lines > 0
+        return not self.compact and min(self.changed, rows) > 0
+
 
 @dataclass(frozen=True)
 class _Layout:
@@ -573,6 +580,8 @@ class _Layout:
     #: Скрытых логических строк в свёрнутом виде (`+ ещё N строк`).
     lines: int
     expandable: bool
+    #: Видимые файлы с телом: после них — пустая строка (§6.2).
+    bodied: frozenset[str] = frozenset()
 
 
 def _accepts(group: Optional[_Block], member: _Member) -> bool:
@@ -990,9 +999,11 @@ class ToolBlocks:
         expandable = bool(lines or more)
         if expanded and expandable:
             keys = tuple(f.key for f in files)
-            return _Layout(keys, None, 0, lines, True)
+            bodied = frozenset(f.key for f in files if f.body(None))
+            return _Layout(keys, None, 0, lines, True, bodied)
         keys = tuple(f.key for f in tail)
-        return _Layout(keys, rows, more, lines, expandable)
+        bodied = frozenset(f.key for f in tail if f.body(rows))
+        return _Layout(keys, rows, more, lines, expandable, bodied)
 
     def _edits_layout(self, block: _Block) -> _Layout:
         files = [
@@ -1255,15 +1266,16 @@ def _edit_word(member: _Member) -> str:
 
 def _file_mode(key: str, layout: _Layout, *, lead: bool = True) -> SetMode:
     """Файл блока: `└ ` у первого видимого без маркера окна (у файлов
-    `Ran` его нет — `└` там у вывода); пустая строка — между видимыми
-    файлами, не перед первым."""
-    first = layout.window[0] if layout.window else None
-    visible = key in layout.window
+    `Ran` его нет — `└` там у вывода); пустая строка — только после
+    видимого файла с телом (§6.2): файлы без тела идут подряд."""
+    window = layout.window
+    first = window[0] if window else None
+    at = window.index(key) if key in window else 0
     return SetMode(
         key,
         "member",
         lead=lead and key == first and not layout.more,
-        gap=visible and key != first,
+        gap=at > 0 and window[at - 1] in layout.bodied,
     )
 
 

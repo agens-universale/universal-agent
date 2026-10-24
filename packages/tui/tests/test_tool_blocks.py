@@ -1244,6 +1244,55 @@ def test_ran_parts_deleted_file():
     assert ("SetPhrase", "block:0", "bottom") not in fold.state
 
 
+def test_ran_parts_bodiless_files_no_gap():
+    """Файлы без тела (`Deleted`) идут подряд, без пустых строк."""
+    model, fold = _edits_model()
+    _ran(model, fold)
+    files = _files(("Deleted", 0), ("Deleted", 0), ("Deleted", 0))
+    fold(
+        model.ran_parts(
+            "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
+        )
+    )
+    assert [fold.mode(f.key).gap for f in files] == [False, False, False]
+
+
+def test_ran_parts_gap_only_after_body():
+    """Пустая строка — только после файла с телом (превью диффа)."""
+    model, fold = _edits_model()
+    _ran(model, fold)
+    files = _files(("Edited", 4), ("Deleted", 0), ("Deleted", 0))
+    fold(
+        model.ran_parts(
+            "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
+        )
+    )
+    assert [fold.mode(f.key).gap for f in files] == [False, True, False]
+
+
+def test_edits_group_gap_only_after_body():
+    """Группа правок: бинарь (размер) и правка без записи — без тела,
+    следующий за ними файл идёт без пустой строки."""
+    model, fold = _edits_model()
+    _apply(model, fold, "a", _edit("a", lines=4))
+    _apply(model, fold, "b", _edit("b", lines=0, size=12))
+    bare = BlockEdit("c", "c.py", "Edited", 0, 0, 0, 0, None, False)
+    _apply(model, fold, "c", bare)
+    assert [fold.mode(k).gap for k in "abc"] == [False, True, False]
+
+
+def test_compact_file_gap_follows_body():
+    """Компактный файл (ход вне окна) тела не показывает до раскрытия."""
+    from dataclasses import replace
+
+    model, fold = _edits_model()
+    _apply(model, fold, "a", replace(_edit("a", lines=4), compact=True))
+    _apply(model, fold, "b", _edit("b", lines=4))
+    assert fold.mode("b").gap is False
+    fold(model.toggle("block:0:bottom"))
+    assert fold.mode("b").gap is True
+
+
 # --- группа по месту строки (порядок монтирования) ---------------------
 
 

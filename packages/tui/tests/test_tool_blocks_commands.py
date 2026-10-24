@@ -441,6 +441,55 @@ async def test_ran_files_one_phrase(tmp_path):
         assert len(diffs) == 2
 
 
+def _gone(path):
+    return _shell_record(path, "delete", hunks="", flags=["no_diff"])
+
+
+def _block_tail(pilot) -> list[str]:
+    """Строки кадра от вывода `└` до последней непустой, пустые внутри
+    — тоже."""
+    rows = [r.plain[ORIGIN:].rstrip() for r in _frame(pilot)]
+    start = next(i for i, r in enumerate(rows) if r.startswith("  └"))
+    end = max(i for i, r in enumerate(rows) if r)
+    return rows[start : end + 1]
+
+
+@pytest.mark.asyncio
+async def test_ran_deleted_files_follow_without_gap(tmp_path):
+    """Файлы без тела (`Deleted`) — подряд, без пустых строк (§4.2)."""
+    thread = _Thread(tmp_path)
+    _journal(tmp_path, _gone("p4a.txt"), _gone("p4b.txt"), _gone("p4c.txt"))
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(pilot, thread, _run("x1", "rm"), _out("x1", _envelope()))
+        assert _block_tail(pilot) == [
+            "  └ (нет вывода)",
+            "    Deleted p4a.txt",
+            "    Deleted p4b.txt",
+            "    Deleted p4c.txt",
+        ]
+
+
+@pytest.mark.asyncio
+async def test_ran_gap_only_after_diff_file(tmp_path):
+    """Дифф, пустая строка, затем файлы без тела подряд."""
+    thread = _Thread(tmp_path)
+    _journal(
+        tmp_path, _shell_record("a.py", n=1), _gone("b.txt"), _gone("c.txt")
+    )
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(pilot, thread, _run("x1", "make"), _out("x1", _envelope()))
+        tail = _block_tail(pilot)
+        assert tail[1].startswith("    Edited a.py (+1 −0)")
+        assert tail[2:] == [
+            "      1 +row 0",
+            "",
+            "    Deleted b.txt",
+            "    Deleted c.txt",
+        ]
+
+
 @pytest.mark.asyncio
 async def test_ran_file_preview_is_changed_lines_only(tmp_path):
     """Файл под `Ran` — правило превью то же (решение 2026-10-23): в
