@@ -1,6 +1,7 @@
 """PreviewScreen — read-only превью сессии реальными виджетами трейса.
 
 Esc → dismiss(False) (назад). Enter → dismiss(True) (продолжить сессию).
+Лента — как живая (`TraceFollowMixin`): открывается у низа.
 Шапка: слева «превью · сессия <id>», справа — путь проекта. Футер — подсказки клавиш.
 Промпт сессии виден в самом трейсе ниже, поэтому в шапку не дублируется."""
 
@@ -12,7 +13,9 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
+from gc_tui import textual_compat
 from gc_tui.messages import BlockToggle, CopyBlockRequest, OpenImageRequest
+from gc_tui.screens.trace_follow import TraceFollowMixin
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.image_open import open_image
 from gc_tui.services.skill_view import truncate_path_left
@@ -21,7 +24,7 @@ from gc_tui.services.trace_retention import subagent_parent_ids_in_window
 _PATH_MAXLEN = 48
 
 
-class PreviewScreen(Screen[bool]):
+class PreviewScreen(TraceFollowMixin, Screen[bool]):
     # priority=True: Enter/Esc срабатывают ДО фокусной строки. Иначе focusable
     # ToolCallRow/TraceRow перехватывают Enter (open-detail + stop) и тред не
     # открывается. В превью нет ввода — Enter всегда = открыть тред, Esc = назад.
@@ -62,7 +65,8 @@ class PreviewScreen(Screen[bool]):
                     id="header-right",
                     markup=False,
                 )
-            yield VerticalScroll(id="trace")
+            trace = textual_compat.AnchoredScroll(id="trace")
+            yield trace
             yield Static(
                 "[Esc] назад  ·  [Enter] продолжить сессию  ·  [↑↓ / PgUp PgDn] прокрутка",
                 id="preview-footer",
@@ -104,6 +108,9 @@ class PreviewScreen(Screen[bool]):
         # короткий трейс, тяжёлые tool output / nested вне окна не нужны.
         self._segments = []
         self._subagent_records = []
+        # Как живая лента после открытия сессии — у низа.
+        self._watch_trace_follow()
+        self._scroll_trace_end()
 
     def _preview_blocks(self):
         """Блоки превью с журналом правок треда (только чтение; лимиты —
