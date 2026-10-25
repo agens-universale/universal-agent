@@ -162,3 +162,15 @@ def test_unknown_model_choice_notice_names_both_models():
 @pytest.mark.parametrize("choice", ["auto", "default", "light", "big"])
 def test_no_notice_for_known_choice(choice):
     assert unknown_model_choice_notice(_cfg(model=choice)) is None
+
+
+def test_no_unknown_model_notice_without_registry():
+    cfg = make_settings({"model": "ghost", "agent.model": "legacy"})
+    assert unknown_model_choice_notice(cfg) is None
+
+
+def test_no_unknown_model_notice_under_legacy_force():
+    loaded = _cfg(model="ghost").with_overrides(
+        {"agent.model": "raw-id"}, layer="cli"
+    )
+    assert unknown_model_choice_notice(loaded) is None

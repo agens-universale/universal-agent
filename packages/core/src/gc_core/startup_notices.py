@@ -208,11 +208,20 @@ def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
     )
 
 
-def unknown_model_choice_notice(settings: Any) -> Optional[Notice]:
+def unknown_model_choice_notice(source: Any) -> Optional[Notice]:
     """Выбор `model` не найден в реестре — запуск идёт моделью слота default.
     Только стартовое: роутер уже подменяет выбор (`effective_choice`), нотис
     называет, что именно заменено и чем."""
-    settings = settings_of(settings)
+    settings = settings_of(source)
+    if not settings.models:
+        return None  # легаси без реестра: выбирать из чего-то нечего
+    loaded = (
+        source
+        if isinstance(source, LoadedSettings)
+        else LoadedSettings(settings=settings)
+    )
+    if cli_forces_legacy_model(loaded):
+        return None  # легаси-форс --model: идёт заданная модель
     choice = configured_choice(settings)
     if choice_in_registry(choice, settings):
         return None
@@ -230,8 +239,8 @@ def _auto_routing(source: Any) -> List[Notice]:
     return [notice] if notice is not None else []
 
 
-def _unknown_model(settings: Any) -> List[Notice]:
-    notice = unknown_model_choice_notice(settings)
+def _unknown_model(source: Any) -> List[Notice]:
+    notice = unknown_model_choice_notice(source)
     return [notice] if notice is not None else []
 
 
@@ -402,7 +411,7 @@ def collect_startup_notices(
         + _mcp_failed(mcp_status)
         + _agentsmd(settings, is_tui=is_tui)
         + _auto_routing(source)
-        + _unknown_model(settings)
+        + _unknown_model(source)
         + list(extra)
         + _compat(compat_notices)
         + _pricing_no_rates(settings)
