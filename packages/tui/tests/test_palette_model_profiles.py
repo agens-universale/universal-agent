@@ -1,12 +1,13 @@
-"""`/level` и `/profiles` в палитре команд + футер из Router (спека
-docs/specs/2026-07-23-profiles-design.md §12.1-§12.2).
+"""`/model` и `/profiles` в палитре команд + футер из Router (спеки
+docs/specs/2026-07-23-profiles-design.md §12.1-§12.2 и
+docs/specs/2026-10-25-model-knob-design.md §6.2).
 
 Стиль — существующие тесты палитро-тогглов (tests/tui/test_palette_toggles.py):
 прямые `assert`, `pytest.importorskip("textual")` перед импортами Textual-слоя.
 """
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 def _wire_palette(app, reg, initial_filter=""):
@@ -25,235 +26,106 @@ def _wire_palette(app, reg, initial_filter=""):
             app, name, value
         ),
         toggle_values=lambda name: effective_toggle_values(app, name),
+        command_value=lambda cmd: (
+            cmd.value_provider(app) if cmd.value_provider else None
+        ),
     )
 
 
-def _level_row_plain(app) -> str:
-    """Строка тоггла `level` из палитры, как её реально видит пользователь:
-    полная обвязка `_wire_palette` (состояние + динамический состав значений) +
-    рендер `_format_toggle_row`, без стилей (`.plain`)."""
-    from gc_tui.commands import build_default_registry
-
-    reg = build_default_registry()
-    pal = _wire_palette(app, reg)
-    return pal._format_toggle_row(reg.lookup("level")).plain
-
-
-# --- Группа «чем работаем» (/level, /profiles) — трек, разделитель, порядок ---
-
-
-@pytest.mark.asyncio
-async def test_level_and_profiles_form_new_group_above_rigor(
-    tmp_path, monkeypatch
-):
-    """/level и /profiles — новая группа над /rigor, отделённая от неё чертой
-    (спека §12.1); gate/answers по-прежнему скрыты в пустом фильтре (§4.1)."""
-    pytest.importorskip("textual")
+def _registry_app(tmp_path, monkeypatch, config=None):
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
-    from gc_tui.commands import build_default_registry
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
         settings=tui_settings(
-            {
-                "model": "default",
-                "models": {"glm-local": {}},
-                "slots": {"default": "glm-local"},
+            config
+            or {
+                "model": "glm-4.6",
+                "models": {"glm-4.6": {}, "giga-max": {}},
+                "slots": {"default": "glm-4.6", "max": "giga-max"},
             }
         ),
     )
     app._config_path = str(tmp_path / "config.yml")
+    return app
+
+
+# --- /model и /profiles — обычные команды, значение справа (спека §6.2) -----
+
+
+@pytest.mark.asyncio
+async def test_model_and_profiles_are_plain_commands_with_values_right(
+    tmp_path, monkeypatch
+):
+    """`/model` и `/profiles` — строки верхнего списка, не ручки подвала;
+    в колонке клавиш — текущее значение: знак + имя модели и «без профиля»."""
+    pytest.importorskip("textual")
+    from gc_tui import palette as p
+    from gc_tui.commands import build_default_registry
+
+    app = _registry_app(tmp_path, monkeypatch)
     reg = build_default_registry()
+    assert not reg.lookup("model").is_toggle
+    assert not reg.lookup("profiles").is_toggle
     async with app.run_test(size=(100, 40)) as pilot:
         pal = _wire_palette(app, reg)
         await app.screen.mount(pal)
         await pilot.pause()
 
-        rows = list(pal.query(".palette-toggle-row"))
-        names = [r.render().plain.split()[0] for r in rows]
-        # rigor всегда тащит своих детей gate/answers (спека §4.1) — видимый
-        # подвал: level, profiles (новая группа), затем rigor + его дети.
-        assert names == ["/level", "/profiles", "/rigor", "/gate", "/answers"]
+        regular = [c.name for c in pal._visible_rows()]
+        assert regular[:4] == ["help", "sessions", "model", "profiles"]
+        model_row = pal._format_row(reg.lookup("model"))
+        profiles_row = pal._format_row(reg.lookup("profiles"))
+        help_row = pal._format_row(reg.lookup("help"))
 
-        seps = list(pal.query(".palette-group-sep"))
-        assert len(seps) == 1
-        assert rows[1].region.y < seps[0].region.y < rows[2].region.y
+    assert model_row.plain.rstrip().endswith("● glm-4.6")
+    assert profiles_row.plain.rstrip().endswith("без профиля")
+    # значения и клавиши — одна правая колонка, прижатая к краю
+    assert len(model_row.plain) == len(str(help_row))
+    dot = model_row.plain.rindex("●")
+    styles = [str(s.style) for s in model_row.spans if s.start <= dot < s.end]
+    assert p.RUN_COLOR in styles
 
 
-def test_level_track_three_positions_light_default_max():
-    """Трек /level — 3 позиции `○ ● ○` (текущая — default, средняя), подпись
-    значения справа (спека §12.1: values=light·default·max)."""
-    from gc_tui.commands import Command, CommandRegistry
+def test_knob_group_is_only_rigor_family():
+    """Подвал ручек — только `/rigor` и его дети; ручки уровня нет."""
+    from gc_tui.commands import build_default_registry
+    from gc_tui.toggles import TOGGLES
     from gc_tui.widgets.command_palette import CommandPalette
 
-    reg = CommandRegistry()
-    reg.register(
-        Command("level", ("models",), "", "уровень модели", is_toggle=True)
-    )
-    pal = CommandPalette(
-        reg, initial_filter="", toggle_state=lambda n: "default"
-    )
-
-    row = pal._format_toggle_row(reg.lookup("level")).plain
-    assert "○ ● ○" in row
-    assert row.rstrip().endswith("default")
+    reg = build_default_registry()
+    pal = CommandPalette(reg, initial_filter="")
+    assert [c.name for c in pal._visible_toggle_rows()] == [
+        "rigor",
+        "gate",
+        "answers",
+    ]
+    assert "level" not in TOGGLES
+    assert reg.lookup("level") is None
 
 
-def test_level_track_colors_semantic():
-    """Цвет ползунка — семантика значения (light=INK, default=RUN_COLOR,
-    max=ACCENT — канон существующих тогглов, спека §12.1)."""
-    from gc_tui import palette as p
-    from gc_tui.commands import Command, CommandRegistry
-    from gc_tui.widgets.command_palette import CommandPalette
-
-    reg = CommandRegistry()
-    reg.register(
-        Command("level", ("models",), "", "уровень модели", is_toggle=True)
-    )
-
-    for value, color in (
-        ("light", p.INK),
-        ("default", p.RUN_COLOR),
-        ("max", p.ACCENT),
-    ):
-        pal = CommandPalette(
-            reg, initial_filter="", toggle_state=lambda n, v=value: v
-        )
-        text = pal._format_toggle_row(reg.lookup("level"))
-        styles = [
-            str(s.style) for s in text.spans if "bold" in str(s.style).lower()
-        ]
-        assert any(color.lower() in st.lower() for st in styles), (
-            value,
-            styles,
-        )
+# --- Тихий алиас `models` -> /model ------------------------------------------
 
 
-def test_profiles_row_is_trackless():
-    """/profiles — без шкалы: сразу значение-имя, без глифов ●/○ (спека §12.1)."""
-    from gc_tui.commands import Command, CommandRegistry
-    from gc_tui.widgets.command_palette import CommandPalette
-
-    reg = CommandRegistry()
-    reg.register(Command("profiles", (), "", "профиль", is_toggle=True))
-    pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n: "work")
-
-    row = pal._format_toggle_row(reg.lookup("profiles")).plain
-    assert "●" not in row and "○" not in row
-    assert row.rstrip().endswith("work")
-
-
-def test_profiles_row_empty_value_shows_none_words():
-    """Пустое значение /profiles — словами «без профиля» (осмысленное состояние,
-    ревизия 2026-07-28), не прочерк."""
-    from gc_tui.commands import Command, CommandRegistry
-    from gc_tui.widgets.command_palette import CommandPalette
-
-    reg = CommandRegistry()
-    reg.register(Command("profiles", (), "", "профиль", is_toggle=True))
-    pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n: "")
-
-    row = pal._format_toggle_row(reg.lookup("profiles")).plain
-    assert row.rstrip().endswith("без профиля")
-
-
-# --- Тихий алиас `models` -> /level (механизм — прецедент /compact «сжать») ---
-
-
-def test_models_alias_filters_to_level():
-    """Набранное `/models` (фильтр палитры) находит `/level` — тихий алиас
-    (спека §12.1): набравший «models» по привычке «сменить модель» попадает
-    на уровень модели."""
+def test_models_alias_filters_to_model():
+    """Набранное `/models` (фильтр палитры) находит `/model` — тихий алиас."""
     from gc_tui.commands import build_default_registry
     from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
     pal = CommandPalette(reg, initial_filter="models")
-    rows = pal._visible_toggle_rows()
-    assert [c.name for c in rows] == ["level"]
+    assert [c.name for c in pal._visible_rows()] == ["model"]
 
 
 def test_models_alias_resolves_via_registry_lookup():
-    """Полный ввод `/models` (Enter, минуя палитру) резолвится в canonical
-    `level` через `CommandRegistry.lookup` — тот же механизм, что у `/сжать`."""
+    """Полный ввод `/models` резолвится в canonical `model` через
+    `CommandRegistry.lookup` — тот же механизм, что у `/сжать`."""
     from gc_tui.commands import build_default_registry
 
     reg = build_default_registry()
     cmd = reg.lookup("models")
-    assert cmd is not None and cmd.name == "level"
-
-
-# --- Хинт /level — из Router, канон §1 ---------------------------------------
-
-
-def test_level_hint_matches_canon_default_and_honest_fallback(
-    tmp_path, monkeypatch
-):
-    """Канон §12.1/§1 дословно: «default — glm-local · основная рабочая:
-    повседневные задачи»; фоллбэк честно показывает стрелку «light → default»,
-    не притворяется, что у light своя модель."""
-    monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
-    from gc_tui.toggles import level_value_hint
-
-    app = TuiApp(
-        settings=tui_settings(
-            {
-                "model": "default",
-                "models": {"glm-local": {}},
-                "slots": {"default": "glm-local"},
-            }
-        )
-    )
-    app._config_path = str(tmp_path / "config.yml")
-
-    assert level_value_hint(app, "default") == (
-        "glm-local · основная рабочая: повседневные задачи"
-    )
-    assert level_value_hint(app, "light") == (
-        "glm-local (light → default) · быстрая и дешёвая: простые задачи"
-    )
-    assert level_value_hint(app, "max") == (
-        "glm-local (max → default) · самая сильная: сложные задачи"
-    )
-
-
-def test_level_hint_legacy_mode(tmp_path, monkeypatch):
-    """Легаси-режим (нет merged-реестра) — /level виден, хинт честно
-    помечает «легаси: уровни появятся с реестром моделей» (спека §12.1)."""
-    monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
-    from gc_tui.toggles import level_value_hint
-
-    app = TuiApp(settings=tui_settings({"agent.model": "glm-5.2-fp8"}))
-    app._config_path = str(tmp_path / "config.yml")
-
-    hint = level_value_hint(app, "default")
-    assert hint == "glm-5.2-fp8 · легаси: уровни появятся с реестром моделей"
-
-
-def test_level_hint_legacy_force(tmp_path, monkeypatch):
-    """Легаси-форс (`--model` поверх непустого реестра) — резолв уровней
-    отключён на этот запуск, хинт честно об этом сообщает; выбор персистится
-    (session override не трогается этой веткой — только показ)."""
-    monkeypatch.chdir(tmp_path)
-    from gc_tui.app import TuiApp
-    from gc_tui.toggles import level_value_hint
-
-    app = TuiApp(
-        # `--model` — слой CLI поверх загруженного (как `apply_cli_overrides`).
-        settings=tui_settings(
-            {
-                "models": {"glm-local": {}},
-                "slots": {"default": "glm-local"},
-            }
-        ).with_overrides({"agent.model": "glm-5.2-fp8"}, layer="cli")
-    )
-    app._config_path = str(tmp_path / "config.yml")
-
-    hint = level_value_hint(app, "default")
-    assert hint == "glm-5.2-fp8 · --model: уровни отключены на этот запуск"
+    assert cmd is not None and cmd.name == "model"
 
 
 # --- /profiles: цикл по алфавиту, тёзка — одна позиция, состав+источник -----
@@ -530,7 +402,7 @@ def _stub_create_run_context(monkeypatch, captured):
         def stop_run(self):
             pass
 
-    async def _fake_acreate_run_context(cfg, **kw):
+    async def _fake_acreate_run_context(_cfg, **kw):
         captured.update(kw)
         return _Ctx()
 
@@ -715,7 +587,7 @@ def test_profiles_command_has_dynamic_picker_wiring():
 
 
 @pytest.mark.asyncio
-async def test_arg_picker_dynamic_footer_hint_follows_selection(tmp_path):
+async def test_arg_picker_dynamic_footer_hint_follows_selection():
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
     from textual.app import App
@@ -743,7 +615,7 @@ async def test_arg_picker_dynamic_footer_hint_follows_selection(tmp_path):
         assert any("default gc" in t for t in texts)
 
 
-def test_arg_picker_paints_a_refusal_status_as_an_error(tmp_path):
+def test_arg_picker_paints_a_refusal_status_as_an_error():
     """Статус-колонка красится по СМЫСЛУ статуса: «✗ не применится» зелёным цветом
     достижения читалось бы как «всё в порядке». Правило — по глифу отказа, а не
     по литералу: пикер не знает ни про профили, ни про их тексты."""
@@ -875,9 +747,9 @@ def test_cmd_profiles_no_arg_opens_picker(tmp_path, monkeypatch):
     app = _picker_app(tmp_path, monkeypatch)
     opened = []
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._open_profiles_picker = lambda *a, **k: opened.append(True)
+    scr._open_command_picker = lambda name: opened.append(name)
     scr._cmd_profiles("")
-    assert opened == [True]
+    assert opened == ["profiles"]
 
 
 def _add_unassemblable_profile(tmp_path) -> None:
@@ -1134,7 +1006,7 @@ def _app_with_live_run(tmp_path):
 
 
 @pytest.mark.parametrize("running", [True, False, None])
-def test_apply_level_toggle_emits_no_deferred_notice(tmp_path, running):
+def test_apply_model_choice_emits_no_deferred_notice(tmp_path, running):
     """В ходе AUTO нет ручного пина: переключение не выдаёт notice ручного уровня."""
     pytest.importorskip("textual")
     from gc_core.runtime_notices import (
@@ -1157,167 +1029,41 @@ def test_apply_level_toggle_emits_no_deferred_notice(tmp_path, running):
     }
 
 
-# --- `/level` — четвёртая позиция `auto` вне шкалы (спека автороутинга §3) ---
-
-
-def _app(tmp_path, config):
-    """TuiApp с переданным конфигом напрямую (по образцу `_level_app`) — без
-    файла на диске: тестам ниже нужен только состав `config`, который видит
-    `effective_settings()`."""
-    from gc_tui.app import TuiApp
-
-    app = TuiApp(settings=tui_settings(config))
-    app._config_path = str(tmp_path / "config.yml")
-    return app
-
-
-# Реестр с двумя разными комплектами вызова — иначе автовыбор недоступен
-# («во всех уровнях одна модель»), и позиции `auto` в треке нет.
-_TWO_KITS = {
-    "models": {"fast": {}, "mid": {}},
-    "slots": {"light": "fast", "default": "mid"},
-}
-
-
-def test_level_track_shows_auto_off_scale_when_available(tmp_path):
-    app = _app(
-        tmp_path,
-        config={
-            "agent.model": "m",
-            "model": "default",
-            "backend.api_mode": "chat_completions",
-            "agent.auto_routing": True,
-            **_TWO_KITS,
-        },
-    )
-    row = _level_row_plain(
-        app
-    )  # хелпер: строка тоггла level из палитры, plain
-    assert "○ ● ○  ○  default" in row  # три позиции + отступ + четвёртая
-
-
-def test_level_track_lights_auto_and_dims_scale(tmp_path):
-    app = _app(
-        tmp_path,
-        config={
-            "agent.model": "m",
-            "model": "auto",
-            "backend.api_mode": "chat_completions",
-            "agent.auto_routing": True,
-            **_TWO_KITS,
-        },
-    )
-    row = _level_row_plain(app)
-    assert "○ ○ ○  ●  auto" in row
-
-
-def test_level_track_hides_auto_when_feature_unavailable(tmp_path):
-    app = _app(
-        tmp_path,
-        config={
-            "agent.model": "m",
-            "model": "auto",
-            "backend.api_mode": "chat_completions",
-            "agent.auto_routing": False,
-        },
-    )
-    row = _level_row_plain(app)
-    assert (
-        "○ ● ○" in row and "auto" not in row
-    )  # горит default, позиции auto нет
-
-
-def test_level_cycle_includes_auto(tmp_path):
-    from gc_tui.toggles import next_toggle_value, apply_toggle, toggle_state
-
-    app = _app(
-        tmp_path,
-        config={
-            "agent.model": "m",
-            "model": "max",
-            "backend.api_mode": "chat_completions",
-            "agent.auto_routing": True,
-            **_TWO_KITS,
-        },
-    )
-    assert next_toggle_value(app, "level", +1) == "auto"
-    apply_toggle(app, "level", "auto")
-    assert toggle_state(app, "level") == "auto"
-    assert next_toggle_value(app, "level", +1) == "light"
-
-
-def test_level_hint_for_auto_does_not_resolve_model(tmp_path):
-    from gc_tui.toggles import level_value_hint
-
-    app = _app(
-        tmp_path,
-        config={
-            "agent.model": "m",
-            "model": "auto",
-            "backend.api_mode": "chat_completions",
-            "agent.auto_routing": True,
-        },
-    )
-    assert (
-        level_value_hint(app, "auto")
-        == "уровень меняется автоматически по ходу работы"
-    )
+# --- Значения правой колонки считаются один раз на перерисовку -------------
 
 
 @pytest.mark.asyncio
-async def test_palette_rebuild_asks_each_values_provider_once_and_skips_trackless(
+async def test_palette_rebuild_asks_each_command_value_once(
     tmp_path, monkeypatch
 ):
-    """Перерисовка подвала (стрелка, символ фильтра): состав `/level` считается
-    один раз на рендер, а провайдер trackless `/profiles` (скан каталогов
-    профилей) раскладке не нужен вовсе — его значения ширину не задают."""
+    """Перерисовка списка (стрелка, символ фильтра): значение `/model`
+    (роутер витрины) и `/profiles` считается один раз на рендер, а не на
+    каждую строку, которой нужна ширина правой колонки."""
     pytest.importorskip("textual")
-    import dataclasses
-    from gc_tui import toggles as tg
-    from gc_tui.app import TuiApp
     from gc_tui.commands import build_default_registry
 
-    monkeypatch.chdir(tmp_path)
-    calls = {"level": 0, "profiles": 0}
-    for name in ("level", "profiles"):
-        real = tg.TOGGLES[name].values_provider
-
-        def counting(app, settings, _real=real, _name=name):
-            calls[_name] += 1
-            return _real(app, settings)
-
-        monkeypatch.setitem(
-            tg.TOGGLES,
-            name,
-            dataclasses.replace(tg.TOGGLES[name], values_provider=counting),
-        )
-
-    app = TuiApp(
-        threads_dir=str(tmp_path / "t"),
-        settings=tui_settings(
-            {
-                "model": "default",
-                "backend.api_mode": "chat_completions",
-                "agent.auto_routing": True,
-                "models": {"fast": {}, "mid": {}},
-                "slots": {"light": "fast", "default": "mid"},
-            }
-        ),
-    )
-    app._config_path = str(tmp_path / "config.yml")
+    app = _registry_app(tmp_path, monkeypatch)
     reg = build_default_registry()
+    calls = {"model": 0, "profiles": 0}
+
+    def counting(cmd):
+        calls[cmd.name] = calls.get(cmd.name, 0) + 1
+        return cmd.value_provider(app) if cmd.value_provider else None
+
+    from gc_tui.widgets.command_palette import CommandPalette
+
     async with app.run_test(size=(120, 40)) as pilot:
-        pal = _wire_palette(app, reg)
+        pal = CommandPalette(reg, initial_filter="", command_value=counting)
         await app.screen.mount(pal)
         await pilot.pause()
-        calls.update(level=0, profiles=0)
+        calls.update(model=0, profiles=0)
 
-        pal.move_selection(1)  # выделение в верхнем списке, не на /profiles
+        pal.move_selection(1)
 
-        assert calls == {"level": 1, "profiles": 0}
+        assert calls["model"] == 1 and calls["profiles"] == 1
 
 
-def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(
+def test_apply_model_choice_has_no_end_of_task_notice_while_run_is_live(
     tmp_path,
 ):
     pytest.importorskip("textual")
@@ -1325,7 +1071,6 @@ def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(
         clear_runtime_notices,
         collect_runtime_notices,
     )
-    from gc_tui.toggles import apply_toggle
 
     clear_runtime_notices()
     app = _level_app(tmp_path)
@@ -1335,7 +1080,7 @@ def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(
             return True
 
     app.active_runner = _LiveRunner()
-    apply_toggle(app, "level", "max")
+    app.apply_model_choice("max")
 
     assert (
         app.effective_settings().settings.model == "max"
@@ -1344,29 +1089,27 @@ def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(
     assert "level_switch_deferred" not in codes
 
 
-def test_apply_level_toggle_no_notice_without_active_run(tmp_path):
+def test_apply_model_choice_no_notice_without_active_run(tmp_path):
     pytest.importorskip("textual")
     from gc_core.runtime_notices import (
         clear_runtime_notices,
         collect_runtime_notices,
     )
-    from gc_tui.toggles import apply_toggle
 
     clear_runtime_notices()
     app = _level_app(tmp_path)
-    apply_toggle(app, "level", "max")
+    app.apply_model_choice("max")
 
     codes = [n.code for n in collect_runtime_notices()]
     assert "level_switch_deferred" not in codes
 
 
-def test_apply_level_toggle_no_notice_after_run_finished(tmp_path):
+def test_apply_model_choice_no_notice_after_run_finished(tmp_path):
     pytest.importorskip("textual")
     from gc_core.runtime_notices import (
         clear_runtime_notices,
         collect_runtime_notices,
     )
-    from gc_tui.toggles import apply_toggle
 
     clear_runtime_notices()
     app = _level_app(tmp_path)
@@ -1376,7 +1119,7 @@ def test_apply_level_toggle_no_notice_after_run_finished(tmp_path):
             return False
 
     app.active_runner = _FinishedRunner()
-    apply_toggle(app, "level", "max")
+    app.apply_model_choice("max")
 
     codes = [n.code for n in collect_runtime_notices()]
     assert "level_switch_deferred" not in codes

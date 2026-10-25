@@ -3260,8 +3260,8 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
 
 async def test_slot_picker_lists_the_whole_registry(tmp_path):
     """Селектор слота показывает весь models, не три слота. Два алиаса с одним
-    id — две строки. /level по-прежнему light/default/max."""
-    from gc_tui.toggles import TOGGLES
+    id — две строки. Уровни по-прежнему light/default/max."""
+    from gc_core.config_modules.model_registry import LEVELS
 
     body = (
         "models:\n"
@@ -3289,7 +3289,7 @@ async def test_slot_picker_lists_the_whole_registry(tmp_path):
             "shared-id",
             "shared-id",
         ]
-    assert tuple(v.value for v in TOGGLES["level"].values) == (
+    assert LEVELS == (
         "light",
         "default",
         "max",

@@ -11,7 +11,7 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.palette import DIM, INK
 from gc_tui.screens.main import _FooterHeadSnapshot
-from gc_tui.toggles import AUTO_LEVEL_VALUE
+from gc_tui.services.model_sign import AUTO_COLOR
 
 
 def _app(tmp_path, config):
@@ -246,7 +246,7 @@ def _span_style(text, substr):
 
 @pytest.mark.asyncio
 async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
-    """Цвета (спека §7.1): точка режима — `bold {AUTO_LEVEL_VALUE.color}`
+    """Цвета (спека §7.1): точка режима — `bold {AUTO_COLOR}`
     (единственный источник цвета `auto`, не литерал BRAND); хода нет — слово
     `auto` INK; идёт ход — стрелка DIM, точка режима остаётся BRAND (точка
     уровня — отдельным цветом снимка, здесь не проверяется)."""
@@ -258,7 +258,7 @@ async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
             meter=None,
             snapshot=_FooterHeadSnapshot(None, True, "#123456", "mid", False),
         )
-        assert _span_style(idle, "●") == f"bold {AUTO_LEVEL_VALUE.color}"
+        assert _span_style(idle, "●") == f"bold {AUTO_COLOR}"
         assert _span_style(idle, " auto") == INK
 
         running = scr._footer_head(
@@ -266,7 +266,7 @@ async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
             meter=None,
             snapshot=_FooterHeadSnapshot(None, True, "#123456", "fast", True),
         )
-        assert _span_style(running, "●") == f"bold {AUTO_LEVEL_VALUE.color}"
+        assert _span_style(running, "●") == f"bold {AUTO_COLOR}"
         assert _span_style(running, " → ") == DIM
 
 

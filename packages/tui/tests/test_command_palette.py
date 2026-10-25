@@ -652,7 +652,7 @@ def test_skill_shadowed_by_command_or_alias_is_hidden():
 
     reg = CommandRegistry()
     reg.register(Command("status", (), "", "статус"))
-    reg.register(Command("level", ("models",), "", "уровень"))
+    reg.register(Command("model", ("models",), "", "модель"))
     skills = [
         {"id": "status"},
         {"id": "pack:status"},

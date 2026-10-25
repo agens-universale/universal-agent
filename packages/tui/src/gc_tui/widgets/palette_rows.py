@@ -55,11 +55,16 @@ class PaletteRowsMixin:
                 if i == self._selected
                 else "palette-row"
             )
-            w = Static(self._format_row(row), classes=classes, markup=False)
+            w = self._row_widget(row, classes)
             if i == self._selected:
                 selected_widget = w
             widgets.append(w)
         return widgets, selected_widget
+
+    def _row_widget(self, row: Any, classes: str) -> Static:
+        """Виджет одной строки; наследник может рисовать строки иначе
+        (черта `ArgPicker`)."""
+        return Static(self._format_row(row), classes=classes, markup=False)
 
     def set_filter(self, text: str) -> None:
         self._filter = text

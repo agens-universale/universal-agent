@@ -778,8 +778,6 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
 
     reg = build_default_registry()
     state = {
-        "level": "default",
-        "profiles": "",
         "rigor": "high",
         "gate": "on",
         "answers": "deny",
@@ -1326,9 +1324,8 @@ async def test_palette_navigation_does_not_change_footer_row_count(tmp_path):
             return [c.name for c in palette._visible_toggle_rows()]
 
         assert palette.selected_command().name == "help"
-        # level/profiles — новая группа «чем работаем» перед rigor (спека §12.1);
-        # дети rigor (gate, answers) видны сразу, без навигации.
-        assert _names() == ["level", "profiles", "rigor", "gate", "answers"]
+        # Подвал — только rigor и его дети (gate, answers), видны сразу.
+        assert _names() == ["rigor", "gate", "answers"]
         expected = len(_names())
 
         regular_count = len(palette._visible_rows())
@@ -1530,19 +1527,3 @@ async def test_full_palette_with_scrollbar_keeps_toggle_values_whole(
             assert row.region.height == 1
             value = toggle_state(pilot.app, cmd.name) or "без профиля"
             assert _row_text(pilot.app, row).rstrip().endswith(value)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("width", [90, 100, 120])
-async def test_profiles_value_starts_at_level_track(tmp_path, width):
-    pytest.importorskip("textual")
-    async with _main_app(tmp_path).run_test(size=(width, 24)) as pilot:
-        pal = await _open_full_palette(pilot)
-        rows = {
-            r.render().plain.split()[0]: _row_text(pilot.app, r)
-            for r in pal.query(".palette-toggle-row")
-        }
-        level = rows["/level"]
-        first_circle = min(i for i, ch in enumerate(level) if ch in "○●")
-        value = toggle_state(pilot.app, "profiles") or "без профиля"
-        assert rows["/profiles"].index(value) == first_circle

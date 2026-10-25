@@ -1929,7 +1929,7 @@ def test_session_profile_auto_activates_runtime_and_level_changes_next_call(
     app.switch_session_profile("automatic")
 
     assert app._choice_provider() == "auto"
-    assert toggle_state(app, "level") == "auto"
+    assert toggle_state(app, "model") == "auto"
     assert app.auto_mode_active() is True
     ctx = run_coro(
         acreate_run_context(
@@ -1944,7 +1944,7 @@ def test_session_profile_auto_activates_runtime_and_level_changes_next_call(
 
     app.set_session_override("model", "light")
     assert app._choice_provider() == "light"
-    assert toggle_state(app, "level") == "light"
+    assert toggle_state(app, "model") == "light"
     assert ctx.model_router.resolve("main").alias == "fast"
     state = State(
         verbose=False,
@@ -1963,7 +1963,7 @@ def test_session_profile_auto_activates_runtime_and_level_changes_next_call(
 
     app.set_session_override("model", "max")
     assert app._choice_provider() == "max"
-    assert toggle_state(app, "level") == "max"
+    assert toggle_state(app, "model") == "max"
     assert ctx.model_router.live_choice() == "max"
     assert run_coro(aprepare_main_call(state, ctx)).alias == "fast"
     close_tick(state, state._call_level)

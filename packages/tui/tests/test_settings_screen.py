@@ -3484,7 +3484,7 @@ def test_fit_mode_pairs_whole_pairs_only():
 
 async def test_modes_section_preview_shows_toggle_pairs():
     """Превью строки «Режимы работы» в меню — пары label: value в порядке секции
-    (первая пара — уровень модели, всегда целиком; дальше — целиком либо усечены
+    (первая пара — модель, всегда целиком; дальше — целиком либо усечены
     в `· …`, смотря по фактической ширине региона в тестовом терминале)."""
     from gc_tui import app as app_mod
 
@@ -3494,7 +3494,7 @@ async def test_modes_section_preview_shows_toggle_pairs():
         await pilot.pause()
         rows = _menu_lines(app.screen)
         modes_row = next(r for r in rows if "Режимы работы" in r)
-        assert "уровень модели: " in modes_row
+        assert "модель: " in modes_row
         assert ("режим разрешений: edit" in modes_row) or ("· …" in modes_row)
 
 
@@ -3590,6 +3590,7 @@ async def test_modes_apply_error_flash_keeps_screen(tmp_path, monkeypatch):
 
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("gate")
         await pilot.press("right")
         await pilot.pause(0.1)
         assert scr._view == settings_section_index("Режимы работы")
@@ -3992,6 +3993,7 @@ async def test_modes_apply_blocked_when_not_writable(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
         assert not scr._writable()
+        scr._modes_idx = modes_row_index("gate")
 
         await pilot.press("right")
         await pilot.pause(0.1)
@@ -5344,7 +5346,7 @@ async def test_the_models_section_names_the_level_that_is_really_acting(
         assert scr._models_editor()._active_choice == "max"
 
 
-# --- level переехал из «Профилей» в «Режимы работы» отдельным блоком ---
+# --- model — отдельным блоком в «Режимах работы» ---
 
 
 def modes_row_index(name: str) -> int:
@@ -5355,16 +5357,15 @@ def modes_row_index(name: str) -> int:
     return modes_section_names().index(name)
 
 
-def test_modes_section_goes_level_then_permissions_then_rigor():
-    """Порядок блоков — решение владельца: сначала «чем работаем» (уровень
-    модели), потом «что агенту можно» (режим разрешений по умолчанию), потом
-    «как строго закрывать ход» (rigor с детьми). Порядок выровнен с палитрой,
-    где `/level` идёт первым. Состав секции спрашивается у одной функции —
-    знание о её композиции не размазано по местам."""
+def test_modes_section_goes_model_then_permissions_then_rigor():
+    """Порядок блоков — решение владельца: сначала «чем работаем» (модель
+    по умолчанию), потом «что агенту можно» (режим разрешений по умолчанию),
+    потом «как строго закрывать ход» (rigor с детьми). Состав секции
+    спрашивается у одной функции — знание о её композиции не размазано."""
     from gc_tui.toggles import modes_section_names
 
     assert modes_section_names() == [
-        "level",
+        "model",
         "mode",
         "rigor",
         "gate",
@@ -5372,7 +5373,7 @@ def test_modes_section_goes_level_then_permissions_then_rigor():
     ]
 
 
-async def test_level_row_stands_behind_a_separator(tmp_path):
+async def test_model_row_stands_behind_a_separator(tmp_path):
     """Отдельный блок = черта на смене группы. Правило родовое: разделитель
     ставится перед новым preset-родителем ИЛИ на смене `group` — старый
     2-group страж (обе группы preset, одна `group`) от этого не страдает."""
@@ -5384,36 +5385,33 @@ async def test_level_row_stands_behind_a_separator(tmp_path):
 
         seps = list(scr.query(".set-group-sep"))
         rows = list(scr.query(".set-row"))
-        # Три блока: level | mode | rigor с детьми — две черты.
+        # Три блока: model | mode | rigor с детьми — две черты.
         assert len(seps) == 2
         assert len(rows) == 5
         assert rows[0].region.y < seps[0].region.y < rows[1].region.y
         assert rows[1].region.y < seps[1].region.y < rows[2].region.y
 
 
-async def test_level_row_keeps_its_default_wording(tmp_path):
-    """Голова строки — `level · уровень модели по умолчанию`. «По умолчанию»
-    отличает файловое значение от сессионного `/level`, и в Настройках оно
-    уместно ровно потому, что здесь правится файл. В палитре тот же тоггл
-    крутит сессию — там это слово соврало бы, поэтому `spec.label` не трогаем:
-    у секции своя подпись."""
+async def test_model_row_keeps_its_default_wording(tmp_path):
+    """Голова строки — `model · модель по умолчанию`: секция правит файл,
+    палитра тем же ключом крутит сессию — «по умолчанию» уместно только
+    здесь."""
     pytest.importorskip("textual")
 
     app, _ = _app_with_config(tmp_path, 'model: "max"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
 
-        text = scr._mode_row_text("level", selected=False).plain
-        assert "level · уровень модели по умолчанию" in text
+        text = scr._mode_row_text("model", selected=False).plain
+        assert "model · модель по умолчанию" in text
         assert text.rstrip().endswith("max")
 
 
 async def test_modes_hint_uses_the_dynamic_provider(tmp_path, monkeypatch):
     """Подсказка строки берёт динамический `hint_provider`, если тоггл его
-    объявил. У `level` значения статических подсказок не несут вовсе — их роль
-    играет модель, резолвнутая роутером для этого уровня, — и без провайдера
-    строка уровня осталась бы с пустой подсказкой (тот же приём, которым
-    динамический хинт получает палитра: `dynamic_toggle_hint`)."""
+    объявил. У `model` статических подсказок нет вовсе — их роль играют
+    уровни модели (тот же приём, которым динамический хинт получает
+    палитра: `dynamic_toggle_hint`)."""
     pytest.importorskip("textual")
 
     monkeypatch.chdir(tmp_path)
@@ -5423,93 +5421,11 @@ async def test_modes_hint_uses_the_dynamic_provider(tmp_path, monkeypatch):
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
+        scr._modes_idx = modes_row_index("model")
 
         hint = scr._modes_hint_text()
 
-        assert "flash" in hint  # модель за уровнем, а не пустота
-        assert "основная рабочая" in hint  # роль уровня — канон копирайта
-
-
-async def test_level_row_track_is_lit_in_the_colour_of_the_level(
-    tmp_path, monkeypatch
-):
-    """Страж переноса: горящая позиция трека окрашена по ТЕКУЩЕМУ уровню — тем же
-    языком, что точка-индикатор футера. Свойство обеспечено общим `padded_track`,
-    но именно ради него строка и переезжала целиком, а не по кусочкам."""
-    pytest.importorskip("textual")
-    from gc_tui.toggles import TOGGLES
-
-    monkeypatch.chdir(tmp_path)
-    app, _ = _app_with_config(tmp_path, 'model: "max"\n')
-    async with app.run_test() as pilot:
-        scr = await _open_modes_section(pilot)
-
-        text = scr._mode_row_text("level", selected=False)
-        max_colour = next(
-            v.color for v in TOGGLES["level"].values if v.value == "max"
-        )
-        assert any(
-            max_colour.lower() in str(s.style).lower() for s in text.spans
-        )
-
-
-# --- level: четвёртая позиция `auto` вне шкалы (спека автороутинга §3) ------
-
-# Два разных комплекта вызова: с одной моделью автовыбор недоступен.
-_TWO_KITS_YAML = (
-    "models:\n  fast: {}\n  mid: {}\nslots:\n  light: fast\n  default: mid\n"
-)
-
-
-async def test_level_row_shows_auto_off_scale_when_available(
-    tmp_path, monkeypatch
-):
-    """Четвёртая позиция `auto` — доступна в Настройках тем же составом
-    значений, что и в палитре (`effective_toggle_values`, values_provider
-    `/level`): `backend.api_mode: chat_completions` + рубильник `auto_routing`
-    по умолчанию включён + в реестре два разных комплекта вызова."""
-    pytest.importorskip("textual")
-
-    monkeypatch.chdir(tmp_path)
-    app, _ = _app_with_config(
-        tmp_path,
-        'model: "default"\nbackend:\n  api_mode: "chat_completions"\n'
-        + _TWO_KITS_YAML,
-    )
-    async with app.run_test() as pilot:
-        scr = await _open_modes_section(pilot)
-
-        text = scr._mode_row_text("level", selected=False).plain
-        # `auto` — через двойной пробел вплотную к своей тройке, даже когда
-        # колонка трека шире (четвёрка режима разрешений).
-        assert "○ ● ○  ○ " in text
-        assert text.rstrip().endswith("default")
-
-
-async def test_level_row_cycle_includes_auto(tmp_path, monkeypatch):
-    """←/→ на строке `level` ходит по действующему составу
-    (`effective_toggle_names`) — включает `auto`, когда фича доступна, тем же
-    generic путём, каким цикл обычно идёт по трём базовым позициям."""
-    pytest.importorskip("textual")
-    import yaml
-
-    monkeypatch.chdir(tmp_path)
-    app, cfg_file = _app_with_config(
-        tmp_path,
-        'model: "max"\nbackend:\n  api_mode: "chat_completions"\n'
-        + _TWO_KITS_YAML,
-    )
-    async with app.run_test() as pilot:
-        scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
-
-        scr._modes_apply(1)  # max -> auto (4-я позиция сразу за max)
-
-        assert (
-            yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["model"]
-            == "auto"
-        )
+        assert "уровень default" in hint  # уровни модели, а не пустота
 
 
 # --- Правило записи секции: куда пишем и что действует ---
@@ -5644,12 +5560,11 @@ async def test_modes_write_says_what_actually_acts_when_a_layer_wins(
 async def test_modes_write_creates_a_missing_top_level_anchor(
     tmp_path, monkeypatch
 ):
-    """Конфиг без строки `level:` (создан до появления ключа) не запирает
-    переключение: якорь дописывается из пакетного шаблона.
+    """Конфиг без строки `model:` (создан до появления ключа) не запирает
+    запись: якорь дописывается из пакетного шаблона.
 
-    Правило родовое, не про `level`: топ-уровневый скаляр `write_values` сам
-    дописать не умеет — его фоллбэк на шаблон работает только для dotted-ключей.
-    Переехало сюда вместе со строкой уровня."""
+    Правило родовое: топ-уровневый скаляр `write_values` сам дописать не
+    умеет — его фоллбэк на шаблон работает только для dotted-ключей."""
     pytest.importorskip("textual")
 
     monkeypatch.chdir(tmp_path)
@@ -5659,9 +5574,8 @@ async def test_modes_write_creates_a_missing_top_level_anchor(
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
 
-        scr._modes_apply(1)
+        scr._write_section_keys({"model": "max"})
         await pilot.pause()
 
         assert 'model: "max"' in base_cfg.read_text(encoding="utf-8")
@@ -5679,7 +5593,7 @@ async def test_modes_write_flashes_the_file_it_wrote_to(tmp_path, monkeypatch):
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
+        scr._modes_idx = modes_row_index("gate")
 
         scr._modes_apply(1)
         await pilot.pause()
@@ -5712,7 +5626,7 @@ async def test_modes_flash_names_the_file_absolutely(tmp_path, monkeypatch):
         await pilot.pause()
         open_settings_section(scr, "Режимы работы")
         await pilot.pause(0.1)
-        scr._modes_idx = modes_row_index("level")
+        scr._modes_idx = modes_row_index("gate")
 
         scr._modes_apply(1)
         await pilot.pause()
@@ -5742,7 +5656,6 @@ async def test_modes_write_leaves_the_file_untouched_when_it_fails(
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
         # правка руками, пока окно открыто: файл «новее» поддерживаемой версии
         # (лишний ключ отказа больше не даёт — только уведомление)
         base_cfg.write_text(
@@ -5751,7 +5664,7 @@ async def test_modes_write_leaves_the_file_untouched_when_it_fails(
         )
         before = base_cfg.read_text(encoding="utf-8")
 
-        scr._modes_apply(1)
+        scr._write_section_keys({"model": "max"})
         await pilot.pause()
 
         assert base_cfg.read_text(encoding="utf-8") == before
@@ -5777,11 +5690,10 @@ async def test_modes_restore_failure_is_reported_not_swallowed(
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
         # правка руками, пока окно открыто: файл «новее» поддерживаемой версии
-        # валит write_values ПОСЛЕ того, как якорь level: уже дописан — снимок и
+        # валит write_values ПОСЛЕ того, как якорь model: уже дописан — снимок и
         # текущий текст расходятся, и без успешного отката файл остаётся с чужим
-        # значением уровня. (Лишний ключ отказа уже не даёт — только уведомление.)
+        # значением модели. (Лишний ключ отказа уже не даёт — только уведомление.)
         base_cfg.write_text(
             base_cfg.read_text(encoding="utf-8") + "config_version: 999\n",
             encoding="utf-8",
@@ -5794,7 +5706,7 @@ async def test_modes_restore_failure_is_reported_not_swallowed(
             "gc_core.onboarding_config_writer.write_text", boom
         )
 
-        scr._modes_apply(1)
+        scr._write_section_keys({"model": "max"})
         await pilot.pause()
 
         notices = [str(w.render()) for w in scr.query("#set-notice")]
@@ -5899,62 +5811,6 @@ async def test_modes_write_to_the_project_config_survives_a_packaged_base(
         assert 'finish_gate_mode: "off"' in packaged.read_text(
             encoding="utf-8"
         )
-
-
-async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_profile_allows_it(
-    tmp_path, monkeypatch
-):
-    """Спека PR140 Р4: база без пары моделей, профиль сессии с парой. Палитра
-    видит `auto`, но Settings правит базу: ←/→ по всему кругу не предлагает
-    `auto` и не пишет его в файл."""
-    pytest.importorskip("textual")
-    import yaml
-
-    monkeypatch.chdir(tmp_path)
-    profile = tmp_path / "profiles" / "pair.yml"
-    profile.parent.mkdir(parents=True)
-    profile.write_text(
-        yaml.safe_dump(
-            {
-                "models": {
-                    "fast": {
-                        "url": "http://fast/v1/chat/completions",
-                        "token": "",
-                    },
-                    "mid": {
-                        "url": "http://mid/v1/chat/completions",
-                        "token": "",
-                    },
-                },
-                "slots": {"light": "fast", "default": "mid"},
-            }
-        ),
-        encoding="utf-8",
-    )
-    app, cfg_file = _app_with_config(
-        tmp_path,
-        "backend:\n  api_mode: chat_completions\n"
-        '  completions_url: "http://base/v1/chat/completions"\n'
-        'model: "default"\n',
-    )
-    app.switch_session_profile("pair")
-    from gc_tui.toggles import effective_toggle_names
-
-    assert "auto" in effective_toggle_names(app, "level")  # сессия его видит
-    async with app.run_test() as pilot:
-        scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
-        written = []
-        for key in ("right",) * 5 + ("left",) * 5:
-            await pilot.press(key)
-            await pilot.pause(0.1)
-            written.append(
-                yaml.safe_load(cfg_file.read_text(encoding="utf-8")).get(
-                    "model"
-                )
-            )
-        assert "auto" not in written
-        assert set(written) >= {"light", "default", "max"}
 
 
 # --- mode: режим разрешений по умолчанию ------------------------------------

@@ -108,7 +108,7 @@ class ToggleSpec:
     `preset_keys` — непусто ⇔ тоггл-пресет над этими ключами (значение = имя пресета
     от резолвера, применение раскладывается в пару; спека §6).
 
-    Профили v2 (спека §12.1, group «чем работаем» — `/level`, `/profiles`):
+    Профили v2 (спека §12.1, group «чем работаем» — `/profiles`):
     `group` — семья тоггла для потребителей, которым нужна ТОЛЬКО «rigor»-семья
     (Settings «Режимы работы» — секция про самопроверку/формат ответа, не про
     модели; см. `group_toggle_names`); дефолт `"rigor"` — существующие
@@ -119,18 +119,14 @@ class ToggleSpec:
     (база окна для Settings или действующие для палитры) вместо
     статического `values` (профили из файлов, а не фиксированный список);
     `hint_provider(app, value) -> текст` — динамический hint вместо статического
-    `ToggleValue.hint` (модель, резолвнутая Router'ом для `/level`; состав
-    профиля для `/profiles`) — оба переносятся с прототипа `feat/model-profiles`
+    `ToggleValue.hint` (уровни модели для `model`; состав профиля для
+    `/profiles`) — оба переносятся с прототипа `feat/model-profiles`
     (адаптация под flat-группы ревизий 5-7: без `group`-based разделителей —
     граница «models»→«rigor» уже покрыта существующим правилом «черта перед
     preset-родителем, который не первый», т.к. `/rigor` сам такой родитель).
     `session_switch_profile` — True у `/profiles`: применение идёт через
     `app.switch_session_profile` (пересборка + notice + предохранитель,
-    спека §9.1), не generic `apply_session_override`. `rebuild_on_apply` —
-    False у `/level`: единственный тоггл, переключаемый БЕЗ `invalidate_runner`
-    (спека §6.4 — модель резолвится перед каждым вызовом по живому уровню
-    инжектируемого провайдера, /level действует со следующего вызова; снимок
-    executor тут не при чём)."""
+    спека §9.1), не generic `apply_session_override`."""
 
     values: Tuple[ToggleValue, ...]
     # Читатель действующего значения: настройки окна (`LoadedSettings`).
@@ -142,7 +138,7 @@ class ToggleSpec:
     preset_keys: Tuple[str, ...] = ()
     group: str = "rigor"
     # Подпись строки в Настройках, когда она обязана отличаться от `label`.
-    # Палитра и Настройки правят РАЗНОЕ: `/level` крутит сессию, секция пишет в
+    # Палитра и Настройки правят РАЗНОЕ: `/model` крутит сессию, секция пишет в
     # файл — уточнение «по умолчанию» верно только во втором и соврало бы в первой.
     settings_label: str = ""
     show_track: bool = True
@@ -153,11 +149,10 @@ class ToggleSpec:
         Callable[[Any, Any], Tuple[ToggleValue, ...]]
     ] = None
     hint_provider: Optional[Callable[[Any, str], str]] = None
-    # Почему значение сейчас не предлагается (набранное `/level auto` при
-    # недоступном автовыборе): `(app, value) -> причина | None`.
-    unavailable_hint: Optional[Callable[[Any, str], Optional[str]]] = None
+    # Значение выбирается списком, а не шагом ←/→ (`model`: строка
+    # «Режимов работы» открывает пикер моделей).
+    opens_picker: bool = False
     session_switch_profile: bool = False
-    rebuild_on_apply: bool = True
     # Значение, действующее в сессии, когда оно живёт не в переопределениях
     # конфига (режим разрешений: Shift+Tab, флаг запуска): `(app) -> значение`.
     # Без него действующее значение читается по настройкам окна.
@@ -168,18 +163,13 @@ class ToggleSpec:
         return tuple(v.value for v in self.values)
 
 
-# --- /level: трек уровней, хинты из Router (спека §12.1) --------------------
+# --- Роли уровней: подписи слотов в Настройках ------------------------------
 LEVEL_ROLE_TEXT: Dict[str, str] = {
     "light": "быстрая и дешёвая: простые задачи",
     "default": "основная рабочая: повседневные задачи",
     "max": "самая сильная: сложные задачи",
     "auto": "уровень меняется автоматически по ходу работы",
 }
-
-# Единственный владелец позиции `auto` (спека автороутинга §3): цвет — BRAND,
-# читается отсюда и палитрой/Настройками (через `level_values`), и футером
-# (задача 4) — литерал цвета не дублируется.
-AUTO_LEVEL_VALUE = ToggleValue("auto", "", _pal.BRAND, off_scale=True)
 
 
 def auto_unavailable_reason_cfg(cfg: Any) -> Optional[str]:
@@ -200,88 +190,26 @@ def auto_unavailable_reason_cfg(cfg: Any) -> Optional[str]:
 
 
 def auto_available_cfg(cfg: Any) -> bool:
-    """Доступна ли позиция `auto` тоггла `/level` для данного конфига."""
+    """Доступен ли выбор `auto` для данного конфига."""
     return auto_unavailable_reason_cfg(cfg) is None
 
 
-def level_values(
-    app: Any,  # noqa: ARG001  # сигнатура values_provider(app, settings)
-    settings: Any,
-) -> Tuple[ToggleValue, ...]:
-    """Состав значений `/level`: статичная тройка плюс `auto` вне шкалы, когда
-    фича доступна для ПЕРЕДАННЫХ настроек — база окна у Settings, действующие у
-    палитры (спека автороутинга §3, PR140 Р4)."""
-    values = TOGGLES["level"].values
-    if auto_available_cfg(settings):
-        return values + (AUTO_LEVEL_VALUE,)
-    return values
+def shown_choice(settings: Any) -> str:
+    """Выбор модели для витрин (палитра, пикер, `/status`, Настройки):
+    `auto` — только пока автовыбор доступен (иначе работает `default`);
+    алиас вне реестра — `default`. `settings` — всё, что принимает
+    `settings_of`."""
+    cfg = settings_of(settings)
+    choice = effective_choice(configured_choice(cfg), cfg)
+    if choice == "auto" and not auto_available_cfg(settings):
+        return "default"
+    return choice
 
 
-def resolve_level_state(cfg: Any) -> str:
-    """Витрина эффективного `/level` (state-callable, спека автороутинга §3):
-    `auto` — когда конфиг реально хранит литерал `auto` И фича доступна
-    (в этой ветке `effective_target` при недоступности вернул бы `default`,
-    что соврало бы состоянию конфига); иначе — перевод через единственную
-    точку `effective_target` (легаси/недоступность и честный `light/default/max`
-    остаются её заботой)."""
-    from gc_core.auto_routing.levels import effective_target
+def _model_hint(app: Any, value: str) -> str:
+    from gc_tui.services.model_picker import model_hint
 
-    available = auto_available_cfg(cfg)
-    choice = effective_choice(
-        configured_choice(settings_of(cfg)), settings_of(cfg)
-    )
-    if choice == "auto" and available:
-        return "auto"
-    return effective_target(choice, None, available)
-
-
-def level_unavailable_hint(app: Any, value: str) -> Optional[str]:
-    """Почему значения `value` сейчас нет в составе `/level`, или None. Выпасть
-    из состава может только `auto`; фраза причины — та же, что у нотиса ядра
-    (`startup_notices.auto_routing_unavailable_reason_text`), без хвоста про
-    default: набор уровень не меняет, действующий показывает футер."""
-    if value != AUTO_LEVEL_VALUE.value:
-        return None
-    reason = auto_unavailable_reason_cfg(_effective_settings(app))
-    if reason is None:
-        return None
-    from gc_core.startup_notices import auto_routing_unavailable_reason_text
-
-    return auto_routing_unavailable_reason_text(reason)
-
-
-def level_value_hint(app: Any, value: str) -> str:
-    """Динамический hint позиции `/level` (спека §12.1, копирайт §1): модель,
-    резолвнутая Router'ом ДЛЯ ЭТОГО уровня (не обязательно активного —
-    `ModelRouter.resolve_level`), + роль уровня. Легаси/легаси-форс — честные
-    пометки вместо модели+роли (канон §12.1); фоллбэк уровня — честная стрелка
-    «light → default» вместо модели притворного light-слота. `auto` (спека
-    автороутинга §3) — фиксированный текст роли ДО любого резолва: модели за
-    ней нет, уровень меняется автоматически по ходу работы."""
-    if value == "auto":
-        return LEVEL_ROLE_TEXT["auto"]
-    from gc_core.model_router import AliasCircuitOpenError
-
-    router = app.display_router()
-    try:
-        resolved = router.resolve_level(value)
-    except AliasCircuitOpenError as exc:
-        return (
-            f"{exc.alias} недоступна (предохранитель) · переключите /profiles"
-        )
-    except ValueError:
-        return (
-            f'уровень "{value}" не резолвится · настройте slots в config.yml'
-        )
-    if router.force_legacy:
-        return f"{resolved.model} · --model: уровни отключены на этот запуск"
-    if router.registry_empty():
-        return f"{resolved.model} · легаси: уровни появятся с реестром моделей"
-    role = LEVEL_ROLE_TEXT.get(value, "")
-    if resolved.source.startswith("фоллбэк "):
-        chain = resolved.source[len("фоллбэк ") :]
-        return f"{resolved.alias} ({chain}) · {role}"
-    return f"{resolved.alias} · {role}"
+    return model_hint(app, value)
 
 
 # --- /profiles: trackless-строка, циклический выбор файла-профиля -----------
@@ -402,6 +330,14 @@ def profile_value_hint(app: Any, value: str) -> str:
 
 
 PROFILE_NONE_VALUE = "без профиля"
+
+
+def profile_value(app: Any) -> Text:
+    """Значение `/profiles` в правой колонке палитры: имя или «без
+    профиля»."""
+    return Text(toggle_state(app, "profiles") or PROFILE_NONE_VALUE)
+
+
 _PROFILE_NONE_HINT = (
     "настройки берутся только из config.yml — файл профиля не подмешивается"
 )
@@ -584,17 +520,16 @@ def group_toggle_names(group: str) -> list:
 
 
 # Состав секции «Режимы работы» — упорядоченный список ГРУПП, а не одна группа.
-# Порядок блоков сверху вниз — решение владельца: «чем работаем» (уровень
-# модели), «что агенту можно» (режим разрешений по умолчанию), «как строго
-# закрывать ход» (строгость, самопроверка, формат ответа). Выровнен с палитрой,
-# где `/level` идёт первым.
-MODES_SECTION_GROUPS: Tuple[str, ...] = ("level", "permissions", "rigor")
+# Порядок блоков сверху вниз — решение владельца: «чем работаем» (модель по
+# умолчанию), «что агенту можно» (режим разрешений по умолчанию), «как строго
+# закрывать ход» (строгость, самопроверка, формат ответа).
+MODES_SECTION_GROUPS: Tuple[str, ...] = ("model", "permissions", "rigor")
 
 
 def modes_section_names() -> list:
     """Имена строк секции «Режимы работы» в порядке показа.
 
-    Секция НЕ равна одной группе: `level` правит глобальный `level:` конфига и
+    Секция НЕ равна одной группе: `model` правит ключ `model:` конфига и
     стоит здесь же, отдельным блоком под чертой (к профилям он отношения не
     имеет — там правился чужой ключ). Знание о композиции секции живёт в одном
     месте: и рендер, и навигация, и запись, и превью меню спрашивают отсюда."""
@@ -633,23 +568,18 @@ def base_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
 
 
 TOGGLES: Dict[str, ToggleSpec] = {
-    "level": ToggleSpec(
+    "model": ToggleSpec(
         dotted="model",
-        values=(
-            ToggleValue("light", "", _pal.INK),
-            ToggleValue("default", "", _pal.RUN_COLOR),
-            ToggleValue("max", "", _pal.ACCENT),
-        ),
-        values_provider=level_values,
-        state=resolve_level_state,
-        label="уровень модели",
-        summary="от лёгкой до максимальной сложности задачи",
-        group="level",
-        settings_label="уровень модели по умолчанию",
-        hint_provider=level_value_hint,
-        unavailable_hint=level_unavailable_hint,
-        rebuild_on_apply=False,
-        palette_default=True,
+        values=(),
+        state=shown_choice,
+        label="модель",
+        summary="auto или конкретная из реестра",
+        group="model",
+        settings_label="модель по умолчанию",
+        show_track=False,
+        hint_provider=_model_hint,
+        opens_picker=True,
+        palette_default=False,
     ),
     "profiles": ToggleSpec(
         dotted="profile",
@@ -663,7 +593,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         empty_value_text=PROFILE_NONE_VALUE,
         hint_provider=profile_value_hint,
         session_switch_profile=True,
-        palette_default=True,
+        palette_default=False,
     ),
     # Только Настройки: команды палитры нет — режим ТЕКУЩЕЙ сессии переключает
     # Shift+Tab. Строка правит конфиг; сессия без своего выбора следует ему
@@ -959,10 +889,7 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
 
     `/profiles` (`session_switch_profile`, спека §9.1) — применяет через
     `app.switch_session_profile` (пересборка + notice + сброс предохранителя —
-    отдельная семантика, не generic single-key путь). `/level`
-    (`rebuild_on_apply=False`, спека §6.4) — пишет сессионный оверрайд, но
-    единственный НЕ зовёт `invalidate_runner`: уровень читается инжектируемым
-    провайдером на старте хода, пересборка executor ему не нужна."""
+    отдельная семантика, не generic single-key путь)."""
     spec = TOGGLES[name]
     if spec.preset_keys:
         if value not in PRESETS:
@@ -981,8 +908,7 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
         app.switch_session_profile(value)
         return toggle_state(app, name)
     app.apply_session_override(spec.dotted, value)
-    if spec.rebuild_on_apply:
-        app.invalidate_runner()
+    app.invalidate_runner()
     return toggle_state(app, name)
 
 
@@ -1060,13 +986,6 @@ def preset_custom_hint(
                 "шаг на пресет заменит пару · закрепить — в /settings"
             )
     return f"ваш дефолт: самопроверка {x}, формат {y} · менять в /settings"
-
-
-def toggle_unavailable_hint(app: Any, name: str, value: str) -> Optional[str]:
-    """Причина, по которой тоггл `name` сейчас не предлагает `value`, или None —
-    значение доступно либо у тоггла такой причины не бывает."""
-    provider = TOGGLES[name].unavailable_hint
-    return provider(app, value) if provider is not None else None
 
 
 def dynamic_toggle_hint(app: Any, name: str, value: str) -> str:

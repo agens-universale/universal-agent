@@ -162,23 +162,18 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
         palette = pilot.app.query_one(".palette")
 
         # Ревизия 7: подвал уже показывает все строки, до всякой навигации.
-        # level/profiles — группа «чем работаем» перед rigor (спека §12.1).
         rows_outside = [
             row.render().plain for row in palette.query(".palette-toggle-row")
         ]
         assert [r.split()[0] for r in rows_outside] == [
-            "/level",
-            "/profiles",
             "/rigor",
             "/gate",
             "/answers",
         ]
 
-        # Спускаемся до /gate (level, profiles, rigor — впереди, +2 шага).
+        # Спускаемся до /gate (rigor — впереди, +1 шаг).
         regular_count = len(palette._visible_rows())
-        for _ in range(
-            regular_count + 3
-        ):  # /level -> /profiles -> /rigor -> /gate
+        for _ in range(regular_count + 1):  # /rigor -> /gate
             await pilot.press("down")
         await pilot.pause(0.05)
         assert palette.selected_command().name == "gate"
@@ -187,8 +182,6 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
             row.render().plain for row in palette.query(".palette-toggle-row")
         ]
         assert [r.split()[0] for r in rows_before] == [
-            "/level",
-            "/profiles",
             "/rigor",
             "/gate",
             "/answers",
@@ -222,8 +215,6 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
             row.render().plain for row in palette.query(".palette-toggle-row")
         ]
         assert [r.split()[0] for r in rows_after] == [
-            "/level",
-            "/profiles",
             "/rigor",
             "/gate",
             "/answers",
@@ -253,8 +244,6 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
             row.render().plain for row in palette.query(".palette-toggle-row")
         ]
         assert [r.split()[0] for r in rows_final] == [
-            "/level",
-            "/profiles",
             "/rigor",
             "/gate",
             "/answers",
@@ -276,8 +265,6 @@ def test_filtered_gate_row_is_dimmed_child_flat():
 
     reg = build_default_registry()
     state = {
-        "level": "default",
-        "profiles": "",
         "rigor": "high",
         "gate": "on",
         "answers": "deny",
@@ -302,8 +289,6 @@ def test_filtered_gate_row_is_dimmed_child_flat():
         ""
     )  # фильтр очищен -> /rigor снова в базе, дети видны всегда
     assert [c.name for c in pal._visible_toggle_rows()] == [
-        "level",
-        "profiles",
         "rigor",
         "gate",
         "answers",

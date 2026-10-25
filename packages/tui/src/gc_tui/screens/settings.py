@@ -4224,6 +4224,8 @@ class SettingsScreen(Screen):
         names = modes_section_names()
         name = names[self._modes_idx]
         spec = TOGGLES[name]
+        if spec.opens_picker:
+            return  # значение выбирается списком, не шагом
         current = toggle_state_base(self.app, name)
         cycle_names = base_toggle_names(self.app, name)
         new_value = cycle_in(cycle_names, current, direction)

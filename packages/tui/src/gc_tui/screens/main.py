@@ -29,7 +29,6 @@ from gc_core.config_modules.agent_edits import (
     DEFAULT_TURN_SUMMARY_IN_STATUS,
 )
 from gc_core.config_modules.images import read_images_config
-from gc_core.config_modules.model_registry import effective_choice
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
 from gc_core.message_policy.plan_messages import accepted_plan_messages
@@ -127,6 +126,10 @@ from gc_tui.services.mode_pill import (
     mode_hint_rows,
     render_mode_pill,
 )
+from gc_tui.services.model_picker import (
+    current_choice,
+    model_choice_refusal,
+)
 from gc_tui.services.notices_ui import format_notices_badge
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from gc_tui.services.session_lock import (
@@ -219,16 +222,13 @@ from gc_tui.services.voice_pill import render_pill
 from gc_tui.session_settings import read_breaker_from_meta, read_from_meta
 from gc_tui.toggles import (
     PROFILE_NONE_VALUE,
-    TOGGLES,
     apply_toggle,
-    auto_available_cfg,
     dynamic_toggle_hint,
     effective_toggle_values,
     next_toggle_value,
     preset_custom_hint,
     preset_track_extra,
     toggle_state,
-    toggle_unavailable_hint,
 )
 from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
@@ -6785,14 +6785,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         elif event.key in ("left", "right"):
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
-                spec = TOGGLES.get(cmd.name)
-                if spec is not None and spec.session_switch_profile:
-                    # /profiles — пикер, не цикл (спека §12.1, ревизия 2026-07-28):
-                    # список произвольной длины не листается вслепую.
-                    self._open_profiles_picker(cmd.name)
-                    event.stop()
-                    event.prevent_default()
-                    return
                 # Мгновенная модель (спека §1): ←/→ применяет в сессию сразу.
                 # custom не выбирается (ревизия 4) — /rigor крутит только
                 # low/medium/high, ровно как Settings.
@@ -7028,6 +7020,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             ),
             toggle_values=lambda name: effective_toggle_values(self.app, name),
             skills=self._palette_skills,
+            command_value=self._palette_command_value,
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -7074,10 +7067,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._arg_picker = picker
         self._mount_input_overlay(picker)
 
-    def _open_profiles_picker(self, name: str = "profiles") -> None:
-        """Раскрыть пикер /profiles (спека §12.1, ревизия 2026-07-28): текст
-        `/profiles ` в input → on_text_area_changed (состояние 3) сам откроет
-        ArgPicker с динамическими опциями и хинтом состава слотов."""
+    def _open_command_picker(self, name: str) -> None:
+        """Раскрыть пикер значения команды (`/model`, `/profiles`): текст
+        `/<name> ` в input → on_text_area_changed (состояние 3) сам откроет
+        ArgPicker с динамическими опциями и хинтом подвала."""
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         if self._palette is not None:
             self._close_palette()
@@ -7400,7 +7393,10 @@ class TraceScreen(TraceFollowMixin, Screen):
                 return
 
         # Arg picker открыт → Enter выполняет команду с выбранным/набранным значением.
+        # Недоступную строку (auto без автовыбора) Enter не берёт.
         if self._arg_picker is not None:
+            if not self._arg_picker.selected_enabled():
+                return
             value = self._arg_picker.selected_value()
             self._close_arg_picker()
             typed = event.value.strip()
@@ -7424,11 +7420,6 @@ class TraceScreen(TraceFollowMixin, Screen):
                 return
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
-                spec = TOGGLES.get(cmd.name)
-                if spec is not None and spec.session_switch_profile:
-                    # /profiles: Enter раскрывает пикер (спека §12.1, ревизия).
-                    self._open_profiles_picker(cmd.name)
-                    return
                 # Toggle-строка: Enter значение не трогает — «готово»: закрыть
                 # палитру и очистить поле, как Esc. Меняют значение ←/→.
                 self._close_palette()
@@ -9267,11 +9258,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         if name == "profiles":
             self._cmd_profiles(arg)
             return
-        # Тоггл-команды опознаются по флагу реестра (develop обобщил перечисление
-        # имён): /voice и /profiles выше — не тогглы, а действия, поэтому идут своими
-        # ветками.
+        if name == "model":
+            self._cmd_model(arg)
+            return
+        # Тоггл-команды опознаются по флагу реестра.
         if cmd.is_toggle:
-            self._toggle_info_command(name, arg)
+            self._toggle_info_command(name)
             return
 
     def _cmd_profiles(self, arg: str) -> None:
@@ -9280,7 +9272,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         конфигом); имя — сессионный выбор; неизвестное имя — честный отказ."""
         value = arg.strip()
         if not value:
-            self._open_profiles_picker()
+            self._open_command_picker("profiles")
             return
         if value == PROFILE_NONE_VALUE:
             target = ""
@@ -9308,21 +9300,35 @@ class TraceScreen(TraceFollowMixin, Screen):
         except (ValueError, OSError) as exc:
             self._show_footer_refusal(f"✗ не сохранено: {exc}")
 
-    def _toggle_info_command(self, name: str, arg: str = "") -> None:
+    def _cmd_model(self, arg: str) -> None:
+        """`/model [модель]` (спека model-knob §6.3): без аргумента — пикер;
+        имя вне реестра и недоступный `auto` — отказ с причиной, в сессию не
+        пишется; иначе — сессионный выбор."""
+        value = arg.strip()
+        if not value:
+            self._open_command_picker("model")
+            return
+        refusal = model_choice_refusal(self.app, value)
+        if refusal is not None:
+            self._show_footer_refusal(refusal)
+            return
+        try:
+            self.app.apply_model_choice(value)
+        except OSError as exc:
+            self._show_footer_refusal(f"✗ не сохранено: {exc}")
+
+    def _palette_command_value(self, cmd) -> Optional[Text]:
+        """Значение команды для правой колонки палитры."""
+        if cmd.value_provider is None:
+            return None
+        return cmd.value_provider(self.app)
+
+    def _toggle_info_command(self, name: str) -> None:
         """`/gate` или `/answers`, набранные и подтверждённые текстом (не через
         стрелки палитры — у toggle-команд нет args-схемы, поэтому пробел после
         имени закрывает палитру и Enter доходит сюда как обычная команда):
         ничего не меняет (иначе набор команды был бы неочевидным side-effect'ом) —
-        показывает текущее значение и как менять (←/→ в открытой палитре).
-        Набранное значение, которого тоггл сейчас не предлагает (`/level auto`
-        при недоступном автовыборе), получает ответ с причиной, а не
-        молчаливое игнорирование."""
-        unavailable = (
-            toggle_unavailable_hint(self.app, name, arg) if arg else None
-        )
-        if unavailable:
-            self._show_footer_refusal(f"/{name} {arg} — {unavailable}")
-            return
+        показывает текущее значение и как менять (←/→ в открытой палитре)."""
         self._show_footer_hint(
             toggle_info_line(name, toggle_state(self.app, name)), seconds=5.0
         )
@@ -9672,12 +9678,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             resolved.alias
         )
         ref = self.app.active_profile_ref()
-        # Действующий выбор модели: `auto` — только когда автовыбор реально
-        # активен (правило палитры и футера), неизвестный алиас — `default`.
-        loaded = self.app.effective_settings()
-        choice = effective_choice(self.app._choice_provider(), loaded.settings)
-        if choice == "auto" and not auto_available_cfg(loaded):
-            choice = "default"
+        # Действующий выбор модели — тем же правилом, что у палитры и пикера.
+        choice = current_choice(self.app)
         payload["runtime"] = {
             "active_task_id": tid,
             "runner_is_running": bool(runner and runner.is_running()),
@@ -9691,9 +9693,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             "profile": {
                 "name": active_profile or None,
                 "source": _profile_source_label(ref),
-                "model_choice": choice,
+                "model": choice,
                 "routing_policy": ("two_level" if choice == "auto" else None),
-                "model": resolved.alias or resolved.model,
+                "resolved_model": resolved.alias or resolved.model,
                 "circuit_breaker_open": breaker_open,
             },
         }

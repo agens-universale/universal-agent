@@ -138,7 +138,7 @@ async def test_status_shows_auto_level_literal(tmp_path):
 
         assert isinstance(pilot.app.screen, ViewerScreen)
         body = _viewer_body(pilot.app.screen)
-        assert '"model_choice": "auto"' in body
+        assert '"model": "auto"' in body
 
 
 @pytest.mark.asyncio
@@ -253,8 +253,7 @@ async def test_status_shows_the_working_level_when_auto_is_unavailable(
 
         body = _viewer_body(pilot.app.screen)
         assert (
-            '"model_choice": "default"' in body
-            and '"routing_policy": null' in body
+            '"model": "default"' in body and '"routing_policy": null' in body
         )
 
 
@@ -281,5 +280,5 @@ async def test_status_shows_model_choice(tmp_path):
         await pilot.pause(0.2)
 
         body = _viewer_body(pilot.app.screen)
-        assert '"model_choice": "mid"' in body
+        assert '"model": "mid"' in body
         assert '"routing_policy": null' in body

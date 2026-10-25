@@ -144,12 +144,12 @@ def _effective_model_name(config) -> str:
 
 def _profile_header_text(config, profile_source: str | None) -> Text:
     """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local».
-    Уровень — действующий, тем же правилом, что у палитры `/level`: `auto`, только
-    когда автовыбор доступен, иначе уровень, которым идёт работа."""
-    from gc_tui.toggles import resolve_level_state
+    Выбор — действующий, тем же правилом, что у `/model`: `auto`, только
+    когда автовыбор доступен, иначе то, чем идёт работа."""
+    from gc_tui.toggles import shown_choice
 
     profile = runtime_of(config).active_profile or None
-    level = resolve_level_state(config)
+    level = shown_choice(config)
     model = _effective_model_name(config)
     t = Text()
     t.append("профиль: ", style=DIM)

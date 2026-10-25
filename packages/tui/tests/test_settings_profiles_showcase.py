@@ -943,8 +943,8 @@ async def test_status_command_includes_profile_level_model(
 
     assert profile_block["name"] == "work"
     assert profile_block["source"] == "проектный"
-    assert profile_block["level"] == "light"
-    assert profile_block["model"] == "flash"
+    assert profile_block["model"] == "light"
+    assert profile_block["resolved_model"] == "flash"
 
 
 # --- онбординг-предупреждение о перекрывающем слое (спека §11) ---

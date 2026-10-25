@@ -63,8 +63,8 @@ def _hint_for(cmd: Command | None) -> str:
 
 def _matches(cmd: Command, prefix: str) -> bool:
     """Фильтр строки палитры: имя ИЛИ любой алиас начинается с набранного
-    (спека §12.1 — тихий алиас `models`→`/level`: набравший «/models» находит
-    `/level` уже на этапе фильтрации, не только по прямому вводу полного
+    (тихий алиас `models`→`/model`: набравший «/models» находит
+    `/model` уже на этапе фильтрации, не только по прямому вводу полного
     алиаса). Generic по `Command.aliases` — тот же механизм, что у `/сжать`
     (`/compact`), просто применённый и к живому фильтру, не только к `lookup`."""
     if cmd.name.startswith(prefix):
@@ -122,6 +122,7 @@ class CommandPalette(VerticalScroll):
         toggle_dynamic_hint: Optional[Callable[[str, str], str]] = None,
         toggle_values: Optional[Callable[[str], tuple]] = None,
         skills: Optional[Callable[[], list[dict]]] = None,
+        command_value: Optional[Callable[[Command], Optional[Text]]] = None,
     ) -> None:
         super().__init__(classes="palette")
         self._registry = registry
@@ -130,16 +131,22 @@ class CommandPalette(VerticalScroll):
         self._toggle_state = toggle_state
         self._toggle_extra = toggle_extra
         self._toggle_custom_hint = toggle_custom_hint
-        # Динамический hint (спека §12.1, /level и /profiles): (name, value) -> текст,
+        # Динамический hint (спека §12.1): (name, value) -> текст,
         # заменяет статический `ToggleValue.hint` для тогглов с `hint_provider`.
         self._toggle_dynamic_hint = toggle_dynamic_hint
-        # Динамический состав значений трека (спека автороутинга §3, /level) —
-        # name -> ToggleValue-кортеж; не инъецирован (юнит-тесты без app) →
+        # Динамический состав значений трека — name -> ToggleValue-кортеж;
+        # не инъецирован (юнит-тесты без app) →
         # `_values_for` берёт статический `TOGGLES[name].values`.
         self._toggle_values = toggle_values
         self._skills = skills
+        # Текущее значение обычной команды (`/model`, `/profiles`) — правая
+        # колонка вместо хоткея; не инъецировано — значений нет.
+        self._command_value = command_value
+        # Значения на одну перерисовку: ширина правой колонки и строки
+        # спрашивают их много раз, провайдер (роутер витрины) — один.
+        self._value_memo: dict[str, Optional[Text]] = {}
         # Состав значений тогглов на время ОДНОГО рендера подвала (`_build_footer`):
-        # раскладка и строки спрашивают его много раз, провайдер (/level) должен
+        # раскладка и строки спрашивают его много раз, провайдер должен
         # отработать один. None — вне рендера, кэша нет.
         self._values_memo: Optional[dict] = None
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
@@ -334,7 +341,7 @@ class CommandPalette(VerticalScroll):
         custom, custom сам не выбирается) — хинт берёт динамический провайдер
         `toggle_custom_hint` (спека §5, два состояния).
 
-        `hint_provider` (спека §12.1, /level и /profiles) — динамический hint
+        `hint_provider` (спека §12.1) — динамический hint
         вместо статического `ToggleValue.hint`, читается через инъекцию
         `toggle_dynamic_hint`. Пустое состояние /profiles (`current` пусто,
         профилей нет) — hint возвращается ЦЕЛИКОМ, без обёртки
@@ -380,11 +387,27 @@ class CommandPalette(VerticalScroll):
             name_w = self._name_col_w()
         return f" {f'/{cmd.name}'.ljust(name_w)}{cmd.description}"
 
+    def _value(self, cmd: Command) -> Optional[Text]:
+        """Текущее значение команды (один вызов провайдера на перерисовку)."""
+        if self._command_value is None or cmd.value_provider is None:
+            return None
+        if cmd.name not in self._value_memo:
+            self._value_memo[cmd.name] = self._command_value(cmd)
+        return self._value_memo[cmd.name]
+
+    def _right_text(self, cmd: Command) -> Text:
+        """Правая колонка строки: значение команды, иначе хоткей."""
+        value = self._value(cmd)
+        return value if value is not None else Text(cmd.hotkey)
+
     def _hotkey_col_w(self) -> int:
-        """Ширина колонки хоткеев — самый длинный видимый хоткей, или 0, если
-        их нет ни у одной видимой строки. Колонка прижата к правому краю
-        строки (`_line_width`), хоткей не обрезается никогда."""
-        return max((len(c.hotkey) for c in self._visible_rows()), default=0)
+        """Ширина правой колонки — самое длинное видимое значение или хоткей,
+        или 0, если их нет ни у одной видимой строки. Колонка прижата к
+        правому краю строки (`_line_width`), не обрезается никогда."""
+        return max(
+            (len(self._right_text(c)) for c in self._visible_rows()),
+            default=0,
+        )
 
     def _line_width(self) -> int:
         """Ширина текста строки (внутри рамки и паддинга). Палитра вне
@@ -415,14 +438,21 @@ class CommandPalette(VerticalScroll):
         width = max(1, self._line_width() - self._desc_start() - tail)
         return fit_text(text, width)
 
-    def _format_row(self, cmd: Command) -> str:
+    def _format_row(self, cmd: Command) -> str | Text:
+        """Строка команды; со значением (`/model`) — `Text`, значение в
+        правой колонке со своими цветами (знак модели)."""
         head = f" {fit_name(f'/{cmd.name}').ljust(self._name_col_w())}"
         tail = self._hotkey_tail()
         desc = self._fit_desc(cmd.description, tail)
-        if not tail or not cmd.hotkey:
+        right = self._right_text(cmd)
+        if not tail or not right:
             return head + desc  # хвост не нужен, колонку держат соседи
-        gap = self._line_width() - len(head) - len(desc) - self._hotkey_col_w()
-        return head + desc + " " * gap + cmd.hotkey.rjust(self._hotkey_col_w())
+        col = self._hotkey_col_w()
+        gap = self._line_width() - len(head) - len(desc) - col
+        line = head + desc + " " * gap + " " * (col - len(right))
+        if self._value(cmd) is None:
+            return line + right.plain
+        return Text.assemble(line, right)
 
     def _format_skill_row(self, skill: dict) -> Text:
         """Строка скилла: запускаемое `/имя` в общей колонке имён (цвет —
@@ -694,7 +724,7 @@ class CommandPalette(VerticalScroll):
         ]
         if not toggle:
             # Обычные команды — фильтр как был: startswith по имени ИЛИ алиасу
-            # (§12.1: тихий алиас `models`→`/level` — тот же приём здесь).
+            # (тихий алиас `models`→`/model` — тот же приём здесь).
             return [c for c in cmds if _matches(c, f)] if f else cmds
         # Toggle-подвал (ревизия 7, спека §2, §4.1): база — пустой фильтр =
         # `palette_default`-тогглы, непустой = startswith (то же правило, что
@@ -792,6 +822,7 @@ class CommandPalette(VerticalScroll):
     def _rebuild(self) -> None:
         if not self.is_mounted:
             return
+        self._value_memo = {}
         rows = self._visible_rows()
         new_widgets: list[Static] = []
         selected_widget: Optional[Static] = None

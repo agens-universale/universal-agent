@@ -261,3 +261,108 @@ async def test_short_hint_still_reserves_one_line(tmp_path):
         # 3 строки + рамка(2) + клавиши (margin + строка) + хинт (margin + строка)
         assert picker.desired_height == 3 + 2 + 2 + 2
         assert picker.desired_height >= picker.outer_size.height
+
+
+def _model_like_options():
+    from gc_tui.widgets.arg_picker import PickerOption
+
+    return [
+        PickerOption(
+            "auto", "модель выбирается по ходу работы", enabled=False
+        ),
+        PickerOption("", "", separator=True),
+        PickerOption("glm-flash", ""),
+        PickerOption("giga-max", "", "● активна"),
+        PickerOption("", "", separator=True),
+        PickerOption("qwen-coder", ""),
+    ]
+
+
+def test_separator_skipped_by_navigation_and_filter():
+    """Черта не выбирается: стрелки перешагивают её; фильтр оставляет черту,
+    только если по обе стороны есть видимые строки."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    p = ArgPicker(_model_like_options())
+    seen = [p.selected_value()]
+    for _ in range(4):
+        p.move_selection(1)
+        seen.append(p.selected_value())
+    assert seen == ["auto", "glm-flash", "giga-max", "qwen-coder", "auto"]
+    p.move_selection(-1)
+    assert p.selected_value() == "qwen-coder"
+
+    p.set_filter("g")
+    assert [o.value for o in p._visible_rows()] == ["glm-flash", "giga-max"]
+    p.set_filter("q")
+    assert [o.value for o in p._visible_rows()] == ["qwen-coder"]
+    p.set_filter("")
+    assert [o.separator for o in p._visible_rows()] == [
+        False,
+        True,
+        False,
+        False,
+        True,
+        False,
+    ]
+
+
+def test_disabled_row_is_dim_and_not_taken():
+    """`enabled=False` — строка видна приглушённой, выбор её не берёт."""
+    pytest.importorskip("textual")
+    from gc_tui import palette as pal
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    p = ArgPicker(_model_like_options())
+    assert p.selected_value() == "auto"
+    assert not p.selected_enabled()
+    row = p._format_row(p._visible_rows()[0])
+    assert {str(s.style) for s in row.spans} == {pal.DIM}
+    p.move_selection(1)
+    assert p.selected_enabled()
+
+
+@pytest.mark.asyncio
+async def test_old_two_and_three_tuples_still_work(tmp_path, monkeypatch):
+    """Старые 2-кортежи (/export) и 3-кортежи (/profiles) нормализуются в
+    PickerOption: значения, описания и статус на месте."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker, PickerOption
+
+    p = ArgPicker([("txt", "вся сессия"), ("json", "данные")])
+    assert p._visible_rows() == [
+        PickerOption("txt", "вся сессия"),
+        PickerOption("json", "данные"),
+    ]
+    assert p._format_row(p._visible_rows()[0]) == " txt    вся сессия"
+    p3 = ArgPicker([("smoke", "глобальный", "● активен")])
+    assert p3._visible_rows()[0].status == "● активен"
+    assert p3._format_row(p3._visible_rows()[0]).plain.endswith("● активен")
+
+    monkeypatch.chdir(tmp_path)
+    async with _mk_app(tmp_path).run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profiles "
+        await pilot.pause(0.1)
+        rows = pilot.app.query_one(ArgPicker)._visible_rows()
+        assert rows and all(isinstance(r, PickerOption) for r in rows)
+        assert rows[0].value == "без профиля"
+
+
+@pytest.mark.asyncio
+async def test_enter_on_disabled_row_keeps_picker_open(tmp_path, monkeypatch):
+    """Enter на недоступной строке ничего не выполняет: пикер остаётся."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    async with _mk_app(tmp_path).run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/model "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        assert picker.selected_value() == "auto"
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(ArgPicker)) == 1
+        assert "model" not in pilot.app._session_overrides

@@ -73,7 +73,8 @@ def _bare_trace_screen(monkeypatch, app):
 def test_level_flag_on_a_one_model_config_explains_in_the_card_and_runs_default(
     tmp_path, monkeypatch
 ):
-    from gc_tui.toggles import effective_toggle_names, toggle_state
+    from gc_tui.services.model_picker import model_picker_options
+    from gc_tui.toggles import toggle_state
 
     app, _cfg = _app_on_disk(
         tmp_path, monkeypatch, _BACKEND + _ONE, model_override="auto"
@@ -86,11 +87,11 @@ def test_level_flag_on_a_one_model_config_explains_in_the_card_and_runs_default(
     ]
     assert notices == [_ONE_MODEL_MESSAGE]
     assert app.auto_mode_active() is False
-    assert toggle_state(app, "level") == "default"
-    assert "auto" not in effective_toggle_names(app, "level")
+    assert toggle_state(app, "model") == "default"
+    assert not model_picker_options(app)[0].enabled
 
 
-def test_typed_level_auto_names_the_reason_when_auto_is_unavailable(
+def test_typed_model_auto_names_the_reason_when_auto_is_unavailable(
     tmp_path, monkeypatch
 ):
     app, _cfg = _app_on_disk(tmp_path, monkeypatch, _BACKEND + _ONE)
@@ -98,20 +99,20 @@ def test_typed_level_auto_names_the_reason_when_auto_is_unavailable(
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
 
-    run_coro(scr._dispatch_command("level auto"))
+    run_coro(scr._dispatch_command("model auto"))
 
     assert hints == [
-        "/level auto — автовыбор моделей недоступен: во всех уровнях одна модель"
+        "/model auto — автовыбор моделей недоступен: во всех уровнях одна модель"
     ]
     assert (
         app.effective_settings().settings.model is None
     )  # набор ничего не переключает
 
 
-def test_typed_level_auto_on_max_names_the_reason_without_claiming_default(
+def test_typed_model_auto_on_max_names_the_reason_without_claiming_default(
     tmp_path, monkeypatch
 ):
-    """Набранное `/level auto` ничего не переключает: на уровне max ответ называет
+    """Набранное `/model auto` ничего не переключает: на уровне max ответ называет
     причину и не выдаёт default за действующий уровень."""
     app, _cfg = _app_on_disk(
         tmp_path,
@@ -123,25 +124,25 @@ def test_typed_level_auto_on_max_names_the_reason_without_claiming_default(
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
 
-    run_coro(scr._dispatch_command("level auto"))
+    run_coro(scr._dispatch_command("model auto"))
 
     assert hints == [
-        "/level auto — автовыбор моделей недоступен: выключен настройкой auto_routing"
+        "/model auto — автовыбор моделей недоступен: выключен настройкой auto_routing"
     ]
     assert app.effective_settings().settings.model == "max"
 
 
-def test_typed_level_auto_when_available_keeps_the_info_hint(
-    tmp_path, monkeypatch
-):
+def test_typed_model_auto_when_available_selects_it(tmp_path, monkeypatch):
+    """Автовыбор доступен — набранное `/model auto` выбирает его в сессии."""
     app, _cfg = _app_on_disk(tmp_path, monkeypatch, _BACKEND + _TWO)
     hints = []
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
 
-    run_coro(scr._dispatch_command("level auto"))
+    run_coro(scr._dispatch_command("model auto"))
 
-    assert len(hints) == 1 and "/level: default" in hints[0]
+    assert hints == []
+    assert app.effective_settings().settings.model == "auto"
 
 
 @pytest.mark.parametrize(
@@ -171,7 +172,7 @@ def test_config_change_making_auto_unavailable_notices_once_and_recovers(
 
     assert (
         app.auto_mode_active() is False
-        and toggle_state(app, "level") == "default"
+        and toggle_state(app, "model") == "default"
     )
     assert _auto_runtime_notices() == [
         f"автовыбор моделей недоступен: {reason} — работает уровень default"
@@ -184,7 +185,7 @@ def test_config_change_making_auto_unavailable_notices_once_and_recovers(
     app.reload_config()
 
     assert (
-        app.auto_mode_active() is True and toggle_state(app, "level") == "auto"
+        app.auto_mode_active() is True and toggle_state(app, "model") == "auto"
     )
     assert len(_auto_runtime_notices()) == 1  # обратный переход нотиса не шлёт
 

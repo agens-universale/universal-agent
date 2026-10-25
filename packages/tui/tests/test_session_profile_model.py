@@ -1336,10 +1336,12 @@ def _write_pair_profile(tmp_path: Path) -> Path:
 def test_settings_offers_auto_only_when_the_base_supports_it(tmp_path):
     """Settings правит глобальную базу: доступность `auto` считается по ней же,
     а не по профилю сессии (спека PR140 Р4). Палитра сессии — по действующему."""
-    from gc_tui.toggles import base_toggle_names, effective_toggle_names
+    from gc_tui.services.model_picker import model_picker_options
 
     _write_pair_profile(tmp_path)
     app = _app_with_base(tmp_path)
     app.switch_session_profile("pair")
-    assert "auto" in effective_toggle_names(app, "level")
-    assert "auto" not in base_toggle_names(app, "level")
+    assert model_picker_options(app)[0].enabled
+    assert not model_picker_options(app, settings=app.base_settings())[
+        0
+    ].enabled
