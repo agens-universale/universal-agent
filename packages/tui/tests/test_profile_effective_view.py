@@ -2043,17 +2043,17 @@ async def test_session_profile_level_is_live_while_running_registry_stays_a_snap
     app.tui_state.active_task_id = "live-profile"
     async with app.run_test(size=(120, 24)):
         snapshot = app.screen._footer_head_snapshot()
-        assert snapshot.model == "mid"
+        assert snapshot.sign.plain.split()[-1] == "mid"
         assert snapshot.mode_auto is False
-        assert snapshot.transition[1] == "auto"
+        assert snapshot.pending.plain == "● auto"
         close_tick(state, state._call_level)
         assert (
             await aprepare_main_call(state, ctx)
         ).alias == "mid"  # next AUTO uses this runner's registry
         snapshot = app.screen._footer_head_snapshot()
-        assert snapshot.model == "mid"
+        assert snapshot.sign.plain.split()[-1] == "mid"
         assert snapshot.mode_auto is True
-        assert snapshot.transition is None
+        assert snapshot.pending is None
     assert runner.call_mode() == "auto"
     notice = next(
         n
@@ -2130,7 +2130,7 @@ async def test_footer_uses_running_auto_availability_after_profile_switch(
             for _ in range(2):
                 snap = app.screen._footer_head_snapshot()
                 assert snap.mode_auto == running_available
-                assert snap.transition is None
+                assert snap.pending is None
                 close_tick(state, state._call_level)
                 await aprepare_main_call(state, ctx)
     finally:

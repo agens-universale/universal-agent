@@ -169,34 +169,37 @@ async def test_footer_shows_profile_name_before_dot_when_active(
 
 
 @pytest.mark.asyncio
-async def test_footer_dot_color_matches_active_level_from_toggles(
+async def test_footer_dot_color_is_the_level_of_the_model(
     tmp_path, monkeypatch
 ):
-    """Цвет точки — ИЗ TOGGLES["level"], не хардкод (light=INK, max=ACCENT)."""
+    """Цвет точки — уровень модели по `model_sign.LEVEL_COLORS`, не хардкод
+    (light=INK, max=ACCENT); модель без уровня — серая точка."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui import palette as p
     from gc_tui.app import TuiApp
 
+    registry = {
+        "models": {"fast": {}, "big": {}},
+        "slots": {"light": "fast", "max": "big"},
+    }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"agent.model": "m", "model": "light"}),
+        settings=tui_settings(
+            {"agent.model": "m", "model": "light", **registry}
+        ),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
         text = scr._compose_footer_right()
-        styles = [
-            str(s.style) for s in text.spans if "bold" in str(s.style).lower()
-        ]
-        assert any(p.INK.lower() in st.lower() for st in styles), styles
+        assert text.plain.startswith("● fast")
+        assert str(text.spans[0].style) == p.INK
 
         app.set_session_override("model", "max")
         text2 = scr._compose_footer_right()
-        styles2 = [
-            str(s.style) for s in text2.spans if "bold" in str(s.style).lower()
-        ]
-        assert any(p.ACCENT.lower() in st.lower() for st in styles2), styles2
+        assert text2.plain.startswith("● big")
+        assert str(text2.spans[0].style) == p.ACCENT
 
 
 @pytest.mark.asyncio
@@ -342,7 +345,10 @@ async def test_footer_stacks_usage_before_dropping_profile(
         assert "запрос" in second and "сессия" in second
 
 
-# --- Task 15: переход «сейчас → станет» посреди хода -------------------------
+# --- Выбор, ждущий ближайшего шага (спека model-knob §6.5) ------------------
+#
+# Было (Task 15): переход «сейчас → станет». Стало: `  ✧ ` + знак выбора с
+# тусклым именем, пока выбор окна не тот, что применил ран.
 #
 # Уровень подготовленного вызова живёт в `state._call_level`, а Router,
 # резолвящий модель, зафиксирован при сборке executor'а («снимок» models/slots/
@@ -353,12 +359,22 @@ async def test_footer_stacks_usage_before_dropping_profile(
 # просто с другим активным уровнем) у живого `display_router()`.
 
 
+def _live(app, monkeypatch, router):
+    """Выбор окна и витрина — от живого Router'а: его выбор и есть выбор,
+    ждущий ближайшего шага, если ран применил другой."""
+    monkeypatch.setattr(app, "display_router", lambda: router)
+    monkeypatch.setattr(app, "_choice_provider", router.live_choice)
+
+
 def _call_runner(level: str, router):
     class _FakeRunner:
         def is_running(self):
             return True
 
         def call_level(self):
+            return level
+
+        def applied_choice(self):
             return level
 
         def executor_router(self):
@@ -378,6 +394,9 @@ def _call_runner_with_usage(level: str, router, usage_snapshot):
         def call_level(self):
             return level
 
+        def applied_choice(self):
+            return level
+
         def executor_router(self):
             return router
 
@@ -388,11 +407,11 @@ def _call_runner_with_usage(level: str, router, usage_snapshot):
 
 
 @pytest.mark.asyncio
-async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(
+async def test_footer_shows_pending_choice_when_level_changes_mid_turn(
     tmp_path, monkeypatch
 ):
-    """Смена уровня посреди хода: слева — факт (пин), справа — точка НОВОГО
-    уровня + новая модель (спека Task 15, пример 1)."""
+    """Смена уровня посреди хода: слева — факт (пин), справа — `✧` и знак
+    модели нового выбора."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
@@ -416,20 +435,20 @@ async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(
             make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
 
         plain = scr._compose_footer_right().plain
-        assert plain == "● minimax-m3 → ● opus-4.8"
+        assert plain == "● minimax-m3  ✧ ● opus-4.8"
 
 
 @pytest.mark.asyncio
-async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_change(
+async def test_footer_shows_new_profile_name_and_pending_choice_when_both_change(
     tmp_path, monkeypatch
 ):
     """Смена И профиля, И уровня посреди хода (спека Task 15, пример 3): слева —
     имя НОВОГО профиля (выбор, меняется мгновенно) + факт-модель старого пина,
-    справа — точка нового уровня + новая модель. Комфортная ширина — ничего не
-    ужато, композиция «профиль + переход с точкой» видна целиком в одной строке."""
+    справа — `✧` и знак нового выбора. Комфортная ширина — ничего не
+    ужато, композиция «профиль + ожидание» видна целиком в одной строке."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -458,24 +477,21 @@ async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_cha
             make_settings(new_snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
 
         plain = scr._compose_footer_right().plain
-        assert plain == "other ● minimax-m3 → ● opus-4.8"
-        assert plain.startswith("other ")  # новое имя профиля слева
-        assert "minimax-m3" in plain and "opus-4.8" in plain
-        assert "→ ●" in plain  # точка перехода справа
+        assert plain == "other ● minimax-m3  ✧ ● opus-4.8"
 
 
 @pytest.mark.asyncio
-async def test_footer_shows_transition_without_dot_when_only_profile_changes(
+async def test_footer_no_pending_when_only_profile_changes(
     tmp_path, monkeypatch
 ):
-    """Смена профиля посреди хода, уровень тот же: справа — модель БЕЗ точки
-    (спека Task 15, пример 2) — Router у пина остаётся снимком СТАРОГО
-    профиля, живой Router уже видит новый."""
+    """Смена профиля посреди хода, выбор тот же: ждать нечего — `✧` нет
+    (сравниваются выборы, не модели), факт — модель Router'а у пина,
+    снимка СТАРОГО профиля."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
@@ -503,10 +519,10 @@ async def test_footer_shows_transition_without_dot_when_only_profile_changes(
             make_settings(new_snapshot), choice_provider=lambda: "default"
         )
         app.active_runner = _call_runner("default", executor_router)
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
 
         plain = scr._compose_footer_right().plain
-        assert plain == "● minimax-m3 → gpt-5.5"
+        assert plain == "● minimax-m3"
 
 
 @pytest.mark.asyncio
@@ -580,7 +596,7 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
                 return executor_router
 
         app.active_runner = _FinishedRunner()
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
 
         plain = scr._compose_footer_right().plain
         assert plain == "● opus-4.8"
@@ -588,11 +604,11 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_footer_drops_profile_name_before_dropping_transition_block(
+async def test_footer_drops_profile_name_before_model_names(
     tmp_path, monkeypatch
 ):
-    """Порядок жертв по ширине (спека Task 15): сначала снимается имя профиля
-    целиком, переход остаётся."""
+    """Порядок жертв по ширине: сначала снимается имя профиля целиком,
+    ожидающий выбор с именем остаётся."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -618,28 +634,28 @@ async def test_footer_drops_profile_name_before_dropping_transition_block(
             make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
         ref = ProfileRef(
             name="very-long-profile-name", path=Path("x"), root_kind="project"
         )
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
 
-        no_profile_with_transition = "● minimax-m3 → ● opus-4.8"
-        avail = cell_len(no_profile_with_transition)
+        no_profile_with_pending = "● minimax-m3  ✧ ● opus-4.8"
+        avail = cell_len(no_profile_with_pending)
         monkeypatch.setattr(
             scr, "_footer_right_available_width", lambda: avail
         )
 
         plain = scr._compose_footer_right().plain
-        assert plain == no_profile_with_transition
+        assert plain == no_profile_with_pending
 
 
 @pytest.mark.asyncio
-async def test_footer_drops_transition_block_when_still_too_narrow_without_profile(
+async def test_footer_drops_names_keeps_dots_and_star_when_too_narrow(
     tmp_path, monkeypatch
 ):
-    """Порядок жертв по ширине (спека Task 15): профиль уже снят и всё равно не
-    влезает — снимается ВЕСЬ блок за стрелкой, факт (точка + модель) остаётся."""
+    """Порядок жертв по ширине: профиль уже снят и всё равно не влезает —
+    снимаются имена (модели хода и выбора), точки и `✧` остаются."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -665,21 +681,20 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
             make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
         ref = ProfileRef(
             name="very-long-profile-name", path=Path("x"), root_kind="project"
         )
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
 
-        fact_only = "● minimax-m3"
-        avail = cell_len(fact_only)
+        dots_only = "●  ✧ ●"
+        avail = cell_len("● minimax-m3  ✧ ●") - 1
         monkeypatch.setattr(
             scr, "_footer_right_available_width", lambda: avail
         )
 
         plain = scr._compose_footer_right().plain
-        assert plain == fact_only
-        assert "→" not in plain
+        assert plain == dots_only
 
 
 # --- Task 16: лесенка деградации — двухстрочная раскладка не теряет всё ------
@@ -689,16 +704,18 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
 # влезает в одну. В этот момент прежняя лесенка проваливала ВСЕ ступени (в
 # каждом результате есть `\n`) и код безусловно отдавал `build(None,
 # with_transition=False)` — самый бедный вариант, без профиля и без перехода,
-# хотя на 1-й строке места хватало для обоих. Юзер также решил: стрелка
-# перехода снимается ПОСЛЕДНЕЙ — позже, чем футер уходит на 2-ю строку.
+# хотя на 1-й строке места хватало для обоих. Юзер также решил: блок
+# выбора снимается ПОСЛЕДНИМ — позже, чем футер уходит на 2-ю строку; с
+# model-knob §6.5 это имена, а точки и `✧` остаются всегда.
 
 
 @pytest.mark.asyncio
-async def test_footer_two_line_layout_keeps_profile_and_transition(
+async def test_footer_two_line_layout_keeps_profile_and_pending(
     tmp_path, monkeypatch
 ):
     """Главный сценарий брифа (живой смок юзера): usage уезжает на 2-ю строку,
-    профиль и переход остаются на 1-й — раньше здесь терялось всё."""
+    профиль и ожидающий выбор остаются на 1-й — раньше здесь терялось
+    всё."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -742,7 +759,7 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(
             executor_router,
             (_meta(2_000_000, 0), _meta(1_000_000, 0)),
         )
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
 
@@ -771,18 +788,18 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(
         assert "\n" in plain
         first_line, second_line = plain.split("\n")
         assert first_line.startswith("other ")
-        assert "→" in first_line
+        assert "✧" in first_line
         assert "minimax-m3" in first_line and "opus-4.8" in first_line
         assert cell_len(first_line) <= avail
         assert cell_len(second_line) <= avail
 
 
 @pytest.mark.asyncio
-async def test_footer_two_line_layout_drops_profile_before_transition(
+async def test_footer_two_line_layout_drops_profile_before_names(
     tmp_path, monkeypatch
 ):
     """На двух строках профиль по-прежнему ужимается/снимается раньше
-    перехода (порядок жертв Task 15 не меняется) — стрелка остаётся."""
+    имён модели и выбора — ожидающий выбор остаётся с именем."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -826,7 +843,7 @@ async def test_footer_two_line_layout_drops_profile_before_transition(
             executor_router,
             (_meta(2_000_000, 0), _meta(1_000_000, 0)),
         )
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
         ref = ProfileRef(
             name="very-long-profile-name", path=Path("x"), root_kind="project"
         )
@@ -866,16 +883,16 @@ async def test_footer_two_line_layout_drops_profile_before_transition(
         assert "\n" in plain
         first_line = plain.split("\n")[0]
         assert "very-long-profile-name" not in first_line
-        assert "→" in first_line
+        assert "✧ ● opus-4.8" in first_line
 
 
 @pytest.mark.asyncio
-async def test_footer_drops_transition_last_when_two_line_still_too_narrow(
+async def test_footer_drops_names_last_when_two_line_still_too_narrow(
     tmp_path, monkeypatch
 ):
-    """Юзер-контракт: стрелка снимается ПОСЛЕДНЕЙ. Профиль уже снят и даже
-    двухстрочный вариант с переходом всё ещё не влезает — отдаётся вариант
-    без перехода (точка + факт-модель остаются)."""
+    """Юзер-контракт: блок выбора снимается ПОСЛЕДНИМ. Профиль уже снят и
+    даже двухстрочный вариант с именами не влезает — имена снимаются,
+    точки и `✧` остаются."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
@@ -917,14 +934,14 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(
             executor_router,
             (_meta(2_000_000, 0), _meta(1_000_000, 0)),
         )
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
 
         head_snapshot = scr._footer_head_snapshot()
         head_no_profile = scr._footer_head(
             with_profile=False, snapshot=head_snapshot
         )
-        # На 1 колонку меньше, чем сама голова с переходом (без профиля) —
-        # даже без профиля переход не влезает НИ на одну строку 2-строчного
+        # На 1 колонку меньше, чем сама голова с ожидающим выбором (без
+        # профиля) — имена не влезают НИ на одну строку 2-строчного
         # варианта, независимо от того, куда денется usage-блок.
         avail = cell_len(head_no_profile.plain) - 1
         monkeypatch.setattr(
@@ -932,17 +949,16 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(
         )
 
         plain = scr._compose_footer_right().plain
-        assert "→" not in plain
-        assert "●" in plain
-        assert "minimax-m3" in plain
+        assert plain.startswith("●  ✧ ●")
+        assert "minimax-m3" not in plain and "opus-4.8" not in plain
 
 
 @pytest.mark.asyncio
-async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
+async def test_footer_one_line_priority_kept_with_profile_pending_and_usage(
     tmp_path, monkeypatch
 ):
     """Регресс-страж Task 8/9: когда всё влезает в одну строку (профиль,
-    переход и usage-сегменты разом), результат остаётся однострочным — новая
+    ожидающий выбор и usage-сегменты разом), результат остаётся однострочным — новая
     лесенка не уносит его на 2-ю строку зря."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
@@ -985,7 +1001,7 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
             executor_router,
             (_meta(2_000_000, 0), _meta(1_000_000, 0)),
         )
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
+        _live(app, monkeypatch, live_router)
         ref = ProfileRef(name="other", path=Path("x"), root_kind="project")
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 1000)
@@ -993,7 +1009,7 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
         plain = scr._compose_footer_right().plain
         assert "\n" not in plain
         assert plain.startswith("other ")
-        assert "→" in plain
+        assert "✧ ● opus-4.8" in plain
 
 
 # --- Task 17: единая лесенка жертв -----------------------------------------
@@ -1006,7 +1022,8 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
 # колонок не проверить.
 #
 # Порядок жертв: 1) всё одной строкой; 2) цены вниз; 3) пилюля режима — глиф;
-# 4) имя профиля 14 → 5; 5) имя снимается; 6) снимается блок за стрелкой.
+# 4) имя профиля 14 → 5; 5) имя снимается; 6) снимаются имена модели и
+# выбора (точки и `✧` остаются).
 
 _FOOTER_CHROME = 5  # padding'и футера + зазор между колонками (main.py)
 _PRICING = {
@@ -1085,8 +1102,8 @@ def _narrowest_named_variant(scr, cols: int) -> str:
     ).plain
 
 
-def _arm_transition(app, monkeypatch, *, profile=None, usage=None):
-    """Пин хода «light → max» (переход виден) + опционально usage-сегменты и
+def _arm_pending(app, monkeypatch, *, profile=None, usage=None):
+    """Пин хода «light», выбор «max» ждёт (`✧` виден) + опционально usage-сегменты и
     активный профиль — общая обвязка ступенчатых тестов."""
     from gc_core.config_modules.profiles import ProfileRef
     from gc_core.model_router import ModelRouter
@@ -1104,7 +1121,7 @@ def _arm_transition(app, monkeypatch, *, profile=None, usage=None):
         if usage
         else _call_runner("light", pinned)
     )
-    monkeypatch.setattr(app, "display_router", lambda: live)
+    _live(app, monkeypatch, live)
     monkeypatch.setattr(app, "collect_footer_notices", list)
     if profile is not None:
         monkeypatch.setattr(
@@ -1137,7 +1154,7 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
-        _arm_transition(
+        _arm_pending(
             app,
             monkeypatch,
             profile=_LONG_NAME,
@@ -1162,7 +1179,7 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
         assert plain == stacked.plain
         first, second = plain.split("\n")
         assert first.startswith(_CEILING)  # имя профиля цело (в потолке)
-        assert "→" in first  # и переход тоже
+        assert "✧ ● opus-4.8" in first  # и ожидающий выбор тоже
         assert "запрос" in second and "сессия" in second
         assert _left_fits(scr, total, plain, glyph=False)
 
@@ -1188,7 +1205,7 @@ async def test_footer_turns_pill_to_glyph_before_shrinking_profile(
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
-        _arm_transition(app, monkeypatch, profile=_LONG_NAME)
+        _arm_pending(app, monkeypatch, profile=_LONG_NAME)
 
         ceiling_need = cell_len(
             scr._footer_head(
@@ -1204,7 +1221,7 @@ async def test_footer_turns_pill_to_glyph_before_shrinking_profile(
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_CEILING)  # имя целое, не ужато
-        assert "→" in plain
+        assert "✧ ● opus-4.8" in plain
         assert not _left_fits(scr, total, plain, glyph=False)
         assert _left_fits(scr, total, plain, glyph=True)
 
@@ -1229,7 +1246,7 @@ async def test_footer_keeps_full_profile_while_glyph_frees_room(
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
-        _arm_transition(app, monkeypatch, profile=_LONG_NAME)
+        _arm_pending(app, monkeypatch, profile=_LONG_NAME)
 
         snapshot = scr._footer_head_snapshot()
         floor_need = cell_len(
@@ -1247,7 +1264,7 @@ async def test_footer_keeps_full_profile_while_glyph_frees_room(
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_CEILING)  # имя в потолке, не ужато
-        assert "→" in plain
+        assert "✧ ● opus-4.8" in plain
         assert _left_fits(scr, total, plain, glyph=True)
 
 
@@ -1270,7 +1287,7 @@ async def test_footer_shrinks_profile_on_the_glyph_pass(tmp_path, monkeypatch):
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
-        _arm_transition(app, monkeypatch, profile=_LONG_NAME)
+        _arm_pending(app, monkeypatch, profile=_LONG_NAME)
 
         snapshot = scr._footer_head_snapshot()
         ceiling_need = cell_len(
@@ -1289,7 +1306,7 @@ async def test_footer_shrinks_profile_on_the_glyph_pass(tmp_path, monkeypatch):
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_LONG_NAME[:12] + "…")  # 13 колонок вместо 14
-        assert "→" in plain
+        assert "✧ ● opus-4.8" in plain
         # левой досталось ровно столько, сколько занимает глиф режима
         assert total - cell_len(plain) - _FOOTER_CHROME == floor
 
@@ -1306,8 +1323,8 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
     - имя профиля при сужении только укорачивается, никогда не растёт
       (фикс-раунд 3: перебор имени целиком во втором проходе, и он тоже
       начинается с потолка);
-    - блок за стрелкой снимается последним: нет ширины, где переход снят, а имя
-      профиля ещё на месте;
+    - имена модели и выбора снимаются последними: нет ширины, где они сняты,
+      а имя профиля ещё на месте; `✧` не снимается никогда;
     - обе ступени действительно достигаются, иначе перебор ничего не стерёг.
 
     Проверяется РЕШЕНИЕ («вариант с именем не проходит предикат»), а не его
@@ -1326,10 +1343,10 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
-        _arm_transition(app, monkeypatch, profile=_LONG_NAME)
+        _arm_pending(app, monkeypatch, profile=_LONG_NAME)
 
         seen_profile_dropped = False
-        seen_transition_dropped = False
+        seen_names_dropped = False
         prev_profile_cols = None
         for total in range(115, 29, -1):
             await pilot.resize_terminal(total, 30)
@@ -1349,12 +1366,13 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
                     f"ширина {total}: имя снято, хотя с минимальным "
                     f"именем строка 1 вставала — {plain!r}"
                 )
-            if "→" not in plain:
-                seen_transition_dropped = True
+            assert "✧" in plain, (total, plain)
+            if "opus-4.8" not in plain:
+                seen_names_dropped = True
                 assert not has_profile, (
-                    f"ширина {total}: переход снят раньше имени профиля — {plain!r}"
+                    f"ширина {total}: имена сняты раньше имени профиля — {plain!r}"
                 )
-        assert seen_profile_dropped and seen_transition_dropped
+        assert seen_profile_dropped and seen_names_dropped
 
 
 @pytest.mark.asyncio
@@ -1469,7 +1487,7 @@ async def test_footer_context_meter_stays_on_the_first_line_at_every_step(
     async with app.run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        _arm_transition(
+        _arm_pending(
             app,
             monkeypatch,
             profile=_LONG_NAME,
@@ -1481,8 +1499,8 @@ async def test_footer_context_meter_stays_on_the_first_line_at_every_step(
             await pilot.resize_terminal(total, 30)
             first = scr._compose_footer_right().plain.split("\n")[0]
             assert "контекст" in first, (total, first)
-            assert "●" in first  # точка уровня и модель хода — там же
-            assert "m" in first
+            assert "●" in first  # точка модели хода и `✧` — там же
+            assert "✧" in first
 
 
 @pytest.mark.asyncio
@@ -1526,7 +1544,7 @@ async def test_footer_resolves_context_meter_once_per_frame(
     async with app.run_test(size=(70, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        _arm_transition(
+        _arm_pending(
             app,
             monkeypatch,
             profile=_LONG_NAME,
@@ -1841,17 +1859,15 @@ async def test_footer_two_line_auto_drops_profile_before_fact_and_fact_last(
 
 
 @pytest.mark.asyncio
-async def test_name_kept_for_a_pending_transition_is_squeezed_not_widened(
+async def test_narrow_pending_drops_both_names_keeps_dots_and_star(
     tmp_path, monkeypatch
 ):
-    """Пока ждёт переход, имя модели не снимается. На ступенях «снять имя» оно
-    остаётся ужатым до минимума — иначе последний вариант узкого окна был бы
-    шире ужатых ступеней с полным длинным ID."""
+    """Узкое окно при ожидающем выборе (спека model-knob §6.5): сначала
+    имена — и длинной модели хода, и выбора; точки и `✧` остаются."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
     from gc_tui.app import TuiApp
-    from gc_tui.screens.main import _MODEL_NAME_MIN_COLS
 
     long_id = "gatewayhub/acme-lab/acme-big-coder-4.5"
     app = TuiApp(
@@ -1872,11 +1888,8 @@ async def test_name_kept_for_a_pending_transition_is_squeezed_not_widened(
             make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
-        monkeypatch.setattr(app, "display_router", lambda: live_router)
-        monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 4)
+        _live(app, monkeypatch, live_router)
+        monkeypatch.setattr(scr, "_context_meter", lambda: None)
+        monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 8)
 
-        plain = scr._compose_footer_right().plain
-        assert long_id not in plain
-        model = plain.split("● ", 1)[1].split(" ", 1)[0]
-        assert "…" in model
-        assert len(model) <= _MODEL_NAME_MIN_COLS
+        assert scr._compose_footer_right().plain == "●  ✧ ●"

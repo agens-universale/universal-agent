@@ -16,18 +16,18 @@ from gc_tui.services.agent_runner import AgentRunner
 @pytest.mark.parametrize(
     "start,selected,pending,next_footer",
     [
-        ("light", "max", "● fast → ● strong", "● strong"),
-        ("max", "light", "● strong → ● fast", "● fast"),
-        ("light", "auto", "● fast → ● auto", "● → ● strong"),
-        ("max", "auto", "● strong → ● auto", "● → ● strong"),
-        ("auto", "light", "● → ● strong → ● fast", "● fast"),
-        ("auto", "max", "● → ● strong → ● strong", "● strong"),
-        ("light", "default", "● fast → ● strong", "● strong"),
-        ("default", "light", "● strong → ● fast", "● fast"),
-        ("default", "max", "● strong → ● strong", "● strong"),
-        ("max", "default", "● strong → ● strong", "● strong"),
-        ("default", "auto", "● strong → ● auto", "● → ● strong"),
-        ("auto", "default", "● → ● strong → ● strong", "● strong"),
+        ("light", "max", "● fast  ✧ ●● strong", "●● strong"),
+        ("max", "light", "●● strong  ✧ ● fast", "● fast"),
+        ("light", "auto", "● fast  ✧ ● auto", "● → ● strong"),
+        ("max", "auto", "●● strong  ✧ ● auto", "● → ● strong"),
+        ("auto", "light", "● → ● strong  ✧ ● fast", "● fast"),
+        ("auto", "max", "● → ● strong  ✧ ●● strong", "●● strong"),
+        ("light", "default", "● fast  ✧ ●● strong", "●● strong"),
+        ("default", "light", "●● strong  ✧ ● fast", "● fast"),
+        ("default", "max", "●● strong  ✧ ●● strong", "●● strong"),
+        ("max", "default", "●● strong  ✧ ●● strong", "●● strong"),
+        ("default", "auto", "●● strong  ✧ ● auto", "● → ● strong"),
+        ("auto", "default", "● → ● strong  ✧ ●● strong", "●● strong"),
     ],
 )
 async def test_footer_keeps_prepared_call_and_applies_selection_to_next_call(
@@ -93,7 +93,7 @@ async def test_footer_keeps_prepared_call_and_applies_selection_to_next_call(
             if start == "auto"
             else "● fast"
             if start == "light"
-            else "● strong"
+            else "●● strong"
         )
         assert app.screen._compose_footer_right().plain == expected
         app.active_runner = None

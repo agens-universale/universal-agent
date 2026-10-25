@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable, Callable, Literal, Optional
 
 if TYPE_CHECKING:
+    from gc_core.model_choice import ModelChoiceApplied
     from gc_core.vision.notes import TraceNote
 
     from gc_tui.widgets.user_reply import UserReplyContainer
@@ -80,6 +81,8 @@ from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.palette import INK as _INK
+from gc_tui.palette import MODEL_APPLIED_SHADES
+from gc_tui.palette import MUTED as _MUTED
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
@@ -395,16 +398,25 @@ _RIGHT_PRICES_DOWN = 0
 # значение (плашка контекста скрыта).
 _UNRESOLVED = object()
 
-# Снимок футер-головы (спека auto-routing §7.1): profile/mode_auto/level_color/
-# model/running — mode_auto различает режим (`● auto`) от факта (`● → ● модель`)
-# и от ручного уровня; model/level_color — факт бегущего хода (Router executor'а
-# по фактическому уровню подготовленного вызова) либо живой резолв витрины. См.
-# `TraceScreen._footer_head_snapshot`.
+# Снимок футер-головы (спека model-knob §6.5): `sign` — знак модели хода
+# (`model_sign`: точки и имя); в auto во время хода — одна точка уровня
+# вызова, голова тогда `● → ● модель`. `pending` — знак выбора, ждущего
+# ближайшего шага; `applied_frame` — кадр дыхания `✦` применённого выбора
+# или None. См. `TraceScreen._footer_head_snapshot`.
 _FooterHeadSnapshot = namedtuple(
     "_FooterHeadSnapshot",
-    ("profile", "mode_auto", "level_color", "model", "running", "transition"),
-    defaults=(None,),
+    ("profile", "mode_auto", "sign", "running", "pending", "applied_frame"),
+    defaults=(None, None),
 )
+
+# Дыхание `✦` применённого выбора: два цикла рампы MUTED ↔ BRIGHT, затем
+# угасание до фона; кадр — шаг таймера (2,4 с дыхания, 0,48 с угасания).
+_BREATH_STEP_S = 0.12
+_BREATH_CYCLE = 10
+_APPLIED_FRAMES = [
+    *MODEL_APPLIED_SHADES[:_BREATH_CYCLE] * 2,
+    *MODEL_APPLIED_SHADES[_BREATH_CYCLE:],
+]
 
 # Данные одной сборки футера, резолвятся ОДИН раз на кадр и идут в обе
 # колонки: бейдж уведомлений (строка 2 левой и резерв лесенки правой),
@@ -456,6 +468,43 @@ def _truncate_middle(name: str, max_cols: int) -> str:
     head = _fit_cells(name, budget - budget // 2)
     tail = _fit_cells(name[::-1], budget // 2)[::-1]
     return f"{head}…{tail}"
+
+
+def _sign_parts(sign: Text) -> tuple[Text, Text]:
+    """Знак модели → (точки, имя): `model_sign.sign` ставит между ними
+    один пробел, в точках пробелов нет."""
+    cut = sign.plain.index(" ")
+    return sign[:cut], sign[cut + 1 :]
+
+
+def _append_sign(
+    head: Text, sign: Text, *, with_name: bool, name_cols: int | None
+) -> None:
+    """Точки знака и, если есть место, имя (ужатое по середине до
+    `name_cols`; None — целиком)."""
+    dots, name = _sign_parts(sign)
+    head.append_text(dots)
+    if not with_name:
+        return
+    if name_cols is not None:
+        style = name.spans[0].style if name.spans else name.style
+        name = Text(_truncate_middle(name.plain, name_cols), style=style)
+    head.append(" ")
+    head.append_text(name)
+
+
+def _snapshot_key(snapshot: _FooterHeadSnapshot | None) -> tuple | None:
+    """Ключ снимка головы для `_footer_inputs`: знаки — по `text_key`."""
+    if snapshot is None:
+        return None
+    return (
+        snapshot.profile,
+        snapshot.mode_auto,
+        text_key(snapshot.sign),
+        snapshot.running,
+        text_key(snapshot.pending),
+        snapshot.applied_frame,
+    )
 
 
 class _TraceBlockHost:
@@ -754,6 +803,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Части футера, чей сбой уже в логе: пишем раз на эпизод,
         # не каждый тик.
         self._footer_faults: set[str] = set()
+        # Дыхание `✦` применённого выбора модели: кадр и его таймер
+        # (`on_model_choice_applied`); None — не дышит.
+        self._applied_frame: Optional[int] = None
+        self._breath_timer = None
         # Input history: per-project ↑/↓ навигация.
         # _history создаётся в on_mount (project_dir = threads_dir.parent).
         self._history = None  # type: Optional["InputHistory"]
@@ -957,21 +1010,16 @@ class TraceScreen(TraceFollowMixin, Screen):
         return model if model and model != MODEL_SENTINEL else "?"
 
     def _footer_live_choice(self) -> str:
-        """Активный уровень ЖИВОГО резолва (спека §12.1/§12.2): реагирует на
-        /level и активацию профиля сразу, без пересборки executor. Общий
-        источник для цвета будущей модели и сравнения «уровень менялся?»
-        посреди вызова; факт берётся через Router работающего executor."""
+        """Цель ЖИВОГО резолва (спека §12.1/§12.2): реагирует на /model и
+        активацию профиля сразу, без пересборки executor. Вне хода — уровень
+        точки знака в auto; факт хода берётся через Router работающего
+        executor."""
         display_router = getattr(self.app, "display_router", None)
         return (
             display_router().active_target()
             if callable(display_router)
             else "default"
         )
-
-    def _level_color(self, level: str) -> str:
-        """Цвет точки-индикатора для конкретного уровня — из ЕДИНОГО источника
-        `model_sign.LEVEL_COLORS`."""
-        return model_sign.LEVEL_COLORS.get(level, _INK)
 
     def _footer_profile_name(self) -> str | None:
         """Имя активного профиля для футера, или None — тот же источник, что
@@ -980,12 +1028,33 @@ class TraceScreen(TraceFollowMixin, Screen):
         ref = ref_fn() if callable(ref_fn) else None
         return ref.name if ref is not None else None
 
-    def _footer_running_resolution(self) -> tuple[str, str, str, bool] | None:
-        """Факт подготовленного вызова через Router работающего executor.
+    def _footer_slots(self) -> dict:
+        """Явные слоты действующих настроек — по ним точки знака модели."""
+        from gc_core.settings import settings_of
 
-        Новый выбор уровня или профиля не подменяет этот комплект. До первого
-        решения используется живой резолв того же Router. Чтение не строит executor.
-        """
+        return settings_of(self.app.effective_settings()).slots.model_dump()
+
+    def _choice_sign(self, choice: str, slots: dict, name_style: str) -> Text:
+        """Знак выбора: `auto` — фирменная точка и слово; уровень или алиас
+        — знак модели, в которую выбор резолвит витрина."""
+        if choice == "auto":
+            return model_sign.sign(choice, slots, name_style=name_style)
+        try:
+            resolved = self.app.display_router().resolve_main_at(
+                choice, check_breaker=False
+            )
+        except ValueError:
+            return model_sign.sign(choice, slots, name_style=name_style)
+        model = resolved.alias or resolved.model
+        return model_sign.sign(model, slots, name_style=name_style)
+
+    def _footer_running_resolution(self) -> tuple[str, str] | None:
+        """Цель и модель подготовленного вызова через Router работающего
+        executor.
+
+        Новый выбор модели или профиля не подменяет этот факт. До первого
+        решения используется живой резолв того же Router. Чтение не строит
+        executor."""
         runner = getattr(self.app, "active_runner", None)
         is_running = getattr(runner, "is_running", None)
         if runner is None or not callable(is_running) or not is_running():
@@ -1009,65 +1078,91 @@ class TraceScreen(TraceFollowMixin, Screen):
         model = resolved.alias or resolved.model
         if not model or model == MODEL_SENTINEL:
             return None
-        return (
-            level,
-            self._level_color(level),
-            model,
-            prepared_level is not None,
-        )
+        return level, model
+
+    def _footer_mode_auto(self, call_running: bool) -> bool:
+        """Режим головы: режим незакрытого такта бегущего хода, иначе выбор
+        следующего вызова в реестре его контекста, иначе выбор окна."""
+        runner = self.app.active_runner if call_running else None
+        if runner is not None:
+            call_mode = getattr(runner, "call_mode", None)
+            actual = call_mode() if callable(call_mode) else None
+            if actual is not None:
+                return actual == "auto"
+            selection = getattr(runner, "next_call_selection", None)
+            upcoming = selection() if callable(selection) else None
+            if upcoming is not None:
+                return upcoming[0]
+        auto_mode_active = getattr(self.app, "auto_mode_active", None)
+        return auto_mode_active() if callable(auto_mode_active) else False
+
+    def _footer_pending(self, call_running: bool, slots: dict) -> Text | None:
+        """Знак выбора, ждущего ближайшего шага: ход идёт, а выбор окна —
+        не тот, которым работает ран (`State.applied_choice`)."""
+        if not call_running:
+            return None
+        applied_fn = getattr(self.app.active_runner, "applied_choice", None)
+        applied = applied_fn() if callable(applied_fn) else None
+        provider = getattr(self.app, "_choice_provider", None)
+        choice = provider() if callable(provider) else None
+        if applied is None or choice is None or choice == applied:
+            return None
+        return self._choice_sign(choice, slots, _DIM)
 
     def _footer_head_snapshot(self) -> _FooterHeadSnapshot:
-        """Один снимок на кадр: фактический вызов и выбранный следующий режим."""
-        profile = self._footer_profile_name()
-        running = self._run_in_progress()
-        auto_mode_active = getattr(self.app, "auto_mode_active", None)
-        selected_auto = (
-            auto_mode_active() if callable(auto_mode_active) else False
-        )
+        """Один снимок на кадр: знак модели хода, ожидающий выбор и кадр
+        дыхания применённого."""
+        slots = self._footer_slots()
         resolution = self._footer_running_resolution()
-        next_selection = None
-        if resolution is not None:
-            selection = getattr(
-                self.app.active_runner, "next_call_selection", None
-            )
-            next_selection = selection() if callable(selection) else None
-            if next_selection is not None:
-                selected_auto = next_selection[0]
-        transition = None
-        mode_auto = selected_auto
-        if resolution is not None:
-            level, color, model, prepared = resolution
-            runner = self.app.active_runner
-            call_mode = getattr(runner, "call_mode", None)
-            actual_mode = call_mode() if callable(call_mode) else None
-            if actual_mode is not None:
-                mode_auto = actual_mode == "auto"
-            if selected_auto:
-                if actual_mode == "manual":
-                    transition = (model_sign.AUTO_COLOR, "auto")
-            else:
-                if next_selection is None:
-                    live_level = self._footer_live_choice()
-                    live_model = str(self._footer_model_name())
-                else:
-                    _, live_level, live_model = next_selection
-                if prepared and (
-                    model != live_model
-                    or level != live_level
-                    or actual_mode == "auto"
-                ):
-                    transition = (
-                        self._level_color(live_level)
-                        if level != live_level or mode_auto
-                        else None,
-                        live_model,
-                    )
-        else:
-            color = self._level_color(self._footer_live_choice())
+        call_running = resolution is not None
+        mode_auto = self._footer_mode_auto(call_running)
+        running = self._run_in_progress()
+        if resolution is None:
+            level = self._footer_live_choice()
             model = str(self._footer_model_name())
+        else:
+            level, model = resolution
+        if mode_auto and running:
+            dot = model_sign.dots(level, slots)
+            sign = Text.assemble(dot, " ", (model, _INK))
+        elif mode_auto:
+            sign = model_sign.sign("auto", slots)
+        else:
+            sign = model_sign.sign(model, slots)
         return _FooterHeadSnapshot(
-            profile, mode_auto, color, model, running, transition
+            self._footer_profile_name(),
+            mode_auto,
+            sign,
+            running,
+            self._footer_pending(call_running, slots),
+            self._applied_frame,
         )
+
+    def on_model_choice_applied(self, event: ModelChoiceApplied) -> None:
+        """Выбор применён (спека model-knob §6.5): `✦` перед знаком дышит
+        и гаснет. Состояние — этого события: перерисовка его не повторяет."""
+        self._stop_breath()
+        self._applied_frame = 0
+        self._breath_timer = self.set_interval(
+            _BREATH_STEP_S, self._breath_tick
+        )
+        self._refresh_footer()
+
+    def _breath_tick(self) -> None:
+        """Следующий кадр дыхания; после последнего `✦` уходит."""
+        if self._applied_frame is None:
+            return
+        if self._applied_frame + 1 < len(_APPLIED_FRAMES):
+            self._applied_frame += 1
+        else:
+            self._stop_breath()
+        self._refresh_footer()
+
+    def _stop_breath(self) -> None:
+        if self._breath_timer is not None:
+            self._breath_timer.stop()
+            self._breath_timer = None
+        self._applied_frame = None
 
     def _footer_head(
         self,
@@ -1077,27 +1172,24 @@ class TraceScreen(TraceFollowMixin, Screen):
         snapshot: _FooterHeadSnapshot | None = None,
         with_model_name: bool = True,
         with_level_block: bool = True,
-        with_transition: bool = True,
         meter: Text | object | None = _UNRESOLVED,
         model_cols: int | None = None,
     ) -> Text:
-        """head = [профиль ] ●[ auto | → ● модель | модель][ · контекст]. Правило
-        единое для обоих режимов (спека auto-routing §7.1): нет активного хода —
-        точка режима + режим (` auto` в auto, модель в ручном); идёт ход —
-        точка режима + факт (` → ● модель` в auto, просто модель в ручном).
-        `transition` отдельно называет выбранный следующий режим/модель,
-        не подменяя уже подготовленный вызов. Точка режима — жирная, ВСЕГДА первая и видна: в auto
-        цветом BRAND (`model_sign.AUTO_COLOR`, единственный источник), иначе
-        цветом уровня.
+        """head = [профиль ][✦ ]знак[  ✧ знак выбора][ · контекст].
 
-        Порядок жертв по ширине (спека auto-routing §7.1): текст после
-        последней точки снимается первым (имя модели или слово `auto`,
-        `with_model_name=False`), затем у auto — стрелка и точка уровня
-        (`with_level_block=False`); точка режима остаётся всегда.
+        Знак — точки и имя модели (`model_sign`); `auto` без хода —
+        `● auto`, во время хода — `● → ● модель` (фирменная точка, стрелка
+        и одна точка уровня вызова). `  ✧ ` со знаком выбора и тусклым
+        именем — выбор ждёт ближайшего шага; `✦` — выбор применён, цвет —
+        кадр дыхания.
 
-        Имя профиля режется ХВОСТОМ до `profile_name_cols` колонок (Task 9):
-        потолок — `_PROFILE_NAME_MAX_COLS`, чтобы длинное имя не отжирало
-        футер даже на широком экране.
+        Порядок жертв по ширине: имена снимаются первыми (и модели хода, и
+        выбора, `with_model_name=False`), затем у auto — стрелка и точка
+        уровня (`with_level_block=False`). Точки, `✧` и `✦` остаются.
+
+        Имя профиля режется ХВОСТОМ до `profile_name_cols` колонок: потолок
+        — `_PROFILE_NAME_MAX_COLS`, чтобы длинное имя не отжирало футер даже
+        на широком экране.
 
         `snapshot` — готовый результат `_footer_head_snapshot()`; не передан —
         резолвим сами (одиночный вызов вне лесенки).
@@ -1106,49 +1198,37 @@ class TraceScreen(TraceFollowMixin, Screen):
         резолвим сами. Как и `snapshot`, это ОДИН резолв на кадр: метр читает
         meta треда с диска, а лесенка строит голову десятки раз.
 
-        `model_cols` — потолок имени модели, режется по середине (ступень
-        перед снятием имени); None — целиком."""
+        `model_cols` — потолок имени модели хода, режется по середине
+        (ступень перед снятием имени); None — целиком."""
         if snapshot is None:
             snapshot = self._footer_head_snapshot()
         if meter is _UNRESOLVED:
             meter = self._context_meter()
-        profile, mode_auto, level_color, model_name, running, transition = (
-            snapshot
-        )
         head = Text()
-        if with_profile and profile:
+        if with_profile and snapshot.profile:
             head.append(
-                _truncate_profile_name(profile, profile_name_cols), style=_INK
+                _truncate_profile_name(snapshot.profile, profile_name_cols),
+                style=_INK,
             )
             head.append(" ")
-        shown = (
-            model_name
-            if model_cols is None
-            else _truncate_middle(model_name, model_cols)
-        )
-        if mode_auto:
-            head.append("●", style=f"bold {model_sign.AUTO_COLOR}")
-            if running:
-                if with_level_block:
-                    head.append(" → ", style=_DIM)
-                    head.append("●", style=f"bold {level_color}")
-                    if with_model_name:
-                        head.append(" ")
-                        head.append(shown, style=_INK)
-            elif with_model_name:
-                head.append(" auto", style=_INK)
+        if snapshot.applied_frame is not None:
+            head.append("✦ ", style=_APPLIED_FRAMES[snapshot.applied_frame])
+        shown = {"with_name": with_model_name, "name_cols": model_cols}
+        if snapshot.mode_auto and snapshot.running:
+            head.append("●", style=model_sign.AUTO_COLOR)
+            if with_level_block:
+                head.append(" → ", style=_DIM)
+                _append_sign(head, snapshot.sign, **shown)
         else:
-            head.append("●", style=f"bold {level_color}")
-            if with_model_name:
-                head.append(" ")
-                head.append(shown, style=_INK)
-        if with_transition and transition is not None:
-            future_color, future_model = transition
-            head.append(" → ", style=_DIM)
-            if future_color is not None:
-                head.append("●", style=f"bold {future_color}")
-                head.append(" ")
-            head.append(future_model, style=_INK)
+            _append_sign(head, snapshot.sign, **shown)
+        if snapshot.pending is not None:
+            head.append("  ✧ ", style=_MUTED)
+            _append_sign(
+                head,
+                snapshot.pending,
+                with_name=with_model_name,
+                name_cols=None,
+            )
         if meter is not None:
             head.append(" · ", style=_DIM)
             head.append_text(meter)
@@ -1204,17 +1284,14 @@ class TraceScreen(TraceFollowMixin, Screen):
             with_level_block: bool = True,
             with_request: bool = True,
             with_prices: bool = True,
-            with_transition: bool = True,
             model_cols: int | None = None,
         ) -> Text:
-            pending_transition = snapshot.transition is not None
             head = self._footer_head(
                 with_profile=profile_cols is not None,
                 profile_name_cols=profile_cols or _PROFILE_NAME_MAX_COLS,
                 snapshot=snapshot,
-                with_model_name=with_model_name or pending_transition,
+                with_model_name=with_model_name,
                 with_level_block=with_level_block,
-                with_transition=with_model_name and with_transition,
                 meter=meter,
                 model_cols=model_cols,
             )
@@ -1290,33 +1367,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         # имя навсегда ради экономии, которой хватило бы и без него.
         # Последняя ступень (`with_level_block=False`) влияет только на auto:
         # в ручном режиме `_footer_head` игнорирует этот флаг вовсе.
-        # Рунг: (имя профиля, имя модели, блок уровня, переход, ширина имени).
-        # Перед снятием имени — снятие перехода при полном имени, затем ужатие
-        # имени по середине (спека §10.4): провайдер и версия видны, пока
-        # влезают. В auto без хода на месте имени слово `auto` — ужимать
-        # нечего.
-        full = cell_len(snapshot.model)
+        # Рунг: (имя профиля, имена, блок уровня, ширина имени). Перед
+        # снятием имён — ужатие имени модели хода по середине (спека §10.4):
+        # провайдер и версия видны, пока влезают. В auto без хода на месте
+        # имени слово `auto` — ужимать нечего. Точки, `✧` и `✦` остаются на
+        # каждой ступени (спека model-knob §6.5).
+        full = cell_len(_sign_parts(snapshot.sign)[1].plain)
         least = min(full, _MODEL_NAME_MIN_COLS)
         name_shown = snapshot.running or not snapshot.mode_auto
         squeeze = range(full - 1, least - 1, -1) if name_shown else ()
-        # Имя ждущего перехода не снимается (`build`), поэтому ступени
-        # «снять имя» тогда — одна: имя ужато до минимума, снят блок уровня
-        # (в auto это «→ ●»). Без неё самой узкой осталась бы ступень с
-        # блоком, и на узком окне правая поджимала бы левую.
-        drop_name = (
-            ((None, False, False, False, least),)
-            if snapshot.transition is not None
-            else (
-                (None, False, True, False, None),
-                (None, False, False, False, None),
-            )
-        )
         head_ladder = (
-            (_PROFILE_NAME_MAX_COLS, True, True, True, None),
-            (None, True, True, True, None),
-            (None, True, True, False, None),
-            *((None, True, True, False, c) for c in squeeze),
-            *drop_name,
+            (_PROFILE_NAME_MAX_COLS, True, True, None),
+            (None, True, True, None),
+            *((None, True, True, c) for c in squeeze),
+            (None, False, True, None),
+            (None, False, False, None),
         )
         # Ценами жертвуем ТОЛЬКО ради пола левой колонки (глиф режима,
         # критичные клавиши и бейдж уведомлений).
@@ -1328,12 +1393,11 @@ class TraceScreen(TraceFollowMixin, Screen):
                 _RIGHT_PRICES_DOWN,
                 with_model_name=name,
                 with_level_block=level_block,
-                with_transition=transition,
                 model_cols=model_cols,
                 **prices,
             )
             for prices in price_ladder
-            for cols, name, level_block, transition, model_cols in head_ladder
+            for cols, name, level_block, model_cols in head_ladder
         )
         tried: list[Text] = []
         for candidate in reserve:
@@ -1695,7 +1759,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._run_in_progress(),
             self.app.tui_state.ask_human_state is not None,
             frame.badge,
-            frame.snapshot,
+            _snapshot_key(frame.snapshot),
             text_key(frame.meter),
             tuple(text_key(seg) for seg in frame.usage),
             text_key(voice),
@@ -2433,6 +2497,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._stopping_runner = None
         self._last_user_message_id = None
         self._closed_turn_summary = None
+        self._stop_breath()
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из

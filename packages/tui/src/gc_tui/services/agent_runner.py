@@ -378,6 +378,16 @@ class AgentRunner:
             return None
         return getattr(ex.get_state(), "_call_level", None)
 
+    def applied_choice(self) -> Optional[str]:
+        """Применённый выбор рана из State (`auto`, уровень или алиас).
+
+        Чтение не строит executor. До старта рана — None.
+        """
+        ex = self._executor
+        if ex is None or not hasattr(ex, "get_state"):
+            return None
+        return getattr(ex.get_state(), "applied_choice", None)
+
     def call_mode(self) -> Optional[str]:
         """Режим незакрытого такта; выбранный в UI режим может уже быть другим."""
         ex = self._executor

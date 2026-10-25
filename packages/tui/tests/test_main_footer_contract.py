@@ -160,7 +160,10 @@ async def test_context_meter_change_rebuilds(tmp_path, monkeypatch):
 def _slot_samples() -> list[tuple[str, bool]]:
     """(текст для показа, можно ли обрезать) по всему реестру слота."""
     return [
-        (text.format(n=4, total=12), text in TRUNCATABLE)
+        (
+            text.format(n=4, total=12, name="giga-max"),
+            text in TRUNCATABLE,
+        )
         for text in slot_texts()
     ]
 
@@ -195,7 +198,6 @@ def _narrowest_right(scr):
         with_profile=False,
         with_model_name=False,
         with_level_block=False,
-        with_transition=False,
         meter=render_context_meter(999, 1000),
     )
 

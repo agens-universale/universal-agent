@@ -63,6 +63,10 @@ COPY_REFUSAL_FAILED = "/copy: не удалось записать в буфер
 COPY_DONE_LAST = "✓ скопирован последний ответ"
 COPY_DONE_NTH = "✓ скопирован ответ {n} из {total}"
 
+# Выбор модели, которая уже работает (спека model-knob §6.4); `{name}` —
+# модель.
+ALREADY_WORKING_HINT = "{name} уже работает — смены нет"
+
 # Тексты, которые по спеке могут обрезаться многоточием (отказы с
 # подстановкой и длинные пояснения); остальные обязаны влезать в
 # `MAIN_FOOTER_MIN_COLS - 20`.
@@ -72,6 +76,7 @@ TRUNCATABLE = frozenset(
         IMAGES_WITH_COMMAND_REFUSAL,
         RETENTION_DETAIL_HINT,
         COPY_REFUSAL_BAD_N,
+        ALREADY_WORKING_HINT,
     }
 )
 

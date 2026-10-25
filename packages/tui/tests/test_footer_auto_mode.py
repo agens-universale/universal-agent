@@ -9,9 +9,13 @@ from gc_testkit.settings import make_settings
 from gc_testkit.tui_support import tui_settings
 
 from gc_tui.app import TuiApp
+from rich.text import Text
+
 from gc_tui.palette import DIM, INK
 from gc_tui.screens.main import _FooterHeadSnapshot
-from gc_tui.services.model_sign import AUTO_COLOR
+from gc_tui.services.model_sign import AUTO_COLOR, sign
+
+AUTO = "auto"
 
 
 def _app(tmp_path, config):
@@ -246,36 +250,36 @@ def _span_style(text, substr):
 
 @pytest.mark.asyncio
 async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
-    """Цвета (спека §7.1): точка режима — `bold {AUTO_COLOR}`
-    (единственный источник цвета `auto`, не литерал BRAND); хода нет — слово
-    `auto` INK; идёт ход — стрелка DIM, точка режима остаётся BRAND (точка
-    уровня — отдельным цветом снимка, здесь не проверяется)."""
+    """Цвета (спека §7.1): точка режима — `AUTO_COLOR` (единственный
+    источник цвета `auto`, не литерал BRAND); хода нет — слово `auto` INK;
+    идёт ход — стрелка DIM, точка режима остаётся BRAND (точка уровня —
+    из знака снимка, здесь не проверяется)."""
     app = _app(tmp_path, CFG)
     async with app.run_test(size=(120, 24)):
         scr = app.screen
         idle = scr._footer_head(
             with_profile=False,
             meter=None,
-            snapshot=_FooterHeadSnapshot(None, True, "#123456", "mid", False),
+            snapshot=_FooterHeadSnapshot(None, True, sign(AUTO, {}), False),
         )
-        assert _span_style(idle, "●") == f"bold {AUTO_COLOR}"
-        assert _span_style(idle, " auto") == INK
+        assert _span_style(idle, "●") == AUTO_COLOR
+        assert _span_style(idle, "auto") == INK
 
         running = scr._footer_head(
             with_profile=False,
             meter=None,
-            snapshot=_FooterHeadSnapshot(None, True, "#123456", "fast", True),
+            snapshot=_FooterHeadSnapshot(None, True, Text("● fast"), True),
         )
-        assert _span_style(running, "●") == f"bold {AUTO_COLOR}"
+        assert _span_style(running, "●") == AUTO_COLOR
         assert _span_style(running, " → ") == DIM
 
 
 @pytest.mark.asyncio
-async def test_pending_transition_keeps_the_narrowest_rung_without_level_block(
+async def test_pending_choice_keeps_the_narrowest_rung_without_level_block(
     tmp_path, monkeypatch
 ):
-    """Пока ждёт переход, имя модели не снимается — но самая узкая ступень
-    auto (без блока уровня «→ ●») остаётся: иначе на совсем узком окне правая
+    """Пока выбор ждёт, `✧` с точкой остаются, а самая узкая ступень auto
+    (без блока уровня «→ ●») — тоже: иначе на совсем узком окне правая
     колонка не влезала и поджимала левую (глиф режима, стоп-клавишу)."""
     app = _app(tmp_path, CFG)
     _set_running(
@@ -286,10 +290,9 @@ async def test_pending_transition_keeps_the_narrowest_rung_without_level_block(
         snapshot = _FooterHeadSnapshot(
             None,
             True,
-            "#123456",
-            "gatewayhub/acme-lab/acme-big-coder-4.5",
+            Text("● gatewayhub/acme-lab/acme-big-coder-4.5"),
             True,
-            ("#654321", "big"),
+            Text("● big"),
         )
         monkeypatch.setattr(scr, "_footer_head_snapshot", lambda: snapshot)
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 3)
@@ -297,3 +300,4 @@ async def test_pending_transition_keeps_the_narrowest_rung_without_level_block(
         plain = scr._compose_footer_right().plain
 
         assert "→ ●" not in plain
+        assert plain.startswith("●  ✧ ●")
