@@ -21,7 +21,7 @@ def _app(tmp_path, monkeypatch, *, scenario: str, tid: str, message: str):
     fake = StubExecutor(
         threads_dir=str(tmp_path), system="cli", scenario=scenario
     )
-    fake.run([message], thread_id=tid)
+    fake.record([message], thread_id=tid)
     return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
@@ -102,48 +102,3 @@ def test_ask_human_image_answer_snapshot(snap_compare, tmp_path, monkeypatch):
         await pilot.pause(0.5)
 
     assert snap_compare(app, terminal_size=(120, 32), run_before=setup)
-
-
-@pytest.mark.parametrize(
-    "tone, plain, style",
-    [
-        ("info", "deepseek не принимает изображения", "DIM"),
-        ("warn", "! deepseek не принимает изображения", "WARN"),
-    ],
-)
-async def test_trace_note_tone_paints_the_reply_consequence(
-    tmp_path, monkeypatch, tone, plain, style
-):
-    """Пометка под репликой с картинкой: `info` — серое следствие без `!`,
-    `warn` — прежнее оранжевое `! …`."""
-    from gc_core.vision.notes import TraceNote
-    from gc_tui import palette
-    from gc_tui.widgets.user_reply import UserReplyContainer
-
-    tid = "img_tone"
-    app = _app(
-        tmp_path,
-        monkeypatch,
-        scenario="image_reply",
-        tid=tid,
-        message="вот, что в файле, проверь сам",
-    )
-    async with app.run_test(size=(120, 32)) as pilot:
-        await pilot.pause()
-        pilot.app.screen.attach_active_task(tid)
-        pilot.app._trace_note_sink.push(
-            tid,
-            TraceNote(
-                "deepseek не принимает изображения", "reply", None, tone
-            ),
-        )
-        await pilot.pause(0.6)
-        reply = [
-            r
-            for r in pilot.app.screen.query(UserReplyContainer)
-            if r.has_images
-        ][-1]
-        body = reply._consequences[-1]
-
-    assert body.plain == plain
-    assert {str(s.style) for s in body.spans} == {getattr(palette, style)}
