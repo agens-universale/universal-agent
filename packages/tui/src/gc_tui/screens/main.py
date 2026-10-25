@@ -3905,20 +3905,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         end_turn(self._block_views, self._call_timers, outcome, settled=False)
 
     def on_block_toggle(self, message: BlockToggle) -> None:
-        """Раскрыть / свернуть блок (§9.3): внизу — остаться внизу; иначе
-        после перекладки довести верх блока до видимости."""
+        """Раскрыть / свернуть блок; прокрутка — общая для лент (§9.3)."""
         message.stop()
-        at_bottom = self._stick_bottom
-        routed = self._block_views.route(message)
-        if routed is None:
-            return
-        view, key = routed
-        if at_bottom:
-            self._scroll_trace_end()
-            return
-        head = view.head_widget(key)
-        if head is not None:
-            self.call_after_refresh(head.scroll_visible, animate=False)
+        self._toggle_trace_block(self._block_views, message)
 
     def _drain_subagent_progress(self) -> None:
         """Слить live-события субагента из app-очереди и отрисовать nested."""

@@ -146,10 +146,11 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
 
     def on_block_toggle(self, message: BlockToggle) -> None:
         """Пробел на строке блока и клик по фразе — раскрыть / свернуть
-        блок своего уровня (Enter остаётся «открыть тред»)."""
+        блок своего уровня (Enter остаётся «открыть тред»); прокрутка —
+        как в живой ленте (§9.3)."""
         message.stop()
         if self._blocks is not None:
-            self._blocks.views.route(message)
+            self._toggle_trace_block(self._blocks.views, message)
 
     def action_resume(self) -> None:
         self.dismiss(True)

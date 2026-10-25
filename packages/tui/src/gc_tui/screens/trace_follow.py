@@ -4,7 +4,8 @@
 флаг `_stick_bottom` и якорь меняются в одной точке, выделение якорь
 снимает, его конец — возвращает после детекта ухода вверх. «Не внизу» —
 накладки (спека P3 §2.6): липкая реплика сверху и плашка «в конец»; клик
-по плашке — к низу, по реплике — к ней. Экран ставит миксин перед
+по плашке — к низу, по реплике — к ней. Прокрутка при раскрытии и свёртке
+блока (спека P4 §9.3) — `_toggle_trace_block`. Экран ставит миксин перед
 `Screen`, монтирует `#trace` как `AnchoredScroll`, накладки —
 `trace_overlays()`, и после монтирования зовёт `_watch_trace_follow()`.
 Подпись и ряд плашки экран может переопределить."""
@@ -18,7 +19,7 @@ from textual.css.query import NoMatches
 from textual.widget import Widget
 
 from gc_tui import textual_compat
-from gc_tui.messages import ScrollToEnd, ScrollToReply
+from gc_tui.messages import BlockToggle, ScrollToEnd, ScrollToReply
 from gc_tui.services.trace_scroll import reply_above
 from gc_tui.widgets.trace_overlays import (
     ScrollEndPill,
@@ -160,6 +161,22 @@ class TraceFollowMixin:
                 if isinstance(child, UserReplyContainer)
             ]
         return self._trace_replies_cache
+
+    def _toggle_trace_block(self, views, message: BlockToggle) -> None:
+        """Раскрыть / свернуть блок ленты моделями `views` (§9.3): внизу —
+        остаться внизу; иначе после перекладки довести верх блока до
+        видимости."""
+        at_bottom = self._stick_bottom
+        routed = views.route(message)
+        if routed is None:
+            return
+        view, key = routed
+        if at_bottom:
+            self._scroll_trace_end()
+            return
+        head = view.head_widget(key)
+        if head is not None:
+            self.call_after_refresh(head.scroll_visible, animate=False)
 
     def on_scroll_to_reply(self, message: ScrollToReply) -> None:
         """Клик по липкой реплике — она наверху видимой области."""

@@ -550,6 +550,35 @@ async def test_preview_enter_opens_thread_and_space_toggles(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_preview_collapse_brings_header_into_view(tmp_path):
+    """Прокрутка при раскрытии и свёртке — как в живой ленте (§9.3):
+    лента прокручена вверх внутрь раскрытого блока, свёртка оставляет его
+    заголовок видимым."""
+    from textual.containers import VerticalScroll
+
+    from gc_tui.messages import BlockToggle
+
+    thread = _Thread(tmp_path, status="stopped")
+    thread.add(*[p for i in range(12) for p in _read(i)])
+    thread.add(_say("a1", "\n\n".join(f"абзац {i}" for i in range(20))))
+    async with _app(tmp_path).run_test(size=(100, 14)) as pilot:
+        preview = await _open_preview(pilot)
+        trace = preview.query_one("#trace", VerticalScroll)
+        preview.post_message(BlockToggle("", "block:0:top"))
+        await pilot.pause()
+        await pilot.pause()
+        (header,) = [r for r in trace.query(ToolCallRow) if r.mode == "header"]
+        trace.scroll_to(y=header.virtual_region.y + 8, animate=False)
+        await pilot.pause()
+        assert preview._stick_bottom is False
+        preview.post_message(BlockToggle("", "block:0:bottom"))
+        await pilot.pause()
+        await pilot.pause()
+        top = trace.scroll_offset.y
+        assert top <= header.virtual_region.y < top + trace.size.height
+
+
+@pytest.mark.asyncio
 async def test_preview_old_turn_compact(tmp_path):
     """Ход вне `replay_expanded_turns` — компактный вид и в превью."""
     from gc_tui.widgets.diff_block import DiffBlock
