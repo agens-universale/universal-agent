@@ -437,3 +437,56 @@ async def test_enter_with_unknown_profile_reaches_its_refusal(
         pilot.app.screen._show_footer_refusal = hints.append
         await _type_and_enter(pilot, "/profiles nope")
         assert hints and 'профиль "nope" не найден' in hints[0]
+
+
+def test_picker_opens_on_the_current_value_when_it_is_selectable():
+    """`initial_value` — стартовая подсветка на текущем значении; невидимое
+    или недоступное значение — первая доступная строка."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    opts = _model_like_options()
+    assert ArgPicker(opts, initial_value="giga-max").selected_value() == (
+        "giga-max"
+    )
+    assert ArgPicker(opts, initial_value="auto").selected_value() == (
+        "glm-flash"
+    )
+    assert ArgPicker(opts, initial_value="nope").selected_value() == (
+        "glm-flash"
+    )
+    filtered = ArgPicker(opts, initial_filter="q", initial_value="giga-max")
+    assert filtered.selected_value() == "qwen-coder"
+
+
+def test_picker_without_keys_line_drops_it_and_its_height():
+    """`keys_hint=None` — строки клавиш нет, и высота её не резервирует."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    full = ArgPicker(_model_like_options())
+    bare = ArgPicker(_model_like_options(), keys_hint=None)
+    assert full.desired_height - bare.desired_height == 2
+
+    def footer_texts(picker):
+        footer = picker._build_footer()
+        return [str(w.render()) for w in footer._pending_children]
+
+    assert any("Tab" in t for t in footer_texts(full))
+    assert not any("Tab" in t for t in footer_texts(bare))
+
+
+@pytest.mark.asyncio
+async def test_model_picker_opens_on_the_current_choice(tmp_path, monkeypatch):
+    """`/model ` открывает список на действующем выборе: Enter сразу его не
+    меняет."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    app = _registry_app(tmp_path)
+    app.apply_model_choice("max")
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/model "
+        await pilot.pause(0.1)
+        assert pilot.app.query_one(ArgPicker).selected_value() == "giga-max"

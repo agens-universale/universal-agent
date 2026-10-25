@@ -7111,10 +7111,12 @@ class TraceScreen(TraceFollowMixin, Screen):
                     if cmd_obj.arg_hint_provider is not None:
                         provider = cmd_obj.arg_hint_provider
                         hint_provider = lambda value: provider(self.app, value)
+                    current = cmd_obj.arg_current_provider
                     self._open_arg_picker(
                         options=options,
                         prefix=rest,
                         hint_provider=hint_provider,
+                        initial_value=current(self.app) if current else None,
                     )
                 else:
                     self._arg_picker.set_filter(rest)
@@ -7246,13 +7248,17 @@ class TraceScreen(TraceFollowMixin, Screen):
         options: list[tuple[str, str]],
         prefix: str,
         hint_provider=None,
+        initial_value=None,
     ) -> None:
         if self._arg_picker is not None:
             return
         from gc_tui.widgets.arg_picker import ArgPicker
 
         picker = ArgPicker(
-            options, initial_filter=prefix, hint_provider=hint_provider
+            options,
+            initial_filter=prefix,
+            hint_provider=hint_provider,
+            initial_value=initial_value,
         )
         self._arg_picker = picker
         self._mount_input_overlay(picker)

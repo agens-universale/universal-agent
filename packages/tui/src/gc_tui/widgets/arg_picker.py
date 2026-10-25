@@ -55,11 +55,17 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         options: list[tuple],
         initial_filter: str = "",
         hint_provider: Optional[Callable[[Optional[str]], str]] = None,
+        *,
+        initial_value: Optional[str] = None,
+        keys_hint: Optional[str] = _HINT,
     ) -> None:
         super().__init__(classes="palette")
         self._options = [_as_option(opt) for opt in options]
         self._filter = initial_filter
-        self._selected = self._first_enabled()
+        # Строка клавиш подвала; None — не рисуется (хозяин пикера сам
+        # говорит о клавишах, и чужие обещания здесь соврали бы).
+        self._keys_hint = keys_hint
+        self._selected = self._start_index(initial_value)
         # Динамический хинт подсвеченного пункта (спека §12.1, /profiles: состав
         # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
         self._hint_provider = hint_provider
@@ -86,9 +92,14 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
                     markup=False,
                 )
             )
-        children.append(
-            Static(_HINT, classes="palette-hint palette-keys", markup=False)
-        )
+        if self._keys_hint is not None:
+            children.append(
+                Static(
+                    self._keys_hint,
+                    classes="palette-hint palette-keys",
+                    markup=False,
+                )
+            )
         return Vertical(*children, classes="palette-footer")
 
     def _choice_rows(self) -> list[PickerOption]:
@@ -251,7 +262,9 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         рамку пикера за экран."""
         rows = self._visible_rows()
         flow = len(rows) if rows else 1
-        footer = 1 + self._footer_line_count(_HINT)
+        footer = 0
+        if self._keys_hint is not None:
+            footer += 1 + self._footer_line_count(self._keys_hint)
         if self._hint_provider is not None:
             footer += 1 + self._footer_line_count(
                 self._hint_text(self.selected_value())
@@ -277,6 +290,22 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         return next(
             (i for i, o in enumerate(rows) if o.enabled and not o.separator),
             0,
+        )
+
+    def _start_index(self, value: Optional[str]) -> int:
+        """Стартовая подсветка — строка `value` (текущее значение), если
+        она видна и доступна; иначе первая доступная."""
+        rows = self._visible_rows()
+        return next(
+            (
+                i
+                for i, o in enumerate(rows)
+                if value is not None
+                and o.value == value
+                and o.enabled
+                and not o.separator
+            ),
+            self._first_enabled(),
         )
 
     def set_filter(self, text: str) -> None:

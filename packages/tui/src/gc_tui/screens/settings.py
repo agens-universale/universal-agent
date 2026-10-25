@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import replace
+from pathlib import Path
+from typing import Literal, Optional
 
 from gc_core.settings import runtime_of, settings_of
 from gc_core.utils.path_display import home_path
@@ -4306,16 +4308,20 @@ class SettingsScreen(Screen):
         "project": "запишется в проектный конфиг ({path})",
         "base": "запишется в основной конфиг ({path})",
     }
+    _MODEL_PROFILE_MISSING = "файл профиля {name} не найден"
 
-    def _model_write_target(self):
+    def _model_write_target(
+        self,
+    ) -> tuple[Optional[Path], Literal["profile", "project", "base"]]:
         """(путь, вид) записи `model`: активный профиль — его файл, где бы
         он ни лежал (решение владельца); иначе общее правило секции
         (`_keys_write_target`): проектный конфиг, если ключ задан там, или
-        основной."""
+        основной. Файла активного профиля нет — путь None: в основной
+        конфиг молча не уходим, запись откажет."""
         name = self._config_profile()
-        row = self._profile_row_by_name(name) if name else None
-        if row is not None:
-            return row["ref"].path, "profile"
+        if name:
+            row = self._profile_row_by_name(name)
+            return (row["ref"].path if row else None), "profile"
         target = self._keys_write_target({"model": None})
         kind = "project" if self._project_config_sets("model") else "base"
         return target, kind
@@ -4327,8 +4333,13 @@ class SettingsScreen(Screen):
 
         value = model_name(self.app, self._settings)
         path, kind = self._model_write_target()
-        target = self._MODEL_TARGET_TEXTS[kind].format(
-            name=self._config_profile(), path=_shown_path(path)
+        name = self._config_profile()
+        target = (
+            self._MODEL_TARGET_TEXTS[kind].format(
+                name=name, path=_shown_path(path)
+            )
+            if path is not None
+            else self._MODEL_PROFILE_MISSING.format(name=name)
         )
         level = model_hint(self.app, value, self._settings)
         return f"{level} · Enter — выбрать из списка · {target}"
@@ -4338,6 +4349,7 @@ class SettingsScreen(Screen):
         Состав и «● активна» — по настройкам цели записи (база окна), не
         по сессии: секция правит файл."""
         from gc_tui.services.model_picker import (
+            model_name,
             model_picker_hint,
             model_picker_options,
         )
@@ -4346,11 +4358,16 @@ class SettingsScreen(Screen):
         hints = list(self.query(_SEL_MODES_HINT))
         if self._modes_picker is not None or not hints:
             return
+        # Клавиши списка называет футер экрана: строка клавиш пикера
+        # обещала бы Tab, которого здесь нет. Открывается на записанном
+        # значении — Enter сразу не перепишет файл чужим выбором.
         picker = ArgPicker(
             model_picker_options(self.app, settings=self._settings),
             hint_provider=lambda value: model_picker_hint(
                 self.app, value, self._settings
             ),
+            initial_value=model_name(self.app, self._settings),
+            keys_hint=None,
         )
         hints[-1].parent.mount(picker, before=hints[-1])
         self._modes_picker = picker
@@ -4377,11 +4394,18 @@ class SettingsScreen(Screen):
         if value:
             self._write_model_default(value)
 
-    def _write_model_default(self, choice: str):
+    def _write_model_default(self, choice: str) -> Optional[Path]:
         """Записать модель по умолчанию в цель (`_model_write_target`) и
         сказать итог: плашка — значение и файл; перекрыто — что действует
         и чем перекрыто. Возвращает путь записи или None (отказ сказан)."""
         path, kind = self._model_write_target()
+        if path is None:
+            name = self._config_profile()
+            self._notice(
+                "✗ не сохранено: "
+                + self._MODEL_PROFILE_MISSING.format(name=name)
+            )
+            return None
         if kind == "profile":
             target = self._write_profile_model(path, choice)
         else:

@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional
 from rich.text import Text
 
 from gc_tui.services.model_picker import (
+    model_name,
     model_picker_hint,
     model_picker_options,
     model_value,
@@ -49,6 +50,9 @@ class Command:
     # Взаимоисключимо с arg_options; хинт подвала пикера — arg_hint_provider.
     arg_options_provider: Optional[Callable[[Any], tuple]] = None
     arg_hint_provider: Optional[Callable[[Any, Optional[str]], str]] = None
+    # Текущее значение аргумента (app -> value): на нём ArgPicker
+    # открывается (`/model` — действующий выбор).
+    arg_current_provider: Optional[Callable[[Any], Optional[str]]] = None
     # Текущее значение команды (app -> Text) — палитра показывает его в
     # правой колонке вместо хоткея (`/model` — знак модели, `/profiles` —
     # имя профиля).
@@ -128,6 +132,7 @@ def build_default_registry() -> CommandRegistry:
             _cap(f"{TOGGLES['model'].label}: {TOGGLES['model'].summary}"),
             arg_options_provider=model_picker_options,
             arg_hint_provider=model_picker_hint,
+            arg_current_provider=model_name,
             value_provider=model_value,
         ),
         Command(

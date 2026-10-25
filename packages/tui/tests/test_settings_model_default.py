@@ -131,6 +131,14 @@ async def test_enter_opens_picker_and_arrows_do_nothing(tmp_path, monkeypatch):
         assert pickers[0].region.y < hint.region.y
         values = [o.value for o in pickers[0]._options if not o.separator]
         assert values == ["auto", "flash", "big", "solo"]
+        # Клавиши называет футер экрана: Tab здесь не работает.
+        picker_text = " ".join(
+            str(w.render()) for w in pickers[0].query("Static")
+        )
+        assert "flash" in picker_text
+        assert "Tab" not in picker_text
+        # Список открыт на записанном значении: Enter его не меняет.
+        assert pickers[0].selected_value() == "flash"
 
         await pilot.press("escape")
         await pilot.pause()
@@ -365,3 +373,30 @@ async def test_menu_preview_shows_model(tmp_path, monkeypatch):
         preview = scr._row_value(_MODES).plain
 
         assert preview.startswith("модель: ● big")
+
+
+async def test_missing_active_profile_file_refuses_not_base(
+    tmp_path, monkeypatch
+):
+    """Активный профиль, чьего файла нет на диске: в основной конфиг молча
+    не пишем — отказ с причиной, подсказка говорит то же."""
+    monkeypatch.chdir(tmp_path)
+    work = _write_profile(tmp_path, "work", _REGISTRY)
+    app, cfg_file = _app_with_config(
+        tmp_path, 'profile: "work"\nmodel: "default"\n'
+    )
+    base_before = cfg_file.read_text(encoding="utf-8")
+    async with app.run_test() as pilot:
+        scr = await _open_modes(pilot)
+        work.unlink()
+        scr._modes_idx = _model_row_index()
+
+        assert scr._modes_hint_text().endswith("файл профиля work не найден")
+        assert scr._write_model_default("big") is None
+        await pilot.pause()
+
+        assert cfg_file.read_text(encoding="utf-8") == base_before
+        notices = _texts(scr, "#set-notice")
+        assert any(
+            "✗ не сохранено: файл профиля work не найден" in n for n in notices
+        ), notices
