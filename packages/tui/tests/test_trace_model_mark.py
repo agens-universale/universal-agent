@@ -264,6 +264,35 @@ async def _ticks(pilot, n: int = 4) -> None:
         await pilot.pause(0.25)
 
 
+@pytest.mark.asyncio
+async def test_choice_seeded_at_run_start_applies_pending_in_place(tmp_path):
+    """Окно старта рана: выбор сделан до засева применённого — ран уже
+    идёт им, события не будет. Тихая отметка — обычной на месте, пока ран
+    идёт; запоздалое событие того же выбора вторую отметку не ставит."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        runner = _busy(app, tmp_path)
+        scr._cmd_model("max")
+        await _ticks(pilot, 1)
+        (mark,) = _marks(scr)
+        assert mark.pending
+        runner.applied = "max"
+        await _ticks(pilot, 2)
+        assert runner.is_running()
+        assert _marks(scr) == [mark]
+        assert not mark.pending
+        assert scr._applied_frame is not None
+        _push(app, ModelChoiceApplied("max", "giga-max"))
+        _call(scr, "c1", 1)
+        await _ticks(pilot, 1)
+        assert _marks(scr) == [mark]
+        kids = list(_trace(scr).children)
+        assert kids.index(mark) < len(kids) - 1
+        runner.running = False
+        app.active_runner = None
+
+
 def _after_turn_line(scr, mark: ModelMark) -> bool:
     kids = list(_trace(scr).children)
     (line,) = [w for w in kids if isinstance(w, TurnLine)]

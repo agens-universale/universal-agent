@@ -5201,13 +5201,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         становится обычной на своём месте; её нет — обычная отметка над
         прижатым хвостом. Футер дышит одновременно."""
         mark = self._pending_model_mark()
-        if mark is None:
+        if mark is not None:
+            self._apply_pending_mark(mark, event.choice, event.alias)
+        elif self._last_model_choice() == event.choice:
+            return  # уже применена на месте окном старта рана
+        else:
             self._trace_mount(
                 self._new_model_mark(event.choice, pending=False)
             )
-        else:
-            self._apply_pending_mark(mark, event.choice, event.alias)
         self.on_model_choice_applied(event)
+
+    def _last_model_choice(self) -> str | None:
+        """Выбор последней отметки модели в ленте; отметок нет — None."""
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        marks = trace.query(ModelMark)
+        return marks.last().choice if marks else None
 
     def _apply_pending_mark(
         self, mark: ModelMark, choice: str, alias: str | None
@@ -5226,15 +5234,19 @@ class TraceScreen(TraceFollowMixin, Screen):
         отметка осталась — выбор применён завершением рана (событие
         `at_run_end` пришло или опоздало) или до засева применённого на
         старте: отметка — обычной после строки итога, текущим выбором.
-        Зовётся тиком после хвоста и пометок и концом рана."""
-        mark = self._pending_model_mark()
+        Зовётся тиком после хвоста и пометок и концом рана. Сначала
+        дешёвые проверки, отметка ищется только в прижатом хвосте."""
+        if self._run_in_progress():
+            self._settle_started_run_mark()
+            return
         if (
-            mark is None
-            or self._run_in_progress()
-            or self._run_pending
+            self._run_pending
             or self._stopping_alive()
             or self._thinking is not None
         ):
+            return
+        mark = self._pending_model_mark()
+        if mark is None:
             return
         from gc_core.model_choice import ModelChoiceApplied
 
@@ -5245,9 +5257,29 @@ class TraceScreen(TraceFollowMixin, Screen):
             ModelChoiceApplied(choice, alias, at_run_end=True)
         )
 
+    def _settle_started_run_mark(self) -> None:
+        """Окно старта рана: выбор сделан до засева применённого — ран уже
+        идёт им, и события не будет. Тихая отметка этого выбора — обычной
+        на месте, тем же путём, что событие."""
+        from gc_core.model_choice import ModelChoiceApplied
+
+        applied_fn = getattr(self.app.active_runner, "applied_choice", None)
+        applied = applied_fn() if callable(applied_fn) else None
+        if applied is None:
+            return
+        mark = self._pending_model_mark()
+        if mark is not None and mark.choice == applied:
+            self._apply_choice_event(
+                ModelChoiceApplied(applied, self._choice_alias(applied))
+            )
+
     def _pending_model_mark(self) -> Optional[ModelMark]:
+        """Тихая отметка — всегда в прижатом хвосте ленты."""
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        return next((m for m in trace.query(ModelMark) if m.pending), None)
+        return next(
+            (w for w in self._pinned_tail(trace) if isinstance(w, ModelMark)),
+            None,
+        )
 
     def _new_model_mark(self, choice: str, *, pending: bool) -> ModelMark:
         return ModelMark(

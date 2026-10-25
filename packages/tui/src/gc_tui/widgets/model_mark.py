@@ -44,6 +44,11 @@ class ModelMark(ConsequenceTraceRow):
             consequences=self._notes(),
         )
 
+    @property
+    def choice(self) -> str:
+        """Выбор, который показывает отметка."""
+        return self._choice
+
     def set_choice(self, choice: str, alias: str | None) -> None:
         """Новый выбор того же ожидания: строка заменяется на месте."""
         self._choice, self._alias = choice, alias
