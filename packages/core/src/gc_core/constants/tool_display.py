@@ -138,7 +138,8 @@ NESTED_TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
 }
 
 #: Короткая роль встроенного субагента — объект заголовка `Agent` во
-#: фронтендах; кастомный и неизвестный — суффикс имени (`subagent_role`).
+#: фронтендах; особый — аргумент `role`, кастомный и неизвестный — суффикс
+#: имени (`subagent_role`).
 SUBAGENT_ROLES: Mapping[str, str] = {
     "subagent_worker": "Worker",
     "subagent_planner": "Planner",
@@ -205,11 +206,15 @@ def tool_display(
     return ToolDisplay(_C.CALLED, _C.CALLED.value, None, wire_name)
 
 
-def subagent_role(wire_name: str) -> str:
-    """Короткая роль субагента по имени тула: из `SUBAGENT_ROLES`, иначе
-    суффикс после `subagent_` словами (`security_audit` → `Security
-    audit`). Роль `subagent_special_agent` — его аргумент `role`: её
-    берёт фронтенд из аргументов вызова."""
+def subagent_role(wire_name: str, args: Mapping[str, object]) -> str:
+    """Короткая роль субагента по имени тула и разобранным аргументам
+    вызова: у `subagent_special_agent` — его аргумент `role`; иначе из
+    `SUBAGENT_ROLES`, иначе суффикс после `subagent_` словами
+    (`security_audit` → `Security audit`)."""
+    role = args.get("role")
+    role = role.strip() if isinstance(role, str) else ""
+    if wire_name == SUBAGENT_SPECIAL_AGENT_NAME and role:
+        return role
     known = SUBAGENT_ROLES.get(wire_name)
     if known is not None:
         return known

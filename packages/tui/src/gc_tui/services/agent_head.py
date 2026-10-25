@@ -13,7 +13,6 @@ from gc_core.constants.tool_display import (
     subagent_role,
     tool_display,
 )
-from gc_core.constants.tool_names import SUBAGENT_SPECIAL_AGENT_NAME
 
 from gc_tui.models import AgentHead
 
@@ -35,15 +34,11 @@ def _text(data: dict, key: str) -> str:
 def agent_head(
     wire_name: Optional[str], arguments: Any
 ) -> Optional[AgentHead]:
-    """Заголовок вызова субагента; не субагент — `None`. Роль — таблица
-    ядра (`subagent_role`), у `subagent_special_agent` — его аргумент
-    `role`."""
+    """Заголовок вызова субагента; не субагент — `None`. Роль — правило
+    ядра (`subagent_role`)."""
     if not wire_name:
         return None
     if tool_display(wire_name).category is not DisplayCategory.AGENT:
         return None
     data = _arguments(arguments)
-    role = ""
-    if wire_name == SUBAGENT_SPECIAL_AGENT_NAME:
-        role = _text(data, "role")
-    return AgentHead(role or subagent_role(wire_name), _text(data, "task"))
+    return AgentHead(subagent_role(wire_name, data), _text(data, "task"))

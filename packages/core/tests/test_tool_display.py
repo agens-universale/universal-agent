@@ -119,7 +119,22 @@ def test_module_does_not_import_tools():
     ],
 )
 def test_subagent_role(name, role):
-    assert subagent_role(name) == role
+    assert subagent_role(name, {"role": "Аудитор"}) == role
+
+
+@pytest.mark.parametrize(
+    ("args", "role"),
+    [
+        ({"role": " Аудитор ретраев "}, "Аудитор ретраев"),
+        ({"role": "  "}, "Special agent"),
+        ({"role": 7}, "Special agent"),
+        ({}, "Special agent"),
+    ],
+)
+def test_special_agent_role_from_argument(args, role):
+    """Роль `subagent_special_agent` — его аргумент `role`, без него —
+    суффикс имени, как у кастомного."""
+    assert subagent_role("subagent_special_agent", args) == role
 
 
 def test_finish_visible_only_nested():
