@@ -1111,6 +1111,21 @@ class AgentExecutor:
                 task.uncancel()
         await self.aclose_run_accounting()
 
+    def _note_choice_at_run_end(self, state: State) -> None:
+        """Выбор, так и не дошедший до вызова, применяется завершением рана.
+        Сбой резолва или хука фронтенда не срывает уборку рана: в лог."""
+        router = self.get_model_router()
+        if router is None:
+            return
+        try:
+            note_applied(
+                state, self._ctx, router.live_choice(), at_run_end=True
+            )
+        except Exception:
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("model_choice_applied_failed", exc_info=True)
+
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
         # Keep the unconsumed queue before the await; messages arriving during
         # MCP cleanup remain pending and are returned by take_undelivered_messages.
@@ -1425,12 +1440,7 @@ class AgentExecutor:
             raise
         finally:
             _stop_bound.__exit__(None, None, None)
-            # Выбор, так и не дошедший до вызова, применяется завершением.
-            router = self.get_model_router()
-            if router is not None:
-                note_applied(
-                    state, self._ctx, router.live_choice(), at_run_end=True
-                )
+            self._note_choice_at_run_end(state)
             state_ops.leave(state)
             state.turn_level = None
             try:

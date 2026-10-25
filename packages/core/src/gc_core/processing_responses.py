@@ -836,7 +836,8 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
     """Единая точка выбора модели перед основным запросом.
 
     Записывает фактический уровень в State; только на новом такте логирует
-    решение и сверяет применённый выбор (`model_choice.note_applied`). Повтор запроса после переполнения контекста получает то же решение.
+    решение и сверяет применённый выбор (`model_choice.note_applied`).
+    Повтор запроса после переполнения контекста получает то же решение.
     Канонические схемы инструментов проецируются транспортом для выбранной модели."""
     active, decision, effective, is_new = await aroute_before_call(state, ctx)
     params = _routing_params(ctx, state)

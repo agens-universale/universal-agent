@@ -71,25 +71,43 @@ def _finish():
     return assistant_tool_call("turn_finish", FINISH_ARGS, "finish")
 
 
-async def _run(tmp_path, monkeypatch, initial, turns, changes):
+async def _run(
+    tmp_path,
+    monkeypatch,
+    initial,
+    turns,
+    changes,
+    *,
+    stop_on=None,
+    hook=None,
+    executor_spy=None,
+):
     """Ран с выбором `initial`; `changes[n]` — выбор, заданный во время
-    n-го запроса. Возвращает события и модели запросов."""
+    n-го запроса; `stop_on` — номер запроса, во время которого человек
+    жмёт стоп; `hook` — свой приёмник события вместо списка.
+    Возвращает события и модели запросов."""
     selected = {"model": initial}
     cfg = parity_config(tmp_path, monkeypatch, **CONFIG)
     monkeypatch.chdir(tmp_path)
+    executor = None
 
     def on_call(number):
         if number in changes:
             selected["model"] = changes[number]
+        if number == stop_on:
+            executor.stop_run()
 
     backend = install(monkeypatch, _Backend(turns, on_call))
     ctx = await acreate_run_context(
         cfg, choice_provider=lambda: selected["model"]
     )
     events = []
-    ctx.on_model_choice_applied = events.append
+    ctx.on_model_choice_applied = hook or events.append
+    executor = AgentExecutor(ctx)
+    if executor_spy is not None:
+        executor_spy(executor)
     try:
-        await AgentExecutor(ctx).arun(
+        await executor.arun(
             ["Выполни контрольную задачу"],
             thread_id="choice",
             system="cli",
@@ -251,6 +269,57 @@ async def test_run_end_with_pending_choice_emits_at_run_end(
 
     assert events == [ModelChoiceApplied("max", "big", at_run_end=True)]
     assert models == ["fast"]
+
+
+async def test_stop_with_pending_choice_emits_at_run_end(
+    tmp_path, monkeypatch
+):
+    """Стоп рана при ожидающем выборе (Review Focus 3): событие — на
+    завершении рана."""
+    events, models = await _run(
+        tmp_path, monkeypatch, "light", [_work()], {1: "max"}, stop_on=1
+    )
+
+    assert events == [ModelChoiceApplied("max", "big", at_run_end=True)]
+    assert models == ["fast"]
+
+
+async def test_failing_choice_hook_does_not_skip_run_teardown(
+    tmp_path, monkeypatch
+):
+    """Хук события на завершении бросает — запись итога и уборка рана
+    всё равно выполняются, ран завершается штатно."""
+    calls = []
+
+    def spy(executor):
+        record = executor._arecord_turn_outcome
+        teardown = executor._ateardown_run
+
+        async def arecord(*args, **kwargs):
+            calls.append("record")
+            return await record(*args, **kwargs)
+
+        async def ateardown(*args, **kwargs):
+            calls.append("teardown")
+            return await teardown(*args, **kwargs)
+
+        executor._arecord_turn_outcome = arecord
+        executor._ateardown_run = ateardown
+
+    def hook(_event):
+        raise RuntimeError("frontend is gone")
+
+    await _run(
+        tmp_path,
+        monkeypatch,
+        "light",
+        [_finish()],
+        {1: "max"},
+        hook=hook,
+        executor_spy=spy,
+    )
+
+    assert calls[-2:] == ["record", "teardown"]
 
 
 async def test_subagent_calls_emit_nothing(tmp_path, monkeypatch):
