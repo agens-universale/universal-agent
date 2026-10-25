@@ -69,6 +69,7 @@ CORE_CONTEXT_ATTRIBUTES = {
     "model_router": BOUND + " (маршрут по имени, model_routing)",
     "model_transport_configured": DATA,
     "on_messages_evicted": FRONTEND + ": хук TUI",
+    "on_model_choice_applied": FRONTEND + ": хук TUI, событий смены нет",
     "on_stream_delta": FRONTEND + ": потокового предпросмотра нет",
     "on_summary_applied": FRONTEND + ": хук TUI",
     "on_trace_note": FRONTEND + ": хук TUI",
@@ -127,6 +128,7 @@ UNBOUND_BINDINGS = {
     "tools_cache": "discovery инструментов — на воркере",
     "on_stream_delta": "потокового предпросмотра в Temporal нет",
     "on_trace_note": "хук TUI",
+    "on_model_choice_applied": "хук TUI: событий смены модели нет",
     "on_messages_evicted": "хук TUI",
 }
 

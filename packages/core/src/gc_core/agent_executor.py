@@ -46,6 +46,7 @@ from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
+from gc_core.model_choice import note_applied
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.persistence.turn_outcome import (
     USER_STOP,
@@ -594,6 +595,11 @@ class AgentExecutor:
             attach(state)
         # Граница хода сбрасывает счётчики; модель выбирается перед вызовом.
         begin_turn_main_trace(state, self._ctx)
+        # Выбранное до старта уже показано фронтендом: применённый выбор
+        # рана — текущий, без события.
+        router = self.get_model_router()
+        if router is not None:
+            state.applied_choice = router.live_choice()
         state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(settings)
         )
@@ -1419,6 +1425,12 @@ class AgentExecutor:
             raise
         finally:
             _stop_bound.__exit__(None, None, None)
+            # Выбор, так и не дошедший до вызова, применяется завершением.
+            router = self.get_model_router()
+            if router is not None:
+                note_applied(
+                    state, self._ctx, router.live_choice(), at_run_end=True
+                )
             state_ops.leave(state)
             state.turn_level = None
             try:

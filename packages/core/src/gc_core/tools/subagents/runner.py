@@ -1208,7 +1208,13 @@ class SubagentRunner:
             return None
         consumer = f"{SUBAGENT_CONSUMER_PREFIX}{tool_name}"
         if not parent_router.has_binding(consumer):
-            frozen_live = parent_router.live_choice()
+            # Применённый выбор родителя, не ожидающий: тихая отметка у
+            # родителя и модель ребёнка не расходятся (спека §4.3).
+            parent_state = getattr(self._ctx, "active_state", None)
+            frozen_live = (
+                getattr(parent_state, "applied_choice", None)
+                or parent_router.live_choice()
+            )
 
             available = auto_available(
                 child_config, force_legacy=parent_router.force_legacy

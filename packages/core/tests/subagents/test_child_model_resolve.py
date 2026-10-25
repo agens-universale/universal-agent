@@ -196,6 +196,27 @@ class TestChildModelResolve:
         )
         assert "/level" not in message
 
+    def test_child_freezes_parent_applied_choice_not_pending(self, tmp_path):
+        """Ребёнок берёт применённый выбор родителя: ожидающий выбор (тихая
+        отметка) ещё не действует ни у родителя, ни у ребёнка."""
+        raw = {
+            "models": {"flash": {}, "smart": {}},
+            "slots": {"light": "flash", "max": "smart"},
+        }
+        cfg = _make_config(tmp_path, raw)
+        ctx = _parent_ctx(cfg, level="max")
+        parent_state = _make_orchestrator_state()
+        parent_state.applied_choice = "light"
+        ctx.active_state = parent_state
+        runner = SubagentRunner(ctx, parent_state)
+
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
+
+        assert child_ctx.model_router.live_choice() == "light"
+        assert child_ctx.model_router.resolve("main").alias == "flash"
+
     def test_unpinned_subagent_falls_back_to_active_level(self, tmp_path):
         raw = {
             "models": {"flash": {}, "deepseek-max": {}},

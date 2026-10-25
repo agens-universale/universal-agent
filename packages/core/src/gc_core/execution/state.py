@@ -128,6 +128,7 @@ STATE_FIELDS = ROUTING_FIELDS + (
     "_session_compact_batch_snapshot",
     "session_compact_applied",
     "allow_pairing_persist",
+    "applied_choice",
     "pending_tool_attachments",
     "vision_probe_turn",
 )
@@ -324,6 +325,7 @@ class ExecutionState:
                 )
             data["_tick_decision"] = (memo[0], memo[1], decision, memo[3])
         data.setdefault("turn_messages_start", None)
+        data.setdefault("applied_choice", None)
         state.__dict__ = data
         state.shared = SharedStateData(**data["shared"])
         state.tool_call_outputs_store = ToolCallOutputsStore.from_dict(

@@ -60,6 +60,7 @@ from gc_core.utils.logging_module import create_run_logger, generate_run_id
 from gc_core.utils.prod_auth import AuthConnector
 
 if TYPE_CHECKING:
+    from gc_core.model_choice import ModelChoiceApplied
     from gc_core.vision.notes import TraceNote
 
 
@@ -128,6 +129,11 @@ class RunContext:
     # ответ). Не задан — `vision.notes.emit_trace_note`
     # пишет предупреждение в `logger` (CLI, сервер, SDK).
     on_trace_note: Optional[Callable[[TraceNote], None]] = None
+    # Живое событие «выбор модели применён» (`gc_core.model_choice`); в тред
+    # не пишется. Дочернему контексту не передаётся: субагент событий не даёт.
+    on_model_choice_applied: Optional[Callable[[ModelChoiceApplied], None]] = (
+        None
+    )
     # Порт «спросить человека»: обычная функция или корутинная. Не задан —
     # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
@@ -268,6 +274,7 @@ def assemble_run_context(
         model_router=bindings.model_router,
         on_stream_delta=bindings.on_stream_delta,
         on_trace_note=bindings.on_trace_note,
+        on_model_choice_applied=bindings.on_model_choice_applied,
         on_messages_evicted=bindings.on_messages_evicted,
         mcp_session_owner=prepared.mcp_session_owner,
         tools_cache=bindings.tools_cache,
