@@ -1666,7 +1666,7 @@ async def test_fixed_consumer_without_default_slot_shows_active(tmp_path):
         await pilot.pause()
         first = ed._picker["rows"][0]
         assert first["value"] is None and first["label"] == "активная"
-        assert str(first["desc"]).startswith("работает активным уровнем")
+        assert str(first["desc"]).startswith("работает выбранной моделью")
 
 
 async def test_alt_down_opens_the_same_picker(tmp_path):

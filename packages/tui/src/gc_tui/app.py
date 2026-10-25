@@ -1260,6 +1260,43 @@ class TuiApp(App):
                 self.invalidate_runner()
         self._notice_auto_routing_unavailable()
 
+    def sanitize_session_model(self) -> None:
+        """Сессионный выбор модели, которого нет в реестре действующего
+        профиля (смена профиля, мета треда другого профиля), — снять и
+        сказать об этом: иначе выбор молча уходил бы в `default`.
+        Слово уровня и `auto` допустимы в любом реестре."""
+        from gc_core.config_modules.model_registry import choice_in_registry
+
+        choice = self._session_overrides.get("model")
+        loaded = self.effective_settings()
+        if not choice or choice_in_registry(choice, loaded.settings):
+            return
+        with self._config_lock:
+            self._session_overrides = {
+                k: v
+                for k, v in self._session_overrides.items()
+                if k != "model"
+            }
+        try:
+            self.persist_session_overrides()
+        except OSError:
+            pass  # тред недоступен — в памяти уже чисто, персист догонит позже
+        profile = loaded.runtime.active_profile or "основной"
+        push_runtime_notice(
+            Notice(
+                "info",
+                "session_model_dropped",
+                f"модели {choice} нет в профиле {profile} — выбор снят",
+                (choice, profile),
+            )
+        )
+
+    def apply_model_choice(self, choice: str) -> None:
+        """Сессионный выбор модели: `auto`, слово уровня или алиас.
+        Executor не пересобирается — роутер читает выбор через
+        `_choice_provider` на каждом такте."""
+        self.apply_session_override("model", choice)
+
     def probe_profile_assembly(self, name: str) -> None:
         """Собирается ли конфиг с профилем `name` — проба, а не применение: ответ
         выбрасывается, спрашивается лишь «собирается ли», исключение уходит
@@ -1302,6 +1339,7 @@ class TuiApp(App):
             self.probe_profile_assembly(name)
         old_effective = self.effective_settings()
         self.apply_session_override("profile", name)
+        self.sanitize_session_model()
         self._notice_boot_frozen_diff(old_effective, self.effective_settings())
         self._notice_auto_routing_unavailable()
         self._notify_screen_config_changed()
@@ -1404,8 +1442,8 @@ class TuiApp(App):
         )
 
     def _choice_provider(self) -> str:
-        """Активный уровень для `ModelRouter` (спека §6.4): читает сессионный слой
-        напрямую, БЕЗ `effective_settings()` — `/level` переключается
+        """Выбор модели для `ModelRouter` (спека §6.4): читает сессионный слой
+        напрямую, БЕЗ `effective_settings()` — выбор модели переключается
         без `invalidate_runner` (единственный тоггл с таким свойством), и это
         единственный потребитель, обязанный видеть смену немедленно, без
         пересборки executor."""

@@ -1122,7 +1122,7 @@ async def test_an_open_profile_names_the_level_that_is_really_acting(
     tmp_path, monkeypatch
 ):
     """Та же поправка, что и у секции «Модели»: пикер привязок под-вида обещает
-    «работает активным уровнем: сейчас …», а уровень переключает сессионный
+    «работает выбранной моделью: сейчас …», а уровень переключает сессионный
     `/level`, до файла не доходящий."""
     from gc_tui import app as app_mod
 
@@ -1137,7 +1137,7 @@ async def test_an_open_profile_names_the_level_that_is_really_acting(
         app._session_overrides["model"] = "max"
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "home")
-        assert ed._active_level == "max"
+        assert ed._active_choice == "max"
 
 
 # --- превью оверлеев переживает запись в профиль ----------------------------------

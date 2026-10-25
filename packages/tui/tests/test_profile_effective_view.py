@@ -832,7 +832,7 @@ async def test_assign_three_states_and_picker_first_row(tmp_path, monkeypatch):
         first = ed._picker["rows"][0]
         assert first["label"] == "активная"
         assert first["value"] is None
-        assert "работает активным уровнем" in first["desc"].plain
+        assert "работает выбранной моделью" in first["desc"].plain
 
 
 async def test_the_value_column_counts_the_inherited_binding_label(

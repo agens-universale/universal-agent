@@ -29,6 +29,7 @@ from gc_core.config_modules.agent_edits import (
     DEFAULT_TURN_SUMMARY_IN_STATUS,
 )
 from gc_core.config_modules.images import read_images_config
+from gc_core.config_modules.model_registry import effective_choice
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
 from gc_core.message_policy.plan_messages import accepted_plan_messages
@@ -220,6 +221,7 @@ from gc_tui.toggles import (
     PROFILE_NONE_VALUE,
     TOGGLES,
     apply_toggle,
+    auto_available_cfg,
     dynamic_toggle_hint,
     effective_toggle_values,
     next_toggle_value,
@@ -2343,6 +2345,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         # + notice + пересборка; санация ПОСЛЕ load_session_overrides — проверяет то,
         # что реально стало активным оверрайдом этого треда.
         self.app.sanitize_session_profile()
+        self.app.sanitize_session_model()
         # Режим разрешений — тоже выбор, сохранённый в сессии; у открытой
         # пикером сессии без режима — режим конфига. Флаг запуска сильнее.
         self.app.adopt_thread_permission_mode(task_meta, resumed=is_resume)
@@ -9669,9 +9672,12 @@ class TraceScreen(TraceFollowMixin, Screen):
             resolved.alias
         )
         ref = self.app.active_profile_ref()
-        # Действующий уровень — то же правило, что у палитры и футера: `auto`,
-        # только когда автовыбор реально активен, иначе уровень, которым идёт работа.
-        level = toggle_state(self.app, "level")
+        # Действующий выбор модели: `auto` — только когда автовыбор реально
+        # активен (правило палитры и футера), неизвестный алиас — `default`.
+        loaded = self.app.effective_settings()
+        choice = effective_choice(self.app._choice_provider(), loaded.settings)
+        if choice == "auto" and not auto_available_cfg(loaded):
+            choice = "default"
         payload["runtime"] = {
             "active_task_id": tid,
             "runner_is_running": bool(runner and runner.is_running()),
@@ -9685,8 +9691,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             "profile": {
                 "name": active_profile or None,
                 "source": _profile_source_label(ref),
-                "level": level,
-                "routing_policy": ("two_level" if level == "auto" else None),
+                "model_choice": choice,
+                "routing_policy": ("two_level" if choice == "auto" else None),
                 "model": resolved.alias or resolved.model,
                 "circuit_breaker_open": breaker_open,
             },

@@ -5317,7 +5317,7 @@ async def test_the_models_section_names_the_level_that_is_really_acting(
 ):
     """`/level` переключает уровень на сессию, в файл не записывая, а экран
     открывается с БАЗОЙ (`screen_config()` — без сессионных переопределений).
-    Пикер привязок обещает «работает активным уровнем: сейчас …» — называть там
+    Пикер привязок обещает «работает выбранной моделью: сейчас …» — называть там
     записанное в файле значит называть не то, что работает."""
     from gc_tui import app as app_mod
 
@@ -5341,7 +5341,7 @@ async def test_the_models_section_names_the_level_that_is_really_acting(
         await pilot.pause()
         open_settings_section(scr, "Модели")
         await pilot.pause()
-        assert scr._models_editor()._active_level == "max"
+        assert scr._models_editor()._active_choice == "max"
 
 
 # --- level переехал из «Профилей» в «Режимы работы» отдельным блоком ---

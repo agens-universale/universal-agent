@@ -1637,8 +1637,8 @@ class SettingsScreen(Screen):
             return False
         return picked != self._raw_value("model")
 
-    def _acting_level(self) -> str:
-        """Уровень, которым агент работает ПРЯМО СЕЙЧАС: сессионный `/level`, если он
+    def _acting_choice(self) -> str:
+        """Выбор модели, которым агент работает ПРЯМО СЕЙЧАС: сессионный, если он
         задан, иначе записанный в конфиге. Тот же порядок, что у
         `TuiApp._choice_provider` — второго прочтения одного факта здесь не заводим.
 
@@ -2137,7 +2137,7 @@ class SettingsScreen(Screen):
                     config_proxy=proxy,
                     presets=endpoint_presets_from_config(self._settings),
                     global_config=self._settings,
-                    active_level=self._acting_level(),
+                    active_choice=self._acting_choice(),
                     legacy_editor_factory=self._make_legacy_model_editor,
                     legacy_hints=self._field_hint_specs("model"),
                     on_change=self._models_changed,
@@ -5736,7 +5736,7 @@ class SettingsScreen(Screen):
                     and not isinstance(profile_cfg, dict)
                     else self._settings
                 ),
-                active_level=self._acting_level(),
+                active_choice=self._acting_choice(),
                 on_change=self._models_changed,
                 on_notice=self._models_notice,
             )

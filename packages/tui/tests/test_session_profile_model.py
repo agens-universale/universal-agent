@@ -108,7 +108,7 @@ async def test_model_restored_on_attach(tmp_path):
 # --- 2. `/level` не инвалидирует раннер; провайдер видит смену немедленно ----------
 
 
-def test_level_change_does_not_invalidate_runner(tmp_path):
+def test_model_change_does_not_invalidate_runner(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
@@ -116,8 +116,9 @@ def test_level_change_does_not_invalidate_runner(tmp_path):
     )
     calls = {"n": 0}
     app.invalidate_runner = lambda: calls.__setitem__("n", calls["n"] + 1)
-    app.apply_session_override("model", "light")
+    app.apply_model_choice("light")
     assert calls["n"] == 0
+    assert app._choice_provider() == "light"
 
 
 def test_choice_provider_reflects_session_override_without_rebuild(tmp_path):
@@ -353,6 +354,70 @@ def test_profile_remerge_notices_once_on_race_and_falls_back(tmp_path):
     assert cfg2 is app.base_settings()
     codes_after = [n.code for n in collect_runtime_notices()]
     assert codes_after.count("session_profile_remerge_failed") == 1
+
+
+# --- 4b. Выбор модели чужого профиля снимается (спека §3.5) ------------------------
+
+
+def _write_other_profile(tmp_path: Path) -> Path:
+    return _write_yaml(
+        tmp_path / "profiles" / "other.yml",
+        {
+            "models": {
+                "pro": {"url": "http://o/v1/chat/completions", "token": ""}
+            },
+            "slots": {"default": "pro"},
+        },
+    )
+
+
+def test_profile_switch_drops_foreign_session_model_with_notice(tmp_path):
+    clear_runtime_notices()
+    _write_work_profile(tmp_path)
+    _write_other_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.switch_session_profile("work")
+    app.apply_model_choice("flash")
+    assert app._choice_provider() == "flash"
+
+    app.switch_session_profile("other")
+
+    assert "model" not in app._session_overrides
+    assert app._choice_provider() == "default"
+    messages = [n.message for n in collect_runtime_notices()]
+    assert "модели flash нет в профиле other — выбор снят" in messages
+
+
+def test_profile_switch_keeps_model_present_in_new_profile(tmp_path):
+    clear_runtime_notices()
+    _write_work_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.apply_model_choice("max")
+    app.switch_session_profile("work")
+    assert app._session_overrides["model"] == "max"
+    assert not [
+        n
+        for n in collect_runtime_notices()
+        if n.code == "session_model_dropped"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_restored_meta_with_foreign_model_is_dropped(tmp_path):
+    clear_runtime_notices()
+    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
+    store.update_tui_meta(
+        "t-foreign", {"session_settings": {"model": "ghost"}}
+    )
+    app = _app_with_base(tmp_path)
+    async with app.run_test() as pilot:
+        pilot.app.screen.attach_active_task("t-foreign")
+        await pilot.pause(0.1)
+        assert "model" not in app._session_overrides
+        assert any(
+            n.code == "session_model_dropped"
+            for n in collect_runtime_notices()
+        )
 
 
 # --- 5. Санация битого профиля — сессионная ветка vs конфиг-указатель (§9.4) -------

@@ -470,7 +470,7 @@ _INHERITED_LABEL = "основной"
 # потребитель следует за активным уровнем (`ModelRouter.resolve`, ветка без binding).
 # «сейчас <уровень>» — вычисленное на этот момент, слово «сейчас» и помечает его
 # как текущее состояние, а не как часть выбора.
-_ACTIVE_DESC_LEAD = "работает активным уровнем: сейчас "
+_ACTIVE_DESC_LEAD = "работает выбранной моделью: сейчас "
 _SLOT_DEAD_HINT = "уровень не резолвится: задайте хотя бы один слот"
 # Подписи потребителей, которых НЕТ в транспортном словаре `CONSUMER_RU_LABEL`
 # (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
@@ -698,7 +698,7 @@ class ModelsSectionEditor(Vertical):
         verify: bool | str = True,
         config_proxy: str | None = None,
         presets=(),
-        active_level: str = "default",
+        active_choice: str = "default",
         legacy_editor_factory=None,
         legacy_hints=(),
         on_change=None,
@@ -747,7 +747,7 @@ class ModelsSectionEditor(Vertical):
         self._presets = list(presets)
         # Активный уровень — знание ЭКРАНА (config + сессионные переключатели);
         # секция показывает файл, но описание «активной» в пикере говорит о рантайме.
-        self._active_level = active_level
+        self._active_choice = active_choice
         self._legacy_editor_factory = legacy_editor_factory
         self._legacy_hints = list(legacy_hints)
         self._on_change = on_change
@@ -2959,7 +2959,7 @@ class ModelsSectionEditor(Vertical):
 
     def _picker_active_desc(self) -> Text:
         t = Text(_ACTIVE_DESC_LEAD, style=DEEP_DIM)
-        t.append(self._active_level, style=value_style(self._active_level))
+        t.append(self._active_choice, style=value_style(self._active_choice))
         return t
 
     def _open_value_picker(self, row: dict) -> None:
