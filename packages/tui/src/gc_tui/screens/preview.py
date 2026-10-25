@@ -119,17 +119,17 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
         self.call_after_refresh(self._refresh_trace_overlays)
 
     def _preview_blocks(self):
-        """Блоки превью с журналом правок треда (только чтение; лимиты —
-        `edits_view.diff_limits`) и долями из `agent_edits` (спека P4
-        §9.10а): правки и доли — как вживую."""
+        """Блоки превью с журналом правок треда (только чтение) и правилом
+        превью диффов из `agent_edits` — `edit_settings` (спека P4 §6.3,
+        §9.10а): правки — как вживую."""
         from gc_tui.services.block_edits import edit_settings
         from gc_tui.services.edits_lookup import lookup_for_settings
         from gc_tui.widgets.tool_blocks_view import PreviewBlocks
 
         settings = getattr(self.app, "base_settings", None)
         if settings is None:
-            # Хост без настроек и тредов (превью вне приложения) — доли по
-            # умолчанию, без журнала правок.
+            # Хост без настроек и тредов (превью вне приложения) — лимиты
+            # по умолчанию, без журнала правок.
             return PreviewBlocks()
         cfg = settings()
         preview, window = edit_settings(cfg.settings.agent_edits.model_dump())

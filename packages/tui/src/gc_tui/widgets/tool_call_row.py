@@ -108,8 +108,8 @@ _FROZEN_TIMER_MIN_S = 1.0
 _CAPTION_SEP = "  "
 
 #: Итог вызова: глиф, его цвет и цвет строки `└` итога. Стоп и лимит —
-#: не сбой (K4), отказ — не сбой, а решение политики или человека: цветом
-#: только глиф, строка серая.
+#: не сбой (K4): глиф и строка серые; отказ — не сбой, а решение политики
+#: или человека: глиф и строка цветом `REFUSED`.
 _OUTCOME_LOOK: dict[str, tuple[str, str, str]] = {
     "ok": (CALL_GLYPH, _OK, _OK),
     "error": (CALL_GLYPH, _ERR, _ERR),
@@ -741,8 +741,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def _consequence_bodies(self) -> list[Text]:
         """Тела строк `└` под вызовом: задача субагента (`DIM`, до двух
-        строк), ошибка (`ERR`), стоп/лимит или отказ (`DIM`), затем
-        пометки."""
+        строк), ошибка, стоп/лимит или отказ — цветом строки итога
+        `_OUTCOME_LOOK` (отказ — `REFUSED`), затем пометки."""
         bodies = list(self._consequences)
         if self._block_consequence is not None:
             bodies.insert(0, self._block_consequence)
