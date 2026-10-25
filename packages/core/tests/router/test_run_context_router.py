@@ -70,6 +70,26 @@ async def test_create_run_context_with_choice_provider_uses_callable(
     )  # провайдер живой, не закэширован
 
 
+async def test_passed_choice_provider_with_unknown_alias_runs_default(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        rc,
+        "abuild_tools_data",
+        as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
+    )
+    cfg = make_settings(
+        {
+            "models": {"fast": {}, "mid": {}},
+            "slots": {"light": "fast", "default": "mid"},
+            "logging.save_logs": False,
+        }
+    )
+    ctx = await rc.acreate_run_context(cfg, choice_provider=lambda: "ghost")
+    assert ctx.model_router.active_target() == "default"
+    assert ctx.model_router.resolve("main").alias == "mid"
+
+
 async def test_create_run_context_model_router_resolves_legacy_main(
     minimal_settings,
 ):
@@ -225,7 +245,7 @@ def test_resolve_main_for_call_open_alias_raises_honest_class2():
     with pytest.raises(RuntimeError) as excinfo:
         pr.resolve_main_for_call(_make_state(), _main_ctx(router))
     assert not isinstance(excinfo.value, AliasCircuitOpenError)
-    assert "/level" in str(excinfo.value)
+    assert "/model" in str(excinfo.value)
 
 
 def test_resolve_main_for_call_keeps_subagent_override():

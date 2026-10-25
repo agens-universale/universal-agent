@@ -6,6 +6,7 @@ from gc_core.startup_notices import (
     auto_routing_unavailable_notice,
     auto_routing_unavailable_reason_text,
     collect_startup_notices,
+    unknown_model_choice_notice,
 )
 from gc_testkit.settings import fake_ctx, make_settings
 
@@ -146,3 +147,18 @@ def test_collect_includes_one_routing_notice_and_preserves_cli_provenance(
     assert routing[0].message == (
         f"автовыбор моделей недоступен: {reason} — работает {tail}"
     )
+
+
+def test_unknown_model_choice_notice_names_both_models():
+    cfg = _cfg(model="ghost")
+    notice = unknown_model_choice_notice(cfg)
+    assert notice is not None
+    assert notice.level == "info"
+    assert notice.message == (
+        "модель ghost не найдена в реестре — работаю моделью mid"
+    )
+
+
+@pytest.mark.parametrize("choice", ["auto", "default", "light", "big"])
+def test_no_notice_for_known_choice(choice):
+    assert unknown_model_choice_notice(_cfg(model=choice)) is None

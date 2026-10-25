@@ -562,7 +562,7 @@ def test_main_trace_trips_breaker_and_raises_honest_error_with_hint(
         )
 
     message = str(excinfo.value)
-    assert "/level" in message
+    assert "/model" in message
     assert "/profiles" in message
     assert "glm-local" in message
     assert router.breaker.is_open("glm-local") is True
@@ -596,7 +596,7 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
 
     assert not isinstance(excinfo.value, AliasCircuitOpenError)
     message = str(excinfo.value)
-    assert "/level" in message
+    assert "/model" in message
     assert "/profiles" in message
     assert "glm-local" in message
 
@@ -665,7 +665,7 @@ def test_subagent_ctx_build_both_open_returns_honest_tool_error(tmp_path):
     assert not isinstance(excinfo.value, AliasCircuitOpenError)
     message = str(excinfo.value)
     assert "subagent_planner" in message
-    assert "/level" in message or "/profiles" in message
+    assert "/model" in message or "/profiles" in message
 
 
 def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):

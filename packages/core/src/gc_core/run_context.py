@@ -650,6 +650,16 @@ def _prepare_run_context(
     )
 
 
+def _sanitized_provider(
+    provider: Optional[Callable[[], str]], configured: str, settings: Any
+) -> Callable[[], str]:
+    """Один источник правды: любой выбор — от фронтенда или из конфига —
+    проходит `effective_choice` (неизвестный алиас → default)."""
+    if provider is None:
+        return lambda: configured
+    return lambda: effective_choice(provider(), settings)
+
+
 def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     prep: _RunContextPrep,
     tools: tuple,
@@ -739,7 +749,9 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     workspace = build_execution_workspace(backend, prep.settings)
 
     configured = effective_choice(configured_choice(settings), settings)
-    effective_choice_provider = choice_provider or (lambda: configured)
+    effective_choice_provider = _sanitized_provider(
+        choice_provider, configured, settings
+    )
     model_router = ModelRouter(
         settings,
         choice_provider=effective_choice_provider,

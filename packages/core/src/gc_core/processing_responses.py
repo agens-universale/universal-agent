@@ -493,7 +493,7 @@ def _raise_honest_main_unavailable(
     )
     message = (
         f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
-        f"{resolved.url}: {reason}. Переключите уровень /level или профиль /profiles."
+        f"{resolved.url}: {reason}. Выберите другую модель /model или профиль /profiles."
     )
     advice = _endpoint_path_advice(ctx, resolved.url, source_exc)
     if advice:

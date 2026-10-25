@@ -11,7 +11,12 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from gc_core.auto_routing.levels import auto_unavailable_reason
 from gc_core.config import cli_forces_legacy_model
+from gc_core.config_modules.model_registry import (
+    choice_in_registry,
+    configured_choice,
+)
 from gc_core.config_modules.pricing import resolve_model_tariff
+from gc_core.model_router import ModelRouter
 from gc_core.settings import AppConfig, LoadedSettings, settings_of
 
 
@@ -203,8 +208,30 @@ def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
     )
 
 
+def unknown_model_choice_notice(settings: Any) -> Optional[Notice]:
+    """Выбор `model` не найден в реестре — запуск идёт моделью слота default.
+    Только стартовое: роутер уже подменяет выбор (`effective_choice`), нотис
+    называет, что именно заменено и чем."""
+    settings = settings_of(settings)
+    choice = configured_choice(settings)
+    if choice_in_registry(choice, settings):
+        return None
+    router = ModelRouter(settings, choice_provider=lambda: "default")
+    return Notice(
+        "info",
+        "unknown_model_choice",
+        f"модель {choice} не найдена в реестре — работаю моделью "
+        f"{router.resolve('main').model}",
+    )
+
+
 def _auto_routing(source: Any) -> List[Notice]:
     notice = auto_routing_unavailable_notice(source)
+    return [notice] if notice is not None else []
+
+
+def _unknown_model(settings: Any) -> List[Notice]:
+    notice = unknown_model_choice_notice(settings)
     return [notice] if notice is not None else []
 
 
@@ -375,6 +402,7 @@ def collect_startup_notices(
         + _mcp_failed(mcp_status)
         + _agentsmd(settings, is_tui=is_tui)
         + _auto_routing(source)
+        + _unknown_model(settings)
         + list(extra)
         + _compat(compat_notices)
         + _pricing_no_rates(settings)

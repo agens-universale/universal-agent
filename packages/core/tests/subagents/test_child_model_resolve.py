@@ -171,6 +171,31 @@ class TestChildModelResolve:
             == "deepseek-max"
         )
 
+    def test_child_breaker_error_suggests_model_command(self, tmp_path):
+        """Пин и активная модель в предохранителе — честная ошибка с
+        подсказкой /model, не /level."""
+        import pytest
+
+        raw = {
+            "models": {"flash": {}, "deepseek-max": {}},
+            "slots": {"default": "flash"},
+            "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
+        }
+        cfg = _make_config(tmp_path, raw)
+        ctx = _parent_ctx(cfg, level="default")
+        ctx.model_router.breaker.trip("flash", "5xx")
+        ctx.model_router.breaker.trip("deepseek-max", "5xx")
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _await(runner._build_child_ctx(tool_name="subagent_planner"))
+
+        message = str(excinfo.value)
+        assert "Выберите другую модель /model или профиль /profiles." in (
+            message
+        )
+        assert "/level" not in message
+
     def test_unpinned_subagent_falls_back_to_active_level(self, tmp_path):
         raw = {
             "models": {"flash": {}, "deepseek-max": {}},

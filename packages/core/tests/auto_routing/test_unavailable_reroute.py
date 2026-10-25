@@ -229,6 +229,17 @@ def test_manual_level_keeps_the_honest_error(monkeypatch):
     assert sent == ["mid"]
 
 
+def test_manual_breaker_error_suggests_model_command(monkeypatch):
+    ctx = _ctx({"value": "default"})
+    s = _state(ctx)
+    _transport(monkeypatch, dead={"mid"})
+    with pytest.raises(MainModelUnavailable) as excinfo:
+        _ask(s, ctx)
+    message = str(excinfo.value)
+    assert "Выберите другую модель /model или профиль /profiles." in message
+    assert "/level" not in message
+
+
 def test_the_pair_judge_is_not_asked_again_after_a_replacement(monkeypatch):
     judge_calls = []
 
