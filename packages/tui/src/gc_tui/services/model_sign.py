@@ -53,8 +53,10 @@ def sign(
     name_style: str = INK,
     alias: str | None = None,
 ) -> Text:
-    """Точки, пробел, имя; для слова уровня имя — `alias` его слота."""
-    text = Text.assemble(dots(choice, slots), " ")
+    """Точки, пробел, имя. Слово уровня с `alias` — полный знак модели
+    этого слота (точки всех её уровней); без `alias` — одна точка уровня."""
+    shown = alias if alias is not None else choice
+    text = Text.assemble(dots(shown, slots), " ")
     text.append(alias if alias is not None else choice, style=name_style)
     return text
 

@@ -29,7 +29,11 @@ def test_dots_colors_per_level_free_and_auto():
 def test_level_word_choice_shows_slot_model():
     assert _colors(ms.dots("max", SLOTS)) == [ACCENT]
     sign = ms.sign("max", SLOTS, alias="main")
-    assert sign.plain == "● main"
+    assert sign.plain == "●● main"
+    assert [str(sp.style) for sp in sign.spans[:2]] == [RUN_COLOR, ACCENT]
+    bare = ms.sign("max", SLOTS)
+    assert bare.plain == "● max"
+    assert str(bare.spans[0].style) == ACCENT
     assert ms.sign("fast", SLOTS).plain == "● fast"
     assert ms.sign("auto", SLOTS).plain == "● auto"
 
