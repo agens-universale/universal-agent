@@ -216,6 +216,45 @@ async def test_reply_note_sits_under_the_reply_with_images_and_only_live(
         assert all(not r._consequences for r in scr.query(UserReplyContainer))
 
 
+@pytest.mark.parametrize(
+    "tone, plain, style",
+    [
+        ("info", "deepseek не принимает изображения", "DIM"),
+        ("warn", "! deepseek не принимает изображения", "WARN"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_trace_note_tone_paints_the_reply_consequence(
+    tmp_path, tone, plain, style
+):
+    """Пометка под репликой с картинкой: `info` — серое следствие без `!`,
+    `warn` — прежнее оранжевое `! …`."""
+    pytest.importorskip("textual")
+    from image_helpers import make_attachment
+
+    from gc_tui import palette
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        reply = UserReplyContainer(
+            "вот", images=(make_attachment("f" * 64, 1),)
+        )
+        scr._trace_mount(reply)
+        await _drained(
+            pilot,
+            TraceNote(
+                "deepseek не принимает изображения", "reply", None, tone
+            ),
+        )
+        body = reply._consequences[-1]
+
+    assert body.plain == plain
+    assert {str(s.style) for s in body.spans} == {getattr(palette, style)}
+
+
 @pytest.mark.asyncio
 async def test_reply_note_without_images_goes_under_the_latest_reply(
     tmp_path,
