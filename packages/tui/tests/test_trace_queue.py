@@ -46,6 +46,9 @@ class _BusyRunner:
     def add_message(self, message: dict) -> None:
         self.added.append(message)
 
+    def withdraw_message(self, msg_id: str) -> bool:
+        return True
+
 
 def _app(threads: Path) -> TuiApp:
     return TuiApp(
@@ -503,3 +506,53 @@ async def test_list_opens_between_queue_and_input(tmp_path):
         assert palette.bottom == input_y
         assert reply.region.height > 0
         assert reply.region.bottom <= palette.y
+
+
+# --- тихая отметка смены модели у низа (спека model-knob §6.4) ---------------
+
+
+def _pending_mark(pilot):
+    from gc_tui.widgets.model_mark import ModelMark
+
+    (mark,) = _trace(pilot).query(ModelMark)
+    assert mark.pending
+    return mark
+
+
+@pytest.mark.asyncio
+async def test_pending_mark_and_queued_reply_keep_action_order(tmp_path):
+    """Тихая отметка и реплики очереди — в порядке действий пользователя;
+    новые события встают над первой из них."""
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        await _busy(pilot, tmp_path)
+        await _send(pilot, "первое")
+        scr._mark_model_choice("max")
+        await pilot.pause()
+        await _send(pilot, "второе")
+        _call(scr, "c1", 1)
+        await pilot.pause()
+        first, second = _replies(pilot)
+        mark = _pending_mark(pilot)
+        kids = list(_trace(pilot).children)
+        assert kids[-3:] == [first, mark, second]
+        assert isinstance(kids[-4], ToolCallRow)
+        assert _hint_shown(second) and not _hint_shown(first)
+
+
+@pytest.mark.asyncio
+async def test_arrow_up_still_withdraws_reply_with_pending_mark(tmp_path):
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _busy(pilot, tmp_path)
+        await _send(pilot, "первое")
+        scr._mark_model_choice("max")
+        inp = scr.query_one("#cmdinput", CommandTextArea)
+        inp.focus()
+        await pilot.pause()
+        await pilot.press("up")
+        await pilot.pause()
+        assert inp.text == "первое"
+        assert _replies(pilot) == []
+        assert _pending_mark(pilot) is not None
+        assert runner.added[0]["id"]

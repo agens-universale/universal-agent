@@ -1948,6 +1948,9 @@ class TuiApp(App):
         # Пометки ленты «изображение не просмотрено» (дизайн картинок §10) — с тредом
         # прогона: хук нужен уже собранному контексту, поэтому ставится здесь.
         ctx.on_trace_note = self._trace_note_sink.hook_for(ctx)
+        ctx.on_model_choice_applied = self._trace_note_sink.hook_for_choice(
+            ctx
+        )
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
         from gc_core.execution.progress import QueueSubagentProgressSink

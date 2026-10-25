@@ -100,6 +100,7 @@ from gc_tui.services.command_output import split_command
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import agent_answers, export_thread
 from gc_tui.services.footer_slot import (
+    ALREADY_WORKING_HINT,
     COPY_DONE_LAST,
     COPY_DONE_NTH,
     COPY_REFUSAL_BAD_N,
@@ -236,6 +237,7 @@ from gc_tui.toggles import (
 from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
+from gc_tui.widgets.model_mark import ModelMark, pins_to_bottom
 from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
@@ -599,6 +601,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Пометки вызова, чья строка ещё не в ленте: (тред, пометка, тиков
         # ожидания осталось) — см. _drain_trace_notes.
         self._waiting_notes: list[tuple[str | None, TraceNote, int]] = []
+        # «Выбор применён» завершением рана — ждёт строки итога хода
+        # (`_on_run_finished`), отметка встаёт после неё.
+        self._run_end_choice: Optional[ModelChoiceApplied] = None
         self._mcp_status_row = (
             None  # Optional[Static] — live MCP-loading индикатор
         )
@@ -1037,16 +1042,20 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _choice_sign(self, choice: str, slots: dict, name_style: str) -> Text:
         """Знак выбора: `auto` — фирменная точка и слово; уровень или алиас
         — знак модели, в которую выбор резолвит витрина."""
+        model = self._choice_alias(choice) or choice
+        return model_sign.sign(model, slots, name_style=name_style)
+
+    def _choice_alias(self, choice: str) -> str | None:
+        """Модель, в которую выбор резолвит витрина; у `auto` её нет."""
         if choice == "auto":
-            return model_sign.sign(choice, slots, name_style=name_style)
+            return None
         try:
             resolved = self.app.display_router().resolve_main_at(
                 choice, check_breaker=False
             )
         except ValueError:
-            return model_sign.sign(choice, slots, name_style=name_style)
-        model = resolved.alias or resolved.model
-        return model_sign.sign(model, slots, name_style=name_style)
+            return choice
+        return resolved.alias or resolved.model
 
     def _footer_running_resolution(self) -> tuple[str, str] | None:
         """Цель и модель подготовленного вызова через Router работающего
@@ -3258,9 +3267,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         в файле треда она будет после.
 
         close_groups=False — виджет не событие верхнего уровня (вложенный
-        без якоря): группы блоков он не закрывает."""
-        from gc_tui.widgets.user_reply import is_queued
+        без якоря): группы блоков он не закрывает.
 
+        К низу прижата и тихая отметка модели (`pins_to_bottom`): с
+        репликами очереди — в порядке действий пользователя."""
         if close_groups:
             self._note_top_event(widget)
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
@@ -3268,8 +3278,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._stick_bottom = True  # отправка своего сообщения = re-engage
         queue = (
             []
-            if is_queued(widget)
-            else self._queued_tail(trace, sent=above_sent)
+            if pins_to_bottom(widget)
+            else self._pinned_tail(trace, sent=above_sent)
         )
         if queue:
             trace.mount(widget, before=queue[0])
@@ -3282,22 +3292,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Единственная точка закрытия групп верхнего уровня (решение
         плана 10): событие ленты не из группы закрывает открытую группу.
         Не закрывают: виджеты модели блоков, живой стрим, реплика в
-        очереди."""
-        from gc_tui.widgets.user_reply import is_queued
-
+        очереди и тихая отметка модели."""
         view = self._block_views.get("")
-        if view is None or view.issued(widget) or is_queued(widget):
+        if view is None or view.issued(widget) or pins_to_bottom(widget):
             return
         if widget is self._stream_answer_row or widget is self._stream_block:
             return
         view.event_closing()
 
     @staticmethod
-    def _queued_tail(trace, *, sent: bool = False) -> list:
-        """Реплики очереди по порядку. Очередь — всегда сплошной хвост
-        ленты (`_trace_mount`), поэтому обход с конца, а не всей ленты.
-        ``sent`` — с ними и отправленные, ещё не записанные ядром."""
-        from gc_tui.widgets.user_reply import UserReplyContainer, is_queued
+    def _pinned_tail(trace, *, sent: bool = False) -> list:
+        """Прижатое к низу по порядку: реплики очереди и тихая отметка
+        модели. Это всегда сплошной хвост ленты (`_trace_mount`), поэтому
+        обход с конца, а не всей ленты. ``sent`` — с ними и отправленные,
+        ещё не записанные ядром."""
+        from gc_tui.widgets.user_reply import UserReplyContainer
 
         tail = []
         for widget in reversed(trace.children):
@@ -3306,10 +3315,19 @@ class TraceScreen(TraceFollowMixin, Screen):
                 and isinstance(widget, UserReplyContainer)
                 and widget.state == "pending"
             )
-            if not (is_queued(widget) or sent_reply):
+            if not (pins_to_bottom(widget) or sent_reply):
                 break
             tail.append(widget)
         return tail[::-1]
+
+    def _queued_tail(self, trace, *, sent: bool = False) -> list:
+        """Реплики очереди по порядку (с ``sent`` — и отправленные, ещё не
+        записанные ядром); тихая отметка модели в хвосте — не реплика."""
+        return [
+            w
+            for w in self._pinned_tail(trace, sent=sent)
+            if not isinstance(w, ModelMark)
+        ]
 
     def _withdraw_last_queued(self) -> bool:
         """↑ забирает последнюю реплику очереди в поле (спека P3 §2.4, §10
@@ -5141,7 +5159,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         Ядро кормит очередь из рабочего потока через on_trace_note; строка
         монтируется здесь, на UI-потоке. Только вживую и только своего треда: в тред
         пометка не пишется, при открытии сессии заново не рисуется, пометка хода
-        другой сессии сюда не попадает."""
+        другой сессии сюда не попадает.
+
+        Событие «выбор модели применён» — отметке смены модели
+        (`_apply_choice_event`); применённое завершением рана ждёт строки
+        итога хода."""
+        from gc_core.model_choice import ModelChoiceApplied
+
         from gc_tui.services.trace_render import note_consequence
 
         sink = getattr(self.app, "_trace_note_sink", None)
@@ -5149,7 +5173,14 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         tid = self._active_task_id
         waiting = [(n, t) for t_id, n, t in self._waiting_notes if t_id == tid]
-        fresh = [(n, _NOTE_OWNER_WAIT_TICKS) for n in sink.drain(tid)]
+        fresh = []
+        for item in sink.drain(tid):
+            if not isinstance(item, ModelChoiceApplied):
+                fresh.append((item, _NOTE_OWNER_WAIT_TICKS))
+            elif item.at_run_end:
+                self._run_end_choice = item
+            else:
+                self._apply_choice_event(item)
         self._waiting_notes = []
         for note, ticks in waiting + fresh:
             owner = self._trace_note_owner(note)
@@ -5161,6 +5192,75 @@ class TraceScreen(TraceFollowMixin, Screen):
             elif note.tone == "warn":
                 # Нейтральной пометке без владельца нечего сообщать отдельно.
                 self._mount_standalone(note.text, "warn")
+
+    def _apply_choice_event(self, event: ModelChoiceApplied) -> None:
+        """Выбор применён (спека model-knob §6.4, §6.5): тихая отметка
+        становится обычной на своём месте — над оставшимся прижатым хвостом;
+        её нет — обычная отметка там же. Футер дышит одновременно."""
+        mark = self._pending_model_mark()
+        if mark is None:
+            mark = self._new_model_mark(event.choice, pending=False)
+            self._trace_mount(mark)
+        else:
+            mark.set_choice(event.choice, event.alias)
+            mark.apply()
+            trace = self.query_one(_SEL_TRACE, VerticalScroll)
+            tail = self._pinned_tail(trace)
+            if tail:
+                trace.move_child(mark, before=tail[0])
+        self.on_model_choice_applied(event)
+
+    def _apply_run_end_choice(self, on_screen: bool) -> None:
+        """Конец рана: выбор, применённый завершением, — отметкой после
+        строки итога хода (её уже поставил `_on_run_finished`)."""
+        if on_screen:
+            self._drain_trace_notes()
+        event, self._run_end_choice = self._run_end_choice, None
+        if event is not None and on_screen:
+            self._apply_choice_event(event)
+
+    def _pending_model_mark(self) -> Optional[ModelMark]:
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        return next((m for m in trace.query(ModelMark) if m.pending), None)
+
+    def _new_model_mark(self, choice: str, *, pending: bool) -> ModelMark:
+        return ModelMark(
+            choice,
+            self._footer_slots(),
+            alias=self._choice_alias(choice),
+            pending=pending,
+        )
+
+    def _mark_model_choice(self, choice: str) -> None:
+        """Сессионный выбор модели и его отметка в ленте (спека model-knob
+        §6.4). Между ходами — обычная отметка в конце ленты, каждая
+        остаётся; во время хода — тихая у низа, новый выбор её заменяет;
+        выбор той модели, что уже работает, — без отметки, с подсказкой.
+        Выбор пишется до отметки: не сохранился — отметки нет."""
+        if not self._run_in_progress():
+            previous = current_choice(self.app)
+            self.app.apply_model_choice(choice)
+            if choice == previous:
+                self._hint_already_working(choice)
+            else:
+                self._trace_mount(self._new_model_mark(choice, pending=False))
+            return
+        applied_fn = getattr(self.app.active_runner, "applied_choice", None)
+        applied = applied_fn() if callable(applied_fn) else None
+        self.app.apply_model_choice(choice)
+        mark = self._pending_model_mark()
+        if choice == applied:
+            if mark is not None:
+                mark.remove()
+            self._hint_already_working(choice)
+        elif mark is not None:
+            mark.set_choice(choice, self._choice_alias(choice))
+        else:
+            self._trace_mount(self._new_model_mark(choice, pending=True))
+
+    def _hint_already_working(self, choice: str) -> None:
+        name = self._choice_alias(choice) or choice
+        self._show_footer_hint(ALREADY_WORKING_HINT.format(name=name))
 
     def _trace_note_owner(self, note):
         """Владелец пометки в ленте: строка вызова `call_id` (верхняя или
@@ -5722,6 +5822,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._stamp_run_outcome(run_tid, word, edits)
         if on_screen and self._outcome_line_due(runner, word):
             self._show_turn_outcome(word, plan_proposed, outcome, edits=edits)
+        self._apply_run_end_choice(on_screen)
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
@@ -9378,7 +9479,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._show_footer_refusal(refusal)
             return
         try:
-            self.app.apply_model_choice(value)
+            self._mark_model_choice(value)
         except OSError as exc:
             self._show_footer_refusal(f"✗ не сохранено: {exc}")
 

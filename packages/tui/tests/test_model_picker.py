@@ -311,6 +311,8 @@ def test_model_command_with_name_applies(tmp_path, monkeypatch):
     applied, opened = [], []
     app.apply_model_choice = lambda choice: applied.append(choice)
     scr._open_command_picker = lambda name: opened.append(name)
+    # Отметка смены модели — тест ленты (test_trace_model_mark.py).
+    scr._mark_model_choice = app.apply_model_choice
     scr._cmd_model("deepseek-v3")
     scr._cmd_model("")
     assert applied == ["deepseek-v3"]
