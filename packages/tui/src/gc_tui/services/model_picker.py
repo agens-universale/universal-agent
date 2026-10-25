@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-from itertools import pairwise
 from typing import Any, Optional
 
 from gc_core.config_modules.model_registry import LEVELS, choice_in_registry
@@ -120,6 +119,28 @@ def model_picker_options(
     return tuple(options)
 
 
+def _auto_levels(loaded: Any) -> list[tuple[str, str]]:
+    """Пары уровней, которыми реально ходит автовыбор: обе — при лестнице
+    пар (`safe_level: auto` уцелел после сборки), иначе одна."""
+    from dataclasses import replace
+
+    from gc_core.auto_routing.levels import resolve_routing_params
+    from gc_core.auto_routing.policy import (
+        PAIR_LOWER,
+        PAIR_UPPER,
+        SAFE_LEVEL_AUTO,
+        pair_levels,
+    )
+
+    params = resolve_routing_params(loaded)
+    if params.safe_level != SAFE_LEVEL_AUTO:
+        return [pair_levels(params)]
+    return [
+        pair_levels(replace(params, safe_level=level))
+        for level in (PAIR_LOWER, PAIR_UPPER)
+    ]
+
+
 def _auto_hint(router: Any, loaded: Any) -> str:
     """Пары автовыбора; недоступный автовыбор — его причина."""
     reason = auto_unavailable_reason_cfg(loaded)
@@ -129,9 +150,12 @@ def _auto_hint(router: Any, loaded: Any) -> str:
         )
 
         return auto_routing_unavailable_reason_text(reason)
-    names = [_alias_of(router, level) for level in LEVELS]
-    pairs = [f"{low} и {high}" for low, high in pairwise(names)]
-    return "пары автовыбора: " + ", ".join(pairs)
+    pairs = [
+        f"{_alias_of(router, weak)} и {_alias_of(router, strong)}"
+        for weak, strong in _auto_levels(loaded)
+    ]
+    head = "пары автовыбора" if len(pairs) > 1 else "пара автовыбора"
+    return f"{head}: " + ", ".join(pairs)
 
 
 def model_hint(app: Any, value: str) -> str:

@@ -3822,16 +3822,12 @@ class SettingsScreen(Screen):
         label_w — макс. ширина головы строки: «name · label» и у пресета, и у
         ребёнка (ревизия 7 — flat, маркера/отступа нет, оба head в одном
         формате — `_modes_head`, одна формула на все строки) + 3 + 2 на курсор;
-        base_w — макс. ширина БАЗОВОГО трека (2*n-1 ячеек по ON-SCALE значениям
-        состава БАЗЫ — `base_toggle_values`, статика или
-        `values_provider`, спека автороутинга §3); extra_w — макс. ширина
-        вне-шкальной зоны: 3 ячейки у preset-тоггла (4-я позиция custom
-        зарезервирована в Settings всегда, спека §4.2), `2 + 2*k - 1` у тоггла
-        с k вне-шкальными значениями состава базы (`/level` — `auto`,
-        k=1 → 3), 0 у single-key тогглов без вне-шкальных значений; value_w
-        (ревизия 6 п.3) — фикс-ширина колонки подписи значения: макс. длина
-        имени значения по ВСЕМ тогглам секции (состав базы — включает
-        `auto`, когда он виден),
+        base_w — макс. ширина БАЗОВОГО трека (2*n-1 ячеек по значениям
+        состава БАЗЫ — `base_toggle_values`, статика или `values_provider`);
+        extra_w — 3 ячейки у preset-тоггла (4-я позиция custom
+        зарезервирована в Settings всегда, спека §4.2), 0 у single-key
+        тогглов; value_w (ревизия 6 п.3) — фикс-ширина колонки подписи
+        значения: макс. длина имени значения по ВСЕМ тогглам секции,
         ПЛЮС `PRESET_CUSTOM` — пресет-строка может показать «custom», хотя
         оно не входит в `spec.names` ни одного тоггла. Точный контракт брал
         бы max только по строкам, где custom реально достижим (preset-
@@ -3856,13 +3852,9 @@ class SettingsScreen(Screen):
         for name in names:
             spec = TOGGLES[name]
             values = base_toggle_values(self.app, name)
-            on_scale = [v for v in values if not v.off_scale]
-            off_scale = [v for v in values if v.off_scale]
-            base_w = max(base_w, 2 * len(on_scale) - 1)
+            base_w = max(base_w, 2 * len(values) - 1)
             if spec.preset_keys:
                 extra_w = max(extra_w, 3)
-            elif off_scale:
-                extra_w = max(extra_w, 2 + 2 * len(off_scale) - 1)
             value_names.extend(v.value for v in values)
         value_w = max(len(v) for v in value_names)
         return label_w, base_w, extra_w, value_w
@@ -4205,10 +4197,9 @@ class SettingsScreen(Screen):
         """←/→ на строке тоггла (канон §1/§3): мгновенно записать
         переключённое ГЛОБАЛЬНОЕ значение в config.yml (Settings = глобальный
         дефолт, дизайн 2026-07-21 §3). Цикл значения — от ТЕКУЩЕГО глобального
-        состояния, по составу базы (`base_toggle_names` — статика
-        или `values_provider`, спека автороутинга §3: `/level` цикл включает
-        `auto`, когда фича доступна, тем же generic путём, каким пресет всегда
-        цикл по низкий/средний/высокий — без разбора по имени тоггла). Guard
+        состояния, по составу базы (`base_toggle_names` — статика или
+        `values_provider`, без разбора по имени тоггла). Строка, значение
+        которой выбирается списком (`opens_picker`), шагом не меняется. Guard
         записи — как у остальных секций (_writable): пакетный шаблон не пишем.
         Ошибка — флеш, значение не меняется. Сессионные переопределения НЕ
         трогаем — их перекрытие показывает пометка §6.2."""

@@ -289,9 +289,10 @@ def test_separator_skipped_by_navigation_and_filter():
     for _ in range(4):
         p.move_selection(1)
         seen.append(p.selected_value())
-    assert seen == ["auto", "glm-flash", "giga-max", "qwen-coder", "auto"]
+    # старт — первая доступная строка, auto недоступен
+    assert seen == ["glm-flash", "giga-max", "qwen-coder", "auto", "glm-flash"]
     p.move_selection(-1)
-    assert p.selected_value() == "qwen-coder"
+    assert p.selected_value() == "auto"
 
     p.set_filter("g")
     assert [o.value for o in p._visible_rows()] == ["glm-flash", "giga-max"]
@@ -314,13 +315,16 @@ def test_disabled_row_is_dim_and_not_taken():
     from gc_tui import palette as pal
     from gc_tui.widgets.arg_picker import ArgPicker
 
-    p = ArgPicker(_model_like_options())
+    p = ArgPicker(_model_like_options(), initial_filter="a")
     assert p.selected_value() == "auto"
-    assert not p.selected_enabled()
+    assert p.selected_disabled()
     row = p._format_row(p._visible_rows()[0])
     assert {str(s.style) for s in row.spans} == {pal.DIM}
-    p.move_selection(1)
-    assert p.selected_enabled()
+    p.set_filter("")
+    assert p.selected_value() == "glm-flash"
+    assert not p.selected_disabled()
+    p.set_filter("zzz")  # нет видимых строк — Enter не блокируется
+    assert not p.selected_disabled()
 
 
 @pytest.mark.asyncio
@@ -366,3 +370,70 @@ async def test_enter_on_disabled_row_keeps_picker_open(tmp_path, monkeypatch):
         await pilot.pause(0.1)
         assert len(pilot.app.query(ArgPicker)) == 1
         assert "model" not in pilot.app._session_overrides
+
+
+def _registry_app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {
+                "models": {"glm-4.6": {}, "giga-max": {}},
+                "slots": {"default": "glm-4.6", "max": "giga-max"},
+            }
+        ),
+    )
+
+
+async def _type_and_enter(pilot, text):
+    inp = pilot.app.query_one("#cmdinput")
+    inp.text = text
+    await pilot.pause(0.1)
+    await pilot.press("enter")
+    await pilot.pause(0.1)
+
+
+@pytest.mark.asyncio
+async def test_enter_with_unknown_typed_model_reaches_the_refusal(
+    tmp_path, monkeypatch
+):
+    """Фильтр не оставил строк — Enter уходит с набранным аргументом, и
+    команда отвечает своим отказом."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        hints = []
+        pilot.app.screen._show_footer_refusal = hints.append
+        await _type_and_enter(pilot, "/model giga-mx")
+        assert len(pilot.app.query(ArgPicker)) == 0
+        assert hints == ["✗ нет такой модели: giga-mx"]
+        assert "model" not in pilot.app._session_overrides
+
+
+@pytest.mark.asyncio
+async def test_enter_with_typed_level_word_applies_it(tmp_path, monkeypatch):
+    """Слово уровня — допустимый выбор, хоть строки в пикере у него нет."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        await _type_and_enter(pilot, "/model light")
+        assert pilot.app._session_overrides.get("model") == "light"
+
+
+@pytest.mark.asyncio
+async def test_enter_with_unknown_profile_reaches_its_refusal(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        hints = []
+        pilot.app.screen._show_footer_refusal = hints.append
+        await _type_and_enter(pilot, "/profiles nope")
+        assert hints and 'профиль "nope" не найден' in hints[0]

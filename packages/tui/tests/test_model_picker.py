@@ -167,8 +167,25 @@ def test_picker_hints_name_levels_only(tmp_path, monkeypatch):
         model_picker_hint(app, "giga-max") == "giga-max — уровни default и max"
     )
     assert model_picker_hint(app, "qwen-coder") == "qwen-coder — без уровня"
+    # safe_level по умолчанию — default: одна пара light + default.
     assert model_picker_hint(app, "auto") == (
-        "auto — пары автовыбора: glm-flash и giga-max, giga-max и giga-max"
+        "auto — пара автовыбора: glm-flash и giga-max"
+    )
+
+
+def test_picker_auto_hint_follows_router_pairs(tmp_path, monkeypatch):
+    """Пары подсказки — те, которыми ходит роутер: лестница пар — обе;
+    выродившаяся лестница (одна модель на default и max) — одна пара."""
+    from gc_tui.services.model_picker import model_picker_hint
+
+    ladder = {"agent.auto_routing_safe_level": "auto", **_AUTO_ON}
+    app = _app(tmp_path, monkeypatch, {**ladder, **_ONE_PER_LEVEL})
+    assert model_picker_hint(app, "auto") == (
+        "auto — пары автовыбора: glm-flash и glm-4.6, glm-4.6 и giga-max"
+    )
+    app = _app(tmp_path, monkeypatch, {**ladder, **_TWO_LEVELS})
+    assert model_picker_hint(app, "auto") == (
+        "auto — пара автовыбора: glm-flash и giga-max"
     )
 
 

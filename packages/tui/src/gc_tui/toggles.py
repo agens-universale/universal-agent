@@ -89,14 +89,11 @@ def resolve_rigor_state(settings: Any) -> str:
 @dataclass(frozen=True)
 class ToggleValue:
     """Одно значение тоггла: каноническое имя + подсказка (§5 спеки) + цвет ползунка
-    (§3 спеки; токен-константа tui/palette.py). `off_scale` (спека автороутинга
-    §3) — значение вне базовой шкалы (`/level`: `auto`): рисуется `render_track`
-    ПОСЛЕ двойного пробела, не в базовом треке."""
+    (§3 спеки; токен-константа tui/palette.py)."""
 
     value: str
     hint: str
     color: str
-    off_scale: bool = False
 
 
 @dataclass(frozen=True)
@@ -763,48 +760,30 @@ def render_track(
     values: Optional[Tuple[ToggleValue, ...]] = None,
 ) -> Text:
     """Канонический трек тоггла (спека §2–§3): ● на позиции current цветом
-    значения (bold), пустые позиции — ○ DEEP_DIM. `values` (спека автороутинга
-    §3) — состав для рендера, по умолчанию `spec.values`; делится на базовую
-    шкалу (`off_scale=False`) и вне-шкальные значения (`off_scale=True`,
-    `/level`: `auto`) — база рисуется как раньше, вне-шкальные — ПОСЛЕ
-    двойного пробела, каждое своим `●` цветом значения при совпадении с
-    `current`, иначе тусклым `○`; `current` вне базовой шкалы — база вся
-    тусклая (idx не находится). Без вне-шкальных значений в `values` и без
-    `extra_lit` 4-й зоны нет вовсе (бит-в-бит как было). `extra_lit` (спека
-    §4.1, /rigor, ревизия 4) — отдельный, единственный на /rigor вне-шкальный
-    глиф custom (значение не входит ни в один трек `values`): None — зоны нет;
-    False — зона ЗАРЕЗЕРВИРОВАНА, но пуста (без тусклой ○ — custom не
-    выбирается стрелкой); True — `●` BRAND (custom применена), база вся
-    тусклая. Только трек — колонки/подпись у потребителя."""
+    значения (bold), пустые позиции — ○ DEEP_DIM. `values` — состав для
+    рендера, по умолчанию `spec.values`. `extra_lit` (спека §4.1, /rigor,
+    ревизия 4) — отдельный вне-шкальный глиф custom после двойного пробела
+    (значение не входит в трек `values`): None — зоны нет; False — зона
+    ЗАРЕЗЕРВИРОВАНА, но пуста (без тусклой ○ — custom не выбирается
+    стрелкой); True — `●` BRAND (custom применена), база вся тусклая.
+    Только трек — колонки/подпись у потребителя."""
     values = values or spec.values
-    on_scale = tuple(v for v in values if not v.off_scale)
-    off_scale = tuple(v for v in values if v.off_scale)
-    on_names = tuple(v.value for v in on_scale)
-    idx = on_names.index(current) if current in on_names else -1
+    names = tuple(v.value for v in values)
+    idx = names.index(current) if current in names else -1
     t = Text()
-    for i, val in enumerate(on_scale):
+    for i, val in enumerate(values):
         if i == idx and extra_lit is not True:
             t.append("●", style=f"bold {val.color}")
         else:
             t.append("○", style=_pal.DEEP_DIM)
-        if i < len(on_scale) - 1:
+        if i < len(values) - 1:
             t.append(" ")
-    if off_scale or extra_lit is not None:
-        t.append("  ")  # двойной пробел — отделяет вне-шкальные позиции
-        for j, val in enumerate(off_scale):
-            if val.value == current:
-                t.append("●", style=f"bold {val.color}")
-            else:
-                t.append("○", style=_pal.DEEP_DIM)
-            if j < len(off_scale) - 1:
-                t.append(" ")
-        if extra_lit is not None:
-            if off_scale:
-                t.append(" ")
-            if extra_lit is True:
-                t.append("●", style=f"bold {_pal.BRAND}")
-            else:
-                t.append(" ")  # резерв: custom пуст, без тусклой ○ (ревизия 4)
+    if extra_lit is not None:
+        t.append("  ")  # двойной пробел — отделяет позицию custom
+        if extra_lit is True:
+            t.append("●", style=f"bold {_pal.BRAND}")
+        else:
+            t.append(" ")  # резерв: custom пуст, без тусклой ○ (ревизия 4)
     return t
 
 
@@ -821,11 +800,8 @@ def padded_track(
     системный контракт, владелец здесь — переиспользуют палитра и Settings).
     `render_track` остаётся ЕДИНСТВЕННЫМ рендером — эта функция только паддит
     его результат пробелами СПРАВА до общей ширины поля `base_w + extra_w`.
-    Вне-шкальная зона (двойной пробел + глифы `auto`/custom-резерва) стоит
-    вплотную к СВОЕЙ базе, а не в колонке после самой длинной базы секции:
-    базы разной длины (тройки и четвёрка режима разрешений) не отрывают
-    `auto` от его тройки (решение владельца). `values` (спека автороутинга
-    §3) — состав для `render_track`."""
+    Резерв custom стоит вплотную к СВОЕЙ базе, а не в колонке после самой
+    длинной базы секции. `values` — состав для `render_track`."""
     values = values or spec.values
     full = render_track(spec, current, extra_lit=extra_lit, values=values)
     t = Text()

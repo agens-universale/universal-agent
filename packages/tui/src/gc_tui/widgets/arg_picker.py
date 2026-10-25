@@ -59,7 +59,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         super().__init__(classes="palette")
         self._options = [_as_option(opt) for opt in options]
         self._filter = initial_filter
-        self._selected = 0
+        self._selected = self._first_enabled()
         # Динамический хинт подсвеченного пункта (спека §12.1, /profiles: состав
         # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
         self._hint_provider = hint_provider
@@ -104,9 +104,11 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         return max(len(opt.value) for opt in rows) + 3
 
     def _rich_rows(self) -> bool:
-        """Есть ли у видимых строк статус или знак: тогда строки — `Text`
-        с общими колонками описания и статуса."""
-        return any(o.status or o.lead for o in self._choice_rows())
+        """Есть ли у видимых строк статус, знак или недоступность: тогда
+        строки — `Text` с общими колонками описания и статуса."""
+        return any(
+            o.status or o.lead or not o.enabled for o in self._choice_rows()
+        )
 
     def _desc_col_w(self) -> int:
         """Ширина description-колонки у строк со статусом: описание паддится
@@ -262,7 +264,22 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
             return None
         return row.value
 
-    def selected_enabled(self) -> bool:
-        """Подсвеченная строка доступна: Enter её берёт."""
+    def selected_disabled(self) -> bool:
+        """Подсвечена видимая недоступная строка: Enter её не берёт. Нет
+        видимых строк — не блок: Enter уходит с набранным аргументом."""
         row = self._selected_row()
-        return row is not None and row.enabled
+        return row is not None and not row.enabled
+
+    def _first_enabled(self) -> int:
+        """Стартовая подсветка — первая доступная строка (не `auto`, когда
+        автовыбор недоступен); нет такой — первая."""
+        rows = self._visible_rows()
+        return next(
+            (i for i, o in enumerate(rows) if o.enabled and not o.separator),
+            0,
+        )
+
+    def set_filter(self, text: str) -> None:
+        self._filter = text
+        self._selected = self._first_enabled()
+        self._rebuild()

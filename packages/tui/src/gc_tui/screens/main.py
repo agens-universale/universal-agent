@@ -7393,9 +7393,9 @@ class TraceScreen(TraceFollowMixin, Screen):
                 return
 
         # Arg picker открыт → Enter выполняет команду с выбранным/набранным значением.
-        # Недоступную строку (auto без автовыбора) Enter не берёт.
+        # Видимую недоступную строку (auto без автовыбора) Enter не берёт.
         if self._arg_picker is not None:
-            if not self._arg_picker.selected_enabled():
+            if self._arg_picker.selected_disabled():
                 return
             value = self._arg_picker.selected_value()
             self._close_arg_picker()

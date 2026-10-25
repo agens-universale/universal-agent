@@ -495,29 +495,20 @@ class CommandPalette(VerticalScroll):
 
     def _my_base_w(self, name: str) -> int:
         """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва),
-        по числу ON-SCALE значений ДЕЙСТВУЮЩЕГО состава (`_values_for` — статика
-        или `values_provider`, спека автороутинга §3). `show_track=False`
-        (спека §12.1, /profiles — trackless) → 0: нет трека, нечего
-        резервировать."""
+        по числу значений ДЕЙСТВУЮЩЕГО состава (`_values_for` — статика или
+        `values_provider`). `show_track=False` (trackless) → 0: нет трека,
+        нечего резервировать."""
         spec = TOGGLES[name]
         if not spec.show_track:
             return 0
-        on_scale = sum(1 for v in self._values_for(name) if not v.off_scale)
-        return _slider_width(on_scale)
+        return _slider_width(len(self._values_for(name)))
 
     def _my_extra_w(self, name: str) -> int:
-        """Собственная ширина extra-зоны тоггла `name`: тогглы с вне-шкальными
-        значениями действующего состава (спека автороутинга §3, /level —
-        `auto`) резервируют `2 + 2*k - 1` ячеек (двойной пробел + k глифов,
-        разделённых пробелом; k=1 → 3); иначе — 0, если `toggle_extra` не
-        задействован (`None`, обычный single-key тоггл), 3 — custom-резерв
-        /rigor (спека §6). `show_track=False` (/profiles) → 0 сразу, как у
-        `_my_base_w`: провайдер значений trackless-тоггла раскладке не нужен."""
+        """Собственная ширина extra-зоны тоггла `name`: 0, если `toggle_extra`
+        не задействован (`None`, обычный single-key тоггл), 3 — custom-резерв
+        /rigor (спека §6). `show_track=False` → 0 сразу, как у `_my_base_w`."""
         if not TOGGLES[name].show_track:
             return 0
-        off_scale = sum(1 for v in self._values_for(name) if v.off_scale)
-        if off_scale:
-            return 2 + 2 * off_scale - 1
         extra = (
             self._toggle_extra(name)
             if self._toggle_extra is not None
