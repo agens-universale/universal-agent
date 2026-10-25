@@ -361,9 +361,18 @@ async def test_footer_stacks_usage_before_dropping_profile(
 
 def _live(app, monkeypatch, router):
     """Выбор окна и витрина — от живого Router'а: его выбор и есть выбор,
-    ждущий ближайшего шага, если ран применил другой."""
+    ждущий ближайшего шага, если ран применил другой. Router рана, как
+    настоящий, читает выбор окна живым каналом (`live_choice`)."""
     monkeypatch.setattr(app, "display_router", lambda: router)
     monkeypatch.setattr(app, "_choice_provider", router.live_choice)
+    runner = app.active_runner
+    pinned_fn = getattr(runner, "executor_router", None)
+    pinned = pinned_fn() if callable(pinned_fn) else None
+    if pinned is not None:
+        ran = pinned.with_choice_providers(
+            pinned.active_target, router.live_choice
+        )
+        monkeypatch.setattr(runner, "executor_router", lambda: ran)
 
 
 def _call_runner(level: str, router):
