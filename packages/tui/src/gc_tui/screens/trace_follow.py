@@ -60,7 +60,7 @@ class TraceFollowMixin:
             self._on_trace_scrolled,
             init=False,
         )
-        self.watch(self, "_selecting", self._on_select_freeze)
+        textual_compat.watch_selecting(self, self._on_select_freeze)
 
     def _ui_frozen_for_select(self) -> bool:
         """F1: заморожен ли UI из-за app-select. Сигнал — Screen._selecting."""

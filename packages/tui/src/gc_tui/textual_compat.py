@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import textual
 from textual import selection
@@ -86,7 +87,7 @@ class AnchoredScroll(VerticalScroll):
 
     def arrange(self, size: Size, optimal: bool = False):
         result = super().arrange(size, optimal)
-        if not optimal:
+        if not optimal and textual_is_patched_version():
             bottom = result.spatial_map.total_region.bottom
             self._anchor_y = max(0, bottom - size.height)
         return result
@@ -115,6 +116,17 @@ def is_being_removed(widget: Widget) -> bool:
 def is_selecting(screen: Screen) -> bool:
     """Идёт ли выделение мышью на экране."""
     return bool(getattr(screen, "_selecting", False))
+
+
+def watch_selecting(screen: Screen, callback: Callable[[bool], None]) -> bool:
+    """Звать `callback` на начало и конец выделения мышью на экране.
+
+    Только для `PATCHED_TEXTUAL`: на иной версии не подписывается
+    (`False`)."""
+    if not textual_is_patched_version():
+        return False
+    screen.watch(screen, "_selecting", callback)
+    return True
 
 
 def stop_selecting(screen: Screen) -> None:

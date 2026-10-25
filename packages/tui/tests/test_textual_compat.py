@@ -184,6 +184,62 @@ async def test_other_version_anchored_scroll_is_plain_anchor(monkeypatch):
     assert await _anchored_scroll_y() < 0
 
 
+class _TallAnchored(App):
+    """Якорная лента выше окна: тридцать строк в окне на десять."""
+
+    CSS = "#a {height: 10;} Static {height: 1;}"
+
+    def compose(self):
+        with textual_compat.AnchoredScroll(id="a"):
+            for i in range(30):
+                yield Static(f"line {i}")
+
+
+async def _tall_anchor_y() -> int:
+    app = _TallAnchored()
+    async with app.run_test(size=(40, 20)) as pilot:
+        await pilot.pause()
+        return app.query_one("#a")._anchor_y
+
+
+@pytest.mark.asyncio
+async def test_anchored_arrange_counts_anchor():
+    assert await _tall_anchor_y() == 20
+
+
+@pytest.mark.asyncio
+async def test_other_version_anchored_arrange_is_plain(monkeypatch):
+    """На чужой версии раскладка якорную прокрутку не считает."""
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    assert await _tall_anchor_y() == 0
+
+
+async def _selecting_seen() -> tuple[bool, list[bool]]:
+    app = _Lines()
+    seen: list[bool] = []
+    async with app.run_test(size=(40, 30)) as pilot:
+        watched = textual_compat.watch_selecting(
+            app.screen, lambda selecting: seen.append(selecting)
+        )
+        await pilot.mouse_down("#t", offset=(0, 2))
+        await pilot.hover("#t", offset=(5, 10))
+        await pilot.pause()
+        await pilot.mouse_up("#t", offset=(5, 10))
+        await pilot.pause()
+    return watched, seen
+
+
+@pytest.mark.asyncio
+async def test_watch_selecting_reports_start_and_end():
+    assert await _selecting_seen() == (True, [False, True, False])
+
+
+@pytest.mark.asyncio
+async def test_other_version_watch_selecting_off(monkeypatch):
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    assert await _selecting_seen() == (False, [])
+
+
 class _BelowScreenApp(_Lines):
     """Стенд repro2.py с протяжкой ниже ленты, как у TraceScreen."""
 
