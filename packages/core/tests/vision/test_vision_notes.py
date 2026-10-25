@@ -297,15 +297,18 @@ def _isolate_child_run(monkeypatch):
     async def _create(*a, **k):
         return _Inst()
 
+    # Класс — из того же модуля, что и диспетчер: соседние наборы
+    # перезагружают `gc_core.tools`, и класс из импорта файла устаревает.
+    runner_cls = runner_mod.SubagentRunner
     monkeypatch.setattr(
-        SubagentRunner,
+        runner_cls,
         "_build_child_state",
         as_coro(lambda self, role: _ChildState()),
     )
     monkeypatch.setattr(
-        SubagentRunner, "_build_initial_messages", lambda *a, **k: []
+        runner_cls, "_build_initial_messages", lambda *a, **k: []
     )
-    monkeypatch.setattr(SubagentRunner, "_log_lifecycle", lambda *a, **k: None)
+    monkeypatch.setattr(runner_cls, "_log_lifecycle", lambda *a, **k: None)
     monkeypatch.setattr(
         runner_mod,
         "get_subagent_class",
