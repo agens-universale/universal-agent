@@ -30,10 +30,10 @@ uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#s
 gc-chat --config ./config.yml
 gc-chat --config ./config.yml --profile <имя>
 # настройки путём через точку поверх профиля/config.yml (как у gc-cli / gc-acp):
-gc-chat --config ./config.yml --profile work --level max --chat_api.port 9001
+gc-chat --config ./config.yml --profile work --model auto --chat_api.port 9001
 ```
 
-Помимо `--config` / `--profile` настройку перекрывает путь через точку (`--chat_api.port 9001`, `--agent.max_steps 50`) и флаги `--model`, `--completions_url`, `--level` — так же, как у `gc-cli` (см. [переопределение из CLI](configuration.md#переопределение-настроек-из-cli)). Неизвестное имя, в том числе прежнее плоское (`--chat_api_port`), — ошибка с подсказкой пути, код выхода 2, порт не открывается.
+Помимо `--config` / `--profile` настройку перекрывает путь через точку (`--chat_api.port 9001`, `--agent.max_steps 50`) и флаги `--model`, `--completions_url` — так же, как у `gc-cli` (см. [переопределение из CLI](configuration.md#переопределение-настроек-из-cli)). Неизвестное имя, в том числе прежнее плоское (`--chat_api_port`), — ошибка с подсказкой пути, код выхода 2, порт не открывается.
 
 Без `--config` поиск конфига тот же, что у остальных команд: явный путь, затем `config.yml` в каталоге Config, затем пакетный шаблон. Конфиг не читается — сообщение в stderr, код выхода 1, порт не открывается.
 
