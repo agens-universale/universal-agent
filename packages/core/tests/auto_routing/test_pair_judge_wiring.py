@@ -18,7 +18,7 @@ RAW = {
     "models": {"fast": {}, "mid": {}, "big": {}},
     "slots": {"light": "fast", "default": "mid", "max": "big"},
     "backend": {"api_mode": "chat_completions"},
-    "level": "auto",
+    "model": "auto",
     "logging": {"save_logs": False},
 }
 #: Три шага на сильной — запас места между стартом хода и спуском, как в соседнем файле.

@@ -41,7 +41,7 @@ async def test_footer_keeps_prepared_call_and_applies_selection_to_next_call(
     loaded = tui_settings(
         {
             "agent.model": "m",
-            "level": start,
+            "model": start,
             "backend.api_mode": "chat_completions",
             "logging.save_logs": False,
             "models": {"fast": {}, "strong": {}},
@@ -74,7 +74,7 @@ async def test_footer_keeps_prepared_call_and_applies_selection_to_next_call(
     app.tui_state.active_task_id = "t1"
     monkeypatch.setattr(app, "collect_footer_notices", list)
     async with app.run_test(size=(120, 24)):
-        app.apply_session_override("level", selected)
+        app.apply_session_override("model", selected)
         assert app.screen._compose_footer_right().plain == pending
         assert state._call_level == first_level
         assert (await aprepare_main_call(state, ctx)).alias == first.alias
@@ -85,7 +85,7 @@ async def test_footer_keeps_prepared_call_and_applies_selection_to_next_call(
         assert state.turn_level is None
         assert app.screen._compose_footer_right().plain == next_footer
 
-        app.apply_session_override("level", start)
+        app.apply_session_override("model", start)
         close_tick(state, state._call_level)
         await aprepare_main_call(state, ctx)
         expected = (

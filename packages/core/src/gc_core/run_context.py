@@ -33,6 +33,10 @@ from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
     intent_scope_from_config_dict,
 )
+from gc_core.config_modules.model_registry import (
+    configured_choice,
+    effective_choice,
+)
 from gc_core.context_preparation import PreparedRunContext, RunContextBindings
 from gc_core.execution.contracts import ToolEffectExecutor
 from gc_core.execution.guard_contracts import GuardProbe
@@ -392,7 +396,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
       запись включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
       по конфигу); библиотечный вызов без режима запуска не оборачивается.
     - ``choice_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
-      CLI/server не передают его → константный провайдер из ``settings.level``.
+      CLI/server не передают его → константный провайдер из ``settings.model``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
       инверсия зависимости через этот параметр.
     - ``circuit_breaker`` — предохранитель модели (спека §8); по умолчанию свежий.
@@ -734,8 +738,8 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 
     workspace = build_execution_workspace(backend, prep.settings)
 
-    configured_level = settings.level or "default"
-    effective_choice_provider = choice_provider or (lambda: configured_level)
+    configured = effective_choice(configured_choice(settings), settings)
+    effective_choice_provider = choice_provider or (lambda: configured)
     model_router = ModelRouter(
         settings,
         choice_provider=effective_choice_provider,

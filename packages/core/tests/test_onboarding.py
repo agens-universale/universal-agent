@@ -1403,7 +1403,7 @@ def test_effective_model_resolves_auto_level_to_default_slot():
                 "brain": {"model": "qwen/qwen3-235b"},
             },
             "slots": {"light": "fast", "default": "brain"},
-            "level": "auto",
+            "model": "auto",
             "backend.api_mode": "chat_completions",
             "agent.auto_routing": True,
             "agent.model": "MiniMax-M2.7",
@@ -1455,7 +1455,7 @@ def test_model_step_current_speaks_about_the_default_slot_not_the_active_level()
                 "brain": {"model": "qwen/qwen3-235b"},
             },
             "slots": {"default": "fast", "max": "brain"},
-            "level": "max",
+            "model": "max",
         }
     )
     assert onboarding.model_step_current(cfg) == "qwen/qwen3-8b"
@@ -1467,14 +1467,14 @@ def test_model_step_current_keeps_the_model_of_a_config_without_slots():
     зависит, и «сейчас» обязана назвать модель — иначе строка пропадает у всех
     конфигов до волны B."""
     flat = make_settings(
-        {"agent.model": "gigacode_agent_v1.6_rc", "level": "max"}
+        {"agent.model": "gigacode_agent_v1.6_rc", "model": "max"}
     )
     assert onboarding.model_step_current(flat) == "gigacode_agent_v1.6_rc"
     registry = make_settings(
         {
             "models": {"fast": {"model": "qwen/qwen3-8b"}},
             "slots": {},
-            "level": "max",
+            "model": "max",
         }
     )
     assert onboarding.model_step_current(registry) == "qwen/qwen3-8b"
@@ -1488,7 +1488,7 @@ def test_model_step_current_is_empty_when_only_another_level_is_assigned():
         {
             "models": {"brain": {"model": "qwen/qwen3-235b"}},
             "slots": {"max": "brain"},
-            "level": "max",
+            "model": "max",
         }
     )
     assert onboarding.model_step_current(cfg) == ""
@@ -1505,7 +1505,7 @@ def test_model_step_display_names_the_fallback_when_default_is_unset():
         {
             "models": {"slim": {"model": "vendor/slim"}},
             "slots": {"light": "slim"},
-            "level": "light",
+            "model": "light",
         }
     )
     assert onboarding.model_step_display(cfg) == (
@@ -1530,7 +1530,7 @@ def test_model_step_display_keeps_the_slotless_config_behaviour():
     """Ни одного слота — прежнее правило `model_step_current` (легаси/одна запись
     реестра), без подписи: там резолв от уровня не зависит."""
     flat = make_settings(
-        {"agent.model": "gigacode_agent_v1.6_rc", "level": "max"}
+        {"agent.model": "gigacode_agent_v1.6_rc", "model": "max"}
     )
     assert onboarding.model_step_display(flat) == (
         "gigacode_agent_v1.6_rc",

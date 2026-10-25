@@ -526,7 +526,7 @@ async def test_level_inside_a_profile_shows_in_the_preview_but_not_in_the_list_r
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(
         tmp_path / "base" / "profiles" / "work.yml",
-        "level: max\n" + _PROFILE_BODY,
+        "model: max\n" + _PROFILE_BODY,
     )
 
     app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
@@ -537,10 +537,10 @@ async def test_level_inside_a_profile_shows_in_the_preview_but_not_in_the_list_r
             for w in scr.query(".set-profiles-row")
             if "work" in str(w.render())
         )
-        assert "level" not in row
+        assert "model" not in row
         await _open_profile(pilot, scr, "work")
-        assert scr._profile_overlay_names() == ["level"]
-        assert "профиль также переопределяет: level" in _texts(scr)
+        assert scr._profile_overlay_names() == ["model"]
+        assert "профиль также переопределяет: model" in _texts(scr)
 
 
 async def test_a_validator_error_with_brackets_reaches_the_screen(
@@ -1134,7 +1134,7 @@ async def test_an_open_profile_names_the_level_that_is_really_acting(
 
     app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
-        app._session_overrides["level"] = "max"
+        app._session_overrides["model"] = "max"
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "home")
         assert ed._active_level == "max"

@@ -4,10 +4,7 @@ import argparse
 
 import pytest
 from gc_core.config_modules.cli_args import add_setting_flags
-from gc_core.config_modules.model_registry import (
-    LEVEL_VALUES,
-    validate_level_value,
-)
+from gc_core.config_modules.model_registry import LEVEL_VALUES
 
 
 def _parser():
@@ -31,6 +28,3 @@ def test_level_flag_choices_are_the_single_level_values():
         a for a in _parser()._actions if "--level" in a.option_strings
     )
     assert list(action.choices) == list(LEVEL_VALUES)
-    assert [validate_level_value(v) for v in LEVEL_VALUES] == list(
-        LEVEL_VALUES
-    )

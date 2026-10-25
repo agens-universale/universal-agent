@@ -21,7 +21,7 @@ RAW = {
     "models": {"fast": {}, "mid": {}, "big": {}},
     "slots": {"light": "fast", "default": "mid", "max": "big"},
     "backend": {"api_mode": "chat_completions"},
-    "level": "auto",
+    "model": "auto",
     "logging": {"save_logs": False},
 }
 

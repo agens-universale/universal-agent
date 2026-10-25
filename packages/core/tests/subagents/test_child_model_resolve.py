@@ -382,7 +382,7 @@ class TestChildModelResolve:
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "backend": {"api_mode": "chat_completions"},
-            "level": "auto",
+            "model": "auto",
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
@@ -416,7 +416,7 @@ class TestChildModelResolve:
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "backend": {"api_mode": "chat_completions"},
-            "level": "auto",
+            "model": "auto",
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
@@ -448,7 +448,7 @@ class TestChildModelResolve:
             "models": {"only": {}},
             "slots": {"default": "only"},
             "backend": {"api_mode": "chat_completions"},
-            "level": "auto",
+            "model": "auto",
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
@@ -469,7 +469,7 @@ class TestChildModelResolve:
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "assign": {"subagents": {"subagent_worker": "big"}},
             "backend": {"api_mode": "chat_completions"},
-            "level": "auto",
+            "model": "auto",
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
@@ -512,7 +512,7 @@ class TestChildCtxToolsSurviveModelSelection:
                 },
             },
             "slots": {"light": "loose", "default": "strict", "max": "strict"},
-            "level": "auto",
+            "model": "auto",
             "backend": {
                 "openai_strict_tools_schema": False,
                 "send_tool_strict": True,
@@ -614,7 +614,7 @@ class TestChildLeavesItsLevelAfterRun:
         "models": {"fast": {}, "mid": {}, "big": {}},
         "slots": {"light": "fast", "default": "mid", "max": "big"},
         "backend": {"api_mode": "chat_completions"},
-        "level": "auto",
+        "model": "auto",
     }
 
     def _run(self, tmp_path, fake_run_agent):

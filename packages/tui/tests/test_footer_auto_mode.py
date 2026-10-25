@@ -74,7 +74,7 @@ def _running_runner(
 
 CFG = {
     "agent.model": "m",
-    "level": "auto",
+    "model": "auto",
     "backend.api_mode": "chat_completions",
     "agent.auto_routing": True,
     "models": {"fast": {}, "mid": {}, "big": {}},
@@ -227,7 +227,7 @@ async def test_footer_auto_ladder_drops_model_then_level_block_keeps_mode_dot(
 
 @pytest.mark.asyncio
 async def test_footer_manual_unchanged(tmp_path, monkeypatch):
-    app = _app(tmp_path, {**CFG, "level": "max"})
+    app = _app(tmp_path, {**CFG, "model": "max"})
     app.active_runner = None
     async with app.run_test(size=(120, 24)):
         plain = app.screen._compose_footer_right().plain

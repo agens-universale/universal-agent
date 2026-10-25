@@ -230,7 +230,7 @@ def test_parse_args_coerces_setting_values():
         ]
     )
     assert args.overrides == {
-        "level": "max",
+        "model": "max",
         "agent.max_steps": 50,
         "agent.verbose": True,
         "agent.model": "forced",
@@ -277,7 +277,7 @@ def test_setting_overrides_apply_after_profile(monkeypatch, tmp_path):
     assert code == 0
     loaded = held["loaded"]
     assert held["profile"] == "work"
-    assert loaded.settings.level == "max"
+    assert loaded.settings.model == "max"
     assert loaded.settings.agent.max_steps == 7
     assert loaded.settings.agent.model == "forced"
     assert loaded.provenance.source("agent.model").layer == "cli"
@@ -363,4 +363,4 @@ def test_acp_declares_a_human_whose_words_are_his_own():
 
 
 def test_parse_args_accepts_auto_level():
-    assert _parse_args(["--level", "auto"]).overrides == {"level": "auto"}
+    assert _parse_args(["--level", "auto"]).overrides == {"model": "auto"}

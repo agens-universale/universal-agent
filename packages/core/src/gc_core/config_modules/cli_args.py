@@ -21,7 +21,7 @@ from gc_core.config_modules.model_registry import LEVEL_VALUES
 SETTING_FLAGS = {
     "model": "agent.model",
     "completions_url": "backend.completions_url",
-    "level": "level",
+    "level": "model",
 }
 
 LEGACY_FORCE_NOTICE = "--model: уровни отключены на этот запуск (легаси-форс)"

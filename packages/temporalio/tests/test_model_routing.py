@@ -251,7 +251,7 @@ async def test_prepared_child_preserves_frozen_raw_mode(
             "backend.vision": False,
             "logging.save_logs": False,
             "agent.use_local_subagents": True,
-            "level": mode,
+            "model": mode,
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "assign.subagents": {"subagent_worker": "big"} if bound else {},
@@ -314,7 +314,7 @@ async def test_old_child_context_without_raw_mode_keeps_effective_level():
                 "backend.api_mode": "chat_completions",
                 "logging.save_logs": False,
                 "agent.use_local_subagents": True,
-                "level": "auto",
+                "model": "auto",
                 "models": {"fast": {}, "mid": {}},
                 "slots": {"light": "fast", "default": "mid"},
             }
@@ -372,7 +372,7 @@ def test_public_child_facts_preserve_working_pairs_and_floor(difference):
     full = make_settings(
         {
             "models": models,
-            "level": "auto",
+            "model": "auto",
             "backend.api_mode": "chat_completions",
             "slots": {"light": "fast", "default": "mid", "max": "big"},
         }

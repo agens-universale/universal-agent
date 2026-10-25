@@ -2438,6 +2438,8 @@ class ModelsSectionEditor(Vertical):
         for consumer in assign_consumers():
             if self._assign_value(consumer) == prev:
                 ops.append(("write_assign", consumer, alias))
+        if self._document.get("model") == prev:
+            ops.append(("write_pointer", "model", alias))
         ops.append(("remove_model", prev, True))
         return ops
 

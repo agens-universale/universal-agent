@@ -466,3 +466,11 @@ def test_strip_removed_drops_emptied_top_level_section_from_text():
     assert stripped == ["update.check_interval_days"]
     assert out_text == "logging:\n  level: INFO\n"
     assert raw == {"logging": {"level": "INFO"}}
+
+
+def test_sync_renames_level_to_model(tmp_path):
+    cfg, report = _run_sync(tmp_path, user="level: max\n")
+    out = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert out["model"] == "max"
+    assert "level" not in out
+    assert report.renamed == 1

@@ -72,19 +72,19 @@ def test_profile_flag_default_is_none(monkeypatch):
 def test_level_flag_parsed_and_merged_into_overrides(monkeypatch):
     ap = _parse(["gc-cli", "-q", "hi", "--level", "light"], monkeypatch)
     assert ap.run_args.level == "light"
-    assert ap.extra_config_overrides.get("level") == "light"
+    assert ap.extra_config_overrides.get("model") == "light"
 
 
 def test_level_flag_parsed_and_merged_into_overrides_auto(monkeypatch):
     ap = _parse(["gc-cli", "-q", "hi", "--level", "auto"], monkeypatch)
     assert ap.run_args.level == "auto"
-    assert ap.extra_config_overrides.get("level") == "auto"
+    assert ap.extra_config_overrides.get("model") == "auto"
 
 
 def test_level_flag_absent_does_not_add_override(monkeypatch):
     ap = _parse(["gc-cli", "-q", "hi"], monkeypatch)
     assert ap.run_args.level is None
-    assert "level" not in ap.extra_config_overrides
+    assert "model" not in ap.extra_config_overrides
 
 
 def test_model_and_completions_url_flags_land_on_their_paths(monkeypatch):
@@ -151,16 +151,16 @@ def test_apply_cli_overrides_tracks_explicit_keys():
     )
     assert overridden.provenance.source("agent.model").layer == "cli"
     # Не заданное CLI — не помечено как cli; исходный объект не изменён.
-    assert overridden.provenance.source("level").layer != "cli"
+    assert overridden.provenance.source("model").layer != "cli"
     assert loaded.provenance.source("agent.model").layer != "cli"
 
 
 def test_apply_cli_overrides_accumulates_explicit_keys_across_calls():
     loaded = make_settings({"models": {"flash": {}}})
     loaded = apply_cli_overrides(loaded, extra_overrides={"agent.model": "X"})
-    loaded = apply_cli_overrides(loaded, extra_overrides={"level": "light"})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"model": "light"})
     assert loaded.provenance.source("agent.model").layer == "cli"
-    assert loaded.provenance.source("level").layer == "cli"
+    assert loaded.provenance.source("model").layer == "cli"
 
 
 def test_force_legacy_true_when_model_override_and_registry_nonempty():
@@ -269,19 +269,19 @@ def test_level_override_wins_over_config_and_profile(isolated_cwd, tmp_path):
     _write_yaml(base_config, _MINIMAL_BASE)
     _write_yaml(
         isolated_cwd / ".gc" / "config.yml",
-        {"profile": "work", "level": "max"},
+        {"profile": "work", "model": "max"},
     )
     _write_yaml(
-        isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"}
+        isolated_cwd / ".gc" / "profiles" / "work.yml", {"model": "light"}
     )
 
     loaded = load_settings(str(base_config))
     assert (
-        loaded.settings.level == "light"
+        loaded.settings.model == "light"
     )  # профиль побеждает конфиг-указатель (ось 1)
 
-    loaded = apply_cli_overrides(loaded, extra_overrides={"level": "default"})
-    assert loaded.settings.level == "default"  # CLI побеждает профиль
+    loaded = apply_cli_overrides(loaded, extra_overrides={"model": "default"})
+    assert loaded.settings.model == "default"  # CLI побеждает профиль
 
 
 # --- Интеграция: --model при непустом реестре -> force_legacy=True, security профиля жива --

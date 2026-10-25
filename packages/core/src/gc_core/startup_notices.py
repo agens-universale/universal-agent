@@ -185,7 +185,7 @@ def auto_routing_unavailable_message(
 def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
     """`level: auto` выбран, а фича недоступна — один нотис с причиной (спека
     auto-routing §6). Работает уровень default; палитра позицию auto не показывает."""
-    if str(settings_of(source).level or "").strip() != "auto":
+    if str(settings_of(source).model or "").strip() != "auto":
         return None
     loaded = (
         source

@@ -1645,10 +1645,12 @@ class SettingsScreen(Screen):
         Экран открывается с БАЗОЙ (`base_settings()`, без сессионных переопределений),
         поэтому спрашивать базу экрана нельзя ни одной витрине, обещающей «сейчас»:
         `/level` в файл не пишет, и записанное там — не то, что работает."""
+        from gc_core.config_modules.model_registry import configured_choice
+
         session = (getattr(self.app, "_session_overrides", None) or {}).get(
-            "level"
+            "model"
         )
-        return str(session or self._cfg_settings().level or "default")
+        return str(session or configured_choice(self._cfg_settings()))
 
     # --- probe-инфраструктура (спека B2.1: слоты + generation) ---
     def _probe_args_from_config(self, config=None):

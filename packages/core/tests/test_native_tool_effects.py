@@ -312,7 +312,7 @@ async def test_view_image_worker_probes_the_model_of_the_actual_call(
     project.mkdir()
     config = {
         "launch_root": str(project),
-        "level": "default",
+        "model": "default",
         "backend.api_mode": "chat_completions",
         "models": {
             name: {

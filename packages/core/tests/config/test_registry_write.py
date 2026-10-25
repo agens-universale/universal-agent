@@ -611,13 +611,13 @@ def test_first_assign_write_into_an_old_config_adds_only_the_chosen_binding(
 ):
     """Старый config.yml без `assign`: первая привязка из «Настройки → Модели»
     пишет ровно её. Привязки шаблона (судьи и суммаризация на `default`) приходят
-    только через `--sync-config`, иначе на `level: light` они молча уехали бы с
+    только через `--sync-config`, иначе на `model: light` они молча уехали бы с
     уровня шага на `default`."""
     path = _cfg(
         tmp_path,
         (
             'profile: ""\n'
-            "level: light\n"
+            "model: light\n"
             "models:\n  flash:\n    model: flash-1\n  mid:\n    model: mid-1\n  big:\n    model: big-1\n"
             "slots:\n  light: flash\n  default: mid\n  max: big\n"
             "backend:\n  api_mode: chat_completions\n"
@@ -1094,3 +1094,30 @@ def test_explicit_null_is_distinct_from_removing_a_model_field(
     assert entry["auxiliary"] == {}
     upsert_model(path, "flash", {"main": None}, template)
     assert "main" not in _models(path)["flash"]
+
+
+def test_remove_model_cascades_model_pointer(tmp_path):
+    body = _REGISTRY.replace("level: default\n", 'model: "flash"\n')
+    path = _cfg(tmp_path, body)
+
+    report = remove_model(path, "flash")
+    assert report.removed is False
+    assert report.references == ["slots.default", "model"]
+
+    report = remove_model(path, "flash", force=True)
+    assert report.removed is True
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert raw["model"] is None
+    assert "flash" not in raw["models"]
+
+
+def test_write_pointer_sets_and_clears_model(tmp_path, template):
+    path = _cfg(tmp_path, _REGISTRY.replace("level: default\n", ""))
+
+    apply_registry_ops(path, [("write_pointer", "model", "glm")], template)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert raw["model"] == "glm"
+
+    apply_registry_ops(path, [("write_pointer", "model", None)], template)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert raw["model"] is None

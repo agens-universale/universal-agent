@@ -49,7 +49,7 @@ def _app_on_disk(tmp_path, monkeypatch, body, *, level_override=None):
     loaded = load_settings(str(cfg))
     if level_override:
         loaded = apply_cli_overrides(
-            loaded, extra_overrides={"level": level_override}
+            loaded, extra_overrides={"model": level_override}
         )
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
@@ -114,7 +114,7 @@ def test_typed_level_auto_names_the_reason_when_auto_is_unavailable(
         "/level auto — автовыбор моделей недоступен: во всех уровнях одна модель"
     ]
     assert (
-        app.effective_settings().settings.level == "default"
+        app.effective_settings().settings.model is None
     )  # набор ничего не переключает
 
 
@@ -128,7 +128,7 @@ def test_typed_level_auto_on_max_names_the_reason_without_claiming_default(
         monkeypatch,
         _BACKEND + _TWO + "agent:\n  auto_routing: false\n",
     )
-    app.set_session_override("level", "max")
+    app.set_session_override("model", "max")
     hints = []
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
@@ -138,7 +138,7 @@ def test_typed_level_auto_on_max_names_the_reason_without_claiming_default(
     assert hints == [
         "/level auto — автовыбор моделей недоступен: выключен настройкой auto_routing"
     ]
-    assert app.effective_settings().settings.level == "max"
+    assert app.effective_settings().settings.model == "max"
 
 
 def test_typed_level_auto_when_available_keeps_the_info_hint(
@@ -171,7 +171,7 @@ def test_config_change_making_auto_unavailable_notices_once_and_recovers(
     from gc_tui.toggles import toggle_state
 
     app, cfg = _app_on_disk(tmp_path, monkeypatch, _BACKEND + _TWO)
-    app.set_session_override("level", "auto")  # auto выбран в сессии палитрой
+    app.set_session_override("model", "auto")  # auto выбран в сессии палитрой
     assert app.auto_mode_active() is True
 
     cfg.write_text(
@@ -205,9 +205,9 @@ def test_saved_level_auto_is_explained_by_the_startup_card_only(
     """`level: auto` сохранён в самом config.yml — причину уже называет карточка
     стартовых уведомлений; runtime-нотис её не дублирует."""
     app, cfg = _app_on_disk(
-        tmp_path, monkeypatch, _BACKEND + _TWO + "level: auto\n"
+        tmp_path, monkeypatch, _BACKEND + _TWO + "model: auto\n"
     )
-    cfg.write_text(_BACKEND + _ONE + "level: auto\n", encoding="utf-8")
+    cfg.write_text(_BACKEND + _ONE + "model: auto\n", encoding="utf-8")
 
     app.reload_config()
 
@@ -228,7 +228,7 @@ def test_session_profile_with_one_call_kit_notices_the_reason(
     (tmp_path / "profiles" / "solo.yml").write_text(
         "slots:\n  light: mid\n  default: mid\n  max: mid\n", encoding="utf-8"
     )
-    app.set_session_override("level", "auto")
+    app.set_session_override("model", "auto")
 
     app.switch_session_profile("solo")
 
@@ -242,7 +242,7 @@ def test_opening_a_thread_saved_in_auto_notices_the_reason(
     app, _cfg = _app_on_disk(tmp_path, monkeypatch, _BACKEND + _ONE)
 
     app.load_session_overrides(
-        {"level": "auto"}
+        {"model": "auto"}
     )  # мета треда: сессия шла в auto
 
     assert app.auto_mode_active() is False

@@ -21,7 +21,7 @@ from gc_testkit.settings import make_settings
         "models.fast.token",
         "mcp.servers.github.command",
         "backend.chat_completion_kwargs.temperature",
-        "level",
+        "model",
     ],
 )
 def test_schema_paths_are_known(path):

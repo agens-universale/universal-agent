@@ -13,7 +13,7 @@ from gc_testkit.settings import fake_ctx, make_settings
 def _cfg(**overrides):
     return make_settings(
         {
-            "level": "auto",
+            "model": "auto",
             "agent.auto_routing": True,
             "backend.api_mode": "chat_completions",
             "models": {"fast": {}, "mid": {}, "big": {}},
@@ -29,7 +29,7 @@ def test_no_notice_when_auto_available_or_not_selected():
         auto_routing_unavailable_notice(
             _cfg(
                 **{
-                    "level": "max",
+                    "model": "max",
                     "agent.auto_routing": False,
                 }
             )

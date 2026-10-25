@@ -90,13 +90,13 @@ SESSION_KEYS: Dict[str, SessionKey] = {
     "tui.text_answer_mode": SessionKey(
         "tui.text_answer_mode", text_answer_mode_of
     ),
-    # Профили и уровни: `level` — обычный ключ, ложится сессионным слоем поверх
+    # Профили и модель: `model` — обычный ключ, ложится сессионным слоем поверх
     # настроек как любой другой. `profile` тоже регистрируется здесь для
     # персиста/восстановления/санации (белый список), но слоем НЕ накладывается —
     # `TuiApp.effective_settings()` перехватывает его отдельно: смена профиля
     # требует пере-сборки базы под ним, а не подмены одного поля. Действующее
     # значение — профиль, под которым база собрана (`RuntimeEnv.active_profile`).
-    "level": SessionKey("level"),
+    "model": SessionKey("model"),
     "profile": SessionKey("profile", _active_profile_of),
 }
 
@@ -121,7 +121,11 @@ def read_from_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
     Форма хранения известна только здесь: читателей у неё больше одного, и
     выражение вида `meta["tui"]["session_settings"]`, расписанное по экранам,
     третьим читателем породило бы третью копию."""
-    return dict(((meta or {}).get("tui") or {}).get(META_KEY) or {})
+    stored = dict(((meta or {}).get("tui") or {}).get(META_KEY) or {})
+    legacy = stored.pop("level", None)
+    if legacy is not None:
+        stored.setdefault("model", legacy)
+    return stored
 
 
 def to_meta_patch(overrides: Dict[str, Any]) -> Dict[str, Any]:

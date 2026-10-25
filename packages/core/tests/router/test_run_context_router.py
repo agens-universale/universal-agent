@@ -23,7 +23,7 @@ def minimal_settings(monkeypatch):
         as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
     )
     return make_settings(
-        {"agent.model": "M", "level": "max", "logging.save_logs": False}
+        {"agent.model": "M", "model": "max", "logging.save_logs": False}
     )
 
 
@@ -471,7 +471,7 @@ async def test_create_run_context_uses_the_virtual_pair_prompt_store(
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "backend.api_mode": "chat_completions",
-            "level": "auto",
+            "model": "auto",
             "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/pair-prompt.md",
         }
     ).settings
@@ -500,7 +500,7 @@ async def test_create_run_context_skips_irrelevant_bad_pair_prompt(
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "backend.api_mode": "chat_completions",
-            "level": "auto",
+            "model": "auto",
             "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/no-prompt.md",
             **updates,
         }
@@ -529,7 +529,7 @@ async def test_a_missing_pair_prompt_never_refuses_the_start(
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "backend.api_mode": "chat_completions",
-            "level": source_level,
+            "model": source_level,
             "paths.chat_completions_routing_pair_judge_prompt_path": "/virtual/missing-pair-prompt.md",
         }
     ).settings

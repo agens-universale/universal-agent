@@ -181,7 +181,7 @@ async def test_same_alias_does_not_rewrite_level(tmp_path):
         tmp_path,
         {
             **_models(default="flash", light="flash", max="opus"),
-            "level": "light",
+            "model": "light",
         },
     )
     facade, writer, agents = _open(loaded)
@@ -200,7 +200,7 @@ async def test_first_level_wins_when_alias_repeats(tmp_path):
         tmp_path,
         {
             **_models(default="flash", light="flash", max="opus"),
-            "level": "max",
+            "model": "max",
         },
     )
     facade, writer, agents = _open(loaded)
@@ -401,7 +401,7 @@ async def test_empty_model_and_unresolved_level_omit_the_option(tmp_path):
     await empty.shutdown()
 
     unresolved = _open(
-        _loaded(tmp_path, {"models": {"a": {}, "b": {}}, "level": "default"})
+        _loaded(tmp_path, {"models": {"a": {}, "b": {}}, "model": "default"})
     )
     facade, writer2, _agents2 = unresolved
     await _init(facade)
@@ -436,7 +436,7 @@ def test_unresolved_level_is_skipped(tmp_path):
     hidden = _loaded(
         tmp_path,
         {
-            "level": "light",
+            "model": "light",
             "models": {"a": {}, "b": {}},
             "slots": {"default": "a", "light": "ghost"},
         },
@@ -559,7 +559,7 @@ async def test_picker_offers_auto_when_available(tmp_path):
 
 
 async def test_auto_level_is_current_and_named_in_the_trace(tmp_path):
-    loaded = _loaded(tmp_path, _auto_models(level="auto"))
+    loaded = _loaded(tmp_path, _auto_models(model="auto"))
     facade, writer, agents = _open(loaded)
     session_id, option = await _session(facade, writer)
     assert option["currentValue"] == "auto"
@@ -581,7 +581,7 @@ async def test_auto_level_is_current_and_named_in_the_trace(tmp_path):
 
 
 async def test_fixed_model_from_auto_leaves_auto(tmp_path):
-    loaded = _loaded(tmp_path, _auto_models(level="auto"))
+    loaded = _loaded(tmp_path, _auto_models(model="auto"))
     facade, writer, agents = _open(loaded)
     session_id, _first = await _session(facade, writer)
     await _set(facade, session_id, "flash", 3)
@@ -629,7 +629,7 @@ async def test_auto_is_not_offered_when_unavailable(tmp_path):
 
 
 def test_unavailable_auto_shows_the_level_that_runs(tmp_path):
-    loaded = _loaded(tmp_path, {**_models(), "level": "auto"})
+    loaded = _loaded(tmp_path, {**_models(), "model": "auto"})
     option = model_config_option(loaded, "auto")
     assert option["currentValue"] == "glm-local"
     assert "auto" not in _values(option)

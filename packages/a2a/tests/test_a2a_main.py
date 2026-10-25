@@ -24,7 +24,7 @@ def test_parse_args_keeps_own_flags_and_collects_setting_paths():
         ["--config", "c.yml", "--level", "max", "--a2a.port", "9001"]
     )
     assert mixed.config == "c.yml"
-    assert mixed.overrides["level"] == "max"
+    assert mixed.overrides["model"] == "max"
     assert mixed.overrides["a2a.port"] == 9001
 
 

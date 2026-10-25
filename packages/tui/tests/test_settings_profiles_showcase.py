@@ -44,7 +44,7 @@ def _base_config_text(profile: str = "") -> str:
     config.default.yml — спека §11)."""
     return (
         f'profile: "{profile}"\n'
-        "level: default\n"
+        "model: default\n"
         "backend:\n"
         '  completions_url: "http://host/v1/chat/completions"\n'
         "agent:\n"
@@ -866,7 +866,7 @@ async def test_config_screen_header_shows_profile_level_model(
         settings=tui_settings(
             {
                 "profile": "work",
-                "level": "default",
+                "model": "default",
                 "agent.model": "flash",
                 "models": {"flash": {}},
                 "slots": {"default": "flash"},
@@ -927,7 +927,7 @@ async def test_status_command_includes_profile_level_model(
         settings=tui_settings(
             {
                 "profile": "work",
-                "level": "light",
+                "model": "light",
                 "models": {"flash": {}},
                 "slots": {"default": "flash"},
             }
@@ -1307,7 +1307,7 @@ async def test_profiles_section_refuses_to_write_into_packaged_template(
     monkeypatch.setattr(
         config_mod, "_default_config_path", lambda: str(packaged)
     )
-    cfg = dict(_base_dict(), profile="home", level="default")
+    cfg = dict(_base_dict(), profile="home", model="default")
 
     app = app_mod.TuiApp(settings=tui_settings(dict(cfg)))
     async with app.run_test() as pilot:

@@ -111,7 +111,7 @@ async def test_status_without_active_task_shows_idle(tmp_path):
 
 @pytest.mark.asyncio
 async def test_status_shows_auto_level_literal(tmp_path):
-    """level: auto (спека auto-routing §5.1) — /status показывает режим
+    """model: auto (спека auto-routing §5.1) — /status показывает режим
     (при доступном автовыборе — `auto`, правило палитры `toggle_state`), не
     резолвленный уровень такта: витрина отвечает на «в каком режиме сессия»,
     футеру нужен факт хода."""
@@ -121,7 +121,7 @@ async def test_status_shows_auto_level_literal(tmp_path):
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -150,7 +150,7 @@ async def test_status_shows_only_two_level_in_auto_mode(tmp_path):
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -178,7 +178,7 @@ async def test_status_leaves_routing_policy_empty_in_manual_mode(tmp_path):
 
     cfg = {
         "agent.model": "m",
-        "level": "default",
+        "model": "default",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -235,7 +235,7 @@ async def test_status_shows_the_working_level_when_auto_is_unavailable(
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},

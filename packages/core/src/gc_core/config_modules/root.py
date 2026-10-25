@@ -44,7 +44,6 @@ from gc_core.config_modules.model_registry import (
     AssignConfig,
     ModelEntry,
     SlotsConfig,
-    validate_level_value,
     validate_model_alias,
 )
 from gc_core.config_modules.os_backend import OsBackendConfig
@@ -188,7 +187,8 @@ class AppConfig(BaseModel):
     # Профили v2 (волна A, фаза 1): реестр моделей + уровни + привязки + указатели.
     # Ссылочная целостность (слоты/привязки против merged-реестра) — фаза 2.
     profile: str = ""
-    level: str = "default"
+    # auto | алиас реестра | слово уровня; пусто — модель уровня default.
+    model: str | None = None
     models: dict[str, ModelEntry] = Field(
         default_factory=dict, json_schema_extra=gc_meta(expert=True)
     )
@@ -212,10 +212,12 @@ class AppConfig(BaseModel):
                 str(exc).removeprefix("config_version: ")
             ) from None
 
-    @field_validator("level")
+    @field_validator("model", mode="before")
     @classmethod
-    def _validate_level(cls, value: str) -> str:
-        return validate_level_value(value)
+    def _blank_model_is_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("models")
     @classmethod

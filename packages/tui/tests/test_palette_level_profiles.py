@@ -57,7 +57,7 @@ async def test_level_and_profiles_form_new_group_above_rigor(
         threads_dir=str(tmp_path / "t"),
         settings=tui_settings(
             {
-                "level": "default",
+                "model": "default",
                 "models": {"glm-local": {}},
                 "slots": {"default": "glm-local"},
             }
@@ -200,7 +200,7 @@ def test_level_hint_matches_canon_default_and_honest_fallback(
     app = TuiApp(
         settings=tui_settings(
             {
-                "level": "default",
+                "model": "default",
                 "models": {"glm-local": {}},
                 "slots": {"default": "glm-local"},
             }
@@ -442,7 +442,7 @@ async def test_footer_shows_router_model_not_stale_flat_key(
                 "agent.model": "STALE-LEGACY-NAME",
                 "models": {"glm-local": {}},
                 "slots": {"default": "glm-local"},
-                "level": "default",
+                "model": "default",
             }
         ),
     )
@@ -469,7 +469,7 @@ async def test_footer_updates_on_level_switch(tmp_path, monkeypatch):
                 "agent.model": "STALE",
                 "models": {"glm-local": {}, "glm-max": {}},
                 "slots": {"default": "glm-local", "max": "glm-max"},
-                "level": "default",
+                "model": "default",
             }
         ),
     )
@@ -477,7 +477,7 @@ async def test_footer_updates_on_level_switch(tmp_path, monkeypatch):
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
         assert scr._compose_footer_right().plain.startswith("● glm-local")
-        app.set_session_override("level", "max")
+        app.set_session_override("model", "max")
         assert scr._compose_footer_right().plain.startswith("● glm-max")
 
 
@@ -1114,8 +1114,8 @@ def _level_app(tmp_path):
     from gc_tui.app import TuiApp
 
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text("level: default\n", encoding="utf-8")
-    app = TuiApp(settings=tui_settings({"level": "default"}))
+    cfg_file.write_text("model: default\n", encoding="utf-8")
+    app = TuiApp(settings=tui_settings({"model": "default"}))
     app._config_path = str(cfg_file)
     app._threads_dir = str(tmp_path / "threads")
     app.tui_state.active_task_id = "t1"
@@ -1150,8 +1150,8 @@ def test_apply_level_toggle_emits_no_deferred_notice(tmp_path, running):
         app.active_runner = None
     else:
         app.active_runner.is_running = lambda: running
-    app.apply_session_override("level", "max")
-    assert app.effective_settings().settings.level == "max"
+    app.apply_session_override("model", "max")
+    assert app.effective_settings().settings.model == "max"
     assert "level_switch_deferred" not in {
         n.code for n in collect_runtime_notices()
     }
@@ -1184,7 +1184,7 @@ def test_level_track_shows_auto_off_scale_when_available(tmp_path):
         tmp_path,
         config={
             "agent.model": "m",
-            "level": "default",
+            "model": "default",
             "backend.api_mode": "chat_completions",
             "agent.auto_routing": True,
             **_TWO_KITS,
@@ -1201,7 +1201,7 @@ def test_level_track_lights_auto_and_dims_scale(tmp_path):
         tmp_path,
         config={
             "agent.model": "m",
-            "level": "auto",
+            "model": "auto",
             "backend.api_mode": "chat_completions",
             "agent.auto_routing": True,
             **_TWO_KITS,
@@ -1216,7 +1216,7 @@ def test_level_track_hides_auto_when_feature_unavailable(tmp_path):
         tmp_path,
         config={
             "agent.model": "m",
-            "level": "auto",
+            "model": "auto",
             "backend.api_mode": "chat_completions",
             "agent.auto_routing": False,
         },
@@ -1234,7 +1234,7 @@ def test_level_cycle_includes_auto(tmp_path):
         tmp_path,
         config={
             "agent.model": "m",
-            "level": "max",
+            "model": "max",
             "backend.api_mode": "chat_completions",
             "agent.auto_routing": True,
             **_TWO_KITS,
@@ -1253,7 +1253,7 @@ def test_level_hint_for_auto_does_not_resolve_model(tmp_path):
         tmp_path,
         config={
             "agent.model": "m",
-            "level": "auto",
+            "model": "auto",
             "backend.api_mode": "chat_completions",
             "agent.auto_routing": True,
         },
@@ -1296,7 +1296,7 @@ async def test_palette_rebuild_asks_each_values_provider_once_and_skips_trackles
         threads_dir=str(tmp_path / "t"),
         settings=tui_settings(
             {
-                "level": "default",
+                "model": "default",
                 "backend.api_mode": "chat_completions",
                 "agent.auto_routing": True,
                 "models": {"fast": {}, "mid": {}},
@@ -1338,7 +1338,7 @@ def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(
     apply_toggle(app, "level", "max")
 
     assert (
-        app.effective_settings().settings.level == "max"
+        app.effective_settings().settings.model == "max"
     )  # применилось сразу (§ выбор)
     codes = [n.code for n in collect_runtime_notices()]
     assert "level_switch_deferred" not in codes

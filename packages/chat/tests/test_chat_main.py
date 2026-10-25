@@ -20,7 +20,7 @@ def test_parse_args_keeps_own_flags_and_collects_setting_paths():
         ["--config", "c.yml", "--level", "max", "--agent.verbose"]
     )
     assert mixed.config == "c.yml"
-    assert mixed.overrides == {"level": "max", "agent.verbose": True}
+    assert mixed.overrides == {"model": "max", "agent.verbose": True}
 
 
 def test_parse_args_coerces_setting_values():
@@ -28,7 +28,7 @@ def test_parse_args_coerces_setting_values():
         ["--level", "max", "--agent.max_steps=50", "--agent.verbose", "true"]
     )
     assert args.overrides == {
-        "level": "max",
+        "model": "max",
         "agent.max_steps": 50,
         "agent.verbose": True,
     }
@@ -83,7 +83,7 @@ def test_setting_overrides_apply_after_profile(monkeypatch, tmp_path):
     assert code == 0
     loaded = held["loaded"]
     assert held["profile"] == "work"
-    assert loaded.settings.level == "max"
+    assert loaded.settings.model == "max"
     assert loaded.settings.agent.max_steps == 7
     assert loaded.settings.agent.model == "forced"
     assert loaded.settings.chat_api.port == 9001

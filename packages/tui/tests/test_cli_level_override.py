@@ -9,16 +9,16 @@ def test_level_override_survives_reload_config(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     cfg_path = tmp_path / "config.yml"
-    cfg_path.write_text("level: max\nagent:\n  model: m\n", encoding="utf-8")
+    cfg_path.write_text("model: max\nagent:\n  model: m\n", encoding="utf-8")
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"agent.model": "m", "level": "auto"}),
+        settings=tui_settings({"agent.model": "m", "model": "auto"}),
         level_override="auto",
     )
     app.set_config_path(str(cfg_path))
     app.reload_config()
     assert (
-        app.effective_settings().settings.level == "auto"
+        app.effective_settings().settings.model == "auto"
     )  # флаг пережил перечитывание
 
 
@@ -71,7 +71,7 @@ def test_level_override_survives_profile_remerge(tmp_path):
         "flash" in app.effective_settings().settings.models
     )  # пере-мерж реально сработал
     assert (
-        app.effective_settings().settings.level == "auto"
+        app.effective_settings().settings.model == "auto"
     )  # флаг пережил пере-мерж профиля
 
 

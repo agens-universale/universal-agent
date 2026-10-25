@@ -726,7 +726,7 @@ async def test_loop_compacts_for_the_upcoming_model(
 
     cfg = _cfg(
         {
-            "level": start_mode,
+            "model": start_mode,
             "backend": {"api_mode": "chat_completions", "vision": False},
             "logging": {"save_logs": False},
             "agent": {"auto_routing_safe_level": "default"},

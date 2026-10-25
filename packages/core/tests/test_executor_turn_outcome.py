@@ -113,7 +113,7 @@ class _Run:
     ):
         config = AppConfig.model_validate(
             {
-                "level": "default",
+                "model": "default",
                 "backend": {"api_mode": api_mode, "vision": False},
                 "logging": {"save_logs": False, "console_trace": False},
                 "agent": {

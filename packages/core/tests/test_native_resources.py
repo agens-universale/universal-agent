@@ -43,7 +43,7 @@ def test_context_assembly_only_consumes_prepared_values(
             "backend": {"api_mode": "chat_completions"},
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
-            "level": "auto",
+            "model": "auto",
         },
         runtime={},
         run_id="recorded-run",

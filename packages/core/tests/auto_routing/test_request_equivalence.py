@@ -44,7 +44,7 @@ def configs(difference):
         {
             "models": models,
             "slots": {"light": "fast", "default": "mid", "max": "big"},
-            "level": "auto",
+            "model": "auto",
             "backend.api_mode": "chat_completions",
         }
     )
@@ -152,7 +152,7 @@ def test_prepared_payload_contains_no_private_values_or_fingerprints():
 
 def test_missing_slot_uses_the_same_fallback_identity():
     full = make_settings(
-        {"models": {"only": {"model": "single"}}, "level": "auto"}
+        {"models": {"only": {"model": "single"}}, "model": "auto"}
     )
     ctx = prepared_ctx(full, full)
     assert auto_available(ctx, force_legacy=False) is False

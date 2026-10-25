@@ -65,7 +65,7 @@ RICH = {
     "voice": {"url": "https://SECRET_VOICE", "token": "SECRET_VOICE"},
     "update": {"extra_args": ["--SECRET"]},
     "agent_auth": {"token": "SECRET_AUTH"},
-    "level": "max",
+    "model": "max",
     "models": {
         "fast": {
             "model": "provider-fast",

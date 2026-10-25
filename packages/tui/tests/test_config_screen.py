@@ -23,7 +23,7 @@ def test_profile_header_shows_registry_model_not_flat_key():
 
     cfg = {
         "agent.model": onboarding.MODEL_SENTINEL,
-        "level": "default",
+        "model": "default",
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         "slots": {"default": "flash"},
     }
@@ -38,7 +38,7 @@ def test_profile_header_prefers_resolved_model_over_stale_flat_key():
 
     cfg = {
         "agent.model": "stale-legacy-model",
-        "level": "default",
+        "model": "default",
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         "slots": {"default": "flash"},
     }
@@ -58,7 +58,7 @@ def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
 
 
 def test_profile_header_resolves_auto_level_to_default_slot_model():
-    """level: auto (спека auto-routing §5.1) переводится через `effective_target`
+    """model: auto (спека auto-routing §5.1) переводится через `effective_target`
     ДО Router'а — сырой литерал иначе роняет резолв (ValueError), и шапка
     показала бы фоллбэк вместо модели default-слота. Строка «уровень:» —
     литерал `auto` при доступном автовыборе (как /status), иначе действующий
@@ -67,7 +67,7 @@ def test_profile_header_resolves_auto_level_to_default_slot_model():
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -395,7 +395,7 @@ def test_profile_header_shows_the_working_level_when_auto_is_unavailable(
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},

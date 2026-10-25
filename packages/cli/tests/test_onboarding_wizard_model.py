@@ -520,7 +520,7 @@ def test_the_model_step_shows_the_default_slot_not_the_active_level():
     именем записи слота default, галочка «← сейчас» вставала не на ту строку, а
     сводка после Enter называла другую модель. Шаг задаёт слот default — и
     «сейчас» говорит про него."""
-    cfg = make_settings({**_two_level_registry(), "level": "max"})
+    cfg = make_settings({**_two_level_registry(), "model": "max"})
     io, out = _io([""])
     wz._collect_model(io, cfg, {}, fetch=lambda *a, **k: _qwen2())
     assert (
@@ -540,7 +540,7 @@ def test_the_model_step_keeps_showing_the_legacy_model_on_a_flat_config():
             "backend.completions_url": "https://h/v1/chat/completions",
             "backend.chat_completion_headers": {"Authorization": "Bearer x"},
             "agent.model": "gigacode_agent_v1.6_rc",
-            "level": "max",
+            "model": "max",
         }
     )
     io, out = _io([""])
@@ -559,7 +559,7 @@ def test_an_unset_default_slot_shows_the_fallback_model_with_its_source():
         {
             **_two_level_registry(),
             "slots": {"max": "brain"},
-            "level": "light",
+            "model": "light",
         }
     )
     io, out = _io([""])
@@ -582,7 +582,7 @@ def test_a_single_entry_registry_without_slots_is_still_shown_as_current():
             **_two_level_registry(),
             "models": {"fast": {"model": "qwen/qwen3-8b"}},
             "slots": {},
-            "level": "max",
+            "model": "max",
         }
     )
     io, out = _io([""])

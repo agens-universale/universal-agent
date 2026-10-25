@@ -18,10 +18,10 @@ from gc_core.utils import connect_backend
 
 
 async def _runtime(initial):
-    selected = {"level": initial}
+    selected = {"model": initial}
     cfg = AppConfig.model_validate(
         {
-            "level": initial,
+            "model": initial,
             "backend": {"api_mode": "chat_completions", "vision": False},
             "logging": {"save_logs": False},
             "agent": {"auto_routing_safe_level": "default"},
@@ -42,7 +42,7 @@ async def _runtime(initial):
         }
     )
     ctx = await acreate_run_context(
-        cfg, choice_provider=lambda: selected["level"]
+        cfg, choice_provider=lambda: selected["model"]
     )
     state = State(
         verbose=False,
@@ -204,7 +204,7 @@ async def test_live_selection_changes_the_next_payload_and_its_threshold(
         )
         limits.append(executor.summary_limits().chars_during)
         if len(sent) == 1:
-            selected["level"] = target
+            selected["model"] = target
             # The first request still owns its original context threshold.
             assert executor.summary_limits().chars_during == thresholds[0]
         return _reply(len(sent))
@@ -241,7 +241,7 @@ async def test_repeated_manual_and_auto_changes_apply_inside_one_user_turn(
         models.append(json.loads(request.content)["model"])
         thresholds.append(executor.summary_limits().chars_during)
         if len(models) <= len(changes):
-            selected["level"] = changes[len(models) - 1]
+            selected["model"] = changes[len(models) - 1]
         return _reply(len(models))
 
     transport = httpx.MockTransport(serve)
@@ -289,7 +289,7 @@ async def test_change_while_preparing_keeps_the_request_then_applies_to_the_next
     async def preparation(*args, **kwargs):
         if not sent:
             await asyncio.sleep(0)
-            selected["level"] = "max"
+            selected["model"] = "max"
             assert executor.summary_limits().chars_during == 100000
 
     def serve(request):
@@ -335,7 +335,7 @@ async def test_auth_retry_keeps_the_call_kit_and_the_next_request_accepts_the_ch
         thresholds.append(executor.summary_limits().chars_during)
         if len(sent) <= 2:
             if len(sent) == 1:
-                selected["level"] = "max"
+                selected["model"] = "max"
             return httpx.Response(401, json={"error": {"message": "expired"}})
         return _reply(len(sent))
 

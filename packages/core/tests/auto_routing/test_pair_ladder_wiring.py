@@ -28,7 +28,7 @@ def _score(n):
 def _ctx(level_box, registry=THREE):
     raw = {
         "backend": {"api_mode": "chat_completions"},
-        "level": "auto",
+        "model": "auto",
         "logging": {"save_logs": False},
         **registry,
         "agent": {

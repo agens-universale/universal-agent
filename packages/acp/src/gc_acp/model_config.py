@@ -20,6 +20,10 @@ from gc_core.auto_routing.levels import (
     effective_target,
 )
 from gc_core.config import cli_forces_legacy_model
+from gc_core.config_modules.model_registry import (
+    configured_choice,
+    effective_choice,
+)
 from gc_core.model_router import ModelRouter
 
 _PICKER_LEVELS = ("default", "light", "max")
@@ -27,11 +31,9 @@ MODEL_CONFIG_ID = "model"
 
 
 def session_level(loaded: Any, override: str | None) -> str:
-    """Уровень хода: выбор сессии, иначе ``settings.level`` или ``default``."""
-    if override:
-        return override
-    configured = loaded.settings.level
-    return configured or "default"
+    """Выбор хода: выбор сессии, иначе ``settings.model`` или ``default``."""
+    settings = loaded.settings
+    return effective_choice(override or configured_choice(settings), settings)
 
 
 def active_model_line(loaded: Any, level: str) -> str | None:

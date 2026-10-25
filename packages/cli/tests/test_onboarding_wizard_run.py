@@ -666,7 +666,7 @@ def test_summary_fallback_model_is_the_one_of_the_level_it_names():
                 "brain": {"model": "qwen/qwen3-235b"},
             },
             "slots": {"light": "fast", "max": "brain"},
-            "level": "light",
+            "model": "light",
         }
     )
     lines = wz._summary_lines(cfg)

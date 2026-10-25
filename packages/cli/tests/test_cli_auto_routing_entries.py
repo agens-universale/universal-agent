@@ -71,7 +71,7 @@ class _Executor:
             "уровень default",
         ),
         (
-            _BACKEND + _THREE_MODELS + "level: auto\n",
+            _BACKEND + _THREE_MODELS + "model: auto\n",
             ["--agent.model", "other"],
             "уровни отключены флагом --model",
             "модель из --model",
@@ -125,7 +125,7 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
         "load_settings",
         lambda path, **kw: make_settings(
             {
-                "level": "auto",
+                "model": "auto",
                 "backend.api_mode": "chat_completions",
                 "models": {"only": {}},
                 "slots": {"default": "only"},
@@ -177,13 +177,13 @@ def test_init_flags_reach_typed_settings_and_actual_router(
     base.write_text(
         _BACKEND
         + _THREE_MODELS
-        + "level: default\nlogging:\n  save_logs: false\n",
+        + "model: default\nlogging:\n  save_logs: false\n",
         encoding="utf-8",
     )
     profiles = tmp_path / "profiles"
     profiles.mkdir()
     (profiles / "review.yml").write_text(
-        f"level: {profile_level}\nmodels:\n  mid:\n    model: profile-mid\n",
+        f"model: {profile_level}\nmodels:\n  mid:\n    model: profile-mid\n",
         encoding="utf-8",
     )
     _reload_arg_parser_with_argv(
@@ -214,7 +214,7 @@ def test_init_flags_reach_typed_settings_and_actual_router(
     assert run_coro(cli._run_init_agents_md()) == 0
 
     ctx = seen["ctx"]
-    assert ctx.settings.level == "auto"
+    assert ctx.settings.model == "auto"
     assert ctx.runtime.active_profile == "review"
     assert ctx.runtime.run_mode == "cli"
     assert ctx.auto_available is True

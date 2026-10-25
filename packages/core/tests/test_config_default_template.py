@@ -121,11 +121,11 @@ def test_default_template_with_live_profile_anchor_stays_legacy():
     """
     raw = _template_raw()
     assert raw["profile"] == ""
-    assert raw["level"] == "default"
+    assert "model" in raw and raw["model"] is None
 
     router = ModelRouter(
         AppConfig.model_validate(raw),
-        choice_provider=lambda: raw["level"],
+        choice_provider=lambda: "default",
     )
     assert router.registry_empty() is True
     assert router.resolve("main").source == "легаси"
@@ -170,8 +170,8 @@ def test_demo_config_carries_live_profile_and_level_pointers():
     assert raw.get("profile") == "", (
         'demo_config.yml потерял живой указатель `profile: ""` — §13 требует демонстрации заполнения указателей'
     )
-    assert raw.get("level") == "default", (
-        "demo_config.yml потерял живой указатель `level: default`"
+    assert "model" in raw and raw["model"] is None, (
+        "demo_config.yml потерял живой указатель `model:`"
     )
 
 

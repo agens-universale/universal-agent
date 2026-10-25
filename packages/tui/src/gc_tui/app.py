@@ -856,7 +856,7 @@ class TuiApp(App):
         base = self._with_tui_runtime(
             apply_cli_overrides(
                 self._load_base_settings(),
-                extra_overrides={"level": self._level_override}
+                extra_overrides={"model": self._level_override}
                 if self._level_override
                 else None,
             )
@@ -1188,7 +1188,7 @@ class TuiApp(App):
         return self._with_tui_runtime(
             apply_cli_overrides(
                 loaded,
-                extra_overrides={"level": self._level_override}
+                extra_overrides={"model": self._level_override}
                 if self._level_override
                 else None,
             )
@@ -1409,10 +1409,12 @@ class TuiApp(App):
         без `invalidate_runner` (единственный тоггл с таким свойством), и это
         единственный потребитель, обязанный видеть смену немедленно, без
         пересборки executor."""
+        from gc_core.config_modules.model_registry import configured_choice
+
         snap = self._config_snapshot()
-        if "level" in snap.overrides:
-            return snap.overrides["level"]
-        return self._session_base_settings(snap).settings.level or "default"
+        if "model" in snap.overrides:
+            return snap.overrides["model"]
+        return configured_choice(self._session_base_settings(snap).settings)
 
     def active_profile_ref(self):
         """`ProfileRef` действующего (эффективного, сессионно-осознанного) профиля
@@ -1450,6 +1452,7 @@ class TuiApp(App):
         автовыбор доступен)."""
         from gc_core.auto_routing.levels import effective_target
         from gc_core.config import cli_forces_legacy_model
+        from gc_core.config_modules.model_registry import effective_choice
         from gc_core.model_router import ModelRouter
 
         from gc_tui.toggles import auto_available_cfg
@@ -1459,7 +1462,9 @@ class TuiApp(App):
         return ModelRouter(
             loaded,
             choice_provider=lambda: effective_target(
-                self._choice_provider(), None, available
+                effective_choice(self._choice_provider(), loaded.settings),
+                None,
+                available,
             ),
             live_choice_provider=self._choice_provider,
             breaker=self._circuit_breaker,

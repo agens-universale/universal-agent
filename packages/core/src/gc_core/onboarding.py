@@ -378,6 +378,10 @@ def effective_model(settings: Any) -> str:
             effective_target,
         )
         from gc_core.config import cli_forces_legacy_model
+        from gc_core.config_modules.model_registry import (
+            configured_choice,
+            effective_choice,
+        )
         from gc_core.model_router import ModelRouter
 
         available = auto_available(
@@ -386,7 +390,9 @@ def effective_model(settings: Any) -> str:
         resolved = ModelRouter(
             source,
             choice_provider=lambda: effective_target(
-                settings.level, None, available
+                effective_choice(configured_choice(settings), settings),
+                None,
+                available,
             ),
             force_legacy=cli_forces_legacy_model(source),
         ).resolve("main", check_breaker=False)

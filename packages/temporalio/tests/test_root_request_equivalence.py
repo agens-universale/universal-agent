@@ -70,7 +70,7 @@ def preparation(monkeypatch, tmp_path):
         loaded = make_settings(
             {
                 "models": models,
-                "level": mode,
+                "model": mode,
                 "slots": {"light": "fast", "default": "mid", "max": "big"},
                 "backend.api_mode": "chat_completions",
                 "backend.vision": False,

@@ -7,6 +7,10 @@ from copy import deepcopy
 # than on the first late-bound store/tool dispatch in a workflow task.
 from gc_core import thread_store_async as _thread_store_async  # noqa: F401
 from gc_core.agent_store import AgentResource, AgentStore
+from gc_core.config_modules.model_registry import (
+    configured_choice,
+    effective_choice,
+)
 from gc_core.config_modules.root import AppConfig
 from gc_core.context_preparation import (
     RunContextBindings,
@@ -121,7 +125,10 @@ def assemble_context(
             "tool_fabric": candidates[name]["tool_fabric"],
         }
     router = ModelRouter(
-        loaded, choice_provider=lambda: loaded.settings.level or "default"
+        loaded,
+        choice_provider=lambda: effective_choice(
+            configured_choice(loaded.settings), loaded.settings
+        ),
     )
     operations.router = router
     try:

@@ -114,6 +114,10 @@ def _effective_model_name(config) -> str:
     ему знать про `gc_tui`)."""
     from gc_core.auto_routing.levels import effective_target
     from gc_core.config import cli_forces_legacy_model
+    from gc_core.config_modules.model_registry import (
+        configured_choice,
+        effective_choice,
+    )
     from gc_core.model_router import ModelRouter
     from gc_core.onboarding import MODEL_SENTINEL
 
@@ -126,7 +130,9 @@ def _effective_model_name(config) -> str:
         resolved = ModelRouter(
             config,
             choice_provider=lambda: effective_target(
-                settings.level, None, available
+                effective_choice(configured_choice(settings), settings),
+                None,
+                available,
             ),
             force_legacy=cli_forces_legacy_model(config),
         ).resolve("main", check_breaker=False)

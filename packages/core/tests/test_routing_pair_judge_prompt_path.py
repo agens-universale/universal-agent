@@ -43,7 +43,7 @@ def test_a_missing_prompt_no_longer_fails_the_run_context(tmp_path):
         "models": {"fast": {}, "mid": {}, "big": {}},
         "slots": {"light": "fast", "default": "mid", "max": "big"},
         "backend": {"api_mode": "chat_completions"},
-        "level": "auto",
+        "model": "auto",
         "logging": {"save_logs": False},
         "agent": {"auto_routing_safe_level": "auto"},
     }
@@ -64,7 +64,7 @@ def test_two_models_under_auto_run_without_the_pair_prompt(tmp_path):
         "models": {"fast": {}, "mid": {}},
         "slots": {"light": "fast", "default": "mid"},
         "backend": {"api_mode": "chat_completions"},
-        "level": "auto",
+        "model": "auto",
         "logging": {"save_logs": False},
         "agent": {"auto_routing_safe_level": "auto"},
     }

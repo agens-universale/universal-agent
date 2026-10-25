@@ -296,7 +296,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 1
         settings = apply_cli_overrides(
             settings,
-            extra_overrides={"level": args.level} if args.level else None,
+            extra_overrides={"model": args.level} if args.level else None,
         )
         profile_meta = settings.profile_meta
 

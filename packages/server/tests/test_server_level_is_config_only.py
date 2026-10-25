@@ -37,7 +37,7 @@ def _minimal_server_config():
         "server": {},
         "defaults": {"system": "generic"},
         "agent": {},
-        "agent_overrides": {"level": "auto"},
+        "agent_overrides": {"model": "auto"},
         "logging": {},
         "swarm": {},
         "threads_cleanup": {},
@@ -85,7 +85,7 @@ def test_level_in_the_request_body_is_not_a_level_input(monkeypatch):
     уровень берётся только из конфига сервера (`agent_overrides`)."""
     _reset_server_module()
     config_dict = {
-        "level": "default",
+        "model": "default",
         "agent.auto_routing": True,
         "backend.api_mode": "chat_completions",
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -93,8 +93,8 @@ def test_level_in_the_request_body_is_not_a_level_input(monkeypatch):
     }
     try:
         cfg = _post_webhook(
-            monkeypatch, config_dict, {"task_id": "t2", "level": "auto"}
+            monkeypatch, config_dict, {"task_id": "t2", "model": "auto"}
         )
-        assert settings_of(cfg).level == "default"
+        assert settings_of(cfg).model == "default"
     finally:
         _reset_server_module()

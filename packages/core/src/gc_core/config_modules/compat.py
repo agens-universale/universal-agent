@@ -24,6 +24,8 @@ RENAMES: Dict[str, str] = {
     # AliasChoices("auxiliary_llm", "llm") недостаточно: deep_merge user(llm)+project
     # (auxiliary_llm) оставляет оба ключа → extra=forbid «Extra inputs are not permitted».
     "chat_completions.llm": "chat_completions.auxiliary_llm",
+    # Выбор модели: слово уровня остаётся допустимым значением `model`.
+    "level": "model",
 }
 # опциональное преобразование значения при переносе (смена формата/смысла)
 RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
@@ -32,6 +34,9 @@ RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
 # ключей: у `chat_completions.llm` → `auxiliary_llm` это настройки модели, и
 # слияние смешало бы параметры двух разных моделей — там старая отбрасывается.
 MERGE_RENAMED_SECTIONS = frozenset({"diff_tui"})
+# Переносы, о которых молчим: значение стоит в шаблонах конфига и фактом
+# не считается. {старое имя: значение}
+SILENT_RENAMES: Dict[str, str] = {"level": "default"}
 # {"dotted.путь": "почему удалён"}  # noqa: ERA001  # описание формата, не выключенный код
 # Сегмент ``*`` — любое имя записи словаря (алиас модели и т.п.).
 REMOVED: Dict[str, str] = {
@@ -217,7 +222,9 @@ def _compat_renames(raw: Dict[str, Any], facts: List[str]) -> None:
                     f"{old}: значение не удалось перенести в {new} — задайте заново ({_SYNC_HINT})"
                 )
                 continue
-        facts.append(_place_renamed(raw, old, new, value, explicit_new))
+        fact = _place_renamed(raw, old, new, value, explicit_new)
+        if SILENT_RENAMES.get(old) != value:
+            facts.append(fact)
 
 
 def _compat_removed(raw: Dict[str, Any], facts: List[str]) -> None:

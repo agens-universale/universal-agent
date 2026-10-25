@@ -180,7 +180,7 @@ async def test_footer_dot_color_matches_active_level_from_toggles(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"agent.model": "m", "level": "light"}),
+        settings=tui_settings({"agent.model": "m", "model": "light"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -191,7 +191,7 @@ async def test_footer_dot_color_matches_active_level_from_toggles(
         ]
         assert any(p.INK.lower() in st.lower() for st in styles), styles
 
-        app.set_session_override("level", "max")
+        app.set_session_override("model", "max")
         text2 = scr._compose_footer_right()
         styles2 = [
             str(s.style) for s in text2.spans if "bold" in str(s.style).lower()

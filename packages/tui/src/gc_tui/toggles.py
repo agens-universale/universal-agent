@@ -9,6 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from gc_core.config_modules.model_registry import (
+    configured_choice,
+    effective_choice,
+)
 from gc_core.security.permission_mode import AVAILABLE_MODES
 from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
@@ -223,9 +227,12 @@ def resolve_level_state(cfg: Any) -> str:
     from gc_core.auto_routing.levels import effective_target
 
     available = auto_available_cfg(cfg)
-    if settings_of(cfg).level == "auto" and available:
+    choice = effective_choice(
+        configured_choice(settings_of(cfg)), settings_of(cfg)
+    )
+    if choice == "auto" and available:
         return "auto"
-    return effective_target(settings_of(cfg).level, None, available)
+    return effective_target(choice, None, available)
 
 
 def level_unavailable_hint(app: Any, value: str) -> Optional[str]:
@@ -627,7 +634,7 @@ def base_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
 
 TOGGLES: Dict[str, ToggleSpec] = {
     "level": ToggleSpec(
-        dotted="level",
+        dotted="model",
         values=(
             ToggleValue("light", "", _pal.INK),
             ToggleValue("default", "", _pal.RUN_COLOR),

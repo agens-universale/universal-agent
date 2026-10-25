@@ -4185,7 +4185,7 @@ async def test_session_line_label_is_dim_italic_and_value_has_its_track_colour(
     from gc_tui.palette import DEEP_DIM
     from gc_tui.toggles import TOGGLES
 
-    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test(size=(140, 30)) as pilot:
         scr = await _open_modes_section(pilot)
         app.set_permission_mode("plan")
@@ -5323,7 +5323,7 @@ async def test_the_models_section_names_the_level_that_is_really_acting(
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
-        "level: default\n"
+        "model: default\n"
         "backend:\n"
         '  completions_url: "http://host/v1/chat/completions"\n'
         'models:\n  flash:\n    model: "m"\n',
@@ -5331,11 +5331,11 @@ async def test_the_models_section_names_the_level_that_is_really_acting(
     )
     cfg = {
         "backend.completions_url": "http://host/v1/chat/completions",
-        "level": "default",
+        "model": "default",
     }
     app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
-        app._session_overrides["level"] = "max"  # /level посреди сессии
+        app._session_overrides["model"] = "max"  # /level посреди сессии
         scr = _mk_screen(config=cfg, config_path=str(cfg_file))
         app.push_screen(scr)
         await pilot.pause()
@@ -5378,7 +5378,7 @@ async def test_level_row_stands_behind_a_separator(tmp_path):
     2-group страж (обе группы preset, одна `group`) от этого не страдает."""
     pytest.importorskip("textual")
 
-    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
 
@@ -5399,7 +5399,7 @@ async def test_level_row_keeps_its_default_wording(tmp_path):
     у секции своя подпись."""
     pytest.importorskip("textual")
 
-    app, _ = _app_with_config(tmp_path, 'level: "max"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "max"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
 
@@ -5419,7 +5419,7 @@ async def test_modes_hint_uses_the_dynamic_provider(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     app, _ = _app_with_config(
         tmp_path,
-        'level: "default"\nmodels:\n  flash:\n    model: "google/gemini-2.5-flash"\nslots:\n  default: "flash"\n',
+        'model: "default"\nmodels:\n  flash:\n    model: "google/gemini-2.5-flash"\nslots:\n  default: "flash"\n',
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
@@ -5441,7 +5441,7 @@ async def test_level_row_track_is_lit_in_the_colour_of_the_level(
     from gc_tui.toggles import TOGGLES
 
     monkeypatch.chdir(tmp_path)
-    app, _ = _app_with_config(tmp_path, 'level: "max"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "max"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
 
@@ -5474,7 +5474,7 @@ async def test_level_row_shows_auto_off_scale_when_available(
     monkeypatch.chdir(tmp_path)
     app, _ = _app_with_config(
         tmp_path,
-        'level: "default"\nbackend:\n  api_mode: "chat_completions"\n'
+        'model: "default"\nbackend:\n  api_mode: "chat_completions"\n'
         + _TWO_KITS_YAML,
     )
     async with app.run_test() as pilot:
@@ -5497,7 +5497,7 @@ async def test_level_row_cycle_includes_auto(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     app, cfg_file = _app_with_config(
         tmp_path,
-        'level: "max"\nbackend:\n  api_mode: "chat_completions"\n'
+        'model: "max"\nbackend:\n  api_mode: "chat_completions"\n'
         + _TWO_KITS_YAML,
     )
     async with app.run_test() as pilot:
@@ -5507,7 +5507,7 @@ async def test_level_row_cycle_includes_auto(tmp_path, monkeypatch):
         scr._modes_apply(1)  # max -> auto (4-я позиция сразу за max)
 
         assert (
-            yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["level"]
+            yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["model"]
             == "auto"
         )
 
@@ -5664,7 +5664,7 @@ async def test_modes_write_creates_a_missing_top_level_anchor(
         scr._modes_apply(1)
         await pilot.pause()
 
-        assert 'level: "max"' in base_cfg.read_text(encoding="utf-8")
+        assert 'model: "max"' in base_cfg.read_text(encoding="utf-8")
 
 
 async def test_modes_write_flashes_the_file_it_wrote_to(tmp_path, monkeypatch):
@@ -5675,7 +5675,7 @@ async def test_modes_write_flashes_the_file_it_wrote_to(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     app, base_cfg = _app_with_config(
-        tmp_path, 'level: "default"\ntui:\n  finish_gate_mode: "off"\n'
+        tmp_path, 'model: "default"\ntui:\n  finish_gate_mode: "off"\n'
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
@@ -5698,7 +5698,7 @@ async def test_modes_flash_names_the_file_absolutely(tmp_path, monkeypatch):
     pytest.importorskip("textual")
 
     monkeypatch.chdir(tmp_path)
-    app, base_cfg = _app_with_config(tmp_path, 'level: "default"\n')
+    app, base_cfg = _app_with_config(tmp_path, 'model: "default"\n')
     app._config_path = (
         "./config.yml"  # так его передаёт относительный --config
     )
@@ -5935,7 +5935,7 @@ async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_p
         tmp_path,
         "backend:\n  api_mode: chat_completions\n"
         '  completions_url: "http://base/v1/chat/completions"\n'
-        'level: "default"\n',
+        'model: "default"\n',
     )
     app.switch_session_profile("pair")
     from gc_tui.toggles import effective_toggle_names
@@ -5950,7 +5950,7 @@ async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_p
             await pilot.pause(0.1)
             written.append(
                 yaml.safe_load(cfg_file.read_text(encoding="utf-8")).get(
-                    "level"
+                    "model"
                 )
             )
         assert "auto" not in written
@@ -5966,7 +5966,7 @@ async def test_mode_row_writes_the_default_permission_mode(tmp_path):
     → конфиг»), сессия с выбором через Shift+Tab свой режим сохраняет."""
     pytest.importorskip("textual")
 
-    app, cfg_file = _app_with_config(tmp_path, 'level: "default"\n')
+    app, cfg_file = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
         scr._modes_idx = modes_row_index("mode")
@@ -6012,7 +6012,7 @@ async def test_mode_row_shows_the_mode_chosen_in_this_session(tmp_path):
     соседей: иначе Настройки молчали бы о режиме, который реально в силе."""
     pytest.importorskip("textual")
 
-    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test(size=(140, 30)) as pilot:
         scr = await _open_modes_section(pilot)
         assert (
