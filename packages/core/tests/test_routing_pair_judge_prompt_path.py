@@ -53,7 +53,7 @@ def test_a_missing_prompt_no_longer_fails_the_run_context(tmp_path):
         )
     }
     cfg = AppConfig.model_validate(raw)
-    ctx = run_coro(rc.acreate_run_context(cfg, level_provider=lambda: "auto"))
+    ctx = run_coro(rc.acreate_run_context(cfg, choice_provider=lambda: "auto"))
     assert ctx.routing_params.safe_level == "auto"
 
 
@@ -74,5 +74,5 @@ def test_two_models_under_auto_run_without_the_pair_prompt(tmp_path):
         )
     }
     cfg = AppConfig.model_validate(raw)
-    ctx = run_coro(rc.acreate_run_context(cfg, level_provider=lambda: "auto"))
+    ctx = run_coro(rc.acreate_run_context(cfg, choice_provider=lambda: "auto"))
     assert ctx.routing_params.safe_level == "default"

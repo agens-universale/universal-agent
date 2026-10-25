@@ -320,7 +320,7 @@ def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_
     assert loaded.settings.security.write_guard.enabled is True
 
     router = ModelRouter(
-        loaded, level_provider=lambda: "default", force_legacy=True
+        loaded, choice_provider=lambda: "default", force_legacy=True
     )
 
     main_resolved = router.resolve("main")
@@ -352,7 +352,7 @@ def test_model_override_without_registry_is_plain_legacy_not_forced(
 
     router = ModelRouter(
         loaded,
-        level_provider=lambda: "default",
+        choice_provider=lambda: "default",
         force_legacy=cli_forces_legacy_model(loaded),
     )
     resolved = router.resolve("main")
@@ -391,7 +391,7 @@ def test_cli_models_override_carries_its_own_token_to_the_router(token):
         },
     )
 
-    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+    resolved = ModelRouter(cfg, choice_provider=lambda: "default").resolve(
         "main"
     )
 

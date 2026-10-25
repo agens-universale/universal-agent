@@ -49,7 +49,7 @@ def _ctx(events):
     )
     return fake_ctx(
         loaded=loaded,
-        model_router=ModelRouter(loaded, level_provider=lambda: "default"),
+        model_router=ModelRouter(loaded, choice_provider=lambda: "default"),
         logger=logger,
         auxiliary_llm=SimpleNamespace(
             completion_kwargs={}, judge_max_tokens=256, max_tokens=1024

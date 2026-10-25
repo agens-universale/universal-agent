@@ -585,7 +585,7 @@ class AcpFacade:
         self._loop = asyncio.get_running_loop()
         settings = self._settings.with_runtime(launch_root=live.cwd)
 
-        def level_provider() -> str:
+        def choice_provider() -> str:
             return session_level(self._settings, live.level)
 
         async with self._create_lock:
@@ -594,7 +594,7 @@ class AcpFacade:
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
                 os_backend=self._session_backend(live),
-                level_provider=level_provider,
+                choice_provider=choice_provider,
             )
         try:
             bind_ask_human(agent)

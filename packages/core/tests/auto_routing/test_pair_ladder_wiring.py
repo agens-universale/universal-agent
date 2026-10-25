@@ -38,7 +38,7 @@ def _ctx(level_box, registry=THREE):
     }
     cfg = AppConfig.model_validate(raw)
     return run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: level_box["value"])
+        rc.acreate_run_context(cfg, choice_provider=lambda: level_box["value"])
     )
 
 

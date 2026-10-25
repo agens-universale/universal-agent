@@ -253,10 +253,10 @@ def test_routing_identity_and_currencies_survive_without_transport():
     public = public_config_snapshot(loaded)
     assert public.model_transport_configured is True
     assert public.provider_currency == "₽"
-    worker_router = ModelRouter(loaded, level_provider=lambda: "max")
+    worker_router = ModelRouter(loaded, choice_provider=lambda: "max")
     public_router = ModelRouter(
         settings_from_snapshot(public.settings, public.runtime),
-        level_provider=lambda: "max",
+        choice_provider=lambda: "max",
     )
     for consumer in ("main", "command_judge", "subagent:searcher"):
         worker, workflow = (

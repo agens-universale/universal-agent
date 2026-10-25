@@ -109,15 +109,15 @@ def test_level_change_does_not_invalidate_runner(tmp_path):
     assert calls["n"] == 0
 
 
-def test_level_provider_reflects_session_override_without_rebuild(tmp_path):
+def test_choice_provider_reflects_session_override_without_rebuild(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
         settings=tui_settings({"agent.model": "M", "level": "default"}),
     )
-    assert app._level_provider() == "default"
+    assert app._choice_provider() == "default"
     app.set_session_override("level", "max")
-    assert app._level_provider() == "max"  # без пересборки executor
+    assert app._choice_provider() == "max"  # без пересборки executor
 
 
 # --- 3. session-профиль → пере-мерж effective_settings -------------------------------
@@ -624,7 +624,7 @@ def test_load_circuit_breaker_restores_in_place_keeping_executor_wired(
         make_settings(
             {"models": {"flash": {}}, "slots": {"default": "flash"}}
         ),
-        level_provider=lambda: "default",
+        choice_provider=lambda: "default",
         breaker=app._circuit_breaker,
     )
 

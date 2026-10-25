@@ -252,12 +252,12 @@ def test_resolved_model_exposes_summary_triggers_zero_means_unset():
             "slots": {"light": "set", "default": "unset"},
         }
     )
-    router = ModelRouter(cfg, level_provider=lambda: "light")
+    router = ModelRouter(cfg, choice_provider=lambda: "light")
     set_m = router.resolve("main")
     assert set_m.summary_trigger_chars == 100000
     assert set_m.summary_trigger_tokens == 116128
 
-    router = ModelRouter(cfg, level_provider=lambda: "default")
+    router = ModelRouter(cfg, choice_provider=lambda: "default")
     unset = router.resolve("main")
     assert unset.summary_trigger_chars == 0
     assert unset.summary_trigger_tokens == 0
@@ -357,7 +357,7 @@ async def test_threshold_belongs_to_the_model_prepared_for_the_call():
 
     level = {"current": "light"}
     cfg = _two_level_cfg()
-    router = ModelRouter(cfg, level_provider=lambda: level["current"])
+    router = ModelRouter(cfg, choice_provider=lambda: level["current"])
     state = _chat_state()
     ctx = SimpleNamespace(settings=cfg, model_router=router, logger=None)
     begin_turn(state, ctx)
@@ -418,7 +418,7 @@ async def test_executor_reports_the_limits_of_the_prepared_call():
 
     level = {"current": "light"}
     cfg = _two_level_cfg()
-    router = ModelRouter(cfg, level_provider=lambda: level["current"])
+    router = ModelRouter(cfg, choice_provider=lambda: level["current"])
     ctx = SimpleNamespace(settings=cfg, model_router=router)
     executor = AgentExecutor(ctx)
     assert executor.summary_limits().chars_during == 10  # хода ещё нет — живой
@@ -437,7 +437,7 @@ async def test_executor_reports_the_limits_of_the_prepared_call():
 def test_limits_without_a_pinned_level_follow_the_live_one():
     """Уровня вызова нет (ход ещё не начинали) — обычный резолв `main`."""
     cfg = _two_level_cfg()
-    router = ModelRouter(cfg, level_provider=lambda: "light")
+    router = ModelRouter(cfg, choice_provider=lambda: "light")
     assert (
         resolve_summary_limits_at_level(cfg, router, None).chars_during == 10
     )
@@ -446,11 +446,23 @@ def test_limits_without_a_pinned_level_follow_the_live_one():
     )
 
 
+def test_limits_follow_alias_target():
+    cfg = _two_level_cfg()
+    router = ModelRouter(cfg, choice_provider=lambda: "default")
+    assert (
+        resolve_summary_limits_at_level(cfg, router, "low").chars_during == 10
+    )
+    assert (
+        resolve_summary_limits_at_level(cfg, router, "high").chars_during
+        == 1_000_000
+    )
+
+
 def test_limits_survive_an_open_breaker_on_the_alias():
     """Открытый предохранитель роняет запросы, а не чтение порога: иначе порог
     молча съезжал бы на общий ровно в аварии."""
     cfg = _two_level_cfg()
-    router = ModelRouter(cfg, level_provider=lambda: "default")
+    router = ModelRouter(cfg, choice_provider=lambda: "default")
     router.breaker.trip("low", "5xx после ретраев")
     assert (
         resolve_summary_limits_at_level(cfg, router, "light").chars_during
@@ -480,7 +492,7 @@ def test_subagent_uses_own_alias_threshold():
             "assign": {"subagents": {"subagent_worker": "sub_m"}},
         }
     )
-    router = ModelRouter(cfg, level_provider=lambda: "default")
+    router = ModelRouter(cfg, choice_provider=lambda: "default")
     child = router.with_override(router.resolve("subagent:subagent_worker"))
     assert (
         resolve_summary_limits_at_level(cfg, router, "default").chars_during
@@ -525,7 +537,7 @@ async def _light_turn(level: dict):
     from gc_core import processing_responses as pr
 
     cfg = _two_level_cfg()
-    router = ModelRouter(cfg, level_provider=lambda: level["current"])
+    router = ModelRouter(cfg, choice_provider=lambda: level["current"])
     ctx = SimpleNamespace(
         settings=cfg,
         model_router=router,
@@ -576,7 +588,7 @@ async def test_compaction_keeps_global_values_for_a_model_without_thresholds(
     )
     ctx = SimpleNamespace(
         settings=cfg,
-        model_router=ModelRouter(cfg, level_provider=lambda: "default"),
+        model_router=ModelRouter(cfg, choice_provider=lambda: "default"),
         logger=None,
     )
     seen = _capture_summarizer(monkeypatch, ctx)
@@ -734,7 +746,7 @@ async def test_loop_compacts_for_the_upcoming_model(
         }
     )
     box = {"value": start_mode}
-    ctx = await acreate_run_context(cfg, level_provider=lambda: box["value"])
+    ctx = await acreate_run_context(cfg, choice_provider=lambda: box["value"])
     state = _chat_state(chars=10000)
     state.messages[0]["id"] = "old"
     executor = AgentExecutor(ctx)

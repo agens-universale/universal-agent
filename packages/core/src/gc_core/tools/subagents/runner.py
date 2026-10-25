@@ -13,7 +13,7 @@ from gc_core.attachments.store import with_committed_attachments
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.levels import (
     auto_available,
-    effective_level,
+    effective_target,
     resolve_routing_params,
 )
 from gc_core.auto_routing.policy import turn_params
@@ -757,7 +757,7 @@ class SubagentRunner:
                 # Снять уровень решения auto по концу дочернего прогона (симметрично
                 # AgentExecutor.arun) — child_ctx
                 # обычно выбрасывается вместе с этим вызовом, но если что-то ещё
-                # читает child_ctx.model_router.active_level() после возврата
+                # читает child_ctx.model_router.active_target() после возврата
                 # (лог/диагностика), не должно видеть уровень последнего решения.
                 state_ops.leave(child_state)
             if error_response is not None:
@@ -1183,12 +1183,12 @@ class SubagentRunner:
           `mode: manual`).
         - непривязанный: override не ставится, ребёнок ведёт СВОЙ роутинг со
           `START_LEVEL` (`aroute_before_call` внутри его собственного цикла);
-          `level_provider` привязывается к дочернему State в `_bind_child_context`
+          `choice_provider` привязывается к дочернему State в `_bind_child_context`
           тем же механизмом, что и провайдер `acreate_run_context`, с
           сырым режимом родителя, замороженным на момент сборки
-          (`parent_router.live_level()`), — живой `/level` родителя посреди
+          (`parent_router.live_choice()`), — живой `/level` родителя посреди
           работы ребёнка не уводит его модель (см.
-          `test_child_router_level_provider_is_frozen_not_live`).
+          `test_child_router_choice_provider_is_frozen_not_live`).
 
         None, если у родителя нет Router (легаси тестовые двойники ctx) — вызывающий
         код и так устойчив к `model_router=None` (turn_boundary/воронки не падают).
@@ -1208,19 +1208,19 @@ class SubagentRunner:
             return None
         consumer = f"{SUBAGENT_CONSUMER_PREFIX}{tool_name}"
         if not parent_router.has_binding(consumer):
-            frozen_live = parent_router.live_level()
+            frozen_live = parent_router.live_choice()
 
             available = auto_available(
                 child_config, force_legacy=parent_router.force_legacy
             )
 
-            def _child_level_provider() -> str:
-                return effective_level(frozen_live, None, available)
+            def _child_choice_provider() -> str:
+                return effective_target(frozen_live, None, available)
 
             return ModelRouter(
                 child_config,
-                level_provider=_child_level_provider,
-                live_level_provider=lambda: frozen_live,
+                choice_provider=_child_choice_provider,
+                live_choice_provider=lambda: frozen_live,
                 breaker=parent_router.breaker,
                 force_legacy=parent_router.force_legacy,
                 is_subagent_child=True,
@@ -1252,11 +1252,11 @@ class SubagentRunner:
                 active_model=resolved.model,
                 enabled=bool(getattr(self._ctx, "is_tui", False)),
             )
-        frozen_level = parent_router.active_level()
+        frozen_level = parent_router.active_target()
         return ModelRouter(
             child_config,
-            level_provider=lambda: frozen_level,
-            live_level_provider=lambda: frozen_level,
+            choice_provider=lambda: frozen_level,
+            live_choice_provider=lambda: frozen_level,
             breaker=parent_router.breaker,
             force_legacy=parent_router.force_legacy,
             unbound_override=resolved,
@@ -1575,17 +1575,17 @@ class SubagentRunner:
             )
         child_ctx.routing_params = params
         if router is not None:
-            live = router.live_level
+            live = router.live_choice
 
             def effective_provider() -> str:
                 state = getattr(child_ctx, "active_state", None)
-                return effective_level(
+                return effective_target(
                     live(),
                     getattr(state, "current_level", None),
                     child_ctx.auto_available,
                 )
 
-            child_ctx.model_router = router.with_level_providers(
+            child_ctx.model_router = router.with_choice_providers(
                 effective_provider, live
             )
         # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,

@@ -124,7 +124,7 @@ def _ctx(tmp_path, cfg, notes: list) -> SimpleNamespace:
         logger=logging.getLogger("test_image_rejection_retry"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(loaded, level_provider=lambda: "default"),
+        model_router=ModelRouter(loaded, choice_provider=lambda: "default"),
         image_store=ImageStore(str(tmp_path)),
         on_trace_note=notes.append,
     )
@@ -596,12 +596,12 @@ def test_an_inferred_limit_is_rechecked_after_its_scope_changes(
     elif reset == "model":
         ctx.model_router = ModelRouter(
             make_settings(_cfg(**{"agent.model": "another-model"})),
-            level_provider=lambda: "default",
+            choice_provider=lambda: "default",
         )
     else:
         ctx.model_router = ModelRouter(
             make_settings(_cfg(**{"backend.completions_url": URL + "/other"})),
-            level_provider=lambda: "default",
+            choice_provider=lambda: "default",
         )
     state.vision_routes.update(warm_routes(ctx))
     start = len(spy.requests)

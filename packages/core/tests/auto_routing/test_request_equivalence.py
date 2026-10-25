@@ -61,7 +61,7 @@ def prepared_ctx(full, public):
         prepared_request_equivalence=facts,
         routing_contract_v2=True,
     )
-    ctx.model_router = ModelRouter(ctx, level_provider=lambda: "light")
+    ctx.model_router = ModelRouter(ctx, choice_provider=lambda: "light")
     return ctx
 
 
@@ -74,7 +74,7 @@ def test_private_difference_preserves_auto_pair_and_floor(difference):
     assert auto_available(public, force_legacy=False) is False
     assert auto_available(ctx, force_legacy=False) is True
     assert resolve_routing_params(ctx).safe_level == "auto"
-    weak = ctx.model_router.resolve("main", level_override="light")
+    weak = ctx.model_router.resolve("main", target_override="light")
     assert (
         _floor_target(ctx, "light", weak, RoutingParams(safe_level="default"))
         == "default"
@@ -85,7 +85,7 @@ def test_equivalent_aliases_do_not_create_auto_or_floor():
     full, public = configs("same")
     ctx = prepared_ctx(full, public)
     assert auto_available(ctx, force_legacy=False) is False
-    weak = ctx.model_router.resolve("main", level_override="light")
+    weak = ctx.model_router.resolve("main", target_override="light")
     assert (
         _floor_target(ctx, "light", weak, RoutingParams(safe_level="default"))
         is None
@@ -99,7 +99,7 @@ def test_legacy_comparison_ignores_prepared_equivalence():
     assert (
         auto_available(ctx, force_legacy=False, legacy_call_kits=True) is True
     )
-    weak = ctx.model_router.resolve("main", level_override="light")
+    weak = ctx.model_router.resolve("main", target_override="light")
     assert (
         _floor_target(ctx, "light", weak, RoutingParams(safe_level="default"))
         == "default"

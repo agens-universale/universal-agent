@@ -37,13 +37,13 @@ def _running_runner(
     `test_footer_profile_indicator.py`, расширенный auto-routing §7.1
     изменяемым `current_level`): `executor_router()` резолвит ЧЕСТНО через
     переданный `router` (breaker/slots настоящего Router'а приложения),
-    подменяя только `active_level()` — читает `.level` СВЕЖИМ на каждый
+    подменяя только `active_target()` — читает `.level` СВЕЖИМ на каждый
     вызов, как `state.current_level` у настоящего исполнителя (`level = None`
-    → «до первого решения», `effective_level` подставит `default`).
+    → «до первого решения», `effective_target` подставит `default`).
     `available` — доступность auto для симулируемого решения (по умолчанию
     True; тест недоступной фичи передаёт False явно, а не полагается на
     реальный конфиг — который сюда не долетает, `router` уже построен)."""
-    from gc_core.auto_routing.levels import effective_level
+    from gc_core.auto_routing.levels import effective_target
 
     class _FakeRunner:
         def __init__(self):
@@ -56,9 +56,9 @@ def _running_runner(
             runner = self
 
             class _LevelRouter:
-                def active_level(self):
-                    return effective_level(
-                        router.live_level(), runner.level, available
+                def active_target(self):
+                    return effective_target(
+                        router.live_choice(), runner.level, available
                     )
 
                 def __getattr__(self, name):
@@ -156,7 +156,7 @@ async def test_footer_running_auto_degraded_resolve_shows_default(
 
     broken = ModelRouter(
         make_settings({"models": {"x": {}, "y": {}}, "slots": {}}),
-        level_provider=lambda: "light",
+        choice_provider=lambda: "light",
     )
 
     class _DegradedRunner:

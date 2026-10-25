@@ -146,7 +146,7 @@ def _unsupported_probe_note(ctx, state, resolved) -> tuple[str, Tone]:
     модели запроса — это «глаза»."""
     router = getattr(ctx, "model_router", None)
     if router is not None:
-        main = router.resolve_main_at_level(
+        main = router.resolve_main_at(
             getattr(state, "_call_level", None), check_breaker=False
         )
         if route_id(main) != route_id(resolved):

@@ -200,7 +200,7 @@ async def test_changed_eyes_access_restores_tool_without_probing_text_request(
             main_backend={"vision": False},
         )
         ctx.model_router = ModelRouter(
-            make_settings(cfg), level_provider=lambda: "default"
+            make_settings(cfg), choice_provider=lambda: "default"
         )
     begin_turn(st, ctx)
     await pr._arequest_backend_canonical([message], st, ctx)

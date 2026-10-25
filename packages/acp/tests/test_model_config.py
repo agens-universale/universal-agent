@@ -59,7 +59,7 @@ def _open(loaded, factory=None):
         agent.factory_kwargs = kwargs
         agent.router = ModelRouter(
             config,
-            level_provider=kwargs["level_provider"],
+            choice_provider=kwargs["choice_provider"],
             force_legacy=cli_forces_legacy_model(config),
         )
         agents.append(agent)
@@ -167,7 +167,7 @@ async def test_set_writes_level_not_config(tmp_path):
     assert _values(option) == ["glm-local", "flash", "opus"]
     live = facade._sessions[session_id]
     assert live.level == "light"
-    assert agents[0].factory_kwargs["level_provider"]() == "light"
+    assert agents[0].factory_kwargs["choice_provider"]() == "light"
     assert len(agents) == 1
     assert loaded.settings.model_dump() == before
     assert all(
@@ -191,7 +191,7 @@ async def test_same_alias_does_not_rewrite_level(tmp_path):
     assert _option(_by_id(writer, 2)["result"])["currentValue"] == "flash"
     await _set(facade, session_id, "flash")
     assert facade._sessions[session_id].level is None
-    assert agents[0].factory_kwargs["level_provider"]() == "light"
+    assert agents[0].factory_kwargs["choice_provider"]() == "light"
     await facade.shutdown()
 
 
@@ -210,7 +210,7 @@ async def test_first_level_wins_when_alias_repeats(tmp_path):
     assert _option(_by_id(writer, 2)["result"])["currentValue"] == "opus"
     await _set(facade, session_id, "flash")
     assert facade._sessions[session_id].level == "default"
-    assert agents[0].factory_kwargs["level_provider"]() == "default"
+    assert agents[0].factory_kwargs["choice_provider"]() == "default"
     await facade.shutdown()
 
 
@@ -234,7 +234,7 @@ async def test_foreign_value_and_boolean_type_are_invalid(tmp_path):
     )
     assert _by_id(writer, 6)["error"]["code"] == -32602
     assert facade._sessions[session_id].level is None
-    assert agents[0].factory_kwargs["level_provider"]() == "default"
+    assert agents[0].factory_kwargs["choice_provider"]() == "default"
     await _set(facade, session_id, "opus", 7, type="select")
     assert _option(_by_id(writer, 7)["result"])["currentValue"] == "opus"
     await facade.shutdown()
@@ -248,8 +248,8 @@ async def test_second_session_keeps_its_level(tmp_path):
     first = _by_id(writer, 2)["result"]["sessionId"]
     second = _by_id(writer, 3)["result"]["sessionId"]
     await _set(facade, first, "flash")
-    assert agents[0].factory_kwargs["level_provider"]() == "light"
-    assert agents[1].factory_kwargs["level_provider"]() == "default"
+    assert agents[0].factory_kwargs["choice_provider"]() == "light"
+    assert agents[1].factory_kwargs["choice_provider"]() == "default"
     await facade.handle_line(
         _line(
             "session/resume",
@@ -278,7 +278,7 @@ async def test_close_forgets_the_choice(tmp_path):
         )
     )
     assert _option(_by_id(writer, 5)["result"])["currentValue"] == "glm-local"
-    assert agents[-1].factory_kwargs["level_provider"]() == "default"
+    assert agents[-1].factory_kwargs["choice_provider"]() == "default"
     await facade.shutdown()
 
 
@@ -304,7 +304,7 @@ async def test_mid_turn_switch_applies_from_the_next_request(tmp_path):
         agent.factory_kwargs = kwargs
         agent.router = ModelRouter(
             config,
-            level_provider=kwargs["level_provider"],
+            choice_provider=kwargs["choice_provider"],
             force_legacy=cli_forces_legacy_model(config),
         )
         agents.append(agent)
@@ -370,7 +370,7 @@ async def test_empty_registry_is_one_row_and_does_not_write_level(tmp_path):
     await _set(facade, session_id, "solo", 4)
     assert _option(_by_id(writer, 4)["result"])["currentValue"] == "solo"
     assert facade._sessions[session_id].level is None
-    assert agents[0].factory_kwargs["level_provider"]() == "default"
+    assert agents[0].factory_kwargs["choice_provider"]() == "default"
     await facade.shutdown()
 
 
@@ -387,7 +387,7 @@ async def test_legacy_force_rejects_registry_alias(tmp_path):
     assert _by_id(writer, 3)["error"]["code"] == -32602
     await _set(facade, session_id, "forced", 4)
     assert facade._sessions[session_id].level is None
-    assert agents[0].factory_kwargs["level_provider"]() == "default"
+    assert agents[0].factory_kwargs["choice_provider"]() == "default"
     await facade.shutdown()
 
 
@@ -563,7 +563,7 @@ async def test_auto_level_is_current_and_named_in_the_trace(tmp_path):
     facade, writer, agents = _open(loaded)
     session_id, option = await _session(facade, writer)
     assert option["currentValue"] == "auto"
-    assert agents[0].factory_kwargs["level_provider"]() == "auto"
+    assert agents[0].factory_kwargs["choice_provider"]() == "auto"
     writer.sent.clear()
     await facade.handle_line(
         _line(
@@ -593,7 +593,7 @@ async def test_fixed_model_from_auto_leaves_auto(tmp_path):
     await _set(facade, session_id, "glm-local", 5)
     assert _option(_by_id(writer, 5)["result"])["currentValue"] == "glm-local"
     assert facade._sessions[session_id].level == "default"
-    assert agents[0].factory_kwargs["level_provider"]() == "default"
+    assert agents[0].factory_kwargs["choice_provider"]() == "default"
     await facade.shutdown()
 
 
@@ -604,7 +604,7 @@ async def test_choosing_auto_sets_the_auto_level(tmp_path):
     option = _option(_by_id(writer, 3)["result"])
     assert option["currentValue"] == "auto"
     assert facade._sessions[session_id].level == "auto"
-    assert agents[0].factory_kwargs["level_provider"]() == "auto"
+    assert agents[0].factory_kwargs["choice_provider"]() == "auto"
     await facade.shutdown()
 
 

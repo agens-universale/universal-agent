@@ -1364,7 +1364,7 @@ class TuiApp(App):
         стартовых уведомлений, второй раз не шлём; повтор того же текста гасит
         `push_runtime_notice`. При восстановлении профильного выбора проверяем
         уведомление после санации, чтобы битый профиль не давал два предупреждения."""
-        if self._level_provider() != "auto":
+        if self._choice_provider() != "auto":
             return
         notice = auto_routing_unavailable_notice(self.effective_settings())
         if notice is None or notice == auto_routing_unavailable_notice(
@@ -1403,7 +1403,7 @@ class TuiApp(App):
             )
         )
 
-    def _level_provider(self) -> str:
+    def _choice_provider(self) -> str:
         """Активный уровень для `ModelRouter` (спека §6.4): читает сессионный слой
         напрямую, БЕЗ `effective_settings()` — `/level` переключается
         без `invalidate_runner` (единственный тоггл с таким свойством), и это
@@ -1439,16 +1439,16 @@ class TuiApp(App):
         (§6.4), поэтому строят свой Router от текущего effective_settings()
         на каждый вызов, а не читают executor.
 
-        `level_provider` переводит сырой `_level_provider()` (может быть
-        литералом `auto`) через `effective_level` (спека auto-routing §5.1) —
+        `choice_provider` переводит сырой `_choice_provider()` (может быть
+        литералом `auto`) через `effective_target` (спека auto-routing §5.1) —
         без этого `_resolve_level` падает `ValueError` на `auto`. Вне хода
-        `current_level` неизвестен (`None` → `effective_level` отдаёт
-        `default`); `live_level_provider` остаётся сырым, чтобы `live_level()`
+        `current_level` неизвестен (`None` → `effective_target` отдаёт
+        `default`); `live_choice_provider` остаётся сырым, чтобы `live_choice()`
         этого Router'а отвечал режимом, как у Router'а рана. Витрины его сейчас
         не читают: `/status` берёт отсюда модель и предохранитель, а уровень —
         через `toggle_state` (то же правило, что у палитры: `auto`, только пока
         автовыбор доступен)."""
-        from gc_core.auto_routing.levels import effective_level
+        from gc_core.auto_routing.levels import effective_target
         from gc_core.config import cli_forces_legacy_model
         from gc_core.model_router import ModelRouter
 
@@ -1458,10 +1458,10 @@ class TuiApp(App):
         available = auto_available_cfg(loaded)
         return ModelRouter(
             loaded,
-            level_provider=lambda: effective_level(
-                self._level_provider(), None, available
+            choice_provider=lambda: effective_target(
+                self._choice_provider(), None, available
             ),
-            live_level_provider=self._level_provider,
+            live_choice_provider=self._choice_provider,
             breaker=self._circuit_breaker,
             force_legacy=cli_forces_legacy_model(loaded),
         )
@@ -1473,7 +1473,7 @@ class TuiApp(App):
         обычной точки уровня."""
         from gc_tui.toggles import auto_available_cfg
 
-        return self._level_provider() == "auto" and auto_available_cfg(
+        return self._choice_provider() == "auto" and auto_available_cfg(
             self.effective_settings()
         )
 
@@ -1889,7 +1889,7 @@ class TuiApp(App):
                     on_progress=progress.update,
                     on_stream_delta=self._stream_pump.on_delta,
                     is_tui=True,
-                    level_provider=self._level_provider,
+                    choice_provider=self._choice_provider,
                     circuit_breaker=self._circuit_breaker,
                     # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url
                     # поверх непустого реестра — тот же детект, что уже

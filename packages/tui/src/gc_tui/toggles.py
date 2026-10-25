@@ -216,16 +216,16 @@ def level_values(
 def resolve_level_state(cfg: Any) -> str:
     """Витрина эффективного `/level` (state-callable, спека автороутинга §3):
     `auto` — когда конфиг реально хранит литерал `auto` И фича доступна
-    (в этой ветке `effective_level` при недоступности вернул бы `default`,
+    (в этой ветке `effective_target` при недоступности вернул бы `default`,
     что соврало бы состоянию конфига); иначе — перевод через единственную
-    точку `effective_level` (легаси/недоступность и честный `light/default/max`
+    точку `effective_target` (легаси/недоступность и честный `light/default/max`
     остаются её заботой)."""
-    from gc_core.auto_routing.levels import effective_level
+    from gc_core.auto_routing.levels import effective_target
 
     available = auto_available_cfg(cfg)
     if settings_of(cfg).level == "auto" and available:
         return "auto"
-    return effective_level(settings_of(cfg).level, None, available)
+    return effective_target(settings_of(cfg).level, None, available)
 
 
 def level_unavailable_hint(app: Any, value: str) -> Optional[str]:

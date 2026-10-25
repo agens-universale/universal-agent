@@ -425,7 +425,7 @@ def _eyes_router(assign: dict) -> "ModelRouter":
             "assign": assign,
         }
     )
-    return ModelRouter(snapshot, level_provider=lambda: "default")
+    return ModelRouter(snapshot, choice_provider=lambda: "default")
 
 
 def _probe_note(

@@ -410,10 +410,10 @@ async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
@@ -452,10 +452,10 @@ async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_cha
             "slots": {"max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(old_snapshot), level_provider=lambda: "light"
+            make_settings(old_snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(new_snapshot), level_provider=lambda: "max"
+            make_settings(new_snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
@@ -497,10 +497,10 @@ async def test_footer_shows_transition_without_dot_when_only_profile_changes(
             "slots": {"default": "gpt-5.5"},
         }
         executor_router = ModelRouter(
-            make_settings(old_snapshot), level_provider=lambda: "default"
+            make_settings(old_snapshot), choice_provider=lambda: "default"
         )
         live_router = ModelRouter(
-            make_settings(new_snapshot), level_provider=lambda: "default"
+            make_settings(new_snapshot), choice_provider=lambda: "default"
         )
         app.active_runner = _call_runner("default", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
@@ -532,7 +532,7 @@ async def test_footer_no_arrow_when_future_model_matches_fact(
             "slots": {"default": "opus-4.8"},
         }
         router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "default"
+            make_settings(snapshot), choice_provider=lambda: "default"
         )
         app.active_runner = _call_runner("default", router)
         monkeypatch.setattr(app, "display_router", lambda: router)
@@ -563,10 +563,10 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
 
         class _FinishedRunner:
@@ -612,10 +612,10 @@ async def test_footer_drops_profile_name_before_dropping_transition_block(
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
@@ -659,10 +659,10 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)
@@ -732,10 +732,10 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner_with_usage(
             "light",
@@ -816,10 +816,10 @@ async def test_footer_two_line_layout_drops_profile_before_transition(
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner_with_usage(
             "light",
@@ -907,10 +907,10 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner_with_usage(
             "light",
@@ -975,10 +975,10 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
             "slots": {"light": "minimax-m3", "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner_with_usage(
             "light",
@@ -1096,9 +1096,9 @@ def _arm_transition(app, monkeypatch, *, profile=None, usage=None):
         "slots": {"light": "minimax-m3", "max": "opus-4.8"},
     }
     pinned = ModelRouter(
-        make_settings(snapshot), level_provider=lambda: "light"
+        make_settings(snapshot), choice_provider=lambda: "light"
     )
-    live = ModelRouter(make_settings(snapshot), level_provider=lambda: "max")
+    live = ModelRouter(make_settings(snapshot), choice_provider=lambda: "max")
     app.active_runner = (
         _call_runner_with_usage("light", pinned, usage)
         if usage
@@ -1581,7 +1581,7 @@ async def test_footer_running_turn_follows_live_level_through_executor_router(
     }
     level = {"value": "light"}
     executor = ModelRouter(
-        make_settings(snapshot), level_provider=lambda: level["value"]
+        make_settings(snapshot), choice_provider=lambda: level["value"]
     )
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
@@ -1589,7 +1589,7 @@ async def test_footer_running_turn_follows_live_level_through_executor_router(
     )
     app._config_path = str(tmp_path / "config.yml")
     app.active_runner = _running_runner(executor)
-    monkeypatch.setattr(app, "_level_provider", lambda: level["value"])
+    monkeypatch.setattr(app, "_choice_provider", lambda: level["value"])
     monkeypatch.setattr(app, "display_router", lambda: executor)
     monkeypatch.setattr(app, "collect_footer_notices", lambda: [])
     async with app.run_test(size=(120, 24)) as pilot:
@@ -1616,13 +1616,13 @@ async def test_footer_running_turn_keeps_executor_model_when_profile_switches(
         make_settings(
             {"models": {"minimax-m3": {}}, "slots": {"light": "minimax-m3"}}
         ),
-        level_provider=lambda: "light",
+        choice_provider=lambda: "light",
     )
     new = ModelRouter(
         make_settings(
             {"models": {"other-model": {}}, "slots": {"light": "other-model"}}
         ),
-        level_provider=lambda: "light",
+        choice_provider=lambda: "light",
     )
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
@@ -1630,7 +1630,7 @@ async def test_footer_running_turn_keeps_executor_model_when_profile_switches(
     )
     app._config_path = str(tmp_path / "config.yml")
     app.active_runner = _running_runner(old)
-    monkeypatch.setattr(app, "_level_provider", lambda: "light")
+    monkeypatch.setattr(app, "_choice_provider", lambda: "light")
     monkeypatch.setattr(app, "display_router", lambda: new)
     monkeypatch.setattr(app, "collect_footer_notices", lambda: [])
     async with app.run_test(size=(120, 24)) as pilot:
@@ -1650,7 +1650,7 @@ async def test_footer_idle_uses_display_router(tmp_path, monkeypatch):
         make_settings(
             {"models": {"other-model": {}}, "slots": {"light": "other-model"}}
         ),
-        level_provider=lambda: "light",
+        choice_provider=lambda: "light",
     )
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
@@ -1670,7 +1670,7 @@ async def test_footer_idle_uses_display_router(tmp_path, monkeypatch):
         make_settings(
             {"models": {"stale-model": {}}, "slots": {"light": "stale-model"}}
         ),
-        level_provider=lambda: "light",
+        choice_provider=lambda: "light",
     )
     app2 = TuiApp(
         threads_dir=str(tmp_path / "t2"),
@@ -1726,9 +1726,9 @@ def _arm_unpinned_running(app, monkeypatch, *, profile=None, usage=None):
         "slots": {"light": "minimax-m3", "max": "opus-4.8"},
     }
     executor = ModelRouter(
-        make_settings(snapshot), level_provider=lambda: "light"
+        make_settings(snapshot), choice_provider=lambda: "light"
     )
-    live = ModelRouter(make_settings(snapshot), level_provider=lambda: "max")
+    live = ModelRouter(make_settings(snapshot), choice_provider=lambda: "max")
     app.active_runner = _running_runner(executor, usage)
     monkeypatch.setattr(app, "display_router", lambda: live)
     monkeypatch.setattr(app, "collect_footer_notices", list)
@@ -1813,7 +1813,7 @@ async def test_footer_two_line_auto_drops_profile_before_fact_and_fact_last(
             make_settings(
                 {"models": {model: {}}, "slots": {"default": model}}
             ),
-            level_provider=lambda: "default",
+            choice_provider=lambda: "default",
         ),
         (_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0)),
     )
@@ -1866,10 +1866,10 @@ async def test_name_kept_for_a_pending_transition_is_squeezed_not_widened(
             "slots": {"light": long_id, "max": "opus-4.8"},
         }
         executor_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "light"
+            make_settings(snapshot), choice_provider=lambda: "light"
         )
         live_router = ModelRouter(
-            make_settings(snapshot), level_provider=lambda: "max"
+            make_settings(snapshot), choice_provider=lambda: "max"
         )
         app.active_runner = _call_runner("light", executor_router)
         monkeypatch.setattr(app, "display_router", lambda: live_router)

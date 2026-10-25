@@ -51,7 +51,7 @@ async def test_footer_keeps_prepared_call_and_applies_selection_to_next_call(
     app = TuiApp(settings=loaded, threads_dir=str(tmp_path / "threads"))
     app._config_path = str(tmp_path / "config.yml")
     ctx = await acreate_run_context(
-        loaded, is_tui=True, level_provider=app._level_provider
+        loaded, is_tui=True, choice_provider=app._choice_provider
     )
     state = State(
         verbose=False,

@@ -23,7 +23,7 @@ from typing import (
 
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.judge_runner import arun_pair_judge
-from gc_core.auto_routing.levels import auto_active, effective_level
+from gc_core.auto_routing.levels import auto_active, effective_target
 from gc_core.auto_routing.log_events import (
     log_artifact_reroute,
     log_routing_decision,
@@ -504,7 +504,7 @@ def _raise_honest_main_unavailable(
 
 
 def resolve_main_for_call(
-    state: State, ctx: Any, *, level_override: Optional[str] = None
+    state: State, ctx: Any, *, target_override: Optional[str] = None
 ) -> Optional[Any]:
     """Единственный резолв модели главного трейса перед LLM-вызовом (спека
     автороутинга §5.2 п.3): ручной уровень и AUTO используют решение текущего
@@ -513,7 +513,7 @@ def resolve_main_for_call(
     повторных резолвов нет — иначе смена уровня между решением и отправкой давала
     бы «половинчатую подмену» (лог от одной модели, запрос к другой).
 
-    `level_override` — зафиксированный уровень из точки решения (`aroute_before_call`):
+    `target_override` — зафиксированный уровень из точки решения (`aroute_before_call`):
     без него `router.resolve("main")` читал бы
     провайдер уровня ЗАНОВО, независимо от чтения внутри `aroute_before_call` — и
     `/level` между решением и этим резолвом развёл бы их. `None` (вызовы вне
@@ -528,7 +528,7 @@ def resolve_main_for_call(
     if router is None:
         return None
     try:
-        resolved = router.resolve("main", level_override=level_override)
+        resolved = router.resolve("main", target_override=target_override)
     except AliasCircuitOpenError as exc:
         if getattr(router, "is_subagent_child", False):
             raise
@@ -633,7 +633,7 @@ def _first_alive_level(
 
     def is_alive(level: str) -> bool:
         try:
-            kits[level] = router.resolve("main", level_override=level)
+            kits[level] = router.resolve("main", target_override=level)
         except AliasCircuitOpenError:
             return False
         return True
@@ -776,7 +776,7 @@ async def aroute_before_call(
         return cached_active, cached_decision, cached_effective, False
 
     router = getattr(ctx, "model_router", None)
-    live = router.live_level() if router is not None else "default"
+    live = router.live_choice() if router is not None else "default"
     available = getattr(ctx, "auto_available", True)
     active = auto_active(router, live, available)
 
@@ -817,7 +817,7 @@ async def aroute_before_call(
                 decision, alive[0], current=state.current_level
             )
         state_ops.apply_decision(state, decision)
-    effective = effective_level(
+    effective = effective_target(
         live, getattr(state, "current_level", None), available
     )
     state._tick_decision = (live, active, decision, effective)
@@ -826,7 +826,7 @@ async def aroute_before_call(
 
 def _apply_call_kit(state: State, ctx: Any, level: str) -> Optional[Any]:
     """Комплект вызова и фактический уровень такта; схемы проецируются транспортом."""
-    resolved = resolve_main_for_call(state, ctx, level_override=level)
+    resolved = resolve_main_for_call(state, ctx, target_override=level)
     state._call_level = level
     return resolved
 
@@ -1024,7 +1024,7 @@ async def _arequest_backend_canonical_local(
     (`_answer_stream_muted`), в повтор после 401 значение едет то же."""
     if resolved is _UNRESOLVED_MAIN:
         resolved = resolve_main_for_call(
-            state, ctx, level_override=getattr(state, "_call_level", None)
+            state, ctx, target_override=getattr(state, "_call_level", None)
         )
     auth_connector = getattr(ctx, "auth_connector", None)
     try:

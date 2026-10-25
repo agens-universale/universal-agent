@@ -1,13 +1,13 @@
 """Витрина модели ACP: одна select-опция и уровень сессии.
 
 Ядро не хранит выбранную модель отдельно от уровня. Пикер показывает алиас,
-а смена пишет уровень этой сессии: ``level_provider`` отдаёт его со
+а смена пишет уровень этой сессии: ``choice_provider`` отдаёт его со
 следующего запроса к модели. ``config.yml`` фасад не трогает.
 
 Уровень ``auto`` — строка пикера, только когда ядро считает автовыбор
 доступным этому конфигу (``auto_routing.levels``). Витрина не гадает модель
 режима: пикер и трейс называют сам режим, а при недоступном ``auto``
-показывают уровень, которым ход пойдёт на деле (``effective_level``).
+показывают уровень, которым ход пойдёт на деле (``effective_target``).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 from gc_core.auto_routing.levels import (
     AUTO,
     auto_available,
-    effective_level,
+    effective_target,
 )
 from gc_core.config import cli_forces_legacy_model
 from gc_core.model_router import ModelRouter
@@ -133,13 +133,13 @@ def _auto_available(loaded: Any) -> bool:
 
 def _shown(level: str, available: bool) -> str:
     """Уровень витрины: литерал ``auto`` в Router не попадает."""
-    return effective_level(level, None, available)
+    return effective_target(level, None, available)
 
 
 def _router(loaded: Any, level: str, breaker: Any) -> ModelRouter:
     return ModelRouter(
         loaded,
-        level_provider=lambda: level,
+        choice_provider=lambda: level,
         breaker=breaker,
         force_legacy=cli_forces_legacy_model(loaded),
     )

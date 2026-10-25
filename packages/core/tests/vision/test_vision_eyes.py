@@ -42,7 +42,7 @@ def _router() -> ModelRouter:
     }
     return ModelRouter(
         AppConfig.model_validate(raw),
-        level_provider=lambda: "default",
+        choice_provider=lambda: "default",
     )
 
 

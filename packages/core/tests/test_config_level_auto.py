@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gc_core.auto_routing.levels import auto_available, effective_level
+from gc_core.auto_routing.levels import auto_available, effective_target
 from gc_core.config import load_settings
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
@@ -44,14 +44,14 @@ def test_level_auto_is_accepted_by_schema():
 def test_level_auto_with_auto_routing_disabled_loads_and_resolves_default():
     """`level: auto` + `agent.auto_routing: false` — конфиг грузится без ошибки
     (рубильник не запрещает значение схемы), а эффективный уровень идёт через
-    `auto_available` в `effective_level`: рубильник выключен → `False` → `default`."""
+    `auto_available` в `effective_target`: рубильник выключен → `False` → `default`."""
     cfg = AppConfig.model_validate(
         {"level": "auto", "agent": {"auto_routing": False}}
     )
     assert cfg.level == "auto"
     available = auto_available(cfg, force_legacy=False)
     assert available is False
-    assert effective_level(cfg.level, None, available) == "default"
+    assert effective_target(cfg.level, None, available) == "default"
 
 
 def test_level_auto_from_the_project_config_on_a_one_model_registry_names_the_reason(

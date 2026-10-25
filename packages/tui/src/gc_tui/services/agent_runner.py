@@ -403,17 +403,17 @@ class AgentRunner:
 
     def next_call_selection(self) -> Optional[tuple[bool, str, str]]:
         """Живой выбор следующего вызова в реестре работающего контекста."""
-        from gc_core.auto_routing.levels import auto_active, effective_level
+        from gc_core.auto_routing.levels import auto_active, effective_target
 
         router = self.executor_router()
         ctx = getattr(self._executor, "_ctx", None)
         if router is None or ctx is None:
             return None
-        live = router.live_level()
+        live = router.live_choice()
         available = getattr(ctx, "auto_available", True)
         selected_auto = auto_active(router, live, available)
-        level = effective_level(live, None, available)
-        resolved = router.resolve_main_at_level(level, check_breaker=False)
+        level = effective_target(live, None, available)
+        resolved = router.resolve_main_at(level, check_breaker=False)
         return selected_auto, level, resolved.alias or resolved.model
 
     def pinned_summary_limits(self) -> Any:

@@ -344,7 +344,7 @@ slots:
 """,
     )
     assert onboarding.is_unconfigured(cfg) is False
-    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+    resolved = ModelRouter(cfg, choice_provider=lambda: "default").resolve(
         "main"
     )
     assert resolved.url == "https://x/v1/chat/completions"
@@ -376,7 +376,7 @@ slots:
         ),
     )
     assert onboarding.is_unconfigured(cfg) is True
-    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+    resolved = ModelRouter(cfg, choice_provider=lambda: "default").resolve(
         "main"
     )
     assert resolved.url == onboarding.URL_SENTINEL
@@ -1083,7 +1083,7 @@ def test_write_wizard_values_result_resolves_in_both_api_modes(
         cfg_path.write_text(text, encoding="utf-8")
         cfg = config.load_settings(str(cfg_path))
         assert onboarding.is_unconfigured(cfg) is False
-        resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+        resolved = ModelRouter(cfg, choice_provider=lambda: "default").resolve(
             "main"
         )
         assert resolved.model == "qwen/qwen3-coder"
@@ -1392,7 +1392,7 @@ def test_effective_model_is_empty_on_the_template_sentinel():
 
 
 def test_effective_model_resolves_auto_level_to_default_slot():
-    """level: auto (спека auto-routing §5.1) переводится через `effective_level`
+    """level: auto (спека auto-routing §5.1) переводится через `effective_target`
     ДО Router'а — сырой литерал иначе роняет резолв (ValueError), и мастер на
     уже настроенном auto-конфиге видел бы устаревший плоский ключ вместо
     модели default-слота."""

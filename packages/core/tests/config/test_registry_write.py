@@ -633,7 +633,7 @@ def test_first_assign_write_into_an_old_config_adds_only_the_chosen_binding(
         "раскомментируйте" not in text
     )  # комментарий-пример шаблона не переехал
     router = ModelRouter(
-        AppConfig.model_validate(snapshot), level_provider=lambda: "light"
+        AppConfig.model_validate(snapshot), choice_provider=lambda: "light"
     )
     # PR140 Р1: судьи и суммаризация без привязки идут кодовым уровнем default,
     # поэтому «не приехали привязки шаблона» проверяем на потребителях вне таблицы

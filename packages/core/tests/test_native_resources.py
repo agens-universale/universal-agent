@@ -63,7 +63,7 @@ def test_context_assembly_only_consumes_prepared_values(
     )
     router = ModelRouter(
         AppConfig.model_validate(prepared.settings),
-        level_provider=lambda: "auto",
+        choice_provider=lambda: "auto",
         force_legacy=force_legacy,
     )
     if bound:

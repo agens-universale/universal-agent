@@ -125,7 +125,7 @@ def test_default_template_with_live_profile_anchor_stays_legacy():
 
     router = ModelRouter(
         AppConfig.model_validate(raw),
-        level_provider=lambda: raw["level"],
+        choice_provider=lambda: raw["level"],
     )
     assert router.registry_empty() is True
     assert router.resolve("main").source == "легаси"

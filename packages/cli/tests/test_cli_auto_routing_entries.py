@@ -218,7 +218,7 @@ def test_init_flags_reach_typed_settings_and_actual_router(
     assert ctx.runtime.active_profile == "review"
     assert ctx.runtime.run_mode == "cli"
     assert ctx.auto_available is True
-    assert ctx.model_router.live_level() == "auto"
+    assert ctx.model_router.live_choice() == "auto"
     assert ctx.model_router.resolve("main").model == "profile-mid"
 
 

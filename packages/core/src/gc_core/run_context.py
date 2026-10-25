@@ -15,7 +15,7 @@ from gc_core.agent_store import (
 from gc_core.attachments.store import ImageStore, image_store_for
 from gc_core.auto_routing.levels import (
     auto_available,
-    effective_level,
+    effective_target,
     resolve_routing_params,
 )
 from gc_core.auto_routing.policy import RoutingParams
@@ -310,15 +310,15 @@ def assemble_run_context(
     ctx.routing_params = resolve_routing_params(
         ctx, legacy_call_kits=not ctx.routing_contract_v2
     )
-    live = bindings.model_router.live_level
+    live = bindings.model_router.live_choice
 
     def effective_provider():
         state = ctx.active_state
-        return effective_level(
+        return effective_target(
             live(), getattr(state, "current_level", None), ctx.auto_available
         )
 
-    ctx.model_router = bindings.model_router.with_level_providers(
+    ctx.model_router = bindings.model_router.with_choice_providers(
         effective_provider, live
     )
     return ctx
@@ -343,7 +343,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     tools_cache: Any = None,
     log_handlers: Any = None,
     thread_store: Any = None,
-    level_provider: Optional[Callable[[], str]] = None,
+    choice_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
     prompt_loader: Optional[PromptLoader] = None,
@@ -391,7 +391,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     - Свой LocalFsBackend → ``TrackingFsBackend`` (журнал правок) там, где
       запись включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
       по конфигу); библиотечный вызов без режима запуска не оборачивается.
-    - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
+    - ``choice_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
       CLI/server не передают его → константный провайдер из ``settings.level``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
       инверсия зависимости через этот параметр.
@@ -501,7 +501,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             is_tui=is_tui,
             tools_cache=tools_cache,
             thread_store=thread_store,
-            level_provider=level_provider,
+            choice_provider=choice_provider,
             circuit_breaker=circuit_breaker,
             force_legacy=force_legacy,
             prompt_loader=prompt_loader,
@@ -659,7 +659,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     is_tui: bool,
     tools_cache: Any,
     thread_store: Any = None,
-    level_provider: Optional[Callable[[], str]] = None,
+    choice_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
     prompt_loader: Optional[PromptLoader] = None,
@@ -735,10 +735,10 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     workspace = build_execution_workspace(backend, prep.settings)
 
     configured_level = settings.level or "default"
-    effective_level_provider = level_provider or (lambda: configured_level)
+    effective_choice_provider = choice_provider or (lambda: configured_level)
     model_router = ModelRouter(
         settings,
-        level_provider=effective_level_provider,
+        choice_provider=effective_choice_provider,
         breaker=circuit_breaker,
         force_legacy=force_legacy,
     )

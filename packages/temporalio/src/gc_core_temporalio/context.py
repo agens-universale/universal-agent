@@ -121,7 +121,7 @@ def assemble_context(
             "tool_fabric": candidates[name]["tool_fabric"],
         }
     router = ModelRouter(
-        loaded, level_provider=lambda: loaded.settings.level or "default"
+        loaded, choice_provider=lambda: loaded.settings.level or "default"
     )
     operations.router = router
     try:

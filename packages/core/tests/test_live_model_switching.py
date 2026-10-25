@@ -42,7 +42,7 @@ async def _runtime(initial):
         }
     )
     ctx = await acreate_run_context(
-        cfg, level_provider=lambda: selected["level"]
+        cfg, choice_provider=lambda: selected["level"]
     )
     state = State(
         verbose=False,

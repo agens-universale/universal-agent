@@ -1924,26 +1924,26 @@ def test_session_profile_auto_activates_runtime_and_level_changes_next_call(
     (profiles / "automatic.yml").write_text("level: auto\n", encoding="utf-8")
     app = TuiApp(settings=load_settings(str(config_path)))
     app.set_config_path(str(config_path))
-    assert app._level_provider() == "default"
+    assert app._choice_provider() == "default"
 
     app.switch_session_profile("automatic")
 
-    assert app._level_provider() == "auto"
+    assert app._choice_provider() == "auto"
     assert toggle_state(app, "level") == "auto"
     assert app.auto_mode_active() is True
     ctx = run_coro(
         acreate_run_context(
             tui_agent_settings(app.effective_settings()),
             is_tui=True,
-            level_provider=app._level_provider,
+            choice_provider=app._choice_provider,
         )
     )
-    assert ctx.model_router.live_level() == "auto"
+    assert ctx.model_router.live_choice() == "auto"
     assert ctx.auto_available is True
     assert ctx.model_router.resolve("main").alias == "mid"
 
     app.set_session_override("level", "light")
-    assert app._level_provider() == "light"
+    assert app._choice_provider() == "light"
     assert toggle_state(app, "level") == "light"
     assert ctx.model_router.resolve("main").alias == "fast"
     state = State(
@@ -1962,9 +1962,9 @@ def test_session_profile_auto_activates_runtime_and_level_changes_next_call(
     assert run_coro(aprepare_main_call(state, ctx)).alias == "fast"
 
     app.set_session_override("level", "max")
-    assert app._level_provider() == "max"
+    assert app._choice_provider() == "max"
     assert toggle_state(app, "level") == "max"
-    assert ctx.model_router.live_level() == "max"
+    assert ctx.model_router.live_choice() == "max"
     assert run_coro(aprepare_main_call(state, ctx)).alias == "fast"
     close_tick(state, state._call_level)
     assert run_coro(aprepare_main_call(state, ctx)).alias == "big"
@@ -2011,7 +2011,7 @@ async def test_session_profile_level_is_live_while_running_registry_stays_a_snap
     ctx = await acreate_run_context(
         app.effective_settings(),
         is_tui=True,
-        level_provider=app._level_provider,
+        choice_provider=app._choice_provider,
     )
     state = State(
         verbose=False,
@@ -2034,7 +2034,7 @@ async def test_session_profile_level_is_live_while_running_registry_stays_a_snap
     clear_runtime_notices()
     app.switch_session_profile("automatic")
 
-    assert app._level_provider() == "auto"
+    assert app._choice_provider() == "auto"
     assert app.display_router().resolve("main").alias == "next-model"
     assert "next-model" not in ctx.settings.models
     assert (
@@ -2104,7 +2104,7 @@ async def test_footer_uses_running_auto_availability_after_profile_switch(
     ctx = await acreate_run_context(
         app.effective_settings(),
         is_tui=True,
-        level_provider=app._level_provider,
+        choice_provider=app._choice_provider,
     )
     state = State(
         verbose=False,

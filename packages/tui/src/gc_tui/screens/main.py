@@ -955,14 +955,14 @@ class TraceScreen(TraceFollowMixin, Screen):
         model = resolved.alias or resolved.model
         return model if model and model != MODEL_SENTINEL else "?"
 
-    def _footer_live_level(self) -> str:
+    def _footer_live_choice(self) -> str:
         """Активный уровень ЖИВОГО резолва (спека §12.1/§12.2): реагирует на
         /level и активацию профиля сразу, без пересборки executor. Общий
         источник для цвета будущей модели и сравнения «уровень менялся?»
         посреди вызова; факт берётся через Router работающего executor."""
         display_router = getattr(self.app, "display_router", None)
         return (
-            display_router().active_level()
+            display_router().active_target()
             if callable(display_router)
             else "default"
         )
@@ -1000,9 +1000,9 @@ class TraceScreen(TraceFollowMixin, Screen):
 
         call_level = getattr(runner, "call_level", None)
         prepared_level = call_level() if callable(call_level) else None
-        level = prepared_level or router.active_level()
+        level = prepared_level or router.active_target()
         try:
-            resolved = router.resolve_main_at_level(level, check_breaker=False)
+            resolved = router.resolve_main_at(level, check_breaker=False)
         except AliasCircuitOpenError as exc:
             resolved = exc.resolved
         except ValueError:
@@ -1048,7 +1048,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                     transition = (AUTO_LEVEL_VALUE.color, "auto")
             else:
                 if next_selection is None:
-                    live_level = self._footer_live_level()
+                    live_level = self._footer_live_choice()
                     live_model = str(self._footer_model_name())
                 else:
                     _, live_level, live_model = next_selection
@@ -1064,7 +1064,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                         live_model,
                     )
         else:
-            color = self._level_color(self._footer_live_level())
+            color = self._level_color(self._footer_live_choice())
             model = str(self._footer_model_name())
         return _FooterHeadSnapshot(
             profile, mode_auto, color, model, running, transition

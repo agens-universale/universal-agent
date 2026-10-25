@@ -20,7 +20,7 @@ def _router(level, assign=None):
     if assign is not None:
         snapshot["assign"] = assign
     return ModelRouter(
-        AppConfig.model_validate(snapshot), level_provider=lambda: level
+        AppConfig.model_validate(snapshot), choice_provider=lambda: level
     )
 
 

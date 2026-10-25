@@ -234,7 +234,7 @@ def validate_model_alias(alias: str) -> None:
 
 def validate_level_value(value: str) -> str:
     """level ∉ LEVELS — ошибка; `auto` — режим автовыбора (перевод в уровень —
-    `auto_routing.levels.effective_level`)."""
+    `auto_routing.levels.effective_target`)."""
     if value not in LEVEL_VALUES:
         raise ValueError(
             f"level должен быть одним из {LEVELS} или 'auto', получено '{value}'"

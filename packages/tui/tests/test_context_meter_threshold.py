@@ -360,7 +360,7 @@ async def test_meter_uses_prepared_call_thresholds_and_next_call_level(
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
     app = TuiApp(settings=loaded, threads_dir=str(tmp_path))
     ctx = await acreate_run_context(
-        loaded, is_tui=True, level_provider=app._level_provider
+        loaded, is_tui=True, choice_provider=app._choice_provider
     )
     state = State(
         verbose=False,

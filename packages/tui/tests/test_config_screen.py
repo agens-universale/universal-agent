@@ -58,7 +58,7 @@ def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
 
 
 def test_profile_header_resolves_auto_level_to_default_slot_model():
-    """level: auto (спека auto-routing §5.1) переводится через `effective_level`
+    """level: auto (спека auto-routing §5.1) переводится через `effective_target`
     ДО Router'а — сырой литерал иначе роняет резолв (ValueError), и шапка
     показала бы фоллбэк вместо модели default-слота. Строка «уровень:» —
     литерал `auto` при доступном автовыборе (как /status), иначе действующий

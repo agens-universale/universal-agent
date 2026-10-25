@@ -482,7 +482,7 @@ def test_model_inherits_from_backend_overridden_by_profile(
     )
 
     loaded = load_settings(str(base_config))
-    resolved = ModelRouter(loaded, level_provider=lambda: "default").resolve(
+    resolved = ModelRouter(loaded, choice_provider=lambda: "default").resolve(
         "main"
     )
 

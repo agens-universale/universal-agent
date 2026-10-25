@@ -1,4 +1,4 @@
-"""RunContext: ModelRouter + level_provider + согласованный выбор модели вызова.
+"""RunContext: ModelRouter + choice_provider + согласованный выбор модели вызова.
 
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-5-brief.md.
 """
@@ -45,28 +45,28 @@ def _make_state(model: str = "unused-legacy-default") -> State:
     )
 
 
-# --- create_run_context: model_router + level_provider ---------------------------
+# --- create_run_context: model_router + choice_provider ---------------------------
 
 
-async def test_create_run_context_without_level_provider_reads_config_level(
+async def test_create_run_context_without_choice_provider_reads_config_level(
     minimal_settings,
 ):
     ctx = await rc.acreate_run_context(minimal_settings)
     assert isinstance(ctx.model_router, ModelRouter)
-    assert ctx.model_router.active_level() == "max"
+    assert ctx.model_router.active_target() == "max"
 
 
-async def test_create_run_context_with_level_provider_uses_callable(
+async def test_create_run_context_with_choice_provider_uses_callable(
     minimal_settings,
 ):
     level = {"value": "light"}
     ctx = await rc.acreate_run_context(
-        minimal_settings, level_provider=lambda: level["value"]
+        minimal_settings, choice_provider=lambda: level["value"]
     )
-    assert ctx.model_router.active_level() == "light"
+    assert ctx.model_router.active_target() == "light"
     level["value"] = "default"
     assert (
-        ctx.model_router.active_level() == "default"
+        ctx.model_router.active_target() == "default"
     )  # провайдер живой, не закэширован
 
 
@@ -103,7 +103,7 @@ async def test_create_run_context_default_force_legacy_is_false(
 def test_begin_turn_sets_default_model_from_router_resolve_main(
     minimal_settings,
 ):
-    router = ModelRouter(minimal_settings, level_provider=lambda: "max")
+    router = ModelRouter(minimal_settings, choice_provider=lambda: "max")
     ctx = SimpleNamespace(model_router=router)
     state = _make_state()
 
@@ -136,7 +136,7 @@ def test_begin_turn_refixes_model_between_turns_when_level_changes():
         }
     )
     level = {"value": "light"}
-    router = ModelRouter(snapshot, level_provider=lambda: level["value"])
+    router = ModelRouter(snapshot, choice_provider=lambda: level["value"])
     ctx = SimpleNamespace(model_router=router)
     state = _make_state()
 
@@ -169,7 +169,7 @@ def _two_slot_router(
     )
     return ModelRouter(
         snapshot,
-        level_provider=lambda: level_box["value"],
+        choice_provider=lambda: level_box["value"],
         is_subagent_child=is_subagent_child,
     )
 
@@ -275,12 +275,12 @@ def test_is_subagent_child_is_an_explicit_flag_not_derived_from_override(
 ):
     """Спека auto-routing §5.1: признак «дочерний Router» задаётся явно — override у
     ребёнка станет необязательным (непривязанный субагент ведёт свой роутинг)."""
-    parent = ModelRouter(minimal_settings, level_provider=lambda: "max")
+    parent = ModelRouter(minimal_settings, choice_provider=lambda: "max")
     assert parent.is_subagent_child is False
 
     child = ModelRouter(
         minimal_settings,
-        level_provider=lambda: "max",
+        choice_provider=lambda: "max",
         is_subagent_child=True,
     )
     assert child.is_subagent_child is True
@@ -450,7 +450,7 @@ def test_auto_turn_does_not_pin_the_manual_level(monkeypatch):
 
     level = {"value": "light"}
     router = _two_slot_router(level)
-    monkeypatch.setattr(router, "live_level", lambda: "auto")
+    monkeypatch.setattr(router, "live_choice", lambda: "auto")
     ctx = _main_ctx(router)
     ctx.auto_available = True
     state = _make_state()
@@ -536,7 +536,7 @@ async def test_a_missing_pair_prompt_never_refuses_the_start(
     store = MemoryAgentStore()
     kwargs = {"agent_store": store}
     if selected_level is not None:
-        kwargs["level_provider"] = lambda: selected_level
+        kwargs["choice_provider"] = lambda: selected_level
     ctx = await rc.acreate_run_context(cfg, **kwargs)
-    assert ctx.model_router.live_level() == (selected_level or source_level)
+    assert ctx.model_router.live_choice() == (selected_level or source_level)
     assert ("prompt", "routing_pair_judge") not in store.reads

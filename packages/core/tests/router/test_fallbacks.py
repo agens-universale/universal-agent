@@ -28,7 +28,7 @@ def _snapshot(raw: dict) -> AppConfig:
 
 
 def _router(raw: dict, *, level: str = "default") -> ModelRouter:
-    return ModelRouter(_snapshot(raw), level_provider=lambda: level)
+    return ModelRouter(_snapshot(raw), choice_provider=lambda: level)
 
 
 def _http_error(status: int) -> httpx.HTTPStatusError:

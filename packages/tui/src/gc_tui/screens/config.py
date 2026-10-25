@@ -104,7 +104,7 @@ def _effective_model_name(config) -> str:
 
     Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4).
 
-    `level: auto` (спека auto-routing §5.1) переводится через `effective_level`
+    `level: auto` (спека auto-routing §5.1) переводится через `effective_target`
     ДО `ModelRouter` — сырой литерал `auto` иначе роняет `_resolve_level`
     (`ValueError`), и шапка показала бы фоллбэк вместо модели default-слота.
     Доступность фичи — через `gc_tui.toggles.auto_available_cfg` (единая точка
@@ -112,7 +112,7 @@ def _effective_model_name(config) -> str:
     `cli_forces_legacy_model`; core-аналог с той же логикой — только на
     core-функциях (`gc_core.onboarding.effective_model`, слой не позволяет
     ему знать про `gc_tui`)."""
-    from gc_core.auto_routing.levels import effective_level
+    from gc_core.auto_routing.levels import effective_target
     from gc_core.config import cli_forces_legacy_model
     from gc_core.model_router import ModelRouter
     from gc_core.onboarding import MODEL_SENTINEL
@@ -125,7 +125,7 @@ def _effective_model_name(config) -> str:
         available = auto_available_cfg(config)
         resolved = ModelRouter(
             config,
-            level_provider=lambda: effective_level(
+            choice_provider=lambda: effective_target(
                 settings.level, None, available
             ),
             force_legacy=cli_forces_legacy_model(config),

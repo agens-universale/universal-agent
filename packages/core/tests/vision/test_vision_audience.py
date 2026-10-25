@@ -43,7 +43,7 @@ def _router(
             "assign": assign or {},
         }
     )
-    return ModelRouter(snapshot, level_provider=lambda: "default")
+    return ModelRouter(snapshot, choice_provider=lambda: "default")
 
 
 def _key(url, model):
@@ -197,7 +197,7 @@ def test_an_unresolvable_eyes_level_does_not_break_the_request():
             }
         }
     )
-    router = ModelRouter(snapshot, level_provider=lambda: "default")
+    router = ModelRouter(snapshot, choice_provider=lambda: "default")
     request = ResolvedModel(
         alias="a",
         model="a",
@@ -222,7 +222,7 @@ def test_the_key_uses_the_fallback_url_when_the_model_has_none():
         AppConfig.model_validate(
             {"models": {"bare": {}}, "slots": {"default": "bare"}}
         ),
-        level_provider=lambda: "default",
+        choice_provider=lambda: "default",
     )
     resolved = router.resolve("main")
     rejects = ImageRejects()
@@ -242,7 +242,7 @@ def test_legacy_request_model_is_keyed_by_its_model_id():
                 "backend.completions_url": _GLM_URL,
             }
         ),
-        level_provider=lambda: "default",
+        choice_provider=lambda: "default",
     )
     rejects = ImageRejects()
     mark_blind(_key(_GLM_URL, "legacy-model"))

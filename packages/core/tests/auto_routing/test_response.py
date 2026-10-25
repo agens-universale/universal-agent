@@ -28,7 +28,7 @@ def tools_data():
     """Реальный реестр тулов такта — тот же, что контроллер отдаёт вердикту."""
     cfg = AppConfig.model_validate(RAW)
     return run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: "default")
+        rc.acreate_run_context(cfg, choice_provider=lambda: "default")
     ).tools_data
 
 
