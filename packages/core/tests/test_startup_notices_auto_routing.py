@@ -174,3 +174,27 @@ def test_no_unknown_model_notice_under_legacy_force():
         {"agent.model": "raw-id"}, layer="cli"
     )
     assert unknown_model_choice_notice(loaded) is None
+
+
+def test_unknown_model_choice_notice_names_default_alias_not_provider_id():
+    cfg = _cfg(model="ghost", models={"fast": {}, "mid": {"model": "p-mid"}})
+    notice = unknown_model_choice_notice(cfg)
+    assert notice is not None
+    assert notice.message == (
+        "модель ghost не найдена в реестре — работаю моделью mid"
+    )
+
+
+def test_unknown_model_choice_notice_survives_unresolvable_default():
+    """Реестр без слотов и не из одной модели: default не резолвится —
+    сборка стартовых уведомлений не падает, нотис называет выбор."""
+    cfg = make_settings(
+        {
+            "model": "ghost",
+            "backend.api_mode": "chat_completions",
+            "models": {"a": {}, "b": {}},
+        }
+    )
+    notice = unknown_model_choice_notice(cfg)
+    assert notice is not None
+    assert notice.message == "модель ghost не найдена в реестре"

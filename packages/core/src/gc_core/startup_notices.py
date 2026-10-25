@@ -211,7 +211,7 @@ def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
 def unknown_model_choice_notice(source: Any) -> Optional[Notice]:
     """Выбор `model` не найден в реестре — запуск идёт моделью слота default.
     Только стартовое: роутер уже подменяет выбор (`effective_choice`), нотис
-    называет, что именно заменено и чем."""
+    называет, что именно заменено и чем — алиасом, как остальные витрины."""
     settings = settings_of(source)
     if not settings.models:
         return None  # легаси без реестра: выбирать из чего-то нечего
@@ -225,13 +225,15 @@ def unknown_model_choice_notice(source: Any) -> Optional[Notice]:
     choice = configured_choice(settings)
     if choice_in_registry(choice, settings):
         return None
+    message = f"модель {choice} не найдена в реестре"
     router = ModelRouter(settings, choice_provider=lambda: "default")
-    return Notice(
-        "info",
-        "unknown_model_choice",
-        f"модель {choice} не найдена в реестре — работаю моделью "
-        f"{router.resolve('main').model}",
-    )
+    try:
+        resolved = router.resolve("main", check_breaker=False)
+    except ValueError:
+        pass  # default не резолвится: причину назовёт первый же вызов
+    else:
+        message += f" — работаю моделью {resolved.alias or resolved.model}"
+    return Notice("info", "unknown_model_choice", message)
 
 
 def _auto_routing(source: Any) -> List[Notice]:
