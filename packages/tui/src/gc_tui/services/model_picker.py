@@ -45,6 +45,12 @@ def _legacy(router: Any) -> bool:
     return router.force_legacy or router.registry_empty()
 
 
+def _loaded(app: Any, settings: Any) -> Any:
+    """Настройки витрины: переданные (цель записи «Настроек») или
+    действующие настройки окна."""
+    return settings if settings is not None else app.effective_settings()
+
+
 def _slots(loaded: Any) -> dict:
     return settings_of(loaded).slots.model_dump()
 
@@ -96,7 +102,7 @@ def model_picker_options(
     модели реестра. «● активна» — на выборе `settings` (по умолчанию —
     действующие настройки окна; «Настройки» передают настройки цели
     записи). Пустой блок — без своей черты."""
-    loaded = settings if settings is not None else app.effective_settings()
+    loaded = _loaded(app, settings)
     router = _router(app, loaded)
     if _legacy(router):
         return _legacy_options(router)
@@ -158,10 +164,10 @@ def _auto_hint(router: Any, loaded: Any) -> str:
     return f"{head}: " + ", ".join(pairs)
 
 
-def model_hint(app: Any, value: str) -> str:
+def model_hint(app: Any, value: str, settings: Any = None) -> str:
     """Подсказка про модель `value` — без её имени: уровни модели, «без
     уровня», «недоступна в этой сессии»; у `auto` — пары или причина."""
-    loaded = app.effective_settings()
+    loaded = _loaded(app, settings)
     router = _router(app, loaded)
     if value == AUTO:
         return _auto_hint(router, loaded)
@@ -173,11 +179,13 @@ def model_hint(app: Any, value: str) -> str:
     return model_sign.level_hint(alias, _slots(loaded))
 
 
-def model_picker_hint(app: Any, value: Optional[str]) -> str:
+def model_picker_hint(
+    app: Any, value: Optional[str], settings: Any = None
+) -> str:
     """Подвал пикера: «<модель> — <подсказка>»."""
     if not value:
         return ""
-    return f"{value} — {model_hint(app, value)}"
+    return f"{value} — {model_hint(app, value, settings)}"
 
 
 def current_choice(app: Any) -> str:
@@ -185,19 +193,25 @@ def current_choice(app: Any) -> str:
     return shown_choice(app.effective_settings())
 
 
-def model_value(app: Any) -> Text:
-    """Значение `/model` в палитре: знак + имя, у auto — «● auto»;
-    в легаси — плоская модель."""
-    loaded = app.effective_settings()
+def model_name(app: Any, settings: Any = None) -> str:
+    """Имя выбора для витрин: `auto`, модель (слово уровня — модель
+    своего слота); в легаси — плоская модель."""
+    loaded = _loaded(app, settings)
     choice = shown_choice(loaded)
-    slots = _slots(loaded)
     if choice == AUTO:
-        return model_sign.sign(AUTO, slots)
+        return AUTO
     router = _router(app, loaded)
     if _legacy(router):
-        model = router.resolve("main", check_breaker=False).model
-        return model_sign.sign(model, {})
-    return model_sign.sign(_alias_of(router, choice), slots)
+        return router.resolve("main", check_breaker=False).model
+    return _alias_of(router, choice)
+
+
+def model_value(app: Any, settings: Any = None) -> Text:
+    """Значение выбора: знак + имя, у auto — «● auto»; в легаси —
+    плоская модель. Палитра — по действующим настройкам, «Настройки» —
+    по настройкам цели записи."""
+    loaded = _loaded(app, settings)
+    return model_sign.sign(model_name(app, loaded), _slots(loaded))
 
 
 def model_choice_refusal(app: Any, value: str) -> Optional[str]:

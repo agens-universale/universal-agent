@@ -3608,15 +3608,22 @@ async def test_modes_footer_shows_value_hint(tmp_path):
     )  # high -> пресет-строка
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        footer = str(scr.query_one("#set-footer", Static).render()).replace(
-            FOOTER_SCROLL, ""
-        )
-        assert footer == (
-            "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню"
+
+        def footer():
+            return str(scr.query_one("#set-footer", Static).render()).replace(
+                FOOTER_SCROLL, ""
+            )
+
+        # Первая строка — модель: её значение выбирается списком.
+        assert footer() == (
+            "↑/↓ — выбор · Enter — список · PgUp/PgDn — секции · Esc — меню"
         )
         scr._modes_idx = modes_row_index("rigor")
         scr._render_view()
         await pilot.pause(0.1)
+        assert footer() == (
+            "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню"
+        )
         hint0 = str(scr.query_one(".set-modes-hint", Static).render())
         assert hint0.startswith("high —")  # строка пресета, значение high
         assert "Enter" not in hint0
@@ -5404,7 +5411,6 @@ async def test_model_row_keeps_its_default_wording(tmp_path):
 
         text = scr._mode_row_text("model", selected=False).plain
         assert "model · модель по умолчанию" in text
-        assert text.rstrip().endswith("max")
 
 
 async def test_modes_hint_uses_the_dynamic_provider(tmp_path, monkeypatch):

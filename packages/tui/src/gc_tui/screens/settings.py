@@ -57,6 +57,7 @@ _KEY_CTRL_U = "ctrl+u"
 _MSG_APPLIES_NEXT_TURN = "применится со следующего хода агента"
 _MSG_APPLIES_NEXT_START = "применится со следующего запуска"
 _SEL_SET_FRAME = "#set-frame"
+_SEL_MODES_HINT = ".set-modes-hint"
 _SEL_SET_MENUROW = ".set-menurow"
 
 
@@ -149,6 +150,13 @@ _FOOTERS = {
     ),
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
+# Строка модели в «Режимах работы»: значение выбирается списком, ←/→ молчат.
+_FOOTER_MODES_LIST = (
+    "↑/↓ — выбор · Enter — список · PgUp/PgDn — секции · Esc — меню"
+)
+_FOOTER_MODES_LIST_OPEN = (
+    "↑/↓ — выбор · Enter — записать · Esc — закрыть список"
+)
 # Отчёт операции (см. `_report`): своя ступень Esc-лестницы, и обещание про неё —
 # и в самом отчёте (последней строкой), и в футере, пока он на экране.
 _REPORT_DISMISS_HINT = "Esc — закрыть отчёт"
@@ -508,6 +516,9 @@ class SettingsScreen(Screen):
         self._view: object = "menu"  # "menu" | int(0..5)
         self._menu_idx = 0
         self._modes_idx = 0  # курсор строки подэкрана «Режимы работы»
+        # Открытый список моделей строки `model` (Enter); перерисовка
+        # секции его снимает вместе с остальным телом рамки.
+        self._modes_picker = None
         self._profiles_idx = 0  # курсор строки подэкрана «Профили»
         self._profiles_disk_cache: dict = {}  # дисковые чтения экрана на один проход UI
         # Под-состояния секции «Профили» (волна B): открытый инлайн-ввод имени
@@ -683,6 +694,10 @@ class SettingsScreen(Screen):
             return ed.footer_text() if ed is not None else _FOOTER_READONLY
         if self._view == _VOICE:
             return self._voice_footer_text()
+        if self._view == _MODES and self._modes_picker is not None:
+            return _FOOTER_MODES_LIST_OPEN
+        if self._view == _MODES and self._modes_row_opens_picker():
+            return _FOOTER_MODES_LIST
         if self._view == _CONNECTION and self._presets_open():
             return (
                 _FOOTER_PRESET_LIST
@@ -1129,18 +1144,14 @@ class SettingsScreen(Screen):
                 val = "выключен"
             v.append(val, style=DIM)
         elif i == _MODES:
-            from gc_tui.toggles import (
-                TOGGLES,
-                modes_section_names,
-                toggle_state_base,
-            )
+            from gc_tui.toggles import TOGGLES, modes_section_names
 
             # Превью меню — детальные пары (preset-тоггл rigor показывается витриной
             # в самой секции, не дублируется в одну строку меню). Скоуп — СОСТАВ
             # секции: превью обязано перечислять то же, что человек увидит внутри,
             # и спрашивает его там же, где рендер (`modes_section_names`).
             pairs = [
-                f"{TOGGLES[name].label}: {toggle_state_base(self.app, name)}"
+                f"{TOGGLES[name].label}: {self._modes_value_plain(name)}"
                 for name in modes_section_names()
                 if not TOGGLES[name].preset_keys
             ]
@@ -1511,6 +1522,7 @@ class SettingsScreen(Screen):
         for w in list(frame.children):
             if w is not title:
                 w.remove()
+        self._modes_picker = None  # список жил в рамке и снят вместе с ней
         if self._view == "menu":
             self._set_title("Настройки")
             for i in range(len(SECTIONS)):
@@ -3870,6 +3882,8 @@ class SettingsScreen(Screen):
         )
 
         spec = TOGGLES[name]
+        if spec.value_text is not None:
+            return self._value_row_text(name, selected)
         current = toggle_state_base(
             self.app, name
         )  # секция правит глобал → трек = глобал
@@ -3925,6 +3939,42 @@ class SettingsScreen(Screen):
             t.append(effective, style=colours.get(effective, DIM))
         return t
 
+    def _value_row_text(self, name: str, selected: bool) -> Text:
+        """Строка без трека (`value_text`): голова и знак значения в колонке
+        треков; выбор сессии, если он другой, — второй строкой, как у
+        соседей (§6.2)."""
+        from gc_tui.toggles import TOGGLES
+
+        spec = TOGGLES[name]
+        label_w = self._modes_columns()[0]
+        t = Text()
+        t.append("▸ " if selected else "  ", style=ACCENT)
+        t.append(self._modes_head(name).ljust(label_w - 2), style=INK)
+        base = spec.value_text(self.app, self.app.base_settings())
+        t.append_text(base)
+        effective = spec.value_text(self.app, self.app.effective_settings())
+        if effective.plain != base.plain:
+            t.append("\n  ")
+            t.append("в текущей сессии: ", style=f"italic {DEEP_DIM}")
+            t.append_text(effective)
+        return t
+
+    def _modes_row_opens_picker(self) -> bool:
+        """Строка под курсором выбирается списком (`opens_picker`)."""
+        from gc_tui.toggles import TOGGLES, modes_section_names
+
+        names = modes_section_names()
+        return bool(names) and TOGGLES[names[self._modes_idx]].opens_picker
+
+    def _modes_value_plain(self, name: str) -> str:
+        """Записанное значение строки словами — для превью меню."""
+        from gc_tui.toggles import TOGGLES, toggle_state_base
+
+        spec = TOGGLES[name]
+        if spec.value_text is None:
+            return toggle_state_base(self.app, name)
+        return spec.value_text(self.app, self.app.base_settings()).plain
+
     def _mount_modes_section(self, frame: Vertical) -> None:
         from gc_tui.toggles import TOGGLES, modes_section_names
 
@@ -3968,7 +4018,7 @@ class SettingsScreen(Screen):
         layout-прохода этого же кадра; carry-fix `_refresh_modes_hint` (тот же приём,
         что и `_refresh_menu_rows`) досчитывает усечение постфактум. Последний матч
         по классу — свежесмонтированный (транзиентный старый ещё не отсоединён)."""
-        widgets = list(self.query(".set-modes-hint"))
+        widgets = list(self.query(_SEL_MODES_HINT))
         if not widgets:
             return 0
         return max(0, widgets[-1].region.width - 2)
@@ -3992,6 +4042,8 @@ class SettingsScreen(Screen):
             return ""
         name = names[self._modes_idx]
         spec = TOGGLES[name]
+        if spec.opens_picker:
+            return self._model_row_hint()
         current = toggle_state_base(self.app, name)
         # Динамический хинт вперёд статического — тот же порядок, что у палитры
         # (`CommandPalette(toggle_dynamic_hint=...)`): у `level` статических
@@ -4021,7 +4073,7 @@ class SettingsScreen(Screen):
         hint-строки ПОСЛЕ layout-прохода, когда регион уже известен."""
         if self._view != _MODES:
             return
-        widgets = list(self.query(".set-modes-hint"))
+        widgets = list(self.query(_SEL_MODES_HINT))
         if widgets:
             widgets[-1].update(self._modes_hint_text())
 
@@ -4247,6 +4299,161 @@ class SettingsScreen(Screen):
             f"«{self._modes_head(name)}» — {new_value}, "
             f"записано в {_shown_path(target)}"
         )
+
+    # --- «Режимы работы»: модель по умолчанию (спека model-knob §6.6) ---
+    _MODEL_TARGET_TEXTS = {
+        "profile": "запишется в профиль {name} ({path})",
+        "project": "запишется в проектный конфиг ({path})",
+        "base": "запишется в основной конфиг ({path})",
+    }
+
+    def _model_write_target(self):
+        """(путь, вид) записи `model`: активный профиль — его файл, где бы
+        он ни лежал (решение владельца); иначе общее правило секции
+        (`_keys_write_target`): проектный конфиг, если ключ задан там, или
+        основной."""
+        name = self._config_profile()
+        row = self._profile_row_by_name(name) if name else None
+        if row is not None:
+            return row["ref"].path, "profile"
+        target = self._keys_write_target({"model": None})
+        kind = "project" if self._project_config_sets("model") else "base"
+        return target, kind
+
+    def _model_row_hint(self) -> str:
+        """Подсказка строки: уровни записанной модели, клавиша списка и
+        файл, куда ляжет выбор."""
+        from gc_tui.services.model_picker import model_hint, model_name
+
+        value = model_name(self.app, self._settings)
+        path, kind = self._model_write_target()
+        target = self._MODEL_TARGET_TEXTS[kind].format(
+            name=self._config_profile(), path=_shown_path(path)
+        )
+        level = model_hint(self.app, value, self._settings)
+        return f"{level} · Enter — выбрать из списка · {target}"
+
+    def _open_model_picker(self) -> None:
+        """Enter на строке модели: список моделей над подсказкой раздела.
+        Состав и «● активна» — по настройкам цели записи (база окна), не
+        по сессии: секция правит файл."""
+        from gc_tui.services.model_picker import (
+            model_picker_hint,
+            model_picker_options,
+        )
+        from gc_tui.widgets.arg_picker import ArgPicker
+
+        hints = list(self.query(_SEL_MODES_HINT))
+        if self._modes_picker is not None or not hints:
+            return
+        picker = ArgPicker(
+            model_picker_options(self.app, settings=self._settings),
+            hint_provider=lambda value: model_picker_hint(
+                self.app, value, self._settings
+            ),
+        )
+        hints[-1].parent.mount(picker, before=hints[-1])
+        self._modes_picker = picker
+        self._refresh_footer()
+
+    def _close_model_picker(self) -> None:
+        if self._modes_picker is None:
+            return
+        self._modes_picker.remove()
+        self._modes_picker = None
+        self._refresh_footer()
+
+    def _model_picker_key(self, key: str) -> None:
+        """Список держит клавиатуру: ↑/↓ — выбор, Enter — запись
+        (недоступная строка не берётся), прочее молчит."""
+        picker = self._modes_picker
+        if key in ("up", "down"):
+            picker.move_selection(-1 if key == "up" else 1)
+            return
+        if key != "enter" or picker.selected_disabled():
+            return
+        value = picker.selected_value()
+        self._close_model_picker()
+        if value:
+            self._write_model_default(value)
+
+    def _write_model_default(self, choice: str):
+        """Записать модель по умолчанию в цель (`_model_write_target`) и
+        сказать итог: плашка — значение и файл; перекрыто — что действует
+        и чем перекрыто. Возвращает путь записи или None (отказ сказан)."""
+        path, kind = self._model_write_target()
+        if kind == "profile":
+            target = self._write_profile_model(path, choice)
+        else:
+            target = self._write_section_keys({"model": choice})
+        if target is None:
+            return None
+        warning = self._model_override_warning(choice, target)
+        if warning is not None:
+            self._notice(warning)
+        else:
+            self._flash(
+                f"«Модель по умолчанию» — {choice}, "
+                f"записано в {_shown_path(target)}"
+            )
+        return target
+
+    def _write_profile_model(self, path, choice: str):
+        """`model:` в файл профиля — писателем секций моделей с проверкой
+        документа профиля (стек следующего старта, как у записей реестра в
+        профиль)."""
+        from gc_core.config_modules.registry_write import (
+            RegistryWriteError,
+            apply_registry_ops,
+        )
+
+        row = self._profile_row_by_name(self._config_profile())
+        block = self._profile_write_block(ref=row["ref"])
+        if block:
+            self._notice(self._profile_write_refusal("сохранено", block))
+            return None
+        try:
+            apply_registry_ops(
+                path,
+                [("write_pointer", "model", choice)],
+                "",
+                is_profile=True,
+                stack_base=self._config_path,
+            )
+        except (RegistryWriteError, OSError) as exc:
+            self._notice(f"✗ не сохранено: {exc}")
+            return None
+        if not self._reload_after_profile_file_change("сохранено"):
+            return None
+        self._render_view()
+        return path
+
+    def _model_override_warning(self, choice: str, target):
+        """Почему записанное не действует, или None. Перекрыть его может
+        слой выше (`_overriding_layer_name`) и сессия: выбор `/model` или
+        профиль сессии."""
+        from gc_tui.toggles import toggle_state, toggle_state_base
+
+        acting = toggle_state_base(self.app, "model")
+        if acting != choice:
+            layer = self._overriding_layer_name({"model": choice})
+        else:
+            acting = toggle_state(self.app, "model")
+            if acting == choice:
+                return None
+            layer = self._session_layer_name()
+        return (
+            f"записано в {_shown_path(target)}, но действует «{acting}» — "
+            f"значение перекрыто {layer}"
+        )
+
+    def _session_layer_name(self) -> str:
+        """Что в сессии перекрыло записанную модель."""
+        overrides = getattr(self.app, "_session_overrides", None) or {}
+        profile = self._session_profile_name()
+        if "model" not in overrides and profile:
+            return f"профилем сессии {profile}"
+        return "выбором сессии /model"
 
     # --- секция «Внешний вид»: тема `tui.theme` ---
     def _theme_value(self) -> str:
@@ -7038,6 +7245,10 @@ class SettingsScreen(Screen):
                     event.stop()
                     ed.cancel_pending()
                     return
+            if self._view == _MODES and self._modes_picker is not None:
+                event.stop()  # закрыт только список, секция жива
+                self._close_model_picker()
+                return
             if self._view == _UPDATE and self._update_awaiting_confirm:
                 event.stop()
                 self._cancel_update()
@@ -7429,6 +7640,11 @@ class SettingsScreen(Screen):
                 event.stop()
                 self._voice_enter()
                 return
+        if self._view == _MODES and self._modes_picker is not None:
+            event.prevent_default()
+            event.stop()
+            self._model_picker_key(event.key)
+            return
         if self._view == _MODES:
             from gc_tui.toggles import modes_section_names
 
@@ -7442,8 +7658,10 @@ class SettingsScreen(Screen):
                 return
         if event.key in ("left", "right", "enter") and self._view == _MODES:
             event.stop()
-            if event.key != "enter":  # Enter на ручке — ничего
+            if event.key != "enter":
                 self._modes_apply(-1 if event.key == "left" else 1)
+            elif self._modes_row_opens_picker():
+                self._open_model_picker()
             return
         if event.key in ("left", "right") and self._view == _LOOK:
             event.stop()

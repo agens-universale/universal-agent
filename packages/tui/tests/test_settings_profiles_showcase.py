@@ -838,10 +838,10 @@ async def test_voice_override_line_stands_above_both_modes(
     assert (margin.top, margin.bottom) == (1, 1), margin
 
 
-# --- /config: шапка профиль/уровень/модель + путь файла профиля ---
+# --- /config: шапка профиль/модель + путь файла профиля ---
 
 
-async def test_config_screen_header_shows_profile_level_model(
+async def test_config_screen_header_shows_profile_and_model(
     tmp_path, monkeypatch
 ):
     from gc_tui import app as app_mod
@@ -881,11 +881,10 @@ async def test_config_screen_header_shows_profile_level_model(
         assert isinstance(scr, ConfigScreen)
         text = config_text(scr)
         assert "профиль: work (проектный)" in text
-        assert "уровень: default" in text
         # Модель — третье слагаемое шапки (`tui/screens/config.py:116`). Без неё
         # тест повторял бы дефект близнеца `/status` ниже: имя обещает три поля,
         # тело проверяет два, а `модель:` могла бы исчезнуть, не уронив ничего.
-        assert "модель: flash" in text
+        assert "модель: ● flash" in text
         assert str(profile_path) in text
 
 

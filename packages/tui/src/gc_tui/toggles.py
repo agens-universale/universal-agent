@@ -149,6 +149,9 @@ class ToggleSpec:
     # Значение выбирается списком, а не шагом ←/→ (`model`: строка
     # «Режимов работы» открывает пикер моделей).
     opens_picker: bool = False
+    # Значение строки в Настройках и превью меню, когда оно не имя
+    # позиции трека: `(app, settings) -> Text` (`model`: знак модели).
+    value_text: Optional[Callable[[Any, Any], Text]] = None
     session_switch_profile: bool = False
     # Значение, действующее в сессии, когда оно живёт не в переопределениях
     # конфига (режим разрешений: Shift+Tab, флаг запуска): `(app) -> значение`.
@@ -207,6 +210,12 @@ def _model_hint(app: Any, value: str) -> str:
     from gc_tui.services.model_picker import model_hint
 
     return model_hint(app, value)
+
+
+def _model_value(app: Any, settings: Any) -> Text:
+    from gc_tui.services.model_picker import model_value
+
+    return model_value(app, settings)
 
 
 # --- /profiles: trackless-строка, циклический выбор файла-профиля -----------
@@ -576,6 +585,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         show_track=False,
         hint_provider=_model_hint,
         opens_picker=True,
+        value_text=_model_value,
         palette_default=False,
     ),
     "profiles": ToggleSpec(
