@@ -68,7 +68,7 @@ def parse_override_args(tokens: List[str]) -> Dict[str, Any]:
 class _RemovedLevelFlag(argparse.Action):
     """Скрытый ``--level``: отказ с подсказкой ``--model`` (код выхода 2)."""
 
-    def __call__(self, parser, namespace, values, option_string=None):
+    def __call__(self, parser, namespace, values, _option_string=None):
         parser.error(LEVEL_REMOVED_MESSAGE)
 
 

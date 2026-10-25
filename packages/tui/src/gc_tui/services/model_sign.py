@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 
 from gc_core.config_modules.model_registry import LEVELS
 from rich.text import Text
@@ -59,11 +59,6 @@ def sign(
     text = Text.assemble(dots(shown, slots), " ")
     text.append(alias if alias is not None else choice, style=name_style)
     return text
-
-
-def dots_width(aliases: Iterable[str], slots: Mapping[str, str | None]) -> int:
-    """Ширина колонки точек: максимум уровней среди алиасов, не меньше 1."""
-    return max([1, *(len(levels_of(a, slots)) for a in aliases)])
 
 
 def level_hint(alias: str, slots: Mapping[str, str | None]) -> str:

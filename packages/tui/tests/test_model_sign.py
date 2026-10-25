@@ -38,12 +38,6 @@ def test_level_word_choice_shows_slot_model():
     assert ms.sign("auto", SLOTS).plain == "● auto"
 
 
-def test_dots_width_is_max_levels_of_registry():
-    assert ms.dots_width(["fast", "main"], SLOTS) == 2
-    assert ms.dots_width(["fast", "other"], SLOTS) == 1
-    assert ms.dots_width([], SLOTS) == 1
-
-
 def test_level_hint_texts():
     assert ms.level_hint("fast", SLOTS) == "уровень light"
     assert ms.level_hint("main", SLOTS) == "уровни default и max"
