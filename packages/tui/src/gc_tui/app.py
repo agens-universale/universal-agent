@@ -361,9 +361,17 @@ class TuiApp(App):
         self._profile_override = profile_override
         # Флаг запуска `--model` — тот же оверрайд, что main() отдаёт загрузчику на
         # старте: каждая пересборка базы (reload_config, _profile_remerge) обязана
-        # накладывать его снова через apply_cli_overrides, иначе выбор живёт только
-        # до первого перечитывания конфига.
-        self._model_override = model_override
+        # накладывать его снова, иначе выбор живёт только до первого
+        # перечитывания конфига. «Выбор или сырой id» решается один раз, по
+        # реестру старта: профиль без алиаса не превращает выбор в легаси-форс
+        # — такой выбор санируется, как `model:` конфига (спека §3.2).
+        from gc_core.config import split_model_flag
+
+        self._model_flag = (
+            split_model_flag({"model": model_override}, settings)
+            if model_override
+            else None
+        )
         # Сессионные переопределения конфига (спека 2026-07-20-session-scoped-settings):
         # база — self._settings (файлы), это — то, что переключено в текущем треде.
         # Хранятся по dotted-именам; накладываются в effective_settings().
@@ -850,17 +858,9 @@ class TuiApp(App):
         включает кандидатные пути сессионно выбранного профиля — ревью Task 11) →
         сессионный слой (не проходит проверку под новой базой — снять с notice) →
         действующие настройки → каталог тредов новой базы."""
-        from gc_core.config import apply_cli_overrides
         from gc_core.thread_store import resolve_threads_dir
 
-        base = self._with_tui_runtime(
-            apply_cli_overrides(
-                self._load_base_settings(),
-                extra_overrides={"model": self._model_override}
-                if self._model_override
-                else None,
-            )
-        )
+        base = self._with_launch_flags(self._load_base_settings())
         snap = self._config_snapshot()
         overrides = dict(snap.overrides)
         notices: list = []
@@ -1182,17 +1182,20 @@ class TuiApp(App):
     def _assemble_session_profile(self, name: str):
         """Стек под профилем `name` — тем же путём, что база окна: файлы с
         `--profile name`, CLI, рантайм TUI. Исключение — профиль не собирается."""
-        from gc_core.config import apply_cli_overrides, load_settings
+        from gc_core.config import load_settings
 
         loaded = load_settings(self._config_path, profile_override=name)
-        return self._with_tui_runtime(
-            apply_cli_overrides(
-                loaded,
-                extra_overrides={"model": self._model_override}
-                if self._model_override
-                else None,
-            )
-        )
+        return self._with_launch_flags(loaded)
+
+    def _with_launch_flags(self, loaded):
+        """Флаги запуска поверх свежей загрузки: слой CLI и путь `--model`,
+        решённый на старте (без повторного решения по новому реестру)."""
+        from gc_core.config import apply_cli_overrides
+
+        loaded = apply_cli_overrides(loaded)
+        if self._model_flag:
+            loaded = loaded.with_overrides(self._model_flag, layer="cli")
+        return self._with_tui_runtime(loaded)
 
     def _maybe_notice_profile_activation(self, name: str, meta, cfg) -> None:
         """Спека §3.5: первая активация ПРОЕКТНОГО профиля в сессии — notice с

@@ -121,3 +121,56 @@ def test_level_flag_errors_with_model_hint(capsys):
         _parse_args(["--level", "max"])
     assert exc.value.code == 2
     assert "--model" in capsys.readouterr().err
+
+
+def test_model_flag_choice_stays_a_choice_under_profile_without_alias(
+    tmp_path,
+):
+    """`--model <алиас>` решён выбором один раз на старте: профиль без этого
+    алиаса не превращает флаг в легаси-форс — выбор санируется (§3.2)."""
+    pytest.importorskip("textual")
+    import yaml
+    from gc_core.config import (
+        apply_cli_overrides,
+        cli_forces_legacy_model,
+        load_settings,
+    )
+    from gc_tui.app import TuiApp
+
+    pair = {"url": "http://x/v1/chat/completions", "token": ""}
+    base = tmp_path / "config.yml"
+    base.write_text(
+        yaml.safe_dump(
+            {"backend": {"api_mode": "chat_completions"}, "profile": "work"}
+        ),
+        encoding="utf-8",
+    )
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    (profiles_dir / "work.yml").write_text(
+        yaml.safe_dump(
+            {"models": {"flash": pair}, "slots": {"default": "flash"}}
+        ),
+        encoding="utf-8",
+    )
+    (profiles_dir / "other.yml").write_text(
+        yaml.safe_dump({"models": {"pro": pair}, "slots": {"default": "pro"}}),
+        encoding="utf-8",
+    )
+    loaded = apply_cli_overrides(
+        load_settings(str(base)), extra_overrides={"model": "flash"}
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=loaded,
+        model_override="flash",
+    )
+    app.set_config_path(str(base))
+    assert app.effective_settings().settings.model == "flash"
+
+    app.set_session_override("profile", "other")
+
+    effective = app.effective_settings()
+    assert not cli_forces_legacy_model(effective)
+    assert effective.settings.model == "flash"
+    assert app.display_router().resolve("main").alias == "pro"
