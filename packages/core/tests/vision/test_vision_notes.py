@@ -537,3 +537,56 @@ def test_other_probe_reasons_keep_their_texts(status, reason, text):
             "reply",
         )
     ]
+
+
+def test_transient_eyes_that_cannot_probe_note_matches_the_stub():
+    """Одно правило «глазам можно смотреть»: временный сбой пробы «глаз»,
+    когда повтор в этом ходе запрещён (`can_probe` false), — тул скрыт
+    (заглушка «видеть некому»), и пометка не обещает «агент посмотрит»."""
+    import asyncio
+
+    from gc_core.vision.audience import compute_audience, route_id
+    from gc_core.vision.probe import ProbeResult
+    from gc_core.vision.registry import process_vision_probes
+    from gc_core.vision.route import VisionRouteKey
+
+    async def transient():
+        return ProbeResult(ProbeStatus.TRANSIENT, "network")
+
+    notes: list = []
+    router = _eyes_router({"vision": "gemini"})
+    main, eyes = router.resolve("main"), router.resolve("vision")
+    main_key = VisionRouteKey(main.url, main.model, "main")
+    eyes_key = VisionRouteKey(eyes.url, eyes.model, "eyes")
+    probes = process_vision_probes()
+    probes.mark_unsupported(main_key, reason="image_unsupported")
+    asyncio.run(probes.ensure(eyes_key, turn_key="root", run=transient))
+    routes = {route_id(main): main_key, route_id(eyes): eyes_key}
+    ctx = SimpleNamespace(
+        on_trace_note=notes.append,
+        model_router=router,
+        settings=make_settings(),
+    )
+    state = SimpleNamespace(
+        vision_probe_turn="root", tools=_VIEW_TOOL, vision_routes=routes
+    )
+
+    audience = compute_audience(
+        router,
+        request_resolved=main,
+        api_mode="chat_completions",
+        tool_in_set=True,
+        settings=ctx,
+        routes=routes,
+        turn_key="root",
+    )
+    note_probe(
+        ctx,
+        state,
+        main_key,
+        main,
+        ProbeResult(ProbeStatus.UNSUPPORTED, "image_unsupported"),
+    )
+
+    assert audience.tool_visible is False
+    assert notes == [TraceNote(_MAIN_NOBODY, "reply")]

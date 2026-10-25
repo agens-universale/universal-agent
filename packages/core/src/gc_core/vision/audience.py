@@ -107,18 +107,8 @@ def compute_audience(
         )
 
     def eligible(resolved):
-        if resolved is None or _declared_blind(resolved, settings):
-            return False
-        result = result_for(resolved)
-        return (
-            result is None
-            or result.status is ProbeStatus.CONFIRMED
-            or (
-                result.status is ProbeStatus.TRANSIENT
-                and process_vision_probes().can_probe(
-                    routes[route_id(resolved)], turn_key=turn_key
-                )
-            )
+        return resolved is not None and _may_view(
+            resolved, settings, routes, turn_key=turn_key
         )
 
     native = (
@@ -152,28 +142,46 @@ def viewing_eyes(
 ) -> ResolvedModel | None:
     """Модель для зрения, которой агент посмотрит картинку за модель
     ``blind``, или None: тул ``fs_view_image`` в наборе запуска, модель
-    зрения назначена другим маршрутом, не заявлена слепой и её проба не
-    провалена (нет результата, подтверждена или временный сбой)."""
+    зрения назначена другим маршрутом, не заявлена слепой и её проба
+    не мешает (`_may_view`)."""
     router = getattr(ctx, "model_router", None)
     tools = getattr(state, "tools", None) or []
     if router is None or not view_tool_in_set(tools):
         return None
     eyes = _resolve_eyes(router)
-    if (
-        eyes is None
-        or route_id(eyes) == route_id(blind)
-        or _declared_blind(eyes, ctx)
-    ):
+    if eyes is None or route_id(eyes) == route_id(blind):
         return None
-    routes = getattr(state, "vision_routes", None) or {}
-    key = routes.get(route_id(eyes))
-    result = process_vision_probes().peek(key) if key is not None else None
-    if result is None or result.status in _EYES_USABLE:
+    if _may_view(
+        eyes,
+        ctx,
+        getattr(state, "vision_routes", None) or {},
+        turn_key=getattr(state, "vision_probe_turn", None),
+    ):
         return eyes
     return None
 
 
-_EYES_USABLE = (ProbeStatus.CONFIRMED, ProbeStatus.TRANSIENT)
+def _may_view(
+    resolved: ResolvedModel,
+    settings: Any,
+    routes: Mapping,
+    *,
+    turn_key: str | None,
+) -> bool:
+    """Можно ли рассчитывать, что маршрут ``resolved`` посмотрит картинку:
+    не заявлен слепым, и его проба не мешает — нет результата, подтверждена
+    или временный сбой, который в ходе ``turn_key`` можно перепроверить.
+    Одно правило для набора тулов (`Audience.tool_visible`) и пометок."""
+    if _declared_blind(resolved, settings):
+        return False
+    key = routes.get(route_id(resolved))
+    probes = process_vision_probes()
+    result = probes.peek(key) if key is not None else None
+    if result is None or result.status is ProbeStatus.CONFIRMED:
+        return True
+    return result.status is ProbeStatus.TRANSIENT and probes.can_probe(
+        key, turn_key=turn_key
+    )
 
 
 def route_id(resolved):
