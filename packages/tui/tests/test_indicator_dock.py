@@ -221,16 +221,20 @@ async def test_trace_height_follows_bar(tmp_path):
         await pilot.pause()
         trace = scr.query_one("#trace")
         idle, input_y = trace.region.height, _input_y(scr)
-        scr._run_pending = True
+        # Работа — живым прогоном треда: голый `_run_pending` без раннера
+        # тик опроса (250 мс) честно закрыл бы как кончившийся ход.
+        run = _Run("ceil1")
+        pilot.app.active_runner = run
         scr._sync_indicator_bar()
         await pilot.pause()
         assert trace.region.height == idle - 2
         assert _input_y(scr) == input_y
-        scr._run_pending = False
+        run.running = False
         scr._sync_indicator_bar()
         await pilot.pause()
         assert trace.region.height == idle
         assert _input_y(scr) == input_y
+        pilot.app.active_runner = None
 
 
 def _input_y(scr) -> int:
