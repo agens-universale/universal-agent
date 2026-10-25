@@ -58,7 +58,7 @@ def test_notice_names_unavailability_and_the_effective_fallback(
     assert notice.level == "info"
     assert notice.code == "auto_routing_unavailable"
     assert notice.message == (
-        f"автовыбор моделей недоступен: {reason} — работает уровень default"
+        f"автовыбор моделей недоступен: {reason} — работает модель слота default"
     )
 
 
@@ -103,7 +103,7 @@ def test_notice_names_an_alternative_when_explicit_pair_is_one_model():
     notice = auto_routing_unavailable_notice(loaded)
     assert notice.message == (
         "автовыбор моделей недоступен: в паре light+default одна модель; "
-        "другая пара — auto_routing_safe_level: max — работает уровень default"
+        "другая пара — auto_routing_safe_level: max — работает модель слота default"
     )
 
 
@@ -130,7 +130,7 @@ def test_collect_includes_one_routing_notice_and_preserves_cli_provenance(
 ):
     loaded = _cfg(**{"agent.auto_routing": False})
     reason = "выключен настройкой auto_routing"
-    tail = "уровень default"
+    tail = "модель слота default"
     if force_legacy:
         loaded = loaded.with_overrides(
             {"agent.model": "forced-model"}, layer="cli"

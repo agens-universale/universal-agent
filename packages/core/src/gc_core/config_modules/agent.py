@@ -191,11 +191,11 @@ class AgentConfig(BaseModel):
     model_steering: str = Field(
         default="", json_schema_extra=gc_meta(expert=True)
     )
-    # Автовыбор уровня модели (спека docs/specs/auto-routing.md):
+    # Автороутинг моделей (спека docs/specs/auto-routing.md):
     # рубильник фичи для деплоя/пресетов. False — автовыбор выключен целиком:
-    # `level: auto` работает как default (нотис при старте), позиция auto в /level
-    # не показывается. Сам по себе режим не включает —
-    # режим выбирают через `level: auto`, `--level auto` или меню `/level`.
+    # `model: auto` работает как слот default (нотис при старте), строка auto
+    # в /model не выбирается. Сам по себе режим не включает —
+    # режим выбирают через `model: auto`, `--model auto` или пикер `/model`.
     auto_routing: bool = True
     # Сильная модель пары: default — light+default, max — default+max.
     # auto — пару выбирает судья в начале хода, когда обе пары различаются;

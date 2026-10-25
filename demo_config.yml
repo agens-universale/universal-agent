@@ -272,7 +272,7 @@ agent:
   # Model steering → append в <special_instructions> (для любой активной модели).
   # model_steering: |
   #   Prefer the next concrete action over a broad survey; targeted reads that unlock that action are fine.
-  # Автовыбор уровня модели включается через model: auto.
+  # Автороутинг моделей включается через model: auto.
   auto_routing: true
   # Сильная модель пары: default — light+default, max — default+max.
   # auto — начальную пару выбирает судья (assign.routing_judge), если в обеих

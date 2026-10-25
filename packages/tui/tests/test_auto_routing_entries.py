@@ -10,7 +10,7 @@ from gc_core.runtime_notices import (
 )
 from gc_testkit import run_coro
 
-_ONE_MODEL_MESSAGE = "автовыбор моделей недоступен: во всех уровнях одна модель — работает уровень default"
+_ONE_MODEL_MESSAGE = "автовыбор моделей недоступен: во всех уровнях одна модель — работает модель слота default"
 _BACKEND = (
     "backend:\n  api_mode: chat_completions\n"
     '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n'
@@ -180,7 +180,7 @@ def test_config_change_making_auto_unavailable_notices_once_and_recovers(
         and toggle_state(app, "model") == "default"
     )
     assert _auto_runtime_notices() == [
-        f"автовыбор моделей недоступен: {reason} — работает уровень default"
+        f"автовыбор моделей недоступен: {reason} — работает модель слота default"
     ]
 
     app.reload_config()  # перечитка того же сломанного конфига

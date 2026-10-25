@@ -98,7 +98,7 @@ agent:
   # Аварийная LLM-суммаризация трейса при лимите (step/tool/token limit).
   # Возвращает envelope с raw_trace_summary; false — пустой summary.
   limit_trace_summary: true
-  # Автовыбор уровня модели включается через model: auto.
+  # Автороутинг моделей включается через model: auto.
   auto_routing: true
   # Сильная модель пары: default — light+default, max — default+max.
   # auto — начальную пару выбирает судья (assign.routing_judge), если в обеих

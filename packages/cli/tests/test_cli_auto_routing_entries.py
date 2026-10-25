@@ -68,7 +68,7 @@ class _Executor:
             _BACKEND + _ONE_MODEL,
             ["--model", "auto"],
             "во всех уровнях одна модель",
-            "уровень default",
+            "модель слота default",
         ),
         (
             _BACKEND + _THREE_MODELS + "model: auto\n",
@@ -156,7 +156,7 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
 
     assert rc == 0
     assert (
-        "автовыбор моделей недоступен: во всех уровнях одна модель — работает уровень default"
+        "автовыбор моделей недоступен: во всех уровнях одна модель — работает модель слота default"
         in capsys.readouterr().err
     )
 

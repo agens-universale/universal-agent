@@ -172,7 +172,7 @@ def _agentsmd(settings: AppConfig, *, is_tui: bool) -> List[Notice]:
 
 def auto_routing_unavailable_reason_text(reason: str) -> str:
     """Фраза причины недоступности автовыбора — одна на все входы (нотис при
-    старте, runtime-нотис TUI, ответ на набранный `/level auto`)."""
+    старте, runtime-нотис TUI, ответ на набранный `/model auto`)."""
     return f"автовыбор моделей недоступен: {reason}"
 
 
@@ -180,16 +180,16 @@ def auto_routing_unavailable_message(
     reason: str, *, forced_model: bool = False
 ) -> str:
     """Текст нотиса: фраза причины и то, что работает. Ответ на набранный
-    `/level auto` берёт одну фразу — набор уровень не меняет, и хвост про
+    `/model auto` берёт одну фразу — набор уровень не меняет, и хвост про
     default соврал бы на light и max. При `--model` идёт заданная модель, а не
-    уровень default."""
-    tail = "модель из --model" if forced_model else "уровень default"
+    модель слота default."""
+    tail = "модель из --model" if forced_model else "модель слота default"
     return f"{auto_routing_unavailable_reason_text(reason)} — работает {tail}"
 
 
 def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
-    """`level: auto` выбран, а фича недоступна — один нотис с причиной (спека
-    auto-routing §6). Работает уровень default; палитра позицию auto не показывает."""
+    """`model: auto` выбран, а фича недоступна — один нотис с причиной (спека
+    auto-routing §6). Работает модель слота default; палитра позицию auto не показывает."""
     if str(settings_of(source).model or "").strip() != "auto":
         return None
     loaded = (

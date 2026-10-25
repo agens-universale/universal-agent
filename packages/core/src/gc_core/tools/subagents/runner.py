@@ -1186,7 +1186,7 @@ class SubagentRunner:
           `choice_provider` привязывается к дочернему State в `_bind_child_context`
           тем же механизмом, что и провайдер `acreate_run_context`, с
           сырым режимом родителя, замороженным на момент сборки
-          (`parent_router.live_choice()`), — живой `/level` родителя посреди
+          (`parent_router.live_choice()`), — живой `/model` родителя посреди
           работы ребёнка не уводит его модель (см.
           `test_child_router_choice_provider_is_frozen_not_live`).
 
