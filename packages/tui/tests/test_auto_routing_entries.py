@@ -138,10 +138,15 @@ def test_typed_model_auto_when_available_selects_it(tmp_path, monkeypatch):
     hints = []
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
+    # Голый экран без ленты: отметку смены модели не монтируем (её вид —
+    # test_trace_model_mark.py), решение `_mark_model_choice` — настоящее.
+    mounted = []
+    scr._trace_mount = lambda widget, **kw: mounted.append(widget)
 
     run_coro(scr._dispatch_command("model auto"))
 
     assert hints == []
+    assert len(mounted) == 1
     assert app.effective_settings().settings.model == "auto"
 
 
