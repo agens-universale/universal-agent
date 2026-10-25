@@ -1,10 +1,14 @@
-"""Пикер модели ACP: алиас в протоколе, уровень в сессии."""
+"""Пикер модели ACP: алиас в протоколе, выбор в сессии."""
 
 import asyncio
 from types import SimpleNamespace
 
 from gc_acp.facade import AcpFacade
-from gc_acp.model_config import active_model_line, model_config_option
+from gc_acp.model_config import (
+    active_model_line,
+    choice_for_value,
+    model_config_option,
+)
 from gc_core.config import cli_forces_legacy_model
 from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.processing_responses import resolve_main_for_call
@@ -99,18 +103,18 @@ async def _set(facade, session_id, value, request_id=9, **extra):
     )
 
 
-async def test_new_load_resume_list_aliases_in_level_order(tmp_path):
+async def test_new_load_resume_list_level_models_then_the_rest(tmp_path):
     facade, writer, _agents = _open(_loaded(tmp_path, _models()))
     await _init(facade)
     await _new(facade, "/work")
     created = _by_id(writer, 2)["result"]
     option = _option(created)
     assert option["currentValue"] == "glm-local"
-    assert _values(option) == ["glm-local", "flash", "opus"]
-    assert "description" not in option["options"][0]
-    assert option["options"][1]["description"] == "qwen/qwen-2.5-flash"
+    assert _values(option) == ["flash", "glm-local", "opus", "judge"]
+    assert option["options"][0]["description"] == "qwen/qwen-2.5-flash"
+    assert "description" not in option["options"][1]
     assert "description" not in option["options"][2]
-    assert "judge" not in _values(option)
+    assert option["options"][3]["description"] == "judge-only"
     dumped = writer.sent
     assert all(item.get("method") != "config_option_update" for item in dumped)
     session_id = created["sessionId"]
@@ -125,9 +129,10 @@ async def test_new_load_resume_list_aliases_in_level_order(tmp_path):
         )
     )
     assert _values(_option(_by_id(writer, 4)["result"])) == [
-        "glm-local",
         "flash",
+        "glm-local",
         "opus",
+        "judge",
     ]
     await facade.handle_line(
         _line(
@@ -148,13 +153,15 @@ async def test_duplicate_alias_is_kept_once(tmp_path):
     await _init(facade)
     await _new(facade, "/work")
     assert _values(_option(_by_id(writer, 2)["result"])) == [
-        "glm-local",
         "flash",
+        "glm-local",
+        "opus",
+        "judge",
     ]
     await facade.shutdown()
 
 
-async def test_set_writes_level_not_config(tmp_path):
+async def test_set_writes_choice_alias(tmp_path):
     loaded = _loaded(tmp_path, _models())
     before = loaded.settings.model_dump()
     facade, writer, agents = _open(loaded)
@@ -164,10 +171,10 @@ async def test_set_writes_level_not_config(tmp_path):
     await _set(facade, session_id, "flash")
     option = _option(_by_id(writer, 9)["result"])
     assert option["currentValue"] == "flash"
-    assert _values(option) == ["glm-local", "flash", "opus"]
+    assert _values(option) == ["flash", "glm-local", "opus", "judge"]
     live = facade._sessions[session_id]
-    assert live.level == "light"
-    assert agents[0].factory_kwargs["choice_provider"]() == "light"
+    assert live.choice == "flash"
+    assert agents[0].factory_kwargs["choice_provider"]() == "flash"
     assert len(agents) == 1
     assert loaded.settings.model_dump() == before
     assert all(
@@ -176,7 +183,7 @@ async def test_set_writes_level_not_config(tmp_path):
     await facade.shutdown()
 
 
-async def test_same_alias_does_not_rewrite_level(tmp_path):
+async def test_same_alias_does_not_rewrite_choice(tmp_path):
     loaded = _loaded(
         tmp_path,
         {
@@ -190,12 +197,12 @@ async def test_same_alias_does_not_rewrite_level(tmp_path):
     session_id = _by_id(writer, 2)["result"]["sessionId"]
     assert _option(_by_id(writer, 2)["result"])["currentValue"] == "flash"
     await _set(facade, session_id, "flash")
-    assert facade._sessions[session_id].level is None
+    assert facade._sessions[session_id].choice is None
     assert agents[0].factory_kwargs["choice_provider"]() == "light"
     await facade.shutdown()
 
 
-async def test_first_level_wins_when_alias_repeats(tmp_path):
+async def test_picker_lists_repeated_alias_once(tmp_path):
     loaded = _loaded(
         tmp_path,
         {
@@ -209,8 +216,8 @@ async def test_first_level_wins_when_alias_repeats(tmp_path):
     session_id = _by_id(writer, 2)["result"]["sessionId"]
     assert _option(_by_id(writer, 2)["result"])["currentValue"] == "opus"
     await _set(facade, session_id, "flash")
-    assert facade._sessions[session_id].level == "default"
-    assert agents[0].factory_kwargs["choice_provider"]() == "default"
+    assert facade._sessions[session_id].choice == "flash"
+    assert agents[0].factory_kwargs["choice_provider"]() == "flash"
     await facade.shutdown()
 
 
@@ -219,7 +226,7 @@ async def test_foreign_value_and_boolean_type_are_invalid(tmp_path):
     await _init(facade)
     await _new(facade, "/work")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
-    await _set(facade, session_id, "judge", 3)
+    await _set(facade, session_id, "ghost", 3)
     assert _by_id(writer, 3)["error"]["code"] == -32602
     await _set(facade, session_id, "flash", 4, type="boolean")
     assert _by_id(writer, 4)["error"]["code"] == -32602
@@ -233,14 +240,14 @@ async def test_foreign_value_and_boolean_type_are_invalid(tmp_path):
         )
     )
     assert _by_id(writer, 6)["error"]["code"] == -32602
-    assert facade._sessions[session_id].level is None
+    assert facade._sessions[session_id].choice is None
     assert agents[0].factory_kwargs["choice_provider"]() == "default"
     await _set(facade, session_id, "opus", 7, type="select")
     assert _option(_by_id(writer, 7)["result"])["currentValue"] == "opus"
     await facade.shutdown()
 
 
-async def test_second_session_keeps_its_level(tmp_path):
+async def test_second_session_keeps_its_choice(tmp_path):
     facade, writer, agents = _open(_loaded(tmp_path, _models()))
     await _init(facade)
     await _new(facade, "/work", 2)
@@ -248,7 +255,7 @@ async def test_second_session_keeps_its_level(tmp_path):
     first = _by_id(writer, 2)["result"]["sessionId"]
     second = _by_id(writer, 3)["result"]["sessionId"]
     await _set(facade, first, "flash")
-    assert agents[0].factory_kwargs["choice_provider"]() == "light"
+    assert agents[0].factory_kwargs["choice_provider"]() == "flash"
     assert agents[1].factory_kwargs["choice_provider"]() == "default"
     await facade.handle_line(
         _line(
@@ -356,7 +363,7 @@ async def test_mid_turn_switch_applies_from_the_next_request(tmp_path):
     await facade.shutdown()
 
 
-async def test_empty_registry_is_one_row_and_does_not_write_level(tmp_path):
+async def test_empty_registry_is_one_row_and_does_not_write_choice(tmp_path):
     loaded = _loaded(tmp_path, {"agent.model": "solo"})
     facade, writer, agents = _open(loaded)
     await _init(facade)
@@ -369,7 +376,7 @@ async def test_empty_registry_is_one_row_and_does_not_write_level(tmp_path):
     assert _by_id(writer, 3)["error"]["code"] == -32602
     await _set(facade, session_id, "solo", 4)
     assert _option(_by_id(writer, 4)["result"])["currentValue"] == "solo"
-    assert facade._sessions[session_id].level is None
+    assert facade._sessions[session_id].choice is None
     assert agents[0].factory_kwargs["choice_provider"]() == "default"
     await facade.shutdown()
 
@@ -386,12 +393,12 @@ async def test_legacy_force_rejects_registry_alias(tmp_path):
     await _set(facade, session_id, "flash", 3)
     assert _by_id(writer, 3)["error"]["code"] == -32602
     await _set(facade, session_id, "forced", 4)
-    assert facade._sessions[session_id].level is None
+    assert facade._sessions[session_id].choice is None
     assert agents[0].factory_kwargs["choice_provider"]() == "default"
     await facade.shutdown()
 
 
-async def test_empty_model_and_unresolved_level_omit_the_option(tmp_path):
+async def test_empty_model_and_unresolved_choice_omit_the_option(tmp_path):
     empty, writer, _agents = _open(_loaded(tmp_path, {"agent.model": ""}))
     await _init(empty)
     await _new(empty, "/work")
@@ -552,13 +559,13 @@ async def _session(facade, writer):
 async def test_picker_offers_auto_when_available(tmp_path):
     facade, writer, _agents = _open(_loaded(tmp_path, _auto_models()))
     _session_id, option = await _session(facade, writer)
-    assert _values(option) == ["glm-local", "flash", "opus", "auto"]
+    assert _values(option) == ["flash", "glm-local", "opus", "judge", "auto"]
     assert option["options"][-1] == {"value": "auto", "name": "auto"}
     assert option["currentValue"] == "glm-local"
     await facade.shutdown()
 
 
-async def test_auto_level_is_current_and_named_in_the_trace(tmp_path):
+async def test_auto_choice_is_current_and_named_in_the_trace(tmp_path):
     loaded = _loaded(tmp_path, _auto_models(model="auto"))
     facade, writer, agents = _open(loaded)
     session_id, option = await _session(facade, writer)
@@ -588,22 +595,22 @@ async def test_fixed_model_from_auto_leaves_auto(tmp_path):
     option = _option(_by_id(writer, 3)["result"])
     assert option["currentValue"] == "flash"
     assert "auto" in _values(option)
-    assert facade._sessions[session_id].level == "light"
+    assert facade._sessions[session_id].choice == "flash"
     await _set(facade, session_id, "auto", 4)
     await _set(facade, session_id, "glm-local", 5)
     assert _option(_by_id(writer, 5)["result"])["currentValue"] == "glm-local"
-    assert facade._sessions[session_id].level == "default"
-    assert agents[0].factory_kwargs["choice_provider"]() == "default"
+    assert facade._sessions[session_id].choice == "glm-local"
+    assert agents[0].factory_kwargs["choice_provider"]() == "glm-local"
     await facade.shutdown()
 
 
-async def test_choosing_auto_sets_the_auto_level(tmp_path):
+async def test_choosing_auto_sets_the_auto_choice(tmp_path):
     facade, writer, agents = _open(_loaded(tmp_path, _auto_models()))
     session_id, _first = await _session(facade, writer)
     await _set(facade, session_id, "auto", 3)
     option = _option(_by_id(writer, 3)["result"])
     assert option["currentValue"] == "auto"
-    assert facade._sessions[session_id].level == "auto"
+    assert facade._sessions[session_id].choice == "auto"
     assert agents[0].factory_kwargs["choice_provider"]() == "auto"
     await facade.shutdown()
 
@@ -624,11 +631,11 @@ async def test_auto_is_not_offered_when_unavailable(tmp_path):
         assert "auto" not in _values(option)
         await _set(facade, session_id, "auto", 3)
         assert _by_id(writer, 3)["error"]["code"] == -32602
-        assert facade._sessions[session_id].level is None
+        assert facade._sessions[session_id].choice is None
         await facade.shutdown()
 
 
-def test_unavailable_auto_shows_the_level_that_runs(tmp_path):
+def test_unavailable_auto_shows_the_model_that_runs(tmp_path):
     loaded = _loaded(tmp_path, {**_models(), "model": "auto"})
     option = model_config_option(loaded, "auto")
     assert option["currentValue"] == "glm-local"
@@ -640,3 +647,34 @@ def test_active_model_line_in_auto_names_the_mode(tmp_path):
     loaded = _loaded(tmp_path, _auto_models())
     assert active_model_line(loaded, "auto") == "Модель: auto"
     assert active_model_line(loaded, "default") == "Модель: glm-local"
+
+
+def test_picker_lists_models_without_level(tmp_path):
+    loaded = _loaded(
+        tmp_path,
+        {
+            **_models(),
+            "models": {
+                **_models()["models"],
+                "extra": {"model": "prov/extra"},
+            },
+        },
+    )
+    option = model_config_option(loaded, "default")
+    assert _values(option) == [
+        "flash",
+        "glm-local",
+        "opus",
+        "judge",
+        "extra",
+    ]
+    assert option["options"][-1]["description"] == "prov/extra"
+    on_extra = model_config_option(loaded, "extra")
+    assert on_extra["currentValue"] == "extra"
+
+
+def test_choice_for_value_returns_the_alias(tmp_path):
+    loaded = _loaded(tmp_path, _models())
+    assert choice_for_value(loaded, "default", "flash") == "flash"
+    assert choice_for_value(loaded, "default", "glm-local") is None
+    assert choice_for_value(loaded, "flash", "flash") is None
