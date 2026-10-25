@@ -60,15 +60,15 @@ class StubExecutor:
         system: Optional[str] = None,
         **_ignored,
     ) -> None:
-        """Ход через раннер TUI: тот же сценарий, что и у `run`."""
-        self.run(
+        """Ход через раннер TUI: тот же сценарий, что и у `record`."""
+        self.record(
             messages,
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             system=system,
         )
 
-    def run(
+    def record(
         self,
         messages: list,
         *,

@@ -31,7 +31,7 @@ def test_ask_human_banner_snapshot(snap_compare, tmp_path, monkeypatch):
     fake = StubExecutor(
         threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow"
     )
-    fake.run(["используй скилл skill-creator"], thread_id=tid)
+    fake.record(["используй скилл skill-creator"], thread_id=tid)
 
     app = TuiApp(
         threads_dir=str(tmp_path),

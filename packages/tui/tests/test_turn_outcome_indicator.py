@@ -426,9 +426,9 @@ async def test_answer_keeps_turn_clock_and_duration_without_wait(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(TID)
         # Вопрос приходит хвостом живого хода: его владелец — этот раннер.
-        StubExecutor(threads_dir=str(tmp_path), scenario="ask_human_flow").run(
-            ["спроси меня"], thread_id=TID
-        )
+        StubExecutor(
+            threads_dir=str(tmp_path), scenario="ask_human_flow"
+        ).record(["спроси меня"], thread_id=TID)
         await wait_until(
             pilot,
             lambda: len(pilot.app.query(AskHumanBanner)) == 1,
