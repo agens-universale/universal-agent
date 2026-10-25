@@ -1,0 +1,48 @@
+from gc_tui.palette import ACCENT, BRAND, DIM, INK, RUN_COLOR
+from gc_tui.services import model_sign as ms
+
+SLOTS = {"light": "fast", "default": "main", "max": "main"}
+
+
+def _colors(text):
+    if text.spans:
+        return [str(s.style) for s in text.spans]
+    return [str(text.style)]
+
+
+def test_levels_follow_explicit_slots_only():
+    assert ms.levels_of("fast", SLOTS) == ("light",)
+    assert ms.levels_of("main", SLOTS) == ("default", "max")
+    assert ms.levels_of("other", SLOTS) == ()
+    assert ms.levels_of("x", {"light": None, "default": None}) == ()
+
+
+def test_dots_colors_per_level_free_and_auto():
+    assert ms.dots("auto", SLOTS).plain == "●"
+    assert _colors(ms.dots("auto", SLOTS)) == [BRAND]
+    assert _colors(ms.dots("main", SLOTS)) == [RUN_COLOR, ACCENT]
+    assert _colors(ms.dots("fast", SLOTS)) == [INK]
+    assert _colors(ms.dots("other", SLOTS)) == [DIM]
+    assert ms.dots("other", SLOTS).plain == "●"
+
+
+def test_level_word_choice_shows_slot_model():
+    assert _colors(ms.dots("max", SLOTS)) == [ACCENT]
+    sign = ms.sign("max", SLOTS, alias="main")
+    assert sign.plain == "● main"
+    assert ms.sign("fast", SLOTS).plain == "● fast"
+    assert ms.sign("auto", SLOTS).plain == "● auto"
+
+
+def test_dots_width_is_max_levels_of_registry():
+    assert ms.dots_width(["fast", "main"], SLOTS) == 2
+    assert ms.dots_width(["fast", "other"], SLOTS) == 1
+    assert ms.dots_width([], SLOTS) == 1
+
+
+def test_level_hint_texts():
+    assert ms.level_hint("fast", SLOTS) == "уровень light"
+    assert ms.level_hint("main", SLOTS) == "уровни default и max"
+    all3 = {"light": "a", "default": "a", "max": "a"}
+    assert ms.level_hint("a", all3) == "все три уровня"
+    assert ms.level_hint("zzz", SLOTS) == "без уровня"

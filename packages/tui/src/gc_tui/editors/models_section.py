@@ -56,6 +56,7 @@ from gc_tui.editors.model_entry_form import (
 )
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
+from gc_tui.services.model_sign import LEVEL_COLORS
 from gc_tui.widgets.action_row import ActionRow
 
 # Виджеты подтверждения в секции моделей.
@@ -586,8 +587,7 @@ def slot_head_text(level: str, width: int = 0) -> Text:
 
 def value_style(value: str) -> str:
     """Цвет ЗАДАННОГО значения слота/привязки — §12.4: уровень — цветом уровня из
-    `TOGGLES["level"]` (единый источник, канон `main.py::_level_color` — будущий
-    авто-режим со своим цветом подхватится сам), алиас-пин — DIM.
+    `model_sign.LEVEL_COLORS` (единый источник, его же читает `main.py::_level_color`), алиас-пин — DIM.
 
     Отсутствие значения («не задан»/«активная» — DEEP_DIM) сюда не попадает: это не
     значение, и решает его тот, кто ЗНАЕТ факт (ключа в файле нет / это первая
@@ -595,11 +595,7 @@ def value_style(value: str) -> str:
     схемой разрешён (`validate_model_alias` режет только `RESERVED_WORDS`). Алиас с
     именем уровня, наоборот, невозможен — они и есть `RESERVED_WORDS`."""
     if value in LEVELS:
-        from gc_tui.toggles import TOGGLES
-
-        return {v.value: v.color for v in TOGGLES["level"].values}.get(
-            value, INK
-        )
+        return LEVEL_COLORS.get(value, INK)
     return DIM
 
 

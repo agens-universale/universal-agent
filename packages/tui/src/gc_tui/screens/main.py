@@ -84,7 +84,7 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
 from gc_tui.screens.trace_follow import TraceFollowMixin, trace_overlays
-from gc_tui.services import image_hints, image_paste, os_ops
+from gc_tui.services import image_hints, image_paste, model_sign, os_ops
 from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.block_edits import (
     RanResult,
@@ -217,7 +217,6 @@ from gc_tui.services.usage_meter import (
 from gc_tui.services.voice_pill import render_pill
 from gc_tui.session_settings import read_breaker_from_meta, read_from_meta
 from gc_tui.toggles import (
-    AUTO_LEVEL_VALUE,
     PROFILE_NONE_VALUE,
     TOGGLES,
     apply_toggle,
@@ -969,10 +968,8 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _level_color(self, level: str) -> str:
         """Цвет точки-индикатора для конкретного уровня — из ЕДИНОГО источника
-        `TOGGLES["level"]` (спека §12.1): не хардкод, будущий авто-режим со
-        своим цветом подхватится сам."""
-        colors = {v.value: v.color for v in TOGGLES["level"].values}
-        return colors.get(level, _INK)
+        `model_sign.LEVEL_COLORS`."""
+        return model_sign.LEVEL_COLORS.get(level, _INK)
 
     def _footer_profile_name(self) -> str | None:
         """Имя активного профиля для футера, или None — тот же источник, что
@@ -1045,7 +1042,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 mode_auto = actual_mode == "auto"
             if selected_auto:
                 if actual_mode == "manual":
-                    transition = (AUTO_LEVEL_VALUE.color, "auto")
+                    transition = (model_sign.AUTO_COLOR, "auto")
             else:
                 if next_selection is None:
                     live_level = self._footer_live_choice()
@@ -1088,7 +1085,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         точка режима + факт (` → ● модель` в auto, просто модель в ручном).
         `transition` отдельно называет выбранный следующий режим/модель,
         не подменяя уже подготовленный вызов. Точка режима — жирная, ВСЕГДА первая и видна: в auto
-        цветом BRAND (`AUTO_LEVEL_VALUE.color`, единственный источник), иначе
+        цветом BRAND (`model_sign.AUTO_COLOR`, единственный источник), иначе
         цветом уровня.
 
         Порядок жертв по ширине (спека auto-routing §7.1): текст после
@@ -1128,7 +1125,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             else _truncate_middle(model_name, model_cols)
         )
         if mode_auto:
-            head.append("●", style=f"bold {AUTO_LEVEL_VALUE.color}")
+            head.append("●", style=f"bold {model_sign.AUTO_COLOR}")
             if running:
                 if with_level_block:
                     head.append(" → ", style=_DIM)
