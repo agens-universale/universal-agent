@@ -556,3 +556,26 @@ async def test_arrow_up_still_withdraws_reply_with_pending_mark(tmp_path):
         assert _replies(pilot) == []
         assert _pending_mark(pilot) is not None
         assert runner.added[0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_applied_mark_rises_above_queued_replies(tmp_path):
+    """Применённая отметка уходит над всей очередью: реплики под и над ней
+    остаются хвостом у ↑."""
+    from gc_core.model_choice import ModelChoiceApplied
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        await _busy(pilot, tmp_path)
+        await _send(pilot, "первое")
+        scr._mark_model_choice("max")
+        await pilot.pause()
+        await _send(pilot, "второе")
+        mark = _pending_mark(pilot)
+        pilot.app._trace_note_sink.push(_TID, ModelChoiceApplied("max", "M"))
+        scr._drain_trace_notes()
+        await pilot.pause()
+        first, second = _replies(pilot)
+        assert list(_trace(pilot).children)[-3:] == [mark, first, second]
+        assert not mark.pending
+        assert scr._queued_tail(_trace(pilot)) == [first, second]

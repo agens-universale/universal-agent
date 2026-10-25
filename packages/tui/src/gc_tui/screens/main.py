@@ -601,9 +601,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Пометки вызова, чья строка ещё не в ленте: (тред, пометка, тиков
         # ожидания осталось) — см. _drain_trace_notes.
         self._waiting_notes: list[tuple[str | None, TraceNote, int]] = []
-        # «Выбор применён» завершением рана — ждёт строки итога хода
-        # (`_on_run_finished`), отметка встаёт после неё.
-        self._run_end_choice: Optional[ModelChoiceApplied] = None
         self._mcp_status_row = (
             None  # Optional[Static] — live MCP-loading индикатор
         )
@@ -4777,11 +4774,14 @@ class TraceScreen(TraceFollowMixin, Screen):
         from gc_tui.services.trace_render import build_block_widgets
 
         text = str(plan.get("text") or "")
-        from gc_tui.widgets.user_reply import is_queued
-
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        # Последний — без очереди: она прижата к низу и рамку не хоронит.
-        children = [w for w in trace.children if not is_queued(w)]
+        # Последний — без прижатого к низу и отметок модели: очередь рамку
+        # не хоронит, отметка после строки итога не отнимает её место.
+        children = [
+            w
+            for w in trace.children
+            if not (pins_to_bottom(w) or isinstance(w, ModelMark))
+        ]
         anchor = None
         if (
             above_fresh_line
@@ -5162,8 +5162,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         другой сессии сюда не попадает.
 
         Событие «выбор модели применён» — отметке смены модели
-        (`_apply_choice_event`); применённое завершением рана ждёт строки
-        итога хода."""
+        (`_apply_choice_event`). Применённое завершением рана ничего не
+        несёт сверх того, что ран кончился: тихую отметку применяет
+        `_settle_pending_mark` после строки итога."""
         from gc_core.model_choice import ModelChoiceApplied
 
         from gc_tui.services.trace_render import note_consequence
@@ -5177,9 +5178,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         for item in sink.drain(tid):
             if not isinstance(item, ModelChoiceApplied):
                 fresh.append((item, _NOTE_OWNER_WAIT_TICKS))
-            elif item.at_run_end:
-                self._run_end_choice = item
-            else:
+            elif not item.at_run_end:
                 self._apply_choice_event(item)
         self._waiting_notes = []
         for note, ticks in waiting + fresh:
@@ -5195,29 +5194,52 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _apply_choice_event(self, event: ModelChoiceApplied) -> None:
         """Выбор применён (спека model-knob §6.4, §6.5): тихая отметка
-        становится обычной на своём месте — над оставшимся прижатым хвостом;
-        её нет — обычная отметка там же. Футер дышит одновременно."""
+        становится обычной на своём месте; её нет — обычная отметка над
+        прижатым хвостом. Футер дышит одновременно."""
         mark = self._pending_model_mark()
         if mark is None:
-            mark = self._new_model_mark(event.choice, pending=False)
-            self._trace_mount(mark)
+            self._trace_mount(
+                self._new_model_mark(event.choice, pending=False)
+            )
         else:
-            mark.set_choice(event.choice, event.alias)
-            mark.apply()
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
-            tail = self._pinned_tail(trace)
-            if tail:
-                trace.move_child(mark, before=tail[0])
+            self._apply_pending_mark(mark, event.choice, event.alias)
         self.on_model_choice_applied(event)
 
-    def _apply_run_end_choice(self, on_screen: bool) -> None:
-        """Конец рана: выбор, применённый завершением, — отметкой после
-        строки итога хода (её уже поставил `_on_run_finished`)."""
-        if on_screen:
-            self._drain_trace_notes()
-        event, self._run_end_choice = self._run_end_choice, None
-        if event is not None and on_screen:
-            self._apply_choice_event(event)
+    def _apply_pending_mark(
+        self, mark: ModelMark, choice: str, alias: str | None
+    ) -> None:
+        """Тихая отметка — обычной, над прижатым хвостом без неё: реплики
+        очереди над ней остаются внизу, у ↑."""
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        tail = [w for w in self._pinned_tail(trace) if w is not mark]
+        mark.set_choice(choice, alias)
+        mark.apply()
+        if tail:
+            trace.move_child(mark, before=tail[0])
+
+    def _settle_pending_mark(self) -> None:
+        """Ран кончился, строка итога стоит, поток стопа вышел, а тихая
+        отметка осталась — выбор применён завершением рана (событие
+        `at_run_end` пришло или опоздало) или до засева применённого на
+        старте: отметка — обычной после строки итога, текущим выбором.
+        Зовётся тиком после хвоста и пометок и концом рана."""
+        mark = self._pending_model_mark()
+        if (
+            mark is None
+            or self._run_in_progress()
+            or self._run_pending
+            or self._stopping_alive()
+            or self._thinking is not None
+        ):
+            return
+        from gc_core.model_choice import ModelChoiceApplied
+
+        choice = current_choice(self.app)
+        alias = self._choice_alias(choice)
+        self._apply_pending_mark(mark, choice, alias)
+        self.on_model_choice_applied(
+            ModelChoiceApplied(choice, alias, at_run_end=True)
+        )
 
     def _pending_model_mark(self) -> Optional[ModelMark]:
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
@@ -5822,7 +5844,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._stamp_run_outcome(run_tid, word, edits)
         if on_screen and self._outcome_line_due(runner, word):
             self._show_turn_outcome(word, plan_proposed, outcome, edits=edits)
-        self._apply_run_end_choice(on_screen)
+        if on_screen:
+            self._settle_pending_mark()
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
@@ -6142,6 +6165,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not _frozen:
             self._poll_trace_tail()
             self._drain_trace_notes()
+            self._settle_pending_mark()
             # Ход кончился, хвост дочитан: впущенное уже сверено. Остальное
             # ядро может держать до следующего прогона (сообщение во время
             # `/compact`) — в поле только снятое у него. После стопа

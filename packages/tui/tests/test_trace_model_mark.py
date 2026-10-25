@@ -259,33 +259,110 @@ async def test_applied_event_turns_pending_into_mark_in_place(tmp_path):
         assert isinstance(kids[-1], ToolCallRow)
 
 
-@pytest.mark.parametrize("drained_first", [True, False])
+async def _ticks(pilot, n: int = 4) -> None:
+    for _ in range(n):  # тик опроса — 250 мс
+        await pilot.pause(0.25)
+
+
+def _after_turn_line(scr, mark: ModelMark) -> bool:
+    kids = list(_trace(scr).children)
+    (line,) = [w for w in kids if isinstance(w, TurnLine)]
+    return kids.index(line) < kids.index(mark)
+
+
+@pytest.mark.parametrize("with_event", [True, False])
 @pytest.mark.asyncio
-async def test_run_end_event_places_mark_after_turn_line(
-    tmp_path, drained_first
-):
+async def test_run_end_event_places_mark_after_turn_line(tmp_path, with_event):
+    """Ран кончился: тихая отметка — обычной после строки итога. Без
+    события тоже: выбор, сделанный до засева применённого на старте,
+    события не даёт."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        runner = _busy(app, tmp_path)
+        scr._cmd_model("max")
+        await _ticks(pilot, 2)
+        (mark,) = _marks(scr)
+        assert mark.pending
+        if with_event:
+            _push(app, ModelChoiceApplied("max", "giga-max", at_run_end=True))
+        runner.running = False
+        await _ticks(pilot)
+        assert _marks(scr) == [mark]
+        assert not mark.pending
+        assert mark._content.plain == "Model  ● giga-max"
+        assert _after_turn_line(scr, mark)
+        assert scr._applied_frame is not None
+
+
+@pytest.mark.asyncio
+async def test_stop_applies_mark_after_stop_line_once_thread_exits(tmp_path):
+    """Стоп: событие конца рана приходит, когда поток ещё дорабатывает;
+    отметка ждёт его выхода и встаёт после строки итога стопа."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        runner = _busy(app, tmp_path)
+        scr._cmd_model("max")
+        await _ticks(pilot, 2)
+        (mark,) = _marks(scr)
+        app.last_stop_requested = True
+        scr._stopping_runner = runner
+        app.active_runner = None
+        await _ticks(pilot)
+        _push(app, ModelChoiceApplied("max", "giga-max", at_run_end=True))
+        await _ticks(pilot)
+        assert mark.pending  # поток стопа жив
+        runner.running = False
+        await _ticks(pilot)
+        assert not mark.pending
+        assert _after_turn_line(scr, mark)
+        assert scr._applied_frame is not None
+
+
+@pytest.mark.asyncio
+async def test_run_end_does_not_leak_into_another_session(tmp_path):
+    other = "n" * 32
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = app.screen
         runner = _busy(app, tmp_path)
         scr._cmd_model("max")
         await pilot.pause()
-        (mark,) = _marks(scr)
-        runner.running = False
         _push(app, ModelChoiceApplied("max", "giga-max", at_run_end=True))
-        if drained_first:
-            scr._drain_trace_notes()
-            await pilot.pause()
-            assert mark.pending  # ждёт строки итога
-            assert scr._applied_frame is None
-        scr._on_run_finished(runner, "run")
+        scr._drain_trace_notes()
+        threads = tmp_path / "threads"
+        (threads / f"data_cli_{other}.jsonl").write_text("", encoding="utf-8")
+        (threads / f"meta_cli_{other}.json").write_text(
+            json.dumps({"thread_id": other, "tui": {}}), encoding="utf-8"
+        )
+        scr.attach_active_task(other)
+        app.tui_state.active_task_id = other
+        _push(app, ModelChoiceApplied("max", "giga-max", at_run_end=True))
+        runner.running = False
+        await _ticks(pilot)
+        assert _marks(scr) == []
+        assert scr._applied_frame is None
+
+
+@pytest.mark.asyncio
+async def test_plan_panel_goes_above_turn_line_past_applied_mark(tmp_path):
+    from gc_tui.widgets.plan_panel import PlanPanel
+
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _activate(app, tmp_path)
+        scr._show_turn_outcome("completed", True, None)
+        scr._cmd_model("max")
+        await pilot.pause()
+        scr._ensure_plan_panel_last({"text": "шаг 1"}, above_fresh_line=True)
         await pilot.pause()
         kids = list(_trace(scr).children)
+        (panel,) = [w for w in kids if isinstance(w, PlanPanel)]
         (line,) = [w for w in kids if isinstance(w, TurnLine)]
-        assert _marks(scr) == [mark]
-        assert kids.index(line) < kids.index(mark)
-        assert not mark.pending
-        assert scr._applied_frame is not None
+        (mark,) = _marks(scr)
+        assert kids.index(panel) < kids.index(line) < kids.index(mark)
 
 
 @pytest.mark.asyncio
