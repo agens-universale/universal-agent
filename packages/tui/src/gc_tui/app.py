@@ -8,7 +8,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, List, NamedTuple, Optional
+from typing import TYPE_CHECKING, Callable, List, NamedTuple, Optional
 
 if TYPE_CHECKING:
     from gc_core.model_router import ModelRouter
@@ -1264,9 +1264,16 @@ class TuiApp(App):
         """Сессионный выбор модели, которого нет в реестре действующего
         профиля (смена профиля, мета треда другого профиля), — снять и
         сказать об этом: иначе выбор молча уходил бы в `default`.
-        Слово уровня и `auto` допустимы в любом реестре."""
+        Слово уровня и `auto` допустимы в любом реестре.
+
+        Пока идёт ран, профиль для него ещё не действует (пересборка — после
+        хода), и снятие сменило бы модель посреди хода: оно откладывается до
+        конца рана или пересборки раннера — оба места зовут санацию снова."""
         from gc_core.config_modules.model_registry import choice_in_registry
 
+        runner = self.active_runner
+        if runner is not None and runner.is_running():
+            return
         choice = self._session_overrides.get("model")
         loaded = self.effective_settings()
         if not choice or choice_in_registry(choice, loaded.settings):
@@ -1440,6 +1447,21 @@ class TuiApp(App):
                 tuple(changed),
             )
         )
+
+    def _run_choice_provider(self) -> Callable[[], str]:
+        """Выбор для Router'а собираемого рана: сессионный `/model` — живой
+        (смена без пересборки), выбор конфига — снимок сборки executor.
+        Смена профиля действует со следующего рана: посреди хода `model:`
+        нового профиля не подменяет выбор идущего."""
+        from gc_core.config_modules.model_registry import configured_choice
+
+        configured = configured_choice(self._session_base_settings().settings)
+
+        def provider() -> str:
+            with self._config_lock:
+                return self._session_overrides.get("model", configured)
+
+        return provider
 
     def _choice_provider(self) -> str:
         """Выбор модели для `ModelRouter` (спека §6.4): читает сессионный слой
@@ -1829,6 +1851,8 @@ class TuiApp(App):
             _release_runner(self.active_runner)
             self.active_runner = None
             self._runner_stale = False
+            # Снятие выбора, отложенное сменой профиля посреди хода.
+            self.sanitize_session_model()
         if self.active_runner is not None:
             return self.active_runner
         from gc_tui.services.agent_runner import AgentRunner
@@ -1892,6 +1916,7 @@ class TuiApp(App):
         # Своё у TUI поверх действующих настроек: промпт-ассеты, адаптивный bounce
         # текстового ответа и режим судьи /gate (CLI/server/swarm их не ставят).
         loaded = tui_agent_settings(self.effective_settings())
+        choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
         progress = McpProgress()
         progress.begin(list(settings_of(loaded).mcp.servers))
@@ -1932,7 +1957,7 @@ class TuiApp(App):
                     on_progress=progress.update,
                     on_stream_delta=self._stream_pump.on_delta,
                     is_tui=True,
-                    choice_provider=self._choice_provider,
+                    choice_provider=choice_provider,
                     circuit_breaker=self._circuit_breaker,
                     # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url
                     # поверх непустого реестра — тот же детект, что уже

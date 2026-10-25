@@ -420,6 +420,134 @@ async def test_restored_meta_with_foreign_model_is_dropped(tmp_path):
         )
 
 
+# --- 4c. Смена профиля посреди хода (Review Focus 4) ------------------------------
+
+
+class _Runner:
+    """Раннер-двойник: ход идёт, пока `running`."""
+
+    def __init__(self):
+        self.running = True
+
+    def is_running(self):
+        return self.running
+
+
+def _run_choice_provider(app, monkeypatch):
+    """Провайдер выбора, с которым собирается executor рана (без сети)."""
+    captured: dict = {}
+
+    class _Ctx:
+        os_backend = None
+        tools_data: dict = {}
+        mcp_status: dict = {}
+        logging_path = "/tmp/agent_main_test.log"
+
+    class _Ex:
+        def __init__(self, ctx):
+            pass
+
+    async def _fake_acreate_run_context(_cfg, **kw):
+        captured.update(kw)
+        return _Ctx()
+
+    monkeypatch.setattr(
+        "gc_core.config_modules.auth.build_auth_connector", lambda cfg: None
+    )
+    monkeypatch.setattr(
+        "gc_core.run_context.acreate_run_context", _fake_acreate_run_context
+    )
+    monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", _Ex)
+    app._build_real_executor()
+    return captured["choice_provider"]
+
+
+def _dropped():
+    return [
+        n
+        for n in collect_runtime_notices()
+        if n.code == "session_model_dropped"
+    ]
+
+
+def test_profile_switch_mid_run_keeps_run_choice_drop_after_run(
+    tmp_path, monkeypatch
+):
+    """Сессионной модели нет в новом профиле: посреди хода выбор рана не
+    меняется; снятие и одно уведомление — после хода, к следующему рану."""
+    clear_runtime_notices()
+    _write_work_profile(tmp_path)
+    _write_other_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.switch_session_profile("work")
+    app.apply_model_choice("flash")
+    provider = _run_choice_provider(app, monkeypatch)
+    runner = _Runner()
+    app.active_runner = runner
+
+    app.switch_session_profile("other")
+
+    assert provider() == "flash"
+    assert app._session_overrides["model"] == "flash"
+    assert _dropped() == []
+
+    runner.running = False
+    app.get_runner()
+
+    assert "model" not in app._session_overrides
+    assert len(_dropped()) == 1
+
+
+@pytest.mark.asyncio
+async def test_deferred_model_drop_happens_at_run_end(tmp_path):
+    """Конец хода на экране — то же отложенное снятие, не дожидаясь
+    следующей отправки."""
+    clear_runtime_notices()
+    _write_work_profile(tmp_path)
+    _write_other_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.switch_session_profile("work")
+    app.apply_model_choice("flash")
+    async with app.run_test() as pilot:
+        runner = _Runner()
+        app.active_runner = runner
+        app.switch_session_profile("other")
+        assert _dropped() == []
+        runner.running = False
+        pilot.app.screen._on_run_finished(runner, "run")
+        assert "model" not in app._session_overrides
+        assert len(_dropped()) == 1
+        app.active_runner = None
+
+
+def test_profile_switch_mid_run_keeps_configured_choice(tmp_path, monkeypatch):
+    """Без сессионной модели: `model:` нового профиля действует со
+    следующего рана — Router идущего не уходит на default старого реестра."""
+    _write_yaml(
+        tmp_path / "profiles" / "work.yml",
+        {
+            "models": {
+                "flash": {"url": "http://w/v1/chat/completions", "token": ""},
+                "big": {"url": "http://w/v1/chat/completions", "token": ""},
+            },
+            "slots": {"default": "flash"},
+            "model": "big",
+        },
+    )
+    _write_other_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.switch_session_profile("work")
+    provider = _run_choice_provider(app, monkeypatch)
+    assert provider() == "big"
+    app.active_runner = _Runner()
+
+    app.switch_session_profile("other")
+
+    assert provider() == "big"
+    app.apply_model_choice("max")
+    assert provider() == "max"  # `/model` посреди хода действует
+
+
 # --- 5. Санация битого профиля — сессионная ветка vs конфиг-указатель (§9.4) -------
 
 

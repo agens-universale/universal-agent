@@ -40,12 +40,24 @@ def _app(tmp_path, choice, registry=None):
     return app
 
 
-def _runner(*, level, mode, applied, registry=None):
-    """Ход идёт: вызов `level` в режиме `mode`, применён выбор `applied`."""
+def _runner(app, *, level, mode, applied, registry=None):
+    """Ход идёт: вызов `level` в режиме `mode`, применён выбор `applied`.
+    Живой выбор Router'а рана — выбор окна, санированный реестром рана,
+    как у настоящего executor."""
+    from gc_core.config_modules.model_registry import (
+        configured_choice,
+        effective_choice,
+    )
     from gc_core.model_router import ModelRouter
 
+    settings = make_settings(registry or _REGISTRY)
     router = ModelRouter(
-        make_settings(registry or _REGISTRY), choice_provider=lambda: level
+        settings,
+        choice_provider=lambda: level,
+        live_choice_provider=lambda: effective_choice(
+            configured_choice(app.effective_settings().settings),
+            settings.settings,
+        ),
     )
 
     class _Runner:
@@ -111,6 +123,7 @@ async def test_running_auto_footer_keeps_arrow_and_decision_dot(tmp_path):
     _run(
         app,
         _runner(
+            app,
             level="max",
             mode="auto",
             applied="auto",
@@ -131,7 +144,7 @@ async def test_running_auto_footer_keeps_arrow_and_decision_dot(tmp_path):
 @pytest.mark.asyncio
 async def test_pending_choice_shows_hollow_star_and_dim_name(tmp_path):
     app = _app(tmp_path, "default")
-    _run(app, _runner(level="default", mode="manual", applied="default"))
+    _run(app, _runner(app, level="default", mode="manual", applied="default"))
     async with app.run_test(size=(120, 24)):
         scr = app.screen
         assert _right(scr).startswith("● glm-4.6")
@@ -147,11 +160,23 @@ async def test_pending_choice_shows_hollow_star_and_dim_name(tmp_path):
         app.active_runner = None
 
     app = _app(tmp_path, "auto")
-    _run(app, _runner(level="max", mode="auto", applied="auto"))
+    _run(app, _runner(app, level="max", mode="auto", applied="auto"))
     async with app.run_test(size=(120, 24)):
         app.apply_model_choice("light")
         plain = _right(app.screen)
         assert plain.startswith("● → ● giga-max  ✧ ● glm-flash")
+        app.active_runner = None
+
+
+@pytest.mark.asyncio
+async def test_unknown_config_choice_is_not_pending(tmp_path):
+    """`model:` вне реестра: ран идёт моделью default (§3.2) — футер
+    сравнивает санированный выбор рана, ожидания нет."""
+    app = _app(tmp_path, "ghost")
+    _run(app, _runner(app, level="default", mode="manual", applied="default"))
+    async with app.run_test(size=(120, 24)):
+        plain = _right(app.screen)
+        assert plain.startswith("● glm-4.6") and "✧" not in plain
         app.active_runner = None
 
 
@@ -230,7 +255,7 @@ async def test_breathing_stops_on_session_switch(tmp_path):
 @pytest.mark.asyncio
 async def test_narrow_footer_keeps_dots_and_stars(tmp_path, monkeypatch):
     app = _app(tmp_path, "auto")
-    _run(app, _runner(level="max", mode="auto", applied="auto"))
+    _run(app, _runner(app, level="max", mode="auto", applied="auto"))
     async with app.run_test(size=(120, 24)):
         scr = app.screen
         app.apply_model_choice("light")

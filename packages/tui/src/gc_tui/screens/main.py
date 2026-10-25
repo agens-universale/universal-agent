@@ -1104,13 +1104,17 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _footer_pending(self, call_running: bool, slots: dict) -> Text | None:
         """Знак выбора, ждущего ближайшего шага: ход идёт, а выбор окна —
-        не тот, которым работает ран (`State.applied_choice`)."""
+        не тот, которым работает ран (`State.applied_choice`). Выбор —
+        санированный Router'ом рана (`live_choice`): ровно его сравнивает
+        ядро, неизвестная реестру модель ожиданием не висит."""
         if not call_running:
             return None
-        applied_fn = getattr(self.app.active_runner, "applied_choice", None)
+        runner = self.app.active_runner
+        applied_fn = getattr(runner, "applied_choice", None)
         applied = applied_fn() if callable(applied_fn) else None
-        provider = getattr(self.app, "_choice_provider", None)
-        choice = provider() if callable(provider) else None
+        router_fn = getattr(runner, "executor_router", None)
+        router = router_fn() if callable(router_fn) else None
+        choice = router.live_choice() if router is not None else None
         if applied is None or choice is None or choice == applied:
             return None
         return self._choice_sign(choice, slots, _DIM)
@@ -5818,6 +5822,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         Тред прогона считается один раз: к тику окончания человек мог уйти
         на другую сессию. Тогда экран (индикатор, сводка, баннер плана,
         подсказка поля) не трогается — он принадлежит открытому треду."""
+        # Снятие выбора модели, отложенное сменой профиля посреди хода.
+        self.app.sanitize_session_model()
         run_tid = self._run_task_id(runner)
         on_screen = run_tid == self._active_task_id
         edits = self._close_turn_edits(kind, run_tid, on_screen=on_screen)
