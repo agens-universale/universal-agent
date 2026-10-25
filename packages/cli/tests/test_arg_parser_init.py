@@ -74,13 +74,15 @@ def test_trace_id_underscore_is_not_a_generic_override(monkeypatch):
     assert "trace_id" not in ap_mod.extra_config_overrides
 
 
-def test_level_flag_choices_are_the_single_level_values(monkeypatch):
-    from gc_core.config_modules.model_registry import LEVEL_VALUES
-
-    _parse(["gc-cli", "-q", "x"], monkeypatch)
+def test_model_flag_goes_to_the_model_override(monkeypatch):
+    _parse(["gc-cli", "-q", "x", "--model", "max"], monkeypatch)
     from gc_cli import arg_parser as ap_mod
 
-    action = next(
-        a for a in ap_mod.parser._actions if "--level" in a.option_strings
-    )
-    assert list(action.choices) == list(LEVEL_VALUES)
+    assert ap_mod.extra_config_overrides["model"] == "max"
+
+
+def test_level_flag_errors_with_model_hint(monkeypatch, capsys):
+    with pytest.raises(SystemExit) as exc:
+        _parse(["gc-cli", "-q", "x", "--level", "max"], monkeypatch)
+    assert exc.value.code == 2
+    assert "--model" in capsys.readouterr().err

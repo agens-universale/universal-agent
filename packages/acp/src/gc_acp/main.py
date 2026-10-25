@@ -216,7 +216,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
     Свои флаги — ``--config``, ``--profile`` (пустой args у VS Code и
     ``--profile acp`` в его настройках) и флаги-настройки gc-cli
-    (``--model``, ``--completions_url``, ``--level``). ``--путь.настройки``
+    (``--model``, ``--completions_url``). ``--путь.настройки``
     — правка конфига, как у gc-cli; незнакомый путь — ошибка. Остальное
     клиенты дописывают сами (JetBrains — позиционный ``acp``,
     ``--experimental``): такие токены пропускаются (``foreign_flags``).

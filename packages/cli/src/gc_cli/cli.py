@@ -23,6 +23,7 @@ from gc_core.config import (
     user_config_path,
 )
 from gc_core.config_modules.auth import build_auth_connector
+from gc_core.config_modules.cli_args import LEGACY_FORCE_NOTICE
 from gc_core.config_modules.env_interpolation import (
     UnresolvedPlaceholdersError,
 )
@@ -933,10 +934,7 @@ async def arun_cli() -> int:
     force_legacy = cli_forces_legacy_model(loaded)
     if force_legacy:
         loaded = loaded.with_runtime(
-            notices=(
-                *loaded.runtime.notices,
-                "--model: уровни отключены на этот запуск (легаси-форс)",
-            )
+            notices=(*loaded.runtime.notices, LEGACY_FORCE_NOTICE)
         )
     from gc_core import upgrade_gate
 

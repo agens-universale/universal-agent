@@ -221,7 +221,7 @@ def _origin(host: str, port: int) -> str:
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     """Свои флаги — ``--config``, ``--profile`` и флаги-настройки gc-cli
-    (``--model``, ``--completions_url``, ``--level``); ``--путь.настройки``
+    (``--model``, ``--completions_url``); ``--путь.настройки``
     — правка конфига, как у gc-cli. Прочее — ошибка разбора."""
     parser = argparse.ArgumentParser(prog="gc-chat", allow_abbrev=False)
     parser.add_argument("--config", default=None, help="путь к config.yml")

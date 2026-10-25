@@ -312,7 +312,7 @@ class TuiApp(App):
         system: str = "cli",
         settings: Optional[LoadedSettings] = None,
         profile_override: Optional[str] = None,
-        level_override: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._threads_dir = threads_dir
@@ -359,11 +359,11 @@ class TuiApp(App):
         # Выбор из приложения (`/profiles`) остаётся сильнее: он ложится поверх
         # базы, собранной под флагом (`_session_base_settings`).
         self._profile_override = profile_override
-        # Флаг запуска `--level` — тот же оверрайд, что main() отдаёт загрузчику на
+        # Флаг запуска `--model` — тот же оверрайд, что main() отдаёт загрузчику на
         # старте: каждая пересборка базы (reload_config, _profile_remerge) обязана
         # накладывать его снова через apply_cli_overrides, иначе выбор живёт только
         # до первого перечитывания конфига.
-        self._level_override = level_override
+        self._model_override = model_override
         # Сессионные переопределения конфига (спека 2026-07-20-session-scoped-settings):
         # база — self._settings (файлы), это — то, что переключено в текущем треде.
         # Хранятся по dotted-именам; накладываются в effective_settings().
@@ -856,8 +856,8 @@ class TuiApp(App):
         base = self._with_tui_runtime(
             apply_cli_overrides(
                 self._load_base_settings(),
-                extra_overrides={"model": self._level_override}
-                if self._level_override
+                extra_overrides={"model": self._model_override}
+                if self._model_override
                 else None,
             )
         )
@@ -1188,8 +1188,8 @@ class TuiApp(App):
         return self._with_tui_runtime(
             apply_cli_overrides(
                 loaded,
-                extra_overrides={"model": self._level_override}
-                if self._level_override
+                extra_overrides={"model": self._model_override}
+                if self._model_override
                 else None,
             )
         )

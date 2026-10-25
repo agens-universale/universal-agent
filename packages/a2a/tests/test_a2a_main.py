@@ -21,7 +21,7 @@ def test_parse_args_keeps_own_flags_and_collects_setting_paths():
     assert bare.profile is None
     assert bare.overrides == {}
     mixed = _parse_args(
-        ["--config", "c.yml", "--level", "max", "--a2a.port", "9001"]
+        ["--config", "c.yml", "--model", "max", "--a2a.port", "9001"]
     )
     assert mixed.config == "c.yml"
     assert mixed.overrides["model"] == "max"
@@ -200,3 +200,55 @@ def test_plan_mode_is_warned_about_and_the_server_still_starts(
 def test_edit_mode_starts_without_the_warning(monkeypatch, capsys):
     _start(monkeypatch, "edit")
     assert "режим разрешений" not in capsys.readouterr().err
+
+
+def _start_model(monkeypatch, value):
+    served = []
+
+    def load(path, profile_override=None):
+        del path, profile_override
+        return make_settings(
+            {
+                "models": {"flash": {"model": "m"}, "pro": {"model": "p"}},
+                "slots": {"default": "flash"},
+            }
+        )
+
+    async def fake_serve(loaded):
+        served.append(loaded)
+
+    monkeypatch.setattr("gc_a2a.main.load_settings", load)
+    monkeypatch.setattr("gc_a2a.main.serve", fake_serve)
+    assert main(["--model", value]) == 0
+    return served[0]
+
+
+def _assert_choice(monkeypatch, value):
+    loaded = _start_model(monkeypatch, value)
+    assert loaded.settings.model == value
+    assert not any("легаси-форс" in n for n in loaded.runtime.notices)
+
+
+def test_model_flag_auto_is_a_choice(monkeypatch):
+    _assert_choice(monkeypatch, "auto")
+
+
+def test_model_flag_alias_is_a_choice(monkeypatch):
+    _assert_choice(monkeypatch, "pro")
+
+
+def test_model_flag_level_word_is_a_choice(monkeypatch):
+    _assert_choice(monkeypatch, "max")
+
+
+def test_model_flag_raw_id_forces_legacy(monkeypatch):
+    loaded = _start_model(monkeypatch, "raw-id")
+    assert loaded.settings.agent.model == "raw-id"
+    assert any("легаси-форс" in n for n in loaded.runtime.notices)
+
+
+def test_level_flag_errors_with_model_hint(capsys):
+    with pytest.raises(SystemExit) as exc:
+        _parse_args(["--level", "max"])
+    assert exc.value.code == 2
+    assert "--model" in capsys.readouterr().err

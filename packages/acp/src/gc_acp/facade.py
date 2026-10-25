@@ -136,7 +136,7 @@ class LiveSession:
     failed: bool = False
     tool_flow: ToolFlow | None = None
     diffs: DiffLog | None = None
-    # Выбор пикера. None — уровень конфига (``settings.model`` / ``--level``).
+    # Выбор пикера. None — уровень конфига (``settings.model`` / ``--model``).
     # close забывает сессию вместе с этим полем; в файл конфига не пишется.
     level: str | None = None
     # Title уже ушёл клиенту — повторно с тем же не слать.

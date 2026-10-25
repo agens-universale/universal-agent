@@ -36,7 +36,7 @@ def _auto_runtime_notices():
     ]
 
 
-def _app_on_disk(tmp_path, monkeypatch, body, *, level_override=None):
+def _app_on_disk(tmp_path, monkeypatch, body, *, model_override=None):
     """TuiApp на настоящем config.yml с диска — так же, как его собирает `gc-ua`
     (`load_settings` + флаг уровня через `apply_cli_overrides`)."""
     pytest.importorskip("textual")
@@ -47,14 +47,14 @@ def _app_on_disk(tmp_path, monkeypatch, body, *, level_override=None):
     from gc_tui.app import TuiApp
 
     loaded = load_settings(str(cfg))
-    if level_override:
+    if model_override:
         loaded = apply_cli_overrides(
-            loaded, extra_overrides={"model": level_override}
+            loaded, extra_overrides={"model": model_override}
         )
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
         settings=loaded,
-        level_override=level_override,
+        model_override=model_override,
     )
     app.set_config_path(str(cfg))
     return app, cfg
@@ -76,7 +76,7 @@ def test_level_flag_on_a_one_model_config_explains_in_the_card_and_runs_default(
     from gc_tui.toggles import effective_toggle_names, toggle_state
 
     app, _cfg = _app_on_disk(
-        tmp_path, monkeypatch, _BACKEND + _ONE, level_override="auto"
+        tmp_path, monkeypatch, _BACKEND + _ONE, model_override="auto"
     )
 
     notices = [
@@ -88,16 +88,6 @@ def test_level_flag_on_a_one_model_config_explains_in_the_card_and_runs_default(
     assert app.auto_mode_active() is False
     assert toggle_state(app, "level") == "default"
     assert "auto" not in effective_toggle_names(app, "level")
-
-
-def test_gc_ua_has_no_model_flag():
-    """`--model` у gc-ua не объявлен (легаси-форс — вход gc-cli и сервера):
-    парсер сохраняет неизвестные аргументы для отказа точки входа с кодом 2."""
-    from gc_tui import _parse_args
-
-    args = _parse_args(["--model", "other"])
-    assert not hasattr(args, "model")
-    assert args.unknown == ["--model", "other"]
 
 
 def test_typed_level_auto_names_the_reason_when_auto_is_unavailable(

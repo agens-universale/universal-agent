@@ -3,7 +3,7 @@ import pytest
 from gc_testkit.tui_support import tui_settings
 
 
-def test_level_override_survives_reload_config(tmp_path, monkeypatch):
+def test_model_override_survives_reload_config(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
@@ -13,7 +13,7 @@ def test_level_override_survives_reload_config(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
         settings=tui_settings({"agent.model": "m", "model": "auto"}),
-        level_override="auto",
+        model_override="auto",
     )
     app.set_config_path(str(cfg_path))
     app.reload_config()
@@ -22,9 +22,9 @@ def test_level_override_survives_reload_config(tmp_path, monkeypatch):
     )  # флаг пережил перечитывание
 
 
-def test_level_override_survives_profile_remerge(tmp_path):
+def test_model_override_survives_profile_remerge(tmp_path):
     """Пере-мерж сессионного профиля (`_profile_remerge`) — второй, независимый от
-    `reload_config` сайт наложения `--level`; оба обязаны сохранять флаг запуска."""
+    `reload_config` сайт наложения `--model`; оба обязаны сохранять флаг запуска."""
     pytest.importorskip("textual")
     import yaml
     from gc_core.config import load_settings
@@ -61,7 +61,7 @@ def test_level_override_survives_profile_remerge(tmp_path):
 
     loaded = load_settings(str(base))
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=loaded, level_override="auto"
+        threads_dir=str(tmp_path / "t"), settings=loaded, model_override="auto"
     )
     app.set_config_path(str(base))
 
@@ -75,20 +75,49 @@ def test_level_override_survives_profile_remerge(tmp_path):
     )  # флаг пережил пере-мерж профиля
 
 
-def test_gc_ua_parser_accepts_level_auto():
-    # Разбор аргументов вынесен в отдельную функцию, чтобы тест мог дёрнуть
-    # парсер без запуска TUI.
+def _loaded_with_registry():
+    return tui_settings(
+        {
+            "models": {"flash": {"model": "m"}, "pro": {"model": "p"}},
+            "slots": {"default": "flash"},
+        }
+    )
+
+
+def _applied(value):
+    from gc_core.config import apply_cli_overrides
     from gc_tui import _parse_args
 
-    args = _parse_args(["--level", "auto"])
-    assert args.level == "auto"
-
-
-def test_level_flag_choices_are_the_single_level_values():
-    from gc_core.config_modules.model_registry import LEVEL_VALUES
-    from gc_tui import _build_parser
-
-    action = next(
-        a for a in _build_parser()._actions if "--level" in a.option_strings
+    args = _parse_args(["--model", value])
+    return apply_cli_overrides(
+        _loaded_with_registry(), extra_overrides={"model": args.model}
     )
-    assert list(action.choices) == list(LEVEL_VALUES)
+
+
+def test_model_flag_auto_is_a_choice():
+    assert _applied("auto").settings.model == "auto"
+
+
+def test_model_flag_alias_is_a_choice():
+    assert _applied("pro").settings.model == "pro"
+
+
+def test_model_flag_level_word_is_a_choice():
+    assert _applied("max").settings.model == "max"
+
+
+def test_model_flag_raw_id_forces_legacy():
+    from gc_core.config import cli_forces_legacy_model
+
+    loaded = _applied("raw-id")
+    assert loaded.settings.agent.model == "raw-id"
+    assert cli_forces_legacy_model(loaded)
+
+
+def test_level_flag_errors_with_model_hint(capsys):
+    from gc_tui import _parse_args
+
+    with pytest.raises(SystemExit) as exc:
+        _parse_args(["--level", "max"])
+    assert exc.value.code == 2
+    assert "--model" in capsys.readouterr().err

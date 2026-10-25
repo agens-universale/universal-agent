@@ -278,6 +278,32 @@ def _get_nested(document: Dict[str, Any], dotted: str) -> Any:
     return document
 
 
+def split_model_flag(updates: Dict[str, Any], loaded) -> Dict[str, Any]:
+    """``--model`` — выбор (``model``) или сырой идентификатор (``agent.model``).
+
+    Допустимый выбор (``auto``, слово уровня, алиас реестра) остаётся в
+    ``model``; при пустом реестре выбором бывает только ``auto``. Прочее
+    значение переезжает в ``agent.model`` — легаси-форс определяет
+    ``cli_forces_legacy_model`` по слою ``cli`` этого пути.
+    """
+    from gc_core.config_modules.model_registry import choice_in_registry
+
+    if "model" not in updates:
+        return updates
+    value = updates["model"]
+    settings = loaded.settings
+    if settings.models:
+        is_choice = choice_in_registry(str(value), settings)
+    else:
+        is_choice = value == "auto"
+    if is_choice:
+        return updates
+    return {
+        ("agent.model" if key == "model" else key): item
+        for key, item in updates.items()
+    }
+
+
 def apply_cli_overrides(
     loaded,
     *,
@@ -306,7 +332,8 @@ def apply_cli_overrides(
     )
 
     updates, param_trace_id, override_facts = _cli_updates(
-        dict(extra_overrides or {}), prefix=param_prefix
+        split_model_flag(dict(extra_overrides or {}), loaded),
+        prefix=param_prefix,
     )
     write_guard = False if no_write_guard else write_guard_enabled
     read_guard = False if no_read_guard else read_guard_enabled

@@ -66,7 +66,7 @@ class _Executor:
     [
         (
             _BACKEND + _ONE_MODEL,
-            ["--level", "auto"],
+            ["--model", "auto"],
             "во всех уровнях одна модель",
             "уровень default",
         ),
@@ -164,7 +164,7 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
 @pytest.mark.parametrize(
     "profile_level, flags",
     [
-        ("max", ["--level", "auto"]),
+        ("max", ["--model", "auto"]),
         ("auto", []),
     ],
     ids=["explicit_auto_over_profile_level", "auto_from_profile"],

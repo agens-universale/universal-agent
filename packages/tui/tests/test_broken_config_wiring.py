@@ -692,8 +692,8 @@ def test_the_repair_wizard_is_not_handed_the_profile_flag(
     assert captured.get("profile_override") is None  # …и флаг в неё не уехал
 
 
-def test_the_repair_wizard_is_not_handed_the_level_flag(monkeypatch, tmp_path):
-    """Симметрия флагов запуска: `--level` гасится под `--init-config` тем же
+def test_the_repair_wizard_is_not_handed_the_model_flag(monkeypatch, tmp_path):
+    """Симметрия флагов запуска: `--model` гасится под `--init-config` тем же
     правилом, что и `--profile` в тесте выше — чинилка читает и пишет
     пользовательский файл, флаги, назвавшие ДРУГОЙ конфиг, там не в счёт."""
     pytest.importorskip("textual")
@@ -724,10 +724,10 @@ def test_the_repair_wizard_is_not_handed_the_level_flag(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
 
-    rc = tui_mod.main(argv=["--init-config", "--level", "max"])
+    rc = tui_mod.main(argv=["--init-config", "--model", "max"])
     assert rc == 0
     assert captured.get("ran") is True  # дошли до сборки приложения
-    assert captured.get("level_override") is None  # …и флаг в неё не уехал
+    assert captured.get("model_override") is None  # …и флаг в неё не уехал
 
 
 def test_main_explains_an_unreadable_layer_instead_of_a_traceback(

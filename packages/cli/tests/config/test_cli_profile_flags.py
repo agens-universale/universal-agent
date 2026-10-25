@@ -1,4 +1,4 @@
-"""CLI `--profile`/`--level` + легаси-форс `--model` (Task 10, план «Профили v2, волна A»).
+"""CLI `--profile`/`--model` + легаси-форс `--model` (Task 10, план «Профили v2, волна A»).
 
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-10-brief.md,
 docs/specs/2026-07-23-profiles-design.md §2, §12.1.
@@ -45,7 +45,7 @@ def isolated_cwd(tmp_path, monkeypatch):
     return project_dir
 
 
-# --- arg_parser: именованные флаги --profile/--level ------------------------------
+# --- arg_parser: именованные флаги --profile/--model ------------------------------
 
 
 def _parse(argv, monkeypatch):
@@ -69,21 +69,21 @@ def test_profile_flag_default_is_none(monkeypatch):
     assert ap.run_args.profile is None
 
 
-def test_level_flag_parsed_and_merged_into_overrides(monkeypatch):
-    ap = _parse(["gc-cli", "-q", "hi", "--level", "light"], monkeypatch)
-    assert ap.run_args.level == "light"
+def test_model_flag_parsed_and_merged_into_overrides(monkeypatch):
+    ap = _parse(["gc-cli", "-q", "hi", "--model", "light"], monkeypatch)
+    assert ap.run_args.model == "light"
     assert ap.extra_config_overrides.get("model") == "light"
 
 
-def test_level_flag_parsed_and_merged_into_overrides_auto(monkeypatch):
-    ap = _parse(["gc-cli", "-q", "hi", "--level", "auto"], monkeypatch)
-    assert ap.run_args.level == "auto"
+def test_model_flag_auto_merged_into_overrides(monkeypatch):
+    ap = _parse(["gc-cli", "-q", "hi", "--model", "auto"], monkeypatch)
+    assert ap.run_args.model == "auto"
     assert ap.extra_config_overrides.get("model") == "auto"
 
 
-def test_level_flag_absent_does_not_add_override(monkeypatch):
+def test_model_flag_absent_does_not_add_override(monkeypatch):
     ap = _parse(["gc-cli", "-q", "hi"], monkeypatch)
-    assert ap.run_args.level is None
+    assert ap.run_args.model is None
     assert "model" not in ap.extra_config_overrides
 
 
@@ -103,7 +103,7 @@ def test_model_and_completions_url_flags_land_on_their_paths(monkeypatch):
         monkeypatch,
     )
     assert ap.extra_config_overrides == {
-        "agent.model": "X",
+        "model": "X",
         "backend.completions_url": "http://x/v1",
     }
     loaded = apply_cli_overrides(
@@ -133,8 +133,8 @@ def test_dotted_param_and_flat_name_hint(monkeypatch):
     assert "--agent.max_steps" in str(exc.value)
 
 
-def test_level_flag_rejects_invalid_choice(monkeypatch):
-    monkeypatch.setattr("sys.argv", ["gc-cli", "-q", "hi", "--level", "bogus"])
+def test_level_flag_is_removed(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["gc-cli", "-q", "hi", "--level", "max"])
     import importlib
 
     with pytest.raises(SystemExit):
@@ -261,15 +261,20 @@ def test_flat_profile_key_names_active_profile_not_config_pointer(
     )
 
 
-# --- Интеграция: --level перекрывает конфиг и профиль ------------------------------
+# --- Интеграция: --model перекрывает конфиг и профиль ------------------------------
 
 
-def test_level_override_wins_over_config_and_profile(isolated_cwd, tmp_path):
+def test_model_override_wins_over_config_and_profile(isolated_cwd, tmp_path):
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
     _write_yaml(
         isolated_cwd / ".gc" / "config.yml",
-        {"profile": "work", "model": "max"},
+        {
+            "profile": "work",
+            "model": "max",
+            "models": {"flash": {}},
+            "slots": {"default": "flash"},
+        },
     )
     _write_yaml(
         isolated_cwd / ".gc" / "profiles" / "work.yml", {"model": "light"}
@@ -282,6 +287,49 @@ def test_level_override_wins_over_config_and_profile(isolated_cwd, tmp_path):
 
     loaded = apply_cli_overrides(loaded, extra_overrides={"model": "default"})
     assert loaded.settings.model == "default"  # CLI побеждает профиль
+
+
+def _registry_base(isolated_cwd, tmp_path):
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(base_config, _MINIMAL_BASE)
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {
+            "models": {"flash": {}, "pro": {}},
+            "slots": {"default": "flash"},
+        },
+    )
+    return load_settings(str(base_config))
+
+
+def _assert_choice(isolated_cwd, tmp_path, value):
+    loaded = apply_cli_overrides(
+        _registry_base(isolated_cwd, tmp_path),
+        extra_overrides={"model": value},
+    )
+    assert loaded.settings.model == value
+    assert cli_forces_legacy_model(loaded) is False
+
+
+def test_model_flag_auto_is_a_choice(isolated_cwd, tmp_path):
+    _assert_choice(isolated_cwd, tmp_path, "auto")
+
+
+def test_model_flag_alias_is_a_choice(isolated_cwd, tmp_path):
+    _assert_choice(isolated_cwd, tmp_path, "pro")
+
+
+def test_model_flag_level_word_is_a_choice(isolated_cwd, tmp_path):
+    _assert_choice(isolated_cwd, tmp_path, "max")
+
+
+def test_model_flag_raw_id_forces_legacy(isolated_cwd, tmp_path):
+    loaded = apply_cli_overrides(
+        _registry_base(isolated_cwd, tmp_path),
+        extra_overrides={"model": "raw-id"},
+    )
+    assert loaded.settings.agent.model == "raw-id"
+    assert cli_forces_legacy_model(loaded) is True
 
 
 # --- Интеграция: --model при непустом реестре -> force_legacy=True, security профиля жива --

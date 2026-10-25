@@ -1,7 +1,7 @@
 """Настройки из командной строки — один контракт у gc-cli, gc-acp и gc-chat.
 
 Настройка задаётся путём через точку (``--agent.max_steps 50``) или
-объявленным флагом (``--model``, ``--completions_url``, ``--level``). Имя
+объявленным флагом (``--model``, ``--completions_url``). Имя
 проверяет ``apply_cli_overrides``: незнакомый путь — ``UnknownSettingError``
 с подсказкой.
 """
@@ -13,16 +13,16 @@ from typing import Any, Dict, Iterable, List
 
 import yaml
 
-from gc_core.config_modules.model_registry import LEVEL_VALUES
-
-#: Объявленные флаги-настройки → путь в схеме. Легаси-форс
-#: (``config.cli_forces_legacy_model``) узнаёт ``--model`` и
-#: ``--completions_url`` по слою ``cli`` их путей.
+#: Объявленные флаги-настройки → путь в схеме. ``--model`` — выбор модели
+#: (``model``); сырой идентификатор вне реестра ``config.split_model_flag``
+#: переносит в ``agent.model`` (легаси-форс —
+#: ``config.cli_forces_legacy_model``).
 SETTING_FLAGS = {
-    "model": "agent.model",
+    "model": "model",
     "completions_url": "backend.completions_url",
-    "level": "model",
 }
+
+LEVEL_REMOVED_MESSAGE = "флаг --level убран — используйте --model"
 
 LEGACY_FORCE_NOTICE = "--model: уровни отключены на этот запуск (легаси-форс)"
 
@@ -65,14 +65,33 @@ def parse_override_args(tokens: List[str]) -> Dict[str, Any]:
     return overrides
 
 
+class _RemovedLevelFlag(argparse.Action):
+    """Скрытый ``--level``: отказ с подсказкой ``--model`` (код выхода 2)."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.error(LEVEL_REMOVED_MESSAGE)
+
+
+def add_removed_level_flag(parser: argparse.ArgumentParser) -> None:
+    """Скрытый ``--level`` во всех точках входа: ошибка вместо молчания."""
+    parser.add_argument(
+        "--level",
+        nargs="?",
+        action=_RemovedLevelFlag,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+
+
 def add_setting_flags(parser: argparse.ArgumentParser) -> None:
-    """``--model``, ``--completions_url``, ``--level`` — как у gc-cli."""
+    """``--model``, ``--completions_url`` и скрытый ``--level`` — как у
+    gc-cli."""
     parser.add_argument(
         "--model",
         default=None,
         help=(
-            "модель на этот запуск (agent.model); при непустом реестре "
-            "моделей — легаси-форс"
+            "модель на этот запуск: auto, слово уровня, алиас из реестра; "
+            "сырой идентификатор вне реестра — легаси-форс (agent.model)"
         ),
     )
     parser.add_argument(
@@ -82,15 +101,7 @@ def add_setting_flags(parser: argparse.ArgumentParser) -> None:
         dest="completions_url",
         help="адрес chat/completions на этот запуск (backend.completions_url)",
     )
-    parser.add_argument(
-        "--level",
-        choices=list(LEVEL_VALUES),
-        default=None,
-        help=(
-            "активный уровень модели на этот запуск; auto — уровень "
-            "меняется автоматически по ходу работы"
-        ),
-    )
+    add_removed_level_flag(parser)
 
 
 def setting_flag_overrides(args: argparse.Namespace) -> Dict[str, Any]:
@@ -165,7 +176,9 @@ def override_error_text(exc: Exception) -> str:
 
 __all__ = [
     "LEGACY_FORCE_NOTICE",
+    "LEVEL_REMOVED_MESSAGE",
     "SETTING_FLAGS",
+    "add_removed_level_flag",
     "add_setting_flags",
     "apply_entry_overrides",
     "coerce_cli_value",
