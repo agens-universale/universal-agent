@@ -209,10 +209,10 @@ def test_hint_provider_not_called_again_on_repeated_desired_height():
     )
 
 
-def test_hint_provider_called_again_after_selection_changes():
-    """Кэш — на ЗНАЧЕНИЕ выбора, не глобальный выключатель: смена подсветки
-    (стрелка) обязана посчитать хинт для НОВОГО пункта, а не отдать текст
-    прежнего."""
+def test_hint_provider_called_once_per_value():
+    """Кэш — по ЗНАЧЕНИЮ: резерв подвала спрашивает хинты всех видимых
+    строк один раз, ход стрелкой провайдер не зовёт, а подвал показывает
+    текст НОВОГО пункта, не прежнего."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
@@ -223,9 +223,11 @@ def test_hint_provider_called_again_after_selection_changes():
         return f"hint for {value}"
 
     p = ArgPicker(_OPTS, initial_filter="", hint_provider=hint)
+    assert sorted(calls) == sorted(value for value, _ in _OPTS)
     calls.clear()
     p.move_selection(1)
     assert p.selected_value() == "json"
     _ = p.desired_height
     p._build_footer()
-    assert calls == ["json"], f"новый выбор не пересчитал хинт: {calls}"
+    assert calls == [], f"ход стрелкой дёрнул провайдер: {calls}"
+    assert str(p._hint_static.render()) == "hint for json"

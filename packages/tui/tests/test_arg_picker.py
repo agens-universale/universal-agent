@@ -534,3 +534,113 @@ async def test_action_picker_keeps_enter_runs(tmp_path, monkeypatch):
         picker = pilot.app.query_one(ArgPicker)
         keys = [str(w.render()) for w in picker.query(".palette-keys")]
         assert "Enter выполнить" in keys[-1]
+
+
+_HINTS = {
+    "short": "default gc · глобальный",
+    "long": _LONG_REASON,
+    "mid": "giga.example.ru:8443",
+}
+
+
+async def _picker_with_hints(pilot, hints: dict, prefix: str = ""):
+    """Пикер, у строк которого подсказки разной длины."""
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    pilot.app.screen._open_arg_picker(
+        options=[(value, "описание") for value in hints],
+        prefix=prefix,
+        hint_provider=lambda v: hints.get(v, ""),
+    )
+    await pilot.pause()
+    await pilot.pause()
+    return pilot.app.query_one(ArgPicker)
+
+
+def _hint_widget(picker):
+    return picker.query(".palette-keys")[0]
+
+
+@pytest.mark.asyncio
+async def test_picker_height_does_not_jump_on_selection(tmp_path):
+    """Место под подсказку — по самой длинной подсказке видимых строк, а не
+    по выбранной: ход стрелкой не меняет ни высоту пикера, ни высоту
+    подсказки (смок, раунд 2, п. 8)."""
+    pytest.importorskip("textual")
+    async with _mk_app(tmp_path).run_test(size=(80, 40)) as pilot:
+        picker = await _picker_with_hints(pilot, _HINTS)
+        assert picker.selected_value() == "short"
+        heights = set()
+        for _ in _HINTS:
+            heights.add(
+                (
+                    picker.desired_height,
+                    picker.outer_size.height,
+                    _hint_widget(picker).region.height,
+                )
+            )
+            picker.move_selection(1)
+            await pilot.pause()
+        assert len(heights) == 1, heights
+        assert _hint_widget(picker).region.height > 1  # резерв — под длинную
+
+
+@pytest.mark.asyncio
+async def test_picker_hint_reserve_follows_the_filter(tmp_path):
+    """Резерв считается по ВИДИМЫМ строкам: фильтр убрал строку с длинной
+    подсказкой — место под неё больше не держится."""
+    pytest.importorskip("textual")
+    async with _mk_app(tmp_path).run_test(size=(80, 40)) as pilot:
+        picker = await _picker_with_hints(pilot, _HINTS)
+        assert _hint_widget(picker).region.height > 1
+        picker.set_filter("s")
+        await pilot.pause()
+        assert _hint_widget(picker).region.height == 1
+        assert picker.desired_height == picker.outer_size.height
+
+
+@pytest.mark.parametrize("size", ((60, 30), (100, 24)))
+@pytest.mark.asyncio
+async def test_long_list_stays_capped_and_scrolls_to_selection(tmp_path, size):
+    """≈40 строк на узком экране: пикер не выше своего потолка (у оверлея
+    ввода — половина экрана) и прокручивается — выбранная строка видна над
+    подвалом и при переходе в конец списка, и обратно в начало."""
+    pytest.importorskip("textual")
+    hints = {f"model-{i:02d}": f"host-{i}.example.ru" for i in range(40)}
+    async with _mk_app(tmp_path).run_test(size=size) as pilot:
+        picker = await _picker_with_hints(pilot, hints)
+        screen_h = pilot.app.size.height
+        assert picker.outer_size.height <= screen_h // 2
+        for step in (-1, 1):  # заворот в конец, затем обратно в начало
+            picker.move_selection(step)
+            await pilot.pause()
+            await pilot.pause()
+            row = picker.query_one(".palette-row.selected")
+            footer = picker.query_one(".palette-footer")
+            assert row.region.height == 1, picker.selected_value()
+            assert row.region.y > picker.region.y
+            assert row.region.bottom <= footer.region.y
+
+
+@pytest.mark.asyncio
+async def test_long_list_opens_scrolled_to_the_current_value(tmp_path):
+    """Текущее значение в хвосте длинного списка видно сразу при открытии:
+    пикер докручивает к стартовой подсветке без хода стрелкой."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    async with _mk_app(tmp_path).run_test(size=(60, 30)) as pilot:
+        pilot.app.screen._open_arg_picker(
+            options=[(f"model-{i:02d}", "описание") for i in range(40)],
+            prefix="",
+            hint_provider=lambda v: v or "",
+            initial_value="model-35",
+        )
+        await pilot.pause()
+        await pilot.pause()
+        picker = pilot.app.query_one(ArgPicker)
+        row = picker.query_one(".palette-row.selected")
+        footer = picker.query_one(".palette-footer")
+        assert picker.selected_value() == "model-35"
+        assert row.region.height == 1
+        assert row.region.bottom <= footer.region.y

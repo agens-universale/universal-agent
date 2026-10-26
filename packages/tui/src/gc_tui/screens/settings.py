@@ -766,6 +766,8 @@ class SettingsScreen(Screen):
         # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
         # ресайз, а не на каждый кадр секции (см. form_frame).
         cap_frame_height(self, _SEL_SET_SCROLL)
+        if self._modes_picker is not None:
+            self._cap_model_picker(self._modes_picker)
         # Влезет ли содержимое, видно только ПОСЛЕ раскладки — от этого зависит,
         # называть ли клавишу прокрутки.
         self.call_after_refresh(self._refresh_footer)
@@ -4371,9 +4373,19 @@ class SettingsScreen(Screen):
             initial_value=model_name(self.app, self._settings),
             keys_hint=None,
         )
+        self._cap_model_picker(picker)
         hints[-1].parent.mount(picker, before=hints[-1])
         self._modes_picker = picker
         self._refresh_footer()
+
+    def _cap_model_picker(self, picker) -> None:
+        """Потолок списка — 80% области прокрутки экрана. `max-height: 80%`
+        у `.palette` здесь не действует: рамка секции — `height: auto`, и
+        процент Textual не от чего считать; без потолка длинный реестр
+        вытягивал список на всю свою длину."""
+        limit = self.query_one(_SEL_SET_SCROLL).styles.max_height
+        if limit is not None and limit.is_cells:
+            picker.styles.max_height = max(1, int(limit.value * 0.8))
 
     def _close_model_picker(self) -> None:
         if self._modes_picker is None:

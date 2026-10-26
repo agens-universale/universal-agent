@@ -406,3 +406,39 @@ async def test_missing_active_profile_file_refuses_not_base(
         assert any(
             "✗ не сохранено: файл профиля work не найден" in n for n in notices
         ), notices
+
+
+@pytest.mark.parametrize("size", ((60, 30), (100, 24)))
+async def test_long_model_list_fits_and_scrolls(tmp_path, monkeypatch, size):
+    """≈40 моделей в узком окне: список модели по умолчанию не выше 80%
+    экрана, рамка целиком на экране, выбранная строка видна над подвалом
+    и в конце списка, и в начале (смок, раунд 2, п. 8)."""
+    monkeypatch.chdir(tmp_path)
+    models = "".join(
+        f"  m{i:02d}:\n"
+        f'    model: "vendor/m{i:02d}"\n'
+        '    url: "https://llm.example.com/v1/chat/completions"\n'
+        '    token: ""\n'
+        for i in range(40)
+    )
+    yaml_text = (
+        'model: "default"\nmodels:\n' + models + 'slots:\n  default: "m00"\n'
+    )
+    app, _ = _app_with_config(tmp_path, yaml_text)
+    async with app.run_test(size=size) as pilot:
+        scr = await _open_modes(pilot)
+        scr._modes_idx = _model_row_index()
+        await pilot.press("enter")
+        await pilot.pause()
+        picker = scr._modes_picker
+        assert picker.outer_size.height <= int(size[1] * 0.8)
+        assert picker.region.bottom <= size[1]
+        for key in ("up", "down"):  # заворот в конец, затем в начало
+            await pilot.press(key)
+            await pilot.pause()
+            await pilot.pause()
+            row = picker.query_one(".palette-row.selected")
+            footer = picker.query_one(".palette-footer")
+            assert row.region.height == 1, picker.selected_value()
+            assert row.region.y > picker.region.y
+            assert row.region.bottom <= footer.region.y

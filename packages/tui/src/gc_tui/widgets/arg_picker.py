@@ -73,11 +73,11 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         # Динамический хинт подсвеченного пункта (спека §12.1, /profiles: состав
         # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
         self._hint_provider = hint_provider
-        # Кэш последнего посчитанного хинта — на ОДИН выбор (см. `_hint_text`):
-        # `_build_footer` и `desired_height` спрашивали провайдер каждый по-своему
-        # — без кэша полная проба (у /profiles — сборка конфига целиком) шла
-        # дважды на каждый выбор ради текста одного и того же пункта.
-        self._hint_cache: Optional[tuple] = None
+        # Тексты хинтов по значению (см. `_hint_text`): место под хинт
+        # резервируется по всем видимым строкам, и провайдер (у /profiles —
+        # проба сборки конфига) не должен звучать на каждый ход стрелкой.
+        self._hint_texts: dict[Optional[str], str] = {}
+        self._hint_static: Optional[Static] = None
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
     def _build_footer(self) -> Vertical:
@@ -89,13 +89,16 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         if self._hint_provider is not None:
             # palette-keys и у динамического хинта: воздух над ним, отделяющий
             # хинт от строк списка (ревизия 2026-07-28 по живому смоку).
-            children.append(
-                Static(
-                    self._hint_text(self.selected_value()),
-                    classes="palette-hint palette-keys",
-                    markup=False,
-                )
+            hint = Static(
+                self._hint_text(self.selected_value()),
+                classes="palette-hint palette-keys",
+                markup=False,
             )
+            # Высота — резерв под самый длинный хинт видимых строк: ход
+            # стрелкой не двигает ни подвал, ни рамку.
+            hint.styles.height = self._hint_lines()
+            self._hint_static = hint
+            children.append(hint)
         if self._keys_hint is not None:
             children.append(
                 Static(
@@ -228,6 +231,30 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         declared `height: auto`."""
         self.styles.min_height = self.desired_height
 
+    def on_mount(self) -> None:
+        """Стартовая подсветка (`initial_value`) может стоять за краем
+        длинного списка — докрутить к ней после первой раскладки."""
+        self.call_after_refresh(self._reveal_selected)
+
+    def _reveal_selected(self) -> None:
+        rows = self.query(".palette-row.selected")
+        if rows:
+            self._reveal(rows.first())
+
+    def _reveal(self, row: Static) -> None:
+        """Подсвеченная строка — в видимой части списка, сам пикер — в
+        видимой части хозяина (в «Настройках» он стоит в прокрутке
+        секции, и строка без подвала была бы видна наполовину)."""
+        row.scroll_visible(animate=False)
+        self.scroll_visible(animate=False)
+
+    def on_resize(self) -> None:
+        """Ширина приходит с раскладкой (до неё хинт считается одной
+        строкой): резерв хинта и высота пикера — по фактической ширине."""
+        if self._hint_static is not None:
+            self._hint_static.styles.height = self._hint_lines()
+        self._apply_size()
+
     def _footer_line_count(self, text: str) -> int:
         """Сколько СТРОК займёт строка подвала при текущей ширине.
 
@@ -237,9 +264,9 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         колонках, а клавиш-подсказка перестаёт влезать к 60.
 
         Ширина текста = ширина пикера минус рамка (2) и `padding: 0 1` (2). До
-        первого layout-прохода ширины ещё нет — считаем по одной строке, тем же
-        ответом, что и раньше; `_apply_size` зовётся заново на каждой перерисовке
-        (`_rebuild`), а `main.py` спрашивает высоту уже после `call_after_refresh`.
+        первого layout-прохода ширины ещё нет — считаем по одной строке; с
+        шириной пересчёт делает `on_resize`, а `_apply_size` зовётся заново и на
+        каждой перерисовке (`_rebuild`).
 
         Модель переноса — `textwrap` (жадная укладка по словам, длинное слово
         ломается), а не деление длины на ширину: делением можно ЗАНИЗИТЬ, а занижение
@@ -250,25 +277,29 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         return max(1, len(textwrap.wrap(text, width)))
 
     def _hint_text(self, value: Optional[str]) -> str:
-        """Текст провайдера для `value`, посчитанный не чаще раза на выбор.
-
-        И `_build_footer`, и `desired_height` спрашивают хинт подсвеченного
-        пункта. Кэш на одну запись
-        (значение → текст): смена подсветки — новый счёт, тот же пункт в том же
-        или следующем кадре — прежний ответ без второго вызова провайдера."""
+        """Текст провайдера для `value`, посчитанный не чаще раза на значение
+        за жизнь пикера: и резерв подвала, и сам подвал спрашивают хинты
+        снова на каждой перерисовке."""
         if self._hint_provider is None:
             return ""
-        if self._hint_cache is not None and self._hint_cache[0] == value:
-            return self._hint_cache[1]
-        text = self._hint_provider(value) or ""
-        self._hint_cache = (value, text)
-        return text
+        if value not in self._hint_texts:
+            self._hint_texts[value] = self._hint_provider(value) or ""
+        return self._hint_texts[value]
+
+    def _hint_lines(self) -> int:
+        """Строк под хинт — по самому длинному хинту ВИДИМЫХ строк, а не
+        подсвеченной: подвал не прыгает при смене выбора и пересчитывается
+        только со сменой фильтра (или ширины)."""
+        values = [o.value for o in self._choice_rows()] or [None]
+        return max(
+            self._footer_line_count(self._hint_text(value)) for value in values
+        )
 
     @property
     def desired_height(self) -> int:
         """Честная желаемая высота: строки списка (или одна no-match-строка) +
         докнутый footer (у каждой его строки — свой margin-top(1) и СВОИ строки
-        после переноса) + рамка .palette(2).
+        после переноса; у хинта — резерв `_hint_lines`) + рамка .palette(2).
         `_apply_size` ставит его в min-height — недосчёт выдавливал бы нижнюю
         рамку пикера за экран."""
         rows = self._visible_rows()
@@ -277,9 +308,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         if self._keys_hint is not None:
             footer += 1 + self._footer_line_count(self._keys_hint)
         if self._hint_provider is not None:
-            footer += 1 + self._footer_line_count(
-                self._hint_text(self.selected_value())
-            )
+            footer += 1 + self._hint_lines()
         return flow + 2 + footer
 
     def selected_value(self) -> Optional[str]:
