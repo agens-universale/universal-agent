@@ -19,12 +19,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
+from gc_core.threads.errors import OperationMismatch
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey, ThreadRecord
 from gc_core.threads.rules import lease_expired
@@ -47,6 +50,10 @@ _SWARM = "swarm"
 #: которых задача — ``failed`` с причиной ``recovery_exhausted``.
 MAX_RECOVERY_ATTEMPTS = 3
 _FINAL = frozenset({"completed", "failed", "cancelled"})
+#: Сколько заявка инстанса на продолжение сбоя держит задачу за ним: его
+#: сборка контекста укладывается в окно. Упал при сборке — после окна
+#: задачу берёт следующий обход, следующей попыткой.
+CLAIM_WINDOW_SEC = 120.0
 
 
 async def arecover_once(
@@ -125,21 +132,67 @@ async def _acontinue(
         if attempts >= MAX_RECOVERY_ATTEMPTS and not stopped:
             await _agive_up(surface, threads, record)
             return False
+        if _claimed_recently(status, record):
+            return False  # этот сбой продолжает другой инстанс
+        if not await _aclaim(threads, record, status, attempts, stopped):
+            return False
         if record.runtime.turn == "running":
             await _anote_interruption(threads, record)
             if status.get("status") == "running":
                 surface.notify(key, {**status, "status": "interrupted"})
-        await task_status.aset_status(
-            threads,
-            key,
-            recovery_attempts=attempts if stopped else attempts + 1,
-            stopped_by=None,
-        )
         return True
 
     return await surface.astart_recovered(
         key.system, key.thread, prepare=prepare
     )
+
+
+def _crash_mark(record: ThreadRecord) -> str:
+    """Сбой треда: поколение и номер последней записи истории."""
+    return f"{record.generation}_{record.max_seq.get('messages', 0)}"
+
+
+def _claimed_recently(status: dict, record: ThreadRecord) -> bool:
+    """Заявка на продолжение этого же сбоя моложе окна: задачу строит
+    другой инстанс (или этот же), захват треда ещё впереди."""
+    claim = status.get("recovering")
+    if not isinstance(claim, dict) or claim.get("mark") != _crash_mark(record):
+        return False
+    at = claim.get("at")
+    return isinstance(at, (int, float)) and time.time() - at < CLAIM_WINDOW_SEC
+
+
+async def _aclaim(
+    threads: Threads,
+    record: ThreadRecord,
+    status: dict,
+    attempts: int,
+    stopped: bool,
+) -> bool:
+    """Выборы продолжающего и попытка — одной записью. ``op_id`` — от
+    сбоя и прежней заявки: инстансы, прочитавшие один снимок, пишут одну
+    операцию с разными заявками, и всем, кроме первого, хранилище
+    отвечает ``OperationMismatch``."""
+    key = record.key
+    previous = status.get("recovering")
+    token = previous.get("token") if isinstance(previous, dict) else None
+    mark = _crash_mark(record)
+    try:
+        await task_status.aset_status(
+            threads,
+            key,
+            op_id=f"recovery-claim:{key.system}:{key.thread}:{mark}:{token}",
+            recovery_attempts=attempts if stopped else attempts + 1,
+            stopped_by=None,
+            recovering={
+                "mark": mark,
+                "at": time.time(),
+                "token": uuid.uuid4().hex,
+            },
+        )
+    except OperationMismatch:
+        return False
+    return True
 
 
 async def _agive_up(
@@ -195,7 +248,7 @@ async def _anote_interruption(threads: Threads, record: ThreadRecord) -> None:
     прерванный ход: инстансы, увидевшие тот же тред, пишут одну и ту же
     операцию (``op_id`` от поколения и номера последней записи истории)."""
     key = record.key
-    mark = f"{record.generation}_{record.max_seq.get('messages', 0)}"
+    mark = _crash_mark(record)
     await threads.submit(
         key,
         {

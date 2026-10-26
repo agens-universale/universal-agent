@@ -290,6 +290,27 @@ async def _arelease_lease(thread_session: Any, logger: Any) -> None:
             logger.warning("thread lease release failed", exc_info=True)
 
 
+@contextlib.asynccontextmanager
+async def _aturn_released_on_failure(ctx: Any, thread_session: Any, logger):
+    """Сбой после захвата треда: отметка «ход окончен», затем аренда.
+
+    Порядок важен: отпущенный тред может сразу взять другой процесс, и
+    отметка, легшая после этого, затёрла бы его runtime. Снятая задача
+    (остановка сервера) оставляет отметку хода: его продолжит
+    восстановление после перезапуска.
+    """
+    try:
+        yield
+    except Exception:
+        # Отказ хода — не падение процесса: восстанавливать нечего.
+        await _amark_turn(ctx, thread_session, running=False, logger=logger)
+        await _arelease_lease(thread_session, logger)
+        raise
+    except BaseException:
+        await _arelease_lease(thread_session, logger)
+        raise
+
+
 #: Метка сообщения входящего потока в очереди хода: его ``seq`` в потоке.
 _INBOX_MARK = "_inbox_seq"
 
@@ -683,6 +704,23 @@ class AgentExecutor:
             # до любой работы, а прочитанное не устареет под чужой записью.
             claim=True,
         )
+        # Сбой между захватом и ходом (проверка состояния треда, хук) не
+        # оставляет аренду и отметку хода до срока: повтор увидел бы «тред
+        # занят» вместо ошибки, восстановление подняло бы упавшую задачу.
+        async with _aturn_released_on_failure(
+            self._ctx, thread_session, logger
+        ):
+            return await self._abind_claimed(
+                thread_session,
+                system_id=system_id,
+                backend_api_mode=backend_api_mode,
+                logger=logger,
+            )
+
+    async def _abind_claimed(
+        self, thread_session, *, system_id: str, backend_api_mode: str, logger
+    ) -> tuple:
+        """Взятый тред — в ход: отметка, история, состояние, личность."""
         await self._aon_thread_claimed(thread_session, logger)
         if logger is not None:
             # Единственная связка «этот лог-файл ↔ этот тред»: на момент
@@ -1514,22 +1552,10 @@ class AgentExecutor:
             answer=answer,
             cancel_target=cancel_target,
         )
-        try:
+        # Тред взят в начале хода; ход, не дошедший до учёта, не держит его
+        # до срока аренды (повторное отпускание безвредно).
+        async with _aturn_released_on_failure(self._ctx, opened[0], logger):
             return await self._arun_on_thread(opened, request)
-        except Exception:
-            # Отказ хода — не падение процесса: восстанавливать нечего.
-            await _amark_turn(
-                self._ctx, opened[0], running=False, logger=logger
-            )
-            await _arelease_lease(opened[0], logger)
-            raise
-        except BaseException:
-            # Тред взят в начале хода; ход, не дошедший до учёта, не держит
-            # его до срока аренды (повторное отпускание безвредно). Снятая
-            # задача (остановка сервера) оставляет отметку хода: его
-            # продолжит восстановление после перезапуска.
-            await _arelease_lease(opened[0], logger)
-            raise
 
     async def _arun_on_thread(
         self, opened: tuple, request: _RunRequest
@@ -1757,10 +1783,9 @@ class AgentExecutor:
             await _stop_lease_keeper(keeper)
             state_ops.leave(state)
             state.turn_level = None
+            # Упавший ход отпускает тред выше (``_arun_turn``) — после
+            # отметки «ход окончен», не до неё.
             teardown_cancel = await self._ateardown_run(_owner_reset)
-            if not loop_finished:
-                # Ход упал — учёт не закроется, аренду не держать до срока.
-                await _arelease_lease(thread_session, logger)
 
         if teardown_cancel is not None:
             # Незавершённый цикл сюда не попадает: его исключение выходит из

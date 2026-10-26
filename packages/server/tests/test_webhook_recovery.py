@@ -727,3 +727,182 @@ async def test_cancel_whose_stop_does_not_settle_still_cancels(
     assert reply == {"status": "cancelling"}
     assert stopped == [True]
     assert [entry.data["type"] for entry in control] == ["cancel"]
+
+
+async def test_task_failing_right_after_claim_is_not_recovered_again(
+    monkeypatch, tmp_path
+):
+    """Ревью, раунд 4: ход, упавший сразу после захвата треда (проверка
+    состояния треда), оставлял отметку хода и аренду — восстановление
+    поднимало упавшую задачу каждый обход, без предела попыток."""
+    import gc_core.agent_executor as ae
+    from gc_core.persistence.schema import StateSchemaError
+
+    seen = _install(monkeypatch)
+
+    def broken(*_args, **_kwargs):
+        raise StateSchemaError("устаревший ключ памяти")
+
+    monkeypatch.setattr(ae, "shared_from_session", broken)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        await _crashed_run(stores.threads)
+        first = await arecover_once(surface, now=utc_now())
+        await _settled(surface)
+        again = await arecover_once(surface, now=utc_now())
+        await _settled(surface)
+        record = await stores.threads.get_thread(KEY)
+    finally:
+        await stores.aclose()
+    assert first == [KEY]
+    assert again == []
+    assert task_status.status_of(record)["status"] == "failed"
+    assert record.runtime.turn != "running"
+    assert seen == []
+
+
+def _record_callbacks(surfaces) -> list:
+    events: list = []
+    for surface in surfaces:
+        surface.notify = lambda key, status: events.append(
+            (status["status"], status.get("error"))
+        )
+    return events
+
+
+async def test_one_crash_is_one_attempt_across_instances(
+    monkeypatch, tmp_path
+):
+    """Ревью, раунд 4: попытка писалась до захвата треда, и каждый
+    инстанс, чей обход попал в окно сборки соседа, прибавлял свою — одно
+    падение давало ``recovery_exhausted`` и повторный ``interrupted``."""
+    from gc_server.webhook import surface as surface_mod
+
+    _install(monkeypatch)
+    gate = asyncio.Event()
+    real_ctx = surface_mod.acreate_run_context
+
+    async def slow_ctx(*args, **kwargs):
+        await gate.wait()  # сборка контекста (MCP и т. п.) идёт долго
+        return await real_ctx(*args, **kwargs)
+
+    monkeypatch.setattr(surface_mod, "acreate_run_context", slow_ctx)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surfaces = [await _surface(tmp_path, stores) for _ in range(4)]
+    events = _record_callbacks(surfaces)
+    try:
+        await _crashed_run(stores.threads)
+        walks = []
+        for surface in surfaces:
+            walks.append(
+                asyncio.create_task(arecover_once(surface, now=utc_now()))
+            )
+            await asyncio.sleep(0.2)
+        gate.set()
+        taken = await asyncio.gather(*walks)
+        await _settled(*surfaces)
+        record = await stores.threads.get_thread(KEY)
+    finally:
+        await stores.aclose()
+    assert sum(len(keys) for keys in taken) == 1
+    status = task_status.status_of(record)
+    assert status["status"] == "completed", status
+    assert events == [("interrupted", None), ("completed", None)]
+
+
+async def test_instances_reading_one_snapshot_elect_one_recovery(
+    monkeypatch, tmp_path
+):
+    """Два инстанса увидели тот же снимок бесхозной задачи: продолжает
+    один, попытка — одна, ``interrupted`` — один."""
+    from gc_server.webhook import recovery
+
+    _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surfaces = [await _surface(tmp_path, stores) for _ in range(2)]
+    events = _record_callbacks(surfaces)
+    try:
+        await _crashed_run(stores.threads)
+        threads = Threads(stores.threads)
+        record = await threads.get(KEY)
+        started = await asyncio.gather(
+            *(
+                recovery._acontinue(surface, threads, record)
+                for surface in surfaces
+            )
+        )
+        await _settled(*surfaces)
+        status = task_status.status_of(await threads.get(KEY))
+    finally:
+        await stores.aclose()
+    assert sorted(started) == [False, True]
+    assert status["status"] == "completed", status
+    assert events == [("interrupted", None), ("completed", None)]
+
+
+async def test_late_run_on_a_drained_thread_keeps_the_final_status(
+    monkeypatch, tmp_path
+):
+    """Прогон взял тред, когда всё уже доставлено (его довёл другой
+    инстанс): статус ``running`` он не пишет — иначе задача навсегда
+    осталась бы «идущей» без хода и аренды."""
+    _install(monkeypatch)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    try:
+        threads = Threads(stores.threads)
+        await surface.asubmit(KEY, {"text": "x"}, op_id=None, trace_id=None)
+        await _settled(surface)
+        assert task_status.status_of(await threads.get(KEY))["status"] == (
+            "completed"
+        )
+        await surface._start_run(KEY.system, KEY.thread, None)
+        await _settled(surface)
+        record = await threads.get(KEY)
+    finally:
+        await stores.aclose()
+    assert task_status.status_of(record)["status"] == "completed"
+
+
+async def test_accepted_task_has_a_status_on_every_instance(
+    monkeypatch, tmp_path
+):
+    """Ревью, раунд 4: задачу, принятую во входящий поток, но ещё без
+    статуса прогона, знал только строящий её инстанс — остальные за
+    балансировщиком отвечали 404. Теперь — ``queued``."""
+    from gc_server.webhook import surface as surface_mod
+
+    _install(monkeypatch)
+    gate = asyncio.Event()
+    real_ctx = surface_mod.acreate_run_context
+
+    async def slow_ctx(*args, **kwargs):
+        await gate.wait()
+        return await real_ctx(*args, **kwargs)
+
+    monkeypatch.setattr(surface_mod, "acreate_run_context", slow_ctx)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    builder = await _surface(tmp_path, stores)
+    other = await _surface(tmp_path, stores)
+    try:
+        submit = asyncio.create_task(
+            builder.asubmit(KEY, {"text": "x"}, op_id=None, trace_id=None)
+        )
+        for _ in range(200):
+            if builder.registry.building_since(
+                system=KEY.system, task_id=KEY.thread
+            ):
+                break
+            await asyncio.sleep(0.01)
+        seen = await other.astatus(KEY)
+        cancelled = await other.acancel(KEY)
+        gate.set()
+        await submit
+        await _settled(builder, other)
+    finally:
+        await stores.aclose()
+    assert seen is not None
+    assert seen["status"] == "queued"
+    assert seen["pending_messages"] == 1
+    assert cancelled == {"status": "cancelling"}

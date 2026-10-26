@@ -210,12 +210,22 @@ class Threads:
     # --- запись -----------------------------------------------------------
 
     async def update_frontend(
-        self, key: ThreadKey, name: str, patch: JsonObject
+        self,
+        key: ThreadKey,
+        name: str,
+        patch: JsonObject,
+        *,
+        op_id: str | None = None,
     ) -> Receipt:
-        """Слить ключи в состояние фронтенда (атомарно в хранилище)."""
+        """Слить ключи в состояние фронтенда (атомарно в хранилище).
+
+        ``op_id`` — своя операция: тот же ``op_id`` с другим патчем —
+        ``OperationMismatch`` (так из нескольких процессов выбирают одного)."""
         return await self.store.append_side(
             key,
-            SideChange(op_id=_op_id(name), patch_frontend=(name, patch)),
+            SideChange(
+                op_id=op_id or _op_id(name), patch_frontend=(name, patch)
+            ),
         )
 
     async def append_frontend(

@@ -310,7 +310,17 @@ class WebhookSurface:
                 **pending,
             }
         if status is None:
-            return None
+            if not pending["pending_messages"]:
+                return None
+            # Принята, а прогона ещё нет (строит другой инстанс, сборка
+            # упала или инстанс умер до захвата): задача есть на любом.
+            return {
+                "status": "queued",
+                **base,
+                "thread_id": key.thread,
+                "started_at": None,
+                **pending,
+            }
         return {**task_status.status_body(status, record, base), **pending}
 
     async def asubmit(
@@ -418,7 +428,7 @@ class WebhookSurface:
         from gc_server.webhook.api_v1 import FINAL
 
         status = await self.astatus(key)
-        settled = status is None or status["status"] in FINAL
+        settled = status is None or status["status"] in FINAL | {"queued"}
         if settled and not await self._aundelivered(key):
             return None if status is None else {"status": status["status"]}
         try:
@@ -607,11 +617,13 @@ class WebhookSurface:
         }
         if callback_url is not KEEP_CALLBACK:
             fields["callback_url"] = callback_url
-        await task_status.aset_status(
-            self.threads(),
-            ThreadKey(system=system, thread=thread_id),
-            **fields,
-        )
+        key = ThreadKey(system=system, thread=thread_id)
+        threads = self.threads()
+        if not _pending(await threads.get(key)):
+            # Всё уже доставлено — задачу довёл другой прогон, этот сейчас
+            # сдаст тред (InboxDrained). Статус ведёт тот, кто её довёл.
+            return
+        await task_status.aset_status(threads, key, **fields)
 
     async def _amark_finished(self, run: ActiveRun) -> None:
         """Итог прогона — в статус задачи, если статус всё ещё его: тред
