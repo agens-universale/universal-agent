@@ -320,13 +320,13 @@ async def test_footer_stacks_usage_before_dropping_profile(
         # однострочную склейку (порог заведомо не пройден) — считаем длины обоих
         # вариантов, чтобы не хардкодить конкретные числа символов.
         single_with_profile = compose_adaptive_footer_right(
-            scr._footer_head(with_profile=True),
+            scr._footer_head(with_profile=True)[0],
             request_seg,
             session_seg,
             available_width=10_000,
         )
         single_without_profile = compose_adaptive_footer_right(
-            scr._footer_head(with_profile=False),
+            scr._footer_head(with_profile=False)[0],
             request_seg,
             session_seg,
             available_width=10_000,
@@ -347,8 +347,9 @@ async def test_footer_stacks_usage_before_dropping_profile(
 
 # --- Выбор, ждущий ближайшего шага (спека model-knob §6.5) ------------------
 #
-# Было (Task 15): переход «сейчас → станет». Стало: `  ✧ ` + знак выбора с
-# тусклым именем, пока выбор окна не тот, что применил ран.
+# Было (Task 15): переход «сейчас → станет». Стало (раунд 3 смока): знак
+# выбора с тусклым именем во второй строке под моделью хода, пока выбор окна
+# не тот, что применил ран.
 #
 # Уровень подготовленного вызова живёт в `state._call_level`, а Router,
 # резолвящий модель, зафиксирован при сборке executor'а («снимок» models/slots/
@@ -419,8 +420,8 @@ def _call_runner_with_usage(level: str, router, usage_snapshot):
 async def test_footer_shows_pending_choice_when_level_changes_mid_turn(
     tmp_path, monkeypatch
 ):
-    """Смена уровня посреди хода: слева — факт (пин), справа — `✧` и знак
-    модели нового выбора."""
+    """Смена уровня посреди хода: строка 1 — факт (пин), строка 2 — знак
+    модели нового выбора под ним."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
@@ -447,7 +448,7 @@ async def test_footer_shows_pending_choice_when_level_changes_mid_turn(
         _live(app, monkeypatch, live_router)
 
         plain = scr._compose_footer_right().plain
-        assert plain == "● minimax-m3  ✧ ● opus-4.8"
+        assert plain == "● minimax-m3\n● opus-4.8  "
 
 
 @pytest.mark.asyncio
@@ -456,8 +457,7 @@ async def test_footer_shows_new_profile_name_and_pending_choice_when_both_change
 ):
     """Смена И профиля, И уровня посреди хода (спека Task 15, пример 3): слева —
     имя НОВОГО профиля (выбор, меняется мгновенно) + факт-модель старого пина,
-    справа — `✧` и знак нового выбора. Комфортная ширина — ничего не
-    ужато, композиция «профиль + ожидание» видна целиком в одной строке."""
+    под ним — знак нового выбора. Комфортная ширина — ничего не ужато."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -491,16 +491,16 @@ async def test_footer_shows_new_profile_name_and_pending_choice_when_both_change
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
 
         plain = scr._compose_footer_right().plain
-        assert plain == "other ● minimax-m3  ✧ ● opus-4.8"
+        assert plain == "other ● minimax-m3\n      ● opus-4.8  "
 
 
 @pytest.mark.asyncio
 async def test_footer_no_pending_when_only_profile_changes(
     tmp_path, monkeypatch
 ):
-    """Смена профиля посреди хода, выбор тот же: ждать нечего — `✧` нет
-    (сравниваются выборы, не модели), факт — модель Router'а у пина,
-    снимка СТАРОГО профиля."""
+    """Смена профиля посреди хода, выбор тот же: ждать нечего — второй
+    строки нет (сравниваются выборы, не модели), факт — модель Router'а
+    у пина, снимка СТАРОГО профиля."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
@@ -649,8 +649,8 @@ async def test_footer_drops_profile_name_before_model_names(
         )
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
 
-        no_profile_with_pending = "● minimax-m3  ✧ ● opus-4.8"
-        avail = cell_len(no_profile_with_pending)
+        no_profile_with_pending = "● minimax-m3\n● opus-4.8  "
+        avail = cell_len("● minimax-m3")
         monkeypatch.setattr(
             scr, "_footer_right_available_width", lambda: avail
         )
@@ -664,7 +664,7 @@ async def test_footer_drops_names_keeps_dots_and_star_when_too_narrow(
     tmp_path, monkeypatch
 ):
     """Порядок жертв по ширине: профиль уже снят и всё равно не влезает —
-    снимаются имена (модели хода и выбора), точки и `✧` остаются."""
+    снимаются имена (модели хода и выбора), точки остаются."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -696,8 +696,8 @@ async def test_footer_drops_names_keeps_dots_and_star_when_too_narrow(
         )
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
 
-        dots_only = "●  ✧ ●"
-        avail = cell_len("● minimax-m3  ✧ ●") - 1
+        dots_only = "●\n●"
+        avail = cell_len("● minimax-m3") - 1
         monkeypatch.setattr(
             scr, "_footer_right_available_width", lambda: avail
         )
@@ -715,16 +715,16 @@ async def test_footer_drops_names_keeps_dots_and_star_when_too_narrow(
 # with_transition=False)` — самый бедный вариант, без профиля и без перехода,
 # хотя на 1-й строке места хватало для обоих. Юзер также решил: блок
 # выбора снимается ПОСЛЕДНИМ — позже, чем футер уходит на 2-ю строку; с
-# model-knob §6.5 это имена, а точки и `✧` остаются всегда.
+# model-knob §6.5 это имена, а точки остаются всегда.
 
 
 @pytest.mark.asyncio
 async def test_footer_two_line_layout_keeps_profile_and_pending(
     tmp_path, monkeypatch
 ):
-    """Главный сценарий брифа (живой смок юзера): usage уезжает на 2-ю строку,
-    профиль и ожидающий выбор остаются на 1-й — раньше здесь терялось
-    всё."""
+    """Главный сценарий брифа (живой смок юзера): usage в строку 1 не
+    влезает — профиль и модель хода остаются на 1-й, ожидающий выбор
+    временно занимает место цен во 2-й (раунд 3 смока)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -776,7 +776,7 @@ async def test_footer_two_line_layout_keeps_profile_and_pending(
         assert request_seg is not None and session_seg is not None
 
         head_snapshot = scr._footer_head_snapshot()
-        head = scr._footer_head(with_profile=True, snapshot=head_snapshot)
+        head = scr._footer_head(with_profile=True, snapshot=head_snapshot)[0]
         # available_width=0 форсирует перенос усложнённых сегментов на 2-ю
         # строку безусловно — так же, как это делает база при нехватке места.
         two_line = compose_adaptive_footer_right(
@@ -797,8 +797,8 @@ async def test_footer_two_line_layout_keeps_profile_and_pending(
         assert "\n" in plain
         first_line, second_line = plain.split("\n")
         assert first_line.startswith("other ")
-        assert "✧" in first_line
-        assert "minimax-m3" in first_line and "opus-4.8" in first_line
+        assert "minimax-m3" in first_line and "opus-4.8" in second_line
+        assert "запрос" not in plain and "сессия" not in plain
         assert cell_len(first_line) <= avail
         assert cell_len(second_line) <= avail
 
@@ -808,14 +808,15 @@ async def test_footer_two_line_layout_drops_profile_before_names(
     tmp_path, monkeypatch
 ):
     """На двух строках профиль по-прежнему ужимается/снимается раньше
-    имён модели и выбора — ожидающий выбор остаётся с именем."""
+    имён модели и выбора — ожидающий выбор во второй строке остаётся с
+    именем."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
     from gc_core.model_router import ModelRouter
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
     from gc_tui.app import TuiApp
-    from gc_tui.services.usage_meter import compose_adaptive_footer_right
+    from gc_tui.screens.main import _PROFILE_NAME_MIN_COLS
     from rich.cells import cell_len
 
     def _meta(inp, out):
@@ -858,32 +859,20 @@ async def test_footer_two_line_layout_drops_profile_before_names(
         )
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
 
-        request_seg, session_seg = scr._usage_segments()
         head_snapshot = scr._footer_head_snapshot()
-
-        head_no_profile = scr._footer_head(
-            with_profile=False, snapshot=head_snapshot
+        # Ширина — ровно на строку 1 без профиля: с профилем (даже ужатым)
+        # она не влезает.
+        avail = cell_len(
+            scr._footer_head(with_profile=False, snapshot=head_snapshot)[
+                0
+            ].plain
         )
-        two_line_no_profile = compose_adaptive_footer_right(
-            head_no_profile, request_seg, session_seg, available_width=0
-        )
-        avail = max(
-            cell_len(line) for line in two_line_no_profile.plain.split("\n")
-        )
-
-        head_with_profile = scr._footer_head(
-            with_profile=True, snapshot=head_snapshot
-        )
-        two_line_with_profile = compose_adaptive_footer_right(
-            head_with_profile, request_seg, session_seg, available_width=0
-        )
-        assert (
-            max(
-                cell_len(line)
-                for line in two_line_with_profile.plain.split("\n")
-            )
-            > avail
-        )
+        with_profile = scr._footer_head(
+            with_profile=True,
+            profile_name_cols=_PROFILE_NAME_MIN_COLS,
+            snapshot=head_snapshot,
+        )[0]
+        assert cell_len(with_profile.plain) > avail
 
         monkeypatch.setattr(
             scr, "_footer_right_available_width", lambda: avail
@@ -891,8 +880,8 @@ async def test_footer_two_line_layout_drops_profile_before_names(
         plain = scr._compose_footer_right().plain
         assert "\n" in plain
         first_line = plain.split("\n")[0]
-        assert "very-long-profile-name" not in first_line
-        assert "✧ ● opus-4.8" in first_line
+        assert first_line.startswith("● minimax-m3")
+        assert "● opus-4.8" in plain.split("\n")[1]
 
 
 @pytest.mark.asyncio
@@ -901,7 +890,7 @@ async def test_footer_drops_names_last_when_two_line_still_too_narrow(
 ):
     """Юзер-контракт: блок выбора снимается ПОСЛЕДНИМ. Профиль уже снят и
     даже двухстрочный вариант с именами не влезает — имена снимаются,
-    точки и `✧` остаются."""
+    точки остаются."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
@@ -945,20 +934,15 @@ async def test_footer_drops_names_last_when_two_line_still_too_narrow(
         )
         _live(app, monkeypatch, live_router)
 
-        head_snapshot = scr._footer_head_snapshot()
-        head_no_profile = scr._footer_head(
-            with_profile=False, snapshot=head_snapshot
-        )
-        # На 1 колонку меньше, чем сама голова с ожидающим выбором (без
-        # профиля) — имена не влезают НИ на одну строку 2-строчного
-        # варианта, независимо от того, куда денется usage-блок.
-        avail = cell_len(head_no_profile.plain) - 1
+        # На 1 колонку меньше, чем строка ожидающего выбора: с именами не
+        # влезает 2-строчный вариант, куда бы ни делся usage-блок.
+        avail = cell_len("● opus-4.8") - 1
         monkeypatch.setattr(
             scr, "_footer_right_available_width", lambda: avail
         )
 
         plain = scr._compose_footer_right().plain
-        assert plain.startswith("●  ✧ ●")
+        assert plain == "●\n●"
         assert "minimax-m3" not in plain and "opus-4.8" not in plain
 
 
@@ -966,9 +950,9 @@ async def test_footer_drops_names_last_when_two_line_still_too_narrow(
 async def test_footer_one_line_priority_kept_with_profile_pending_and_usage(
     tmp_path, monkeypatch
 ):
-    """Регресс-страж Task 8/9: когда всё влезает в одну строку (профиль,
-    ожидающий выбор и usage-сегменты разом), результат остаётся однострочным — новая
-    лесенка не уносит его на 2-ю строку зря."""
+    """Регресс-страж Task 8/9: когда профиль, модель и usage-сегменты
+    влезают в строку 1, цены остаются в ней, а ожидающий выбор — во
+    второй строке (раунд 3 смока)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.config_modules.profiles import ProfileRef
@@ -1015,10 +999,9 @@ async def test_footer_one_line_priority_kept_with_profile_pending_and_usage(
         monkeypatch.setattr(app, "active_profile_ref", lambda: ref)
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 1000)
 
-        plain = scr._compose_footer_right().plain
-        assert "\n" not in plain
-        assert plain.startswith("other ")
-        assert "✧ ● opus-4.8" in plain
+        first, second = scr._compose_footer_right().plain.split("\n")
+        assert first.startswith("other ") and "сессия" in first
+        assert second.strip() == "● opus-4.8"
 
 
 # --- Task 17: единая лесенка жертв -----------------------------------------
@@ -1032,7 +1015,7 @@ async def test_footer_one_line_priority_kept_with_profile_pending_and_usage(
 #
 # Порядок жертв: 1) всё одной строкой; 2) цены вниз; 3) пилюля режима — глиф;
 # 4) имя профиля 14 → 5; 5) имя снимается; 6) снимаются имена модели и
-# выбора (точки и `✧` остаются).
+# выбора (точки остаются).
 
 _FOOTER_CHROME = 5  # padding'и футера + зазор между колонками (main.py)
 _PRICING = {
@@ -1102,7 +1085,7 @@ def _narrowest_named_variant(scr, cols: int) -> str:
         with_profile=True,
         profile_name_cols=cols,
         snapshot=scr._footer_head_snapshot(),
-    )
+    )[0]
     request_seg, session_seg = scr._usage_segments()
     if request_seg is None and session_seg is None:
         return head.plain
@@ -1111,9 +1094,10 @@ def _narrowest_named_variant(scr, cols: int) -> str:
     ).plain
 
 
-def _arm_pending(app, monkeypatch, *, profile=None, usage=None):
-    """Пин хода «light», выбор «max» ждёт (`✧` виден) + опционально usage-сегменты и
-    активный профиль — общая обвязка ступенчатых тестов."""
+def _arm_pending(app, monkeypatch, *, profile=None, usage=None, choice="max"):
+    """Пин хода «light», выбор `choice` («max» — ждёт, вторая строка;
+    «light» — ожидания нет) + опционально usage-сегменты и активный
+    профиль — общая обвязка ступенчатых тестов."""
     from gc_core.config_modules.profiles import ProfileRef
     from gc_core.model_router import ModelRouter
 
@@ -1124,7 +1108,7 @@ def _arm_pending(app, monkeypatch, *, profile=None, usage=None):
     pinned = ModelRouter(
         make_settings(snapshot), choice_provider=lambda: "light"
     )
-    live = ModelRouter(make_settings(snapshot), choice_provider=lambda: "max")
+    live = ModelRouter(make_settings(snapshot), choice_provider=lambda: choice)
     app.active_runner = (
         _call_runner_with_usage("light", pinned, usage)
         if usage
@@ -1149,7 +1133,8 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
     """Ступень 2 на живой ширине (дефект смока): раньше правой колонке считали
     бюджет как «всё, что осталось от левой», левая не отдавала ни колонки — и на
     этой ширине футер терял и имя профиля, и стрелку разом. Теперь вниз уезжают
-    цены, а голова (профиль + переход) остаётся на 1-й строке целиком."""
+    цены, а голова (профиль + модель) остаётся на 1-й строке целиком. Без
+    ожидающего выбора: с ним вторая строка — его (тесты выше)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
@@ -1168,12 +1153,13 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
             monkeypatch,
             profile=_LONG_NAME,
             usage=(_usage_meta(2_000_000, 0), _usage_meta(1_000_000, 0)),
+            choice="light",
         )
 
         request_seg, session_seg = scr._usage_segments()
         head = scr._footer_head(
             with_profile=True, snapshot=scr._footer_head_snapshot()
-        )
+        )[0]
         stacked = compose_adaptive_footer_right(
             head, request_seg, session_seg, 0
         )
@@ -1188,7 +1174,7 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
         assert plain == stacked.plain
         first, second = plain.split("\n")
         assert first.startswith(_CEILING)  # имя профиля цело (в потолке)
-        assert "✧ ● opus-4.8" in first  # и ожидающий выбор тоже
+        assert "● minimax-m3" in first  # и модель хода тоже
         assert "запрос" in second and "сессия" in second
         assert _left_fits(scr, total, plain, glyph=False)
 
@@ -1221,7 +1207,7 @@ async def test_footer_turns_pill_to_glyph_before_shrinking_profile(
                 with_profile=True,
                 profile_name_cols=_PROFILE_NAME_MAX_COLS,
                 snapshot=scr._footer_head_snapshot(),
-            ).plain
+            )[0].plain
         )
         # Ровно одной колонки не хватает потолку имени рядом с полной пилюлей.
         total = ceiling_need + _FOOTER_CHROME + _mode_line_cols(scr) - 1
@@ -1230,7 +1216,7 @@ async def test_footer_turns_pill_to_glyph_before_shrinking_profile(
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_CEILING)  # имя целое, не ужато
-        assert "✧ ● opus-4.8" in plain
+        assert "● opus-4.8" in plain.split("\n")[1]
         assert not _left_fits(scr, total, plain, glyph=False)
         assert _left_fits(scr, total, plain, glyph=True)
 
@@ -1263,7 +1249,7 @@ async def test_footer_keeps_full_profile_while_glyph_frees_room(
                 with_profile=True,
                 profile_name_cols=_PROFILE_NAME_MIN_COLS,
                 snapshot=snapshot,
-            ).plain
+            )[0].plain
         )
         # Полной пилюле не хватает одной колонки даже рядом с самым узким
         # вариантом правой с именем — значит, пилюля станет глифом.
@@ -1273,7 +1259,7 @@ async def test_footer_keeps_full_profile_while_glyph_frees_room(
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_CEILING)  # имя в потолке, не ужато
-        assert "✧ ● opus-4.8" in plain
+        assert "● opus-4.8" in plain.split("\n")[1]
         assert _left_fits(scr, total, plain, glyph=True)
 
 
@@ -1304,7 +1290,7 @@ async def test_footer_shrinks_profile_on_the_glyph_pass(tmp_path, monkeypatch):
                 with_profile=True,
                 profile_name_cols=_PROFILE_NAME_MAX_COLS,
                 snapshot=snapshot,
-            ).plain
+            )[0].plain
         )
         # Пол левой: пилюля режима в один глиф (за ней в покое ничего нет).
         floor = _mode_line_cols(scr, glyph=True)
@@ -1315,9 +1301,10 @@ async def test_footer_shrinks_profile_on_the_glyph_pass(tmp_path, monkeypatch):
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_LONG_NAME[:12] + "…")  # 13 колонок вместо 14
-        assert "✧ ● opus-4.8" in plain
+        first, second = plain.split("\n")
+        assert "● opus-4.8" in second
         # левой досталось ровно столько, сколько занимает глиф режима
-        assert total - cell_len(plain) - _FOOTER_CHROME == floor
+        assert total - cell_len(first) - _FOOTER_CHROME == floor
 
 
 @pytest.mark.asyncio
@@ -1333,7 +1320,8 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
       (фикс-раунд 3: перебор имени целиком во втором проходе, и он тоже
       начинается с потолка);
     - имена модели и выбора снимаются последними: нет ширины, где они сняты,
-      а имя профиля ещё на месте; `✧` не снимается никогда;
+      а имя профиля ещё на месте; строка ожидающего выбора не снимается
+      никогда;
     - обе ступени действительно достигаются, иначе перебор ничего не стерёг.
 
     Проверяется РЕШЕНИЕ («вариант с именем не проходит предикат»), а не его
@@ -1357,7 +1345,7 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
         seen_profile_dropped = False
         seen_names_dropped = False
         prev_profile_cols = None
-        for total in range(115, 29, -1):
+        for total in range(115, 14, -1):
             await pilot.resize_terminal(total, 30)
             plain = scr._compose_footer_right().plain
             has_profile = plain.startswith(_LONG_NAME[:_PROFILE_MIN_VISIBLE])
@@ -1375,7 +1363,7 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
                     f"ширина {total}: имя снято, хотя с минимальным "
                     f"именем строка 1 вставала — {plain!r}"
                 )
-            assert "✧" in plain, (total, plain)
+            assert plain.count("\n") == 1, (total, plain)
             if "opus-4.8" not in plain:
                 seen_names_dropped = True
                 assert not has_profile, (
@@ -1508,8 +1496,7 @@ async def test_footer_context_meter_stays_on_the_first_line_at_every_step(
             await pilot.resize_terminal(total, 30)
             first = scr._compose_footer_right().plain.split("\n")[0]
             assert "контекст" in first, (total, first)
-            assert "●" in first  # точка модели хода и `✧` — там же
-            assert "✧" in first
+            assert "●" in first  # точка модели хода — там же
 
 
 @pytest.mark.asyncio
@@ -1794,7 +1781,7 @@ async def test_footer_auto_fact_keeps_profile_and_usage_on_both_layouts(
     monkeypatch.setattr(app, "auto_mode_active", lambda: True)
     async with app.run_test(size=(200, 30)):
         scr = app.screen
-        head = scr._footer_head(with_profile=True)
+        head = scr._footer_head(with_profile=True)[0]
         request, session = scr._usage_segments()
         expected = compose_adaptive_footer_right(
             head,
@@ -1850,7 +1837,7 @@ async def test_footer_two_line_auto_drops_profile_before_fact_and_fact_last(
         scr = app.screen
         request, session = scr._usage_segments()
         no_profile = compose_adaptive_footer_right(
-            scr._footer_head(with_profile=False),
+            scr._footer_head(with_profile=False)[0],
             request,
             session,
             available_width=0,
@@ -1872,7 +1859,7 @@ async def test_narrow_pending_drops_both_names_keeps_dots_and_star(
     tmp_path, monkeypatch
 ):
     """Узкое окно при ожидающем выборе (спека model-knob §6.5): сначала
-    имена — и длинной модели хода, и выбора; точки и `✧` остаются."""
+    имена — и длинной модели хода, и выбора; точки остаются."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_core.model_router import ModelRouter
@@ -1901,4 +1888,4 @@ async def test_narrow_pending_drops_both_names_keeps_dots_and_star(
         monkeypatch.setattr(scr, "_context_meter", lambda: None)
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 8)
 
-        assert scr._compose_footer_right().plain == "●  ✧ ●"
+        assert scr._compose_footer_right().plain == "●\n●"

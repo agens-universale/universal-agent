@@ -36,3 +36,10 @@ def test_level_word_choice_shows_slot_model():
     assert str(bare.spans[0].style) == ACCENT
     assert ms.sign("fast", SLOTS).plain == "● fast"
     assert ms.sign("auto", SLOTS).plain == "● auto"
+
+
+def test_parts_split_dots_and_name_with_styles():
+    dots, name = ms.parts(ms.sign("main", SLOTS, name_style=DIM))
+    assert (dots.plain, name.plain) == ("●●", "main")
+    assert _colors(dots) == [RUN_COLOR, ACCENT]
+    assert str(name.spans[0].style) == DIM

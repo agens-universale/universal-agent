@@ -261,7 +261,7 @@ async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
             with_profile=False,
             meter=None,
             snapshot=_FooterHeadSnapshot(None, True, sign(AUTO, {}), False),
-        )
+        )[0]
         assert _span_style(idle, "●") == AUTO_COLOR
         assert _span_style(idle, "auto") == INK
 
@@ -269,7 +269,7 @@ async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
             with_profile=False,
             meter=None,
             snapshot=_FooterHeadSnapshot(None, True, Text("● fast"), True),
-        )
+        )[0]
         assert _span_style(running, "●") == AUTO_COLOR
         assert _span_style(running, " → ") == DIM
 
@@ -278,9 +278,10 @@ async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
 async def test_pending_choice_keeps_the_narrowest_rung_without_level_block(
     tmp_path, monkeypatch
 ):
-    """Пока выбор ждёт, `✧` с точкой остаются, а самая узкая ступень auto
-    (без блока уровня «→ ●») — тоже: иначе на совсем узком окне правая
-    колонка не влезала и поджимала левую (глиф режима, стоп-клавишу)."""
+    """Пока выбор ждёт, его точка во второй строке остаётся, а самая узкая
+    ступень auto (без блока уровня «→ ●») — тоже: иначе на совсем узком
+    окне правая колонка не влезала и поджимала левую (глиф режима,
+    стоп-клавишу)."""
     app = _app(tmp_path, CFG)
     _set_running(
         app, _running_runner(app.display_router(), current_level="light")
@@ -300,4 +301,4 @@ async def test_pending_choice_keeps_the_narrowest_rung_without_level_block(
         plain = scr._compose_footer_right().plain
 
         assert "→ ●" not in plain
-        assert plain.startswith("●  ✧ ●")
+        assert plain == "●\n●"

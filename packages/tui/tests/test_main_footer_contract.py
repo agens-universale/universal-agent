@@ -199,7 +199,7 @@ def _narrowest_right(scr):
         with_model_name=False,
         with_level_block=False,
         meter=render_context_meter(999, 1000),
-    )
+    )[0]
 
 
 # Пояснение edit (75 колонок) не встаёт в 2 × 34 рядом с полом правой

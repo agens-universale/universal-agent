@@ -279,7 +279,7 @@ async def test_notices_badge_does_not_push_prices_down(tmp_path, monkeypatch):
             with_profile=True,
             profile_name_cols=_PROFILE_NAME_MAX_COLS,
             snapshot=scr._footer_head_snapshot(),
-        )
+        )[0]
         one_line = compose_adaptive_footer_right(
             head, *scr._usage_segments(), _RIGHT_ONE_LINE
         ).plain

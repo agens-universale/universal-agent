@@ -251,7 +251,6 @@ async def test_applied_event_turns_pending_into_mark_in_place(tmp_path):
         assert not mark.pending
         assert mark._prefix.plain == "✦ "
         assert _notes(mark) == []
-        assert scr._applied_frame is not None  # футер гаснет вместе с лентой
         _call(scr, "c2", 2)
         await pilot.pause()
         kids = list(_trace(scr).children)
@@ -282,7 +281,6 @@ async def test_choice_seeded_at_run_start_applies_pending_in_place(tmp_path):
         assert runner.is_running()
         assert _marks(scr) == [mark]
         assert not mark.pending
-        assert scr._applied_frame is not None
         _push(app, ModelChoiceApplied("max", "giga-max"))
         _call(scr, "c1", 1)
         await _ticks(pilot, 1)
@@ -321,7 +319,6 @@ async def test_run_end_event_places_mark_after_turn_line(tmp_path, with_event):
         assert not mark.pending
         assert mark._content.plain == "Model  ● giga-max"
         assert _after_turn_line(scr, mark)
-        assert scr._applied_frame is not None
 
 
 @pytest.mark.asyncio
@@ -346,7 +343,6 @@ async def test_stop_applies_mark_after_stop_line_once_thread_exits(tmp_path):
         await _ticks(pilot)
         assert not mark.pending
         assert _after_turn_line(scr, mark)
-        assert scr._applied_frame is not None
 
 
 @pytest.mark.asyncio
@@ -371,7 +367,6 @@ async def test_run_end_does_not_leak_into_another_session(tmp_path):
         runner.running = False
         await _ticks(pilot)
         assert _marks(scr) == []
-        assert scr._applied_frame is None
 
 
 @pytest.mark.asyncio

@@ -198,10 +198,6 @@ VALIDATING_SHADES = [
 ]
 
 
-# «Выбор модели применён» (✦ в футере): одно угасание BRIGHT → фон.
-MODEL_APPLIED_SHADES = [_mix(BRIGHT, BG, k / 7) for k in range(8)]
-
-
 # ── Тема auto: палитра от фона терминала ───────────────────────────────────
 # Всё выше — тема gigacode (литералы, снапшоты неизменны). apply_background
 # подменяет фон и зависящие от него токены; reset возвращает литералы.
@@ -228,7 +224,6 @@ _RAMP_PEAKS = {
     "GLOW_SHADES": "#f0c896",
     "PROCESSING_SHADES": DEEP_DIM,
     "VALIDATING_SHADES": CODE_BLOCK,
-    "MODEL_APPLIED_SHADES": BRIGHT,
 }
 _GIGACODE = {
     name: globals()[name]

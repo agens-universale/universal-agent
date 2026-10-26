@@ -59,3 +59,10 @@ def sign(
     text = Text.assemble(dots(shown, slots), " ")
     text.append(alias if alias is not None else choice, style=name_style)
     return text
+
+
+def parts(sign_text: Text) -> tuple[Text, Text]:
+    """Знак → (точки, имя): `sign` ставит между ними один пробел, в точках
+    пробелов нет."""
+    cut = sign_text.plain.index(" ")
+    return sign_text[:cut], sign_text[cut + 1 :]

@@ -1,17 +1,17 @@
-"""Футер и выбор модели (спека model-knob §6.5): знак модели, ожидающий
-выбор `  ✧ ` и применённый `✦`, который по событию один раз гаснет."""
+"""Футер и выбор модели (спека model-knob §6.5, раунд 3 смока): строка 1
+— знак модели хода; выбор, ждущий ближайшего шага, — во второй строке
+справа знаком с тусклым именем: имя в колонке имени строки 1, точки
+прижаты к нему. Применение — сразу, без анимации."""
 
-from itertools import pairwise
 from types import SimpleNamespace
 
 import pytest
-from gc_core.model_choice import ModelChoiceApplied
 from gc_core.states import State
 from gc_testkit.settings import make_settings
 from gc_testkit.tui_support import tui_settings
 from gc_tui import palette
 from gc_tui.app import TuiApp
-from gc_tui.palette import ACCENT, BRIGHT, DIM, INK, MUTED, RUN_COLOR
+from gc_tui.palette import ACCENT, DIM, INK, RUN_COLOR
 from gc_tui.services.agent_runner import AgentRunner
 from gc_tui.services.model_sign import AUTO_COLOR, FREE_COLOR
 
@@ -142,30 +142,127 @@ async def test_running_auto_footer_keeps_arrow_and_decision_dot(tmp_path):
         assert _style_at(head, "●", 1) == ACCENT
 
 
+def _rows(scr) -> list[str]:
+    return _right(scr).split("\n")
+
+
+def _assert_aligned(row1: str, row2: str, name1: str, name2: str) -> None:
+    """Имена в одной колонке, точки выбора прижаты к имени, строки одной
+    ширины (колонка выровнена вправо)."""
+    col = row2.index(name2)
+    assert row1.index(name1) == col
+    assert row2[col - 2 : col] == "● "
+    assert row2[: col - 2].rstrip("●").strip() == ""
+    assert len(row1) == len(row2)
+
+
 @pytest.mark.asyncio
-async def test_pending_choice_shows_hollow_star_and_dim_name(tmp_path):
+async def test_pending_choice_goes_to_second_row_under_name(tmp_path):
     app = _app(tmp_path, "default")
     _run(app, _runner(app, level="default", mode="manual", applied="default"))
     async with app.run_test(size=(120, 24)):
         scr = app.screen
-        assert _right(scr).startswith("● glm-4.6")
-        assert "✧" not in _right(scr)
+        assert _rows(scr) == [_rows(scr)[0]]
         app.apply_model_choice("max")
         head = scr._compose_footer_right()
-        assert head.plain.startswith("● glm-4.6  ✧ ● giga-max")
-        assert "→" not in head.plain
-        assert _style_at(head, "  ✧ ") == MUTED
-        assert _style_at(head, "giga-max") == DIM
+        row1, row2 = head.plain.split("\n")
+        assert row1.startswith("● glm-4.6")
+        assert "✧" not in head.plain and "→" not in head.plain
+        _assert_aligned(row1, row2, "glm-4.6", "giga-max")
+        second = head.plain.index("giga-max")
+        assert _style_at(head, "giga-max", second) == DIM
+        assert _style_at(head, "●", second - 2) == ACCENT
+        # manual → auto: слово `auto` в колонке имени.
         app.apply_model_choice("auto")
-        assert _right(scr).startswith("● glm-4.6  ✧ ● auto")
+        row1, row2 = _rows(scr)
+        _assert_aligned(row1, row2, "glm-4.6", "auto")
         app.active_runner = None
 
+
+@pytest.mark.asyncio
+async def test_pending_wider_dots_shift_first_row(tmp_path):
+    """Точек выбора больше, чем у модели хода: строка 1 сдвигается, имена
+    остаются в одной колонке."""
+    both = {"slots": {**_REGISTRY["slots"], "default": "giga-max"}}
+    registry = {**_REGISTRY, **both}
+    app = _app(tmp_path, "light", both)
+    _run(
+        app,
+        _runner(
+            app,
+            level="light",
+            mode="manual",
+            applied="light",
+            registry=registry,
+        ),
+    )
+    async with app.run_test(size=(120, 24)):
+        scr = app.screen
+        app.apply_model_choice("max")
+        row1, row2 = _rows(scr)
+        assert row1.startswith(" ● glm-flash")
+        assert row2.startswith("●● giga-max")
+        _assert_aligned(row1, row2, "glm-flash", "giga-max")
+        app.active_runner = None
+
+
+@pytest.mark.asyncio
+async def test_pending_under_running_auto_aligns_with_decision(tmp_path):
     app = _app(tmp_path, "auto")
     _run(app, _runner(app, level="max", mode="auto", applied="auto"))
     async with app.run_test(size=(120, 24)):
         app.apply_model_choice("light")
-        plain = _right(app.screen)
-        assert plain.startswith("● → ● giga-max  ✧ ● glm-flash")
+        row1, row2 = _rows(app.screen)
+        assert row1.startswith("● → ● giga-max")
+        _assert_aligned(row1, row2, "giga-max", "glm-flash")
+        app.active_runner = None
+
+
+def _prices(scr, monkeypatch) -> None:
+    from rich.text import Text
+
+    monkeypatch.setattr(scr, "_context_meter", lambda: None)
+    monkeypatch.setattr(
+        scr,
+        "_usage_segments",
+        lambda: (Text("запрос 1k/0.1₽"), Text("сессия 2k/0.2₽")),
+    )
+
+
+@pytest.mark.asyncio
+async def test_pending_keeps_prices_on_first_row_when_wide(
+    tmp_path, monkeypatch
+):
+    app = _app(tmp_path, "default")
+    _run(app, _runner(app, level="default", mode="manual", applied="default"))
+    async with app.run_test(size=(160, 24)):
+        scr = app.screen
+        _prices(scr, monkeypatch)
+        app.apply_model_choice("max")
+        row1, row2 = _rows(scr)
+        assert "запрос" in row1 and "сессия" in row1
+        assert "запрос" not in row2
+        _assert_aligned(row1, row2, "glm-4.6", "giga-max")
+        app.active_runner = None
+
+
+@pytest.mark.asyncio
+async def test_pending_takes_prices_place_on_second_row_when_narrow(
+    tmp_path, monkeypatch
+):
+    app = _app(tmp_path, "default")
+    runner = _runner(app, level="default", mode="manual", applied="default")
+    _run(app, runner)
+    async with app.run_test(size=(160, 24)):
+        scr = app.screen
+        _prices(scr, monkeypatch)
+        monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 34)
+        assert _rows(scr) == ["● glm-4.6", "запрос 1k/0.1₽ · сессия 2k/0.2₽"]
+        app.apply_model_choice("max")
+        row1, row2 = _rows(scr)
+        assert row1.rstrip() == "● glm-4.6"
+        assert "запрос" not in _right(scr) and "сессия" not in _right(scr)
+        _assert_aligned(row1, row2, "glm-4.6", "giga-max")
         app.active_runner = None
 
 
@@ -177,7 +274,7 @@ async def test_unknown_config_choice_is_not_pending(tmp_path):
     _run(app, _runner(app, level="default", mode="manual", applied="default"))
     async with app.run_test(size=(120, 24)):
         plain = _right(app.screen)
-        assert plain.startswith("● glm-4.6") and "✧" not in plain
+        assert plain.startswith("● glm-4.6") and "\n" not in plain
         app.active_runner = None
 
 
@@ -187,65 +284,40 @@ async def test_no_pending_when_idle(tmp_path):
     async with app.run_test(size=(120, 24)):
         app.apply_model_choice("max")
         plain = _right(app.screen)
-        assert plain.startswith("● giga-max") and "✧" not in plain
+        assert plain.startswith("● giga-max") and "\n" not in plain
 
 
-def test_applied_shades_single_monotonic_fade():
-    shades = [c.lower() for c in palette.MODEL_APPLIED_SHADES]
-    assert len(shades) == 8
-    assert shades[0] == BRIGHT.lower()
-    assert shades[-1] == palette.BG.lower()
-    lum = [sum(int(c[i : i + 2], 16) for i in (1, 3, 5)) for c in shades]
-    assert all(x > y for x, y in pairwise(lum))
-    try:
-        palette.apply_background((0x21, 0x27, 0x33))
-        rebased = palette.MODEL_APPLIED_SHADES
-        assert rebased[0].lower() == BRIGHT.lower()
-        assert rebased[-1].lower() == "#212733"
-    finally:
-        palette.reset()
+def test_no_applied_fade_ramp_in_palette():
+    assert not hasattr(palette, "MODEL_APPLIED_SHADES")
+    assert "MODEL_APPLIED_SHADES" not in palette._RAMP_PEAKS
 
 
 @pytest.mark.asyncio
-async def test_applied_event_fades_once_then_clears(tmp_path):
-    frames = palette.MODEL_APPLIED_SHADES
-    app = _app(tmp_path, "max")
+async def test_applied_choice_switches_footer_at_once(tmp_path):
+    """Применение: строка 1 — сразу новая модель, вторая строка уходит;
+    ни кадров, ни таймера угасания."""
+    from gc_tui.screens import main as main_screen
+
+    assert not hasattr(main_screen, "_APPLIED_STEP_S")
+    app = _app(tmp_path, "default")
+    runner = _runner(app, level="default", mode="manual", applied="default")
+    _run(app, runner)
     async with app.run_test(size=(120, 24)):
         scr = app.screen
-        scr.on_model_choice_applied(ModelChoiceApplied("max", "giga-max"))
-        head = scr._compose_footer_right()
-        assert head.plain.startswith("✦ ● giga-max")
-        assert _style_at(head, "✦ ") == BRIGHT.lower()
-        assert "✦" in str(scr.query_one("#footer-right").render())
-        seen = [_style_at(head, "✦ ")]
-        for _ in range(len(frames) - 1):
-            scr._applied_tick()
-            seen.append(_style_at(scr._compose_footer_right(), "✦ "))
-        assert seen == [c.lower() for c in frames]
-        assert seen[-1] == palette.BG.lower()
-        scr._applied_tick()
-        assert scr._applied_frame is None
-        assert scr._applied_timer is None
-        assert _right(scr).startswith("● giga-max")
-        scr._refresh_footer()
-        assert "✦" not in str(scr.query_one("#footer-right").render())
-
-
-@pytest.mark.asyncio
-async def test_fade_stops_on_session_switch(tmp_path):
-    app = _app(tmp_path, "max")
-    async with app.run_test(size=(120, 24)):
-        scr = app.screen
-        scr.on_model_choice_applied(ModelChoiceApplied("max", "giga-max"))
-        assert scr._applied_timer is not None
-        scr._switch_to_empty_state()
-        assert scr._applied_frame is None
-        assert scr._applied_timer is None
+        app.apply_model_choice("max")
+        assert len(_rows(scr)) == 2
+        applied = _runner(app, level="max", mode="manual", applied="max")
+        app.active_runner = applied
+        rows = _rows(scr)
+        assert rows == [rows[0]] and rows[0].startswith("● giga-max")
         assert "✦" not in _right(scr)
+        for name in ("_applied_frame", "_applied_timer", "_applied_tick"):
+            assert not hasattr(scr, name)
+        app.active_runner = None
 
 
 @pytest.mark.asyncio
-async def test_narrow_footer_keeps_dots_and_stars(tmp_path, monkeypatch):
+async def test_narrow_footer_keeps_dots_aligned(tmp_path, monkeypatch):
     app = _app(tmp_path, "auto")
     _run(app, _runner(app, level="max", mode="auto", applied="auto"))
     async with app.run_test(size=(120, 24)):
@@ -253,9 +325,7 @@ async def test_narrow_footer_keeps_dots_and_stars(tmp_path, monkeypatch):
         app.apply_model_choice("light")
         monkeypatch.setattr(scr, "_context_meter", lambda: None)
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 12)
-        assert _right(scr) == "● → ●  ✧ ●"
-        scr.on_model_choice_applied(ModelChoiceApplied("light", "glm-flash"))
-        assert _right(scr) == "✦ ● → ●  ✧ ●"
+        assert _right(scr) == "● → ●\n    ●"
         app.active_runner = None
 
 
