@@ -112,7 +112,7 @@ def test_main_names_the_reason_runs_default_and_exits_0(
     assert rc == 0
     assert seen["available"] is False  # RunContext соберётся на default
     assert (
-        f"автовыбор моделей недоступен: {reason} — работает {tail}"
+        f"автовыбор недоступен: {reason} — работает {tail}"
         in capsys.readouterr().err
     )
 
@@ -156,7 +156,7 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
 
     assert rc == 0
     assert (
-        "автовыбор моделей недоступен: во всех уровнях одна модель — работает модель слота default"
+        "автовыбор недоступен: во всех уровнях одна модель — работает модель слота default"
         in capsys.readouterr().err
     )
 

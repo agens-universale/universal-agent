@@ -100,4 +100,4 @@ async def test_no_warning_when_auto_is_available_or_not_selected(
     cfg = _cfg(tmp_path, **over)
     assert auto_routing_unavailable_notice(cfg) is None
     warnings = await _run_log_warnings(cfg)
-    assert [m for m in warnings if "автовыбор моделей недоступен" in m] == []
+    assert [m for m in warnings if "автовыбор недоступен" in m] == []

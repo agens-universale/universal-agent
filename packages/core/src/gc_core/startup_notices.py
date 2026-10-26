@@ -172,8 +172,9 @@ def _agentsmd(settings: AppConfig, *, is_tui: bool) -> List[Notice]:
 
 def auto_routing_unavailable_reason_text(reason: str) -> str:
     """Фраза причины недоступности автовыбора — одна на все входы (нотис при
-    старте, runtime-нотис TUI, ответ на набранный `/model auto`)."""
-    return f"автовыбор моделей недоступен: {reason}"
+    старте, runtime-нотис TUI, ответ на набранный `/model auto`, подсказка
+    строки `auto` в пикере `/model`)."""
+    return f"автовыбор недоступен: {reason}"
 
 
 def auto_routing_unavailable_message(

@@ -10,7 +10,7 @@ from gc_core.runtime_notices import (
 )
 from gc_testkit import run_coro
 
-_ONE_MODEL_MESSAGE = "автовыбор моделей недоступен: во всех уровнях одна модель — работает модель слота default"
+_ONE_MODEL_MESSAGE = "автовыбор недоступен: во всех уровнях одна модель — работает модель слота default"
 _BACKEND = (
     "backend:\n  api_mode: chat_completions\n"
     '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n'
@@ -102,7 +102,7 @@ def test_typed_model_auto_names_the_reason_when_auto_is_unavailable(
     run_coro(scr._dispatch_command("model auto"))
 
     assert hints == [
-        "/model auto — автовыбор моделей недоступен: во всех уровнях одна модель"
+        "/model auto — автовыбор недоступен: во всех уровнях одна модель"
     ]
     assert (
         app.effective_settings().settings.model is None
@@ -127,7 +127,7 @@ def test_typed_model_auto_on_max_names_the_reason_without_claiming_default(
     run_coro(scr._dispatch_command("model auto"))
 
     assert hints == [
-        "/model auto — автовыбор моделей недоступен: выключен настройкой auto_routing"
+        "/model auto — автовыбор недоступен: выключен настройкой auto_routing"
     ]
     assert app.effective_settings().settings.model == "max"
 
@@ -180,7 +180,7 @@ def test_config_change_making_auto_unavailable_notices_once_and_recovers(
         and toggle_state(app, "model") == "default"
     )
     assert _auto_runtime_notices() == [
-        f"автовыбор моделей недоступен: {reason} — работает модель слота default"
+        f"автовыбор недоступен: {reason} — работает модель слота default"
     ]
 
     app.reload_config()  # перечитка того же сломанного конфига

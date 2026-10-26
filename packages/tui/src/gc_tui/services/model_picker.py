@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from gc_core.config_modules.model_registry import LEVELS, choice_in_registry
 from gc_core.settings import settings_of
+from gc_core.startup_notices import auto_routing_unavailable_reason_text
 from rich.text import Text
 
 from gc_tui.services import model_sign
@@ -25,7 +26,6 @@ AUTO = "auto"
 AUTO_DESC = "модель выбирается автоматически по ходу работы"
 ACTIVE_STATUS = "активна"
 UNAVAILABLE_HINT = "недоступна в этой сессии"
-AUTO_UNAVAILABLE_HINT = "автовыбор недоступен: {reason}"
 LEGACY_HINT = "легаси: выбор модели появится с реестром моделей"
 LEGACY_FORCE_HINT = "--model: выбор модели отключён на этот запуск"
 UNKNOWN_REFUSAL = "✗ нет такой модели: {arg}"
@@ -173,7 +173,7 @@ def _auto_hint(router: Any, loaded: Any) -> str:
     """Пары автовыбора; недоступный автовыбор — его причина."""
     reason = auto_unavailable_reason_cfg(loaded)
     if reason is not None:
-        return AUTO_UNAVAILABLE_HINT.format(reason=reason)
+        return auto_routing_unavailable_reason_text(reason)
     pairs = [
         f"{_alias_of(router, weak)} и {_alias_of(router, strong)}"
         for weak, strong in _auto_levels(loaded)
@@ -247,6 +247,4 @@ def model_choice_refusal(app: Any, value: str) -> Optional[str]:
     reason = auto_unavailable_reason_cfg(loaded)
     if reason is None:
         return None
-    from gc_core.startup_notices import auto_routing_unavailable_reason_text
-
     return f"/model auto — {auto_routing_unavailable_reason_text(reason)}"

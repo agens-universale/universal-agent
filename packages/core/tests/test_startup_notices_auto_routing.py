@@ -58,7 +58,7 @@ def test_notice_names_unavailability_and_the_effective_fallback(
     assert notice.level == "info"
     assert notice.code == "auto_routing_unavailable"
     assert notice.message == (
-        f"автовыбор моделей недоступен: {reason} — работает модель слота default"
+        f"автовыбор недоступен: {reason} — работает модель слота default"
     )
 
 
@@ -81,7 +81,7 @@ def test_cli_model_override_provenance_disables_levels():
     )
     notice = auto_routing_unavailable_notice(loaded)
     assert notice.message == (
-        "автовыбор моделей недоступен: уровни отключены флагом --model "
+        "автовыбор недоступен: уровни отключены флагом --model "
         "— работает модель из --model"
     )
 
@@ -102,7 +102,7 @@ def test_notice_names_an_alternative_when_explicit_pair_is_one_model():
     )
     notice = auto_routing_unavailable_notice(loaded)
     assert notice.message == (
-        "автовыбор моделей недоступен: в паре light+default одна модель; "
+        "автовыбор недоступен: в паре light+default одна модель; "
         "другая пара — auto_routing_safe_level: max — работает модель слота default"
     )
 
@@ -121,7 +121,7 @@ def test_auto_pair_uses_two_available_models_without_a_notice():
 def test_reason_phrase_is_the_notice_text_without_the_level_tail():
     assert auto_routing_unavailable_reason_text(
         "выключен настройкой auto_routing"
-    ) == ("автовыбор моделей недоступен: выключен настройкой auto_routing")
+    ) == ("автовыбор недоступен: выключен настройкой auto_routing")
 
 
 @pytest.mark.parametrize("force_legacy", [False, True])
@@ -145,7 +145,7 @@ def test_collect_includes_one_routing_notice_and_preserves_cli_provenance(
     ]
     assert len(routing) == 1
     assert routing[0].message == (
-        f"автовыбор моделей недоступен: {reason} — работает {tail}"
+        f"автовыбор недоступен: {reason} — работает {tail}"
     )
 
 

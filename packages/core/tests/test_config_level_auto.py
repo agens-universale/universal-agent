@@ -10,7 +10,7 @@ from gc_core.config_modules.env_vars import EnvVars
 from gc_core.config_modules.root import AppConfig
 from gc_core.startup_notices import auto_routing_unavailable_notice
 
-_ONE_MODEL_MESSAGE = "автовыбор моделей недоступен: во всех уровнях одна модель — работает модель слота default"
+_ONE_MODEL_MESSAGE = "автовыбор недоступен: во всех уровнях одна модель — работает модель слота default"
 _BASE = {
     "backend": {
         "api_mode": "chat_completions",

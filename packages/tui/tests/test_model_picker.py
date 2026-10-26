@@ -383,8 +383,7 @@ def test_model_command_auto_unavailable_names_reason(tmp_path, monkeypatch):
     scr._show_footer_refusal = lambda text: hints.append(text)
     scr._cmd_model("auto")
     assert hints == [
-        "/model auto — автовыбор моделей недоступен: "
-        "выключен настройкой auto_routing"
+        "/model auto — автовыбор недоступен: выключен настройкой auto_routing"
     ]
     assert "model" not in app._session_overrides
 
