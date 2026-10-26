@@ -190,14 +190,23 @@ def _after_cursor(
     return (record.key.system, record.key.thread) > (system, thread)
 
 
+def in_list_order(
+    records: Iterable[ThreadRecord], query: ThreadQuery
+) -> list[ThreadRecord]:
+    """Треды по фильтру ``query`` в порядке списка (updated_at ↓, system,
+    thread); курсор и ``limit`` не смотрятся."""
+    chosen = [r for r in records if _matches(r, query)]
+    chosen.sort(key=lambda r: (r.key.system, r.key.thread))
+    chosen.sort(key=_updated, reverse=True)
+    return chosen
+
+
 def page_of(
     records: Iterable[ThreadRecord], query: ThreadQuery
 ) -> Page[ThreadRecord]:
     """Страница списка тредов: фильтр, порядок (updated_at ↓, system,
     thread), курсор — непрозрачная строка последней записи страницы."""
-    chosen = [r for r in records if _matches(r, query)]
-    chosen.sort(key=lambda r: (r.key.system, r.key.thread))
-    chosen.sort(key=_updated, reverse=True)
+    chosen = in_list_order(records, query)
     if query.cursor:
         position = parse_list_cursor(query.cursor)
         chosen = [r for r in chosen if _after_cursor(r, position)]

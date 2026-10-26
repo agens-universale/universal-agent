@@ -101,17 +101,25 @@ class Threads:
         updated_before: str | None = None,
         updated_after: str | None = None,
     ) -> AsyncIterator[ThreadRecord]:
-        """Все треды по фильтру, ``updated_at`` по убыванию, постранично."""
+        """Все треды по фильтру, ``updated_at`` по убыванию, постранично.
+        Файловое хранилище — одним проходом: его страница и так читает весь
+        каталог."""
+        from gc_core.threads.file_store import FileThreadStore
+
+        query = ThreadQuery(
+            system=system,
+            updated_before=updated_before,
+            updated_after=updated_after,
+            limit=_PAGE,
+        )
+        if isinstance(self.store, FileThreadStore):
+            for record in await self.store.list_all_threads(query):
+                yield record
+            return
         cursor = None
         while True:
             page = await self.store.list_threads(
-                ThreadQuery(
-                    system=system,
-                    updated_before=updated_before,
-                    updated_after=updated_after,
-                    cursor=cursor,
-                    limit=_PAGE,
-                )
+                query.model_copy(update={"cursor": cursor})
             )
             for record in page.items:
                 yield record
