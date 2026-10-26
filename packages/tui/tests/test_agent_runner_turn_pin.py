@@ -14,24 +14,26 @@ from gc_tui.services.agent_runner import AgentRunner
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "start,selected,pending,next_footer",
+    "start,selected,row1,row2,next_footer",
     [
-        ("light", "max", "● fast  ✧ ●● strong", "●● strong"),
-        ("max", "light", "●● strong  ✧ ● fast", "● fast"),
-        ("light", "auto", "● fast  ✧ ● auto", "● → ● strong"),
-        ("max", "auto", "●● strong  ✧ ● auto", "● → ● strong"),
-        ("auto", "light", "● → ● strong  ✧ ● fast", "● fast"),
-        ("auto", "max", "● → ● strong  ✧ ●● strong", "●● strong"),
-        ("light", "default", "● fast  ✧ ●● strong", "●● strong"),
-        ("default", "light", "●● strong  ✧ ● fast", "● fast"),
-        ("default", "max", "●● strong  ✧ ●● strong", "●● strong"),
-        ("max", "default", "●● strong  ✧ ●● strong", "●● strong"),
-        ("default", "auto", "●● strong  ✧ ● auto", "● → ● strong"),
-        ("auto", "default", "● → ● strong  ✧ ●● strong", "●● strong"),
+        # Пока выбор ждёт: строка 1 — модель идущего хода, строка 2 — выбор;
+        # имена в одной колонке, правые точки друг под другом.
+        ("light", "max", " ● fast  ", "●● strong", "●● strong"),
+        ("max", "light", "●● strong", " ● fast  ", "● fast"),
+        ("light", "auto", "● fast", "● auto", "● → ● strong"),
+        ("max", "auto", "●● strong", " ● auto  ", "● → ● strong"),
+        ("auto", "light", "● → ● strong", "    ● fast  ", "● fast"),
+        ("auto", "max", "● → ● strong", "   ●● strong", "●● strong"),
+        ("light", "default", " ● fast  ", "●● strong", "●● strong"),
+        ("default", "light", "●● strong", " ● fast  ", "● fast"),
+        ("default", "max", "●● strong", "●● strong", "●● strong"),
+        ("max", "default", "●● strong", "●● strong", "●● strong"),
+        ("default", "auto", "●● strong", " ● auto  ", "● → ● strong"),
+        ("auto", "default", "● → ● strong", "   ●● strong", "●● strong"),
     ],
 )
 async def test_footer_keeps_prepared_call_and_applies_selection_to_next_call(
-    tmp_path, monkeypatch, start, selected, pending, next_footer
+    tmp_path, monkeypatch, start, selected, row1, row2, next_footer
 ):
     from gc_core.agent_executor import AgentExecutor
     from gc_core.auto_routing.state_ops import close_tick
@@ -73,6 +75,7 @@ async def test_footer_keeps_prepared_call_and_applies_selection_to_next_call(
     app.active_runner = runner
     app.tui_state.active_task_id = "t1"
     monkeypatch.setattr(app, "collect_footer_notices", list)
+    pending = f"{row1}\n{row2}"
     async with app.run_test(size=(120, 24)):
         app.apply_session_override("model", selected)
         assert app.screen._compose_footer_right().plain == pending
