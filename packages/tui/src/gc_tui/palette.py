@@ -198,12 +198,8 @@ VALIDATING_SHADES = [
 ]
 
 
-# «Выбор модели применён» (✦ в футере): ступени MUTED → BRIGHT → MUTED
-# (ping-pong, пик BRIGHT), затем гаснет ступенями до фона.
-MODEL_APPLIED_SHADES = [
-    *(_mix(MUTED, BRIGHT, k / 5) for k in (0, 1, 2, 3, 4, 5, 4, 3, 2, 1)),
-    *(_mix(MUTED, BG, k / 4) for k in (1, 2, 3, 4)),
-]
+# «Выбор модели применён» (✦ в футере): одно угасание BRIGHT → фон.
+MODEL_APPLIED_SHADES = [_mix(BRIGHT, BG, k / 7) for k in range(8)]
 
 
 # ── Тема auto: палитра от фона терминала ───────────────────────────────────

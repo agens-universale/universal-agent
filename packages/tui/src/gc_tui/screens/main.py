@@ -411,14 +411,9 @@ _FooterHeadSnapshot = namedtuple(
     defaults=(None, None),
 )
 
-# Дыхание `✦` применённого выбора: два цикла рампы MUTED ↔ BRIGHT, затем
-# угасание до фона; кадр — шаг таймера (2,4 с дыхания, 0,48 с угасания).
-_BREATH_STEP_S = 0.12
-_BREATH_CYCLE = 10
-_APPLIED_FRAMES = [
-    *MODEL_APPLIED_SHADES[:_BREATH_CYCLE] * 2,
-    *MODEL_APPLIED_SHADES[_BREATH_CYCLE:],
-]
+# Угасание `✦` применённого выбора: одна рампа BRIGHT → фон; кадр — шаг
+# таймера (8 кадров, около секунды).
+_APPLIED_STEP_S = 0.12
 
 # Данные одной сборки футера, резолвятся ОДИН раз на кадр и идут в обе
 # колонки: бейдж уведомлений (строка 2 левой и резерв лесенки правой),
@@ -808,9 +803,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # не каждый тик.
         self._footer_faults: set[str] = set()
         # Дыхание `✦` применённого выбора модели: кадр и его таймер
-        # (`on_model_choice_applied`); None — не дышит.
+        # (`on_model_choice_applied`); None — не горит.
         self._applied_frame: Optional[int] = None
-        self._breath_timer = None
+        self._applied_timer = None
         # Input history: per-project ↑/↓ навигация.
         # _history создаётся в on_mount (project_dir = threads_dir.parent).
         self._history = None  # type: Optional["InputHistory"]
@@ -1151,29 +1146,29 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
 
     def on_model_choice_applied(self, event: ModelChoiceApplied) -> None:
-        """Выбор применён (спека model-knob §6.5): `✦` перед знаком дышит
-        и гаснет. Состояние — этого события: перерисовка его не повторяет."""
-        self._stop_breath()
+        """Выбор применён (спека model-knob §6.5): `✦` перед знаком один раз
+        гаснет. Состояние — этого события: перерисовка его не повторяет."""
+        self._stop_applied()
         self._applied_frame = 0
-        self._breath_timer = self.set_interval(
-            _BREATH_STEP_S, self._breath_tick
+        self._applied_timer = self.set_interval(
+            _APPLIED_STEP_S, self._applied_tick
         )
         self._refresh_footer()
 
-    def _breath_tick(self) -> None:
-        """Следующий кадр дыхания; после последнего `✦` уходит."""
+    def _applied_tick(self) -> None:
+        """Следующий кадр угасания; после последнего `✦` уходит."""
         if self._applied_frame is None:
             return
-        if self._applied_frame + 1 < len(_APPLIED_FRAMES):
+        if self._applied_frame + 1 < len(MODEL_APPLIED_SHADES):
             self._applied_frame += 1
         else:
-            self._stop_breath()
+            self._stop_applied()
         self._refresh_footer()
 
-    def _stop_breath(self) -> None:
-        if self._breath_timer is not None:
-            self._breath_timer.stop()
-            self._breath_timer = None
+    def _stop_applied(self) -> None:
+        if self._applied_timer is not None:
+            self._applied_timer.stop()
+            self._applied_timer = None
         self._applied_frame = None
 
     def _footer_head(
@@ -1224,7 +1219,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
             head.append(" ")
         if snapshot.applied_frame is not None:
-            head.append("✦ ", style=_APPLIED_FRAMES[snapshot.applied_frame])
+            head.append(
+                "✦ ", style=MODEL_APPLIED_SHADES[snapshot.applied_frame]
+            )
         shown = {"with_name": with_model_name, "name_cols": model_cols}
         if snapshot.mode_auto and snapshot.running:
             head.append("●", style=model_sign.AUTO_COLOR)
@@ -2509,7 +2506,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._stopping_runner = None
         self._last_user_message_id = None
         self._closed_turn_summary = None
-        self._stop_breath()
+        self._stop_applied()
 
     def _mount_failed_from_meta(self, task_id: str) -> None:
         """После рестарта: смонтировать виджеты failed-реплик из
@@ -5207,7 +5204,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _apply_choice_event(self, event: ModelChoiceApplied) -> None:
         """Выбор применён (спека model-knob §6.4, §6.5): тихая отметка
         становится обычной на своём месте; её нет — обычная отметка над
-        прижатым хвостом. Футер дышит одновременно."""
+        прижатым хвостом. Футер гаснет одновременно."""
         mark = self._pending_model_mark()
         if mark is not None:
             self._apply_pending_mark(mark, event.choice, event.alias)

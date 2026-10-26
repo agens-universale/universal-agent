@@ -251,7 +251,7 @@ async def test_applied_event_turns_pending_into_mark_in_place(tmp_path):
         assert not mark.pending
         assert mark._prefix.plain == "✦ "
         assert _notes(mark) == []
-        assert scr._applied_frame is not None  # футер дышит вместе с лентой
+        assert scr._applied_frame is not None  # футер гаснет вместе с лентой
         _call(scr, "c2", 2)
         await pilot.pause()
         kids = list(_trace(scr).children)

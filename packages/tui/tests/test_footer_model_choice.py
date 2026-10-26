@@ -1,5 +1,5 @@
 """Футер и выбор модели (спека model-knob §6.5): знак модели, ожидающий
-выбор `  ✧ ` и применённый `✦`, который дышит по событию и гаснет."""
+выбор `  ✧ ` и применённый `✦`, который по событию один раз гаснет."""
 
 from types import SimpleNamespace
 
@@ -189,66 +189,57 @@ async def test_no_pending_when_idle(tmp_path):
         assert plain.startswith("● giga-max") and "✧" not in plain
 
 
-def test_applied_shades_breathe_then_fade_to_background():
+def test_applied_shades_single_monotonic_fade():
     shades = [c.lower() for c in palette.MODEL_APPLIED_SHADES]
-    assert len(shades) == 14
-    assert shades[0] == MUTED.lower() and shades[5] == BRIGHT.lower()
-    assert shades[1:5] == shades[9:5:-1]
+    assert len(shades) == 8
+    assert shades[0] == BRIGHT.lower()
     assert shades[-1] == palette.BG.lower()
+    lum = [sum(int(c[i : i + 2], 16) for i in (1, 3, 5)) for c in shades]
+    assert all(x > y for x, y in zip(lum, lum[1:]))
     try:
         palette.apply_background((0x21, 0x27, 0x33))
         rebased = palette.MODEL_APPLIED_SHADES
-        assert rebased[5].lower() == BRIGHT.lower()
+        assert rebased[0].lower() == BRIGHT.lower()
         assert rebased[-1].lower() == "#212733"
     finally:
         palette.reset()
 
 
 @pytest.mark.asyncio
-async def test_applied_event_breathes_then_clears(tmp_path):
-    from gc_tui.screens.main import _APPLIED_FRAMES
-
+async def test_applied_event_fades_once_then_clears(tmp_path):
+    frames = palette.MODEL_APPLIED_SHADES
     app = _app(tmp_path, "max")
     async with app.run_test(size=(120, 24)):
         scr = app.screen
         scr.on_model_choice_applied(ModelChoiceApplied("max", "giga-max"))
         head = scr._compose_footer_right()
         assert head.plain.startswith("✦ ● giga-max")
-        assert _style_at(head, "✦ ") == MUTED.lower()
+        assert _style_at(head, "✦ ") == BRIGHT.lower()
         assert "✦" in str(scr.query_one("#footer-right").render())
-        for _ in range(5):
-            scr._breath_tick()
-        assert _style_at(scr._compose_footer_right(), "✦ ") == BRIGHT
-        assert "✦" in str(scr.query_one("#footer-right").render())
-        for _ in range(len(_APPLIED_FRAMES) - 6):
-            scr._breath_tick()
-        last = scr._compose_footer_right()
-        assert _style_at(last, "✦ ") == palette.BG.lower()
-        scr._breath_tick()
+        seen = [_style_at(head, "✦ ")]
+        for _ in range(len(frames) - 1):
+            scr._applied_tick()
+            seen.append(_style_at(scr._compose_footer_right(), "✦ "))
+        assert seen == [c.lower() for c in frames]
+        assert seen[-1] == palette.BG.lower()
+        scr._applied_tick()
         assert scr._applied_frame is None
-        assert scr._breath_timer is None
+        assert scr._applied_timer is None
         assert _right(scr).startswith("● giga-max")
         scr._refresh_footer()
         assert "✦" not in str(scr.query_one("#footer-right").render())
 
 
-def test_breath_frames_two_cycles_then_fade():
-    from gc_tui.screens.main import _APPLIED_FRAMES
-
-    shades = palette.MODEL_APPLIED_SHADES
-    assert [*shades[:10], *shades[:10], *shades[10:]] == _APPLIED_FRAMES
-
-
 @pytest.mark.asyncio
-async def test_breathing_stops_on_session_switch(tmp_path):
+async def test_fade_stops_on_session_switch(tmp_path):
     app = _app(tmp_path, "max")
     async with app.run_test(size=(120, 24)):
         scr = app.screen
         scr.on_model_choice_applied(ModelChoiceApplied("max", "giga-max"))
-        assert scr._breath_timer is not None
+        assert scr._applied_timer is not None
         scr._switch_to_empty_state()
         assert scr._applied_frame is None
-        assert scr._breath_timer is None
+        assert scr._applied_timer is None
         assert "✦" not in _right(scr)
 
 
