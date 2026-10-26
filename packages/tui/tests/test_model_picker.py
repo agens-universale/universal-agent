@@ -193,6 +193,7 @@ def test_picker_auto_disabled_with_reason(tmp_path, monkeypatch):
     """Автовыбор недоступен — строка auto видна, но выбрать её нельзя;
     подсказка называет причину."""
     from gc_tui.services.model_picker import (
+        AUTO_DESC,
         model_picker_hint,
         model_picker_options,
     )
@@ -208,7 +209,7 @@ def test_picker_auto_disabled_with_reason(tmp_path, monkeypatch):
     )
     auto = model_picker_options(app)[0]
     assert auto.value == "auto" and not auto.enabled
-    assert auto.desc == "недоступен — выключен настройкой auto_routing"
+    assert auto.desc == AUTO_DESC
     assert model_picker_hint(app, "auto") == (
         "auto — автовыбор моделей недоступен: выключен настройкой auto_routing"
     )
@@ -236,6 +237,7 @@ def test_picker_legacy_single_row(tmp_path, monkeypatch):
     """Пустой реестр: одна строка плоской модели (активна), выбор не
     действует — ни она, ни auto не выбираются."""
     from gc_tui.services.model_picker import (
+        AUTO_DESC,
         model_picker_hint,
         model_picker_options,
     )
@@ -244,7 +246,7 @@ def test_picker_legacy_single_row(tmp_path, monkeypatch):
     options = model_picker_options(app)
     rows = [o for o in options if not o.separator]
     assert [o.value for o in rows] == ["auto", "glm-5.2-fp8"]
-    assert not rows[0].enabled
+    assert not rows[0].enabled and rows[0].desc == AUTO_DESC
     assert rows[1].status == "● активна" and not rows[1].enabled
     assert model_picker_hint(app, "glm-5.2-fp8") == (
         "glm-5.2-fp8 — легаси: выбор модели появится с реестром моделей"
