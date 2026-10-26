@@ -59,15 +59,3 @@ def sign(
     text = Text.assemble(dots(shown, slots), " ")
     text.append(alias if alias is not None else choice, style=name_style)
     return text
-
-
-def level_hint(alias: str, slots: Mapping[str, str | None]) -> str:
-    """Подсказка пикера про уровни модели."""
-    levels = levels_of(alias, slots)
-    if not levels:
-        return "без уровня"
-    if len(levels) == len(LEVELS):
-        return "все три уровня"
-    if len(levels) == 1:
-        return f"уровень {levels[0]}"
-    return f"уровни {levels[0]} и {levels[1]}"

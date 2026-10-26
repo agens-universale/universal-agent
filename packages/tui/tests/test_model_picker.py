@@ -1,5 +1,6 @@
 """Пикер `/model` и команда `/model` (спека model-knob §6.3, §3.2, §3.3,
-§4.4): состав и порядок строк, знак модели слева, «● активна», подсказки,
+§4.4): состав и порядок строк, знак модели слева, «активна», описания,
+подсказки,
 легаси и отказ на неизвестное имя."""
 
 import pytest
@@ -126,7 +127,7 @@ def test_picker_dots_right_aligned_to_name(tmp_path, monkeypatch):
 
 
 def test_picker_marks_current_active(tmp_path, monkeypatch):
-    """«● активна» — на выборе действующих настроек; сессионный выбор
+    """«активна» — на выборе действующих настроек; сессионный выбор
     переносит отметку, слово уровня отмечает модель своего слота, а
     переданные настройки (база для «Настроек») — своё значение."""
     from gc_tui.services.model_picker import model_picker_options
@@ -139,7 +140,7 @@ def test_picker_marks_current_active(tmp_path, monkeypatch):
     assert _status(model_picker_options(app)) == {
         "auto": "",
         "glm-flash": "",
-        "glm-4.6": "● активна",
+        "glm-4.6": "активна",
         "giga-max": "",
         "qwen-coder": "",
         "deepseek-v3": "",
@@ -154,39 +155,90 @@ def test_picker_marks_current_active(tmp_path, monkeypatch):
     assert marked == ["giga-max"]
 
 
-def test_picker_hints_name_levels_only(tmp_path, monkeypatch):
-    """Подсказка — только про модель: её уровни или «без уровня»; у auto —
-    пары автовыбора."""
-    from gc_tui.services.model_picker import model_picker_hint
+def test_picker_desc_names_model_role(tmp_path, monkeypatch):
+    """Описание строки: у auto — режим, у модели одного уровня — роль
+    уровня, у модели нескольких уровней — их список, без уровня — пусто."""
+    from gc_tui.services.model_picker import AUTO_DESC, model_picker_options
+    from gc_tui.toggles import LEVEL_ROLE_TEXT
+
+    app = _app(tmp_path, monkeypatch, {**_AUTO_ON, **_ONE_PER_LEVEL})
+    descs = {
+        o.value: o.desc for o in model_picker_options(app) if not o.separator
+    }
+    assert descs == {
+        "auto": AUTO_DESC,
+        "glm-flash": LEVEL_ROLE_TEXT["light"],
+        "glm-4.6": LEVEL_ROLE_TEXT["default"],
+        "giga-max": LEVEL_ROLE_TEXT["max"],
+        "qwen-coder": "",
+        "deepseek-v3": "",
+    }
+    app = _app(tmp_path, monkeypatch, {**_AUTO_ON, **_TWO_LEVELS})
+    giga = next(o for o in model_picker_options(app) if o.value == "giga-max")
+    assert giga.desc == "уровни default и max"
+    all_three = {
+        "models": {"giga-max": {}},
+        "slots": {
+            "light": "giga-max",
+            "default": "giga-max",
+            "max": "giga-max",
+        },
+    }
+    app = _app(tmp_path, monkeypatch, all_three)
+    giga = next(o for o in model_picker_options(app) if o.value == "giga-max")
+    assert giga.desc == "уровни light, default и max"
+
+
+_ADDRESSED = {
+    "models": {
+        "glm-flash": {
+            "model": "zai/glm-4.5-flash",
+            "url": "https://api.z.ai/v1/chat/completions",
+            "token": "",
+        },
+        "giga-max": {
+            "url": "https://giga.example.ru:8443/v1/chat",
+            "token": "",
+        },
+    },
+    "slots": {"light": "glm-flash", "default": "giga-max", "max": "giga-max"},
+}
+
+
+def test_picker_hint_is_model_id_and_host(tmp_path, monkeypatch):
+    """Подсказка — без имени и уровней: id у провайдера и хост адреса;
+    id, равный алиасу, опускается."""
+    from gc_tui.services.model_picker import model_hint
+
+    app = _app(tmp_path, monkeypatch, {**_AUTO_ON, **_ADDRESSED})
+    assert model_hint(app, "glm-flash") == "zai/glm-4.5-flash · api.z.ai"
+    assert model_hint(app, "giga-max") == "giga.example.ru:8443"
+    assert model_hint(app, None) == ""
+
+
+def test_picker_auto_hint_names_pairs(tmp_path, monkeypatch):
+    """У auto — пары автовыбора, без имени."""
+    from gc_tui.services.model_picker import model_hint
 
     app = _app(
         tmp_path, monkeypatch, {"model": "auto", **_AUTO_ON, **_TWO_LEVELS}
     )
-    assert model_picker_hint(app, "glm-flash") == "glm-flash — уровень light"
-    assert (
-        model_picker_hint(app, "giga-max") == "giga-max — уровни default и max"
-    )
-    assert model_picker_hint(app, "qwen-coder") == "qwen-coder — без уровня"
     # safe_level по умолчанию — default: одна пара light + default.
-    assert model_picker_hint(app, "auto") == (
-        "auto — пара автовыбора: glm-flash и giga-max"
-    )
+    assert model_hint(app, "auto") == ("пара автовыбора: glm-flash и giga-max")
 
 
 def test_picker_auto_hint_follows_router_pairs(tmp_path, monkeypatch):
     """Пары подсказки — те, которыми ходит роутер: лестница пар — обе;
     выродившаяся лестница (одна модель на default и max) — одна пара."""
-    from gc_tui.services.model_picker import model_picker_hint
+    from gc_tui.services.model_picker import model_hint
 
     ladder = {"agent.auto_routing_safe_level": "auto", **_AUTO_ON}
     app = _app(tmp_path, monkeypatch, {**ladder, **_ONE_PER_LEVEL})
-    assert model_picker_hint(app, "auto") == (
-        "auto — пары автовыбора: glm-flash и glm-4.6, glm-4.6 и giga-max"
+    assert model_hint(app, "auto") == (
+        "пары автовыбора: glm-flash и glm-4.6, glm-4.6 и giga-max"
     )
     app = _app(tmp_path, monkeypatch, {**ladder, **_TWO_LEVELS})
-    assert model_picker_hint(app, "auto") == (
-        "auto — пара автовыбора: glm-flash и giga-max"
-    )
+    assert model_hint(app, "auto") == ("пара автовыбора: glm-flash и giga-max")
 
 
 def test_picker_auto_disabled_with_reason(tmp_path, monkeypatch):
@@ -194,7 +246,7 @@ def test_picker_auto_disabled_with_reason(tmp_path, monkeypatch):
     подсказка называет причину."""
     from gc_tui.services.model_picker import (
         AUTO_DESC,
-        model_picker_hint,
+        model_hint,
         model_picker_options,
     )
 
@@ -210,27 +262,56 @@ def test_picker_auto_disabled_with_reason(tmp_path, monkeypatch):
     auto = model_picker_options(app)[0]
     assert auto.value == "auto" and not auto.enabled
     assert auto.desc == AUTO_DESC
-    assert model_picker_hint(app, "auto") == (
-        "auto — автовыбор моделей недоступен: выключен настройкой auto_routing"
+    assert model_hint(app, "auto") == (
+        "автовыбор недоступен: выключен настройкой auto_routing"
     )
 
 
 def test_picker_breaker_model_hint(tmp_path, monkeypatch):
     """Модель в предохранителе — видна и выбираема (ошибка будет честной),
-    подсказка — «недоступна в этой сессии» (Review Focus 5)."""
+    к подсказке добавлено «недоступна в этой сессии» (Review Focus 5)."""
     from gc_tui.services.model_picker import (
-        model_picker_hint,
+        model_hint,
         model_picker_options,
     )
 
-    app = _app(tmp_path, monkeypatch, {**_AUTO_ON, **_ONE_PER_LEVEL})
-    app._circuit_breaker.trip("giga-max", "401")
-    giga = next(o for o in model_picker_options(app) if o.value == "giga-max")
-    assert giga.enabled
-    assert (
-        model_picker_hint(app, "giga-max")
-        == "giga-max — недоступна в этой сессии"
+    app = _app(tmp_path, monkeypatch, {**_AUTO_ON, **_ADDRESSED})
+    app._circuit_breaker.trip("glm-flash", "401")
+    flash = next(
+        o for o in model_picker_options(app) if o.value == "glm-flash"
     )
+    assert flash.enabled
+    assert model_hint(app, "glm-flash") == (
+        "zai/glm-4.5-flash · api.z.ai · недоступна в этой сессии"
+    )
+
+
+def test_picker_row_status_column_follows_name(tmp_path, monkeypatch):
+    """Строка пикера: имя, колонка статуса сразу за ним (у неактивных —
+    пусто), затем описание; описание — SUB_INK."""
+    pytest.importorskip("textual")
+    from gc_tui import palette as p
+    from gc_tui.services.model_picker import model_picker_options
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    app = _app(
+        tmp_path,
+        monkeypatch,
+        {"model": "glm-4.6", **_AUTO_ON, **_ONE_PER_LEVEL},
+    )
+    options = [o for o in model_picker_options(app) if not o.separator]
+    picker = ArgPicker(options)
+    rows = {o.value: picker._format_row(o) for o in options}
+    active = rows["glm-4.6"].plain
+    flash = rows["glm-flash"].plain
+    status_at = active.index("активна")
+    assert active[:status_at].rstrip().endswith("glm-4.6")
+    assert flash[status_at : status_at + len("активна")].strip() == ""
+    assert active.index("основная") == flash.index("быстрая")
+    desc = rows["glm-flash"]
+    start = desc.plain.index("быстрая")
+    styles = {(s.start, str(s.style)) for s in desc.spans}
+    assert (start, p.SUB_INK) in styles
 
 
 def test_picker_legacy_single_row(tmp_path, monkeypatch):
@@ -238,7 +319,7 @@ def test_picker_legacy_single_row(tmp_path, monkeypatch):
     действует — ни она, ни auto не выбираются."""
     from gc_tui.services.model_picker import (
         AUTO_DESC,
-        model_picker_hint,
+        model_hint,
         model_picker_options,
     )
 
@@ -247,9 +328,9 @@ def test_picker_legacy_single_row(tmp_path, monkeypatch):
     rows = [o for o in options if not o.separator]
     assert [o.value for o in rows] == ["auto", "glm-5.2-fp8"]
     assert not rows[0].enabled and rows[0].desc == AUTO_DESC
-    assert rows[1].status == "● активна" and not rows[1].enabled
-    assert model_picker_hint(app, "glm-5.2-fp8") == (
-        "glm-5.2-fp8 — легаси: выбор модели появится с реестром моделей"
+    assert rows[1].status == "активна" and not rows[1].enabled
+    assert model_hint(app, "glm-5.2-fp8") == (
+        "легаси: выбор модели появится с реестром моделей"
     )
 
 

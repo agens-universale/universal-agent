@@ -14,13 +14,18 @@ from gc_core.settings import settings_of
 from rich.text import Text
 
 from gc_tui.services import model_sign
-from gc_tui.toggles import auto_unavailable_reason_cfg, shown_choice
+from gc_tui.toggles import (
+    LEVEL_ROLE_TEXT,
+    auto_unavailable_reason_cfg,
+    shown_choice,
+)
 from gc_tui.widgets.arg_picker import PickerOption
 
 AUTO = "auto"
 AUTO_DESC = "модель выбирается автоматически по ходу работы"
-ACTIVE_STATUS = "● активна"
+ACTIVE_STATUS = "активна"
 UNAVAILABLE_HINT = "недоступна в этой сессии"
+AUTO_UNAVAILABLE_HINT = "автовыбор недоступен: {reason}"
 LEGACY_HINT = "легаси: выбор модели появится с реестром моделей"
 LEGACY_FORCE_HINT = "--model: выбор модели отключён на этот запуск"
 UNKNOWN_REFUSAL = "✗ нет такой модели: {arg}"
@@ -76,6 +81,17 @@ def _level_models(slots: dict, models: Any) -> list[str]:
     return out
 
 
+def _level_desc(alias: str, slots: dict) -> str:
+    """Описание модели в пикере: роль её уровня, список уровней — у модели
+    нескольких уровней, пусто — без уровня."""
+    levels = model_sign.levels_of(alias, slots)
+    if len(levels) == 1:
+        return LEVEL_ROLE_TEXT[levels[0]]
+    if not levels:
+        return ""
+    return f"уровни {', '.join(levels[:-1])} и {levels[-1]}"
+
+
 def _legacy_options(router: Any) -> tuple[PickerOption, ...]:
     """Легаси: выбор не действует — auto и плоская модель видны, но не
     выбираются; плоская модель — та, что работает."""
@@ -102,7 +118,7 @@ def model_picker_options(
     app: Any, settings: Any = None
 ) -> tuple[PickerOption, ...]:
     """Строки пикера: `auto`, черта, модели уровней, черта, остальные
-    модели реестра. «● активна» — на выборе `settings` (по умолчанию —
+    модели реестра. «активна» — на выборе `settings` (по умолчанию —
     действующие настройки окна; «Настройки» передают настройки цели
     записи). Пустой блок — без своей черты."""
     loaded = _loaded(app, settings)
@@ -115,7 +131,7 @@ def model_picker_options(
     rest = [alias for alias in models if alias not in levels]
     active = _alias_of(router, shown_choice(loaded))
 
-    def row(value: str, desc: str = "", enabled: bool = True):
+    def row(value: str, desc: str, enabled: bool = True):
         status = ACTIVE_STATUS if value == active else ""
         lead = model_sign.dots(value, slots)
         return PickerOption(value, desc, status, lead, enabled)
@@ -124,7 +140,10 @@ def model_picker_options(
     options = [row(AUTO, AUTO_DESC, available)]
     for block in (levels, rest):
         if block:
-            options += [_SEPARATOR, *(row(alias) for alias in block)]
+            options += [
+                _SEPARATOR,
+                *(row(alias, _level_desc(alias, slots)) for alias in block),
+            ]
     return tuple(options)
 
 
@@ -154,11 +173,7 @@ def _auto_hint(router: Any, loaded: Any) -> str:
     """Пары автовыбора; недоступный автовыбор — его причина."""
     reason = auto_unavailable_reason_cfg(loaded)
     if reason is not None:
-        from gc_core.startup_notices import (
-            auto_routing_unavailable_reason_text,
-        )
-
-        return auto_routing_unavailable_reason_text(reason)
+        return AUTO_UNAVAILABLE_HINT.format(reason=reason)
     pairs = [
         f"{_alias_of(router, weak)} и {_alias_of(router, strong)}"
         for weak, strong in _auto_levels(loaded)
@@ -167,9 +182,21 @@ def _auto_hint(router: Any, loaded: Any) -> str:
     return f"{head}: " + ", ".join(pairs)
 
 
-def model_hint(app: Any, value: str, settings: Any = None) -> str:
-    """Подсказка про модель `value` — без её имени: уровни модели, «без
-    уровня», «недоступна в этой сессии»; у `auto` — пары или причина."""
+def _address_hint(router: Any, alias: str) -> str:
+    """«<id у провайдера> · <хост адреса>»; id, равный алиасу, опущен."""
+    from gc_tui.editors.models_section import address_host
+
+    resolved = router.resolve_main_at(alias, check_breaker=False)
+    host = address_host(resolved.url)
+    return host if resolved.model == alias else f"{resolved.model} · {host}"
+
+
+def model_hint(app: Any, value: Optional[str], settings: Any = None) -> str:
+    """Подсказка про модель `value` — без её имени и уровней (они в строке):
+    id у провайдера и хост адреса, у модели в предохранителе — плюс
+    «недоступна в этой сессии»; у `auto` — пары или причина."""
+    if not value:
+        return ""
     loaded = _loaded(app, settings)
     router = _router(app, loaded)
     if value == AUTO:
@@ -177,18 +204,10 @@ def model_hint(app: Any, value: str, settings: Any = None) -> str:
     if _legacy(router):
         return LEGACY_FORCE_HINT if router.force_legacy else LEGACY_HINT
     alias = _alias_of(router, value)
+    hint = _address_hint(router, alias)
     if router.breaker.is_open(alias):
-        return UNAVAILABLE_HINT
-    return model_sign.level_hint(alias, _slots(loaded))
-
-
-def model_picker_hint(
-    app: Any, value: Optional[str], settings: Any = None
-) -> str:
-    """Подвал пикера: «<модель> — <подсказка>»."""
-    if not value:
-        return ""
-    return f"{value} — {model_hint(app, value, settings)}"
+        return f"{hint} · {UNAVAILABLE_HINT}"
+    return hint
 
 
 def current_choice(app: Any) -> str:

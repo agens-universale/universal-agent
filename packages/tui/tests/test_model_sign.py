@@ -36,11 +36,3 @@ def test_level_word_choice_shows_slot_model():
     assert str(bare.spans[0].style) == ACCENT
     assert ms.sign("fast", SLOTS).plain == "● fast"
     assert ms.sign("auto", SLOTS).plain == "● auto"
-
-
-def test_level_hint_texts():
-    assert ms.level_hint("fast", SLOTS) == "уровень light"
-    assert ms.level_hint("main", SLOTS) == "уровни default и max"
-    all3 = {"light": "a", "default": "a", "max": "a"}
-    assert ms.level_hint("a", all3) == "все три уровня"
-    assert ms.level_hint("zzz", SLOTS) == "без уровня"

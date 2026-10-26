@@ -15,8 +15,8 @@ from typing import Any, Callable, Optional
 from rich.text import Text
 
 from gc_tui.services.model_picker import (
+    model_hint,
     model_name,
-    model_picker_hint,
     model_picker_options,
     model_value,
 )
@@ -134,7 +134,7 @@ def build_default_registry() -> CommandRegistry:
             "[модель]",
             _cap(f"{TOGGLES['model'].label}: {TOGGLES['model'].summary}"),
             arg_options_provider=model_picker_options,
-            arg_hint_provider=model_picker_hint,
+            arg_hint_provider=model_hint,
             arg_current_provider=model_name,
             arg_picks=True,
             value_provider=model_value,

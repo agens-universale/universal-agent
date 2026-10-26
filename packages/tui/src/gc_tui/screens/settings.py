@@ -4329,8 +4329,8 @@ class SettingsScreen(Screen):
         return target, kind
 
     def _model_row_hint(self) -> str:
-        """Подсказка строки: уровни записанной модели, клавиша списка и
-        файл, куда ляжет выбор."""
+        """Подсказка строки: про записанную модель (как под списком),
+        клавиша списка и файл, куда ляжет выбор."""
         from gc_tui.services.model_picker import model_hint, model_name
 
         value = model_name(self.app, self._settings)
@@ -4343,16 +4343,16 @@ class SettingsScreen(Screen):
             if path is not None
             else self._MODEL_PROFILE_MISSING.format(name=name)
         )
-        level = model_hint(self.app, value, self._settings)
-        return f"{level} · Enter — выбрать из списка · {target}"
+        about = model_hint(self.app, value, self._settings)
+        return f"{about} · Enter — выбрать из списка · {target}"
 
     def _open_model_picker(self) -> None:
         """Enter на строке модели: список моделей над подсказкой раздела.
-        Состав и «● активна» — по настройкам цели записи (база окна), не
+        Состав и «активна» — по настройкам цели записи (база окна), не
         по сессии: секция правит файл."""
         from gc_tui.services.model_picker import (
+            model_hint,
             model_name,
-            model_picker_hint,
             model_picker_options,
         )
         from gc_tui.widgets.arg_picker import ArgPicker
@@ -4365,7 +4365,7 @@ class SettingsScreen(Screen):
         # значении — Enter сразу не перепишет файл чужим выбором.
         picker = ArgPicker(
             model_picker_options(self.app, settings=self._settings),
-            hint_provider=lambda value: model_picker_hint(
+            hint_provider=lambda value: model_hint(
                 self.app, value, self._settings
             ),
             initial_value=model_name(self.app, self._settings),

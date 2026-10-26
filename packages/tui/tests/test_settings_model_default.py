@@ -13,10 +13,16 @@ _REGISTRY = (
     "models:\n"
     "  flash:\n"
     '    model: "google/flash"\n'
+    '    url: "https://llm.example.com/v1/chat/completions"\n'
+    '    token: ""\n'
     "  big:\n"
     '    model: "big-x"\n'
+    '    url: "https://llm.example.com/v1/chat/completions"\n'
+    '    token: ""\n'
     "  solo:\n"
     '    model: "solo-x"\n'
+    '    url: "https://llm.example.com/v1/chat/completions"\n'
+    '    token: ""\n'
     "slots:\n"
     '  default: "flash"\n'
     '  max: "big"\n'
@@ -150,7 +156,7 @@ async def test_enter_opens_picker_and_arrows_do_nothing(tmp_path, monkeypatch):
 async def test_picker_marks_written_value_not_session_choice(
     tmp_path, monkeypatch
 ):
-    """«● активна» стоит на записанном выборе, а не на выборе сессии:
+    """«активна» стоит на записанном выборе, а не на выборе сессии:
     секция правит файл."""
     from gc_tui.services.model_picker import ACTIVE_STATUS
 
@@ -244,7 +250,7 @@ async def test_hint_names_target_profile(tmp_path, monkeypatch):
         hint = scr._modes_hint_text()
 
         assert hint == (
-            "уровень default · Enter — выбрать из списка · "
+            "google/flash · llm.example.com · Enter — выбрать из списка · "
             f"запишется в профиль work ({_shown_path(work)})"
         )
 
@@ -268,7 +274,7 @@ async def test_hint_names_target_project(tmp_path, monkeypatch):
         assert hint.endswith(
             f"запишется в проектный конфиг ({_shown_path(project_cfg)})"
         )
-        assert hint.startswith("уровень max · ")
+        assert hint.startswith("big-x · llm.example.com · ")
 
 
 async def test_hint_names_target_base(tmp_path, monkeypatch):
@@ -284,7 +290,7 @@ async def test_hint_names_target_base(tmp_path, monkeypatch):
         hint = scr._modes_hint_text()
 
         assert hint == (
-            "без уровня · Enter — выбрать из списка · "
+            "solo-x · llm.example.com · Enter — выбрать из списка · "
             f"запишется в основной конфиг ({_shown_path(cfg_file)})"
         )
 

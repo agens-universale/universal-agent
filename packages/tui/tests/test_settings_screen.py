@@ -5415,9 +5415,9 @@ async def test_model_row_keeps_its_default_wording(tmp_path):
 
 async def test_modes_hint_uses_the_dynamic_provider(tmp_path, monkeypatch):
     """Подсказка строки берёт динамический `hint_provider`, если тоггл его
-    объявил. У `model` статических подсказок нет вовсе — их роль играют
-    уровни модели (тот же приём, которым динамический хинт получает
-    палитра: `dynamic_toggle_hint`)."""
+    объявил. У `model` статических подсказок нет вовсе — их роль играет
+    подсказка модели: id у провайдера (тот же приём, которым динамический
+    хинт получает палитра: `dynamic_toggle_hint`)."""
     pytest.importorskip("textual")
 
     monkeypatch.chdir(tmp_path)
@@ -5431,7 +5431,7 @@ async def test_modes_hint_uses_the_dynamic_provider(tmp_path, monkeypatch):
 
         hint = scr._modes_hint_text()
 
-        assert "уровень default" in hint  # уровни модели, а не пустота
+        assert hint.startswith("google/gemini-2.5-flash · ")  # не пустота
 
 
 # --- Правило записи секции: куда пишем и что действует ---
