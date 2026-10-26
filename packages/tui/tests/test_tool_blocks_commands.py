@@ -425,9 +425,9 @@ async def test_ran_files_one_phrase(tmp_path):
             line.startswith("    Added new.py (+10 −0)") for line in lines
         )
         assert "    Deleted gone.py" in lines
-        # Одна фраза — в самом низу: 7 строк вывода, 7 строк new.py сверх
-        # превью в 3 изменённые и 2 строки скрытого a.py.
-        assert lines[-1] == "    + ещё 16 строк"
+        # Одна фраза — в самом низу: 7 строк вывода и 2 строки скрытого
+        # a.py; new.py (10 строк) влезает в превью целиком.
+        assert lines[-1] == "    + ещё 9 строк"
         assert sum("+ ещё" in line for line in lines) == 1
         trace = scr.query_one("#trace", VerticalScroll)
         files = [

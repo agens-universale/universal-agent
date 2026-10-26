@@ -558,8 +558,8 @@ async def test_collapse_threshold_comes_from_config(tmp_path):
 
 @pytest.mark.asyncio
 async def test_collapse_threshold_defaults_without_config(tmp_path):
-    """Без ключа в конфиге — дефолт 3 изменённые строки превью (P4 §6.3):
-    правка на 40 строк — 3 строки.
+    """Без ключа в конфиге — дефолт 10 изменённых строк превью (P4 §6.3):
+    правка на 40 строк — 10 строк.
 
     Строк берём заведомо больше дефолта: иначе тест не отличил бы работающий
     лимит от отсутствующего."""
@@ -578,7 +578,7 @@ async def test_collapse_threshold_defaults_without_config(tmp_path):
     )
 
     async with _screen(tmp_path, tid) as scr:
-        assert _body_lines(scr.query_one(DiffBlock)) == 3
+        assert _body_lines(scr.query_one(DiffBlock)) == 10
 
 
 # --- фокус: клик по диффу не трогает позицию Tab -----------------------------
