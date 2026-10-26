@@ -138,6 +138,7 @@ from gc_tui.services.model_picker import (
     model_choice_refusal,
 )
 from gc_tui.services.notices_ui import format_notices_badge
+from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from gc_tui.services.session_lock import (
     BUSY_MESSAGE,
@@ -6004,6 +6005,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._run_orphan_cleanups()
         # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
         self._update_mcp_indicator()
+        # Замок выбора в открытом пикере (`/profile` во время хода) снимается
+        # с концом хода — без переоткрытия.
+        if self._arg_picker is not None:
+            self._arg_picker.sync_lock()
         self._pump_reasoning_stream_source()
         err = self._active_run_error()
         if err and not self._error_shown:
@@ -7194,12 +7199,16 @@ class TraceScreen(TraceFollowMixin, Screen):
                         provider = cmd_obj.arg_hint_provider
                         hint_provider = lambda value: provider(self.app, value)
                     current = cmd_obj.arg_current_provider
+                    lock = cmd_obj.arg_lock_provider
                     self._open_arg_picker(
                         options=options,
                         prefix=rest,
                         hint_provider=hint_provider,
                         initial_value=current(self.app) if current else None,
                         picks=cmd_obj.arg_picks,
+                        lock_provider=(
+                            (lambda: lock(self.app)) if lock else None
+                        ),
                     )
                 else:
                     self._arg_picker.set_filter(rest)
@@ -7333,6 +7342,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         hint_provider=None,
         initial_value=None,
         picks: bool = False,
+        lock_provider=None,
     ) -> None:
         if self._arg_picker is not None:
             return
@@ -7348,6 +7358,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             hint_provider=hint_provider,
             initial_value=initial_value,
             keys_hint=PICK_KEYS_HINT if picks else RUN_KEYS_HINT,
+            lock_provider=lock_provider,
         )
         self._arg_picker = picker
         self._mount_input_overlay(picker)
@@ -9558,6 +9569,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         value = arg.strip()
         if not value:
             self._open_command_picker("profile")
+            return
+        refusal = profile_switch_refusal(self.app)
+        if refusal is not None:
+            self._show_footer_refusal(f"✗ {refusal}")
             return
         if value == PROFILE_NONE_VALUE:
             target = ""

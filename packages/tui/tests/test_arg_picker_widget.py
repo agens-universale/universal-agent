@@ -231,3 +231,29 @@ def test_hint_provider_called_once_per_value():
     p._build_footer()
     assert calls == [], f"ход стрелкой дёрнул провайдер: {calls}"
     assert str(p._hint_static.render()) == "hint for json"
+
+
+def test_locked_picker_browses_but_takes_no_choice():
+    """Пока провайдер замка называет причину, пикер только смотрит: строка
+    клавиш — «смотреть» с причиной, Enter строку не берёт, строки не
+    тускнеют. Причина ушла — `sync_lock` возвращает обычный выбор."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import PICK_KEYS_HINT, ArgPicker
+
+    reason = ["нельзя сейчас"]
+    opts = [("alpha", "один", ""), ("beta", "два", "активен")]
+    locked = ArgPicker(
+        opts, keys_hint=PICK_KEYS_HINT, lock_provider=lambda: reason[0]
+    )
+    free = ArgPicker(opts, keys_hint=PICK_KEYS_HINT)
+
+    assert locked.keys_line() == "↑↓ смотреть · Esc закрыть · нельзя сейчас"
+    assert locked.selected_disabled()
+    locked.move_selection(1)
+    assert locked.selected_value() == "beta"
+    assert locked._format_row(opts[0]) == free._format_row(opts[0])
+
+    reason[0] = None
+    locked.sync_lock()
+    assert locked.keys_line() == PICK_KEYS_HINT
+    assert not locked.selected_disabled()

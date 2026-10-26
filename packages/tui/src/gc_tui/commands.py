@@ -20,6 +20,7 @@ from gc_tui.services.model_picker import (
     model_picker_options,
     model_value,
 )
+from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.toggles import (
     TOGGLES,
     profile_name,
@@ -57,6 +58,9 @@ class Command:
     # Enter по строке пикера только выбирает значение (`/model`,
     # `/profile`), а не запускает действие: строка клавиш — «Enter выбрать».
     arg_picks: bool = False
+    # Причина, по которой выбор значения сейчас закрыт (app -> str | None):
+    # пикер листается, но Enter строку не берёт (`/profile` во время хода).
+    arg_lock_provider: Optional[Callable[[Any], Optional[str]]] = None
     # Текущее значение команды (app -> Text) — палитра показывает его в
     # правой колонке вместо хоткея (`/model` — знак модели, `/profile` —
     # имя профиля).
@@ -151,6 +155,7 @@ def build_default_registry() -> CommandRegistry:
             arg_hint_provider=profile_picker_hint,
             arg_current_provider=profile_name,
             arg_picks=True,
+            arg_lock_provider=profile_switch_refusal,
             value_provider=profile_value,
         ),
         Command(

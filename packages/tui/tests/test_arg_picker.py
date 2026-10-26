@@ -644,3 +644,102 @@ async def test_long_list_opens_scrolled_to_the_current_value(tmp_path):
         assert picker.selected_value() == "model-35"
         assert row.region.height == 1
         assert row.region.bottom <= footer.region.y
+
+
+# --- Профиль не меняется во время хода ---------------------------------------
+
+_LOCKED_KEYS = (
+    "↑↓ смотреть · Esc закрыть · профиль можно сменить, когда ход закончится"
+)
+
+
+class _Runner:
+    """Раннер, чей ход идёт, пока `running`."""
+
+    def __init__(self):
+        self.running = True
+
+    def is_running(self):
+        return self.running
+
+
+def _profile_app(tmp_path, monkeypatch):
+    """Два профиля на диске, ход идёт; переключения записываются."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "profiles").mkdir()
+    for name in ("alpha", "work"):
+        (tmp_path / "profiles" / f"{name}.yml").write_text(
+            "models: {}\n", encoding="utf-8"
+        )
+    (tmp_path / "config.yml").write_text("model: default\n", encoding="utf-8")
+    app = _registry_app(tmp_path)
+    app._config_path = str(tmp_path / "config.yml")
+    app.active_runner = _Runner()
+    switched = []
+    monkeypatch.setattr(app, "switch_session_profile", switched.append)
+    return app, switched
+
+
+def _keys(picker):
+    return [str(w.render()) for w in picker.query(".palette-keys")][-1]
+
+
+@pytest.mark.asyncio
+async def test_profile_picker_during_run_browses_without_choosing(
+    tmp_path, monkeypatch
+):
+    """Во время хода пикер `/profile` открывается и листается, строка
+    клавиш говорит, когда выбор станет можно; Enter ничего не переключает
+    и пикер не закрывает. Ход закончился — тот же пикер снова выбирает."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import PICK_KEYS_HINT, ArgPicker
+
+    app, switched = _profile_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        assert _keys(picker) == _LOCKED_KEYS
+        rows_before = [w.render() for w in picker.query(".palette-row")]
+        first = picker.selected_value()
+        await pilot.press("down")
+        await pilot.pause(0.1)
+        assert picker.selected_value() != first
+        chosen = picker.selected_value()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(ArgPicker)) == 1
+        assert switched == []
+
+        pilot.app.active_runner.running = False
+        await pilot.pause(0.4)  # тик экрана перечитывает замок
+        picker = pilot.app.query_one(ArgPicker)
+        assert _keys(picker) == PICK_KEYS_HINT
+        rows_after = [w.render() for w in picker.query(".palette-row")]
+        assert [str(r) for r in rows_after] == [str(r) for r in rows_before]
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(ArgPicker)) == 0
+        expected = "" if chosen == "без профиля" else chosen
+        assert switched == [expected]
+
+
+@pytest.mark.asyncio
+async def test_typed_profile_during_run_is_refused_in_footer(
+    tmp_path, monkeypatch
+):
+    """Набранное `/profile <имя>` во время хода — отказ во второй строке
+    футера той же фразой, профиль не меняется."""
+    pytest.importorskip("textual")
+
+    app, switched = _profile_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        hints = []
+        pilot.app.screen._show_footer_refusal = hints.append
+        await pilot.app.screen._handle_command("profile work")
+        assert hints == ["✗ профиль можно сменить, когда ход закончится"]
+        assert switched == []
+
+        pilot.app.active_runner.running = False
+        await pilot.app.screen._handle_command("profile work")
+        assert switched == ["work"]

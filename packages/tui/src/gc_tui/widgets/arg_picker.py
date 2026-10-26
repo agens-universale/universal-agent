@@ -27,6 +27,9 @@ from gc_tui.widgets.palette_rows import PaletteRowsMixin
 # значение (`/model`, `/profile` — `Command.arg_picks`).
 RUN_KEYS_HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
 PICK_KEYS_HINT = "↑↓ выбрать · Tab дополнить · Enter выбрать · Esc закрыть"
+# Выбор закрыт (`Command.arg_lock_provider`): листать можно, причина — в
+# строке клавиш вместо обещания Enter.
+LOCKED_KEYS_HINT = "↑↓ смотреть · Esc закрыть · {reason}"
 
 
 class PickerOption(NamedTuple):
@@ -62,6 +65,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         *,
         initial_value: Optional[str] = None,
         keys_hint: Optional[str] = RUN_KEYS_HINT,
+        lock_provider: Optional[Callable[[], Optional[str]]] = None,
     ) -> None:
         super().__init__(classes="palette")
         self._options = [_as_option(opt) for opt in options]
@@ -69,6 +73,10 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         # Строка клавиш подвала; None — не рисуется (хозяин пикера сам
         # говорит о клавишах, и чужие обещания здесь соврали бы).
         self._keys_hint = keys_hint
+        # Причина, по которой выбор сейчас закрыт (None — открыт); хозяин
+        # перечитывает её через `sync_lock`.
+        self._lock_provider = lock_provider
+        self._lock = lock_provider() if lock_provider else None
         self._selected = self._start_index(initial_value)
         # Динамический хинт подсвеченного пункта (спека §12.1, /profile: состав
         # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
@@ -102,7 +110,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         if self._keys_hint is not None:
             children.append(
                 Static(
-                    self._keys_hint,
+                    self.keys_line(),
                     classes="palette-hint palette-keys",
                     markup=False,
                 )
@@ -306,10 +314,26 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         flow = len(rows) if rows else 1
         footer = 0
         if self._keys_hint is not None:
-            footer += 1 + self._footer_line_count(self._keys_hint)
+            footer += 1 + self._footer_line_count(self.keys_line())
         if self._hint_provider is not None:
             footer += 1 + self._hint_lines()
         return flow + 2 + footer
+
+    def keys_line(self) -> Optional[str]:
+        """Строка клавиш подвала: при закрытом выборе — «смотреть» и
+        причина."""
+        if self._lock is not None and self._keys_hint is not None:
+            return LOCKED_KEYS_HINT.format(reason=self._lock)
+        return self._keys_hint
+
+    def sync_lock(self) -> None:
+        """Перечитать замок выбора; сменился — перерисовать подвал."""
+        if self._lock_provider is None:
+            return
+        lock = self._lock_provider()
+        if lock != self._lock:
+            self._lock = lock
+            self._rebuild()
 
     def selected_value(self) -> Optional[str]:
         row = self._selected_row()
@@ -318,10 +342,11 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         return row.value
 
     def selected_disabled(self) -> bool:
-        """Подсвечена видимая недоступная строка: Enter её не берёт. Нет
-        видимых строк — не блок: Enter уходит с набранным аргументом."""
+        """Подсвечена видимая недоступная строка или выбор закрыт: Enter
+        строку не берёт. Нет видимых строк — не блок: Enter уходит с
+        набранным аргументом (и команда отвечает своим отказом)."""
         row = self._selected_row()
-        return row is not None and not row.enabled
+        return row is not None and (not row.enabled or self._lock is not None)
 
     def _first_enabled(self) -> int:
         """Стартовая подсветка — первая доступная строка (не `auto`, когда

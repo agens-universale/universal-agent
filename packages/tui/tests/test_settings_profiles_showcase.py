@@ -1846,3 +1846,49 @@ async def test_profiles_section_opens_on_the_active_row(tmp_path, monkeypatch):
             scr._profiles_idx = len(scr._profiles_rows()) - 1
             await _open_profiles(pilot, scr)
             assert scr._profiles_rows()[scr._profiles_idx] == row
+
+
+class _LiveRunner:
+    def is_running(self):
+        return True
+
+
+async def test_profile_activation_is_refused_while_a_run_is_going(
+    tmp_path, monkeypatch
+):
+    """Во время хода «Профили» листаются, но ни активация, ни снятие не
+    пишут указатель: отказ той же фразой, что у `/profile`."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+    _write(tmp_path / "base" / "profiles" / "work.yml", "models: {}\n")
+
+    cfg = dict(_base_dict(), profile="home")
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=cfg, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        app.active_runner = _LiveRunner()
+        before = base_cfg.read_text(encoding="utf-8")
+        work = next(r for r in scr._profiles_rows() if r.get("name") == "work")
+
+        for act in (
+            lambda: scr._activate_profile("work", work["ref"]),
+            scr._deactivate_profile,
+        ):
+            act()
+            await pilot.pause()
+            assert base_cfg.read_text(encoding="utf-8") == before
+            notice = scr.query_one("#set-notice", Static)
+            assert str(notice.render()) == (
+                "✗ профиль можно сменить, когда ход закончится"
+            )
+        app.active_runner = None

@@ -39,6 +39,7 @@ from gc_tui.form_frame import (
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
 from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
 from gc_tui.services.probe_presentation import connection_line_text
+from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.toggles import PROFILE_ACTIVE_STATUS, PROFILE_NONE_VALUE
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
@@ -4739,6 +4740,8 @@ class SettingsScreen(Screen):
         if config_active is None:
             self._title_note("профиль не выбран")
             return
+        if self._refuse_profile_switch():
+            return
         target = self._deactivation_target()
         if not self._target_writable(target):
             self._notice(self._TEMPLATE_WRITE_REFUSAL)
@@ -4771,6 +4774,14 @@ class SettingsScreen(Screen):
         self._render_view()
         self._flash(f"Профиль деактивирован — {_shown_path(target)}. {effect}")
 
+    def _refuse_profile_switch(self) -> bool:
+        """Во время хода профиль не меняется: отказ той же фразой, что у
+        `/profile`. True — отказано."""
+        refusal = profile_switch_refusal(self.app)
+        if refusal is not None:
+            self._notice(f"✗ {refusal}")
+        return refusal is not None
+
     def _activate_profile(self, name: str, ref) -> None:
         """Space на строке профиля (клавиша перевешена решением В1 волны B). «Уже
         активен» — сравнение с КОНФИГ-указателем (`_config_profile()`, то, что
@@ -4779,6 +4790,8 @@ class SettingsScreen(Screen):
         config_active = self._file_profile_pointer()
         if name == config_active:
             self._title_note("уже активен")
+            return
+        if self._refuse_profile_switch():
             return
         target = self._profile_activation_target(ref)
         if not self._target_writable(target):
