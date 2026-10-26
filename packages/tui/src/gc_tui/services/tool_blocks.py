@@ -145,6 +145,15 @@ def header_word(
     return verb or done
 
 
+def shown_when_folded(total: int, limit: int) -> int:
+    """Сколько из ``total`` показать свёрнутым при пределе ``limit``
+    (решение 2026-10-26): фраза `ещё N` занимает строку, как и один
+    скрытый элемент, — одного не прячем. До `limit + 1` — всё, без фразы;
+    больше — `limit`, скрыто не меньше двух. Одно правило для окон членов,
+    файлов и `Agent`, хвоста вывода, команды и бюджета диффа."""
+    return total if total <= limit + 1 else limit
+
+
 def more_phrase(n: int) -> str:
     """Маркер окна над членами: `… ещё N`."""
     return f"… ещё {n}"
@@ -167,7 +176,8 @@ def output_tail(lines: Sequence[str]) -> tuple[tuple[str, ...], int]:
     `OUTPUT_PREVIEW_LINES` строк и число скрытых над ними. Вывод растёт —
     хвост сдвигается, скрытых больше; одно правило для живой ленты,
     возврата и превью."""
-    tail = tuple(lines[-OUTPUT_PREVIEW_LINES:]) if lines else ()
+    shown = shown_when_folded(len(lines), OUTPUT_PREVIEW_LINES)
+    tail = tuple(lines[len(lines) - shown :])
     return tail, len(lines) - len(tail)
 
 
@@ -554,10 +564,13 @@ class _Block:
 
     def window(self) -> list[_Member]:
         shown = self.shown()
-        return shown if self.expanded else shown[-WINDOW:]
+        if self.expanded:
+            return shown
+        return shown[len(shown) - shown_when_folded(len(shown), WINDOW) :]
 
     def expandable(self) -> bool:
-        return self.headed and len(self.shown()) > WINDOW
+        n = len(self.shown())
+        return self.headed and shown_when_folded(n, WINDOW) < n
 
 
 @dataclass(frozen=True)
@@ -583,7 +596,7 @@ class _File:
         `diff_render`), показано `min(lines, rows)` (§6.3)."""
         if self.compact:
             return self.lines
-        return self.lines - min(self.lines, rows)
+        return self.lines - shown_when_folded(self.lines, rows)
 
     def body(self, rows: Optional[int]) -> bool:
         """Есть ли под файлом тело сейчас: раскрытый — весь дифф, свёрнутый
@@ -939,7 +952,7 @@ class ToolBlocks:
 
     def _toggle_window(self) -> list[Decision]:
         assert self._window is not None
-        if len(self._events) <= WINDOW:
+        if not self._agent_windowed():
             return []
         self._window.expanded = not self._window.expanded
         return self._window_changes()
@@ -948,7 +961,13 @@ class ToolBlocks:
         assert self._window is not None
         if self._window.expanded:
             return self._events
-        return self._events[-WINDOW:]
+        n = len(self._events)
+        return self._events[n - shown_when_folded(n, WINDOW) :]
+
+    def _agent_windowed(self) -> bool:
+        """Окно субагента что-то скрывает в свёрнутом виде."""
+        n = len(self._events)
+        return shown_when_folded(n, WINDOW) < n
 
     def _shown(self, key: str) -> bool:
         return self._window is None or key in self._shown_events()
@@ -972,7 +991,7 @@ class ToolBlocks:
                 out += self._diff([SetVisible(key, visible)])
         hidden = len(self._events) - len(shown)
         more = more_phrase(hidden) if hidden else None
-        expanded = self._window.expanded and len(self._events) > WINDOW
+        expanded = self._window.expanded and self._agent_windowed()
         collapse = GROUP_COLLAPSE_PHRASE if expanded else None
         # Маркер — под строкой `Agent`; `− свернуть` — последней строкой
         # блока `Agent`: в конце уровня, его держит там хвост уровня.
@@ -1099,9 +1118,11 @@ class ToolBlocks:
         files = self._files(block)
         rows = {f.key: self._rows(f) for f in files}
         hidden = {f.key: f.hidden(self._preview) for f in files}
-        tail = files[-WINDOW:]
         unrecorded = block.parts.unrecorded if block.parts else 0
-        more = len(files) - len(tail) + unrecorded
+        total = len(files) + unrecorded
+        folded = shown_when_folded(total, WINDOW) < total
+        tail = files[-WINDOW:] if folded else files
+        more = total - len(tail) if folded else 0
         shown = files if block.expanded and more else tail
         return _Layout(
             window=tuple(f.key for f in shown),
@@ -1115,7 +1136,9 @@ class ToolBlocks:
     def _rows(self, file: _File) -> Optional[int]:
         if file.key in self._open and file.hidden(self._preview):
             return None
-        return self._preview
+        # Бюджет растёт на одну строку, если скрыта была бы только она.
+        budget = self._preview
+        return max(budget, shown_when_folded(file.lines, budget))
 
     def _file_phrase(
         self, key: str, edit: Optional[BlockEdit], layout: _Layout
@@ -1278,7 +1301,8 @@ class ToolBlocks:
             out += phrase
         k = parts.unrecorded
         unrecorded = None
-        if block.expanded and k:
+        # Окно не прячет — строка видна и свёрнутой (одну не прячем).
+        if k and not layout.more:
             unrecorded = f"ещё {k} {files_word(k)} не записано"
         out += self._phrase(block.key, "unrecorded", unrecorded, after=last)
         if unrecorded is not None:

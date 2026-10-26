@@ -444,15 +444,11 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert added == ["a_gen.py", "gen.py"]
     assert any("Agent  Worker" in t for t in texts)
     # Влезающие диффы — целиком, с контекстом, без фразы; e2 (9
-    # изменённых и 2 контекста при 10) — изменённые и верхний контекст,
-    # фраза под его диффом — оставшаяся строка. У многострочной команды
-    # фраза — под её продолжением, над выводом.
-    assert sum(t.endswith(" ctx") for t in texts) == 9
-    file_phrase = [
-        i for i, t in enumerate(texts) if t == "     + ещё 1 строка"
-    ]
-    assert len(file_phrase) == 1
-    assert texts[file_phrase[0] - 1].split()[1:] == ["+v8"]
+    # изменённых и 2 контекста при 10) — тоже целиком: одну строку фраза
+    # не прячет. У многострочной команды фраза — под её продолжением, над
+    # выводом.
+    assert sum(t.endswith(" ctx") for t in texts) == 10
+    assert not any("ещё 1" in t for t in texts)
     phrases = [i for i, t in enumerate(texts) if t == "     + ещё 2 строки"]
     assert [texts[i - 1 : i + 2] for i in phrases] == [
         ["     print(1)", "     + ещё 2 строки", "   └ 1"]
@@ -468,10 +464,11 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     ]
     assert texts[ran + 6].startswith(" ")
     assert "└" not in texts[ran + 6]
+    # Четыре члена `Memory` — видны все.
     start = texts.index(" ● Memory")
     assert texts[start : start + 5] == [
         " ● Memory",
-        "   └ … ещё 1",
+        "   └ Write  goal · 1с",
         "     Read  project · 1с",
         "     Append  state · 1с",
         "     List · 1с",
@@ -626,7 +623,7 @@ async def test_window_toggle_one_frame(tmp_path, monkeypatch, where):
     по ширине ленты заранее (у низа ленты и с прокруткой — §9.3)."""
     frames = record_frames(monkeypatch)
     thread = _Thread(tmp_path, status="stopped")
-    thread.add(*[p for i in range(4) for p in _long_read(i)])
+    thread.add(*[p for i in range(5) for p in _long_read(i)])
     thread.add(_say("a1", "Готово."))
     async with _app(tmp_path).run_test(size=(70, 24)) as pilot:
         if where == "preview":

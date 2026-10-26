@@ -73,6 +73,7 @@ from gc_tui.services.tool_blocks import (
     Parts,
     WordRole,
     counts_text,
+    shown_when_folded,
 )
 from gc_tui.services.trace_glyphs import (
     CALL_GLYPH,
@@ -393,6 +394,14 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         собственных часов, пока ядро вызов знает."""
         self._clock = source
 
+    def refit(self) -> None:
+        """Строку показывают: ни разу не разложенная (скрыта с
+        монтирования) пересобирается по ширине ленты сейчас — при сборке
+        ширины могло ещё не быть, и первый показ нарисовал бы объект
+        несокращённым."""
+        if self.size.width == 0:
+            self._update()
+
     def set_mode(
         self,
         mode: RowMode,
@@ -682,10 +691,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def _append_command_rest(self, text: Text, style: str) -> None:
         """Продолжение команды под строкой: в свёрнутом виде — до двух
-        строк (§4.0), раскрытом — все; длинная строка — `…` по ширине."""
+        строк (§4.0; одну скрытую не прячем — `shown_when_folded`),
+        раскрытом — все; длинная строка — `…` по ширине."""
         rest = self._command_rest
         if not self._parts_expanded:
-            rest = rest[: COMMAND_PREVIEW_LINES - 1]
+            n = len(rest) + 1
+            rest = rest[: shown_when_folded(n, COMMAND_PREVIEW_LINES) - 1]
         width = self._content_width()
         for line in rest:
             if width > 2:

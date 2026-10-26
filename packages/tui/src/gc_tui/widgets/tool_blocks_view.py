@@ -55,8 +55,10 @@ from gc_tui.services.tool_blocks import (
     command_file_verb,
     diff_key,
     phrase_key,
+    shown_when_folded,
 )
 from gc_tui.services.trace_render import level_prefix
+from gc_tui.textual_compat import paint_after_mount
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.ran_output import OutputTexts
 from gc_tui.widgets.tool_call_row import LOOK_STYLE, ToolCallRow, parts_text
@@ -221,12 +223,16 @@ class ToolBlocksView:
         row.block_key = (self.level, row.call_id)
         self.register(row.call_id, row)
         self._host.mount(row)
+        # Решения ниже (окно, фраза) ложатся сразу, а строка собирается
+        # следующим тактом: рост группы — один кадр с ней.
+        paint_after_mount(row)
         key = row.call_id
         self.apply(self.model.member_added(key, category, waiting=waiting))
         if self.model.kind_of(key) != BlockKind.RAN or not command:
             return
         row.set_command(command)
-        hidden = max(0, len(command) - COMMAND_PREVIEW_LINES)
+        n = len(command)
+        hidden = n - shown_when_folded(n, COMMAND_PREVIEW_LINES)
         self._command_hidden[key] = hidden
         if self._command_hidden[key]:
             self._ran_parts(key, RanResult(output=None))
@@ -448,6 +454,8 @@ class ToolBlocksView:
             if widget is not None:
                 widget.set_class(not d.visible, HIDDEN_CLASS)
         widget = self._widgets.get(d.key)
+        if d.visible and isinstance(widget, ToolCallRow):
+            widget.refit()
         if not d.visible and widget is not None and widget.has_focus:
             self._unfocused = d.key
 

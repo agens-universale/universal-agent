@@ -41,6 +41,7 @@ from gc_tui.services.tool_blocks import (
     more_lines_phrase,
     more_phrase,
     output_tail,
+    shown_when_folded,
 )
 
 
@@ -211,9 +212,9 @@ def test_grouping_rule_two_responses():
     """Чтения из двух ответов модели без прозы между ними — одна группа."""
     model, fold, _ = _model()
     _reads(model, fold, 2)
-    _reads(model, fold, 2, start=2)
+    _reads(model, fold, 3, start=2)
     assert ("MountHeader", "block:1") not in fold.state
-    assert fold.phrase("block:0", "top") == "… ещё 1"
+    assert fold.phrase("block:0", "top") == "… ещё 2"
 
 
 def test_grouping_rule_closing():
@@ -268,7 +269,7 @@ def test_hidden_category_ignored():
 def test_batch_waiting_hidden():
     model, fold, _ = _model()
     _reads(model, fold, 3)
-    for key in ("w0", "w1"):
+    for key in ("w0", "w1", "w2"):
         fold(model.member_added(key, C.READ, waiting=True))
     assert fold.visible("w0") is False
     assert fold.visible("w1") is False
@@ -277,7 +278,11 @@ def test_batch_waiting_hidden():
     fold(model.started("w0"))
     assert fold.visible("w0") is True
     assert fold.visible("w1") is False
-    assert fold.phrase("block:0", "top") == "… ещё 1"
+    assert fold.phrase("block:0", "top") is None
+    fold(model.started("w1"))
+    assert fold.visible("w1") is True
+    assert fold.visible("w2") is False
+    assert fold.phrase("block:0", "top") == "… ещё 2"
 
 
 def test_waiting_batch_header_waits_for_start():
@@ -670,13 +675,13 @@ def test_paused_single_row_no_block_change():
 @pytest.mark.parametrize("cat", [C.FETCH])
 def test_fetched_like_explored(cat):
     model, fold, _ = _model()
-    for i in range(4):
+    for i in range(5):
         key = f"f{i}"
         fold(model.member_added(key, cat, waiting=False))
         fold(model.started(key))
     assert fold.header() == SetHeader("block:0", "Fetching", "run", ())
-    assert fold.phrase("block:0", "top") == "… ещё 1"
-    for i in range(4):
+    assert fold.phrase("block:0", "top") == "… ещё 2"
+    for i in range(5):
         fold(model.result(f"f{i}", "ok", reason="", executed=None))
     assert fold.header() == SetHeader("block:0", "Fetched", "ok", ())
     # Fetch и Read — разные виды: Read открывает новый блок.
@@ -1112,26 +1117,26 @@ def test_header_toggles_whole_block_file_toggles_own():
     """Пробел на заголовке — все файлы, окно и диффы целиком; на строке
     файла — только его дифф; клик по фразе файла — тоже только он."""
     model, fold = _edits_model()
-    keys = [f"f{i}" for i in range(4)]
+    keys = [f"f{i}" for i in range(5)]
     for key in keys:
         _apply(model, fold, key, _edit(key, lines=5))
-    fold(model.toggle("f2"))
-    assert [fold.share(k).rows for k in keys[1:]] == [3, None, 3]
-    assert [fold.phrase(k, "more") for k in keys[1:]] == [
+    fold(model.toggle("f3"))
+    assert [fold.share(k).rows for k in keys[2:]] == [3, None, 3]
+    assert [fold.phrase(k, "more") for k in keys[2:]] == [
         "+ ещё 2 строки",
         COLLAPSE_PHRASE,
         "+ ещё 2 строки",
     ]
-    fold(model.toggle("f3:more"))
-    assert fold.share("f3").rows is None
+    fold(model.toggle("f4:more"))
+    assert fold.share("f4").rows is None
     fold(model.toggle("block:0"))
     assert all(fold.visible(k) for k in keys)
-    assert [fold.share(k).rows for k in keys] == [None] * 4
-    assert [fold.phrase(k, "more") for k in keys] == [COLLAPSE_PHRASE] * 4
+    assert [fold.share(k).rows for k in keys] == [None] * 5
+    assert [fold.phrase(k, "more") for k in keys] == [COLLAPSE_PHRASE] * 5
     assert fold.phrase("block:0", "bottom") == GROUP_COLLAPSE_PHRASE
     fold(model.toggle("block:0"))
-    assert [fold.visible(k) for k in keys] == [False, True, True, True]
-    assert [fold.share(k).rows for k in keys[1:]] == [3, 3, 3]
+    assert [fold.visible(k) for k in keys] == [False, False] + [True] * 3
+    assert [fold.share(k).rows for k in keys[2:]] == [3, 3, 3]
     assert fold.phrase("block:0", "bottom") is None
 
 
@@ -1311,30 +1316,31 @@ def test_ran_parts_one_line_no_output():
 def test_ran_parts_files():
     model, fold = _edits_model()
     _ran(model, fold)
-    files = _files(("Added", 4), ("Edited", 4), ("Edited", 4), ("Edited", 4))
+    files = _files(("Added", 5), *[("Edited", 5)] * 4)
     fold(
         model.ran_parts(
             "x", command_hidden=0, output_hidden=10, files=files, unrecorded=0
         )
     )
     keys = [f.key for f in files]
-    assert fold.phrase("block:0", "files") == "… ещё 1"
+    assert fold.phrase("block:0", "files") == "… ещё 2"
     assert fold.state[("MountPhrase", "block:0", "files")] == MountPhrase(
         "block:0", "files", before=keys[0]
     )
-    assert [fold.visible(k) for k in keys] == [False, True, True, True]
-    assert [fold.share(k).rows for k in keys[1:]] == [3, 3, 3]
+    assert [fold.visible(k) for k in keys] == [False, False, True, True, True]
+    assert [fold.share(k).rows for k in keys[2:]] == [3, 3, 3]
     assert fold.share(keys[0]) is None
-    assert [fold.mode(k).gap for k in keys[1:]] == [False, True, True]
+    assert [fold.mode(k).gap for k in keys[2:]] == [False, True, True]
     assert not any(fold.mode(k).lead for k in keys)
-    assert fold.tail(keys[1]) == " (+4 −0)"
+    assert fold.tail(keys[2]) == " (+5 −0)"
     # Каждая фраза — где скрытое: вывод — над хвостом, в строке `Ran`;
     # у каждого видимого файла — своя под диффом; фразы блока нет.
     assert fold.parts() == SetRanParts(
         "block:0", False, output="… ещё 10 строк"
     )
     assert fold.phrase("block:0", "output") is None
-    assert [fold.phrase(k, "more") for k in keys[1:]] == ["+ ещё 1 строка"] * 3
+    more = [fold.phrase(k, "more") for k in keys[2:]]
+    assert more == ["+ ещё 2 строки"] * 3
     assert ("SetPhrase", "block:0", "bottom") not in fold.state
     fold(model.toggle("block:0:files"))
     assert all(fold.visible(k) for k in keys)
@@ -1352,11 +1358,11 @@ def test_ran_parts_files():
     assert fold.state[("MountPhrase", "block:0", "output")] == MountPhrase(
         "block:0", "output", before=keys[0]
     )
-    assert [fold.share(k).rows for k in keys] == [None] * 4
+    assert [fold.share(k).rows for k in keys] == [None] * 5
     out = fold(model.toggle("x"))
     assert SetRanParts("block:0", False, output="… ещё 10 строк") in out
-    assert [fold.share(k).rows for k in keys[1:]] == [3] * 3
-    assert [fold.visible(k) for k in keys] == [False, True, True, True]
+    assert [fold.share(k).rows for k in keys[2:]] == [3] * 3
+    assert [fold.visible(k) for k in keys] == [False, False, True, True, True]
 
 
 def test_ran_parts_unrecorded():
@@ -1623,23 +1629,26 @@ def _agent_model() -> tuple[ToolBlocks, _Fold]:
 
 
 def test_agent_window_counts_events():
-    """Блок из 5 чтений + проза + `Ran` + реплика = 4 события: окно 3,
-    `… ещё 1` у окна субагента; члены блока событиями не считаются."""
+    """Блок из 5 чтений + проза + `Ran` + две реплики = 5 событий: окно
+    3, `… ещё 2` у окна субагента; члены блока событиями не считаются;
+    4 события видны все."""
     model, fold = _agent_model()
     _reads(model, fold, 5)
     fold(model.event_added("prose"))
     fold(model.member_added("x", C.RUN, waiting=False))
     fold(model.started("x"))
     fold(model.result("x", "ok", reason="", executed=None))
-    assert fold.phrase(AGENT_WINDOW, "top") is None
     fold(model.event_added("reply"))
-    assert fold.phrase(AGENT_WINDOW, "top") == "… ещё 1"
+    assert fold.phrase(AGENT_WINDOW, "top") is None
+    fold(model.event_added("reply2"))
+    assert fold.phrase(AGENT_WINDOW, "top") == "… ещё 2"
     assert fold.state[("MountPhrase", AGENT_WINDOW, "top")] == MountPhrase(
         AGENT_WINDOW, "top", after=AGENT_WINDOW
     )
     assert not fold.visible("block:0")
+    assert not fold.visible("prose")
     assert not any(fold.visible(f"c{i}") for i in range(5))
-    assert all(fold.visible(k) for k in ("prose", "x", "reply"))
+    assert all(fold.visible(k) for k in ("x", "reply", "reply2"))
 
 
 def test_agent_visibility_conjunction():
@@ -1650,7 +1659,7 @@ def test_agent_visibility_conjunction():
     assert [fold.visible(f"c{i}") for i in range(5)] == [
         False, False, True, True, True,
     ]  # fmt: skip
-    for key in ("e1", "e2", "e3"):
+    for key in ("e1", "e2", "e3", "e4"):
         fold(model.event_added(key))
     # Блок вне окна субагента: скрыты и видимые в блоке члены.
     assert not any(fold.visible(f"c{i}") for i in range(5))
@@ -1670,7 +1679,7 @@ def test_agent_visibility_conjunction():
     assert all(fold.visible(f"c{i}") for i in range(5))
     fold(model.toggle(AGENT_WINDOW))
     assert not any(fold.visible(f"c{i}") for i in range(5))
-    assert fold.phrase(AGENT_WINDOW, "top") == "… ещё 1"
+    assert fold.phrase(AGENT_WINDOW, "top") == "… ещё 2"
     assert fold.phrase(AGENT_WINDOW, "bottom") is None
 
 
@@ -1717,3 +1726,178 @@ def test_finish_word_from_outcome(outcome, word):
     fold(model.started("f"))
     fold(model.result("f", outcome, reason="нет", executed=True))
     assert fold.word("f") == word
+
+
+# --- одну строку не прятать (решение владельца 2026-10-26) -----------------
+
+
+@pytest.mark.parametrize(
+    "total,limit,shown",
+    [
+        (0, 3, 0),
+        (3, 3, 3),
+        (4, 3, 4),
+        (5, 3, 3),
+        (10, 10, 10),
+        (11, 10, 11),
+        (12, 10, 10),
+    ],
+)
+def test_shown_when_folded_boundaries(total, limit, shown):
+    """До `L + 1` — всё без фразы; дальше `L` и скрыто не меньше двух."""
+    assert shown_when_folded(total, limit) == shown
+
+
+@pytest.mark.parametrize("cat", [C.READ, C.FETCH, C.MEMORY])
+def test_group_window_four_members_all_shown(cat):
+    model, fold, _ = _model()
+    for i in range(4):
+        fold(model.member_added(f"c{i}", cat, waiting=False))
+        fold(model.started(f"c{i}"))
+    assert fold.phrase("block:0", "top") is None
+    assert [fold.visible(f"c{i}") for i in range(4)] == [True] * 4
+    assert fold.mode("c0").lead is True
+    assert model.toggle("block:0") == []
+
+
+@pytest.mark.parametrize("cat", [C.READ, C.FETCH, C.MEMORY])
+def test_group_window_five_members_hides_two(cat):
+    model, fold, _ = _model()
+    for i in range(5):
+        fold(model.member_added(f"c{i}", cat, waiting=False))
+        fold(model.started(f"c{i}"))
+    assert fold.phrase("block:0", "top") == "… ещё 2"
+    assert [fold.visible(f"c{i}") for i in range(5)] == [
+        False, False, True, True, True,
+    ]  # fmt: skip
+
+
+def test_group_live_growth_three_four_five():
+    """Идущая группа: 3 → 4 — видны все четыре; 5 — окно 3 и `… ещё 2`."""
+    model, fold, _ = _model()
+    _reads(model, fold, 3, done=False)
+    assert fold.phrase("block:0", "top") is None
+    _reads(model, fold, 1, start=3, done=False)
+    assert fold.phrase("block:0", "top") is None
+    assert all(fold.visible(f"c{i}") for i in range(4))
+    _reads(model, fold, 1, start=4, done=False)
+    assert fold.phrase("block:0", "top") == "… ещё 2"
+    assert [fold.visible(f"c{i}") for i in range(5)] == [
+        False, False, True, True, True,
+    ]  # fmt: skip
+
+
+def _edit_block(model, fold, n):
+    keys = [f"e{i}" for i in range(n)]
+    for key in keys:
+        _apply(model, fold, key, _edit(key, lines=0))
+    return keys
+
+
+def test_edits_file_window_four_all_shown():
+    model, fold = _edits_model()
+    keys = _edit_block(model, fold, 4)
+    assert fold.phrase("block:0", "top") is None
+    assert all(fold.visible(k) for k in keys)
+    assert model.toggle("block:0:top") == []
+
+
+def test_edits_file_window_five_hides_two():
+    model, fold = _edits_model()
+    keys = _edit_block(model, fold, 5)
+    assert fold.phrase("block:0", "top") == "… ещё 2"
+    assert [fold.visible(k) for k in keys] == [False, False, True, True, True]
+
+
+def _ran_files(model, fold, n, unrecorded=0):
+    _ran(model, fold)
+    files = _files(*[("Edited", 0)] * n)
+    fold(
+        model.ran_parts(
+            "x",
+            command_hidden=0,
+            output_hidden=0,
+            files=files,
+            unrecorded=unrecorded,
+        )
+    )
+    return [f.key for f in files]
+
+
+def test_ran_file_window_four_all_shown():
+    model, fold = _edits_model()
+    keys = _ran_files(model, fold, 4)
+    assert fold.phrase("block:0", "files") is None
+    assert all(fold.visible(k) for k in keys)
+    assert model.toggle("block:0:files") == []
+
+
+def test_ran_file_window_five_hides_two():
+    model, fold = _edits_model()
+    keys = _ran_files(model, fold, 5)
+    assert fold.phrase("block:0", "files") == "… ещё 2"
+    assert [fold.visible(k) for k in keys] == [False, False, True, True, True]
+
+
+def test_ran_unrecorded_counts_toward_window():
+    """Незаписанные файлы — те же элементы окна: 3 файла и 1 незаписанный
+    — видно всё, строка «не записано» без раскрытия."""
+    model, fold = _edits_model()
+    keys = _ran_files(model, fold, 3, unrecorded=1)
+    assert fold.phrase("block:0", "files") is None
+    assert all(fold.visible(k) for k in keys)
+    assert fold.phrase("block:0", "unrecorded") == "ещё 1 файл не записано"
+    assert fold.phrase("block:0", "bottom") is None
+
+
+def test_agent_window_four_events_all_shown():
+    model, fold = _agent_model()
+    for key in ("e1", "e2", "e3", "e4"):
+        fold(model.event_added(key))
+    assert fold.phrase(AGENT_WINDOW, "top") is None
+    assert all(fold.visible(k) for k in ("e1", "e2", "e3", "e4"))
+    assert model.toggle(AGENT_WINDOW) == []
+
+
+def test_agent_window_five_events_hides_two():
+    model, fold = _agent_model()
+    for key in ("e1", "e2", "e3", "e4", "e5"):
+        fold(model.event_added(key))
+    assert fold.phrase(AGENT_WINDOW, "top") == "… ещё 2"
+    assert [fold.visible(k) for k in ("e1", "e2", "e3")] == [
+        False, False, True,
+    ]  # fmt: skip
+
+
+def test_output_tail_four_lines_all_shown():
+    assert output_tail(["a", "b", "c", "d"]) == (("a", "b", "c", "d"), 0)
+    lines = ["a", "b", "c", "d", "e"]
+    assert output_tail(lines) == (("c", "d", "e"), 2)
+
+
+def test_diff_budget_limit_plus_one_shown_whole():
+    """Дифф файла в `M + 1` строк — целиком, без фразы; `M + 2` — `M`
+    строк и `+ ещё 2 строки`."""
+    model, fold = _edits_model(preview=10)
+    _apply(model, fold, "e0", _edit("e0", lines=11))
+    assert fold.share("e0").rows == 11
+    assert fold.phrase("e0", "more") is None
+    assert model.toggle("e0") == []
+    model, fold = _edits_model(preview=10)
+    _apply(model, fold, "e0", _edit("e0", lines=12))
+    assert fold.share("e0").rows == 10
+    assert fold.phrase("e0", "more") == "+ ещё 2 строки"
+
+
+def test_ran_file_diff_budget_limit_plus_one():
+    model, fold = _edits_model(preview=10)
+    _ran(model, fold)
+    files = _files(("Edited", 11), ("Edited", 12))
+    fold(
+        model.ran_parts(
+            "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
+        )
+    )
+    assert fold.share("x:f0").rows == 11
+    assert fold.phrase("x:f0", "more") is None
+    assert fold.phrase("x:f1", "more") == "+ ещё 2 строки"

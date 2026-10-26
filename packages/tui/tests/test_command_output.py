@@ -71,8 +71,22 @@ def test_truncated_channel_marker_between_head_and_tail():
     parsed = parse_command_output(_envelope(stdout))
     assert parsed.lines == ("a", "b", "… пропущено 1 200 символов", "y", "z")
     assert parsed.omitted_chars == 1200
-    assert parsed.tail == ("b", "y", "z")
-    assert parsed.hidden == 1
+    # Четыре строки вывода — видны все: одну строку фраза не прячет.
+    assert parsed.tail == ("a", "b", "y", "z")
+    assert parsed.hidden == 0
+
+
+def test_tail_five_lines_hides_two():
+    stdout = {
+        "truncated": True,
+        "head": "a\nb\nc\n",
+        "tail": "y\nz\n",
+        "total_chars": 1210,
+        "omitted_chars": 1200,
+    }
+    parsed = parse_command_output(_envelope(stdout))
+    assert parsed.tail == ("c", "y", "z")
+    assert parsed.hidden == 2
 
 
 def test_omitted_line_plural():

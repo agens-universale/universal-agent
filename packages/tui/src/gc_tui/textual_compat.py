@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 
@@ -36,6 +37,11 @@ PATCHED_TEXTUAL = "8.2.8"
 
 # Потолок скорости протяжки ниже ленты (доля скорости Textual).
 _MAX_BELOW_SPEED = 2.0
+# Сколько экран ждёт монтирования строки, прежде чем рисовать без неё:
+# страховка от строки, снятой до монтирования, — экран не замирает.
+_PAINT_HOLD_LIMIT = 1.0
+# Ждущие монтирования задачи — ссылка, чтобы их не собрал сборщик.
+_PAINT_HOLDS: set[asyncio.Task] = set()
 
 _log = logging.getLogger(__name__)
 
@@ -105,6 +111,32 @@ class AnchoredScroll(VerticalScroll):
 async def mounted(parent: Widget, widgets: list[Widget]) -> None:
     """Дождаться монтирования детей, уже отданных `parent.mount()`."""
     await AwaitMount(parent, widgets)
+
+
+def paint_after_mount(widget: Widget) -> None:
+    """Экран не рисует, пока ``widget``, уже отданный `mount()`, не
+    смонтирован (его дети собираются следующим тактом): перемены соседей,
+    сделанные до того, ложатся одним кадром с ним. Уже смонтированный или
+    без родителя — ничего не ждёт."""
+    parent = widget.parent
+    if widget.is_mounted or not isinstance(parent, Widget):
+        return
+    batch = widget.app.batch_update()
+    batch.__enter__()
+
+    async def release() -> None:
+        try:
+            await asyncio.wait_for(
+                mounted(parent, [widget]), _PAINT_HOLD_LIMIT
+            )
+        except TimeoutError:
+            _log.debug("строка не смонтирована за %s с", _PAINT_HOLD_LIMIT)
+        finally:
+            batch.__exit__(None, None, None)
+
+    task = asyncio.get_running_loop().create_task(release())
+    _PAINT_HOLDS.add(task)
+    task.add_done_callback(_PAINT_HOLDS.discard)
 
 
 def is_being_removed(widget: Widget) -> bool:

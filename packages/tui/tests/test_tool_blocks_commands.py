@@ -253,22 +253,24 @@ async def test_ran_empty(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ran_failed_exit_code(tmp_path):
+@pytest.mark.parametrize(
+    "n,tail",
+    [
+        # 4 строки — видны все: одну строку фраза не прячет.
+        (4, ["    err 0", "    err 1", "    err 2", "    err 3"]),
+        (5, ["    … ещё 2 строки", "    err 2", "    err 3", "    err 4"]),
+    ],
+)
+async def test_ran_failed_exit_code(tmp_path, n, tail):
     thread = _Thread(tmp_path)
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         await _open(pilot)
-        out = _envelope("", _lines(4, "err"), exit_code=2)
+        out = _envelope("", _lines(n, "err"), exit_code=2)
         await _tail(pilot, thread, _run("x1", "make docs"), _out("x1", out))
         lines = _rows(pilot)
         assert lines[1].startswith("● Ran  make docs")
         assert _colour(_frame_row(pilot, "Ran  make"), "●") == ERR.lower()
-        assert lines[2:] == [
-            "  └ код выхода 2",
-            "    … ещё 1 строка",
-            "    err 1",
-            "    err 2",
-            "    err 3",
-        ]
+        assert lines[2:] == ["  └ код выхода 2", *tail]
         assert _colour(_frame_row(pilot, "код выхода"), "код") == ERR.lower()
         assert not any("· код выхода" in line for line in lines)
 
@@ -418,6 +420,7 @@ async def test_ran_phrases_under_owners(tmp_path):
         _shell_record("a.py", n=2),
         _shell_record("new.py", "create", n=10),
         _shell_record("b.py", n=2),
+        _shell_record("c.py", n=2),
         _shell_record("gone.py", "delete", hunks="", flags=["no_diff"]),
     )
     async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
@@ -435,13 +438,13 @@ async def test_ran_phrases_under_owners(tmp_path):
             "    line 8",
             "    line 9",
         ]
-        assert lines[6] == "    … ещё 1"
+        assert lines[6] == "    … ещё 2"
         assert any(
             line.startswith("    Added new.py (+10 −0)") for line in lines
         )
         assert "    Deleted gone.py" in lines
-        # Видимые файлы влезают в превью целиком — своих фраз нет; a.py
-        # скрыт окном.
+        # Видимые файлы влезают в превью целиком — своих фраз нет; a.py и
+        # b.py скрыты окном.
         assert not any("+ ещё" in line for line in lines)
         trace = scr.query_one("#trace", VerticalScroll)
         files = [
@@ -449,10 +452,10 @@ async def test_ran_phrases_under_owners(tmp_path):
             for r in trace.query(ToolCallRow)
             if r.call_id.startswith("x1:") and r.display
         ]
-        # По пути: a.py (скрыт), b.py, gone.py, new.py; после `Deleted`
-        # тела нет — new.py без пустой строки.
+        # По пути: a.py, b.py (скрыты), c.py, gone.py, new.py; после
+        # `Deleted` тела нет — new.py без пустой строки.
         assert [r.call_id for r in files] == [
-            "x1:b.py",
+            "x1:c.py",
             "x1:gone.py",
             "x1:new.py",
         ]
@@ -543,7 +546,8 @@ async def test_ran_file_preview_budget_changes_then_context(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ran_files_unrecorded(tmp_path):
+async def test_ran_files_unrecorded_fit_window(tmp_path):
+    """Файл и 3 незаписанных — 4 элемента окна: видно всё, фразы нет."""
     thread = _Thread(tmp_path)
     _journal(tmp_path, _shell_record("a.py", n=1, paths=4))
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
@@ -555,10 +559,27 @@ async def test_ran_files_unrecorded(tmp_path):
             _out("x1", _envelope("ok\n")),
         )
         lines = _rows(pilot)
-        assert "    … ещё 3" in lines
+        assert "    ещё 3 файла не записано" in lines
+        assert not any("… ещё" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_ran_files_unrecorded(tmp_path):
+    thread = _Thread(tmp_path)
+    _journal(tmp_path, _shell_record("a.py", n=1, paths=5))
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(
+            pilot,
+            thread,
+            _run("x1", "codegen"),
+            _out("x1", _envelope("ok\n")),
+        )
+        lines = _rows(pilot)
+        assert "    … ещё 4" in lines
         await _toggle(pilot)
         lines = _rows(pilot)
-        assert "    ещё 3 файла не записано" in lines
+        assert "    ещё 4 файла не записано" in lines
 
 
 # --- многострочная команда --------------------------------------------------
@@ -588,6 +609,27 @@ async def test_ran_multiline_command(tmp_path):
         ]
         row = _frame_row(pilot, "import json")
         assert _colour(row, "import json") == SUB_INK.lower()
+
+
+@pytest.mark.asyncio
+async def test_ran_four_line_command_all_shown(tmp_path):
+    """Команда в 4 строки — видна целиком: одну строку фраза не прячет."""
+    thread = _Thread(tmp_path)
+    script = "python - <<'EOF'\nimport json\nprint(1)\nEOF"
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(
+            pilot, thread, _run("x1", script), _out("x1", _envelope("1\n"))
+        )
+        lines = _rows(pilot)
+        assert lines[2:] == [
+            "    import json",
+            "    print(1)",
+            "    EOF",
+            "  └ 1",
+        ]
+        await _toggle(pilot)
+        assert _rows(pilot)[2:] == lines[2:]
 
 
 @pytest.mark.asyncio
