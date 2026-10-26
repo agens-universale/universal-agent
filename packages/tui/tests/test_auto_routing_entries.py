@@ -138,15 +138,17 @@ def test_typed_model_auto_when_available_selects_it(tmp_path, monkeypatch):
     hints = []
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
-    # Голый экран без ленты: отметку смены модели не монтируем (её вид —
-    # test_trace_model_mark.py), решение `_mark_model_choice` — настоящее.
+    # Голый экран без ленты: черту смены не монтируем (её вид и склейка с
+    # соседями — test_trace_model_mark.py), решение `_mark_model_choice` —
+    # настоящее. Шов — монтаж черты целиком: склейка читает соседей уже
+    # смонтированной черты, а их на голом экране нет.
     mounted = []
-    scr._trace_mount = lambda widget, **kw: mounted.append(widget)
+    scr._mount_applied_mark = lambda choice, before: mounted.append(choice)
 
     run_coro(scr._dispatch_command("model auto"))
 
     assert hints == []
-    assert len(mounted) == 1
+    assert mounted == ["auto"]
     assert app.effective_settings().settings.model == "auto"
 
 
