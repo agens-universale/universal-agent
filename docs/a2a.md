@@ -103,7 +103,7 @@ gRPC и HTTP+JSON фасад не объявляет.
       "protocolVersion": "1.0"
     }
   ],
-  "version": "0.4.0",
+  "version": "0.5.0",
   "capabilities": {
     "streaming": false,
     "pushNotifications": false,
