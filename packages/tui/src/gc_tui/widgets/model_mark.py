@@ -5,13 +5,15 @@
 `──── знак ────` (полосы `TRACK`, имя `DEEP_DIM`, точки в цвете уровней).
 Выбрана во время хода — знак в колонке глифа с тусклым именем и
 следствием `└ модель переключится на ближайшем шаге`, прижата к низу
-ленты, как реплика в очереди. Только живая: в тред не пишется, превью её
-не рисует."""
+ленты, как реплика в очереди. Применённая смена лежит в треде записью
+`model_choice`: восстановление ленты и превью рисуют ту же черту на её
+месте (`restored_mark`) с той же склейкой (`drop_mark_before`)."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 
+from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from rich.cells import cell_len
 from rich.text import Text
 from textual import events
@@ -20,6 +22,7 @@ from textual.widgets import Static
 from gc_tui.palette import DEEP_DIM, DIM, MUTED, TRACK
 from gc_tui.services import model_sign
 from gc_tui.services.trace_render import full_width_rule
+from gc_tui.textual_compat import is_being_removed
 from gc_tui.widgets.trace_row import ConsequenceTraceRow
 from gc_tui.widgets.user_reply import is_queued
 
@@ -118,3 +121,36 @@ def pins_to_bottom(widget: object) -> bool:
     return is_queued(widget) or (
         isinstance(widget, ModelMark) and widget.pending
     )
+
+
+def restored_mark(
+    record: ModelChoiceRecord, slots: Mapping[str, str | None]
+) -> ModelMark:
+    """Черта смены из записи треда: модель — та, что записана."""
+    return ModelMark(
+        record.choice,
+        slots,
+        alias=record.alias,
+        pending=False,
+        before=record.before,
+    )
+
+
+def drop_mark_before(mark: ModelMark) -> None:
+    """Отметки подряд не копятся (раунд 3 смока): черта сразу за другой,
+    без событий между ними, заменяет её — и вживую, и при восстановлении.
+    Вернулись к модели, что была до заменённой черты (`before`), — смены
+    не было: уходит и новая черта.
+
+    Соседство — по детям родителя без снятых (снятие доходит до DOM
+    тактом позже, а восстановление монтирует подряд): скрытый виджет между
+    чертами тоже событие, схлопывание он запирает."""
+    kids = [w for w in mark.parent.children if not is_being_removed(w)]
+    at = kids.index(mark)
+    previous = kids[at - 1] if at > 0 else None
+    if not isinstance(previous, ModelMark) or previous.pending:
+        return
+    previous.remove()
+    mark.before = previous.before
+    if mark.before == mark.choice:
+        mark.remove()

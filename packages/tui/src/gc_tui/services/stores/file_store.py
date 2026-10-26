@@ -21,6 +21,7 @@ from gc_core.message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
     user_content_to_text,
 )
+from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.turn_outcome import (
     TurnOutcome,
     is_turn_outcome_record,
@@ -211,6 +212,33 @@ class FileTaskStore:
         ):
             return clear_plan_meta(str(self._dir), sys_, task_id)
 
+    def append_model_choice(
+        self,
+        task_id: str,
+        record: ModelChoiceRecord,
+        system: Optional[str] = None,
+    ) -> bool:
+        """Смена модели между ходами — записью треда за последним
+        сообщением; True — записана. Решение и запись — в ядре, здесь
+        делегирование под блокировкой записи. Тред durable-владельца и тред
+        без сообщений записи не получают."""
+        from gc_core.thread_store import (
+            append_model_choice_after_last_message,
+        )
+        from gc_core.thread_store_journal import (
+            ThreadStoreOwnershipError,
+            local_write_scope,
+        )
+
+        sys_ = system or self._system
+        try:
+            with local_write_scope(str(self._dir), sys_, task_id):
+                return append_model_choice_after_last_message(
+                    str(self._dir), sys_, task_id, record
+                )
+        except ThreadStoreOwnershipError:
+            return False
+
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред (все формы файлов). Делегирует в thread_store."""
         sys_ = system or self._system
@@ -339,13 +367,13 @@ class FileTaskStore:
         """Сводка сжатия сегмента seg; leading — dialog_summary следующего
         файла.
 
-        Счёт и объём — только по сообщениям: запись итога хода сообщением
-        не является."""
+        Счёт и объём — только по сообщениям: записи итога хода и смены
+        модели сообщениями не являются (сообщение — строка с `payload`)."""
         payload = leading.get("payload") or {}
         synthesis = _clean_summary(
             user_content_to_text(payload.get("content"))
         )
-        messages = [r for r in seg if not is_turn_outcome_record(r)]
+        messages = [r for r in seg if isinstance(r.get("payload"), dict)]
         # Мера триггера ядра: аргументы вызовов и вывод тулов тоже объём.
         chars_before = calc_history_chars_for_trigger(
             [r.get("payload") or {} for r in messages]

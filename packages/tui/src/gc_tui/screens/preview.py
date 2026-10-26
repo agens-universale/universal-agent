@@ -47,8 +47,12 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
         project_path: str = "",
         subagent_records: list | None = None,
         mcp_snapshot: dict | None = None,
+        model_slots: dict | None = None,
     ) -> None:
         super().__init__()
+        # Слоты уровней действующих настроек — точки знака черт смены
+        # модели.
+        self._model_slots = model_slots
         self._segments = segments
         self._thread_id = thread_id
         self._project_path = project_path
@@ -98,7 +102,9 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
             "root": self._project_path or None,
             "blocks": self._blocks,
         }
-        calls = render_segments_readonly(trace, segments, **opts)
+        calls = render_segments_readonly(
+            trace, segments, model_slots=self._model_slots, **opts
+        )
         if records:
             merge_nested_readonly(
                 trace,

@@ -36,6 +36,11 @@ from gc_core.message_policy.plan_messages import accepted_plan_messages
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
 )
+from gc_core.persistence.model_choice_record import (
+    ModelChoiceRecord,
+    is_model_choice_record,
+    parse_model_choice,
+)
 from gc_core.persistence.turn_outcome import (
     TurnOutcome,
     is_turn_outcome_record,
@@ -235,7 +240,12 @@ from gc_tui.toggles import (
 from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
-from gc_tui.widgets.model_mark import ModelMark, pins_to_bottom
+from gc_tui.widgets.model_mark import (
+    ModelMark,
+    drop_mark_before,
+    pins_to_bottom,
+    restored_mark,
+)
 from gc_tui.widgets.plan_panel import PlanPanel
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
@@ -2722,6 +2732,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         context: RenderContext | None = None,
         in_window: bool = True,
     ) -> None:
+        if is_model_choice_record(rec):
+            if not live:
+                self._restore_model_mark(rec)
+            return
         if is_turn_outcome_record(rec):
             # Итог хода — не сообщение ленты: строка последнего хода, пока
             # после записи не началась реплика.
@@ -5213,30 +5227,36 @@ class TraceScreen(TraceFollowMixin, Screen):
         mark.apply()
         if tail:
             trace.move_child(mark, before=tail[0])
-        self._drop_mark_before(mark)
+        drop_mark_before(mark)
 
     def _mount_applied_mark(self, choice: str, before: str | None) -> None:
         mark = self._new_model_mark(choice, pending=False, before=before)
         self._trace_mount(mark)
-        self._drop_mark_before(mark)
+        drop_mark_before(mark)
 
-    def _drop_mark_before(self, mark: ModelMark) -> None:
-        """Отметки подряд не копятся (раунд 3 смока): черта сразу за другой,
-        без событий между ними, заменяет её — и между ходами, и в ходе.
-        Вернулись к модели, что была до заменённой черты (`before`), —
-        смены не было: уходит и новая черта.
-
-        Соседство — по `children` ленты: скрытый виджет между чертами
-        тоже событие, схлопывание он запирает."""
-        kids = list(self.query_one(_SEL_TRACE, VerticalScroll).children)
-        at = kids.index(mark)
-        previous = kids[at - 1] if at > 0 else None
-        if not isinstance(previous, ModelMark) or previous.pending:
+    def _restore_model_mark(self, rec: dict) -> None:
+        """Черта смены модели из записи треда — на месте записи, с той же
+        склейкой, что вживую. Живой хвост записи не рисует: черту уже дала
+        живая смена."""
+        record = parse_model_choice(rec)
+        if record is None:
             return
-        previous.remove()
-        mark.before = previous.before
-        if mark.before == mark.choice:
-            mark.remove()
+        mark = restored_mark(record, self._footer_slots())
+        self._trace_mount(mark, scroll=False)
+        drop_mark_before(mark)
+
+    def _write_model_choice(self, choice: str, before: str) -> None:
+        """Смена между ходами — в тред (запись `model_choice` за последним
+        сообщением) через хранилище; треда ещё нет — не пишется. Сбой
+        записи — в лог: черта уже стоит, выбор применён."""
+        tid = self._active_task_id
+        if not tid:
+            return
+        record = ModelChoiceRecord(choice, self._choice_alias(choice), before)
+        try:
+            self._store.append_model_choice(tid, record)
+        except Exception:
+            _log.warning("смена модели не записана в тред", exc_info=True)
 
     def _settle_pending_mark(self) -> None:
         """Ран кончился, строка итога стоит, поток стопа вышел, а тихая
@@ -5309,6 +5329,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 self._hint_already_working(choice)
             else:
                 self._mount_applied_mark(choice, previous)
+                self._write_model_choice(choice, previous)
             return
         applied_fn = getattr(self.app.active_runner, "applied_choice", None)
         applied = applied_fn() if callable(applied_fn) else None

@@ -18,6 +18,10 @@ from gc_core.constants.tool_display import (
     McpToolInfo,
     tool_display,
 )
+from gc_core.persistence.model_choice_record import (
+    is_model_choice_record,
+    parse_model_choice,
+)
 from gc_core.persistence.turn_outcome import (
     TurnOutcome,
     is_turn_outcome_record,
@@ -825,6 +829,21 @@ def _readonly_result(
     view.result(row, ev, edit, compact=compact, ran=ran)
 
 
+def _mount_model_mark(
+    mount_target, rec: dict, slots: Mapping[str, str | None]
+) -> None:
+    """Черта смены модели в превью — как при восстановлении ленты: на
+    месте записи, черта сразу за чертой её заменяет."""
+    from gc_tui.widgets.model_mark import drop_mark_before, restored_mark
+
+    record = parse_model_choice(rec)
+    if record is None:
+        return
+    mark = restored_mark(record, slots)
+    mount_target.mount(mark)
+    drop_mark_before(mark)
+
+
 def _mount_compaction(mount_target, ev: TraceEvent) -> None:
     """Метка сжатия и тело в read-only превью. Метка не focusable: иначе
     перехватывала бы Enter (в превью Enter — открыть тред); раскрытие —
@@ -996,6 +1015,7 @@ def _render_record_readonly(
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
     questions: dict | None = None,
+    model_slots: Mapping[str, str | None] | None = None,
 ) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
@@ -1003,6 +1023,9 @@ def _render_record_readonly(
     from gc_tui.services.trace_mapper import map_message
     from gc_tui.widgets.tool_blocks_view import end_turn
 
+    if is_model_choice_record(rec):
+        _mount_model_mark(mount_target, rec, model_slots or {})
+        return no
     if is_turn_outcome_record(rec):
         # Итог хода — строка на месте записи, не событие ленты; в превью
         # индикатора нет, поэтому видна и строка последнего хода. Время
@@ -1042,10 +1065,12 @@ def render_segments_readonly(
     mcp_servers: Iterable[str] = (),
     root: str | None = None,
     blocks: PreviewBlocks | None = None,
+    model_slots: Mapping[str, str | None] | None = None,
 ) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
-    трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там).
+    трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там),
+    черты смены модели — по слотам ``model_slots`` (точки знака).
     Возвращает `calls` (`{call_id: ToolCallRow}`) — нужен вызывающему для
     домонтирования вложенного трейса субагентов (см. `merge_nested_readonly`).
 
@@ -1105,6 +1130,7 @@ def render_segments_readonly(
                 mcp_tools=mcp_tools,
                 mcp_servers=mcp_servers,
                 questions=questions,
+                model_slots=model_slots,
             )
         comp = seg.get("compacted_by")
         if comp:

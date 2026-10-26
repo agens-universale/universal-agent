@@ -12,7 +12,7 @@ from gc_core.message_policy.user_message_policy import (
     resolve_technical_user_content_type,
     user_content_to_text,
 )
-from gc_core.persistence.turn_outcome import is_turn_outcome_record
+from gc_core.persistence.model_choice_record import parse_model_choice
 
 from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.trace_mapper import collect_render_context, map_message
@@ -36,12 +36,13 @@ def _env_ts(rec: dict) -> str:
 def _build_header(
     segments: list[dict], *, meta: dict, thread_id: str, system: str
 ) -> dict:
-    # Экспорт — сообщения треда: запись итога хода в счёт не идёт.
+    # Экспорт — сообщения треда (строки с `payload`): записи итога хода и
+    # смены модели в счёт не идут.
     all_recs = [
         r
         for seg in segments
         for r in seg["messages"]
-        if not is_turn_outcome_record(r)
+        if isinstance(r.get("payload"), dict)
     ]
     n_sum = sum(1 for seg in segments if seg.get("compacted_by"))
     return {
@@ -218,6 +219,15 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
     ]
 
 
+def _model_choice_lines(rec: dict) -> list[str]:
+    """Смена модели — одна строка: имя модели, у `auto` — сам выбор."""
+    record = parse_model_choice(rec)
+    if record is None:
+        return []
+    name = record.alias if record.choice != "auto" else None
+    return [f"────────── модель: {name or record.choice} ──────────", ""]
+
+
 def _render_txt(segments: list[dict], header: dict) -> str:
     out: list[str] = [_header_line(header), ""]
     all_recs = [r for seg in segments for r in seg["messages"]]
@@ -227,6 +237,7 @@ def _render_txt(segments: list[dict], header: dict) -> str:
         for r in seg["messages"]:
             payload = r.get("payload")
             if not isinstance(payload, dict):
+                out += _model_choice_lines(r)
                 continue
             n += 1
             out += _render_record(n, payload, name_by_call)

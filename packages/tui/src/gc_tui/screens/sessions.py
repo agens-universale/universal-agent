@@ -555,6 +555,13 @@ class SessionsScreen(Screen):
         self._store.update_tui_meta(thread_id, {"title": value})
         self._reload()
 
+    def _model_slots(self) -> dict:
+        """Слоты уровней действующих настроек окна — для черт смены
+        модели в превью."""
+        from gc_core.settings import settings_of
+
+        return settings_of(self.app.effective_settings()).slots.model_dump()
+
     def _preview_selected(self) -> None:
         task = self._selected_task()
         if task is None:
@@ -576,6 +583,7 @@ class SessionsScreen(Screen):
                 project_path=self._project_path(),
                 subagent_records=subagent_records,
                 mcp_snapshot=runtime.get("mcp_tools"),
+                model_slots=self._model_slots(),
             ),
             _on_result,
         )

@@ -2,8 +2,9 @@
 смока): между ходами — черта во всю ширину `──── знак ────`, во время
 хода — знак с тусклым именем и следствием у низа ленты; событие «выбор
 применён» делает её чертой на месте или после строки итога хода.
-Отметки подряд не копятся: новая заменяет предыдущую. Только живая: в
-тред не пишется."""
+Отметки подряд не копятся: новая заменяет предыдущую. Смену между
+ходами TUI пишет в тред через хранилище (запись `model_choice`), смену в
+ходе — ядро; восстановление их рисует (`test_model_choice_readers`)."""
 
 import json
 from pathlib import Path
@@ -550,8 +551,66 @@ async def test_plan_panel_goes_above_turn_line_past_applied_mark(tmp_path):
         assert kids.index(panel) < kids.index(line) < kids.index(mark)
 
 
+def _write_dialog(threads: Path) -> None:
+    """Тред с одним ходом: две записи сообщений."""
+    from gc_core.thread_store import append_new_thread_messages
+
+    msgs = [
+        {"id": "u1", "role": "user", "content": "вопрос"},
+        {"id": "a1", "role": "assistant", "content": "ответ"},
+    ]
+    append_new_thread_messages(str(threads), "cli", _TID, msgs, set())
+
+
+def _thread_rows(tmp_path: Path) -> list[dict]:
+    path = tmp_path / "threads" / f"data_cli_{_TID}.jsonl"
+    return [json.loads(ln) for ln in path.read_text().splitlines()]
+
+
 @pytest.mark.asyncio
-async def test_marks_not_in_preview_after_reload(tmp_path):
+async def test_idle_change_is_written_and_restored(tmp_path):
+    from gc_core.persistence.model_choice_record import (
+        ModelChoiceRecord,
+        parse_model_choice,
+    )
+
+    app = _app(tmp_path)
+    _write_dialog(tmp_path / "threads")
+    async with app.run_test() as pilot:
+        scr = app.screen
+        scr.attach_active_task(_TID)
+        await pilot.pause()
+        scr._cmd_model("max")
+        await pilot.pause()
+        record = _thread_rows(tmp_path)[-1]
+        assert parse_model_choice(record) == ModelChoiceRecord(
+            "max", "giga-max", "default"
+        )
+        assert record["seq"] == 2
+        assert len(_marks(scr)) == 1
+        scr.attach_active_task(_TID, is_resume=True)
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        await _assert_rule(pilot, mark, "● giga-max")
+
+
+@pytest.mark.asyncio
+async def test_running_change_is_not_written_by_tui(tmp_path):
+    """Смену в ходе пишет ядро, когда она применена, — не TUI."""
+    app = _app(tmp_path)
+    _write_dialog(tmp_path / "threads")
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _busy(app, tmp_path)
+        scr._cmd_model("max")
+        await pilot.pause()
+        assert all(r["type"] == "message" for r in _thread_rows(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_change_before_first_message_is_not_written(tmp_path):
+    """Треда ещё нет (ни одного сообщения) — смена не пишется и после
+    перечитывания черты нет."""
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = app.screen
