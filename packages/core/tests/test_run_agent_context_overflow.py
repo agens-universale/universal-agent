@@ -2,10 +2,13 @@
 
 from gc_core import processing_responses as pr
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _state():
     s = type("S", (), {})()
+    s.mode_announced = None
+    s.mark_turn_start = lambda: None
     s.messages = []
     s.steps = 0
     s.max_steps = 100
@@ -17,13 +20,13 @@ def _state():
 
 def _run_ctx():
     cd = {
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 3,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 3,
+        "agent.strict_turn_finish_validation": True,
         "text_answer_mode": "allow",
     }
-    return type("C", (), {"config_dict": cd, "logger": None})()
+    return fake_ctx(cd, logger=None)
 
 
 def test_context_overflow_triggers_compaction_and_retries(monkeypatch):

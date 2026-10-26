@@ -4,25 +4,29 @@ from types import SimpleNamespace
 import pytest
 from gc_core.run_context import acreate_run_context
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import make_settings
 
 
 @pytest.mark.asyncio
 async def test_child_ctx_inherits_trace_id(tmp_path):
-    config = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "logging_format": "jsonl",
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
-        "launch_root": str(tmp_path),
-        "trace_id": "wf-42",
-        "use_local_subagents": True,
-    }
+    config = make_settings(
+        {
+            "paths.logs_dump_dir": str(tmp_path),
+            "logging.save_logs": True,
+            "logging.format": "jsonl",
+            "logging.console_trace": False,
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://localhost:1/v1/chat/completions",
+            "agent.model": "test-model",
+            "launch_root": str(tmp_path),
+            "trace_id": "wf-42",
+            "agent.use_local_subagents": True,
+        }
+    )
     parent_ctx = await acreate_run_context(config)
-    # SubagentRunner(ctx, orchestrator_state, config_dict); _build_child_ctx
-    # читает только self._ctx и self._config, поэтому state здесь — заглушка.
+    # Аргументы SubagentRunner — контекст, состояние оркестратора, настройки;
+    # _build_child_ctx читает только контекст и настройки, поэтому state —
+    # заглушка.
     runner = SubagentRunner(parent_ctx, SimpleNamespace(), config)
     child_ctx = await runner._build_child_ctx("subagent_coder")
 

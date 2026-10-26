@@ -16,6 +16,8 @@
 клиента оттуда.
 """
 
+from __future__ import annotations
+
 import functools
 import html as html_lib
 import json
@@ -36,7 +38,7 @@ _EMPTY_META: Dict[str, Optional[str]] = {
 }
 
 
-def _response_url(exc: Exception) -> "str | None":
+def _response_url(exc: Exception) -> str | None:
     """URL из ответа-ошибки строкой: httpx.URL в JSON не сериализуется."""
     response = getattr(exc, "response", None)
     url = getattr(response, "url", None)
@@ -77,7 +79,7 @@ def http_error_failure(
 
 def preview_from_stripped(
     stripped: str, max_preview_chars: int
-) -> "tuple[str, bool]":
+) -> tuple[str, bool]:
     """Превью из текста без тегов: обрезка до ``max_preview_chars`` и заголовок."""
     truncated = len(stripped) > max_preview_chars
     if truncated:
@@ -103,6 +105,14 @@ class FetchRequest(NamedTuple):
 
 class FetchUrlBase(AbstractSimpleTool):
     """База ``FetchUrl`` / ``SimpleFetchUrl``: всё, кроме разбора HTML и запроса."""
+
+    # Меняет состояние сессии (память, todo, кэш fetch): получает частный
+    # срез состояния и возвращает изменения (tools.aapply_tool_result).
+    owns_session_state = True
+
+    # GET-чтение страницы: повтор после сбоя исполнителя допустим, внешней
+    # мутации инструмент не делает.
+    effect_is_read_only = True
 
     timeout_seconds = 20
     max_content_chars = 20_000
@@ -252,7 +262,7 @@ class FetchUrlBase(AbstractSimpleTool):
 
     # --- кэш страниц ---------------------------------------------------------
 
-    def _get_cache(self) -> Optional["OrderedDict[str, Any]"]:
+    def _get_cache(self) -> Optional[OrderedDict[str, Any]]:
         shared = getattr(self._state, "shared", None)
         if shared is None:
             return None
@@ -480,7 +490,7 @@ class FetchUrlBase(AbstractSimpleTool):
 
     def _fetch_arg_error(
         self, timeout, max_preview_chars, offset, limit
-    ) -> "Optional[Dict[str, Any]]":
+    ) -> Optional[Dict[str, Any]]:
         if timeout is not None and not isinstance(timeout, int):
             return {"type": _INVALID_ARGUMENT, "field": "timeout"}
         if not isinstance(max_preview_chars, int) or max_preview_chars <= 0:
@@ -493,7 +503,7 @@ class FetchUrlBase(AbstractSimpleTool):
 
     def _url_or_timeout_error(
         self, normalized_url: str, timeout
-    ) -> "Optional[Dict[str, Any]]":
+    ) -> Optional[Dict[str, Any]]:
         if not normalized_url:
             return {
                 "type": _INVALID_ARGUMENT,

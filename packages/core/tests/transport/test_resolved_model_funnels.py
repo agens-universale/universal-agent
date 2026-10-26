@@ -20,6 +20,7 @@ from gc_core.utils.connect_backend import (
     create_call_data_responses,
 )
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _canonical_once(processing_module, *args, **kwargs):
@@ -34,6 +35,13 @@ def _canonical_once(processing_module, *args, **kwargs):
     return asyncio.run(
         processing_module._arequest_backend_canonical_once(*args, **kwargs)
     )
+
+
+def _serve_main_trace(router) -> None:
+    """Main-трейс берёт модель через `ModelRouter.resolve_main_at_level` (уровень
+    вызова). У фейка без уровней это тот же `resolve("main")` — счёт вызовов
+    `resolve` в проверках остаётся прежним."""
+    router.resolve_main_at_level = lambda level, **_kw: router.resolve("main")
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -71,8 +79,8 @@ def _state(**overrides) -> SimpleNamespace:
 
 
 async def test_create_call_headers_authorization_none_inherits_effective_header():
-    ctx = SimpleNamespace(
-        config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
+    ctx = fake_ctx(
+        {"backend.api_mode": "chat_completions", "agent.x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
     headers = await acreate_call_headers(
@@ -82,8 +90,8 @@ async def test_create_call_headers_authorization_none_inherits_effective_header(
 
 
 def test_create_call_headers_authorization_empty_string_omits_header():
-    ctx = SimpleNamespace(
-        config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
+    ctx = fake_ctx(
+        {"backend.api_mode": "chat_completions", "agent.x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
     headers = build_call_headers(
@@ -93,8 +101,8 @@ def test_create_call_headers_authorization_empty_string_omits_header():
 
 
 def test_create_call_headers_authorization_value_used_as_is():
-    ctx = SimpleNamespace(
-        config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "1"},
+    ctx = fake_ctx(
+        {"backend.api_mode": "chat_completions", "agent.x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
     headers = build_call_headers(
@@ -105,8 +113,8 @@ def test_create_call_headers_authorization_value_used_as_is():
 
 async def test_create_call_headers_responses_mode_ignores_resolved_authorization():
     # спека §4: per-model token/url/backend-квирки — chat_completions-only.
-    ctx = SimpleNamespace(
-        config_dict={"backend_api_mode": "responses", "x_cl_id": "1"},
+    ctx = fake_ctx(
+        {"backend.api_mode": "responses", "agent.x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
     headers = await acreate_call_headers(
@@ -119,11 +127,11 @@ def test_create_call_headers_model_token_survives_global_chat_completion_headers
     # Боевой конфиг (config.default.yml) держит Authorization в глобальном
     # backend.chat_completion_headers. Оверлей общих заголовков НЕ должен
     # перебивать per-model token — иначе корп-токен уезжает на чужой хост.
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
                 "Authorization": "Bearer corp-token",
                 "X-Custom": "keep-me",
             },
@@ -139,11 +147,13 @@ def test_create_call_headers_model_token_survives_global_chat_completion_headers
 
 def test_create_call_headers_empty_token_not_revived_by_global_headers():
     # authorization="" — «явно без Authorization» (напр. локальная модель).
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {"Authorization": "Bearer corp-token"},
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer corp-token"
+            },
         },
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
@@ -154,11 +164,13 @@ def test_create_call_headers_empty_token_not_revived_by_global_headers():
 
 
 def test_create_call_headers_lowercase_global_authorization_also_yields_to_model_token():
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {"authorization": "Bearer corp-token"},
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
+                "authorization": "Bearer corp-token"
+            },
         },
         auth_connector=None,
     )
@@ -172,11 +184,13 @@ def test_create_call_headers_lowercase_global_authorization_also_yields_to_model
 async def test_create_call_headers_global_authorization_applies_without_model_token():
     # Охранный: без per-model решения (authorization=None) поведение прежнее —
     # статический заголовок конфига выигрывает у токена коннектора.
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {"Authorization": "Bearer corp-token"},
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer corp-token"
+            },
         },
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
@@ -189,11 +203,13 @@ async def test_create_call_headers_global_authorization_applies_without_model_to
 def test_create_call_headers_model_backend_overlay_authorization_wins_over_token():
     # Оверлей заголовков НА ТОЙ ЖЕ модели — тоже per-model решение, и более
     # конкретное: он уточняет token, а не перебивается им.
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {"Authorization": "Bearer corp-token"},
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer corp-token"
+            },
         },
         auth_connector=None,
     )
@@ -257,10 +273,10 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
             )
         )
     )
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
+    ctx = fake_ctx(
+        {
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
         },
         model_router=router,
         logger=None,
@@ -288,11 +304,13 @@ def test_create_call_data_completions_backend_overrides_apply_on_top():
     data = create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         _state(),
-        config_dict={
-            "use_max_tokens_param": False,
-            "chat_completions_max_tokens": 100,
-            "chat_completion_kwargs": {"temperature": 0.1},
-        },
+        settings=make_settings(
+            {
+                "backend.use_max_tokens_param": False,
+                "backend.chat_completions_max_tokens": 100,
+                "backend.chat_completion_kwargs": {"temperature": 0.1},
+            }
+        ),
         resolved=_resolved(
             backend_overrides={
                 "use_max_tokens_param": True,
@@ -308,10 +326,10 @@ def test_create_call_data_completions_backend_overrides_apply_on_top():
 
 
 def test_create_call_headers_backend_overrides_chat_completion_headers():
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "chat_completion_headers": {"X-Base": "base"},
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.chat_completion_headers": {"X-Base": "base"},
         },
         auth_connector=None,
     )
@@ -356,11 +374,11 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
             )
         )
     )
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "use_ssl": True,
+    ctx = fake_ctx(
+        {
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.use_ssl": True,
         },
         model_router=router,
         logger=None,
@@ -400,13 +418,13 @@ _JUDGE_JSON = json.dumps(
 def _router_ctx(**cfg_overrides):
     router = SimpleNamespace(resolve=Mock(return_value=_resolved()))
     cfg = {
-        "completions_url": "http://backend.local/v1/chat/completions",
-        "backend_request_timeout_sec": 600,
-        "backend_api_mode": "chat_completions",
+        "backend.completions_url": "http://backend.local/v1/chat/completions",
+        "backend.request_timeout_sec": 600,
+        "backend.api_mode": "chat_completions",
     }
     cfg.update(cfg_overrides)
-    ctx = SimpleNamespace(
-        config_dict=cfg,
+    ctx = fake_ctx(
+        cfg,
         model_router=router,
         auxiliary_llm=SimpleNamespace(
             max_tokens=500, judge_max_tokens=200, completion_kwargs={}
@@ -629,7 +647,7 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
     )
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p: "prompt",
+        lambda _p, **_kw: "prompt",
     )
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",
@@ -638,18 +656,18 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
         ),
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "model": "test-model",
-            "completions_url": "http://example.test/v1/chat/completions",
-            "summary_params": {
+    ctx = fake_ctx(
+        {
+            "agent.model": "test-model",
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "summary": {
                 "chat_completions_summary_trigger_chars": 999999,
-                "incremental_batch_chars": int(999999 * 1.4),
+                "incremental_batch_chars": int(999999 * 1.2),
                 "max_accumulated_summary_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },
-            "chat_completions_params": {
+            "chat_completions": {
                 "auxiliary_llm": {"max_tokens": 8192, "completion_kwargs": {}},
             },
         },
@@ -704,13 +722,14 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     router = SimpleNamespace(
         resolve=Mock(return_value=_resolved(model="light-model"))
     )
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+    _serve_main_trace(router)
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         model_router=router,
         auth_connector=None,
@@ -718,8 +737,13 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
+    resolved = processing_module.resolve_main_for_call(state, ctx)
     _canonical_once(
-        processing_module, [{"role": "user", "content": "hi"}], state, ctx
+        processing_module,
+        [{"role": "user", "content": "hi"}],
+        state,
+        ctx,
+        resolved=resolved,
     )
 
     # main фиксируется один раз; vision резолвится для свежего ключа доступа
@@ -779,13 +803,14 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
             )
         )
     )
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+    _serve_main_trace(router)
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         model_router=router,
         auth_connector=None,
@@ -793,8 +818,13 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
+    resolved = processing_module.resolve_main_for_call(state, ctx)
     _canonical_once(
-        processing_module, [{"role": "user", "content": "hi"}], state, ctx
+        processing_module,
+        [{"role": "user", "content": "hi"}],
+        state,
+        ctx,
+        resolved=resolved,
     )
 
     assert captured["verify"] is False
@@ -836,13 +866,13 @@ def test_main_trace_legacy_network_params_without_overrides(monkeypatch):
         as_coro(_fake_request_chat_completions_with_policy),
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         auth_connector=None,
         logger=None,
@@ -850,7 +880,11 @@ def test_main_trace_legacy_network_params_without_overrides(monkeypatch):
     state = _state(default_model="legacy-model")
 
     _canonical_once(
-        processing_module, [{"role": "user", "content": "hi"}], state, ctx
+        processing_module,
+        [{"role": "user", "content": "hi"}],
+        state,
+        ctx,
+        resolved=None,
     )
 
     assert captured["verify"] is True
@@ -903,14 +937,14 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
             )
         )
     )
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "responses",
-            "agent_url": "http://legacy.local/v1/responses",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+    _serve_main_trace(router)
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "responses",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         model_router=router,
         auth_connector=None,
@@ -918,8 +952,13 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
     )
     state = _state(default_model="legacy-model")
 
+    resolved = processing_module.resolve_main_for_call(state, ctx)
     _canonical_once(
-        processing_module, [{"role": "user", "content": "hi"}], state, ctx
+        processing_module,
+        [{"role": "user", "content": "hi"}],
+        state,
+        ctx,
+        resolved=resolved,
     )
 
     assert captured["verify"] is True
@@ -935,7 +974,7 @@ def test_legacy_create_call_data_completions_keeps_state_default_model_without_r
     data = create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         _state(default_model="legacy-model"),
-        config_dict={"chat_completions_max_tokens": 999},
+        settings=make_settings({"backend.chat_completions_max_tokens": 999}),
     )
     assert data["model"] == "legacy-model"
     assert data["max_completion_tokens"] == 999
@@ -950,8 +989,8 @@ def test_legacy_create_call_data_responses_keeps_state_default_model_without_res
 
 
 async def test_legacy_create_call_headers_uses_auth_connector_without_resolved():
-    ctx = SimpleNamespace(
-        config_dict={"backend_api_mode": "chat_completions", "x_cl_id": "7"},
+    ctx = fake_ctx(
+        {"backend.api_mode": "chat_completions", "agent.x_cl_id": "7"},
         auth_connector=SimpleNamespace(get_token=lambda: "legacy-token"),
     )
     headers = await acreate_call_headers(_state(), ctx)
@@ -981,10 +1020,10 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
         as_coro(lambda _s, _c, resolved=None: {}),
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
+    ctx = fake_ctx(
+        {
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
         },
         logger=None,
     )
@@ -1050,27 +1089,31 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(
             )
         )
     )
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
-            "retry_embedded_choice_errors": True,
-            "chat_completions_max_tokens": 32768,
-            "chat_completions_min_response_tokens": 1024,
+    _serve_main_trace(router)
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
+            "backend.retry_embedded_choice_errors": True,
+            "backend.chat_completions_max_tokens": 32768,
+            "backend.chat_completions_min_response_tokens": 1024,
         },
         model_router=router,
         auth_connector=None,
         logger=None,
     )
 
+    state = _state(default_model="legacy-model")
+    resolved = processing_module.resolve_main_for_call(state, ctx)
     _canonical_once(
         processing_module,
         [{"role": "user", "content": "hi"}],
-        _state(default_model="legacy-model"),
+        state,
         ctx,
+        resolved=resolved,
     )
 
     assert captured["retry_embedded_choice_errors"] is False
@@ -1106,11 +1149,11 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
             )
         )
     )
-    ctx = SimpleNamespace(
-        config_dict={
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "retry_embedded_choice_errors": True,
+    ctx = fake_ctx(
+        {
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.retry_embedded_choice_errors": True,
         },
         model_router=router,
         logger=None,
@@ -1210,6 +1253,87 @@ def test_fields_declared_per_model_are_actually_read_by_the_funnels():
     assert not missing, (
         f"заявлены per-model, но не читаются ни одной воронкой: {missing}"
     )
+
+
+def test_openai_strict_schema_is_read_per_model_of_the_call(tmp_path):
+    """Спека auto-routing §5.2 п.4: модель с `backend.openai_strict_tools_schema: true`
+    получает строгую схему инструментов, соседняя без ключа — обычную, в одном ране."""
+    from gc_core import processing_responses as pr
+    from gc_core import run_context as rc
+    from gc_core.config_modules.root import AppConfig
+
+    raw = {
+        "models": {
+            "strict-one": {"backend": {"openai_strict_tools_schema": True}},
+            "loose-one": {},
+        },
+        "slots": {"light": "loose-one", "max": "strict-one"},
+        "backend": {"api_mode": "chat_completions"},
+        "logging": {"save_logs": False},
+    }
+    cfg = AppConfig.model_validate(raw)
+    level = {"value": "light"}
+    ctx = run_coro(
+        rc.acreate_run_context(cfg, level_provider=lambda: level["value"])
+    )
+    state = _state(default_model="legacy-model", tools=ctx.tools_spec)
+
+    loose = pr.resolve_main_for_call(state, ctx)
+    canonical_loose = ctx.tools_data["fs_read_file"]["spec"]
+    loose_data = create_call_data_completions(
+        [], state, settings=cfg, resolved=loose
+    )
+    level["value"] = "max"
+    strict = pr.resolve_main_for_call(state, ctx)
+    canonical_strict = ctx.tools_data["fs_read_file"]["spec"]
+    strict_data = create_call_data_completions(
+        [], state, settings=cfg, resolved=strict
+    )
+
+    def read_spec(data):
+        return next(
+            t["function"]
+            for t in data["tools"]
+            if t["function"]["name"] == "fs_read_file"
+        )
+
+    assert state.tools is ctx.tools_spec
+    strict_params = read_spec(strict_data)["parameters"]
+    loose_params = read_spec(loose_data)["parameters"]
+    assert set(strict_params["required"]) == set(strict_params["properties"])
+    assert set(loose_params["required"]) < set(loose_params["properties"])
+    assert strict_params["additionalProperties"] is False
+    assert "x-openai-strict" not in canonical_loose["parameters"]
+    assert "x-openai-strict" not in canonical_strict["parameters"]
+
+
+def test_openai_strict_schema_per_model_override_is_ignored_in_responses_mode():
+    tools = [
+        {
+            "name": "read",
+            "type": "function",
+            "description": "read",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "optional": {"type": "string"},
+                },
+                "required": ["path"],
+            },
+        }
+    ]
+    state = _state(tools=tools)
+    settings = make_settings({"backend.api_mode": "responses"})
+    data = create_call_data_responses(
+        [],
+        state,
+        settings=settings,
+        resolved=_resolved(
+            backend_overrides={"openai_strict_tools_schema": True}
+        ),
+    )
+    assert data["tools"][0]["parameters"]["required"] == ["path"]
 
 
 # ---------------------------------------------------------------------------
@@ -1330,14 +1454,14 @@ def test_prompt_cache_global_false_disables_and_per_model_true_overrides():
     off = create_call_data_completions(
         _HISTORY,
         _state(),
-        config_dict={"claude_prompt_cache": False},
+        settings=make_settings({"backend.claude_prompt_cache": False}),
         resolved=_resolved(model="anthropic/claude-opus-5"),
     )
     assert _marked_indexes(off) == []
     on = create_call_data_completions(
         _HISTORY,
         _state(),
-        config_dict={"claude_prompt_cache": False},
+        settings=make_settings({"backend.claude_prompt_cache": False}),
         resolved=_resolved(
             model="anthropic/claude-opus-5",
             backend_overrides={"claude_prompt_cache": True},
@@ -1351,11 +1475,13 @@ def test_chat_completion_kwargs_cannot_inject_top_level_cache_control(caplog):
     data = create_call_data_completions(
         _HISTORY,
         _state(),
-        config_dict={
-            "chat_completion_kwargs": {
-                "cache_control": {"type": "ephemeral", "ttl": "1h"}
+        settings=make_settings(
+            {
+                "backend.chat_completion_kwargs": {
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"}
+                }
             }
-        },
+        ),
         resolved=_resolved(model="anthropic/claude-opus-5"),
     )
     assert "cache_control" not in data
@@ -1366,12 +1492,14 @@ def test_chat_completion_kwargs_cannot_inject_top_level_cache_control(caplog):
 def test_chat_completion_kwargs_cache_control_passes_when_marks_are_off():
     """Пока разметка не наша, поле верхнего уровня — рабочая настройка пользователя."""
     kwargs = {
-        "chat_completion_kwargs": {"cache_control": {"type": "ephemeral"}}
+        "backend.chat_completion_kwargs": {
+            "cache_control": {"type": "ephemeral"}
+        }
     }
     gemini = create_call_data_completions(
         _HISTORY,
         _state(),
-        config_dict=kwargs,
+        settings=make_settings(kwargs),
         resolved=_resolved(model="google/gemini-2.5-flash"),
     )
     assert gemini["cache_control"] == {"type": "ephemeral"}
@@ -1379,7 +1507,7 @@ def test_chat_completion_kwargs_cache_control_passes_when_marks_are_off():
     claude_off = create_call_data_completions(
         _HISTORY,
         _state(),
-        config_dict=kwargs,
+        settings=make_settings(kwargs),
         resolved=_resolved(
             model="anthropic/claude-opus-5",
             backend_overrides={"claude_prompt_cache": False},

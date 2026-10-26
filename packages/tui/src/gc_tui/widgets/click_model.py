@@ -72,6 +72,7 @@ def focus_target_at(
             return node
     return default
 
+
 from gc_tui.messages import OpenImageRequest
 
 

@@ -29,7 +29,7 @@ from gc_core.tools.arguments_validation import (
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.file_info import FileInfo
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
-from gc_core.tools.schema_optional import (
+from gc_core.execution.tool_schema import (
     apply_openai_strict_parameters,
     augment_optional_property_descriptions,
     resolve_optional_property_keys,

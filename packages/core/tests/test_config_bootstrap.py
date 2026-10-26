@@ -17,9 +17,10 @@ def test_bootstrap_creates_user_config(tmp_path, monkeypatch):
     monkeypatch.setattr(env_vars, "project_slug", lambda: "testproj")
     dest = cfg_dir / "config.yml"
     assert not dest.exists()
-    cfg = config.load_config()  # no --config, no ~/.gc/config.yml
+    # no --config, no ~/.gc/config.yml
+    settings = config.load_settings().settings
     assert dest.is_file()  # bootstrap создал
-    assert cfg["model"] == onboarding.MODEL_SENTINEL
+    assert settings.agent.model == onboarding.MODEL_SENTINEL
 
 
 def test_bootstrap_does_not_clobber_existing(tmp_path, monkeypatch):
@@ -39,5 +40,5 @@ def test_bootstrap_does_not_clobber_existing(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(env_vars, "project_slug", lambda: "testproj")
-    cfg = config.load_config()
-    assert cfg["model"] == "custom-x"  # существующий не перезаписан
+    settings = config.load_settings().settings
+    assert settings.agent.model == "custom-x"  # существующий не перезаписан

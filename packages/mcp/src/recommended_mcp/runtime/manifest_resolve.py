@@ -37,12 +37,15 @@ def _gc_config_recommended_dir() -> Path:
 
 
 def resolve_agent_manifest_path(
-    config_dict: dict[str, Any],
+    settings: Any,
     *,
     cwd: Path | None = None,
 ) -> Path | None:
     """
     Манифест для gc-cli -a и install по умолчанию.
+
+    ``settings`` — настройки агента: всё, что принимает ``settings_of``
+    (контекст, ``LoadedSettings``, ``AppConfig``).
 
     Приоритет:
       1. mcp-meta.recommended-mcp-manifest (абсолютный или относительно gc config)
@@ -52,8 +55,9 @@ def resolve_agent_manifest_path(
     """
     del cwd  # cwd больше не используется — агент может работать из любой папки
 
-    mcp_meta = config_dict.get("mcp-meta") or {}
-    raw = mcp_meta.get("recommended-mcp-manifest")
+    from gc_core.settings import settings_of
+
+    raw = settings_of(settings).mcp.meta.recommended_mcp_manifest
     if raw:
         path = Path(str(raw)).expanduser()
         if not path.is_absolute():
@@ -86,7 +90,9 @@ def resolve_install_manifest_path(config: Path | str | None) -> Path:
             raise ManifestError(f"manifest not found: {path}")
         return path
 
-    resolved = resolve_agent_manifest_path({})
+    from gc_core.settings import AppConfig
+
+    resolved = resolve_agent_manifest_path(AppConfig())
     if resolved is None:
         raise ManifestError(
             f"manifest not found: задай --config PATH или положи config.local.yml в {_gc_config_recommended_dir()}"

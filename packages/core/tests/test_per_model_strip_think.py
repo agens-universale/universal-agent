@@ -1,15 +1,18 @@
 """strip_think на алиасе: отсутствие ключа — глобальный флаг хода."""
 
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.config_modules.strip_tags_projection import (
     persist_reasoning_content_for_model,
 )
-from gc_core.model_router import ModelRouter, ResolvedModel
+from gc_core.model_router import (
+    ModelRouter,
+    ResolvedModel,
+    serialize_model_entry,
+)
 
 
-def _cfg(raw: dict) -> dict:
-    return flatten_app_config(AppConfig.model_validate(raw))
+def _cfg(raw: dict) -> AppConfig:
+    return AppConfig.model_validate(raw)
 
 
 def test_alias_strip_think_overrides_the_global_flag():
@@ -53,11 +56,11 @@ def test_alias_strip_think_overrides_the_global_flag():
     inherit = router.resolve("main")
     assert inherit.strip_think is None
     assert persist_reasoning_content_for_model(inherit, cfg) is False
-    assert "strip_think" not in cfg["models"]["inherit"]
+    assert "strip_think" not in serialize_model_entry(cfg.models["inherit"])
 
 
 def test_missing_alias_follows_global_false():
-    cfg = {"strip_tags_projection": {"strip_think": False}}
+    cfg = _cfg({"strip_tags_projection": {"strip_think": False}})
     legacy = ResolvedModel(
         alias=None,
         model="m",

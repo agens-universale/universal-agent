@@ -249,12 +249,12 @@ class SessionsScreen(Screen):
         usage = getattr(task, "token_usage", None)
         if not usage:
             return None
-        cfg = getattr(self.app, "_config", None) or {}
+        settings = self.app.base_settings().settings
         return format_nonzero_cost(
             usage,
-            cfg.get("pricing"),
-            cfg.get("model"),
-            cfg.get("completions_url"),
+            settings.pricing,
+            settings.agent.model,
+            settings.backend.completions_url,
         )
 
     def _session_is_busy(self, thread_id: str) -> bool:

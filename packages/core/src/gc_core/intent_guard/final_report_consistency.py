@@ -1,8 +1,18 @@
 import json
-import os
 from typing import Any, Dict, List
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    agent_store_of,
+    read_required_text,
+)
 from gc_core.bundled_assets import bundled_root
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
 from gc_core.intent_guard.trace_digest import (
     FinishGateTraceDigest,
     build_finish_gate_trace_digest,
@@ -11,20 +21,27 @@ from gc_core.intent_guard.validation_result import (
     ValidationResult,
     fail_open_validation_result,
     parse_validator_response,
+    salvage_validator_axes,
 )
+from gc_core.settings import settings_of
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_judge_max_tokens,
 )
-from gc_core.utils.user_text import read_user_text
 
-# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_PROJECT_ROOT = str(bundled_root())
-DEFAULT_INTENT_GUARD_PROMPT_PATH = os.path.abspath(
-    os.path.join(
-        _PROJECT_ROOT, "prompts", "chat_completions_intent_guard_prompt.md"
+
+def default_guard_prompt_path() -> str:
+    return str(
+        bundled_root() / "prompts" / "chat_completions_intent_guard_prompt.md"
     )
-)
+
+
+def __getattr__(name: str):
+    # Keep the public legacy constant lazy: resolving assets is worker I/O.
+    if name == "DEFAULT_INTENT_GUARD_PROMPT_PATH":
+        return default_guard_prompt_path()
+    raise AttributeError(name)
+
 
 _FINISH_GATE_RETRY_DRAFT_MAX_CHARS = 6000
 
@@ -80,12 +97,18 @@ def _normalize_handoff_in_finish_args(args: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _load_guard_prompt(prompt_path: str | None = None) -> str:
-    path = prompt_path or DEFAULT_INTENT_GUARD_PROMPT_PATH
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Intent guard prompt file not found: {path}")
+def _load_guard_prompt(
+    prompt_path: str | None = None,
+    *,
+    store: AgentStore = DEFAULT_AGENT_STORE,
+) -> str:
+    path = prompt_path or default_guard_prompt_path()
     # Путь задаёт конфиг (`chat_completions_intent_guard_prompt_path`).
-    prompt = read_user_text(path).strip()
+    prompt = read_required_text(
+        store,
+        AgentResource("prompt", "finish_gate", path),
+        missing=f"Intent guard prompt file not found: {path}",
+    ).strip()
     if not prompt:
         raise ValueError(f"Intent guard prompt file is empty: {path}")
     return prompt
@@ -114,9 +137,10 @@ def _clip_retry_draft(
 def _build_finish_gate_user_prompt(payload: Dict[str, Any]) -> str:
     return (
         "Run the two-axis finish gate on the input below.\n"
-        "Do NOT reason out loud. Do NOT write <think> or analysis prose.\n"
-        "Return ONLY a single raw JSON object with required keys from the system prompt "
-        "(action, trace_ok, report_ok; lists on reject).\n\n"
+        "Do not reason out loud. Return ONLY a single raw JSON object.\n"
+        "In that JSON: list evidence first (trace_gaps, report_mismatches), then derive "
+        "trace_ok / report_ok from list emptiness, then action from the decision matrix.\n"
+        "Required keys: trace_gaps, report_mismatches, trace_ok, report_ok, action, is_question.\n\n"
         f"Input:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
 
@@ -130,10 +154,12 @@ def _build_finish_gate_retry_user_prompt(
     draft = _clip_retry_draft(previous_raw)
     return (
         "Your previous finish-gate reply was INVALID: it was not parseable JSON with "
-        "required keys (action, trace_ok, report_ok), or it was truncated mid-reasoning.\n\n"
+        "required keys (trace_ok, report_ok, action), or it was truncated mid-reasoning.\n\n"
         "STRICT RETRY RULES:\n"
-        "- Do NOT reason. Do NOT write <think>…</think>, commentary, or step-by-step text.\n"
-        "- Return ONLY the raw JSON verdict object (no markdown fences, no preamble).\n"
+        "- Do not reason out loud. Return ONLY the raw JSON verdict object "
+        "(no markdown fences, no preamble).\n"
+        "- JSON key order: trace_gaps, report_mismatches first; then trace_ok / report_ok "
+        "from list emptiness; then action from the decision matrix.\n"
         "- You may use your previous incomplete output below as scratch notes, then emit JSON only.\n\n"
         "Previous incomplete output:\n"
         "-----\n"
@@ -164,6 +190,63 @@ async def _arequest_finish_gate_once(
         max_tokens=auxiliary_llm_judge_max_tokens(ctx),
         request_label=request_label,
         consumer=consumer,
+    )
+
+
+def _resolve_after_unparseable_replies(
+    *,
+    raw: str,
+    raw_retry: str,
+    logger: Any,
+) -> ValidationResult:
+    """Retry уже сделан; пробуем salvage осей, иначе fail-open accept."""
+    salvaged = salvage_validator_axes(raw_retry) or salvage_validator_axes(raw)
+    if salvaged is None:
+        return fail_open_validation_result()
+    if logger is not None:
+        logger.warning(
+            "finish_gate both replies unparseable; using salvaged axes "
+            "trace_ok=%s report_ok=%s action=%s",
+            salvaged.trace_ok,
+            salvaged.report_ok,
+            salvaged.action,
+        )
+    return salvaged
+
+
+async def _aretry_finish_gate_after_unparseable(
+    *,
+    ctx: Any,
+    state: Any,
+    system_prompt: str,
+    payload: Dict[str, Any],
+    previous_raw: str,
+    consumer: str,
+) -> ValidationResult:
+    logger = getattr(ctx, "logger", None)
+    if logger is not None:
+        logger.warning(
+            "finish_gate first reply unparseable; retrying with JSON-only prompt previous_chars=%s",
+            len(previous_raw or ""),
+        )
+    raw_retry = await _arequest_finish_gate_once(
+        ctx=ctx,
+        state=state,
+        system_prompt=system_prompt,
+        user_prompt=_build_finish_gate_retry_user_prompt(
+            payload=payload,
+            previous_raw=previous_raw,
+        ),
+        request_label="intent_guard_finish_gate_retry",
+        consumer=consumer,
+    )
+    parsed_retry = parse_validator_response(raw_retry)
+    if parsed_retry is not None:
+        return parsed_retry
+    return _resolve_after_unparseable_replies(
+        raw=previous_raw,
+        raw_retry=raw_retry,
+        logger=logger,
     )
 
 
@@ -198,20 +281,23 @@ async def avalidate_final_report_vs_user_intent(
         str(x) for x in (context_user_messages or []) if isinstance(x, str)
     ]
 
+    settings = settings_of(ctx)
     if trace_digest is None:
-        cfg = getattr(ctx, "config_dict", {}) or {}
         trace_digest = build_finish_gate_trace_digest(
             state=state,
-            cfg=cfg if isinstance(cfg, dict) else None,
+            settings=settings,
         )
 
-    ctx_cfg = getattr(ctx, "config_dict", {}) or {}
     guard_prompt_path = (
-        ctx_cfg.get("chat_completions_intent_guard_prompt_path")
-        if isinstance(ctx_cfg, dict)
-        else None
+        settings.paths.chat_completions_intent_guard_prompt_path
     )
-    system_prompt = _load_guard_prompt(guard_prompt_path)
+    system_prompt = await aload_prompt_resource(
+        ctx,
+        PromptResourceRequest("finish_gate", path=guard_prompt_path),
+        local=lambda: _load_guard_prompt(
+            guard_prompt_path, store=agent_store_of(ctx)
+        ),
+    )
     is_subagent = getattr(state, "parent_state_id", None) is not None
     payload = {
         "user_context": user_context,
@@ -236,26 +322,11 @@ async def avalidate_final_report_vs_user_intent(
     parsed = parse_validator_response(raw)
     if parsed is not None:
         return parsed
-
-    logger = getattr(ctx, "logger", None)
-    if logger is not None:
-        logger.warning(
-            "finish_gate first reply unparseable; retrying with JSON-only prompt previous_chars=%s",
-            len(raw or ""),
-        )
-
-    raw_retry = await _arequest_finish_gate_once(
+    return await _aretry_finish_gate_after_unparseable(
         ctx=ctx,
         state=state,
         system_prompt=system_prompt,
-        user_prompt=_build_finish_gate_retry_user_prompt(
-            payload=payload,
-            previous_raw=raw,
-        ),
-        request_label="intent_guard_finish_gate_retry",
+        payload=payload,
+        previous_raw=raw,
         consumer=consumer,
     )
-    parsed_retry = parse_validator_response(raw_retry)
-    if parsed_retry is not None:
-        return parsed_retry
-    return fail_open_validation_result()

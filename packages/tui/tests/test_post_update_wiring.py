@@ -12,6 +12,7 @@ covered separately below for the "no mark_current_run at startup during an
 upgrade" wiring.
 """
 
+from gc_testkit.tui_support import tui_settings
 import sys
 
 import pytest
@@ -44,11 +45,13 @@ async def test_upgrade_info_set_pushes_post_update_screen(
     from gc_tui.screens.main import TraceScreen
 
     cfg = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._config_path = str(tmp_path / "config.yml")
     app._upgrade_info = upgrade_gate.UpgradeInfo(
         old_version="0.3.0", new_version="0.4.0"
@@ -75,11 +78,13 @@ async def test_no_upgrade_info_no_post_update_screen(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._config_path = str(tmp_path / "config.yml")
     # app._upgrade_info stays None (default)
 
@@ -106,31 +111,38 @@ async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     configured = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         cfg_mod,
-        "load_config_ex",
-        lambda p=None, **kw: (
-            dict(configured),
-            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        "load_settings",
+        lambda p=None, **kw: replace(
+            make_settings(configured),
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
-    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
+    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(
         ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t")
     )
 
     unconf = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=unconf)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(unconf)
+    )
     app._onboarding_mode = "auto"
     app._onboarding_config_path = str(tmp_path / "config.yml")
     app._config_path = str(tmp_path / "config.yml")
@@ -165,11 +177,13 @@ async def test_show_post_update_is_idempotent(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._config_path = str(tmp_path / "config.yml")
     app._upgrade_info = upgrade_gate.UpgradeInfo(
         old_version="0.3.0", new_version="0.4.0"
@@ -199,10 +213,20 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict):
 
     from gc_core import config as cfg_mod
 
+    from gc_core.config_modules.profiles import ProfileMeta
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
+
     monkeypatch.setattr(
-        cfg_mod, "load_config", lambda path=None: dict(config_dict)
+        cfg_mod,
+        "load_settings",
+        lambda path=None, **kw: replace(
+            make_settings(config_dict),
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
-    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
+    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(
         cfg_mod, "user_config_path", lambda: tmp_path / "config.yml"
     )
@@ -232,9 +256,9 @@ def test_main_does_not_stamp_when_upgrade_detected(monkeypatch, tmp_path):
     import gc_tui as tui_mod
 
     configured = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     _patch_entry_prereqs(monkeypatch, tmp_path, configured)
 
@@ -282,9 +306,9 @@ def test_main_stamps_when_no_upgrade(monkeypatch, tmp_path):
     import gc_tui as tui_mod
 
     configured = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     _patch_entry_prereqs(monkeypatch, tmp_path, configured)
 

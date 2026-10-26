@@ -11,22 +11,24 @@ Each test drives real code with a jsonl-mode per-run logger from
 
 import json
 import tempfile
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _make_logger(tmp_path, level="debug"):
     cfg = {
-        "logging_format": "jsonl",
-        "log_level": level,
-        "save_logs": True,
-        "console_trace": False,
-        "logs_dump_dir": str(tmp_path),
+        "logging.format": "jsonl",
+        "logging.log_level": level,
+        "logging.save_logs": True,
+        "logging.console_trace": False,
+        "paths.logs_dump_dir": str(tmp_path),
     }
-    logger, path, _ = create_run_logger(cfg, run_id="t", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        make_settings(cfg), run_id="t", agent_kind="main"
+    )
     return logger, path
 
 
@@ -149,23 +151,22 @@ def test_log_path_event_emitted_at_end_of_run(tmp_path):
             async def list_skills(self):
                 return []
 
-        ctx = SimpleNamespace(
-            config_dict={
-                "verbose": False,
-                "model": "CodeChat",
-                "max_steps": 0,
-                "system_prompt_id": "v1",
-                "use_server_subagents": False,
-                "agent_md_path": None,
-                "limit_project_metadata": True,
-                "console_trace": False,
-                "threads_data_path": thread_dir,
-                "agent_url": "http://backend.local/v1/responses",
-                "backend_api_mode": "responses",
-                "use_ssl": True,
-                "use_retry": False,
-                "x_cl_id": 12345,
-                "no_tool_call_max_count": 5,
+        ctx = fake_ctx(
+            {
+                "agent.verbose": False,
+                "agent.model": "CodeChat",
+                "agent.max_steps": 0,
+                "agent.system_prompt_id": "v1",
+                "agent.use_server_subagents": False,
+                "paths.agent_md_path": "",
+                "agent.limit_project_metadata": True,
+                "logging.console_trace": False,
+                "paths.threads_data_path": thread_dir,
+                "backend.api_mode": "responses",
+                "backend.use_ssl": True,
+                "backend.use_retry": False,
+                "agent.x_cl_id": "12345",
+                "agent.no_tool_call_max_count": 5,
             },
             auth_connector=None,
             logger=logger,

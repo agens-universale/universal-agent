@@ -4,6 +4,7 @@
 сообщение) — confirm не отвечался. Инпут на время confirm должен быть НЕ
 способен принимать клавиши (не только blur, но disabled)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -26,7 +27,9 @@ async def test_confirm_y_answers_when_input_was_focused(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.active_runner = _Runner()
 
@@ -64,7 +67,9 @@ async def test_confirm_disables_input_synchronously(tmp_path):
     from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
 
     async with app.run_test() as pilot:

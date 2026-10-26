@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -36,11 +37,13 @@ async def test_refresh_updates_mounted_answer_row(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer",
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -65,7 +68,9 @@ async def test_refresh_noop_when_nothing_mounted(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

@@ -1,4 +1,5 @@
 from gc_core.tools.connect_mcp.agent_tools import _servers_cfg_with_trace
+from gc_testkit.settings import make_settings
 
 
 def _servers():
@@ -48,25 +49,34 @@ def _servers():
 class TestAbsentTrace:
     def test_returns_same_object(self):
         servers = _servers()
-        assert _servers_cfg_with_trace(servers, {}) is servers
+        assert _servers_cfg_with_trace(servers, make_settings({})) is servers
 
     def test_empty_string_returns_same_object(self):
         servers = _servers()
-        assert _servers_cfg_with_trace(servers, {"trace_id": "  "}) is servers
+        assert (
+            _servers_cfg_with_trace(servers, make_settings({"trace_id": "  "}))
+            is servers
+        )
 
 
 class TestPresentTrace:
     def test_http_family_gets_header(self):
-        out = _servers_cfg_with_trace(_servers(), {"trace_id": "wf-42"})
+        out = _servers_cfg_with_trace(
+            _servers(), make_settings({"trace_id": "wf-42"})
+        )
         for name in ("http_srv", "sse_srv", "shttp_srv", "ssse_srv"):
             assert out[name]["headers"]["trace_id"] == "wf-42", name
 
     def test_existing_headers_are_preserved(self):
-        out = _servers_cfg_with_trace(_servers(), {"trace_id": "wf-42"})
+        out = _servers_cfg_with_trace(
+            _servers(), make_settings({"trace_id": "wf-42"})
+        )
         assert out["sse_srv"]["headers"]["X-Keep"] == "1"
 
     def test_stdio_family_gets_env_and_no_header(self):
-        out = _servers_cfg_with_trace(_servers(), {"trace_id": "wf-42"})
+        out = _servers_cfg_with_trace(
+            _servers(), make_settings({"trace_id": "wf-42"})
+        )
         for name in ("stdio_srv", "sstdio_srv"):
             assert out[name]["env"]["TRACE_ID"] == "wf-42", name
             assert "trace_id" not in (out[name].get("headers") or {}), name
@@ -74,7 +84,9 @@ class TestPresentTrace:
 
     def test_server_gets_nothing_without_explicit_opt_in(self):
         """Дефолт — не отправлять: и явный `trace_header_enabled: false`, и отсутствие ключа."""
-        out = _servers_cfg_with_trace(_servers(), {"trace_id": "wf-42"})
+        out = _servers_cfg_with_trace(
+            _servers(), make_settings({"trace_id": "wf-42"})
+        )
         for name in ("opted_out", "no_flag"):
             assert "trace_id" not in (out[name].get("headers") or {}), name
             assert "TRACE_ID" not in (out[name].get("env") or {}), name
@@ -82,14 +94,21 @@ class TestPresentTrace:
     def test_custom_header_name_is_used(self):
         out = _servers_cfg_with_trace(
             _servers(),
-            {"trace_id": "wf-42", "trace_id_header_name": "X-Trace-Id"},
+            make_settings(
+                {
+                    "trace_id": "wf-42",
+                    "agent.trace_id_header_name": "X-Trace-Id",
+                }
+            ),
         )
         assert out["http_srv"]["headers"]["X-Trace-Id"] == "wf-42"
         assert "trace_id" not in out["http_srv"]["headers"]
 
     def test_original_dicts_are_not_mutated(self):
         servers = _servers()
-        out = _servers_cfg_with_trace(servers, {"trace_id": "wf-42"})
+        out = _servers_cfg_with_trace(
+            servers, make_settings({"trace_id": "wf-42"})
+        )
         # Мутация запрещена: в серверном режиме этот словарь общий с
         # процесс-глобальным конфигом, а раны идут в конкурентных потоках.
         assert servers["http_srv"].get("headers") in (None, {})

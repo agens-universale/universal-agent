@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import threading
 import time
 import types
@@ -161,7 +162,9 @@ async def test_cancel_confirm_always_on_reset_even_without_banner():
         cancel_confirm=lambda: cancelled.__setitem__("n", cancelled["n"] + 1),
         is_running=lambda: False,
     )
-    async with TuiApp(config={"model": "M"}).run_test() as pilot:
+    async with TuiApp(
+        settings=tui_settings({"agent.model": "M"})
+    ).run_test() as pilot:
         scr = pilot.app.screen
         pilot.app.active_runner = runner
         scr._confirm_active = False
@@ -182,7 +185,9 @@ def test_tui_without_tui_confirm_denies_not_cli_input(monkeypatch):
 
     # CLI fallback lives in path_policy; confirm_port imports it lazily.
     monkeypatch.setattr(pp, "prompt_user_confirmation_choice", boom)
-    ctx = types.SimpleNamespace(is_tui=True, tui_confirm=None, config_dict={})
+    from gc_testkit.settings import fake_ctx
+
+    ctx = fake_ctx(is_tui=True, tui_confirm=None)
     assert (
         cp.request_confirm(title="t", question="q?", fields=[], ctx=ctx)
         is False
@@ -241,7 +246,9 @@ def test_flush_outputs_before_confirm_blocking_tool(monkeypatch):
             "arguments": "{}",
         },
     ]
-    ctx = type("C", (), {"config_dict": {}, "logger": None})()
+    from gc_testkit.settings import fake_ctx
+
+    ctx = fake_ctx(logger=None)
     outs = run_coro(
         pr.aprocess_tool_calls(
             messages,

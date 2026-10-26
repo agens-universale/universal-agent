@@ -62,7 +62,6 @@ async def test_aapply_tool_awaits_async_tool():
         {"x": "1"},
         _data(_AsyncTool, "t_async"),
         ctx=None,
-        config_dict={},
     )
     assert out == "async:1"
 
@@ -91,7 +90,6 @@ async def test_aapply_tool_rejects_a_tool_without_acall():
             {"x": "1"},
             _data(_NoAcall, "t_sync"),
             ctx=None,
-            config_dict={},
         )
 
 
@@ -115,7 +113,6 @@ async def test_async_tool_exception_becomes_agent_visible_text():
         {"x": "1"},
         _data(_Boom, "t_async"),
         ctx=None,
-        config_dict={},
     )
     assert "тул сломался" in out
     payload = json.loads(out)
@@ -132,7 +129,7 @@ async def test_sync_tool_exception_via_async_dispatch():
             raise RuntimeError("и этот сломался")
 
     out = await aapply_tool(
-        "t_sync", {"x": "1"}, _data(_Boom, "t_sync"), ctx=None, config_dict={}
+        "t_sync", {"x": "1"}, _data(_Boom, "t_sync"), ctx=None
     )
     assert "и этот сломался" in out
 
@@ -144,7 +141,7 @@ async def test_unknown_tool_returns_an_actionable_envelope():
     чем, поэтому проверяется сам конверт.
     """
     data = _data(_SyncTool, "t_sync")
-    out = await aapply_tool("нет_такого", {}, data, ctx=None, config_dict={})
+    out = await aapply_tool("нет_такого", {}, data, ctx=None)
     assert "нет_такого" in out
 
 
@@ -156,7 +153,5 @@ async def test_non_string_result_is_serialized_the_same_way():
             return {"ok": True, "x": x}
 
     data = _data(_Dict, "t_sync")
-    out = await aapply_tool(
-        "t_sync", {"x": "1"}, data, ctx=None, config_dict={}
-    )
+    out = await aapply_tool("t_sync", {"x": "1"}, data, ctx=None)
     assert out == '{"ok": true, "x": "1"}'

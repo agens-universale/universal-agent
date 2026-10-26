@@ -80,11 +80,6 @@ def logo_text() -> Text:
     return t
 
 
-def tagline_display() -> str:
-    """`Universal Agent` → `U N I V E R S A L   A G E N T` (капс + разрядка)."""
-    return "   ".join(" ".join(word) for word in TAGLINE.upper().split())
-
-
 # Разрядка тэглайна (как `.logo-sub` в gc-ua-install.html: airy letter-spacing,
 # заметный gap между словами). Межсловный зазор — двойной от межбуквенного.
 # Оба меняются одним числом.

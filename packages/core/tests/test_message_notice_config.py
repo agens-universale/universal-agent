@@ -1,6 +1,6 @@
 import pytest
 import yaml
-from gc_core.config import load_config
+from gc_core.config import load_settings
 from gc_core.config_modules.message_notice import (
     ToolUsageNoticeRule,
     active_tool_usage_notice_rules,
@@ -9,10 +9,10 @@ from gc_core.config_modules.message_notice import (
 from gc_core.config_modules.project_memory import (
     ProjectMemoryConfig,
     normalize_project_memory_config,
-    project_memory_from_config_dict,
-    project_memory_notice_enabled,
 )
 from gc_core.config_modules.root import AppConfig
+from gc_core.settings import settings_of
+from gc_testkit.settings import make_settings
 from pydantic import ValidationError
 
 
@@ -25,7 +25,7 @@ def test_project_memory_notice_defaults():
 
 def test_normalize_long_memory_notice_rejects_non_positive():
     cfg = ProjectMemoryConfig(check_interval_messages=-1)
-    normalize_project_memory_config(cfg)
+    cfg = normalize_project_memory_config(cfg)
     assert cfg.check_interval_messages == 5
 
 
@@ -65,23 +65,25 @@ def test_app_config_rejects_unknown_keys_in_notice_sections():
 
 
 def test_project_memory_notice_from_config_dict_from_params():
-    cfg = project_memory_from_config_dict(
-        {"project_memory_params": {"check_interval_messages": 3}}
-    )
+    cfg = settings_of(
+        make_settings({"project_memory": {"check_interval_messages": 3}})
+    ).project_memory
     assert cfg.check_interval_messages == 3
 
 
 def test_tool_usage_notice_rules_from_yaml_list():
     rules = tool_usage_notice_rules_from_config_dict(
-        {
-            "tool_usage_notice": [
-                {
-                    "tool_name": "working_memory",
-                    "step_messages_count": 3,
-                    "notice_message": "nudge",
-                }
-            ]
-        }
+        make_settings(
+            {
+                "tool_usage_notice": [
+                    {
+                        "tool_name": "working_memory",
+                        "step_messages_count": 3,
+                        "notice_message": "nudge",
+                    }
+                ]
+            }
+        )
     )
     assert len(rules) == 1
     assert rules[0].tool_name == "working_memory"
@@ -89,21 +91,23 @@ def test_tool_usage_notice_rules_from_yaml_list():
 
 
 def test_tool_usage_notice_rules_empty_without_config():
-    assert tool_usage_notice_rules_from_config_dict({}) == []
+    assert tool_usage_notice_rules_from_config_dict(make_settings()) == []
     assert tool_usage_notice_rules_from_config_dict(None) == []
 
 
 def test_active_tool_usage_notice_rules_respects_stop_tools():
-    cfg = {
-        "tool_usage_notice": [
-            ToolUsageNoticeRule(
-                tool_name="working_memory",
-                step_messages_count=3,
-                notice_message="nudge",
-            )
-        ],
-        "stop_tools": ["working_memory"],
-    }
+    cfg = make_settings(
+        {
+            "tool_usage_notice": [
+                ToolUsageNoticeRule(
+                    tool_name="working_memory",
+                    step_messages_count=3,
+                    notice_message="nudge",
+                )
+            ],
+            "agent.stop_tools": ["working_memory"],
+        }
+    )
     assert active_tool_usage_notice_rules(cfg) == []
 
 
@@ -122,23 +126,30 @@ tool_usage_notice:
 
 
 def test_project_memory_notice_enabled_from_nested_and_flat_config():
-    assert not project_memory_notice_enabled({})
-    assert project_memory_notice_enabled(
-        {"project_memory_params": {"enable_project_memory_notice": True}}
+    def enabled(settings):
+        return settings_of(
+            settings
+        ).project_memory.enable_project_memory_notice
+
+    assert not enabled(make_settings())
+    assert enabled(
+        make_settings(
+            {"project_memory": {"enable_project_memory_notice": True}}
+        )
     )
-    assert project_memory_notice_enabled(
-        {"enable_project_memory_notice": True}
+    assert enabled(
+        make_settings({"project_memory.enable_project_memory_notice": True})
     )
 
 
 def test_normalize_project_memory_limits_rejects_non_positive():
     cfg = ProjectMemoryConfig(max_chars=-1, max_append_chars=0)
-    normalize_project_memory_config(cfg)
+    cfg = normalize_project_memory_config(cfg)
     assert cfg.max_chars == 10_000
     assert cfg.max_append_chars == 3_000
 
 
-def test_load_config_includes_message_notice_keys(tmp_path, monkeypatch):
+def test_load_settings_includes_message_notice_keys(tmp_path, monkeypatch):
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
         """
@@ -160,11 +171,11 @@ project_memory:
         lambda: None,
     )
     monkeypatch.setattr("gc_core.config._xdg_config_path", lambda: None)
-    cfg = load_config(str(cfg_path))
-    assert cfg["project_memory_check_interval_messages"] == 4
-    assert cfg["project_memory_max_chars"] == 10_000
-    assert cfg["project_memory_max_append_chars"] == 3_000
-    assert cfg["enable_project_memory_notice"] is True
-    assert cfg["project_memory_params"]["check_interval_messages"] == 4
-    assert len(cfg["tool_usage_notice_params"]) == 1
-    assert cfg["tool_usage_notice_params"][0]["step_messages_count"] == 25
+    settings = load_settings(str(cfg_path)).settings
+    memory = settings.project_memory
+    assert memory.check_interval_messages == 4
+    assert memory.max_chars == 10_000
+    assert memory.max_append_chars == 3_000
+    assert memory.enable_project_memory_notice is True
+    assert len(settings.tool_usage_notice) == 1
+    assert settings.tool_usage_notice[0].step_messages_count == 25

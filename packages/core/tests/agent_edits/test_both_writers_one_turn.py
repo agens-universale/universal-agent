@@ -71,9 +71,7 @@ async def test_tool_edit_and_shell_edit_land_in_one_journal_one_turn(repo):
     ctx = _ctx(launch_root, threads_dir)
 
     after_tool = b"line1\nline2x\n"
-    tool = WriteToFile(
-        ctx=ctx, config_dict=ctx.config_dict, call_id="call-tool"
-    )
+    tool = WriteToFile(ctx=ctx, call_id="call-tool")
     raw = await tool.acall(path=str(target), content="line1\nline2x\n")
     assert json.loads(raw)["ok"] is True
 

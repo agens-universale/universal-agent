@@ -2,7 +2,7 @@
 и что при этом уцелело у человека.
 
 Одна лестница на обе поверхности (gc-cli и gc-ua): полная загрузка → загрузка
-БЕЗ ПРОФИЛЯ → пакетный шаблон. Проверяется на НАСТОЯЩИХ файлах (load_config_ex
+БЕЗ ПРОФИЛЯ → пакетный шаблон. Проверяется на НАСТОЯЩИХ файлах (load_settings
 не мокается) — раскладка взята со стенда живого смока: рабочие адрес, токен и
 реестр в базе, нерезолвимый слот в профиле.
 """
@@ -54,7 +54,7 @@ def test_healthy_config_lands_on_full_stage_without_message(stand):
 
     assert loaded.stage == onboarding.REPAIR_STAGE_FULL
     assert loaded.message is None
-    assert loaded.config["profile"] == "work"  # профиль остался в силе
+    assert loaded.config.runtime.active_profile == "work"  # профиль в силе
     assert loaded.meta.active_name == "work"
 
 
@@ -76,11 +76,14 @@ def test_broken_profile_only_drops_profile_and_keeps_user_connection(stand):
 
     assert loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
     cfg = loaded.config
-    assert cfg["completions_url"] == _USER_URL
-    assert cfg["completions_url"] != onboarding.URL_SENTINEL
-    assert cfg["chat_completion_headers"]["Authorization"] == _USER_TOKEN
-    assert list(cfg["models"]) == ["fast"]
-    assert cfg["profile"] == ""  # профиль — единственное, что снято
+    backend = cfg.settings.backend
+    assert backend.completions_url == _USER_URL
+    assert backend.completions_url != onboarding.URL_SENTINEL
+    assert backend.chat_completion_headers["Authorization"] == _USER_TOKEN
+    assert list(cfg.settings.models) == ["fast"]
+    assert (
+        cfg.runtime.active_profile == ""
+    )  # профиль — единственное, что снято
     # Человеку сказано, что именно отброшено, а не просто «конфиг не читается».
     assert "work" in loaded.message
 
@@ -128,7 +131,7 @@ def test_pointer_in_managed_layer_is_named_and_no_deactivation_is_promised(
 
     assert loaded.stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE
     assert (
-        loaded.config["completions_url"] == _USER_URL
+        loaded.config.settings.backend.completions_url == _USER_URL
     )  # ступень та же: данные целы
     assert loaded.profile == "work"
     assert loaded.deactivate_profile is False
@@ -182,9 +185,9 @@ def test_pointer_named_by_two_layers_is_deactivated_where_the_write_lands(
     )
 
     assert _load_yaml(project_gc / "config.yml").get("profile") == ""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
-    _config, meta = load_config_ex(None)
+    meta = load_settings(None).profile_meta
     assert meta.active_name in (None, "")
 
 
@@ -324,7 +327,10 @@ def test_broken_base_falls_back_to_template_usable_by_runtime(stand):
     loaded = onboarding.load_config_for_repair()
 
     assert loaded.stage == onboarding.REPAIR_STAGE_TEMPLATE
-    assert loaded.config["completions_url"] == onboarding.URL_SENTINEL
+    assert (
+        loaded.config.settings.backend.completions_url
+        == onboarding.URL_SENTINEL
+    )
 
     from gc_core.thread_store import resolve_threads_dir
 
@@ -387,7 +393,10 @@ def test_broken_base_and_broken_profile_still_lands_on_template(stand):
     loaded = onboarding.load_config_for_repair()
 
     assert loaded.stage == onboarding.REPAIR_STAGE_TEMPLATE
-    assert loaded.config["completions_url"] == onboarding.URL_SENTINEL
+    assert (
+        loaded.config.settings.backend.completions_url
+        == onboarding.URL_SENTINEL
+    )
 
 
 def test_template_stage_with_an_active_pointer_refuses_before_the_questions(
@@ -493,10 +502,10 @@ def test_broken_project_layer_hands_the_caller_the_first_error_not_a_template_di
     with pytest.raises(ValueError, match="slots.max") as info:
         onboarding.load_config_for_repair()
 
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     with pytest.raises(ValueError) as first:
-        load_config_ex(None)
+        load_settings(None)
     assert str(info.value) == str(first.value)
 
 
@@ -562,12 +571,13 @@ def test_wizard_finish_on_without_profile_stage_deactivates_the_profile(stand):
 
     # Главное: следующий старт поднимается. Настоящий загрузчик, не мок — тупик
     # был именно в том, что стек следующего старта не собирался.
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
-    config, meta = load_config_ex(None)
+    config = load_settings(None)
+    meta = config.profile_meta
     assert meta.active_name in (None, "")
     assert onboarding.effective_model(config) == "claude-fable-5"
-    assert config["completions_url"] == _USER_URL
+    assert config.settings.backend.completions_url == _USER_URL
 
 
 def test_wizard_finish_on_a_healthy_config_leaves_the_active_profile_alone(
@@ -593,9 +603,9 @@ def test_wizard_finish_on_a_healthy_config_leaves_the_active_profile_alone(
     )
 
     assert _load_yaml(stand / "config.yml").get("profile") == "work"
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
-    _config, meta = load_config_ex(None)
+    meta = load_settings(None).profile_meta
     assert meta.active_name == "work"
 
 

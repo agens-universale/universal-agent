@@ -1,5 +1,3 @@
-import json
-
 from gc_core.intent_log.user_turn import init_subagent_open_turn
 from gc_core.message_policy.tool_usage_notice.state import (
     META_MEMORY_NOTICE_CNT,
@@ -123,18 +121,6 @@ def test_init_subagent_current_user_intent_resets_tool_usage_notice():
     init_subagent_open_turn(state, "do task")
     assert state.project_memory_content_hash is None
     assert state.tool_usage_notice_cnt == {}
-
-
-def test_state_to_dict_roundtrip_restores_memory_fields():
-    state = _make_state()
-    state.project_memory_content_hash = "hash_x"
-    state.tool_usage_notice_cnt = {"session_memory": 8}
-    from gc_core.persistence.state_serializer import StateSerializer
-
-    payload = StateSerializer.serialize(state)
-    restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
-    assert restored.project_memory_content_hash == "hash_x"
-    assert restored.tool_usage_notice_cnt == {"session_memory": 8}
 
 
 def test_meta_only_long_memory_check_cnt():

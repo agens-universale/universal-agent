@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-from types import SimpleNamespace
 
 from gc_core import processing_responses as pr
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE
@@ -23,6 +22,7 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.states import State
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 from helpers.turn_finish_apply import stub_turn_finish_apply_sync
 
 _LOG = logging.getLogger("test_check_mode_technical_tail")
@@ -285,12 +285,12 @@ def test_run_agent_sends_loop_notice_tail_as_function_call_output(monkeypatch):
         use_server_subagents=False,
     )
     state.backend_api_mode = "chat_completions"
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "console_trace": False,
-            "no_tool_call_max_count": 5,
-            "strict_turn_finish_validation": False,
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "logging.console_trace": False,
+            "agent.no_tool_call_max_count": 5,
+            "agent.strict_turn_finish_validation": False,
         },
         tools_data={"fs_read_file": {LOOP_WARN_KEY: READ_PROFILE}},
         logger=_LOG,

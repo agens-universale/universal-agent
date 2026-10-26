@@ -7,11 +7,12 @@ from gc_core.project_memory.compaction import (
     CompactionResult,
 )
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _make_ctx(backend_mode: str = "chat_completions") -> SimpleNamespace:
-    return SimpleNamespace(
-        config_dict={"backend_api_mode": backend_mode, "model": "test-model"},
+    return fake_ctx(
+        {"backend.api_mode": backend_mode, "agent.model": "test-model"},
         auth_connector=None,
         logger=None,
     )

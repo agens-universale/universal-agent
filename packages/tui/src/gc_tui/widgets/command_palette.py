@@ -32,10 +32,11 @@ def _slider_width(n_values: int) -> int:
 
 
 def _hint_for(cmd: Command | None) -> str:
-    """Хинт обычной (не toggle) строки: есть схема args → Enter подставит команду
-    в поле, иначе — базовый hint. Toggle-строки получают свой hint через
+    """Хинт обычной (не toggle) строки: Enter подставит команду в поле — у
+    команды есть что ввести или выбрать (`Command.runs_on_enter`), иначе —
+    базовый hint. Toggle-строки получают свой hint через
     `CommandPalette._toggle_hint` (значение + подсказка из TOGGLES, спека §6)."""
-    if cmd is not None and cmd.args:
+    if cmd is not None and not cmd.runs_on_enter:
         return _HINT_WITH_ARGS
     return _HINT_NO_ARGS
 
@@ -64,6 +65,7 @@ class CommandPalette(VerticalScroll):
         toggle_extra: Optional[Callable[[str], Any]] = None,
         toggle_custom_hint: Optional[Callable[[str], str]] = None,
         toggle_dynamic_hint: Optional[Callable[[str, str], str]] = None,
+        toggle_values: Optional[Callable[[str], tuple]] = None,
     ) -> None:
         super().__init__(classes="palette")
         self._registry = registry
@@ -75,7 +77,31 @@ class CommandPalette(VerticalScroll):
         # Динамический hint (спека §12.1, /level и /profiles): (name, value) -> текст,
         # заменяет статический `ToggleValue.hint` для тогглов с `hint_provider`.
         self._toggle_dynamic_hint = toggle_dynamic_hint
+        # Динамический состав значений трека (спека автороутинга §3, /level) —
+        # name -> ToggleValue-кортеж; не инъецирован (юнит-тесты без app) →
+        # `_values_for` берёт статический `TOGGLES[name].values`.
+        self._toggle_values = toggle_values
+        # Состав значений тогглов на время ОДНОГО рендера подвала (`_build_footer`):
+        # раскладка и строки спрашивают его много раз, провайдер (/level) должен
+        # отработать один. None — вне рендера, кэша нет.
+        self._values_memo: Optional[dict] = None
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
+
+    def _values_for(self, name: str) -> tuple:
+        """Состав значений трека тоггла `name`: инъецированный `toggle_values`
+        (палитра в проде — `effective_toggle_values(app, name)`) либо
+        статический `TOGGLES[name].values` без него. Внутри рендера подвала —
+        один вызов провайдера на тоггл (`_values_memo`)."""
+        memo = self._values_memo
+        if memo is not None and name in memo:
+            return memo[name]
+        if self._toggle_values is not None:
+            values = self._toggle_values(name)
+        else:
+            values = TOGGLES[name].values
+        if memo is not None:
+            memo[name] = values
+        return values
 
     def _toggle_children(self, name: str) -> list[str]:
         """Дети пресета `name` (спека §4.1): тоггл-имена, чей `dotted` входит в
@@ -181,6 +207,15 @@ class CommandPalette(VerticalScroll):
         источник, что и `_footer_reserved_height`). Возвращает (контейнер для
         монтирования, выделенная toggle-строка или None) — второе нужно _rebuild для
         scroll_visible (children контейнера пусты до реального mount)."""
+        self._values_memo = {}
+        try:
+            return self._build_footer_rows(offset)
+        finally:
+            self._values_memo = None
+
+    def _build_footer_rows(
+        self, offset: int
+    ) -> tuple[Vertical, Optional[Static]]:
         toggles = self._visible_toggle_rows()
         children: list = []
         selected_row: Optional[Static] = None
@@ -317,19 +352,30 @@ class CommandPalette(VerticalScroll):
         return head + " " * (col - len(cmd.description)) + cmd.hotkey
 
     def _my_base_w(self, name: str) -> int:
-        """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва).
-        `show_track=False` (спека §12.1, /profiles — trackless) → 0: нет трека,
-        нечего резервировать."""
+        """Собственная ширина БАЗОВОГО трека тоггла `name` (без extra-резерва),
+        по числу ON-SCALE значений ДЕЙСТВУЮЩЕГО состава (`_values_for` — статика
+        или `values_provider`, спека автороутинга §3). `show_track=False`
+        (спека §12.1, /profiles — trackless) → 0: нет трека, нечего
+        резервировать."""
         spec = TOGGLES[name]
         if not spec.show_track:
             return 0
-        return _slider_width(len(spec.values))
+        on_scale = sum(1 for v in self._values_for(name) if not v.off_scale)
+        return _slider_width(on_scale)
 
     def _my_extra_w(self, name: str) -> int:
-        """Собственная ширина extra-зоны тоггла `name`: 0 — extra не
-        задействован (`toggle_extra` не инъецирован или вернул `None`, обычный
-        single-key тоггл); иначе фиксированные 3 ячейки (двойной пробел +
-        глиф custom-резерва, спека §6)."""
+        """Собственная ширина extra-зоны тоггла `name`: тогглы с вне-шкальными
+        значениями действующего состава (спека автороутинга §3, /level —
+        `auto`) резервируют `2 + 2*k - 1` ячеек (двойной пробел + k глифов,
+        разделённых пробелом; k=1 → 3); иначе — 0, если `toggle_extra` не
+        задействован (`None`, обычный single-key тоггл), 3 — custom-резерв
+        /rigor (спека §6). `show_track=False` (/profiles) → 0 сразу, как у
+        `_my_base_w`: провайдер значений trackless-тоггла раскладке не нужен."""
+        if not TOGGLES[name].show_track:
+            return 0
+        off_scale = sum(1 for v in self._values_for(name) if v.off_scale)
+        if off_scale:
+            return 2 + 2 * off_scale - 1
         extra = (
             self._toggle_extra(name)
             if self._toggle_extra is not None
@@ -407,7 +453,7 @@ class CommandPalette(VerticalScroll):
             text = Text(head.ljust(col))
             text.append(value_text)
             if is_child:
-                text.stylize(_pal.DIM)
+                text.stylize(_pal.SUB_INK)
             return text
 
         track_w = base_w + extra_w
@@ -434,22 +480,28 @@ class CommandPalette(VerticalScroll):
 
         text = Text(head.ljust(col))
         if is_child:
-            text.stylize(_pal.DIM, 0, len(head))
+            text.stylize(_pal.SUB_INK, 0, len(head))
         extra = (
             self._toggle_extra(cmd.name)
             if self._toggle_extra is not None
             else None
         )
+        values = self._values_for(cmd.name)
         text.append_text(
             padded_track(
-                spec, current, extra_lit=extra, base_w=base_w, extra_w=extra_w
+                spec,
+                current,
+                extra_lit=extra,
+                base_w=base_w,
+                extra_w=extra_w,
+                values=values,
             )
         )
         text.append("  ")
         value_start = len(text)
         text.append(current)
         if is_child:
-            text.stylize(_pal.DIM, value_start, len(text))
+            text.stylize(_pal.SUB_INK, value_start, len(text))
         return text
 
     def _visible_rows(self) -> list[Command]:

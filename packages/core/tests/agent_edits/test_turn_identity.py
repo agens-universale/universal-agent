@@ -15,6 +15,7 @@ import gc_core.agent_executor as agent_executor_module
 from gc_core.agent_edits.journal import EditsJournal
 from gc_core.config_modules import env_vars
 from gc_core.run_context import acreate_run_context
+from gc_testkit.settings import make_settings
 from gc_core.thread_store import edits_journal_path
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
 from gc_core.tools.subagents.sidecar import (
@@ -59,22 +60,24 @@ def _prompt_file(tmp_path):
 
 def _config(tmp_path):
     return {
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "threads_data_path": str(tmp_path / "threads"),
-        "save_logs": True,
-        "logging_format": "jsonl",
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "paths.threads_data_path": str(tmp_path / "threads"),
+        "logging.save_logs": True,
+        "logging.format": "jsonl",
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
         "launch_root": str(tmp_path),
         "run_mode": "cli",
         "agent_edits": {"record": {"cli": True}},
-        "max_steps": 0,
-        "system_prompt_id": "v1",
-        "chat_completions_system_prompt_path": str(_prompt_file(tmp_path)),
-        "no_tool_call_max_count": 5,
-        "verbose": False,
+        "agent.max_steps": 0,
+        "agent.system_prompt_id": "v1",
+        "paths.chat_completions_system_prompt_path": str(
+            _prompt_file(tmp_path)
+        ),
+        "agent.no_tool_call_max_count": 5,
+        "agent.verbose": False,
     }
 
 
@@ -83,7 +86,7 @@ class TestAgentExecutorBindsFreshTurnIdPerRun:
     тот же executor — как в TUI, где RunContext кэшируется на всю сессию)."""
 
     async def test_each_run_gets_fresh_turn_id_without_thread(self, tmp_path):
-        ctx = await acreate_run_context(_config(tmp_path))
+        ctx = await acreate_run_context(make_settings(_config(tmp_path)))
         seen = []
 
         async def _fake_run_agent(messages, state, _ctx, **_kwargs):
@@ -105,7 +108,7 @@ class TestAgentExecutorBindsFreshTurnIdPerRun:
     async def test_each_run_gets_fresh_turn_id_with_same_thread(
         self, tmp_path
     ):
-        ctx = await acreate_run_context(_config(tmp_path))
+        ctx = await acreate_run_context(make_settings(_config(tmp_path)))
         seen = []
 
         async def _fake_run_agent(messages, state, _ctx, **_kwargs):
@@ -148,21 +151,22 @@ def _subagent_parent_ctx(tmp_path, monkeypatch, *, turn_id: str | None):
     threads_dir.mkdir()
 
     cfg = {
-        "save_logs": True,
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "m",
-        "system_prompt_id": "p",
+        "logging.save_logs": True,
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "m",
+        "agent.system_prompt_id": "p",
         "launch_root": str(launch_root),
-        "chat_completions_params": {
-            "llm": {"max_tokens": 128, "completion_kwargs": {}}
+        "chat_completions.auxiliary_llm": {
+            "max_tokens": 128,
+            "completion_kwargs": {},
         },
     }
     parent = local_ctx(cfg)
+    # Настройки субагент берёт из контекста родителя (settings/runtime).
+    cfg = parent
     # Режим с записью правок: дочерний ctx субагента наследует его от родителя.
     parent.is_tui = True
     parent.run_id = "p1"
@@ -226,9 +230,7 @@ class TestSubagentEditsCarryParentTurnId:
         child = await _child_ctx(parent, cfg)
         target = launch_root / "child.py"
 
-        tool = WriteToFile(
-            ctx=child, config_dict=child.config_dict, call_id="call-child"
-        )
+        tool = WriteToFile(ctx=child, call_id="call-child")
         raw = await tool.acall(path=str(target), content="hello\n")
         assert json.loads(raw)["ok"] is True
 
@@ -267,7 +269,7 @@ class TestUserResetPurgesThreadSnapshots:
         return store
 
     async def _run(self, tmp_path, **kwargs):
-        ctx = await acreate_run_context(_config(tmp_path))
+        ctx = await acreate_run_context(make_settings(_config(tmp_path)))
 
         async def _fake_run_agent(messages, state, _ctx, **_kwargs):
             state.messages += list(messages)
@@ -292,3 +294,21 @@ class TestUserResetPurgesThreadSnapshots:
         await self._run(tmp_path, thread_id="thr-keep")
 
         assert store.session_baseline("a.py") == b"old"
+
+
+def test_mint_turn_id_takes_the_supplied_id_in_durable_execution():
+    """В workflow id хода выдаёт среда исполнения: ``uuid4`` там запрещён песочницей
+    Temporal, а повтор истории обязан дать тот же id."""
+    from gc_core.execution.environment import execution_environment
+
+    seen = []
+
+    def new_id(prefix):
+        seen.append(prefix)
+        return f"{prefix}_" + "ab" * 32
+
+    with patch("uuid.uuid4", side_effect=AssertionError("uuid4 in workflow")):
+        with execution_environment(new_id=new_id, now=lambda: None):
+            turn_id = mint_turn_id()
+    assert seen == ["turn"]
+    assert turn_id == "ab" * 6

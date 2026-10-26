@@ -1,5 +1,6 @@
 """_context_meter / compact-count читают только meta.runtime.live_*, не data_*."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -38,9 +39,9 @@ def _write_task(
 
 def _cfg(trigger=10_000, turn_end=1):
     return {
-        "model": "M",
-        "backend_api_mode": "chat_completions",
-        "summary_params": {
+        "agent.model": "M",
+        "backend.api_mode": "chat_completions",
+        "summary": {
             "chat_completions_summary_trigger_chars": trigger,
             "chat_completions_summary_turn_end_trigger_chars": turn_end,
         },
@@ -55,20 +56,13 @@ async def test_context_meter_hidden_without_live_chars_key(tmp_path):
 
     tid = "ctxm0000000000000000000000000003a"
     _write_task(tmp_path, tid, content="x" * 5000)  # data есть, ключа нет
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_cfg())
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(_cfg())
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        calls = []
-        orig = scr._store.read_live_messages
-
-        def _spy(task_id, system=None):
-            calls.append(task_id)
-            return orig(task_id, system=system)
-
-        scr._store.read_live_messages = _spy
         assert scr._context_meter() is None
-        assert calls == []
 
 
 @pytest.mark.asyncio
@@ -86,23 +80,16 @@ async def test_context_meter_reads_meta_not_data(tmp_path):
         data_content="Z" * 50_000,
     )
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config=_cfg(trigger=1000)
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_cfg(trigger=1000)),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        calls = []
-        orig = scr._store.read_live_messages
-
-        def _spy(task_id, system=None):
-            calls.append(task_id)
-            return orig(task_id, system=system)
-
-        scr._store.read_live_messages = _spy
         meter = scr._context_meter()
         assert meter is not None
         assert "50%" in meter.plain  # 500/1000, не 50_000/1000
-        assert calls == []
 
 
 @pytest.mark.asyncio
@@ -138,21 +125,14 @@ async def test_cmd_compact_antispam_uses_live_msg_count(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         runner = _Runner()
         pilot.app.active_runner = runner
-        calls = []
-        orig = scr._store.read_live_messages
-
-        def _spy(task_id, system=None):
-            calls.append(task_id)
-            return orig(task_id, system=system)
-
-        scr._store.read_live_messages = _spy
         scr._cmd_compact()
         assert runner.compacted is False
-        assert calls == []

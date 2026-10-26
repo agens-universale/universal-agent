@@ -31,7 +31,7 @@ def _tool(tmp_path, extra=None):
     cfg = {"launch_root": str(tmp_path)}
     if extra:
         cfg["fs_tools"] = {"find_in_files": extra}
-    return with_local_ctx(FindInFiles, config_dict=cfg)
+    return with_local_ctx(FindInFiles, cfg)
 
 
 def _call_tool(tmp_path, extra=None, **kwargs):
@@ -431,9 +431,7 @@ async def test_single_file_grep_recipe(tmp_path, monkeypatch):
 def test_native_finds_ascii_needle_in_a_cp1251_file(tmp_path):
     """В UTF-8-локали grep считал cp1251-файл бинарным и молча пропускал — ответ объявлялся полным."""
     (tmp_path / "legacy.txt").write_bytes("needle привет\n".encode("cp1251"))
-    tool = with_local_ctx(
-        FindInFiles, config_dict={"launch_root": str(tmp_path)}
-    )
+    tool = with_local_ctx(FindInFiles, {"launch_root": str(tmp_path)})
 
     data = json.loads(
         tool(path=str(tmp_path), pattern="needle", query_mode="text")

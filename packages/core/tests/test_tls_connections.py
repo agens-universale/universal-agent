@@ -160,18 +160,18 @@ async def test_custom_ca_keeps_chain_and_hostname_verification(
 
 
 def test_sync_probe_accepts_configured_ca(tls_files):
-    from gc_core.model_picker import _requests_get_ex, _urllib_get_ex
+    from gc_core.model_picker import _requests_get_ex
 
     with https_server(tls_files) as url:
-        for get in (_requests_get_ex, _urllib_get_ex):
-            assert get(url, {}, str(tls_files / "trusted.pem")).status == 200
-            rejected = get(
-                url.replace("localhost", "127.0.0.1"),
-                {},
-                str(tls_files / "trusted.pem"),
-            )
-            assert rejected.status is None
-            assert "CERTIFICATE_VERIFY_FAILED" in rejected.network_error
+        get = _requests_get_ex
+        assert get(url, {}, str(tls_files / "trusted.pem")).status == 200
+        rejected = get(
+            url.replace("localhost", "127.0.0.1"),
+            {},
+            str(tls_files / "trusted.pem"),
+        )
+        assert rejected.status is None
+        assert "CERTIFICATE_VERIFY_FAILED" in rejected.network_error
 
 
 def test_ca_paths_expand_without_disabling_verification(

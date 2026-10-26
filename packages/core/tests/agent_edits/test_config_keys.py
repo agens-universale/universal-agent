@@ -37,8 +37,10 @@ def test_snapshots_max_files_default_and_compat():
     assert any("cache_max_orig" in f for f in facts)
 
 
-def test_flatten_exposes_agent_edits_new_keys_from_yaml(tmp_path, monkeypatch):
-    """Значения из config.yml доходят до config_dict['agent_edits']."""
+def test_load_settings_exposes_agent_edits_keys_from_yaml(
+    tmp_path, monkeypatch
+):
+    """Значения из config.yml доходят до настроек `agent_edits`."""
     import gc_core.config as cfgmod
     import gc_core.config_modules.env_vars as env_vars
 
@@ -58,7 +60,7 @@ def test_flatten_exposes_agent_edits_new_keys_from_yaml(tmp_path, monkeypatch):
         "  shell_tracking: false\n",
         encoding="utf-8",
     )
-    cfg = cfgmod.load_config(str(conf))
-    assert cfg["agent_edits"]["hunk_context_lines"] == 7
-    assert cfg["agent_edits"]["max_diff_source_bytes"] == 12345
-    assert cfg["agent_edits"]["shell_tracking"] is False
+    section = cfgmod.load_settings(str(conf)).settings.agent_edits
+    assert section.hunk_context_lines == 7
+    assert section.max_diff_source_bytes == 12345
+    assert section.shell_tracking is False

@@ -32,11 +32,15 @@ _CANARY_TOKEN = "Bearer gc-probe-invalid-token"
 _CANARY_NAKED = "gc-probe-invalid-token"
 
 
-def accepted_literal_auth(source: str | None, accepted: str | None) -> str | None:
+def accepted_literal_auth(
+    source: str | None, accepted: str | None
+) -> str | None:
     """Принятая форма для черновика; ссылки на секреты не раскрываются и не заменяются."""
     if not source or "${ENV:" in source or "${FILE:" in source:
         return None
-    if accepted == source.strip() or accepted not in authorization_attempts(source):
+    if accepted == source.strip() or accepted not in authorization_attempts(
+        source
+    ):
         return None
     return accepted
 
@@ -82,14 +86,6 @@ class ProbeResult:
     # None — токен не принимали / auth не интерпретировался. Только результат пробы;
     # исходный источник токена в форме и конфиге не меняется.
     accepted_auth: Optional[str] = None
-
-    @property
-    def reachable(self) -> bool:
-        return self.verdict != "unknown"
-
-    @property
-    def auth_ok(self) -> bool:
-        return self.http_status != 401
 
 
 def probe(

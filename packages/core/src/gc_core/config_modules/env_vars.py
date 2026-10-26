@@ -83,7 +83,7 @@ class EnvVars(BaseSettings):
     server_config_path: Path | None = None
 
     # Legacy SWARM_* — backward-compat для серверного режима, переопределяют
-    # paths.* в config_dict через apply_swarm_env_overrides (config_modules/common.py).
+    # paths.* слоем "env" при загрузке (config_modules/common.swarm_env_updates).
     swarm_agentmd_path: Path | None = None
     swarm_threads_dir: Path | None = None
     swarm_skills_dir: Path | None = None

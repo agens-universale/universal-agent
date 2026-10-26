@@ -143,3 +143,5 @@ snapshot_report.html
 *.stackdump
 # отчёты синхронизации — рабочие записи, не часть поставки
 docs/sync/
+# пробы записи mini_cli, которые тесты оставляют в корне
+.mini_cli_write_probe_*.tmp

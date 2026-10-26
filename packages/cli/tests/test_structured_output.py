@@ -19,6 +19,7 @@ from gc_core.config_modules.chat_completions import (
 )
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 from gc_core.usage.context import record_usage
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _parse(argv, monkeypatch):
@@ -65,6 +66,9 @@ class _Logger:
 
 class _Ctx:
     def __init__(self):
+        loaded = make_settings()
+        self.settings = loaded.settings
+        self.runtime = loaded.runtime
         self.auxiliary_llm = _Aux()
         self.logger = _Logger()
 
@@ -141,7 +145,7 @@ async def test_rephrase_sends_format_and_fields(monkeypatch):
         return SimpleNamespace(text="  ## Итог\n4\n", finish_reason="stop")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_chat_completion_outcome",
+        "gc_core.structured_output.arequest_chat_completion_outcome",
         _fake,
     )
     text = await arephrase_turn_outcome(
@@ -185,7 +189,7 @@ async def test_rephrase_refuses_aborted_run_and_accepts_prose(monkeypatch):
         return "ok", "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _fake,
     )
     text = await arephrase_turn_outcome(
@@ -208,7 +212,7 @@ async def test_rephrase_uses_default_max_tokens_when_unset(monkeypatch):
         return "ok", None
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _fake,
     )
     ctx = _Ctx()
@@ -230,7 +234,7 @@ async def test_rephrase_empty_answer_is_an_error(monkeypatch):
         return "  \n", "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _empty,
     )
     with pytest.raises(StructuredOutputError, match="пустой ответ"):
@@ -260,7 +264,7 @@ async def test_rephrase_unfinished_reason_is_an_error(
         return '{"result": "answer', finish_reason
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _cut,
     )
     with pytest.raises(StructuredOutputError, match=match):
@@ -284,7 +288,7 @@ async def test_rephrase_keeps_text_when_reason_does_not_block(
         return "форма", finish_reason
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _done,
     )
     text = await arephrase_turn_outcome(
@@ -303,7 +307,7 @@ async def test_rephrase_transport_error_stays_structured(monkeypatch):
         raise RuntimeError("backend down")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _boom,
     )
     with pytest.raises(StructuredOutputError, match="backend down"):
@@ -318,26 +322,26 @@ async def test_rephrase_transport_error_stays_structured(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "config_dict",
+    "config",
     [
-        {"logging_format": "text", "console_trace": True},
-        {"logging_format": "jsonl", "console_trace": False},
+        {"logging.format": "text", "logging.console_trace": True},
+        {"logging.format": "jsonl", "logging.console_trace": False},
     ],
 )
 async def test_emit_prints_text_when_stdout_is_not_jsonl(
-    monkeypatch, capsys, config_dict
+    monkeypatch, capsys, config
 ):
     async def _ok(**_kwargs):
         return '{"n": 4}', "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _ok,
     )
     ctx = _Ctx()
     code = await aemit_structured_result(
         response=_finish(),
-        config_dict=config_dict,
+        settings=make_settings(config),
         ctx=ctx,
         state=object(),
         terminal_outcome=None,
@@ -360,13 +364,15 @@ async def test_emit_jsonl_stream_keeps_stdout_free_of_raw_text(
         return '{"n": 4}', "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _ok,
     )
     ctx = _Ctx()
     code = await aemit_structured_result(
         response=_finish(),
-        config_dict={"logging_format": "jsonl", "console_trace": True},
+        settings=make_settings(
+            {"logging.format": "jsonl", "logging.console_trace": True}
+        ),
         ctx=ctx,
         state=object(),
         terminal_outcome=None,
@@ -385,7 +391,7 @@ async def test_emit_failure_leaves_stdout_empty(capsys):
     ctx = _Ctx()
     code = await aemit_structured_result(
         response="не итог",
-        config_dict={"logging_format": "text"},
+        settings=make_settings({"logging.format": "text"}),
         ctx=ctx,
         state=object(),
         terminal_outcome="tool_errors",
@@ -417,14 +423,14 @@ async def test_emit_failure_logs_raw_answer_then_rephrase_error(
         raise RuntimeError("backend down")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _boom,
     )
     ctx = _Ctx()
     raw = _finish()
     code = await aemit_structured_result(
         response=raw,
-        config_dict={"logging_format": "text"},
+        settings=make_settings({"logging.format": "text"}),
         ctx=ctx,
         state=object(),
         terminal_outcome=None,
@@ -487,13 +493,13 @@ def _executor_with_open_accounting():
         stop_requested=False,
     )
     logger = _RunLogger()
-    ctx = SimpleNamespace(
-        config_dict={
-            "console_trace": True,
-            "logging_format": "text",
-            "model": "m",
-            "completions_url": "http://llm/v1/chat/completions",
-            "backend_request_timeout_sec": 30,
+    ctx = fake_ctx(
+        {
+            "logging.console_trace": True,
+            "logging.format": "text",
+            "agent.model": "m",
+            "backend.completions_url": "http://llm/v1/chat/completions",
+            "backend.request_timeout_sec": 30,
         },
         logger=logger,
         auxiliary_llm=_Aux(),
@@ -532,7 +538,7 @@ async def test_rephrase_tokens_are_in_the_snapshot_taken_after_it(
     executor = _executor_with_open_accounting()
     code = await aemit_structured_result(
         response=_finish(),
-        config_dict=executor._ctx.config_dict,
+        settings=executor._ctx,
         ctx=executor._ctx,
         state=executor.get_state(),
         terminal_outcome=None,
@@ -591,7 +597,7 @@ async def test_truncated_rephrase_is_not_printed(monkeypatch, capsys):
     raw = _finish()
     code = await aemit_structured_result(
         response=raw,
-        config_dict=executor._ctx.config_dict,
+        settings=executor._ctx,
         ctx=executor._ctx,
         state=executor.get_state(),
         terminal_outcome=None,
@@ -672,8 +678,10 @@ async def test_meta_write_error_still_shuts_down_mcp(monkeypatch, tmp_path):
             structured_output_format=str(fmt),
         ),
     )
-    monkeypatch.setattr(cli, "load_config_ex", lambda *_a, **_k: ({}, None))
-    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        cli, "load_settings", lambda *_a, **_k: make_settings()
+    )
+    monkeypatch.setattr(cli, "apply_cli_overrides", lambda d, **_kw: d)
     monkeypatch.setattr(
         "gc_core.upgrade_gate.detect_upgrade", lambda *_a, **_k: None
     )

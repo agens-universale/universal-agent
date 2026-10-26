@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -289,7 +290,9 @@ async def test_replay_renders_ask_human_dialog(tmp_path):
     ]
     threads_dir = _write_thread(tmp_path, thread_id=thread_id, records=records)
 
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)
@@ -321,7 +324,9 @@ async def test_replay_empty_response_shows_meta_and_unmounts_banner(tmp_path):
     ]
     threads_dir = _write_thread(tmp_path, thread_id=thread_id, records=records)
 
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)
@@ -345,7 +350,9 @@ async def test_live_submit_mounts_pending_user_reply(tmp_path):
     """В live-ask_human submit Enter-ом монтирует pending user-реплику,
     сразу снимает баннер и показывает thinking-индикатор."""
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings({}),
     )
     async with app.run_test() as pilot:
         screen = app.screen
@@ -413,7 +420,9 @@ async def test_live_function_call_output_confirms_pending(tmp_path):
     response-текстом) → pending переводится в normal через _pending_wire_match,
     дубля user-реплики нет, banner снят."""
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings({}),
     )
     async with app.run_test() as pilot:
         screen = app.screen

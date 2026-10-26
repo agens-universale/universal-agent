@@ -18,6 +18,7 @@ from gc_core import processing_responses as pr
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, READ_PROFILE
 from gc_core.states import State
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 from helpers.turn_finish_apply import stub_turn_finish_apply_sync
 
 _FINISH = {
@@ -66,12 +67,12 @@ def _state() -> State:
 
 
 def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "console_trace": False,
-            "no_tool_call_max_count": 5,
-            "strict_turn_finish_validation": False,
+    return fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "logging.console_trace": False,
+            "agent.no_tool_call_max_count": 5,
+            "agent.strict_turn_finish_validation": False,
         },
         tools_data={"fs_read_file": {LOOP_WARN_KEY: READ_PROFILE}},
         logger=logging.getLogger("test_pending_mid_run_batch"),

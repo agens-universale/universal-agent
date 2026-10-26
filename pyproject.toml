@@ -5,21 +5,23 @@ build-backend = "hatchling.build"
 [project]
 name = "gc-ua"
 
-version = "0.4.0"
+version = "0.5.0"
 description = "GigaCode Universal Agent — полный агент (ядро + CLI + TUI + server)"
 readme = "readme.md"
 requires-python = ">=3.11"
 dependencies = [
-    "gc-core==0.4.0",
-    "gc-cli==0.4.0",
-    "gc-tui==0.4.0",
-    "gc-server==0.4.0",
-    "gc-mcp==0.4.0",
-    "gc-acp==0.4.0",
-    "gc-chat==0.4.0",
+    "gc-core==0.5.0",
+    "gc-cli==0.5.0",
+    "gc-tui==0.5.0",
+    "gc-server==0.5.0",
+    "gc-mcp==0.5.0",
+    "gc-acp==0.5.0",
+    "gc-chat==0.5.0",
+    "gc-a2a==0.5.0",
 ]
 
 [project.optional-dependencies]
+temporal = ["gc-core-temporalio==0.5.0"]
 
 all = []
 
@@ -32,6 +34,7 @@ gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 gc-voice = "gc_tui.voice_runtime.cli:main"
 gc-acp = "gc_acp.main:main"
 gc-chat = "gc_chat.main:main"
+gc-a2a = "gc_a2a.main:main"
 
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
@@ -58,6 +61,7 @@ lint = [
 test = [
 
     "gc-testkit",
+    "gc-core-temporalio==0.5.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",
@@ -91,8 +95,10 @@ gc-server = { workspace = true }
 gc-mcp = { workspace = true }
 gc-acp = { workspace = true }
 gc-chat = { workspace = true }
+gc-a2a = { workspace = true }
 
 gc-testkit = { workspace = true }
+gc-core-temporalio = { workspace = true }
 office-mcp = { path = "packages/mcp/external/vendor/office-mcp", editable = true }
 
 [tool.pytest.ini_options]
@@ -105,8 +111,10 @@ testpaths = [
     "packages/cli/tests",
     "packages/server/tests",
     "packages/tui/tests",
+    "packages/temporalio/tests",
     "packages/acp/tests",
     "packages/chat/tests",
+    "packages/a2a/tests",
 ]
 asyncio_mode = "auto"
 
@@ -188,6 +196,7 @@ paths = [
     "packages/core/src",
     "packages/mcp/src",
     "packages/server/src",
+    "packages/temporalio/src",
     "packages/acp/src",
     "packages/chat/src",
     "packages/core/assets/skills",

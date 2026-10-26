@@ -23,9 +23,12 @@ _supervisor: Any = None
 
 
 def ensure_mcp_daemons(
-    config_dict: dict[str, Any], *, disable_hint: str | None = None
+    settings: Any, *, disable_hint: str | None = None
 ) -> None:
     """Поднять недостающие MCP-daemon'ы перед запуском агента.
+
+    ``settings`` — настройки агента: всё, что принимает ``settings_of``
+    (контекст, ``LoadedSettings``, ``AppConfig``).
 
     Сбой автозапуска НЕ мешает фронтенду подняться. Автозапуск — удобство:
     агент работает и без него, со встроенными инструментами и с теми серверами,
@@ -55,7 +58,7 @@ def ensure_mcp_daemons(
 
     kwargs = {} if disable_hint is None else {"disable_hint": disable_hint}
     try:
-        _supervisor = ensure_daemons_for_agent(config_dict, **kwargs)
+        _supervisor = ensure_daemons_for_agent(settings, **kwargs)
     except Exception as exc:  # сознательно широко, см. докстринг
         _supervisor = None
         from recommended_mcp.autostart import _warn

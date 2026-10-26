@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 from gc_core.model_router import ModelRouter
@@ -5,26 +7,41 @@ from gc_core.vision import probe
 from gc_core.vision.eyes import adescribe_image
 from gc_core.vision.probe import make_challenge
 from gc_core.vision.service import VisionNotConfirmed
+from gc_testkit.settings import make_settings
 from test_image_rejection_retry import OK, _cfg, _ctx, _state, _user_with_image
 from test_vision_probe_flow import pngs
 from transport_fakes import install_transport
 
 
-def eyes_config(mode="responses"):
+def eyes_config(
+    mode="responses", *, tokens=True, eyes_target="eyes", main_backend=None
+):
+    """Две модели реестра: основная и «глаза» со своим доступом.
+
+    ``tokens=False`` — без своего адреса и токена: запись работает через общее
+    подключение и наследует авторизацию ``auth_connector`` (свой адрес без
+    токена схема не пропускает)."""
+
+    def access(host, token):
+        # Форма с ``Bearer`` — как в develop: проба шлёт её первой как есть.
+        return (
+            {"url": f"http://{host}/chat", "token": f"Bearer {token}"}
+            if tokens
+            else {}
+        )
+
+    main = {"model": "main-model", **access("main.test", "main-token")}
+    if main_backend is not None:
+        main["backend"] = main_backend
     return _cfg(
-        backend_api_mode=mode,
+        **{"backend.api_mode": mode},
         models={
-            "main": {
-                "model": "main-model",
-                "url": "http://main.test/chat",
-                "authorization_header": "Bearer main-token",
-            },
+            "main": main,
             "eyes": {
                 "model": "eyes-model",
-                "url": "http://eyes.test/chat",
-                "authorization_header": "Bearer eyes-token",
-                "backend_overrides": {
-                    "chat_completion_headers": {"x-target": "eyes"}
+                **access("eyes.test", "eyes-token"),
+                "backend": {
+                    "chat_completion_headers": {"x-target": eyes_target}
                 },
             },
         },
@@ -127,14 +144,9 @@ async def test_changed_eyes_access_restores_tool_without_probing_text_request(
 
     challenge = make_challenge(retry=False)
     monkeypatch.setattr(probe, "make_challenge", lambda **kwargs: challenge)
-    cfg = eyes_config(mode)
-    cfg["agent_url"] = "http://main.test/responses"
-    for model in cfg["models"].values():
-        model.pop("authorization_header")
-    cfg["models"]["main"]["backend_overrides"] = {"vision": False}
-    cfg["models"]["eyes"]["backend_overrides"]["chat_completion_headers"] = {
-        "x-target": "old"
-    }
+    cfg = eyes_config(
+        mode, tokens=False, eyes_target="old", main_backend={"vision": False}
+    )
 
     class Auth:
         token = "old-token"
@@ -147,7 +159,9 @@ async def test_changed_eyes_access_restores_tool_without_probing_text_request(
     auth = Auth()
 
     def handler(request):
-        if request.url.host == "eyes.test":
+        # Без своих адресов обе модели идут на общий адрес — «глаза» узнаются
+        # по id модели в теле запроса.
+        if json.loads(request.content).get("model") == "eyes-model":
             access = (
                 request.headers["Authorization"]
                 if change == "token"
@@ -179,15 +193,22 @@ async def test_changed_eyes_access_restores_tool_without_probing_text_request(
     if change == "token":
         auth.token = "new-token"
     else:
-        cfg["models"]["eyes"]["backend_overrides"][
-            "chat_completion_headers"
-        ] = {"x-target": "new"}
-        ctx.model_router = ModelRouter(cfg, level_provider=lambda: "default")
+        cfg = eyes_config(
+            mode,
+            tokens=False,
+            eyes_target="new",
+            main_backend={"vision": False},
+        )
+        ctx.model_router = ModelRouter(
+            make_settings(cfg), level_provider=lambda: "default"
+        )
     begin_turn(st, ctx)
     await pr._arequest_backend_canonical([message], st, ctx)
     assert st.vision_audience.tool_visible
     assert b"fs_view_image" in spy.requests[-1].content
-    assert len(spy.requests) == 3  # Two rejected auth forms, then the text request.
+    assert (
+        len(spy.requests) == 3
+    )  # Two rejected auth forms, then the text request.
     assert (
         auth.calls == 2
     )  # Main and candidate key share one auth acquisition.

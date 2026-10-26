@@ -12,25 +12,30 @@ from unittest.mock import patch
 
 from gc_core import agent_executor as agent_executor_module
 from gc_core.run_context import acreate_run_context
+from gc_testkit.settings import make_settings
 
 
 def _config(tmp_path, log_format):
-    return {
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "threads_data_path": str(tmp_path / "threads"),
-        "save_logs": True,
-        "logging_format": log_format,
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
-        "launch_root": str(tmp_path),
-        "max_steps": 0,
-        "system_prompt_id": "v1",
-        "chat_completions_system_prompt_path": str(_prompt_file(tmp_path)),
-        "no_tool_call_max_count": 5,
-        "verbose": False,
-    }
+    return make_settings(
+        {
+            "paths.logs_dump_dir": str(tmp_path / "logs"),
+            "paths.threads_data_path": str(tmp_path / "threads"),
+            "logging.save_logs": True,
+            "logging.format": log_format,
+            "logging.console_trace": False,
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://localhost:1/v1/chat/completions",
+            "agent.model": "test-model",
+            "launch_root": str(tmp_path),
+            "agent.max_steps": 0,
+            "agent.system_prompt_id": "v1",
+            "paths.chat_completions_system_prompt_path": str(
+                _prompt_file(tmp_path)
+            ),
+            "agent.no_tool_call_max_count": 5,
+            "agent.verbose": False,
+        }
+    )
 
 
 def _prompt_file(tmp_path):

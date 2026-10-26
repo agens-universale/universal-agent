@@ -8,10 +8,9 @@ from gc_core.intent_log.operations import utc_now_ts
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.summarize.summary_message_body import (
     build_dialog_summary_content,
-    build_intent_blocks_prefix,
     format_summary_block,
 )
-from gc_core.summarize.summary_spec import hint_section_tags
+from gc_core.summarize.summary_spec import SUMMARY_SECTIONS
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 
@@ -41,7 +40,8 @@ def test_xml_summary_not_double_wrapped_in_dialog_body():
     )
     assert body.count("<summary>") == 1
     assert body.count("</summary>") == 1
-    assert any(f"<{tag}>" in body for tag in hint_section_tags())
+    hint_tags = [s.tag for s in SUMMARY_SECTIONS if not s.agent_visible]
+    assert any(f"<{tag}>" in body for tag in hint_tags)
 
 
 def test_session_memory_block_inlined():
@@ -123,21 +123,6 @@ def test_empty_current_skips_current_section():
     )
     assert "<user_intent_log" in body
     assert "<current_user_intent>" not in body
-
-
-def test_build_intent_blocks_prefix_matches_dialog_summary_wire_format():
-    closed = [_user_ask("closed turn"), _user_ask("older", turn=1)]
-    open_turn = [_user_ask("open turn")]
-    prefix = build_intent_blocks_prefix(
-        closed, open_turn, intent_log_preview_chars=10_000
-    )
-    assert "<user_intent_log " in prefix
-    assert '"action": "user_ask"' in prefix
-    assert "closed turn" in prefix
-    assert "<current_user_intent>" in prefix
-    assert "open turn" in prefix
-    assert "[intent_scope:raw]" not in prefix
-    assert "\n- closed" not in prefix
 
 
 def test_summary_intent_tail_matches_read_page_slice():

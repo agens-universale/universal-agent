@@ -12,6 +12,7 @@ from gc_core.attachments.normalize import NormalizedImage
 from gc_core.attachments.store import ImageStore
 from gc_core.model_router import ModelRouter
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 from vision_fakes import warm_routes
 from transport_fakes import install_transport
 
@@ -32,15 +33,15 @@ def test_a_live_image_is_read_once_per_request(tmp_path, monkeypatch):
         monkeypatch, lambda _request: httpx.Response(200, json=OK)
     )
     cfg = {
-        "model": "seeing-model",
-        "completions_url": URL,
-        "backend_api_mode": "chat_completions",
-        "chat_completions_max_tokens": 256,
-        "chat_completions_min_response_tokens": 64,
-        "backend_request_timeout_sec": 30,
-        "use_ssl": False,
-        "use_retry": False,
-        "x_cl_id": "test-cl-id",
+        "agent.model": "seeing-model",
+        "backend.completions_url": URL,
+        "backend.api_mode": "chat_completions",
+        "backend.chat_completions_max_tokens": 256,
+        "backend.chat_completions_min_response_tokens": 64,
+        "backend.request_timeout_sec": 30,
+        "backend.use_ssl": False,
+        "backend.use_retry": False,
+        "agent.x_cl_id": "test-cl-id",
     }
     store = ImageStore(str(tmp_path))
     att = store.stage(
@@ -64,13 +65,14 @@ def test_a_live_image_is_read_once_per_request(tmp_path, monkeypatch):
         return read_for_send(attachment)
 
     monkeypatch.setattr(store, "read_for_send", counting_read)
-    ctx = SimpleNamespace(
-        config_dict=cfg,
+    loaded = make_settings(cfg)
+    ctx = fake_ctx(
+        loaded=loaded,
         on_stream_delta=None,
         logger=logging.getLogger("test_image_request_reads"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(cfg, level_provider=lambda: "default"),
+        model_router=ModelRouter(loaded, level_provider=lambda: "default"),
         image_store=store,
         on_trace_note=lambda _note: None,
     )

@@ -1,7 +1,9 @@
 """config_sync: ре-материализация user config.yml из свежего шаблона."""
 
 import pytest
+import yaml
 from gc_core import config_sync
+from gc_core.config import _default_config_path
 from gc_core.config_modules import compat as compat
 
 TEMPLATE = (
@@ -282,6 +284,66 @@ def test_sync_keeps_new_template_keys_when_user_has_key_outside_template(
     assert config_sync.needs_sync(out, tmpl) is False  # и sync идемпотентен
 
 
+# --- поля backend, неприменимые на модели (REMOVED с `*`) ---
+
+
+def test_sync_keeps_models_and_drops_model_level_backend_fields(tmp_path):
+    """Модель с `backend.stream` переносится целиком без этого поля, а не
+    уезжает в бэкап вся (строгая проверка поддерева раньше отвергала секцию)."""
+    from pathlib import Path as P
+
+    from gc_core.config import _default_config_path, load_settings
+
+    user = (
+        "models:\n"
+        "  flash:\n"
+        "    model: qwen\n"
+        "    url: http://h/v1/chat/completions\n"
+        "    token: t\n"
+        "    backend:\n"
+        "      stream: false\n"
+        "      use_retry: true\n"
+        "  plain:\n"
+        "    model: p\n"
+        "    backend:\n"
+        "      api_mode: chat_completions\n"
+        "slots:\n"
+        "  default: flash\n"
+    )
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(user, encoding="utf-8")
+    report = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t"
+    )
+    assert report.unknown == []
+    assert sorted(report.removed) == [
+        "models.flash.backend.stream",
+        "models.plain.backend.api_mode",
+    ]
+    out = P(cfg).read_text(encoding="utf-8")
+    assert (
+        "stream: false" not in out
+        and "api_mode: chat_completions\n" not in out.split("\nmodels:")[1]
+    )
+    loaded = load_settings(str(cfg))
+    assert sorted(loaded.settings.models) == ["flash", "plain"]
+    assert loaded.settings.models["flash"].backend.use_retry is True
+    assert not any("models." in n for n in loaded.runtime.notices)
+
+
+def test_needs_sync_true_for_model_level_backend_field():
+    from pathlib import Path as P
+
+    from gc_core.config import _default_config_path
+
+    template = P(_default_config_path()).read_text(encoding="utf-8")
+    user = (
+        template
+        + "\nmodels:\n  m:\n    model: x\n    backend:\n      stream: false\n"
+    )
+    assert config_sync.needs_sync(user, template) is True
+
+
 def test_sync_moves_the_old_diff_tui_section_to_agent_edits(tmp_path):
     """`--sync-config` переносит старую секцию под новое имя вместе со старыми листьями
     — без мусора и без повторного требования синка."""
@@ -330,3 +392,77 @@ def test_sync_keeps_the_new_name_when_both_sections_are_in_one_file(
     assert parsed["agent_edits"]["trace_inline_max_lines"] == 99
     # лист, заданный только старым именем, не теряется — как у загрузчика
     assert parsed["agent_edits"]["replay_expanded_turns"] == 4
+
+
+def test_sync_strips_exact_removed_key_inside_section_outside_template(
+    tmp_path,
+):
+    """Точный REMOVED-ключ в блоке вне шаблона (assign) не переезжает в файл
+    вместе с блоком, попадает в removed один раз, повторный синк ничего не меняет."""
+    user = (
+        "models:\n"
+        "  flash:\n"
+        "    model: qwen\n"
+        "    url: http://h/v1/chat/completions\n"
+        "    token: t\n"
+        "slots:\n"
+        "  default: flash\n"
+        "assign:\n"
+        "  auto_judge: max\n"
+        "  finish_gate: default\n"
+    )
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(user, encoding="utf-8")
+    report = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t1"
+    )
+    assert report.removed == ["assign.auto_judge"]
+    out = cfg.read_text(encoding="utf-8")
+    assert "auto_judge" not in out
+    assert "finish_gate: default" in out
+
+    again = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t2"
+    )
+    assert again.removed == []
+    assert yaml.safe_load(cfg.read_text(encoding="utf-8")) == yaml.safe_load(
+        out
+    )
+
+
+def test_sync_removed_key_does_not_leave_empty_section_over_template_defaults(
+    tmp_path,
+):
+    """Секция, опустевшая после вырезания REMOVED-ключа, не перекрывает
+    умолчания шаблона пустым значением юзера."""
+    user = (
+        "update:\n"
+        "  check_interval_days: 3\n"
+        "logging:\n"
+        "  level: INFO\n"
+        "  dump_storage: true\n"
+    )
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(user, encoding="utf-8")
+    report = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t"
+    )
+    assert report.removed == [
+        "update.check_interval_days",
+        "logging.dump_storage",
+    ]
+    out = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert out["update"]["check"] == "auto"
+    assert "dump_storage" not in out["logging"]
+    assert out["logging"]["level"] == "INFO"
+
+
+def test_strip_removed_drops_emptied_top_level_section_from_text():
+    """Опустевшая секция верхнего уровня уходит и из текста, не только из
+    данных: иначе ``update: {}`` осталось бы в тексте юзера."""
+    text = "update:\n  check_interval_days: 3\nlogging:\n  level: INFO\n"
+    raw = yaml.safe_load(text)
+    out_text, stripped = config_sync._strip_removed_patterns(text, raw)
+    assert stripped == ["update.check_interval_days"]
+    assert out_text == "logging:\n  level: INFO\n"
+    assert raw == {"logging": {"level": "INFO"}}

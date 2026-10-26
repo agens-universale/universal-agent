@@ -126,7 +126,7 @@ def test_tls_error_is_not_swallowed(monkeypatch):
 
     Иначе однократная инъекция системного траста не случится, и за корп-прокси с
     собственным CA голос будет молча «недоступен»."""
-    net.reset_for_tests()
+    net._injected = False  # однократная инъекция траста — заново
     monkeypatch.setattr(net, "_inject", lambda: None)
     calls = {"n": 0}
 

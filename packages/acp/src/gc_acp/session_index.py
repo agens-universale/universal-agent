@@ -53,6 +53,10 @@ class SessionIndex:
         self._threads_dir = threads_dir
         self._clock = clock or now_iso
 
+    @property
+    def threads_dir(self) -> str:
+        return self._threads_dir
+
     def create(self, session_id: str, cwd: str) -> SessionFile:
         record = SessionFile(
             validate_thread_id(session_id),
@@ -201,13 +205,14 @@ def _list_payload(threads_dir: str, record: SessionFile) -> dict:
         "cwd": record.cwd,
         "updatedAt": record.updated_at,
     }
-    title = _title(threads_dir, record.session_id)
+    title = session_title(threads_dir, record.session_id)
     if title is not None:
         item["title"] = title
     return item
 
 
-def _title(threads_dir: str, session_id: str) -> str | None:
+def session_title(threads_dir: str, session_id: str) -> str | None:
+    """Title сессии = первая строка первой реальной user-реплики."""
     try:
         messages, _keys, _seq = load_thread_messages(
             threads_dir, ACP_SYSTEM, session_id
@@ -215,13 +220,14 @@ def _title(threads_dir: str, session_id: str) -> str | None:
     except (OSError, ValueError):
         return None
     for message in messages:
-        line = _first_line(extract_real_user_message_text(message))
+        line = prompt_title_line(extract_real_user_message_text(message))
         if line is not None:
             return line
     return None
 
 
-def _first_line(text: str) -> str | None:
+def prompt_title_line(text: str) -> str | None:
+    """Первая непустая строка текста, не длиннее лимита title."""
     stripped = text.strip()
     if stripped == "":
         return None

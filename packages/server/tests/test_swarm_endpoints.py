@@ -8,7 +8,7 @@
 - финализация снимает sworm с monitor'а.
 
 Полностью изолировано от хостового config.yml через мок-патчи на
-`load_server_config` и `build_agent_config_for_server` ДО импорта server.
+`load_server_config` и `build_agent_settings_for_server` ДО импорта server.
 """
 
 import json
@@ -17,6 +17,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from gc_testkit.settings import make_settings
 
 # Server-side зависимости (fastapi, starlette) ставятся через extra [server]
 # и могут отсутствовать в основном venv проекта. Если их нет — skip всех тестов.
@@ -50,9 +51,9 @@ def _minimal_server_config():
     }
 
 
-def _minimal_agent_config():
-    """Минимальный agent_config_dict — пустые поля, server.py их использует только при /events/webhook."""
-    return {}
+def _minimal_agent_settings():
+    """Минимальные настройки агента — умолчания, server.py их использует только при /events/webhook."""
+    return make_settings()
 
 
 @pytest.fixture
@@ -88,8 +89,8 @@ def make_server(tmp_path):
                 return_value=_minimal_server_config(),
             ),
             patch(
-                "gc_server.rest_api.server_config.build_agent_config_for_server",
-                return_value=_minimal_agent_config(),
+                "gc_server.rest_api.server_config.build_agent_settings_for_server",
+                return_value=_minimal_agent_settings(),
             ),
         ):
             from gc_server import server as server_mod

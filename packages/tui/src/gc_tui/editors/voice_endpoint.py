@@ -64,7 +64,9 @@ _FIELDS = {
 # «оставить свой адрес», и рамка спорила с футером о значении одного Enter'а). Формула
 # та же, что у `_LANG_HINT_NO_MATCH`/`_MODEL_HINT_NO_MATCH`.
 _URL_HINT_NO_MATCH = "свой адрес · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
-_URL_HINT_NO_MATCH_ONBOARDING = "свой адрес · Enter — оставить как есть · Esc — свернуть"
+_URL_HINT_NO_MATCH_ONBOARDING = (
+    "свой адрес · Enter — оставить как есть · Esc — свернуть"
+)
 
 # ВСЕ языки whisper (`whisper.tokenizer.LANGUAGES` модели large-v3: 99 базовых кодов +
 # добавленный в ней `yue`) с русскими названиями: сначала частые (их ищут чаще всего и
@@ -180,7 +182,9 @@ _LANG_HINT = (
 # Фильтр не оставил строк: обещать «подставить» нечего — Enter уйдёт про введённое
 # (канон _LIST_NO_MATCH списка моделей — честная строка вместо залипшей).
 _LANG_HINT_NO_MATCH = "свой код · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
-_LANG_HINT_NO_MATCH_ONBOARDING = "свой код · Enter — оставить как есть · Esc — свернуть"
+_LANG_HINT_NO_MATCH_ONBOARDING = (
+    "свой код · Enter — оставить как есть · Esc — свернуть"
+)
 _LANG_ROW_CLASS = "voice-lang-row"
 _LANG_HINT_CLASS = "voice-lang-hint"
 # Рамка-скролл вокруг строк: канон-класс `.dropdown-scroll` + свой маркер (по нему список
@@ -202,7 +206,9 @@ _LANG_CODE_W = 6  # колонка кода: 2-3 символа + воздух �
 # же — идёт на сервер).
 _MODEL_HINT = "модели · печать — фильтр/свой id · Enter — подставить · Esc — свернуть · Alt+↓ — перечитать список"
 _MODEL_HINT_NO_MATCH = "свой id · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
-_MODEL_HINT_NO_MATCH_ONBOARDING = "свой id · Enter — оставить как есть · Esc — свернуть"
+_MODEL_HINT_NO_MATCH_ONBOARDING = (
+    "свой id · Enter — оставить как есть · Esc — свернуть"
+)
 # LIST_LOADING/LIST_FAILED/LIST_EMPTY — статусы сетевого списка, общие с `model`
 # (`field_list.LIST_*`, спека 2026-08-06): своих формулировок здесь больше нет.
 _MODEL_ROW_CLASS = "voice-model-row"
@@ -288,6 +294,10 @@ def lang_list_controller(
     поверх значения — `Alt+↓` или печать. Правило одно на все три списка панели, и
     заводить исключение «язык всегда раскрывается» нельзя: тогда одно и то же
     действие (вход курсора на поле) вело бы себя по-разному в соседних строках."""
+    if save_hint:
+        no_match_hint = _LANG_HINT_NO_MATCH
+    else:
+        no_match_hint = _LANG_HINT_NO_MATCH_ONBOARDING
     return FieldListController(
         host,
         input_id=input_id,
@@ -299,9 +309,7 @@ def lang_list_controller(
         matches=lambda item, q: q in item[0] or q in item[1],
         value_of=lambda item: item[0],
         initial_index=_lang_initial_index,
-        hint=lambda ok: _LANG_HINT if ok else (
-            _LANG_HINT_NO_MATCH if save_hint else _LANG_HINT_NO_MATCH_ONBOARDING
-        ),
+        hint=lambda ok: _LANG_HINT if ok else no_match_hint,
         can_open=lambda value: not value,
         on_pick=on_pick,
         closed_hint=closed_hint,
@@ -505,12 +513,18 @@ class ModelListController(FieldListController):
             None,
         )
 
-    def _model_hint(self, has_selection: bool, *, save_hint: bool = True) -> str:
+    def _model_hint(
+        self, has_selection: bool, *, save_hint: bool = True
+    ) -> str:
         if self._status:
             return self._status
         if has_selection:
             return _MODEL_HINT
-        return _MODEL_HINT_NO_MATCH if save_hint else _MODEL_HINT_NO_MATCH_ONBOARDING
+        return (
+            _MODEL_HINT_NO_MATCH
+            if save_hint
+            else _MODEL_HINT_NO_MATCH_ONBOARDING
+        )
 
     @staticmethod
     def _model_row(item, *, selected: bool) -> Text:
@@ -521,7 +535,7 @@ class ModelListController(FieldListController):
 
 
 class VoiceEndpointEditor(Vertical):
-    def __init__(
+    def __init__(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         *,
         values: dict,
@@ -813,9 +827,6 @@ class VoiceEndpointEditor(Vertical):
         return (
             ctrl.pick() is not None
         )  # подстановку делает `on_pick` контроллера
-
-    def pick_language(self) -> bool:
-        return self.pick_in("language")
 
     def values(self) -> dict:
         """Введённые значения по ключам полей (обрезанные), без сайд-эффектов."""

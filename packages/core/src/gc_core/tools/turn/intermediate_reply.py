@@ -21,6 +21,10 @@ _TOOL_DESCRIPTION = (
 
 
 class IntermediateReply(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
+
     @staticmethod
     def _result(
         *,
@@ -46,9 +50,7 @@ class IntermediateReply(AbstractSimpleTool):
         return logger or _logger
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_intermediate_reply",
@@ -77,9 +79,7 @@ class IntermediateReply(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: turn_intermediate_reply
 
 Overview:

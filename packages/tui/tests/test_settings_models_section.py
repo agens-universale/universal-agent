@@ -7,6 +7,7 @@
 цель — базовый config.yml, показывается ФАЙЛОВОЕ состояние цели (решение 6 плана).
 """
 
+from gc_testkit.tui_support import tui_settings
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -138,7 +139,7 @@ async def _section(
 
     cfg_file = _write_cfg(tmp_path, body, model=model)
     cfg = _loaded(cfg_file)
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     with mock.patch.object(
         model_picker,
         "fetch_models",
@@ -319,7 +320,7 @@ async def test_second_entry_is_written_together_with_the_default_slot(
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open, (
+        assert _editor(scr)._picker is not None, (
             "пикер «какая модель по умолчанию» не открылся"
         )
         assert cfg_file.read_bytes() == before  # до выбора файл не тронут
@@ -360,11 +361,11 @@ async def test_a_write_failure_past_the_slot_picker_closes_it_and_refocuses(
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open
+        assert _editor(scr)._picker is not None
         await pilot.press("enter")  # выбор → запись падает
         await pilot.pause()
         ed = _editor(scr)
-        assert not ed.picker_open, "пикер остался над формой после отказа"
+        assert ed._picker is None, "пикер остался над формой после отказа"
         assert "не сохранено" in _notice(scr)
         focused = scr.app.focused
         assert (
@@ -401,7 +402,7 @@ async def test_the_default_slot_picker_describes_the_entry_being_written(
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         ed = _editor(scr)
-        assert ed.picker_open
+        assert ed._picker is not None
         row = next(r for r in ed._picker["rows"] if r["value"] == "opus")
         desc = row["desc"].plain
         assert "anthropic/claude-opus" in desc, desc  # id из формы, не алиас
@@ -424,7 +425,7 @@ async def test_the_base_section_asks_about_the_default_when_a_profile_holds_mode
     профиля, а у основной секции её нет вовсе — вопрос не задавался там, где запись
     без слота невозможна, и человек упирался в тупик (предложить слот секции было
     негде). Ответ уходит ОДНОЙ транзакцией, после которой конфиг грузится."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     project = tmp_path / "project"
     project.mkdir()
@@ -452,7 +453,7 @@ async def test_the_base_section_asks_about_the_default_when_a_profile_holds_mode
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open, (
+        assert _editor(scr)._picker is not None, (
             "пикер «какая модель по умолчанию» не открылся"
         )
         await pilot.press("enter")  # выбрать первую строку пикера
@@ -460,7 +461,7 @@ async def test_the_base_section_asks_about_the_default_when_a_profile_holds_mode
         doc = _doc(cfg_file)
         assert doc["models"]["gc"]["model"] == "anthropic/claude-opus"
         assert doc["slots"]["default"] == "gc"
-        load_config_ex(str(cfg_file))  # merged резолвится — тупика нет
+        load_settings(str(cfg_file))  # merged резолвится — тупика нет
 
 
 async def test_the_add_row_opens_the_creation_form(tmp_path):
@@ -471,7 +472,8 @@ async def test_the_add_row_opens_the_creation_form(tmp_path):
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
         idx = _goto(ed, "add")
-        assert idx == len(ed._aliases)  # сразу за записями, до слотов
+        # сразу за записями, до слотов
+        assert idx == len(ed._effective_aliases)
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -539,7 +541,7 @@ async def test_editing_fields_without_renaming_keeps_the_edited_alias_a_candidat
         await pilot.press("ctrl+s")  # submit → должен спросить дефолт
         await pilot.pause()
 
-        assert ed.picker_open, (
+        assert ed._picker is not None, (
             "правка полей без переименования не спросила дефолт-слот"
         )
         values = {row["value"] for row in ed._picker["rows"]}
@@ -583,10 +585,10 @@ async def test_entry_without_any_address_is_shown_as_problematic(tmp_path):
     )
     from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(config={"model": "test-model"})
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "test-model"}))
     async with app.run_test() as pilot:
         scr = _mk_screen(
-            config={"model": "test-model"}, config_path=str(cfg_file)
+            config={"agent.model": "test-model"}, config_path=str(cfg_file)
         )
         app.push_screen(scr)
         await pilot.pause()
@@ -602,7 +604,9 @@ async def test_hub_glyph_stays_quiet_about_a_foreign_config_error(tmp_path):
     чужой ошибке: вердикта нет — «—»."""
     from gc_tui.palette import DEEP_DIM
 
-    body = 'models:\n  flash:\n    model: "google/gemini-2.5-flash"\nmax_steps: не-число\n'
+    # Ошибка в посторонней секции: негодное значение (лишний ключ отказа уже не
+    # даёт — только уведомление).
+    body = 'models:\n  flash:\n    model: "google/gemini-2.5-flash"\nlogging:\n  format: json\n'
     async with _section(tmp_path, body) as (_pilot, scr, _cfg_file):
         assert scr._menu_glyph(1) == ("—", DEEP_DIM)
 
@@ -667,7 +671,7 @@ async def test_removing_an_entry_the_profile_points_at_is_refused_at_once(
         assert "✗ не удалено" in notice
         assert "work.yml" in notice and "slots.default" in notice, notice
         assert cfg_file.read_bytes() == before
-        assert "gc" in ed._aliases  # строка на месте
+        assert "gc" in ed._effective_aliases  # строка на месте
 
 
 async def test_a_raced_removal_tells_the_truth_and_refreshes_the_list(
@@ -1161,7 +1165,7 @@ async def test_ctrl_u_still_falls_through_with_no_form(tmp_path):
         await pilot.pause()
         await pilot.press("enter")  # раскрыть пикер слота — формы нет
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
         assert ed._form is None
         assert ed.clear_token() is False, (
             "без формы Ctrl+U по-прежнему не наш случай"
@@ -1558,7 +1562,7 @@ async def test_slot_picker_opens_under_the_row_with_unset_first(tmp_path):
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert ed.picker_open, "пикер слота не раскрылся"
+        assert ed._picker is not None, "пикер слота не раскрылся"
         assert [r["label"] for r in ed._picker["rows"]] == [
             "не задан",
             "flash",
@@ -1583,7 +1587,7 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
     ИЛИ алиас (жёсткий пин). Первый пункт — «активная» (привязки нет)."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
-        _goto(ed, "assign", consumer="finish_gate")
+        _goto(ed, "assign", consumer="vision")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -1597,6 +1601,74 @@ async def test_assign_picker_offers_levels_and_aliases_after_active(tmp_path):
         ]
 
 
+def test_command_judge_label_names_both_roles():
+    """Строка судьи команд на экране называет обе его роли: команды в edit
+    и действия в режиме auto (не уровень модели auto)."""
+    from gc_tui.editors.models_section import consumer_labels
+
+    assert consumer_labels()["command_judge"] == (
+        "судья command_judge · команды в edit, действия в режиме auto"
+    )
+
+
+_FIXED_CONSUMERS = (
+    "finish_gate",
+    "text_answer_judge",
+    "command_judge",
+    "summary",
+    "routing_judge",
+)
+
+
+async def test_fixed_consumer_without_binding_shows_the_level_it_really_uses(
+    tmp_path,
+):
+    """Судьи финала, текстового ответа и команд, суммаризация и судья
+    автовыбора без привязки работают уровнем default (спека PR140 Р1): строка
+    и первый пункт пикера говорят это словами пустого слота («не задана →
+    default», «действует default → модель»). Остальные потребители без
+    привязки — «активная»."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        for consumer in _FIXED_CONSUMERS:
+            assert ed._assign_unset_label(consumer) == "не задана → default"
+        assert ed._assign_unset_label("vision") == "активная"
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        first = ed._picker["rows"][0]
+        assert first["value"] is None and first["label"] == "не задана"
+        assert str(first["desc"]) == "действует default → flash"
+
+
+async def test_fixed_consumer_without_default_slot_shows_active(tmp_path):
+    """Слот default не задан — кодовый уровень не действует: судьи без привязки
+    идут активным уровнем, как прочие потребители, и экран говорит «активная»,
+    а не «не задана → default» с фоллбэком на max."""
+    registry = (
+        "models:\n"
+        "  flash:\n"
+        '    model: "google/gemini-2.5-flash"\n'
+        "  opus:\n"
+        '    model: "anthropic/claude-opus"\n'
+        "slots:\n"
+        '  light: "flash"\n'
+        '  max: "opus"\n'
+    )
+    async with _section(tmp_path, registry) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        for consumer in _FIXED_CONSUMERS:
+            assert ed._assign_unset_label(consumer) == "активная"
+        _goto(ed, "assign", consumer="finish_gate")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        first = ed._picker["rows"][0]
+        assert first["value"] is None and first["label"] == "активная"
+        assert str(first["desc"]).startswith("работает активным уровнем")
+
+
 async def test_alt_down_opens_the_same_picker(tmp_path):
     """Канон клавиш: `Alt+↓` — раскрыть список. У строки слота список тот же, что и
     у Enter (решение 9 называет обе клавиши), а не вторая, отдельная механика."""
@@ -1606,7 +1678,7 @@ async def test_alt_down_opens_the_same_picker(tmp_path):
         await pilot.pause()
         await pilot.press("alt+down")
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
 
 
 async def test_escape_collapses_the_picker_without_writing(tmp_path):
@@ -1621,7 +1693,7 @@ async def test_escape_collapses_the_picker_without_writing(tmp_path):
         await pilot.press("down")  # выбор уехал на алиас
         await pilot.press("escape")
         await pilot.pause()
-        assert not ed.picker_open
+        assert ed._picker is None
         assert scr._view == 1  # из секции не вышли
         assert cfg_file.read_bytes() == before
 
@@ -1638,7 +1710,7 @@ async def test_arrows_do_not_page_values_on_a_collapsed_row(tmp_path):
         await pilot.press("right")
         await pilot.press("left")
         await pilot.pause()
-        assert not ed.picker_open
+        assert ed._picker is None
         assert cfg_file.read_bytes() == before
         assert "не задан" in str(
             list(ed.query(".models-row"))[ed._idx].render()
@@ -1662,7 +1734,7 @@ async def test_choosing_an_alias_writes_the_slot(tmp_path):
         validate_config_text_with_sections(
             cfg_file.read_text(encoding="utf-8")
         )
-        assert not _editor(scr).picker_open
+        assert not _editor(scr)._picker is not None
         assert "opus" in str(
             list(_editor(scr).query(".models-row"))[ed._idx].render()
         )
@@ -1745,7 +1817,7 @@ async def test_enter_on_an_unset_slot_is_an_honest_no_op(tmp_path):
         assert cfg_file.read_bytes() == before
         assert "снят" not in _flash(scr), _flash(scr)
         assert "ничего не изменено" in _notice(scr), _notice(scr)
-        assert not _editor(scr).picker_open
+        assert not _editor(scr)._picker is not None
 
 
 async def test_enter_on_the_current_binding_value_is_an_honest_no_op(tmp_path):
@@ -1844,13 +1916,14 @@ def test_subagent_rows_come_from_the_code_registry():
 def test_consumer_labels_reuse_the_transport_dictionary():
     """6 готовых подписей берутся ИЗ транспортного словаря, а не копируются в UI
     (копия разошлась бы с ним на первой же правке); свой UI-словарь — только для
-    остальных: `auto_judge`, субагенты поимённо, wildcard."""
+    остальных: субагенты поимённо, wildcard."""
     from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
     from gc_tui.editors import models_section
 
     labels = models_section.consumer_labels()
     for consumer, label in CONSUMER_RU_LABEL.items():
-        assert labels[consumer] == label
+        role = models_section._CONSUMER_ROLE.get(consumer)
+        assert labels[consumer] == (f"{label} · {role}" if role else label)
     assert not set(models_section._UI_CONSUMER_LABEL) & set(CONSUMER_RU_LABEL)
     assert set(labels) == set(models_section.assign_consumers())
 
@@ -1863,28 +1936,6 @@ def test_vision_row_is_in_the_assign_block():
 
     assert "vision" in assign_consumers()
     assert consumer_labels()["vision"] == "модель для зрения"
-
-
-async def test_auto_judge_row_is_present_and_marked_inert(tmp_path):
-    """`auto_judge` в реестре потребителей есть (строка на месте), но до волны C
-    привязка инертна — это говорит ГОЛОВА строки («имя · описание», построчной
-    подсказки у секции больше нет), а не молчит.
-
-    Что Router его не зовёт и без привязки идёт уровнем default, а не активной
-    моделью, — страж волны A (`tests/router/test_model_router.py::
-    test_auto_judge_without_binding_uses_default_statically_not_active_level`);
-    здесь не дублируется."""
-    from gc_tui.editors.models_section import consumer_labels
-
-    assert (
-        consumer_labels()["auto_judge"]
-        == "судья auto_judge · появится с авто-выбором"
-    )
-    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
-        ed = _editor(scr)
-        _goto(ed, "assign", consumer="auto_judge")
-        await pilot.pause()
-        assert "появится с авто-выбором" in _texts(scr)
 
 
 async def test_unset_slot_hint_names_the_real_fallback(tmp_path):
@@ -2010,7 +2061,7 @@ async def test_picker_rows_carry_the_same_color_semantics(tmp_path):
 
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
-        _goto(ed, "assign", consumer="finish_gate")
+        _goto(ed, "assign", consumer="vision")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -2024,8 +2075,13 @@ async def test_picker_rows_carry_the_same_color_semantics(tmp_path):
 
 async def test_slot_row_head_is_the_canonical_level_copy(tmp_path):
     """Голова строки слота — канон §1 дословно (тот же источник, что хинты `/level`):
-    «default · основная рабочая: повседневные задачи»."""
-    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+    «default · основная рабочая: повседневные задачи». Окно шире 80 колонок:
+    проверяется текст подписи, а не порядок ужатия (он — ниже, свипами)."""
+    async with _section(tmp_path, _REGISTRY, size=(100, 24)) as (
+        _pilot,
+        scr,
+        _cfg_file,
+    ):
         ed = _editor(scr)
         head = ed._row_text({"kind": "slot", "level": "default"}, False).plain
         assert "default · основная рабочая: повседневные задачи" in head
@@ -2153,7 +2209,7 @@ async def test_clicking_a_block_header_collapses_and_expands(tmp_path):
         await pilot.pause()
         assert ed._collapsed == {"entry"}
         assert all(r["kind"] not in ("entry", "add") for r in ed._rows())
-        assert len(ed._rows()) == rows_before - len(ed._aliases) - 1
+        assert len(ed._rows()) == rows_before - len(ed._effective_aliases) - 1
         head = str(list(ed.query(".models-block"))[0].render())
         assert head.startswith("▸") and "2 модели" in head
         assert "─" not in head  # у свёрнутой шапки черты нет
@@ -2280,20 +2336,19 @@ _SECOND_WRITING = (
 async def test_own_connection_in_the_second_writing_gets_no_inherited_tail(
     tmp_path,
 ):
-    """§6: хвост «· адрес из «Подключения»» означает УНАСЛЕДОВАННУЮ пару. Запись,
-    задавшая своё подключение вторым написанием (`backend.completions_url`, `proxy`),
-    показывала свой хост И этот хвост — ложь, которая была тут и до правила: гейт
-    смотрел на один ключ `url`, а сам адрес считался с учётом `backend`.
+    """§6: хвост «· адрес из «Подключения»» означает УНАСЛЕДОВАННЫЙ адрес.
+    Своё второе написание адреса (`backend.completions_url`) хвост гасит: иначе
+    строка показывала свой хост и «из «Подключения»» разом. Гейт — ядровое
+    определение §2 (`model_registry.connection_parts`), то же, каким пару считают
+    обе точки валидации и форма записи.
 
-    Судит гейт ЯДРОВЫМ определением §2 (`model_registry.connection_parts`) — тем же,
-    каким пару считают обе точки валидации и форма записи. Прокси — тоже своё
-    подключение (решение владельца 1): он решает, куда физически уйдёт запрос, и
-    звать такой адрес «из «Подключения»» значит называть чужую половину источником."""
+    Прокси в адрес не входит: это транспорт, не свой url. Запись только с
+    `backend.proxy` по-прежнему ходит на хост «Подключения», и хвост остаётся."""
     async with _section(tmp_path, _SECOND_WRITING) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
         assert ed._address_cell("second") == "my-host"
-        assert ed._address_cell("proxied") == "host"
+        assert ed._address_cell("proxied") == "host · адрес из «Подключения»"
 
 
 async def test_the_address_column_shrinks_but_the_pointer_stays_whole(
@@ -2396,7 +2451,7 @@ def _lower_rows(ed) -> list:
     """Виджеты нижней половины секции: строки слотов, привязок и резервной модели —
     всё, что идёт после записей реестра и строки «+ добавить» (она — часть верхнего
     блока и меряется своим стражем)."""
-    return list(ed.query(".models-row"))[len(ed._aliases) + 1 :]
+    return list(ed.query(".models-row"))[len(ed._effective_aliases) + 1 :]
 
 
 def _grid_rows(ed) -> list:
@@ -2595,7 +2650,7 @@ async def test_the_role_is_cut_before_the_name_of_the_level(tmp_path):
     async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
-        ed._row_width = lambda: 55
+        ed._row_width = lambda: 66
         row = ed._row_text({"kind": "slot", "level": "default"}, False)
         assert row.plain.startswith("  default · основная рабочая: повс")
         assert "…" in row.plain  # ужато описание, не строка
@@ -2610,11 +2665,11 @@ async def test_a_narrow_frame_drops_the_role_whole(tmp_path):
     async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
-        ed._row_width = lambda: 26
+        ed._row_width = lambda: 37
         assert ed._row_text(
             {"kind": "slot", "level": "default"}, False
         ).plain.startswith("  default · осн…")  # ступенью выше огрызок ещё жив
-        ed._row_width = lambda: 25
+        ed._row_width = lambda: 36
         row = ed._row_text({"kind": "slot", "level": "default"}, False)
         assert "·" not in row.plain
         assert "…" not in row.plain
@@ -2626,7 +2681,7 @@ def _entry_rows(ed) -> list:
     """Отрисованные строки ЗАПИСЕЙ (первые в списке): у слотов и привязок сетка своя
     (`_binding_columns`), и стерегут её свои тесты выше."""
     widgets = [str(w.render()) for w in ed.query(".models-row")]
-    return widgets[: len(ed._aliases)]
+    return widgets[: len(ed._effective_aliases)]
 
 
 async def test_a_live_resize_recomputes_the_columns(tmp_path):
@@ -2675,10 +2730,10 @@ async def test_a_dead_entry_dims_its_level_pointer_too(tmp_path):
     )
     from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(config={"model": "test-model"})
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "test-model"}))
     async with app.run_test() as pilot:
         scr = _mk_screen(
-            config={"model": "test-model"}, config_path=str(cfg_file)
+            config={"agent.model": "test-model"}, config_path=str(cfg_file)
         )
         app.push_screen(scr)
         await pilot.pause()
@@ -2802,10 +2857,10 @@ async def test_empty_state_does_not_claim_levels_are_off_under_a_profile_registr
     monkeypatch.chdir(tmp_path)
     from gc_core import config as config_mod
 
-    cfg, _meta = config_mod.load_config_ex(str(cfg_file))
-    assert cfg.get("models") or {}, "предпосылка: реестр приходит из профиля"
+    cfg = config_mod.load_settings(str(cfg_file))
+    assert cfg.settings.models, "предпосылка: реестр приходит из профиля"
 
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=cfg)
     async with app.run_test() as pilot:
         scr = _mk_screen(config=cfg, config_path=str(cfg_file))
         app.push_screen(scr)
@@ -2839,7 +2894,7 @@ async def _section_over_layers(
 ):
     """Секция «Модели» на настоящем стеке слоёв: база в `tmp_path`, проектный
     `.gc/config.yml` в рабочем каталоге, managed-файл в подменённом `GC_HOME`.
-    Конфиг экрана — настоящий `load_config_ex` (слои смержены, как у приложения),
+    Конфиг экрана — настоящий `load_settings` (слои смержены, как у приложения),
     `on_apply` — заглушка: снимок конфига приложения после записи НЕ обновляется,
     ровно как в зазоре между перестройкой секции и перечиткой конфига."""
     from unittest import mock
@@ -2866,8 +2921,8 @@ async def _section_over_layers(
     cfg_file = _write_cfg(tmp_path, body)
     from gc_core import config as config_mod
 
-    cfg, _meta = config_mod.load_config_ex(str(cfg_file))
-    app = app_mod.TuiApp(config=cfg)
+    cfg = config_mod.load_settings(str(cfg_file))
+    app = app_mod.TuiApp(settings=cfg)
     with mock.patch.object(
         model_picker,
         "fetch_models",
@@ -2893,7 +2948,7 @@ async def test_empty_state_names_the_project_layer_that_carries_the_registry(
     async with _section_over_layers(
         tmp_path, monkeypatch, project=_PROJECT_REGISTRY
     ) as (_pilot, scr, _cfg_file):
-        assert scr._config.get("models") or {}, (
+        assert scr._settings.settings.models or {}, (
             "предпосылка: реестр приходит из проекта"
         )
         text = _texts(scr)
@@ -2909,7 +2964,7 @@ async def test_empty_state_names_the_managed_file_that_carries_the_registry(
     async with _section_over_layers(
         tmp_path, monkeypatch, managed=_PROJECT_REGISTRY
     ) as (_pilot, scr, _cfg_file):
-        assert scr._config.get("models") or {}, (
+        assert scr._settings.settings.models or {}, (
             "предпосылка: реестр приходит из managed"
         )
         text = _texts(scr)
@@ -2932,7 +2987,7 @@ async def test_removing_the_last_base_entry_without_a_profile_returns_the_legacy
         scr,
         cfg_file,
     ):
-        assert set(scr._config.get("models") or {}) == {
+        assert set(scr._settings.settings.models or {}) == {
             "a"
         }  # снимок приложения: запись ещё есть
         ed = _editor(scr)
@@ -2977,7 +3032,7 @@ async def test_form_fields_are_deaf_while_the_default_slot_question_hangs(
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open
+        assert _editor(scr)._picker is not None
         fields = ("alias", "model", "url", "token")
         before = {f: form.query_one(f"#mef-{f}", Input).value for f in fields}
         for key in ("space", "ctrl+u", "x", "backspace"):
@@ -3015,11 +3070,13 @@ async def test_alt_down_does_not_reach_the_form_while_the_default_slot_question_
         assert form.on_url_field  # там, где Alt+↓ форме есть что делать
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open
+        assert _editor(scr)._picker is not None
         before = cfg_file.read_bytes()
         await pilot.press("alt+down")
         await pilot.pause()
-        assert _editor(scr).picker_open, "вопрос о слоте снят клавишей формы"
+        assert _editor(scr)._picker is not None, (
+            "вопрос о слоте снят клавишей формы"
+        )
         assert not form._presets_ctrl.is_open, (
             "Alt+↓ дошёл до формы сквозь висящий вопрос"
         )
@@ -3043,11 +3100,11 @@ async def test_form_takes_input_back_when_the_question_is_dismissed(tmp_path):
         await pilot.pause()
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
-        assert _editor(scr).picker_open
+        assert _editor(scr)._picker is not None
         before = _cfg_file.read_bytes()
         await pilot.press("escape")  # вопрос снят, форма осталась
         await pilot.pause()
-        assert not _editor(scr).picker_open
+        assert not _editor(scr)._picker is not None
         assert _cfg_file.read_bytes() == before, (
             "отменённый вопрос тронул файл"
         )
@@ -3069,7 +3126,7 @@ async def test_registry_origin_reads_the_stack_once_per_ui_pass(
 
     cfg_file = _write_cfg(tmp_path)
     cfg = _loaded(cfg_file)
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=cfg, config_path=str(cfg_file))
         app.push_screen(scr)
@@ -3180,13 +3237,13 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
         await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         ed = _editor(scr)
-        assert ed.picker_open
+        assert ed._picker is not None
         idx_before = form._idx
         model_input.scroll_visible(animate=False)
         await pilot.pause()
         await pilot.click("#mef-model")
         await pilot.pause()
-        assert ed.picker_open, "клик убил пикер вопроса"
+        assert ed._picker is not None, "клик убил пикер вопроса"
         assert form._idx == idx_before, "клик переехал курсором под вопросом"
         assert not form._list.is_open, "список моделей раскрылся поверх пикера"
         # MouseDown фокусирует Input сам — гейт обязан снять фокус обратно:
@@ -3266,7 +3323,9 @@ async def test_ctrl_down_on_a_registry_entry_scrolls_the_section(tmp_path):
         assert scroll.scroll_offset.y > top
 
 
-async def test_backend_secret_reference_requires_confirmation(tmp_path, monkeypatch):
+async def test_backend_secret_reference_requires_confirmation(
+    tmp_path, monkeypatch
+):
     from textual.widgets import TextArea
 
     monkeypatch.setenv("REVIEW_TOKEN", "old-secret")
@@ -3297,7 +3356,10 @@ slots:
         await pilot.press("enter")
         await pilot.pause()
         entry = _doc(cfg_file)["models"]["flash"]
-        assert entry["backend"]["chat_completion_headers"]["Authorization"] == "new-secret"
+        assert (
+            entry["backend"]["chat_completion_headers"]["Authorization"]
+            == "new-secret"
+        )
 
 
 async def test_explicit_null_sections_survive_an_unrelated_form_edit(tmp_path):
@@ -3341,20 +3403,28 @@ async def test_ctrl_s_saves_model_draft_from_any_focus(tmp_path, focus):
         await pilot.pause()
         await pilot.press("ctrl+s")
         await pilot.pause()
-        assert _doc(cfg_file)["models"]["flash"]["main"] == {"temperature": 0.31}
+        assert _doc(cfg_file)["models"]["flash"]["main"] == {
+            "temperature": 0.31
+        }
         assert ed.form_open is False
 
 
 @pytest.mark.parametrize("from_header", [True, False])
-async def test_credential_source_switch_still_confirms_env_overwrite(tmp_path, monkeypatch, from_header):
+async def test_credential_source_switch_still_confirms_env_overwrite(
+    tmp_path, monkeypatch, from_header
+):
     from textual.widgets import TextArea
 
     monkeypatch.setenv("MODEL_SWITCH", "secret")
     credential = (
         "    backend:\n      chat_completion_headers:\n        Authorization: '${ENV:MODEL_SWITCH}'\n"
-        if from_header else "    token: '${ENV:MODEL_SWITCH}'\n"
+        if from_header
+        else "    token: '${ENV:MODEL_SWITCH}'\n"
     )
-    body = "models:\n  flash:\n    model: test-model\n    url: https://example.test/chat\n" + credential
+    body = (
+        "models:\n  flash:\n    model: test-model\n    url: https://example.test/chat\n"
+        + credential
+    )
     async with _section(tmp_path, body) as (pilot, scr, cfg_file):
         await pilot.press("enter")
         await pilot.pause()
@@ -3364,7 +3434,9 @@ async def test_credential_source_switch_still_confirms_env_overwrite(tmp_path, m
         if from_header:
             form.query_one("#mef-token", Input).value = "new"
         else:
-            form.query_one("#mef-backend", TextArea).load_text("chat_completion_headers:\n  Authorization: new")
+            form.query_one("#mef-backend", TextArea).load_text(
+                "chat_completion_headers:\n  Authorization: new"
+            )
         ed._submit_form()
         await pilot.pause()
         assert ed._env_pending is not None
@@ -3466,7 +3538,11 @@ async def test_section_switch_protects_dirty_model_draft(tmp_path):
 
 
 async def test_legacy_model_dirty_exit_keeps_draft_until_confirmed(tmp_path):
-    async with _section(tmp_path, "agent:\n  model: old\n") as (pilot, scr, cfg_file):
+    async with _section(tmp_path, "agent:\n  model: old\n") as (
+        pilot,
+        scr,
+        cfg_file,
+    ):
         await pilot.press("enter")
         await pilot.pause()
         scr.query_one("#onb-model", Input).value = "new-model"
@@ -3509,9 +3585,9 @@ async def test_escape_dirty_connection_asks_before_discard(tmp_path):
     async with _section(tmp_path, body) as (pilot, scr, cfg_file):
         await pilot.press("pageup")
         await pilot.pause()
-        scr.query_one("#conn-url", Input).value = (
-            "https://changed.test/v1/chat/completions"
-        )
+        scr.query_one(
+            "#conn-url", Input
+        ).value = "https://changed.test/v1/chat/completions"
         before = cfg_file.read_bytes()
         await pilot.press("escape")
         await pilot.pause()
@@ -3529,7 +3605,11 @@ async def test_escape_dirty_connection_asks_before_discard(tmp_path):
 async def test_yaml_validation_error_is_revealed_in_small_window(tmp_path):
     from textual.widgets import TextArea
 
-    async with _section(tmp_path, _REGISTRY, size=(100, 25)) as (pilot, scr, cfg_file):
+    async with _section(tmp_path, _REGISTRY, size=(100, 25)) as (
+        pilot,
+        scr,
+        cfg_file,
+    ):
         before = cfg_file.read_bytes()
         await pilot.press("enter")
         await pilot.pause()
@@ -3571,17 +3651,25 @@ async def test_yaml_help_is_optional_and_escape_keeps_the_draft(tmp_path):
         assert area.text == "temperature: 0.4"
 
 
-async def test_model_help_keeps_backend_keys_readable_without_focused_prose(tmp_path):
+async def test_model_help_keeps_backend_keys_readable_without_focused_prose(
+    tmp_path,
+):
     from gc_tui.widgets.block_panel import BlockPanel
 
     from textual.containers import VerticalScroll
     from gc_tui.widgets.trace_row import TraceRow
 
-    async with _section(tmp_path, _REGISTRY, size=(70, 25)) as (pilot, scr, cfg_file):
+    async with _section(tmp_path, _REGISTRY, size=(70, 25)) as (
+        pilot,
+        scr,
+        cfg_file,
+    ):
         await pilot.press("enter", "f1")
         await pilot.pause()
         help_screen = scr.app.screen
-        assert help_screen.focused is help_screen.query_one("#model-help-body", VerticalScroll)
+        assert help_screen.focused is help_screen.query_one(
+            "#model-help-body", VerticalScroll
+        )
         assert all(not row.can_focus for row in help_screen.query(TraceRow))
         assert len(help_screen.query(BlockPanel)) > 1
         assert not help_screen.query(".table-block")
@@ -3590,7 +3678,10 @@ async def test_model_help_keeps_backend_keys_readable_without_focused_prose(tmp_
         assert "chat_completions_min_response_tokens" in text
         await pilot.press("pagedown")
         await pilot.pause()
-        assert help_screen.query_one("#model-help-body", VerticalScroll).scroll_y > 0
+        assert (
+            help_screen.query_one("#model-help-body", VerticalScroll).scroll_y
+            > 0
+        )
 
 
 async def test_dirty_model_confirmation_blocks_typing(tmp_path):
@@ -3612,7 +3703,11 @@ async def test_dirty_model_confirmation_blocks_typing(tmp_path):
 async def test_reopened_model_starts_at_top(tmp_path, size):
     from textual.containers import VerticalScroll
 
-    async with _section(tmp_path, _REGISTRY, size=size) as (pilot, scr, cfg_file):
+    async with _section(tmp_path, _REGISTRY, size=size) as (
+        pilot,
+        scr,
+        cfg_file,
+    ):
         await pilot.press("enter")
         await pilot.pause()
         form = _editor(scr)._form
@@ -3653,6 +3748,193 @@ async def test_yaml_fields_use_settings_frame_and_focus_palette(tmp_path):
         assert area.styles.background == Color.parse(BAND_BG)
         assert area.styles.color == Color.parse(INK)
         body = scr.query_one("#set-scroll")
-        for name in ("scrollbar_color", "scrollbar_color_hover", "scrollbar_color_active",
-                     "scrollbar_background", "scrollbar_background_hover", "scrollbar_background_active"):
+        for name in (
+            "scrollbar_color",
+            "scrollbar_color_hover",
+            "scrollbar_color_active",
+            "scrollbar_background",
+            "scrollbar_background_hover",
+            "scrollbar_background_active",
+        ):
             assert getattr(area.styles, name) == getattr(body.styles, name)
+
+
+# --- строки-действия формы: справка и карточка модели -------------------------
+
+_CARD = {"id": "google/gemini-2.5-flash", "context_length": 1048576}
+
+
+async def _open_form_with_card(pilot, scr):
+    """Форма новой записи с уже «загруженным» каталогом — без похода в сеть."""
+    from gc_core.model_picker import ModelInfo
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+
+    await pilot.press("alt+n")
+    await pilot.pause()
+    form = scr.query(ModelEntryForm).last()
+    form._presets_ctrl.close()
+    form.query_one("#mef-alias", Input).value = "flash"
+    form.query_one("#mef-model", Input).value = _CARD["id"]
+    form._models = [ModelInfo(id=_CARD["id"])]
+    form._models_payload = {"data": [_CARD]}
+    form._catalog_key = (form._current_url(), form._current_auth_header())
+    form._refresh_model_metadata()
+    await pilot.pause()
+    # Вписанный руками id прошёл через `Input.Changed` и раскрыл список моделей;
+    # человек свернул бы его Esc, прежде чем идти стрелками дальше.
+    form._list.close()
+    await pilot.pause()  # раскладка без списка: клик целится по ней
+    return form
+
+
+async def _open_action_row(pilot, scr, form, row: str, how: str, key: str):
+    """Три пути к одному экрану: своя F-клавиша из любого поля, Enter на строке и
+    клик по ней."""
+    if how == "key":
+        await pilot.press(key)
+    elif how == "enter":
+        form._idx = form._positions.index(row)
+        form._focus_position()
+        scr._refresh_footer()
+        await pilot.pause()
+        await pilot.press("enter")
+    else:
+        # Строка справки — последняя в форме и на окне 80 строк стоит на нижней
+        # рамке `#set-scroll`: клик без прокрутки попадает в рамку, а не в строку.
+        form.query_one(f"#{row}").scroll_visible(animate=False)
+        await pilot.pause()
+        await pilot.click(f"#{row}")
+
+
+@pytest.mark.parametrize("how", ["key", "enter", "click"])
+async def test_model_card_opens_in_a_viewer_and_esc_returns_to_the_form(
+    tmp_path, how
+):
+    """Полная карточка — отдельным экраном с прокруткой, а не простынёй в форме.
+    F2, Enter на строке и клик ведут в одно место; Esc возвращает в форму с
+    набранным."""
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+    from gc_tui.screens.viewer import ViewerScreen
+
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        form = await _open_form_with_card(pilot, scr)
+        await _open_action_row(pilot, scr, form, "mef-model-meta", how, "f2")
+        await pilot.pause()
+        viewer = pilot.app.screen
+        assert isinstance(viewer, ViewerScreen)
+        assert viewer._title == (
+            "Настройки · Сведения провайдера о модели"
+            " · google/gemini-2.5-flash"
+        )
+        assert viewer._content == _CARD
+        await pilot.press("escape")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+        assert scr.query(ModelEntryForm).last() is form
+        assert form.query_one("#mef-alias", Input).value == "flash"
+
+
+@pytest.mark.parametrize("how", ["f2", "click"])
+async def test_inactive_window_row_opens_nothing(tmp_path, how):
+    """Сведений о модели нет — строка окна неактивна: ни F2, ни клик экран не
+    открывают."""
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        await pilot.press("alt+n")
+        await pilot.pause()
+        form = scr.query(ModelEntryForm).last()
+        form._presets_ctrl.close()
+        await pilot.pause()
+        if how == "f2":
+            await pilot.press("f2")
+        else:
+            await pilot.click("#mef-model-meta")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+        assert scr.query(ModelEntryForm)
+
+
+@pytest.mark.parametrize("how", ["key", "enter", "click"])
+async def test_form_help_opens_by_key_enter_and_click(tmp_path, how):
+    from gc_tui.screens.model_help import ModelHelpScreen
+
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        form = await _open_form_with_card(pilot, scr)
+        await _open_action_row(pilot, scr, form, "mef-help-line", how, "f1")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, ModelHelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+
+
+async def test_action_line_click_is_ignored_while_a_question_is_pending(
+    tmp_path,
+):
+    """Под вопросом секции мышь молчит так же, как клавиши: экран поверх баннера
+    увёл бы человека от вопроса, на который он ещё не ответил."""
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        await _open_form_with_card(pilot, scr)
+        ed = _editor(scr)
+        ed._dirty_exit_pending = True
+        await pilot.click("#mef-help-line")
+        await pilot.pause()
+        assert pilot.app.screen is scr
+
+
+async def test_footer_on_an_action_row_promises_enter(tmp_path):
+    """Футер судит по позиции курсора: на строке-действии он обещает Enter, и
+    обещание одно на обе строки."""
+    async with _section(tmp_path, size=(120, 80)) as (pilot, scr, _cfg_file):
+        form = await _open_form_with_card(pilot, scr)
+        for row in ("mef-model-meta", "mef-help-line"):
+            form._idx = form._positions.index(row)
+            form._focus_position()
+            scr._refresh_footer()
+            await pilot.pause()
+            assert _footer(scr).startswith(
+                "↑/↓ · Enter — открыть · Ctrl+S — сохранить/выйти"
+            )
+
+
+async def test_empty_summary_trigger_shows_the_threshold_from_the_config_file(
+    tmp_path,
+):
+    """Сквозной путь от файла до поля: пустой порог показывает общий порог ИЗ
+    КОНФИГА, которым открыт экран, а не константу. Конфиг грузится настоящим
+    загрузчиком: упрощённый `_loaded` раздела `summary` не несёт, и на нём
+    проверка прошла бы мимо."""
+    from unittest import mock
+
+    from gc_core import model_picker
+    from gc_core.config import load_settings
+    from gc_tui import app as app_mod
+    from gc_tui.editors.model_entry_form import ModelEntryForm
+
+    cfg_file = _write_cfg(
+        tmp_path,
+        "summary:\n"
+        "  chat_completions_summary_trigger_chars: 150000\n"
+        "  chat_completions_summary_trigger_tokens: 60000\n",
+    )
+    cfg = load_settings(str(cfg_file))
+    app = app_mod.TuiApp(settings=cfg)
+    with mock.patch.object(model_picker, "fetch_models", lambda *a, **k: []):
+        async with app.run_test(size=(120, 80)) as pilot:
+            scr = _mk_screen(config=cfg, config_path=str(cfg_file))
+            app.push_screen(scr)
+            await pilot.pause()
+            open_settings_section(scr, _SECTION)
+            await pilot.pause()
+            await pilot.press("alt+n")
+            await pilot.pause()
+            form = scr.query(ModelEntryForm).last()
+            assert form.query_one("#mef-summary-chars", Input).placeholder == (
+                "не задан · действует общий порог для всех моделей: 150 000"
+            )
+            assert form.query_one(
+                "#mef-summary-tokens", Input
+            ).placeholder == (
+                "не задан · действует общий порог для всех моделей: 60 000"
+            )

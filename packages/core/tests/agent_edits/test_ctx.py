@@ -7,19 +7,20 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-from gc_core.agent_edits.ctx import limit
+import pytest
+from gc_core.agent_edits.ctx import limit, section_limit
 from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
     DEFAULT_MAX_DIFF_CHARS,
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
     DEFAULT_SNAPSHOTS_MAX_FILES,
 )
+from gc_testkit.settings import fake_ctx
+from pydantic import ValidationError
 
 
 def _ctx(**agent_edits):
-    return SimpleNamespace(config_dict={"agent_edits": dict(agent_edits)})
+    return fake_ctx({"agent_edits": dict(agent_edits)})
 
 
 def test_explicit_value_wins_over_config():
@@ -45,25 +46,40 @@ def test_non_positive_source_cap_falls_back_to_default():
 
 def test_non_numeric_value_falls_back_instead_of_raising():
     """`int("много")` раньше летел из `_record_edit` — правка пропадала целиком:
-    внешний `except Exception` глотает её вместе со счётчиками."""
-    ctx = _ctx(max_diff_source_bytes="много", hunk_context_lines=None)
+    внешний `except Exception` глотает её вместе со счётчиками.
+
+    В настройки такое значение не попадает — схема отказывает громко; правило
+    читателя (`section_limit`) всё равно держит мусор в секции-словаре."""
+    with pytest.raises(ValidationError):
+        _ctx(max_diff_source_bytes="много")
+    with pytest.raises(ValidationError):
+        _ctx(hunk_context_lines=None)
+    section = {"max_diff_source_bytes": "много", "hunk_context_lines": None}
     assert (
-        limit(
-            None, ctx, "max_diff_source_bytes", DEFAULT_MAX_DIFF_SOURCE_BYTES
+        section_limit(
+            section, "max_diff_source_bytes", DEFAULT_MAX_DIFF_SOURCE_BYTES
         )
         == DEFAULT_MAX_DIFF_SOURCE_BYTES
     )
     assert (
-        limit(None, ctx, "hunk_context_lines", DEFAULT_HUNK_CONTEXT_LINES)
+        section_limit(
+            section, "hunk_context_lines", DEFAULT_HUNK_CONTEXT_LINES
+        )
         == DEFAULT_HUNK_CONTEXT_LINES
     )
 
 
 def test_bool_is_not_a_limit():
-    """`true` в yaml — это не «один»: для питона `True == 1`, для конфига — мусор."""
-    ctx = _ctx(snapshots_max_files=True)
+    """`true` в yaml — это не «один»: для питона `True == 1`, для конфига — мусор.
+
+    Правило читателя; через схему настроек `true` приходит уже числом (лакс-режим
+    pydantic), так что проверяется сама `section_limit`."""
     assert (
-        limit(None, ctx, "snapshots_max_files", DEFAULT_SNAPSHOTS_MAX_FILES)
+        section_limit(
+            {"snapshots_max_files": True},
+            "snapshots_max_files",
+            DEFAULT_SNAPSHOTS_MAX_FILES,
+        )
         == DEFAULT_SNAPSHOTS_MAX_FILES
     )
 
@@ -155,8 +171,6 @@ def test_sane_values_pass_through():
 
 # --- запись правок по режимам запуска ------------------------------------------
 
-import pytest  # noqa: E402
-
 from gc_core.agent_edits.ctx import recording_enabled  # noqa: E402
 
 
@@ -188,6 +202,6 @@ def test_recording_is_decided_by_the_run_mode(
     config = {"agent_edits": {"record": record}}
     if run_mode is not None:
         config["run_mode"] = run_mode
-    ctx = SimpleNamespace(is_tui=is_tui, config_dict=config)
+    ctx = fake_ctx(config, is_tui=is_tui)
 
     assert recording_enabled(ctx) is expected

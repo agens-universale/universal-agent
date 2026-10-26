@@ -13,6 +13,7 @@ from transport_fakes import (
     stream_response,
 )
 from gc_testkit import run_coro
+from gc_testkit.settings import make_settings
 
 BLOB = "A" * 4000
 DATA_URL = "data:image/png;base64," + BLOB
@@ -21,13 +22,15 @@ MASKED = "data:image/png;base64,<4000 bytes>"
 
 def _jsonl_logger(tmp_path):
     cfg = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "console_trace": False,
-        "logging_format": "jsonl",
-        "log_level": "debug",
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.console_trace": False,
+        "logging.format": "jsonl",
+        "logging.log_level": "debug",
     }
-    logger, path, _ = create_run_logger(cfg, run_id="mask", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        make_settings(cfg), run_id="mask", agent_kind="main"
+    )
     return logger, path
 
 

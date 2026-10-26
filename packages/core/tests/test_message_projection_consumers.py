@@ -16,6 +16,13 @@ from gc_core.utils.format_messages import (
 )
 
 
+def _split_cut_reasoning(text: str) -> tuple[str, int, str]:
+    body = text.split("[reasoning]\n", 1)[1]
+    head, rest = body.split("...[cutted ", 1)
+    cut, tail = rest.split(" chars...]...", 1)
+    return head, int(cut), tail
+
+
 def test_format_canonical_assistant_keeps_think_prose_as_in_messages():
     msg = {
         "type": "message",
@@ -136,6 +143,62 @@ def test_message_text_for_summary_assistant_without_think():
     text = message_text_for_summary(msg)
     assert text == "[assistant] visible"
     assert "<think" not in text
+
+
+def test_message_text_for_summary_includes_reasoning_tail():
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "",
+        "reasoning_content": "s041 wrong; s075 correct; s078 WA 38",
+    }
+    text = message_text_for_summary(msg)
+    assert "[assistant]" in text
+    assert "[reasoning]" in text
+    assert "s075 correct" in text
+    assert "s078 WA 38" in text
+
+
+def test_message_text_for_summary_reasoning_keeps_head_and_tail():
+    raw = ("H" * 6000) + ("M" * 4000) + ("T" * 6000) + "END"
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "ok",
+        "reasoning_content": raw,
+    }
+    text = message_text_for_summary(msg)
+    head, cut, tail = _split_cut_reasoning(text)
+    assert len(head) == len(tail) == 4000
+    assert head.startswith("H")
+    assert tail.endswith("END")
+    assert "M" not in head and "M" not in tail
+    assert cut == len(raw) - 8000
+
+
+def test_message_text_for_summary_uses_openrouter_reasoning_alias():
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "",
+        "reasoning": "alias-only verdict",
+    }
+    text = message_text_for_summary(msg)
+    assert "[reasoning]" in text
+    assert "alias-only verdict" in text
+
+
+def test_trigger_volume_counts_full_reasoning_content():
+    raw = "R" * 20000
+    msg = {
+        "type": "message",
+        "role": "assistant",
+        "content": "visible",
+        "reasoning_content": raw,
+    }
+    assert message_raw_payload_chars_for_trigger(msg) == len("visible") + len(
+        raw
+    )
 
 
 def test_build_history_text_smoke_no_think_in_assistant():

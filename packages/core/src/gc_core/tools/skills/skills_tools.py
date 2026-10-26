@@ -18,17 +18,18 @@ from gc_core.config_modules.agent import (
     exec_output_preview_edge_chars_from_config_dict,
     exec_timeout_from_config_dict,
 )
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import (
     LOOP_WARN_KEY,
     READ_PROFILE,
     copy_loop_warn,
     loop_warn_on_repeat,
 )
+from gc_core.security.permission_mode import CAT_SKILL, CAT_SKILL_EXEC
 from gc_core.tools.exec.exec_envelope import (
     as_captured_stream,
     exec_channels_json,
 )
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.skills.registry import AmbiguousSkillId, SkillsRegistry
 from gc_core.utils.arg_decorators import parse_json_object_argument
 from gc_core.utils.json_arg_parser import JsonArgParseError
@@ -154,7 +155,12 @@ class RunSkillScriptTool:
     ) -> None:
         self._registry = registry
         self._ctx = kwargs.get("ctx")
-        self._config_dict = kwargs.get("config_dict") or {}
+        #: Явные настройки (всё, что принимает ``settings_of``); иначе — из ctx.
+        self._settings = kwargs.get("settings")
+
+    @property
+    def _settings_source(self) -> Any:
+        return self._settings if self._settings is not None else self._ctx
 
     @parse_json_object_argument(
         source_arg="args",
@@ -194,7 +200,7 @@ class RunSkillScriptTool:
             exec_result = await aexec_port(backend).aexec_argv(
                 run_argv,
                 stdin=stdin,
-                timeout=exec_timeout_from_config_dict(self._config_dict),
+                timeout=exec_timeout_from_config_dict(self._settings_source),
             )
             stdout = as_captured_stream(
                 getattr(exec_result, "stdout_stream", None)
@@ -215,7 +221,7 @@ class RunSkillScriptTool:
                     stdout,
                     stderr,
                     exec_output_preview_edge_chars_from_config_dict(
-                        self._config_dict
+                        self._settings_source
                     ),
                 )
             )
@@ -428,6 +434,7 @@ def get_skills_tools_data(
 
     tools: Dict[str, Dict[str, Any]] = {
         "skills_list": {
+            "category": CAT_SKILL,
             "tool_fabric": _make_fabric(SkillsListTool),
             "spec": {
                 "type": "function",
@@ -469,6 +476,7 @@ def get_skills_tools_data(
             ),
         },
         "skills_load": {
+            "category": CAT_SKILL,
             "tool_fabric": _make_fabric(LoadSkillTool),
             "spec": {
                 "type": "function",
@@ -505,6 +513,13 @@ def get_skills_tools_data(
             ),
         },
         "skills_run_script": {
+            # Исполнение, а не чтение: скрипт запускается мимо модерации
+            # команд, поэтому решает гейт режима по строке действия.
+            "category": CAT_SKILL_EXEC,
+            # Что исполняется, задаёт пара «скилл + имя скрипта»: гейт кладёт
+            # её в вопрос и в ключ решения. argv — данные для уже
+            # одобренного кода, в ключ не входит.
+            "decision_args": ("skill_id", "script_name"),
             "tool_fabric": _make_fabric(RunSkillScriptTool),
             "spec": {
                 "type": "function",
@@ -575,6 +590,7 @@ def get_skills_tools_data(
             ),
         },
         "skills_read_reference": {
+            "category": CAT_SKILL,
             "tool_fabric": _make_fabric(LoadReferenceTool),
             "spec": {
                 "type": "function",
@@ -625,6 +641,7 @@ def get_skills_tools_data(
             ),
         },
         "skills_read_asset": {
+            "category": CAT_SKILL,
             "tool_fabric": _make_fabric(LoadAssetTool),
             "spec": {
                 "type": "function",

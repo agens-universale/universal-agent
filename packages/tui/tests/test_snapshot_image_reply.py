@@ -7,6 +7,7 @@ pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
 from gc_testkit.tui_fixtures.stub_executor import StubExecutor
+from gc_testkit.tui_support import tui_settings
 
 
 def _app(tmp_path, monkeypatch, *, scenario: str, tid: str, message: str):
@@ -24,7 +25,12 @@ def _app(tmp_path, monkeypatch, *, scenario: str, tid: str, message: str):
     return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "CodeAgent", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {
+                "agent.model": "CodeAgent",
+                "backend.api_mode": "chat_completions",
+            }
+        ),
     )
 
 

@@ -5,16 +5,19 @@ from gc_core.message_format.dialog_history import (
     group_into_turns,
     split_turns_into_char_batches,
 )
-from gc_core.message_policy.user_message_policy import append_user_log_entries
-from gc_core.summarize.summary_validation import (
-    is_valid_summary_text,
-    validate_summary_text,
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
 )
+from gc_core.summarize.summary_validation import validate_summary_text
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 
+def _is_valid(text: str) -> bool:
+    return validate_summary_text(text)[0]
+
+
 class ThreadSummarizerTest(unittest.TestCase):
-    def test_append_user_log_entries_skips_technical_user_message(
+    def test_extract_real_user_message_text_skips_technical_user_message(
         self,
     ) -> None:
         messages = [
@@ -37,22 +40,22 @@ class ThreadSummarizerTest(unittest.TestCase):
             {"role": "user", "content": "Сделай рефакторинг parser слоя"},
             {"role": "assistant", "content": "ok"},
         ]
-        log = append_user_log_entries([], messages)
+        log = [
+            text
+            for text in map(extract_real_user_message_text, messages)
+            if text
+        ]
         self.assertEqual(log, ["Сделай рефакторинг parser слоя"])
 
-    def test_is_valid_summary_text(self) -> None:
-        self.assertTrue(is_valid_summary_text(valid_summary_xml_for_tests()))
-        self.assertFalse(is_valid_summary_text(""))
+    def test_validate_summary_text(self) -> None:
+        self.assertTrue(_is_valid(valid_summary_xml_for_tests()))
+        self.assertFalse(_is_valid(""))
         ok, reason = validate_summary_text("[assistant] raw transcript")
-        self.assertFalse(is_valid_summary_text("[assistant] raw transcript"))
+        self.assertFalse(_is_valid("[assistant] raw transcript"))
         self.assertEqual(reason, "missing_structure")
-        self.assertFalse(
-            is_valid_summary_text("TASK_AND_CONTEXT:\n- short prose")
-        )
+        self.assertFalse(_is_valid("TASK_AND_CONTEXT:\n- short prose"))
         preamble = "[assistant] preamble\n\n"
-        self.assertTrue(
-            is_valid_summary_text(preamble + valid_summary_xml_for_tests())
-        )
+        self.assertTrue(_is_valid(preamble + valid_summary_xml_for_tests()))
         ok, reason = validate_summary_text(
             "<summary><task_and_context>x</task_and_context></summary>"
         )

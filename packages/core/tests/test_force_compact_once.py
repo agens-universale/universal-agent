@@ -4,6 +4,7 @@ import importlib
 import types
 
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _coord(monkeypatch, calls, backend="chat_completions"):
@@ -15,7 +16,7 @@ def _coord(monkeypatch, calls, backend="chat_completions"):
     rsc = importlib.import_module("gc_core.run_summary_coordinator")
     state = types.SimpleNamespace(backend_api_mode=backend)
     coord = rsc.RunSummaryCoordinator(
-        ctx=types.SimpleNamespace(),
+        ctx=fake_ctx(),
         state=state,
         thread_session=None,
         summary_trigger_chars=10_000,

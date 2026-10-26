@@ -69,11 +69,6 @@ def with_system_trust_retry(fn: Callable[[], T]) -> T:
         return fn()
 
 
-def reset_for_tests() -> None:
-    global _injected
-    _injected = False
-
-
 def post(url: str, *, config_proxy: Optional[str] = None, **kwargs):
     """POST голосового пути: общая сессия агента + прокси по его же правилам.
 

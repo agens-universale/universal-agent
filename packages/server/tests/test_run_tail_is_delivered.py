@@ -22,6 +22,7 @@ import pytest
 from gc_server import server
 from gc_server.rest_api import agent_execution_registry as registry_module
 from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
+from gc_testkit.settings import make_settings
 
 #: Потолок любого ожидания: зависший прогон должен дать красный тест, а не
 #: вечный набор.
@@ -33,14 +34,17 @@ def _within(awaitable):
 
 
 def _cfg(tmp_path):
-    return {
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
-    }
+    return make_settings(
+        {
+            "logging.save_logs": False,  # без каталога логов: умолчание модели — писать
+            "paths.threads_data_path": str(tmp_path),
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://test",
+            "agent.model": "x",
+            "agent.max_steps": 1,
+            "agent.system_prompt_id": "v1",
+        }
+    )
 
 
 def _msg(content: str) -> dict:
@@ -182,7 +186,7 @@ async def test_stopped_or_failed_run_does_not_replay_its_tail(
             system="s", task_id="t", make_message=_msg, content="вдогонку"
         )
         if ending == "stop":
-            registry.stop(system="s", task_id="t")
+            await registry.stop(system="s", task_id="t")
 
     env.teardown_steps.append(_message_then_end)
     env.fail = ending == "failure"

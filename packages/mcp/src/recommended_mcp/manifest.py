@@ -64,29 +64,6 @@ def default_manifest_path(root: Path) -> Path:
     return root / "config.yml"
 
 
-def resolve_manifest_path(root: Path, config: Path | str | None) -> Path:
-    """Разрешить путь до YAML-манифеста.
-
-    Если `config` не задан — `root/config.yml`.
-    Относительные пути считаются от текущей рабочей директории (cwd), не от `root`.
-    `path:` внутри манифеста по-прежнему относителен `root`. А `install.source` —
-    НЕ путь: это ИМЯ каталога в `external/vendor/`, которое ищет
-    `install._vendor_candidates`. Относительная форма (`../external/<имя>`)
-    принимается ради дореформенных манифестов, но с одноразовым `[warn]`: путь
-    резолвился от каталога рецептов, а после их переезда в `packages/mcp/src`
-    стал вести в никуда.
-    """
-    if config is None:
-        return default_manifest_path(root)
-    path = Path(config).expanduser()
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    path = path.resolve()
-    if not path.is_file():
-        raise ManifestError(f"manifest not found: {path}")
-    return path
-
-
 def load_manifest(path: Path) -> list[MCPEntry]:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     raw_mcps = data.get("mcps", [])

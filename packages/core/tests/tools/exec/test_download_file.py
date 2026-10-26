@@ -72,15 +72,15 @@ def _config(
 ):
     cfg = {
         "launch_root": str(launch_root),
-        "download": {
+        "security.download": {
             "download_dir": download_dir,
             "max_bytes": max_bytes,
         },
     }
     if write_guard is not None:
-        cfg["write_guard"] = write_guard
+        cfg["security.write_guard"] = write_guard
     if url_policy is not None:
-        cfg["url_policy"] = url_policy
+        cfg["security.url_policy"] = url_policy
     return cfg
 
 
@@ -158,7 +158,7 @@ def test_download_file_pdf_happy_path(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/report.pdf",
             filename="report.pdf",
         )
@@ -180,7 +180,7 @@ def test_download_file_docx_zip_header(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/doc.docx",
             filename="doc.docx",
         )
@@ -207,7 +207,7 @@ def test_download_file_plain_text_extensions(
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url=f"https://example.com/{filename}",
             filename=filename,
         )
@@ -226,7 +226,7 @@ def test_download_file_plain_text_rejects_null_bytes(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/notes.txt",
             filename="notes.txt",
         )
@@ -243,7 +243,7 @@ def test_download_file_invalid_filename_path_traversal(tmp_path):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/x.pdf",
             filename="../../x.pdf",
         )
@@ -271,7 +271,7 @@ def test_download_file_accepts_spaces_parens_unicode(
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/x.pdf",
             filename=filename,
         )
@@ -289,7 +289,7 @@ def test_download_file_rejects_null_and_newlines(tmp_path, bad_char):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/x.pdf",
             filename=f"bad{bad_char}name.pdf",
         )
@@ -305,7 +305,7 @@ def test_download_file_format_blocked_extension(tmp_path):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/malware.exe",
             filename="malware.exe",
         )
@@ -322,7 +322,7 @@ def test_download_file_format_blocked_magic_mismatch(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/fake.pdf",
             filename="fake.pdf",
         )
@@ -345,7 +345,7 @@ def test_download_file_exists(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/report.pdf",
             filename="report.pdf",
         )
@@ -363,9 +363,7 @@ def test_download_file_too_large(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(
-                DownloadFile, config_dict=_config(launch_root, max_bytes=10)
-            ),
+            with_local_ctx(DownloadFile, _config(launch_root, max_bytes=10)),
             url="https://example.com/big.pdf",
             filename="big.pdf",
         )
@@ -390,7 +388,7 @@ def test_download_file_redirect_blocked_by_policy(tmp_path, monkeypatch):
         _call(
             with_local_ctx(
                 DownloadFile,
-                config_dict=_config(
+                _config(
                     launch_root,
                     url_policy={
                         "enabled": True,
@@ -418,7 +416,7 @@ def test_download_file_relative_download_dir(tmp_path, monkeypatch):
         _call(
             with_local_ctx(
                 DownloadFile,
-                config_dict=_config(launch_root, download_dir="incoming"),
+                _config(launch_root, download_dir="incoming"),
             ),
             url="https://example.com/report.pdf",
             filename="report.pdf",
@@ -441,7 +439,7 @@ def test_download_file_absolute_download_dir_in_extra_paths(
         _call(
             with_local_ctx(
                 DownloadFile,
-                config_dict=_config(
+                _config(
                     launch_root,
                     download_dir=str(scratch),
                     write_guard={
@@ -472,7 +470,7 @@ def test_download_file_absolute_download_dir_outside_perimeter(
         _call(
             with_local_ctx(
                 DownloadFile,
-                config_dict=_config(
+                _config(
                     launch_root,
                     download_dir=str(outside),
                     write_guard={
@@ -520,7 +518,7 @@ def test_download_file_atomic_write_replace_failure(tmp_path, monkeypatch):
 
     result = json.loads(
         _call(
-            with_local_ctx(DownloadFile, config_dict=_config(launch_root)),
+            with_local_ctx(DownloadFile, _config(launch_root)),
             url="https://example.com/report.pdf",
             filename="report.pdf",
         )
@@ -564,9 +562,7 @@ def test_oversized_file_is_rejected_by_content_length_without_downloading(
 
     out = json.loads(
         _call(
-            with_local_ctx(
-                DownloadFile, config_dict=_config(launch_root, max_bytes=1024)
-            ),
+            with_local_ctx(DownloadFile, _config(launch_root, max_bytes=1024)),
             url="https://example.com/big.pdf",
             filename="big.pdf",
         )
@@ -594,9 +590,7 @@ def test_lying_content_length_is_caught_while_streaming(monkeypatch, tmp_path):
 
     out = json.loads(
         _call(
-            with_local_ctx(
-                DownloadFile, config_dict=_config(launch_root, max_bytes=1024)
-            ),
+            with_local_ctx(DownloadFile, _config(launch_root, max_bytes=1024)),
             url="https://example.com/lying.pdf",
             filename="lying.pdf",
         )
@@ -624,9 +618,7 @@ def test_small_file_still_downloads(monkeypatch, tmp_path):
 
     out = json.loads(
         _call(
-            with_local_ctx(
-                DownloadFile, config_dict=_config(launch_root, max_bytes=4096)
-            ),
+            with_local_ctx(DownloadFile, _config(launch_root, max_bytes=4096)),
             url="https://example.com/ok.pdf",
             filename="ok.pdf",
         )

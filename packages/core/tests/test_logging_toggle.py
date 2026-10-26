@@ -2,16 +2,17 @@ import json
 
 from gc_core.security.log_redaction import MASK
 from gc_core.utils.logging_module import create_run_logger
+from gc_testkit.settings import make_settings
 
 
 def _base(tmp_path, **over):
     cfg = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "console_trace": False,
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.console_trace": False,
     }
     cfg.update(over)
-    return cfg
+    return make_settings(cfg)
 
 
 def test_text_default_writes_dot_log_plaintext(tmp_path):
@@ -30,7 +31,9 @@ def test_text_default_writes_dot_log_plaintext(tmp_path):
 
 def test_jsonl_writes_dot_jsonl_events(tmp_path):
     logger, path, _ = create_run_logger(
-        _base(tmp_path, logging_format="jsonl"), run_id="r2", agent_kind="main"
+        _base(tmp_path, **{"logging.format": "jsonl"}),
+        run_id="r2",
+        agent_kind="main",
     )
     assert path.endswith(".jsonl")
     logger.info("msg", extra={"event": "agent_start", "foo": 1})
@@ -46,11 +49,13 @@ def test_jsonl_writes_dot_jsonl_events(tmp_path):
 def test_jsonl_redaction_masks_payload(tmp_path):
     cfg = _base(
         tmp_path,
-        logging_format="jsonl",
-        redact_secrets={
-            "enabled": True,
-            "extra_keys": [],
-            "extra_patterns": [],
+        **{"logging.format": "jsonl"},
+        **{
+            "logging.redact_secrets": {
+                "enabled": True,
+                "extra_keys": [],
+                "extra_patterns": [],
+            }
         },
     )
     logger, path, _ = create_run_logger(cfg, run_id="r3", agent_kind="main")
@@ -70,7 +75,7 @@ def test_jsonl_redaction_masks_payload(tmp_path):
 
 
 def test_text_redaction_masks_line(tmp_path):
-    cfg = _base(tmp_path, redact_secrets={"enabled": True})
+    cfg = _base(tmp_path, **{"logging.redact_secrets": {"enabled": True}})
     logger, path, _ = create_run_logger(cfg, run_id="r4", agent_kind="main")
     logger.info("token Bearer abcdef.ghijk-123 tail", extra={"event": "e"})
     for h in logger.handlers:

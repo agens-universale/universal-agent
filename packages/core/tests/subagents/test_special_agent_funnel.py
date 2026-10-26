@@ -32,6 +32,7 @@ from gc_core.usage.account import CATEGORY_SUBAGENT, UsageAccount
 from gc_core.usage.context import current_usage_context
 from gc_core.utils import llm_chat_client
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -64,18 +65,19 @@ def _create_instance():
             role_description="Web security",
             task="Audit",
             model="test-model",
-            config_dict={},
         )
     )
 
 
-def _ctx(**overrides) -> SimpleNamespace:
+_BASE_CONFIG = {
+    "backend.completions_url": "http://backend.local/v1/chat/completions",
+    "backend.request_timeout_sec": 600,
+    "backend.api_mode": "chat_completions",
+}
+
+
+def _ctx(config=None, **overrides) -> SimpleNamespace:
     base = dict(
-        config_dict={
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "backend_api_mode": "chat_completions",
-        },
         auxiliary_llm=ChatCompletionsLlmConfig(),
         auth_connector=None,
         model_router=None,
@@ -83,7 +85,7 @@ def _ctx(**overrides) -> SimpleNamespace:
         is_tui=False,
     )
     base.update(overrides)
-    return SimpleNamespace(**base)
+    return fake_ctx(_BASE_CONFIG if config is None else config, **base)
 
 
 def test_default_budgets_match_prior_hardcodes():
@@ -241,10 +243,12 @@ def test_special_agent_role_generation_respects_configured_max_tokens_override(
     )
 
     ctx = _ctx(
-        config_dict={
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "auxiliary_llm_params": {"subagent_role_max_tokens": 222},
+        {
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "chat_completions.auxiliary_llm": {
+                "subagent_role_max_tokens": 222
+            },
         },
         auxiliary_llm=ChatCompletionsLlmConfig(subagent_role_max_tokens=222),
     )
@@ -269,10 +273,10 @@ def test_project_memory_compaction_uses_configured_max_tokens_default(
         as_coro(_fake_call),
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "model": "test-model",
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.model": "test-model",
         },
         logger=None,
     )
@@ -297,11 +301,11 @@ def test_project_memory_compaction_respects_configured_max_tokens_override(
         as_coro(_fake_call),
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "backend_api_mode": "chat_completions",
-            "model": "test-model",
-            "project_memory_params": {"compaction_max_tokens": 111},
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "agent.model": "test-model",
+            "project_memory": {"compaction_max_tokens": 111},
         },
         logger=None,
     )

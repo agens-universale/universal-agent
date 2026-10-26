@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    ValidationError,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ImagesConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     # Картинок в одном сообщении: больше — отказ при вставке (TUI), ошибка старта (CLI).
     max_per_message: int = Field(default=10, ge=1)
@@ -36,18 +30,13 @@ class ImagesConfig(BaseModel):
         return self
 
 
-def read_images_config(config_dict: Mapping[str, Any] | None) -> ImagesConfig:
-    """Секция ``images`` из ``config_dict`` — единственный путь чтения во всём коде.
+def read_images_config(settings: Any) -> ImagesConfig:
+    """Секция ``images`` настроек — единственный путь чтения во всём коде.
 
-    Зовётся на каждом запросе, поэтому не бросает никогда: секции нет (двойники
-    ctx, словарь собран руками мимо ``AppConfig``) или она невалидна — дефолты,
-    как у соседних читателей секций (``parse_find_in_files_config``,
-    ``intent_scope_from_config_dict``).
+    ``settings`` — всё, что принимает ``settings_of`` (контекст рана,
+    ``LoadedSettings``, ``AppConfig``); ``None`` — умолчания. Секция уже
+    провалидирована при загрузке, поэтому чтение не бросает.
     """
-    raw = (config_dict or {}).get("images")
-    if not isinstance(raw, Mapping):
-        return ImagesConfig()
-    try:
-        return ImagesConfig.model_validate(dict(raw))
-    except ValidationError:
-        return ImagesConfig()
+    from gc_core.settings import settings_of
+
+    return settings_of(settings).images

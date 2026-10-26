@@ -32,7 +32,10 @@ from gc_core.config_modules.agent_edits import (
 from gc_core.config_modules.images import read_images_config
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
+from gc_core.message_policy.plan_messages import accepted_plan_messages
+from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
+from gc_core.security.permission_mode import Mode, mode_label
 from rich.cells import cell_len
 from rich.text import Text
 from textual import events
@@ -46,7 +49,7 @@ from textual.widgets import Static, TextArea
 from gc_tui import branding
 from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import CopyBlockRequest, OpenImageRequest
-from gc_tui.models import TaskCursor
+from gc_tui.models import CompactionStep, TaskCursor
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
@@ -60,6 +63,11 @@ from gc_tui.services.export import export_thread
 from gc_tui.services.git_info import current_branch
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
+from gc_tui.services.mode_pill import (
+    MODE_HINTS,
+    PILL_GAP,
+    render_mode_pill,
+)
 from gc_tui.services.notices_ui import (
     footer_left_rows,
     footer_left_with_badge,
@@ -98,20 +106,24 @@ from gc_tui.services.terminal_title import (
     set_terminal_title,
 )
 from gc_tui.services.trace_mapper import (
+    PROPOSE_PLAN_ID,
     RenderContext,
     coerce_args,
     collect_render_context,
     map_message,
+    response_tail,
+    with_closing_replies,
 )
 from gc_tui.services.trace_render import (
     LINE_INTERMEDIATE_CLASS,
     NESTED_PREFIX,
     NESTED_PROSE_PREFIX,
-    build_compaction_label,
+    build_compaction_marker_event,
 )
 from gc_tui.services.trace_retention import (
     RETENTION_DETAIL_HINT,
     apply_payload_retention,
+    events_leaving_window,
     filter_sidecar_to_parents,
     is_light_payload,
     message_ids_in_retention_window,
@@ -127,19 +139,26 @@ from gc_tui.services.usage_meter import (
 from gc_tui.services.voice_pill import render_pill
 from gc_tui.session_settings import read_breaker_from_meta, read_from_meta
 from gc_tui.toggles import (
+    AUTO_LEVEL_VALUE,
     PROFILE_NONE_VALUE,
     TOGGLES,
     apply_toggle,
     dynamic_toggle_hint,
+    effective_toggle_values,
     next_toggle_value,
     preset_custom_hint,
     preset_track_extra,
     toggle_state,
+    toggle_unavailable_hint,
 )
 from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
+from gc_tui.widgets.plan_panel import PlanPanel
+from gc_tui.widgets.static_content import update_if_changed
 from gc_tui.widgets.thinking_indicator import (
+    DONE_LABEL,
+    DONE_LABEL_PLAN,
     TERMINAL_INDICATOR_STATES,
     ThinkingIndicator,
     is_terminal_indicator_state,
@@ -159,6 +178,11 @@ _SEL_TRACE = "#trace"
 
 _log = logging.getLogger(__name__)
 
+# События, которыми диалог продолжается после вопроса ask_human.
+_DIALOG_CONTINUATION_KINDS = frozenset(
+    {"user", "agent", "call", "result", "error", "error_msg"}
+)
+
 
 def resolve_terminal_outcome(
     *, runner_error, stop_requested, terminal_outcome
@@ -177,6 +201,8 @@ def resolve_terminal_outcome(
         return "stopped_tokens"
     if terminal_outcome == "tool_call_limit":
         return "stopped_tool_calls"
+    if terminal_outcome == "judge_unavailable":
+        return "stopped_judge"
     return "completed"
 
 
@@ -193,6 +219,7 @@ def resolve_live_terminal_indicator_state(
         "stopped_errors",
         "stopped_tokens",
         "stopped_tool_calls",
+        "stopped_judge",
     ):
         return last_indicator_kind
     outcome = status
@@ -263,18 +290,26 @@ def select_active_substate(
 # Отступ колонки статусов от логотипа — тот же, что в CSS (#brand-mcp padding-left):
 # порог узости считается по нему, и разъехаться они не должны.
 _MCP_COL_PAD = 6
-# F7/buffer пришёл из develop (синк 2026-08-06) — клавиша живёт в хроме наравне с
-# остальными.
-_FOOTER_LEFT = (
-    "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
-)
-# Во время хода слева остаётся ТОЛЬКО остановка (Task 17, решение юзера):
-# F-подсказки не показываются никогда, независимо от ширины терминала —
-# пользователь их уже знает, а место во время хода нужно правой колонке, там
-# живут стрелка перехода и сегмент «запрос». Это безусловное правило, а не
-# ступень деградации по ширине.
+# Слева в футере — пилюля режима разрешений и счётчик уведомлений (решение
+# владельца): постоянный индикатор режима важнее списка F-клавиш, а клавиши
+# перечислены в справке (F1). Во время хода к пилюле добавляется ТОЛЬКО
+# остановка: место нужно правой колонке, там живут стрелка перехода и сегмент
+# «запрос».
 _FOOTER_RUNNING_LEFT = "Ctrl+C/stop"
 _PLACEHOLDER_READY = "опишите задачу или /команда"
+# Раз за запуск, до первого действия человека: потом справку он уже знает
+# (сообщение, F1, палитра, новая сессия — `spend_help_hint`).
+_PLACEHOLDER_READY_HELP = f"{_PLACEHOLDER_READY} · F1 — справка"
+_PLACEHOLDER_PLAN_REWORK = "что доработать в плане…"
+_PLACEHOLDER_ASK_HUMAN = "ваш ответ агенту…"
+_PLACEHOLDER_PLAN_WAITS = "опишите задачу или /plan — вернуться к плану"
+# Ответы команды /plan, когда показывать нечего.
+_PLAN_CMD_ENTERED = (
+    "plan mode включён — опишите задачу, и агент предложит план"
+)
+_PLAN_CMD_NO_PLAN = "плана пока нет — опишите задачу, и агент предложит план"
+_PLAN_CMD_NO_PLAN_BUSY = "плана пока нет"
+_PLAN_CLEAR_HINT = "/plan clear — убрать план из сессии"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",
     "stop": "Esc ещё раз, чтобы остановить",
@@ -323,6 +358,10 @@ _IMAGE_PASTE_REFUSALS = {
 # снимается целиком.
 _PROFILE_NAME_MAX_COLS = 14  # потолок: 13 символов + «…»
 _PROFILE_NAME_MIN_COLS = 5  # минимум: 4 символа + «…» (Task 17)
+# Имя модели в футере перед снятием режется по середине (спека §10.4):
+# начало (провайдер) и конец (версия) остаются; ниже минимума не ужимается —
+# дальше имя снимается целиком.
+_MODEL_NAME_MIN_COLS = 10
 
 # Хром футера: padding #footer (0 1 → 2) + padding-right #footer-right (1) +
 # зазор между колонками, который держит padding-right у #footer-left (2). На
@@ -338,13 +377,23 @@ _RIGHT_PRICES_DOWN = 0
 # значение (плашка контекста скрыта).
 _UNRESOLVED = object()
 
-# Снимок футер-головы (Task 15, docs 2026-08-09-profiles-a-migration-plan):
-# profile/level_color/model — «факт» (пин хода или, вне хода, живой резолв);
-# transition — (цвет_нового_уровня_или_None, новая_модель) или None (переход
-# не нужен). См. `TraceScreen._footer_head_snapshot`.
+# Снимок футер-головы (спека auto-routing §7.1): profile/mode_auto/level_color/
+# model/running — mode_auto различает режим (`● auto`) от факта (`● → ● модель`)
+# и от ручного уровня; model/level_color — факт бегущего хода (Router executor'а
+# по фактическому уровню подготовленного вызова) либо живой резолв витрины. См.
+# `TraceScreen._footer_head_snapshot`.
 _FooterHeadSnapshot = namedtuple(
-    "_FooterHeadSnapshot", ("profile", "level_color", "model", "transition")
+    "_FooterHeadSnapshot",
+    ("profile", "mode_auto", "level_color", "model", "running", "transition"),
+    defaults=(None,),
 )
+
+
+def _records_context(records: list[dict]) -> RenderContext:
+    """Контекст рендера порции записей треда (по их payload)."""
+    return collect_render_context(
+        rec.get("payload") for rec in records if isinstance(rec, dict)
+    )
 
 
 def _profile_source_label(ref) -> str | None:
@@ -354,17 +403,33 @@ def _profile_source_label(ref) -> str | None:
     return "проектный" if ref.root_kind == "project" else "глобальный"
 
 
+def _fit_cells(text: str, cols: int) -> str:
+    """Самое длинное начало `text`, что помещается в `cols` колонок."""
+    out = ""
+    for ch in text:
+        if cell_len(out + ch) > cols:
+            break
+        out += ch
+    return out
+
+
 def _truncate_profile_name(name: str, max_cols: int) -> str:
     """Режет ХВОСТ имени профиля до `max_cols` колонок (cell-width), с «…» на
     конце, если целиком не влезает."""
     if cell_len(name) <= max_cols:
         return name
-    out = ""
-    for ch in name:
-        if cell_len(out + ch) > max_cols - 1:
-            break
-        out += ch
-    return out + "…"
+    return _fit_cells(name, max_cols - 1) + "…"
+
+
+def _truncate_middle(name: str, max_cols: int) -> str:
+    """Режет СЕРЕДИНУ имени до `max_cols` колонок: начало (провайдер) и
+    конец (версия) остаются — `gatewayhub/…-coder-4.5`."""
+    if cell_len(name) <= max_cols:
+        return name
+    budget = max_cols - 1
+    head = _fit_cells(name, budget - budget // 2)
+    tail = _fit_cells(name[::-1], budget // 2)[::-1]
+    return f"{head}…{tail}"
 
 
 class TraceScreen(Screen):
@@ -418,6 +483,9 @@ class TraceScreen(Screen):
         self._cursor: Optional[TaskCursor] = None
         self._next_no: int = 1
         self._active_task_id: Optional[str] = None
+        # Снимок меты на тик опроса (см. _tick_meta); вне тика — None.
+        self._tick_meta_cache: tuple[str, dict] | None = None
+        self._in_poll_tick = False
         self._session_lock_hb_mono: float = 0.0  # throttle heartbeat ≤ 1 Гц
         self._error_shown: bool = False
         self._mcp_status_row = (
@@ -450,13 +518,14 @@ class TraceScreen(Screen):
         self._edits_lookup = None  # Optional[EditsLookup]
         self._edits_lookup_key: Optional[tuple] = None
         self._submit_solution_call_ids: set[str] = set()
-        # Track submit_solution agent-line widgets, чтобы при повторе свернуть предыдущие.
-        # list of (event_no, main_static, note_widget_or_None)
-        # spec 2026-05-26 (code-block-highlight): теперь храним СПИСОК виджетов
-        # предыдущей submit_solution (multi-widget рендер: prose + code-panels).
-        self._submit_solution_widgets: list[
-            tuple[list[Widget], Optional[TraceRow]]
-        ] = []
+        # Виджеты последней попытки turn_finish хода (ответ, код, итог,
+        # заметка) — при повторе свернуть предыдущую.
+        self._submit_solution_widgets: list[list[Widget]] = []
+        # Отчёт последней попытки turn_finish, нарисованный ответом: база
+        # дедупа A1, пока попытку не убрала свёртка.
+        self._finish_summary: Optional[str] = None
+        # Записи незаконченного ответа модели из прошлой пачки опроса.
+        self._response_tail: list = []
         # Mapping event_no → summary-body TraceRow (скрыт; раскрывается при фокусе маркера).
         self._summary_body_widgets: dict[int, TraceRow] = {}
         self._summary_marker_widgets: dict[int, TraceRow] = {}
@@ -466,6 +535,13 @@ class TraceScreen(Screen):
         # confirm banner state (T2)
         self._confirm_banner = None  # type: Optional["ConfirmBanner"]
         self._confirm_active: bool = False
+        self._plan_banner = None  # type: Optional["PlanApprovalBanner"]
+        # Выбрано «Обсудить и доработать план»: следующее сообщение человека —
+        # замечания к плану, о чём в ленте остаётся строка.
+        self._plan_rework_pending = False
+        # Подсказка F1 в поле ввода погашена до конца запуска. Экран главный и
+        # живёт весь запуск — признак принадлежит ему.
+        self._help_hint_spent = False
         # Скрытая трейс-строка вопроса; раскрывается при схлопывании баннера.
         self._ask_human_question_row = None  # type: Optional[TraceRow]
         # Раннер, задавший текущий ask_human (владелец вопроса). None, если плашка
@@ -476,6 +552,11 @@ class TraceScreen(Screen):
         self._ask_human_child_parent_call_id: Optional[str] = None
         # Spec 2026-05-26: pending user-replies (in-memory dict by client_id, FIFO ordered).
         self._pending_user_widgets: dict[str, UserReplyContainer] = {}
+        # id записей, уже отрисованных в трейсе: запись с таким id не
+        # рисуется повторно ни на одном пути (rebuild, live-тик).
+        self._rendered_ids: set[str] = set()
+        # Индекс первого события каждого сегмента в _task_events (retention).
+        self._segment_starts: list[int] = []
         # Кэш wire_content для reconciliation — независим от состояния meta-файла,
         # который executor может перезаписывать в своём потоке.
         self._pending_wire_cache: dict[str, str] = {}
@@ -628,10 +709,10 @@ class TraceScreen(Screen):
             with Horizontal(id="input-row"):
                 yield Static("> ", id="input-prompt", markup=False)
                 yield CommandTextArea(
-                    placeholder=_PLACEHOLDER_READY, id="cmdinput"
+                    placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )
             with Horizontal(id="footer"):
-                yield Static(_FOOTER_LEFT, id="footer-left", markup=False)
+                yield Static("", id="footer-left", markup=False)
                 yield Static(
                     self._compose_footer_right(),
                     id="footer-right",
@@ -752,15 +833,14 @@ class TraceScreen(Screen):
         """Действующая модель СЛЕДУЮЩЕГО хода из Router (спека §12.2), не
         плоский ключ `cfg["model"]`: должна отражать активный уровень/профиль
         сразу после /level или /profiles, до пересборки executor (Router
-        витрин строится от `effective_config()` на каждый вызов, §6.4).
+        витрин строится от `effective_settings()` на каждый вызов, §6.4).
 
         Легаси-плейсхолдер шаблона (Task 14) — не имя модели, показывать нечего."""
         from gc_core.onboarding import MODEL_SENTINEL
 
         display_router = getattr(self.app, "display_router", None)
         if not callable(display_router):
-            cfg = getattr(self.app, "_config", None) or {}
-            model = cfg.get("model")
+            model = self.app.base_settings().settings.agent.model
             return model if model and model != MODEL_SENTINEL else "?"
         # check_breaker=False: витрина показывает модель честно даже при открытом
         # активном алиасе (спека §12.2) — иначе футер молча замирал бы (§8).
@@ -771,8 +851,8 @@ class TraceScreen(Screen):
     def _footer_live_level(self) -> str:
         """Активный уровень ЖИВОГО резолва (спека §12.1/§12.2): реагирует на
         /level и активацию профиля сразу, без пересборки executor. Общий
-        источник для цвета точки будущего состояния и сравнения «уровень
-        менялся?» посреди хода (спека Task 15)."""
+        источник для цвета будущей модели и сравнения «уровень менялся?»
+        посреди вызова; факт берётся через Router работающего executor."""
         display_router = getattr(self.app, "display_router", None)
         return (
             display_router().active_level()
@@ -794,34 +874,28 @@ class TraceScreen(Screen):
         ref = ref_fn() if callable(ref_fn) else None
         return ref.name if ref is not None else None
 
-    def _footer_pinned_resolution(self) -> tuple[str, str, str] | None:
-        """(уровень, цвет, имя модели) ХОДА, зафиксированного на пине (спека
-        Task 15) — «факт», на чём реально идут запросы, а не живой резолв.
+    def _footer_running_resolution(self) -> tuple[str, str, str, bool] | None:
+        """Факт подготовленного вызова через Router работающего executor.
 
-        None — активного хода нет (раннер отсутствует / не бежит), пина нет
-        (легаси-старт не через `begin_turn`) или у раннера нет Router'а этого
-        executor'а. Резолвит `pinned_level()` ЧЕРЕЗ `pinned_router()` — снимок
-        `models`/`slots`/`assign`, зафиксированный при сборке ИМЕННО этого
-        executor'а, — не живой `display_router()` TUI: тот отражает /profiles
-        мгновенно и подменил бы «факт» на модель уже переключившегося профиля
-        раньше, чем ход её реально увидит."""
+        Новый выбор уровня или профиля не подменяет этот комплект. До первого
+        решения используется живой резолв того же Router. Чтение не строит executor.
+        """
         runner = getattr(self.app, "active_runner", None)
         is_running = getattr(runner, "is_running", None)
         if runner is None or not callable(is_running) or not is_running():
             return None
-        pinned_level_fn = getattr(runner, "pinned_level", None)
-        pinned_router_fn = getattr(runner, "pinned_router", None)
-        if not callable(pinned_level_fn) or not callable(pinned_router_fn):
-            return None
-        level = pinned_level_fn()
-        router = pinned_router_fn()
-        if not level or router is None:
+        router_fn = getattr(runner, "executor_router", None)
+        router = router_fn() if callable(router_fn) else None
+        if router is None:
             return None
         from gc_core.model_router import AliasCircuitOpenError
         from gc_core.onboarding import MODEL_SENTINEL
 
+        call_level = getattr(runner, "call_level", None)
+        prepared_level = call_level() if callable(call_level) else None
+        level = prepared_level or router.active_level()
         try:
-            resolved = router.resolve_level(level)
+            resolved = router.resolve_main_at_level(level, check_breaker=False)
         except AliasCircuitOpenError as exc:
             resolved = exc.resolved
         except ValueError:
@@ -829,35 +903,65 @@ class TraceScreen(Screen):
         model = resolved.alias or resolved.model
         if not model or model == MODEL_SENTINEL:
             return None
-        return (level, self._level_color(level), model)
+        return (
+            level,
+            self._level_color(level),
+            model,
+            prepared_level is not None,
+        )
 
     def _footer_head_snapshot(self) -> _FooterHeadSnapshot:
-        """Снимок футер-головы — один резолв на отрисовку футера.
-
-        `profile`/`level_color`/`model` — «факт»: то, на чём реально идёт
-        текущий ход (пин, спека Task 15), либо, вне хода, живой резолв, как
-        раньше. `transition` — `(цвет_нового_уровня_или_None, новая_модель)`,
-        что применится ПОСЛЕ хода, или `None` — переход не нужен (хода нет,
-        будущая модель совпадает с фактической). Каждый резолв недёшев: имя
-        профиля глобит оба корня профилей (диск), цвет/модель строят Router
-        витрин от `effective_config()` — лесенка усечения в
-        `_compose_footer_right` обязана получить снимок готовым, не резолвить
-        заново на каждой ступени."""
+        """Один снимок на кадр: фактический вызов и выбранный следующий режим."""
         profile = self._footer_profile_name()
-        live_level = self._footer_live_level()
-        live_color = self._level_color(live_level)
-        live_model = str(self._footer_model_name())
-        pinned = self._footer_pinned_resolution()
-        if pinned is None:
-            return _FooterHeadSnapshot(profile, live_color, live_model, None)
-        pinned_level, fact_color, fact_model = pinned
-        if fact_model == live_model:
-            return _FooterHeadSnapshot(profile, fact_color, fact_model, None)
-        transition = (
-            live_color if pinned_level != live_level else None,
-            live_model,
+        running = self._run_in_progress()
+        auto_mode_active = getattr(self.app, "auto_mode_active", None)
+        selected_auto = (
+            auto_mode_active() if callable(auto_mode_active) else False
         )
-        return _FooterHeadSnapshot(profile, fact_color, fact_model, transition)
+        resolution = self._footer_running_resolution()
+        next_selection = None
+        if resolution is not None:
+            selection = getattr(
+                self.app.active_runner, "next_call_selection", None
+            )
+            next_selection = selection() if callable(selection) else None
+            if next_selection is not None:
+                selected_auto = next_selection[0]
+        transition = None
+        mode_auto = selected_auto
+        if resolution is not None:
+            level, color, model, prepared = resolution
+            runner = self.app.active_runner
+            call_mode = getattr(runner, "call_mode", None)
+            actual_mode = call_mode() if callable(call_mode) else None
+            if actual_mode is not None:
+                mode_auto = actual_mode == "auto"
+            if selected_auto:
+                if actual_mode == "manual":
+                    transition = (AUTO_LEVEL_VALUE.color, "auto")
+            else:
+                if next_selection is None:
+                    live_level = self._footer_live_level()
+                    live_model = str(self._footer_model_name())
+                else:
+                    _, live_level, live_model = next_selection
+                if prepared and (
+                    model != live_model
+                    or level != live_level
+                    or actual_mode == "auto"
+                ):
+                    transition = (
+                        self._level_color(live_level)
+                        if level != live_level or mode_auto
+                        else None,
+                        live_model,
+                    )
+        else:
+            color = self._level_color(self._footer_live_level())
+            model = str(self._footer_model_name())
+        return _FooterHeadSnapshot(
+            profile, mode_auto, color, model, running, transition
+        )
 
     def _footer_head(
         self,
@@ -865,42 +969,73 @@ class TraceScreen(Screen):
         with_profile: bool,
         profile_name_cols: int = _PROFILE_NAME_MAX_COLS,
         snapshot: _FooterHeadSnapshot | None = None,
+        with_model_name: bool = True,
+        with_level_block: bool = True,
         with_transition: bool = True,
         meter: Text | object | None = _UNRESOLVED,
+        model_cols: int | None = None,
     ) -> Text:
-        """head = [профиль ] ● модель[ → [● ]модель][ · контекст]. Точка —
-        жирная, цвет уровня, сама и есть разделитель перед моделью (спека
-        Task 8). Переход «сейчас → станет» (спека Task 15) — только посреди
-        хода и только если будущая модель отличается от фактической; точка
-        нового уровня — только если уровень менялся.
+        """head = [профиль ] ●[ auto | → ● модель | модель][ · контекст]. Правило
+        единое для обоих режимов (спека auto-routing §7.1): нет активного хода —
+        точка режима + режим (` auto` в auto, модель в ручном); идёт ход —
+        точка режима + факт (` → ● модель` в auto, просто модель в ручном).
+        `transition` отдельно называет выбранный следующий режим/модель,
+        не подменяя уже подготовленный вызов. Точка режима — жирная, ВСЕГДА первая и видна: в auto
+        цветом BRAND (`AUTO_LEVEL_VALUE.color`, единственный источник), иначе
+        цветом уровня.
+
+        Порядок жертв по ширине (спека auto-routing §7.1): текст после
+        последней точки снимается первым (имя модели или слово `auto`,
+        `with_model_name=False`), затем у auto — стрелка и точка уровня
+        (`with_level_block=False`); точка режима остаётся всегда.
 
         Имя профиля режется ХВОСТОМ до `profile_name_cols` колонок (Task 9):
         потолок — `_PROFILE_NAME_MAX_COLS`, чтобы длинное имя не отжирало
         футер даже на широком экране.
 
         `snapshot` — готовый результат `_footer_head_snapshot()`; не передан —
-        резолвим сами (одиночный вызов вне лесенки). `with_transition=False` —
-        порядок жертв по ширине (спека Task 15): блок за стрелкой снимается
-        ПОСЛЕ того, как имя профиля снято целиком — точка и факт-модель
-        остаются всегда.
+        резолвим сами (одиночный вызов вне лесенки).
 
         `meter` — готовая плашка контекста (`None` = скрыта); не передана —
         резолвим сами. Как и `snapshot`, это ОДИН резолв на кадр: метр читает
-        meta треда с диска, а лесенка строит голову до 22 раз."""
+        meta треда с диска, а лесенка строит голову десятки раз.
+
+        `model_cols` — потолок имени модели, режется по середине (ступень
+        перед снятием имени); None — целиком."""
         if snapshot is None:
             snapshot = self._footer_head_snapshot()
         if meter is _UNRESOLVED:
             meter = self._context_meter()
-        profile, level_color, model_name, transition = snapshot
+        profile, mode_auto, level_color, model_name, running, transition = (
+            snapshot
+        )
         head = Text()
         if with_profile and profile:
             head.append(
                 _truncate_profile_name(profile, profile_name_cols), style=_INK
             )
             head.append(" ")
-        head.append("●", style=f"bold {level_color}")
-        head.append(" ")
-        head.append(model_name, style=_INK)
+        shown = (
+            model_name
+            if model_cols is None
+            else _truncate_middle(model_name, model_cols)
+        )
+        if mode_auto:
+            head.append("●", style=f"bold {AUTO_LEVEL_VALUE.color}")
+            if running:
+                if with_level_block:
+                    head.append(" → ", style=_DIM)
+                    head.append("●", style=f"bold {level_color}")
+                    if with_model_name:
+                        head.append(" ")
+                        head.append(shown, style=_INK)
+            elif with_model_name:
+                head.append(" auto", style=_INK)
+        else:
+            head.append("●", style=f"bold {level_color}")
+            if with_model_name:
+                head.append(" ")
+                head.append(shown, style=_INK)
         if with_transition and transition is not None:
             future_color, future_model = transition
             head.append(" → ", style=_DIM)
@@ -914,7 +1049,7 @@ class TraceScreen(Screen):
         return head
 
     def _compose_footer_right(self) -> Text:
-        """Правый край футера: [профиль ]● модель[ → …] · контекст [+ цены вниз].
+        """Правый край футера: [профиль ]●[ модель] · контекст [+ цены вниз].
 
         Единая лесенка жертв (Task 17, порядок — дословное решение юзера);
         первое подошедшее и есть ответ:
@@ -922,30 +1057,35 @@ class TraceScreen(Screen):
         1. всё одной строкой справа, левая в одну строку, имя профиля в потолке;
         2. цены («запрос · сессия») уезжают на 2-ю строку справа, контекст
            остаётся наверху; левая ещё в одну строку, имя в потолке;
-        3. левая переносит подсказки на свою 2-ю строку (по одной с хвоста —
-           это делает Rich-wrap); имя профиля ВСЁ ЕЩЁ в потолке;
-        4. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
-        5. имя профиля снимается целиком;
-        6. снимается блок за стрелкой — последняя жертва.
+        3. левая занимает свою 2-ю строку (туда уходит счётчик уведомлений,
+           перенос делает Rich-wrap); имя профиля ВСЁ ЕЩЁ в потолке;
+        4. пилюля режима слева сжимается до глифа (имя режима и подпись
+           хоткея уходят, режим остаётся виден);
+        5. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
+        6. имя профиля снимается целиком;
+        7. имя модели ужимается по середине до `_MODEL_NAME_MIN_COLS`;
+        8. снимается имя модели (или слово `auto`), затем у auto — стрелка с
+           точкой уровня; точка режима/уровня и плашка контекста остаются
+           всегда.
 
         Ступени 1-3 ничего не теряют: вторая строка футера (height: 2)
-        зарезервирована в ОБЕИХ колонках и так, и перенос подсказок вниз — то же
+        зарезервирована в ОБЕИХ колонках и так, и перенос левой вниз — то же
         перекладывание в уже оплаченное место, что и перенос цен. Потеря
         информации начинается с 4-й. Отсюда и порядок (живой смок юзера,
         фикс-раунд 3): бесплатные ходы идут раньше платных, поэтому перебор
-        имени живёт ЦЕЛИКОМ во втором проходе, а в первом пробуется только
+        имени живёт ЦЕЛИКОМ в платном проходе, а в бесплатных пробуется только
         потолок — раньше имя ужималось при левой, спокойно стоявшей в один ряд.
 
         Лесенка МОНОТОННА по СОДЕРЖИМОМУ: при сужении окна цены, имя профиля и
-        переход не возвращаются. Поэтому вариант «всё одной строкой» живёт лишь
+        имя модели не возвращаются. Поэтому вариант «всё одной строкой» живёт лишь
         в первом проходе — иначе на границе ступени 3 (левой разрешили 2 ряда,
         места стало больше) цены прыгали бы обратно наверх, а это ровно то
         дёрганье, против которого задача и заведена. Уехали вниз — остались
-        внизу. По той же причине во втором проходе перебор имени начинается с
-        потолка: имя, ужатое в первом проходе, иначе «подросло» бы обратно.
+        внизу. По той же причине в платном проходе перебор имени начинается с
+        потолка: имя, ужатое раньше, иначе «подросло» бы обратно.
 
         Число рядов ЛЕВОЙ монотонности не подчиняется, и запирать его не надо
-        (решение по ревью): на ступенях 5-6 освободившаяся ширина может вернуть
+        (решение по ревью): на ступенях 6-7 освободившаяся ширина может вернуть
         левую в один ряд. Это зеркало того же обмена «ряд слева ↔ сегмент
         справа», информации при этом не теряется, а искусственный запрет
         тратил бы место впустую.
@@ -955,7 +1095,7 @@ class TraceScreen(Screen):
         лесенка перебирает варианты правой с предикатом «сколько рядов при
         этом остатке занимает левая», а не считает бюджет от левой (так было
         до Task 17: левая не отдавала ни колонки никогда, и правая заранее
-        теряла имя профиля и переход — живой смок).
+        теряла имя профиля и имя модели — живой смок).
 
         «Рядов левой» считает `footer_left_rows` — то же ядро, что её и
         рисует: параллельный оценщик разъехался бы с отрисовкой.
@@ -967,23 +1107,29 @@ class TraceScreen(Screen):
         total = self._footer_total_width()
         snapshot = self._footer_head_snapshot()
         meter = self._context_meter()
-        left_commands = self._footer_left_commands()
         left_badge = format_notices_badge(self._collect_footer_notices())
 
         def build(
             profile_cols: int | None,
             layout_width: int,
             *,
-            with_transition: bool = True,
+            with_model_name: bool = True,
+            with_level_block: bool = True,
             with_request: bool = True,
             with_prices: bool = True,
+            with_transition: bool = True,
+            model_cols: int | None = None,
         ) -> Text:
+            pending_transition = snapshot.transition is not None
             head = self._footer_head(
                 with_profile=profile_cols is not None,
                 profile_name_cols=profile_cols or _PROFILE_NAME_MAX_COLS,
                 snapshot=snapshot,
-                with_transition=with_transition,
+                with_model_name=with_model_name or pending_transition,
+                with_level_block=with_level_block,
+                with_transition=with_model_name and with_transition,
                 meter=meter,
+                model_cols=model_cols,
             )
             request = request_seg if (with_prices and with_request) else None
             session = session_seg if with_prices else None
@@ -996,16 +1142,19 @@ class TraceScreen(Screen):
         def width_of(result: Text) -> int:
             return max(cell_len(line) for line in result.plain.split("\n"))
 
-        # Пол левой колонки. Обычный `_FOOTER_LEFT` — список F-подсказок: его не жаль
-        # ни перенести, ни укоротить с хвоста. Но когда слева стоят КРИТИЧНЫЕ клавиши
-        # («Ctrl+C/stop» во время хода, ответ на ask_human), урезать их нечем: другого
-        # способа остановить агента или ответить ему нет. Их ширина резервируется, и
-        # жертвует дальше правая колонка, а не левая.
-        left_floor = (
-            0 if left_commands == _FOOTER_LEFT else cell_len(left_commands)
-        )
+        # Левая колонка меряется в двух формах пилюли режима. Полная (имя и
+        # подпись хоткея) — мерка бесплатных ступеней. Узкая (один глиф) —
+        # мерка платных и пол: режим должен быть виден всегда, а «Ctrl+C/stop»
+        # и ответ на ask_human урезать нечем — другого способа остановить
+        # агента или ответить ему нет. Ширина пола резервируется, и жертвует
+        # дальше правая.
+        left_full = self._footer_left_commands()
+        left_narrow = self._footer_left_commands(narrow=True)
+        left_floor = cell_len(left_narrow)
 
-        def fits(result: Text, allowed_left_rows: int) -> bool:
+        def fits(
+            result: Text, allowed_left_rows: int, left_commands: str
+        ) -> bool:
             lines = result.plain.split("\n")
             need = width_of(result)
             if len(lines) > 2 or need > available:
@@ -1022,9 +1171,10 @@ class TraceScreen(Screen):
             )
 
         # Первый проход (левая в один ряд) — только бесплатные ступени 1-2, имя
-        # всегда в потолке. Всё платное живёт во втором (левая в два ряда):
-        # перебор имени 14 → 5 и его снятие. «Одной строкой» во второй проход не
-        # переходит — монотонность, см. докстринг.
+        # всегда в потолке. Второй (левая в два ряда, пилюля режима полная) —
+        # бесплатная ступень 3. Всё платное живёт в третьем (пилюля — глиф):
+        # перебор имени 14 → 5 и его снятие. «Одной строкой» дальше первого
+        # прохода не переходит — монотонность, см. докстринг.
         prices_down = [
             (cols, _RIGHT_PRICES_DOWN)
             for cols in range(
@@ -1034,22 +1184,26 @@ class TraceScreen(Screen):
         passes = (
             (
                 1,
+                left_full,
                 [
                     (_PROFILE_NAME_MAX_COLS, _RIGHT_ONE_LINE),
                     (_PROFILE_NAME_MAX_COLS, _RIGHT_PRICES_DOWN),
                 ],
             ),
-            (2, [*prices_down, (None, _RIGHT_PRICES_DOWN)]),
+            (2, left_full, [(_PROFILE_NAME_MAX_COLS, _RIGHT_PRICES_DOWN)]),
+            (2, left_narrow, [*prices_down, (None, _RIGHT_PRICES_DOWN)]),
         )
-        for allowed_left_rows, variants in passes:
+        for allowed_left_rows, left_commands, variants in passes:
             for cols, layout_width in variants:
                 result = build(cols, layout_width)
-                if fits(result, allowed_left_rows):
+                if fits(result, allowed_left_rows, left_commands):
                     return result
 
-        # Резерв (ступени 6-8), от богатого к бедному: снимается блок за стрелкой,
-        # затем «запрос» (сессия остаётся), затем цены целиком. Точка уровня,
-        # факт-модель и плашка контекста остаются всегда.
+        # Резерв (рунги шапки × до 3 уровней цен), от богатого к бедному:
+        # имя модели ужимается по середине, затем снимается (или слово
+        # `auto`), затем у auto — стрелка с точкой уровня, затем «запрос»
+        # (сессия остаётся), затем цены целиком. Точка режима (в ручном —
+        # точка уровня) и плашка контекста остаются всегда.
         #
         # Почему цены вообще стали жертвой (решение владельца, синк 2026-08-20):
         # раньше последняя ступень возвращалась БЕЗУСЛОВНО, и на узком окне левой
@@ -1059,7 +1213,7 @@ class TraceScreen(Screen):
         #
         # И почему берётся не первый попавшийся: когда цены стоят на второй строке,
         # ширину правой колонки диктуют ОНИ, а не шапка, — тогда снятие имени профиля
-        # и перехода не освобождает ни колонки. Поэтому если место не нашлось ни на
+        # и имени модели не освобождает ни колонки. Поэтому если место не нашлось ни на
         # одной ступени, берётся вариант с МИНИМАЛЬНОЙ шириной, а среди равных по
         # ширине — первый, то есть самый богатый: жертва принимается только когда
         # она что-то даёт.
@@ -1067,31 +1221,60 @@ class TraceScreen(Screen):
         # «запрос» освобождает больше, чем имя профиля, и после неё имя часто
         # возвращается на место. Перебирать в другом порядке значило бы отдавать
         # имя навсегда ради экономии, которой хватило бы и без него.
+        # Последняя ступень (`with_level_block=False`) влияет только на auto:
+        # в ручном режиме `_footer_head` игнорирует этот флаг вовсе.
+        # Рунг: (имя профиля, имя модели, блок уровня, переход, ширина имени).
+        # Перед снятием имени — снятие перехода при полном имени, затем ужатие
+        # имени по середине (спека §10.4): провайдер и версия видны, пока
+        # влезают. В auto без хода на месте имени слово `auto` — ужимать
+        # нечего.
+        full = cell_len(snapshot.model)
+        least = min(full, _MODEL_NAME_MIN_COLS)
+        name_shown = snapshot.running or not snapshot.mode_auto
+        squeeze = range(full - 1, least - 1, -1) if name_shown else ()
+        # Имя ждущего перехода не снимается (`build`), поэтому ступени
+        # «снять имя» тогда — одна: имя ужато до минимума, снят блок уровня
+        # (в auto это «→ ●»). Без неё самой узкой осталась бы ступень с
+        # блоком, и на узком окне правая поджимала бы левую.
+        drop_name = (
+            ((None, False, False, False, least),)
+            if snapshot.transition is not None
+            else (
+                (None, False, True, False, None),
+                (None, False, False, False, None),
+            )
+        )
         head_ladder = (
-            (_PROFILE_NAME_MAX_COLS, True),
-            (None, True),
-            (None, False),
+            (_PROFILE_NAME_MAX_COLS, True, True, True, None),
+            (None, True, True, True, None),
+            (None, True, True, False, None),
+            *((None, True, True, False, c) for c in squeeze),
+            *drop_name,
         )
-        # Ценами жертвуем ТОЛЬКО ради пола левой колонки. Когда слева обычные
-        # F-подсказки, пола нет и терять цены не за что: место всё равно достанется
-        # подсказкам, которые не жалко перенести или укоротить.
-        price_ladder = (
-            ({}, {"with_request": False}, {"with_prices": False})
-            if left_floor
-            else ({},)
-        )
-        reserve = [
+        # Ценами жертвуем ТОЛЬКО ради пола левой колонки (глиф режима и
+        # критичные клавиши).
+        price_ladder = ({}, {"with_request": False}, {"with_prices": False})
+        # Лениво: до хвоста резерва доходит только узкое окно.
+        reserve = (
             build(
-                cols, _RIGHT_PRICES_DOWN, with_transition=transition, **prices
+                cols,
+                _RIGHT_PRICES_DOWN,
+                with_model_name=name,
+                with_level_block=level_block,
+                with_transition=transition,
+                model_cols=model_cols,
+                **prices,
             )
             for prices in price_ladder
-            for cols, transition in head_ladder
-        ]
+            for cols, name, level_block, transition, model_cols in head_ladder
+        )
+        tried: list[Text] = []
         for candidate in reserve:
-            if fits(candidate, 2):
+            if fits(candidate, 2, left_narrow):
                 return candidate
+            tried.append(candidate)
         # Не подошло ничего — и дальше важно, ПОЧЕМУ.
-        affordable = [c for c in reserve if width_of(c) <= available]
+        affordable = [c for c in tried if width_of(c) <= available]
         if affordable:
             # Правая в свою ширину влезает; не хватило ЛЕВОЙ. Её беда снятием
             # имени профиля не лечится — ширину правой диктует строка цен, и
@@ -1099,9 +1282,9 @@ class TraceScreen(Screen):
             # равных по ширине — первый, то есть самый богатый.
             return min(affordable, key=width_of)
         # Правая не влезает даже в отведённую ей ширину: её обрежет терминал, и
-        # действует прежний контракт вёрстки — самый бедный вариант, где переход
-        # снят последним (`test_footer_drops_transition_last_...`).
-        return reserve[-1]
+        # действует прежний контракт вёрстки — самый бедный вариант, где имя
+        # модели снято последним (точка остаётся).
+        return tried[-1]
 
     def _footer_total_width(self) -> int:
         """Ширина всего футера — её и делят между собой колонки."""
@@ -1137,37 +1320,54 @@ class TraceScreen(Screen):
         if not snapshot:
             return (None, None)
         session_meta, request_meta = snapshot
-        cfg = getattr(self.app, "_config", None) or {}
+        settings = self.app.base_settings().settings
         return usage_segments(
             session_meta,
             request_meta,
-            cfg.get("pricing"),
-            cfg.get("model"),
-            cfg.get("completions_url"),
+            settings.pricing,
+            settings.agent.model,
+            settings.backend.completions_url,
         )
+
+    def _tick_meta(self) -> dict:
+        """Мета активной задачи — ТОЛЬКО для показа; читатели не мутируют.
+
+        Вне тика опроса — свежее чтение (`{}` без стора или задачи). Внутри
+        тика (`_poll_active`) — одно чтение на задачу, дальше тот же
+        словарь: показ за тик видит один снимок. Любая запись `tui`-меты
+        экрана идёт через `_write_tui_meta`, он сам сбрасывает снимок. Для
+        read-modify-write снимок не годится — читать хранилище напрямую.
+        `tui.pending_user_messages` через `_tick_meta` не читать.
+        """
+        if self._store is None or self._active_task_id is None:
+            return {}
+        if not self._in_poll_tick:
+            return self._store.get_task_meta(self._active_task_id)
+        tid = self._active_task_id
+        if self._tick_meta_cache is None or self._tick_meta_cache[0] != tid:
+            self._tick_meta_cache = (tid, self._store.get_task_meta(tid))
+        return self._tick_meta_cache[1]
+
+    def _write_tui_meta(self, task_id: str, patch: dict) -> None:
+        """Записать `tui`-мету задачи; снимок тика после записи устарел."""
+        self._store.update_tui_meta(task_id, patch)
+        self._tick_meta_cache = None
 
     def _context_meter(self) -> Text | None:
         """Rich-Text индикатора контекста или None (скрыт)."""
-        cfg = getattr(self.app, "_config", None) or {}
-        if str(cfg.get("backend_api_mode")) != "chat_completions":
+        cfg = self.app.effective_settings()
+        if str(cfg.settings.backend.api_mode) != "chat_completions":
             return None
         # Знаменатель шкалы — её mid-turn. turn-end (60%) подставляется только когда
         # mid-turn этой шкалы выключен: иначе проактивная уборка показывала бы 100%.
         if self._store is None or self._active_task_id is None:
             return None
-        meta = self._store.get_task_meta(self._active_task_id)
-        from gc_core.summarize.config import (
-            parse_summary_trigger_chars,
-            parse_summary_trigger_tokens,
-            parse_summary_turn_end_trigger_chars,
-            parse_summary_turn_end_trigger_tokens,
-        )
-
-        # Токенная шкала — сохранённое число провайдера без хвоста. Числа нет
-        # или токенный порог выключен — символы, как раньше. Знаменатель шкалы —
-        # её mid-turn; mid-turn 0 подменяется её turn-end, и только тогда.
-        token_mid = parse_summary_trigger_tokens(cfg)
-        token_end = parse_summary_turn_end_trigger_tokens(cfg)
+        meta = self._tick_meta()
+        # Знаменатель — mid-turn активной шкалы модели, которая ведёт историю.
+        # mid-turn 0 подменяется turn-end той же шкалы.
+        limits = self._meter_summary_limits(cfg)
+        token_mid = limits.tokens_during
+        token_end = limits.tokens_after
         saved_tokens = meta.get("last_main_prompt_tokens")
         if (
             not isinstance(saved_tokens, bool)
@@ -1180,9 +1380,7 @@ class TraceScreen(Screen):
                 return None
             return render_context_meter(saved_tokens, denominator)
 
-        threshold = parse_summary_trigger_chars(
-            cfg
-        ) or parse_summary_turn_end_trigger_chars(cfg)
+        threshold = limits.chars_during or limits.chars_after
         if threshold <= 0:
             return None
         # Источник символьной шкалы — meta.runtime.live_history_chars (persist).
@@ -1194,6 +1392,33 @@ class TraceScreen(Screen):
         except (TypeError, ValueError):
             return None
         return render_context_meter(chars, threshold)
+
+    def _meter_summary_limits(self, cfg: dict):
+        """Пороги для знаменателя индикатора контекста.
+
+        Пока ход идёт — те, по которым сжимает РАБОТАЮЩИЙ агент
+        (`runner.pinned_summary_limits`): его снимок конфига и уровень
+        подготовленного вызова. /level действует со следующего нового вызова,
+        /profiles требует пересборки runner, и по живым данным бар показывал бы не тот порог, по которому
+        реально сработает сжатие. Вне хода — живой конфиг и живой Router: это
+        пороги СЛЕДУЮЩЕГО хода."""
+        runner = getattr(self.app, "active_runner", None)
+        is_running = getattr(runner, "is_running", None)
+        pinned = getattr(runner, "pinned_summary_limits", None)
+        if callable(is_running) and is_running() and callable(pinned):
+            limits = pinned()
+            if limits is not None:
+                return limits
+        from gc_core.summarize.config import resolve_summary_limits_at_level
+
+        router = None
+        display_router = getattr(self.app, "display_router", None)
+        if callable(display_router):
+            try:
+                router = display_router()
+            except Exception:
+                router = None
+        return resolve_summary_limits_at_level(cfg, router, None)
 
     def _session_status_word(self) -> Optional[str]:
         """Сырое слово статуса сессии (без скобок): asking/running/completed/
@@ -1210,7 +1435,7 @@ class TraceScreen(Screen):
             return "running"
         # Нет активного runner — статус из meta (tui-owned, затем legacy top-level).
         if self._store is not None and self._active_task_id is not None:
-            meta = self._store.get_task_meta(self._active_task_id)
+            meta = self._tick_meta()
             tui_status = (meta.get("tui") or {}).get("status")
             if tui_status == "running":
                 return "running"
@@ -1231,13 +1456,16 @@ class TraceScreen(Screen):
     def _refresh_header(self) -> None:
         left, right = self._compose_header_segments()
         try:
-            self.query_one("#header-left", Static).update(left)
-            self.query_one("#header-right", Static).update(right)
+            update_if_changed(self.query_one("#header-left", Static), left)
+            update_if_changed(self.query_one("#header-right", Static), right)
         except Exception:
             pass
 
-    def _footer_left_commands(self) -> str:
-        """Базовые команды footer-left без суффикса уведомлений."""
+    def _footer_left_commands(self, *, narrow: bool = False) -> str:
+        """Строка-мерка footer-left без суффикса уведомлений.
+
+        `narrow` — с пилюлей режима в один глиф: по этой форме считается пол
+        левой колонки, в ней же она рисуется, когда полная не укладывается."""
         if self._voice is not None and self._voice.state != "idle":
             # Во время записи слева не команды, а пилюля с таймером и эквалайзером
             # (её рисует `_voice_footer_render`). Лесенка правой колонки меряет левую
@@ -1245,27 +1473,65 @@ class TraceScreen(Screen):
             # значит и то и другое обязано видеть пилюлю: иначе правая колонка мерит
             # команды, которых на экране нет, и выдавливает пилюлю на второй ряд.
             return self._voice_footer_render().plain
-        if self.app.tui_state.ask_human_state is not None:
-            return "Esc/stop  Enter/ответить"
-        return (
-            _FOOTER_RUNNING_LEFT if self._run_in_progress() else _FOOTER_LEFT
+        tail = self._footer_tail_commands()
+        head = self._mode_pill(narrow=narrow).plain
+        return f"{head}{PILL_GAP}{tail}" if tail else head
+
+    def _mode_pill(self, *, narrow: bool = False) -> Text:
+        return render_mode_pill(
+            self.app.effective_permission_mode(), narrow=narrow
         )
 
-    def _footer_left_text(self) -> str:
-        """Команды footer-left + счётчик уведомлений, собранные по фактической ширине.
+    def _footer_tail_commands(self) -> str:
+        """Команды после пилюли режима: только то, без чего не обойтись.
+
+        F-клавиш здесь нет намеренно (решение владельца): они перечислены в
+        справке, а место в футере отдано режиму и правой колонке."""
+        if self.app.tui_state.ask_human_state is not None:
+            return "Esc/stop  Enter/ответить"
+        return _FOOTER_RUNNING_LEFT if self._run_in_progress() else ""
+
+    def _footer_left_text(self) -> Text:
+        """Пилюля режима + команды + счётчик уведомлений, собранные по фактической ширине.
 
         Сборку делает footer_left_with_badge: блок уведомлений либо стоит в строке с
         командами (тогда перед ним разделитель-точка), либо уходит вниз целиком и без
         точки. Ширина — контентная ширина самого #footer-left; до первого layout она
         нулевая, и сборка оптимистична — resize/refresh пересоберут по месту (канон
         бренд-карточки: раскладку выбирает фактическая ширина, а не момент сборки)."""
-        base = self._footer_left_commands()
         badge = format_notices_badge(self._collect_footer_notices())
         try:
             width = self.query_one(_SEL_FOOTER_LEFT, Static).content_size.width
         except Exception:
             width = 0
-        return footer_left_with_badge(base, badge, width=width)
+        # Пилюля — в самой богатой форме, с которой левая укладывается в свои
+        # два ряда (то же условие, по которому правая колонка оставляла ей
+        # место): полная, затем один глиф. Если рядом с критичной командой не
+        # встаёт и глиф, уступает он: команду остановки терять нельзя ни на
+        # какой ширине.
+        tail = self._footer_tail_commands()
+        forms = [
+            (pill, f"{pill.plain}{PILL_GAP}{tail}" if tail else pill.plain)
+            for pill in (self._mode_pill(), self._mode_pill(narrow=True))
+        ]
+        if tail:
+            forms.append((Text(), tail))
+        # Первая форма, что укладывается; не уложилась ни одна — последняя.
+        pill, commands = next(
+            (
+                form
+                for form in forms
+                if width <= 0
+                or footer_left_rows(form[1], badge, width=width) <= 2
+            ),
+            forms[-1],
+        )
+        # Сборка работает со строками; цвет пилюли возвращается поверх: она
+        # стоит в начале текста, и её разметка ложится по тем же позициям.
+        out = Text(footer_left_with_badge(commands, badge, width=width))
+        for span in pill.spans:
+            out.stylize(span.style, span.start, span.end)
+        return out
 
     def _refresh_notices_footer(self) -> None:
         """Обновить счётчик уведомлений в footer-left (без затрагивания footer-right)."""
@@ -1276,8 +1542,9 @@ class TraceScreen(Screen):
         if self._voice is not None and self._voice.state != "idle":
             return
         try:
-            self.query_one(_SEL_FOOTER_LEFT, Static).update(
-                self._footer_left_text()
+            update_if_changed(
+                self.query_one(_SEL_FOOTER_LEFT, Static),
+                self._footer_left_text(),
             )
         except Exception:
             pass
@@ -1291,8 +1558,9 @@ class TraceScreen(Screen):
         растёт по ходу прогона.
         """
         try:
-            self.query_one("#footer-right", Static).update(
-                self._compose_footer_right()
+            update_if_changed(
+                self.query_one("#footer-right", Static),
+                self._compose_footer_right(),
             )
         except Exception:
             pass
@@ -1302,7 +1570,7 @@ class TraceScreen(Screen):
             return
         # Голосовая пилюля вытесняет остальной footer-left, пока стадия активна.
         if self._voice is not None and self._voice.state != "idle":
-            left.update(self._voice_footer_render())
+            update_if_changed(left, self._voice_footer_render())
             return
         # Подсказка уступает место запущенному прогону: пока отказ дожёвывает
         # свои 5 секунд, человек мог отправить запрос — футер обязан показать
@@ -1314,7 +1582,7 @@ class TraceScreen(Screen):
         ):
             self._reset_footer_hint_state()
         if not self._footer_hint_active:
-            left.update(self._footer_left_text())
+            update_if_changed(left, self._footer_left_text())
 
     def on_screen_resume(self) -> None:
         """После возврата с под-экрана — освежить карточку и футер уведомлений."""
@@ -1391,6 +1659,22 @@ class TraceScreen(Screen):
             seconds, self._clear_footer_hint
         )
 
+    def on_permission_mode_changed(self, mode: str) -> None:
+        """Смена режима: пилюля перерисовывается сразу, плюс короткое пояснение.
+
+        Пояснение склеивается с пилюлей в одну фразу («⏸ manual mode —
+        подтверждение всех действий, кроме чтения»): имя стоит в пилюле, текст
+        его не повторяет.
+        """
+        self._refresh_footer()
+        hint = MODE_HINTS.get(mode)
+        if not hint:
+            return
+        text = Text()
+        text.append_text(render_mode_pill(mode, hint=False))
+        text.append(f" — {hint}")
+        self._show_footer_hint(text, seconds=2.5)
+
     def _show_esc_hint(self, kind: str) -> None:
         """Esc-confirm hint: запоминает kind (для 2-го Esc) + показывает подсказку."""
         self._esc_confirm_kind = kind
@@ -1437,12 +1721,15 @@ class TraceScreen(Screen):
         """voice-секция + прокси агента: у голоса своего поля прокси нет, а в облако
         он ходит по тем же правилам, что backend (копия — оригинал не трогаем).
 
-        Читаем из ЕДИНОЙ точки (`effective_config`), как витрины и сборка executor:
-        база `app._config` не знает про сессионный слой, и профиль, выбранный на
+        Читаем из ЕДИНОЙ точки (`effective_settings`), как витрины и сборка executor:
+        база окна не знает про сессионный слой, и профиль, выбранный на
         сессию, со своей секцией `voice` до диктовки бы не доехал."""
-        cfg = self.app.effective_config() or {}
-        voice = dict(cfg.get("voice") or {})
-        voice.setdefault("proxy", cfg.get("proxy"))
+        from gc_core.config_modules.field_meta import plain_dump
+
+        settings = self.app.effective_settings().settings
+        # Сырой токен: транскрайбер шлёт его в заголовке Authorization.
+        voice = plain_dump(settings.voice)
+        voice.setdefault("proxy", settings.backend.proxy)
         return voice
 
     def _ensure_voice_flow(self):
@@ -1532,10 +1819,8 @@ class TraceScreen(Screen):
         try:
             from gc_tui.services.voice_setup import status_cheap
 
-            cfg = (
-                self.app.effective_config() or {}
-            )  # единая точка, как в _voice_config
-            return status_cheap(cfg).mode == "local"
+            # единая точка, как в _voice_config
+            return status_cheap(self.app.effective_settings()).mode == "local"
         except Exception:
             return False
 
@@ -1575,7 +1860,7 @@ class TraceScreen(Screen):
         человек за это время успевает уйти — зовём его обратно тостом."""
         self._voice_service_pending = True
         cfg = (
-            self.app.effective_config() or {}
+            self.app.effective_settings()
         )  # единая точка, как в _voice_config
 
         def _work() -> None:
@@ -1704,6 +1989,8 @@ class TraceScreen(Screen):
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
         self._task_events.clear()
+        self._rendered_ids.clear()
+        self._segment_starts.clear()
         self._last_agent_summary = None
         self._next_no = 1
         self._stick_bottom = (
@@ -1718,6 +2005,8 @@ class TraceScreen(Screen):
         self._subagent_parent_rows.clear()
         self._submit_solution_call_ids.clear()
         self._submit_solution_widgets.clear()
+        self._finish_summary = None
+        self._response_tail = []
         self._summary_body_widgets.clear()
         self._summary_marker_widgets.clear()
         self._pending_user_widgets.clear()  # spec 2026-05-26
@@ -1751,6 +2040,11 @@ class TraceScreen(Screen):
         if self._confirm_active:
             try:
                 self._hide_confirm_banner()
+            except Exception:
+                pass
+        if self._plan_banner is not None:
+            try:
+                self._hide_plan_banner()
             except Exception:
                 pass
         if self._thinking is not None:
@@ -1851,6 +2145,9 @@ class TraceScreen(Screen):
         # + notice + пересборка; санация ПОСЛЕ load_session_overrides — проверяет то,
         # что реально стало активным оверрайдом этого треда.
         self.app.sanitize_session_profile()
+        # Режим разрешений — тоже выбор, сохранённый в сессии; у открытой
+        # пикером сессии без режима — режим конфига. Флаг запуска сильнее.
+        self.app.adopt_thread_permission_mode(task_meta, resumed=is_resume)
         # read_all_events — атомарный снимок live-файла + cursor (как раньше).
         # Была ли компакция, определяем по голове live-снимка (после turn_end
         # первая запись = сводка) — без доп. I/O. Тред без компакции рендерим
@@ -1869,6 +2166,7 @@ class TraceScreen(Screen):
         if compacted:
             self._render_segments(self._store.read_segments(task_id))
         else:
+            self._segment_starts = [0]
             self._render_records(records)
         self._merge_sidecar_nested(task_id)
         self._refresh_header()
@@ -1877,6 +2175,7 @@ class TraceScreen(Screen):
         if is_resume:
             self._resumed_prompt = sp  # авторитетно из стора (переключение)
             self._restore_terminal_indicator()  # строка-итог прошлого хода
+            self._sync_plan_panel_with_session()
         elif sp is not None:
             self._resumed_prompt = sp  # auto-create: не затирать свежий send
         self._update_terminal_title()  # статус + последний промпт сессии в таб
@@ -1887,6 +2186,9 @@ class TraceScreen(Screen):
         # только что отправленные картинки уже несут номера этого треда.
         if prev != task_id:
             self._renumber_input_images()
+            # Намерение «обсудить план» принадлежит прежней сессии.
+            self._plan_rework_pending = False
+        self._sync_input_placeholder()
 
         # Свести ask_human-баннер с реальностью: replay/компакция могли оставить
         # баннер для уже отвеченного вопроса (его output суммаризован) — см. helper.
@@ -1982,7 +2284,7 @@ class TraceScreen(Screen):
         if len(kept_records) != len(records) or any(
             r.get("status") == "pending" for r in records
         ):
-            self._store.update_tui_meta(
+            self._write_tui_meta(
                 task_id, {"pending_user_messages": kept_records}
             )
 
@@ -1991,57 +2293,121 @@ class TraceScreen(Screen):
         сегментов в маркер. Маркер сжатия сегмента i = его compacted_by (ставится
         между сегментами, чтобы было видно, где прошла компакция).
 
-        Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
-        файле с тем же id. Рисуем первое вхождение, чтобы не дублировать строку
-        вокруг маркера. Payload остаётся full, пока этот id есть в окне
-        segments[-2:]."""
-        from gc_tui.models import TraceEvent
-
-        context = collect_render_context(
-            rec.get("payload")
-            for seg in segments
-            for rec in seg["messages"]
-            if isinstance(rec, dict)
+        Дедуп по id — в `_render_record` (общий для всех путей): preserved-копия
+        лежит в следующем файле с тем же id, рисуется первое вхождение.
+        Payload остаётся full, пока этот id есть в окне segments[-2:]."""
+        records = [rec for seg in segments for rec in seg["messages"]]
+        context = _records_context(records)
+        # Ответ модели, начатый в конце ленты, нужен вызову следующего тика.
+        self._response_tail = response_tail(
+            [rec.get("payload") for rec in records if isinstance(rec, dict)]
         )
-        seen_ids: set[str] = set()
         window_start = retention_window_start_index(len(segments))
         window_ids = message_ids_in_retention_window(segments)
         for i, seg in enumerate(segments):
             seg_in_window = i >= window_start
+            self._segment_starts.append(len(self._task_events))
             for rec in seg["messages"]:
                 payload = rec.get("payload")
                 mid = payload.get("id") if isinstance(payload, dict) else None
-                if mid is not None:
-                    if mid in seen_ids:
-                        continue
-                    seen_ids.add(mid)
                 in_window = seg_in_window or (
                     mid is not None and mid in window_ids
                 )
                 self._render_record(rec, context=context, in_window=in_window)
             comp = seg["compacted_by"]
             if comp is not None:
-                ev = TraceEvent(
-                    no=self._next_no,
-                    event_ts_utc_iso=comp.get("ts", ""),
-                    kind="summary",
-                    title="summary",
-                    summary=build_compaction_label(i + 1, comp),
-                    summary_content=comp["synthesis"],
-                    full_payload={},
+                self._append_and_render(
+                    build_compaction_marker_event(self._next_no, i, comp)
                 )
-                self._next_no += 1
-                self._task_events.append(ev)
-                self._render_event(ev)
+
+    def _append_and_render(self, ev, *, live: bool = False) -> None:
+        """Событие с номером _next_no — в _task_events и на экран."""
+        self._next_no += 1
+        self._task_events.append(ev)
+        self._render_event(ev, live=live)
 
     def _render_records(
-        self, records: list[dict], *, live: bool = False
+        self,
+        records: list[dict],
+        *,
+        live: bool = False,
+        context: RenderContext | None = None,
     ) -> None:
-        context = collect_render_context(
+        payloads = [
             rec.get("payload") for rec in records if isinstance(rec, dict)
-        )
+        ]
+        if live:
+            # Ответ модели мог начаться в прошлой пачке опроса: его текст
+            # нужен вызову turn_finish, пришедшему сейчас.
+            payloads = [*self._response_tail, *payloads]
+        self._response_tail = response_tail(payloads)
+        if context is None:
+            context = collect_render_context(payloads)
+        elif live:
+            # Общий контекст шага сжатия не видит текста ответа из прошлой
+            # пачки опроса.
+            context = with_closing_replies(context, payloads)
         for rec in records:
             self._render_record(rec, live=live, context=context)
+
+    def _render_finish(self, ev) -> None:
+        """Конец хода turn_finish: отчёт ответом, запись «итог» или строка
+        «заметка» (правило — turn_close.finish_close)."""
+        from gc_core.tools.turn.turn_close import without_repeated_body
+
+        from gc_tui.services.trace_render import (
+            build_finish_widgets,
+            finish_close_of,
+        )
+
+        # A1: отчёт, уже показанный прозой, вторым блоком не рисуем. База
+        # дедупа — только проза: попытки хода убирает свёртка ниже.
+        close = without_repeated_body(
+            finish_close_of(ev), self._last_agent_summary or ""
+        )
+        body = close.body.strip()
+        following = self._stick_bottom
+        widgets = build_finish_widgets(close, event_no=ev.no)
+        for w in widgets:
+            self._trace_mount(w, scroll=False)
+        if following:
+            self._scroll_trace_end()
+        if not ev.call_id:
+            return
+        self._submit_solution_call_ids.add(ev.call_id)
+        self._drop_finish_attempts()
+        self._submit_solution_widgets.append(widgets)
+        self._finish_summary = body or None
+        # Финальный ответ виден — переключаем индикатор в режим
+        # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
+        # _poll_active). Sticky-маркер sentinel выставляется в
+        # _render_records, чтобы пережить _last_event_kind = ev.kind.
+        # Ход, закрытый в этом же тике, уже показал строку-итог.
+        if self._thinking is not None and not is_terminal_indicator_state(
+            self._thinking._state
+        ):
+            self._thinking.set_state("validating")
+
+    def _drop_finish_attempts(self) -> None:
+        """Убрать прошлые попытки turn_finish хода.
+
+        Отклонённые intent_guard'ом попытки убираем молча (как regenerate
+        в чатах): внутренняя кухня качества юзеру не показывается, обе
+        попытки сохранены в jsonl треда."""
+        for prev_widgets in self._submit_solution_widgets:
+            for w in prev_widgets:
+                w.remove()
+        self._submit_solution_widgets.clear()
+        self._finish_summary = None
+
+    def _shown_by_finish_attempt(self, text: Optional[str]) -> bool:
+        """Текст виден только отчётом попытки turn_finish, которую уберёт
+        свёртка."""
+        return (
+            bool(self._submit_solution_widgets)
+            and text is not None
+            and text == self._finish_summary
+        )
 
     def _render_record(
         self,
@@ -2054,6 +2420,11 @@ class TraceScreen(Screen):
         payload = rec.get("payload")
         if not isinstance(payload, dict):
             return
+        mid = payload.get("id")
+        if mid is not None:
+            if mid in self._rendered_ids:
+                return
+            self._rendered_ids.add(mid)
         ev = map_message(
             payload,
             no=self._next_no,
@@ -2071,9 +2442,7 @@ class TraceScreen(Screen):
                     sk, True
                 )  # mid-run доставка: на resume только маркер
             return
-        self._next_no += 1
-        self._task_events.append(ev)
-        self._render_event(ev, live=live)
+        self._append_and_render(ev, live=live)
         # После реплики монтируем [skill]-маркер (если payload несёт skill_loaded).
         # На live-пути маркер уже смонтирован delivery-флоу (_mount_user_reply →
         # _flush_skill_marker → _mount_skill_marker), поэтому только на rebuild.
@@ -2108,16 +2477,14 @@ class TraceScreen(Screen):
         if self._thinking is not None:
             # Индикатор живёт в фиксированной #indicator-bar (вне скролла) —
             # unhide/смена state не двигают вид трейса.
-            self._thinking.remove_class("hidden")
-            self._thinking.set_state(state)
+            self._thinking.show(state)
             return
-        _cfg = getattr(self.app, "_config", None) or {}
+        stream_display = self.app.base_settings().settings.tui.stream_display
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at,
             state=state,
             sink=getattr(self.app, "_stream_sink", None),
-            reasoning_tag=_cfg.get("tui_stream_display", "minimal")
-            != "answer_reasoning",
+            reasoning_tag=stream_display != "answer_reasoning",
             reasoning_clock=self._reasoning_clock,
         )
         self._thinking = indicator
@@ -2143,6 +2510,7 @@ class TraceScreen(Screen):
         tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
         last = tui.get("last_indicator")
         edits = None
+        done_label = DONE_LABEL
         if (
             isinstance(last, dict)
             and last.get("kind") in TERMINAL_INDICATOR_STATES
@@ -2150,6 +2518,8 @@ class TraceScreen(Screen):
             kind = last["kind"]
             elapsed = last.get("elapsed")
             edits = last.get("edits")
+            if last.get("plan"):
+                done_label = DONE_LABEL_PLAN
         else:
             # Фолбэк: kind из единого источника статуса (того же, что заголовок).
             # None (исход не записан) → строку-итог НЕ рисуем — не выдумываем исход.
@@ -2165,15 +2535,16 @@ class TraceScreen(Screen):
             state=kind,
             frozen_elapsed=elapsed if isinstance(elapsed, int) else None,
             turn_summary=self._restored_turn_summary(edits),
+            done_label=done_label,
         )
         self._thinking = ind
         self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
 
     def _hide_thinking_indicator(self) -> None:
-        """Скрыть индикатор (CSS `.hidden`), не удаляя — анимация продолжает идти."""
+        """Скрыть индикатор (CSS `.hidden`), не удаляя; анимация на паузе."""
         if self._thinking is None:
             return
-        self._thinking.add_class("hidden")
+        self._thinking.hide()
 
     def _destroy_thinking_indicator(self) -> None:
         """Полностью убрать индикатор. Вызывается когда run завершён."""
@@ -2234,7 +2605,9 @@ class TraceScreen(Screen):
 
     def _sticky_banner_widget(self):
         """Sticky-баннер над вводом (ask_human / confirm) или None."""
-        return self._ask_human_banner or self._confirm_banner
+        return (
+            self._ask_human_banner or self._confirm_banner or self._plan_banner
+        )
 
     def _cap_sticky_banner(self, banner, *, chrome: int) -> int:
         """Потолок sticky-баннера: длинный вопрос не выдавливает input/footer.
@@ -2426,7 +2799,18 @@ class TraceScreen(Screen):
         Картинки (дизайн картинок §12): подписи `[Изображение #N]` в историю ↑ и
         имя сессии не идут — вспомненная подпись без записи в сторе была бы мёртвой
         плашкой; для отката отправки картинки запоминаются рядом с текстом."""
+        self.spend_help_hint()
         plain = strip_image_chips(text, images)
+        if self._plan_rework_pending:
+            self._plan_rework_pending = False
+            # Вне plan статус плана не сменится — строка была бы неправдой.
+            if self.app.effective_permission_mode() == Mode.PLAN.value:
+                self._mount_trace_row(
+                    prefix="· ",
+                    content="план отправлен на доработку",
+                    kind_class="line-meta",
+                )
+            self._sync_input_placeholder()
         self._last_user_send_text = text
         self._last_user_send_images = images
         self._resumed_prompt = text  # send = новое последнее сообщение активной сессии (сырой текст)
@@ -2456,12 +2840,12 @@ class TraceScreen(Screen):
             if isinstance(current, str) and current.strip():
                 # уже задано — обновляем только содержательным промптом
                 if len(norm) > LAST_ACTUAL_MIN:
-                    self._store.update_tui_meta(
+                    self._write_tui_meta(
                         self._active_task_id, {"last_actual": norm}
                     )
             else:
                 # seed: первый промпт безусловно
-                self._store.update_tui_meta(
+                self._write_tui_meta(
                     self._active_task_id, {"last_actual": norm}
                 )
         except Exception:
@@ -2491,7 +2875,7 @@ class TraceScreen(Screen):
         if task_title(tui_meta) == task:
             return
         try:
-            self._store.update_tui_meta(self._active_task_id, {"task": task})
+            self._write_tui_meta(self._active_task_id, {"task": task})
         except Exception:
             return
         self._update_terminal_title()
@@ -2522,8 +2906,7 @@ class TraceScreen(Screen):
         if self._store is None or self._active_task_id is None:
             return self._resumed_prompt or ""
         try:
-            meta = self._store.get_task_meta(self._active_task_id) or {}
-            return display_name(meta.get("tui"))
+            return display_name(self._tick_meta().get("tui"))
         except Exception:
             return self._resumed_prompt or ""
 
@@ -2555,7 +2938,7 @@ class TraceScreen(Screen):
         if self._active_task_id is None or self._store is None:
             return
         try:
-            self._store.update_tui_meta(self._active_task_id, {"title": value})
+            self._write_tui_meta(self._active_task_id, {"title": value})
         except Exception:
             return
         self._update_terminal_title()
@@ -2633,6 +3016,10 @@ class TraceScreen(Screen):
             # Previous submit_solutions are now considered completed answers,
             # not retry candidates for collapse.
             self._submit_solution_widgets.clear()
+            self._finish_summary = None
+            # Дедуп A1 действует внутри хода: проза прошлого хода не
+            # глушит такой же ответ этого.
+            self._last_agent_summary = None
             if live:
                 # Граница хода для эвристики имени — именно user-запись ядра:
                 # она есть и при обычном старте, и при подхвате очереди бегущим
@@ -2673,12 +3060,18 @@ class TraceScreen(Screen):
             # от записей на реплее защищает should_update_task (счётчик live-only).
             if ev.tool_name == "submit_solution":
                 self._seed_or_update_task_from_submit(ev)
+                self._render_finish(ev)
+                return
             # A1: дубль контента (проза → тот же финализатор / повтор) — молча
             # опускаем второй ряд (контент уже показан первым). Exact-match (strip),
             # без маркера: завершение хода и так видно по готовому инпуту.
             norm = (ev.summary or "").strip()
             if norm and norm == self._last_agent_summary:
                 return
+            if self._shown_by_finish_attempt(norm):
+                # Ответ модели повторил отчёт отклонённой попытки: попытка
+                # уходит, текст остаётся ответом — свёртка не унесёт его.
+                self._drop_finish_attempts()
             self._last_agent_summary = norm
             if ev.tool_name == "intermediate_reply":
                 from gc_tui.services.trace_render import (
@@ -2694,58 +3087,33 @@ class TraceScreen(Screen):
                 if following:
                     self._scroll_trace_end()
                 return
-            from gc_tui.services.trace_render import build_agent_widgets
+            from gc_tui.services.trace_render import (
+                build_agent_widgets,
+                build_block_widgets,
+            )
 
             # «Прилипание к низу»: фиксируем ДО монтирования (mount растит max_scroll_y).
             following = self._stick_bottom
-            mounted_widgets = build_agent_widgets(ev.summary, event_no=ev.no)
-            for w in mounted_widgets:
-                self._trace_mount(w, scroll=False)
-
-            # Submit_solution comment как note — после всех виджетов.
-            note_widget: Optional[TraceRow] = None
-            if isinstance(ev.full_payload, dict) and ev.full_payload.get(
-                "_submit_comment"
-            ):
-                from gc_tui.services.trace_render import note_text
-                from gc_tui.widgets.trace_row import TraceRow
-
-                note_widget = TraceRow(
-                    prefix="* ",
-                    content=note_text(ev.full_payload["_submit_comment"]),
-                    kind_class="line-note",
-                    event_no=ev.no,
-                    focusable=False,
+            is_plan = ev.tool_name == PROPOSE_PLAN_ID
+            mounted_widgets = (
+                # В рамке с подписью маркер ответа «●» лишний.
+                build_block_widgets(
+                    ev.summary, prose_bullet=False, event_no=ev.no
                 )
-                self._trace_mount(note_widget, scroll=False)
+                if is_plan
+                else build_agent_widgets(ev.summary, event_no=ev.no)
+            )
+            if is_plan:
+                # План — в рамке с подписью: он не обычный ответ, его одобряют.
+                self._trace_mount(
+                    PlanPanel(*mounted_widgets, plan_text=ev.summary),
+                    scroll=False,
+                )
+            else:
+                for w in mounted_widgets:
+                    self._trace_mount(w, scroll=False)
             if following:
                 self._scroll_trace_end()
-
-            if ev.tool_name == "submit_solution" and ev.call_id:
-                self._submit_solution_call_ids.add(ev.call_id)
-                if self._submit_solution_widgets:
-                    # Отклонённые intent_guard'ом попытки убираем молча (как
-                    # regenerate в чатах): внутренняя кухня качества юзеру не
-                    # показывается, обе попытки сохранены в jsonl треда.
-                    for (
-                        prev_widgets,
-                        prev_note,
-                    ) in self._submit_solution_widgets:
-                        for w in prev_widgets:
-                            w.remove()
-                        if prev_note is not None:
-                            prev_note.remove()
-                # Трекаем ВСЕ смонтированные виджеты этой submit_solution
-                # (prose-блоки + code-block-panels) — нужно для коллапса при retry.
-                self._submit_solution_widgets.append(
-                    (list(mounted_widgets), note_widget)
-                )
-                # Финальный ответ виден — переключаем индикатор в режим
-                # «✓ завершаю…» немедленно (без 250мс лага на следующий тик
-                # _poll_active). Sticky-маркер sentinel выставляется в
-                # _render_records, чтобы пережить _last_event_kind = ev.kind ниже.
-                if self._thinking is not None:
-                    self._thinking.set_state("validating")
             return
 
         if ev.kind == "ask_human":
@@ -2757,7 +3125,7 @@ class TraceScreen(Screen):
             # Когнитивное событие — эпизод раздумья не рвём (как session_think).
             # Канон spec 2026-07-31 §2 — строки собирает общий билдер
             # (он же у read-only канала), здесь только монтируем.
-            from gc_core.tools.subagents.progress import (
+            from gc_core.execution.progress import (
                 todo_items_from_arguments,
             )
 
@@ -3206,7 +3574,7 @@ class TraceScreen(Screen):
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
         self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
-        inp.placeholder = "ваш ответ агенту…"
+        self._sync_input_placeholder()
         inp.add_class("ask-human-mode")
         self._refresh_header()
         self._refresh_footer()
@@ -3254,8 +3622,8 @@ class TraceScreen(Screen):
             return None
         from gc_tui.services.edits_view import diff_limits
 
-        cfg = getattr(self.app, "_config", None) or {}
-        launch_root = cfg.get("launch_root")
+        cfg = self.app.base_settings()
+        launch_root = cfg.runtime.launch_root
         launch_root = str(launch_root) if launch_root else None
         max_source_bytes, hunk_context_lines = diff_limits(cfg)
         key = (*identity, launch_root, max_source_bytes, hunk_context_lines)
@@ -3276,8 +3644,11 @@ class TraceScreen(Screen):
 
         Мусор (0, отрицательное, `true`) даёт дефолт, а не пустое тело с
         хвостом «… ещё N строк» — сломанный вид вместо диффа."""
-        cfg = getattr(self.app, "_config", None) or {}
-        return section_limit(cfg.get("agent_edits") or {}, key, default)
+        return section_limit(self._agent_edits_section(), key, default)
+
+    def _agent_edits_section(self) -> dict:
+        """Секция `agent_edits` базовых настроек окна — словарём для `section_limit`."""
+        return self.app.base_settings().settings.agent_edits.model_dump()
 
     def _trace_inline_max_lines(self) -> int:
         """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
@@ -3291,8 +3662,7 @@ class TraceScreen(Screen):
         Ровно `0` — «без ограничения»: разворачиваются все ходы (вернём -1 как
         признак «окно не режем», см. `_is_stale_edit_turn`). Прочий мусор
         (отрицательное, `true`, строка) даёт дефолт — общим правилом."""
-        cfg = getattr(self.app, "_config", None) or {}
-        section = cfg.get("agent_edits") or {}
+        section = self._agent_edits_section()
         raw = section.get(
             "replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS
         )
@@ -3304,8 +3674,7 @@ class TraceScreen(Screen):
 
     def _turn_summary_in_status(self) -> bool:
         """Показывать ли сводку правок в строке-итоге — `agent_edits.turn_summary_in_status`."""
-        cfg = getattr(self.app, "_config", None) or {}
-        section = cfg.get("agent_edits") or {}
+        section = self._agent_edits_section()
         return bool(
             section.get(
                 "turn_summary_in_status", DEFAULT_TURN_SUMMARY_IN_STATUS
@@ -3334,6 +3703,22 @@ class TraceScreen(Screen):
             lookup.last_turn_id() if lookup is not None else None
         )
         self._edits_baseline_taken = True
+
+    def _close_turn_edits(self, kind: str) -> Optional[tuple]:
+        """Конец прогона: сбросить состояние хода, вернуть сводку его правок.
+
+        Агент мог создать скилл → TUI-кэш скиллов инвалидируется (ленивый
+        релоад при следующем /skill). Следующий прогон снимет свою границу
+        журнала правок заново. Сводка правок — тихий правый сегмент
+        строки-итога; compact ходом не считается, правок в нём нет."""
+        self._skills_cache = None
+        self._edits_baseline_taken = False
+        if kind == "compact":
+            return None
+        edits = self._finished_turn_summary()
+        if self._thinking is not None:
+            self._thinking.set_turn_summary(edits)
+        return edits
 
     def _finished_turn_summary(self) -> Optional[tuple]:
         """(файлов, +, −) правок завершившегося хода; None — показывать нечего.
@@ -3471,7 +3856,7 @@ class TraceScreen(Screen):
         self.call_after_refresh(self._sync_trace_max_height)
         # switch input to ask-human mode
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
-        inp.placeholder = "ваш ответ агенту…"
+        self._sync_input_placeholder()
         inp.add_class("ask-human-mode")
         self._refresh_header()
         self._refresh_footer()
@@ -3496,7 +3881,7 @@ class TraceScreen(Screen):
         self._ask_human_call_id = None
         self.app.tui_state.ask_human_state = None
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
-        inp.placeholder = _PLACEHOLDER_READY
+        self._sync_input_placeholder()
         inp.remove_class("ask-human-mode")
         self._refresh_header()
         self._refresh_footer()
@@ -3510,6 +3895,7 @@ class TraceScreen(Screen):
         question: str,
         fields: list | None = None,
         via: str | None = None,
+        decision_key: str | None = None,
     ) -> None:
         """Смонтировать ConfirmBanner и переключить в режим одиночной клавиши.
 
@@ -3527,6 +3913,8 @@ class TraceScreen(Screen):
             question=question,
             fields=fields,
             via=via,
+            decision_key=decision_key,
+            permission_mode=self.app.effective_permission_mode(),
         )
         self._confirm_banner = banner
         self._confirm_active = True
@@ -3549,12 +3937,22 @@ class TraceScreen(Screen):
     def _hide_confirm_banner(self) -> None:
         """Снять ConfirmBanner и восстановить поле ввода."""
         self._confirm_active = False
+        self._return_focus_to_input()
         if self._confirm_banner is not None:
             try:
                 self._confirm_banner.remove()
             except Exception:
                 pass
             self._confirm_banner = None
+        self._settle_trace_after_banner()
+
+    def _return_focus_to_input(self) -> None:
+        """Вернуть поле ввода и фокус в него — ДО снятия баннера. Фокус стоит
+        на баннере: удалённый первым, он отдал бы фокус Textual, а тот перевёл
+        бы его на фокусируемую строку ленты и прокрутил ленту к ней — человек,
+        ушедший читать вверх, улетал бы в конец. Поэтому `set_focus` экрана
+        (сразу), а не `focus()` (отложенный: к удалению баннера фокус был бы
+        ещё на нём)."""
         try:
             self.query_one(_SEL_INPUT_ROW, Horizontal).remove_class("hidden")
         except Exception:
@@ -3564,9 +3962,335 @@ class TraceScreen(Screen):
             inp.disabled = (
                 False  # снять disable ДО focus (фокус не идёт на disabled)
             )
-            inp.focus()
+            self.set_focus(inp)
         except Exception:
             pass
+
+    def _settle_trace_after_banner(self) -> None:
+        """Баннер снят: место под ним отдаётся ленте, и её низ сдвигается на
+        высоту баннера. Опрос принял бы сдвиг за уход человека вверх и снял
+        бы липкость — лента, прижатая к низу до снятия, туда и возвращается."""
+        sticky = self._stick_bottom
+
+        def _settle() -> None:
+            self._sync_trace_max_height()
+            if sticky:
+                self._stick_bottom = True
+                self._scroll_trace_end()
+
+        self.call_after_refresh(_settle)
+
+    # ───────────────────────────── одобрение плана ─────────────────────────────
+
+    def _show_plan_banner(self, *, resumed: bool = False) -> None:
+        """Смонтировать баннер плана — по образцу confirm-баннера: поле ввода
+        скрыто и выключено, фокус на баннере. `resumed` — план уже утверждён,
+        вопрос о продолжении."""
+        from gc_tui.widgets.plan_banner import PlanApprovalBanner
+
+        if self._plan_banner is not None:
+            return
+        banner = PlanApprovalBanner(resumed=resumed)
+        self._plan_banner = banner
+        inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
+        self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
+        self.call_after_refresh(self._sync_trace_max_height)
+        inp_row.add_class("hidden")
+        try:
+            self.query_one(_SEL_CMDINPUT, CommandTextArea).disabled = True
+        except Exception:
+            pass
+        self.set_focus(banner)
+        if self._stick_bottom:
+            self._scroll_trace_end()
+
+    def _hide_plan_banner(self) -> None:
+        """Снять баннер плана и вернуть поле ввода — единая точка для всех
+        путей снятия (выбор варианта, Esc, смена сессии)."""
+        if self._plan_banner is None:
+            return
+        self._return_focus_to_input()
+        try:
+            self._plan_banner.remove()
+        except Exception:
+            pass
+        self._plan_banner = None
+        try:
+            self._sync_input_placeholder()
+        except Exception:
+            pass
+        self._settle_trace_after_banner()
+
+    def _session_plan(self) -> Optional[dict]:
+        """План открытой сессии из её меты — то, что загрузит следующий прогон
+        (во время прогона мета тоже свежая: состояние сливается в неё на каждом
+        батче). Модель в этом не участвует."""
+        if self._store is None or self._active_task_id is None:
+            return None
+        shared = self._store.get_task_meta(self._active_task_id).get("shared")
+        plan = (shared or {}).get("plan")
+        return plan if isinstance(plan, dict) and plan.get("text") else None
+
+    def _plan_panels(self):
+        try:
+            return list(self.query(PlanPanel))
+        except Exception:
+            return []
+
+    def _mark_plan_accepted(self, accepted: bool, plan_text: str) -> None:
+        """Все рамки этого плана в ленте (исходная и копии): серые, пока план
+        ждёт решения; цвета режима plan — когда принят и идёт реализация."""
+        for panel in self._plan_panels():
+            if panel.shows(plan_text):
+                panel.set_accepted(accepted)
+
+    def _sync_plan_panel_with_session(self) -> None:
+        """Привести рамки к сессии: утверждённой остаётся только рамка плана,
+        принятого в сессии; прежние (заменённые) планы — серые. Зовётся там,
+        где лента перерисована или статус мог смениться."""
+        plan = self._session_plan()
+        for panel in self._plan_panels():
+            panel.set_accepted(plan_is_accepted(plan, panel.plan_text))
+
+    def _ensure_plan_panel_last(self, plan: dict) -> None:
+        """Рамка плана сессии стоит последней в ленте: если нет — показать
+        копию. Копия — локальный рендер, в историю не пишется."""
+        from gc_tui.services.trace_render import build_block_widgets
+
+        text = str(plan.get("text") or "")
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        children = list(trace.children)
+        last = children[-1] if children else None
+        if isinstance(last, PlanPanel) and last.shows(text):
+            return
+        # event_no=0: строки копии не привязаны к событию истории — клик по
+        # ним не должен открывать чужое событие.
+        panel = PlanPanel(
+            *build_block_widgets(text, prose_bullet=False, event_no=0),
+            plan_text=text,
+        )
+        live = self._stream_answer_row or self._stream_block
+        if live is not None and live.parent is trace:
+            # Идёт потоковый ответ: копия встаёт ПЕРЕД ним, иначе готовый
+            # ответ потом перепрыгнул бы через план.
+            trace.mount(panel, before=live)
+        else:
+            self._trace_mount(panel)
+        panel.set_accepted(plan_is_accepted(plan, text))
+
+    def _present_session_plan(self) -> None:
+        """Ход закончился планом: рамка в ленте (её может не быть, если агент
+        предъявил сохранённый план заново) и выбор по его статусу."""
+        plan = self._session_plan()
+        if plan is None:
+            return
+        self._ensure_plan_panel_last(plan)
+        self._sync_plan_panel_with_session()
+        self._show_plan_banner(resumed=plan_is_accepted(plan))
+
+    def _plan_file_row(self) -> None:
+        """Под планом, открытым командой: где лежит его файл и как убрать план.
+        Две отдельные строки ленты — между ними воздух, как между любыми
+        служебными строками: путь и подсказка про команду — разные сведения."""
+        from gc_core.thread_store import plan_file_path
+
+        threads_dir = self.app._threads_dir or ""
+        if threads_dir and self._active_task_id:
+            path = plan_file_path(
+                threads_dir, self.app._system, self._active_task_id
+            )
+            if os.path.exists(path):
+                home = os.path.expanduser("~")
+                shown = (
+                    "~" + path[len(home) :] if path.startswith(home) else path
+                )
+                self._mount_trace_row(
+                    prefix="· ",
+                    content=f"план сохранён: {shown}",
+                    kind_class="line-meta",
+                )
+        self._mount_trace_row(
+            prefix="· ", content=_PLAN_CLEAR_HINT, kind_class="line-meta"
+        )
+
+    def _cmd_plan(self, arg: str = "") -> None:
+        """/plan — вернуться к плану сессии: показать его рамкой в конце ленты
+        и, если исполнитель свободен, дать выбор. Показывает и утверждает
+        программа, а не модель: та пересказала бы план по памяти.
+
+        Режим не трогается, когда план есть: его меняет выбор в баннере.
+        Плана нет — команда включает plan, и при занятом исполнителе.
+        """
+        arg = (arg or "").strip()
+        if arg == "clear":
+            self._cmd_plan_clear()
+            return
+        if arg:
+            self._mount_trace_row(
+                prefix="[!] ",
+                content=f"/plan: аргумент {arg!r} не поддерживается",
+                kind_class="line-error",
+            )
+            return
+        if self._plan_banner is not None:
+            return
+        runner = self.app.active_runner
+        busy = runner is not None and runner.is_running()
+        plan = self._session_plan()
+        if plan is None:
+            already = self.app.effective_permission_mode() == Mode.PLAN.value
+            if not already:
+                # Как Shift+Tab — и посреди хода: смену объявят модели.
+                self.app.set_permission_mode(Mode.PLAN.value)
+                self.on_permission_mode_changed(Mode.PLAN.value)
+            if busy:
+                # Следов в ленте нет: ответ — подсказка смены режима в футере.
+                if already:
+                    self.app.notify(_PLAN_CMD_NO_PLAN_BUSY)
+                return
+            self._mount_trace_row(
+                prefix="· ",
+                content=_PLAN_CMD_NO_PLAN if already else _PLAN_CMD_ENTERED,
+                kind_class="line-meta",
+            )
+            return
+        self._ensure_plan_panel_last(plan)
+        self._plan_file_row()
+        if not busy:
+            # Пока исполнитель занят, выбора нет: продолжение не стартует.
+            self._show_plan_banner(resumed=plan_is_accepted(plan))
+
+    def _cmd_plan_clear(self) -> None:
+        """/plan clear — убрать план из сессии: он перестаёт показываться
+        командой и ехать в сводку при сжатии истории; модели об этом сообщит
+        следующий прогон. Рамки в ленте остаются — это история."""
+        runner = self.app.active_runner
+        if runner is not None and runner.is_running():
+            self.app.notify(
+                "агент работает — уберите план после завершения хода"
+            )
+            return
+        if self._plan_banner is not None:
+            return
+        removed = False
+        clear = getattr(self._store, "clear_plan", None)
+        if callable(clear) and self._active_task_id is not None:
+            removed = bool(clear(self._active_task_id))
+        if runner is not None and hasattr(runner, "clear_plan"):
+            runner.clear_plan(self._active_task_id)
+        self._plan_rework_pending = False
+        self._sync_plan_panel_with_session()
+        self._sync_input_placeholder()
+        self._mount_trace_row(
+            prefix="· ",
+            content="план убран из сессии" if removed else "плана и так нет",
+            kind_class="line-meta",
+        )
+
+    def _sync_input_placeholder(self) -> None:
+        """Подсказка в пустом поле ввода — одна точка на все состояния:
+        вопрос агента > замечания к плану > план ждёт решения > обычная (с
+        подсказкой F1, пока она не погашена)."""
+        try:
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+        except Exception:
+            return
+        if self.app.tui_state.ask_human_state is not None:
+            inp.placeholder = _PLACEHOLDER_ASK_HUMAN
+        elif self._plan_rework_pending:
+            inp.placeholder = _PLACEHOLDER_PLAN_REWORK
+        elif (
+            self._plan_banner is None
+            and self.app.effective_permission_mode() == Mode.PLAN.value
+            and plan_awaits_decision(self._session_plan())
+        ):
+            inp.placeholder = _PLACEHOLDER_PLAN_WAITS
+        elif self._help_hint_spent:
+            inp.placeholder = _PLACEHOLDER_READY
+        else:
+            inp.placeholder = _PLACEHOLDER_READY_HELP
+
+    def spend_help_hint(self) -> None:
+        """Погасить подсказку F1 в поле ввода до конца запуска: человек
+        отправил сообщение, открыл справку или палитру, начал новую сессию."""
+        if self._help_hint_spent:
+            return
+        self._help_hint_spent = True
+        self._sync_input_placeholder()
+
+    def _apply_plan_choice(self, choice: str) -> None:
+        """Выбран вариант баннера: режим исполнения либо «Обсудить и доработать»."""
+        from gc_tui.widgets.plan_banner import PLAN_CHOICE_REWORK
+
+        if choice == PLAN_CHOICE_REWORK:
+            self._rework_plan()
+        else:
+            self._accept_plan(choice)
+
+    def _rework_plan(self) -> None:
+        """«Обсудить и доработать»: вернуть поле ввода и режим plan.
+
+        Статус плана здесь не меняется — взводится только намерение: в
+        доработку план уйдёт, когда человек реально отправит сообщение. Режим
+        переключается из любого состояния: иначе агент начнёт править файлы
+        вместо того, чтобы предложить исправленный план.
+        """
+        plan = self._session_plan()
+        self._hide_plan_banner()
+        self.app.get_runner().arm_plan_rework(
+            self.app.tui_state.active_task_id
+        )
+        self._plan_rework_pending = True
+        if plan is not None:
+            # принятый план вернули в обсуждение
+            self._mark_plan_accepted(False, plan["text"])
+        self.app.set_permission_mode(Mode.PLAN.value)
+        self.on_permission_mode_changed(Mode.PLAN.value)
+        self._sync_input_placeholder()
+
+    def _accept_plan(self, mode: str) -> None:
+        """План утверждён: режим, статус и автоматическое продолжение."""
+        # Признак «утверждён повторно» живёт на баннере — читается ДО снятия.
+        resumed = bool(getattr(self._plan_banner, "resumed", False))
+        plan = self._session_plan()
+        runner = self.app.get_runner()
+        if runner.is_running():
+            self.app.notify(
+                "агент работает — утвердите план после завершения хода"
+            )
+            return
+        self._plan_rework_pending = False
+        self._hide_plan_banner()
+        if plan is not None:
+            self._mark_plan_accepted(True, plan["text"])
+        self.app.set_permission_mode(mode)
+        self._refresh_footer()
+        thread_id = self.app.tui_state.active_task_id
+        # Тред уезжает вместе с решением: оно не должно примениться к прогону
+        # другой сессии, если продолжение не стартовало.
+        runner.accept_plan(mode, thread_id)
+        # Решение человека — галочкой цвета режима plan (тот же, что у рамки
+        # утверждённого плана), не зелёной: зелёная «✓» в ленте — успешный
+        # вызов инструмента.
+        self._mount_trace_row(
+            prefix="✓ ",
+            # Повторное решение по уже утверждённому плану — не новое
+            # утверждение: строка говорит, что выполнение продолжено.
+            content=(
+                f"выполнение плана продолжено → {mode_label(mode)}"
+                if resumed
+                else f"план утверждён → {mode_label(mode)}"
+            ),
+            kind_class="line-meta line-plan-accepted",
+        )
+        self._prepare_for_new_run()
+        self._reset_thinking_timer()
+        (query,) = accepted_plan_messages(mode, resumed=resumed)
+        runner.start(
+            query=query,
+            thread_id=thread_id,
+            system=self.app._system,
+        )
 
     def _answer_confirm(self, choice: str) -> None:
         """Отправить ответ в confirm-канал раннера и скрыть баннер."""
@@ -3592,25 +4316,22 @@ class TraceScreen(Screen):
         осмысленные события (ответ / 'контекст сжат' / продолжение) — значит вопрос
         НЕ висячий (его output мог быть суммаризован при компакции), remnant не нужен.
         False — ask_human реально последнее осмысленное событие (висячий вопрос)."""
-        cid = self._ask_human_call_id
-        ah_idx = None
-        for i, ev in enumerate(self._task_events):
-            if ev.kind == "ask_human" and (not cid or ev.call_id == cid):
-                ah_idx = i
+        ah_idx = self._last_ask_human_index(self._task_events)
         if ah_idx is None:
             return False
-        meaningful = {
-            "user",
-            "agent",
-            "call",
-            "result",
-            "error",
-            "error_msg",
-            "summary",
-        }
+        meaningful = _DIALOG_CONTINUATION_KINDS | {"summary"}
         return any(
             ev.kind in meaningful for ev in self._task_events[ah_idx + 1 :]
         )
+
+    def _last_ask_human_index(self, events: list) -> int | None:
+        """Индекс последнего события смонтированного вопроса ask_human."""
+        cid = self._ask_human_call_id
+        ah_idx = None
+        for i, ev in enumerate(events):
+            if ev.kind == "ask_human" and (not cid or ev.call_id == cid):
+                ah_idx = i
+        return ah_idx
 
     def _reconcile_ask_human_after_render(
         self, *, allow_remnant: bool
@@ -3740,7 +4461,7 @@ class TraceScreen(Screen):
             "pending_user_messages", []
         )
         new_list = (existing + [record])[-self._PENDING_CAP :]
-        self._store.update_tui_meta(tid, {"pending_user_messages": new_list})
+        self._write_tui_meta(tid, {"pending_user_messages": new_list})
         # In-memory кэш для reconciliation: meta может быть перетёрт executor'ом.
         self._pending_wire_cache[client_id] = wire_content
         self._last_pending_client_id = client_id
@@ -3761,9 +4482,7 @@ class TraceScreen(Screen):
         )
         new_list = [r for r in existing if r.get("client_id") != client_id]
         if len(new_list) != len(existing):
-            self._store.update_tui_meta(
-                tid, {"pending_user_messages": new_list}
-            )
+            self._write_tui_meta(tid, {"pending_user_messages": new_list})
 
     def _mark_pending_failed(self) -> None:
         """При фейле run'а: все текущие pending-виджеты → state=failed,
@@ -3785,9 +4504,7 @@ class TraceScreen(Screen):
                 else r
                 for r in records
             ]
-            self._store.update_tui_meta(
-                tid, {"pending_user_messages": new_list}
-            )
+            self._write_tui_meta(tid, {"pending_user_messages": new_list})
         self._pending_user_widgets.clear()
 
     def _begin_auto_created_task(self) -> str:
@@ -3830,7 +4547,7 @@ class TraceScreen(Screen):
         self._capture_edits_baseline()
         if self._store is None or self._active_task_id is None:
             return
-        self._store.update_tui_meta(
+        self._write_tui_meta(
             self._active_task_id,
             {"status": "running", "last_indicator": None},
         )
@@ -3928,6 +4645,27 @@ class TraceScreen(Screen):
         return bool(getattr(self, "_selecting", False))
 
     def _poll_active(self) -> None:
+        self._in_poll_tick = True
+        try:
+            self._poll_tick()
+        finally:
+            self._in_poll_tick = False
+            self._tick_meta_cache = None
+
+    def _apply_human_wait(self, human_wait: bool) -> None:
+        """Пауза running-строк на человеко-ожидании и тик их elapsed.
+
+        Вложенные строки субагента тоже: тул субагента может стоять на
+        подтверждении, пока корень ждёт. Завершённые строки — no-op.
+        """
+        for row in self._active_calls.values():
+            row.pause() if human_wait else row.resume()
+            row.refresh_running_elapsed()
+        for row in self._nested_tool_rows.values():
+            row.pause() if human_wait else row.resume()
+            row.refresh_running_elapsed()
+
+    def _poll_tick(self) -> None:
         # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
         # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
         # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
@@ -4009,29 +4747,21 @@ class TraceScreen(Screen):
         # _prepare_for_new_run; ловит любой путь, где prepare не вызвали).
         if (not self._was_running) and is_running and _kind != "compact":
             self._stamp_tui_running()
-        # Спадающий фронт: агент мог создать скилл в прогоне → инвалидируем
-        # TUI-кэш скиллов (/skill picker/inline); ленивый релоад при следующем
-        # /skill. Открытие пикера/набор по клавишам диск не трогают.
-        _turn_edits = None
-        if self._was_running and not is_running:
-            self._skills_cache = None
-            # Прогон кончился — следующий снимет свою границу хода заново.
-            self._edits_baseline_taken = False
-            # Сводка правок хода — тихий правый сегмент строки-итога (compact
-            # ходом не считается: правок в нём нет по определению).
-            if _kind != "compact":
-                _turn_edits = self._finished_turn_summary()
-                if self._thinking is not None:
-                    self._thinking.set_turn_summary(_turn_edits)
-        # Спадающий фронт прогона True→False → зафиксировать терминальный статус
-        # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
+        # Ход уложился между тиками: бегущим его не застал ни один тик, но
+        # мета ещё «running» — конец хода тот же, что у спадающего фронта.
         _finished_before_poll = (
             runner is not None
+            and _kind != "compact"
             and getattr(runner, "_last_target", None)
             == (self._active_task_id, self.app._system)
             and self._store is not None
-            and (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("status") == "running"
+            and (self._tick_meta().get("tui") or {}).get("status") == "running"
         )
+        _turn_edits = None
+        if (self._was_running or _finished_before_poll) and not is_running:
+            _turn_edits = self._close_turn_edits(_kind)
+        # Спадающий фронт прогона True→False → зафиксировать терминальный статус
+        # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
         if (
             (self._was_running or _finished_before_poll)
             and not is_running
@@ -4059,6 +4789,7 @@ class TraceScreen(Screen):
                 "stopped_errors": "stopped",
                 "stopped_tokens": "stopped",
                 "stopped_tool_calls": "stopped",
+                "stopped_judge": "stopped",
             }
             _KIND = {
                 "completed": "done",
@@ -4068,6 +4799,7 @@ class TraceScreen(Screen):
                 "stopped_errors": "stopped_errors",
                 "stopped_tokens": "stopped_tokens",
                 "stopped_tool_calls": "stopped_tool_calls",
+                "stopped_judge": "stopped_judge",
             }
             _elapsed = None
             if (
@@ -4075,7 +4807,12 @@ class TraceScreen(Screen):
                 and self._thinking_started_at is not None
             ):
                 _elapsed = int(time.monotonic() - self._thinking_started_at)
-            self._store.update_tui_meta(
+            _plan_proposed = (
+                outcome == "completed"
+                and getattr(self.app, "last_terminal_outcome", None)
+                == "plan_proposed"
+            )
+            self._write_tui_meta(
                 self._active_task_id,
                 {
                     "status": _STATUS[outcome],
@@ -4083,11 +4820,30 @@ class TraceScreen(Screen):
                         "kind": _KIND[outcome],
                         "elapsed": _elapsed,
                         "edits": list(_turn_edits) if _turn_edits else None,
+                        # ход кончился планом: строка-итог — «План готов»
+                        "plan": _plan_proposed or None,
                     },
                 },
             )
+            # Ход уложился между тиками: индикатор не создавался — строка-
+            # итог из только что записанной меты, как при переоткрытии.
+            # Тик, заставший прогон, индикатор создал; если его нет, его
+            # убрали намеренно (отмена-«undo») — не воскрешаем.
+            if self._thinking is None and not self._was_running:
+                self._restore_terminal_indicator()
             self.app.last_stop_requested = False
             self._update_terminal_title()
+            # Ход закончился предложенным планом — баннер одобрения.
+            if _plan_proposed:
+                if self._thinking is not None:
+                    self._thinking.set_done_label(DONE_LABEL_PLAN)
+                # После дорисовки хвоста ленты в этом же тике: иначе рамка
+                # плана была бы поставлена раньше исходной и задвоилась.
+                self.call_after_refresh(self._present_session_plan)
+            else:
+                # статус плана мог смениться за ход (доработка, утверждение)
+                self._sync_plan_panel_with_session()
+                self._sync_input_placeholder()
         self._was_running = is_running
         # Активный ask_human — агент НЕ работает, он ждёт ответ юзера.
         # Индикатор активности здесь обманывает; банер ask_human уже
@@ -4100,10 +4856,7 @@ class TraceScreen(Screen):
         # Тикающий elapsed на running tool-строках (running · Nс). Во время
         # человеко-ожидания (confirm / ask_human) агент заблокирован на решении
         # юзера — это не работа тула: замораживаем тикер и исключаем простой.
-        human_wait = self._confirm_active or ask_human_active
-        for row in self._active_calls.values():
-            row.pause() if human_wait else row.resume()
-            row.refresh_running_elapsed()
+        self._apply_human_wait(self._confirm_active or ask_human_active)
         # Nested progress субагента: drain runtime-очереди → строки под parent.
         self._drain_subagent_progress()
         summarizing = False
@@ -4112,7 +4865,7 @@ class TraceScreen(Screen):
         _tmeta: dict = {}
         if self._store is not None and self._active_task_id is not None:
             try:
-                _tmeta = self._store.get_task_meta(self._active_task_id)
+                _tmeta = self._tick_meta()
                 _rt = _tmeta.get("runtime") or {}
                 summarizing = bool(_rt.get("summarizing"))
                 finalizing = bool(_rt.get("finalizing"))
@@ -4133,7 +4886,7 @@ class TraceScreen(Screen):
             live_count = (_tmeta.get("runtime") or {}).get("live_msg_count")
             if live_count is not None:
                 try:
-                    self._store.update_tui_meta(
+                    self._write_tui_meta(
                         self._active_task_id,
                         {"last_compact_msg_count": int(live_count)},
                     )
@@ -4228,8 +4981,7 @@ class TraceScreen(Screen):
                 from gc_tui.widgets.stream_block import StreamBlock
 
                 think, answer = sink.snapshot()
-                _cfg = getattr(self.app, "_config", None) or {}
-                mode = _cfg.get("tui_stream_display", "minimal")
+                mode = self.app.base_settings().settings.tui.stream_display
                 clean = format_stream_block(answer=answer)
                 reasoning = format_reasoning_line(think=think)
                 kind, thinking = select_stream_render(mode, clean, reasoning)
@@ -4266,7 +5018,7 @@ class TraceScreen(Screen):
                 self._clear_stream_block()
         elif _indicator_mode == "hide":
             # Агент заблокирован — ждёт ответа пользователя. Скрываем (не destroy),
-            # анимация вернётся когда агент продолжит.
+            # анимация стоит и вернётся, когда агент продолжит.
             self._hide_thinking_indicator()
         else:  # terminal
             # Idle. Терминальный исход прогона держим как строку-итог индикатора
@@ -4276,10 +5028,7 @@ class TraceScreen(Screen):
             li_kind = None
             status = None
             if self._store is not None and self._active_task_id is not None:
-                tui = (
-                    self._store.get_task_meta(self._active_task_id).get("tui")
-                    or {}
-                )
+                tui = self._tick_meta().get("tui") or {}
                 li = tui.get("last_indicator")
                 if isinstance(li, dict):
                     li_kind = li.get("kind")
@@ -4290,7 +5039,9 @@ class TraceScreen(Screen):
                 stop_requested=getattr(runner, "_stop_requested", False),
             )
             if term_state is not None and self._thinking is not None:
-                self._thinking.set_state(term_state)
+                # show, не set_state: стоп мог прийти, пока строка была
+                # скрыта на человеко-ожидании.
+                self._thinking.show(term_state)
             else:
                 self._destroy_thinking_indicator()
             if not _frozen:
@@ -4303,42 +5054,108 @@ class TraceScreen(Screen):
         # случилась до ответа модели на повтор. При заморозке выделения ждут в очереди.
         if not _frozen:
             self._drain_trace_notes()
+        # F3: при freeze хвост не читаем и трейс НЕ перерисовываем
+        # (wipe/clear_trace/render_records дрожали бы экраном под выделением):
+        # курсор стоит, первый тик после MouseUp дочитает накопленный хвост,
+        # сброс или шаг сжатия.
         if (
-            self._store is None
+            _frozen
+            or self._store is None
             or self._active_task_id is None
             or self._cursor is None
         ):
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
-        # F3: при freeze НЕ перерисовываем трейс (wipe/clear_trace/render_records
-        # дрожали бы экраном под выделением). Курсор двигаем, чтобы не копить
-        # хвост — отрисовка догонит на следующем тике после MouseUp.
-        if _frozen:
-            self._cursor = tail.next_cursor
+        if tail.compaction is not None:
+            self._apply_compaction(tail.compaction, tail.next_cursor)
             return
         if tail.stream_reset:
-            self._clear_trace()
-            self._reset_render_state()
-            records, cur = self._store.read_all_events(self._active_task_id)
-            self._cursor = cur
-            if records and self._store.is_compaction_summary(records[0]):
-                self._render_segments(
-                    self._store.read_segments(self._active_task_id)
-                )
-            else:
-                self._render_records(records)
-            self._merge_sidecar_nested(self._active_task_id)
-            # После компакции (stream_reset) баннер мог пере-монтироваться для уже
-            # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
-            self._reconcile_ask_human_after_render(allow_remnant=False)
-            # I1/A: GC pending симметрично attach — delivered drop, orphan → failed.
-            self._mount_failed_from_meta(self._active_task_id)
-            self._refresh_header()
-            self._refresh_footer()
+            self._rebuild_from_store()
             return
         self._cursor = tail.next_cursor
         self._render_records(tail.new_records, live=True)
         self._refresh_header()
+
+    def _rebuild_from_store(self) -> None:
+        """Полная перерисовка трейса из хранилища: сброс потока и откат
+        неудавшегося шага сжатия."""
+        tid = self._active_task_id
+        self._clear_trace()
+        self._reset_render_state()
+        records, cur = self._store.read_all_events(tid)
+        self._cursor = cur
+        if records and self._store.is_compaction_summary(records[0]):
+            self._render_segments(self._store.read_segments(tid))
+        else:
+            self._segment_starts = [0]
+            self._render_records(records)
+        self._merge_sidecar_nested(tid)
+        # После компакции (stream_reset) баннер мог пере-монтироваться для уже
+        # отвеченного вопроса — снять, иначе ввод уйдёт в stdin «вникуда».
+        self._reconcile_ask_human_after_render(allow_remnant=False)
+        # I1/A: GC pending симметрично attach — delivered drop, orphan → failed.
+        self._mount_failed_from_meta(tid)
+        # Лента перерисована посреди хода: рамки плана новые, их состояние
+        # берётся из сессии заново.
+        self._sync_plan_panel_with_session()
+        self._refresh_header()
+        self._refresh_footer()
+
+    def _apply_compaction(
+        self, step: CompactionStep, next_cursor: TaskCursor
+    ) -> None:
+        """Шаг сжатия — обычная порция записей плюс маркер (спека 3.2).
+
+        Строки до сжатия, карты экрана, индикатор, баннер подтверждения и
+        прокрутка остаются. Сбой — откат полной перерисовкой."""
+        try:
+            self._append_compaction_step(step)
+        except Exception:
+            _log.exception("шаг сжатия не применён, трейс перерисован")
+            self._rebuild_from_store()
+            return
+        self._cursor = next_cursor
+        self._refresh_header()
+
+    def _append_compaction_step(self, step: CompactionStep) -> None:
+        """Хвост архива, маркер, новый живой файл — живым путём, одним
+        контекстом рендера (вызов в хвосте сводится с выводом в живом)."""
+        start = len(self._task_events)
+        context = _records_context([*step.archive_tail, *step.live_records])
+        self._render_records(step.archive_tail, live=True, context=context)
+        self._mount_compaction_marker(step)
+        self._segment_starts.append(len(self._task_events))
+        self._render_records(step.live_records, live=True, context=context)
+        self._lighten_segment_left_window(step)
+        self._drop_answered_ask_human_banner(start)
+
+    def _lighten_segment_left_window(self, step: CompactionStep) -> None:
+        """Retention: сегмент, выпавший из окна, облегчаем как полная
+        перерисовка. Вложенные строки субагентов не трогаем (спека 3.4)."""
+        for ev in events_leaving_window(
+            self._task_events, self._segment_starts, step.window_ids
+        ):
+            apply_payload_retention(ev, seg_in_window=False)
+
+    def _mount_compaction_marker(self, step: CompactionStep) -> None:
+        self._append_and_render(
+            build_compaction_marker_event(
+                self._next_no, step.segment_index, step.compacted_by
+            )
+        )
+
+    def _drop_answered_ask_human_banner(self, start: int) -> None:
+        """Снять баннер ask_human, если среди событий шага (с индекса start)
+        после вопроса диалог продолжился: ответ ушёл в сводку и отдельной
+        записью не придёт. Маркер сжатия — не продолжение: агент, который
+        реально ждёт ответа, баннер сохраняет."""
+        if self._ask_human_banner is None:
+            return
+        added = self._task_events[start:]
+        ah_idx = self._last_ask_human_index(added)
+        after = 0 if ah_idx is None else ah_idx + 1
+        if any(ev.kind in _DIALOG_CONTINUATION_KINDS for ev in added[after:]):
+            self._unmount_ask_human_banner()
 
     # Ширина хрома вокруг колонки статусов. Порог узости считается по факту
     # (`_brand_fits_beside`), а не константой: длина строк статусов зависит от MCP и
@@ -4448,8 +5265,7 @@ class TraceScreen(Screen):
     def _has_mcp_servers(self) -> bool:
         """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
         MCP-settle — карточку досбираем тогда; без них — сразу на boot."""
-        cfg = getattr(self.app, "_config", None) or {}
-        return bool(cfg.get("mcp-servers"))
+        return bool(self.app.base_settings().settings.mcp.servers)
 
     def _compose_card_lines(self, mcp_line: Optional[str]) -> Text:
         """Итог-содержимое правой колонки карточки: до четырёх строк через пустую строку.
@@ -4602,6 +5418,28 @@ class TraceScreen(Screen):
             event.prevent_default()
             return
 
+        # Баннер одобрения плана: тот же приоритет и та же механика, что у
+        # confirm-баннера. Esc — только клавиша: снимает баннер без действий.
+        if self._plan_banner is not None:
+            key = event.key
+            banner = self._plan_banner
+            if key == "up":
+                banner.move_selection(-1)
+            elif key == "down":
+                banner.move_selection(1)
+            elif key == "enter":
+                self._apply_plan_choice(banner.selected_choice())
+            elif key == "escape":
+                self._hide_plan_banner()
+            elif not banner.scroll_body(key):
+                direct = banner.choice_for_key(key)
+                if direct is not None:
+                    self._apply_plan_choice(direct)
+            # иначе — проглотить без действия (нет случайного ввода)
+            event.stop()
+            event.prevent_default()
+            return
+
         # Confirm-баннер имеет наивысший приоритет: одиночный y/N перехватываем
         # до истории, Esc-лестницы и любых пикеров. TextArea скрыта, клавиши
         # не потребляются ею и доходят сюда.
@@ -4613,18 +5451,17 @@ class TraceScreen(Screen):
             elif key == "down" and banner is not None:
                 banner.move_selection(1)
             elif key == "enter":
-                from gc_tui.widgets.confirm_banner import choice_for
-
                 self._answer_confirm(
-                    choice_for(banner.selected)
+                    banner.selected_choice()
                     if banner is not None
-                    else "deny_remember"
+                    else "deny_once"
                 )
             elif banner is not None and banner.scroll_body(key):
                 pass  # прокрутка тела — не ответ на вопрос
             else:
                 # Same physical-key sets as CLI / confirm_port (QWERTY + ЙЦУКЕН).
                 from gc_core.security.confirm_port import (
+                    CONFIRM_DENY_ONCE,
                     CONFIRM_DENY_REMEMBER,
                     CONFIRM_KEY_N,
                     CONFIRM_KEY_O,
@@ -4633,7 +5470,11 @@ class TraceScreen(Screen):
                     normalize_confirm_key,
                 )
 
-                if key == "escape" or key in CONFIRM_KEY_N:
+                # Esc — отмена, то есть разовый запрет: запрет на сессию
+                # сильнее режима, его выбирают явно (клавишей N).
+                if key == "escape":
+                    self._answer_confirm(CONFIRM_DENY_ONCE)
+                elif key in CONFIRM_KEY_N:
                     self._answer_confirm(CONFIRM_DENY_REMEMBER)
                 elif (
                     key in CONFIRM_KEY_Y
@@ -5137,6 +5978,7 @@ class TraceScreen(Screen):
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
             return
+        self.spend_help_hint()
         palette = CommandPalette(
             self._registry,
             initial_filter=prefix,
@@ -5146,6 +5988,7 @@ class TraceScreen(Screen):
             toggle_dynamic_hint=lambda name, value: dynamic_toggle_hint(
                 self.app, name, value
             ),
+            toggle_values=lambda name: effective_toggle_values(self.app, name),
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -5427,6 +6270,20 @@ class TraceScreen(Screen):
         else:
             self._close_file_picker()
 
+    def _is_command_input(self, text: str) -> bool:
+        """Набранное — команда (`/…`, `!…`), а не текст агенту.
+
+        Поле одно на ответ и команды. Пока висит вопрос агента, командой
+        считается только известная `/команда`; прочее с «/» (путь и т.п.) и с
+        «!» — ответ. Вне вопроса любое `/…` — команда (неизвестная получит
+        «нет такой команды»), `!…` — shell.
+        """
+        asking = self.app.tui_state.ask_human_state is not None
+        if text.startswith("/"):
+            name = (text[1:].split(None, 1) or [""])[0]
+            return not asking or self._registry.lookup(name) is not None
+        return text.startswith("!") and not asking
+
     async def on_command_text_area_submitted(
         self, event: CommandTextArea.Submitted
     ) -> None:
@@ -5446,7 +6303,7 @@ class TraceScreen(Screen):
         # отказ раньше пикеров и палитры — они очищают ввод, а набранное с
         # плашками должно остаться в поле.
         images = event.attachments
-        if images and event.value.strip().startswith(("/", "!")):
+        if images and self._is_command_input(event.value.strip()):
             self._show_footer_refusal(_IMAGES_WITH_COMMAND_REFUSAL)
             return
 
@@ -5505,8 +6362,10 @@ class TraceScreen(Screen):
 
         # Если открыта палитра — Enter выполняет выбранную/набранную команду
         # (логика перенесена из on_key, т.к. TextArea перехватывает Enter).
-        # Команды со схемой args (`<path>`, `[txt|…]`) подставляются в поле;
-        # выполнение (с дефолтом, если args опциональны) — следующим Enter в поле.
+        # Команда с обязательным аргументом или меню вариантов (`<path>`,
+        # `[txt|…]`) подставляется в поле — выполнение следующим Enter;
+        # необязательный аргумент без меню (`/plan`) выполняется сразу
+        # (`Command.runs_on_enter`).
         if self._palette is not None:
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
@@ -5530,7 +6389,7 @@ class TraceScreen(Screen):
             typed = event.value.strip()
             has_args = len(typed.split()) > 1
             if cmd is not None and not has_args:
-                if cmd.args:
+                if not cmd.runs_on_enter:
                     inp.text = f"/{cmd.name} "
                     inp.move_cursor(inp.document.end)
                     self._close_palette()
@@ -5540,20 +6399,23 @@ class TraceScreen(Screen):
                 inp.text = ""
                 await self._handle_command(cmd.name)
                 return
-            # Свободный ввод с / — выполнить (например, /view path/to/file)
-            if typed.startswith("/"):
-                self._close_palette()
-                inp.text = ""
-                await self._handle_command(typed[1:])
-                return
-            # Всё остальное — закрыть палитру и очистить ввод
             self._close_palette()
-            inp.text = ""
-            return
+            # Свободный ввод с / (например, /view path/to/file) — общим путём
+            # ниже: там решается, команда это или ответ на вопрос агента.
+            if not typed.startswith("/"):
+                inp.text = ""
+                return
 
         text = event.value.strip()
         inp.text = ""
         if not text:
+            return
+
+        # Команда или текст агенту — решается до ветки вопроса: она снимает
+        # вопрос и при пропавшем владельце пропускает ответ дальше.
+        is_command = self._is_command_input(text)
+        if is_command and text.startswith("/"):
+            await self._handle_command(text[1:])
             return
 
         # Ask-human mode: input is the answer to the agent's question.
@@ -5609,11 +6471,7 @@ class TraceScreen(Screen):
                 self._stop_and_replace_runner()
             # fall-through ↓ к "continue thread": тот же active_task_id, start(answer).
 
-        if text.startswith("/"):
-            await self._handle_command(text[1:])
-            return
-
-        if text.startswith("!"):
+        if is_command and text.startswith("!"):
             self._handle_bang_shell(text)
             return
 
@@ -5647,10 +6505,10 @@ class TraceScreen(Screen):
             )
             self.attach_active_task(tid)
             if patch:
-                self._store.update_tui_meta(tid, patch)
+                self._write_tui_meta(tid, patch)
             branch = current_branch(self._current_cwd())
             if branch:
-                self._store.update_tui_meta(tid, {"branch": branch})
+                self._write_tui_meta(tid, {"branch": branch})
             # Абсолютный путь проекта на момент создания сессии (исторический,
             # не живой cwd). Безусловно — путь есть даже в не-git папке.
             try:
@@ -5658,7 +6516,7 @@ class TraceScreen(Screen):
             except Exception:
                 ppath = ""
             if ppath:
-                self._store.update_tui_meta(tid, {"project_path": ppath})
+                self._write_tui_meta(tid, {"project_path": ppath})
             # _track_pending — после attach_active_task (которое чистит
             # _pending_user_widgets через _reset_render_state) и после
             # потенциальной первой записи meta исполнителем.
@@ -5697,9 +6555,7 @@ class TraceScreen(Screen):
         full_query, patch = await self._consume_pending_prefix(text)
         display_query, skill_loaded = self._skill_display_args(text)
         if patch and self._store is not None:
-            self._store.update_tui_meta(
-                self.app.tui_state.active_task_id, patch
-            )
+            self._write_tui_meta(self.app.tui_state.active_task_id, patch)
         client_id = self._track_pending(
             display_text=text, wire_content=full_query, images=images
         )
@@ -5825,7 +6681,7 @@ class TraceScreen(Screen):
         try:
             inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
             limit = read_images_config(
-                self.app.effective_config()
+                self.app.effective_settings()
             ).max_per_message
             outcome = await image_paste.astage_paste(
                 path,
@@ -5961,7 +6817,7 @@ class TraceScreen(Screen):
                 skill_is_available,
             )
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             prefix.append(await build_skill_delivery(pending_skill, reg))
             patch["skills"] = [pending_skill]
             self._pending_skill_marker = (
@@ -6014,7 +6870,7 @@ class TraceScreen(Screen):
         self.app.reload_config_if_changed()  # свежесть глобала — только на пути Settings (дизайн 2026-07-21 §4)
         self.app.push_screen(
             SettingsScreen(
-                config=self.app.screen_config(),
+                settings=self.app.base_settings(),
                 config_path=getattr(self.app, "_config_path", None),
                 on_apply=self.app.reload_config,
             )
@@ -6033,11 +6889,13 @@ class TraceScreen(Screen):
             profile_path = str(ref.path)
         self.app.push_screen(
             ConfigScreen(
-                config=self.app.effective_config(),
+                settings=self.app.effective_settings(),
                 config_path=getattr(self.app, "_config_path", None),
                 project_local=getattr(self.app, "_config_project_local", None),
                 profile_source=profile_source,
                 profile_path=profile_path,
+                permission_mode=self.app.effective_permission_mode(),
+                permission_mode_source=self.app.permission_mode_source(),
             )
         )
 
@@ -6046,7 +6904,7 @@ class TraceScreen(Screen):
         from gc_tui.screens.file_view import FileViewerScreen
         from gc_tui.services.file_view import FileViewSettings
 
-        cfg = self.app.screen_config()
+        file_view = self.app.base_settings().settings.tui.file_view
         store = getattr(self.app, "view_positions", None)
         if store is None:
             from gc_tui.services.file_view import ViewPositionStore
@@ -6058,9 +6916,7 @@ class TraceScreen(Screen):
                 raw_path=arg or "",
                 cwd=self._current_cwd(),
                 store=store,
-                settings=FileViewSettings.from_mapping(
-                    cfg.get("tui_file_view")
-                ),
+                settings=FileViewSettings.from_mapping(file_view.model_dump()),
             )
         )
 
@@ -6069,7 +6925,7 @@ class TraceScreen(Screen):
 
         self.app.push_screen(
             McpScreen(
-                config=self.app.screen_config(),
+                settings=self.app.base_settings(),
                 tools_snapshot=self._mcp_screen_snapshot(),
             )
         )
@@ -6079,8 +6935,8 @@ class TraceScreen(Screen):
         from gc_tui.screens.diff import DiffScreen
         from gc_tui.services.edits_view import SOURCE_SESSION
 
-        cfg = self.app.screen_config()
-        launch_root = cfg.get("launch_root")
+        cfg = self.app.base_settings()
+        launch_root = cfg.runtime.launch_root
         if not launch_root:
             self._mount_trace_row(
                 prefix="· ",
@@ -6092,7 +6948,7 @@ class TraceScreen(Screen):
         self.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=cfg,
                 on_undo_feedback=self._on_diff_undo_feedback,
                 on_ui_ack=self._on_diff_ui_ack,
                 threads_dir=threads_dir,
@@ -6143,12 +6999,10 @@ class TraceScreen(Screen):
             projection_tags_from_config,
         )
 
-        effective = getattr(self.app, "effective_config", None)
-        if callable(effective):
-            cfg = effective() or {}
-        else:
-            cfg = getattr(self.app, "_config", None) or {}
-        return projection_tags_from_config(cfg), True
+        return (
+            projection_tags_from_config(self.app.effective_settings()),
+            True,
+        )
 
     def _append_technical_to_thread(self, msg: dict) -> None:
         tid = self._active_task_id or getattr(
@@ -6529,7 +7383,7 @@ class TraceScreen(Screen):
                 skill_is_available,
             )
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             loaded = await skill_is_available(skill_id, reg)
             msg = {
                 "role": "user",
@@ -6646,9 +7500,7 @@ class TraceScreen(Screen):
                 "skills", []
             )
             if skill_id not in current:
-                self._store.update_tui_meta(
-                    tid, {"skills": current + [skill_id]}
-                )
+                self._write_tui_meta(tid, {"skills": current + [skill_id]})
 
     def _switch_to_empty_state(self) -> None:
         """Очистить trace и перейти в empty-state. pending_skill_id/cwd сохраняются."""
@@ -6669,6 +7521,7 @@ class TraceScreen(Screen):
         # Новая сессия — номера картинок с 1: выданное прежней несозданной — не её.
         self._image_seq_issued.pop(None, None)
         self._renumber_input_images()
+        self.spend_help_hint()
 
     def _renumber_input_images(self) -> None:
         """Смена сессии: image-плашки буфера ввода — в последовательность активного треда
@@ -6723,8 +7576,8 @@ class TraceScreen(Screen):
             self._clear_bang_blocks(clear_meta.count)
             return
 
-        cfg = getattr(self.app, "_config", None) or {}
-        settings = BangShellSettings.from_mapping(cfg.get("tui_bang_shell"))
+        bang_shell = self.app.base_settings().settings.tui.bang_shell
+        settings = BangShellSettings.from_mapping(bang_shell.model_dump())
         self._bang_timeout_sec = settings.timeout_sec
 
         self._mount_bang_row(
@@ -6927,9 +7780,7 @@ class TraceScreen(Screen):
                 await self._cmd_use_skill(arg.strip(), prompt="")
             return
         if name == "help":
-            from gc_tui.screens.help import HelpScreen
-
-            self.app.push_screen(HelpScreen())
+            self.app.action_help()
             return
         if name == "skills":
             from gc_tui.screens.skills import SkillsScreen
@@ -6937,7 +7788,7 @@ class TraceScreen(Screen):
             self.app.push_screen(
                 SkillsScreen(
                     skills=await self._load_skills_safe(),
-                    config=self.app.screen_config(),
+                    settings=self.app.base_settings(),
                 )
             )
             return
@@ -6977,6 +7828,9 @@ class TraceScreen(Screen):
         if name == "compact":
             self._cmd_compact()
             return
+        if name == "plan":
+            self._cmd_plan(arg)
+            return
         if name == "voice":
             self._voice_toggle()
             return
@@ -6987,7 +7841,7 @@ class TraceScreen(Screen):
         # имён): /voice и /profiles выше — не тогглы, а действия, поэтому идут своими
         # ветками.
         if cmd.is_toggle:
-            self._toggle_info_command(name)
+            self._toggle_info_command(name, arg)
             return
 
     def _cmd_profiles(self, arg: str) -> None:
@@ -7024,13 +7878,23 @@ class TraceScreen(Screen):
         except (ValueError, OSError) as exc:
             self._show_footer_refusal(f"✗ не сохранено: {exc}")
 
-    def _toggle_info_command(self, name: str) -> None:
+    def _toggle_info_command(self, name: str, arg: str = "") -> None:
         """`/gate` или `/answers`, набранные и подтверждённые текстом (не через
         стрелки палитры — у toggle-команд нет args-схемы, поэтому пробел после
         имени закрывает палитру и Enter доходит сюда как обычная команда):
         ничего не меняет (иначе набор команды был бы неочевидным side-effect'ом) —
         показывает текущее значение и как переключать (←/→ и Enter в открытой
-        палитре)."""
+        палитре). Набранное значение, которого тоггл сейчас не предлагает
+        (`/level auto` при недоступном автовыборе), получает ответ с причиной, а не
+        молчаливое игнорирование."""
+        unavailable = (
+            toggle_unavailable_hint(self.app, name, arg) if arg else None
+        )
+        if unavailable:
+            self._show_footer_hint(
+                f"/{name} {arg} — {unavailable}", seconds=5.0
+            )
+            return
         current = toggle_state(self.app, name)
         self._show_footer_hint(
             f"/{name} — текущее значение: {current} · для переключения: ←/→ и Enter в меню команд",
@@ -7181,7 +8045,7 @@ class TraceScreen(Screen):
         try:
             from gc_core.tools.skills.registry import get_skills_registry
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             # include_all=True — показываем и внутренние скиллы паков, не только bootstrap.
             return await reg.list_skills(include_all=True)
         except Exception as exc:
@@ -7299,7 +8163,7 @@ class TraceScreen(Screen):
 
         runner = self.app.active_runner
         ah = self.app.tui_state.ask_human_state
-        cfg = self.app.effective_config()
+        active_profile = self.app.effective_settings().runtime.active_profile
         router = self.app.display_router()
         # check_breaker=False: /status показывает модель честно даже при открытом
         # активном алиасе (спека §12.2); недоступность отражаем отдельным флагом.
@@ -7308,6 +8172,9 @@ class TraceScreen(Screen):
             resolved.alias
         )
         ref = self.app.active_profile_ref()
+        # Действующий уровень — то же правило, что у палитры и футера: `auto`,
+        # только когда автовыбор реально активен, иначе уровень, которым идёт работа.
+        level = toggle_state(self.app, "level")
         payload["runtime"] = {
             "active_task_id": tid,
             "runner_is_running": bool(runner and runner.is_running()),
@@ -7319,9 +8186,10 @@ class TraceScreen(Screen):
             ),
             "last_runner_error": getattr(self.app, "last_runner_error", None),
             "profile": {
-                "name": cfg.get("profile") or None,
+                "name": active_profile or None,
                 "source": _profile_source_label(ref),
-                "level": router.active_level(),
+                "level": level,
+                "routing_policy": ("two_level" if level == "auto" else None),
                 "model": resolved.alias or resolved.model,
                 "circuit_breaker_open": breaker_open,
             },
@@ -7336,8 +8204,8 @@ class TraceScreen(Screen):
 
     def _cmd_compact(self) -> None:
         """/compact — принудительно сжать сессию (гарды: режим/простой/контент)."""
-        cfg = getattr(self.app, "_config", None) or {}
-        if str(cfg.get("backend_api_mode")) != "chat_completions":
+        settings = self.app.base_settings().settings
+        if str(settings.backend.api_mode) != "chat_completions":
             self._mount_trace_row(
                 prefix="· ",
                 content="/compact недоступен в режиме responses",

@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List
 import yaml
 
 # Синтаксис ${ENV:VAR} — единый источник истины (модуль-владелец резолва).
-from gc_core.config_modules.env_interpolation import _ENV_MARKER
+from gc_core.config_modules.env_interpolation import env_ref_names
 from gc_core.utils.user_text import read_user_text_or_none
 
 
@@ -66,9 +66,7 @@ def read_values(path, dotted_keys: Iterable[str]) -> Dict[str, Any]:
 
 def env_refs(value: Any) -> List[str]:
     """Имена переменных, на которые ссылается сырое значение (в порядке появления)."""
-    if not isinstance(value, str):
-        return []
-    return _ENV_MARKER.findall(value)
+    return env_ref_names(value)
 
 
 def env_refs_overwritten(
@@ -93,7 +91,7 @@ def env_refs_overwritten(
             # Значение ключа заменяется целиком: пропавшие вложенные ключи
             # тоже стирают ссылки, в отличие от отсутствующего верхнего ключа.
             replacement = value if isinstance(value, dict) else {}
-            nested_values = {name: None for name in old}
+            nested_values = dict.fromkeys(old)
             nested_values.update(replacement)
             nested_written, nested_erased = env_refs_overwritten(
                 nested_values, old
@@ -109,5 +107,10 @@ def env_refs_overwritten(
 
 
 def missing_env_refs(value: Any) -> List[str]:
-    """Из env_refs — те, которых нет в окружении (ссылка не подставится)."""
-    return [name for name in env_refs(value) if name not in os.environ]
+    """Из env_refs — обязательные (без умолчания ``:-``), которых нет в окружении
+    (ссылка не подставится)."""
+    return [
+        name
+        for name in env_ref_names(value, required_only=True)
+        if name not in os.environ
+    ]

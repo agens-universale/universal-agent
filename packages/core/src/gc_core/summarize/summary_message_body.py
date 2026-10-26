@@ -10,8 +10,6 @@ from gc_core.attachments.texts import (
     SUMMARY_IMAGES_OPEN,
 )
 from gc_core.config_modules.summary import DEFAULT_INTENT_LOG_PREVIEW_CHARS
-from gc_core.intent_log import serialize, tail_preview
-from gc_core.intent_log.record import IntentRecord
 from gc_core.message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
 )
@@ -146,36 +144,6 @@ def resolve_intent_log_preview_chars(
     return value if value > 0 else DEFAULT_INTENT_LOG_PREVIEW_CHARS
 
 
-def build_intent_blocks_prefix(
-    closed_records: Iterable[IntentRecord],
-    open_records: Iterable[IntentRecord],
-    *,
-    intent_log_preview_chars: int,
-) -> str:
-    """XML intent blocks для ``dialog_summary`` (не для summarizer/patch LLM).
-
-    Closed log: ``tail_preview``. Open turn: full JSONL. См. ``build_dialog_summary_content``.
-    """
-    safe_chars = (
-        int(intent_log_preview_chars)
-        if int(intent_log_preview_chars) > 0
-        else DEFAULT_INTENT_LOG_PREVIEW_CHARS
-    )
-    preview = tail_preview(list(closed_records), safe_chars)
-    parts: list[str] = []
-    log_block = render_user_intent_log_block(preview)
-    if log_block:
-        parts.append(log_block)
-    current_block = render_current_user_intent_block(
-        serialize(list(open_records))
-    )
-    if current_block:
-        parts.append(current_block)
-    if not parts:
-        return ""
-    return "\n\n".join(parts) + "\n\n"
-
-
 def format_summary_block(summary_text: str) -> str:
     """Одна обёртка ``<summary>``: если текст уже корневой ``<summary>``, не дублирует."""
     s = (summary_text or "").strip()
@@ -186,6 +154,21 @@ def format_summary_block(summary_text: str) -> str:
     return f"<summary>\n{s}\n</summary>"
 
 
+def render_plan_block(plan: Mapping[str, Any] | None) -> str:
+    """План сессии для тела сводки: дословно, со статусом. Без этого план
+    (в том числе черновик в доработке) терялся бы при сжатии истории."""
+    if not isinstance(plan, Mapping):
+        return ""
+    text = str(plan.get("text") or "").rstrip("\n")
+    if not text.strip():
+        return ""
+    attrs = (
+        f'status="{plan.get("status") or ""}" '
+        f'updated_at="{plan.get("updated_at") or ""}"'
+    )
+    return f"<current_plan {attrs}>\n{text}\n</current_plan>"
+
+
 def build_dialog_summary_content(
     summary_text: str,
     last_dialog_steps: str,
@@ -194,6 +177,8 @@ def build_dialog_summary_content(
     user_intent_log_preview: Mapping[str, Any] | None = None,
     current_user_intent_jsonl: str = "",
     images_block: str = "",
+    plan_block: str = "",
+    mode_block: str = "",
 ) -> str:
     """Собирает итоговое тело сообщения-резюме треда для подстановки в историю чата.
 
@@ -218,6 +203,18 @@ def build_dialog_summary_content(
         if log_section:
             lines.append("")
             lines.append(log_section)
+
+    plan_section = str(plan_block or "").strip()
+    if plan_section:
+        lines.append("")
+        lines.append(plan_section)
+
+    # Правила действующего режима разрешений: сообщение о входе в режим
+    # сжатие уносит, а режим продолжает действовать.
+    mode_section = str(mode_block or "").strip()
+    if mode_section:
+        lines.append("")
+        lines.append(mode_section)
 
     current_section = render_current_user_intent_block(
         current_user_intent_jsonl

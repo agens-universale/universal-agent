@@ -5,12 +5,22 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from types import SimpleNamespace
 
+from gc_core.settings import runtime_of, settings_of
 from gc_core.utils.connect_backend import build_call_headers
 from gc_core.utils.llm_chat_client import snapshot_chat_completion
 from gc_core.vision.audience import route_id
 from gc_core.vision.probe import ProbeResult, ProbeStatus
 from gc_core.vision.registry import process_vision_probes
+from gc_core.vision.rejects import process_image_rejects
 from gc_core.vision.route import vision_route_key
+
+
+def clear_image_rejects() -> None:
+    """Сбросить потолки процесса на месте — объект тот же: ссылки, взятые до
+    сброса, видят пустой реестр."""
+    registry = process_image_rejects()
+    with registry._lock:
+        registry._caps = {}
 
 
 def route_key(ctx, *, url=None, model=None, resolved=None):
@@ -19,9 +29,10 @@ def route_key(ctx, *, url=None, model=None, resolved=None):
         resolved = replace(
             resolved, url=url or resolved.url, model=model or resolved.model
         )
-    cfg = {"backend_request_timeout_sec": 600, **ctx.config_dict}
     proxy_ctx = SimpleNamespace(
-        config_dict=cfg, auth_connector=getattr(ctx, "auth_connector", None)
+        settings=settings_of(ctx),
+        runtime=runtime_of(ctx),
+        auth_connector=getattr(ctx, "auth_connector", None),
     )
     state = SimpleNamespace(state_id="test-thread", x_target=None)
     prepared = snapshot_chat_completion(

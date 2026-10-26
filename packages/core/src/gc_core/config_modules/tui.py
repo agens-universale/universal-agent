@@ -2,15 +2,19 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gc_core.config_modules.field_meta import gc_meta
+
 
 class BangShellConfig(BaseModel):
     """Yaml ``tui.bang_shell`` — локальный `!command` в TUI (не агент)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = True
     # None / omit / <=0 = без лимита. Положительное N = авто-kill через N секунд.
-    timeout_sec: Optional[float] = None
+    timeout_sec: Optional[float] = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     max_output_bytes: int = 32768
     max_output_lines: int = 200
 
@@ -18,16 +22,18 @@ class BangShellConfig(BaseModel):
 class FileViewConfig(BaseModel):
     """Yaml ``tui.file_view`` — постраничный `/view` в TUI."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = True
     max_file_bytes: int = 64 * 1024 * 1024
     # None = авто по высоте экрана; число = фиксированный шаг PgUp/PgDn (1..200).
-    page_lines: Optional[int] = None
+    page_lines: Optional[int] = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
 
 
 class TuiConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     # Мастер-свитч live-стриминга в TUI (chat_completions). На CLI/server/swarm
     # НЕ влияет — там всегда non-stream (стрим гейтится наличием on_stream_delta,
@@ -53,5 +59,11 @@ class TuiConfig(BaseModel):
     # (~/.config/gc) и .gc/AGENTS.md. Игнорируется, если задан
     # paths.agent_md_path (путь главнее флага).
     agentsmd_override: bool = False
-    bang_shell: BangShellConfig = Field(default_factory=BangShellConfig)
-    file_view: FileViewConfig = Field(default_factory=FileViewConfig)
+    bang_shell: BangShellConfig = Field(
+        default_factory=BangShellConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )
+    file_view: FileViewConfig = Field(
+        default_factory=FileViewConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )

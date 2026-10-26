@@ -1,7 +1,7 @@
 """gc-ua — entrypoint.
 
 Тонкий парсинг startup-аргументов (--config, --task-root) + сборка
-стека: load_config → threads_dir → TuiApp.
+стека: load_settings → threads_dir → TuiApp.
 """
 
 from __future__ import annotations
@@ -47,18 +47,13 @@ def _force_truecolor_if_supported() -> None:
         os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    """Entrypoint для `gc-ua = "tui:main"`."""
-    _force_truecolor_if_supported()
-    try:
-        # importlib.import_module goes through sys.modules, not the package
-        # attribute cache, so evicting tui.app in tests forces a real re-import.
-        _app_mod = importlib.import_module("gc_tui.app")
-    except ImportError:
-        print(_missing_textual_msg(), file=sys.stderr)
-        return 1
+def _build_parser() -> argparse.ArgumentParser:
+    from gc_core.config_modules.model_registry import LEVEL_VALUES
+    from gc_core.security.permission_mode import AVAILABLE_MODES
 
-    parser = argparse.ArgumentParser(prog="gc-ua", add_help=False)
+    parser = argparse.ArgumentParser(
+        prog="gc-ua", add_help=False, allow_abbrev=False
+    )
     parser.add_argument("--config", default=None)
     parser.add_argument("--task-root", default=None)
     parser.add_argument(
@@ -68,6 +63,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help=(
             "Активировать профиль <имя> поверх указателя profile: из config.yml "
             "(~/.gc/profiles/ или <project>/.gc/profiles/)"
+        ),
+    )
+    parser.add_argument(
+        "--level",
+        choices=list(LEVEL_VALUES),
+        default=None,
+        help=(
+            "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
+            "auto — уровень меняется автоматически по ходу работы"
+        ),
+    )
+    parser.add_argument(
+        "--permission-mode",
+        type=str.lower,
+        choices=[mode.value for mode in AVAILABLE_MODES],
+        default=None,
+        help=(
+            "Режим разрешений сессии (сохраняется в ней; флаг перебивает "
+            "сохранённый режим; по умолчанию — security.permissions.default_mode)"
         ),
     )
     parser.add_argument(
@@ -96,9 +110,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         dest="auto_mcp",
         help="Не поднимать HTTP/SSE MCP-daemon'ы при старте",
     )
-    args, _unknown = parser.parse_known_args(
+    parser.add_argument(
+        "-h", "--help", action="store_true", help="Показать справку и выйти"
+    )
+    return parser
+
+
+def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = _build_parser()
+    args, unknown = parser.parse_known_args(
         list(argv) if argv is not None else sys.argv[1:]
     )
+    args.unknown = unknown
+    return args
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Entrypoint для `gc-ua = "tui:main"`."""
+    args_list = list(argv) if argv is not None else sys.argv[1:]
+    if args_list[:1] == ["config"]:
+        from gc_core.config_command import main as config_main
+
+        return config_main(args_list[1:], program="gc-ua")
+    _force_truecolor_if_supported()
+    try:
+        # importlib.import_module goes through sys.modules, not the package
+        # attribute cache, so evicting tui.app in tests forces a real re-import.
+        _app_mod = importlib.import_module("gc_tui.app")
+    except ImportError:
+        print(_missing_textual_msg(), file=sys.stderr)
+        return 1
+
+    args = _parse_args(args_list)
+    if args.help:
+        print(_build_parser().format_help())
+        return 0
+    if args.unknown:
+        print(
+            f"gc-ua: неизвестные аргументы: {' '.join(args.unknown)} (флаги не "
+            "сокращаются: --config, --profile, --level, --permission-mode, "
+            "--init-config, --task-root, --no-auto-mcp; справка — gc-ua --help)",
+            file=sys.stderr,
+        )
+        return 2
 
     # Паритет с gc-cli: создать <cwd>/.gc/ (project-local слой: config overlay,
     # project skills). Тихо игнорит отсутствие прав на запись в cwd.
@@ -113,7 +167,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_core.config import (
         _bootstrap_user_config,
         apply_cli_overrides,
-        load_config_ex,
+        load_settings,
         resolve_config_path,
         user_config_path,
     )
@@ -151,7 +205,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        config_dict, profile_meta = loaded.config, loaded.meta
+        settings, profile_meta = loaded.settings, loaded.meta
         if not _interactive():
             # TUI не стартует — stderr доезжает до человека и остаётся на экране.
             # Гайд знает ступень лестницы: на деградировавшей «настроен — можно
@@ -161,7 +215,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(
                 onboarding.setup_guide(
                     str(onb_write_path),
-                    config_dict,
+                    settings,
                     program="gc-ua",
                     just_created=just_created,
                     repair=loaded,
@@ -207,7 +261,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _bootstrap_user_config() if args.config is None else False
         )
         try:
-            config_dict, profile_meta = load_config_ex(
+            settings = load_settings(
                 args.config, profile_override=args.profile
             )
         except ValueError as exc:
@@ -226,14 +280,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        apply_cli_overrides(config_dict)
+        settings = apply_cli_overrides(
+            settings,
+            extra_overrides={"level": args.level} if args.level else None,
+        )
+        profile_meta = settings.profile_meta
 
-        if args.config is None and onboarding.is_unconfigured(config_dict):
+        if args.config is None and onboarding.is_unconfigured(settings):
             if not _interactive():
                 print(
                     onboarding.setup_guide(
                         str(onb_write_path),
-                        config_dict,
+                        settings,
                         program="gc-ua",
                         just_created=just_created,
                     ),
@@ -244,13 +302,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     # Поля, вычисляемые рантаймом TUI (в файле конфига их нет) — владелец
     # tui/runtime_config; тот же модуль переносит их через hot-reload настроек.
-    from gc_tui.runtime_config import apply_runtime_fields
+    from gc_tui.runtime_config import apply_tui_runtime
 
-    apply_runtime_fields(config_dict)
+    settings = apply_tui_runtime(settings)
 
     from gc_core.thread_store import resolve_threads_dir
 
-    threads_dir = resolve_threads_dir(config_dict)
+    threads_dir = resolve_threads_dir(settings)
 
     from recommended_mcp.runtime.daemon_autostart import (
         ensure_mcp_daemons,
@@ -261,7 +319,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     auto_mcp = args.auto_mcp
     if auto_mcp:
         ensure_mcp_daemons(
-            config_dict,
+            settings,
             disable_hint="отключить автозапуск целиком: `--no-auto-mcp`",
         )
 
@@ -276,7 +334,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         _release_voice = release_voice_service
         _vs = _voice_state()
-        voice_expected = _vs is not None and url_is_ours(config_dict, _vs.port)
+        voice_expected = _vs is not None and url_is_ours(settings, _vs.port)
     except Exception:
         voice_expected = False
 
@@ -288,12 +346,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     app = _app_mod.TuiApp(
         threads_dir=threads_dir,
         system="cli",
-        config=config_dict,
+        settings=settings,
         profile_override=None if args.init_config else args.profile,
+        level_override=None if args.init_config else args.level,
     )
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)
     )
+    if args.permission_mode:
+        app.lock_permission_mode(args.permission_mode)
     app._config_project_local = project_local_config_path()  # str | None
     # Подъём (`ensure_voice_service`: spawn + ожидание готовности, до 90 с на холодном
     # старте) идёт ЦЕЛИКОМ фоном: TuiApp запускает его после первого кадра
@@ -307,7 +368,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # (`TuiApp._profile_remerge`), но здесь ProfileMeta есть только на этом
     # единственном старте загрузки, до создания app/треда.
     app._maybe_notice_profile_activation(
-        profile_meta.active_name or "", profile_meta, config_dict
+        profile_meta.active_name or "", profile_meta, settings
     )
     app._onboarding_mode = onboarding_mode
     app._onboarding_deactivate_profile = onboarding_deactivate_profile

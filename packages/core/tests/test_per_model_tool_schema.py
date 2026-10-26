@@ -16,7 +16,7 @@ from gc_core.tools import _finish_tools_data
 from gc_core.tools.arguments_validation import (
     parse_and_validate_tool_arguments,
 )
-from gc_core.tools.schema_optional import (
+from gc_core.execution.tool_schema import (
     OPTIONAL_EMPTY_AS_OMIT_HINT,
     OPTIONAL_OMIT_HINT,
 )
@@ -25,6 +25,7 @@ from gc_core.utils.connect_backend import (
     create_call_data_responses,
 )
 from gc_core.utils.llm_chat_client import _build_chat_completion_payload
+from gc_testkit.settings import make_settings
 
 
 def _canon_tool() -> dict:
@@ -81,11 +82,18 @@ def _wire_function(data: dict) -> dict:
     return data["tools"][0]["function"]
 
 
+def _settings(flags: dict):
+    """Флаги схемы общего backend (``openai_strict_tools_schema``…)."""
+    return make_settings(
+        {f"backend.{key}": value for key, value in flags.items()}
+    )
+
+
 def _send(tools, *, config=None, resolved=None):
     return create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         _state(tools),
-        config_dict=config or {},
+        settings=_settings(config or {}),
         resolved=resolved,
     )
 
@@ -117,7 +125,7 @@ def test_finish_tools_data_keeps_canonical_schema_regardless_of_flags():
             },
             {},
             {},
-            flags,
+            _settings(flags),
             logger=None,
         )
         return tools_data["note_tool"]["spec"], specs[0]
@@ -231,13 +239,13 @@ def test_two_aliases_project_per_call_without_rewriting_state_tools():
     first = create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         state,
-        config_dict={"send_tool_strict": True},
+        settings=_settings({"send_tool_strict": True}),
         resolved=loose,
     )
     second = create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         state,
-        config_dict={"send_tool_strict": True},
+        settings=_settings({"send_tool_strict": True}),
         resolved=strict,
     )
     assert state.tools == before
@@ -311,8 +319,8 @@ def test_service_call_without_tools_does_not_touch_schema():
     state = _state(tools)
     before = copy.deepcopy(tools)
     payload = _build_chat_completion_payload(
-        ctx=SimpleNamespace(
-            config_dict={
+        ctx=_settings(
+            {
                 "openai_strict_tools_schema": True,
                 "send_tool_strict": False,
             }
@@ -343,10 +351,12 @@ def test_responses_projects_global_flags_and_ignores_alias():
         [{"role": "user", "content": "hi"}],
         state,
         resolved=alias,
-        config_dict={
-            "openai_strict_tools_schema": False,
-            "send_tool_strict": True,
-        },
+        settings=_settings(
+            {
+                "openai_strict_tools_schema": False,
+                "send_tool_strict": True,
+            }
+        ),
     )
     assert state.tools == before
     assert data["tools"][0]["parameters"]["required"] == ["path"]
@@ -360,10 +370,12 @@ def test_responses_projects_global_flags_and_ignores_alias():
         [{"role": "user", "content": "hi"}],
         state,
         resolved=_resolved(),
-        config_dict={
-            "openai_strict_tools_schema": True,
-            "send_tool_strict": False,
-        },
+        settings=_settings(
+            {
+                "openai_strict_tools_schema": True,
+                "send_tool_strict": False,
+            }
+        ),
     )
     projected = strict_global["tools"][0]
     assert "strict" not in projected
@@ -383,8 +395,10 @@ def test_responses_explicit_empty_tools_not_revived_by_projection():
         previous_response_id=None,
     )
     data = create_call_data_responses(
-        [], state, tools=[],
-        config_dict={"openai_strict_tools_schema": True},
+        [],
+        state,
+        tools=[],
+        settings=_settings({"openai_strict_tools_schema": True}),
     )
     assert data["tools"] == []
     assert state.tools == [tool]

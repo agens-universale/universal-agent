@@ -94,11 +94,14 @@ def register_cleanup_threads_on_startup(
     app: FastAPI,
     *,
     server_config: Dict[str, Any],
-    base_agent_config: Dict[str, Any],
+    base_agent_settings: Any,
     logger: logging.Logger,
 ) -> None:
     """
     Подключает startup-хук, который запускает поток чистки threads-файлов.
+
+    ``base_agent_settings`` — настройки агента сервера: всё, что принимает
+    ``settings_of`` (``LoadedSettings``, ``AppConfig``, контекст).
 
     Без lock-ов (предполагается 1 worker).
     """
@@ -147,7 +150,7 @@ def register_cleanup_threads_on_startup(
             return
         interval_seconds, ttl_days = cfg
 
-        threads_dir = resolve_threads_dir(base_agent_config)
+        threads_dir = resolve_threads_dir(base_agent_settings)
         # Объявляемся вслух. Строка стоит ЗДЕСЬ, а не на регистрации хука:
         # регистрация идёт на импорте модуля, до `logging.basicConfig` в
         # `serve()`, и запись ушла бы в никуда через `logging.lastResort`

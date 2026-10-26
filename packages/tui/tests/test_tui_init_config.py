@@ -101,7 +101,26 @@ def test_tui_proceeds_when_configured(tmp_path, monkeypatch):
         "    Authorization: Bearer real-token\n",
         encoding="utf-8",
     )
-    cfg = config.load_config(None)
+    cfg = config.load_settings(None)
     from gc_core import onboarding
 
     assert onboarding.is_unconfigured(cfg) is False
+
+
+def test_tui_rejects_abbreviated_and_unknown_flags(
+    tmp_path, monkeypatch, capsys
+):
+    """`--conf my.yml`, `--init`, `--prof X` — не тихий запуск на другом
+    конфиге, а ошибка с кодом 2, как у gc-cli; конфиг не создаётся."""
+    _isolate(tmp_path, monkeypatch)
+    for argv in (
+        ["--conf", "my.yml"],
+        ["--init"],
+        ["--prof", "X"],
+        ["--bogus"],
+    ):
+        assert tui.main(argv) == 2, argv
+        assert "неизвестные аргументы" in capsys.readouterr().err
+    assert not (tmp_path / "gc" / "config.yml").exists()
+    assert tui.main(["--help"]) == 0
+    assert "--init-config" in capsys.readouterr().out

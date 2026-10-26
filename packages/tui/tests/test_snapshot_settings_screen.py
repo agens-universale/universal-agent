@@ -19,7 +19,7 @@ import pytest
 pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
-from gc_testkit.tui_support import wait_until
+from gc_testkit.tui_support import tui_settings, wait_until
 
 _VERSION = "0.4.2"  # версия в шапке — фикстурой
 _MODEL = "CodeAgent"
@@ -28,11 +28,11 @@ _TOKEN = "Bearer sk-demo-token"
 
 
 def _config() -> dict:
-    """База, как её видит приложение: `load_config` отдаёт backend/agent плоско."""
+    """База приложения — плоскими именами теста (`tui_settings` переводит их в пути)."""
     return {
-        "completions_url": _URL,
-        "chat_completion_headers": {"Authorization": _TOKEN},
-        "model": _MODEL,
+        "backend.completions_url": _URL,
+        "backend.chat_completion_headers": {"Authorization": _TOKEN},
+        "agent.model": _MODEL,
     }
 
 
@@ -97,7 +97,11 @@ def _app(tmp_path, monkeypatch):
     monkeypatch.setattr(TuiApp, "_start_auto_update_check", lambda self: None)
 
     cfg_file = _write_config_file(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_config())
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_config()),
+    )
     app.set_config_path(str(cfg_file))
     return app, cfg_file
 
@@ -108,7 +112,7 @@ def _push_settings(pilot, cfg_file):
     from gc_tui.screens.settings import SettingsScreen
 
     scr = SettingsScreen(
-        config=pilot.app.screen_config(),
+        settings=pilot.app.base_settings(),
         config_path=str(cfg_file),
         on_apply=pilot.app.reload_config,
         probe_fn=_probe,

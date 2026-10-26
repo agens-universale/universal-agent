@@ -17,6 +17,7 @@ from textual.widgets.text_area import Selection
 from gc_tui.app import TuiApp
 from gc_tui.services import os_ops
 from gc_tui.widgets.command_input import CommandTextArea
+from gc_testkit.tui_support import tui_settings
 
 SHOT = "Снимок экрана 2026-09-24 в\u202f10.00.00.png"
 
@@ -33,7 +34,13 @@ def _app(tmp_path, **config) -> TuiApp:
     return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "threads_data_path": str(tmp_path), **config},
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "paths.threads_data_path": str(tmp_path),
+                **config,
+            }
+        ),
     )
 
 

@@ -1,11 +1,11 @@
-"""backend.request_timeout_sec → config_dict[backend_request_timeout_sec] → HTTP timeout."""
+"""backend.request_timeout_sec → settings.backend.request_timeout_sec → HTTP timeout."""
 
 import os
 import tempfile
 
 import pytest
 import yaml
-from gc_core.config import load_config
+from gc_core.config import load_settings
 from gc_core.config_modules.backend import (
     DEFAULT_REQUEST_TIMEOUT_SEC,
     BackendConfig,
@@ -43,8 +43,8 @@ def test_load_config_maps_backend_request_timeout_sec():
                 },
                 fd,
             )
-        cfg = load_config(cfg_path)
-        assert cfg["backend_request_timeout_sec"] == 120
+        cfg = load_settings(cfg_path).settings
+        assert cfg.backend.request_timeout_sec == 120
 
 
 def test_load_config_timeout_default_when_omitted():
@@ -52,10 +52,8 @@ def test_load_config_timeout_default_when_omitted():
         cfg_path = os.path.join(tmp_dir, "config.yml")
         with open(cfg_path, "w", encoding="utf-8") as fd:
             fd.write("backend:\n  api_mode: chat_completions\n")
-        cfg = load_config(cfg_path)
-        assert (
-            cfg["backend_request_timeout_sec"] == DEFAULT_REQUEST_TIMEOUT_SEC
-        )
+        cfg = load_settings(cfg_path).settings
+        assert cfg.backend.request_timeout_sec == DEFAULT_REQUEST_TIMEOUT_SEC
 
 
 def _install_capturing_transport(monkeypatch, seen):

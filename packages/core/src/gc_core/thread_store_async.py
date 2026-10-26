@@ -252,6 +252,36 @@ class SyncThreadStoreAdapter:
     # --- чтение ------------------------------------------------------------
 
     @property
+    def aread_snapshot(self):
+        if not callable(getattr(self._store, "read_snapshot", None)):
+            return None
+
+        async def read(*args, **kwargs):
+            return self._call("read_snapshot", *args, **kwargs)
+
+        return read
+
+    @property
+    def acommit_operation(self):
+        if not callable(getattr(self._store, "commit_operation", None)):
+            return None
+
+        async def commit(*args, **kwargs):
+            return self._call("commit_operation", *args, **kwargs)
+
+        return commit
+
+    @property
+    def areset_run_flags(self):
+        if not callable(getattr(self._store, "reset_run_flags", None)):
+            return None
+
+        async def reset(*args, **kwargs):
+            return self._call("reset_run_flags", *args, **kwargs)
+
+        return reset
+
+    @property
     def areplace_messages(self):
         """Замена истории одной операцией — если хранилище её умеет.
 

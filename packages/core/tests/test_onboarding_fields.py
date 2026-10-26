@@ -12,27 +12,27 @@ def test_authorization_attempts_try_bare_key_and_bearer():
     """Ключ без схемы пробуется как вставлен и с префиксом Bearer.
     Уже собранный заголовок Bearer даёт и голый ключ — сервер мог ждать
     ровно одну из двух форм. Basic не переписываем."""
-    from gc_core import onboarding
+    from gc_core.utils import http_auth
 
-    assert onboarding.authorization_attempts("sk-abc") == [
+    assert http_auth.authorization_attempts("sk-abc") == [
         "sk-abc",
         "Bearer sk-abc",
     ]
-    assert onboarding.authorization_attempts("  sk-abc  ") == [
+    assert http_auth.authorization_attempts("  sk-abc  ") == [
         "sk-abc",
         "Bearer sk-abc",
     ]
-    assert onboarding.authorization_attempts("Bearer sk-abc") == [
+    assert http_auth.authorization_attempts("Bearer sk-abc") == [
         "Bearer sk-abc",
         "sk-abc",
     ]
-    assert onboarding.authorization_attempts("bearer sk-abc") == [
+    assert http_auth.authorization_attempts("bearer sk-abc") == [
         "bearer sk-abc",
         "sk-abc",
     ]
-    assert onboarding.authorization_attempts("Basic abc") == ["Basic abc"]
-    assert onboarding.authorization_attempts("") == []
-    assert onboarding.authorization_attempts(None) == []
+    assert http_auth.authorization_attempts("Basic abc") == ["Basic abc"]
+    assert http_auth.authorization_attempts("") == []
+    assert http_auth.authorization_attempts(None) == []
 
 
 def test_mask_secret_shows_recognisable_edges():

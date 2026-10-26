@@ -6,7 +6,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_preview_multiparagraph_prose_single_row(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.services.trace_render import render_thread_readonly
+    from trace_readonly import render_thread_readonly
     from gc_tui.widgets.trace_row import TraceRow
     from textual.app import App
     from textual.containers import VerticalScroll

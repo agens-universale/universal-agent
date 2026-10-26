@@ -109,7 +109,6 @@ class MicRecorder:
         # Состояние полосовых фильтров (x1, x2, y1, y2 на полосу) живёт МЕЖДУ блоками:
         # сброс на каждом блоке дал бы переходный процесс на каждые 32 мс.
         self._band_state = [[0.0, 0.0, 0.0, 0.0] for _ in BAND_FREQS]
-        self._overflows = 0
 
     def _on_audio(self, indata, frames, time_info, status) -> None:
         # Поток PortAudio с ЖЁСТКИМ дедлайном на блок: не уложились — драйвер выбросит
@@ -122,10 +121,6 @@ class MicRecorder:
         data = bytes(indata)
         self._chunks.append(data)
         self._pending.append(data)
-        if status:
-            self._overflows += (
-                1  # драйвер сообщил о потере звука — больше не молчим
-            )
 
     def analyse(self) -> None:
         """Пересчитать уровень и спектр по звуку, накопленному с прошлого кадра.
@@ -175,12 +170,6 @@ class MicRecorder:
         # и усреднение съело бы пик слога — лента получилась бы вялой.
         self._level = level
         self._band_levels = bands
-
-    @property
-    def overflows(self) -> int:
-        """Сколько раз драйвер сообщил о потере входного звука за эту запись.
-        Больше нуля — часть фразы до распознавания не доехала."""
-        return self._overflows
 
     @property
     def level(self) -> float:

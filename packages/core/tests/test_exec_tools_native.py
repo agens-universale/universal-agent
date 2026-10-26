@@ -57,16 +57,12 @@ NAP = 0.6
 TICK = 0.02
 
 
-def _cmd(config_dict=None):
-    return ExecuteCommand(
-        ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS)
-    )
+def _cmd(config=None):
+    return ExecuteCommand(ctx=local_ctx(config or _NO_GUARDS))
 
 
-def _py(config_dict=None):
-    return RunPythonCode(
-        ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS)
-    )
+def _py(config=None):
+    return RunPythonCode(ctx=local_ctx(config or _NO_GUARDS))
 
 
 def _sleep_command(sec) -> str:

@@ -1,6 +1,7 @@
 """Гвозди приёмки /rigor (спека §8): резолвер-матрица, custom-правило, эфемерная
 позиция, smart-гейт, сессионность пары. Живые UI-гейты — в смоуке (см. план §смоук)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_testkit import run_coro
 from gc_testkit.paths import REPO
@@ -11,7 +12,7 @@ def _app(tmp_path, yaml_text):
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(yaml_text, encoding="utf-8")
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
     app._threads_dir = str(tmp_path / "threads")
@@ -87,17 +88,13 @@ def test_session_pair_not_preset_survives(tmp_path):
     assert "rigor" not in str(saved)  # пресет как значение не хранится
 
 
-def test_apply_rigor_preset_never_clears_session_overrides(
-    tmp_path, monkeypatch
-):
+def test_apply_rigor_preset_never_clears_session_overrides(tmp_path):
     """§8, Г-А: «никакой выбор в палитре не снимает сессионные оверрайды» —
     прибиваем буквально, не чтением кода. `SESSION_KEYS` сейчас содержит РОВНО
     `RIGOR_KEYS` (`tui/session_settings.py`) — третьего, истинно-несвязанного
     ключа для оверрайда нет, поэтому честная проверка: до шага сессия несёт
     ЧАСТИЧНЫЙ оверрайд одного ключа пары (нестандартная, «обрезанная» custom-
-    ситуация), `app.clear_session_overrides` подменена шпионом — после
-    `apply_toggle(rigor, preset)` шпион обязан остаться НЕ вызванным (замена
-    пары идёт только через `apply_session_overrides`), а оверрайды — полностью
+    ситуация) — после `apply_toggle(rigor, preset)` оверрайды полностью
     замещены целевой парой (не остались частичными, не были обнулены)."""
     pytest.importorskip("textual")
     from gc_tui.toggles import apply_toggle
@@ -110,16 +107,8 @@ def test_apply_rigor_preset_never_clears_session_overrides(
         {"tui.finish_gate_mode": "on"}
     )  # частичный оверрайд
 
-    clear_calls = []
-    monkeypatch.setattr(
-        app,
-        "clear_session_overrides",
-        lambda keys: clear_calls.append(tuple(keys)),
-    )
-
     apply_toggle(app, "rigor", "low")
 
-    assert clear_calls == []
     assert app._session_overrides == {
         "tui.finish_gate_mode": "off",
         "tui.text_answer_mode": "allow",
@@ -133,18 +122,19 @@ def test_smart_gate_counts_failed_and_subagent_calls():
     from types import SimpleNamespace
 
     from gc_core.intent_guard.guard import FinishGateGuard
+    from gc_testkit.settings import fake_ctx
 
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
         "finish_gate_smart": True,
     }
     g0 = FinishGateGuard(
-        ctx=SimpleNamespace(config_dict=cfg),
+        ctx=fake_ctx(cfg),
         state=SimpleNamespace(parent_state_id=None, turn_tool_calls=0),
     )
     g1 = FinishGateGuard(
-        ctx=SimpleNamespace(config_dict=cfg),
+        ctx=fake_ctx(cfg),
         state=SimpleNamespace(parent_state_id=None, turn_tool_calls=1),
     )
     assert g0.enabled is False and g1.enabled is True
@@ -175,6 +165,7 @@ def test_turn_tool_calls_counter_survives_summary_compaction():
         raw_summary="summary text",
         last_dialog_steps="",
         summarized_messages_count=1,
+        can_propose_plan=True,
     )
     assert state.turn_tool_calls == 3
 
@@ -202,7 +193,7 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
     )
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config=app._config,
+            settings=app.base_settings(),
             config_path=app._config_path,
             on_apply=app.reload_config,
         )
@@ -216,15 +207,18 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
             for s in rigor_text.spans
         )
         assert not any(
-            p.DIM.lower() in str(s.style).lower() for s in rigor_text.spans
+            p.SUB_INK.lower() in str(s.style).lower() for s in rigor_text.spans
         )
 
         gate_text = scr._mode_row_text("gate", selected=False)
 
-        # Имя+описание ребёнка (head, включая имя команды) — DIM.
+        # Имя+описание ребёнка (head, включая имя команды) — SUB_INK: на ступень
+        # светлее подсказок (DIM), но тише основных ключей (INK).
         gate_plain = gate_text.plain
         dim_spans = [
-            s for s in gate_text.spans if p.DIM.lower() in str(s.style).lower()
+            s
+            for s in gate_text.spans
+            if p.SUB_INK.lower() in str(s.style).lower()
         ]
         assert (
             dim_spans and dim_spans[0].start == 2
@@ -237,7 +231,7 @@ async def test_settings_rigor_row_flat_children_dim(tmp_path):
         # подписью — семантические цвета, не задет).
         value_start = gate_plain.rindex("on")
         assert any(
-            p.DIM.lower() in str(s.style).lower()
+            p.SUB_INK.lower() in str(s.style).lower()
             and s.start <= value_start < s.end
             for s in gate_text.spans
         )
@@ -261,15 +255,15 @@ def test_exactly_one_preset_group_today():
 def test_shipped_templates_resolve_to_medium():
     """§8: «дефолт поставки: схема + оба шаблона = smart+judge → свежая установка
     резолвится в medium» — половина (схема) уже прибита в test_rigor_presets.py
-    (`resolve_rigor_state({}) == "medium"`) и в test_config_default_template.py
+    (`resolve_rigor_state(make_settings()) == "medium"`) и в test_config_default_template.py
     (config.default.yml не расходится с pydantic-дефолтами); здесь — прямой
     гвоздь по ОБОИМ файлам поставки (demo_config.yml, config.default.yml):
-    парсим и валидируем как настоящий загрузчик (`flatten_app_config`), без
-    файловых side-effect'ов `load_config` (XDG/project-оверлеи не при чём)."""
+    парсим и валидируем схемой, как настоящий загрузчик, без файловых
+    side-effect'ов загрузки (XDG/project-оверлеи не при чём)."""
     from pathlib import Path
 
     import yaml
-    from gc_core.config import _default_config_path, flatten_app_config
+    from gc_core.config import _default_config_path
     from gc_core.config_modules.root import AppConfig
     from gc_tui.toggles import resolve_rigor_state
 
@@ -277,8 +271,7 @@ def test_shipped_templates_resolve_to_medium():
     for path in (Path(_default_config_path()), demo_path):
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         app_cfg = AppConfig.model_validate(raw)
-        cfg = flatten_app_config(app_cfg)
-        assert resolve_rigor_state(cfg) == "medium", (
+        assert resolve_rigor_state(app_cfg) == "medium", (
             f"{path.name}: не резолвится в medium"
         )
 
@@ -373,7 +366,9 @@ def test_process_tool_calls_increments_counter_even_on_tool_failure(
             self.tool_calls = 0
 
     state = _State()
-    ctx = SimpleNamespace(config_dict={}, logger=None)
+    from gc_testkit.settings import fake_ctx
+
+    ctx = fake_ctx(logger=None)
     messages = [
         {
             "type": "function_call",

@@ -555,7 +555,9 @@ class ConnectionEditor(Vertical):
         if self._no_auth:
             return False
         field = self.query_one(_SEL_CONN_TOKEN, Input)
-        source = field.value.strip() or (None if self._token_cleared else self._auth_header)
+        source = field.value.strip() or (
+            None if self._token_cleared else self._auth_header
+        )
         value = accepted_literal_auth(source, accepted)
         if value is None:
             return False

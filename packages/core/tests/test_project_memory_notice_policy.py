@@ -10,6 +10,7 @@ from gc_core.message_policy.tool_usage_notice.state import (
     get_project_memory_check_cnt,
 )
 from gc_core.states import State
+from gc_testkit.settings import make_settings
 
 
 def _state() -> State:
@@ -35,11 +36,13 @@ def test_on_persist_steps_increments_meta_counter():
 def test_collect_hints_empty_before_k_tick():
     state = _state()
     meta: dict = {}
-    cfg = {
-        "enable_project_memory_notice": True,
-        "project_memory_params": {"check_interval_messages": 5},
-        "stop_tools": [],
-    }
+    cfg = make_settings(
+        {
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 5},
+            "agent.stop_tools": [],
+        }
+    )
     on_persist_steps(meta, steps=4)
     hints = collect_project_memory_hints(
         state, meta, SimpleNamespace(), cfg, get_hash_fn=lambda _ctx: "abc"
@@ -50,11 +53,13 @@ def test_collect_hints_empty_before_k_tick():
 def test_collect_exists_hint_on_k_tick_first_hash():
     state = _state()
     meta: dict = {}
-    cfg = {
-        "enable_project_memory_notice": True,
-        "project_memory_params": {"check_interval_messages": 3},
-        "stop_tools": [],
-    }
+    cfg = make_settings(
+        {
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 3},
+            "agent.stop_tools": [],
+        }
+    )
     on_persist_steps(meta, steps=3)
 
     def _hash(_ctx):
@@ -73,11 +78,13 @@ def test_collect_changed_hint_when_baseline_differs():
     state = _state()
     state.project_memory_content_hash = "old"
     meta: dict = {}
-    cfg = {
-        "enable_project_memory_notice": True,
-        "project_memory_params": {"check_interval_messages": 2},
-        "stop_tools": [],
-    }
+    cfg = make_settings(
+        {
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 2},
+            "agent.stop_tools": [],
+        }
+    )
     on_persist_steps(meta, steps=2)
     hints = collect_project_memory_hints(
         state,
@@ -101,8 +108,10 @@ def test_touch_project_memory_baseline_updates_state():
 
 
 def test_hints_disabled_when_long_memory_stopped():
-    cfg = {
-        "enable_project_memory_notice": True,
-        "stop_tools": ["project_memory"],
-    }
+    cfg = make_settings(
+        {
+            "project_memory.enable_project_memory_notice": True,
+            "agent.stop_tools": ["project_memory"],
+        }
+    )
     assert not project_memory_hints_enabled(cfg)

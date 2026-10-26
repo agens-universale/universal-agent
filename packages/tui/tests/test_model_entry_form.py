@@ -13,6 +13,7 @@
 
 from pathlib import Path
 
+from gc_testkit.settings import make_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -54,6 +55,10 @@ def _form(**kwargs):
         "probe",
         lambda *a, **k: ProbeResult("unknown", None, None, 0, "нет сети"),
     )
+    # Пороги формы читает `settings_of`: плоский словарь после рефакторинга
+    # настроек не принимается. Тест, которому нужен свой раздел `summary`,
+    # передаёт `global_config` сам.
+    kwargs.setdefault("global_config", make_settings())
     return ModelEntryForm(**kwargs)
 
 
@@ -67,22 +72,37 @@ def _models():
 async def test_changed_backend_credential_is_used_by_probe_before_save():
     from textual.widgets import TextArea
 
-    form = _form(initial={"alias": "m", "url": "https://example.test/chat", "token": "old"})
+    form = _form(
+        initial={
+            "alias": "m",
+            "url": "https://example.test/chat",
+            "token": "old",
+        }
+    )
     async with _harness(form).run_test() as pilot:
-        form.query_one("#mef-backend", TextArea).load_text("chat_completion_headers:\n  Authorization: new")
+        form.query_one("#mef-backend", TextArea).load_text(
+            "chat_completion_headers:\n  Authorization: new"
+        )
         await pilot.pause()
         assert form._current_auth_value() == ("new", False)
         ok, _, fields = form.submit()
         assert ok is True
         assert fields["token"] is None
-        assert fields["backend"]["chat_completion_headers"]["Authorization"] == "new"
+        assert (
+            fields["backend"]["chat_completion_headers"]["Authorization"]
+            == "new"
+        )
 
 
 async def test_changed_backend_credential_wins_over_visible_old_token():
     from textual.widgets import Input, TextArea
 
     form = _form(
-        initial={"alias": "m", "url": "https://example.test/chat", "token": "old"}
+        initial={
+            "alias": "m",
+            "url": "https://example.test/chat",
+            "token": "old",
+        }
     )
     async with _harness(form).run_test() as pilot:
         form.query_one("#mef-token", Input).value = "old"
@@ -102,6 +122,1014 @@ async def test_strip_shortcut_survives_every_switch():
             text = str(form.query_one("#mef-strip", Static).render())
             assert f"strip_think: {expected}" in text
             assert "Space — переключить" in text
+
+
+async def test_unset_summary_triggers_are_empty_and_drop_the_key():
+    """Незаданный порог — пустое поле, и наружу уходит `None`: писатель по нему
+    УДАЛЯЕТ ключ. Число 0 в `fields` писалось бы в каждую сохранённую запись, а в
+    профиле перекрывало бы положительный порог базового слоя."""
+    form = _form(initial={"alias": "m"})
+    async with _harness(form).run_test() as pilot:
+        chars = form.query_one("#mef-summary-chars", Input)
+        tokens = form.query_one("#mef-summary-tokens", Input)
+        assert chars.value == ""
+        assert tokens.value == ""
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] is None
+        assert fields["summary_trigger_tokens"] is None
+
+
+async def test_typed_zero_means_unset_like_an_empty_field():
+    form = _form(initial={"alias": "m"})
+    async with _harness(form).run_test() as pilot:
+        form.query_one("#mef-summary-chars", Input).value = "0"
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] is None
+
+
+@pytest.mark.parametrize(
+    "typed", ["300000", "300 000", " 300 000 ", "300\u00a0000", "300_000"]
+)
+async def test_summary_trigger_accepts_digit_group_spaces(typed):
+    """Форма сама показывает числа с пробелами — значит, и принять их обязана:
+    отказ «нужно целое число» на `300 000` был бы ловушкой."""
+    form = _form(initial={"alias": "m"})
+    async with _harness(form).run_test() as pilot:
+        form.query_one("#mef-summary-chars", Input).value = typed
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] == 300000
+
+
+async def test_spaced_summary_trigger_switches_the_neighbour_off():
+    """Число с пробелами — такое же заданное значение, как без них: соседнее
+    пустое поле говорит «выключен»."""
+    form = _form(initial={"alias": "m"}, global_config=_GLOBAL_SUMMARY)
+    async with _harness(form).run_test() as pilot:
+        form.query_one("#mef-summary-tokens", Input).value = "100 000"
+        await pilot.pause()
+        assert _summary_placeholders(form)[0] == (
+            "не задан · выключен, пока задан порог в токенах"
+        )
+
+
+async def test_cleared_summary_trigger_removes_the_key_from_the_file():
+    """Сквозной путь формы до текста файла: очищенный порог пропадает из записи,
+    нетронутый соседний остаётся."""
+    from gc_core.config_modules.registry_write import _upsert_model_text
+
+    text = (
+        "models:\n"
+        "  m:\n"
+        "    model: qwen/qwen\n"
+        "    summary_trigger_chars: 100000\n"
+        "    summary_trigger_tokens: 116128\n"
+    )
+    form = _form(
+        initial={
+            "alias": "m",
+            "model": "qwen/qwen",
+            "summary_trigger_chars": 100000,
+            "summary_trigger_tokens": 116128,
+        }
+    )
+    async with _harness(form).run_test() as pilot:
+        form.query_one("#mef-summary-chars", Input).value = ""
+        ok, alias, fields = form.submit()
+        assert ok is True
+    entry = yaml.safe_load(_upsert_model_text(text, "", alias, fields))[
+        "models"
+    ]["m"]
+    assert "summary_trigger_chars" not in entry
+    assert entry["summary_trigger_tokens"] == 116128
+
+
+async def test_field_order_is_model_then_alias_then_thresholds():
+    """Порядок курсора и порядок на экране — один: пара «id модели → алиас» не
+    разрывается, пороги идут за ней, дальше — прежние поля формы."""
+    form = _form(initial={"alias": "m"})
+    async with _harness(form).run_test() as pilot:
+        assert form._positions == (
+            "mef-url",
+            "mef-token",
+            None,
+            "mef-proxy",
+            "mef-model",
+            "mef-alias",
+            "mef-model-meta",
+            "mef-summary-chars",
+            "mef-summary-tokens",
+            "mef-strip",
+            "mef-main",
+            "mef-auxiliary",
+            "mef-backend",
+            "mef-help-line",
+        )
+        on_screen = [
+            w.id
+            for w in form.query("Input, TextArea, #mef-strip, ActionRow")
+            if w.id in form._positions
+        ]
+        assert on_screen == [p for p in form._positions if p is not None]
+
+
+_GLOBAL_SUMMARY = make_settings(
+    {
+        "summary": {
+            "chat_completions_summary_trigger_chars": 200000,
+            "chat_completions_summary_trigger_tokens": 0,
+        }
+    }
+)
+
+
+def _summary_placeholders(form) -> tuple[str, str]:
+    return (
+        form.query_one("#mef-summary-chars", Input).placeholder,
+        form.query_one("#mef-summary-tokens", Input).placeholder,
+    )
+
+
+async def test_summary_trigger_fields_say_what_they_are():
+    """Подписи — словами интерфейса. Что значит пустое поле, говорит оно само;
+    отдельной подсказки под парой нет."""
+    form = _form(initial={"alias": "m"}, global_config=_GLOBAL_SUMMARY)
+    async with _harness(form).run_test() as pilot:
+        text = " ".join(str(w.render()) for w in form.query(Static))
+        assert "Порог автосжатия контекста · символы" in text
+        assert "Порог автосжатия контекста · токены" in text
+        assert "Суммаризация" not in text
+        assert "оба пустые" not in text
+
+
+async def test_empty_summary_triggers_show_the_global_setting_in_effect():
+    """Оба поля пусты — действуют общие пороги, и поле показывает какие: число
+    или «выключен» (в общем конфиге это 0, «не задан» там не бывает)."""
+    form = _form(initial={"alias": "m"}, global_config=_GLOBAL_SUMMARY)
+    async with _harness(form).run_test() as pilot:
+        assert _summary_placeholders(form) == (
+            "не задан · действует общий порог для всех моделей: 200 000",
+            "не задан · общий порог для всех моделей выключен",
+        )
+
+
+async def test_empty_summary_trigger_says_it_is_off_while_the_other_is_set():
+    """Задан один порог — второй для этой модели выключен. Текст меняется на
+    лету и возвращается, когда соседнее поле очищают."""
+    form = _form(initial={"alias": "m"}, global_config=_GLOBAL_SUMMARY)
+    async with _harness(form).run_test() as pilot:
+        tokens = form.query_one("#mef-summary-tokens", Input)
+        tokens.value = "116128"
+        await pilot.pause()
+        assert _summary_placeholders(form)[0] == (
+            "не задан · выключен, пока задан порог в токенах"
+        )
+        tokens.value = ""
+        await pilot.pause()
+        assert _summary_placeholders(form)[0] == (
+            "не задан · действует общий порог для всех моделей: 200 000"
+        )
+        form.query_one("#mef-summary-chars", Input).value = "90000"
+        await pilot.pause()
+        assert _summary_placeholders(form)[1] == (
+            "не задан · выключен, пока задан порог в символах"
+        )
+
+
+# --- запись профиля поверх записи основного конфига: три состояния порога ------
+
+_BASE_WITH_THRESHOLD = {"model": "qwen/qwen", "summary_trigger_chars": 400000}
+
+
+def _profile_form(**initial):
+    """Запись профиля под именем записи основного конфига, у которой свой порог."""
+    return _form(
+        initial={"alias": "m", **initial},
+        base_entry=_BASE_WITH_THRESHOLD,
+        base_aliases=frozenset({"m"}),
+        global_config=_GLOBAL_SUMMARY,
+    )
+
+
+def _summary_note(form, scale: str) -> str:
+    note = form.query_one(f"#mef-summary-{scale}-note", Static)
+    return str(note.render()) if note.display else ""
+
+
+async def test_empty_profile_threshold_shows_the_base_entry_threshold():
+    """Запись профиля сливается с записью основного конфига поключно: пустое поле
+    значит «действует её порог», а не общий. Соседняя шкала из-за него выключена.
+    Сохранение ключ не пишет — наследование остаётся."""
+    form = _profile_form()
+    async with _harness(form).run_test() as pilot:
+        assert _summary_placeholders(form) == (
+            "не задан · действует порог из записи основного конфига: 400 000",
+            "не задан · выключен, пока задан порог в символах",
+        )
+        assert _summary_note(form, "chars") == ""
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] is None
+
+
+async def test_zero_in_a_profile_cancels_the_base_entry_threshold():
+    """Ноль поверх порога основного конфига — отмена: он пишется в файл явным
+    нулём, и строка под полем говорит, что действует вместо отменённого."""
+    from gc_core.config_modules.registry_write import _upsert_model_text
+
+    form = _profile_form()
+    async with _harness(form).run_test() as pilot:
+        form.query_one("#mef-summary-chars", Input).value = "0"
+        await pilot.pause()
+        assert _summary_note(form, "chars") == (
+            "порог из записи основного конфига (400 000) отменён · "
+            "действует общий порог для всех моделей: 200 000"
+        )
+        # Порог основного конфига отменён — соседняя шкала снова от общих настроек.
+        assert _summary_placeholders(form)[1] == (
+            "не задан · общий порог для всех моделей выключен"
+        )
+        ok, alias, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] == 0
+    text = _upsert_model_text(
+        "models:\n  m:\n    model: x\n", "", alias, fields
+    )
+    assert yaml.safe_load(text)["models"]["m"]["summary_trigger_chars"] == 0
+
+
+async def test_stored_cancelling_zero_survives_an_unrelated_save():
+    """Явный ноль, записанный в профиле руками, форма показывает и при сохранении
+    другой правки не стирает — иначе порог основного конфига молча вернулся бы."""
+    form = _profile_form(summary_trigger_chars=0)
+    async with _harness(form).run_test() as pilot:
+        assert form.query_one("#mef-summary-chars", Input).value == "0"
+        assert "отменён" in _summary_note(form, "chars")
+        assert form.is_dirty() is False
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] == 0
+
+
+async def test_stored_null_cancels_like_a_stored_zero():
+    """Второе написание отмены — ключ без значения (YAML null): загрузчик читает
+    его как 0 поверх порога основного конфига. Форма обязана показать отмену и не
+    стереть её при сохранении."""
+    form = _profile_form(summary_trigger_chars=None)
+    async with _harness(form).run_test() as pilot:
+        assert form.query_one("#mef-summary-chars", Input).value == "0"
+        assert "отменён" in _summary_note(form, "chars")
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] == 0
+
+
+async def test_renamed_entry_no_longer_inherits_from_the_base_entry():
+    """Запись основного конфига действует под ИМЕНЕМ. Переименовали запись
+    профиля в форме — наследования больше нет: ни её порога, ни её id, а ноль
+    снова значит «не задан», отменять нечего."""
+    form = _profile_form()
+    async with _harness(form).run_test() as pilot:
+        alias = form.query_one("#mef-alias", Input)
+        alias.value = "other"
+        await pilot.pause()
+        assert _summary_placeholders(form) == (
+            "не задан · действует общий порог для всех моделей: 200 000",
+            "не задан · общий порог для всех моделей выключен",
+        )
+        assert form._provider_model_id() == "other"
+        # Подсказка пустого поля id говорит то же правило, что и строка окна.
+        model_field = form.query_one("#mef-model", Input)
+        assert (
+            model_field.placeholder
+            == "если не указать — id модели равен алиасу"
+        )
+        form.query_one("#mef-summary-chars", Input).value = "0"
+        await pilot.pause()
+        assert _summary_note(form, "chars") == ""
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] is None
+        form.query_one("#mef-summary-chars", Input).value = ""
+        alias.value = "m"
+        await pilot.pause()
+        assert _summary_placeholders(form)[0] == (
+            "не задан · действует порог из записи основного конфига: 400 000"
+        )
+        assert form._provider_model_id() == "qwen/qwen"
+        assert model_field.placeholder == (
+            "если не указать — qwen/qwen из основного конфига"
+        )
+
+
+async def test_own_number_in_a_profile_overrides_the_base_entry_threshold():
+    form = _profile_form()
+    async with _harness(form).run_test() as pilot:
+        form.query_one("#mef-summary-chars", Input).value = "250 000"
+        await pilot.pause()
+        assert _summary_note(form, "chars") == ""
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] == 250000
+
+
+async def test_cancelled_threshold_is_off_while_the_other_scale_is_set():
+    form = _profile_form()
+    async with _harness(form).run_test() as pilot:
+        form.query_one("#mef-summary-chars", Input).value = "0"
+        form.query_one("#mef-summary-tokens", Input).value = "100 000"
+        await pilot.pause()
+        assert _summary_note(form, "chars") == (
+            "порог из записи основного конфига (400 000) отменён · "
+            "выключен, пока задан порог в токенах"
+        )
+
+
+async def test_zero_without_a_base_threshold_is_just_unset():
+    """Отменять нечего — ноль значит «не задан»: ключа в файле нет, строки нет."""
+    form = _form(initial={"alias": "m"}, global_config=_GLOBAL_SUMMARY)
+    async with _harness(form).run_test() as pilot:
+        form.query_one("#mef-summary-chars", Input).value = "0"
+        await pilot.pause()
+        assert _summary_note(form, "chars") == ""
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] is None
+
+
+async def test_summary_placeholders_follow_the_stored_entry():
+    """Форма существующей записи с одним порогом: пустое поле сразу говорит
+    «выключен», не дожидаясь первой правки."""
+    form = _form(
+        initial={"alias": "m", "summary_trigger_tokens": 116128},
+        global_config=_GLOBAL_SUMMARY,
+    )
+    async with _harness(form).run_test() as pilot:
+        assert _summary_placeholders(form)[0] == (
+            "не задан · выключен, пока задан порог в токенах"
+        )
+
+
+@pytest.mark.parametrize(
+    "field, label",
+    [
+        ("#mef-summary-chars", "Порог автосжатия контекста · символы"),
+        ("#mef-summary-tokens", "Порог автосжатия контекста · токены"),
+    ],
+)
+async def test_bad_summary_trigger_is_refused_in_plain_words(field, label):
+    form = _form(initial={"alias": "m"})
+    async with _harness(form).run_test() as pilot:
+        form.query_one(field, Input).value = "много"
+        ok, _, _ = form.submit()
+        assert ok is False
+        error = str(form.query_one("#mef-error", Static).render())
+        assert error == f"{label}: нужно целое число, не меньше 0"
+
+
+async def test_summary_trigger_fields_roundtrip_and_not_meta():
+    form = _form(
+        initial={
+            "alias": "m",
+            "model": "qwen",
+            "summary_trigger_chars": 100000,
+            "summary_trigger_tokens": 116128,
+        }
+    )
+    async with _harness(form).run_test() as pilot:
+        # Сохранённое число показывается с пробелами между разрядами — так же, как
+        # его пишут серый текст поля и строка окна модели.
+        assert form.query_one("#mef-summary-chars", Input).value == "100 000"
+        assert form.query_one("#mef-summary-tokens", Input).value == "116 128"
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] == 100000
+        assert fields["summary_trigger_tokens"] == 116128
+        assert "meta" not in fields
+        assert all(
+            k not in fields for k in ("context", "context_length", "n_ctx")
+        )
+
+
+_CARD = {
+    "id": "qwen/qwen",
+    "context_length": 131072,
+    "architecture": {"modality": "text"},
+}
+
+
+def _card_form():
+    return _form(initial={"alias": "m", "model": "qwen/qwen"})
+
+
+def _load_catalog(form, *, window: bool = True) -> None:
+    """Каталог «пришёл»: список с окном модели и сырое тело ответа. Только на
+    смонтированной форме — список, подложенный до монтирования, считается раскрытым
+    и держит стрелки у себя."""
+    card = dict(_CARD)
+    if not window:
+        del card["context_length"]  # провайдер окна не сообщает
+    form._models = [ModelInfo(id="qwen/qwen")]
+    form._models_payload = {"data": [card]}
+    # Каталог принадлежит связи, которой за ним ходили, — ключ ставим тот же.
+    form._catalog_key = (form._current_url(), form._current_auth_header())
+    form._refresh_model_metadata()
+
+
+def _counting_catalog(calls, *, fail=False):
+    """Каталог одного эндпоинта: обе модели одним ответом, как его отдаёт провайдер."""
+
+    def fetch(url, auth, **kwargs):
+        calls.append(kwargs.get("refresh", False))
+        if fail:
+            return None
+        return (
+            [
+                ModelInfo(id="qwen/qwen"),
+                ModelInfo(id="zhipu/glm-4.6"),
+            ],
+            {
+                "data": [
+                    _CARD,
+                    {"id": "zhipu/glm-4.6", "context_length": 200000},
+                ]
+            },
+        )
+
+    return fetch
+
+
+def _entry_form(calls, **catalog):
+    return _form(
+        initial={
+            "alias": "m",
+            "model": "qwen/qwen",
+            "url": "https://example.test/v1/chat/completions",
+            "token": "tok",
+        },
+        fetch=_counting_catalog(calls, **catalog),
+    )
+
+
+async def test_catalog_loads_when_an_entry_with_a_model_opens():
+    """Строка окна модели не ждёт, пока курсор дойдёт до поля id: каталог
+    запрашивается при открытии записи — один раз, тихо. Список не раскрывается и
+    статус под полем id не появляется: курсор стоит на адресе."""
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        assert calls == [False]
+        assert str(row.render()).startswith(
+            "▸ Контекстное окно модели: 131 072 токенов"
+        )
+        assert form._positions[form._idx] == "mef-url"
+        assert form._list.is_open is False
+        assert form.query_one("#mef-model-status").display is False
+
+
+async def test_entering_the_model_field_does_not_refetch_the_catalog():
+    """Открытие занимает ключ автоподгрузки: вход в поле id теми же адресом и
+    токеном второй запрос не отправляет."""
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        await wait_until(pilot, lambda: bool(form._models), "каталог")
+        _land(form, "mef-model")
+        await pilot.pause()
+        assert calls == [False]
+
+
+async def test_another_model_from_the_same_catalog_needs_no_request():
+    """Каталог — один ответ на все модели эндпоинта: смена id обновляет строку из
+    уже полученного, возврат к прежнему id — тоже."""
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        model = form.query_one("#mef-model", Input)
+        model.value = "zhipu/glm-4.6"
+        await pilot.pause()
+        assert "200 000 токенов" in str(row.render())
+        model.value = "qwen/qwen"
+        await pilot.pause()
+        assert "131 072 токенов" in str(row.render())
+        model.value = "нет/такой"
+        await pilot.pause()
+        assert row.enabled is False
+        assert str(row.render()) == (
+            _WINDOW_UNKNOWN + "модели нет в каталоге провайдера"
+        )
+        assert calls == [False]
+
+
+async def test_catalog_of_the_previous_address_is_not_shown_for_a_new_one():
+    """Сменили адрес или токен — каталог прежнего сервера не про эту связь: строка
+    окна гаснет сразу, без запроса на каждую букву. Новый каталог форма берёт на
+    поле id, когда адрес и токен уже набраны, — и строка возвращается."""
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://other.test/v1/chat/completions"
+        await pilot.pause()
+        assert row.enabled is False
+        assert str(row.render()) == (
+            _WINDOW_UNKNOWN + "каталог провайдера не загружен"
+        )
+        assert form.model_card() is None
+        assert calls == [False]
+        form.escape()
+        _land(form, "mef-model")
+        await wait_until(pilot, lambda: row.enabled, "строка нового каталога")
+        assert calls == [False, False]
+
+
+async def test_changed_token_hides_the_catalog_of_the_previous_one():
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        form.query_one("#mef-token", Input).value = "other-token"
+        await pilot.pause()
+        assert row.enabled is False
+        assert calls == [False]
+
+
+async def test_catalog_is_not_current_until_its_own_answer_arrives():
+    """Каталог принадлежит связи, ОТВЕТ от которой получен, а не той, к которой
+    форма только собралась идти. Пока ответ нового сервера летит, сведения
+    прежнего показывать нельзя: F2 открыл бы карточку чужого сервера."""
+    import threading
+
+    from gc_testkit.tui_support import wait_until
+
+    release = threading.Event()
+    calls = []
+    catalog = _counting_catalog(calls)
+
+    def fetch(url, auth, **kwargs):
+        if "other.test" in url:
+            release.wait(5)
+        return catalog(url, auth, **kwargs)
+
+    form = _form(
+        initial={
+            "alias": "m",
+            "model": "qwen/qwen",
+            "url": "https://example.test/v1/chat/completions",
+            "token": "tok",
+        },
+        fetch=fetch,
+    )
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        form.query_one(
+            "#mef-url", Input
+        ).value = "https://other.test/v1/chat/completions"
+        await pilot.pause()
+        form.escape()
+        _land(form, "mef-model")
+        await pilot.pause()
+        assert row.enabled is False  # запрос ушёл, ответа ещё нет
+        assert form.model_card() is None
+        release.set()
+        await wait_until(pilot, lambda: row.enabled, "каталог нового сервера")
+
+
+async def test_catalog_stays_foreign_when_the_new_request_never_starts(
+    monkeypatch,
+):
+    """Запрос к новой связи не ушёл (ссылка на переменную окружения не
+    раскрылась) — каталог прежнего сервера остаётся чужим навсегда."""
+    from gc_testkit.tui_support import wait_until
+
+    monkeypatch.delenv("GC_TEST_NO_SUCH_TOKEN", raising=False)
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        form.query_one(
+            "#mef-token", Input
+        ).value = "${ENV:GC_TEST_NO_SUCH_TOKEN}"
+        await pilot.pause()
+        _land(form, "mef-model")
+        await pilot.pause()
+        assert calls == [False]  # второй запрос не стартовал
+        assert row.enabled is False
+        assert form.model_card() is None
+
+
+async def test_no_auth_toggle_makes_the_catalog_foreign():
+    """Галка «без авторизации» меняет связь так же, как правка токена."""
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        _land(form, None)
+        assert form.toggle_no_auth() is True
+        assert row.enabled is False
+
+
+async def test_window_comes_from_the_card_itself():
+    """Окно и сведения — из одного источника: модели нет в разобранном списке
+    (отфильтрована по `endpoints`), а в сыром ответе она есть с окном."""
+    form = _card_form()
+    async with _harness(form).run_test() as pilot:
+        form._models = []
+        form._models_payload = {"data": [_CARD]}
+        form._catalog_key = (form._current_url(), form._current_auth_header())
+        form._refresh_model_metadata()
+        row = form.query_one("#mef-model-meta")
+        assert str(row.render()).startswith(
+            "▸ Контекстное окно модели: 131 072 токенов"
+        )
+
+
+async def test_entry_without_its_own_id_uses_the_alias_as_the_provider_id():
+    """У записи без ключа `model` провайдерским id служит алиас (так его шлёт
+    Router). Строка окна и загрузка каталога идут по нему же."""
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _form(
+        initial={
+            "alias": "qwen/qwen",
+            "url": "https://example.test/v1/chat/completions",
+            "token": "tok",
+        },
+        fetch=_counting_catalog(calls),
+    )
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        assert calls == [False]
+        assert form.model_card() == ("qwen/qwen", _CARD)
+
+
+async def test_shadowing_entry_uses_the_base_entry_id():
+    """Запись профиля без своего `model` наследует id заслонённой базовой."""
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _form(
+        initial={
+            "alias": "m",
+            "url": "https://example.test/v1/chat/completions",
+            "token": "tok",
+        },
+        base_entry={"model": "qwen/qwen"},
+        base_aliases=frozenset({"m"}),
+        fetch=_counting_catalog(calls),
+    )
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        assert form.model_card() == ("qwen/qwen", _CARD)
+
+
+async def test_model_list_of_the_previous_server_is_not_offered(monkeypatch):
+    """Список моделей принадлежит той же связи, что и сведения о модели. Запрос к
+    новой связи не ушёл — при повторном входе в поле id форма не показывает
+    счётчик и не раскрывает список прежнего сервера: выбранного из него id на
+    новой связи нет."""
+    from gc_testkit.tui_support import wait_until
+
+    monkeypatch.delenv("GC_TEST_NO_SUCH_TOKEN", raising=False)
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        await wait_until(pilot, lambda: bool(form._models), "каталог")
+        form.query_one(
+            "#mef-token", Input
+        ).value = "${ENV:GC_TEST_NO_SUCH_TOKEN}"
+        await pilot.pause()
+        _land(form, "mef-model")
+        await pilot.pause()
+        _land(form, "mef-alias")
+        _land(form, "mef-model")
+        await pilot.pause()
+        status = form.query_one("#mef-model-status")
+        assert "модел" not in str(status.render())
+        assert form.list_open is False
+        form.query_one("#mef-model", Input).value = "zhi"
+        await pilot.pause()
+        assert form.list_open is False
+        # Enter раскрывает список явно — и он тоже не предлагает чужие модели.
+        form.query_one("#mef-model", Input).value = ""
+        await pilot.pause()
+        form.enter()
+        await pilot.pause()
+        assert not _rows(form)
+        assert calls == [False]
+
+
+async def test_accepted_token_form_keeps_the_catalog_its_own():
+    """Проба приводит токен к принятому виду (`tok` → `Bearer tok`). Связь та
+    же — каталог остаётся своим: строка окна активна, в сеть форма заново не идёт."""
+    from gc_testkit.tui_support import wait_until
+
+    calls = []
+    form = _entry_form(calls)
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        assert form.apply_accepted_auth("Bearer tok") is True
+        assert row.enabled is True
+        assert form.model_card() == ("qwen/qwen", _CARD)
+        _land(form, "mef-model")
+        await pilot.pause()
+        assert calls == [False]
+
+
+async def test_accepted_token_form_keeps_a_catalog_still_in_flight():
+    """Проба успела раньше ответа каталога и переписала токен в принятый вид.
+    Ответ, пришедший следом, — от той же связи: каталог свой, строка окна активна."""
+    import threading
+
+    from gc_testkit.tui_support import wait_until
+
+    release = threading.Event()
+    calls = []
+    catalog = _counting_catalog(calls)
+
+    def fetch(url, auth, **kwargs):
+        release.wait(5)
+        return catalog(url, auth, **kwargs)
+
+    form = _form(
+        initial={
+            "alias": "m",
+            "model": "qwen/qwen",
+            "url": "https://example.test/v1/chat/completions",
+            "token": "tok",
+        },
+        fetch=fetch,
+    )
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        await wait_until(
+            pilot, lambda: form._pending_catalog_key is not None, "запрос ушёл"
+        )
+        assert form.apply_accepted_auth("Bearer tok") is True
+        release.set()
+        await wait_until(pilot, lambda: row.enabled, "строка окна модели")
+        assert form.model_card() == ("qwen/qwen", _CARD)
+
+
+async def test_no_auth_toggle_resets_the_probe_verdict():
+    """Галка меняет связь — вердикт пробы прежней связи больше не про неё."""
+    from gc_tui.services.probe_presentation import connection_line_text
+    from rich.text import Text
+
+    form = _entry_form([])
+    async with _harness(form).run_test() as pilot:
+        form._set_probe_line(Text("✓ принят"))
+        _land(form, None)
+        assert form.toggle_no_auth() is True
+        line = form.query_one("#mef-probe-line", Static)
+        assert str(line.render()) == connection_line_text(None).plain
+
+
+async def test_alias_typing_does_not_recompute_the_window_row_needlessly():
+    """Алиас влияет на строку окна, только когда служит провайдерским id или
+    решает, действует ли запись основного конфига."""
+    with_id = _form(initial={"alias": "m", "model": "qwen/qwen"})
+    async with _harness(with_id).run_test() as pilot:
+        seen = []
+        with_id._refresh_model_metadata = lambda: seen.append(1)
+        with_id.query_one("#mef-alias", Input).value = "другое"
+        await pilot.pause()
+        assert seen == []
+    no_id = _form(initial={"alias": "m"})
+    async with _harness(no_id).run_test() as pilot:
+        seen = []
+        no_id._refresh_model_metadata = lambda: seen.append(1)
+        no_id.query_one("#mef-alias", Input).value = "другое"
+        await pilot.pause()
+        assert seen == [1]
+
+
+async def test_model_count_stays_after_the_list_is_collapsed():
+    """Счётчик говорит «список этой связи загружен» — он виден всё время, пока
+    курсор на поле id, в том числе после Esc: как в редакторе резервной модели."""
+    from gc_testkit.tui_support import wait_until
+
+    form = _entry_form([])
+    async with _harness(form).run_test() as pilot:
+        await wait_until(pilot, lambda: bool(form._models), "каталог")
+        _land(form, "mef-model")
+        await pilot.pause()
+        status = form.query_one("#mef-model-status", Static)
+        assert str(status.render()) == "2 модели"
+        form.enter()
+        await pilot.pause()
+        assert form.list_open is True
+        assert form.escape() is True
+        assert form.list_open is False
+        assert str(status.render()) == "2 модели"
+        assert status.display is True
+
+
+async def test_new_entry_without_a_model_does_not_touch_the_network():
+    calls = []
+    form = _form(initial=None, fetch=_counting_catalog(calls))
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause(0.2)
+        assert calls == []
+
+
+async def test_failed_catalog_on_open_is_silent_until_the_model_field():
+    """Сервер не ответил при открытии: строки окна нет, под чужим полем форма
+    молчит; причину она говорит на поле id — и второй раз в сеть не идёт."""
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.editors.field_list import LIST_FAILED
+
+    calls = []
+    form = _entry_form(calls, fail=True)
+    async with _harness(form).run_test() as pilot:
+        await wait_until(pilot, lambda: bool(calls), "запрос каталога")
+        await wait_until(
+            pilot, lambda: form._list_status == LIST_FAILED, "исход запроса"
+        )
+        status = form.query_one("#mef-model-status")
+        row = form.query_one("#mef-model-meta")
+        assert row.enabled is False
+        assert str(row.render()) == (
+            _WINDOW_UNKNOWN + "каталог провайдера не загружен"
+        )
+        assert status.display is False
+        _land(form, "mef-model")
+        await pilot.pause()
+        assert str(status.render()) == LIST_FAILED
+        assert calls == [False]
+
+
+_WINDOW_UNKNOWN = "  Контекстное окно модели: неизвестно · "
+
+
+async def test_window_row_is_always_there_and_says_why_the_window_is_unknown():
+    """Строка окна стоит на месте всегда. Когда открывать нечего, она неактивна —
+    приглушена, без указателя, курсор её пропускает — и называет причину: каталог
+    этой связи не получен либо модели в нём нет."""
+    from form_harness import _rgb, _value_color
+    from gc_tui.palette import DEEP_DIM
+
+    form = _form(initial={"alias": "m", "model": "qwen/qwen"})
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        assert row.display is True
+        assert row.enabled is False
+        assert str(row.render()) == (
+            _WINDOW_UNKNOWN + "каталог провайдера не загружен"
+        )
+        assert _value_color(row.render(), "  Контекстное") == _rgb(DEEP_DIM)
+        assert form.model_card() is None
+        form._models_payload = {"data": [{"id": "другая"}]}
+        form._catalog_key = (
+            form._current_url(),
+            form._current_auth_header(),
+        )
+        form._refresh_model_metadata()
+        assert row.enabled is False
+        assert str(row.render()) == (
+            _WINDOW_UNKNOWN + "модели нет в каталоге провайдера"
+        )
+        _land(form, "mef-alias")
+        form.move(1)
+        assert form._positions[form._idx] == "mef-summary-chars"
+
+
+async def test_window_row_of_an_entry_without_a_model_id():
+    form = _form(initial=None)
+    async with _harness(form).run_test() as pilot:
+        row = form.query_one("#mef-model-meta")
+        assert row.enabled is False
+        assert str(row.render()) == _WINDOW_UNKNOWN + "id модели не указан"
+
+
+async def test_model_card_row_shows_the_context_window_and_its_keys():
+    form = _card_form()
+    async with _harness(form).run_test() as pilot:
+        _load_catalog(form)
+        row = form.query_one("#mef-model-meta")
+        assert row.enabled is True
+        assert (
+            str(row.render()) == "▸ Контекстное окно модели: 131 072 токенов"
+            "   Enter/F2 — открыть сведения провайдера о модели"
+        )
+        assert form.model_card() == ("qwen/qwen", _CARD)
+
+
+async def test_model_card_row_without_a_known_window():
+    form = _card_form()
+    async with _harness(form).run_test() as pilot:
+        _load_catalog(form, window=False)
+        row = form.query_one("#mef-model-meta")
+        assert row.enabled is True
+        assert (
+            str(row.render())
+            == "▸ Контекстное окно модели: провайдер не сообщает"
+            "   Enter/F2 — открыть сведения провайдера о модели"
+        )
+
+
+async def test_action_rows_are_cursor_positions_with_a_pointer():
+    """Строка, открывающая другой экран, — позиция курсора с указателем `▸`, как
+    пункт меню настроек. Указатель стоит всегда и держит текст на месте: вне
+    курсора он приглушён, под курсором — акцентный, строка с фоном, фокус с полей
+    снят."""
+    from form_harness import _rgb, _value_color
+    from gc_tui.palette import ACCENT, DEEP_DIM
+
+    form = _card_form()
+    async with _harness(form).run_test() as pilot:
+        _load_catalog(form)
+        card = form.query_one("#mef-model-meta")
+        help_row = form.query_one("#mef-help-line")
+        _land(form, "mef-alias")
+        text_idle = str(card.render())
+        assert _value_color(card.render(), "▸ ") == _rgb(DEEP_DIM)
+        form.move(1)
+        assert form._positions[form._idx] == "mef-model-meta"
+        assert form.on_action_row is True
+        assert _value_color(card.render(), "▸ ") == _rgb(ACCENT)
+        assert (
+            str(card.render()) == text_idle
+        )  # текст под курсором не сдвигается
+        assert card.has_class("selected")
+        assert pilot.app.focused is None
+        form.move(1)
+        assert form.on_action_row is False
+        assert _value_color(card.render(), "▸ ") == _rgb(DEEP_DIM)
+        assert not card.has_class("selected")
+        _land(form, "mef-help-line")
+        assert (
+            str(help_row.render())
+            == "▸ Справка по параметрам модели   Enter/F1 — открыть"
+        )
+        assert _value_color(help_row.render(), "▸ ") == _rgb(ACCENT)
+        assert help_row.has_class("selected")
+
+
+async def test_enter_on_an_action_row_asks_the_host_to_open_it():
+    from gc_tui.widgets.action_row import ActionRow
+
+    form = _card_form()
+    pressed = []
+
+    class _Host(App):
+        def compose(self) -> ComposeResult:
+            yield form
+
+        def on_action_row_pressed(self, message: ActionRow.Pressed) -> None:
+            pressed.append(message.action)
+
+    async with _Host().run_test() as pilot:
+        _load_catalog(form)
+        _land(form, "mef-model-meta")
+        assert form.enter() is True
+        _land(form, "mef-help-line")
+        assert form.enter() is True
+        await pilot.pause()
+        assert pressed == ["card", "help"]
+
+
+async def test_raw_card_json_is_not_rendered_into_the_form():
+    """Карточка одной модели в каталоге OpenRouter — 40–246 строк экрана: в форму
+    идёт одна строка, сам JSON открывается отдельным экраном. В запись — ничего."""
+    form = _card_form()
+    async with _harness(form).run_test() as pilot:
+        _load_catalog(form)
+        text = " ".join(str(w.render()) for w in form.query(Static))
+        assert "architecture" not in text
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert "context_length" not in fields
+        assert fields["summary_trigger_chars"] is None
 
 
 def _rows(form) -> list:
@@ -728,7 +1756,7 @@ async def test_probe_does_not_send_the_inherited_token_to_a_typed_address():
             "#mef-url", Input
         ).value = "https://foreign/v1/chat/completions"
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen and all(
@@ -739,7 +1767,10 @@ async def test_probe_does_not_send_the_inherited_token_to_a_typed_address():
 
 async def test_the_model_list_does_not_send_the_inherited_token_to_a_typed_address():
     """Тот же страж для АВТОПОДГРУЗКИ: список уходит на эндпоинт при простом переходе
-    курсора на поле id — без единой сетевой клавиши и до всякого сохранения."""
+    курсора на поле id — без единой сетевой клавиши и до всякого сохранения.
+
+    Первый запрос — загрузка каталога при открытии записи: он идёт на СОХРАНЁННОЕ
+    подключение его же токеном. На набранный чужой адрес общий токен не уходит."""
     calls = []
 
     form = _form(
@@ -759,7 +1790,13 @@ async def test_the_model_list_does_not_send_the_inherited_token_to_a_typed_addre
         _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
-        assert calls == [("https://foreign/v1/chat/completions", None)], calls
+        assert calls == [
+            (
+                "https://openrouter.ai/api/v1/chat/completions",
+                "Bearer sk-COMMON",
+            ),
+            ("https://foreign/v1/chat/completions", None),
+        ], calls
 
 
 async def test_untouched_token_field_keeps_the_saved_secret():
@@ -1681,7 +2718,7 @@ async def test_the_probe_and_the_model_list_of_a_namesake_go_to_the_shadowed_pai
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen and all(e == _SHADOWED["url"] for e, _ in seen), seen
@@ -1747,7 +2784,7 @@ async def test_a_shadowed_record_without_a_token_is_explained_not_masked():
             "запись основного конфига без токена — запросы идут без авторизации"
         )
         assert not token.has_class("has-saved")
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen == [(_SHADOWED["url"], None)], seen
@@ -1767,6 +2804,8 @@ async def test_empty_model_id_means_the_alias_is_the_id():
             "auxiliary": None,
             "backend": None,
             "strip_think": None,
+            "summary_trigger_chars": None,
+            "summary_trigger_tokens": None,
         }
 
 
@@ -1909,9 +2948,7 @@ async def test_the_model_list_opens_when_only_the_bare_token_is_accepted():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()
-        form.move(1)
-        form.move(1)
-        form.move(1)
+        _land(form, "mef-model")
         for _ in range(4):
             await pilot.pause()
         assert calls == ["sk-live"], calls
@@ -1961,8 +2998,7 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
         form.move(1)  # адрес → токен
         form.query_one("#mef-token", Input).value = "sk-NEW"
         await pilot.pause()
-        form.move(1)
-        form.move(1)  # токен → галка → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         assert len(calls) == 2, "изменённый токен не перечитал список"
@@ -2169,7 +3205,7 @@ async def test_ctrl_space_probes_and_alt_down_fetches_and_they_never_swap():
         # (`SettingsScreen._reset_draft_state`): даём событию дойти ДО пробы,
         # иначе оно обесценило бы её же результат.
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert fetches == [], "проба сходила за списком моделей"
@@ -2191,7 +3227,7 @@ async def test_probe_without_any_address_is_honest():
     form = _form(initial=None, existing_aliases=set())
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         await pilot.pause()
         assert "адрес" in str(
             form.query_one("#mef-probe-line", Static).render()
@@ -2228,7 +3264,7 @@ async def test_the_probe_resolves_env_references_before_the_request(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         assert seen, "проба не пошла"
@@ -2336,7 +3372,7 @@ async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         line = str(form.query_one("#mef-probe-line", Static).render())
@@ -2381,7 +3417,7 @@ async def test_a_missing_env_variable_in_the_token_stops_the_probe(
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        assert form.probe_connection() is True
+        form.probe_connection()
         for _ in range(3):
             await pilot.pause()
         line = str(form.query_one("#mef-probe-line", Static).render())
@@ -2849,9 +3885,7 @@ async def test_typing_in_the_id_field_reopens_the_fetched_list_with_a_filter():
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(1)
-        form.move(1)
-        form.move(1)  # адрес -> токен -> галка -> id
+        _land(form, "mef-model")
         await pilot.pause()
         assert form._positions[form._idx] == "mef-model"
         assert form._list.is_open  # автоподгрузка раскрыла
@@ -2903,6 +3937,9 @@ async def test_yaml_fields_round_trip_and_reject_bad_input():
         hint = str(hint_widget.render())
         assert "Поля `main` и `auxiliary`" in hint
         assert "enable_thinking: false" in hint
+        assert "OpenRouter" in hint
+        assert "reasoning:" in hint
+        assert "effort: none" in hint
         assert main.text == safe_yaml_dump(saved).rstrip(
             "\n"
         ) or main.text.rstrip("\n") == safe_yaml_dump(saved).rstrip("\n")
@@ -3026,6 +4063,213 @@ async def test_backend_field_round_trip_and_hint_lists_overlay_keys():
         assert ok is True and fields["backend"] is None
 
 
+async def test_proxy_field_shows_the_endpoint_proxy_and_writes_it_back():
+    """Свой прокси эндпоинта — поле карточки, не строка в YAML backend.
+    Не тронутое поле сохраняет ключ; стёртое — снимает только его."""
+    from textual.widgets import TextArea
+
+    form = _paired_form(
+        initial={
+            "backend": {
+                "proxy": "http://own-proxy:8080",
+                "request_timeout_sec": 90,
+            }
+        }
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        field = form.query_one("#mef-proxy", Input)
+        area = form.query_one("#mef-backend", TextArea)
+        assert field.value == "http://own-proxy:8080"
+        assert "proxy" not in area.text
+        assert "request_timeout_sec: 90" in area.text
+        assert form.is_dirty() is False
+        text = " ".join(str(w.render()) for w in form.query(Static))
+        assert "Прокси (необязательно)" in text
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "http://own-proxy:8080"
+        assert fields["backend"]["request_timeout_sec"] == 90
+
+        field.value = ""
+        await pilot.pause()
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert "proxy" not in fields["backend"]
+        assert fields["backend"]["request_timeout_sec"] == 90
+
+
+async def test_typed_proxy_is_saved_for_this_endpoint():
+    form = _paired_form()
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-proxy", Input).value = "socks5h://proxy:1080"
+        await pilot.pause()
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "socks5h://proxy:1080"
+
+
+async def test_yaml_proxy_lands_in_the_field_when_save_fails():
+    """`proxy:` в блоке backend переносится в поле до срыва сохранения.
+
+    Вырезание идёт раньше отказа (здесь — плохой порог). Без переноса
+    в поле следующий submit читает пустой блок и пустое поле и пишет
+    модель без прокси.
+    """
+    from textual.widgets import TextArea
+
+    form = _paired_form()
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        area = form.query_one("#mef-backend", TextArea)
+        area.load_text("proxy: http://proxy:8080\nrequest_timeout_sec: 90\n")
+        form.query_one("#mef-summary-chars", Input).value = "много"
+        ok, _alias, fields = form.submit()
+        assert ok is False and fields is None
+        assert form.query_one("#mef-proxy", Input).value == "http://proxy:8080"
+        assert "proxy" not in area.text
+        assert "request_timeout_sec: 90" in area.text
+
+        form.query_one("#mef-summary-chars", Input).value = ""
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "http://proxy:8080"
+        assert fields["backend"]["request_timeout_sec"] == 90
+
+
+async def test_proxy_saves_without_its_own_token_or_address():
+    """Прокси — строка эндпоинта. Общий адрес и токен при этом не трогаются."""
+    form = _form(
+        initial={"alias": "flash", "model": "google/gemini-2.5-flash"},
+        existing_aliases={"flash"},
+        effective_url="https://openrouter.ai/api/v1/chat/completions",
+        effective_auth="Bearer sk-COMMON",
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-proxy", Input).value = "http://proxy:8080"
+        await pilot.pause()
+        assert form.own_connection() is False
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "http://proxy:8080"
+        assert "url" not in fields and "token" not in fields
+
+
+async def test_cleared_address_does_not_send_own_token_to_parent_because_of_proxy():
+    """Свой токен без адреса сохранить нельзя. Заполненный прокси не повод
+    слать этот токен на адрес родителя."""
+    seen = []
+
+    def fake_probe(endpoint, auth, verify, model, **kwargs):
+        seen.append((endpoint, auth))
+        return ProbeResult("ok", 200, None, 1, "")
+
+    form = _form(
+        initial={
+            "alias": "flash",
+            "model": "m",
+            "url": "https://own.example/v1/chat/completions",
+            "token": "sk-OWN",
+            "backend": {"proxy": "http://own-proxy:8080"},
+        },
+        existing_aliases={"flash"},
+        effective_url="https://parent.example/v1/chat/completions",
+        effective_auth="Bearer sk-PARENT",
+        probe=fake_probe,
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.query_one("#mef-url", Input).value = ""
+        await pilot.pause()
+        assert form._current_url() == ""
+        form.probe_connection()
+        for _ in range(3):
+            await pilot.pause()
+        assert seen == []
+
+
+async def test_inherited_pair_with_own_proxy_still_uses_the_parent_address():
+    form = _form(
+        initial={
+            "alias": "flash",
+            "model": "m",
+            "backend": {"proxy": "http://own-proxy:8080"},
+        },
+        existing_aliases={"flash"},
+        effective_url="https://parent.example/v1/chat/completions",
+        effective_auth="Bearer sk-PARENT",
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.own_connection() is False
+        assert (
+            form._current_url() == "https://parent.example/v1/chat/completions"
+        )
+
+
+async def test_proxy_field_strips_whitespace():
+    """Пробелы по краям снимаются, строка из одних пробелов — пустое поле.
+
+    Пустое поле ключ не пишет: иначе `"   "` стало бы явным `backend.proxy`
+    и перекрыло бы прокси общего конфига."""
+    form = _paired_form()
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        field = form.query_one("#mef-proxy", Input)
+        field.value = "   "
+        await pilot.pause()
+        assert form.is_dirty() is False
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert "proxy" not in (fields.get("backend") or {})
+
+        field.value = "  http://proxy:8080  "
+        await pilot.pause()
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["proxy"] == "http://proxy:8080"
+
+
+async def test_empty_proxy_field_names_the_inherited_proxy():
+    from gc_core.onboarding import display_secret
+    from textual.widgets import Static
+
+    form = _form(
+        initial={"alias": "flash", "model": "m"},
+        existing_aliases={"flash"},
+        config_proxy="http://corp-proxy:8080",
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert (
+            form.query_one("#mef-proxy", Input).placeholder
+            == f"наследуется: {display_secret('http://corp-proxy:8080')}"
+        )
+        text = " ".join(str(w.render()) for w in form.query(Static))
+        assert "прокси из общего конфига" not in text
+
+
+async def test_ctrl_u_leaves_the_endpoint_proxy():
+    """Возврат пары к наследованию снимает адрес и токен, прокси остаётся."""
+    form = _paired_form(
+        initial={"backend": {"proxy": "http://own-proxy:8080"}}
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        _land(form, "mef-url")
+        assert form.clear_token() is True
+        assert (
+            form.query_one("#mef-proxy", Input).value
+            == "http://own-proxy:8080"
+        )
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["url"] is None
+        assert fields["backend"]["proxy"] == "http://own-proxy:8080"
+
+
 @pytest.mark.parametrize("field", ["main", "auxiliary", "backend"])
 async def test_incomplete_yaml_can_be_corrected_without_losing_form(field):
     from textual.widgets import TextArea
@@ -3045,7 +4289,9 @@ async def test_incomplete_yaml_can_be_corrected_without_losing_form(field):
         assert fields[field] == {}
 
 
-async def test_backend_form_preserves_env_references_on_unrelated_edit(monkeypatch):
+async def test_backend_form_preserves_env_references_on_unrelated_edit(
+    monkeypatch,
+):
     monkeypatch.setenv("MODEL_SETTING", "16384")
     backend = {
         "chat_completions_max_tokens": "${ENV:MODEL_SETTING}",
@@ -3061,7 +4307,9 @@ async def test_backend_form_preserves_env_references_on_unrelated_edit(monkeypat
 
 
 async def test_model_form_migrates_legacy_backend_kwargs():
-    form = _paired_form(initial={"backend": {"chat_completion_kwargs": {"temperature": 0.7}}})
+    form = _paired_form(
+        initial={"backend": {"chat_completion_kwargs": {"temperature": 0.7}}}
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         ok, _, fields = form.submit()
@@ -3085,7 +4333,9 @@ async def test_empty_and_explicit_null_yaml_have_distinct_write_intent(text):
         assert fields["main"] is expected
 
 
-@pytest.mark.parametrize("headers", ["oops", "[one]", "'${FILE:/tmp/headers}'"])
+@pytest.mark.parametrize(
+    "headers", ["oops", "[one]", "'${FILE:/tmp/headers}'"]
+)
 async def test_invalid_header_mapping_can_be_corrected(headers):
     from textual.widgets import TextArea
 
@@ -3101,13 +4351,19 @@ async def test_invalid_header_mapping_can_be_corrected(headers):
 
 
 @pytest.mark.parametrize("token_field", [True, False])
-async def test_probe_uses_the_model_backend_and_resolves_token_before_bearer(monkeypatch, token_field):
-    monkeypatch.setenv("PROBE_TOKEN", "Bearer actual-token" if token_field else "bare-token")
+async def test_probe_uses_the_model_backend_and_resolves_token_before_bearer(
+    monkeypatch, token_field
+):
+    monkeypatch.setenv(
+        "PROBE_TOKEN", "Bearer actual-token" if token_field else "bare-token"
+    )
     seen = []
 
     def probe(url, auth, verify, model, **kwargs):
         seen.append((url, auth, verify, kwargs.get("config_proxy")))
-        return ProbeResult("ok" if auth else "rejected", 200 if auth else 401, None, 1, "")
+        return ProbeResult(
+            "ok" if auth else "rejected", 200 if auth else 401, None, 1, ""
+        )
 
     backend = {
         "completions_url": "https://own.example/v1/chat/completions",
@@ -3118,7 +4374,9 @@ async def test_probe_uses_the_model_backend_and_resolves_token_before_bearer(mon
     if token_field:
         initial["token"] = "${ENV:PROBE_TOKEN}"
     else:
-        backend["chat_completion_headers"] = {"Authorization": "${ENV:PROBE_TOKEN}"}
+        backend["chat_completion_headers"] = {
+            "Authorization": "${ENV:PROBE_TOKEN}"
+        }
     form = _form(initial=initial, existing_aliases={"flash"}, probe=probe)
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
@@ -3127,14 +4385,21 @@ async def test_probe_uses_the_model_backend_and_resolves_token_before_bearer(mon
             await pilot.pause()
         assert seen == [
             (backend["completions_url"], None, False, backend["proxy"]),
-            (backend["completions_url"], "Bearer actual-token" if token_field else "bare-token", False, backend["proxy"]),
+            (
+                backend["completions_url"],
+                "Bearer actual-token" if token_field else "bare-token",
+                False,
+                backend["proxy"],
+            ),
         ]
 
 
 async def test_existing_invalid_backend_mapping_is_editable():
     from textual.widgets import TextArea
 
-    form = _paired_form(initial={"backend": {"chat_completion_headers": "oops"}})
+    form = _paired_form(
+        initial={"backend": {"chat_completion_headers": "oops"}}
+    )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert form.submit() == (False, None, None)
@@ -3144,10 +4409,16 @@ async def test_existing_invalid_backend_mapping_is_editable():
 
 
 @pytest.mark.parametrize("action", ["probe", "list"])
-async def test_invalid_file_transport_is_reported_without_closing_form(tmp_path, action):
+async def test_invalid_file_transport_is_reported_without_closing_form(
+    tmp_path, action
+):
     calls = []
     form = _paired_form(
-        initial={"backend": {"request_timeout_sec": f"${{FILE:{tmp_path / 'missing'}}}"}},
+        initial={
+            "backend": {
+                "request_timeout_sec": f"${{FILE:{tmp_path / 'missing'}}}"
+            }
+        },
         probe=lambda *args, **kwargs: calls.append(args),
         fetch=lambda *args, **kwargs: calls.append(args),
     )
@@ -3162,19 +4433,25 @@ async def test_invalid_file_transport_is_reported_without_closing_form(tmp_path,
         assert calls == []
         assert form.is_mounted
         if action == "probe":
-            assert "не удалось" in str(form.query_one("#mef-probe-line", Static).render())
+            assert "не удалось" in str(
+                form.query_one("#mef-probe-line", Static).render()
+            )
         else:
             assert form._models == []
 
 
-@pytest.mark.parametrize("token", ["secret", "Bearer abc", "Basic abc", "bearer abc"])
+@pytest.mark.parametrize(
+    "token", ["secret", "Bearer abc", "Basic abc", "bearer abc"]
+)
 def test_model_probe_token_uses_runtime_normalization(monkeypatch, token):
     from gc_core.config_modules.model_registry import ModelEntry
     from gc_tui.editors.model_entry_form import _resolved_for_request
 
     monkeypatch.setenv("MODEL_TOKEN", token)
     model = ModelEntry(url="https://example.test", token=token)
-    _, header = _resolved_for_request("https://example.test", "${ENV:MODEL_TOKEN}", normalize_token=True)
+    _, header = _resolved_for_request(
+        "https://example.test", "${ENV:MODEL_TOKEN}", normalize_token=True
+    )
     assert header == model.authorization_header
 
 
@@ -3182,7 +4459,9 @@ def test_model_probe_header_is_trimmed_after_interpolation(monkeypatch):
     from gc_tui.editors.model_entry_form import _resolved_for_request
 
     monkeypatch.setenv("MODEL_HEADER", "  Basic abc  ")
-    _, header = _resolved_for_request("https://example.test", "${ENV:MODEL_HEADER}")
+    _, header = _resolved_for_request(
+        "https://example.test", "${ENV:MODEL_HEADER}"
+    )
     assert header == "Basic abc"
 
 
@@ -3193,25 +4472,50 @@ async def test_inherited_model_token_uses_runtime_normalization():
         assert form._current_auth_header() == "Basic abc"
 
 
-@pytest.mark.parametrize("source,expected", [
-    ("secret", "Bearer secret"),
-    ("${ENV:MODEL_SOURCE}", "${ENV:MODEL_SOURCE}"),
-    ("${FILE:/not/read/by/probe/callback}", "${FILE:/not/read/by/probe/callback}"),
-])
-async def test_probe_normalizes_literal_token_and_preserves_secret_references(monkeypatch, source, expected):
+@pytest.mark.parametrize(
+    "source,expected",
+    [
+        ("secret", "Bearer secret"),
+        ("${ENV:MODEL_SOURCE}", "${ENV:MODEL_SOURCE}"),
+        (
+            "${FILE:/not/read/by/probe/callback}",
+            "${FILE:/not/read/by/probe/callback}",
+        ),
+    ],
+)
+async def test_probe_normalizes_literal_token_and_preserves_secret_references(
+    monkeypatch, source, expected
+):
     from textual.widgets import TextArea
 
     monkeypatch.setenv("MODEL_SOURCE", "secret")
     form = _form(
-        initial={"alias": "m", "url": "https://example.test/chat", "token": source},
+        initial={
+            "alias": "m",
+            "url": "https://example.test/chat",
+            "token": source,
+        },
         existing_aliases={"m"},
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         token = form.query_one("#mef-token", Input)
         token.value = source
-        form.query_one("#mef-backend", TextArea).load_text("request_timeout_sec: 45")
-        form._on_probe(ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth="Bearer secret"), form._probe_gen)
+        form.query_one("#mef-backend", TextArea).load_text(
+            "request_timeout_sec: 45"
+        )
+        form._on_probe(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth="Bearer secret",
+            ),
+            form._probe_gen,
+        )
         assert token.value == expected
         ok, alias, fields = form.submit()
         assert ok is True
@@ -3219,28 +4523,55 @@ async def test_probe_normalizes_literal_token_and_preserves_secret_references(mo
         assert fields["backend"] == {"request_timeout_sec": 45}
 
 
-@pytest.mark.parametrize("source,accepted", [("secret", "Bearer secret"), ("Bearer secret", "secret")])
-async def test_probe_normalizes_existing_literal_token_without_retyping(source, accepted):
+@pytest.mark.parametrize(
+    "source,accepted",
+    [("secret", "Bearer secret"), ("Bearer secret", "secret")],
+)
+async def test_probe_normalizes_existing_literal_token_without_retyping(
+    source, accepted
+):
     form = _form(
-        initial={"alias": "m", "url": "https://example.test/chat", "token": source},
+        initial={
+            "alias": "m",
+            "url": "https://example.test/chat",
+            "token": source,
+        },
         existing_aliases={"m"},
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert form.query_one("#mef-token", Input).value == ""
-        form._on_probe(ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth=accepted), form._probe_gen)
+        form._on_probe(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth=accepted,
+            ),
+            form._probe_gen,
+        )
         assert form.query_one("#mef-token", Input).value == accepted
         assert form.is_dirty()
         assert form.submit()[2]["token"] == accepted
 
 
 @pytest.mark.parametrize("from_header", [True, False])
-async def test_explicit_credential_source_switch_removes_the_previous_key(from_header):
+async def test_explicit_credential_source_switch_removes_the_previous_key(
+    from_header,
+):
     from textual.widgets import TextArea
 
     initial = {"alias": "m", "url": "https://example.test/chat"}
     if from_header:
-        initial["backend"] = {"chat_completion_headers": {"Authorization": "old", "X-Test": "kept"}}
+        initial["backend"] = {
+            "chat_completion_headers": {
+                "Authorization": "old",
+                "X-Test": "kept",
+            }
+        }
     else:
         initial["token"] = "old"
     form = _form(initial=initial, existing_aliases={"m"})
@@ -3249,8 +4580,14 @@ async def test_explicit_credential_source_switch_removes_the_previous_key(from_h
         if from_header:
             form.query_one("#mef-token", Input).value = "new"
         else:
-            form.query_one("#mef-backend", TextArea).load_text("chat_completion_headers:\n  Authorization: new")
+            form.query_one("#mef-backend", TextArea).load_text(
+                "chat_completion_headers:\n  Authorization: new"
+            )
         ok, alias, fields = form.submit()
         assert ok is True
         assert fields["token"] == ("new" if from_header else None)
-        assert fields["backend"] == {"chat_completion_headers": {"X-Test": "kept"} if from_header else {"Authorization": "new"}}
+        assert fields["backend"] == {
+            "chat_completion_headers": {"X-Test": "kept"}
+            if from_header
+            else {"Authorization": "new"}
+        }

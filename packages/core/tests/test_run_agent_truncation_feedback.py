@@ -3,10 +3,12 @@
 
 from gc_core import processing_responses as pr
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _state():
     s = type("S", (), {})()
+    s.mode_announced = None
     s.messages = []
     s.steps = 0
     s.max_steps = 100
@@ -14,18 +16,20 @@ def _state():
     s.user_intent_log = []
     s.flush_current_user_intent = lambda: None
     s.last_finish_reason = None
+    s.tick_signals = set()
+    s.mark_turn_start = lambda: None
     return s
 
 
 def _run_ctx():
     cd = {
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 3,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 3,
+        "agent.strict_turn_finish_validation": True,
         "text_answer_mode": "allow",
     }
-    return type("C", (), {"config_dict": cd, "logger": None})()
+    return fake_ctx(cd, logger=None)
 
 
 def _run_with_finish_reason(monkeypatch, finish_reason, extra_hint=None):

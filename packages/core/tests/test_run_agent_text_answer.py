@@ -6,6 +6,7 @@
 
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 class _S:
@@ -14,10 +15,13 @@ class _S:
 
 
 def _ctx(mode=None, backend="chat_completions", strict=True):
-    cd = {"backend_api_mode": backend, "strict_turn_finish_validation": strict}
+    cd = {
+        "backend.api_mode": backend,
+        "agent.strict_turn_finish_validation": strict,
+    }
     if mode is not None:
         cd["text_answer_mode"] = mode
-    return type("C", (), {"config_dict": cd, "logger": None})()
+    return fake_ctx(cd, logger=None)
 
 
 # --- решение по режиму (изолированно) -----------------------------------------
@@ -319,6 +323,9 @@ def test_empty_text_bounces_in_all_modes(monkeypatch):
 
 def _state():
     s = type("S", (), {})()
+    s.mode_announced = None
+    s.mark_turn_start = lambda: None
+    s.tick_signals = set()
     s.messages = []
     s.steps = 0
     s.max_steps = 100
@@ -330,14 +337,14 @@ def _state():
 
 def _run_ctx(mode):
     cd = {
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 3,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 3,
+        "agent.strict_turn_finish_validation": True,
     }
     if mode is not None:
         cd["text_answer_mode"] = mode
-    return type("C", (), {"config_dict": cd, "logger": None})()
+    return fake_ctx(cd, logger=None)
 
 
 def _text_msgs():
@@ -510,7 +517,7 @@ def test_run_agent_length_text_uses_truncation_bounce(monkeypatch):
 
     def _fake_process_user_ask(messages, state, ctx):
         # Следующий ход — валидный финал; иначе deny снова bounce'ит «ok».
-        ctx.config_dict["text_answer_mode"] = "allow"
+        ctx.runtime = ctx.runtime.with_values(text_answer_mode="allow")
         state.last_finish_reason = "stop"
         return [
             {"role": "assistant", "type": "message", "content": "ok"}

@@ -3,29 +3,28 @@
 C1 (после компакции) и C2 (после close_all в finally) — всегда включены и от флага
 не зависят. C3 — условная точка: один ``gc.collect()`` на границе «батч тулов → LLM-шаг».
 
-Разрешение значения:
-1. Если в конфиге явно задан ``gc.force_collect`` — использовать его.
-2. Иначе: ``True`` для CLI и TUI (долгоживущий / бенчмарк-режим), ``False`` для server
-   (``gc.collect()`` глобален для процесса и стопает все треды).
+Значение режимное: ``True`` для CLI и TUI (долгоживущий / бенчмарк-режим),
+``False`` для server (``gc.collect()`` глобален для процесса и стопает все треды).
+Ключа ``gc.force_collect`` в схеме нет (строгая валидация его не пропустит),
+поэтому прежнее чтение секции ``gc`` плоского конфига было мёртвым и снято.
 
 См. ``docs_md/actual/2026-07-29-gc-collect-placement-spec.md``.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 def gc_force_collect_enabled(
-    config_dict: Optional[Dict[str, Any]],
+    settings: Any,
     *,
     is_tui: bool = False,
     is_cli_mode: bool = False,
 ) -> bool:
     """Включена ли точка C3 (collect после батча тулов).
 
-    Явный ``gc.force_collect`` в конфиге перекрывает режимный default.
+    Секции ``gc`` в схеме нет — значение всегда режимное: CLI и TUI — да,
+    server — нет. ``settings`` (контекст/настройки) не читается и оставлен
+    ради сигнатуры.
     """
-    cfg: Dict[str, Any] = config_dict or {}
-    gc_cfg = cfg.get("gc")
-    if isinstance(gc_cfg, dict) and "force_collect" in gc_cfg:
-        return bool(gc_cfg["force_collect"])
+    del settings
     return is_cli_mode or is_tui

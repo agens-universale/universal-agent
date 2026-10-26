@@ -10,6 +10,7 @@ Esc — назад к списку профилей (под-состояние �
 Constraints); PgUp/PgDn и повторный вход в секцию под-вид не переживает.
 """
 
+from gc_testkit.tui_support import tui_settings
 from pathlib import Path
 
 import pytest
@@ -108,7 +109,7 @@ async def test_enter_on_a_profile_row_opens_the_editor_on_that_file(
         tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
@@ -128,7 +129,7 @@ async def test_create_opens_the_new_profile_right_away(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await pilot.press("n")
@@ -153,7 +154,7 @@ async def test_enter_on_the_none_row_says_there_is_nothing_to_open(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "none")
@@ -182,7 +183,7 @@ async def test_enter_does_not_open_a_profile_whose_root_is_read_only(
         "gc_core.config._default_config_path", lambda: base_cfg
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -212,7 +213,7 @@ async def test_the_form_writes_the_entry_into_the_profile_and_not_into_config_ym
         tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         before = base_cfg.read_bytes()
@@ -239,7 +240,7 @@ async def test_the_slot_picker_writes_into_the_profile(tmp_path, monkeypatch):
         tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         before = base_cfg.read_bytes()
@@ -247,7 +248,7 @@ async def test_the_slot_picker_writes_into_the_profile(tmp_path, monkeypatch):
         _cursor_to(ed, "slot", level="light")
         await pilot.press("enter")  # раскрыть пикер значений
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
         await pilot.press("down")  # первая позиция — снятие слота
         await pilot.press("enter")
         await pilot.pause()
@@ -272,7 +273,7 @@ async def test_the_profile_key_cannot_be_written_into_a_profile(
         'profile: "other"\n' + _PROFILE_BODY,
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         before = profile.read_bytes()
@@ -311,7 +312,7 @@ async def test_focus_returns_to_the_form_after_a_write_fails_past_the_env_confir
         '    token: "${ENV:GLM_TOKEN}"\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         before = profile.read_bytes()
@@ -369,7 +370,7 @@ async def test_the_address_warning_and_the_literal_token_warning_share_one_notic
         '  default: "secret"\n',
     )  # default уже резолвится — без вопроса о слоте
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
@@ -406,7 +407,7 @@ async def test_a_removed_legacy_key_in_the_profile_does_not_break_the_write(
         "logging:\n  dump_storage: true\n" + _PROFILE_BODY,
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _open_profile(pilot, scr, "work")
@@ -438,7 +439,7 @@ async def test_the_reserve_model_row_is_absent_in_a_profile(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
@@ -471,7 +472,7 @@ async def test_a_profile_that_only_repoints_slots_is_not_called_empty(
         'slots:\n  default: flash\nassign:\n  "*": max\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         row = " ".join(str(w.render()) for w in scr.query(".set-profiles-row"))
@@ -501,7 +502,7 @@ async def test_the_overlay_preview_stays_silent_about_what_the_forms_show(
         _OVERLAY_SECTION.format(name="security") + _PROFILE_BODY,
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _open_profile(pilot, scr, "work")
@@ -528,7 +529,7 @@ async def test_level_inside_a_profile_shows_in_the_preview_but_not_in_the_list_r
         "level: max\n" + _PROFILE_BODY,
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         row = next(
@@ -557,10 +558,12 @@ async def test_a_validator_error_with_brackets_reaches_the_screen(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     profile = _write(
         tmp_path / "base" / "profiles" / "work.yml",
-        '"[bogus]": []\n' + _PROFILE_BODY,
+        # Сервер без обязательного `transport`: координата отказа несёт
+        # `[bogus]` (лишний ключ отказа больше не даёт — только уведомление).
+        'mcp:\n  servers:\n    "[bogus]": {}\n' + _PROFILE_BODY,
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         before = profile.read_bytes()
@@ -590,7 +593,7 @@ async def test_an_empty_profile_shows_its_own_empty_state(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", PROFILE_SKELETON)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
@@ -625,7 +628,7 @@ async def test_the_overlay_preview_names_the_sections_raw(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _OVERLAY_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _open_profile(pilot, scr, "work")
@@ -662,7 +665,7 @@ async def test_the_overlay_preview_truncates_by_whole_names(
     )
     _write(tmp_path / "base" / "profiles" / "work.yml", body)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _open_profile(pilot, scr, "work")
@@ -699,7 +702,7 @@ async def test_esc_returns_to_the_list_and_the_second_esc_to_the_menu(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _open_profile(pilot, scr, "work")
@@ -723,17 +726,17 @@ async def test_esc_closes_the_inner_picker_before_the_editor(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
         _cursor_to(ed, "slot", level="max")
         await pilot.press("enter")
         await pilot.pause()
-        assert ed.picker_open
+        assert ed._picker is not None
         await pilot.press("escape")
         await pilot.pause()
-        assert not ed.picker_open
+        assert ed._picker is None
         assert not scr.query(".set-profiles-row"), (
             "выбросило к списку профилей"
         )
@@ -750,7 +753,7 @@ async def test_switching_sections_closes_the_open_profile(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _open_profile(pilot, scr, "work")
@@ -778,7 +781,7 @@ async def test_a_profile_deleted_from_outside_falls_back_to_the_list(
         tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _open_profile(pilot, scr, "work")
@@ -811,7 +814,7 @@ async def test_the_list_keys_do_not_reach_it_while_the_editor_is_open(
         tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
@@ -850,7 +853,7 @@ async def test_the_list_footer_promises_opening(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -872,7 +875,7 @@ async def test_the_editor_footer_leads_back_to_the_list(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
@@ -922,7 +925,7 @@ async def test_the_first_block_caption_stands_under_the_profile_title(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
@@ -942,9 +945,9 @@ def _active_profile_runtime() -> dict:
     свой токен. Именно он подставлялся, когда стек ОТКРЫТОГО профиля не собрался, —
     и именно ему нельзя попадать в витрину чужого файла."""
     return {
-        "completions_url": "https://active-profile/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer ACTIVE"},
-        "model": "test-model",
+        "backend.completions_url": "https://active-profile/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer ACTIVE"},
+        "agent.model": "test-model",
         "profile": "home",
     }
 
@@ -987,7 +990,7 @@ async def test_an_open_profile_inherits_from_its_own_connection(
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
     _write(tmp_path / "base" / "profiles" / "corp.yml", _CORP_PROFILE)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "corp")
@@ -1012,7 +1015,7 @@ async def test_an_open_profile_keeps_its_connection_when_its_registry_does_not_r
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
     _write(tmp_path / "base" / "profiles" / "corp.yml", _CORP_PROFILE)
 
-    app = app_mod.TuiApp(config=_active_profile_runtime())
+    app = app_mod.TuiApp(settings=tui_settings(_active_profile_runtime()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(
             pilot, app, base_cfg, config=_active_profile_runtime()
@@ -1041,7 +1044,7 @@ async def test_an_open_profile_without_its_own_connection_keeps_the_base_one(
         "models:\n  m1:\n    model: x\n",
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "corp")
@@ -1067,7 +1070,7 @@ async def test_an_open_profile_that_cannot_be_stacked_falls_back_to_its_document
         "max_steps: не-число\nmodels:\n  m1:\n    model: x\n",
     )
 
-    app = app_mod.TuiApp(config=_active_profile_runtime())
+    app = app_mod.TuiApp(settings=tui_settings(_active_profile_runtime()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(
             pilot, app, base_cfg, config=_active_profile_runtime()
@@ -1093,7 +1096,7 @@ async def test_a_profile_whose_file_is_unreadable_never_lends_another_connection
         tmp_path / "base" / "profiles" / "corp.yml", "backend: [не закрыт\n"
     )
 
-    app = app_mod.TuiApp(config=_active_profile_runtime())
+    app = app_mod.TuiApp(settings=tui_settings(_active_profile_runtime()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(
             pilot, app, base_cfg, config=_active_profile_runtime()
@@ -1129,7 +1132,7 @@ async def test_an_open_profile_names_the_level_that_is_really_acting(
     )
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         app._session_overrides["level"] = "max"
         scr = await _profiles_screen(pilot, app, base_cfg)
@@ -1157,7 +1160,7 @@ async def test_the_overlay_preview_is_recounted_after_a_write(
         "slots:\n  default: flash\n",
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _open_profile(pilot, scr, "work")
@@ -1190,7 +1193,7 @@ async def test_an_open_profile_offers_its_own_endpoint_presets(
         + 'endpoint_presets:\n  - name: "Корп-шлюз"\n    url: "https://corp-gw/v1/chat/completions"\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "corp")
@@ -1211,7 +1214,7 @@ async def test_an_open_profile_is_written_under_the_stack_gate(
     )
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "home")
@@ -1254,7 +1257,7 @@ async def test_renaming_in_an_inactive_profile_still_asks_for_a_default_slot(
     )
     profile = _write(tmp_path / "base" / "profiles" / "work.yml", body)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         ed = await _open_profile(pilot, scr, "work")
@@ -1269,7 +1272,7 @@ async def test_renaming_in_an_inactive_profile_still_asks_for_a_default_slot(
         await pilot.press("ctrl+s")  # submit → должен спросить дефолт
         await pilot.pause()
 
-        assert ed.picker_open, (
+        assert ed._picker is not None, (
             "рена́йм не спросил дефолт-слот при неактивном профиле"
         )
         values = {row["value"] for row in ed._picker["rows"]}

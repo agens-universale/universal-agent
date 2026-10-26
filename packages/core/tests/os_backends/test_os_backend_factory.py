@@ -14,36 +14,43 @@ from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.remote_shell import RemoteShellBackend
 from gc_core.backends.sandbox import SandboxBackend
 from gc_core.run_context import acreate_run_context
+from gc_testkit.settings import make_settings
 
 
 def test_parse_os_backend_defaults_to_local():
-    assert parse_os_backend_kind({}) == "local"
-    assert parse_os_backend_kind({"os_backend": "  LOCAL  "}) == "local"
+    assert parse_os_backend_kind(make_settings()) == "local"
+    assert (
+        parse_os_backend_kind(make_settings({"os_backend": "  LOCAL  "}))
+        == "local"
+    )
 
 
 def test_parse_os_backend_rejects_unknown():
     with pytest.raises(ValueError, match="unsupported"):
-        parse_os_backend_kind({"os_backend": "s3"})
+        parse_os_backend_kind(make_settings({"os_backend": "s3"}))
 
 
 def test_parse_os_backend_harbor():
-    assert parse_os_backend_kind({"os_backend": "harbor"}) == "harbor"
-    assert parse_os_backend_kind({}) == "local"
+    assert (
+        parse_os_backend_kind(make_settings({"os_backend": "harbor"}))
+        == "harbor"
+    )
+    assert parse_os_backend_kind(make_settings()) == "local"
 
 
 def test_resolve_local():
-    be = resolve_os_backend({})
+    be = resolve_os_backend(make_settings())
     assert isinstance(be, LocalFsBackend)
 
 
 def test_resolve_harbor_requires_runtime():
     with pytest.raises(ValueError, match="environment and loop"):
-        resolve_os_backend({"os_backend": "harbor"})
+        resolve_os_backend(make_settings({"os_backend": "harbor"}))
 
 
 def test_resolve_override_wins():
     sentinel = object()
-    assert resolve_os_backend({}, override=sentinel) is sentinel  # type: ignore[arg-type]
+    assert resolve_os_backend(make_settings(), override=sentinel) is sentinel  # type: ignore[arg-type]
 
 
 def test_resolve_harbor_with_env_and_loop():
@@ -51,7 +58,9 @@ def test_resolve_harbor_with_env_and_loop():
     loop = asyncio.new_event_loop()
     try:
         be = resolve_os_backend(
-            {"os_backend": "harbor", "harbor_exec_init": "bashrc"},
+            make_settings(
+                {"os_backend": "harbor", "agent.harbor_exec_init": "bashrc"}
+            ),
             environment=env,
             loop=loop,
         )
@@ -64,9 +73,16 @@ def test_resolve_harbor_with_env_and_loop():
 def test_resolve_harbor_rejects_non_string_exec_init():
     loop = asyncio.new_event_loop()
     try:
+        # Негодное значение отвергает уже схема настроек (ValidationError —
+        # подкласс ValueError), до сборки бэкенда.
         with pytest.raises(ValueError, match="harbor_exec_init"):
             resolve_os_backend(
-                {"os_backend": "harbor", "harbor_exec_init": ["bashrc"]},
+                make_settings(
+                    {
+                        "os_backend": "harbor",
+                        "agent.harbor_exec_init": ["bashrc"],
+                    }
+                ),
                 environment=object(),
                 loop=loop,
             )
@@ -78,7 +94,12 @@ async def test_create_run_context_leaves_local_bare_where_recording_is_off():
     """Вне TUI без включённой записи правок (`agent_edits.record`) Local не
     оборачивается: трекер зовёт `git status` вокруг каждой команды зря."""
     ctx = await acreate_run_context(
-        {"backend_api_mode": "chat_completions", "save_logs": False}
+        make_settings(
+            {
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
+            }
+        )
     )
     assert isinstance(ctx.os_backend, LocalFsBackend)
     assert getattr(ctx, "is_tui", False) is False
@@ -88,7 +109,12 @@ async def test_create_run_context_tui_wraps_tracking():
     from gc_core.agent_edits.tracking import TrackingFsBackend
 
     ctx = await acreate_run_context(
-        {"backend_api_mode": "chat_completions", "save_logs": False},
+        make_settings(
+            {
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
+            }
+        ),
         is_tui=True,
     )
     assert isinstance(ctx.os_backend, TrackingFsBackend)
@@ -99,7 +125,7 @@ async def test_create_run_context_tui_wraps_tracking():
 async def test_create_run_context_explicit_override():
     sentinel = object()
     ctx = await acreate_run_context(
-        {"save_logs": False},
+        make_settings({"logging.save_logs": False}),
         os_backend=sentinel,  # type: ignore[arg-type]
         is_tui=True,
     )
@@ -127,7 +153,12 @@ async def test_workspace_is_assembled_once_even_when_wrapped(monkeypatch):
     )
 
     ctx = await acreate_run_context(
-        {"backend_api_mode": "chat_completions", "save_logs": False},
+        make_settings(
+            {
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
+            }
+        ),
         is_tui=True,
     )
 
@@ -140,22 +171,46 @@ async def test_workspace_is_assembled_once_even_when_wrapped(monkeypatch):
     )
 
 
+def _cfg(raw: dict):
+    """Плоский словарь develop → настройки: секция ``os_backend`` путями,
+    строка ``os_backend`` — переопределение вида в ``RuntimeEnv``."""
+    updates = {}
+    for key, value in raw.items():
+        if key == "os_backend" and isinstance(value, dict):
+            updates.update({f"os_backend.{k}": v for k, v in value.items()})
+        elif key == "harbor_exec_init":
+            updates["agent.harbor_exec_init"] = value
+        else:
+            updates[key] = value
+    return make_settings(updates)
+
+
+def _resolve(raw: dict, **kwargs):
+    return resolve_os_backend(_cfg(raw), **kwargs)
+
+
+def _section(raw: dict) -> dict:
+    return os_backend_section(_cfg(raw))
+
+
+def _kind(raw: dict) -> str:
+    return parse_os_backend_kind(_cfg(raw))
+
+
 def test_section_accepts_string_dict_and_missing():
-    assert os_backend_section({}) == {"kind": "local"}
-    assert os_backend_section({"os_backend": "Harbor"}) == {"kind": "harbor"}
-    sec = os_backend_section(
-        {"os_backend": {"kind": "docker", "docker": {"name": "b"}}}
-    )
+    assert _section({})["kind"] == "local"
+    assert _section({"os_backend": "Harbor"})["kind"] == "harbor"
+    sec = _section({"os_backend": {"kind": "docker", "docker": {"name": "b"}}})
     assert sec["kind"] == "docker" and sec["docker"]["name"] == "b"
 
 
 def test_parse_kind_lists_all_supported():
     for k in ("local", "harbor", "docker", "ssh", "exec", "sandbox"):
-        assert parse_os_backend_kind({"os_backend": k}) == k
+        assert _kind({"os_backend": k}) == k
 
 
 def test_resolve_docker_builds_remote_shell():
-    be = resolve_os_backend(
+    be = _resolve(
         {
             "os_backend": {"kind": "docker", "docker": {"name": "box"}},
             "harbor_exec_init": "bashrc",
@@ -170,11 +225,11 @@ def test_resolve_docker_builds_remote_shell():
 
 def test_resolve_docker_without_name_fails_loudly():
     with pytest.raises(ValueError, match="docker.name"):
-        resolve_os_backend({"os_backend": "docker"})
+        _resolve({"os_backend": "docker"})
 
 
 def test_resolve_exec_passes_prefix_cwd_env():
-    be = resolve_os_backend(
+    be = _resolve(
         {
             "os_backend": {
                 "kind": "exec",
@@ -204,7 +259,7 @@ def test_resolve_sandbox_auto_workdir(tmp_path, monkeypatch):
     from gc_core.config_modules.env_vars import project_slug
 
     cfg = {"os_backend": {"kind": "sandbox", "sandbox": {"workdir": "auto"}}}
-    be = resolve_os_backend(cfg)
+    be = _resolve(cfg)
     assert isinstance(be, SandboxBackend)
     # Один каталог на папку запуска: повторный запуск и продолжение треда
     # (-t) видят те же файлы, а не пустую песочницу.
@@ -213,20 +268,18 @@ def test_resolve_sandbox_auto_workdir(tmp_path, monkeypatch):
     )
     assert be.auto_workdir == expected and os.path.isdir(expected)
     assert be.default_cwd() == be.auto_workdir
-    assert resolve_os_backend(cfg).auto_workdir == expected
+    assert _resolve(cfg).auto_workdir == expected
 
 
 def test_resolve_sandbox_fails_closed_without_tool(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: None)
     with pytest.raises(ValueError, match="sandbox"):
-        resolve_os_backend({"os_backend": "sandbox"})
+        _resolve({"os_backend": "sandbox"})
 
 
 def test_resolve_ssh_joins_argv_docker_does_not():
-    ssh = resolve_os_backend(
-        {"os_backend": {"kind": "ssh", "ssh": {"host": "h"}}}
-    )
-    docker = resolve_os_backend(
+    ssh = _resolve({"os_backend": {"kind": "ssh", "ssh": {"host": "h"}}})
+    docker = _resolve(
         {"os_backend": {"kind": "docker", "docker": {"name": "b"}}}
     )
     assert ssh.joins_argv is True and docker.joins_argv is False
@@ -247,18 +300,19 @@ def test_auto_workdir_follows_configured_launch_root(tmp_path, monkeypatch):
         "launch_root": str(tmp_path / "proj"),
         "os_backend": {"kind": "sandbox", "sandbox": {"workdir": "auto"}},
     }
-    be = resolve_os_backend(cfg)
+    be = _resolve(cfg)
     assert be.auto_workdir == str(
         tmp_path / "sandboxes" / project_slug(str(tmp_path / "proj"))
     )
 
 
 def test_raw_dict_rejects_option_like_values():
-    # Фабрика на сыром dict (мимо pydantic) повторяет запрет ведущего `-`.
+    # Ведущий `-` отвергает уже схема секции (ValidationError — ValueError);
+    # фабрика повторяет запрет для переопределений мимо неё.
     import pytest
 
     with pytest.raises(ValueError, match="ssh.host"):
-        resolve_os_backend(
+        _resolve(
             {
                 "os_backend": {
                     "kind": "ssh",
@@ -267,7 +321,7 @@ def test_raw_dict_rejects_option_like_values():
             }
         )
     with pytest.raises(ValueError, match="docker.name"):
-        resolve_os_backend(
+        _resolve(
             {
                 "os_backend": {
                     "kind": "docker",

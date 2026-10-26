@@ -1,12 +1,15 @@
 import logging
 import os
 
+import pytest
+
 from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.model_router import ModelRouter
 from gc_server.rest_api import server_config
 from gc_server.rest_api.server_config import load_server_config
+from gc_testkit.settings import make_settings
 
 
 def test_server_config_path_from_env_vars(monkeypatch, tmp_path):
@@ -90,22 +93,26 @@ def test_load_server_config_reports_empty_path_when_nothing_found(
 def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
     monkeypatch.setattr(
         server_config,
-        "load_config",
-        lambda: {
-            "models": {"flash": {}},
-            "slots": {"default": "flash"},
-            "model": "flash",
-            "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
-        },
+        "load_settings",
+        lambda: make_settings(
+            {
+                "models": {"flash": {}},
+                "slots": {"default": "flash"},
+                "agent.model": "flash",
+                "backend.completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+            }
+        ),
     )
 
-    cfg = server_config.build_agent_config_for_server(
-        {"agent_overrides": {"model": "forced-model"}}
+    loaded = server_config.build_agent_settings_for_server(
+        {"agent_overrides": {"agent.model": "forced-model"}}
     )
 
-    assert cli_forces_legacy_model(cfg) is True
+    # agent_overrides видны легаси-форсу как заданные из CLI.
+    assert loaded.provenance.source("agent.model").layer == "cli"
+    assert cli_forces_legacy_model(loaded) is True
     router = ModelRouter(
-        cfg, level_provider=lambda: "default", force_legacy=True
+        loaded, level_provider=lambda: "default", force_legacy=True
     )
     resolved = router.resolve("main")
     assert resolved.alias is None
@@ -116,37 +123,82 @@ def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
 def test_agent_overrides_without_model_is_not_forced(monkeypatch):
     monkeypatch.setattr(
         server_config,
-        "load_config",
-        lambda: {"models": {"flash": {}}, "slots": {"default": "flash"}},
+        "load_settings",
+        lambda: make_settings(
+            {"models": {"flash": {}}, "slots": {"default": "flash"}}
+        ),
     )
 
-    cfg = server_config.build_agent_config_for_server(
-        {"agent_overrides": {"stop_tools": ["write_to_file"]}}
+    loaded = server_config.build_agent_settings_for_server(
+        {"agent_overrides": {"agent.stop_tools": ["write_to_file"]}}
     )
 
-    assert cli_forces_legacy_model(cfg) is False
+    assert cli_forces_legacy_model(loaded) is False
 
 
 def test_agent_overrides_other_keys_still_applied(monkeypatch):
     """Регресс: прочие agent_overrides (например, stop_tools) применяются как раньше."""
-    monkeypatch.setattr(server_config, "load_config", lambda: {"model": "m"})
-
-    cfg = server_config.build_agent_config_for_server(
-        {"agent_overrides": {"stop_tools": ["write_to_file"], "max_steps": 7}}
+    monkeypatch.setattr(
+        server_config,
+        "load_settings",
+        lambda: make_settings({"agent.model": "m"}),
     )
 
-    assert cfg["stop_tools"] == ["write_to_file"]
-    assert cfg["max_steps"] == 7
+    settings = server_config.build_agent_settings_for_server(
+        {
+            "agent_overrides": {
+                "agent.stop_tools": ["write_to_file"],
+                "agent.max_steps": 7,
+            }
+        }
+    ).settings
+
+    assert settings.agent.stop_tools == ["write_to_file"]
+    assert settings.agent.max_steps == 7
+
+
+def test_agent_overrides_section_overrides_only_its_fields(monkeypatch):
+    """Вложенная секция перекрывает только заданные поля — как deep-merge у
+    swarm; прочие значения config.yml остаются."""
+    monkeypatch.setattr(
+        server_config,
+        "load_settings",
+        lambda: make_settings({"agent.model": "m", "agent.max_steps": 3}),
+    )
+
+    settings = server_config.build_agent_settings_for_server(
+        {"agent_overrides": {"agent": {"stop_tools": ["write_to_file"]}}}
+    ).settings
+
+    assert settings.agent.stop_tools == ["write_to_file"]
+    assert settings.agent.max_steps == 3
+    assert settings.agent.model == "m"
+
+
+def test_agent_overrides_flat_name_fails_with_path_hint(monkeypatch):
+    """Плоских имён нет: сервер не стартует, сообщение подсказывает путь."""
+    monkeypatch.setattr(server_config, "load_settings", make_settings)
+
+    with pytest.raises(ValueError) as exc:
+        server_config.build_agent_settings_for_server(
+            {"agent_overrides": {"max_steps": 7}}
+        )
+    message = str(exc.value)
+    assert message.startswith(
+        "agent_overrides: неизвестная настройка max_steps"
+    )
+    assert "agent.max_steps" in message
+    assert "--" not in message
 
 
 def _agent_md(server_agentmd_path, cfg_path):
-    """cfg["agent_md_path"] для заданной пары «значение поля, путь конфига»."""
-    return server_config.build_agent_config_for_server(
+    """``paths.agent_md_path`` для заданной пары «значение поля, путь конфига»."""
+    return server_config.build_agent_settings_for_server(
         {
             "config_path": str(cfg_path),
             "agent": {"server_agentmd_path": server_agentmd_path},
         }
-    )["agent_md_path"]
+    ).settings.paths.agent_md_path
 
 
 def test_relative_agent_md_is_found_next_to_the_config(tmp_path):

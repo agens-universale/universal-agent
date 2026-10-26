@@ -56,7 +56,7 @@ def _tool(
         ctx.system_id = "cli"
         ctx.thread_id = "th1"
         ctx.turn_id = "turn-1"
-    return tool_cls(ctx=ctx, config_dict=ctx.config_dict, call_id=call_id)
+    return tool_cls(ctx=ctx, call_id=call_id)
 
 
 def _records(threads_dir):
@@ -123,7 +123,10 @@ async def test_download_file_records_the_file_it_created(roots, monkeypatch):
         launch_root,
         threads_dir,
         config={
-            "download": {"download_dir": "downloads", "max_bytes": 1_000_000}
+            "security.download": {
+                "download_dir": "downloads",
+                "max_bytes": 1_000_000,
+            }
         },
     )
     result = json.loads(

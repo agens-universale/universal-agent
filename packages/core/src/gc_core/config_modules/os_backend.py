@@ -11,6 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from gc_core.config_modules.field_meta import gc_meta
+
 OsBackendKind = Literal["local", "harbor", "docker", "ssh", "exec", "sandbox"]
 
 
@@ -53,7 +55,12 @@ class OsBackendConfig(BaseModel):
 
     kind: OsBackendKind = "local"
     cwd: str | None = None  # стартовый каталог «там» (не для sandbox)
-    env: dict[str, str] = Field(default_factory=dict)
+    # Переменные окружения команд «там»: могут быть токены — секрет,
+    # в публичный снимок (историю Temporal) не идут.
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        json_schema_extra=gc_meta(secret=True, worker_only=True),
+    )
     # Где качает `exec_fetch_url`: на хосте (agent) или через бэкенд
     # (os_backend) — когда сеть есть только у среды исполнения. Разбор
     # страницы всегда на хосте. Для local/sandbox значение игнорируется.
@@ -62,9 +69,21 @@ class OsBackendConfig(BaseModel):
     # старте рана: реестр читает их через бэкенд, а лежат они на хосте.
     # Только для remote-kind (docker/ssh/exec); Harbor-адаптер грузит сам.
     provision_skills: bool = True
-    docker: DockerBackendConfig = Field(default_factory=DockerBackendConfig)
-    ssh: SshBackendConfig = Field(default_factory=SshBackendConfig)
-    exec: ExecBackendConfig = Field(default_factory=ExecBackendConfig)
+    # Параметры подключения (хост, пользователь, ключ, префикс команды — в
+    # нём бывают токены) нужны только процессу, который исполняет команды:
+    # в публичный снимок (историю Temporal) не идут.
+    docker: DockerBackendConfig = Field(
+        default_factory=DockerBackendConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )
+    ssh: SshBackendConfig = Field(
+        default_factory=SshBackendConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )
+    exec: ExecBackendConfig = Field(
+        default_factory=ExecBackendConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )
     sandbox: SandboxBackendConfig = Field(default_factory=SandboxBackendConfig)
 
     @model_validator(mode="before")

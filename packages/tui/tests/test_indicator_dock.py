@@ -1,6 +1,7 @@
 """Индикатор живёт в фиксированной #indicator-bar (вне скролла #trace) —
 растущий стрим не может на него наложиться."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -32,7 +33,9 @@ async def test_indicator_docked_not_in_trace(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -60,7 +63,9 @@ async def test_trace_row_lands_in_trace_with_indicator_docked(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

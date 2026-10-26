@@ -1,14 +1,22 @@
 import asyncio
-import copy
 import json
 import logging
 import os
 import threading
+from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from gc_core.agent_store import AgentResource, agent_store_of
 from gc_core.attachments.store import with_committed_attachments
+from gc_core.auto_routing import state_ops
+from gc_core.auto_routing.levels import (
+    auto_available,
+    effective_level,
+    resolve_routing_params,
+)
+from gc_core.auto_routing.policy import turn_params
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.agent import (
     merge_special_instructions_with_model_steering,
@@ -21,6 +29,8 @@ from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.progress import emit_progress
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.intent_log.user_turn import (
     append_user_asks_from_messages,
@@ -39,6 +49,7 @@ from gc_core.message_policy.tool_usage_notice.state import (
     persist_tool_usage_notice_state,
 )
 from gc_core.message_policy.user_message_policy import (
+    build_model_fallback_resume_message,
     extract_real_user_message_text,
 )
 from gc_core.message_policy.user_stop import cancelled_by_user_output
@@ -50,23 +61,29 @@ from gc_core.model_router import (
 from gc_core.run_context import RunContext
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.settings import (
+    AppConfig,
+    LoadedSettings,
+    RuntimeEnv,
+    override_settings,
+    runtime_of,
+    settings_of,
+)
+from gc_core.state_preparation import prepare_state
 from gc_core.states import State
 from gc_core.summarize.config import (
-    parse_summary_trigger_chars,
-    parse_summary_trigger_tokens,
-    summary_mid_turn_enabled,
+    resolve_summary_limits_at_level,
 )
-from gc_core.tools import (
-    SUBAGENT_TOOLS_ALLOW_KEY,
-    SUBAGENT_TOOLS_STOP_KEY,
-    abuild_tools_data,
-)
+from gc_core.tools import abuild_tools_data
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.subagents.active_scope import activate_child_input
-from gc_core.tools.subagents.progress import emit_progress
 from gc_core.tools.subagents.registry import (
     get_subagent_class,
     resolve_subagent_definitions,
+)
+from gc_core.tools.subagents.runner_preparation import (
+    PreparedChildState,
+    SubagentPreparation,
 )
 from gc_core.tools.subagents.sidecar import (
     apersist_subagent_trace,
@@ -76,7 +93,6 @@ from gc_core.tools.subagents.sidecar import (
     clear_turn_identity,
     current_turn_id,
 )
-from gc_core.trace_id import trace_id_from_config
 from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
 from gc_core.usage.account import UsageAccount
@@ -111,20 +127,6 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
         if isinstance(content, str):
             return content
     return ""
-
-
-# Вложенные узлы config_dict, передаваемые по ссылке при сборке дочернего конфига
-# (спека §7 п.4): заголовки/kwargs backend + реестр моделей Router (models/slots/
-# assign — Router их не мутирует, но `{**self._config}` расшарил бы эти dict'ы с
-# родителем; deepcopy только их, не всего конфига — остальные секции read-only).
-_CHILD_CONFIG_DEEP_COPY_KEYS = (
-    "chat_completion_headers",
-    "chat_completion_kwargs",
-    "auxiliary_llm_params",
-    "models",
-    "slots",
-    "assign",
-)
 
 
 async def _drain_trace_writes(
@@ -178,11 +180,31 @@ class SubagentRunner:
     """Создаёт дочерний State и запускает run_agent для субагента."""
 
     def __init__(
-        self, ctx: Any, orchestrator_state: State, config_dict: Dict[str, Any]
+        self,
+        ctx: Any,
+        orchestrator_state: State,
+        settings: Any = None,
+        *,
+        preparation: Optional[SubagentPreparation] = None,
+        input_scope_factory: Optional[Callable] = None,
     ):
         self._ctx = ctx
+        self._preparation = preparation or getattr(
+            ctx, "subagent_preparation", None
+        )
+        self._input_scope_factory = (
+            input_scope_factory
+            or getattr(ctx, "subagent_input_scope_factory", None)
+            or (
+                partial(activate_child_input, thread_safe=False)
+                if getattr(ctx, "tool_effect", None) is not None
+                else activate_child_input
+            )
+        )
         self._orchestrator_state = orchestrator_state
-        self._config = config_dict
+        #: Настройки родителя (всё, что принимает ``settings_of``) — когда у
+        #: ``ctx`` своих нет (тестовые двойники); иначе источник — сам ``ctx``.
+        self._settings = settings
         self._parent_call_id: str = ""
         # Имя тула текущего вызова: нужно сборке child_config, а до неё
         # доезжают не все методы (у _build_child_state его в сигнатуре нет).
@@ -214,9 +236,23 @@ class SubagentRunner:
         Производственных вызывающих у них не было ни одного: ``apply_tool``
         ходит корутиной, остальные 48 вызовов жили в тестах.
         """
+        executor = getattr(self._ctx, "subagent_executor", None)
+        if executor is not None:
+            return await executor(
+                self, tool_name, arguments, parent_call_id=parent_call_id or ""
+            )
         self._parent_call_id = parent_call_id or ""
         self._active_tool_name = tool_name
-        subagent_cls = get_subagent_class(tool_name, self._config)
+        if (
+            self._preparation is None
+            and getattr(self._ctx, "tool_effect", None) is not None
+        ):
+            raise RuntimeError("Native subagents require explicit preparation")
+        subagent_cls = (
+            self._preparation.resolve_subagent(tool_name)
+            if self._preparation is not None
+            else get_subagent_class(tool_name, self._parent_source())
+        )
         if subagent_cls is None:
             return self._error_response(
                 tool_name=tool_name,
@@ -235,26 +271,63 @@ class SubagentRunner:
             tool_name, subagent_cls, arguments, run_agent_func
         )
 
+    def _parent_has_settings(self) -> bool:
+        return isinstance(
+            getattr(self._ctx, "settings", None), (AppConfig, LoadedSettings)
+        )
+
+    def _parent_source(self) -> Any:
+        """Источник настроек родителя: ``ctx`` с настройками, иначе переданные
+        ``settings`` (тестовые двойники ctx), иначе сам ``ctx``.
+
+        Он же — ключ кэша определений сабагентов (``ctx.subagent_definitions``).
+        """
+        if self._parent_has_settings() or self._settings is None:
+            return self._ctx
+        return self._settings
+
+    def _parent_settings(self) -> AppConfig:
+        """Настройки родителя (см. ``_parent_source``)."""
+        return settings_of(self._parent_source())
+
+    def _parent_runtime(self) -> RuntimeEnv:
+        """Рантайм родителя — в паре с ``_parent_settings``."""
+        if self._parent_has_settings():
+            return runtime_of(self._ctx)
+        runtime = getattr(self._ctx, "runtime", None)
+        if isinstance(runtime, RuntimeEnv):
+            return runtime
+        return runtime_of(self._parent_source())
+
     def _pre_backend_compaction_hook(
         self, child_ctx: Any, child_state: Any
     ) -> Optional[Callable]:
         """Хук компакции ребёнка перед backend-вызовом; ``None`` — компакция выключена."""
-        summary_trigger_chars = parse_summary_trigger_chars(self._config)
-        should_enable_summary = (
-            child_state.backend_api_mode == "chat_completions"
-            and summary_mid_turn_enabled(self._config)
-        )
-        if not should_enable_summary:
+        if child_state.backend_api_mode != "chat_completions":
             return None
+
+        def child_limits():
+            return resolve_summary_limits_at_level(
+                self._parent_source(),
+                getattr(child_ctx, "model_router", None),
+                getattr(child_state, "_call_level", None),
+            )
+
+        # Хук для chat_completions: порог читается на проверке (смена алиаса).
+        # Глобальный mid-turn выключен и у модели хода оба порога 0 — координатор no-op.
+        limits = child_limits()
         summary = RunSummaryCoordinator(
             ctx=child_ctx,
             state=child_state,
             thread_session=None,
-            summary_trigger_chars=summary_trigger_chars,
-            summary_trigger_tokens=parse_summary_trigger_tokens(self._config),
+            summary_trigger_chars=limits.chars_during,
+            summary_trigger_tokens=limits.tokens_during,
+            turn_end_trigger_chars=limits.chars_after,
+            turn_end_trigger_tokens=limits.tokens_after,
             is_cli_mode=False,
             pre_backend_trigger_reason="subagent_pre_backend",
             logger=_log,
+            limits_provider=child_limits,
         )
         # Sidecar marker when child compaction applies (append-only; no rewrite).
         _orig_on_summary = summary.on_summary_applied
@@ -263,7 +336,7 @@ class SubagentRunner:
             event: Dict[str, Any],
         ) -> None:
             # `on_summary_applied` — корутина. Без `await` она молча не
-            # исполнялась: терялись `append_summary_trace_record` и
+            # исполнялась: терялись `aappend_summary_trace_record` и
             # `archive_suffix`. Прогон это ВИДЕЛ — `RuntimeWarning:
             # coroutine ... was never awaited`, — но предупреждение не
             # роняет набор, и тест был зелёным, потому что проверяет
@@ -342,6 +415,8 @@ class SubagentRunner:
                 messages=messages, child_ctx=child_ctx, **loop_kwargs
             )
             return result, child_ctx, None
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             fallback_ctx = self._maybe_pin_fallback(
                 child_ctx=child_ctx,
@@ -363,13 +438,23 @@ class SubagentRunner:
         # батч, на котором упал вызов). Повторный фейл — честная ошибка тула,
         # без ещё одного фоллбэка (fallback_ctx строится максимум один раз).
         child_ctx = fallback_ctx
-        retry_messages = (
-            messages if child_state.steps == 0 else child_state.messages
-        )
+        if child_state.steps > 0 and getattr(
+            child_ctx, "subagent_independent_auto", True
+        ):
+            # История уже в State: повтор передаёт новый батч, а не старые calls.
+            retry_messages = [
+                build_model_fallback_resume_message(child_state.state_id)
+            ]
+        else:
+            retry_messages = (
+                messages if child_state.steps == 0 else child_state.messages
+            )
         try:
             result = await self._arun_child_loop(
                 messages=retry_messages, child_ctx=child_ctx, **loop_kwargs
             )
+        except ExecutionFailure:
+            raise
         except Exception as retry_exc:
             return (
                 None,
@@ -411,6 +496,37 @@ class SubagentRunner:
             steps=child_state.steps,
             child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
         )
+
+    async def _astopped_response(
+        self, tool_name: str, child_state: Any, child_ctx: Any, result: Any
+    ) -> Any:
+        """Ответ родителю, если ребёнок остановлен лимитом или недоступной
+        проверкой действий; None — прогон закончился обычно."""
+        outcome = getattr(child_state, "terminal_outcome", None)
+        if outcome in ("step_limit", "token_limit", "tool_call_limit"):
+            await self._afinish_on_limit(
+                tool_name, child_state, child_ctx, outcome
+            )
+            # Pass-through: child run_agent already built the limit envelope
+            # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
+            # our own JSON or call LLM here — spec §6.2.
+            return result
+        if outcome == "judge_unavailable":
+            # Проверка действий судьёй недоступна: субагент остановлен,
+            # родитель и соседи продолжают — о недоступности родитель
+            # узнает на своём первом спорном действии.
+            await self._afinish_on_limit(
+                tool_name, child_state, child_ctx, outcome
+            )
+            return self._error_response(
+                tool_name=tool_name,
+                code=outcome,
+                message=str(result or ""),
+                retryable=False,
+                steps=child_state.steps,
+                child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
+            )
+        return None
 
     async def _afinish_on_limit(
         self,
@@ -457,6 +573,8 @@ class SubagentRunner:
                 await instance.afinalize_role(
                     child_ctx, self._orchestrator_state
                 )
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             return (
                 None,
@@ -472,6 +590,8 @@ class SubagentRunner:
 
         try:
             child_state = await self._build_child_state(agent_role)
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             return (
                 None,
@@ -486,7 +606,25 @@ class SubagentRunner:
         # child_ctx.model_router — свой Router ребёнка (спека §7 п.4): фиксирует
         # default_model на модель субагента, как begin_turn фиксирует его на
         # активную модель в обычном ходе (turn_boundary.begin_turn).
-        begin_turn(child_state, child_ctx)
+        attach = getattr(child_ctx, "attach_state", None)
+        if callable(attach):
+            attach(child_state)
+        try:
+            begin_turn(child_state, child_ctx)
+        except AliasCircuitOpenError as exc:
+            return (
+                None,
+                None,
+                self._error_response(
+                    tool_name=tool_name,
+                    code="subagent_ctx_build_failed",
+                    message=(
+                        f"субагент {tool_name}: {exc.alias} недоступна: "
+                        f"{exc.reason}. Переключите уровень /level или профиль /profiles."
+                    ),
+                    retryable=True,
+                ),
+            )
 
         user_message = {
             "role": "user",
@@ -503,7 +641,9 @@ class SubagentRunner:
         # здесь родительский — набор ребёнка знает только его State, собранный
         # выше уже с учётом tools/stop_tools из файла сабагента.
         bootstrap_text = (
-            subagent_thread_memory_bootstrap_text(self._config, shared_mf)
+            subagent_thread_memory_bootstrap_text(
+                self._parent_settings(), shared_mf
+            )
             if tool_is_available(
                 available_tool_names(child_state), SESSION_MEMORY_TOOL_NAME
             )
@@ -537,12 +677,13 @@ class SubagentRunner:
             instance = await subagent_cls.create_instance(
                 task=task,
                 model=model,
-                config_dict=self._config,
                 runtime_notices_enabled=bool(
                     getattr(self._ctx, "is_tui", False)
                 ),
                 **extra,
             )
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -553,6 +694,8 @@ class SubagentRunner:
 
         try:
             child_ctx = await self._build_child_ctx(tool_name=tool_name)
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -606,6 +749,12 @@ class SubagentRunner:
                 # (иначе double-count уже запушенных токенов).
                 self._push_usage_delta(child_state, child_ctx)
                 self._push_tool_calls_delta(child_state)
+                # Снять уровень решения auto по концу дочернего прогона (симметрично
+                # AgentExecutor.arun) — child_ctx
+                # обычно выбрасывается вместе с этим вызовом, но если что-то ещё
+                # читает child_ctx.model_router.active_level() после возврата
+                # (лог/диагностика), не должно видеть уровень последнего решения.
+                state_ops.leave(child_state)
             if error_response is not None:
                 return error_response
 
@@ -614,19 +763,11 @@ class SubagentRunner:
                     tool_name, child_state, child_ctx
                 )
 
-            _limit_outcome = getattr(child_state, "terminal_outcome", None)
-            if _limit_outcome in (
-                "step_limit",
-                "token_limit",
-                "tool_call_limit",
-            ):
-                await self._afinish_on_limit(
-                    tool_name, child_state, child_ctx, _limit_outcome
-                )
-                # Pass-through: child run_agent already built the limit envelope
-                # (ok=false, status, message, raw_trace_summary). Do NOT rebuild
-                # our own JSON or call LLM here — spec §6.2.
-                return result
+            stopped = await self._astopped_response(
+                tool_name, child_state, child_ctx, result
+            )
+            if stopped is not None:
+                return stopped
 
             result_payload: Any = (
                 result or "Subagent finished without explicit result."
@@ -652,7 +793,7 @@ class SubagentRunner:
                 result=result_payload,
                 steps=child_state.steps,
                 finish_reason="completed",
-                usage=child_state.usage.to_meta(),
+                usage=child_state.usage.to_compact_meta(),
                 child_run_id=str(getattr(child_ctx, "run_id", "") or ""),
             )
         finally:
@@ -664,9 +805,14 @@ class SubagentRunner:
             # прогон ушёл на запасной контекст (первый раньше утекал), и ранние
             # выходы после сборки контекста.
             final_child_logger = getattr(child_ctx, "logger", None)
-            release_run_logger(primary_child_logger)
-            if final_child_logger is not primary_child_logger:
-                release_run_logger(final_child_logger)
+            if self._preparation is not None:
+                await await_callback(
+                    self._preparation.release_child_context(child_ctx)
+                )
+            else:
+                release_run_logger(primary_child_logger)
+                if final_child_logger is not primary_child_logger:
+                    release_run_logger(final_child_logger)
 
     async def _arun_child_loop(
         self,
@@ -683,7 +829,7 @@ class SubagentRunner:
         Вынесено отдельно, чтобы класс-1 фоллбэк (спека §8, ``_maybe_pin_fallback``)
         мог вызвать его повторно (рестарт/деградация) со свежим scope — переиспользовать
         уже закрытый ``scope`` первой попытки небезопасно (его `__exit__` уже отработал)."""
-        with activate_child_input(
+        with self._input_scope_factory(
             self._ctx, parent_call_id=self._parent_call_id
         ) as scope:
             # Колбэк enqueue приходит из ЧУЖОГО потока: его дёргает
@@ -702,7 +848,10 @@ class SubagentRunner:
             # собираются и дожидаются на границе прогона. Лок — потому что
             # добавляет их чужой поток, а разбирает loop.
             trace_writes: list = []
-            trace_writes_lock = threading.Lock()
+            thread_safe = getattr(scope, "thread_safe", True)
+            trace_writes_lock = (
+                threading.Lock() if thread_safe else nullcontext()
+            )
 
             async def _apersist_child_user(
                 message: Dict[str, Any], prose: str
@@ -735,8 +884,11 @@ class SubagentRunner:
                 # Копия в тред и запись трассы — на loop ребёнка, а не в потоке
                 # постановки (UI TUI): там же, где приём из очереди, — копии не
                 # гоняются, повторная идемпотентна.
-                future = asyncio.run_coroutine_threadsafe(
-                    _apersist_child_user(message, prose), loop
+                write = _apersist_child_user(message, prose)
+                future = (
+                    asyncio.run_coroutine_threadsafe(write, loop)
+                    if thread_safe
+                    else asyncio.create_task(write)
                 )
                 with trace_writes_lock:
                     trace_writes.append(future)
@@ -767,7 +919,12 @@ class SubagentRunner:
                 # Колбэк снимается ПЕРВЫМ делом: пока он вооружён, чужой поток
                 # добавляет futures, и дренаж гонялся бы за собственным хвостом.
                 scope.set_on_enqueue(None)
-                await _drain_trace_writes(trace_writes, trace_writes_lock)
+                if thread_safe:
+                    await _drain_trace_writes(trace_writes, trace_writes_lock)
+                # Signals and the child loop share one event loop. Await all
+                # sidecar writes before returning; storage failure propagates.
+                elif trace_writes:
+                    await asyncio.gather(*trace_writes)
 
     def _maybe_pin_fallback(
         self,
@@ -848,8 +1005,12 @@ class SubagentRunner:
             mode=kind,
             enabled=bool(getattr(self._ctx, "is_tui", False)),
         )
+        # Деградация заменяет упавший комплект, поэтому его AUTO-мемо больше
+        # не относится к повтору. Пара и факты хода сохраняются без begin_turn.
+        # Старые durable-входы оставляют прежнюю последовательность команд.
         child_ctx.model_router = router.with_override(active_resolved)
-        begin_turn(child_state, child_ctx)
+        if getattr(child_ctx, "subagent_independent_auto", True):
+            state_ops.leave(child_state)
         return child_ctx
 
     def _check_stop_requested(self) -> bool:
@@ -934,62 +1095,103 @@ class SubagentRunner:
         # Live spend → касса родителя (футер TUI читает parent state.usage).
         self._push_usage_delta(child_state, child_ctx)
         self._push_tool_calls_delta(child_state)
+        checkpoint = getattr(self._ctx, "subagent_checkpoint", None)
+        if checkpoint is not None:
+            checkpoint(self._orchestrator_state, self._ctx)
 
-    def _build_child_config(self) -> Dict[str, Any]:
-        """Единственная сборка конфига дочернего рана.
+    def _build_child_config(self) -> Any:
+        """Единственная сборка настроек дочернего рана.
 
         Метод общий для _build_child_state и _build_child_ctx намеренно: раньше
-        словарь собирался в двух местах независимо, и они обязаны были оставаться
-        синхронными — ровно на этом уже разъезжались ctx.trace_id и config_dict.
+        конфиг собирался в двух местах независимо, и они обязаны были оставаться
+        синхронными — ровно на этом уже разъезжались ctx.trace_id и настройки.
 
+        Локально — ``LoadedSettings`` ребёнка: настройки родителя без локальных
+        субагентов и рантайм родителя с областью инструментов из файла
+        сабагента (см. ``_build_child_settings``/``_build_child_runtime``).
         ``stop_tools`` файла ДОПОЛНЯЕТ глобальный ``agent.stop_tools``, а не
         заменяет: глобальный уже вычтен внутри get_builtin_tools_data, а этот
         список применяется поверх, к полному набору (включая mcp_*). Снять
         глобальный запрет из файла сабагента нельзя.
 
-        Узлы из ``_CHILD_CONFIG_DEEP_COPY_KEYS`` (заголовки/kwargs backend +
-        реестр моделей Router — models/slots/assign) копируются deepcopy, а не
-        по ссылке: иначе мутация ребёнка (например, override child-слота в
-        ``_build_child_model_router``) утекла бы в ``self._config`` и оттуда —
-        во все последующие ходы/субагентов сессии.
+        С внешней подготовкой (durable-исполнитель) — то, что отдаёт её
+        ``build_child_config``: всё, что принимает ``settings_of``.
         """
-        child_config = {**self._config, "use_local_subagents": False}
-        for key in _CHILD_CONFIG_DEEP_COPY_KEYS:
-            if key in child_config:
-                child_config[key] = copy.deepcopy(child_config[key])
-        definition = resolve_subagent_definitions(self._config).get(
+        if self._preparation is not None:
+            return self._preparation.build_child_config(self)
+        return LoadedSettings(
+            settings=self._build_child_settings(),
+            runtime=self._build_child_runtime(),
+        )
+
+    def _child_tool_scope(
+        self,
+    ) -> Optional[tuple[Optional[tuple[str, ...]], tuple[str, ...]]]:
+        """Область инструментов из файла сабагента: ``(allow, stop)``.
+
+        ``None`` — сабагент встроенный, область наследуется от родителя.
+        Читается рантаймом ребёнка (``_build_child_runtime``).
+        """
+        definition = resolve_subagent_definitions(self._parent_source()).get(
             self._active_tool_name
         )
-        if definition is not None:
-            child_config[SUBAGENT_TOOLS_ALLOW_KEY] = (
-                list(definition.tools)
-                if definition.tools is not None
-                else None
-            )
-            child_config[SUBAGENT_TOOLS_STOP_KEY] = list(definition.stop_tools)
-        return child_config
+        if definition is None:
+            return None
+        allow = (
+            tuple(definition.tools) if definition.tools is not None else None
+        )
+        return allow, tuple(definition.stop_tools)
+
+    def _build_child_runtime(self) -> RuntimeEnv:
+        """Рантайм ребёнка: рантайм родителя + область инструментов из его файла."""
+        parent = self._parent_runtime()
+        scope = self._child_tool_scope()
+        if scope is None:
+            return parent
+        allow, stop = scope
+        return parent.with_values(
+            subagent_tools_allow=allow, subagent_tools_stop=stop
+        )
+
+    def _build_child_settings(self) -> AppConfig:
+        """Настройки ребёнка: настройки родителя без локальных субагентов —
+        ребёнку сабагенты не выдаются в принципе (глубина всегда 1)."""
+        return override_settings(
+            self._parent_settings(),
+            {"agent.use_local_subagents": False},
+            config_dir=self._parent_runtime().config_dir,
+        )
 
     def _build_child_model_router(
-        self, tool_name: str, child_config: Dict[str, Any]
+        self, tool_name: str, child_config: Any
     ) -> Optional[ModelRouter]:
-        """Свой Router ребёнка (спека §7 п.4): `subagent:<tool_name>` родительского
-        Router становится «main» ребёнка и наследуется любым служебным вызовом БЕЗ
-        более точной assign-привязки — через `unbound_override` (спека §5.2:
-        явные привязки, и уровнем, и алиасом, продолжают резолвиться по
-        нетронутым слотам/реестру ребёнка — override их не перекрывает).
+        """Свой Router ребёнка, одним правилом «auto только у непривязанного»
+        (спека автороутинга §5.1):
 
-        `level_provider` ребёнка — константа (уровень хода родителя на момент
-        вызова), не живой TUI-провайдер: используется Router'ом только если
-        `unbound_override` не задан (сюда с непустым родительским Router'ом не
-        доходим — оставлено для полноты resolve-логики).
+        - привязанный (`assign.subagents.<tool_name>` или `"*"`,
+          `parent_router.has_binding`): `subagent:<tool_name>` родительского Router
+          становится override «main» ребёнка — наследуется любым служебным вызовом
+          БЕЗ более точной assign-привязки (явные привязки, и уровнем, и алиасом,
+          продолжают резолвиться по нетронутым слотам/реестру ребёнка — override
+          их не перекрывает); `auto_allowed` для такого Router'а False — auto у
+          привязанного субагента не активен (поле/блок не ставятся, лог
+          `mode: manual`).
+        - непривязанный: override не ставится, ребёнок ведёт СВОЙ роутинг со
+          `START_LEVEL` (`aroute_before_call` внутри его собственного цикла);
+          `level_provider` привязывается к дочернему State в `_bind_child_context`
+          тем же механизмом, что и провайдер `acreate_run_context`, с
+          сырым режимом родителя, замороженным на момент сборки
+          (`parent_router.live_level()`), — живой `/level` родителя посреди
+          работы ребёнка не уводит его модель (см.
+          `test_child_router_level_provider_is_frozen_not_live`).
 
         None, если у родителя нет Router (легаси тестовые двойники ctx) — вызывающий
         код и так устойчив к `model_router=None` (turn_boundary/воронки не падают).
 
-        Класс 1 фоллбэков недоступности (спека §8): если пин этого субагента уже
-        открыт в предохранителе (прошлый вызов этой же сессии его уронил) — ребёнок
-        сразу собирается на активной модели + notice, без повторной попытки на
-        заведомо мёртвом пине.
+        Класс 1 фоллбэков недоступности (спека §8), только для ПРИВЯЗАННОГО
+        случая: если пин этого субагента уже открыт в предохранителе (прошлый
+        вызов этой же сессии его уронил) — ребёнок сразу собирается на активной
+        модели + notice, без повторной попытки на заведомо мёртвом пине.
 
         `force_legacy` родителя (CLI `--model`/`--completions_url` поверх непустого
         реестра, спека §2) наследуется ребёнком (Task 10) — иначе собственная
@@ -999,10 +1201,27 @@ class SubagentRunner:
         parent_router = getattr(self._ctx, "model_router", None)
         if parent_router is None:
             return None
-        try:
-            resolved = parent_router.resolve(
-                f"{SUBAGENT_CONSUMER_PREFIX}{tool_name}"
+        consumer = f"{SUBAGENT_CONSUMER_PREFIX}{tool_name}"
+        if not parent_router.has_binding(consumer):
+            frozen_live = parent_router.live_level()
+
+            available = auto_available(
+                child_config, force_legacy=parent_router.force_legacy
             )
+
+            def _child_level_provider() -> str:
+                return effective_level(frozen_live, None, available)
+
+            return ModelRouter(
+                child_config,
+                level_provider=_child_level_provider,
+                live_level_provider=lambda: frozen_live,
+                breaker=parent_router.breaker,
+                force_legacy=parent_router.force_legacy,
+                is_subagent_child=True,
+            )
+        try:
+            resolved = parent_router.resolve(consumer)
         except AliasCircuitOpenError as exc:
             try:
                 resolved = parent_router.resolve("main")
@@ -1032,13 +1251,14 @@ class SubagentRunner:
         return ModelRouter(
             child_config,
             level_provider=lambda: frozen_level,
+            live_level_provider=lambda: frozen_level,
             breaker=parent_router.breaker,
             force_legacy=parent_router.force_legacy,
             unbound_override=resolved,
+            is_subagent_child=True,
         )
 
-    async def _build_child_state(self, agent_role: str) -> State:
-        """Создать дочерний State, наследуя общие данные от оркестратора."""
+    async def _prepare_local_child_state(self) -> PreparedChildState:
         child_config = self._build_child_config()
         parent_backend = getattr(self._ctx, "os_backend", None)
         (
@@ -1059,17 +1279,43 @@ class SubagentRunner:
         child_system_prompt = self._resolve_subagent_system_prompt()
 
         parent = self._orchestrator_state
-        child_state = await State.acreate(
+        prepared = await prepare_state(
+            workspace_config=child_config,
+            workspace=getattr(parent, "workspace", None),
+            agent_md_path=parent.agent_md_path,
+            verbose=parent.verbose,
+            logger=parent.logger,
+            agent_store=agent_store_of(self._ctx),
+        )
+        return PreparedChildState(
+            child_config,
+            child_tools_spec,
+            child_tools_descr,
+            child_system_prompt,
+            prepared,
+        )
+
+    async def _build_child_state(self, agent_role: str) -> State:
+        """Assemble the same State from local or externally prepared facts."""
+        prepared = (
+            await self._preparation.prepare_child_state(self)
+            if self._preparation is not None
+            else await self._prepare_local_child_state()
+        )
+        child_config = prepared.settings
+        parent = self._orchestrator_state
+        child_state = State.from_prepared(
+            prepared.state,
             parent_state_id=parent.state_id,
             verbose=parent.verbose,
             model=parent.default_model,
-            tools_spec=child_tools_spec,
-            tools_descr=child_tools_descr,
+            tools_spec=prepared.tools_spec,
+            tools_descr=prepared.tools_description,
             skills_list=parent.skills_list,
-            max_steps=self._config.get("subagent_max_steps", 50),
+            max_steps=self._parent_settings().agent.subagent_max_steps,
             system_prompt_id=parent.system_prompt_id,
             use_server_subagents=False,
-            chat_completions_system_prompt=child_system_prompt,
+            chat_completions_system_prompt=prepared.system_prompt,
             specific_role=agent_role,
             agent_md_path=parent.agent_md_path,
             shared=parent.shared,
@@ -1095,7 +1341,7 @@ class SubagentRunner:
     def _is_custom_subagent(self) -> bool:
         """Задан ли текущий сабагент файлом, а не классом."""
         return self._active_tool_name in resolve_subagent_definitions(
-            self._config
+            self._parent_source()
         )
 
     def _resolve_subagent_system_prompt(self) -> Optional[str]:
@@ -1105,37 +1351,48 @@ class SubagentRunner:
         что роль написана оператором в локальном файле, прав не выдаёт и может
         расходиться с фактическим набором инструментов.
         """
+        # Путь из настроек есть только у кастомных; встроенные берут пакетный.
         if self._is_custom_subagent():
-            config_key = "chat_completions_custom_subagent_system_prompt_path"
+            paths = self._parent_settings().paths
+            prompt_path_raw = (
+                paths.chat_completions_custom_subagent_system_prompt_path
+            )
+            name = "custom_subagent"
             default_name = "chat_completions_custom_subagent_system_prompt.md"
         else:
-            config_key = "chat_completions_subagent_system_prompt_path"
+            prompt_path_raw = None
+            name = "subagent"
             default_name = "chat_completions_subagent_system_prompt.md"
 
-        prompt_path_raw = self._config.get(config_key)
-        candidate_paths: List[str] = []
+        candidates: List[AgentResource] = []
         if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
-            candidate_paths.append(os.path.abspath(prompt_path_raw.strip()))
+            candidates.append(
+                AgentResource(
+                    "prompt", name, os.path.abspath(prompt_path_raw.strip())
+                )
+            )
         # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-        candidate_paths.append(str(bundled_root() / "prompts" / default_name))
+        candidates.append(
+            AgentResource(
+                "prompt", name, str(bundled_root() / "prompts" / default_name)
+            )
+        )
 
-        for prompt_path in candidate_paths:
-            if not prompt_path:
-                continue
+        store = agent_store_of(self._ctx)
+        for resource in candidates:
             try:
-                if not os.path.exists(prompt_path):
-                    continue
-                with open(prompt_path, encoding="utf-8") as fd:
-                    loaded = fd.read().strip()
+                loaded = store.read_text(resource).strip()
                 if loaded:
                     return loaded
+            except FileNotFoundError:
+                continue
             # Первый кандидат — путь ИЗ КОНФИГА: файл человека, кодировка его.
             # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и уходил
             # мимо этого фолбэка, роняя запуск сабагента вместо отката на пакетный.
             except (OSError, UnicodeDecodeError):
                 _log.warning(
                     "Failed to read subagent system prompt from %s",
-                    prompt_path,
+                    resource.label,
                     exc_info=True,
                 )
 
@@ -1155,7 +1412,7 @@ class SubagentRunner:
             special_instructions = (
                 merge_special_instructions_with_model_steering(
                     None,
-                    config_dict=self._config,
+                    settings=self._parent_source(),
                 )
             )
             rendered = render_system_prompt(
@@ -1179,6 +1436,11 @@ class SubagentRunner:
 
     async def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
+        if self._preparation is not None:
+            child_ctx = await self._preparation.build_child_context(
+                self, tool_name
+            )
+            return self._bind_child_context(child_ctx, tool_name)
         child_config = self._build_child_config()
         child_router = self._build_child_model_router(tool_name, child_config)
         child_run_id = generate_run_id()
@@ -1219,13 +1481,20 @@ class SubagentRunner:
             tools_cache=getattr(self._ctx, "tools_cache", None),
         )
 
+        child_loaded = LoadedSettings(
+            settings=settings_of(child_config),
+            runtime=runtime_of(child_config),
+        )
+        child_runtime = child_loaded.runtime
         child_ctx = RunContext(
-            config_dict=child_config,
+            settings=child_loaded.settings,
+            runtime=child_runtime,
             run_id=child_run_id,
-            # config_dict наследуется дословно через child_config, но поле ctx
-            # собирается руками и НЕ наследуется автоматически — без этой строки
-            # ctx.trace_id ребёнка разъедется с его же config_dict.
-            trace_id=trace_id_from_config(child_config),
+            # Рантайм наследуется через child_runtime, но поле ctx собирается
+            # руками и НЕ наследуется автоматически — без этой строки
+            # ctx.trace_id ребёнка разъедется с его же рантаймом.
+            # "" — отсутствие (как trace_id_from_config).
+            trace_id=str(child_runtime.trace_id or "").strip(),
             auth_connector=getattr(self._ctx, "auth_connector", None),
             logger=child_logger,
             logging_path=child_log_path,
@@ -1244,11 +1513,84 @@ class SubagentRunner:
             # Кэш едет дальше вниз: иначе внуки (субагент субагента) снова
             # платили бы полную дискавери на каждый спавн.
             tools_cache=getattr(self._ctx, "tools_cache", None),
+            # Определения сабагентов родителя (и их диагностика) — ребёнку как
+            # есть: повторный дискавери ему ни к чему.
+            subagent_definitions=getattr(
+                self._ctx, "subagent_definitions", None
+            ),
+            subagent_diagnostics=getattr(
+                self._ctx, "subagent_diagnostics", None
+            ),
+            subagent_independent_auto=getattr(
+                self._ctx, "subagent_independent_auto", True
+            ),
         )
+        return self._bind_child_context(child_ctx, tool_name)
+
+    def _root_user_words(self) -> list[str]:
+        """Слова пользователя корневой сессии — для судьи действий ребёнка.
+
+        Читаются в момент проверки, а не при запуске. В этой ветке родитель
+        ждёт ребёнка, и за это время его журнал не меняется; фоновым
+        субагентам источник нужно будет подменить на текущее состояние
+        корневой сессии — тогда граница, названная человеком после запуска
+        ребёнка, дойдёт до его судьи.
+        """
+        inherited = getattr(self._ctx, "root_user_messages", None)
+        if callable(inherited):
+            return list(inherited())
+        from gc_core.security.action_judge_input import user_words
+
+        return user_words(
+            self._orchestrator_state,
+            getattr(self._ctx, "tools_data", None) or {},
+        )
+
+    def _bind_child_context(self, child_ctx: Any, tool_name: str) -> Any:
+        """Common routing, parent identity, human frontend and sidecar binding."""
+        child_ctx.root_user_messages = self._root_user_words
+        router = getattr(child_ctx, "model_router", None)
+        child_ctx.auto_available = auto_available(
+            child_ctx,
+            force_legacy=bool(getattr(router, "force_legacy", False)),
+            legacy_call_kits=not getattr(
+                child_ctx, "routing_contract_v2", True
+            ),
+        )
+        params = resolve_routing_params(
+            child_ctx,
+            legacy_call_kits=not getattr(
+                child_ctx, "routing_contract_v2", True
+            ),
+        )
+        if not getattr(child_ctx, "subagent_independent_auto", True):
+            params = turn_params(
+                params,
+                getattr(self._orchestrator_state, "turn_safe_level", None),
+            )
+        child_ctx.routing_params = params
+        if router is not None:
+            live = router.live_level
+
+            def effective_provider() -> str:
+                state = getattr(child_ctx, "active_state", None)
+                return effective_level(
+                    live(),
+                    getattr(state, "current_level", None),
+                    child_ctx.auto_available,
+                )
+
+            child_ctx.model_router = router.with_level_providers(
+                effective_provider, live
+            )
         # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
         # иначе child process_tool_calls видит оба флага False и collect выключается.
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))
         child_ctx.is_cli_mode = bool(getattr(self._ctx, "is_cli_mode", False))
+        # Хранилище агента у ребёнка то же: промпты, инструкции и скиллы
+        # одного агента.
+        if getattr(child_ctx, "agent_store", None) is None:
+            child_ctx.agent_store = getattr(self._ctx, "agent_store", None)
         # Progress bridge: same sink as parent (TUI queue or None/no-op); call_id of
         # the parent subagent_* function_call for correlating nested UI rows.
         child_ctx.subagent_progress_sink = getattr(
@@ -1289,8 +1631,10 @@ class SubagentRunner:
             bind_turn_identity(child_ctx, parent_turn_id)
         else:
             clear_turn_identity(child_ctx)
-        # HITL: тот же confirm-баннер родителя + имя субагента для метки via.
+        # HITL: баннер TUI и порт confirm родителя (ACP: session/request_permission).
+        # Без порта ребёнок при is_tui=False молча отвечает deny_once.
         child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)
+        child_ctx.confirm_request = getattr(self._ctx, "confirm_request", None)
         child_ctx.permission_store = getattr(
             self._ctx, "permission_store", None
         )
@@ -1299,6 +1643,10 @@ class SubagentRunner:
         # потоко-локальна: поток читал настоящую консоль, которую держит
         # Textual, и делил с ним нажатия — ход висел, клавиши пропадали.
         child_ctx.ask_human = getattr(self._ctx, "ask_human", None)
+        # Порт подтверждения — туда же. Без него write/command guard ребёнка
+        # при tty читает `input()` процесса. Канал без человека (A2A, сервер)
+        # объявлен в рантайме, ребёнок его наследует.
+        child_ctx.confirm_request = getattr(self._ctx, "confirm_request", None)
         # Пометка «изображение не просмотрено» — в ленту родителя: отказ «глаз»
         # внутри субагента иначе ушёл бы только в журнал ребёнка.
         child_ctx.on_trace_note = getattr(self._ctx, "on_trace_note", None)
@@ -1307,7 +1655,8 @@ class SubagentRunner:
         # файловое хранилище по умолчанию. У встраивающего, отдавшего свой стор
         # (`AsyncAgent.create(cfg, thread_store=…)`), трасса либо терялась, либо
         # ложилась на диск хоста мимо него.
-        child_ctx.thread_store = getattr(self._ctx, "thread_store", None)
+        if getattr(child_ctx, "thread_store", None) is None:
+            child_ctx.thread_store = getattr(self._ctx, "thread_store", None)
         # Хранилище картинок — родителя: запросы ребёнка проецируют вложения (снимки
         # его тула) через это хранилище.
         child_ctx.image_store = getattr(self._ctx, "image_store", None)

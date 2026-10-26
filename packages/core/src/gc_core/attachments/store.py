@@ -11,7 +11,12 @@
 Имя файла — хеш нормализованных байт, поэтому запись идемпотентна: есть файл —
 второй раз он не пишется. Запись атомарная: временный файл и замена. Сам
 объект хранилища на диске ничего не создаёт: каталоги появляются при первой
-записи (``stage`` / ``commit`` / ``snapshot``).
+записи (``stage`` / ``commit`` / ``snapshot``), временный корень — тоже.
+
+Хранилище тредов с файлами треда (``gc_core.thread_files``: SQLite, S3,
+память SDK, воркер Temporal) держит картинки у себя — ``StoreImageStore``:
+на диске процесса ничего, reset и delete треда удаляют их вместе с историей.
+Выбор — ``image_store_for``.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ import shutil
 import stat
 import tempfile
 from dataclasses import replace
-from typing import Any, Mapping
+from typing import Any
 
 from gc_core.attachments.model import (
     CLIPBOARD_SOURCE,
@@ -53,6 +58,8 @@ from gc_core.utils.pid_alive import is_pid_alive
 logger = logging.getLogger(__name__)
 
 IMAGES_DIRNAME = "images"
+#: Медиа из ответов инструментов (MCP) среди файлов треда.
+MEDIA_DIRNAME = "mcp-media"
 STAGING_DIRNAME = "_staging"
 
 _TEMP_ROOT_PREFIX = "gc-images-"
@@ -61,22 +68,32 @@ _PID_DIRNAME = re.compile(r"[0-9]+")
 
 
 class ImageStore:
-    def __init__(self, root: str, *, pid: int | None = None) -> None:
-        self.root = os.path.abspath(root)
+    def __init__(self, root: str | None, *, pid: int | None = None) -> None:
+        # None — свой каталог во временном каталоге системы, но создаётся он
+        # только при первом обращении к корню (запись, проверка пути), а не
+        # при сборке контекста.
+        self._root = os.path.abspath(root) if root else None
         self.pid = os.getpid() if pid is None else pid
-        self.staging_dir = os.path.join(
-            self.root, STAGING_DIRNAME, str(self.pid)
-        )
+
+    @property
+    def root(self) -> str:
+        if self._root is None:
+            self._root = _temp_root()
+        return self._root
+
+    @property
+    def staging_dir(self) -> str:
+        return os.path.join(self.root, STAGING_DIRNAME, str(self.pid))
 
     @classmethod
     def for_threads_dir(cls, threads_dir: str) -> ImageStore:
         """Хранилище каталога тредов; ``""`` — свой каталог во временном каталоге системы."""
         if threads_dir:
             return cls(os.path.join(threads_dir, IMAGES_DIRNAME))
-        return cls(_temp_root())
+        return cls(None)
 
     @classmethod
-    def for_config(cls, config_dict: Mapping[str, Any]) -> ImageStore:
+    def for_config(cls, settings: Any) -> ImageStore:
         """Хранилище конфига запуска — единственное правило корня для ядра, охраны
         путей (``security/media_roots.py``), CLI и TUI.
 
@@ -86,7 +103,7 @@ class ImageStore:
         корня, который охрана считает ``media``.
         """
         try:
-            threads_dir = resolve_threads_dir(config_dict)
+            threads_dir = resolve_threads_dir(settings)
         except ValueError:
             threads_dir = ""
         return cls.for_threads_dir(threads_dir)
@@ -215,6 +232,173 @@ class ImageStore:
         return os.path.join(self.root, name)
 
 
+class StoreImageStore:
+    """Картинки в хранилище тредов (файлы треда): на диске процесса ничего.
+
+    Тот же интерфейс, что у ``ImageStore``; путь вложения — ссылка
+    ``thread-file://…`` (``gc_core.thread_files``). Карман процесса — в
+    памяти: картинка до отправки живёт, пока жив процесс. Карманом пользуется
+    только прогон без треда (SDK без ``thread_id``) — в одном процессе; под
+    Temporal у сессии тред есть всегда, и снимки сразу ложатся в хранилище
+    (``snapshot``), так что «stage на одном воркере, commit на другом» не
+    случается. Вложение приложения из ``ImageStore`` (файл на диске)
+    ``commit`` и ``read_for_send`` читают с диска.
+    """
+
+    root = None
+    staging_dir = None
+
+    def __init__(self, thread_store: Any) -> None:
+        from gc_core.thread_files import thread_files_capability
+
+        files = thread_files_capability(thread_store)
+        if files is None:
+            raise TypeError("Хранилище тредов не умеет файлы треда")
+        self._files = files
+        self._staging: dict[str, bytes] = {}
+
+    def stage(
+        self, image: NormalizedImage, *, origin: str, label: str, source: str
+    ) -> Attachment:
+        att_id = image_id(image.data)
+        self._staging[att_id] = image.data
+        return _attachment(
+            image,
+            att_id,
+            f"{_STAGING_URI}{att_id}.{_extension(image.mime)}",
+            origin=origin,
+            label=label,
+            source=source,
+        )
+
+    def commit(
+        self, att: Attachment, system_id: str, thread_id: str
+    ) -> Attachment:
+        """Из кармана в хранилище треда; не бросает (как ``ImageStore``)."""
+        name = _image_name(att.id, att.mime)
+        data = self._staging.get(att.id)
+        if data is None:
+            data = self.read_for_send(att)
+        if data is None:
+            logger.warning(
+                "image_commit_failed: картинки %s нет в кармане", att.id
+            )
+            return att
+        try:
+            self._files.write(system_id, thread_id, name, data)
+        except Exception as exc:
+            logger.warning(
+                "image_commit_failed: картинка %s не записана в тред: %s",
+                att.id,
+                exc,
+            )
+            return att
+        from gc_core.thread_files import thread_file_uri
+
+        return replace(att, path=thread_file_uri(system_id, thread_id, name))
+
+    def snapshot(
+        self,
+        image: NormalizedImage,
+        system_id: str,
+        thread_id: str,
+        *,
+        origin: str,
+        label: str,
+        source: str,
+    ) -> Attachment:
+        from gc_core.thread_files import thread_file_uri
+
+        att_id = image_id(image.data)
+        name = _image_name(att_id, image.mime)
+        self._files.write(system_id, thread_id, name, image.data)
+        return _attachment(
+            image,
+            att_id,
+            thread_file_uri(system_id, thread_id, name),
+            origin=origin,
+            label=label,
+            source=source,
+        )
+
+    def read_uri(self, uri: str) -> bytes | None:
+        """Байты файла треда по ссылке ``thread-file://`` (или ``None``)."""
+        from gc_core.thread_files import parse_thread_file_uri
+
+        if uri.startswith(_STAGING_URI):
+            return self._staging.get(uri[len(_STAGING_URI) :].split(".")[0])
+        parsed = parse_thread_file_uri(uri)
+        if parsed is None:
+            return None
+        try:
+            return self._files.read(*parsed)
+        except Exception:
+            logger.warning("thread_file_read_failed: %s", uri, exc_info=True)
+            return None
+
+    def write_media(
+        self, system_id: str, thread_id: str, name: str, data: bytes
+    ) -> str:
+        """Медиа инструмента (картинка или аудио из ответа MCP) — файлом
+        треда; → ссылка ``thread-file://`` для модели."""
+        from gc_core.thread_files import safe_name, thread_file_uri
+
+        path = f"{MEDIA_DIRNAME}/{safe_name(name)}"
+        self._files.write(system_id, thread_id, path, data)
+        return thread_file_uri(system_id, thread_id, path)
+
+    def read_for_send(self, att: Attachment) -> bytes | None:
+        """Байты ссылки ``thread-file://`` или файла на диске (вложение,
+        сделанное приложением через ``ImageStore``, тред из локального режима);
+        хеш сверяется с ``att.id``, как у ``ImageStore``."""
+        from gc_core.thread_files import THREAD_FILE_SCHEME
+
+        if str(att.path).startswith(THREAD_FILE_SCHEME):
+            data = self.read_uri(att.path)
+        else:
+            try:
+                with open(att.path, "rb") as handle:
+                    data = handle.read()
+            except (OSError, TypeError, ValueError):
+                data = None
+        return data if data is not None and image_id(data) == att.id else None
+
+    def delete_thread_images(self, system_id: str, thread_id: str) -> None:
+        """Файлы треда удаляет само хранилище (reset, delete)."""
+
+    def clear_own_staging(self) -> None:
+        self._staging.clear()
+
+    def sweep_dead_staging(self) -> None:
+        """Карман в памяти процесса: чужих карманов нет."""
+
+
+#: Карман ``StoreImageStore`` — в памяти процесса, ссылка без треда.
+_STAGING_URI = "thread-file://-/staging/"
+
+
+def _image_name(att_id: str, mime: str) -> str:
+    return f"{IMAGES_DIRNAME}/{att_id}.{_extension(mime)}"
+
+
+def image_store_for(settings: Any, thread_store: Any = None) -> Any:
+    """Хранилище картинок прогона.
+
+    Хранилище тредов с файлами треда — картинки у него (``StoreImageStore``);
+    файловое хранилище — каталог ``images`` рядом с его тредами; без
+    хранилища — по конфигу, как раньше (``ImageStore.for_config``).
+    """
+    from gc_core.thread_files import thread_files_capability
+
+    if thread_store is not None:
+        if thread_files_capability(thread_store) is not None:
+            return StoreImageStore(thread_store)
+        threads_dir = getattr(thread_store, "threads_dir", None)
+        if isinstance(threads_dir, str) and threads_dir:
+            return ImageStore.for_threads_dir(threads_dir)
+    return ImageStore.for_config(settings)
+
+
 def commit_to_run_thread(ctx: Any, att: Attachment) -> Attachment:
     """Копия вложения в тред прогона — единственный путь ядра «карман → тред».
 
@@ -304,6 +488,20 @@ def _put(
 ) -> Attachment:
     if not os.path.exists(path):
         _write_atomic(path, image.data)
+    return _attachment(
+        image, att_id, path, origin=origin, label=label, source=source
+    )
+
+
+def _attachment(
+    image: NormalizedImage,
+    att_id: str,
+    path: str,
+    *,
+    origin: str,
+    label: str,
+    source: str,
+) -> Attachment:
     return Attachment(
         id=att_id,
         kind=KIND_IMAGE,

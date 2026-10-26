@@ -1,10 +1,9 @@
 """Цепочка: проба → поле/конфиг as-is → build_call_headers шлёт как записано."""
 
-from types import SimpleNamespace
-
 import pytest
 from gc_core import onboarding_config_writer as ocw
 from gc_core.utils.connect_backend import build_call_headers
+from gc_testkit.settings import fake_ctx
 from gc_tui.services.settings_probe import ProbeResult, probe_connection
 
 pytest.importorskip("textual")
@@ -115,11 +114,11 @@ async def test_naked_in_field_survives_save_into_call_headers(tmp_path):
     assert 'Authorization: "sk-naked"' in text
     assert "Bearer sk-naked" not in text
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "x_cl_id": 1,
-            "backend_api_mode": "chat_completions",
-            "chat_completion_headers": {"Authorization": "sk-naked"},
+    ctx = fake_ctx(
+        {
+            "agent.x_cl_id": "1",
+            "backend.api_mode": "chat_completions",
+            "backend.chat_completion_headers": {"Authorization": "sk-naked"},
         },
         auth_connector=None,
     )
@@ -172,11 +171,13 @@ async def test_explicit_bearer_saved_as_written(tmp_path):
         encoding="utf-8"
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
-            "x_cl_id": 1,
-            "backend_api_mode": "chat_completions",
-            "chat_completion_headers": {"Authorization": "Bearer sk-naked"},
+    ctx = fake_ctx(
+        {
+            "agent.x_cl_id": "1",
+            "backend.api_mode": "chat_completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer sk-naked"
+            },
         },
         auth_connector=None,
     )

@@ -1,8 +1,6 @@
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
-
-
-def _yaml_of(screen):
-    return screen.rendered_text()
+from screen_text import mcp_text
 
 
 def test_mcp_cards_text_shows_status_reason_tools():
@@ -23,7 +21,7 @@ def test_mcp_cards_text_shows_status_reason_tools():
         },
     }
     scr = McpScreen(tools_snapshot=snap)
-    text = scr.rendered_text()
+    text = mcp_text(scr)
     assert "office" in text and "connected" in text
     assert "Read office docs" in text
     assert "mcp_office_read" not in text  # свёрнуто: имён тулов нет
@@ -31,16 +29,14 @@ def test_mcp_cards_text_shows_status_reason_tools():
     assert "команда 'computer-mcp' не найдена" in text
     assert "1 connected" in text and "1 failed" in text
     scr.cards[0].toggle()  # раскрыли office
-    assert (
-        "read" in scr.rendered_text()
-    )  # короткое имя (префикс mcp_office_ срезан)
+    assert "read" in mcp_text(scr)  # короткое имя (префикс mcp_office_ срезан)
 
 
 def test_mcp_cards_empty_when_no_snapshot():
     from gc_tui.screens.mcp import McpScreen
 
     scr = McpScreen(tools_snapshot=None)
-    assert "после первого запуска" in scr.rendered_text()
+    assert "после первого запуска" in mcp_text(scr)
 
 
 @pytest.mark.asyncio
@@ -50,7 +46,7 @@ async def test_mcp_screen_with_snapshot(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     cfg = {
-        "mcp-servers": {
+        "mcp.servers": {
             "search": {"transport": "sse", "url": "http://x", "token": "T"}
         }
     }
@@ -62,17 +58,19 @@ async def test_mcp_screen_with_snapshot(tmp_path):
             "tools": [{"name": "search.web", "description": "web"}],
         }
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test() as pilot:
-        scr = McpScreen(config=cfg, tools_snapshot=snap)
+        scr = McpScreen(settings=as_settings(cfg), tools_snapshot=snap)
         await app.push_screen(scr)
         await pilot.pause()
-        t = _yaml_of(scr)
+        t = mcp_text(scr)
         assert "search" in t and "connected" in t
         assert "search.web" not in t  # свёрнуто
         scr.cards[0].toggle()
         await pilot.pause()
-        assert "search.web" in _yaml_of(
+        assert "search.web" in mcp_text(
             scr
         )  # имя без префикса mcp_ остаётся как есть
 
@@ -83,13 +81,15 @@ async def test_mcp_screen_no_snapshot_shows_note(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.mcp import McpScreen
 
-    cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    cfg = {"mcp.servers": {"search": {"transport": "sse", "url": "http://x"}}}
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test() as pilot:
-        scr = McpScreen(config=cfg, tools_snapshot=None)
+        scr = McpScreen(settings=as_settings(cfg), tools_snapshot=None)
         await app.push_screen(scr)
         await pilot.pause()
-        t = _yaml_of(scr)
+        t = mcp_text(scr)
         assert "после первого запуска" in t
 
 
@@ -100,13 +100,17 @@ async def test_mcp_screen_empty(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"mcp.servers": {}}),
     )
     async with app.run_test() as pilot:
-        scr = McpScreen(config={"mcp-servers": {}}, tools_snapshot={})
+        scr = McpScreen(
+            settings=as_settings({"mcp.servers": {}}), tools_snapshot={}
+        )
         await app.push_screen(scr)
         await pilot.pause()
-        assert "нет MCP-серверов" in _yaml_of(scr)
+        assert "нет MCP-серверов" in mcp_text(scr)
 
 
 @pytest.mark.asyncio
@@ -117,7 +121,9 @@ async def test_mcp_screen_esc_returns_to_main(tmp_path):
     from gc_tui.screens.main import TraceScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"mcp.servers": {}}),
     )
     async with app.run_test() as pilot:
         await pilot.app.screen._handle_command("mcp")
@@ -137,10 +143,12 @@ async def test_mcp_screen_has_header_and_footer(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.mcp import McpScreen
 
-    cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    cfg = {"mcp.servers": {"search": {"transport": "sse", "url": "http://x"}}}
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test() as pilot:
-        scr = McpScreen(config=cfg, tools_snapshot=None)
+        scr = McpScreen(settings=as_settings(cfg), tools_snapshot=None)
         await app.push_screen(scr)
         await pilot.pause()
         assert scr.query("#header") and scr.query("#footer")
@@ -157,7 +165,7 @@ def test_mcp_card_reason_on_failed_line():
             "tools": [],
         }
     }
-    text = McpScreen(tools_snapshot=snap).rendered_text()
+    text = mcp_text(McpScreen(tools_snapshot=snap))
     failed_line = next(ln for ln in text.splitlines() if "failed" in ln)
     assert (
         "команда не найдена" in failed_line

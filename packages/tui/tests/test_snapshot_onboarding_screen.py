@@ -17,7 +17,7 @@ import pytest
 pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
-from gc_testkit.tui_support import wait_until
+from gc_testkit.tui_support import tui_settings, wait_until
 
 
 def _unconfigured() -> dict:
@@ -26,11 +26,11 @@ def _unconfigured() -> dict:
     from gc_core import onboarding
 
     return {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
+        "backend.completions_url": onboarding.URL_SENTINEL,
+        "backend.chat_completion_headers": {
             "Authorization": onboarding.TOKEN_SENTINEL
         },
-        "model": onboarding.MODEL_SENTINEL,
+        "agent.model": onboarding.MODEL_SENTINEL,
     }
 
 
@@ -42,7 +42,9 @@ def _app(tmp_path, monkeypatch):
     monkeypatch.setattr(TuiApp, "_start_auto_update_check", lambda self: None)
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config=_unconfigured()
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_unconfigured()),
     )
     app._onboarding_mode = "auto"  # ставит tui/__init__.py
     app._onboarding_config_path = str(tmp_path / "config.yml")

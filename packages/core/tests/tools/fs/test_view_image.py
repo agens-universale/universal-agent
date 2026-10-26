@@ -5,8 +5,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from PIL import Image
-
 from gc_core.attachments.model import ORIGIN_TOOL, TOOL_LABEL
 from gc_core.attachments.store import ImageStore
 from gc_core.attachments.texts import (
@@ -25,6 +23,8 @@ from gc_core.vision.audience import Audience
 from gc_core.vision.errors import ERR_NO_IMAGE_STORE, ERR_TOO_MANY_IMAGES
 from gc_testkit.harbor_fakes import FakeBackend
 from gc_testkit.helpers.tool_ctx import local_ctx
+from gc_testkit.settings import fake_ctx, make_settings
+from PIL import Image
 
 
 def _png(size=(64, 48)) -> bytes:
@@ -64,14 +64,14 @@ def _local_tool(tmp_path, *, state, config=None, thread=True):
     ctx.logger = None
     if thread:
         ctx.system_id, ctx.thread_id = "cli", "t1"
-    return ViewImage(ctx=ctx, state=state, config_dict=cfg)
+    return ViewImage(ctx=ctx, state=state)
 
 
 class _BytesBackend(FakeBackend):
     """Контейнер с двоичными файлами: ``FakeBackend`` хранит только текст."""
 
     def __init__(self, blobs):
-        super().__init__({path: "" for path in blobs})
+        super().__init__(dict.fromkeys(blobs, ""))
         self._blobs = dict(blobs)
 
     async def getsize(self, p):
@@ -82,9 +82,13 @@ class _BytesBackend(FakeBackend):
 
 
 def _sandbox_tool(tmp_path, backend, *, state):
-    cfg = {"launch_root": "/work"}
-    ctx = SimpleNamespace(
-        config_dict=cfg,
+    # Периметр чтения выключен, как в плоском словаре теста на develop (секции
+    # `read_guard` там не было): здесь проверяется выбор хоста или контейнера.
+    cfg = make_settings(
+        {"launch_root": "/work", "security.read_guard": {"enabled": False}}
+    )
+    ctx = fake_ctx(
+        loaded=cfg,
         os_backend=backend,
         workspace=build_execution_workspace(backend, cfg),
         image_store=ImageStore(str(tmp_path / "store")),
@@ -92,7 +96,7 @@ def _sandbox_tool(tmp_path, backend, *, state):
         thread_id="t1",
         logger=None,
     )
-    return ViewImage(ctx=ctx, state=state, config_dict=cfg)
+    return ViewImage(ctx=ctx, state=state)
 
 
 def test_schema_path_required_question_optional_mcp_hint():
@@ -340,7 +344,7 @@ async def test_path_outside_the_read_perimeter_is_read_denied(tmp_path):
     src.write_bytes(_png())
     cfg = {
         "launch_root": str(project),
-        "read_guard": {
+        "security.read_guard": {
             "enabled": True,
             "mode": "deny",
             "allowed_read_roots": [str(project)],
@@ -408,3 +412,66 @@ async def test_project_file_is_read_through_the_execution_environment(
 
     assert out["attached"] is True
     assert state.pending_tool_attachments[0]["source"] == "/work/shot.png"
+
+
+async def test_thread_file_link_is_read_through_the_thread_store(tmp_path):
+    """Картинка из ответа MCP в хранилище тредов (ссылка ``thread-file://``):
+    тул читает байты через хранилище, снимок кладёт туда же — на диске
+    процесса ни файла, ни каталога."""
+    from gc_core.attachments.store import StoreImageStore
+    from gc_core.thread_files import is_thread_file_uri
+    from gc_testkit.memory_thread_store import MemoryThreadStore
+
+    store = MemoryThreadStore()
+    image_store = StoreImageStore(store)
+    link = image_store.write_media("cli", "t1", "shot.png", _png())
+    state = _state()
+    tool = _local_tool(tmp_path, state=state)
+    tool._ctx.image_store = image_store
+
+    out = json.loads(await tool.acall(path=link))
+
+    assert out["ok"] is True and out["attached"] is True
+    assert out["path"] == link
+    [att] = state.pending_tool_attachments
+    assert is_thread_file_uri(att["path"])
+    assert not (tmp_path / "images").exists()
+    missing = json.loads(
+        await tool.acall(path="thread-file://cli/t1/mcp-media/none.png")
+    )
+    assert missing["ok"] is False
+    # Ссылка на файл ЧУЖОГО треда — отказ, даже если файл существует.
+    foreign = image_store.write_media("cli", "other", "secret.png", _png())
+    denied = json.loads(await tool.acall(path=foreign))
+    assert denied["ok"] is False
+    assert denied["error"]["type"] == "read_denied"
+
+
+async def test_image_in_the_run_image_store_is_media_wherever_it_lives(
+    tmp_path,
+):
+    """SDK со своим ``FileThreadStore(dir)``: картинки лежат рядом с его тредами,
+    не по конфигу. Охрана считает корнем media хранилище картинок ПРОГОНА —
+    повторный просмотр картинки из истории не получает ``read_denied``."""
+    project = tmp_path / "project"
+    project.mkdir()
+    cfg = {
+        "launch_root": str(project),
+        "security.read_guard": {
+            "enabled": True,
+            "mode": "deny",
+            "allowed_read_roots": [str(project)],
+        },
+    }
+    state = _state()
+    tool = _local_tool(tmp_path, state=state, config=cfg)
+    tool._ctx.image_store = ImageStore.for_threads_dir(
+        str(tmp_path / "sdk-threads")
+    )
+    shot = Path(tool._ctx.image_store.root) / "images" / "shot.png"
+    shot.parent.mkdir(parents=True)
+    shot.write_bytes(_png())
+
+    out = json.loads(await tool.acall(path=str(shot)))
+
+    assert out["ok"] is True, out

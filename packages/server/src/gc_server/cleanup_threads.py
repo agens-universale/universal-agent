@@ -186,12 +186,12 @@ def _default_threads_dir() -> str:
     from gc_core.thread_store import resolve_threads_dir
 
     from gc_server.rest_api.server_config import (
-        build_agent_config_for_server,
+        build_agent_settings_for_server,
         load_server_config,
     )
 
     return resolve_threads_dir(
-        build_agent_config_for_server(load_server_config())
+        build_agent_settings_for_server(load_server_config())
     )
 
 

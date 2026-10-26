@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from gc_core.loop_detector.constants import (
     GENERIC_PROFILE,
@@ -12,6 +12,10 @@ _THINK_FIELDS = ("thoughts", "critics", "doubts", "reflection")
 
 @loop_warn_on_repeat(**GENERIC_PROFILE)
 class Think(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
+
     @staticmethod
     def _result(
         *,
@@ -47,7 +51,7 @@ class Think(AbstractSimpleTool):
         return remapped
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         description = {
             "type": "function",
             "name": "session_think",
@@ -88,7 +92,7 @@ class Think(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = """Tool name: session_think
 Tool description: Think out loud for the current turn. Supports structured multi-layer thinking: thoughts, critics, doubts, reflection.
 IMPORTANT: think content is NOT saved to thread memory and NOT saved to any durable storage. It only exists in the current dialogue context.

@@ -14,6 +14,8 @@ from gc_chat.main import main
 from gc_chat.responses.facade import ResponsesFacade
 from gc_chat.responses.http_api import create_app as create_responses
 from gc_chat.responses.index_store import ResponseIndex
+from gc_core.settings import LoadedSettings
+from gc_testkit.settings import make_settings
 
 # Host-guard пускает только loopback (gc_chat.http_guard).
 LOOPBACK = "http://127.0.0.1"
@@ -69,32 +71,37 @@ class _Hold(httpx.AsyncByteStream):
         self.release.set()
 
 
-def _config(tmp_path, model: str = "backend-model") -> dict:
-    return {
-        "model": model,
-        "threads_data_path": str(tmp_path / "threads"),
-        "completions_url": _URL,
-        "backend_request_timeout_sec": 12,
-        "use_ssl": False,
-        "proxy": "http://proxy.test:8080",
-        "backend_api_mode": "chat_completions",
-        "chat_completion_headers": {"X-Corp": "yes"},
-        "chat_api_auth_token": "client-secret",
+def _settings(
+    tmp_path, model: str = "backend-model", **extra
+) -> LoadedSettings:
+    config = {
+        "agent.model": model,
+        "paths.threads_data_path": str(tmp_path / "threads"),
+        "backend.completions_url": _URL,
+        "backend.request_timeout_sec": 12,
+        "backend.use_ssl": False,
+        "backend.proxy": "http://proxy.test:8080",
+        "backend.api_mode": "chat_completions",
+        "backend.chat_completion_headers": {"X-Corp": "yes"},
+        "chat_api.auth_token": "client-secret",
     }
+    return make_settings({**config, **extra})
 
 
-def _completions(tmp_path, *, model: str = "backend-model", auth=None):
+def _completions(
+    tmp_path, *, model: str = "backend-model", auth=None, **extra
+):
     threads = tmp_path / "threads"
     threads.mkdir(exist_ok=True)
-    created: list[dict] = []
+    created: list[LoadedSettings] = []
 
-    async def factory(config, **kwargs):
+    async def factory(settings, **kwargs):
         del kwargs
-        created.append(config)
+        created.append(settings)
         return _Agent()
 
     facade = CompletionsFacade(
-        config=_config(tmp_path, model),
+        settings=_settings(tmp_path, model, **extra),
         agent_factory=factory,
         auth_connector=auth,
     )
@@ -148,19 +155,18 @@ def test_models_list_order_and_empty_config(tmp_path):
 def test_joint_and_responses_list_the_same_ids(tmp_path):
     threads = tmp_path / "threads"
     threads.mkdir()
-    config = _config(tmp_path)
-    config["chat_api_auth_token"] = ""
+    settings = _settings(tmp_path, **{"chat_api.auth_token": ""})
 
-    async def factory(config, **kwargs):
-        del config, kwargs
+    async def factory(settings, **kwargs):
+        del settings, kwargs
         return _Agent()
 
     responses = ResponsesFacade(
-        config=config,
+        settings=settings,
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )
-    completions = CompletionsFacade(config=config, agent_factory=factory)
+    completions = CompletionsFacade(settings=settings, agent_factory=factory)
     joint = TestClient(create_joint(responses, completions), base_url=LOOPBACK)
     alone = TestClient(create_responses(responses), base_url=LOOPBACK)
     assert [item["id"] for item in joint.get("/v1/models").json()["data"]] == [
@@ -176,13 +182,13 @@ def test_joint_and_responses_list_the_same_ids(tmp_path):
 def test_config_model_gc_ua_exits_before_bind(monkeypatch, capsys):
     def load(path, profile_override=None):
         del path, profile_override
-        return {"os_backend": "local", "model": "GC-UA"}, None
+        return make_settings(os_backend="local", **{"agent.model": "GC-UA"})
 
     def run(coro):
         coro.close()
         raise AssertionError("bind")
 
-    monkeypatch.setattr("gc_chat.main.load_config_ex", load)
+    monkeypatch.setattr("gc_chat.main.load_settings", load)
     monkeypatch.setattr("gc_chat.main.asyncio.run", run)
     assert main(["--config", "c.yml"]) == 1
     captured = capsys.readouterr()
@@ -241,7 +247,7 @@ def test_agent_turn_keeps_config_model(tmp_path):
     assert response.status_code == 200
     assert response.json()["model"] == "GC-UA"
     assert response.json()["choices"][0]["message"]["content"] == "итог"
-    assert created[0]["model"] == "backend-model"
+    assert created[0].settings.agent.model == "backend-model"
     assert list(threads.glob("data_*.jsonl")) == []
 
 
@@ -272,10 +278,12 @@ def test_direct_forwards_body_and_backend_headers(tmp_path, monkeypatch):
     key = tmp_path / "key.pem"
     cert.write_text("cert")
     key.write_text("key")
-    app, created, threads = _completions(tmp_path, auth=_Auth())
-    facade_config = app.state.completions_facade._config
-    facade_config["cert_path"] = str(cert)
-    facade_config["key_path"] = str(key)
+    app, created, threads = _completions(
+        tmp_path,
+        auth=_Auth(),
+        **{"backend.cert_path": str(cert)},
+        **{"backend.key_path": str(key)},
+    )
     client = TestClient(app, base_url=LOOPBACK)
     messages = [
         {"role": "system", "content": "sys"},
@@ -436,15 +444,18 @@ def test_backend_error_and_transport_failure(tmp_path, monkeypatch):
 def test_responses_rejects_other_models_without_a_thread(tmp_path):
     threads = tmp_path / "threads"
     threads.mkdir()
-    created: list[dict] = []
+    created: list[LoadedSettings] = []
 
-    async def factory(config, **kwargs):
+    async def factory(settings, **kwargs):
         del kwargs
-        created.append(config)
+        created.append(settings)
         return _Agent()
 
     facade = ResponsesFacade(
-        config={"model": "backend-model", "threads_data_path": str(threads)},
+        settings=make_settings(
+            **{"agent.model": "backend-model"},
+            **{"paths.threads_data_path": str(threads)},
+        ),
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )
@@ -465,7 +476,7 @@ def test_responses_rejects_other_models_without_a_thread(tmp_path):
     )
     assert opened.status_code == 200
     assert opened.json()["model"] == "GC-UA"
-    assert created[0]["model"] == "backend-model"
+    assert created[0].settings.agent.model == "backend-model"
 
 
 async def test_direct_stream_cancel_closes_upstream(tmp_path, monkeypatch):

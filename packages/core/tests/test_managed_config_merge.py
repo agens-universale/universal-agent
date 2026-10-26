@@ -27,6 +27,6 @@ def test_managed_local_config_merges_mcp_servers(tmp_path, monkeypatch):
         "backend:\n  api_mode: chat_completions\n", encoding="utf-8"
     )
 
-    cfg = config.load_config(str(base))
-    assert "science" in cfg["mcp-servers"]
-    assert cfg["mcp-servers"]["science"]["transport"] == "stream_http"
+    servers = config.load_settings(str(base)).settings.mcp.servers
+    assert "science" in servers
+    assert servers["science"].transport == "stream_http"

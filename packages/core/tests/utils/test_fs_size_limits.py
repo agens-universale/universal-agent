@@ -1,3 +1,4 @@
+import pytest
 from gc_core.utils.fs_size_limits import (
     DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES,
     DEFAULT_FS_MUTATE_MAX_BYTES,
@@ -8,6 +9,8 @@ from gc_core.utils.fs_size_limits import (
     fs_mutate_max_bytes,
     fs_read_max_bytes,
 )
+from gc_testkit.settings import make_settings
+from pydantic import ValidationError
 
 
 def test_defaults_and_config_keys():
@@ -15,16 +18,23 @@ def test_defaults_and_config_keys():
     assert DEFAULT_FS_MUTATE_MAX_BYTES == 16 * 1024 * 1024
     assert fs_read_max_bytes(None) == DEFAULT_FS_READ_MAX_BYTES
     assert fs_mutate_max_bytes(None) == DEFAULT_FS_MUTATE_MAX_BYTES
-    assert fs_read_max_bytes({"fs_tools": {"max_read_bytes": 100}}) == 100
-    assert fs_mutate_max_bytes({"fs_tools": {"max_mutate_bytes": 200}}) == 200
     assert (
-        fs_read_max_bytes({"fs_tools": {"max_read_bytes": 0}})
-        == DEFAULT_FS_READ_MAX_BYTES
+        fs_read_max_bytes(make_settings({"fs_tools": {"max_read_bytes": 100}}))
+        == 100
     )
     assert (
-        fs_read_max_bytes({"fs_tools": {"max_read_bytes": "x"}})
+        fs_mutate_max_bytes(
+            make_settings({"fs_tools": {"max_mutate_bytes": 200}})
+        )
+        == 200
+    )
+    assert (
+        fs_read_max_bytes(make_settings({"fs_tools": {"max_read_bytes": 0}}))
         == DEFAULT_FS_READ_MAX_BYTES
     )
+    # Нечисло отсекает схема настроек (строгая конвертация), а не фолбэк.
+    with pytest.raises(ValidationError):
+        fs_read_max_bytes(make_settings({"fs_tools": {"max_read_bytes": "x"}}))
 
 
 def test_find_in_files_max_bytes_defaults():
@@ -34,28 +44,32 @@ def test_find_in_files_max_bytes_defaults():
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
     assert (
-        fs_find_in_files_max_bytes({})
+        fs_find_in_files_max_bytes(make_settings())
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
     assert (
-        fs_find_in_files_max_bytes({"fs_tools": {}})
+        fs_find_in_files_max_bytes(make_settings({"fs_tools": {}}))
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
 
 
 def test_find_in_files_max_bytes_reads_nested_key():
-    cfg = {"fs_tools": {"find_in_files": {"max_file_bytes": 100}}}
+    cfg = make_settings(
+        {"fs_tools": {"find_in_files": {"max_file_bytes": 100}}}
+    )
     assert fs_find_in_files_max_bytes(cfg) == 100
 
 
 def test_find_in_files_max_bytes_ignores_read_mutate_keys():
-    cfg = {
-        "fs_tools": {
-            "max_read_bytes": 1,
-            "max_mutate_bytes": 2,
-            "find_in_files": {"max_file_bytes": 100},
+    cfg = make_settings(
+        {
+            "fs_tools": {
+                "max_read_bytes": 1,
+                "max_mutate_bytes": 2,
+                "find_in_files": {"max_file_bytes": 100},
+            }
         }
-    }
+    )
     assert fs_find_in_files_max_bytes(cfg) == 100
     assert fs_read_max_bytes(cfg) == 1
     assert fs_mutate_max_bytes(cfg) == 2
@@ -64,30 +78,36 @@ def test_find_in_files_max_bytes_ignores_read_mutate_keys():
 def test_find_in_files_max_bytes_invalid_fallbacks():
     assert (
         fs_find_in_files_max_bytes(
-            {"fs_tools": {"find_in_files": {"max_file_bytes": 0}}}
+            make_settings(
+                {"fs_tools": {"find_in_files": {"max_file_bytes": 0}}}
+            )
         )
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
+    # Нечисло и не-словарь секции отсекает схема настроек.
+    with pytest.raises(ValidationError):
+        fs_find_in_files_max_bytes(
+            make_settings(
+                {"fs_tools": {"find_in_files": {"max_file_bytes": "x"}}}
+            )
+        )
     assert (
         fs_find_in_files_max_bytes(
-            {"fs_tools": {"find_in_files": {"max_file_bytes": "x"}}}
+            make_settings(
+                {"fs_tools": {"find_in_files": {"max_file_bytes": -5}}}
+            )
         )
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
-    assert (
+    with pytest.raises(ValidationError):
         fs_find_in_files_max_bytes(
-            {"fs_tools": {"find_in_files": {"max_file_bytes": -5}}}
+            make_settings({"fs_tools": {"find_in_files": 42}})
         )
-        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-    )
-    # Non-mapping find_in_files section → default
-    assert (
-        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": 42}})
-        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-    )
     # find_in_files present but without max_file_bytes → default
     assert (
-        fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {}}})
+        fs_find_in_files_max_bytes(
+            make_settings({"fs_tools": {"find_in_files": {}}})
+        )
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
 

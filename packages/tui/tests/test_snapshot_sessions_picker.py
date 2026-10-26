@@ -1,5 +1,6 @@
 """/sessions picker — каноничный вид с 7 фикстурными задачами (новый дизайн Spec 1)."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -179,7 +180,9 @@ def test_sessions_picker_full_snapshot(snap_compare, tmp_path, monkeypatch):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
 
     async def setup(pilot):

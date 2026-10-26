@@ -17,7 +17,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
-from gc_core.utils.user_text import read_user_text
+from gc_core.agent_store import (
+    AgentResource,
+    agent_store_of,
+    read_resource_text,
+)
+from gc_core.settings import settings_of
 
 # Имя сабагента = имя тула. Префикс обязателен: по нему `is_subagent_tool`
 # отличает вызов сабагента, а `_normalize_agent_kind` отрезает его, получая kind
@@ -235,7 +240,7 @@ def _warn(
 
 
 def discover_subagent_definitions(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     builtin_names: Sequence[str] | set[str],
     logger: Optional[logging.Logger] = None,
@@ -253,103 +258,169 @@ def discover_subagent_definitions(
 
     Всё деградирует до варнинга: один битый файл не должен лишать оператора
     остальных.
+
+    ``settings`` — всё, что принимает ``settings_of``; ``None`` — папки нет.
     """
-    raw_dir = (config_dict or {}).get("subagents_dir")
+    raw_dir = (
+        settings_of(settings).agent.subagents_dir
+        if settings is not None
+        else None
+    )
     base_dir = str(raw_dir).strip() if raw_dir is not None else ""
-    if not base_dir:
-        return []
+    store = agent_store_of(settings)
+    directory = AgentResource("subagents", "", base_dir or None)
 
-    if not os.path.isdir(base_dir):
-        _warn(
-            logger,
-            "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
-            base_dir,
-            event="subagents_dir_missing",
-            diagnostics=diagnostics,
-            dir=base_dir,
-        )
-        return []
-
-    try:
-        entries = sorted(os.listdir(base_dir))
-    except OSError as exc:
-        _warn(
-            logger,
-            "subagents_dir_unreadable dir=%s error=%s",
-            base_dir,
-            exc,
-            event="subagents_dir_unreadable",
-            diagnostics=diagnostics,
-            dir=base_dir,
-        )
-        return []
-
+    entries = _definition_entries(
+        store, directory, base_dir, logger=logger, diagnostics=diagnostics
+    )
     taken: Dict[str, SubagentDefinition] = {}
     builtin = set(builtin_names)
 
-    for entry in entries:
+    for entry in sorted(entries):
         if not entry.endswith(".md"):
             continue
-        path = os.path.join(base_dir, entry)
-        if not os.path.isfile(path):
+        path = os.path.join(base_dir, entry) if base_dir else entry
+        definition = _read_definition(
+            store,
+            entry,
+            path,
+            base_dir,
+            logger=logger,
+            diagnostics=diagnostics,
+        )
+        if definition is None or _name_collides(
+            definition, path, builtin, taken, logger, diagnostics
+        ):
             continue
-        try:
-            # Файл определения пишет человек — значит и кодировка его, а не наша.
-            # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и мимо
-            # этого перехвата уходил наружу: один файл в чужой кодировке ронял
-            # весь старт агента, хотя обещание модуля — «битый файл не лишает
-            # оператора остальных».
-            definition = parse_subagent_file(path, read_user_text(path))
-        except (
-            OSError,
-            ValueError,
-        ) as exc:  # ValueError ⊇ SubagentDefinitionError
-            _warn(
-                logger,
-                "subagent_definition_invalid error=%s",
-                exc,
-                event="subagent_definition_invalid",
-                diagnostics=diagnostics,
-                path=path,
-                reason=getattr(exc, "reason", str(exc)),
-            )
-            continue
-
-        if definition.name in builtin:
-            _warn(
-                logger,
-                "subagent_name_collision name=%s path=%s (совпадает со встроенным, файл пропущен)",
-                definition.name,
-                path,
-                event="subagent_name_collision",
-                diagnostics=diagnostics,
-                subagent_name=definition.name,
-                path=path,
-                winner="builtin",
-            )
-            continue
-        if definition.name in taken:
-            _warn(
-                logger,
-                "subagent_name_collision name=%s path=%s winner=%s (побеждает прочитанный первым)",
-                definition.name,
-                path,
-                taken[definition.name].source_path,
-                event="subagent_name_collision",
-                diagnostics=diagnostics,
-                subagent_name=definition.name,
-                path=path,
-                winner=taken[definition.name].source_path,
-            )
-            continue
-
         taken[definition.name] = definition
 
     return list(taken.values())
 
 
-def resolve_max_count(config_dict: Dict[str, Any]) -> int:
-    raw = (config_dict or {}).get("subagents_max_count", DEFAULT_MAX_COUNT)
+def _definition_entries(
+    store: Any,
+    directory: AgentResource,
+    base_dir: str,
+    *,
+    logger: Optional[logging.Logger],
+    diagnostics: Optional[List[Dict[str, Any]]],
+) -> List[str]:
+    """Имена файлов папки сабагентов; недоступная папка — пусто (с варнингом)."""
+    try:
+        return [
+            name for name, kind in store.list_dir(directory) if kind == "file"
+        ]
+    except (FileNotFoundError, NotADirectoryError):
+        # Папка не задана — кастомных нет (своё хранилище может отдать их и
+        # без пути); задана, но её нет — предупреждение.
+        if base_dir:
+            _warn(
+                logger,
+                "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
+                base_dir,
+                event="subagents_dir_missing",
+                diagnostics=diagnostics,
+                dir=base_dir,
+            )
+        return []
+    except OSError as exc:
+        _warn(
+            logger,
+            "subagents_dir_unreadable dir=%s error=%s",
+            directory.label,
+            exc,
+            event="subagents_dir_unreadable",
+            diagnostics=diagnostics,
+            dir=directory.label,
+        )
+        return []
+
+
+def _read_definition(
+    store: Any,
+    entry: str,
+    path: str,
+    base_dir: str,
+    *,
+    logger: Optional[logging.Logger],
+    diagnostics: Optional[List[Dict[str, Any]]],
+) -> Optional[SubagentDefinition]:
+    """Разобрать один файл определения; битый — ``None`` (с варнингом)."""
+    try:
+        # Файл определения пишет человек — значит и кодировка его, а не наша.
+        # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и мимо
+        # этого перехвата уходил наружу: один файл в чужой кодировке ронял
+        # весь старт агента, хотя обещание модуля — «битый файл не лишает
+        # оператора остальных».
+        return parse_subagent_file(
+            path,
+            read_resource_text(
+                store,
+                AgentResource("subagents", entry, path if base_dir else None),
+            ),
+        )
+    except (
+        OSError,
+        ValueError,
+    ) as exc:  # ValueError ⊇ SubagentDefinitionError
+        _warn(
+            logger,
+            "subagent_definition_invalid error=%s",
+            exc,
+            event="subagent_definition_invalid",
+            diagnostics=diagnostics,
+            path=path,
+            reason=getattr(exc, "reason", str(exc)),
+        )
+        return None
+
+
+def _name_collides(
+    definition: SubagentDefinition,
+    path: str,
+    builtin: set,
+    taken: Dict[str, SubagentDefinition],
+    logger: Optional[logging.Logger],
+    diagnostics: Optional[List[Dict[str, Any]]],
+) -> bool:
+    """Имя занято встроенным или прочитанным раньше — варнинг и ``True``."""
+    if definition.name in builtin:
+        _warn(
+            logger,
+            "subagent_name_collision name=%s path=%s (совпадает со встроенным, файл пропущен)",
+            definition.name,
+            path,
+            event="subagent_name_collision",
+            diagnostics=diagnostics,
+            subagent_name=definition.name,
+            path=path,
+            winner="builtin",
+        )
+        return True
+    if definition.name in taken:
+        _warn(
+            logger,
+            "subagent_name_collision name=%s path=%s winner=%s (побеждает прочитанный первым)",
+            definition.name,
+            path,
+            taken[definition.name].source_path,
+            event="subagent_name_collision",
+            diagnostics=diagnostics,
+            subagent_name=definition.name,
+            path=path,
+            winner=taken[definition.name].source_path,
+        )
+        return True
+    return False
+
+
+def resolve_max_count(settings: Any) -> int:
+    """``agent.subagents_max_count`` настроек (всё, что принимает ``settings_of``)."""
+    raw = (
+        settings_of(settings).agent.subagents_max_count
+        if settings is not None
+        else DEFAULT_MAX_COUNT
+    )
     try:
         value = int(raw)
     except (TypeError, ValueError):

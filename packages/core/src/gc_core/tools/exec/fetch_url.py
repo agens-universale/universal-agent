@@ -11,6 +11,7 @@ from readability import Document
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import resolve_tool_context
+from gc_core.security.permission_mode import follows_cross_host_redirects
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.tools.exec.fetch_url_base import FetchUrlBase, http_error_failure
 from gc_core.tools.exec.redirect_policy import (
@@ -39,7 +40,7 @@ class FetchUrl(FetchUrlBase):
     )
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         return cls._tool_spec(
             description=(
                 "Fetches a URL via HTTP GET and returns extracted readable text when possible. "
@@ -58,7 +59,7 @@ class FetchUrl(FetchUrlBase):
         )
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         return """Tool name: exec_fetch_url
 Tool description: Downloads a web page via HTTP GET and extracts the main text content using trafilatura.
 Input schema: {"type": "object", "properties": {"url": {"type": "string", "description": "Absolute URL to fetch."}, "timeout": {"type": "integer", "description": "HTTP timeout in seconds."}, "offset": {"type": "integer", "description": "Character offset for paginated reads."}, "limit": {"type": "integer", "description": "Max characters to return in this call."}, "proxy": {"type": "string", "description": "Optional proxy URL (http/https/socks5/socks5h/socks4). Empty string or omit = no proxy."}}, "required": ["url"], "additionalProperties": false}
@@ -164,12 +165,14 @@ Usage:
         policy_context = resolve_tool_context(
             self, ctx=self._ctx, state=self._state
         )
+        # Переход на другой хост — по режиму сессии; решает слой безопасности.
+        same_host_only = not follows_cross_host_redirects(policy_context.ctx)
         last_exc = None
         attempts = 1 + self.max_retries
         for attempt in range(1, attempts + 1):
             try:
                 if fetches_on_backend(
-                    self._config_dict, self._backend_or_none()
+                    self._settings_source, self._backend_or_none()
                 ):
                     # Сеть у среды исполнения: GET делает python3 той стороны,
                     # редиректы и политика — здесь (см. remote_fetch).
@@ -181,6 +184,7 @@ Usage:
                         normalized_proxy,
                         allowed_schemes=policy_context.url_allowed_schemes,
                         url_blacklist=policy_context.url_blacklist,
+                        same_host_only=same_host_only,
                     )
                     response.raise_for_status()
                     return response, None
@@ -199,6 +203,7 @@ Usage:
                     effective_timeout,
                     allowed_schemes=policy_context.url_allowed_schemes,
                     url_blacklist=policy_context.url_blacklist,
+                    same_host_only=same_host_only,
                 )
                 response.raise_for_status()
                 return response, None

@@ -1,5 +1,6 @@
 """/init: видимый prompt-driven прогон — роутинг + busy-guard."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -25,7 +26,9 @@ async def test_cmd_init_busy_guard(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     rec = _RecRunner(running=True)
     app.active_runner = rec
@@ -45,7 +48,9 @@ async def test_cmd_init_starts_run_with_init_prompt(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     rec = _RecRunner(running=False)
     # get_runner() должен вернуть наш стаб

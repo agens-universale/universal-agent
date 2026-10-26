@@ -11,6 +11,7 @@ from pydantic import (
 )
 
 from gc_core.config_modules.backend import parse_chat_completions_max_tokens
+from gc_core.config_modules.field_meta import gc_meta
 
 DEFAULT_AUXILIARY_LLM_MAX_TOKENS = 24576
 # Judges (command_moderation, finish_gate / text_answer): запас под мысль модели.
@@ -34,11 +35,21 @@ class ChatCompletionsLlmConfig(BaseModel):
     ``judge_max_tokens`` по-прежнему здесь.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    max_tokens: int = DEFAULT_AUXILIARY_LLM_MAX_TOKENS
-    judge_max_tokens: int = DEFAULT_JUDGE_MAX_TOKENS
-    subagent_role_max_tokens: int = DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
+    # Тюнинг служебных вызовов; в шаблоне только completion_kwargs.
+    max_tokens: int = Field(
+        default=DEFAULT_AUXILIARY_LLM_MAX_TOKENS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    judge_max_tokens: int = Field(
+        default=DEFAULT_JUDGE_MAX_TOKENS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    subagent_role_max_tokens: int = Field(
+        default=DEFAULT_SUBAGENT_ROLE_MAX_TOKENS,
+        json_schema_extra=gc_meta(expert=True),
+    )
     completion_kwargs: dict[str, Any] = {}
 
     @field_validator("max_tokens", mode="before")
@@ -73,7 +84,9 @@ class ChatCompletionsLlmConfig(BaseModel):
 
 
 class ChatCompletionsConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, frozen=True
+    )
 
     auxiliary_llm: ChatCompletionsLlmConfig = Field(
         default_factory=ChatCompletionsLlmConfig,
@@ -81,78 +94,26 @@ class ChatCompletionsConfig(BaseModel):
     )
 
 
-def _parse_auxiliary_llm_raw(raw: Any) -> ChatCompletionsLlmConfig | None:
-    if isinstance(raw, ChatCompletionsLlmConfig):
-        return raw
-    if isinstance(raw, dict):
-        return ChatCompletionsLlmConfig.model_validate(raw)
-    return None
-
-
-def _auxiliary_llm_dump_if_non_default(raw: Any) -> dict[str, Any] | None:
-    """Dump профиля, если он отличается от schema defaults; иначе None.
-
-    Flatten всегда кладёт дефолтный ``auxiliary_llm_params`` рядом с таким же
-    dump в ``chat_completions_params.auxiliary_llm``. Сравниваем с дефолтом,
-    чтобы выбрать первый «живой» слой: flat → nested → legacy → schema.
-    """
-    parsed = _parse_auxiliary_llm_raw(raw)
-    if parsed is None:
-        return None
-    dump = parsed.model_dump()
-    if dump == ChatCompletionsLlmConfig().model_dump():
-        return None
-    return dump
-
-
 def auxiliary_llm_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    settings: Any,
 ) -> ChatCompletionsLlmConfig:
-    """Собрать typed aux-профиль из плоского config_dict.
+    """Typed aux-профиль: ``chat_completions.auxiliary_llm`` настроек.
 
-    Канон flat-ключа: ``auxiliary_llm_params`` (dict рядом с
-    ``chat_completion_kwargs``). YAML-схема по-прежнему
-    ``chat_completions.auxiliary_llm`` → flatten кладёт dump в
-    ``auxiliary_llm_params``.
-
-    Приоритет (первый слой, отличающийся от schema defaults):
-    1. ``auxiliary_llm_params`` (канон harbor / deep_merge)
-    2. ``chat_completions_params.auxiliary_llm`` / ``llm`` (старые оверлеи)
-    3. legacy ``chat_completions_llm``
-    4. schema defaults (``completion_kwargs: {}``)
+    ``settings`` — всё, что принимает ``settings_of``. Плоские
+    ``auxiliary_llm_params`` и ``chat_completions_params.auxiliary_llm`` ведут в
+    одно поле модели (лист перекрывает секцию — прежний приоритет слоёв).
     """
-    cfg = config_dict if isinstance(config_dict, dict) else {}
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
 
-    flat = _auxiliary_llm_dump_if_non_default(cfg.get("auxiliary_llm_params"))
-    if flat is not None:
-        return ChatCompletionsLlmConfig.model_validate(flat)
-
-    cc_params = cfg.get("chat_completions_params")
-    if isinstance(cc_params, dict):
-        nested = _auxiliary_llm_dump_if_non_default(
-            cc_params.get("auxiliary_llm")
-        )
-        if nested is None:
-            nested = _auxiliary_llm_dump_if_non_default(cc_params.get("llm"))
-        if nested is not None:
-            return ChatCompletionsLlmConfig.model_validate(nested)
-
-    legacy = _auxiliary_llm_dump_if_non_default(
-        cfg.get("chat_completions_llm")
-    )
-    if legacy is not None:
-        return ChatCompletionsLlmConfig.model_validate(legacy)
-
-    return ChatCompletionsLlmConfig()
+    return settings_of(settings).chat_completions.auxiliary_llm
 
 
 def subagent_role_max_tokens_from_ctx(ctx: Any) -> int:
     """``chat_completions.auxiliary_llm.subagent_role_max_tokens`` — лимит ответа для
     LLM-генерации роли special_agent (``ctx.auxiliary_llm``, с фоллбэком
-    на ``ctx.config_dict`` для двойников без готового профиля)."""
+    на настройки контекста для двойников без готового профиля)."""
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     if not isinstance(auxiliary_llm, ChatCompletionsLlmConfig):
-        auxiliary_llm = auxiliary_llm_from_config_dict(
-            getattr(ctx, "config_dict", None)
-        )
+        auxiliary_llm = auxiliary_llm_from_config_dict(ctx)
     return auxiliary_llm.subagent_role_max_tokens

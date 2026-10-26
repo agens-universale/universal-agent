@@ -5,6 +5,7 @@ Bug 2: Skill-реплика на resume показывается как [!] fail
 Bug 3: CSS: отсутствует .skill-marker в styles.tcss (отступ под маркером).
 """
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -28,7 +29,9 @@ async def test_skill_reply_no_duplicate_on_reconcile(tmp_path):
     display = "давай"
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -82,7 +85,9 @@ async def test_skill_reply_without_payload_falls_back_to_summary(tmp_path):
     text = "обычное сообщение"
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -158,7 +163,9 @@ async def test_mount_failed_skips_skill_message_via_display_content(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         screen.attach_active_task(thread_id)
@@ -216,7 +223,9 @@ async def test_mount_failed_mounts_truly_orphaned_skill(tmp_path):
         encoding="utf-8",
     )
 
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
         screen.attach_active_task(thread_id)
@@ -270,7 +279,9 @@ async def test_skill_marker_has_css_class(tmp_path):
     from gc_tui.widgets.trace_row import TraceRow
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

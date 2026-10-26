@@ -254,3 +254,36 @@ def test_env_only_nested_structures(monkeypatch):
 
 def test_env_only_none_passthrough():
     assert resolve_env_only(None) is None
+
+
+def test_strict_file_path_with_unset_env_names_the_variable(monkeypatch):
+    """``${FILE:${ENV:X}/key}`` при незаданной X: диагностика называет X.
+
+    Регресс (ревью PR #135): метка неразрешённой переменной (с нулевым байтом)
+    попадала в путь файла, и ``os.path.getsize`` бросал ``ValueError: embedded
+    null byte`` вместо ``UnresolvedPlaceholdersError``.
+    """
+    from gc_core.config_modules.env_interpolation import (
+        UnresolvedPlaceholdersError,
+        resolve_env_placeholders_strict,
+    )
+
+    monkeypatch.delenv("SECRETS_DIR", raising=False)
+    unresolved = []
+    resolve_env_placeholders(
+        {"token": "${FILE:${ENV:SECRETS_DIR}/key}"}, unresolved=unresolved
+    )
+    assert [(r.kind, r.name) for r in unresolved] == [("env", "SECRETS_DIR")]
+    with pytest.raises(UnresolvedPlaceholdersError, match="SECRETS_DIR"):
+        resolve_env_placeholders_strict(
+            {"token": "${FILE:${ENV:SECRETS_DIR}/key}"}
+        )
+
+
+def test_strict_file_path_with_unset_env_uses_file_default(monkeypatch):
+    monkeypatch.delenv("SECRETS_DIR", raising=False)
+    unresolved = []
+    out = resolve_env_placeholders(
+        "${FILE:${ENV:SECRETS_DIR}/key:-fallback}", unresolved=unresolved
+    )
+    assert out == "fallback"

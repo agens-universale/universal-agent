@@ -5,7 +5,7 @@
 `asyncio.to_thread`». Ступень существовала «ради встраивающих», но
 зарегистрировать свой Python-класс-тул извне НЕЛЬЗЯ:
 
-* `abuild_tools_data` собирает набор целиком из `config_dict`;
+* `abuild_tools_data` собирает набор целиком из настроек;
 * у `acreate_run_context` нет параметра для чужих тулов;
 * механизма плагинов или entry-points нет.
 
@@ -88,8 +88,11 @@ async def test_every_core_tool_acall_is_a_coroutine_function():
     без `await` — тихо и неправильно.
     """
     from gc_core.tools import abuild_tools_data
+    from gc_testkit.settings import make_settings
 
-    tools_data, _spec, _desc, _status = await abuild_tools_data({})
+    tools_data, _spec, _desc, _status = await abuild_tools_data(
+        make_settings()
+    )
     not_coroutines = []
     for name, entry in tools_data.items():
         fabric = entry.get("tool_fabric")
@@ -97,7 +100,9 @@ async def test_every_core_tool_acall_is_a_coroutine_function():
         # с собой реестр). Класса из замыкания не достать, поэтому смотрим на
         # ЭКЗЕМПЛЯР — ровно так же, как это делает диспетчер.
         try:
-            tool = fabric(ctx=None, state=None, config_dict={}, call_id=None)
+            tool = fabric(
+                ctx=None, state=None, settings=make_settings(), call_id=None
+            )
         except Exception:
             try:
                 tool = fabric()

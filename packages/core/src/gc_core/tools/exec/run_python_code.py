@@ -4,11 +4,16 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.backends.async_protocol import aexec_port
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
+    _probe_failure_message,
+)
 from gc_core.config_modules.agent import (
     exec_output_preview_edge_chars_from_config_dict,
     exec_timeout_from_config_dict,
 )
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
+from gc_core.message_policy.user_stop import cancelled_by_user_output
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import (
     effective_command_cwd,
@@ -20,6 +25,7 @@ from gc_core.tools.exec.exec_envelope import (
     build_exec_envelope,
 )
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.user_stop import UserStopInterrupt
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
 
@@ -95,13 +101,14 @@ def _parse_env_vars(
 
 class RunPythonCode(AbstractSimpleTool):
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_default = exec_timeout_from_config_dict(config_dict)
+    def tool_description(cls, settings: Any = None):
+        timeout_default = exec_timeout_from_config_dict(settings)
         description = {
             "type": "function",
             "name": "exec_python",
             "description": (
-                "Run Python code synchronously in a subprocess. Returns JSON with ok, return_code, stdout, stderr."
+                "Run Python code synchronously in a subprocess. Returns JSON with ok, return_code, stdout, stderr. "
+                "The `timeout` argument is the deadline that kills the process."
             ),
             "parameters": {
                 "type": "object",
@@ -116,8 +123,9 @@ class RunPythonCode(AbstractSimpleTool):
                     "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Maximum execution time in seconds before the process is terminated. "
-                            f"Default is {timeout_default} (agent.exec_timeout_sec)."
+                            "Deadline for this call, in seconds. When it elapses the process is killed. "
+                            f"Omit it and the default {timeout_default} applies (agent.exec_timeout_sec). "
+                            "If the code needs longer, pass a larger number here."
                         ),
                         "default": timeout_default,
                         "minimum": 1,
@@ -154,8 +162,8 @@ class RunPythonCode(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_default = exec_timeout_from_config_dict(config_dict)
+    def prompt_description(cls, settings: Any = None):
+        timeout_default = exec_timeout_from_config_dict(settings)
         description = (
             """Tool name: exec_python
 Tool description: Run Python in a subprocess; returns JSON with return_code, stdout, stderr.
@@ -194,7 +202,7 @@ Usage:
             stdout=as_captured_stream(stdout),
             stderr=as_captured_stream(stderr),
             preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
-                self._config_dict
+                self._settings_source
             ),
             error=error,
         )
@@ -244,16 +252,31 @@ Usage:
                 timeout=plan["timeout"],
                 env=plan["env"],
             )
+        except RuntimeUnavailable as exc:
+            return self._runtime_unavailable(exc)
+        except UserStopInterrupt:
+            raise
         except Exception as exc:
             return self._exec_failed(exc)
         return self._finish(res, plan)
+
+    def _runtime_unavailable(self, exc: RuntimeUnavailable) -> str:
+        """Бэкенд не дошёл до кода: проба суммы не вернулась."""
+        return self._result(
+            ok=False,
+            return_code=-1 if exc.return_code is None else exc.return_code,
+            timed_out=exc.timed_out,
+            stdout=exc.stdout,
+            stderr=exc.stderr,
+            error={"type": "execution_failed", "message": str(exc)},
+        )
 
     def _exec_failed(self, exc: Exception) -> str:
         """Отказ запуска — общий для обоих входов."""
         return self._result(
             ok=False,
             return_code=None,
-            timed_out=False,
+            timed_out=bool(getattr(exc, "timed_out", False)),
             stdout="",
             stderr="",
             error={"type": "execution_failed", "message": str(exc)},
@@ -265,9 +288,24 @@ Usage:
         """Рабочий каталог запуска или ошибка cwd_invalid (с подсказкой, куда можно писать)."""
         if self._backend.is_sandbox:
             cwd_used = cwd  # None → container default workdir
-            if cwd_used is not None and not await self._backend.is_dir(
-                cwd_used
-            ):
+            if cwd_used is None:
+                return cwd_used, None
+            # Сбой транспорта — не «каталога нет»: иначе модель чинит cwd.
+            # `is_dir` здесь — ответ 0/1. Исключение значит, что ответа нет.
+            try:
+                is_directory = await self._backend.is_dir(cwd_used)
+            except RuntimeUnavailable as exc:
+                return cwd_used, {
+                    "type": "execution_failed",
+                    "message": str(exc),
+                }
+            except OSError as exc:
+                err = str(exc).replace("\n", " ").strip()
+                return cwd_used, {
+                    "type": "execution_failed",
+                    "message": _probe_failure_message("", err),
+                }
+            if not is_directory:
                 return cwd_used, _cwd_invalid_error(cwd_used, [])
             return cwd_used, None
         security_context = resolve_tool_context(self, **kwargs)
@@ -329,7 +367,7 @@ Usage:
         effective_timeout = (
             timeout
             if timeout is not None
-            else exec_timeout_from_config_dict(self._config_dict)
+            else exec_timeout_from_config_dict(self._settings_source)
         )
         if not isinstance(effective_timeout, int) or effective_timeout <= 0:
             return reject({"type": "invalid_argument", "field": "timeout"})
@@ -366,6 +404,15 @@ Usage:
             getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
         )
 
+        if getattr(res, "stopped_by_user", False):
+            return cancelled_by_user_output(
+                RunPythonCode.registered_tool_name(),
+                meta={
+                    "stdout": getattr(res, "stdout", "") or "",
+                    "stderr": getattr(res, "stderr", "") or "",
+                },
+            )
+
         if res.timed_out:
             return self._result(
                 ok=False,
@@ -375,7 +422,11 @@ Usage:
                 stderr=stderr_stream,
                 error={
                     "type": "timeout",
-                    "message": f"Execution timed out after {effective_timeout} seconds",
+                    "message": (
+                        f"Execution timed out after {effective_timeout} seconds. "
+                        "This deadline is the `timeout` argument of this tool. "
+                        "Call again and pass a larger `timeout`."
+                    ),
                 },
             )
 

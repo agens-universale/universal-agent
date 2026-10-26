@@ -17,7 +17,7 @@
         persistent_session: true
 
 Жизненный цикл сессий привязан к AgentExecutor.run(): в finally вызывается
-PersistentStdioRegistry.instance().close_all(), чтобы не оставлять висящие
+PersistentStdioRegistry.instance().aclose_all(), чтобы не оставлять висящие
 Chromium между запусками агента.
 
 Почему здесь ``subprocess.Popen``, а не ``asyncio.create_subprocess_exec``
@@ -60,10 +60,12 @@ from gc_core.tools.connect_mcp.transport import (
     _INIT_PAYLOAD,
     _INITIALIZED_PAYLOAD,
     _areadline_with_timeout,
+    _cancelled_notification,
     _readline_with_timeout,
     _resolve_command,
     forget_stdio_reader,
 )
+from gc_core.user_stop import UserStopInterrupt, current_user_stop
 from gc_core.utils.aio_compat import run_coro_blocking
 
 #: Общий бюджет на дочистку остатка сессий, когда прогон сняли снаружи.
@@ -276,21 +278,36 @@ async def _aterminate_process_tree(
 _NOT_RUNNING_MSG = "persistent stdio MCP process is not running"
 
 
+def _user_stop_requested() -> bool:
+    stop = current_user_stop()
+    return stop is not None and stop.requested
+
+
 class PersistentStdioSession:
     """
     Одна долгоживущая stdio-сессия с MCP-сервером.
 
-    Потокобезопасна: все операции ввода/вывода сериализуются одним lock'ом,
-    что даёт корректную очередь запросов даже если агент-луп начнёт слать
-    запросы из нескольких потоков.
+    Потокобезопасна: обмен сериализуется одним lock'ом, что даёт корректную
+    очередь запросов, даже если агент-луп шлёт их из нескольких потоков.
+    Отмена в этот лок не встаёт: она пишет ``notifications/cancelled`` в stdin,
+    пока ``call`` ждёт ответ.
     """
 
     def __init__(self, server_cfg: Dict[str, Any]) -> None:
         self._server_cfg = server_cfg
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
+        # Запись в stdin отдельно от ``_lock``: отмена приходит с loop, пока
+        # ``call`` держит ``_lock`` и сидит в чтении. Вставать в тот же лок
+        # значило бы ждать, пока сервер сам ответит.
+        self._write_lock = threading.Lock()
+        self._inflight_guard = threading.Lock()
         # id=1 зарезервирован за initialize; пользовательские запросы начинаются со 2.
         self._next_id = 2
+        self._inflight_id: Any = None
+        self._ignored_ids: set[Any] = set()
+        self._notified_ids: set[Any] = set()
+        self._sending_ids: set[Any] = set()
 
     def _is_alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -300,6 +317,11 @@ class PersistentStdioSession:
             return
         # На случай если процесс умер между вызовами — чистим хендл.
         if self._proc is not None:
+            from gc_core.tools.connect_mcp.durable_scope import (
+                require_no_reconnect,
+            )
+
+            require_no_reconnect()
             dead = self._proc
             self._proc = None
             # И его читателя: реестр ключуется по id трубы, а запись мёртвого
@@ -322,6 +344,11 @@ class PersistentStdioSession:
 
         self._proc = _spawn_detached_stdio_process(self._server_cfg)
         self._next_id = 2
+        with self._inflight_guard:
+            self._inflight_id = None
+            self._ignored_ids.clear()
+            self._notified_ids.clear()
+            self._sending_ids.clear()
         self._write_line(_INIT_PAYLOAD)
         # Ответ на initialize читаем, но его содержимое нам не нужно.
         self._read_matching(_INIT_PAYLOAD["id"], timeout)
@@ -335,6 +362,8 @@ class PersistentStdioSession:
     ) -> Dict[str, Any]:
         with self._lock:
             self._ensure_started(timeout)
+            if _user_stop_requested():
+                raise UserStopInterrupt(kind="mcp", started=True)
             req_id = self._next_id
             self._next_id += 1
             payload = {
@@ -344,7 +373,16 @@ class PersistentStdioSession:
                 "params": params or {},
             }
             self._write_line(payload)
-            return self._read_matching(req_id, timeout)
+            self._set_inflight(req_id)
+            try:
+                return self._read_matching(req_id, timeout)
+            except UserStopInterrupt:
+                # Запрос уже ушёл. Снимаем его по спеке и не отдаём поздний
+                # результат ни этому чтению, ни следующему ходу.
+                self.cancel_inflight()
+                raise
+            finally:
+                self._clear_inflight(req_id)
 
     def _detach_nowait(self) -> "tuple[Optional[subprocess.Popen], bool]":
         """Снять процесс, НЕ вставая в очередь за локом.
@@ -394,8 +432,8 @@ class PersistentStdioSession:
             if had_lock:
                 self._close_prologue(proc)
             # Форма терминации одна и корутинная. Loop'а нет в `atexit`, но
-            # встраивающий зовёт `close_all` из своего `finally` — под живым
-            # loop. Голый `asyncio.run` там бросал, общий `except` выше это
+            # встраивающий может звать `close_everything` из своего `finally` —
+            # под живым loop. Голый `asyncio.run` там бросал, общий `except` выше это
             # глушил, и отцепленный процесс оставался жить без хозяина.
             run_coro_blocking(
                 _aterminate_process_tree(proc, graceful_timeout=5.0)
@@ -521,20 +559,93 @@ class PersistentStdioSession:
             raise RuntimeError(_NOT_RUNNING_MSG)
         self._write_line_on(proc, payload)
 
-    @staticmethod
     def _write_line_on(
-        proc: "subprocess.Popen", payload: Dict[str, Any]
+        self, proc: "subprocess.Popen", payload: Dict[str, Any]
     ) -> None:
         """Написать в УЖЕ ИЗВЕСТНЫЙ процесс.
 
         Закрытие снимает процесс с сессии первым делом (``_detach``), поэтому
         обращаться к ``self._proc`` дальше нельзя — там уже ``None``.
+        Лок только на сам write: отмена с loop пишет в тот же stdin, пока
+        ``call`` держит обменный лок и ждёт строку.
         """
         if proc.stdin is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
         line = json.dumps(payload) + "\n"
-        proc.stdin.write(line)
-        proc.stdin.flush()
+        with self._write_lock:
+            proc.stdin.write(line)
+            proc.stdin.flush()
+
+    def _set_inflight(self, req_id: Any) -> None:
+        with self._inflight_guard:
+            self._inflight_id = req_id
+
+    def _clear_inflight(self, req_id: Any) -> None:
+        with self._inflight_guard:
+            if self._inflight_id == req_id:
+                self._inflight_id = None
+
+    def _response_ignored(self, req_id: Any) -> bool:
+        with self._inflight_guard:
+            return req_id in self._ignored_ids
+
+    def cancel_inflight(self) -> "bool | None":
+        """Послать ``notifications/cancelled`` на текущий запрос.
+
+        ``True`` — уведомление ушло (или уже уходило). ``False`` — запрос
+        был, записать его не удалось. ``None`` — отменять нечего: запрос ещё
+        не выдан, либо это ``initialize``, который клиенту отменять нельзя.
+        Процесс сессии не трогаем. Ответ с этим id дальше не принимаем:
+        очередь читателя из другого потока не вычищаем, иначе чужая строка
+        могла бы встать не на своё место.
+        """
+        with self._inflight_guard:
+            req_id = self._inflight_id
+            proc = self._proc
+            if req_id is None or req_id == _INIT_PAYLOAD["id"]:
+                return None
+            if req_id in self._notified_ids or req_id in self._sending_ids:
+                return True
+            self._sending_ids.add(req_id)
+            self._ignored_ids.add(req_id)
+        if proc is None or proc.stdin is None:
+            self._drop_sending(req_id)
+            return False
+        try:
+            if proc.poll() is not None:
+                self._drop_sending(req_id)
+                return False
+            self._write_line_on(proc, _cancelled_notification(req_id))
+        except Exception:
+            self._drop_sending(req_id)
+            return False
+        with self._inflight_guard:
+            self._sending_ids.discard(req_id)
+            self._notified_ids.add(req_id)
+        return True
+
+    def _drop_sending(self, req_id: Any) -> None:
+        with self._inflight_guard:
+            self._sending_ids.discard(req_id)
+
+    def _match_response(
+        self, line: "str | None", req_id: Any
+    ) -> "tuple[bool, Dict[str, Any]]":
+        """Как ``_match_line``, но ответ снятого id не считается результатом.
+
+        Стоп, увиденный уже после того, как строка вынута из очереди, тоже
+        не отдаёт её вызывающему: чтение к этому моменту уже брошено.
+        """
+        done, obj = self._match_line(line, req_id)
+        if not done:
+            return False, {}
+        if obj.get("id") == req_id and (
+            self._response_ignored(req_id) or _user_stop_requested()
+        ):
+            if _user_stop_requested():
+                raise UserStopInterrupt(kind="mcp", started=True)
+            return False, {}
+        return True, obj
 
     @staticmethod
     def _match_line(
@@ -570,7 +681,7 @@ class PersistentStdioSession:
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
-            done, obj = self._match_line(
+            done, obj = self._match_response(
                 await _areadline_with_timeout(proc.stdout, timeout), req_id
             )
             if done:
@@ -584,7 +695,7 @@ class PersistentStdioSession:
         if proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
-            done, obj = self._match_line(
+            done, obj = self._match_response(
                 _readline_with_timeout(proc.stdout, timeout), req_id
             )
             if done:
@@ -601,22 +712,10 @@ class PersistentStdioSession:
         if proc is None or proc.stdout is None:
             raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
-            line = _readline_with_timeout(proc.stdout, timeout)
-            if line is None:
-                return {}
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                obj = json.loads(stripped)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(obj, dict):
-                continue
-            # notifications не имеют id — просто пропускаем.
-            if "id" not in obj:
-                continue
-            if obj.get("id") == req_id:
+            done, obj = self._match_response(
+                _readline_with_timeout(proc.stdout, timeout), req_id
+            )
+            if done:
                 return obj
         return {}
 
@@ -625,7 +724,7 @@ class PersistentStdioRegistry:
     """Реестр долгоживущих stdio-сессий, ключ — ``(владелец, server_key)``.
 
     Владелец (см. ``gc_core.mcp_session_owner``) в ключе обязателен. Без него ключом было
-    одно лишь имя сервера, и ``close_all()`` из ``arun`` первого доигравшего
+    одно лишь имя сервера, и ``aclose_all()`` из ``arun`` первого доигравшего
     агента убивал браузер, в котором в этот момент работали остальные. Симптом
     был тихим — ``_ensure_started`` молча поднимал процесс заново, — и виден
     только по времени: в прогоне трёх агентов один занял 44.8 с вместо 18.8 с
@@ -685,13 +784,6 @@ class PersistentStdioRegistry:
                 self._sessions[key] = session
             return session
 
-    def _take_own(self) -> list:
-        """Снять с реестра сессии ТЕКУЩЕГО владельца. Чужие не трогаем."""
-        owner = current_owner()
-        with self._lock:
-            keys = [k for k in self._sessions if k[0] == owner]
-            return [self._sessions.pop(k) for k in keys]
-
     def _take_one_own(self):
         """Снять ОДНУ сессию текущего владельца. ``None`` — своих больше нет.
 
@@ -744,22 +836,13 @@ class PersistentStdioRegistry:
             except Exception:
                 pass
 
-    def close_all(self) -> None:
-        """Закрыть сессии текущего владельца. Синхронный вход."""
-        for session in self._take_own():
-            try:
-                session.close()
-            except Exception:
-                pass
-
     async def aclose_all(self) -> None:
         """То же, не занимая поток из пула.
 
         Цикл агента гасит сессии в своём ``finally``, и это до 7 с на сессию
         (SIGTERM → таймаут → SIGKILL) плюс до 10 с на ответ close-тула. Раньше
         всё это уезжало в ``asyncio.to_thread``; теперь ожидание — опрос, и
-        поток не нужен. Форма та же, что у ``stream_client``: синхронный
-        ``close_all`` рядом с ``aclose_all``.
+        поток не нужен.
 
         Отмена приходит из двух РАЗНЫХ мест, и поступать с ними надо
         по-разному; различаем по счётчику ``Task.cancelling()``:
@@ -819,7 +902,7 @@ class PersistentStdioRegistry:
     def close_everything(self) -> None:
         """Закрыть ВСЕ сессии, включая чужие. Завершение процесса и тесты.
 
-        Нужен отдельным именем: обычный ``close_all`` теперь намеренно щадит
+        Нужен отдельным именем: обычный ``aclose_all`` теперь намеренно щадит
         чужих, а на выходе из процесса щадить некого — иначе Chromium
         переживёт агента, ради чего всё и затевалось.
         """

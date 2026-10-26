@@ -3,7 +3,7 @@ import sys
 from typing import Any, NamedTuple
 
 from gc_core import config_sync, onboarding
-from gc_core.agent_edits.ctx import RUN_MODE_CLI, RUN_MODE_KEY
+from gc_core.agent_edits.ctx import RUN_MODE_CLI
 from gc_core.agent_executor import AgentExecutor
 from gc_core.attachments.model import (
     ORIGIN_USER,
@@ -17,32 +17,44 @@ from gc_core.attachments.store import ImageStore, amake_attachment
 from gc_core.config import (
     _bootstrap_user_config,
     apply_cli_overrides,
-    build_auth_connector,
     cli_forces_legacy_model,
-    load_config,
-    load_config_ex,
+    load_settings,
     resolve_config_path,
     user_config_path,
 )
+from gc_core.config_modules.auth import build_auth_connector
+from gc_core.config_modules.env_interpolation import (
+    UnresolvedPlaceholdersError,
+)
 from gc_core.config_modules.images import read_images_config
+from gc_core.config_modules.path_hints import UnknownSettingError
+from gc_core.config_modules.root import schema_error_details
 from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
 )
 from gc_core.run_context import RunContext, acreate_run_context
+from gc_core.settings import is_explicit
 from gc_core.thread_store import resolve_threads_dir
 from gc_core.thread_store_file import FileThreadStore
+from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
 from gc_core.utils.json_text import format_json_for_display
 from gc_core.utils.logging_module import human_console_enabled
+from pydantic import ValidationError
 from recommended_mcp.runtime.daemon_autostart import (
     ensure_mcp_daemons,
     shutdown_mcp_daemons,
 )
 
 from gc_cli import arg_parser
+from gc_cli.plan_approval import (
+    NO_PROPOSED_PLAN,
+    arun_plan_approval,
+    thread_has_proposed_plan,
+)
 from gc_cli.structured_output import (
     StructuredOutputError,
     aemit_structured_result,
@@ -97,10 +109,11 @@ async def arun(
     )
 
 
-async def _resolve_forced_skill(
-    skill_name: str, config_dict: dict
-) -> str | None:
+async def _resolve_forced_skill(skill_name: str, settings: Any) -> str | None:
     """Resolve the -s/--skill flag deterministically (pack-aware).
+
+    ``settings`` — всё, что принимает ``settings_of`` (контекст,
+    ``LoadedSettings``, ``AppConfig``).
 
     Returns the exact canonical skill id when resolved; the raw name as a
     soft fallback when it can't be resolved (unresolvable / ambiguous, or the
@@ -119,7 +132,7 @@ async def _resolve_forced_skill(
     )
 
     try:
-        catalog = await get_skills_registry(config_dict).skill_catalog()
+        catalog = await get_skills_registry(settings).skill_catalog()
     except Exception as exc:  # surface as warning, not traceback
         print(
             f"warning: не удалось построить каталог скиллов для -s ({exc}); "
@@ -218,7 +231,7 @@ class _CliImages(NamedTuple):
 
 
 async def _aprepare_cli_images(
-    config_dict: dict,
+    settings: Any,
     image_paths: list[str],
     *,
     thread_id: str | None,
@@ -230,7 +243,7 @@ async def _aprepare_cli_images(
     условие запуска: ошибка диска её пропускает, как в TUI. Каталог тредов нужен только
     номеру первой плашки — без `--image` к нему не обращаемся. None — отказ: текст уже в
     stderr, карман снят."""
-    store = ImageStore.for_config(config_dict)
+    store = ImageStore.for_config(settings)
     try:
         store.sweep_dead_staging()
     except OSError:
@@ -238,14 +251,14 @@ async def _aprepare_cli_images(
     if not image_paths:
         return _CliImages(store, [], 1)
     first_n = _first_image_number(
-        resolve_threads_dir(config_dict), thread_id, start_new_thread
+        resolve_threads_dir(settings), thread_id, start_new_thread
     )
     try:
         images = await _astage_cli_images(
             image_paths,
             store,
             first_n=first_n,
-            max_per_message=read_images_config(config_dict).max_per_message,
+            max_per_message=read_images_config(settings).max_per_message,
         )
     except ImageArgError as exc:
         print(str(exc), file=sys.stderr)
@@ -312,7 +325,7 @@ def _run_init() -> int:
             onboarding.explain_broken_config(str(path), exc), file=sys.stderr
         )
         return 1
-    config_dict = loaded.config
+    settings = loaded.config
     if loaded.message:
         # Мастер gc-cli плоский, экран не занимает — stderr человек видит.
         print(f"[gc] {loaded.message}", file=sys.stderr)
@@ -320,7 +333,7 @@ def _run_init() -> int:
         from gc_cli import onboarding_wizard
 
         configured = onboarding_wizard.run(
-            config_dict,
+            settings,
             path,
             review_all=True,
             io=onboarding_wizard.default_io(),  # без mcp — gc-cli не ставит MCP
@@ -343,7 +356,7 @@ def _run_init() -> int:
         print(
             onboarding.setup_guide(
                 str(path),
-                config_dict,
+                settings,
                 just_created=just_created,
                 repair=loaded,
             ),
@@ -530,9 +543,19 @@ def _run_update() -> int:
     """
     src = _updater_source_or_hint()
     if src is not None:
-        config_dict = load_config(arg_parser.run_args.config)
+        try:
+            loaded = load_settings(arg_parser.run_args.config)
+        except ValueError as exc:
+            # Обновление чинит и сломанный конфиг: он нужен только ради
+            # `update.extra_args`, без них ставим с умолчаниями.
+            print(
+                "[gc] конфиг не загружается, обновление без "
+                f"update.extra_args: {exc}",
+                file=sys.stderr,
+            )
+            loaded = None
         command = updater_runner.build_install_command(
-            src, updater_check.extra_args(config_dict)
+            src, updater_check.extra_args(loaded)
         )
         updater_runner.spawn_detached_update(
             command, parent_pid=os.getpid(), restart_cmd=None
@@ -545,6 +568,37 @@ def _run_update() -> int:
     return 0
 
 
+def _print_startup_notices(
+    loaded: Any, ctx: Any, *, upgrade_info=None
+) -> None:
+    """Стартовые уведомления → stderr (не-блокирующие; на основном пути онбординг
+    идёт раньше; `--init` его не проходит). Один вывод на все пути, которые
+    запускают агента: `--init` и основной запуск видят одни и те же
+    предупреждения о конфиге."""
+    from gc_core.startup_notices import (
+        collect_startup_notices,
+        render_notices_for_cli,
+    )
+    from gc_core.tools.registry import all_builtin_tool_names
+
+    notices = collect_startup_notices(
+        loaded,
+        all_builtin_tool_names(loaded),
+        getattr(ctx, "mcp_status", None),
+        is_tui=False,
+        known_tool_names=getattr(ctx, "registered_tool_names", None),
+        deprecated_keys_used=(
+            ["backend.stream"]
+            if is_explicit(loaded.settings, "backend.stream")
+            else []
+        ),
+        upgrade_info=upgrade_info,
+        compat_notices=list(loaded.runtime.notices),
+    )
+    if notices:
+        print(render_notices_for_cli(notices), file=sys.stderr)
+
+
 async def _run_init_agents_md() -> int:
     """`gc-cli --init`: агент сам сканирует репозиторий и пишет AGENTS.md.
 
@@ -554,22 +608,32 @@ async def _run_init_agents_md() -> int:
     from gc_core.instructions.init_agents_md import build_init_prompt
     from gc_core.security.confirm_port import confirm_available
 
-    config_dict = load_config(arg_parser.run_args.config)
     # Тот же режим запуска, что у основного входа: правило одно для всех
     # контекстов gc-cli (запись журнала правок — `agent_edits.record.cli`).
-    config_dict[RUN_MODE_KEY] = RUN_MODE_CLI
-    auth_connector = build_auth_connector(config_dict)
+    loaded, settings_exit = _load_cli_settings(
+        arg_parser.run_args.config,
+        getattr(arg_parser.run_args, "profile", None),
+    )
+    if settings_exit is not None:
+        return settings_exit
+    loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)
+    auth_connector = build_auth_connector(loaded)
+    force_legacy = cli_forces_legacy_model(loaded)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
     # create_run_context морозил бы его на всё MCP-дискавери — замер на
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
     # против 0.01 с и 365 тиков у асинхронного двойника.
-    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
+    ctx = await acreate_run_context(
+        loaded, auth_connector=auth_connector, force_legacy=force_legacy
+    )
     # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
     # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
     # ждал строку в stdin. Режим `--init` как раз и спрашивает человека.
     from gc_cli.ask_human_port import make_cli_ask_human_port
 
     ctx.ask_human = make_cli_ask_human_port()
+
+    _print_startup_notices(loaded, ctx)
 
     from gc_core.utils.async_http import aclose_clients
 
@@ -625,10 +689,13 @@ def _load_structured_format() -> tuple[str | None, int | None]:
 
 
 def _print_agent_response(
-    response: Any, config_dict: dict, ctx: RunContext
+    response: Any, settings: Any, ctx: RunContext
 ) -> None:
-    formatted = format_json_for_display(response)
-    if human_console_enabled(config_dict) and formatted:
+    """``settings`` — всё, что принимает ``settings_of``. Ход, закрытый
+    планом, печатается текстом плана, а не служебным JSON."""
+    plan = ProposePlan.present_result(response)
+    formatted = plan if plan is not None else format_json_for_display(response)
+    if human_console_enabled(settings) and formatted:
         print(formatted)
     if formatted:
         ctx.logger.info(
@@ -641,7 +708,7 @@ async def _emit_structured_if_requested(
     *,
     format_text: str | None,
     response: Any,
-    config_dict: dict,
+    settings: Any,
     ctx: RunContext,
     executor: AgentExecutor,
 ) -> int | None:
@@ -649,7 +716,7 @@ async def _emit_structured_if_requested(
         return None
     return await aemit_structured_result(
         response=response,
-        config_dict=config_dict,
+        settings=settings,
         ctx=ctx,
         state=executor.get_state(),
         terminal_outcome=executor.last_terminal_outcome,
@@ -659,7 +726,7 @@ async def _emit_structured_if_requested(
 
 def _unconfigured_setup_exit(
     config_arg: str | None,
-    config_dict: dict,
+    settings: Any,
     *,
     just_created: bool,
     format_text: str | None,
@@ -670,18 +737,164 @@ def _unconfigured_setup_exit(
     С ``--structured-output-format`` код 1: пустой stdout и 0 скрипт
     принял бы за ответ. Без флага код 0, подсказка остаётся в stderr.
     Вынесено из ``arun_cli``: вложенная ветка поднимала S3776 выше 15.
+    ``settings`` — всё, что принимает ``settings_of``.
     """
-    if config_arg is not None or not onboarding.is_unconfigured(config_dict):
+    if config_arg is not None or not onboarding.is_unconfigured(settings):
         return None
     print(
         onboarding.setup_guide(
-            str(user_config_path()), config_dict, just_created=just_created
+            str(user_config_path()), settings, just_created=just_created
         ),
         file=sys.stderr,
     )
     if format_text is not None:
         return 1
     return 0
+
+
+def _load_cli_settings(config_arg, profile_arg):
+    """Настройки запуска: конфиг + CLI-override поверх него.
+
+    ``(loaded, None)`` или ``(None, код выхода)`` — отказ уже объяснён в stderr.
+    """
+    try:
+        loaded = load_settings(config_arg, profile_override=profile_arg)
+    except ValueError as exc:
+        # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый traceback
+        # из глубины загрузки (см. onboarding.explain_broken_config). Профиль —
+        # тот же, что грузили: по указателю из файла объяснение описывало бы
+        # чужой стек.
+        print(
+            onboarding.explain_broken_config(
+                resolve_config_path(config_arg),
+                exc,
+                profile_override=profile_arg,
+            ),
+            file=sys.stderr,
+        )
+        return None, 1
+
+    # Единая точка применения CLI-override поверх config.yml.
+    try:
+        loaded = apply_cli_overrides(
+            loaded,
+            extra_overrides=getattr(
+                arg_parser, "extra_config_overrides", None
+            ),
+            write_guard_enabled=arg_parser.run_args.write_guard,
+            no_write_guard=arg_parser.run_args.no_write_guard,
+            command_moderation_mode=arg_parser.run_args.command_moderation,
+            read_guard_enabled=getattr(
+                arg_parser.run_args, "read_guard", None
+            ),
+            no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
+            read_guard_mode=getattr(
+                arg_parser.run_args, "read_guard_mode", None
+            ),
+            agentsmd_override=getattr(
+                arg_parser.run_args, "agentsmd_override", False
+            ),
+            trace_id=getattr(arg_parser.run_args, "trace_id", None),
+        )
+    except UnresolvedPlaceholdersError as exc:
+        # `--param key='${ENV:X}'` с незаданной X — отказ, как у файлов на
+        # старте (`_cli_updates` резолвит строго), а не traceback.
+        print(f"[gc] {exc}", file=sys.stderr)
+        return None, 1
+    except UnknownSettingError as exc:
+        # Незнакомое схеме имя (в том числе прежнее плоское `--max_steps`):
+        # сообщение подсказывает путь (`--agent.max_steps`).
+        print(f"[gc] {exc}", file=sys.stderr)
+        return None, 2
+    except ValidationError as exc:
+        # Негодное значение параметра: координата и причина, без значения
+        # (в нём может быть токен).
+        print(
+            f"[gc] некорректный параметр: {schema_error_details(exc)}",
+            file=sys.stderr,
+        )
+        return None, 2
+    except ValueError as exc:
+        # Правило пары адрес+токен и прочие отказы правки — текстом, без
+        # трейсбека (значения в сообщении нет).
+        print(f"[gc] некорректный параметр: {exc}", file=sys.stderr)
+        return None, 2
+    if getattr(arg_parser.run_args, "external_request", False):
+        # Канал объявляет о себе, как webhook сервера: человека нет, слова
+        # запроса — запрос внешней системы.
+        loaded = loaded.with_runtime(
+            human_channel=False, external_user_words=True
+        )
+    return loaded, None
+
+
+def _approve_plan_exit(
+    settings: Any, approve_mode: str | None, thread_id: str | None
+) -> int | None:
+    """`--approve-plan` без предложенного плана в сессии — ошибка, код 1."""
+    if not approve_mode:
+        return None
+    if thread_id and thread_has_proposed_plan(
+        resolve_threads_dir(settings), thread_id
+    ):
+        return None
+    print(NO_PROPOSED_PLAN.format(thread_id=thread_id), file=sys.stderr)
+    return 1
+
+
+def _launch_exit(
+    config_arg: str | None,
+    loaded: Any,
+    *,
+    just_created: bool,
+    format_text: str | None,
+    approve_mode: str | None,
+    thread_id: str | None,
+) -> int | None:
+    """Запуск кончается до агента: неполный конфиг (подсказка и выход)
+    или `--approve-plan` без предложенного плана в сессии."""
+    setup_exit = _unconfigured_setup_exit(
+        config_arg,
+        loaded,
+        just_created=just_created,
+        format_text=format_text,
+    )
+    if setup_exit is not None:
+        return setup_exit
+    return _approve_plan_exit(loaded, approve_mode, thread_id)
+
+
+async def _arun_requested_turn(
+    executor: AgentExecutor,
+    user_parts: list[str],
+    *,
+    approve_mode: str | None,
+    extra_text: str | None,
+    thread_id: str | None,
+    start_new_thread: bool,
+    verbose: bool,
+    attachments: Any,
+    account_run: bool,
+) -> Any:
+    """Ход, о котором просит запуск: одобрение предложенного плана флагом
+    `--approve-plan` (та же последовательность ядра, что у консольного
+    вопроса) либо обычный запрос `-q`."""
+    if approve_mode:
+        return await executor.aexecute_accepted_plan(
+            approve_mode,
+            thread_id,
+            extra_text=extra_text or "",
+            verbose=verbose,
+            account_run=account_run,
+        )
+    return await executor.arun(
+        user_parts,
+        thread_id=thread_id,
+        start_new_thread=start_new_thread,
+        verbose=verbose,
+        attachments=attachments,
+        account_run=account_run,
+    )
 
 
 async def arun_cli() -> int:
@@ -709,49 +922,21 @@ async def arun_cli() -> int:
     config_arg = arg_parser.run_args.config
     profile_arg = getattr(arg_parser.run_args, "profile", None)
     just_created = _bootstrap_user_config() if config_arg is None else False
-    try:
-        config_dict, _profile_meta = load_config_ex(
-            config_arg, profile_override=profile_arg
-        )
-    except ValueError as exc:
-        # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый traceback
-        # из глубины загрузки (см. onboarding.explain_broken_config). Профиль —
-        # тот же, что грузили: по указателю из файла объяснение описывало бы
-        # чужой стек.
-        print(
-            onboarding.explain_broken_config(
-                resolve_config_path(config_arg),
-                exc,
-                profile_override=profile_arg,
-            ),
-            file=sys.stderr,
-        )
-        return 1
-
-    # Единая точка применения CLI-override поверх config.yml.
-    apply_cli_overrides(
-        config_dict,
-        extra_overrides=getattr(arg_parser, "extra_config_overrides", None),
-        write_guard_enabled=arg_parser.run_args.write_guard,
-        no_write_guard=arg_parser.run_args.no_write_guard,
-        command_moderation_mode=arg_parser.run_args.command_moderation,
-        read_guard_enabled=getattr(arg_parser.run_args, "read_guard", None),
-        no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
-        read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
-        agentsmd_override=getattr(
-            arg_parser.run_args, "agentsmd_override", False
-        ),
-        trace_id=getattr(arg_parser.run_args, "trace_id", None),
-    )
+    loaded, settings_exit = _load_cli_settings(config_arg, profile_arg)
+    if settings_exit is not None:
+        return settings_exit
     # Режим запуска для ядра: от него зависит запись журнала правок
     # (`agent_edits.record.cli`, по умолчанию выключена — журнал здесь не смотрят).
-    config_dict[RUN_MODE_KEY] = RUN_MODE_CLI
+    loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)
     # Легаси-форс (спека §2): --model/--completions_url поверх непустого реестра
     # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
-    force_legacy = cli_forces_legacy_model(config_dict)
+    force_legacy = cli_forces_legacy_model(loaded)
     if force_legacy:
-        config_dict.setdefault("compat_notices", []).append(
-            "--model: уровни отключены на этот запуск (легаси-форс)"
+        loaded = loaded.with_runtime(
+            notices=(
+                *loaded.runtime.notices,
+                "--model: уровни отключены на этот запуск (легаси-форс)",
+            )
         )
     from gc_core import upgrade_gate
 
@@ -759,19 +944,22 @@ async def arun_cli() -> int:
 
     # gc-cli больше НЕ запускает визард автоматически — только по --init-config.
     # При неполном конфиге на дефолтном пути — пассивный текстовый хинт и выход.
-    setup_exit = _unconfigured_setup_exit(
-        config_arg,
-        config_dict,
-        just_created=just_created,
-        format_text=format_text,
-    )
-    if setup_exit is not None:
-        return setup_exit
-
     thread_id = arg_parser.run_args.thread_id
     start_new_thread = arg_parser.run_args.new
+    approve_mode = getattr(arg_parser.run_args, "approve_plan", None)
+    launch_exit = _launch_exit(
+        config_arg,
+        loaded,
+        just_created=just_created,
+        format_text=format_text,
+        approve_mode=approve_mode,
+        thread_id=thread_id,
+    )
+    if launch_exit is not None:
+        return launch_exit
+
     cli_images = await _aprepare_cli_images(
-        config_dict,
+        loaded,
         getattr(arg_parser.run_args, "images", None) or [],
         thread_id=thread_id,
         start_new_thread=start_new_thread,
@@ -784,23 +972,23 @@ async def arun_cli() -> int:
     # notice «агент обновлён» (ревью Task 4).
     upgrade_gate.mark_current_run()
     forced_skill_id = await _resolve_forced_skill(
-        arg_parser.run_args.skill, config_dict
+        arg_parser.run_args.skill, loaded
     )
 
-    auth_connector = build_auth_connector(config_dict)
+    auth_connector = build_auth_connector(loaded)
     auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
     if auto_mcp:
         # У gc-cli автозапуск opt-in: выключается тем, что `-a` не передан.
         # Флага `--no-auto-mcp` здесь нет — он живёт только у gc-ua.
         ensure_mcp_daemons(
-            config_dict,
+            loaded,
             disable_hint="отключить автозапуск: запустите без `-a`",
         )
     # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
     # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
     ctx = await acreate_run_context(
-        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+        loaded, auth_connector=auth_connector, force_legacy=force_legacy
     )
     # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
     # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
@@ -809,25 +997,7 @@ async def arun_cli() -> int:
 
     ctx.ask_human = make_cli_ask_human_port()
 
-    # Стартовые уведомления → stderr (не-блокирующие; онбординг остаётся выше).
-    from gc_core.startup_notices import (
-        collect_startup_notices,
-        render_notices_for_cli,
-    )
-    from gc_core.tools.registry import all_builtin_tool_names
-
-    _notices = collect_startup_notices(
-        config_dict,
-        all_builtin_tool_names(config_dict),
-        getattr(ctx, "mcp_status", None),
-        is_tui=False,
-        known_tool_names=getattr(ctx, "registered_tool_names", None),
-        deprecated_keys_used=config_dict.get("deprecated_keys_used"),
-        upgrade_info=_upgrade_info,
-        compat_notices=config_dict.get("compat_notices"),
-    )
-    if _notices:
-        print(render_notices_for_cli(_notices), file=sys.stderr)
+    _print_startup_notices(loaded, ctx, upgrade_info=_upgrade_info)
 
     user_parts, attachments = _cli_user_parts(
         arg_parser.run_args.query,
@@ -839,15 +1009,26 @@ async def arun_cli() -> int:
 
     verbose = arg_parser.run_args.verbose
 
+    from gc_cli.run_stop import install_run_sigint, restore_run_sigint
+
     executor = AgentExecutor(ctx)
+    _sigint_previous = install_run_sigint(executor)
+    # Флаг запуска — выбор режима на эту сессию: он сильнее сохранённого в
+    # треде, поэтому идёт исполнителю, а не слоем конфига.
+    permission_mode = getattr(arg_parser.run_args, "permission_mode", None)
+    if permission_mode:
+        executor.set_permission_mode(permission_mode)
     structured_exit: int | None = None
     # Учёт закрывается один раз, после всего, что ещё прибавится к прогону.
     # Сейчас это перефраз. Следующий такой шаг встаёт перед той же точкой.
     close_accounting_after = format_text is not None
     ran = False
     try:
-        response = await executor.arun(
+        response = await _arun_requested_turn(
+            executor,
             user_parts,
+            approve_mode=approve_mode,
+            extra_text=arg_parser.run_args.query,
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             verbose=verbose,
@@ -855,14 +1036,24 @@ async def arun_cli() -> int:
             account_run=not close_accounting_after,
         )
         ran = True
+        # До уборки ниже: продолжение после одобрения — ещё один прогон тем
+        # же процессом, ему нужны те же клиенты и MCP-демоны.
+        response = await arun_plan_approval(
+            executor,
+            response,
+            thread_id=thread_id,
+            verbose=verbose,
+            account_run=not close_accounting_after,
+        )
         structured_exit = await _emit_structured_if_requested(
             format_text=format_text,
             response=response,
-            config_dict=config_dict,
+            settings=loaded,
             ctx=ctx,
             executor=executor,
         )
     finally:
+        restore_run_sigint(_sigint_previous)
         # Запись меты может бросить исключение. Если она стоит первой
         # строкой finally, клиенты и демоны `-a` этого запуска не гасятся.
         # Учёт — в своём try, уборка — во внутреннем finally.
@@ -883,7 +1074,7 @@ async def arun_cli() -> int:
                 shutdown_mcp_daemons()
     if structured_exit is not None:
         return structured_exit
-    _print_agent_response(response, config_dict, ctx)
+    _print_agent_response(response, loaded, ctx)
     return 0
 
 
@@ -899,6 +1090,12 @@ def main() -> int:
     """
     import asyncio
 
+    # `gc-cli config …` — без агента, MCP и сети (gc_core.config_command);
+    # парсер агента её пропускает (arg_parser.CONFIG_COMMAND).
+    if sys.argv[1:2] == ["config"]:
+        from gc_core.config_command import main as config_main
+
+        return config_main(sys.argv[2:], program="gc-cli")
     return asyncio.run(arun_cli())
 
 

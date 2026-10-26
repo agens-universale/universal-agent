@@ -620,20 +620,26 @@ def assert_conforms(store_factory: Callable[[], Any]) -> List[str]:
     расхождении. Возвращает список пройденных проверок — тесту удобно
     утверждать, что их столько, сколько ожидалось.
     """
-    passed: List[str] = []
+    return run_checks(store_factory, STRUCTURE_CHECKS, BEHAVIOUR_CHECKS)
 
+
+def run_checks(
+    store_factory: Callable[[], Any], structure: tuple, behaviour: tuple
+) -> List[str]:
+    """Прогон набора проверок: структурные — на одном экземпляре, каждая
+    поведенческая — на свежем (с ``ensure_ready``, если он есть). Общий для
+    обычного и durable-контракта."""
+    passed: List[str] = []
     store = store_factory()
-    for check in STRUCTURE_CHECKS:
+    for check in structure:
         check(store)
         passed.append(check.__name__)
-
-    for check in BEHAVIOUR_CHECKS:
+    for check in behaviour:
         fresh = store_factory()
         if hasattr(fresh, "ensure_ready"):
             fresh.ensure_ready()
         check(fresh)
         passed.append(check.__name__)
-
     return passed
 
 

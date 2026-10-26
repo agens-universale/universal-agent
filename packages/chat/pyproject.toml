@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-chat"
-version = "0.4.0"
+version = "0.5.0"
 description = "GigaCode Universal Agent — HTTP-фасады Responses и Chat Completions (gc-chat)"
 requires-python = ">=3.11"
 dependencies = [
-    "gc-core==0.4.0",
+    "gc-core==0.5.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.31.1",
 ]

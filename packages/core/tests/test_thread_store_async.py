@@ -151,7 +151,7 @@ def test_incomplete_async_contract_is_rejected():
 async def test_session_reads_and_writes_through_the_async_store():
     store = RedisLikeStore()
     session = await ThreadSession.afrom_config(
-        config_dict={},
+        settings=None,
         system_id=SYS,
         thread_id=TID,
         store=store,
@@ -203,7 +203,7 @@ async def test_adapter_and_native_port_agree(tmp_path):
 
     async def _run(store):
         session = await ThreadSession.afrom_config(
-            config_dict={},
+            settings=None,
             system_id=SYS,
             thread_id=TID,
             store=store,
@@ -253,7 +253,7 @@ async def test_compaction_without_files_does_not_write_to_disk(
     monkeypatch.chdir(tmp_path)
     store = MemoryThreadStore()
     session = await ThreadSession.afrom_config(
-        config_dict={},
+        settings=None,
         system_id=SYS,
         thread_id=TID,
         store=store,
@@ -277,7 +277,7 @@ async def test_file_store_still_archives(tmp_path):
     store = FileThreadStore(str(tmp_path))
     store.ensure_ready()
     session = await ThreadSession.afrom_config(
-        config_dict={},
+        settings=None,
         system_id=SYS,
         thread_id=TID,
         store=store,
@@ -311,7 +311,7 @@ async def test_runtime_flags_reach_the_async_store():
 
     store = RedisLikeStore()
     session = await ThreadSession.afrom_config(
-        config_dict={},
+        settings=None,
         system_id=SYS,
         thread_id=TID,
         store=store,
@@ -346,7 +346,7 @@ async def test_trace_ids_reach_the_async_store():
 
     store = RedisLikeStore()
     session = await ThreadSession.afrom_config(
-        config_dict={},
+        settings=None,
         system_id=SYS,
         thread_id=TID,
         store=store,
@@ -395,7 +395,7 @@ async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(
 
     `replace_messages` в контракт НЕ входит: он объявлен умолчанием базы, а
     `CONTRACT_METHODS` собираются из абстрактных методов. Хранилище, принятое
-    «по сигнатурам» (законный путь, см. docs/thread-store.md), этого метода не
+    «по сигнатурам» (законный путь, см. docs/sdk/thread-store-contract.md), этого метода не
     имеет — и компакция шла парой `areset` + `aappend_messages`, где `reset` по
     контракту сносит тред вместе с трассой. Терялась она молча и каждый раз, а
     конформанс оставался зелёным.
@@ -407,7 +407,7 @@ async def test_compaction_keeps_the_trace_on_a_store_without_replace_messages(
         "двойник перестал быть утиным"
     )
     session = await ThreadSession.afrom_config(
-        config_dict={},
+        settings=None,
         system_id=SYS,
         thread_id=TID,
         store=store,

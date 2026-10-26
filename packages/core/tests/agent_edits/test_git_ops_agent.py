@@ -34,12 +34,12 @@ from gc_core.agent_edits.git_ops import (
     ls_files_set,
     parse_status_line,
     paths_committed_since,
-    rev_parse_head,
     run_git,
     show_index_bytes,
     status_entries,
     with_eol,
 )
+from gc_testkit.git_support import rev_parse_head
 
 
 @pytest.fixture
@@ -380,30 +380,6 @@ def test_head_blob_oids_returns_only_existing(tmp_git_repo):
 
 def test_head_blob_oids_empty_input_returns_empty_dict(tmp_git_repo):
     assert head_blob_oids(str(tmp_git_repo), []) == {}
-
-
-def test_rev_parse_head_returns_full_oid(tmp_git_repo):
-    root = tmp_git_repo
-    code, out = run_git(str(root), ["rev-parse", "HEAD"])
-    assert code == 0
-
-    assert rev_parse_head(str(root)) == out.decode("utf-8").strip()
-
-
-def test_rev_parse_head_none_on_empty_repo(tmp_path):
-    """Репозиторий существует, но ни одного коммита ещё нет."""
-    if shutil.which("git") is None:
-        pytest.skip("git недоступен")
-    root = tmp_path / "empty_repo"
-    root.mkdir()
-    subprocess.run(
-        ["git", "init", "-q", "-b", "main"],
-        cwd=str(root),
-        check=True,
-        capture_output=True,
-    )
-
-    assert rev_parse_head(str(root)) is None
 
 
 def test_head_commit_label_format(tmp_git_repo):

@@ -6,14 +6,18 @@
 
 * всё, в чём vulture уверен на ``STRICT_CONFIDENCE`` % и выше — неиспользуемые
   импорты и переменные, недостижимый код после ``return``/``raise`` (S1763);
-* неиспользуемые ПРИВАТНЫЕ функции, методы, классы и свойства (``_name``,
-  не dunder) от ``PRIVATE_CONFIDENCE`` % — это S1144 «Unused private methods».
-  Публичные имена vulture помечает десятками: их зовут фреймворки (Textual,
-  pydantic, FastAPI, pytest) и внешние пользователи пакета, поэтому как гейт
-  они шумят сильнее, чем помогают.
+* неиспользуемые функции, методы, классы и свойства — приватные и публичные
+  — от ``DEF_CONFIDENCE`` % (S1144 «Unused private methods» и его публичный
+  аналог). Имена, которые зовут фреймворки (Textual, HTMLParser, Temporal,
+  pydantic, FastAPI, pytest), отсеиваются правилами ниже; публичный контракт
+  для внешних пользователей пакета (SDK, протоколы хранилищ) — в белом списке
+  с пояснением.
 
-Где ищем использования: прод-код, тесты (функция, которую зовёт только тест,
-— живая: её держит тест) и белый список ``scripts/dead_code_whitelist.py``.
+Где ищем использования: прод-код и белый список
+``scripts/dead_code_whitelist.py``. Вызов из теста использованием НЕ считается:
+код, который зовут только тесты, — мёртвый вместе со своими тестами.
+Исключение — ``gc_testkit``: это инфраструктура тестов, её потребители и есть
+наборы тестов (``USAGE_PATHS``).
 Где ищем мёртвый код: только прод-код (``PROD_PATHS``).
 
 Имена, которые вызывает фреймворк, а не наш код, отсеиваются по соглашениям
@@ -42,19 +46,23 @@ PROD_PATHS = [
     "packages/server/src",
     "packages/testkit/src",
     "packages/tui/src",
+    "packages/temporalio/src",
     "packages/acp/src",
     "packages/chat/src",
     "packages/core/assets/skills",
     "scripts",
     "integrations",
 ]
-# Только как места использования: сами не проверяются.
+# Наборы тестов: места использования ТОЛЬКО для кода gc_testkit
+# (``TEST_INFRA_PATHS``); остальной прод-код живым от тестов не становится.
+TEST_INFRA_PATHS = ["packages/testkit/src"]
 USAGE_PATHS = [
     "packages/cli/tests",
     "packages/core/tests",
     "packages/mcp/tests",
     "packages/server/tests",
     "packages/tui/tests",
+    "packages/temporalio/tests",
     "packages/acp/tests",
     "packages/chat/tests",
     "tests",
@@ -63,8 +71,8 @@ WHITELIST = "scripts/dead_code_whitelist.py"
 EXCLUDE = ["*/external/*", "*/__pycache__/*", "*/__snapshots__/*"]
 
 STRICT_CONFIDENCE = 80
-PRIVATE_CONFIDENCE = 60
-_PRIVATE_KINDS = {"function", "method", "class", "property"}
+DEF_CONFIDENCE = 60
+_DEF_KINDS = {"function", "method", "class", "property"}
 
 # Соглашения фреймворков: эти методы зовёт не наш код.
 IGNORE_NAMES = [
@@ -81,6 +89,16 @@ IGNORE_NAMES = [
     "_compute_*",
     "compose",
     "render",
+    # Textual: переопределения методов App/Widget, их зовёт фреймворк.
+    "get_default_screen",
+    "check_action",
+    "get_content_height",
+    "get_selection",
+    # html.parser.HTMLParser: обработчики разбора, их зовёт feed().
+    "handle_*",
+    # PEP 562: ленивые атрибуты модуля, зовёт механизм импорта.
+    "__getattr__",
+    "__dir__",
     # pytest: хуки плагина gc_testkit.
     "pytest_*",
 ]
@@ -102,45 +120,61 @@ IGNORE_DECORATORS = [
     "@*.fixture",
     "@on",
     "@work",
+    # Temporal: обработчики и точки входа регистрирует SDK по декоратору.
+    "@workflow.signal",
+    "@workflow.update",
+    "@workflow.query",
+    "@workflow.run",
+    "@activity.defn",
 ]
-
-
-def _is_private(name: str) -> bool:
-    return name.startswith("_") and not (
-        name.startswith("__") and name.endswith("__")
-    )
 
 
 def _reported(item) -> bool:
     if item.confidence >= STRICT_CONFIDENCE:
         return True
-    return (
-        item.confidence >= PRIVATE_CONFIDENCE
-        and item.typ in _PRIVATE_KINDS
-        and _is_private(item.name)
-    )
+    return item.confidence >= DEF_CONFIDENCE and item.typ in _DEF_KINDS
+
+
+def _rel(path: Path) -> str:
+    return path.resolve().relative_to(ROOT).as_posix()
+
+
+def _under(rel: str, roots: list[str]) -> bool:
+    return any(rel == p or rel.startswith(p + "/") for p in roots)
 
 
 def _in_prod(path: Path) -> bool:
-    rel = path.resolve().relative_to(ROOT).as_posix()
-    return any(rel == p or rel.startswith(p + "/") for p in PROD_PATHS)
+    return _under(_rel(path), PROD_PATHS)
 
 
-def find_dead_code() -> list:
+def _unused(paths: list[str]) -> dict:
+    """Находки vulture в прод-коде, когда использования ищутся в ``paths``."""
     vulture = Vulture(
         ignore_names=IGNORE_NAMES, ignore_decorators=IGNORE_DECORATORS
     )
-    paths = [
-        str(ROOT / p)
-        for p in PROD_PATHS + USAGE_PATHS + [WHITELIST]
-        if (ROOT / p).exists()
-    ]
-    vulture.scavenge(paths, exclude=EXCLUDE)
+    vulture.scavenge(
+        [str(ROOT / p) for p in paths if (ROOT / p).exists()], exclude=EXCLUDE
+    )
     if vulture.exit_code:
         raise RuntimeError("vulture could not analyze all input files")
-    items = vulture.get_unused_code(min_confidence=PRIVATE_CONFIDENCE)
+    return {
+        (str(i.filename), i.first_lineno, i.name, i.typ): i
+        for i in vulture.get_unused_code(min_confidence=DEF_CONFIDENCE)
+        if _reported(i) and _in_prod(Path(i.filename))
+    }
+
+
+def find_dead_code() -> list:
+    # Два прохода: без тестов — для прод-кода, с тестами — для gc_testkit.
+    dead = _unused(PROD_PATHS + [WHITELIST])
+    with_tests = _unused(PROD_PATHS + USAGE_PATHS + [WHITELIST])
     return sorted(
-        (i for i in items if _reported(i) and _in_prod(Path(i.filename))),
+        (
+            item
+            for key, item in dead.items()
+            if not _under(_rel(Path(item.filename)), TEST_INFRA_PATHS)
+            or key in with_tests
+        ),
         key=lambda i: (str(i.filename), i.first_lineno),
     )
 

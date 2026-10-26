@@ -40,7 +40,16 @@ def clear_thread_identity(ctx: Any) -> None:
 
 
 def mint_turn_id() -> str:
-    """Новый идентификатор хода (12 hex-символов)."""
+    """Новый идентификатор хода (12 hex-символов).
+
+    В durable-исполнении (Temporal workflow) id выдаёт среда исполнения
+    (``supplied_id``): ``uuid4`` там недетерминирован и запрещён песочницей.
+    """
+    from gc_core.execution.environment import supplied_id
+
+    supplied = supplied_id("turn")
+    if supplied is not None:
+        return supplied.rsplit("_", 1)[-1][:12]
     return uuid.uuid4().hex[:12]
 
 

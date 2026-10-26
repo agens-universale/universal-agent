@@ -94,6 +94,7 @@ import logging
 import re
 import time
 from typing import (
+    Any,
     Callable,
     Dict,
     List,
@@ -1746,7 +1747,7 @@ class DiffScreen(_ActionFlash, Screen):
         self,
         *,
         launch_root: str,
-        config: Optional[dict] = None,
+        settings: Any = None,
         threads_dir: Optional[str] = None,
         system_id: Optional[str] = None,
         thread_id: Optional[str] = None,
@@ -1755,7 +1756,7 @@ class DiffScreen(_ActionFlash, Screen):
         on_ui_ack: Optional[UiAckFn] = None,
     ) -> None:
         super().__init__()
-        self._config = config or {}
+        self._settings = settings
         self._on_undo_feedback = on_undo_feedback
         self._on_ui_ack = on_ui_ack
         self._source = source
@@ -1794,7 +1795,7 @@ class DiffScreen(_ActionFlash, Screen):
                 str(system_id),
                 str(thread_id),
                 str(launch_root),
-                self._config,
+                self._settings,
             )
 
     @property
@@ -2697,7 +2698,7 @@ class DiffScreen(_ActionFlash, Screen):
 
         # Числа и превью — ИЗ ОДНОГО расчёта, и того самого, которым откат
         # пишет: счётчики строки списка идут от счётной базы и обещали бы
-        # другое (см. `EditsView.revert_delta`). Дельты уезжают в подтверждение
+        # другое (см. `EditsView.revert_deltas`). Дельты уезжают в подтверждение
         # ЦЕЛИКОМ: там показывается весь набор (Р22) — с диффом каждого файла,
         # а выше порога компактного вида без тел, — и счётчики каждой дельты
         # становятся заголовком её файла.

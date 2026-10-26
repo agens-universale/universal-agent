@@ -6,9 +6,6 @@ def _store_with_last_indicator(last):
         def get_task_meta(self, tid):
             return {"tui": {"last_indicator": last}}
 
-        def read_live_messages(self, tid):
-            return []
-
     return _Store()
 
 
@@ -18,9 +15,6 @@ def _store_with_tui_status(status):
     class _Store:
         def get_task_meta(self, tid):
             return {"tui": {"status": status}}
-
-        def read_live_messages(self, tid):
-            return []
 
     return _Store()
 
@@ -77,9 +71,6 @@ async def test_resume_unrecorded_outcome_no_line(tmp_path):
     class _Store:
         def get_task_meta(self, tid):
             return {"tui": {}}  # исход нигде не записан
-
-        def read_live_messages(self, tid):
-            return []
 
     async with TuiApp(
         threads_dir=str(tmp_path / "threads")

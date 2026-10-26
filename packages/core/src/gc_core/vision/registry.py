@@ -124,8 +124,3 @@ _PROBES = VisionProbeRegistry()
 
 def process_vision_probes() -> VisionProbeRegistry:
     return _PROBES
-
-
-def reset_vision_probes_for_tests() -> None:
-    global _PROBES
-    _PROBES = VisionProbeRegistry()

@@ -57,10 +57,9 @@ async def test_meta_has_model_context_and_status(tmp_path):
         assert not scr.query("#meta-left")
         assert not scr.query("#meta-right")
 
-        # Модель из конфига в footer-right
-        cfg_model = str(
-            (getattr(pilot.app, "_config", None) or {}).get("model", "?")
-        )
+        # Модель из конфига в footer-right (без реестра — `agent.model`
+        # настроек; у пустого конфига это умолчание схемы).
+        cfg_model = pilot.app.base_settings().settings.agent.model
         fr_text = str(scr.query_one("#footer-right", Static).render())
         assert cfg_model in fr_text, (
             f"model {cfg_model!r} не найдена в footer-right: {fr_text!r}"

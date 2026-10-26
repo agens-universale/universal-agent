@@ -4,7 +4,7 @@ from gc_core.tools.arguments_validation import (
     parse_and_validate_tool_arguments,
 )
 from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
-from gc_core.tools.schema_optional import (
+from gc_core.execution.tool_schema import (
     OPTIONAL_EMPTY_AS_OMIT_HINT,
     OPTIONAL_OMIT_HINT,
     X_SUPPRESS_OPTIONAL_HINT,

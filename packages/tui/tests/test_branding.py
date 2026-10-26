@@ -29,10 +29,6 @@ def test_logo_text_plain_matches_and_spaces_unstyled():
     assert len(t.spans) == glyphs
 
 
-def test_tagline_display():
-    assert branding.tagline_display() == "U N I V E R S A L   A G E N T"
-
-
 def test_version_under_logo_is_centered_like_the_tagline(monkeypatch):
     """Версия центрируется по ширине лого ведущими пробелами — тем же приёмом, что и
     тэглайн: рамка карточки шире бренда, и CSS-выравнивание увело бы строку по ней."""

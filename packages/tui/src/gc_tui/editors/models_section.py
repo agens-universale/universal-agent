@@ -54,6 +54,10 @@ from gc_tui.editors.model_entry_form import (
 )
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
+from gc_tui.widgets.action_row import ActionRow
+
+# Виджеты подтверждения в секции моделей.
+_CONFIRM_SELECTOR = ".models-confirm"
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _CLS_SET_HINT_SET_DYN = "set-hint set-dyn"
@@ -82,9 +86,8 @@ _FOOTER_FORM_URL = "Ctrl+S — сохранить/выйти · Alt+↓ — по
 _FOOTER_FORM_MODEL = "Ctrl+S — сохранить/выйти · Alt+↓ — перечитать список · Ctrl+Space — проверить связь · Esc — назад"
 _FOOTER_FORM_NOAUTH = "↑/↓ · Ctrl+S — сохранить/выйти · Space — переключить · Ctrl+Space — проверить связь · Esc — назад"
 _FOOTER_FORM_STRIP = "↑/↓ · Ctrl+S — сохранить/выйти · Space — переключить · Ctrl+Space — проверить связь · Esc — назад"
-_FOOTER_FORM_FIELD = (
-    "↑/↓ · Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — назад"
-)
+_FOOTER_FORM_ACTION = "↑/↓ · Enter — открыть · Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — назад"
+_FOOTER_FORM_FIELD = "↑/↓ · Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — назад"
 # Пара своя и курсор на одном из её полей: `Ctrl+U` возвращает общее подключение
 # ЦЕЛИКОМ (§5). Слова взяты из словаря формы, а не списаны заново: ту же клавишу
 # называет подпись поля токена, и разойтись двум обещаниям одного действия нельзя.
@@ -93,9 +96,13 @@ _FOOTER_FORM_FIELD = (
 # Прежнее «Ctrl+U — очистить» с адреса ушло: это был встроенный `delete_left_all`
 # Textual, а над заполненным адресом клавишу теперь забирает пара — над пустым же
 # стирать нечего, и обещать её там значило бы обещать мёртвую клавишу.
-_FOOTER_FORM_URL_PAIR = f"Ctrl+S — сохранить/выйти · Enter — список · {CTRL_U_PAIR} · Esc — назад"
+_FOOTER_FORM_URL_PAIR = (
+    f"Ctrl+S — сохранить/выйти · Enter — список · {CTRL_U_PAIR} · Esc — назад"
+)
 _FOOTER_FORM_LIST = "↑/↓ · Enter — подставить · Ctrl+S — сохранить/выйти · Esc · Ctrl+Space — проверить связь"
-_FOOTER_FORM_LIST_NO_MATCH = "↑/↓ · Ctrl+S — сохранить/выйти · Esc · Ctrl+Space — проверить связь"
+_FOOTER_FORM_LIST_NO_MATCH = (
+    "↑/↓ · Ctrl+S — сохранить/выйти · Esc · Ctrl+Space — проверить связь"
+)
 # Футер раскрытого списка НЕ модальный: `Ctrl+Space` под ним работает, и `Ctrl+U` над
 # своим адресом тоже (список адреса раскрывают поверх заполненного поля, `Alt+↓`).
 # Молчание о работающей клавише — та же ложь футера, что обещание мёртвой.
@@ -442,6 +449,9 @@ def address_host(url: str) -> str:
 # --- нижняя половина секции: слоты (уровень → алиас) и привязки потребителей ---
 _SLOT_UNSET = "не задан"
 _ASSIGN_ACTIVE = "активная"
+# Привязки нет, но потребитель работает фиксированным уровнем
+# (`fixed_unbound_level`): слова пустого слота — «не задана → default».
+_ASSIGN_UNSET = "не задана"
 # Значение, которого в файле цели нет, а в основном конфиге есть (§7-8): смысл
 # несёт СЛОВО, а не приглушённый цвет (замер ревью развёл DIM и DEEP_DIM на
 # неразличимые 1.26 контраста). Это же слово — подпись первой строки пикера: канон
@@ -458,20 +468,18 @@ _SLOT_DEAD_HINT = "уровень не резолвится: задайте хо
 # (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
 # собственностью — здесь только UI-добавка (контракт п.2 волны B).
 #
-# `auto_judge` — потребитель волны C: строка в реестре есть, но никто его ещё не
-# зовёт, а без привязки он пойдёт уровнем default, не активным (`ModelRouter.
-# resolve`). Описание «появится с авто-выбором» — в голове строки грамматикой
-# «имя · описание» (построчной подсказки у секции больше нет — строка объясняет
-# себя сама).
-#
 # `*` — не «те, кого нет в списке»: в списке перечислены ВСЕ канонические имена, и
 # поимённо чужое имя вписать нельзя (валидатор фазы 2 отвергает ключ). Реальный
 # смысл ровно два: единственный способ привязать кастомных субагентов из
 # `.md`-файлов и общая привязка «всем сразу, кому своя не задана»
 # (`ModelRouter._lookup_binding`: точное имя → `*`).
 _UI_CONSUMER_LABEL = {
-    "auto_judge": "судья auto_judge · появится с авто-выбором",
     "*": "* · кастомные и будущие субагенты",
+}
+# Роль служебного потребителя к подписи из транспортного словаря — только на
+# экране: в уведомлениях о деградации подпись остаётся короткой.
+_CONSUMER_ROLE = {
+    "command_judge": "команды в edit, действия в режиме auto",
 }
 # Роль субагента рядом с его именем — грамматика «имя · описание» канона
 # `_mode_row_text`: имя ключа в файле человеку нужно (он его там и увидит),
@@ -505,12 +513,14 @@ def assign_consumers() -> list:
 
 
 def consumer_labels() -> dict:
-    """Подпись каждой строки привязок: 6 готовых берутся ИЗ транспортного словаря
+    """Подпись каждой строки привязок: 7 готовых берутся ИЗ транспортного словаря
     (копия разошлась бы с ним на первой же правке), остальные — свои."""
     from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
 
     labels = dict(CONSUMER_RU_LABEL)
     labels.update(_UI_CONSUMER_LABEL)
+    for consumer, role in _CONSUMER_ROLE.items():
+        labels[consumer] = f"{labels[consumer]} · {role}"
     for name in SUBAGENT_NAMES:
         # `.get`, а не индекс: новый субагент в коде появляется строкой сам — пусть
         # витрина деградирует до общей подписи, а не роняет секцию `KeyError`.
@@ -690,8 +700,10 @@ class ModelsSectionEditor(Vertical):
         on_change=None,
         on_notice=None,
         on_legacy_save=None,
+        global_config: dict | None = None,
     ) -> None:
         super().__init__(classes="onb-dyn")
+        self._global_config = global_config
         self._target = target
         self._template = template
         # Что за файл перед нами — единственное, чем режимы отличаются: валидатор
@@ -836,12 +848,6 @@ class ModelsSectionEditor(Vertical):
         заслоняет), свои-новые — после, в порядке файла профиля."""
         base = self._base_entries
         return list(base) + [a for a in self._own_aliases if a not in base]
-
-    @property
-    def _aliases(self) -> list:
-        """Прежнее имя того же списка — строк реестра, то есть эффективного. У
-        основной секции тени нет, и это по-прежнему ровно записи файла."""
-        return self._effective_aliases
 
     def _entry_origin(self, alias: str) -> str:
         """Откуда строка: `base` — стоит одной лишь тенью основного конфига, `own`
@@ -1077,7 +1083,7 @@ class ModelsSectionEditor(Vertical):
 
         Хвост — про СВОЁ ПОДКЛЮЧЕНИЕ записи, и судит его ядровое определение §2
         (`connection_parts`), а не один ключ `url`: второе написание
-        (`backend.completions_url`, `proxy`) — тоже своё, и запись, задавшая адрес
+        (`backend.completions_url`) — тоже своё, и запись, задавшая адрес
         так, показывала свой хост И хвост «из «Подключения»» разом. Своего
         определения у витрины быть не должно — им же считают пару обе точки
         валидации и форма записи.
@@ -1104,7 +1110,6 @@ class ModelsSectionEditor(Vertical):
             token=None,
             authorization=None,
             completions_url=backend.get("completions_url"),
-            proxy=backend.get("proxy"),
         )
         if own_address or self._entry_origin(alias) == "base":
             return address_host(address)
@@ -1438,10 +1443,23 @@ class ModelsSectionEditor(Vertical):
 
     def _assign_unset_label(self, consumer: str) -> str:
         """Значение строки привязки без своего ключа: привязка основного конфига —
-        словом «основной → light» (§8), иначе прежняя «активная» (потребитель идёт
-        за активным уровнем, фиксировать нечего)."""
+        словом «основной → light» (§8); потребитель с фиксированным уровнем без
+        привязки — «не задана → default», как пустой слот; иначе «активная»
+        (идёт за активным уровнем, фиксировать нечего)."""
         inherited = self._base_assign_value(consumer)
-        return inherited_value(inherited) if inherited else _ASSIGN_ACTIVE
+        if inherited:
+            return inherited_value(inherited)
+        level = self._fixed_unbound_level(consumer)
+        return f"{_ASSIGN_UNSET} → {level}" if level else _ASSIGN_ACTIVE
+
+    def _fixed_unbound_level(self, consumer: str) -> str | None:
+        """Фиксированный уровень потребителя без привязки при ЭФФЕКТИВНЫХ слотах
+        экрана — правило роутера (`fixed_unbound_level`), не своё: уровень
+        действует, только когда его слот задан."""
+        from gc_core.model_router import fixed_unbound_level
+
+        slots = {lvl: self._effective_slot_value(lvl) for lvl in LEVELS}
+        return fixed_unbound_level(consumer, slots)
 
     def _slot_row_text(self, level: str, selected: bool) -> Text:
         return self._binding_row_text(
@@ -1528,7 +1546,9 @@ class ModelsSectionEditor(Vertical):
                     markup=False,
                 )
             self._legacy = self._make_legacy_editor()
-            if self._legacy_baseline is None and getattr(self._legacy, "models_loaded", True):
+            if self._legacy_baseline is None and getattr(
+                self._legacy, "models_loaded", True
+            ):
                 self._legacy_baseline = getattr(
                     self._legacy, "initial_value", self._legacy.peek()
                 )
@@ -1822,10 +1842,6 @@ class ModelsSectionEditor(Vertical):
         )
 
     @property
-    def picker_open(self) -> bool:
-        return self._picker is not None
-
-    @property
     def form_open(self) -> bool:
         return self._form is not None
 
@@ -1867,7 +1883,11 @@ class ModelsSectionEditor(Vertical):
             value = manual_value
             if value is None:
                 return False
-        if not self._legacy_baseline and initial_value and value == initial_value:
+        if (
+            not self._legacy_baseline
+            and initial_value
+            and value == initial_value
+        ):
             # The effective model may become known asynchronously after the body
             # was first composed; promote that resolved value to the baseline.
             self._legacy_baseline = initial_value
@@ -1960,6 +1980,8 @@ class ModelsSectionEditor(Vertical):
             return _FOOTER_FORM_NOAUTH
         if form.on_strip_row:
             return _FOOTER_FORM_STRIP
+        if form.on_action_row:
+            return _FOOTER_FORM_ACTION
         # Остались поле токена и поле алиаса. Ни одному из них футер клавишу не
         # обещает: у токена её называет ПОДПИСЬ ПОЛЯ (`_TOKEN_LABEL_INHERIT`, канон
         # `ConnectionEditor._token_label`) — повторять то же обещание в одном кадре
@@ -1970,12 +1992,6 @@ class ModelsSectionEditor(Vertical):
         return _FOOTER_FORM_FIELD
 
     # --- клавиши --------------------------------------------------------------
-    def toggle_form_help(self) -> bool:
-        if self._form is None or self._picker is not None:
-            return False
-        self._form.toggle_help()
-        return True
-
     def open_form_help(self) -> bool:
         if self._form is None or self._picker is not None:
             return False
@@ -1983,6 +1999,35 @@ class ModelsSectionEditor(Vertical):
 
         self.app.push_screen(ModelHelpScreen())
         return True
+
+    def open_form_card(self) -> bool:
+        """Запись о модели из каталога провайдера — отдельным экраном: в форме от
+        неё одна строка. `False` — открывать нечего, клавиша не наша."""
+        if self._form is None or self._picker is not None:
+            return False
+        card = self._form.model_card()
+        if card is None:
+            return False
+        from gc_tui.screens.viewer import ViewerScreen
+
+        model_id, content = card
+        self.app.push_screen(
+            ViewerScreen(
+                title=f"Настройки · Сведения провайдера о модели · {model_id}",
+                content=content,
+            )
+        )
+        return True
+
+    def on_action_row_pressed(self, message: ActionRow.Pressed) -> None:
+        """Enter или клик по строке-действию формы — то же действие, что её
+        F-клавиша. Под вопросом секции мышь молчит, как клавиши."""
+        message.stop()
+        if self.awaiting_confirm:
+            return
+        {"help": self.open_form_help, "card": self.open_form_card}[
+            message.action
+        ]()
 
     def form_keeps_key(self, key: str) -> bool:
         """YAML-поля формы держат Enter и стрелки внутри текста.
@@ -2135,7 +2180,7 @@ class ModelsSectionEditor(Vertical):
 
     def _clear_dirty_exit_confirm(self) -> None:
         self._dirty_exit_pending = False
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     def new_entry(self) -> bool:
@@ -2181,7 +2226,8 @@ class ModelsSectionEditor(Vertical):
         if self._picker is not None or self._env_pending is not None:
             return False  # висит вопрос (слот / перезапись ссылки) — клавиши не формы
         if self._form is not None:
-            return self._form.probe_connection()
+            self._form.probe_connection()
+            return True
         return False
 
     def space(self) -> bool:
@@ -2241,7 +2287,8 @@ class ModelsSectionEditor(Vertical):
             initial = {"alias": alias, **self._own_entry(alias)}
         self._form = ModelEntryForm(
             interaction_gate=lambda: (
-                self._picker is not None or self._env_pending is not None
+                self._picker is not None
+                or self._env_pending is not None
                 or self._dirty_exit_pending
             ),
             initial=initial,
@@ -2253,6 +2300,7 @@ class ModelsSectionEditor(Vertical):
             config_proxy=self._config_proxy,
             base_aliases=frozenset(self._base_entries),
             base_entry=self._base_entry(alias) if alias is not None else {},
+            global_config=self._global_config,
         )
         self._legacy_open = False  # форма занимает тело целиком
         self._rebuild()
@@ -2282,11 +2330,18 @@ class ModelsSectionEditor(Vertical):
         merged = self._merged_entry(prev, fields)
         old_auth = old.get("token")
         if old_auth is None:
-            old_auth = ((old.get("backend") or {}).get("chat_completion_headers") or {}).get("Authorization")
+            old_auth = (
+                (old.get("backend") or {}).get("chat_completion_headers") or {}
+            ).get("Authorization")
         new_auth = merged.get("token")
         if new_auth is None:
-            new_auth = ((merged.get("backend") or {}).get("chat_completion_headers") or {}).get("Authorization")
-        credential_refs, _ = config_raw.env_refs_overwritten({"token": new_auth}, {"token": old_auth})
+            new_auth = (
+                (merged.get("backend") or {}).get("chat_completion_headers")
+                or {}
+            ).get("Authorization")
+        credential_refs, _ = config_raw.env_refs_overwritten(
+            {"token": new_auth}, {"token": old_auth}
+        )
         written = sorted(set(written) | set(credential_refs))
         if written:
             self._env_pending = (alias, fields)
@@ -2758,7 +2813,7 @@ class ModelsSectionEditor(Vertical):
 
     def _clear_confirm(self) -> None:
         self._pending = None
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     def _clear_env_confirm(self) -> None:
@@ -2766,7 +2821,7 @@ class ModelsSectionEditor(Vertical):
         confirm удаления (`_ask` один на оба), а состояния взаимоисключающие —
         снос по классу чужого не заденет."""
         self._env_pending = None
-        for widget in self.query(".models-confirm"):
+        for widget in self.query(_CONFIRM_SELECTOR):
             widget.remove()
 
     # --- инлайн-пикер значений (решение 9: свой механизм раскрытия) -----------
@@ -2856,6 +2911,18 @@ class ModelsSectionEditor(Vertical):
             t.append_text(self._picker_fallback_desc(level))
         return t
 
+    def _assign_unset_entry(self, consumer: str) -> tuple[str, Text]:
+        """Подпись и описание пункта «без привязки»: фиксированный уровень —
+        «не задана · действует default → модель», иначе «активная»."""
+        level = self._fixed_unbound_level(consumer)
+        if level is None:
+            return _ASSIGN_ACTIVE, self._picker_active_desc()
+        t = Text("действует ", style=DEEP_DIM)
+        t.append(level, style=value_style(level))
+        t.append(" ")
+        t.append_text(self._picker_level_desc(level))
+        return _ASSIGN_UNSET, t
+
     def _picker_active_desc(self) -> Text:
         t = Text(_ACTIVE_DESC_LEAD, style=DEEP_DIM)
         t.append(self._active_level, style=value_style(self._active_level))
@@ -2909,8 +2976,7 @@ class ModelsSectionEditor(Vertical):
             [
                 self._picker_unset_row(
                     self._base_assign_value(consumer),
-                    _ASSIGN_ACTIVE,
-                    self._picker_active_desc(),
+                    *self._assign_unset_entry(consumer),
                 )
             ]
             + [

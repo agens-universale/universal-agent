@@ -1,13 +1,18 @@
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 from gc_core.backends.async_protocol import aexec_port
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
+    _probe_failure_message,
+)
 from gc_core.config_modules.agent import (
     DEFAULT_EXEC_TIMEOUT_SEC,
     exec_output_preview_edge_chars_from_config_dict,
     exec_timeout_from_config_dict,
 )
 from gc_core.constants.tool_names import EXEC_COMMAND_NAME
+from gc_core.message_policy.user_stop import cancelled_by_user_output
 from gc_core.security.command_guard import enforce_command_guard
 from gc_core.security.command_moderation import moderate_command_execution
 from gc_core.tools.exec.exec_envelope import (
@@ -15,6 +20,7 @@ from gc_core.tools.exec.exec_envelope import (
     build_exec_envelope,
 )
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.user_stop import UserStopInterrupt
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -64,17 +70,18 @@ class ExecuteCommand(AbstractSimpleTool):
     Tool to execute a CLI command on the system and return its output.
     """
 
-    # Fallback when config_dict has no exec_timeout_sec (tests / partial wiring).
+    # Fallback when settings have no exec_timeout_sec (tests / partial wiring).
     timeout = DEFAULT_EXEC_TIMEOUT_SEC
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_default = exec_timeout_from_config_dict(config_dict)
+    def tool_description(cls, settings: Any = None):
+        timeout_default = exec_timeout_from_config_dict(settings)
         description = {
             "type": "function",
             "name": "exec_command",
             "description": (
-                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr."
+                "Run a shell command synchronously. Returns JSON with ok, exit_code, stdout, stderr. "
+                "The `timeout` argument is the deadline that kills the process; a `timeout` prefix inside the command does not extend it."
             ),
             "parameters": {
                 "type": "object",
@@ -86,7 +93,10 @@ class ExecuteCommand(AbstractSimpleTool):
                     "timeout": {
                         "type": "integer",
                         "description": (
-                            f"Execution timeout in seconds. Default is {timeout_default} (agent.exec_timeout_sec)."
+                            "Deadline for this call, in seconds. When it elapses the process is killed. "
+                            f"Omit it and the default {timeout_default} applies (agent.exec_timeout_sec). "
+                            "A `timeout` prefix inside `command` does not extend this deadline. "
+                            "If the command needs longer, pass a larger number here."
                         ),
                         "default": timeout_default,
                         "minimum": 1,
@@ -118,19 +128,17 @@ class ExecuteCommand(AbstractSimpleTool):
                     "run_in_background": {
                         "type": "boolean",
                         "description": (
-                            "Start the command detached and return immediately, without waiting "
-                            "for it to finish. Use this for anything long-lived: dev servers, "
-                            "watchers, `npm run dev`, `uvicorn`. The command keeps running after "
-                            "the agent exits. Its output is NOT captured — the reply carries only "
-                            "the pid. Check that it works by probing it (e.g. request its port). "
-                            "If it does not come up, find out why with a short diagnostic run "
-                            "in the foreground (small `timeout`): a failing start prints its "
-                            "error and exits, one that keeps running is stopped at the timeout. "
-                            "That run is only for reading the error — the service itself is "
-                            "still started with this flag. A command started WITHOUT this flag "
-                            "does not outlive the call — appending `&` to it is not enough: "
-                            "it is killed with its process group on timeout or cancel, it dies "
-                            "with the agent, and nothing of its output is reported back."
+                            "Start the command detached and return without waiting for it to finish. "
+                            "Use for long-lived processes: dev servers, watchers, `npm run dev`, `uvicorn`. "
+                            "It keeps running after the agent exits. Stdout and stderr are not captured. "
+                            "A process still running is reported by pid. One that exits at once is an error "
+                            "with its exit code and no pid. Check a server by probing it (e.g. request its port). "
+                            "To see a startup error, run that command once in the foreground with a small "
+                            "`timeout`: the failure is in stdout/stderr, and a process that stays up is killed "
+                            "when the timeout elapses. That run does not leave it running — start the service "
+                            "again with this flag. Without this flag the command does not outlive the call. "
+                            "Appending `&` does not change that: on timeout or cancel the process group is killed, "
+                            "and the process dies with the agent. Output printed before that kill is in the reply."
                         ),
                     },
                 },
@@ -142,14 +150,14 @@ class ExecuteCommand(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_default = exec_timeout_from_config_dict(config_dict)
+    def prompt_description(cls, settings: Any = None):
+        timeout_default = exec_timeout_from_config_dict(settings)
         description = (
             """Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
 Input schema: {"type": "object", "properties": {"command": {"type": "string", "description": "The CLI command to execute."}, "timeout": {"type": "integer", "description": "Execution timeout in seconds.", "default": """
             + str(timeout_default)
-            + """}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}, "run_in_background": {"type": "boolean", "description": "Start detached and return the pid at once; for long-lived commands. Output is not captured."}}, "required": ["command"], "additionalProperties": false}
+            + """}, "cwd": {"type": "string", "description": "Optional working directory (absolute or relative)."}, "env_vars": {"type":"array","description":"Optional env overrides as [{name,value}]","items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}}, "run_in_background": {"type": "boolean", "description": "Start detached and return at once; for long-lived commands. Output is not captured. Pid if the process is still running."}}, "required": ["command"], "additionalProperties": false}
 
 Usage:
 - Use this tool to run shell commands such as listing directories (`ls`, `dir`), checking versions (`python --version`), or running scripts.
@@ -159,14 +167,15 @@ Usage:
 - Be cautious with destructive commands (e.g., `rm`, `del`, `rmdir`).
 - Long-lived commands (dev servers, watchers, `npm run dev`, `uvicorn`) MUST be started
   with `run_in_background: true`. They then keep running after this call returns and
-  after the agent itself exits. Their output is NOT captured: check that such a command
-  works by probing it (e.g. request its port). If it does not come up, find out why with
-  a short diagnostic run in the foreground (small `timeout`): a failing start prints its
-  error and exits, one that keeps running is stopped at the timeout. That run is only for
-  reading the error — the service itself is still started in the background.
-  Appending `&` to a normal foreground command is NOT enough: such a command is killed
-  with its process group on timeout or cancel, it dies with the agent, and nothing of
-  its output is reported back.
+  after the agent itself exits. Stdout and stderr are not captured. A process still
+  running is reported by pid; one that exits at once is an error with its exit code
+  and no pid. Check a server by probing it (e.g. request its port). To see a startup
+  error, run that command once in the foreground with a small `timeout`: the failure
+  is in stdout/stderr, and a process that stays up is killed when the timeout elapses.
+  That run does not leave it running — start the service again with `run_in_background: true`.
+  Without this flag the command does not outlive the call. Appending `&` does not change
+  that: on timeout or cancel the process group is killed, and the process dies with the
+  agent. Output printed before that kill is in the reply.
 - On timeout the command is stopped and its work is lost. If it simply needs longer,
   re-run it with a bigger `timeout`, or start it with `run_in_background: true`.
 - Don't remove or create any files or folders outside of project directory!
@@ -221,7 +230,7 @@ Important Usage Rules:
             stdout=as_captured_stream(stdout),
             stderr=as_captured_stream(stderr),
             preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
-                self._config_dict
+                self._settings_source
             ),
             error=error,
             head_fields={"command": command, "cwd": cwd},
@@ -252,7 +261,30 @@ Important Usage Rules:
             return None
         if not isinstance(cwd_used, str) or not cwd_used.strip():
             return {"type": "invalid_argument", "field": "cwd"}
-        if not await self._backend.is_dir(cwd_used):
+        # Прогретый cwd уже известен: Harbor — WORKDIR из `aprime_default_cwd`,
+        # RemoteShell — заданный cwd или тот же `pwd`. Повторный `is_dir` перед
+        # каждой командой — лишний round-trip. Чужой явный cwd проверяется.
+        # Сбой транспорта — не «нет каталога»: иначе модель чинит cwd вместо
+        # того, чтобы сдать отчёт через turn_finish.
+        default_cwd = getattr(self._backend, "default_cwd", None)
+        default = default_cwd() if callable(default_cwd) else None
+        if isinstance(default, str) and cwd_used == default:
+            return None
+        try:
+            is_directory = await self._backend.is_dir(cwd_used)
+        except RuntimeUnavailable as exc:
+            return {"type": "execution_failed", "message": str(exc)}
+        except OSError as exc:
+            if not getattr(self._backend, "is_sandbox", False):
+                raise
+            # `is_dir` здесь — ответ 0/1. Исключение значит, что ответа нет:
+            # та же ситуация, что и непройденная проба суммы. Текст не разбираем.
+            err = str(exc).replace("\n", " ").strip()
+            return {
+                "type": "execution_failed",
+                "message": _probe_failure_message("", err),
+            }
+        if not is_directory:
             return {
                 "type": "invalid_argument",
                 "field": "cwd",
@@ -306,7 +338,7 @@ Important Usage Rules:
             )
 
         if timeout is None:
-            timeout = exec_timeout_from_config_dict(self._config_dict)
+            timeout = exec_timeout_from_config_dict(self._settings_source)
         if not isinstance(timeout, int) or timeout <= 0:
             return reject({"type": "invalid_argument", "field": "timeout"})
 
@@ -327,7 +359,7 @@ Important Usage Rules:
 
     @enforce_command_guard(payload_arg="command", tool_name=EXEC_COMMAND_NAME)
     @moderate_command_execution(
-        payload_arg="command", tool_name=EXEC_COMMAND_NAME
+        payload_arg="command", tool_name=EXEC_COMMAND_NAME, shell_payload=True
     )
     async def acall(
         self,
@@ -359,6 +391,10 @@ Important Usage Rules:
         early, plan = await self._plan(command, timeout, cwd, env_vars)
         if early is not None:
             return early
+        if run_in_background and not getattr(
+            self._backend, "supports_background", False
+        ):
+            return await self._abackground(plan)
         if run_in_background:
             return await self._abackground(plan)
         try:
@@ -368,6 +404,10 @@ Important Usage Rules:
                 timeout=plan["timeout"],
                 env=plan["env"],
             )
+        except RuntimeUnavailable as exc:
+            return self._runtime_unavailable(plan, exc)
+        except UserStopInterrupt:
+            raise
         except Exception as exc:
             return self._exec_failed(plan, exc)
         return self._finish(res, plan)
@@ -416,7 +456,19 @@ Important Usage Rules:
                 cwd=cwd_used,
                 env=plan["env"],
             )
+        except RuntimeUnavailable as exc:
+            return self._runtime_unavailable(plan, exc)
         except Exception as exc:
+            from gc_core.execution.resource_scope import (
+                resource_capture_active,
+            )
+
+            if resource_capture_active():
+                from gc_core.execution.contracts import ToolOutcomeUnknown
+
+                raise ToolOutcomeUnknown(
+                    "Background start did not return a reliable receipt"
+                ) from exc
             return self._exec_failed(plan, exc)
 
         # Команда могла не прожить и мгновения (бэкенд, который это проверяет,
@@ -441,6 +493,14 @@ Important Usage Rules:
                     ),
                 },
             )
+        if exit_code is None and isinstance(started.get("pid"), int):
+            from gc_core.execution.resource_scope import (
+                record_background_process,
+            )
+
+            record_background_process(
+                started["pid"], type(self._backend).__name__
+            )
         background = {"pid": started.get("pid"), "output": "not captured"}
         if exit_code == 0:
             background["note"] = (
@@ -455,7 +515,7 @@ Important Usage Rules:
             stdout=as_captured_stream(""),
             stderr=as_captured_stream(""),
             preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
-                self._config_dict
+                self._settings_source
             ),
             error=None,
             head_fields={
@@ -463,6 +523,19 @@ Important Usage Rules:
                 "cwd": cwd_used or "",
                 "background": background,
             },
+        )
+
+    def _runtime_unavailable(self, plan: dict, exc: RuntimeUnavailable) -> str:
+        """Бэкенд не дошёл до команды: проба суммы не вернулась."""
+        return self._result(
+            ok=False,
+            command=plan["command"],
+            cwd=plan["cwd"] or "",
+            exit_code=-1 if exc.return_code is None else exc.return_code,
+            timed_out=exc.timed_out,
+            stdout=exc.stdout,
+            stderr=exc.stderr,
+            error={"type": "execution_failed", "message": str(exc)},
         )
 
     def _exec_failed(self, plan: dict, exc: Exception) -> str:
@@ -495,6 +568,15 @@ Important Usage Rules:
             getattr(res, "stderr_stream", None) or getattr(res, "stderr", "")
         )
 
+        if getattr(res, "stopped_by_user", False):
+            return cancelled_by_user_output(
+                ExecuteCommand.registered_tool_name(),
+                meta={
+                    "stdout": getattr(res, "stdout", "") or "",
+                    "stderr": getattr(res, "stderr", "") or "",
+                },
+            )
+
         if res.timed_out:
             return self._result(
                 ok=False,
@@ -506,7 +588,12 @@ Important Usage Rules:
                 stderr=stderr_stream,
                 error={
                     "type": "timeout",
-                    "message": f"Command timed out after {timeout} seconds",
+                    "message": (
+                        f"Command timed out after {timeout} seconds. "
+                        "This deadline is the `timeout` argument of this tool. "
+                        "A `timeout` prefix inside the command does not extend it. "
+                        "Call again and pass a larger `timeout`."
+                    ),
                 },
             )
 

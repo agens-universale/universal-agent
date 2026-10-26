@@ -21,9 +21,12 @@ from gc_core import execution_workspace as ew
 from gc_core.execution_workspace import (
     WorkspaceRootUnknownError,
     aprime_backend_cwd,
+    areconcile_remote_root,
     build_execution_workspace,
     discover_backend_cwd,
 )
+from gc_core.settings import runtime_of
+from gc_testkit.settings import make_settings
 
 
 class _Res:
@@ -78,7 +81,7 @@ async def test_generic_pwd_answers_for_an_async_only_sandbox():
     """
     backend = _AsyncOnlySandbox(pwd="/work")
 
-    await aprime_backend_cwd(backend, {})
+    await aprime_backend_cwd(backend, make_settings())
 
     assert backend.asked == 1, "окружение не спросили вовсе"
     assert discover_backend_cwd(backend) == "/work", (
@@ -96,7 +99,7 @@ async def test_a_silent_environment_is_a_loud_error():
     backend = _AsyncOnlySandbox(raises=RuntimeError("контейнер не отвечает"))
 
     with pytest.raises(WorkspaceRootUnknownError) as excinfo:
-        await aprime_backend_cwd(backend, {})
+        await aprime_backend_cwd(backend, make_settings())
 
     assert "launch_root" in str(excinfo.value), (
         "в отказе нет подсказки, чем его лечить"
@@ -107,7 +110,9 @@ async def test_a_config_root_makes_the_failure_harmless():
     """Корень назван явно — спрашивать окружение незачем и отказывать не за что."""
     backend = _AsyncOnlySandbox(raises=RuntimeError("контейнер не отвечает"))
 
-    await aprime_backend_cwd(backend, {"launch_root": "/testbed"})
+    await aprime_backend_cwd(
+        backend, make_settings({"launch_root": "/testbed"})
+    )
 
     assert backend.asked == 0, "окружение спросили, хотя корень задан конфигом"
 
@@ -119,7 +124,7 @@ async def test_a_hanging_environment_does_not_hang_the_build(monkeypatch):
 
     started = time.monotonic()
     with pytest.raises(WorkspaceRootUnknownError):
-        await aprime_backend_cwd(backend, {})
+        await aprime_backend_cwd(backend, make_settings())
     spent = time.monotonic() - started
 
     assert spent < 1.0, f"сборка ждала молчащее окружение {spent:.2f} с"
@@ -134,9 +139,83 @@ async def test_a_declared_cwd_is_not_asked_again():
 
     backend = _Knows()
 
-    await aprime_backend_cwd(backend, {})
+    await aprime_backend_cwd(backend, make_settings())
 
     assert backend.asked == 0
+
+
+class _SandboxRoot:
+    """Песочница с уже известным cwd и управляемым ответом ``is_dir``."""
+
+    is_sandbox = True
+
+    def __init__(self, *, cwd=None, is_dir_result=False, is_dir_error=None):
+        self._cwd = cwd
+        self._is_dir_result = is_dir_result
+        self._is_dir_error = is_dir_error
+        self.checked = []
+
+    def default_cwd(self):
+        return self._cwd
+
+    async def is_dir(self, path):
+        self.checked.append(path)
+        if self._is_dir_error is not None:
+            raise self._is_dir_error
+        return self._is_dir_result
+
+
+async def test_dead_sandbox_does_not_keep_a_host_launch_root(tmp_path):
+    """Оболочка не ответила на проверку корня — ран не стартует с путём хоста."""
+    backend = _SandboxRoot(is_dir_error=RuntimeError("docker down"))
+    settings = make_settings(
+        {"launch_root": str(tmp_path), "project_root": str(tmp_path)}
+    )
+
+    with pytest.raises(WorkspaceRootUnknownError) as excinfo:
+        await areconcile_remote_root(backend, settings)
+
+    assert runtime_of(settings).launch_root == str(tmp_path)
+    assert "Хостовый путь" in str(excinfo.value)
+    assert backend.checked == [str(tmp_path)]
+
+
+async def test_missing_remote_dir_without_container_cwd_does_not_start():
+    """Каталога на той стороне нет и cwd окружения не узнан — хостовый корень не оставляем."""
+    backend = _SandboxRoot(cwd=None, is_dir_result=False)
+    settings = make_settings({"launch_root": "/home/alex/proj"})
+
+    with pytest.raises(WorkspaceRootUnknownError):
+        await areconcile_remote_root(backend, settings)
+
+    assert runtime_of(settings).launch_root == "/home/alex/proj"
+
+
+async def test_host_path_is_replaced_when_container_cwd_is_known():
+    backend = _SandboxRoot(cwd="/data", is_dir_result=False)
+    settings = make_settings(
+        {"launch_root": "/home/alex/proj", "project_root": "/home/alex/proj"}
+    )
+
+    updated = await areconcile_remote_root(backend, settings)
+
+    assert runtime_of(updated).launch_root == "/data"
+    assert runtime_of(updated).project_root == "/data"
+    assert runtime_of(settings).launch_root == "/home/alex/proj"
+
+
+async def test_confirmed_container_launch_root_is_kept():
+    backend = _SandboxRoot(cwd="/data", is_dir_result=True)
+    settings = make_settings(
+        {"launch_root": "/data/sub", "project_root": "/data/sub"}
+    )
+
+    updated = await areconcile_remote_root(backend, settings)
+
+    assert updated is settings
+    assert runtime_of(updated).launch_root == "/data/sub"
+    assert runtime_of(updated).project_root == "/data/sub"
+    assert backend.checked == ["/data/sub"]
 
 
 async def test_a_local_backend_is_never_a_hard_failure(caplog):
@@ -156,7 +235,7 @@ async def test_a_local_backend_is_never_a_hard_failure(caplog):
             return None
 
     with caplog.at_level(logging.WARNING):
-        await aprime_backend_cwd(_Local(), {})
+        await aprime_backend_cwd(_Local(), make_settings())
 
     assert any(
         "backend_cwd_prime_failed" in r.getMessage() for r in caplog.records
@@ -197,6 +276,8 @@ def test_the_root_is_asked_before_mcp_discovery():
     """
     node = _acreate_run_context_node()
     prime_at = _calls_named(node, "aprime_backend_cwd")
+    # Дискавери идёт в сборке базового реестра (`abuild_tools_data`):
+    # декорирует его сам контекст (автовыбор §5.2 п.4).
     discovery_at = _calls_named(node, "abuild_tools_data")
 
     assert prime_at, "сборка больше не спрашивает корень — проверка устарела"
@@ -253,7 +334,7 @@ async def test_the_primed_answer_is_not_kept_forever():
     import weakref
 
     backend = _AsyncOnlySandbox(pwd="/work")
-    await aprime_backend_cwd(backend, {})
+    await aprime_backend_cwd(backend, make_settings())
     ref = weakref.ref(backend)
 
     del backend

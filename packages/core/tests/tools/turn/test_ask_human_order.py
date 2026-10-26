@@ -26,7 +26,7 @@ def events(monkeypatch):
     import importlib
 
     seen: list = []
-    mod = importlib.import_module("gc_core.tools.subagents.progress")
+    mod = importlib.import_module("gc_core.execution.progress")
     monkeypatch.setattr(
         mod, "emit_progress", lambda ctx, state, kind, **kw: seen.append(kind)
     )

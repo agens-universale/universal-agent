@@ -6,6 +6,8 @@ develop передаёт `os_backend` в сборку MCP-тулов; при п�
 песочницы.
 """
 
+from gc_testkit.settings import make_settings
+
 
 async def test_build_tools_data_hands_the_backend_to_mcp_discovery(
     monkeypatch,
@@ -29,15 +31,17 @@ async def test_build_tools_data_hands_the_backend_to_mcp_discovery(
     )
     sandbox = object()
     await tools_pkg.abuild_tools_data(
-        {
-            "mcp-servers": {
-                "x": {
-                    "transport": "stdio",
-                    "command": "x",
-                    "execute_on": "os_backend",
+        make_settings(
+            {
+                "mcp.servers": {
+                    "x": {
+                        "transport": "stdio",
+                        "command": "x",
+                        "execute_on": "os_backend",
+                    }
                 }
             }
-        },
+        ),
         os_backend=sandbox,
     )
     assert "os_backend" in seen, (

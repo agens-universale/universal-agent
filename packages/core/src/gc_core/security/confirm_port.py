@@ -1,19 +1,43 @@
 from __future__ import annotations
 
+import inspect
 import sys
+from functools import partial
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
+from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
+from gc_core.execution.ports import port
+from gc_core.message_policy.permission_denials import (
+    declined_error,
+    session_denied_error,
+    timed_out_error,
+    unattended_error,
+)
+from gc_core.security.call_scope import current_call
+from gc_core.security.permission_store import remembers_similar
+from gc_core.settings import runtime_of, settings_of
 
 CONFIRM_ALLOW_REMEMBER = (
     "allow_remember"  # Y — exec + session True + few-shot allowed
 )
-CONFIRM_ALLOW_ONCE = "allow_once"  # O — exec + run only
+CONFIRM_ALLOW_ONCE = "allow_once"  # O — разрешить на этот вызов тула
 CONFIRM_DENY_REMEMBER = (
     "deny_remember"  # N — block + session False + few-shot denied
 )
-CONFIRM_DENY_ONCE = "deny_once"  # T — block + run only
+CONFIRM_DENY_ONCE = "deny_once"  # T — запретить на этот вызов тула
+# Таймаут диалога: отказ без записи. Человек «запретить разово» не выбирал —
+# тот же ключ спрашивается снова при следующей проверке, даже в этом вызове.
+CONFIRM_TIMED_OUT = "timed_out"
+#: Исход вопроса, не давшего «да», — для текста отказа (`unconfirmed_error`):
+#: человек ответил «нет».
+CONFIRM_OUTCOME_DECLINED = "declined"
+#: Человек запретил действие до конца сессии (ответ N): отказ говорит об
+#: этом сразу, как и все следующие отказы по этому запрету.
+CONFIRM_OUTCOME_SESSION_DENIED = "session_denied"
+#: Ответа нет: таймаут, вопрос отменён или клиент не умеет отвечать.
+CONFIRM_OUTCOME_TIMED_OUT = "timed_out"
 _VALID_CHOICES = {
     CONFIRM_ALLOW_REMEMBER,
     CONFIRM_ALLOW_ONCE,
@@ -30,19 +54,48 @@ CONFIRM_KEY_T = frozenset({"t", "T", "е", "Е"})  # deny_once
 
 # Human-facing one-liner (CLI prompt / docs); mirrors banner Y/O/N/T labels.
 CONFIRM_CHOICE_HINT = "[Y/Н] и подобные в сессии  [O/Щ] разово  [N/Т] запрет+ в сессии  [T/Е] запрет разово"
+# То же для вопросов НЕ про команду (запись, чтение, адрес, MCP, скрипт):
+# «подобных» там нет — запоминается ровно это действие, и судье команд ответ
+# подсказкой не уходит.
+CONFIRM_CHOICE_HINT_PLAIN = "[Y/Н] разрешить в сессии  [O/Щ] разово  [N/Т] запретить в сессии  [T/Е] запрет разово"
 
-# Backward-compat aliases (optional one release): old tui_confirm returns
-# once|session|deny — маппим в новые 4-choice ids. CLI input() aliases removed.
-_ALIAS_MAP = {
-    "once": CONFIRM_ALLOW_ONCE,
-    "session": CONFIRM_ALLOW_REMEMBER,
-    "deny": CONFIRM_DENY_REMEMBER,
-}
 
-# Old constants kept as aliases for external callers (one release).
-CONFIRM_ONCE = CONFIRM_ALLOW_ONCE
-CONFIRM_SESSION = CONFIRM_ALLOW_REMEMBER
-CONFIRM_DENY = CONFIRM_DENY_REMEMBER
+def confirm_choice_hint(decision_key: str | None, mode: Any = "edit") -> str:
+    """Строка-подсказка ответов под вид вопроса (консольный запрос).
+
+    «И подобные» — ровно там, где ответ действительно уйдёт судье команд
+    (`remembers_similar`)."""
+    if remembers_similar(decision_key, mode):
+        return CONFIRM_CHOICE_HINT
+    return CONFIRM_CHOICE_HINT_PLAIN
+
+
+def call_with_optional(
+    fn: Callable[..., Any], *args: Any, **optional: Any
+) -> Any:
+    """Позвать ``fn``, отдав ему только те необязательные именованные
+    параметры, которые он принимает.
+
+    Показ вопроса проходит несколько звеньев (порт → раннер → приложение →
+    экран), и у каждого есть упрощённые реализации с короткой сигнатурой.
+    Новый необязательный параметр не должен ломать ни одну из них.
+    """
+    try:
+        parameters = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return fn(*args)
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return fn(*args, **optional)
+    names = {
+        p.name
+        for p in parameters
+        if p.kind
+        in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    }
+    return fn(*args, **{k: v for k, v in optional.items() if k in names})
 
 
 def normalize_confirm_key(answer: str | None) -> str:
@@ -50,43 +103,49 @@ def normalize_confirm_key(answer: str | None) -> str:
 
     Accepts Latin/Cyrillic same-key glyphs in either case. Multi-char words
     (yes/no/once) are not accepted — same as TUI single-key handlers.
-    Unknown / empty → deny_remember (explicit-safe).
+    Непонятный ответ (пустой, конец ввода, слово, чужая клавиша) — запрет
+    РАЗОВЫЙ: безопасно, но не запоминается. Запрет на всю сессию сильнее
+    режима, его выбирают только явной клавишей N.
     """
-    if answer is None:
-        return CONFIRM_DENY_REMEMBER
-    token = str(answer).strip()
-    if not token:
-        return CONFIRM_DENY_REMEMBER
-    # Single key only (TUI parity). Full-width / accidental paste → deny_remember.
+    token = "" if answer is None else str(answer).strip()
     if len(token) != 1:
-        return CONFIRM_DENY_REMEMBER
+        return CONFIRM_DENY_ONCE
     if token in CONFIRM_KEY_Y:
         return CONFIRM_ALLOW_REMEMBER
     if token in CONFIRM_KEY_O:
         return CONFIRM_ALLOW_ONCE
     if token in CONFIRM_KEY_N:
         return CONFIRM_DENY_REMEMBER
-    if token in CONFIRM_KEY_T:
-        return CONFIRM_DENY_ONCE
-    return CONFIRM_DENY_REMEMBER
+    return CONFIRM_DENY_ONCE
 
 
 def coerce_confirm_choice(choice: Any) -> str:
     """Normalize UI/port return value to a valid 4-way id."""
+    if choice == CONFIRM_TIMED_OUT:
+        return CONFIRM_TIMED_OUT
     if choice in _VALID_CHOICES:
         return choice  # type: ignore[return-value]
-    if isinstance(choice, str) and choice in _ALIAS_MAP:
-        return _ALIAS_MAP[choice]
-    return CONFIRM_DENY_REMEMBER
+    # Неизвестное значение — не выбор человека: запрет разовый.
+    return CONFIRM_DENY_ONCE
 
 
 def _ask_human_enabled(ctx: Any) -> bool:
-    cfg = getattr(ctx, "config_dict", None) or {}
-    stop = cfg.get("stop_tools") or []
+    stop = settings_of(ctx).agent.stop_tools or []
     return ASK_HUMAN_TOOL_NAME not in stop
 
 
 def confirm_available(ctx: Any) -> bool:
+    """Можно ли спросить человека.
+
+    Объявление канала (`RuntimeEnv.human_channel`) сильнее догадок: ACP —
+    человек в IDE, сервер и A2A — никого. Не объявлено — автопроверка:
+    порт рантайма, TUI, терминал при включённом `turn_ask_human` (`gc-cli`).
+    """
+    declared = runtime_of(ctx).human_channel
+    if declared is not None:
+        return declared
+    if callable(port(ctx, "human_request")):
+        return True
     if getattr(ctx, "is_tui", False):
         return True
     if not _ask_human_enabled(ctx):
@@ -95,21 +154,78 @@ def confirm_available(ctx: Any) -> bool:
     return bool(stdin and stdin.isatty())
 
 
+def unconfirmed_error(ctx: Any, **fields: Any) -> dict:
+    """Тело отказа после вопроса, на который не ответили «да».
+
+    Причин четыре, и человеку с моделью нужно знать, какая: спросить было
+    некого (канал без человека — вопрос стал отказом), ответа не пришло
+    вовремя (таймаут, отмена, клиент не умеет отвечать), человек отказал
+    разово — или запретил до конца сессии. Исход вопроса лежит в привязке
+    вызова (`CallScope`).
+    """
+    if not confirm_available(ctx):
+        return unattended_error(**fields)
+    outcome = getattr(current_call(), "confirm_outcome", None)
+    if outcome == CONFIRM_OUTCOME_TIMED_OUT:
+        return timed_out_error(**fields)
+    if outcome == CONFIRM_OUTCOME_SESSION_DENIED:
+        return session_denied_error(**fields)
+    return declined_error(**fields)
+
+
+def guard_refusal(ctx: Any, error_type: str, **fields: Any) -> dict:
+    """Отказ гарда после его собственного вопроса: тип — гарда (по нему
+    аудит и тесты различают гарды), причина и инструкция модели — по исходу
+    вопроса, те же, что у вопросов режима (`unconfirmed_error`)."""
+    return {**unconfirmed_error(ctx, **fields), "type": error_type}
+
+
+def refuse_in_place(
+    error: dict, ctx: Any, error_type: str, **fields: Any
+) -> None:
+    """Переписать словарь отказа гарда (его ошибку периметра) отказом после
+    вопроса: прежняя фраза `message` уступает причине и инструкции по исходу
+    (`guard_refusal`), прочие поля ошибки остаются."""
+    error.pop("message", None)
+    error.update(guard_refusal(ctx, error_type, **fields))
+
+
 def _via_name(ctx: Any) -> str | None:
     name = getattr(ctx, "subagent_tool_name", None)
     return name if isinstance(name, str) and name.strip() else None
 
 
-def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
+def _ask_choice(
+    ctx: Any,
+    *,
+    title: str,
+    question: str,
+    fields: list,
+    decision_key: str | None = None,
+) -> str:
+    request_port = getattr(ctx, "confirm_request", None)
+    if callable(request_port):
+        return coerce_confirm_choice(
+            request_port(
+                HumanRequest(
+                    kind="confirm",
+                    title=title,
+                    question=question,
+                    fields=[[str(key), str(value)] for key, value in fields],
+                    decision_key=decision_key,
+                )
+            )
+        )
     # Confirm недоступен / AFK-like: block without teaching (deny_once).
-    # Explicit invalid UI choice → deny_remember (fail-closed + few-shot).
+    # Непонятный ответ интерфейса → разовый запрет (`coerce_confirm_choice`):
+    # безопасно, но не запоминается — запрет на сессию только явной клавишей N.
     if not confirm_available(ctx):
         return CONFIRM_DENY_ONCE
 
     # Lazy: security → tools на module load ломает import graph (paths/diff_tui).
     # Nested: path_policy → confirm_port cycle if imported at module top.
+    from gc_core.execution.progress import emit_progress
     from gc_core.security.path_policy import prompt_user_confirmation_choice
-    from gc_core.tools.subagents.progress import emit_progress
 
     via = _via_name(ctx)
     # confirm-порт не знает steps child — для progress достаточно нулей
@@ -128,27 +244,27 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
             if not callable(tui_confirm):
                 # Нет рабочего present → deny_once (не учить few-shot), не CLI input() за Textual.
                 return CONFIRM_DENY_ONCE
-            try:
-                choice = tui_confirm(
-                    title=title,
-                    question=question,
-                    fields=fields,
-                    via=via,
-                )
-            except TypeError:
-                choice = tui_confirm(
-                    title=title, question=question, fields=fields
-                )
+            choice = call_with_optional(
+                partial(
+                    tui_confirm, title=title, question=question, fields=fields
+                ),
+                via=via,
+                decision_key=decision_key,
+            )
             result = coerce_confirm_choice(choice)
         else:
             # Non-TUI fallback (headless CLI / scripts). Product path is TUI;
             # mode=ask is not the intended CLI UX (allow|deny policy instead),
             # but if confirm is reached, key matrix matches TUI.
+            from gc_core.security.permission_mode import resolve_mode
+
             result = coerce_confirm_choice(
                 prompt_user_confirmation_choice(
                     title=title,
                     fields=fields,
                     question=question,
+                    decision_key=decision_key,
+                    permission_mode=resolve_mode(ctx).value,
                 )
             )
     finally:
@@ -160,6 +276,49 @@ def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
             args_summary=title,
         )
     return result
+
+
+def _note_outcome(outcome: str | None) -> None:
+    """Исход вопроса — в привязку вызова: по нему `unconfirmed_error`
+    выбирает текст отказа. Вне диспетчера привязки нет, и текст не нужен."""
+    scope = current_call()
+    if scope is not None:
+        scope.confirm_outcome = outcome
+
+
+def _outcome_of(choice: Any, *, remembered: bool) -> str | None:
+    """Исход ответа на вопрос; «да» — None. Запрет «в сессии» называет себя
+    только если его есть куда запомнить (`remembered`): иначе повтор спросит
+    снова, и это обычный отказ."""
+    if choice == CONFIRM_TIMED_OUT:
+        return CONFIRM_OUTCOME_TIMED_OUT
+    choice = coerce_confirm_choice(choice)
+    if choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE):
+        return None
+    if choice == CONFIRM_DENY_REMEMBER and remembered:
+        return CONFIRM_OUTCOME_SESSION_DENIED
+    return CONFIRM_OUTCOME_DECLINED
+
+
+def _remembered_outcome(
+    store: Any, decision_key: str, allowed: bool
+) -> str | None:
+    """Исход запомненного ответа — тот же, что у самого ответа."""
+    if allowed:
+        return None
+    if decision_key in store.session_rules():
+        return CONFIRM_OUTCOME_SESSION_DENIED
+    return CONFIRM_OUTCOME_DECLINED
+
+
+def _remembered(store: Any, decision_key: str | None) -> bool | None:
+    """Ответ, уже данный на этот ключ (в сессии или в этом вызове тула)."""
+    if store is None or decision_key is None:
+        return None
+    cached = store.decision_for(decision_key)
+    if cached is not None:
+        _note_outcome(_remembered_outcome(store, decision_key, cached))
+    return cached
 
 
 def request_confirm(
@@ -174,18 +333,42 @@ def request_confirm(
     from gc_core.tools.connect_mcp.abandonable import current_call_abandoned
 
     store = getattr(ctx, "permission_store", None)
-    if store is not None and decision_key is not None:
-        cached = store.decision_for(decision_key)
-        if cached is not None:
-            return cached
+    cached = _remembered(store, decision_key)
+    if cached is not None:
+        return cached
     if current_call_abandoned():
+        _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False
-    choice = _ask_choice(ctx, title=title, question=question, fields=fields)
+    choice = _ask_choice(
+        ctx,
+        title=title,
+        question=question,
+        fields=fields,
+        decision_key=decision_key,
+    )
     if current_call_abandoned():
         # Вопрос бросили (Ctrl+C), пока человек думал: ответ, если он и пришёл,
         # набран уже для ДРУГОГО вопроса. Записать его — значит выдать
         # разрешение на путь, в котором человек только что отказал.
+        _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False
+    _note_outcome(
+        _outcome_of(
+            choice, remembered=store is not None and decision_key is not None
+        )
+    )
+    return apply_confirm_choice(choice, store=store, decision_key=decision_key)
+
+
+def apply_confirm_choice(
+    choice: Any, *, store: Any, decision_key: str | None
+) -> bool:
+    """Apply the native four-choice policy after a completed human reply."""
+    if choice == CONFIRM_TIMED_OUT:
+        # Голый таймаут не выбор человека: ничего не пишем — разовый ответ
+        # заглушил бы повтор вопроса до конца вызова тула.
+        return False
+    choice = coerce_confirm_choice(choice)
     allow = choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
     if store is not None and decision_key is not None:
         # 2×2 record matrix: (allow, session) per choice.
@@ -196,3 +379,71 @@ def request_confirm(
         session = choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_DENY_REMEMBER)
         store.record(decision_key, allow, session=session)
     return allow
+
+
+async def aconfirm_via_human_port(request: HumanRequest, *, ctx: Any) -> bool:
+    """Ответ человека через async-порт рантайма (``ctx.human_request``).
+
+    Это не async-двойник `request_confirm`: тот ждёт локальный UI (TUI-баннер
+    или ``input()``) блокирующе в рабочем потоке, а здесь ожидание — durable
+    порт Temporal. Общий у них только редьюсер `apply_confirm_choice`.
+    Отмена / ``HumanRequestInterrupted`` разрешения не записывают.
+    """
+    if request.kind != "confirm" or request.schema_version != 1:
+        raise ValueError("Unsupported confirmation request")
+    port = getattr(ctx, "human_request", None)
+    if not callable(port):
+        raise ValueError("ctx.human_request port is required")
+    store = getattr(ctx, "permission_store", None)
+    cached = _remembered(store, request.decision_key)
+    if cached is not None:
+        return cached
+    try:
+        choice = await port(request)
+    except HumanRequestInterrupted:
+        _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
+        return False
+    _note_outcome(
+        _outcome_of(
+            choice,
+            remembered=store is not None and request.decision_key is not None,
+        )
+    )
+    return apply_confirm_choice(
+        choice,
+        store=store,
+        decision_key=request.decision_key,
+    )
+
+
+def confirmation_step(
+    *,
+    title: str,
+    question: str,
+    fields: list[tuple[str, object]],
+    ctx: Any,
+    decision_key: str | None = None,
+    local_request: Callable[..., bool] | None = None,
+    local_wait: Callable[[], bool] | None = None,
+) -> Any:
+    """One native guard request with local UI and durable async drivers."""
+    from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop
+
+    request = HumanRequest(
+        kind="confirm",
+        title=title,
+        question=question,
+        fields=[[str(key), str(value)] for key, value in fields],
+        decision_key=decision_key,
+    )
+    if callable(port(ctx, "human_request")):
+        return AwaitOnCaller(lambda: aconfirm_via_human_port(request, ctx=ctx))
+    wait = local_wait or partial(
+        local_request or request_confirm,
+        title=title,
+        question=question,
+        fields=fields,
+        ctx=ctx,
+        decision_key=decision_key,
+    )
+    return OffLoop(wait, on_interrupt=False)

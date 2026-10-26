@@ -9,6 +9,11 @@ to match.
 
 from __future__ import annotations
 
+import pytest
+
+from gc_core.tools.arguments_validation import (
+    parse_and_validate_tool_arguments,
+)
 from gc_core.tools.connect_mcp.agent_tools import (
     _normalize_schema_recursive,
     normalize_tool_spec_for_agent,
@@ -346,8 +351,12 @@ def test_recursive_defs_ref_keeps_defs_for_openai_strict() -> None:
     assert params["$defs"]["OrFilterGroup"]["additionalProperties"] is False
 
 
-def test_anyof_array_object_items_get_additional_properties_false() -> None:
-    """``list[dict] | None`` must not keep ``additionalProperties: true`` under strict."""
+def test_anyof_array_object_items_stay_open() -> None:
+    """``list[dict] | None``: элементы — свободные объекты, их не закрываем.
+
+    Закрытый объект без ``properties`` не принял бы ни одного ключа. OpenAI
+    strict открытый объект не принимает — такой инструмент уходит без strict.
+    """
     tool_spec = {
         "type": "function",
         "name": "mcp_office_query_xlsx",
@@ -374,9 +383,129 @@ def test_anyof_array_object_items_get_additional_properties_false() -> None:
             "required": ["path"],
         },
     }
-    normalized = normalize_tool_spec_for_agent(tool_spec)
-    items = normalized["parameters"]["properties"]["sort"]["anyOf"][0]["items"]
-    assert items["additionalProperties"] is False
+    for openai_strict in (False, True):
+        normalized = normalize_tool_spec_for_agent(
+            tool_spec, openai_strict=openai_strict
+        )
+        items = normalized["parameters"]["properties"]["sort"]["anyOf"][0][
+            "items"
+        ]
+        assert items["additionalProperties"] is True
+        assert "x-openai-strict" not in items
+
+
+def _create_issue_spec() -> dict:
+    """Как ``create_issue`` у Jira MCP: произвольные поля задачи — ``dict``."""
+    return {
+        "type": "function",
+        "name": "mcp_jira_create_issue",
+        "description": "Create issue.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string"},
+                "fields": {"type": "object", "additionalProperties": True},
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+                "extra": {"type": "object"},
+                "meta": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                },
+            },
+            "required": ["project"],
+        },
+    }
+
+
+@pytest.mark.parametrize("openai_strict", [False, True])
+def test_free_object_param_keeps_its_keys(openai_strict: bool) -> None:
+    """Регресс: ``fields: dict`` превращался в ``{}`` с ``additionalProperties:
+    false`` — валидатор отказывал в любом ключе (``customfield_17500``)."""
+    normalized = normalize_tool_spec_for_agent(
+        _create_issue_spec(), openai_strict=openai_strict
+    )
+    props = normalized["parameters"]["properties"]
+    assert props["fields"]["additionalProperties"] is True
+    assert props["labels"]["additionalProperties"] == {"type": "string"}
+    # Объект без properties и без additionalProperties — по JSON Schema открыт.
+    assert props["extra"]["additionalProperties"] is True
+    # Объект с перечисленными ключами закрывается, как и раньше.
+    assert props["meta"]["additionalProperties"] is False
+    # Без пустых properties/required: OpenAI без strict читает такой объект
+    # как пустой и шлёт `{}` (gpt-5.4-mini, проверено живым запросом).
+    for name in ("fields", "labels", "extra"):
+        assert "properties" not in props[name]
+        assert "required" not in props[name]
+
+    args = parse_and_validate_tool_arguments(
+        tool_name="mcp_jira_create_issue",
+        arguments={
+            "project": "PDLC",
+            "fields": {"customfield_17500": "x", "priority": {"name": "High"}},
+            "labels": {"team": "qa"},
+            "extra": {"k": 1},
+            "meta": {"a": "b"},
+        },
+        tool_spec=normalized,
+        allow_empty_for_empty_schema=False,
+    )
+    assert args["fields"] == {
+        "customfield_17500": "x",
+        "priority": {"name": "High"},
+    }
+    assert args["labels"] == {"team": "qa"}
+
+
+def test_free_object_values_still_validated() -> None:
+    """Открыт только набор ключей: схема значений (``dict[str, str]``) действует."""
+    normalized = normalize_tool_spec_for_agent(_create_issue_spec())
+    with pytest.raises(Exception):
+        parse_and_validate_tool_arguments(
+            tool_name="mcp_jira_create_issue",
+            arguments={"project": "PDLC", "labels": {"team": 1}},
+            tool_spec=normalized,
+            allow_empty_for_empty_schema=False,
+        )
+
+
+@pytest.mark.parametrize("openai_strict", [False, True])
+def test_tool_with_free_object_is_sent_without_strict(
+    openai_strict: bool,
+) -> None:
+    """strict требует закрыть каждый объект — инструмент со свободным уходит
+    со ``strict: false``, свободный объект остаётся открытым; остальные
+    инструменты strict сохраняют."""
+    from gc_core.utils.connect_backend import project_tool_specs
+
+    free = normalize_tool_spec_for_agent(_create_issue_spec())
+    plain = normalize_tool_spec_for_agent(
+        {
+            "type": "function",
+            "name": "mcp_jira_get_issue",
+            "description": "Get issue.",
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {"key": {"type": "string"}},
+                "required": ["key"],
+            },
+        }
+    )
+    sent_free, sent_plain = project_tool_specs(
+        [free, plain], openai_strict=openai_strict, send_tool_strict=True
+    )
+    assert sent_free["strict"] is False
+    assert (
+        sent_free["parameters"]["properties"]["fields"]["additionalProperties"]
+        is True
+    )
+    assert sent_plain["strict"] is True
+    # Исходные спеки проекция не меняет.
+    assert free["strict"] is True
 
 
 def test_non_strict_preserves_server_required_default() -> None:

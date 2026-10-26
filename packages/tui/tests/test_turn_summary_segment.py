@@ -10,17 +10,17 @@ import json
 import re
 
 import pytest
-from rich.text import Text
-
-from gc_testkit.paths import module_dir
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.thread_store import edits_journal_path
+from gc_testkit.paths import module_dir
+from gc_testkit.tui_support import tui_settings
 from gc_tui.widgets.thinking_indicator import (
     ThinkingIndicator,
     compose_status_line,
     format_turn_summary,
 )
+from rich.text import Text
 
 
 def _write_task(tmp_path, tid):
@@ -181,7 +181,6 @@ def test_hover_speaks_the_same_color_as_every_hover_rule_of_the_base():
     может только здесь — в базе всего два hover-правила, и оба про наведение на
     кликабельный элемент блока.
     """
-    from pathlib import Path
 
     from gc_tui.palette import css_variables
 
@@ -309,7 +308,9 @@ async def test_turn_with_edits_shows_summary_from_journal(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+        settings=tui_settings(
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -353,7 +354,9 @@ async def test_turn_summary_shows_net_delta_not_sum_of_records(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+        settings=tui_settings(
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -373,7 +376,9 @@ async def test_turn_without_edits_has_no_segment(tmp_path):
     _write_task(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T0", add=9, del_=9)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -402,7 +407,9 @@ async def test_second_stamp_does_not_move_the_turn_boundary(tmp_path):
     tid = "turn0000000000000000000000000009a"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -423,7 +430,9 @@ async def test_empty_journal_has_no_segment(tmp_path):
     tid = "turn0000000000000000000000000003a"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -442,10 +451,12 @@ async def test_config_switch_off_hides_segment(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "agent_edits": {"turn_summary_in_status": False},
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "M",
+                "agent_edits": {"turn_summary_in_status": False},
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -464,7 +475,9 @@ async def test_no_cta_block_in_trace_after_turn_with_edits(tmp_path):
     _write_task(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T1", add=3, del_=1)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -491,6 +504,38 @@ async def _turn_with_edits(pilot, tmp_path, tid):
     ind = scr._thinking
     assert ind is not None and ind._summary_span is not None
     return scr, ind
+
+
+def _hover_at(pilot, widget, dx):
+    """Навести указатель на клетку виджета и оставить его там.
+
+    `pilot.hover` запоминает координату, потом делает `pause()` и только затем
+    ищет виджет: за паузу раскладка успевает сдвинуть индикатор. Прямая
+    доставка берёт клетку уже после раскладки. `mouse_position` обязан
+    совпасть с ней: следующий кадр сверяет указатель с этой точкой и иначе
+    шлёт `Leave`, который гасит подсветку.
+    """
+    from textual.events import MouseMove
+    from textual.geometry import Offset
+
+    x = widget.region.x + dx
+    y = widget.region.y
+    pilot.app.mouse_position = Offset(x, y)
+    pilot.app.screen._forward_event(
+        MouseMove(
+            widget,
+            x,
+            y,
+            0,
+            0,
+            0,
+            False,
+            False,
+            False,
+            screen_x=x,
+            screen_y=y,
+        )
+    )
 
 
 def _post_gesture(pilot, widget, down_dx, up_dx=None, *, button=1):
@@ -552,7 +597,9 @@ async def _app_with_turn_edits(tmp_path, tid):
     return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+        settings=tui_settings(
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
+        ),
     )
 
 
@@ -572,14 +619,18 @@ async def test_click_inside_summary_span_opens_screen_in_turn_source(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+        settings=tui_settings(
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
+        ),
     )
     async with app.run_test() as pilot:
         _scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
 
-        await pilot.click(ind, offset=(start + 1, 0))
-        await pilot.pause()
+        # Не pilot.click: он обходит App.on_event, и on_mouse_down не всегда
+        # успевает выставить _pressed_in_summary — под нагрузкой клик молчит.
+        # Тот же путь, что у test_single_click_still_opens_the_screen_through_the_queue.
+        await _gesture(pilot, ind, start + 1)
 
         assert isinstance(pilot.app.screen, DiffScreen)
         assert pilot.app.screen.source == SOURCE_TURN
@@ -600,7 +651,9 @@ async def test_click_outside_span_does_nothing(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+        settings=tui_settings(
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
+        ),
     )
     async with app.run_test() as pilot:
         scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
@@ -629,17 +682,23 @@ async def test_hover_over_segment_lightens_it_and_leaving_dims_back(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+        settings=tui_settings(
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
+        ),
     )
     async with app.run_test() as pilot:
         _scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
 
-        await pilot.hover(ind, offset=(start + 1, 0))
+        _hover_at(pilot, ind, start + 1)
         await pilot.pause()
         assert ind._summary_hover is True
 
-        await pilot.hover(ind, offset=(0, 0))
+        _hover_at(pilot, ind, 0)
+        await pilot.pause()
+        assert ind._summary_hover is False
+
+        _hover_at(pilot, ind, 0)
         await pilot.pause()
         assert ind._summary_hover is False
 
@@ -774,7 +833,9 @@ async def test_click_on_indicator_without_summary_is_inert(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+        settings=tui_settings(
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -796,7 +857,9 @@ async def test_resume_shows_summary_saved_with_indicator(tmp_path):
     tid = "turn0000000000000000000000000006a"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -832,7 +895,9 @@ async def test_resume_without_saved_summary_shows_no_stale_numbers(tmp_path):
     _write_task(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T0", add=9, del_=9)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

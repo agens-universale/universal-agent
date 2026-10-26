@@ -1,40 +1,39 @@
 ---
 id: "computer-use"
 name: "Computer Use — Windows GUI control"
-description: "ОБЯЗАТЕЛЬНО загружай этот скилл ПЕРЕД любым вызовом computer_* тулов (computer_launch_app, computer_click, computer_type, computer_get_state, computer_scroll, computer_shortcut, computer_key, computer_switch, computer_resize, computer_drag, computer_wait). Триггеры в запросе пользователя: 'открой/запусти/закрой приложение X', 'кликни/нажми кнопку/ссылку/меню', 'введи/набери/напечатай текст', 'сохрани файл', 'переключись на окно', 'прокрути', 'нажми сочетание клавиш'. Приложения: Excel, Word, Outlook, PowerPoint, Блокнот, Калькулятор, 1С, Chrome, внутренние корпоративные программы. Скилл содержит правила последовательности вызовов тулов, работу с element_id из get_state и обработку типичных ошибок."
-version: "0.1.2"
+description: "You MUST load this skill BEFORE any call to computer_* tools (computer_launch_app, computer_click, computer_type, computer_get_state, computer_scroll, computer_shortcut, computer_key, computer_switch, computer_resize, computer_drag, computer_wait). Triggers in the user's request: 'открой/запусти/закрой приложение X', 'кликни/нажми кнопку/ссылку/меню', 'введи/набери/напечатай текст', 'сохрани файл', 'переключись на окно', 'прокрути', 'нажми сочетание клавиш'. Applications: Excel, Word, Outlook, PowerPoint, Блокнот, Калькулятор, 1С, Chrome, internal corporate applications. This skill covers tool-call ordering, using element_id from get_state, and handling common errors."
+version: "0.1.3"
 ---
 
-# Computer Use — управление Windows GUI
+# Computer Use — Windows GUI control
 
-## Когда загружать этот скилл
+## When to load this skill
 
-**Всегда загружай `skills_load("computer-use")` как только определил что задача
-требует любого из `computer_*` тулов.** Это единственный источник правил
-последовательности вызовов — без него ты вызовешь тулы в неверном порядке
-и получишь ошибки.
+**Always load `skills_load("computer-use")` as soon as you determine that the task
+requires any `computer_*` tool.** This is the only source of tool-call ordering
+rules — without it, you will call tools in the wrong order and get errors.
 
-Загружай **перед** первым `computer_*` вызовом, а не после. Загрузка занимает
-один tool call и окупается тем, что ты не будешь переделывать работу из-за
+Load it **before** the first `computer_*` call, not afterward. Loading takes
+one tool call and pays off by avoiding rework caused by
 [stale_state] / [element_not_found].
 
-## Назначение
+## Purpose
 
-Инструкции для работы с desktop-приложениями Windows через MCP-сервер
-`gc-computer-mcp`. Применяется когда приложение не предоставляет программного
-API — Excel, Word, Outlook, 1С, внутренние корпоративные инструменты.
+Instructions for working with Windows desktop applications through the
+`gc-computer-mcp` MCP server. Applies when an application does not provide a
+programmatic API — Excel, Word, Outlook, 1С, internal corporate tools.
 
-Если тулы `computer_*` отсутствуют в списке доступных — MCP-сервер не
-подключён, этот скилл не применим; сообщи пользователю.
+If `computer_*` tools are not available, the MCP server is not connected
+and this skill does not apply; inform the user.
 
-## Как работает взаимодействие
+## How interaction works
 
-Ты не видишь экран напрямую. Ты получаешь **структурированное текстовое
-описание** UI через `computer_get_state`. В ответе приходит дерево элементов
-с целочисленными ID в квадратных скобках, типом (Button, TextBox, MenuItem)
-и текстом.
+You do not see the screen directly. You receive a **structured textual
+description** of the UI through `computer_get_state`. The response contains
+an element tree with integer IDs in square brackets, types (Button, TextBox,
+MenuItem), and text.
 
-Пример дерева:
+Example tree:
 
 ```
 [0] Desktop
@@ -45,255 +44,254 @@ API — Excel, Word, Outlook, 1С, внутренние корпоративны
     [5] Edit "Поиск" value="last query"
 ```
 
-Ты взаимодействуешь с элементами **по их ID**:
+You interact with elements **by their IDs**:
 
-- `computer_click(element_id=2)` — кликнуть по кнопке «Сохранить»
-- `computer_type(element_id=3, text="Продажи")` — ввести текст в пустое поле A1
+- `computer_click(element_id=2)` — click the “Сохранить” button
+- `computer_type(element_id=3, text="Продажи")` — enter text in the empty A1 field
 
-**Поле `value="..."` у Edit/ComboBox/Document** показывает текущее
-содержимое поля (если оно не пустое). Если `value=` отсутствует в
-строке — поле пустое. Это ключевой сигнал для `computer_type` (см.
-раздел «Работа с полями формы» ниже).
+**The `value="..."` field on Edit/ComboBox/Document** shows the field's current
+contents (if nonempty). If `value=` is absent from the line, the field is empty.
+This is a key signal for `computer_type` (see the “Form fields” section below).
 
-## Обязательная последовательность
+## Mandatory sequence
 
-Для **любого** GUI-действия следуй этому порядку:
+For **any** GUI action, follow this order:
 
-1. **`computer_launch_app(...)`** — если нужное приложение ещё не запущено.
-2. **`computer_wait(1)` или `computer_wait(2)`** — дать окну отрисоваться.
-   Пропускать этот шаг — частая причина `[element_not_found]`.
-3. **`computer_get_state()`** — получить актуальное дерево элементов с их
-   `element_id`. **Без этого шага ты не знаешь какие ID существуют** и
-   любая попытка `computer_click`/`computer_type` с угаданным `element_id`
-   упадёт с `[stale_state]` или `[element_not_found]`.
+1. **`computer_launch_app(...)`** — if the required application is not already running.
+2. **`computer_wait(1)` or `computer_wait(2)`** — let the window render.
+   Skipping this step is a common cause of `[element_not_found]`.
+3. **`computer_get_state()`** — obtain the current element tree and its
+   `element_id` values. **Without this step, you do not know which IDs exist**,
+   and any attempt to use `computer_click`/`computer_type` with a guessed
+   `element_id` will fail with `[stale_state]` or `[element_not_found]`.
 
-   **Параметр `scope`.** По умолчанию `get_state` возвращает дерево текущего
-   focused-окна (`scope="foreground"`) — это экономит токены и точнее попадает
-   в цель. Если нужен список всех открытых окон — `scope="desktop"`. Если знаешь
-   конкретное целевое окно по заголовку — `scope="window"`,
+   **The `scope` parameter.** By default, `get_state` returns the tree of the
+   currently focused window (`scope="foreground"`), saving tokens and targeting
+   more precisely. For a list of all open windows, use `scope="desktop"`.
+   If you know the target window's title, use `scope="window"`,
    `window_title="подстрока"`.
 4. **`computer_click` / `computer_type` / `computer_scroll` / `computer_key`
-   / `computer_shortcut`** — собственно действие, по `element_id` из
-   последнего `get_state`.
-5. **Повторить `computer_get_state` если дальше планируются ещё действия**
-   — после каждого мутирующего вызова нумерация ID может измениться.
+   / `computer_shortcut`** — perform the action using an `element_id` from
+   the latest `get_state`.
+5. **Repeat `computer_get_state` if more actions are planned**
+   — IDs may change after each mutating call.
 
-## Правила работы
+## Operating rules
 
-1. **Всегда начинай с `computer_get_state`.** Без него ты не знаешь какие
-   элементы существуют на экране. Запрещается вызывать `computer_click`
-   / `computer_type` / `computer_scroll` без предшествующего успешного
-   `computer_get_state` в этой же серии шагов.
+1. **Always start with `computer_get_state`.** Without it, you do not know
+   which elements exist on the screen. You MUST NOT call `computer_click`
+   / `computer_type` / `computer_scroll` without a preceding successful
+   `computer_get_state` in the same sequence of steps.
 
-2. **Вызывай `computer_get_state` только когда СТРУКТУРА экрана могла
-   поменяться.** Это значит:
-   - открылось / закрылось меню, диалог, всплывающая панель;
-   - сменилось окно, режим или вкладка приложения;
-   - появились / исчезли элементы управления.
+2. **Call `computer_get_state` only when the screen STRUCTURE may have
+   changed.** This means:
+   - a menu, dialog, or popup panel has opened / closed;
+   - the application window, mode, or tab has changed;
+   - controls have appeared / disappeared.
 
-   **Между последовательными кликами/вводами на одном экране лишний
-   `get_state` НЕ нужен** — например серия нажатий цифр и операторов в
-   калькуляторе, ввод нескольких букв через `computer_type`, подряд
-   идущие `computer_key`. Layout не меняется, а `element_id` у кнопок
-   остаются те же из последнего снимка. Лишние снимки тратят токены и
-   добавляют лишние раунды между тобой и приложением.
+   **An extra `get_state` is NOT needed between consecutive clicks or
+   typing actions on the same screen** — for example, a series of digit and
+   operator clicks in a calculator, typing several letters with
+   `computer_type`, or consecutive `computer_key` calls. The layout does
+   not change, and the buttons retain the `element_id` values from the
+   latest snapshot. Extra snapshots waste tokens and add unnecessary
+   round trips between you and the application.
 
-   Если сомневаешься — лучше сделать `get_state`, чем кликнуть по
-   устаревшему `element_id`. Но не делай его автоматически после каждого
-   единичного клика.
+   If in doubt, obtain `get_state` rather than click a stale `element_id`.
+   But do not do so automatically after every individual click.
 
-   **Обязательно проверяй результат через `get_state` после:**
-   - `computer_shortcut(["ctrl","v"])` — вставился ли текст
-     (смотри `value="..."` у целевого `Edit`);
-   - `computer_shortcut(["ctrl","s"])` — открылся ли диалог сохранения
-     или файл сохранился;
-   - `computer_key("enter")` в поле сообщения / поиска / диалоге —
-     сообщение ушло, поиск применился, диалог закрылся;
-   - любого `computer_shortcut` в Electron / Qt-приложении (Telegram,
-     VS Code, Jazz, Teams) — эти приложения часто «глотают» клавиатурный
-     ввод, и тулы вернут `ok=true`, хотя эффекта не было.
+   **Always verify the result through `get_state` after:**
+   - `computer_shortcut(["ctrl","v"])` — check whether the text was pasted
+     (look at `value="..."` on the target `Edit`);
+   - `computer_shortcut(["ctrl","s"])` — check whether a save dialog opened
+     or the file was saved;
+   - `computer_key("enter")` in a message / search field or dialog —
+     check whether the message was sent, the search applied, or the dialog closed;
+   - any `computer_shortcut` in an Electron / Qt application (Telegram,
+     VS Code, Jazz, Teams) — these applications often swallow keyboard
+     input, and the tools return `ok=true` even though nothing happened.
 
-   `ok=true` от shortcut/key означает только «SendInput отправил клавиши
-   в систему», а НЕ «приложение отреагировало».
+   `ok=true` from shortcut/key means only that SendInput sent the keys
+   to the system, NOT that the application reacted.
 
-3. **Используй клавиатурные комбинации через `computer_shortcut` где
-   возможно.** Они быстрее и надёжнее серии кликов: `["ctrl","s"]` вместо
-   кликов «Файл → Сохранить». `["ctrl","c"]`, `["ctrl","v"]`,
-   `["alt","tab"]`, `["ctrl","shift","s"]` — привычные сочетания работают.
+3. **Use keyboard shortcuts through `computer_shortcut` wherever
+   possible.** They are faster and more reliable than a series of clicks:
+   `["ctrl","s"]` instead of clicking “Файл → Сохранить”. `["ctrl","c"]`,
+   `["ctrl","v"]`, `["alt","tab"]`, `["ctrl","shift","s"]` — familiar shortcuts work.
 
-4. **Для запуска приложений используй `computer_launch_app(имя)`**
-   с короткими именами: `excel`, `word`, `outlook`, `notepad`, `calc`,
-   `powerpoint`, `explorer`, `cmd`. Не ищи иконки на рабочем столе через
-   клики и `computer_get_state`.
+4. **Use `computer_launch_app(имя)` to launch applications**
+   with short names: `excel`, `word`, `outlook`, `notepad`, `calc`,
+   `powerpoint`, `explorer`, `cmd`. Do not look for desktop icons through
+   clicks and `computer_get_state`.
 
-5. **Перед деструктивными действиями** (удаление, закрытие без сохранения,
-   отправка сообщений, необратимые изменения) — спрашивай подтверждение у
-   пользователя.
+5. **Before destructive actions** (deletion, closing without saving,
+   sending messages, irreversible changes), ask the user for confirmation.
 
-6. **Не повторяй одно и то же действие бесконечно.** Если action не
-   сработал три раза — попробуй альтернативный путь или сообщи
-   пользователю о проблеме.
+6. **Do not repeat the same action indefinitely.** If an action has
+   failed three times, try an alternative route or inform the user
+   of the problem.
 
-7. **Если `computer_get_state` возвращает почти пустое дерево или только
-   PaneControl без содержимого** — приложение скорее всего не поддерживает
-   UIA (Electron: Teams, Slack, VS Code; Canvas-based UI; игры). Сообщи об
-   этом пользователю; если в списке тулов доступны
-   `computer_capture_screenshot` / `computer_analyze_screen_region` —
-   попробуй их.
+7. **If `computer_get_state` returns an almost empty tree or only
+   PaneControl without content**, the application most likely does not
+   support UIA (Electron: Teams, Slack, VS Code; canvas-based UI; games).
+   Inform the user; if `computer_capture_screenshot` /
+   `computer_analyze_screen_region` are available in the tool list,
+   try them.
 
-8. **Electron-приложения требуют явного фокуса перед `get_state`.**
-   Jazz / SberJazz, Teams, Slack, Discord, VS Code и другие Electron-приложения
-   материализуют свой UIA-контент только когда окно в фокусе. Паттерн:
+8. **Electron applications require explicit focus before `get_state`.**
+   Jazz / SberJazz, Teams, Slack, Discord, VS Code, and other Electron
+   applications materialize their UIA content only when the window has focus.
+   Pattern:
    `computer_launch_app(...)` → `computer_wait(2)` → `computer_switch(window_title=...)` →
-   `computer_get_state()`. Пропуск `computer_switch` даст почти пустое дерево.
+   `computer_get_state()`. Skipping `computer_switch` yields an almost empty tree.
 
-9. **Не вызывай computer-тулы параллельно в одном шаге модели.**
-   Сервер хранит снимок в файле `%TEMP%\gc-computer-mcp\last_state_*.json`
-   и параллельные `computer_get_state` будут конкурировать за него.
-   Последовательность важнее скорости.
+9. **Do not call computer tools in parallel within a single model step.**
+   The server stores the snapshot in `%TEMP%\gc-computer-mcp\last_state_*.json`,
+   and parallel `computer_get_state` calls compete for it.
+   Ordering matters more than speed.
 
-## Типичные ошибки и как реагировать
+## Common errors and how to respond
 
-Все computer-тулы возвращают ошибки с префиксом `[category]` в сообщении.
-Категория — контракт: по ней определяй что делать.
+All computer tools return errors with a `[category]` prefix in the message.
+The category is a contract: use it to decide what to do.
 
-- `[element_not_found]` или `[stale_state]` → немедленно вызови
-  `computer_get_state` и повтори действие с новыми ID.
-- `[readonly_violation]` → не пытайся повторить, readonly-режим включён
-  принципиально. Сообщи пользователю если он ожидал мутацию.
-- `[blacklisted_keys]` → не повторяй эту комбинацию. Она в системном
-  блэклисте (ctrl+alt+del, win+l, alt+f4). Выбери другую стратегию.
-- `[timeout]` → тул превысил лимит. Возможно система зависла или ответ
-  слишком большой. Попробуй `computer_wait(5)` и повтори.
-- `[app_not_found]` → приложение не найдено или окно с таким заголовком
-  отсутствует. Проверь точное написание, используй `computer_get_state`
-  чтобы увидеть список активных окон.
-- `[out_of_bounds]` → координаты вне экрана. Вызови `get_state`, бери
-  актуальные bounds элементов.
+- `[element_not_found]` or `[stale_state]` → immediately call
+  `computer_get_state` and retry the action using new IDs.
+- `[readonly_violation]` → do not retry; readonly mode is intentional.
+  Inform the user if they expected a mutation.
+- `[blacklisted_keys]` → do not retry that combination. It is on the system
+  blacklist (ctrl+alt+del, win+l, alt+f4). Choose another strategy.
+- `[timeout]` → the tool exceeded its time limit. The system may be frozen
+  or the response too large. Try `computer_wait(5)` and retry.
+- `[app_not_found]` → the application was not found or no window has that
+  title. Check the exact spelling and use `computer_get_state`
+  to see the list of active windows.
+- `[out_of_bounds]` → coordinates are outside the screen. Call `get_state`
+  and use the current element bounds.
 
-## Если доступны vision-тулы
+## If vision tools are available
 
-Если в окружении активированы `computer_capture_screenshot` и
-`computer_analyze_screen_region` — используй их для:
+If `computer_capture_screenshot` and `computer_analyze_screen_region`
+are activated in the environment, use them for:
 
-- Анализа содержимого графиков и диаграмм
-- Работы с приложениями где UIA-дерево пустое или неинформативное
-- Визуальной проверки результата действия
+- Analyzing the contents of graphs and charts
+- Working with applications whose UIA tree is empty or uninformative
+- Visually verifying an action's result
 
-**Не используй vision-тулы для того, что можно решить через UIA** — это
-медленнее, дороже по токенам и не всегда надёжнее.
+**Do not use vision tools for anything that can be handled through UIA** —
+it is slower, costs more tokens, and is not always more reliable.
 
-**Важно:** в текущей версии background-agent бинарные данные из MCP
-превращаются в строку `"binary data"` при передаче в LLM. Vision-тулы
-готовы к работе, но до модели как изображения пока не доходят. Если
-запрос требует визуального анализа — предупреди об этом пользователя.
+**Important:** in the current background-agent version, MCP binary data
+reaches the LLM as the string `"binary data"`, not as images. The vision
+tools are ready to use, but their output does not yet reach the model
+as images. Warn the user if their request requires visual analysis.
 
-## Доступные тулы
+## Available tools
 
-Основные (UIA, всегда доступны если MCP подключён):
+Primary (UIA, always available if MCP is connected):
 
-| Тул | Сигнатура (ключевые параметры) |
+| Tool | Signature (key parameters) |
 |---|---|
 | `computer_get_state` | `scope="foreground"` (default) / `"window"` / `"desktop"`, `window_title?`, `max_depth?`, `exclude_shell`, `only_interactive`, `include_invisible?` |
 | `computer_click` | `element_id`, `button?`, `clicks?` |
-| `computer_type` | `element_id`, `text`, `clear?` (см. «Работа с полями формы»), `press_enter?` |
+| `computer_type` | `element_id`, `text`, `clear?` (see “Form fields”), `press_enter?` |
 | `computer_scroll` | `direction`, `amount?`, `element_id?` |
 | `computer_drag` | `from_element_id`, `to_element_id`, `button?` |
-| `computer_key` | `key` (одна клавиша: `enter`, `f5`, `tab`) |
+| `computer_key` | `key` (a single key: `enter`, `f5`, `tab`) |
 | `computer_shortcut` | `keys: list[str]` (`["ctrl","s"]`) |
 | `computer_resize` | `window_title`, `x?/y?/width?/height?/maximize?/minimize?` |
-| `computer_switch` | `window_title` (подстрока) |
+| `computer_switch` | `window_title` (substring) |
 | `computer_launch_app` | `app_name` (`excel`, `word`, `outlook`, `notepad`, ...) |
 | `computer_wait` | `seconds` (0..30) |
 
-Опциональные (vision, активируются флагом в env MCP-сервера):
+Optional (vision, activated by a flag in the MCP server environment):
 
-| Тул | Сигнатура |
+| Tool | Signature |
 |---|---|
 | `computer_capture_screenshot` | `region?`, `downscale?` |
 | `computer_analyze_screen_region` | `x`, `y`, `width`, `height` |
 
-## Работа с полями формы
+## Form fields
 
-Перед `computer_type(element_id=X)` посмотри в дереве из `get_state` на
-элемент `X` и реши по трём кейсам:
+Before `computer_type(element_id=X)`, look at element `X` in the tree
+from `get_state` and choose among three cases:
 
-**Кейс 1 — пользователь указал конкретный текст для поля.**
-Запрос вида «введи 'Привет' в блокноте», «заполни имя 'Иван'».
-→ `computer_type(element_id=X, text="Привет", clear=True)` — всегда
-`clear=True`, чтобы не получить склейку с уже лежащим там текстом.
+**Case 1 — the user supplied specific text for the field.**
+Requests such as “введи 'Привет' в блокноте”, “заполни имя 'Иван'”.
+→ `computer_type(element_id=X, text="Привет", clear=True)` — always use
+`clear=True` to avoid concatenating it with existing text.
 
-**Кейс 2 — пользователь НЕ указал текст, а поле уже заполнено
-осмысленным значением (ты видишь `value="..."` у элемента).**
-Типичный пример: Electron-формы с автозаполнением из предыдущей сессии
-(SberJazz помнит имя «Дмитрий», название «Видеовстреча»).
-→ **Не вызывай `computer_type` вообще.** Оставь поле как есть.
-Придумывать свой default и затирать им разумное автозаполнение — хуже,
-чем ничего не делать.
+**Case 2 — the user did NOT supply text and the field already contains
+a meaningful value (you see `value="..."` on the element).**
+A typical example is an Electron form autofilled from a previous session
+(SberJazz remembers the name “Дмитрий” and title “Видеовстреча”).
+→ **Do not call `computer_type` at all.** Leave the field as it is.
+Inventing a default and overwriting meaningful autofill is worse
+than doing nothing.
 
-**Кейс 3 — пользователь не указал текст, поле пустое (в дереве нет
-`value="..."`), и оно похоже на обязательное.**
-→ Сначала попробуй продолжить задачу без заполнения (многие формы
-разрешают обязательные поля с пустыми дефолтами на сервере). Если
-упрёшься в валидацию — заполни коротким нейтральным значением
-(`"Пользователь"`, `"Встреча"`) и передай `clear=True`.
+**Case 3 — the user did not supply text, the field is empty (no
+`value="..."` in the tree), and it appears required.**
+→ First try to continue without filling it (many forms allow required
+fields with empty defaults on the server). Only if validation blocks
+progress, use a short neutral value (`"Пользователь"`, `"Встреча"`)
+and pass `clear=True`.
 
-### Как читать `value=` в дереве
+### How to read `value=` in the tree
 
 ```
-[49] Edit "Ваше имя" value="Дмитрий"     ← поле заполнено
-[56] Edit "Название встречи"             ← поле пустое
+[49] Edit "Ваше имя" value="Дмитрий"     ← field is populated
+[56] Edit "Название встречи"             ← field is empty
 [64] Button "Создать и присоединиться"
 ```
 
-- Есть `value="..."` → в поле уже что-то есть.
-- Нет `value=` → поле пустое (или это не Edit/ComboBox — проверь по типу).
+- `value="..."` is present → the field already contains something.
+- No `value=` → the field is empty (or it is not an Edit/ComboBox — check its type).
 
-### Анти-паттерн
+### Anti-pattern
 
-Не делай так:
+Do not do this:
 ```
-# Пользователь сказал просто «создай встречу», имени не указал.
-computer_type(element_id=49, text="Пользователь")  # затирает "Дмитрий"
-computer_type(element_id=56, text="Моя встреча")   # затирает "Видеовстреча"
+# The user only said “создай встречу” and did not provide a name.
+computer_type(element_id=49, text="Пользователь")  # overwrites "Дмитрий"
+computer_type(element_id=56, text="Моя встреча")   # overwrites "Видеовстреча"
 ```
-В итоге получится склейка типа `"ДмитрийПользователь"` или потеря
-осмысленного автозаполнения. Правильное поведение — **оставить эти
-поля нетронутыми** и сразу жать финальную кнопку.
+This produces concatenation such as `"ДмитрийПользователь"` or loses
+meaningful autofill. The correct behavior is to **leave these fields
+untouched** and click the final button immediately.
 
-### Фокус на поле перед Ctrl+V / Ctrl+A
+### Focus the field before Ctrl+V / Ctrl+A
 
-Если нужно поставить фокус на input (например перед `computer_shortcut(["ctrl","v"])`) —
-используй **`computer_click(element_id=X)`**. Не используй `computer_type(text="")`
-как способ сфокусироваться: он всё равно делает click + SendInput с пустой
-строкой, но менее очевиден из лога и легко путается с реальным вводом текста.
+To focus an input (for example, before `computer_shortcut(["ctrl","v"])`),
+use **`computer_click(element_id=X)`**. Do not use `computer_type(text="")`
+as a focusing mechanism: it still performs click + SendInput with an empty
+string, but is less obvious in the log and easily confused with actual text input.
 
-## Использование окна из `computer_launch_app`
+## Using the window returned by `computer_launch_app`
 
-`computer_launch_app` возвращает `window_title` и `window_hwnd`, если ему удалось
-их определить за ~3 сек. Это значит, что после `launch_app` ты можешь сразу звать
-`computer_get_state(scope="window", window_title=<launched_title>)`, минуя
-дорогостоящий foreground-polling. Пример:
+`computer_launch_app` returns `window_title` and `window_hwnd` if it can
+identify them within ~3 seconds. After `launch_app`, you can therefore call
+`computer_get_state(scope="window", window_title=<launched_title>)` directly,
+bypassing expensive foreground polling. Example:
 
 1. `computer_launch_app("Jazz")` → `{launched: "Jazz", window_title: "SaluteJazz", ...}`
-2. `computer_wait(2)` (Electron всё равно нужно время)
+2. `computer_wait(2)` (Electron still needs time)
 3. `computer_get_state(scope="window", window_title="SaluteJazz")`
 
-## Примеры сценариев
+## Example scenarios
 
-**Открыть калькулятор, посчитать 2+2:**
+**Open the calculator and calculate 2+2:**
 1. `computer_launch_app("calc")`
-2. `computer_wait(1)` — даём окну открыться
-3. `computer_get_state()` — видим кнопки калькулятора
+2. `computer_wait(1)` — let the window open
+3. `computer_get_state()` — see the calculator buttons
 4. `computer_click(element_id=<2>)`, `computer_click(element_id=<+>)`,
    `computer_click(element_id=<2>)`, `computer_click(element_id=<=>)`
-5. `computer_get_state()` — читаем результат с экрана
+5. `computer_get_state()` — read the result from the screen
 
-**Создать таблицу в Excel:**
+**Create a spreadsheet in Excel:**
 1. `computer_launch_app("excel")`
-2. `computer_wait(2)` — Excel запускается заметно дольше
-3. `computer_get_state()` — ожидаем увидеть сетку и ячейку A1
-4. `computer_type(element_id=<A1>, text="Продажи")` — ввод в ячейку
-5. `computer_key("tab")` — переход к B1
-6. ... и так далее
-7. `computer_shortcut(["ctrl","s"])` — сохранение
+2. `computer_wait(2)` — Excel takes noticeably longer to launch
+3. `computer_get_state()` — expect to see the grid and cell A1
+4. `computer_type(element_id=<A1>, text="Продажи")` — enter text in the cell
+5. `computer_key("tab")` — move to B1
+6. ... and so on
+7. `computer_shortcut(["ctrl","s"])` — save

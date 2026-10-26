@@ -18,6 +18,7 @@ from gc_tui.messages import OpenEventRequest, OpenImageRequest
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.user_reply import UserReplyContainer
 from image_helpers import make_attachment_file
+from gc_testkit.tui_support import tui_settings
 
 
 def _style(image_id: str | None):
@@ -252,7 +253,13 @@ def _restored_reply_app(tmp_path):
     (threads / f"meta_cli_{tid}.json").write_text(
         json.dumps({"thread_id": tid, "tui": {}}), encoding="utf-8"
     )
-    return TuiApp(threads_dir=str(threads), system="cli", config={}), tid, att
+    return (
+        TuiApp(
+            threads_dir=str(threads), system="cli", settings=tui_settings({})
+        ),
+        tid,
+        att,
+    )
 
 
 async def _open_reply(pilot, tid):
@@ -581,7 +588,9 @@ async def test_ctrl_click_on_input_text_outside_chips_opens_nothing(tmp_path):
 
 def _screen_app(tmp_path) -> TuiApp:
     return TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings({}),
     )
 
 

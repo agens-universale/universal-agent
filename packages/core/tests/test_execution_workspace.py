@@ -9,6 +9,7 @@ from gc_core.execution_workspace import (
 )
 from gc_core.utils.project_data import get_project_data
 from gc_core.utils.tool_report_paths import tool_report_abspath
+from gc_testkit.settings import make_settings
 
 
 class _Exec:
@@ -48,9 +49,9 @@ class SandboxBackend:
 
 
 def test_launch_root_from_config_falls_back_to_cwd(tmp_path, monkeypatch):
-    """Конфиг без ключа — корнем становится текущий каталог, а не пустота.
+    """Настройки без корня — корнем становится текущий каталог, а не пустота.
 
-    Ключа `launch_root` в конфиге CLI нет: он появляется не всегда, и канон —
+    Корня рантайма (`launch_root`) у CLI нет: он появляется не всегда, и канон —
     цепочка с падением на `os.getcwd()`. Вызывающий, взявший только первое
     звено, получал пустоту и молча пропускал свою работу — так сброс треда
     перестал чистить снимки, и поймал это только живой смок, а не тесты.
@@ -59,14 +60,17 @@ def test_launch_root_from_config_falls_back_to_cwd(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
 
-    assert launch_root_from_config({}) == os.getcwd()
+    assert launch_root_from_config(make_settings()) == os.getcwd()
     assert launch_root_from_config(None) == os.getcwd()
-    assert launch_root_from_config({"launch_root": "  "}) == os.getcwd()
-    assert launch_root_from_config({"project_root": "/p"}) == os.path.abspath(
-        "/p"
+    assert (
+        launch_root_from_config(make_settings({"launch_root": "  "}))
+        == os.getcwd()
     )
     assert launch_root_from_config(
-        {"launch_root": "/l", "project_root": "/p"}
+        make_settings({"project_root": "/p"})
+    ) == os.path.abspath("/p")
+    assert launch_root_from_config(
+        make_settings({"launch_root": "/l", "project_root": "/p"})
     ) == os.path.abspath("/l")
 
 
@@ -85,16 +89,18 @@ def test_launch_root_from_config_is_normalised_like_the_execution_root(
     monkeypatch.chdir(tmp_path)
 
     assert launch_root_from_config(
-        {"project_root": "~"}
+        make_settings({"project_root": "~"})
     ) == os.path.expanduser("~")
-    assert launch_root_from_config({"project_root": "proj/../proj"}) == str(
-        tmp_path / "proj"
-    )
+    assert launch_root_from_config(
+        make_settings({"project_root": "proj/../proj"})
+    ) == str(tmp_path / "proj")
 
 
 def test_local_workspace_uses_launch_root(tmp_path):
     be = LocalFsBackend()
-    ws = build_execution_workspace(be, {"launch_root": str(tmp_path)})
+    ws = build_execution_workspace(
+        be, make_settings({"launch_root": str(tmp_path)})
+    )
     assert ws.root == str(tmp_path.resolve())
     assert ws.backend is be
 
@@ -120,7 +126,9 @@ def test_sandbox_workspace_asks_pwd_when_cwd_undeclared():
 
 def test_sandbox_config_root_overrides_pwd():
     be = SandboxBackend(cwd=None, pwd="/app/other")
-    root = resolve_execution_root(be, {"project_root": "/testbed"})
+    root = resolve_execution_root(
+        be, make_settings({"project_root": "/testbed"})
+    )
     assert root == "/testbed"
 
 

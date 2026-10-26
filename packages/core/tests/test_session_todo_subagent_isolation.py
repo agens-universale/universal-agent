@@ -9,13 +9,13 @@ replace-семантика — субагент затирал план орке
 import json
 
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
-from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.working_memory_gateway import (
     read_session_todo_from_state,
 )
 from gc_core.tools.session.todo import SessionTodo
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import make_settings
 
 PARENT_ITEMS = [
     {"content": "Спроектировать", "status": "completed"},
@@ -122,21 +122,6 @@ def test_persistent_state_reads_own_checklist():
     assert read_session_todo_from_state(parent) == PARENT_ITEMS
 
 
-def test_legacy_snapshot_without_subagent_todo_restores():
-    """Снапшот пишется до __init__-поля: восстановление не должно падать."""
-    parent = _state()
-    parent.session_todo = list(PARENT_ITEMS)
-    child = _child_of(parent)
-    snapshot = StateSerializer.serialize(child)
-    snapshot.pop("subagent_todo", None)
-
-    restored = StateSerializer.deserialize(snapshot)
-
-    assert restored.session_todo == []
-    restored.session_todo = list(CHILD_ITEMS)
-    assert restored.shared.session_todo != CHILD_ITEMS
-
-
 def test_reminder_uses_own_checklist():
     """Напоминание судит по СВОЕМУ списку субагента, а не по родительскому.
 
@@ -146,7 +131,7 @@ def test_reminder_uses_own_checklist():
     parent.session_todo = list(PARENT_ITEMS)
     child = _child_of(parent)
     child.session_todo = [{"content": "Готово", "status": "completed"}]
-    config = {"todo_params": {"reminder_steps": 1}}
+    config = make_settings({"todo": {"reminder_steps": 1}})
 
     out = apply_todo_reminder([], child, config, step_messages=[])
 

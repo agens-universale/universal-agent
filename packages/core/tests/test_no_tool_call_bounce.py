@@ -1,3 +1,4 @@
+from gc_core.execution.finish_reason import finish_blocks_final
 from gc_core.message_policy.no_tool_call_bounce import (
     CONTENT_FILTER_BOUNCE_MESSAGE,
     LENGTH_BOUNCE_MESSAGE,
@@ -5,7 +6,6 @@ from gc_core.message_policy.no_tool_call_bounce import (
     PROVIDER_BLOCKED_BOUNCE_MESSAGE,
     extract_last_assistant_text,
     format_no_tool_call_bounce,
-    is_content_filter_finish,
 )
 
 # --- extract_last_assistant_text ---
@@ -146,12 +146,12 @@ def test_format_content_filter_is_case_insensitive():
         format_no_tool_call_bounce(finish_reason="Content_Filter")
         == CONTENT_FILTER_BOUNCE_MESSAGE
     )
-    assert is_content_filter_finish("CONTENT_FILTER")
-    assert is_content_filter_finish("refusal")
-    assert is_content_filter_finish("safety")
-    assert not is_content_filter_finish("stop")
-    assert not is_content_filter_finish("length")
-    assert not is_content_filter_finish(None)
+    assert finish_blocks_final("CONTENT_FILTER")
+    assert finish_blocks_final("refusal")
+    assert finish_blocks_final("safety")
+    assert not finish_blocks_final("stop")
+    assert not finish_blocks_final("length")
+    assert not finish_blocks_final(None)
 
 
 def test_bounce_asks_for_a_tool_call():

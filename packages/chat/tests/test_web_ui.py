@@ -9,6 +9,7 @@ from gc_chat.app import create_app
 from gc_chat.completions.facade import CompletionsFacade
 from gc_chat.responses.facade import ResponsesFacade
 from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
+from gc_testkit.settings import make_settings
 
 # Host-guard пускает только loopback (gc_chat.http_guard).
 LOOPBACK = "http://127.0.0.1"
@@ -23,23 +24,24 @@ def _rid(n: int) -> str:
 def _joint(tmp_path, *, token: str = "", launch_root: str | None = None):
     threads = tmp_path / "threads"
     threads.mkdir(exist_ok=True)
-    config = {
-        "model": "agent-model",
-        "chat_api_auth_token": token,
-        "threads_data_path": str(threads),
-    }
-    if launch_root is not None:
-        config["chat_api_launch_root"] = launch_root
+    settings = make_settings(
+        {
+            "agent.model": "agent-model",
+            "chat_api.auth_token": token,
+            "chat_api.launch_root": launch_root,
+            "paths.threads_data_path": str(threads),
+        }
+    )
 
-    async def factory(config, **kwargs):
-        del config, kwargs
+    async def factory(settings, **kwargs):
+        del settings, kwargs
         raise AssertionError("agent")
 
     index = ResponseIndex(str(threads))
     responses = ResponsesFacade(
-        config=config, agent_factory=factory, index=index
+        settings=settings, agent_factory=factory, index=index
     )
-    completions = CompletionsFacade(config=config, agent_factory=factory)
+    completions = CompletionsFacade(settings=settings, agent_factory=factory)
     return create_app(responses, completions), index, threads
 
 

@@ -5,6 +5,7 @@ display_query и skill_loaded, — вместо реального прогон�
 сети). Параллельно проверяется add_message-путь (inline во время run).
 """
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -62,7 +63,9 @@ async def test_skill_prompt_start_gets_display_and_skill(
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -92,7 +95,13 @@ async def test_skill_continuation_start_gets_display_and_skill(
     from gc_core.tools.skills import skill_delivery as sd
     from gc_tui.app import TuiApp
 
-    monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
+    class _Registry:
+        # Конец хода сбрасывает кэш скиллов: второй /skill перечитывает
+        # реестр, и скилл в нём должен быть.
+        async def list_skills(self, *, include_all=False):
+            return [{"id": "qa-x"}]
+
+    monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: _Registry())
     monkeypatch.setattr(
         sd,
         "build_skill_delivery",
@@ -131,7 +140,9 @@ async def test_skill_continuation_start_gets_display_and_skill(
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -198,7 +209,9 @@ async def test_skill_inline_during_run_add_message_gets_fields(
             added.append(m)
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:

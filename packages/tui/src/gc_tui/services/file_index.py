@@ -724,11 +724,6 @@ class PathIndex:
         return rank(query, matched, limit=limit)
 
 
-def fuzzy_search(root: str, query: str, *, limit: int = 50) -> list[str]:
-    """Разовый поиск без кэша (см. PathIndex.search); пикер держит PathIndex сам."""
-    return PathIndex(root).search(query, limit=limit)
-
-
 _AT_MENTION_RE = re.compile(r"(?:^|(?<=\s))@([\w./\\-][\w./\\-]*)")
 
 

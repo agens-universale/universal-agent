@@ -63,6 +63,7 @@ def test_outbound_keeps_think_as_in_messages(capture_outbound):
             ],
             state,
             ctx,
+            resolved=None,
         )
     )
 
@@ -143,7 +144,7 @@ def test_only_think_assistant_kept_in_outbound(capture_outbound):
     ]
     ctx, state = make_ctx_state(history=history)
 
-    run_coro(pr._arequest_backend_canonical([], state, ctx))
+    run_coro(pr._arequest_backend_canonical([], state, ctx, resolved=None))
 
     assistant_texts = _assistant_contents(capture_outbound["messages"])
     assert assistant_texts == ["<think>only reasoning</think>"]
@@ -180,7 +181,7 @@ def test_attachments_are_the_only_outbound_projection(capture_outbound):
     ctx, state = make_ctx_state(history=history)
     before = copy.deepcopy(state.messages)
 
-    run_coro(pr._arequest_backend_canonical([], state, ctx))
+    run_coro(pr._arequest_backend_canonical([], state, ctx, resolved=None))
 
     outbound = capture_outbound["messages"]
     assert DIRTY_THINK in "\n".join(_assistant_contents(outbound))

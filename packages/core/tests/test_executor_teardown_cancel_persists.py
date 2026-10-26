@@ -13,18 +13,22 @@ import types
 import pytest
 from gc_core.thread_store import load_thread_meta
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_STRUCTURED_OUTPUT
+from gc_testkit.settings import make_settings
 
 
 def _cfg(tmp_path):
-    return {
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
-        "trace_id": "trace-1",
-    }
+    return make_settings(
+        {
+            "paths.threads_data_path": str(tmp_path),
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://test",
+            "agent.model": "x",
+            "agent.max_steps": 1,
+            "agent.system_prompt_id": "v1",
+            "trace_id": "trace-1",
+            "logging.save_logs": False,
+        }
+    )
 
 
 def _release_cancel() -> None:
@@ -183,3 +187,24 @@ async def test_deferred_accounting_still_includes_formatting_tokens(
     structured = usage[CATEGORY_STRUCTURED_OUTPUT]
     assert structured["input"] == 7
     assert structured["output"] == 4
+
+
+async def test_injected_mcp_cleanup_failure_keeps_answer(
+    monkeypatch, tmp_path
+):
+    """Сбой уборки durable-исполнителя не подменяет готовый ответ (как local)."""
+
+    async def _loop(_messages, state, _ctx, **_kw):
+        _remember_outcome(state)
+        return "ok"
+
+    async def _cleanup():
+        raise RuntimeError("worker lost the profile")
+
+    ex = await _executor(monkeypatch, tmp_path, _loop, _close_ok)
+    ex._ctx.mcp_cleanup = _cleanup
+    answer = await ex.arun(
+        ["ход"], thread_id="t", start_new_thread=True, system="cli"
+    )
+    assert answer == "ok"
+    _assert_finished_loop_on_disk(_meta(tmp_path))

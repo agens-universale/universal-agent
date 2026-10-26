@@ -3,25 +3,28 @@ import_path: adapters.gc_cli_external:GcCliExternal
 model: openai/qwen_next_vanilla
 agent_kwargs:
   gc_cli_config:
-    max_steps: 1000
-    no_tool_call_max_count: 5
-    use_server_subagents: false
-    use_local_subagents: false           # <-- 01/02 = false, 03/04 = true
-    subagent_max_steps: 100
-    subagent_finish_gate_max_iterations: 3
-    strict_turn_finish_validation: true
-    finish_gate_max_iterations: 10
-    stop_tools: [turn_ask_human, project_memory, fs_view_image]
-    disable_skills: [supercoder, topic-research, complex-task-solver, science-article-creator, articles]
-    tool_output_inline_max_chars: 10000
-    stored_tool_outputs_max_entries: 50
-    inject_tool_fields:
-      reason: "At most 10 words: why this call, what you expect."
-    chat_completion_kwargs:
-      separate_reasoning: true
-      chat_template_kwargs: {enable_thinking: false}
-      tool_choice: auto
-    summary_params:                       # <-- present only in 02 & 04
+    agent:
+      max_steps: 1000
+      no_tool_call_max_count: 5
+      use_server_subagents: false
+      use_local_subagents: false           # <-- 01/02 = false, 03/04 = true
+      subagent_max_steps: 100
+      subagent_finish_gate_max_iterations: 3
+      strict_turn_finish_validation: true
+      finish_gate_max_iterations: 10
+      stop_tools: [turn_ask_human, project_memory, fs_view_image]
+      disable_skills: [supercoder, topic-research, complex-task-solver, science-article-creator, articles]
+      tool_output_inline_max_chars: 10000
+      stored_tool_outputs_max_entries: 50
+      inject_tool_fields:
+        reason: "At most 10 words: why this call, what you expect."
+    backend:
+      chat_completion_kwargs:
+        separate_reasoning: true
+        chat_template_kwargs: {enable_thinking: false}
+        tool_choice: auto
+    # <-- present only in 02 & 04
+    summary:
       chat_completions_summary_trigger_chars: 150000
       chat_completions_summary_turn_end_trigger_chars: 90000
       incremental_batch_chars: 210000

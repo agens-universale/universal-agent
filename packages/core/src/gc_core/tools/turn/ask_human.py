@@ -7,6 +7,8 @@ from typing import Any, Dict, Optional
 
 from gc_core.attachments.model import Attachment, chip_of
 from gc_core.attachments.store import commit_to_run_thread
+from gc_core.execution.human import HumanRequestInterrupted
+from gc_core.execution.ports import port as runtime_port
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _logger = logging.getLogger(__name__)
@@ -86,6 +88,14 @@ async def _aread_human_response(
     одноразовом потоке: всё, что порт держит привязанным к своему loop —
     очередь, соединение, сессия, — там просто не работало.
     """
+    native_port = runtime_port(ctx, "human_request")
+    if callable(native_port):
+        from gc_core.execution.human import HumanRequest
+
+        result = await native_port(
+            HumanRequest(kind="ask_human", question=question)
+        )
+        return (str(result) if result is not None else "").strip()
     port = getattr(ctx, "ask_human", None)
     if callable(port):
         result = port(question)
@@ -117,6 +127,10 @@ def _read_stdin_lines() -> str:
 
 
 class AskHuman(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
+
     @staticmethod
     def _result(
         *,
@@ -149,9 +163,7 @@ class AskHuman(AbstractSimpleTool):
     """
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_ask_human",
@@ -175,9 +187,7 @@ class AskHuman(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         # Legacy channel (tools_descr); not wired to API today — reserved for a future
         # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
         description = """Tool name: turn_ask_human
@@ -273,7 +283,7 @@ Do not implement until they confirm.
         question, via_name = prepared
         try:
             response = await _aread_human_response(self._ctx, question)
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, HumanRequestInterrupted):
             return self._ask_interrupted(question, via_name)
         except Exception as exc:  # EOFError, отказ порта встраивающего
             return self._ask_failed(question, via_name, exc)
@@ -282,7 +292,7 @@ Do not implement until they confirm.
             # `ask_human` из `_begin_ask` оставалось незакрытым, а баннер
             # «агент спрашивает» висел в TUI и у встраивающего после отмены
             # `stream()` или остановки сервера. Закрываем и пробрасываем.
-            from gc_core.tools.subagents.progress import emit_progress
+            from gc_core.execution.progress import emit_progress
 
             emit_progress(
                 self._ctx,
@@ -338,7 +348,7 @@ Do not implement until they confirm.
 
         question = self._normalize_text(question)
 
-        from gc_core.tools.subagents.progress import emit_progress
+        from gc_core.execution.progress import emit_progress
 
         via_name = getattr(self._ctx, "subagent_tool_name", None)
         via_name = via_name if isinstance(via_name, str) else None
@@ -349,14 +359,13 @@ Do not implement until they confirm.
             prose=question,
             tool_name=via_name,
         )
-        print("\n" + "=" * 60, file=sys.stderr)
-        print("AI ASKS HUMAN:", file=sys.stderr)
-        print("-" * 60, file=sys.stderr)
-        print(question, file=sys.stderr)
-        print("-" * 60, file=sys.stderr)
-        print(
-            "Please enter your response (end with EOF or empty line):",
-            file=sys.stderr,
+        self._console("\n" + "=" * 60)
+        self._console("AI ASKS HUMAN:")
+        self._console("-" * 60)
+        self._console(question)
+        self._console("-" * 60)
+        self._console(
+            "Please enter your response (end with EOF or empty line):"
         )
         self._run_logger().info(
             "ask_human_question",
@@ -367,12 +376,12 @@ Do not implement until they confirm.
     def _ask_answered(
         self, question: str, via_name: Optional[str], response: str
     ) -> str:
-        from gc_core.tools.subagents.progress import emit_progress
+        from gc_core.execution.progress import emit_progress
 
         if response == "":
             response = "(empty response)"
-        print(f"Human responded: {response!r}", file=sys.stderr)
-        print("=" * 60 + "\n", file=sys.stderr)
+        self._console(f"Human responded: {response!r}")
+        self._console("=" * 60 + "\n")
         self._run_logger().info(
             "ask_human_response",
             extra={"event": "ask_human_response", "response": response},
@@ -408,10 +417,17 @@ Do not implement until they confirm.
                 commit_to_run_thread(self._ctx, att).to_dict()
             )
 
-    def _ask_interrupted(self, question: str, via_name: Optional[str]) -> str:
-        from gc_core.tools.subagents.progress import emit_progress
+    def _console(self, *values: Any) -> None:
+        """Строка диалога с человеком в stderr (CLI). В durable-исполнении
+        (код workflow) — нет: вопрос идёт приложению, а печать повторялась
+        бы при каждом replay; вопрос и ответ остаются в журнале прогона."""
+        if not getattr(self._ctx, "durable_execution", False):
+            print(*values, file=sys.stderr)
 
-        print("\n\n[Interaction interrupted by user]", file=sys.stderr)
+    def _ask_interrupted(self, question: str, via_name: Optional[str]) -> str:
+        from gc_core.execution.progress import emit_progress
+
+        self._console("\n\n[Interaction interrupted by user]")
         self._run_logger().warning(
             "ask_human_interrupted",
             extra={"event": "ask_human_interrupted"},
@@ -437,10 +453,10 @@ Do not implement until they confirm.
     def _ask_failed(
         self, question: str, via_name: Optional[str], exc: Exception
     ) -> str:
-        from gc_core.tools.subagents.progress import emit_progress
+        from gc_core.execution.progress import emit_progress
 
         error_msg = f"(error reading input: {exc!s})"
-        print(f"[turn_ask_human error]: {error_msg}", file=sys.stderr)
+        self._console(f"[turn_ask_human error]: {error_msg}")
         self._run_logger().warning(
             "ask_human_error",
             extra={"event": "ask_human_error", "error": error_msg},

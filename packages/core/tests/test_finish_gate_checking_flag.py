@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-from types import SimpleNamespace
 
 import pytest
 from gc_core import processing_responses as pr
@@ -14,6 +13,7 @@ from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
@@ -39,13 +39,13 @@ def _make_state() -> State:
 
 def _make_ctx(**overrides):
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
-        "finish_gate_max_iterations": 10,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
+        "agent.finish_gate_max_iterations": 10,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=logging.getLogger("test_finish_gate_checking_flag"),
         auth_connector=None,
     )

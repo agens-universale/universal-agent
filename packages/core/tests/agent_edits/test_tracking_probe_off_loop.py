@@ -38,7 +38,7 @@ class _Inner:
 
 
 class _Ctx:
-    config_dict: dict = {}
+    pass
 
 
 @pytest.fixture

@@ -6,8 +6,6 @@ Backward-compat: old ids once/session/deny mapped to new ids.
 Invalid → deny_remember. allow = choice in (allow_remember, allow_once).
 """
 
-import types
-
 from gc_core.security import confirm_port as cp
 from gc_core.security.confirm_port import (
     CONFIRM_ALLOW_ONCE,
@@ -17,6 +15,7 @@ from gc_core.security.confirm_port import (
     request_confirm,
 )
 from gc_core.security.permission_store import PermissionStore
+from gc_testkit.settings import fake_ctx
 
 
 def _ctx(choice, store=None):
@@ -26,10 +25,9 @@ def _ctx(choice, store=None):
         calls["n"] += 1
         return choice
 
-    return types.SimpleNamespace(
+    return fake_ctx(
         is_tui=True,
         tui_confirm=tui_confirm,
-        config_dict={},
         permission_store=store,
     ), calls
 
@@ -45,7 +43,10 @@ def test_four_choice_constants_exist():
 
 
 def test_normalize_confirm_key_matches_tui_sets():
-    """Shared key normalizer: Latin/Cyrillic both cases; multi-char → deny_remember."""
+    """Shared key normalizer: Latin/Cyrillic both cases. Непонятный ответ —
+    пустой (Enter), конец ввода, слово или чужая клавиша — запрет РАЗОВЫЙ:
+    безопасно, но не запоминается. Запрет на всю сессию сильнее режима, его
+    выбирают только явной клавишей N."""
     from gc_core.security.confirm_port import normalize_confirm_key
 
     assert normalize_confirm_key("y") == CONFIRM_ALLOW_REMEMBER
@@ -53,11 +54,22 @@ def test_normalize_confirm_key_matches_tui_sets():
     assert normalize_confirm_key("щ") == CONFIRM_ALLOW_ONCE
     assert normalize_confirm_key("Т") == CONFIRM_DENY_REMEMBER
     assert normalize_confirm_key("е") == CONFIRM_DENY_ONCE
-    assert normalize_confirm_key("yes") == CONFIRM_DENY_REMEMBER
-    assert normalize_confirm_key("once") == CONFIRM_DENY_REMEMBER
-    assert normalize_confirm_key("s") == CONFIRM_DENY_REMEMBER
-    assert normalize_confirm_key("") == CONFIRM_DENY_REMEMBER
-    assert normalize_confirm_key(None) == CONFIRM_DENY_REMEMBER
+    assert normalize_confirm_key("yes") == CONFIRM_DENY_ONCE
+    assert normalize_confirm_key("once") == CONFIRM_DENY_ONCE
+    assert normalize_confirm_key("s") == CONFIRM_DENY_ONCE
+    assert normalize_confirm_key("") == CONFIRM_DENY_ONCE
+    assert normalize_confirm_key(None) == CONFIRM_DENY_ONCE
+
+
+def test_an_unknown_choice_value_is_a_one_time_refusal():
+    from gc_core.security.confirm_port import coerce_confirm_choice
+
+    assert coerce_confirm_choice("whatever") == CONFIRM_DENY_ONCE
+    assert coerce_confirm_choice(None) == CONFIRM_DENY_ONCE
+    # Старые ответы трёхвариантного вопроса (once|session|deny) — больше не
+    # псевдонимы: непонятный ответ, запрет разовый.
+    for legacy in ("once", "session", "deny"):
+        assert coerce_confirm_choice(legacy) == CONFIRM_DENY_ONCE
 
 
 # ── record matrix ────────────────────────────────────────────────────────
@@ -154,7 +166,7 @@ def test_t_denies_and_records_run_only():
 # ── invalid choice → deny_remember ──────────────────────────────────────
 
 
-def test_invalid_choice_maps_to_deny_remember():
+def test_invalid_choice_is_a_one_time_refusal():
     store = PermissionStore()
     for bad in ("yes", None, "", "ok", 1, "session_old"):
         ctx, _ = _ctx(bad, store)
@@ -166,68 +178,19 @@ def test_invalid_choice_maps_to_deny_remember():
             decision_key="command:x",
         )
         assert result is False, f"bad {bad!r} must deny"
-    # invalid → deny_remember → session False
-    assert store.session_rules().get("command:x") is False
+    # Непонятный ответ — запрет разовый: в сессии не запоминается.
+    assert "command:x" not in store.session_rules()
 
 
 # ── backward-compat aliases (old tui_confirm returns once/session/deny) ──
-
-
-def test_alias_once_maps_to_allow_once():
-    store = PermissionStore()
-    ctx, _ = _ctx("once", store)
-    assert (
-        request_confirm(
-            title="t",
-            question="q",
-            fields=[],
-            ctx=ctx,
-            decision_key="command:ls",
-        )
-        is True
-    )
-    assert store.session_rules() == {}  # once → allow_once → run only
-
-
-def test_alias_session_maps_to_allow_remember():
-    store = PermissionStore()
-    ctx, _ = _ctx("session", store)
-    assert (
-        request_confirm(
-            title="t",
-            question="q",
-            fields=[],
-            ctx=ctx,
-            decision_key="command:ls",
-        )
-        is True
-    )
-    assert store.session_rules() == {"command:ls": True}
-
-
-def test_alias_deny_maps_to_deny_remember():
-    store = PermissionStore()
-    ctx, _ = _ctx("deny", store)
-    assert (
-        request_confirm(
-            title="t",
-            question="q",
-            fields=[],
-            ctx=ctx,
-            decision_key="command:rm",
-        )
-        is False
-    )
-    assert store.session_rules() == {"command:rm": False}
 
 
 def test_unavailable_confirm_is_deny_once_not_session(monkeypatch):
     """No confirm channel → deny_once: block without poisoning insession denied."""
     store = PermissionStore()
     monkeypatch.setattr(cp, "confirm_available", lambda ctx: False)
-    ctx = types.SimpleNamespace(
+    ctx = fake_ctx(
         is_tui=False,
-        config_dict={},
         permission_store=store,
         tui_confirm=None,
     )

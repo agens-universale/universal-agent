@@ -6,6 +6,10 @@ from email.utils import format_datetime
 
 import httpx
 import pytest
+from gc_core.utils.http_auth import (
+    remember_accepted_authorization,
+    server_authorization_attempts,
+)
 from gc_core.utils.llm_chat_client import (
     ChatCompletionText,
     aprepare_chat_completion,
@@ -160,12 +164,6 @@ async def test_wrong_read_retries_with_new_larger_image(probe_http):
         ),
         (httpx.Response(503), ProbeStatus.TRANSIENT),
         (httpx.ReadTimeout("timeout"), ProbeStatus.TRANSIENT),
-        (
-            httpx.Response(
-                200, json={"error": {"code": 401, "message": "bad key"}}
-            ),
-            ProbeStatus.BLOCKED,
-        ),
     ],
 )
 async def test_failures_stop_after_one_actual_request(
@@ -184,38 +182,124 @@ async def test_failures_stop_after_one_actual_request(
 
 
 @pytest.mark.parametrize("second", ["success", "wrong", "401"])
-async def test_401_repeats_same_image_and_preserves_recognition_retry(monkeypatch, probe_http, second):
+async def test_401_repeats_same_image_and_preserves_recognition_retry(
+    monkeypatch, probe_http, second
+):
     from gc_core.vision import probe
 
     challenge = make_challenge(retry=False)
     retry_challenge = make_challenge(retry=True, previous_code=challenge.code)
     monkeypatch.setattr(
-        probe, "make_challenge",
+        probe,
+        "make_challenge",
         lambda **kwargs: retry_challenge if kwargs["retry"] else challenge,
     )
     requests, responses = probe_http
     responses.append(httpx.Response(401))
     responses.append(
-        httpx.Response(401) if second == "401" else httpx.Response(
-            200, json={"choices": [{"message": {"content": challenge.code if second == "success" else "wrong"}, "finish_reason": "stop"}]}
+        httpx.Response(401)
+        if second == "401"
+        else httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": challenge.code
+                            if second == "success"
+                            else "wrong"
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
         )
     )
     if second == "wrong":
-        responses.append(httpx.Response(
-            200, json={"choices": [{"message": {"content": retry_challenge.code}, "finish_reason": "stop"}]}
-        ))
+        responses.append(
+            httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {"content": retry_challenge.code},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                },
+            )
+        )
     ctx, st = context(), state()
     prepared = await aprepare_chat_completion(ctx, st, resolved=model())
     result = await aprobe_route(ctx, st, prepared)
-    assert result.status is (ProbeStatus.BLOCKED if second == "401" else ProbeStatus.CONFIRMED)
-    assert result.authorization_alternative is (second != "401")
+    assert result.status is (
+        ProbeStatus.BLOCKED if second == "401" else ProbeStatus.CONFIRMED
+    )
     assert [r.headers["Authorization"] for r in requests] == (
-        ["Bearer secret", "secret", "secret"] if second == "wrong" else ["Bearer secret", "secret"]
+        ["Bearer secret", "secret", "secret"]
+        if second == "wrong"
+        else ["Bearer secret", "secret"]
     )
     assert requests[0].content == requests[1].content
     if second == "wrong":
         assert requests[2].content != requests[1].content
     assert prepared.headers["Authorization"] == "Bearer secret"
+    learned = server_authorization_attempts(
+        prepared.url, prepared.resolved.model, "Bearer secret"
+    )[0]
+    assert learned == ("Bearer secret" if second == "401" else "secret")
+
+
+@pytest.mark.parametrize("alternative_passes", [True, False])
+async def test_embedded_401_switches_form_like_real_401(
+    monkeypatch, probe_http, alternative_passes
+):
+    from gc_core.vision import probe
+
+    requests, responses = probe_http
+    embedded = httpx.Response(
+        200, json={"error": {"code": 401, "message": "bad key"}}
+    )
+    responses.append(embedded)
+    ctx, st = context(), state()
+    prepared = await aprepare_chat_completion(ctx, st, resolved=model())
+    challenge = probe.make_challenge(retry=False)
+    responses.append(
+        httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": challenge.code},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+        if alternative_passes
+        else embedded
+    )
+    monkeypatch.setattr(probe, "make_challenge", lambda **kwargs: challenge)
+    result = await aprobe_route(ctx, st, prepared)
+    assert result.status is (
+        ProbeStatus.CONFIRMED if alternative_passes else ProbeStatus.BLOCKED
+    )
+    assert [r.headers["Authorization"] for r in requests] == [
+        "Bearer secret",
+        "secret",
+    ]
+
+
+async def test_probe_starts_with_form_learned_by_transport(probe_http):
+    requests, responses = probe_http
+    responses.append(httpx.Response(503))
+    ctx, st = context(), state()
+    prepared = await aprepare_chat_completion(ctx, st, resolved=model())
+    remember_accepted_authorization(
+        prepared.url, prepared.resolved.model, "Bearer secret", "secret"
+    )
+    await aprobe_route(ctx, st, prepared)
+    assert [r.headers["Authorization"] for r in requests] == ["secret"]
 
 
 async def test_retry_after_http_date(probe_http):

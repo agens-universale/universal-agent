@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -36,10 +37,10 @@ async def test_section_titles_show_section_name(tmp_path, monkeypatch):
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -70,10 +71,10 @@ async def test_mcp_space_uninstalled_flashes_title_note(tmp_path, monkeypatch):
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,

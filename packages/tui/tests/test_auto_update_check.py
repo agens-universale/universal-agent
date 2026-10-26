@@ -1,11 +1,13 @@
 """Авто-проверка обновления при старте TUI (спека D; персист-вердикт).
 
-Ядро — `_maybe_auto_check(config, state, now, installed_commit, *, check, record_result,
+Ядро — `_maybe_auto_check(settings, state, now, installed_commit, *, check, record_result,
 on_available)`: персистентный вердикт (КАЖДЫЙ старт, без сети: сохранённый remote ≠
 установленный → on_available(False)) + свежая сетевая перепроверка на КАЖДОМ запуске
 (on_available(True) при найденном обновлении). Гейты: resolved_source None / check: off
 → сеть не трогаем; персист-вердикт от них НЕ зависит."""
 
+from gc_testkit.tui_support import tui_settings
+from gc_testkit.settings import make_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -36,7 +38,7 @@ def _call(
         return check(src)
 
     app_mod._maybe_auto_check(
-        config,
+        make_settings(config),
         state,
         now,
         installed,
@@ -111,7 +113,7 @@ def test_on_result_publishes_verdict(monkeypatch):
     monkeypatch.setattr(source_mod, "resolved_source", lambda: _src())
     seen = []
     app_mod._maybe_auto_check(
-        {},
+        make_settings({}),
         {},
         1000.0,
         "inst",
@@ -134,7 +136,7 @@ def test_on_result_unknown_when_check_fails(monkeypatch):
         raise RuntimeError("network down")
 
     app_mod._maybe_auto_check(
-        {},
+        make_settings({}),
         {},
         1000.0,
         "inst",
@@ -151,7 +153,7 @@ def test_on_result_silent_when_check_off(monkeypatch):
     monkeypatch.setattr(source_mod, "resolved_source", lambda: _src())
     seen = []
     app_mod._maybe_auto_check(
-        {"update": {"check": "off"}},
+        make_settings({"update": {"check": "off"}}),
         {},
         1000.0,
         "inst",
@@ -235,7 +237,7 @@ def test_run_auto_check_safely_swallows_exception(monkeypatch):
 
     monkeypatch.setattr(app_mod, "_maybe_auto_check", _boom)
     app_mod._run_auto_check_safely(
-        {},
+        make_settings({}),
         {},
         1000.0,
         "inst",
@@ -255,7 +257,7 @@ def test_run_auto_check_safely_delegates(monkeypatch):
         ),
     )
     app_mod._run_auto_check_safely(
-        {},
+        make_settings({}),
         {},
         42.0,
         "COMMIT",
@@ -270,7 +272,7 @@ def test_run_auto_check_safely_delegates(monkeypatch):
 async def test_on_mount_starts_auto_check_worker(tmp_path, monkeypatch):
     """on_mount не падает и планирует авто-чек воркер (resolved_source None → no-op)."""
     monkeypatch.setattr(source_mod, "resolved_source", lambda: None)
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.pause()

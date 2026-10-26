@@ -3,6 +3,7 @@
 from gc_chat.responses import facade as facade_mod
 from gc_chat.responses.facade import ResponsesFacade
 from gc_chat.responses.index_store import ResponseIndex
+from gc_testkit.settings import make_settings
 
 
 class _Agent:
@@ -14,12 +15,12 @@ class _Agent:
 
 
 def _facade(tmp_path, made: list[_Agent]) -> ResponsesFacade:
-    async def factory(config, **kwargs):
+    async def factory(settings, **kwargs):
         made.append(_Agent())
         return made[-1]
 
     return ResponsesFacade(
-        config={"model": "m"},
+        settings=make_settings(**{"agent.model": "m"}),
         agent_factory=factory,
         index=ResponseIndex(str(tmp_path)),
     )

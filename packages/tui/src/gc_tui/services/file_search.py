@@ -63,18 +63,6 @@ class FileSearchSession:
             self._closed = True
             self._cond.notify_all()
 
-    def wait_idle(self, timeout: float) -> bool:
-        """True — всё, что отдано через `want`, посчитано и отдано в `on_result` (или
-        отброшено из-за закрытия), либо поток вышел; False — вышел таймаут. Не из
-        UI-потока: поток может ждать его внутри `on_result`."""
-        with self._cond:
-            return self._cond.wait_for(
-                lambda: (
-                    (self._pending is None and not self._busy) or self._exited
-                ),
-                timeout,
-            )
-
     def _run(self) -> None:
         try:
             while True:

@@ -289,14 +289,3 @@ def test_stream_asks_for_small_blocks():
     assert seen["blocksize"] == rec_mod.BLOCK_SAMPLES == 512
     assert seen["latency"] == "low"
     assert seen["samplerate"] == rec_mod.SAMPLE_RATE
-
-
-def test_driver_overflow_is_counted_not_swallowed():
-    """Драйвер сообщает о потере входного звука флагом status. Раньше его молча
-    игнорировали, и обрезанное распознавание выглядело как «модель не расслышала»."""
-    box = {}
-    rec = MicRecorder(stream_factory=_factory(box))
-    rec.start()
-    assert rec.overflows == 0
-    box["stream"].callback(b"\x00\x00" * 160, 160, None, "input overflow")
-    assert rec.overflows == 1

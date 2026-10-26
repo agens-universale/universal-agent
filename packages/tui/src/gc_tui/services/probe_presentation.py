@@ -82,24 +82,6 @@ def connection_line_text(result) -> Text:
     return Text(f"? не удалось проверить: {result.detail}", style=WARN)
 
 
-def save_warning(result) -> str:
-    """Короткая реплика рядом с «сохранено», когда проба закончилась не «ок».
-    Пустая строка — говорить нечего.
-
-    Смысл берём из `auth_state`/`offline`, а не из `verdict`: «rejected» бывает и
-    про имя модели (404 с телом от живого сервера), «unknown» — вердиктом канарейки,
-    когда сервер отвечает, просто неотличимо от заведомо неверного токена. Прежние
-    тексты («сервер отклонил токен», «сервер недоступен») в обоих случаях врали.
-    Остальное отдаём как есть: `detail` уже написан для человека."""
-    if result is None or result.verdict == "ok":
-        return ""
-    if result.auth_state == "rejected":
-        return "сервер отклонил токен — проверьте"
-    if result.offline:
-        return "проверить не удалось — сервер недоступен"
-    return result.detail
-
-
 def token_accepted(result, *, has_token: bool):
     """Приняли ли токен: True / False / None — не проверяли, утверждать нельзя.
 

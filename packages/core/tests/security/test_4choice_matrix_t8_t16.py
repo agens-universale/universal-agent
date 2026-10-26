@@ -31,8 +31,10 @@ def test_t8_config_command_moderation_and_write_guard_are_separate_fields():
     assert hasattr(cfg, "write_guard"), "SecurityConfig must have write_guard"
     # They are distinct objects (not nested or aliased).
     assert cfg.command_moderation is not cfg.write_guard
-    # Changing one does not affect the other.
-    cfg.command_moderation.mode = "ask"
+    # Changing one does not affect the other (settings are immutable copies).
+    cfg = SecurityConfig.model_validate(
+        {"command_moderation": {"mode": "ask"}}
+    )
     assert (
         cfg.write_guard.mode != "ask"
         or cfg.write_guard.mode == cfg.write_guard.mode
@@ -125,17 +127,17 @@ def test_t11c_cli_same_key_matrix_matches_tui(fake_tty, answer, expected):
 
 
 def test_t11c_cli_rejects_legacy_words(fake_tty):
-    """yes/no/once are not TUI keys — invalid → deny_remember (no soft aliases)."""
-    assert _run_prompt(fake_tty, "yes") == "deny_remember"
-    assert _run_prompt(fake_tty, "no") == "deny_remember"
-    assert _run_prompt(fake_tty, "once") == "deny_remember"
-    assert (
-        _run_prompt(fake_tty, "s") == "deny_remember"
-    )  # old session key removed
+    """yes/no/once are not TUI keys — непонятный ответ → разовый запрет (no
+    soft aliases): запрет на всю сессию выбирают только явной клавишей N."""
+    assert _run_prompt(fake_tty, "yes") == "deny_once"
+    assert _run_prompt(fake_tty, "no") == "deny_once"
+    assert _run_prompt(fake_tty, "once") == "deny_once"
+    assert _run_prompt(fake_tty, "s") == "deny_once"  # old session key removed
 
 
-def test_t11c_cli_eof_returns_deny_remember(fake_tty):
-    """EOFError (Ctrl+D) → deny_remember (explicit dismiss)."""
+def test_t11c_cli_eof_returns_deny_once(fake_tty):
+    """EOFError (Ctrl+D) → разовый запрет: конец ввода — не выбор запрета
+    на всю сессию."""
     from gc_core.security.path_policy import prompt_user_confirmation_choice
 
     fake_tty.truncate(0)
@@ -145,7 +147,7 @@ def test_t11c_cli_eof_returns_deny_remember(fake_tty):
         result = prompt_user_confirmation_choice(
             title="T", fields=[], question="Q?"
         )
-    assert result == "deny_remember"
+    assert result == "deny_once"
 
 
 def test_t11c_cli_keyboard_interrupt_returns_deny_once(fake_tty, monkeypatch):
@@ -308,6 +310,8 @@ def test_t15_cli_prints_payload_before_meta(fake_tty, monkeypatch):
             ("Риски", "network_to_private"),
         ],
         question="Разрешить запуск?",
+        # вид вопроса задаёт ключ решения: «и подобные» — только для команд
+        decision_key="command:curl -sL https://example.com/very/long",
     )
     assert result == "deny_once"
     text = printed.getvalue()

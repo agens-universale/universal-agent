@@ -6,8 +6,10 @@ import json
 from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.summarize.config import resolve_summary_limits
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
 from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx
 
 
 class _FakeChildState:
@@ -58,8 +60,11 @@ def _wire_runner(monkeypatch, runner, child):
     monkeypatch.setattr(
         runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
     )
+    # Сжатие у ребёнка выключено: пороги нулевые (координатор — no-op).
     monkeypatch.setattr(
-        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+        runner_mod,
+        "resolve_summary_limits_at_level",
+        lambda cfg, router, level: resolve_summary_limits(None),
     )
 
     async def _create(*a, **k):
@@ -76,10 +81,14 @@ def _runner_with_orchestrator():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(
-        logger=None, run_id="r", auth_connector=None, is_tui=False
+    ctx = fake_ctx(
+        {"agent.use_local_subagents": True},
+        logger=None,
+        run_id="r",
+        auth_connector=None,
+        is_tui=False,
     )
-    return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
+    return SubagentRunner(ctx, orch), orch
 
 
 async def test_live_delta_then_finally_no_double_count(monkeypatch):
@@ -150,3 +159,37 @@ async def test_parent_messages_untouched_by_usage_push(monkeypatch):
         "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
     )
     assert orch.messages == [{"role": "user", "content": "parent only"}]
+
+
+async def test_result_usage_is_compact_for_parent_model(monkeypatch):
+    runner, _orch = _runner_with_orchestrator()
+    child = _FakeChildState()
+    subagent_cls = _wire_runner(monkeypatch, runner, child)
+
+    async def _fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        child_state.usage.add(
+            CATEGORY_MAIN,
+            100,
+            20,
+            cost=0.1,
+            billed=True,
+            currency="USD",
+            model="m1",
+        )
+        return "done"
+
+    out = await runner._arun_internal(
+        "subagent_worker", subagent_cls, {"task": "t"}, _fake_run_agent
+    )
+    assert json.loads(out)["meta"]["usage"] == {
+        "by_category": {
+            "main": {
+                "input": 100,
+                "output": 20,
+                "cached": 0,
+                "calls": 1,
+                "missing_usage_calls": 0,
+                "cost_by_currency": {"USD": 0.1},
+            }
+        }
+    }

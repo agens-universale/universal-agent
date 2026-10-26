@@ -24,12 +24,9 @@ from gc_core.vision.notes import NOTE_EYES_BLIND
 from gc_core.vision.probe import ProbeStatus
 from gc_core.vision.registry import process_vision_probes
 from gc_core.vision.route import VisionRouteKey
+from vision_fakes import clear_image_rejects
 from gc_core.vision.rejects import mark_blind
 from gc_core.utils.backend_errors import is_image_request_error
-from gc_core.vision.rejects import (
-    process_image_rejects,
-    reset_image_rejects_for_tests,
-)
 from gc_testkit.helpers.tool_ctx import local_ctx
 
 EYES_URL = "http://eyes.local/v1/chat/completions"
@@ -50,9 +47,9 @@ EYES = Audience(
 
 @pytest.fixture(autouse=True)
 def _fresh_rejects():
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
     yield
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
 
 
 def _png() -> bytes:

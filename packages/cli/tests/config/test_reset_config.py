@@ -11,6 +11,7 @@ from pathlib import Path
 
 from gc_core import config_sync, onboarding
 from gc_core import onboarding_config_writer as ocw
+from gc_testkit.settings import make_settings
 
 # --- config_sync.reset_config: бэкап + содержимое = шаблон + профили пережили ---
 
@@ -202,25 +203,25 @@ def test_run_reset_config_refuses_missing_file(monkeypatch, tmp_path, capsys):
 
 def test_is_unconfigured_true_when_everything_placeholder():
     config = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
+        "backend.completions_url": onboarding.URL_SENTINEL,
+        "backend.chat_completion_headers": {
             "Authorization": onboarding.TOKEN_SENTINEL
         },
-        "model": onboarding.MODEL_SENTINEL,
+        "agent.model": onboarding.MODEL_SENTINEL,
     }
-    assert onboarding.is_unconfigured(config) is True
+    assert onboarding.is_unconfigured(make_settings(config)) is True
 
 
 def test_is_unconfigured_false_when_registry_covers_model_placeholder():
     """Спека §11: заполненный merged-реестр (`models` непуст) закрывает требование
     МОДЕЛИ — плейсхолдер `agent.model` при нём не блокирует."""
     config = {
-        "completions_url": "http://real/v1",
-        "chat_completion_headers": {"Authorization": "Bearer sk-1"},
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"url": "http://x"}},
+        "backend.completions_url": "http://real/v1",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk-1"},
+        "agent.model": onboarding.MODEL_SENTINEL,
+        "models": {"flash": {"model": "flash-model"}},
     }
-    assert onboarding.is_unconfigured(config) is False
+    assert onboarding.is_unconfigured(make_settings(config)) is False
 
 
 def test_is_unconfigured_true_when_registry_but_endpoint_placeholder():
@@ -228,36 +229,36 @@ def test_is_unconfigured_true_when_registry_but_endpoint_placeholder():
     (решение 10 волны B), наследуют url/токен от плоского `backend` — плейсхолдерный
     endpoint при живом реестре означает «нечем работать»."""
     config = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
+        "backend.completions_url": onboarding.URL_SENTINEL,
+        "backend.chat_completion_headers": {
             "Authorization": onboarding.TOKEN_SENTINEL
         },
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"url": "http://x"}},
+        "agent.model": onboarding.MODEL_SENTINEL,
+        "models": {"flash": {"model": "flash-model"}},
     }
-    assert onboarding.is_unconfigured(config) is True
+    assert onboarding.is_unconfigured(make_settings(config)) is True
 
 
 def test_is_unconfigured_false_when_legacy_fields_filled():
     config = {
-        "completions_url": "http://real/v1",
-        "chat_completion_headers": {"Authorization": "Bearer sk-1"},
-        "model": "real-model",
+        "backend.completions_url": "http://real/v1",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk-1"},
+        "agent.model": "real-model",
     }
-    assert onboarding.is_unconfigured(config) is False
+    assert onboarding.is_unconfigured(make_settings(config)) is False
 
 
 def test_is_unconfigured_true_when_empty_models_dict():
     """`models: {}` эквивалентен отсутствию секции (спека §1) — не закрывает требование."""
     config = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
+        "backend.completions_url": onboarding.URL_SENTINEL,
+        "backend.chat_completion_headers": {
             "Authorization": onboarding.TOKEN_SENTINEL
         },
-        "model": onboarding.MODEL_SENTINEL,
+        "agent.model": onboarding.MODEL_SENTINEL,
         "models": {},
     }
-    assert onboarding.is_unconfigured(config) is True
+    assert onboarding.is_unconfigured(make_settings(config)) is True
 
 
 # --- onboarding_config_writer.ensure_pointer_anchor: вставка + идемпотентность ---

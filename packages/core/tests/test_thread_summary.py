@@ -16,6 +16,7 @@ from gc_core.thread_store import (
     save_thread_meta,
 )
 from gc_testkit.intent_fixtures import intent_user_ask_texts
+from gc_testkit.settings import make_settings
 
 
 # `unittest.TestCase` НЕ запускает корутинные тесты: метод просто возвращает
@@ -89,7 +90,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             )
 
             session = await ThreadSession.afrom_config(
-                config_dict={"threads_data_path": tmp_dir},
+                settings=make_settings({"paths.threads_data_path": tmp_dir}),
                 system_id=system_id,
                 thread_id=thread_id,
             )
@@ -175,7 +176,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             )
 
             session = await ThreadSession.afrom_config(
-                config_dict={"threads_data_path": tmp_dir},
+                settings=make_settings({"paths.threads_data_path": tmp_dir}),
                 system_id=system_id,
                 thread_id=thread_id,
             )
@@ -212,7 +213,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             )
 
             session = await ThreadSession.afrom_config(
-                config_dict={"threads_data_path": tmp_dir},
+                settings=make_settings({"paths.threads_data_path": tmp_dir}),
                 system_id=system_id,
                 thread_id=thread_id,
             )

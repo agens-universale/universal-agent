@@ -241,7 +241,6 @@ async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
         {"path": str(target)},
         _tools_data(ReadFile),
         ctx=local_ctx(),
-        config_dict={},
     )
 
     assert json.loads(out)["ok"] is True

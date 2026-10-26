@@ -3,7 +3,7 @@
 
 Один мьютекс на экземпляр, держится кратко (доступ к state / pending / stop).
 State создаётся заново при каждом run(). Возвращённый из get_state() state
-нельзя мутировать снаружи; изменения — только через add_message() или под get_lock().
+нельзя мутировать снаружи; изменения — только через add_message() или под замком executor'а.
 """
 
 import asyncio
@@ -19,12 +19,12 @@ from gc_core.attachments.store import (
     commit_to_run_thread,
     with_committed_attachments,
 )
-from gc_core.config_modules.agent import (
-    merge_special_instructions_with_model_steering,
-)
+from gc_core.auto_routing import state_ops
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.ports import port
 from gc_core.execution_workspace import launch_root_from_config
 from gc_core.intent_log.user_turn import (
     append_user_ask_deduped,
@@ -32,14 +32,25 @@ from gc_core.intent_log.user_turn import (
 )
 from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
+from gc_core.message_policy.plan_messages import (
+    PLAN_REMOVED_MESSAGE,
+    accepted_plan_messages,
+)
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.tool_usage_notice.state import (
     persist_tool_usage_notice_state,
 )
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
+    wrap_technical_user_content,
 )
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.plan_store import (
+    PLAN_STATUS_APPROVED,
+    PLAN_STATUS_REWORKING,
+    normalize_plan_block,
+    now_stamp,
+)
 from gc_core.processing_responses import (
     _acall_blocking_hook,
     arun_agent,
@@ -48,17 +59,22 @@ from gc_core.processing_responses import (
 from gc_core.run_context import RunContext
 from gc_core.run_summary_coordinator import (
     RunSummaryCoordinator,
-    areset_stale_summarizing_flag,
+    areset_run_flags,
     aset_tui_finalizing,
     aset_tui_finish_gate_checking,
 )
+from gc_core.security.action_judge_step import lift_pause_on_user_message
+from gc_core.security.permission_mode import (
+    PLAN_EXECUTION_MODES,
+    Mode,
+    coerce_mode,
+    resolve_mode,
+)
 from gc_core.security.permission_store import PermissionStore
+from gc_core.settings import settings_of
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.config import (
-    parse_summary_trigger_chars,
-    parse_summary_trigger_tokens,
-    parse_summary_turn_end_trigger_chars,
-    parse_summary_turn_end_trigger_tokens,
+    resolve_summary_limits_at_level,
 )
 from gc_core.thread_store import (
     ThreadSession,
@@ -140,6 +156,8 @@ async def _aappend_trace_id_to_meta(
         await port.aupdate_runtime_meta(
             sys_norm, thread_id, {"trace_ids": ids}
         )
+    except ExecutionFailure:
+        raise
     except Exception as exc:
         if logger is not None:
             try:
@@ -222,6 +240,48 @@ def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
         ]
 
 
+def _require_plan_execution_mode(mode: str) -> str:
+    """План исполняется только в режиме исполнения (edit, auto, manual).
+
+    Возвращает нормализованное имя режима (``"Auto"`` → ``"auto"``)."""
+    resolved = coerce_mode(mode)
+    if resolved not in PLAN_EXECUTION_MODES:
+        raise ValueError(f"not a plan execution mode: {mode!r}")
+    return resolved.value
+
+
+def _require_supported_persist_mode(settings: Any, ctx: Any) -> None:
+    """``persist: turn`` — только у durable-исполнителя (Temporal).
+
+    Без истории durable-исполнителя несохранённые шаги пропали бы при падении
+    процесса, а UI не видел бы хода."""
+    if settings.thread_store.persist == "turn" and not getattr(
+        ctx, "durable_execution", False
+    ):
+        raise ValueError(
+            "thread_store.persist: turn is supported only by a durable "
+            "executor (Temporal); local runs use persist: step"
+        )
+
+
+def _extend_with_thread_history(
+    state: Any, thread_session: Any, backend_api_mode: str
+) -> None:
+    """chat_completions: история треда — копиями сообщений в ``state.messages``."""
+    if (
+        thread_session is not None
+        and backend_api_mode == "chat_completions"
+        and thread_session.history_messages
+    ):
+        state.messages.extend(
+            [
+                _shallow_copy_msg(m)
+                for m in thread_session.history_messages
+                if isinstance(m, dict)
+            ]
+        )
+
+
 class AgentExecutor:
     """
     Потокобезопасный запуск агента с возможностью добавлять сообщения во время run
@@ -230,7 +290,8 @@ class AgentExecutor:
 
     def __init__(self, ctx: RunContext) -> None:
         self._ctx = ctx
-        self._lock = threading.Lock()
+        lock_factory = getattr(ctx, "lock_factory", None) or threading.Lock
+        self._lock = lock_factory()
         self._pending_messages: list[dict] = []
         #: То, что прогон не успел съесть, снятое с очереди на выходе из цикла.
         #: Держим отдельно, а не выбрасываем: клиенту на эти сообщения уже
@@ -244,7 +305,26 @@ class AgentExecutor:
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
+        # Явный выбор режима разрешений (хоткей фронтенда, флаг запуска). Живёт
+        # весь срок исполнителя и ложится на состояние каждого прогона: выбор
+        # человека сильнее и сохранённого в сессии, и конфига.
+        self._permission_mode_choice: Optional[str] = None
+        # Отложенный переход статуса плана (одобрение из фронтенда):
+        # (статус, режим, тред). Применяется в начале следующего прогона и
+        # только к своему треду — см. _apply_plan_changes.
+        self._plan_transition_pending: Optional[
+            tuple[str, Optional[str], Optional[str]]
+        ] = None
+        # Человек нажал «Доработать план» в этом треде: статус сменится, когда
+        # он реально отправит сообщение.
+        self._plan_rework_thread: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
+
+        from gc_core.user_stop import UserStop
+
+        self.user_stop = UserStop()
+
+        self.last_closing_reply: str = ""
 
     def take_undelivered_messages(self) -> list[dict]:
         """Забрать всё, что отдано прогону, но до агента не дошло, — в порядке прихода.
@@ -267,6 +347,33 @@ class AgentExecutor:
             self._pending_messages = []
             return out
 
+    def _take_pending_messages(self) -> list[dict]:
+        with self._lock:
+            out = self._pending_messages[:]
+            self._pending_messages.clear()
+            state = self._state
+        # Сообщение из очереди — такое же новое слово человека, как
+        # стартовое: снимает паузу судьи и посреди прогона.
+        if state is not None:
+            self._lift_judge_pause(state, out)
+        # Вне замка: копия картинок в тред — файловая операция, а замок ждут
+        # поток TUI и обработчик сервера.
+        return self._commit_queued(out)
+
+    def _is_stop_requested(self) -> bool:
+        with self._lock:
+            return (
+                self._state.stop_requested
+                if self._state is not None
+                else False
+            )
+
+    async def _alist_skills(self):
+        loader = port(self._ctx, "skills_loader")
+        if loader is None:
+            loader = self._ctx.skills_registry.list_skills
+        return await loader()
+
     async def _aopen_thread_session(
         self,
         thread_id,
@@ -277,7 +384,6 @@ class AgentExecutor:
         logger,
     ):
         """Тред-сессия прогона → (thread_session, thread_shared, previous_response_id, system_id)."""
-        config_dict = self._ctx.config_dict
         system_id = system or "cli"
         if thread_id is None:
             clear_thread_identity(self._ctx)
@@ -289,9 +395,7 @@ class AgentExecutor:
             if _reset_store is None:
                 from gc_core.thread_store_file import FileThreadStore
 
-                _reset_store = FileThreadStore(
-                    resolve_threads_dir(config_dict)
-                )
+                _reset_store = FileThreadStore(resolve_threads_dir(self._ctx))
             from gc_core.thread_store_async import athread_store
 
             await athread_store(_reset_store).areset(system_id, thread_id)
@@ -302,13 +406,13 @@ class AgentExecutor:
             # каталога прямо в корутине подвешивал бы старт нового треда.
             await asyncio.to_thread(
                 purge_thread_snapshots,
-                resolve_threads_dir(config_dict),
+                resolve_threads_dir(self._ctx),
                 system_id,
                 thread_id,
-                launch_root=launch_root_from_config(config_dict),
+                launch_root=launch_root_from_config(self._ctx),
             )
         thread_session = await ThreadSession.afrom_config(
-            config_dict=config_dict,
+            settings=self._ctx,
             system_id=system_id,
             thread_id=thread_id,
             # Хранилище встраивающего, если он его передал. None — файловое
@@ -358,14 +462,13 @@ class AgentExecutor:
         self, thread_session, thread_id, system_id: str
     ) -> None:
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
-        config_dict = self._ctx.config_dict
-        if thread_id is None or not config_dict.get("mcp-servers"):
+        if thread_id is None or not settings_of(self._ctx).mcp.servers:
             return
         try:
             from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
 
             snap = build_mcp_tools_snapshot(
-                config_dict, self._ctx.tools_data, self._ctx.mcp_status
+                self._ctx, self._ctx.tools_data, self._ctx.mcp_status
             )
             await thread_session.port.aupdate_runtime_meta(
                 system_id,
@@ -375,51 +478,31 @@ class AgentExecutor:
         except Exception:
             pass
 
-    def _load_chat_completions_prompts(
+    async def _aload_chat_completions_prompts(
         self, *, effective_verbose: bool, logger
     ) -> tuple:
-        """(system prompt, special instructions) для chat/completions из файлов конфига."""
-        config_dict = self._ctx.config_dict
-        chat_completions_system_prompt: str | None = None
-        prompt_path = config_dict.get("chat_completions_system_prompt_path")
-        if isinstance(prompt_path, str) and prompt_path.strip():
-            try:
-                with open(prompt_path, encoding="utf-8") as fd:
-                    chat_completions_system_prompt = fd.read().strip()
-            # Путь берётся из конфига — файл человека, кодировка его.
-            # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`: он
-            # уходил мимо этой ветки, то есть run падал БЕЗ объяснения, какой
-            # файл виноват.
-            except (OSError, UnicodeDecodeError) as e:
-                if effective_verbose:
-                    print(
-                        f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
-                    )
-                if logger is not None:
-                    logger.warning(
-                        "system_prompt_read_failed",
-                        extra={
-                            "event": "system_prompt_read_failed",
-                            "path": prompt_path,
-                        },
-                    )
-                raise e
+        """(system prompt, special instructions) для chat/completions из файлов конфига.
 
-        # Клиент-специфичные инструкции (напр. TUI) — отсутствие/нечитаемость
-        # файла деградирует тихо (None), не роняя run.
-        special_instructions: str | None = None
-        si_path = config_dict.get("chat_completions_special_instructions_path")
-        if isinstance(si_path, str) and si_path.strip():
-            try:
-                with open(si_path.strip(), encoding="utf-8") as fd:
-                    special_instructions = fd.read().strip() or None
-            except (OSError, UnicodeDecodeError):
-                special_instructions = None
-        special_instructions = merge_special_instructions_with_model_steering(
-            special_instructions,
-            config_dict=config_dict,
+        Без `prompt_loader` в контексте файлы читаются здесь же, как в develop;
+        с ним (Temporal native) чтение уходит в загрузчик рантайма.
+        """
+        from gc_core.agent_store import agent_store_of
+        from gc_core.run_preparation import (
+            PromptPreparationRequest,
+            load_run_prompts,
         )
-        return chat_completions_system_prompt, special_instructions
+
+        request = PromptPreparationRequest.from_config(
+            self._ctx, verbose=effective_verbose
+        )
+        loader = port(self._ctx, "prompt_loader")
+        if loader is None:
+            prepared = load_run_prompts(
+                request, logger=logger, store=agent_store_of(self._ctx)
+            )
+        else:
+            prepared = await loader(request)
+        return prepared.system_prompt, prepared.special_instructions
 
     async def _abuild_run_state(
         self,
@@ -435,45 +518,52 @@ class AgentExecutor:
         logger,
     ) -> tuple:
         """State прогона и отрендеренный system prompt (chat/completions) либо None."""
-        config_dict = self._ctx.config_dict
+        settings = settings_of(self._ctx)
         state_data = {
-            "limit_project_metadata": config_dict.get(
-                "limit_project_metadata", False
-            ),
+            "limit_project_metadata": settings.agent.limit_project_metadata,
             "parent_state_id": None,
             "verbose": effective_verbose,
-            "model": config_dict["model"],
+            "model": settings.agent.model,
             "tools_spec": self._ctx.tools_spec,
             "tools_descr": self._ctx.tools_description,
-            "max_steps": config_dict["max_steps"],
+            "max_steps": settings.agent.max_steps,
             "skills_list": skills_list,
-            "system_prompt_id": config_dict["system_prompt_id"],
+            "system_prompt_id": settings.agent.system_prompt_id,
             "chat_completions_system_prompt": chat_completions_system_prompt,
-            "use_server_subagents": config_dict.get(
-                "use_server_subagents", False
-            ),
-            "agent_md_path": config_dict.get("agent_md_path"),
+            "use_server_subagents": settings.agent.use_server_subagents,
+            "agent_md_path": settings.paths.agent_md_path,
             "is_tui": bool(getattr(self._ctx, "is_tui", False)),
-            "agentsmd_override": bool(
-                config_dict.get("agentsmd_override", False)
-            ),
+            "agentsmd_override": settings.tui.agentsmd_override,
             "thread_id": thread_id,
             "shared": thread_shared,
-            "workspace_config": config_dict,
+            "workspace_config": self._ctx,
             "logger": logger,
             "workspace": getattr(self._ctx, "workspace", None),
         }
-        if subagents_enabled(config_dict.get("use_local_subagents", False)):
+        if subagents_enabled(settings.agent.use_local_subagents):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
-        state = await State.acreate(**state_data)
-        # Старт рана — первая из двух точек начала хода (спека §6.4): фиксируем
-        # модель этого хода через Router, дальше внутри хода не перечитываем.
-        # Открытый активный алиас (trip прошлого хода / персист breaker при attach)
-        # → честная ошибка класса 2 ДО транспорта (спека §8), не сырой
-        # AliasCircuitOpenError на старте рана.
+        preparer = port(self._ctx, "state_preparer")
+        if preparer is None:
+            state = await State.acreate(**state_data)
+        else:
+            from gc_core.state_preparation import StatePreparationRequest
+
+            prepared = await preparer(
+                StatePreparationRequest(
+                    agent_md_path=state_data["agent_md_path"],
+                    is_tui=state_data["is_tui"],
+                    agentsmd_override=state_data["agentsmd_override"],
+                    verbose=effective_verbose,
+                )
+            )
+            state = State.from_prepared(prepared, **state_data)
+        attach = getattr(self._ctx, "attach_state", None)
+        if callable(attach):
+            attach(state)
+        # Граница хода сбрасывает счётчики; модель выбирается перед вызовом.
         begin_turn_main_trace(state, self._ctx)
         state.tool_call_outputs_store.set_max_entries(
-            get_stored_tool_outputs_max_entries(config_dict)
+            get_stored_tool_outputs_max_entries(settings)
         )
         state.backend_api_mode = backend_api_mode
         state.on_messages_evicted = getattr(
@@ -531,6 +621,14 @@ class AgentExecutor:
             if self._stop_pending:
                 self._state.stop_requested = True
                 self._stop_pending = False
+            # В shared уже лежит выбор, восстановленный из сессии; явный выбор
+            # этого запуска — поверх. Под тем же замком, что публикует state:
+            # иначе между публикацией и наложением вклинился бы
+            # set_permission_mode и его значение было бы затёрто.
+            if self._permission_mode_choice is not None:
+                self._state.shared.permission_mode = (
+                    self._permission_mode_choice
+                )
             # Очередь здесь НЕ сбрасываем. Сброс стоял тут с тех пор, когда до
             # него не было setup-фазы и класть сообщения заранее было некому.
             # Теперь кладут: сервер, пока прогон ещё не дошёл до цикла,
@@ -542,6 +640,179 @@ class AgentExecutor:
             # доигрывает отдельным ходом. Не забранное из очереди уходит этому
             # прогону вслед за его собственными сообщениями (см. ниже), а
             # отложенное `finally` прошлого прогона ждёт владельца.
+
+    def accept_plan(self, mode: str, thread_id: Optional[str]) -> None:
+        """Человек принял план и выбрал режим исполнения.
+
+        Фронтенд зовёт это ДО запуска продолжения; статус плана сменится в
+        начале следующего прогона. Переход одноразовый и привязан к треду:
+        если продолжение не стартовало, он не должен примениться к прогону
+        другой сессии.
+        """
+        with self._lock:
+            self._plan_transition_pending = (
+                PLAN_STATUS_APPROVED,
+                mode,
+                thread_id,
+            )
+
+    def arm_plan_rework(self, thread_id: Optional[str]) -> None:
+        """Человек выбрал «Доработать план»: следующее его сообщение в этом
+        треде переведёт план в доработку."""
+        with self._lock:
+            self._plan_rework_thread = thread_id
+
+    def prepare_accepted_plan(
+        self, mode: str, thread_id: Optional[str], *, extra_text: str = ""
+    ) -> list[str]:
+        """Человек одобрил предложенный план: режим исполнения, одобрение и
+        сообщения продолжения — без прогона.
+
+        Для фронтенда, который ведёт прогон своим путём (ACP — потоком дельт
+        ``AsyncAgent.stream``); остальные зовут ``aexecute_accepted_plan``.
+        Не режим исполнения — ``ValueError`` до любых изменений.
+        ``extra_text`` — уточнение человека к исполнению, отдельным
+        сообщением после служебного «план одобрен».
+        """
+        mode = _require_plan_execution_mode(mode)
+        self.set_permission_mode(mode)
+        self.accept_plan(mode, thread_id)
+        return accepted_plan_messages(mode, extra_text=extra_text)
+
+    async def aexecute_accepted_plan(
+        self,
+        mode: str,
+        thread_id: Optional[str],
+        *,
+        extra_text: str = "",
+        verbose: Optional[bool] = None,
+        account_run: bool = True,
+        system: Optional[str] = None,
+    ) -> Any:
+        """Человек одобрил предложенный план: исполнить его в выбранном режиме.
+
+        Одна последовательность на фронтенды — консольный вопрос и
+        ``--approve-plan`` gc-cli (ACP — через ``prepare_accepted_plan``).
+        Негодный режим — ``ValueError`` до любых действий, и учёт прошлого
+        прогона тоже не трогается. Учёт закрывается ДО смены режима: его
+        мета пишется такой, какой была на его конце; закрытый учёт и
+        прогон, которого в этом процессе не было, — no-op.
+        """
+        _require_plan_execution_mode(mode)
+        await self.aclose_run_accounting()
+        messages = self.prepare_accepted_plan(
+            mode, thread_id, extra_text=extra_text
+        )
+        return await self.arun(
+            messages,
+            thread_id=thread_id,
+            system=system,
+            verbose=verbose,
+            account_run=account_run,
+        )
+
+    def plan_snapshot(
+        self, expected_thread_id: Optional[str]
+    ) -> Optional[dict]:
+        """План указанного треда из живого состояния; None — другой тред,
+        состояния нет или плана нет. Пустой id — всегда несовпадение."""
+        with self._lock:
+            state = self._state
+            if (
+                state is None
+                or not expected_thread_id
+                or getattr(state, "thread_id", None) != expected_thread_id
+            ):
+                return None
+            return normalize_plan_block(getattr(state.shared, "plan", None))
+
+    def _apply_plan_changes(self, state, new_user_messages) -> None:
+        """Применить к плану то, что человек решил между прогонами.
+
+        Оба намерения гасятся в начале ЛЮБОГО прогона и действуют только на
+        свой тред: невидимое взведённое состояние не должно пережить момент,
+        когда его создали, и выстрелить в чужой сессии.
+        """
+        with self._lock:
+            pending = self._plan_transition_pending
+            rework_thread = self._plan_rework_thread
+            self._plan_transition_pending = None
+            self._plan_rework_thread = None
+        thread_id = getattr(state, "thread_id", None)
+        plan = getattr(state.shared, "plan", None)
+        if not thread_id or not isinstance(plan, dict):
+            return
+        if pending is not None and pending[2] == thread_id:
+            status, approved_mode, _thread = pending
+            plan["status"] = status
+            plan["approved_mode"] = approved_mode
+            plan["updated_at"] = now_stamp()
+            # Выход из plan через одобрение: «план не одобрен» слать нельзя
+            # — продолжение несёт своё «план одобрен».
+            if (
+                status == PLAN_STATUS_APPROVED
+                and state.mode_announced == Mode.PLAN.value
+            ):
+                state.mode_announced = None
+            return
+        # «В доработке» — только по двум шагам сразу: человек нажал «Доработать»
+        # И отправил обычное сообщение, оставаясь в plan. Иначе вопрос не по
+        # теме после закрытого баннера уводил бы план в доработку.
+        first = new_user_messages[0] if new_user_messages else None
+        if (
+            rework_thread == thread_id
+            and first is not None
+            and extract_real_user_message_text(first)
+            and resolve_mode(self._ctx) is Mode.PLAN
+        ):
+            plan["status"] = PLAN_STATUS_REWORKING
+            plan["approved_mode"] = None
+            plan["updated_at"] = now_stamp()
+
+    def _export_plan_file(self, state, logger) -> None:
+        """Файл плана для человека — раз в конце прогона, рядом с записью меты.
+
+        Пишет хранилище, если умеет (файловый стор); сбой экспорта прогон не
+        роняет: файл — удобство, канон плана уже сохранён в мете.
+        """
+        session = self._thread_session
+        save = getattr(getattr(session, "store", None), "save_plan_file", None)
+        plan = getattr(state.shared, "plan", None)
+        if not callable(save) or not plan:
+            return
+        try:
+            save(session.system_id, session.thread_id, plan)
+        except Exception as exc:
+            if logger is not None:
+                logger.warning("plan file export failed: %s", exc)
+
+    def clear_plan(self, thread_id: Optional[str]) -> None:
+        """Человек убрал план этой сессии: взведённые решения по нему (утвердить,
+        доработать) больше не к чему применять."""
+        with self._lock:
+            pending = self._plan_transition_pending
+            if pending is not None and pending[2] == thread_id:
+                self._plan_transition_pending = None
+            if self._plan_rework_thread == thread_id:
+                self._plan_rework_thread = None
+
+    @staticmethod
+    def _lift_judge_pause(state, new_user_messages) -> None:
+        """Новое сообщение человека снимает паузу судьи
+        (`lift_pause_on_user_message`). Служебные сообщения человеком не
+        считаются."""
+        if any(extract_real_user_message_text(m) for m in new_user_messages):
+            lift_pause_on_user_message(state.shared)
+
+    def _plan_notices(self, state) -> list[str]:
+        """Служебное сообщение в начале прогона, один раз: «план убран
+        человеком». О режиме агенту говорит цикл перед каждым запросом к
+        модели (``processing_responses._mode_notices``)."""
+        shared = state.shared
+        if not shared.plan_removed_notice:
+            return []
+        shared.plan_removed_notice = False
+        return [PLAN_REMOVED_MESSAGE]
 
     @staticmethod
     def _seed_current_user_intent(state, new_user_messages) -> None:
@@ -678,7 +949,6 @@ class AgentExecutor:
         return messages, None, None
 
     async def _afinalize_thread(self, thread_session, state, logger) -> None:
-        config_dict = self._ctx.config_dict
         if thread_session is None or (
             state.discard_writes_after_stop and state.stop_requested
         ):
@@ -691,7 +961,11 @@ class AgentExecutor:
         await thread_session.apersist_batch(
             [], previous_response_id=state.previous_response_id
         )
-        _run_trace_id = trace_id_from_config(config_dict)
+        # persist: turn — конец хода и есть точка сброса.
+        flush = getattr(thread_session, "aflush_deferred", None)
+        if flush is not None:
+            await flush()
+        _run_trace_id = trace_id_from_config(self._ctx)
         if _run_trace_id:
             # После persist_batch: он пересобирает мету с диска, поэтому
             # запись должна быть последней, иначе её затрёт.
@@ -704,30 +978,36 @@ class AgentExecutor:
     ) -> None:
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         # ``console=False`` — тот же отчёт только в лог, без таблицы в stdout.
-        config_dict = self._ctx.config_dict
+        settings = settings_of(self._ctx)
         try:
             run_usage = state.usage.delta_from(run_start_usage)
             # Доступно in-memory: get_state().usage (кумулятив) и .last_run_usage (этот прогон).
             state.last_run_usage = run_usage
             usage_text = build_run_usage_report(
                 run_usage,
-                config_dict.get("pricing"),
-                config_dict.get("model"),
-                config_dict.get("completions_url"),
+                settings.pricing,
+                settings.agent.model,
+                settings.backend.completions_url,
+                provider_currency=getattr(
+                    self._ctx, "provider_currency", None
+                ),
             )
             if usage_text:
                 if logger is not None:
                     logger.info(
                         "\n<run_usage>\n%s\n</run_usage>\n", usage_text
                     )
-                if console and human_console_enabled(config_dict):
+                if console and human_console_enabled(settings):
                     print(f"\n{usage_text}\n")
             if logger is not None:
                 usage_dict = build_run_usage_dict(
                     run_usage,
-                    config_dict.get("pricing"),
-                    config_dict.get("model"),
-                    config_dict.get("completions_url"),
+                    settings.pricing,
+                    settings.agent.model,
+                    settings.backend.completions_url,
+                    provider_currency=getattr(
+                        self._ctx, "provider_currency", None
+                    ),
                 )
                 if usage_dict:
                     logger.info(
@@ -759,6 +1039,7 @@ class AgentExecutor:
         logger = getattr(self._ctx, "logger", None)
         await self._afinalize_thread(self._thread_session, state, logger)
         self._accounting_closed = True
+        self._export_plan_file(state, logger)
         try:
             baseline = UsageAccount.from_meta(
                 getattr(state, "run_start_usage_meta", None)
@@ -786,6 +1067,44 @@ class AgentExecutor:
             while task.cancelling():
                 task.uncancel()
         await self.aclose_run_accounting()
+
+    async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
+        # Keep the unconsumed queue before the await; messages arriving during
+        # MCP cleanup remain pending and are returned by take_undelivered_messages.
+        with self._lock:
+            self._undelivered_messages.extend(self._pending_messages)
+            self._pending_messages = []
+        try:
+            cleanup = port(self._ctx, "mcp_cleanup")
+            if cleanup is None:
+                await _aclose_mcp_and_release(owner_reset)
+            else:
+                try:
+                    await cleanup()
+                except Exception:
+                    # Как локальная уборка: сбой закрытия MCP не отменяет
+                    # готовый ответ хода.
+                    logger = getattr(self._ctx, "logger", None)
+                    if logger is not None:
+                        logger.warning("mcp_cleanup_failed", exc_info=True)
+                finally:
+                    reset_owner(owner_reset)
+        except asyncio.CancelledError as exc:
+            # arun persists accounting for a completed loop before re-raising.
+            return exc
+        return None
+
+    def _report_log_path(self, logger: Any) -> None:
+        if human_console_enabled(self._ctx):
+            print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
+        if logger is not None:
+            logger.info(
+                "log_path",
+                extra={
+                    "event": "log_path",
+                    "path": getattr(self._ctx, "logging_path", None),
+                },
+            )
 
     async def arun(
         self,
@@ -837,19 +1156,19 @@ class AgentExecutor:
             # молча погасил бы следующий запрос человека.
             self._state = None
             self._accounting_closed = False
-        config_dict = self._ctx.config_dict
+        settings = settings_of(self._ctx)
+        # Раньше стопа: неверный persist не должен падать на отсутствии
+        # ``user_stop`` и не вооружает снятие хода, который не начнётся.
+        _require_supported_persist_mode(settings, self._ctx)
+        self.user_stop.prepare_run(
+            asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
+        )
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
-            verbose
-            if verbose is not None
-            else config_dict.get("verbose", False)
+            verbose if verbose is not None else settings.agent.verbose
         )
-        skills_list = await self._ctx.skills_registry.list_skills()
-        backend_api_mode = (
-            str(config_dict.get("backend_api_mode", "responses"))
-            .strip()
-            .lower()
-        )
+        skills_list = await self._alist_skills()
+        backend_api_mode = str(settings.backend.api_mode).strip().lower()
         (
             thread_session,
             thread_shared,
@@ -868,32 +1187,29 @@ class AgentExecutor:
         bind_turn_identity(self._ctx, mint_turn_id())
         is_cli_mode = system_id == "cli"
 
-        # Снять протухший флаг компакции от прерванного прошлого run'а: на старте
-        # компакция не идёт, иначе TUI вечно показывает «сжимаю контекст».
-        await areset_stale_summarizing_flag(thread_session)
-        # Снять протухший флаг финализации от прерванного прошлого run'а.
-        await aset_tui_finalizing(thread_session, False)
-        # Снять протухший флаг «судья работает» от прерванного прошлого run'а.
-        await aset_tui_finish_gate_checking(thread_session, False)
+        # Снять протухшие runtime-индикаторы одним атомарным store batch,
+        # сохраняя прежний путь у пользовательских хранилищ без capability.
+        await areset_run_flags(thread_session)
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
-        summary_trigger_chars = parse_summary_trigger_chars(config_dict)
-        summary_trigger_tokens = parse_summary_trigger_tokens(config_dict)
-        turn_end_trigger_tokens = parse_summary_turn_end_trigger_tokens(
-            config_dict
-        )
-        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(
-            config_dict
-        )
+        # Начальные значения для координатора; проверка истории перечитывает
+        # пороги подготовленного вызова через limits_provider.
+        limits_provider = self._history_summary_limits
+        initial_limits = limits_provider()
+        summary_trigger_chars = initial_limits.chars_during
+        summary_trigger_tokens = initial_limits.tokens_during
+        turn_end_trigger_chars = initial_limits.chars_after
+        turn_end_trigger_tokens = initial_limits.tokens_after
 
         chat_completions_system_prompt: str | None = None
         special_instructions: str | None = None
         if backend_api_mode == "chat_completions":
-            chat_completions_system_prompt, special_instructions = (
-                self._load_chat_completions_prompts(
-                    effective_verbose=effective_verbose,
-                    logger=logger,
-                )
+            (
+                chat_completions_system_prompt,
+                special_instructions,
+            ) = await self._aload_chat_completions_prompts(
+                effective_verbose=effective_verbose,
+                logger=logger,
             )
 
         state, rendered_system_prompt = await self._abuild_run_state(
@@ -914,22 +1230,15 @@ class AgentExecutor:
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
         # session-правила пишутся прямо в shared и сохраняются обычной персистентностью.
         self._ctx.permission_store = PermissionStore(
-            session_rules=state.shared.confirm_rules
+            session_rules=state.shared.confirm_rules, shared=state.shared
         )
+        _extend_with_thread_history(state, thread_session, backend_api_mode)
 
-        if (
-            thread_session is not None
-            and backend_api_mode == "chat_completions"
-            and thread_session.history_messages
-        ):
-            state.messages.extend(
-                [
-                    _shallow_copy_msg(m)
-                    for m in thread_session.history_messages
-                    if isinstance(m, dict)
-                ]
-            )
-
+        execution_patch = port(self._ctx, "execution_patch")
+        deferred_startup_compaction = (
+            execution_patch is None
+            or execution_patch("startup-compaction-call-kit-v1")
+        )
         summary = RunSummaryCoordinator(
             ctx=self._ctx,
             state=state,
@@ -941,15 +1250,25 @@ class AgentExecutor:
             is_cli_mode=is_cli_mode,
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
+            limits_provider=limits_provider,
+            deferred_startup_compaction=deferred_startup_compaction,
+            startup_progress_guard=(
+                deferred_startup_compaction
+                and (
+                    execution_patch is None
+                    or execution_patch("startup-compaction-progress-v1")
+                )
+            ),
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
         self._ctx.is_cli_mode = is_cli_mode
 
-        # Хук компакции ждём тем же способом, что и три остальных
-        # (_acall_blocking_hook): корутину — нативно, обычную функцию — в потоке.
-        await _acall_blocking_hook(
-            summary.apre_run_compact_if_needed, trigger_reason="pre_run"
-        )
+        # Старые истории сохраняют порядок команд. Новые исполнения проверяют
+        # стартовую историю в цикле после выбора первого комплекта модели.
+        if not deferred_startup_compaction:
+            await _acall_blocking_hook(
+                summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+            )
 
         if not messages:
             raise ValueError(
@@ -972,6 +1291,19 @@ class AgentExecutor:
             commit=commit_attachment,
         )
         self._seed_current_user_intent(state, new_user_messages)
+        self._apply_plan_changes(state, new_user_messages)
+        self._lift_judge_pause(state, new_user_messages)
+        # «План убран» — до сообщений человека: сначала контекст, потом
+        # запрос. О режиме цикл скажет перед первым запросом к модели.
+        for text in reversed(self._plan_notices(state)):
+            new_user_messages.insert(
+                0,
+                {
+                    "role": "user",
+                    "content": wrap_technical_user_content(text),
+                    "id": generate_message_id_func("m"),
+                },
+            )
 
         messages, persist_messages_callback, get_full_history_messages = (
             self._persistence_for_run(
@@ -985,22 +1317,6 @@ class AgentExecutor:
                 summary_trigger_tokens=summary_trigger_tokens,
             )
         )
-
-        def get_pending_messages() -> list[dict]:
-            with self._lock:
-                out = self._pending_messages[:]
-                self._pending_messages.clear()
-            # Вне замка: копия картинок в тред — файловая операция, а замок ждут
-            # поток TUI и обработчик сервера.
-            return self._commit_queued(out)
-
-        def check_stop() -> bool:
-            with self._lock:
-                return (
-                    self._state.stop_requested
-                    if self._state is not None
-                    else False
-                )
 
         # Снимок usage до прогона: для resume треда state.usage гидрирован кумулятивом,
         # отчёт же показывает токены именно этого прогона (дельту). Тот же baseline
@@ -1018,14 +1334,13 @@ class AgentExecutor:
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
-        with self._lock:
-            queued_before_loop = self._pending_messages[:]
-            self._pending_messages.clear()
+        queued_before_loop = self._take_pending_messages()
         if queued_before_loop:
-            messages = [
-                *messages,
-                *self._commit_queued(queued_before_loop),
-            ]
+            messages = [*messages, *queued_before_loop]
+        from gc_core.user_stop import bind_user_stop
+
+        _stop_bound = bind_user_stop(self.user_stop)
+        _stop_bound.__enter__()
         try:
             response = await arun_agent(
                 messages,
@@ -1041,8 +1356,8 @@ class AgentExecutor:
                 pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
                 force_compact_hook=summary.aforce_compact_once,
-                get_pending_messages=get_pending_messages,
-                check_stop=check_stop,
+                get_pending_messages=self._take_pending_messages,
+                check_stop=self._is_stop_requested,
                 session_meta=(
                     thread_session.meta if thread_session is not None else None
                 ),
@@ -1059,29 +1374,12 @@ class AgentExecutor:
             self.last_terminal_outcome = getattr(
                 state, "terminal_outcome", None
             )
+            self.last_closing_reply = getattr(state, "closing_reply", "")
         finally:
-            # Несъеденное циклом откладываем в сторону: оно не должно молча
-            # уехать следующему прогону позади его запроса. Это НЕ граница
-            # «чистого листа»: ниже ещё `await` сноса MCP, и то, что ляжет в
-            # очередь за это время, окажется там же, где и раньше. Оба куска
-            # забирает владелец одним `take_undelivered_messages`.
-            with self._lock:
-                # КОПИМ, а не присваиваем: иначе следующий прогон затрёт хвост
-                # предыдущего пустым списком — то самое молчаливое исчезновение,
-                # ради которого всё и затевалось.
-                self._undelivered_messages.extend(self._pending_messages)
-                self._pending_messages = []
-            # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
-            # чтобы они не переживали конкретный запуск агента.
-            # Ждём напрямую, без потока: блокирующим в закрытии было только
-            # ожидание смерти процесса, и оно переведено на опрос. Подробности
-            # и разбор отмены — в самой `_aclose_mcp_and_release`.
-            # Отмену здесь не выпускаем: иначе учёт ниже не выполнится, а цикл
-            # уже закончился. Проброс — после записи.
-            try:
-                await _aclose_mcp_and_release(_owner_reset)
-            except asyncio.CancelledError as exc:
-                teardown_cancel = exc
+            _stop_bound.__exit__(None, None, None)
+            state_ops.leave(state)
+            state.turn_level = None
+            teardown_cancel = await self._ateardown_run(_owner_reset)
 
         if teardown_cancel is not None:
             # Незавершённый цикл сюда не попадает: его исключение выходит из
@@ -1095,17 +1393,46 @@ class AgentExecutor:
         if account_run:
             await self.aclose_run_accounting()
 
-        if human_console_enabled(config_dict):
-            print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
-        if logger is not None:
-            logger.info(
-                "log_path",
-                extra={
-                    "event": "log_path",
-                    "path": getattr(self._ctx, "logging_path", None),
-                },
-            )
+        self._report_log_path(logger)
         return response
+
+    def set_permission_mode(self, mode: str) -> None:
+        """Сменить режим разрешений сессии (хоткей фронтенда, флаг запуска).
+
+        Резолвер читает режим на каждом решении, поэтому следующий вызов тула
+        пойдёт уже по новому режиму — и посреди прогона. Выбор запоминается
+        ВСЕГДА, а не только при живом state: между прогонами ``self._state``
+        принадлежит завершённому прогону, запись в него никуда не поедет, а
+        следующий прогон соберёт shared заново из сессии.
+        """
+        resolved = coerce_mode(mode)
+        if resolved is None:
+            raise ValueError(f"unknown permission mode: {mode!r}")
+        with self._lock:
+            self._permission_mode_choice = resolved.value
+            if self._state is not None:
+                self._state.shared.permission_mode = resolved.value
+
+    def clear_permission_mode(self) -> None:
+        """Снять явный выбор режима: следующий прогон возьмёт режим из
+        сессии, а нет его там — из конфига.
+
+        Живое состояние не трогается: между прогонами оно принадлежит
+        завершённому прогону, а следующий соберёт shared из сессии заново.
+        До следующего прогона ``permission_mode()`` может вернуть выбор
+        прошлого прогона.
+        """
+        with self._lock:
+            self._permission_mode_choice = None
+
+    def permission_mode(self) -> Optional[str]:
+        """Режим, выбранный явно или сохранённый в сессии; None — действует конфиг."""
+        with self._lock:
+            if self._permission_mode_choice is not None:
+                return self._permission_mode_choice
+            if self._state is not None:
+                return getattr(self._state.shared, "permission_mode", None)
+            return None
 
     def add_message(self, message: dict) -> None:
         """Потокобезопасно добавляет сообщение в очередь активного скоупа.
@@ -1132,32 +1459,48 @@ class AgentExecutor:
         """``call_id`` вызова субагента, который сейчас принимает ввод."""
         return active_parent_call_id(self._ctx)
 
+    async def aflush_thread(self) -> None:
+        """Записать отложенные шаги хода (persist: turn); иначе — ничего."""
+        flush = getattr(self._thread_session, "aflush_deferred", None)
+        if flush is not None:
+            await flush()
+
     def get_state(self) -> State | None:
         """
         Возвращает текущий state (под замком).
-        Не мутировать снаружи; изменения — только через add_message() или под get_lock().
+        Не мутировать снаружи; изменения — только через add_message() или под замком executor'а.
         """
         with self._lock:
             return self._state
-
-    def get_lock(self) -> threading.Lock:
-        """
-        Возвращает мьютекс executor'а.
-        Изменения state — только под этим замком.
-        """
-        return self._lock
 
     def get_model_router(self):
         """Router, зафиксированный при сборке ЭТОГО executor'а (``RunContext.model_router``,
         см. ``src/run_context.py``) — снимок ``models``/``slots``/``assign`` неизменен всю
         его жизнь (пересборка — только следующим ``get_runner()`` после ``invalidate_runner``).
 
-        Футеру TUI (Task 15) нужен именно этот Router для резолва уровня, зафиксированного
-        на ход (``state.turn_level``): живой ``display_router()`` TUI отражает /profiles
-        мгновенно и подменил бы «факт» на модель уже переключившегося профиля раньше, чем
-        ход её реально увидит. ``None`` — у ``ctx`` нет ``model_router`` (тестовые двойники).
+        Футеру TUI нужен именно этот Router для резолва подготовленного вызова по
+        его уровню: живой ``display_router()`` отражает /profiles мгновенно и подменил бы
+        факт моделью уже переключившегося профиля (резолв — перед каждым вызовом по
+        живому уровню, ``processing_responses.resolve_main_for_call``). ``None`` — у
+        ``ctx`` нет ``model_router`` (тестовые двойники).
         """
         return getattr(self._ctx, "model_router", None)
+
+    def _history_summary_limits(self):
+        """Пороги сжатия модели текущего вызова (не снимок старта run):
+        по уровню, выбранному перед подготовкой запроса, — тому же, по которому идут
+        запросы. До сборки state уровня ещё нет — обычный резолв `main`."""
+        return resolve_summary_limits_at_level(
+            self._ctx,
+            self.get_model_router(),
+            getattr(self._state, "_call_level", None),
+        )
+
+    def summary_limits(self):
+        """Пороги сжатия, по которым работает ЭТОТ executor: его снимок конфига,
+        его Router, уровень текущего вызова. Читает индикатор контекста TUI — новый
+        выбор пользователя не меняет уже подготовленный вызов."""
+        return self._history_summary_limits()
 
     def usage_meta_snapshot(self) -> Optional[tuple[dict, Optional[dict]]]:
         """Снимок usage для TUI-футера: ``(session_meta, request_meta | None)``.
@@ -1250,6 +1593,8 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+            run_logger = getattr(self._ctx, "logger", None)
+        self.user_stop.request(run_logger)
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

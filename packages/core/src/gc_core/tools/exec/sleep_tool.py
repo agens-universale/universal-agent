@@ -1,11 +1,14 @@
 import asyncio
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 
 class Sleep(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     max_seconds = 180
 
     @staticmethod
@@ -28,7 +31,7 @@ class Sleep(AbstractSimpleTool):
         )
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         return {
             "type": "function",
             "name": "exec_sleep",
@@ -51,7 +54,7 @@ class Sleep(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         return f"""Tool name: exec_sleep
 Tool description: Pauses execution for the given number of seconds. Use when waiting for external processes, rate limits, or delayed availability.
 Input schema: {{"type":"object","properties":{{"seconds":{{"type":"number","description":"Sleep duration in seconds (0 to {cls.max_seconds})."}}}},"required":["seconds"],"additionalProperties":false}}

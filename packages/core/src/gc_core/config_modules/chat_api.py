@@ -4,15 +4,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from gc_core.config_modules.field_meta import gc_meta
+
 
 class ChatApiConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     # Слушает этот процесс. По умолчанию только loopback.
     host: str = "127.0.0.1"
     port: int = Field(default=8090, ge=1, le=65535)
     # Пустая строка — заголовок Authorization не проверяется.
-    auth_token: str = ""
+    auth_token: str = Field(default="", json_schema_extra=gc_meta(secret=True))
     # Пустой список — CORS выключен: API доступен только своей странице и
     # не-браузерным клиентам. Непустой — только эти origin. ``*`` из списка
     # выбрасывается: любой сайт в браузере запускал бы агента с shell.

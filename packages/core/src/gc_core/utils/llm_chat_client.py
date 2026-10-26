@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from gc_core.config_modules.model_registry import effective_completion_kwargs
+from gc_core.execution.ports import port
 from gc_core.model_router import (
     AliasCircuitOpenError,
     ResolvedModel,
@@ -18,6 +19,7 @@ from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.settings import settings_of
 from gc_core.usage.account import category_for_request_label
 from gc_core.usage.context import usage_scope
 from gc_core.utils.backend_errors import is_model_unavailable_error
@@ -31,13 +33,7 @@ from gc_core.utils.connect_backend import (
 from gc_core.utils.data_urls import mask_data_urls
 
 # РУССКИЕ ПОДПИСИ служебных потребителей (спека §5.1/§8) для notice деградации
-# «модель привязки недоступна → повтор активной моделью». `auto_judge` в таблице
-# нет намеренно: его фоллбэк-цель другая ("default", а не "активная" — см.
-# model_router.resolve). Но отсутствие здесь даёт ТОЛЬКО подпись: сама деградация
-# ниже применяется ко всем потребителям без разбора, и вызови её auto_judge
-# сегодня — ушёл бы на активную модель вопреки этой цели. Пока безвредно (вызовов
-# auto_judge ещё нет); каким быть его поведению на мёртвой привязке — решает
-# волна C, вместе с появлением самого вызова.
+# «модель привязки недоступна → повтор активной моделью».
 CONSUMER_RU_LABEL = {
     "finish_gate": "судья finish_gate",
     "text_answer_judge": "судья text_answer_judge",
@@ -46,6 +42,7 @@ CONSUMER_RU_LABEL = {
     "intent_scope": "intent scope",
     "memory_compaction": "компакция памяти",
     "vision": "модель для зрения",
+    "routing_judge": "судья автовыбора",
 }
 
 _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(
@@ -187,7 +184,7 @@ def _build_chat_completion_payload(
     payload_overrides: Optional[Dict[str, Any]] = None,
     resolved: Optional[ResolvedModel] = None,
 ) -> Dict[str, Any]:
-    cfg = getattr(ctx, "config_dict", {}) or {}
+    settings = settings_of(ctx)
     # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
     # finish-gate, генерация роли, компакция памяти) — инструменты не
     # использует. Пустой "tools": [] — бессмысленный шум; для plain-completion
@@ -195,7 +192,7 @@ def _build_chat_completion_payload(
     model = (
         resolved.model
         if resolved is not None
-        else (getattr(state, "default_model", None) or cfg.get("model"))
+        else (getattr(state, "default_model", None) or settings.agent.model)
     )
     payload: Dict[str, Any] = {
         "model": model,
@@ -205,7 +202,7 @@ def _build_chat_completion_payload(
         resolved, "use_max_tokens_param"
     )
     if use_max_tokens_param is NO_BACKEND_OVERRIDE:
-        use_max_tokens_param = cfg.get("use_max_tokens_param", False)
+        use_max_tokens_param = settings.backend.use_max_tokens_param
     if bool(use_max_tokens_param):
         payload["max_tokens"] = max_tokens
     else:
@@ -216,7 +213,9 @@ def _build_chat_completion_payload(
     # Диалог и цикл субагента собираются в connect_backend и читают ``main``.
     # ``consumer`` выбирает алиас выше по стеку. При откате на запасную
     # ``resolved`` уже активная: словарь мёртвого алиаса сюда не подмешивается.
-    extra = effective_completion_kwargs(resolved, cfg, section="auxiliary")
+    extra = effective_completion_kwargs(
+        resolved, settings, section="auxiliary"
+    )
     if isinstance(extra, dict) and extra:
         for key, value in extra.items():
             if key in _PROTECTED_CHAT_COMPLETION_KEYS:
@@ -263,8 +262,10 @@ class PreparedChatCompletion:
 
 def snapshot_chat_completion(ctx, state, *, resolved, headers):
     """Snapshot an already authenticated call without fetching another token."""
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    verify, cert, _, timeout, proxy, _ = resolve_network_params(cfg, resolved)
+    settings = settings_of(ctx)
+    verify, cert, _, timeout, proxy, _ = resolve_network_params(
+        settings, resolved
+    )
     payload = _build_chat_completion_payload(
         ctx=ctx, state=state, messages=[], max_tokens=512, resolved=resolved
     )
@@ -272,7 +273,7 @@ def snapshot_chat_completion(ctx, state, *, resolved, headers):
     payload.pop("messages")
     extra = backend_override_value(resolved, "chat_completion_headers")
     if extra is NO_BACKEND_OVERRIDE:
-        extra = cfg.get("chat_completion_headers", {})
+        extra = settings.backend.chat_completion_headers
     explicit = {str(k).strip().lower() for k, v in (extra or {}).items() if v}
     volatile = {
         "x_rq_id",
@@ -283,7 +284,7 @@ def snapshot_chat_completion(ctx, state, *, resolved, headers):
     }
     from gc_core.trace_id import trace_header_name
 
-    volatile.add(trace_header_name(cfg, "x_trace_id").lower())
+    volatile.add(trace_header_name(settings, "x_trace_id").lower())
     return PreparedChatCompletion(
         resolved,
         resolved.url,
@@ -313,7 +314,10 @@ async def aprepare_chat_completion(ctx, state, *, resolved):
 async def arequest_chat_completion_once(
     ctx, state, *, prepared, messages, max_tokens, request_label
 ) -> ChatCompletionText:
-    """One pinned HTTP attempt, no adaptive retry or model fallback."""
+    """One pinned attempt at the model, no adaptive retry or model fallback.
+
+    A 401 never reaches the model, so the transport may still resend the
+    request once with the other Authorization form."""
     payload = copy.deepcopy(dict(prepared.payload_kwargs))
     token_key = (
         "max_tokens" if "max_tokens" in payload else "max_completion_tokens"
@@ -339,11 +343,28 @@ async def arequest_chat_completion_once(
             url=prepared.url,
             **prepared.network_kwargs,
             use_retry=False,
-            allow_auth_retry=False,
             logger=getattr(ctx, "logger", None),
         )
         _raise_on_embedded_choice_error(res)
     return _completion_text_and_finish(res)
+
+
+def _network_params(
+    settings: Any,
+    resolved: Optional[ResolvedModel],
+    isolated_timeout_sec: Optional[float],
+) -> tuple:
+    """Сетевые параметры запроса. Вызов со своим бюджетом повторов — одна
+    попытка (без повторов транспорта) и таймаут не больше своего потолка:
+    настроенный короче — действует он."""
+    params = resolve_network_params(settings, resolved)
+    if isolated_timeout_sec is None:
+        return params
+    verify, cert, _use_retry, timeout, proxy, embedded = params
+    limit = float(isolated_timeout_sec)
+    if timeout:
+        limit = min(limit, float(timeout))
+    return verify, cert, False, limit, proxy, embedded
 
 
 async def _asend_chat_completion_text(
@@ -357,14 +378,10 @@ async def _asend_chat_completion_text(
     resolved: Optional[ResolvedModel],
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
+    isolated_timeout_sec: Optional[float] = None,
 ) -> ChatCompletionText:
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    log_params = cfg.get("logging_params")
-    full_log_backend = (
-        bool(log_params.get("full_log_backend", False))
-        if isinstance(log_params, dict)
-        else False
-    )
+    settings = settings_of(ctx)
+    full_log_backend = bool(settings.logging.full_log_backend)
 
     def _payload_factory(requested_max_tokens: int) -> Dict[str, Any]:
         return _build_chat_completion_payload(
@@ -380,7 +397,7 @@ async def _asend_chat_completion_text(
         resolved, "chat_completions_min_response_tokens"
     )
     min_response_tokens = _positive_int(
-        cfg.get("chat_completions_min_response_tokens")
+        settings.backend.chat_completions_min_response_tokens
         if _min_response_tokens_override is NO_BACKEND_OVERRIDE
         else _min_response_tokens_override,
         default=1024,
@@ -396,8 +413,8 @@ async def _asend_chat_completion_text(
         if resolved is None:
             resolved = ResolvedModel(
                 alias=None,
-                model=cfg["model"],
-                url=cfg["completions_url"],
+                model=settings.agent.model,
+                url=settings.backend.completions_url,
                 authorization=None,
                 backend_overrides={},
                 tariff=None,
@@ -407,10 +424,11 @@ async def _asend_chat_completion_text(
             ctx, state, resolved=resolved, headers=headers
         )
         await before_send(prepared)
-        from gc_core.vision.service import confirmed_route_headers
-
-        headers = confirmed_route_headers(prepared)
-    url = resolved.url if resolved is not None else cfg["completions_url"]
+    url = (
+        resolved.url
+        if resolved is not None
+        else settings.backend.completions_url
+    )
     (
         verify,
         cert,
@@ -418,7 +436,7 @@ async def _asend_chat_completion_text(
         timeout,
         config_proxy,
         retry_embedded_choice_errors,
-    ) = resolve_network_params(cfg, resolved)
+    ) = _network_params(settings, resolved, isolated_timeout_sec)
 
     if prepared is not None:
 
@@ -458,6 +476,7 @@ async def _asend_chat_completion_text(
             notice_url=url,
             timeout=timeout,
             config_proxy=config_proxy,
+            adaptive_retry=isolated_timeout_sec is None,
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:
@@ -518,6 +537,67 @@ async def arequest_chat_completion_outcome(
     allow_images: bool = False,
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
+    isolated_timeout_sec: Optional[float] = None,
+) -> ChatCompletionText:
+    """Request text and finish reason through the configured model boundary.
+
+    ``isolated_timeout_sec`` задан — вызов со своим бюджетом повторов (судья
+    действий): одна попытка с этим таймаутом, без повторов транспорта и
+    понижения max_tokens, предохранитель моделей не трогается. Повторы и счёт
+    сбоев — у вызывающего; через durable-границу признак едет в
+    ``ModelRequest``."""
+    from gc_core.execution.model import arequest_model
+
+    if max_tokens < 1:
+        raise ValueError("max_tokens must be >= 1")
+    operations = port(ctx, "operations")
+    if operations is None:
+        return await _arequest_chat_completion_outcome_local(
+            ctx=ctx,
+            state=state,
+            messages=messages,
+            max_tokens=max_tokens,
+            consumer=consumer,
+            request_label=request_label,
+            payload_overrides=payload_overrides,
+            allow_images=allow_images,
+            before_send=before_send,
+            isolated_timeout_sec=isolated_timeout_sec,
+        )
+    if allow_images or before_send is not None:
+        # Картинки и проверка маршрута до отправки — только там, где есть
+        # хранилище картинок и транспорт (локально или в activity воркера):
+        # колбэк ``before_send`` через границу durable-операции не переносится.
+        raise RuntimeError(
+            "вызов модели с картинками или before_send не поддерживается "
+            "через durable-границу"
+        )
+    result = await arequest_model(
+        operations,
+        state,
+        messages,
+        consumer=consumer,
+        max_tokens=max_tokens,
+        request_label=request_label,
+        payload_overrides=payload_overrides,
+        isolated_timeout_sec=isolated_timeout_sec,
+    )
+    return ChatCompletionText(result.text or "", result.finish_reason)
+
+
+async def _arequest_chat_completion_outcome_local(
+    *,
+    ctx: Any,
+    state: Any,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    consumer: str,
+    request_label: str = "chat_completion",
+    payload_overrides: Optional[Dict[str, Any]] = None,
+    allow_images: bool = False,
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
+    isolated_timeout_sec: Optional[float] = None,
 ) -> ChatCompletionText:
     """Текст choice и ``finish_reason``. ``consumer`` — canonical id из
     ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
@@ -530,6 +610,11 @@ async def arequest_chat_completion_outcome(
     падает — исключение уходит наверх без изменений (существующая per-consumer
     fail-семантика: finish_gate/text_answer_judge fail-open, summary — пропуск
     цикла, command_judge — fail-closed).
+
+    Вызов со своим бюджетом повторов (``isolated_timeout_sec``, судья действий)
+    предохранитель не трогает и на свежем сбое не деградирует: его сбой — не
+    знание о модели основного хода, повторяет и считает он сам. Деградация при
+    уже открытом предохранителе — как у всех.
 
     ``allow_images=True`` — вызов несёт картинки (``content`` списком частей): так
     зовут только «глаза» (``vision/eyes``). Без флага картинки — ``ValueError``."""
@@ -548,9 +633,11 @@ async def arequest_chat_completion_outcome(
         request_label=request_label,
         payload_overrides=payload_overrides,
         before_send=before_send,
+        isolated_timeout_sec=isolated_timeout_sec,
     )
     if router is None:
         return await send(resolved=None)
+    isolated = isolated_timeout_sec is not None
 
     failed_alias: Optional[str] = None
     primary_exc: Optional[Exception] = None
@@ -565,7 +652,7 @@ async def arequest_chat_completion_outcome(
         try:
             return await send(resolved=resolved)
         except Exception as exc:
-            if resolved.alias is None or not is_model_unavailable_error(exc):
+            if not _trips_breaker(exc, resolved.alias, isolated=isolated):
                 raise
             failed_alias = resolved.alias
             newly_failed_alias = (
@@ -599,9 +686,7 @@ async def arequest_chat_completion_outcome(
     try:
         return await send(resolved=active_resolved)
     except Exception as exc:
-        if active_resolved.alias is not None and is_model_unavailable_error(
-            exc
-        ):
+        if _trips_breaker(exc, active_resolved.alias, isolated=isolated):
             router.breaker.trip(active_resolved.alias, _breaker_reason(exc))
         raise
 
@@ -618,6 +703,7 @@ async def arequest_chat_completion_text(
     allow_images: bool = False,
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
     | None = None,
+    isolated_timeout_sec: Optional[float] = None,
 ) -> str:
     """Текст choice. Причина остановки — в ``arequest_chat_completion_outcome``."""
     outcome = await arequest_chat_completion_outcome(
@@ -630,6 +716,7 @@ async def arequest_chat_completion_text(
         payload_overrides=payload_overrides,
         allow_images=allow_images,
         before_send=before_send,
+        isolated_timeout_sec=isolated_timeout_sec,
     )
     return outcome.text
 
@@ -643,3 +730,13 @@ def _resolve_active_model(router: Any):
 
 def _breaker_reason(exc: BaseException) -> str:
     return str(exc).strip()[:300] or exc.__class__.__name__
+
+
+def _trips_breaker(
+    exc: BaseException, alias: Optional[str], *, isolated: bool
+) -> bool:
+    """Отмечает ли сбой вызова модель в предохранителе: недоступность модели
+    с алиасом — да, кроме вызова со своим бюджетом повторов."""
+    return (
+        not isolated and alias is not None and is_model_unavailable_error(exc)
+    )

@@ -18,23 +18,27 @@ import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     ValidationError,
     field_validator,
     model_validator,
 )
 
-from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.backend import ModelBackendConfig
+from gc_core.config_modules.chat_completions import (
+    auxiliary_llm_from_config_dict,
+)
 from gc_core.config_modules.env_interpolation import (
     _FILE_MARKER,
     resolve_env_only,
 )
-from gc_core.config_modules.chat_completions import (
-    auxiliary_llm_from_config_dict,
-)
+from gc_core.config_modules.field_meta import SecretText, gc_meta, secret_value
 from gc_core.config_modules.pricing import ModelTariff
 
-RESERVED_WORDS = ("light", "default", "max", "auto")
 LEVELS = ("light", "default", "max")
+#: Допустимые значения `level` и флагов `--level`: уровни и режим автовыбора.
+LEVEL_VALUES = (*LEVELS, "auto")
+RESERVED_WORDS = LEVEL_VALUES
 
 # Транспорт одной модели поверх общего backend. Ключ в поле — переписывает
 # одноимённый дефолт; незаписанный остаётся общим. Сэмплинг сюда не входит.
@@ -95,7 +99,8 @@ def _parse_mapping_text(text: str) -> dict[str, Any] | None:
         mark = getattr(exc, "problem_mark", None)
         where = (
             f" (строка {mark.line + 1}, столбец {mark.column + 1})"
-            if mark else ""
+            if mark
+            else ""
         )
         raise ValueError(f"неверный YAML{where}") from exc
     if loaded is not None and not isinstance(loaded, dict):
@@ -162,7 +167,7 @@ def _validated_backend_overlay(loaded: dict) -> dict[str, Any]:
         if not (isinstance(value, str) and _FILE_MARKER.search(value))
     }
     try:
-        BackendConfig.model_validate(immediate)
+        ModelBackendConfig.model_validate(immediate)
     except ValidationError as exc:
         err = exc.errors()[0]
         loc = ".".join(str(part) for part in err.get("loc") or ())
@@ -191,7 +196,7 @@ def parse_model_backend_text(text: str) -> dict[str, Any] | None:
 
 
 def effective_completion_kwargs(
-    resolved: Any, config_dict: dict | None, *, section: str
+    resolved: Any, settings: Any, *, section: str
 ) -> dict[str, Any]:
     """Kwargs секции резолвленного алиаса.
 
@@ -206,11 +211,14 @@ def effective_completion_kwargs(
     chosen = getattr(resolved, section, None) if resolved is not None else None
     if isinstance(chosen, dict):
         return copy.deepcopy(chosen)
-    cfg = config_dict if isinstance(config_dict, dict) else {}
+    if settings is None:
+        return {}
+    from gc_core.settings import settings_of
+
     if section == "main":
-        global_kw = cfg.get("chat_completion_kwargs")
+        global_kw = settings_of(settings).backend.chat_completion_kwargs
     else:
-        global_kw = auxiliary_llm_from_config_dict(cfg).completion_kwargs
+        global_kw = auxiliary_llm_from_config_dict(settings).completion_kwargs
     if isinstance(global_kw, dict):
         return copy.deepcopy(global_kw)
     return {}
@@ -225,14 +233,11 @@ def validate_model_alias(alias: str) -> None:
 
 
 def validate_level_value(value: str) -> str:
-    """level ∉ LEVELS — ошибка; auto получает отдельную подсказку (появится в волне C)."""
-    if value == "auto":
+    """level ∉ LEVELS — ошибка; `auto` — режим автовыбора (перевод в уровень —
+    `auto_routing.levels.effective_level`)."""
+    if value not in LEVEL_VALUES:
         raise ValueError(
-            "level: значение 'auto' появится с функцией авто-выбора — пока недоступно"
-        )
-    if value not in LEVELS:
-        raise ValueError(
-            f"level должен быть одним из {LEVELS}, получено '{value}'"
+            f"level должен быть одним из {LEVELS} или 'auto', получено '{value}'"
         )
     return value
 
@@ -242,7 +247,6 @@ def connection_parts(
     url: Any,
     token: Any,
     completions_url: Any,
-    proxy: Any,
     authorization: Any,
 ) -> tuple[bool, bool]:
     """§2, ЕДИНОЕ определение «адрес задан» / «токен задан» для всех точек проверки.
@@ -257,11 +261,14 @@ def connection_parts(
     наследуется», и правило обязано читать его так же, иначе отвергает законную форму,
     а `{url: "", token: ...}` пропускает как целую пару.
 
+    `backend.proxy` в пару не входит: это строка транспорта эндпоинта. Она
+    применяется сама по себе и не требует своего токена или адреса.
+
     Токен — по «значение задано» (`is not None`), потому что так его читает
     `ModelEntry.authorization_header`: `None` — наследовать, `""` — ЗАДАННЫЙ токен
     «сервер не требует авторизации»."""
     return (
-        bool(url or completions_url or proxy),
+        bool(url or completions_url),
         token is not None or authorization is not None,
     )
 
@@ -326,7 +333,6 @@ def _unresolved_pair_refs(entry) -> list[str]:
         entry.get("url"),
         entry.get("token"),
         backend.get("completions_url"),
-        backend.get("proxy"),
         headers.get("Authorization"),
     ):
         for name in missing_env_refs(value):
@@ -380,7 +386,6 @@ def validate_registry_pairs(
                 url=entry.get("url"),
                 token=entry.get("token"),
                 completions_url=backend.get("completions_url"),
-                proxy=backend.get("proxy"),
                 authorization=headers.get("Authorization"),
             ),
         )
@@ -407,13 +412,15 @@ class ModelEntry(BaseModel):
     """Запись реестра `models`: алиас (ключ словаря) → провайдерская модель + точечные
     оверлеи backend/pricing поверх эффективной секции backend."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     model: str | None = None
     url: str | None = None
-    token: str | None = None
+    token: SecretText | None = Field(
+        default=None, json_schema_extra=gc_meta(secret=True)
+    )
     pricing: ModelTariff | None = None
-    backend: BackendConfig | None = None
+    backend: ModelBackendConfig | None = None
     # None — секция не задана: свой глобальный словарь (main —
     # chat_completion_kwargs, auxiliary — auxiliary_llm.completion_kwargs).
     # {} — задана и пуста: в запрос эти ключи не класть.
@@ -422,6 +429,10 @@ class ModelEntry(BaseModel):
     # None — ключа нет, ход берёт глобальный strip_tags_projection.strip_think.
     # true — вырезать мысль из истории. false — копировать скрытое поле.
     strip_think: bool | None = None
+    # Mid-turn пороги сжатия на алиасе. 0 / нет ключа — шкала не задана.
+    # Хотя бы одно > 0 — режим модели (см. summarize.config.resolve_summary_limits).
+    summary_trigger_chars: int = 0
+    summary_trigger_tokens: int = 0
 
     @field_validator("strip_think", mode="before")
     @classmethod
@@ -433,6 +444,23 @@ class ModelEntry(BaseModel):
         raise ValueError(
             "strip_think: true, false или отсутствие ключа (глобальный флаг)"
         )
+
+    @field_validator(
+        "summary_trigger_chars", "summary_trigger_tokens", mode="before"
+    )
+    @classmethod
+    def _summary_trigger_null_is_unset(cls, value: Any) -> Any:
+        # YAML null — «не задан», как у соседних ключей записи.
+        return 0 if value is None else value
+
+    @field_validator("summary_trigger_chars", "summary_trigger_tokens")
+    @classmethod
+    def _summary_trigger_nonneg(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(
+                "summary_trigger_chars/tokens: отрицательное недопустимо"
+            )
+        return value
 
     @field_validator("main", "auxiliary", mode="before")
     @classmethod
@@ -478,7 +506,6 @@ class ModelEntry(BaseModel):
             completions_url=backend.completions_url
             if backend is not None
             else None,
-            proxy=backend.proxy if backend is not None else None,
             authorization=(
                 backend.chat_completion_headers.get("Authorization")
                 if backend is not None
@@ -492,8 +519,8 @@ class ModelEntry(BaseModel):
         провайдеру: половина пары либо уносит общий ключ на чужой хост (свой адрес без
         токена), либо уезжает вслед за сменой общего адреса (свой токен без адреса).
 
-        Прокси считается адресом: он определяет, куда физически уходит запрос
-        (`connect_backend.resolve_network_params`). `use_ssl`/сертификаты — не адрес, у них
+        `backend.proxy` адрес не задаёт: строка применяется к запросу этого
+        эндпоинта и без своего токена. `use_ssl`/сертификаты — тоже не адрес, у них
         своё предупреждение (спека §7). Что считать заданным — `connection_parts`, общее
         с проверкой слоя."""
         problem = _pair_violation("models.<alias>", *self._connection_parts())
@@ -523,15 +550,16 @@ class ModelEntry(BaseModel):
 
     @property
     def authorization_header(self) -> str | None:
-        """Bearer-нормализация token: None → наследование, "" → явно без авторизации,
-        иначе — `Bearer <token>` (уже с префиксом — не дублируется)."""
-        return model_authorization_header(self.token)
+        """Token записи как настроен: None → наследование, "" → явно без
+        авторизации. Если сервер ответил 401 и принял другую форму (с
+        ``Bearer`` или без), транспорт до конца процесса начинает с неё."""
+        return model_authorization_header(secret_value(self.token))
 
 
 class SlotsConfig(BaseModel):
     """Уровни light/default/max — указатели на алиас из `models`."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     light: str | None = None
     default: str | None = None
@@ -542,7 +570,7 @@ class AssignConfig(BaseModel):
     """Привязки потребителей → уровень или алиас. Ключ `main` запрещён — основной
     трейс управляется уровнем (`level`/`/level`), не привязкой."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     finish_gate: str | None = None
     text_answer_judge: str | None = None
@@ -550,9 +578,9 @@ class AssignConfig(BaseModel):
     summary: str | None = None
     intent_scope: str | None = None
     memory_compaction: str | None = None
-    auto_judge: str | None = None
     vision: str | None = None
-    subagents: dict[str, str] = {}
+    routing_judge: str | None = None
+    subagents: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod

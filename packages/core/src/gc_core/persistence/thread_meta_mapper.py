@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
+from gc_core.execution.state import SharedStateData
 from gc_core.intent_log.serialize import serialize_for_meta
 from gc_core.persistence.schema import (
     STATE_SCHEMA_VERSION,
+    normalize_permission_mode,
     normalize_session_todo,
     normalize_working_memory,
     reject_legacy_memory_keys,
     serialize_shared_block,
     validate_thread_meta_for_load,
 )
-from gc_core.states import SharedStateData, State
+from gc_core.plan_store import normalize_plan_block
+
+if TYPE_CHECKING:
+    from gc_core.states import State
 
 
 def read_optional_nonneg_int(value: Any) -> Optional[int]:
@@ -47,6 +52,25 @@ class ThreadMetaMapper:
                 session_todo=normalize_session_todo(
                     shared_raw.get("session_todo")
                 ),
+                permission_mode=normalize_permission_mode(
+                    shared_raw.get("permission_mode")
+                ),
+                plan=normalize_plan_block(shared_raw.get("plan")),
+                mode_announced=normalize_permission_mode(
+                    shared_raw.get("mode_announced")
+                ),
+                plan_removed_notice=bool(
+                    shared_raw.get("plan_removed_notice", False)
+                ),
+                judge_denials_in_a_row=read_optional_nonneg_int(
+                    shared_raw.get("judge_denials_in_a_row")
+                )
+                or 0,
+                judge_denials_total=read_optional_nonneg_int(
+                    shared_raw.get("judge_denials_total")
+                )
+                or 0,
+                judge_paused=shared_raw.get("judge_paused") is True,
             )
 
         return None

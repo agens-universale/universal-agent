@@ -1,7 +1,6 @@
 """Finish gate для subagent: assignment в scope, не CLI user оркестратора."""
 
 import logging
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +10,7 @@ from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log.user_turn import init_subagent_open_turn
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 
 def _make_orchestrator_state():
@@ -34,22 +34,20 @@ def _make_orchestrator_state():
 
 def _make_config():
     return {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
-        "finish_gate_max_iterations": 10,
-        "subagent_finish_gate_max_iterations": 3,
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
+        "agent.finish_gate_max_iterations": 10,
+        "agent.subagent_finish_gate_max_iterations": 3,
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
     }
 
 
 def _make_ctx(cfg):
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         auth_connector=None,
         logger=logging.getLogger("test_subagent_finish_gate"),
     )

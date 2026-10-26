@@ -1,7 +1,7 @@
 import os
 import tempfile
 
-from gc_core.config import load_config
+from gc_core.config import load_settings
 from gc_core.config_modules.backend import BackendConfig
 
 
@@ -18,5 +18,5 @@ def test_load_config_stream_default_true():
         cfg_path = os.path.join(tmp_dir, "config.yml")
         with open(cfg_path, "w", encoding="utf-8") as fd:
             fd.write("backend:\n  api_mode: chat_completions\n")
-        cfg = load_config(cfg_path)
-        assert cfg["stream"] is True
+        cfg = load_settings(cfg_path).settings
+        assert cfg.backend.stream is True

@@ -10,6 +10,7 @@ import logging
 from gc_core.tools.subagents.custom.file_definitions import (
     discover_subagent_definitions,
 )
+from gc_testkit.settings import make_settings
 
 BUILTIN = {"subagent_worker", "subagent_coder"}
 
@@ -26,7 +27,7 @@ def _write(tmp_path, filename, name, body="Роль."):
 def _discover(cfg, caplog=None):
     logger = logging.getLogger("test_discovery")
     return discover_subagent_definitions(
-        cfg, builtin_names=BUILTIN, logger=logger
+        make_settings(cfg), builtin_names=BUILTIN, logger=logger
     )
 
 
@@ -38,18 +39,20 @@ class TestAbsence:
 
     def test_blank_path_is_absence(self, caplog):
         with caplog.at_level(logging.WARNING, logger="test_discovery"):
-            assert _discover({"subagents_dir": "   "}) == []
+            assert _discover({"agent.subagents_dir": "   "}) == []
         assert caplog.records == []
 
     def test_missing_dir_warns_once(self, tmp_path, caplog):
         with caplog.at_level(logging.WARNING, logger="test_discovery"):
-            assert _discover({"subagents_dir": str(tmp_path / "нет")}) == []
+            assert (
+                _discover({"agent.subagents_dir": str(tmp_path / "нет")}) == []
+            )
         assert len(caplog.records) == 1
         assert "subagents_dir_missing" in caplog.records[0].getMessage()
 
     def test_empty_dir(self, tmp_path, caplog):
         with caplog.at_level(logging.WARNING, logger="test_discovery"):
-            assert _discover({"subagents_dir": str(tmp_path)}) == []
+            assert _discover({"agent.subagents_dir": str(tmp_path)}) == []
         assert caplog.records == []
 
 
@@ -57,7 +60,9 @@ class TestReading:
     def test_reads_md_files(self, tmp_path):
         _write(tmp_path, "a.md", "subagent_alpha")
         _write(tmp_path, "b.md", "subagent_beta")
-        names = [d.name for d in _discover({"subagents_dir": str(tmp_path)})]
+        names = [
+            d.name for d in _discover({"agent.subagents_dir": str(tmp_path)})
+        ]
         assert sorted(names) == ["subagent_alpha", "subagent_beta"]
 
     def test_ignores_non_md_and_subdirs(self, tmp_path):
@@ -68,7 +73,9 @@ class TestReading:
         nested = tmp_path / "nested"
         nested.mkdir()
         _write(nested, "deep.md", "subagent_deep")
-        names = [d.name for d in _discover({"subagents_dir": str(tmp_path)})]
+        names = [
+            d.name for d in _discover({"agent.subagents_dir": str(tmp_path)})
+        ]
         assert names == ["subagent_alpha"]
 
     def test_broken_file_does_not_block_others(self, tmp_path, caplog):
@@ -78,7 +85,8 @@ class TestReading:
         _write(tmp_path, "good.md", "subagent_good")
         with caplog.at_level(logging.WARNING, logger="test_discovery"):
             names = [
-                d.name for d in _discover({"subagents_dir": str(tmp_path)})
+                d.name
+                for d in _discover({"agent.subagents_dir": str(tmp_path)})
             ]
         assert names == ["subagent_good"]
         assert any(
@@ -91,7 +99,7 @@ class TestCollisions:
     def test_builtin_wins(self, tmp_path, caplog):
         _write(tmp_path, "mine.md", "subagent_worker")
         with caplog.at_level(logging.WARNING, logger="test_discovery"):
-            assert _discover({"subagents_dir": str(tmp_path)}) == []
+            assert _discover({"agent.subagents_dir": str(tmp_path)}) == []
         assert any(
             "subagent_name_collision" in r.getMessage() for r in caplog.records
         )
@@ -100,7 +108,7 @@ class TestCollisions:
         _write(tmp_path, "z_second.md", "subagent_dup", body="Проиграл.")
         _write(tmp_path, "a_first.md", "subagent_dup", body="Победил.")
         with caplog.at_level(logging.WARNING, logger="test_discovery"):
-            found = _discover({"subagents_dir": str(tmp_path)})
+            found = _discover({"agent.subagents_dir": str(tmp_path)})
         assert len(found) == 1
         # Сортировка по имени файла — единственное, что делает «первого» определённым.
         assert found[0].role == "Победил."
@@ -118,14 +126,19 @@ class TestNoLimitHere:
         for i in range(25):
             _write(tmp_path, f"a{i:02d}.md", f"subagent_n{i:02d}")
         found = _discover(
-            {"subagents_dir": str(tmp_path), "subagents_max_count": 2}
+            {
+                "agent.subagents_dir": str(tmp_path),
+                "agent.subagents_max_count": 2,
+            }
         )
         assert len(found) == 25
 
     def test_order_is_by_filename(self, tmp_path):
         _write(tmp_path, "z.md", "subagent_zebra")
         _write(tmp_path, "a.md", "subagent_alpha")
-        names = [d.name for d in _discover({"subagents_dir": str(tmp_path)})]
+        names = [
+            d.name for d in _discover({"agent.subagents_dir": str(tmp_path)})
+        ]
         assert names == ["subagent_alpha", "subagent_zebra"]
 
 
@@ -146,7 +159,7 @@ class TestWarningsAreLoggable:
         _write(tmp_path, "a_dup.md", "subagent_dup")
         _write(tmp_path, "z_dup.md", "subagent_dup")
         discover_subagent_definitions(
-            {"subagents_dir": str(tmp_path)},
+            make_settings({"agent.subagents_dir": str(tmp_path)}),
             builtin_names=BUILTIN,
             logger=logger,
         )
@@ -163,7 +176,7 @@ class TestWarningsAreLoggable:
         logger = logging.getLogger("test_extra_keys")
         with caplog.at_level(logging.WARNING, logger="test_extra_keys"):
             discover_subagent_definitions(
-                {"subagents_dir": str(tmp_path / "нет")},
+                make_settings({"agent.subagents_dir": str(tmp_path / "нет")}),
                 builtin_names=BUILTIN,
                 logger=logger,
             )

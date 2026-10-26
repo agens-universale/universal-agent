@@ -1,11 +1,10 @@
 """Тесты summarize.summary_logging."""
 
 import json
-from types import SimpleNamespace
 
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
-    append_summary_trace_record,
+    aappend_summary_trace_record,
     log_compaction_started,
     log_memory_patch_skipped_multi_batch,
     log_memory_patch_wm_unchanged,
@@ -15,6 +14,7 @@ from gc_core.summarize.summary_logging import (
     resolve_summary_trace_path,
     trigger_reason_label,
 )
+from gc_testkit.settings import fake_ctx
 
 
 def test_summary_slice_fallback_logs_warning():
@@ -105,23 +105,20 @@ def test_cli_prints_full_summary_texts(capsys):
 
 def test_resolve_summary_trace_path_prefers_ctx(tmp_path):
     custom = tmp_path / "custom_trace.jsonl"
-    ctx = SimpleNamespace(
-        summary_trace_path=str(custom),
-        config_dict={
-            "save_logs": True,
-            "logs_dump_dir": str(tmp_path / "ignored"),
+    ctx = fake_ctx(
+        {
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path / "ignored"),
         },
+        summary_trace_path=str(custom),
     )
     assert resolve_summary_trace_path(ctx) == str(custom)
 
 
-def test_append_summary_trace_record_writes_jsonl(tmp_path):
+async def test_append_summary_trace_record_writes_jsonl(tmp_path):
     trace_file = tmp_path / "trace.jsonl"
-    ctx = SimpleNamespace(
-        summary_trace_path=str(trace_file),
-        config_dict={},
-    )
-    append_summary_trace_record(
+    ctx = fake_ctx(summary_trace_path=str(trace_file))
+    await aappend_summary_trace_record(
         ctx,
         trigger_reason="turn_end",
         trace_data={"step": 1},
@@ -133,11 +130,11 @@ def test_append_summary_trace_record_writes_jsonl(tmp_path):
     assert parsed["newly_summarized_message_id"] == "m_sum"
 
 
-def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
+async def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
     trace_file = tmp_path / "summary_trace_main_abc.jsonl"
-    ctx = SimpleNamespace(summary_trace_path=str(trace_file), config_dict={})
+    ctx = fake_ctx(summary_trace_path=str(trace_file))
 
-    append_summary_trace_record(
+    await aappend_summary_trace_record(
         ctx,
         trigger_reason="chars",
         trace_data={"a": 1},
@@ -148,14 +145,11 @@ def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
     assert "trace_id" not in record
 
 
-def test_append_summary_trace_record_writes_trace_id(tmp_path):
+async def test_append_summary_trace_record_writes_trace_id(tmp_path):
     trace_file = tmp_path / "summary_trace_main_abc.jsonl"
-    ctx = SimpleNamespace(
-        summary_trace_path=str(trace_file),
-        config_dict={"trace_id": "wf-42"},
-    )
+    ctx = fake_ctx({"trace_id": "wf-42"}, summary_trace_path=str(trace_file))
 
-    append_summary_trace_record(
+    await aappend_summary_trace_record(
         ctx,
         trigger_reason="chars",
         trace_data={"a": 1},

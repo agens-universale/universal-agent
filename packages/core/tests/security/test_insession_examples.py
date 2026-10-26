@@ -6,10 +6,10 @@ T6: judge verdict=safe never writes store / few-shot.
 """
 
 import json
-from types import SimpleNamespace
 
 from gc_core.security.command_moderation import moderate_command_execution
 from gc_core.security.permission_store import PermissionStore
+from gc_testkit.settings import fake_ctx
 
 
 def _populate(store, rules):
@@ -62,10 +62,10 @@ def test_t6_judge_safe_does_not_write_store(tmp_path, monkeypatch):
     from gc_core.security import confirm_port as cp
 
     store = PermissionStore()
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "ask"},
+            "security.command_moderation": {"enabled": True, "mode": "ask"},
         },
         permission_store=store,
         is_tui=True,

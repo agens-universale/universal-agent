@@ -1,5 +1,6 @@
 """Brand-блок: постоянная шапка #trace — виден в empty-state и после событий."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -99,18 +100,17 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
 
     async with app.run_test() as pilot:
         # Initial: empty-state — без [Esc] back/выход, без /stop, без /export.
         footer_left = pilot.app.query_one("#footer-left")
         rendered = str(footer_left.render())
-        assert "/help" in rendered
-        assert "/sessions" in rendered
-        assert "/config" in rendered
-        assert "/diff" in rendered
-        assert "/settings" in rendered
+        # слева — пилюля режима; F-клавиши перечислены в справке, не в футере
+        assert rendered == "▸▸ edit mode (Shift+Tab)"
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/stop" not in rendered
@@ -128,11 +128,8 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
 
         footer_left = pilot.app.query_one("#footer-left")
         rendered = str(footer_left.render())
-        assert "/sessions" in rendered
-        assert "/help" in rendered
-        assert "/config" in rendered
-        assert "/diff" in rendered
-        assert "/settings" in rendered
+        # слева — пилюля режима; F-клавиши перечислены в справке, не в футере
+        assert rendered == "▸▸ edit mode (Shift+Tab)"
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
         assert "/export" not in rendered

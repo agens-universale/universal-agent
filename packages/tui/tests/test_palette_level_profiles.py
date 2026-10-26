@@ -5,11 +5,16 @@ docs/specs/2026-07-23-profiles-design.md §12.1-§12.2).
 прямые `assert`, `pytest.importorskip("textual")` перед импортами Textual-слоя.
 """
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
 def _wire_palette(app, reg, initial_filter=""):
-    from gc_tui.toggles import dynamic_toggle_hint, toggle_state
+    from gc_tui.toggles import (
+        dynamic_toggle_hint,
+        effective_toggle_values,
+        toggle_state,
+    )
     from gc_tui.widgets.command_palette import CommandPalette
 
     return CommandPalette(
@@ -19,7 +24,19 @@ def _wire_palette(app, reg, initial_filter=""):
         toggle_dynamic_hint=lambda name, value: dynamic_toggle_hint(
             app, name, value
         ),
+        toggle_values=lambda name: effective_toggle_values(app, name),
     )
+
+
+def _level_row_plain(app) -> str:
+    """Строка тоггла `level` из палитры, как её реально видит пользователь:
+    полная обвязка `_wire_palette` (состояние + динамический состав значений) +
+    рендер `_format_toggle_row`, без стилей (`.plain`)."""
+    from gc_tui.commands import build_default_registry
+
+    reg = build_default_registry()
+    pal = _wire_palette(app, reg)
+    return pal._format_toggle_row(reg.lookup("level")).plain
 
 
 # --- Группа «чем работаем» (/level, /profiles) — трек, разделитель, порядок ---
@@ -38,11 +55,13 @@ async def test_level_and_profiles_form_new_group_above_rigor(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={
-            "level": "default",
-            "models": {"glm-local": {}},
-            "slots": {"default": "glm-local"},
-        },
+        settings=tui_settings(
+            {
+                "level": "default",
+                "models": {"glm-local": {}},
+                "slots": {"default": "glm-local"},
+            }
+        ),
     )
     app._config_path = str(tmp_path / "config.yml")
     reg = build_default_registry()
@@ -179,11 +198,13 @@ def test_level_hint_matches_canon_default_and_honest_fallback(
     from gc_tui.toggles import level_value_hint
 
     app = TuiApp(
-        config={
-            "level": "default",
-            "models": {"glm-local": {}},
-            "slots": {"default": "glm-local"},
-        }
+        settings=tui_settings(
+            {
+                "level": "default",
+                "models": {"glm-local": {}},
+                "slots": {"default": "glm-local"},
+            }
+        )
     )
     app._config_path = str(tmp_path / "config.yml")
 
@@ -205,7 +226,7 @@ def test_level_hint_legacy_mode(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.toggles import level_value_hint
 
-    app = TuiApp(config={"model": "glm-5.2-fp8"})
+    app = TuiApp(settings=tui_settings({"agent.model": "glm-5.2-fp8"}))
     app._config_path = str(tmp_path / "config.yml")
 
     hint = level_value_hint(app, "default")
@@ -221,12 +242,13 @@ def test_level_hint_legacy_force(tmp_path, monkeypatch):
     from gc_tui.toggles import level_value_hint
 
     app = TuiApp(
-        config={
-            "model": "glm-5.2-fp8",
-            "models": {"glm-local": {}},
-            "slots": {"default": "glm-local"},
-            "cli_explicit_keys": ["model"],
-        }
+        # `--model` — слой CLI поверх загруженного (как `apply_cli_overrides`).
+        settings=tui_settings(
+            {
+                "models": {"glm-local": {}},
+                "slots": {"default": "glm-local"},
+            }
+        ).with_overrides({"agent.model": "glm-5.2-fp8"}, layer="cli")
     )
     app._config_path = str(tmp_path / "config.yml")
 
@@ -261,7 +283,7 @@ def test_profile_values_deduplicate_namesake_project_wins(
     from gc_tui.app import TuiApp
     from gc_tui.toggles import _discovered_profiles, profile_values
 
-    app = TuiApp(config={"profile": ""})
+    app = TuiApp(settings=tui_settings({"profile": ""}))
     app._config_path = str(base_dir / "config.yml")
 
     values = profile_values(app)
@@ -286,7 +308,11 @@ def test_profiles_cycle_wraps_alphabetically(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.toggles import next_toggle_value
 
-    app = TuiApp(config={"profile": "alpha"})
+    # Сессионный выбор пере-собирает базу под профилем — нужен сам config.yml.
+    (tmp_path / "config.yml").write_text(
+        'profile: "alpha"\n', encoding="utf-8"
+    )
+    app = TuiApp(settings=tui_settings({"profile": "alpha"}))
     app._config_path = str(tmp_path / "config.yml")
 
     assert next_toggle_value(app, "profiles", 1) == "work"
@@ -309,11 +335,13 @@ def test_profiles_hint_shows_slots_and_project_source(tmp_path, monkeypatch):
     from gc_tui.toggles import profile_value_hint
 
     app = TuiApp(
-        config={
-            "profile": "work",
-            "models": {"flash": {}, "glm-local": {}},
-            "slots": {"light": "flash", "default": "glm-local"},
-        }
+        settings=tui_settings(
+            {
+                "profile": "work",
+                "models": {"flash": {}, "glm-local": {}},
+                "slots": {"light": "flash", "default": "glm-local"},
+            }
+        )
     )
     app._config_path = str(tmp_path / "base" / "config.yml")
 
@@ -327,7 +355,7 @@ def test_profiles_hint_shows_slots_and_project_source(tmp_path, monkeypatch):
 def test_profiles_hint_warns_about_mcp_rebuild(tmp_path, monkeypatch):
     """Цена переключения (§12.1): профиль, переопределяющий MCP-серверы, —
     предупреждение в хинте. Секция во ВХОДНОМ документе называется `mcp: servers:`
-    (плоский `mcp-servers` существует только в снимке flatten_app_config, а
+    (верхнеуровневое имя `mcp-servers` — только плоское имя ключа, а
     литеральный верхнеуровневый `mcp-servers:` схема профиля отвергает)."""
     monkeypatch.chdir(tmp_path)
     profiles_dir = tmp_path / "base" / "profiles"
@@ -351,7 +379,7 @@ def test_profiles_hint_warns_about_mcp_rebuild(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.toggles import profile_value_hint
 
-    app = TuiApp(config={"profile": "corp"})
+    app = TuiApp(settings=tui_settings({"profile": "corp"}))
     app._config_path = str(tmp_path / "base" / "config.yml")
 
     assert "переключение пересоберёт MCP: 2 серверов" in profile_value_hint(
@@ -366,7 +394,7 @@ def test_profiles_empty_state_hint_verbatim(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.toggles import profile_value_hint
 
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(tmp_path / "config.yml")
 
     assert profile_value_hint(app, "") == (
@@ -385,7 +413,7 @@ def test_profiles_not_selected_hint_lists_available(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.toggles import profile_value_hint
 
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(tmp_path / "base" / "config.yml")
 
     assert (
@@ -409,12 +437,14 @@ async def test_footer_shows_router_model_not_stale_flat_key(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={
-            "model": "STALE-LEGACY-NAME",
-            "models": {"glm-local": {}},
-            "slots": {"default": "glm-local"},
-            "level": "default",
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "STALE-LEGACY-NAME",
+                "models": {"glm-local": {}},
+                "slots": {"default": "glm-local"},
+                "level": "default",
+            }
+        ),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -427,19 +457,21 @@ async def test_footer_shows_router_model_not_stale_flat_key(
 @pytest.mark.asyncio
 async def test_footer_updates_on_level_switch(tmp_path, monkeypatch):
     """Футер обновляется при смене /level — БЕЗ пересборки executor (§6.4):
-    Router-витрина читает effective_config()/сессионный уровень на каждый вызов."""
+    Router-витрина читает effective_settings()/сессионный уровень на каждый вызов."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={
-            "model": "STALE",
-            "models": {"glm-local": {}, "glm-max": {}},
-            "slots": {"default": "glm-local", "max": "glm-max"},
-            "level": "default",
-        },
+        settings=tui_settings(
+            {
+                "agent.model": "STALE",
+                "models": {"glm-local": {}, "glm-max": {}},
+                "slots": {"default": "glm-local", "max": "glm-max"},
+                "level": "default",
+            }
+        ),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -468,7 +500,7 @@ def test_profiles_hint_survives_syntactically_broken_yaml(
     from gc_tui.app import TuiApp
     from gc_tui.toggles import profile_value_hint, profile_values
 
-    app = TuiApp(config={"profile": "broken"})
+    app = TuiApp(settings=tui_settings({"profile": "broken"}))
     app._config_path = str(tmp_path / "config.yml")
 
     assert [v.value for v in profile_values(app)] == [
@@ -503,7 +535,7 @@ def _stub_create_run_context(monkeypatch, captured):
         return _Ctx()
 
     monkeypatch.setattr(
-        "gc_core.config.build_auth_connector", lambda cfg: None
+        "gc_core.config_modules.auth.build_auth_connector", lambda cfg: None
     )
     monkeypatch.setattr(
         "gc_core.run_context.acreate_run_context", _fake_acreate_run_context
@@ -521,12 +553,13 @@ def test_build_real_executor_passes_force_legacy_when_cli_model_forces_it(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={
-            "model": "cli-forced-model",
-            "models": {"glm-local": {}},
-            "slots": {"default": "glm-local"},
-            "cli_explicit_keys": ["model"],
-        },
+        # `--model` — слой CLI поверх загруженного (как `apply_cli_overrides`).
+        settings=tui_settings(
+            {
+                "models": {"glm-local": {}},
+                "slots": {"default": "glm-local"},
+            }
+        ).with_overrides({"agent.model": "cli-forced-model"}, layer="cli"),
     )
     captured: dict = {}
     _stub_create_run_context(monkeypatch, captured)
@@ -544,10 +577,12 @@ def test_build_real_executor_force_legacy_false_without_cli_model_override(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        config={
-            "models": {"glm-local": {}},
-            "slots": {"default": "glm-local"},
-        },
+        settings=tui_settings(
+            {
+                "models": {"glm-local": {}},
+                "slots": {"default": "glm-local"},
+            }
+        ),
     )
     captured: dict = {}
     _stub_create_run_context(monkeypatch, captured)
@@ -580,7 +615,7 @@ def _picker_app(tmp_path, monkeypatch, *, base_profile="", session=None):
 
     from gc_tui.app import TuiApp
 
-    app = TuiApp(config={"profile": base_profile})
+    app = TuiApp(settings=tui_settings({"profile": base_profile}))
     app._config_path = str(tmp_path / "base" / "config.yml")
     if session is not None:
         app._session_overrides.update(session)
@@ -984,7 +1019,7 @@ def test_profile_picker_hint_reuses_the_opening_probe(tmp_path, monkeypatch):
     непроверенного профиля — хинт подвала (`profile_picker_hint`, зовётся на
     каждый highlight И на каждый тик поллинга `ArgPicker.desired_height`, 0.25 с)
     не имеет права звать вторую полную сборку конфига (`probe_profile_assembly` →
-    `load_config_ex`, ~6 мс на профиль) для профиля, который уже пробовала
+    `load_settings`, ~6 мс на профиль) для профиля, который уже пробовала
     витрина списка."""
     from gc_tui.toggles import profile_picker_hint, profile_picker_options
 
@@ -1058,26 +1093,21 @@ def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_tui.app import TuiApp
 
-    cfg, _meta = load_config_ex(str(base_dir / "config.yml"))
-    assert cfg.get("models")  # профиль подмешан
+    cfg = load_settings(str(base_dir / "config.yml"))
+    assert cfg.settings.models  # профиль подмешан
 
-    app = TuiApp(config=cfg)
+    app = TuiApp(settings=cfg)
     app._config_path = str(base_dir / "config.yml")
     app.set_session_override("profile", "")
-    eff = app.effective_config()
-    assert not eff.get("models")  # оверлей профиля снят
-    assert eff.get("profile") == ""
+    eff = app.effective_settings()
+    assert not eff.settings.models  # оверлей профиля снят
+    assert eff.runtime.active_profile == ""
 
 
-# --- Task 15: /level посреди хода — уведомление об отложенном применении -----
-#
-# Симметрично `switch_session_profile` (§9.1, `test_session_profile_level.py`):
-# сессионный оверрайд применяется сразу (палитра меняет значение мгновенно),
-# но запросы текущего хода всё ещё идут на прежнем пине — уведомление честно
-# говорит, что новый уровень подхватится СО СЛЕДУЮЩЕГО хода.
+# --- Ручной уровень закрепляется на ход; AUTO не шлёт deferred notice ----
 
 
 def _level_app(tmp_path):
@@ -1085,14 +1115,211 @@ def _level_app(tmp_path):
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text("level: default\n", encoding="utf-8")
-    app = TuiApp(config={"level": "default"})
+    app = TuiApp(settings=tui_settings({"level": "default"}))
     app._config_path = str(cfg_file)
     app._threads_dir = str(tmp_path / "threads")
     app.tui_state.active_task_id = "t1"
     return app
 
 
-def test_apply_level_toggle_defers_notice_while_run_is_live(tmp_path):
+def _app_with_live_run(tmp_path):
+    app = _level_app(tmp_path)
+
+    class _LiveRunner:
+        def is_running(self):
+            return True
+
+    app.active_runner = _LiveRunner()
+    return app
+
+
+@pytest.mark.parametrize("running", [True, False, None])
+def test_apply_level_toggle_emits_no_deferred_notice(tmp_path, running):
+    """В ходе AUTO нет ручного пина: переключение не выдаёт notice ручного уровня."""
+    pytest.importorskip("textual")
+    from gc_core.runtime_notices import (
+        clear_runtime_notices,
+        collect_runtime_notices,
+    )
+
+    clear_runtime_notices()
+    app = _app_with_live_run(tmp_path)
+    app.active_runner.call_level = lambda: None
+    app.auto_mode_active = lambda: True
+    if running is None:
+        app.active_runner = None
+    else:
+        app.active_runner.is_running = lambda: running
+    app.apply_session_override("level", "max")
+    assert app.effective_settings().settings.level == "max"
+    assert "level_switch_deferred" not in {
+        n.code for n in collect_runtime_notices()
+    }
+
+
+# --- `/level` — четвёртая позиция `auto` вне шкалы (спека автороутинга §3) ---
+
+
+def _app(tmp_path, config):
+    """TuiApp с переданным конфигом напрямую (по образцу `_level_app`) — без
+    файла на диске: тестам ниже нужен только состав `config`, который видит
+    `effective_settings()`."""
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(settings=tui_settings(config))
+    app._config_path = str(tmp_path / "config.yml")
+    return app
+
+
+# Реестр с двумя разными комплектами вызова — иначе автовыбор недоступен
+# («во всех уровнях одна модель»), и позиции `auto` в треке нет.
+_TWO_KITS = {
+    "models": {"fast": {}, "mid": {}},
+    "slots": {"light": "fast", "default": "mid"},
+}
+
+
+def test_level_track_shows_auto_off_scale_when_available(tmp_path):
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "default",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": True,
+            **_TWO_KITS,
+        },
+    )
+    row = _level_row_plain(
+        app
+    )  # хелпер: строка тоггла level из палитры, plain
+    assert "○ ● ○  ○  default" in row  # три позиции + отступ + четвёртая
+
+
+def test_level_track_lights_auto_and_dims_scale(tmp_path):
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "auto",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": True,
+            **_TWO_KITS,
+        },
+    )
+    row = _level_row_plain(app)
+    assert "○ ○ ○  ●  auto" in row
+
+
+def test_level_track_hides_auto_when_feature_unavailable(tmp_path):
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "auto",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": False,
+        },
+    )
+    row = _level_row_plain(app)
+    assert (
+        "○ ● ○" in row and "auto" not in row
+    )  # горит default, позиции auto нет
+
+
+def test_level_cycle_includes_auto(tmp_path):
+    from gc_tui.toggles import next_toggle_value, apply_toggle, toggle_state
+
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "max",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": True,
+            **_TWO_KITS,
+        },
+    )
+    assert next_toggle_value(app, "level", +1) == "auto"
+    apply_toggle(app, "level", "auto")
+    assert toggle_state(app, "level") == "auto"
+    assert next_toggle_value(app, "level", +1) == "light"
+
+
+def test_level_hint_for_auto_does_not_resolve_model(tmp_path):
+    from gc_tui.toggles import level_value_hint
+
+    app = _app(
+        tmp_path,
+        config={
+            "agent.model": "m",
+            "level": "auto",
+            "backend.api_mode": "chat_completions",
+            "agent.auto_routing": True,
+        },
+    )
+    assert (
+        level_value_hint(app, "auto")
+        == "уровень меняется автоматически по ходу работы"
+    )
+
+
+@pytest.mark.asyncio
+async def test_palette_rebuild_asks_each_values_provider_once_and_skips_trackless(
+    tmp_path, monkeypatch
+):
+    """Перерисовка подвала (стрелка, символ фильтра): состав `/level` считается
+    один раз на рендер, а провайдер trackless `/profiles` (скан каталогов
+    профилей) раскладке не нужен вовсе — его значения ширину не задают."""
+    pytest.importorskip("textual")
+    import dataclasses
+    from gc_tui import toggles as tg
+    from gc_tui.app import TuiApp
+    from gc_tui.commands import build_default_registry
+
+    monkeypatch.chdir(tmp_path)
+    calls = {"level": 0, "profiles": 0}
+    for name in ("level", "profiles"):
+        real = tg.TOGGLES[name].values_provider
+
+        def counting(app, settings, _real=real, _name=name):
+            calls[_name] += 1
+            return _real(app, settings)
+
+        monkeypatch.setitem(
+            tg.TOGGLES,
+            name,
+            dataclasses.replace(tg.TOGGLES[name], values_provider=counting),
+        )
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings(
+            {
+                "level": "default",
+                "backend.api_mode": "chat_completions",
+                "agent.auto_routing": True,
+                "models": {"fast": {}, "mid": {}},
+                "slots": {"light": "fast", "default": "mid"},
+            }
+        ),
+    )
+    app._config_path = str(tmp_path / "config.yml")
+    reg = build_default_registry()
+    async with app.run_test(size=(120, 40)) as pilot:
+        pal = _wire_palette(app, reg)
+        await app.screen.mount(pal)
+        await pilot.pause()
+        calls.update(level=0, profiles=0)
+
+        pal.move_selection(1)  # выделение в верхнем списке, не на /profiles
+
+        assert calls == {"level": 1, "profiles": 0}
+
+
+def test_apply_level_toggle_has_no_end_of_task_notice_while_run_is_live(
+    tmp_path,
+):
     pytest.importorskip("textual")
     from gc_core.runtime_notices import (
         clear_runtime_notices,
@@ -1111,16 +1338,10 @@ def test_apply_level_toggle_defers_notice_while_run_is_live(tmp_path):
     apply_toggle(app, "level", "max")
 
     assert (
-        app.effective_config()["level"] == "max"
+        app.effective_settings().settings.level == "max"
     )  # применилось сразу (§ выбор)
     codes = [n.code for n in collect_runtime_notices()]
-    assert "level_switch_deferred" in codes
-    msg = next(
-        n.message
-        for n in collect_runtime_notices()
-        if n.code == "level_switch_deferred"
-    )
-    assert "max" in msg and "завершения текущей задачи" in msg
+    assert "level_switch_deferred" not in codes
 
 
 def test_apply_level_toggle_no_notice_without_active_run(tmp_path):

@@ -6,7 +6,7 @@ class UpdateConfig(BaseModel):
     updater.check-геттеры из сырого dict; схема нужна, чтобы extra='forbid'
     верхнего AppConfig не отвергал ключ update в config.yml."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     # YAML разворачивает голое `off` в bool False → принимаем str|bool; смысл «выкл»
     # даёт и "off", и False (см. updater.check.auto_check_enabled).

@@ -19,6 +19,7 @@ from gc_core.summarize.working_memory_gateway import (
 )
 from gc_testkit import run_coro
 from gc_testkit.paths import ASSETS
+from gc_testkit.settings import fake_ctx
 
 
 def _prompt_path() -> str:
@@ -76,7 +77,7 @@ def test_request_patch_replace_injects_subagent_guidance_in_system_only(
         "gc_core.summarize.memory_suggestions.arequest_summary_text",
         _fake_summary_text,
     )
-    ctx = SimpleNamespace(config_dict={}, logger=None)
+    ctx = fake_ctx(logger=None)
     child = SimpleNamespace(parent_state_id="parent-1")
     run_coro(
         arequest_patch_replace(

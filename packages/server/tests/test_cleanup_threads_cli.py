@@ -24,7 +24,7 @@ import sys
 from gc_core.thread_store import resolve_threads_dir
 from gc_server import cleanup_threads as cleanup_mod
 from gc_server.rest_api.server_config import (
-    build_agent_config_for_server,
+    build_agent_settings_for_server,
     load_server_config,
 )
 
@@ -41,7 +41,7 @@ def test_default_is_the_same_dir_the_janitor_cleans():
     дефолт разъедется с janitor'ом, и CLI начнёт чистить не тот каталог.
     """
     expected = resolve_threads_dir(
-        build_agent_config_for_server(load_server_config())
+        build_agent_settings_for_server(load_server_config())
     )
 
     assert cleanup_mod._default_threads_dir() == expected

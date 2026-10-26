@@ -8,9 +8,10 @@ import time
 import uuid
 from typing import Any
 
+from gc_core.settings import LoadedSettings
 from gc_core.thread_store import resolve_threads_dir, validate_thread_id
 
-from gc_chat.agent_config import prepare_agent_config
+from gc_chat.agent_config import prepare_agent_settings
 from gc_chat.completions.ask_human import bind_ask_human
 from gc_chat.completions.content import ContentMap
 from gc_chat.completions.history import (
@@ -36,29 +37,30 @@ class CompletionsFacade:
     def __init__(
         self,
         *,
-        config: dict,
+        settings: LoadedSettings,
         agent_factory: Any,
         auth_connector: Any = None,
         tools_cache: Any = None,
         os_backend: Any = None,
     ) -> None:
-        self._config = config
+        self._settings = settings
         self._agent_factory = agent_factory
         self._auth = auth_connector
         self._tools_cache = tools_cache
         self._os_backend = os_backend
-        self._threads_dir = _threads_dir(config)
-        self.auth_token = str(config.get("chat_api_auth_token") or "")
-        self.cors_origins = _cors_origins(config)
-        self.bind_host = str(config.get("chat_api_host") or "127.0.0.1")
-        self.model_id = str(config.get("model") or "")
+        self._threads_dir = resolve_threads_dir(settings)
+        chat_api = settings.settings.chat_api
+        self.auth_token = chat_api.auth_token
+        self.cors_origins = _cors_origins(chat_api.cors_origins)
+        self.bind_host = chat_api.host
+        self.model_id = str(settings.settings.agent.model or "")
         self._create_lock = asyncio.Lock()
 
     async def open(self, body: Any) -> TurnRun:
         incoming = parse_turn(body)
         thread_id = validate_thread_id(str(uuid.uuid4()))
         cwd = cwd_for_turn(
-            incoming.cwd_sent, self._config.get("chat_api_launch_root")
+            incoming.cwd_sent, self._settings.settings.chat_api.launch_root
         )
         agent = await self._agent_for(thread_id, cwd)
         try:
@@ -74,13 +76,13 @@ class CompletionsFacade:
     async def _agent_for(self, thread_id: str, cwd: str) -> Any:
         del thread_id
         async with self._create_lock:
-            config = prepare_agent_config(
-                self._config,
+            settings = prepare_agent_settings(
+                self._settings,
                 cwd=cwd,
                 instructions_path=completions_special_instructions_path(),
             )
             return await self._agent_factory(
-                config,
+                settings,
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
                 os_backend=self._os_backend,
@@ -111,14 +113,7 @@ def _forget_quietly(threads_dir: str, thread_id: str) -> None:
         logger.exception("completions delete thread")
 
 
-def _threads_dir(config: dict) -> str:
-    return resolve_threads_dir(config)
-
-
-def _cors_origins(config: dict) -> list[str]:
-    raw = config.get("chat_api_cors_origins") or []
-    if not isinstance(raw, list):
-        return []
+def _cors_origins(raw: list[str]) -> list[str]:
     return [
         item for item in raw if isinstance(item, str) and item not in {"", "*"}
     ]

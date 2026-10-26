@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.intent_guard.agent_logging import (
     log_finish_gate_decision,
     log_finish_gate_skipped,
@@ -11,12 +12,10 @@ from gc_core.intent_guard.agent_logging import (
     log_finish_gate_validate_start,
 )
 from gc_core.intent_guard.feedback import build_finish_gate_feedback
-from gc_core.intent_guard.final_report_consistency import (
-    avalidate_final_report_vs_user_intent,
-)
 from gc_core.intent_guard.trace_digest import build_finish_gate_trace_digest
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
+from gc_core.settings import AppConfig, RuntimeEnv, runtime_of, settings_of
 
 _logger = logging.getLogger(__name__)
 
@@ -24,22 +23,27 @@ _DEFAULT_FINISH_GATE_MAIN = 10
 _DEFAULT_FINISH_GATE_SUB = 3
 
 
-def judge_available(cfg: dict) -> bool:
+def judge_available(settings: Any) -> bool:
     """Доступна ли машинерия судейства (finish-gate validator) — инфраструктурное
-    условие: только ``backend_api_mode == "chat_completions"``. БЕЗ пользовательских
-    ручек (``strict_turn_finish_validation`` — ручка finish-gate, сюда не входит)."""
-    if not isinstance(cfg, dict):
+    условие: только ``backend.api_mode == "chat_completions"``. БЕЗ пользовательских
+    ручек (``strict_turn_finish_validation`` — ручка finish-gate, сюда не входит).
+
+    ``settings`` — то, что принимает ``settings_of`` (ctx, ``LoadedSettings``,
+    ``AppConfig``); ``None`` — судейства нет."""
+    if settings is None:
         return False
     return (
-        str(cfg.get("backend_api_mode") or "").strip().lower()
+        str(settings_of(settings).backend.api_mode or "").strip().lower()
         == "chat_completions"
     )
 
 
-def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
-    """Макс. число reject за turn/run (§10); всегда >= 1."""
-    if not isinstance(cfg, dict):
-        cfg = {}
+def resolve_finish_gate_max_rejections(settings: Any, state: Any) -> int:
+    """Макс. число reject за turn/run (§10); всегда >= 1.
+
+    ``settings`` — то, что принимает ``settings_of``; ``None`` — умолчания.
+    """
+    agent = settings_of(settings).agent if settings is not None else None
     is_main = getattr(state, "parent_state_id", None) is None
     key = (
         "finish_gate_max_iterations"
@@ -49,7 +53,7 @@ def resolve_finish_gate_max_rejections(cfg: dict | None, state: Any) -> int:
     default = (
         _DEFAULT_FINISH_GATE_MAIN if is_main else _DEFAULT_FINISH_GATE_SUB
     )
-    raw = cfg.get(key, default)
+    raw = getattr(agent, key) if agent is not None else default
     try:
         value = int(raw)
     except (TypeError, ValueError):
@@ -84,19 +88,21 @@ class FinishGateDecision:
     feedback_text: str = ""
 
 
-def _finish_gate_skip_reason(cfg: dict, backend: str) -> str:
-    if not bool(cfg.get("strict_turn_finish_validation", True)):
+def _finish_gate_skip_reason(
+    settings: AppConfig, runtime: RuntimeEnv, backend: str
+) -> str:
+    if not bool(settings.agent.strict_turn_finish_validation):
         return "strict_turn_finish_validation=false"
     if backend != "chat_completions":
         return f"backend_api_mode={backend}"
-    if cfg.get("finish_gate_smart"):
+    if runtime.finish_gate_smart:
         return "finish_gate_smart_no_tool_calls"
     return "disabled"
 
 
-def _finish_gate_digest_chars(state: Any, cfg: dict) -> int:
+def _finish_gate_digest_chars(state: Any, settings: Any) -> int:
     try:
-        digest = build_finish_gate_trace_digest(state=state, cfg=cfg)
+        digest = build_finish_gate_trace_digest(state=state, settings=settings)
         return len(digest.trace_digest_text or "")
     except Exception:
         return 0
@@ -118,15 +124,14 @@ class FinishGateGuard:
 
     @property
     def enabled(self) -> bool:
-        cfg = getattr(self._ctx, "config_dict", {}) or {}
-        if not isinstance(cfg, dict):
+        settings = settings_of(self._ctx)
+        strict = bool(settings.agent.strict_turn_finish_validation)
+        if not (strict and judge_available(settings)):
             return False
-        strict = bool(cfg.get("strict_turn_finish_validation", True))
-        if not (strict and judge_available(cfg)):
-            return False
-        # smart (только TUI-проекция): без вызовов инструментов за ход судью не зовём.
-        # CLI/server ключа finish_gate_smart не ставят → ветка не срабатывает.
-        if cfg.get("finish_gate_smart"):
+        # smart (только TUI-сигнал рантайма): без вызовов инструментов за ход
+        # судью не зовём. CLI/server finish_gate_smart не ставят → ветка не
+        # срабатывает.
+        if runtime_of(self._ctx).finish_gate_smart:
             return int(getattr(self._state, "turn_tool_calls", 0) or 0) >= 1
         return True
 
@@ -136,15 +141,15 @@ class FinishGateGuard:
         finish_handoff_arguments: Any,
     ) -> FinishGateDecision:
         """Run quality gate on the agent's finish-turn handoff (arguments JSON)."""
-        cfg = getattr(self._ctx, "config_dict", {}) or {}
-        if not isinstance(cfg, dict):
-            cfg = {}
-        backend = str(cfg.get("backend_api_mode") or "").strip().lower()
+        cfg = settings_of(self._ctx)
+        backend = str(cfg.backend.api_mode or "").strip().lower()
         parent_state_id = getattr(self._state, "parent_state_id", None)
         agent_kind = "subagent" if parent_state_id is not None else "main"
 
         if not self.enabled:
-            reason = _finish_gate_skip_reason(cfg, backend)
+            reason = _finish_gate_skip_reason(
+                cfg, runtime_of(self._ctx), backend
+            )
             log_finish_gate_skipped(
                 self._logger,
                 reason=reason,
@@ -211,6 +216,8 @@ class FinishGateGuard:
                 context_user_messages=user_intent_log,
                 finish_handoff_arguments=finish_handoff_arguments,
             )
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             self._logger.warning(
                 "finish_gate validator error; fail-open accept so pending finish handoff "
@@ -265,3 +272,11 @@ class FinishGateGuard:
             feedback_preview=feedback_text,
         )
         return decision
+
+
+async def avalidate_final_report_vs_user_intent(**kwargs):
+    from gc_core.intent_guard.final_report_consistency import (
+        avalidate_final_report_vs_user_intent as validate,
+    )
+
+    return await validate(**kwargs)

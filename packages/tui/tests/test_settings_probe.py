@@ -126,7 +126,7 @@ def test_ok_from_stage1_models():
         fetch_ex=_fetch(models=[mp.ModelInfo(id="m1")], status=200),
     )
     assert r.verdict == "ok" and r.models and r.latency_ms == 7
-    assert r.reachable and r.auth_ok
+    assert r.verdict != "unknown" and r.http_status != 401
 
 
 def test_stage1_401_with_working_post_is_ok():
@@ -141,11 +141,16 @@ def test_stage1_401_with_working_post_is_ok():
         fetch_ex=_fetch(status=401),
         post_ex=_post(status=200),
     )
-    assert r.verdict == "ok" and r.auth_ok
+    assert r.verdict == "ok" and r.http_status != 401
 
 
-@pytest.mark.parametrize("source, accepted", [("secret", "Bearer secret"), ("Bearer secret", "secret")])
-def test_menu_probe_fallback_retries_chat_auth_after_catalog_failure(monkeypatch, source, accepted):
+@pytest.mark.parametrize(
+    "source, accepted",
+    [("secret", "Bearer secret"), ("Bearer secret", "secret")],
+)
+def test_menu_probe_fallback_retries_chat_auth_after_catalog_failure(
+    monkeypatch, source, accepted
+):
     calls = []
 
     def get_ex(url, headers, verify, *, config_proxy=None):
@@ -161,7 +166,13 @@ def test_menu_probe_fallback_retries_chat_auth_after_catalog_failure(monkeypatch
     monkeypatch.setattr(mp, "_requests_post_ex", post_ex)
     result = probe("http://x/v1/chat/completions", source, True, "m1")
     assert result.verdict == "ok"
-    assert calls == [("config", source), ("config", accepted), ("models", source), ("chat", source), ("chat", accepted)]
+    assert calls == [
+        ("config", source),
+        ("config", accepted),
+        ("models", source),
+        ("chat", source),
+        ("chat", accepted),
+    ]
 
 
 @pytest.mark.parametrize("status", [200, 403, 404, 500, None])
@@ -172,12 +183,26 @@ def test_menu_probe_fallback_does_not_retry_without_401(status):
         calls.append(auth)
         return status, "timeout" if status is None else "", 1, {}
 
-    result = probe("http://x/v1/chat/completions", "secret", True, "m1", fetch_ex=_fetch(status=404), post_ex=post_ex)
+    result = probe(
+        "http://x/v1/chat/completions",
+        "secret",
+        True,
+        "m1",
+        fetch_ex=_fetch(status=404),
+        post_ex=post_ex,
+    )
     assert result.http_status == status
     assert calls == ["secret"]
 
 
-@pytest.mark.parametrize("auth, expected", [("secret", ["secret", "Bearer secret"]), ("Basic encoded", ["Basic encoded"]), (None, [None])])
+@pytest.mark.parametrize(
+    "auth, expected",
+    [
+        ("secret", ["secret", "Bearer secret"]),
+        ("Basic encoded", ["Basic encoded"]),
+        (None, [None]),
+    ],
+)
 def test_menu_probe_fallback_limits_401_retries(auth, expected):
     calls = []
 
@@ -185,7 +210,14 @@ def test_menu_probe_fallback_limits_401_retries(auth, expected):
         calls.append(token)
         return 401, "", 1, {}
 
-    result = probe("http://x/v1/chat/completions", auth, True, "m1", fetch_ex=_fetch(status=404), post_ex=post_ex)
+    result = probe(
+        "http://x/v1/chat/completions",
+        auth,
+        True,
+        "m1",
+        fetch_ex=_fetch(status=404),
+        post_ex=post_ex,
+    )
     assert result.verdict == "rejected"
     assert calls == expected
 
@@ -201,7 +233,7 @@ def test_stage1_401_and_post_401_is_rejected():
         post_ex=_post(status=401),
     )
     assert r.verdict == "rejected" and r.http_status == 401
-    assert "401" in r.detail and not r.auth_ok
+    assert "401" in r.detail and r.http_status == 401
 
 
 def test_no_model_dummy_post_non401_token_accepted():
@@ -216,7 +248,7 @@ def test_no_model_dummy_post_non401_token_accepted():
         fetch_ex=_fetch(status=401),
         post_ex=_post(status=500),
     )
-    assert r.verdict == "ok" and r.auth_ok
+    assert r.verdict == "ok" and r.http_status != 401
 
 
 def test_no_model_dummy_post_401_is_rejected():
@@ -243,7 +275,7 @@ def test_no_model_dummy_post_404_json_is_ok():
         fetch_ex=_fetch(status=401),
         post_ex=_post(status=404, json_body=True),
     )
-    assert r.verdict == "ok" and r.auth_ok
+    assert r.verdict == "ok" and r.http_status != 401
 
 
 def test_no_model_dummy_post_404_html_is_unknown():
@@ -260,7 +292,7 @@ def test_no_model_dummy_post_404_html_is_unknown():
         post_ex=_post(status=404, json_body=False),
     )
     assert r.verdict == "unknown" and r.http_status == 404
-    assert r.auth_ok
+    assert r.http_status != 401
 
 
 def test_no_model_sends_dummy_probe_model():
@@ -291,7 +323,7 @@ def test_network_stage1_is_unknown():
         "m1",
         fetch_ex=_fetch(net="timeout"),
     )
-    assert r.verdict == "unknown" and not r.reachable
+    assert r.verdict == "unknown"
     assert "timeout" in r.detail
 
 
@@ -701,14 +733,22 @@ def test_probe_reports_the_form_that_must_be_carried_into_runtime():
     from gc_core.config_modules.model_registry import ModelEntry
     from gc_tui.services.settings_probe import probe_connection
 
-    auth = ModelEntry(url="https://example.test/v1/chat/completions", token="secret").authorization_header
+    auth = ModelEntry(
+        url="https://example.test/v1/chat/completions", token="secret"
+    ).authorization_header
 
     def bare_only(endpoint, header, verify, model, **kwargs):
         if header == "secret":
             return ProbeResult("ok", 200, None, 1, "доступен")
         return ProbeResult("rejected", 401, None, 1, "отказ")
 
-    result = probe_connection("https://example.test/v1/chat/completions", auth, True, "m", probe_fn=bare_only)
+    result = probe_connection(
+        "https://example.test/v1/chat/completions",
+        auth,
+        True,
+        "m",
+        probe_fn=bare_only,
+    )
     assert result.auth_state == "accepted"
     assert result.verdict == "ok"
     assert result.accepted_auth == "secret"

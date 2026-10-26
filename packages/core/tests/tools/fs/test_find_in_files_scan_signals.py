@@ -12,13 +12,14 @@ from collections import Counter
 from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_testkit import as_coro
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_testkit.settings import make_settings
 
 
 def _tool(tmp_path, extra=None):
     cfg = {"launch_root": str(tmp_path)}
     if extra:
         cfg["fs_tools"] = {"find_in_files": extra}
-    return with_local_ctx(FindInFiles, config_dict=cfg)
+    return with_local_ctx(FindInFiles, cfg)
 
 
 def _call(tool, tmp_path, **kwargs):
@@ -209,8 +210,8 @@ def test_tool_description_uses_live_config_limits():
             }
         }
     }
-    spec = FindInFiles.tool_description(config_dict=cfg)
-    prompt = FindInFiles.prompt_description(config_dict=cfg)
+    spec = FindInFiles.tool_description(make_settings(cfg))
+    prompt = FindInFiles.prompt_description(make_settings(cfg))
     limit = spec["parameters"]["properties"]["limit"]
     assert limit["maximum"] == 11
     assert "Default 7" in limit["description"]
@@ -223,14 +224,16 @@ def test_builtin_tools_data_schema_uses_live_config():
     from gc_core.tools.registry import get_builtin_tools_data
 
     tools = get_builtin_tools_data(
-        {
-            "fs_tools": {
-                "find_in_files": {
-                    "default_limit": 7,
-                    "max_total_matches": 11,
+        make_settings(
+            {
+                "fs_tools": {
+                    "find_in_files": {
+                        "default_limit": 7,
+                        "max_total_matches": 11,
+                    }
                 }
             }
-        }
+        )
     )
     entry = tools["fs_find_in_files"]
     limit = entry["spec"]["parameters"]["properties"]["limit"]

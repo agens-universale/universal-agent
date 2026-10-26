@@ -5,6 +5,7 @@
 сбрасывает кэш; без runner'а сегмента нет.
 """
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
@@ -27,7 +28,7 @@ class _FakeRunner:
 
 def _meta(inp, out):
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, inp, out)
+    acc.add(CATEGORY_MAIN, inp, out, model="m")
     return acc.to_meta()
 
 
@@ -39,7 +40,7 @@ async def test_footer_shows_request_and_session(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        app._config = {"model": "m", "pricing": _PRICING}
+        app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
         app.active_runner = _FakeRunner(
             (_meta(2_000_000, 0), _meta(1_000_000, 0))
@@ -60,7 +61,7 @@ async def test_request_reflects_live_snapshot(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        app._config = {"model": "m", "pricing": _PRICING}
+        app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
 
         # Ход в процессе: «запрос» = live-дельта, растёт вместе с сессией.
@@ -88,7 +89,7 @@ async def test_request_hidden_until_first_tokens(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        app._config = {"model": "m", "pricing": _PRICING}
+        app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
         app.active_runner = _FakeRunner(
             (_meta(2_000_000, 0), UsageAccount().to_meta())
@@ -110,7 +111,7 @@ async def test_no_usage_segment_when_runner_lacks_method(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        app._config = {"model": "m", "pricing": _PRICING}
+        app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
         app.active_runner = _Bare()
         right = scr._compose_footer_right().plain  # не должно кинуть
@@ -125,7 +126,7 @@ async def test_no_usage_segment_without_runner(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        app._config = {"model": "m", "pricing": _PRICING}
+        app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
         app.active_runner = None
         right = scr._compose_footer_right().plain
@@ -140,9 +141,10 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
-    async with app.run_test(size=(40, 24)) as pilot:
+    # 48 колонок: ценам хватает второй строки рядом с глифом режима слева.
+    async with app.run_test(size=(48, 24)) as pilot:
         scr = pilot.app.screen
-        app._config = {"model": "m", "pricing": _PRICING}
+        app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
         app.active_runner = _FakeRunner(
             (_meta(2_000_000, 0), _meta(1_000_000, 0))
@@ -158,14 +160,14 @@ async def test_footer_stacks_session_on_narrow_width(tmp_path):
 async def test_footer_never_flush_against_left(tmp_path):
     """Граничная ширина: right-блок влезает ровно впритык к footer-left
     (хром футера съедает весь резерв) → должен уйти в стек, а не клеиться.
-    W=67: left=25 (_FOOTER_LEFT), right=39, хром=3 → зазор был бы 0."""
+    W=67: правой нужно 39, хром=3 → левой осталось бы 25, меньше пилюли режима."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test(size=(67, 24)) as pilot:
         scr = pilot.app.screen
-        app._config = {"model": "m", "pricing": _PRICING}
+        app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
         app.active_runner = _FakeRunner(
             (_meta(2_000_000, 0), _meta(1_000_000, 0))
@@ -182,7 +184,7 @@ async def test_footer_single_line_on_wide_width(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test(size=(200, 24)) as pilot:
         scr = pilot.app.screen
-        app._config = {"model": "m", "pricing": _PRICING}
+        app._settings = tui_settings({"agent.model": "m", "pricing": _PRICING})
         scr._active_task_id = "t1"
         app.active_runner = _FakeRunner(
             (_meta(2_000_000, 0), _meta(1_000_000, 0))
@@ -207,11 +209,13 @@ async def test_footer_fact_currency_follows_endpoint(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        app._config = {
-            "model": "m",
-            "pricing": _PRICING,
-            "completions_url": "https://routerai.ru/api/v1/chat/completions",
-        }
+        app._settings = tui_settings(
+            {
+                "agent.model": "m",
+                "pricing": _PRICING,
+                "backend.completions_url": "https://routerai.ru/api/v1/chat/completions",
+            }
+        )
         scr._active_task_id = "t1"
         app.active_runner = _FakeRunner(
             (

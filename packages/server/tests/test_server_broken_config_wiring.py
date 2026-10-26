@@ -1,4 +1,4 @@
-"""server.py грузит конфиг НА ИМПОРТЕ (module-level SERVER_CONFIG/BASE_AGENT_CONFIG) —
+"""server.py грузит конфиг НА ИМПОРТЕ (module-level SERVER_CONFIG/BASE_AGENT_SETTINGS) —
 сломанный конфиг не должен ронять импорт голым traceback'ом, а должен дать
 понятный SystemExit, тем же приёмом, что config_modules/env_vars.py уже
 применяет к битым GC_*-переменным окружения.
@@ -56,7 +56,7 @@ def _minimal_server_config():
 
 
 def test_import_server_exits_cleanly_when_agent_config_broken():
-    """build_agent_config_for_server (rest_api/server_config.py:93) падает на
+    """build_agent_settings_for_server (rest_api/server_config.py) падает на
     сломанном config.yml агента — импорт server должен завершиться SystemExit
     с текстом причины, а не поднять ValueError наружу."""
     _reset_server_module()
@@ -67,7 +67,7 @@ def test_import_server_exits_cleanly_when_agent_config_broken():
                 return_value=_minimal_server_config(),
             ),
             patch(
-                "gc_server.rest_api.server_config.build_agent_config_for_server",
+                "gc_server.rest_api.server_config.build_agent_settings_for_server",
                 side_effect=ValueError(
                     "C:\\gc\\config.yml: невалидный YAML: boom"
                 ),

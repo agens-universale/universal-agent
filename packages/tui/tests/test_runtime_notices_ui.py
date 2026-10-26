@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_core.runtime_notices import clear_runtime_notices, push_runtime_notice
 from gc_core.startup_notices import Notice
@@ -16,9 +17,9 @@ async def test_runtime_notice_appears_in_card(tmp_path):
     from gc_tui.app import TuiApp
 
     clear_runtime_notices()
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         scr = pilot.app.screen
         await pilot.pause()
@@ -54,7 +55,8 @@ async def test_runtime_notice_footer_on_sessions_disappears_after_view(
 
     clear_runtime_notices()
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config={"model": "M"}
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     ).run_test() as pilot:
         push_runtime_notice(Notice("warning", "w1", "тест"))
         await pilot.press("ctrl+s")

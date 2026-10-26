@@ -11,17 +11,13 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 
 def _call(tmp_path, **kwargs):
-    tool = with_local_ctx(
-        FindInFiles, config_dict={"launch_root": str(tmp_path)}
-    )
+    tool = with_local_ctx(FindInFiles, {"launch_root": str(tmp_path)})
     return json.loads(tool(path=str(tmp_path), **kwargs))
 
 
 def _python_call(tmp_path, monkeypatch, **kwargs):
     """Python canon: native grep is a separate contract (see native_live tests)."""
-    tool = with_local_ctx(
-        FindInFiles, config_dict={"launch_root": str(tmp_path)}
-    )
+    tool = with_local_ctx(FindInFiles, {"launch_root": str(tmp_path)})
     monkeypatch.setattr(type(tool._backend), "has_grep", False, raising=False)
     data = json.loads(tool(path=str(tmp_path), **kwargs))
     assert data.get("search_backend") == "python"
@@ -51,9 +47,7 @@ def test_whole_response_stays_small_on_a_minified_line(tmp_path):
         ("y" * 5000 + "needle") * 40, encoding="utf-8"
     )
 
-    tool = with_local_ctx(
-        FindInFiles, config_dict={"launch_root": str(tmp_path)}
-    )
+    tool = with_local_ctx(FindInFiles, {"launch_root": str(tmp_path)})
     raw = tool(
         path=str(tmp_path), pattern="needle", query_mode="text", limit=20
     )

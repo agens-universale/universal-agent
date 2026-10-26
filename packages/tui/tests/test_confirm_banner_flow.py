@@ -1,5 +1,6 @@
 """confirm banner: показ/скрытие + перехват y/s/N/Esc/↑↓/Enter → submit_confirm_reply."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -102,7 +103,9 @@ async def test_confirm_banner_y_answers_allow_remember(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -142,7 +145,9 @@ async def test_confirm_banner_o_answers_allow_once(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -170,7 +175,9 @@ async def test_confirm_banner_n_answers_deny_remember(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -188,9 +195,10 @@ async def test_confirm_banner_n_answers_deny_remember(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
-    """Esc при активном баннере: submit_confirm_reply("deny_remember"), не проваливается
-    в глобальную Esc-лестницу (нет exit-модалки)."""
+async def test_confirm_banner_escape_answers_deny_once(tmp_path):
+    """Esc при активном баннере — отмена: submit_confirm_reply("deny_once"), не
+    запрет на всю сессию (его выбирают явно, клавишей N), и не проваливается в
+    глобальную Esc-лестницу (нет exit-модалки)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
@@ -199,7 +207,9 @@ async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -211,7 +221,7 @@ async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
         await pilot.press("escape")
         await pilot.pause(0.1)
 
-        assert runner.replies == ["deny_remember"]
+        assert runner.replies == ["deny_once"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # Не открылась exit-модалка (screen_stack == 1)
@@ -229,7 +239,9 @@ async def test_confirm_banner_enter_default_answers_allow_remember(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -257,7 +269,9 @@ async def test_confirm_banner_down_then_enter_answers_allow_once(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -295,7 +309,9 @@ async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -365,7 +381,9 @@ async def test_confirm_ctrl_click_not_open_tool_detail(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -412,7 +430,9 @@ async def test_ctrl_click_opens_tool_detail_without_confirm(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
 
     async with app.run_test() as pilot:
@@ -447,7 +467,9 @@ async def test_confirm_ctrl_click_not_open_viewer_for_trace_row(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -500,7 +522,9 @@ async def test_confirm_click_does_not_toggle_summary_body(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -552,7 +576,9 @@ async def test_click_toggles_summary_body_without_confirm(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
 
     async with app.run_test() as pilot:
@@ -594,7 +620,9 @@ async def test_confirm_banner_receives_focus_on_show(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
 
     async with app.run_test() as pilot:
@@ -630,7 +658,9 @@ async def test_ctrl_c_during_init_style_confirm_cancels_and_hides_banner(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -673,7 +703,9 @@ async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -713,7 +745,9 @@ async def test_reset_render_state_clears_confirm_banner(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
     app.active_runner = runner
 
@@ -735,3 +769,78 @@ async def test_reset_render_state_clears_confirm_banner(tmp_path):
         assert not pilot.app.query_one("#input-row", Horizontal).has_class(
             "hidden"
         )
+
+
+@pytest.mark.asyncio
+async def test_answered_banner_returns_a_following_trace_to_the_bottom(
+    tmp_path,
+):
+    """Ответ снял баннер — лента, прижатая к низу, туда и возвращается."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    runner = _StubRunner()
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+    app.active_runner = runner
+
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.show_confirm_banner("Тест", "Разрешить?")
+        await pilot.pause(0.1)
+        scrolled = []
+        scr._scroll_trace_end = lambda: scrolled.append(True)
+        scr._stick_bottom = True
+
+        scr._answer_confirm("allow_once")
+        scr._stick_bottom = False  # опрос увидел сдвиг низа после снятия
+        await pilot.pause(0.1)
+
+        assert runner.replies == ["allow_once"]
+        assert scrolled  # опрос потом может прижать ещё раз
+        assert scr._stick_bottom is True
+
+
+@pytest.mark.asyncio
+async def test_answered_banner_keeps_a_trace_scrolled_up_in_place(tmp_path):
+    """Фокус уходит в поле ввода до снятия баннера: иначе Textual переводит
+    его на фокусируемую строку ленты и прокручивает ленту к ней."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
+    from textual.widgets import Static
+
+    class _Focusable(Static):
+        can_focus = True
+
+    runner = _StubRunner()
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+    app.active_runner = runner
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        for i in range(80):
+            scr._trace_mount(Static(f"строка {i}"))
+        scr._trace_mount(_Focusable("строка с кнопкой"))
+        scr.show_confirm_banner("Тест", "Разрешить?")
+        await pilot.pause(0.3)
+        trace = scr.query_one("#trace", VerticalScroll)
+        trace.scroll_to(y=10, animate=False)
+        await pilot.pause(0.5)
+
+        await pilot.press("o")
+        await pilot.pause(0.5)
+
+        assert runner.replies == ["allow_once"]
+        assert trace.scroll_offset.y == 10

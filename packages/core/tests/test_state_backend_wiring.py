@@ -57,29 +57,3 @@ async def test_state_os_backend_compat_builds_workspace():
     assert state.workspace.root == "/testbed"
     assert state.workspace.backend is backend
     assert state.initial_project_data["projectDir"] == "/testbed"
-
-
-async def test_state_with_workspace_is_json_serializable():
-    """Live I/O handle must not leak into the persisted snapshot."""
-    import json
-
-    from gc_core.persistence.state_repository import StateRepository
-
-    backend = FakeSandboxBackend(
-        cwd="/testbed", tree={"/testbed": []}, git=False
-    )
-    state = await _state(
-        workspace=ExecutionWorkspace(
-            root="/testbed",
-            backend=backend,
-            shell="sh",
-            os_name="Linux",
-            root_writable=True,
-        )
-    )
-
-    payload = StateRepository.serialize_storage({state.state_id: state})
-
-    json.dumps(payload)  # must not raise
-    assert "workspace" not in payload[state.state_id]
-    assert "os_backend" not in payload[state.state_id]

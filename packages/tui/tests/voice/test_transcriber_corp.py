@@ -14,7 +14,7 @@ CFG = {
 
 
 def test_openai_retries_after_ssl_error(monkeypatch):
-    net.reset_for_tests()
+    net._injected = False  # однократная инъекция траста — заново
     monkeypatch.setattr(net, "_inject", lambda: None)
     calls = {"n": 0}
 

@@ -10,6 +10,7 @@ import yaml
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 from gc_core.bundled_assets import bundled_root
+from gc_core.settings import settings_of
 
 SKILL_MD = "SKILL.md"
 
@@ -803,30 +804,33 @@ class SkillsRegistry:
         }
 
 
-def disabled_skills_from_config(
-    config_dict: Optional[Dict[str, Any]],
-) -> List[str]:
-    """`disable_skills` из плоского конфига: id паков и скиллов, без мусора."""
-    raw_disabled = (config_dict or {}).get("disable_skills")
-    if not isinstance(raw_disabled, list):
+def disabled_skills_from_config(settings: Any) -> List[str]:
+    """``agent.disable_skills``: id паков и скиллов, без пустых.
+
+    ``settings`` — всё, что принимает ``settings_of``; ``None`` — список пуст.
+    """
+    if settings is None:
         return []
     return [
-        str(item).strip()
-        for item in raw_disabled
-        if isinstance(item, (str, int)) and str(item).strip()
+        item.strip()
+        for item in settings_of(settings).agent.disable_skills
+        if item.strip()
     ]
 
 
 def get_skills_registry(
-    config_dict: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
     *,
     backend: FsBackend | None = None,
 ) -> SkillsRegistry:
     """
     Фабрика реестра скиллов.
 
+    ``settings`` — всё, что принимает ``settings_of`` (контекст, ``LoadedSettings``,
+    ``AppConfig``); ``None`` — без настроек (трёхслойный режим, ничего не отключено).
+
     Поведение:
-    - Если config_dict содержит непустой "skills_data_path" — single-source режим:
+    - Если в настройках непустой ``paths.skills_data_path`` — single-source режим:
       registry видит ТОЛЬКО эту папку (escape-hatch для production-сценариев,
       curated team set, тестов / CI с фикстурами). Все скиллы помечаются source="user".
       Папка — родитель скиллов и паков: загружаются и flat-скиллы (подпапка с
@@ -836,13 +840,11 @@ def get_skills_registry(
       + Project (<cwd>/.gc/skills/), приоритет project > user > system.
     """
     skills_root: Optional[str] = None
-    disable_skills = disabled_skills_from_config(config_dict)
-    if config_dict is not None:
-        raw = config_dict.get("skills_data_path")
-        if isinstance(raw, str):
-            path = raw.strip()
-            if path:
-                skills_root = path
+    disable_skills = disabled_skills_from_config(settings)
+    if settings is not None:
+        path = (settings_of(settings).paths.skills_data_path or "").strip()
+        if path:
+            skills_root = path
 
     if skills_root is not None:
         return SkillsRegistry(

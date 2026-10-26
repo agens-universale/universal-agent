@@ -2,6 +2,12 @@
 
 import os
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    read_resource_text,
+)
 from gc_core.bundled_assets import bundled_root
 from gc_core.summarize.summary_spec import (
     MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
@@ -14,7 +20,6 @@ from gc_core.summarize.summary_spec import (
 from gc_core.summarize.working_memory_gateway import (
     inject_working_memory_prompt_placeholders,
 )
-from gc_core.utils.user_text import read_user_text
 
 
 def default_prompt_path() -> str:
@@ -31,7 +36,9 @@ def default_prompt_path() -> str:
     )
 
 
-def load_prompt_template(path: str) -> str:
+def load_prompt_template(
+    path: str, *, store: AgentStore = DEFAULT_AGENT_STORE
+) -> str:
     """Читает файл с системным промптом суммаризации и проверяет, что он не пустой.
 
     Args:
@@ -47,7 +54,9 @@ def load_prompt_template(path: str) -> str:
     # Путь задаёт КОНФИГ (`summary_prompt_path`) — файл может быть чей угодно и в
     # любой кодировке. Отказ обязан назвать его: без пути человек читает голую
     # жалобу кодека и не знает, какой из промптов чинить.
-    prompt = read_user_text(path).strip()
+    prompt = read_resource_text(
+        store, AgentResource("prompt", "summary", path)
+    ).strip()
     if not prompt:
         raise ValueError(f"Summary prompt file is empty: {path}")
     if SUMMARY_SECTIONS_PLACEHOLDER in prompt:
@@ -89,8 +98,15 @@ This compaction is for a **subagent** child dialog. Session memory registers are
 """.strip()
 
 
-def _load_memory_patch_prompt(path: str, *, subagent: bool = False) -> str:
-    prompt = read_user_text(path).strip()
+def _load_memory_patch_prompt(
+    path: str,
+    *,
+    subagent: bool = False,
+    store: AgentStore = DEFAULT_AGENT_STORE,
+) -> str:
+    prompt = read_resource_text(
+        store, AgentResource("prompt", "memory_patch", path)
+    ).strip()
     if not prompt:
         raise ValueError(f"Memory patch prompt file is empty: {path}")
     if MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER in prompt:
@@ -111,6 +127,9 @@ def _load_memory_patch_prompt(path: str, *, subagent: bool = False) -> str:
 
 
 def load_memory_patch_replace_prompt(
-    path: str, *, subagent: bool = False
+    path: str,
+    *,
+    subagent: bool = False,
+    store: AgentStore = DEFAULT_AGENT_STORE,
 ) -> str:
-    return _load_memory_patch_prompt(path, subagent=subagent)
+    return _load_memory_patch_prompt(path, subagent=subagent, store=store)

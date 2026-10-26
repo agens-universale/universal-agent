@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 from gc_core.constants.tool_names import (
     FS_APPEND_FILE_NAME,
@@ -39,11 +39,18 @@ _TECHNICAL_USER_MARKERS = (
 )
 
 
+#: Оформление перед маркером (пробелы, значок, выделение markdown) началом
+#: текста не считается: так начинались ошибки валидации до обёртки
+#: ``<technical>`` («❌ **Tool Argument Validation Failed**»).
+_LEADING_DECORATION_RE = re.compile(r"^[^\w<\[]+")
+
+
 def is_technical_user_message_text(text: str) -> bool:
-    normalized = str(text or "").strip().lower()
-    if not normalized:
-        return False
-    return any(marker in normalized for marker in _TECHNICAL_USER_MARKERS)
+    """Служебное ли сообщение: нормализованный текст НАЧИНАЕТСЯ с маркера.
+    Маркер в середине — слова человека (вставленная ошибка, цитата
+    служебного текста), а не служебное сообщение."""
+    normalized = _LEADING_DECORATION_RE.sub("", str(text or "").lower())
+    return normalized.startswith(_TECHNICAL_USER_MARKERS)
 
 
 def wrap_technical_user_content(
@@ -58,6 +65,17 @@ def wrap_technical_user_content(
     if match:
         return raw
     return f'<technical type="{technical_type}">{raw}</technical>'
+
+
+def build_model_fallback_resume_message(state_id: str) -> dict[str, str]:
+    return {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            "Continue the existing task from the recorded history and tool results. "
+            "The failed model request was replaced; do not repeat completed tool calls."
+        ),
+        "id": f"m_model_fallback_{state_id}",
+    }
 
 
 def wrap_skill_resolution_technical_instruction(skill_name: str) -> str:
@@ -113,19 +131,6 @@ def user_content_to_text(content: Any) -> str:
     return str(content)
 
 
-def user_display_text(message: Any) -> str | None:
-    """Человеко-текст user-сообщения для показа: display_content если ключ есть
-    (включая ""), иначе content. None — если это не user-сообщение."""
-    if not isinstance(message, dict):
-        return None
-    if str(message.get("role", "")).strip().lower() != "user":
-        return None
-    disp = message.get("display_content")
-    if disp is not None:
-        return str(disp)
-    return user_content_to_text(message.get("content"))
-
-
 def extract_real_user_message_text(message: Any) -> str:
     if not isinstance(message, dict):
         return ""
@@ -160,21 +165,6 @@ def resolve_technical_user_content_type(content: str) -> str:
     if is_dialog_summary_user_message_text(content):
         return TECHNICAL_TYPE_DIALOG_SUMMARY
     return TECHNICAL_TYPE_TECHNICAL
-
-
-def append_user_log_entries(
-    existing: List[str], step_messages: List[Dict[str, Any]]
-) -> List[str]:
-    out = list(existing) if isinstance(existing, list) else []
-    seen = set(out)
-    for message in step_messages:
-        entry = extract_real_user_message_text(message)
-        if not entry:
-            continue
-        if entry not in seen:
-            out.append(entry)
-            seen.add(entry)
-    return out
 
 
 def build_invalid_tool_call_feedback_message(message: dict) -> dict:

@@ -5,6 +5,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from gc_core.config_modules.editing import editable
+from gc_core.config_modules.field_meta import gc_meta
+
 _logger = logging.getLogger(__name__)
 
 DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS = 500
@@ -17,7 +20,7 @@ IntentScopeRecordMode = Literal["aggregated", "raw"]
 
 
 class IntentScopeToolConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     record: IntentScopeRecordMode = "aggregated"
     store_arguments: bool = True
@@ -37,22 +40,43 @@ class IntentScopeToolConfig(BaseModel):
 
 
 class IntentScopeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    tools: dict[str, IntentScopeToolConfig] = Field(default_factory=dict)
-    max_summary_chars: int = DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS
-    max_tool_output_chars: int = DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS
-    max_raw_record_chars: int = DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS
+    tools: dict[str, IntentScopeToolConfig] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(expert=True)
+    )
+    max_summary_chars: int = Field(
+        default=DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    max_tool_output_chars: int = Field(
+        default=DEFAULT_INTENT_SCOPE_MAX_TOOL_OUTPUT_CHARS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    max_raw_record_chars: int = Field(
+        default=DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS,
+        json_schema_extra=gc_meta(expert=True),
+    )
     max_final_answer_raw_chars: int = (
         DEFAULT_INTENT_SCOPE_MAX_FINAL_ANSWER_RAW_CHARS
     )
-    read_page_record_limit: int = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
-    fallback_raw_on_llm_error: bool = True
-    intent_scope_tool_summary_prompt_path: str | None = None
-    intent_scope_final_answer_summary_prompt_path: str | None = None
+    read_page_record_limit: int = Field(
+        default=DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    fallback_raw_on_llm_error: bool = Field(
+        default=True, json_schema_extra=gc_meta(expert=True)
+    )
+    intent_scope_tool_summary_prompt_path: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    intent_scope_final_answer_summary_prompt_path: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
 
 
-def normalize_intent_scope_config(cfg: IntentScopeConfig) -> None:
+def normalize_intent_scope_config(cfg: IntentScopeConfig) -> IntentScopeConfig:
+    cfg = editable(cfg)
     if cfg.max_summary_chars <= 0:
         _logger.warning(
             "intent_scope.max_summary_chars=%s must be > 0; using %s",
@@ -90,6 +114,7 @@ def normalize_intent_scope_config(cfg: IntentScopeConfig) -> None:
             DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
         )
         cfg.read_page_record_limit = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+    return cfg.result()
 
 
 def intent_scope_active(cfg: IntentScopeConfig) -> bool:
@@ -115,24 +140,10 @@ def intent_scope_tool_store_flags(
 
 
 def intent_scope_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    settings: Any,
 ) -> IntentScopeConfig:
-    """Собрать IntentScopeConfig из ``config_dict`` (после ``load_config``)."""
-    raw = (config_dict or {}).get("intent_scope")
-    if isinstance(raw, IntentScopeConfig):
-        return raw
-    params = (config_dict or {}).get("intent_scope_params")
-    if isinstance(params, dict):
-        return IntentScopeConfig.model_validate(params)
-    return IntentScopeConfig()
+    """``IntentScopeConfig`` настроек (``settings`` — всё, что принимает ``settings_of``)."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
 
-
-def backend_allows_intent_scope_hook(
-    config_dict: dict[str, Any] | None,
-) -> bool:
-    raw_mode = (
-        str((config_dict or {}).get("backend_api_mode", "responses"))
-        .strip()
-        .lower()
-    )
-    return raw_mode == "chat_completions"
+    return settings_of(settings).intent_scope

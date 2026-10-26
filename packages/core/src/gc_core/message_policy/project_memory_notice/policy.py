@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from gc_core.config_modules.project_memory import (
-    project_memory_from_config_dict,
-    project_memory_notice_enabled,
-)
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.message_policy.tool_usage_notice.state import (
     get_project_memory_check_cnt,
@@ -15,24 +11,29 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
     wrap_technical_user_content,
 )
+from gc_core.settings import settings_of
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id,
 )
 
 
-def tool_project_memory_enabled(config_dict: dict[str, Any] | None) -> bool:
-    stop = (
-        config_dict.get("stop_tools")
-        if isinstance(config_dict, dict)
-        else None
+def tool_project_memory_enabled(settings: Any) -> bool:
+    """Тул project_memory не в ``agent.stop_tools``.
+
+    ``settings`` здесь и ниже — то, что принимает ``settings_of`` (ctx,
+    ``LoadedSettings``, ``AppConfig``).
+    """
+    return (
+        PROJECT_MEMORY_TOOL_NAME not in settings_of(settings).agent.stop_tools
     )
-    return not (isinstance(stop, list) and PROJECT_MEMORY_TOOL_NAME in stop)
 
 
-def project_memory_hints_enabled(config_dict: dict[str, Any] | None) -> bool:
-    return project_memory_notice_enabled(
-        config_dict
-    ) and tool_project_memory_enabled(config_dict)
+def project_memory_hints_enabled(settings: Any) -> bool:
+    """Exists/changed hints: только явный флаг в ``project_memory`` и живой тул."""
+    settings = settings_of(settings)
+    return bool(
+        settings.project_memory.enable_project_memory_notice
+    ) and tool_project_memory_enabled(settings)
 
 
 def on_persist_steps(meta: dict[str, Any], *, steps: int = 1) -> int:
@@ -80,12 +81,13 @@ def collect_project_memory_hints(
     state: Any,
     meta: dict[str, Any],
     ctx: Any,
-    config_dict: dict[str, Any] | None,
+    settings: Any,
     *,
     get_hash_fn: Callable[[Any], str | None] | None = None,
 ) -> list[str]:
     """Exists/changed hints на K-тике; пустой список если tool/mode выключены."""
-    if not project_memory_hints_enabled(config_dict):
+    settings = settings_of(settings)
+    if not project_memory_hints_enabled(settings):
         return []
     if get_hash_fn is None:
         from gc_core.project_memory import (
@@ -94,8 +96,7 @@ def collect_project_memory_hints(
 
         get_hash_fn = get_hash
 
-    cfg = project_memory_from_config_dict(config_dict)
-    interval = cfg.check_interval_messages
+    interval = settings.project_memory.check_interval_messages
     if get_project_memory_check_cnt(meta) < interval:
         return []
 

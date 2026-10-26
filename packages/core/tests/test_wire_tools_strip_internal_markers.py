@@ -12,16 +12,19 @@ import json
 
 import pytest
 from gc_core.tools import abuild_tools_data
-from gc_core.tools.schema_optional import resolve_optional_property_keys
+from gc_core.execution.tool_schema import resolve_optional_property_keys
 from gc_core.utils.connect_backend import normalize_chat_completions_tools
+from gc_testkit.settings import make_settings
 
-CONFIG = {
-    "inject_tool_fields": {
-        "reason": "One short sentence explaining this call."
-    },
-    "stop_tools": [],
-    "openai_strict_tools_schema": False,
-}
+CONFIG = make_settings(
+    {
+        "agent.inject_tool_fields": {
+            "reason": "One short sentence explaining this call."
+        },
+        "agent.stop_tools": [],
+        "backend.openai_strict_tools_schema": False,
+    }
+)
 
 
 @pytest.fixture(scope="module")

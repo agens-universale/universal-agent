@@ -7,6 +7,7 @@ import threading
 from typing import Any
 from urllib.parse import urlsplit
 
+from gc_core.settings import settings_of
 from gc_core.utils.url_addr import is_loopback
 from recommended_mcp.autostart import wait_daemon_url_ready
 from recommended_mcp.process_supervisor import (
@@ -45,7 +46,7 @@ SERVICE_NAME = "speaches"
 _VOICE_READY_TIMEOUT_SEC = 90.0
 
 
-def url_is_ours(config_dict: dict[str, Any], port: int) -> bool:
+def url_is_ours(settings: Any, port: int) -> bool:
     """Публичный гейт автостарта: voice.url в конфиге указывает на наш локальный
     сервис. Единственный владелец этой проверки — использовать и из TUI.
 
@@ -53,8 +54,15 @@ def url_is_ours(config_dict: dict[str, Any], port: int) -> bool:
     `"localhost" in url` промахивался в обе стороны: адрес без пути и IPv6-форма
     считались чужими (автостарт молчал, а /settings показывал «облако» для своей же
     машины), а `http://localhost.чужой-домен.com:8735/…` — своим, и агент брался
-    поднимать локальный сервис под удалённый хост."""
-    url = str((config_dict.get("voice") or {}).get("url") or "")
+    поднимать локальный сервис под удалённый хост.
+
+    `settings` — всё, что принимает `settings_of`: настройки окна, контекст,
+    `AppConfig`."""
+    return voice_url_is_ours(str(settings_of(settings).voice.url or ""), port)
+
+
+def voice_url_is_ours(url: str, port: int) -> bool:
+    """`url_is_ours` для голого адреса (поле формы, ещё не ставшее настройкой)."""
     if not is_loopback(url):
         return False
     try:
@@ -68,7 +76,7 @@ def _preheat_bg(state) -> None:
 
 
 def ensure_voice_service(
-    config_dict: dict[str, Any],
+    settings: Any,
     *,
     supervisor_factory=RunSupervisor,
     preheat_async: bool = True,
@@ -76,9 +84,10 @@ def ensure_voice_service(
     """Поднять локальный voice-сервис, если он установлен и сконфигурирован.
 
     True — сервис доступен (жил или поднят), lease взят, прогрев запущен.
-    False — гейт не прошёл (не наша конфигурация) или подъём не удался."""
+    False — гейт не прошёл (не наша конфигурация) или подъём не удался.
+    `settings` — всё, что принимает `settings_of`."""
     state = load_state()
-    if state is None or not url_is_ours(config_dict, state.port):
+    if state is None or not url_is_ours(settings, state.port):
         return False
     if not port_alive(state):
         supervisor = supervisor_factory(pids_dir=voice_pids_dir())

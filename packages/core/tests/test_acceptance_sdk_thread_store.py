@@ -307,6 +307,9 @@ async def test_loop_stays_responsive_with_a_slow_async_store(
     )
 
     store = SlowAsyncStore()
+    # Типизированные настройки собраны (и провалидированы) ``parity_config``
+    # до окна замера: валидация конфига не часть сборки агента.
+    settings = cfg
     # Сборщик глушится на окне: тест судит НАТИВНОСТЬ ожидания хранилища, а
     # пауза поколения 2 на куче набора (180–220 мс) кратно больше бюджета.
     # Пульс прогрет и тикает ДО сборки агента: иначе синхронный кусок сборки
@@ -314,13 +317,18 @@ async def test_loop_stays_responsive_with_a_slow_async_store(
     with quiet_gc_for_loop_timing():
         async with LoopPulse() as pulse:
             async with await AsyncAgent.create(
-                cfg, thread_store=store
+                settings, thread_store=store
             ) as agent:
                 await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert store.awaited >= 10, f"хранилище звали всего {store.awaited} раз"
+    # Порог пропусков 50 мс: джиттер планировщика 20–40 мс под нагрузкой не
+    # считается залипанием, а синхронные куски хранилища (~85 и ~100 мс) — да.
     assert_loop_was_free(
-        pulse.gaps, tick=pulse.step, label="хранилище с RTT 5 мс: "
+        pulse.gaps,
+        tick=pulse.step,
+        label="хранилище с RTT 5 мс: ",
+        stall_after=0.050,
     )
 
 

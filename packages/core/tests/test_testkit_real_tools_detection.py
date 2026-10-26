@@ -37,9 +37,14 @@ def test_a_stub_is_not_taken_for_the_real_package(monkeypatch):
     переживёт тест и протечёт в соседние.
     """
     ensure_real_tools_package()
+    original = sys.modules["gc_core.tools"]
     stub = types.ModuleType("gc_core.tools")
     stub.__path__ = list(sys.modules["gc_core.tools"].__path__)
     stub.abuild_tools_data = lambda *_a, **_k: None
-    monkeypatch.setitem(sys.modules, "gc_core.tools", stub)
+    # Снять заглушку до autouse teardown тест-кита: иначе он загрузит новое
+    # дерево tools, а monkeypatch затем вернёт только старый пакет.
+    with monkeypatch.context() as patcher:
+        patcher.setitem(sys.modules, "gc_core.tools", stub)
+        assert not _real_tools_loaded(), "заглушку приняли за настоящий пакет"
 
-    assert not _real_tools_loaded(), "заглушку приняли за настоящий пакет"
+    assert sys.modules["gc_core.tools"] is original

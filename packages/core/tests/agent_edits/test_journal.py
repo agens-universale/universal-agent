@@ -70,13 +70,12 @@ def test_torn_middle_line_is_skipped_not_fatal(tmp_path):
     assert [r.turn_id for r in recs] == ["t1", "t3"]
 
 
-def test_last_turn_and_summary(tmp_path):
+def test_last_turn_id(tmp_path):
     j = EditsJournal(tmp_path / "e.jsonl")
     j.append(make_rec(turn="t1"))
     j.append(make_rec(turn="t2", add=3, del_=0))
 
     assert j.last_turn_id() == "t2"
-    assert j.files_summary(j.turn_records("t2")) == {"a.py": (3, 0)}
 
 
 def test_last_turn_id_is_none_for_empty_journal(tmp_path):

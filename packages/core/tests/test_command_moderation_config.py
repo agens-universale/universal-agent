@@ -2,11 +2,7 @@ import os
 import tempfile
 import unittest
 
-from gc_core.config import (
-    apply_cli_command_moderation_overrides,
-    apply_cli_overrides,
-    load_config,
-)
+from gc_core.config import apply_cli_overrides, load_settings
 
 
 class CommandModerationConfigTest(unittest.TestCase):
@@ -17,18 +13,18 @@ class CommandModerationConfigTest(unittest.TestCase):
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write("backend:\n  api_mode: chat_completions\n")
 
-            cfg = load_config(cfg_path)
-            self.assertEqual(cfg["command_moderation"]["mode"], "ask")
-            self.assertTrue(cfg["write_guard"]["enabled"])
-            self.assertEqual(cfg["write_guard"]["extra_paths"], [])
+            security = load_settings(cfg_path).settings.security
+            self.assertEqual(security.command_moderation.mode, "ask")
+            self.assertTrue(security.write_guard.enabled)
+            self.assertEqual(security.write_guard.extra_paths, [])
             self.assertEqual(
-                cfg["command_moderation"]["allowed_command_examples"], []
+                security.command_moderation.allowed_command_examples, []
             )
-            self.assertTrue(cfg["url_policy"]["enabled"])
+            self.assertTrue(security.url_policy.enabled)
             self.assertEqual(
-                cfg["url_policy"]["allowed_schemes"], ["http", "https"]
+                security.url_policy.allowed_schemes, ["http", "https"]
             )
-            self.assertEqual(cfg["url_policy"]["url_blacklist"], [])
+            self.assertEqual(security.url_policy.url_blacklist, [])
 
     def test_extra_paths_resolve_relative_to_config_dir(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -41,9 +37,9 @@ class CommandModerationConfigTest(unittest.TestCase):
                     "    extra_paths: ['tmp/cache']\n"
                 )
 
-            cfg = load_config(cfg_path)
+            security = load_settings(cfg_path).settings.security
             self.assertEqual(
-                cfg["write_guard"]["extra_paths"],
+                security.write_guard.extra_paths,
                 [os.path.join(tmp_dir, "tmp", "cache")],
             )
 
@@ -58,7 +54,7 @@ class CommandModerationConfigTest(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError, "security.command_moderation.mode"
             ):
-                load_config(cfg_path)
+                load_settings(cfg_path)
 
     def test_cli_overrides_have_priority(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -73,14 +69,23 @@ class CommandModerationConfigTest(unittest.TestCase):
                     "    enabled: true\n"
                 )
 
-            cfg = load_config(cfg_path)
-            apply_cli_command_moderation_overrides(
-                cfg,
+            loaded = load_settings(cfg_path)
+            overridden = apply_cli_overrides(
+                loaded,
                 write_guard_enabled=False,
                 command_moderation_mode="allow",
             )
-            self.assertFalse(cfg["write_guard"]["enabled"])
-            self.assertEqual(cfg["command_moderation"]["mode"], "allow")
+            security = overridden.settings.security
+            self.assertFalse(security.write_guard.enabled)
+            self.assertEqual(security.command_moderation.mode, "allow")
+            # Источник правок — слой cli; исходный объект не изменён.
+            self.assertEqual(
+                overridden.provenance.source(
+                    "security.write_guard.enabled"
+                ).layer,
+                "cli",
+            )
+            self.assertTrue(loaded.settings.security.write_guard.enabled)
 
     def test_apply_cli_overrides_is_single_entry_point(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -96,29 +101,37 @@ class CommandModerationConfigTest(unittest.TestCase):
                     "    enabled: true\n"
                 )
 
-            cfg = load_config(cfg_path)
-            apply_cli_overrides(
-                cfg,
-                extra_overrides={"model": "cli-model", "max_steps": 77},
+            settings = apply_cli_overrides(
+                load_settings(cfg_path),
+                extra_overrides={
+                    "agent.model": "cli-model",
+                    "agent.max_steps": 77,
+                },
                 write_guard_enabled=True,
                 no_write_guard=True,
                 command_moderation_mode="deny",
-            )
-            self.assertEqual(cfg["model"], "cli-model")
-            self.assertEqual(cfg["max_steps"], 77)
-            self.assertFalse(cfg["write_guard"]["enabled"])
-            self.assertEqual(cfg["command_moderation"]["mode"], "deny")
+            ).settings
+            self.assertEqual(settings.agent.model, "cli-model")
+            self.assertEqual(settings.agent.max_steps, 77)
+            self.assertFalse(settings.security.write_guard.enabled)
+            self.assertEqual(settings.security.command_moderation.mode, "deny")
 
-    def test_apply_cli_overrides_syncs_logging_params(self):
+    def test_apply_cli_overrides_reaches_logging_section(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write("backend:\n  api_mode: chat_completions\n")
-            cfg = load_config(cfg_path)
-            self.assertTrue(cfg["logging_params"]["save_logs"])
-            apply_cli_overrides(cfg, extra_overrides={"save_logs": False})
-            self.assertFalse(cfg["save_logs"])
-            self.assertFalse(cfg["logging_params"]["save_logs"])
+            loaded = load_settings(cfg_path)
+            self.assertTrue(loaded.settings.logging.save_logs)
+            # Прежнее плоское имя `save_logs` доезжает до секции logging.
+            overridden = apply_cli_overrides(
+                loaded, extra_overrides={"logging.save_logs": False}
+            )
+            self.assertFalse(overridden.settings.logging.save_logs)
+            self.assertEqual(
+                overridden.provenance.source("logging.save_logs").layer,
+                "cli",
+            )
 
 
 if __name__ == "__main__":

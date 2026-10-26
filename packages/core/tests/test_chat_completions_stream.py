@@ -1,6 +1,7 @@
 from gc_core.utils.chat_completions_stream import (
     assemble_streamed_completion,
     iter_sse_data_lines,
+    without_answer_deltas,
 )
 
 # Realistic OpenAI-compatible stream: reasoning_content, content, a fragmented
@@ -135,3 +136,19 @@ def test_reasoning_alias_is_read_and_not_double_counted():
     assert [t for k, t in both if k == "think"] == ["канон"], (
         "оба поля сложились"
     )
+
+
+def test_without_answer_deltas_drops_only_the_answer_channel():
+    deltas = []
+    muted = without_answer_deltas(
+        lambda kind, text: deltas.append((kind, text))
+    )
+    muted("reset", "")
+    assemble_streamed_completion(iter_sse_data_lines(_LINES), on_delta=muted)
+    assert deltas == [
+        ("reset", ""),
+        ("think", "ана"),
+        ("think", "лизирую"),
+        ("tool", '{"a":'),
+        ("tool", "1}"),
+    ]

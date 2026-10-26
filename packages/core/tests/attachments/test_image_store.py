@@ -13,8 +13,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from PIL import Image
-
 from gc_core.attachments import store as store_module
 from gc_core.attachments.model import (
     ORIGIN_TOOL,
@@ -24,8 +22,8 @@ from gc_core.attachments.model import (
 )
 from gc_core.attachments.normalize import (
     MIME_JPEG,
-    NormalizeError,
     NormalizedImage,
+    NormalizeError,
     normalize_image,
 )
 from gc_core.attachments.store import (
@@ -36,6 +34,8 @@ from gc_core.attachments.store import (
     commit_to_run_thread,
 )
 from gc_core.security.media_roots import media_roots
+from gc_testkit.settings import make_settings
+from PIL import Image
 
 
 def _png(size=(60, 40), color=(10, 20, 30)) -> bytes:
@@ -132,17 +132,23 @@ def test_a_foreign_owned_temp_root_is_not_used(tmp_path, monkeypatch):
 
 
 def test_for_config_takes_the_absolute_threads_dir(tmp_path):
-    store = ImageStore.for_config({"threads_data_path": str(tmp_path)})
+    store = ImageStore.for_config(
+        make_settings({"paths.threads_data_path": str(tmp_path)})
+    )
     assert store.root == os.path.join(str(tmp_path), IMAGES_DIRNAME)
 
 
 @pytest.mark.parametrize(
     "config",
-    [{}, {"threads_data_path": ""}, {"threads_data_path": "rel/threads"}],
+    [
+        {},
+        {"paths.threads_data_path": ""},
+        {"paths.threads_data_path": "rel/threads"},
+    ],
 )
 def test_for_config_without_an_absolute_threads_dir_uses_the_temp_root(config):
     assert (
-        ImageStore.for_config(config).root
+        ImageStore.for_config(make_settings(config)).root
         == ImageStore.for_threads_dir("").root
     )
 
@@ -154,8 +160,13 @@ def test_for_config_root_is_the_media_root(tmp_path, threads):
     config = (
         {}
         if threads is None
-        else {"threads_data_path": str(tmp_path / threads) if threads else ""}
+        else {
+            "paths.threads_data_path": str(tmp_path / threads)
+            if threads
+            else ""
+        }
     )
+    config = make_settings(config)
     store = ImageStore.for_config(config)
     assert media_roots(config)[:2] == (
         Path(store.root),

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import functools
 import html as html_lib
@@ -9,6 +11,7 @@ import httpx
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import resolve_tool_context
+from gc_core.security.permission_mode import follows_cross_host_redirects
 from gc_core.security.url_policy import enforce_url_policy
 from gc_core.tools.exec.fetch_url_base import FetchUrlBase, http_error_failure
 from gc_core.tools.exec.redirect_policy import (
@@ -47,7 +50,7 @@ class SimpleFetchUrl(FetchUrlBase):
     )
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         return cls._tool_spec(
             description=(
                 "Fetches a URL via HTTP GET and returns readable text extracted from HTML without heavy dependencies. "
@@ -59,7 +62,7 @@ class SimpleFetchUrl(FetchUrlBase):
         )
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         return (
             "Tool name: exec_fetch_url\n"
             "Tool description: Downloads a URL and extracts readable text using a lightweight HTML cleaner. "
@@ -200,13 +203,15 @@ class SimpleFetchUrl(FetchUrlBase):
         attempts = 1 + self.max_retries
         # Политику берём ТЕМ ЖЕ путём, что и гвард `enforce_url_policy`, —
         # через `resolve_tool_context`. Политика лежит на ВЕРХНЕМ уровне
-        # (`path_policy.resolve_tool_context`); чтение config_dict напрямую давало
+        # (`path_policy.resolve_tool_context`); чтение плоского конфига напрямую давало
         # пустой чёрный список и per-hop проверка ничего не проверяла.
         _policy = resolve_tool_context(self, ctx=self._ctx, state=self._state)
         _allowed_schemes = list(
             _policy.url_allowed_schemes or ["http", "https"]
         )
         _url_blacklist = list(_policy.url_blacklist or [])
+        # Переход на другой хост — по режиму сессии; решает слой безопасности.
+        _same_host_only = not follows_cross_host_redirects(_policy.ctx)
         # Потолок ОБЩИЙ: три тула не должны расходиться в том, сколько
         # переходов считается петлёй.
         _max_redirects = DEFAULT_MAX_REDIRECTS
@@ -223,7 +228,7 @@ class SimpleFetchUrl(FetchUrlBase):
         for attempt in range(1, attempts + 1):
             try:
                 if fetches_on_backend(
-                    self._config_dict, self._backend_or_none()
+                    self._settings_source, self._backend_or_none()
                 ):
                     # Сеть у среды исполнения (см. remote_fetch): политика та же.
                     response = await afetch_via_backend(
@@ -234,6 +239,7 @@ class SimpleFetchUrl(FetchUrlBase):
                         normalized_proxy,
                         allowed_schemes=_allowed_schemes,
                         url_blacklist=_url_blacklist,
+                        same_host_only=_same_host_only,
                         max_redirects=_max_redirects,
                     )
                     response.raise_for_status()
@@ -246,6 +252,7 @@ class SimpleFetchUrl(FetchUrlBase):
                     effective_timeout,
                     allowed_schemes=_allowed_schemes,
                     url_blacklist=_url_blacklist,
+                    same_host_only=_same_host_only,
                     max_redirects=_max_redirects,
                 )
                 response.raise_for_status()

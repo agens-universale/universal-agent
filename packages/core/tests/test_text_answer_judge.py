@@ -9,13 +9,14 @@ from gc_core.intent_guard.text_answer_judge import (
 )
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _ctx(mode=None, backend="chat_completions"):
-    cfg = {"backend_api_mode": backend}
+    cfg = {"backend.api_mode": backend}
     if mode is not None:
         cfg["text_answer_mode"] = mode
-    return SimpleNamespace(config_dict=cfg, logger=None)
+    return fake_ctx(cfg, logger=None)
 
 
 class _S:

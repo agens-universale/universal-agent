@@ -22,9 +22,7 @@ from gc_tui.services.file_view import (
     read_window,
     resolve_view_path,
     textarea_language_for_lexer,
-    view_window_renderable,
 )
-from rich.syntax import Syntax
 
 
 def test_resolve_relative_uses_cwd(tmp_path):
@@ -232,11 +230,3 @@ def test_pygments_highlight_map_python_keywords():
     styles = {name for spans in mapped.values() for _, _, name in spans}
     assert "keyword" in styles
     assert mapped  # непусто
-
-
-def test_view_window_renderable_syntax_or_plain():
-    plain = view_window_renderable("a = 1", lexer=None)
-    assert plain == "a = 1"
-    syn = view_window_renderable("a = 1", lexer="python")
-    assert isinstance(syn, Syntax)
-    assert "python" in syn.lexer.aliases

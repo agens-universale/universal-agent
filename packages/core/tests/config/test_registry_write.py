@@ -29,6 +29,8 @@ from gc_core.config_modules.registry_write import (
     write_assign,
     write_slot,
 )
+from gc_core.config_modules.root import AppConfig
+from gc_core.model_router import ModelRouter
 
 _BASE = '# основной конфиг\nprofile: ""\nlevel: default\nbackend:\n  completions_url: "http://real/v1/chat/completions"\n'
 
@@ -604,6 +606,42 @@ def test_write_assign_scalar_consumer(tmp_path, template):
     )
 
 
+def test_first_assign_write_into_an_old_config_adds_only_the_chosen_binding(
+    tmp_path, template
+):
+    """Старый config.yml без `assign`: первая привязка из «Настройки → Модели»
+    пишет ровно её. Привязки шаблона (судьи и суммаризация на `default`) приходят
+    только через `--sync-config`, иначе на `level: light` они молча уехали бы с
+    уровня шага на `default`."""
+    path = _cfg(
+        tmp_path,
+        (
+            'profile: ""\n'
+            "level: light\n"
+            "models:\n  flash:\n    model: flash-1\n  mid:\n    model: mid-1\n  big:\n    model: big-1\n"
+            "slots:\n  light: flash\n  default: mid\n  max: big\n"
+            "backend:\n  api_mode: chat_completions\n"
+        ),
+    )
+
+    write_assign(path, "intent_scope", "light", template)
+
+    text = path.read_text(encoding="utf-8")
+    snapshot = yaml.safe_load(text)
+    assert snapshot["assign"] == {"intent_scope": "light"}
+    assert (
+        "раскомментируйте" not in text
+    )  # комментарий-пример шаблона не переехал
+    router = ModelRouter(
+        AppConfig.model_validate(snapshot), level_provider=lambda: "light"
+    )
+    # PR140 Р1: судьи и суммаризация без привязки идут кодовым уровнем default,
+    # поэтому «не приехали привязки шаблона» проверяем на потребителях вне таблицы
+    # unbound_level — они по-прежнему следуют за уровнем шага.
+    for consumer in ("memory_compaction", "vision"):
+        assert router.resolve(consumer, check_breaker=False).alias == "flash"
+
+
 def test_write_assign_nested_subagent(tmp_path, template):
     path = _cfg(tmp_path, _REGISTRY)
 
@@ -1044,7 +1082,9 @@ def test_validate_profile_text_rejects_broken_yaml():
         validate_profile_text("models: [незакрытый\n  список")
 
 
-def test_explicit_null_is_distinct_from_removing_a_model_field(tmp_path, template):
+def test_explicit_null_is_distinct_from_removing_a_model_field(
+    tmp_path, template
+):
     from gc_core.config_modules.registry_write import YAML_NULL
 
     path = _cfg(tmp_path, _REGISTRY)

@@ -37,7 +37,7 @@ def test_delta_from_empty_baseline():
 
 def test_build_report_with_pricing():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 250_000, 40_000)
+    acc.add(CATEGORY_MAIN, 250_000, 40_000, model="m")
     text = build_run_usage_report(acc, _PRICING, "m")
     assert text is not None
     assert "Run usage" in text
@@ -100,25 +100,50 @@ def test_state_exposes_usage_and_last_run_in_memory():
     assert st.last_run_usage is None
 
 
-def test_last_run_usage_survives_state_snapshot():
-    # last_run_usage (UsageAccount) сериализуется/восстанавливается в session-снапшоте.
-    from gc_core.persistence.state_serializer import StateSerializer
-    from gc_core.states import State
+_PRICING_OTHER = {
+    "enabled": True,
+    "currency": "₽",
+    "per_tokens": 1_000_000,
+    "models": {"other": {"input": 93, "output": 295}},
+}
 
-    st = State(
-        verbose=False,
-        model="m",
-        tools_spec=[],
-        tools_descr=[],
-        skills_list=[],
-        max_steps=10,
-        system_prompt_id="v1",
-        use_server_subagents=False,
+
+def test_report_and_dict_mark_unknown_cost_without_a_sum():
+    from gc_core.usage.report import build_run_usage_dict
+
+    run = UsageAccount()
+    run.add(CATEGORY_MAIN, 1000, 100, model="m")
+    text = build_run_usage_report(run, _PRICING_OTHER, "m")
+    total = next(l for l in text.splitlines() if l.startswith("total"))
+    assert total.rstrip().endswith("?") and "—?" not in text
+    assert "? — часть вызовов без цены, итог неполный" in text
+    data = build_run_usage_dict(run, _PRICING_OTHER, "m")
+    assert data["cost"] == {"by_currency": {}, "unpriced": True}
+
+
+def test_long_model_names_keep_every_column_aligned():
+    run = UsageAccount()
+    run.add(
+        CATEGORY_MAIN,
+        1000,
+        100,
+        model="deepseek-ai/DeepSeek-V3.2-Exp-long-name",
     )
-    st.usage.add(CATEGORY_MAIN, 150, 30)
-    st.last_run_usage = UsageAccount()
-    st.last_run_usage.add(CATEGORY_MAIN, 50, 10)
-    restored = StateSerializer.deserialize(StateSerializer.serialize(st))
-    assert restored.usage.totals()["input"] == 150
-    assert isinstance(restored.last_run_usage, UsageAccount)
-    assert restored.last_run_usage.totals()["input"] == 50
+    run.add(CATEGORY_MAIN, 500, 50, model="m")
+    lines = build_run_usage_report(run, _PRICING, "m").splitlines()
+    header = next(line for line in lines if line.startswith("category"))
+    end = header.index("input") + len("input")  # правый край колонки input
+    rows = [
+        line
+        for line in lines
+        if line.startswith(("main", "total", "deepseek-ai/"))
+    ]
+    assert len(rows) == 3
+    for row in rows:
+        assert row[end - 1] != " ", row  # число input упирается в тот же край
+        assert row[:end] == row[:end].rstrip(), row
+        assert row[end] == " ", (
+            row
+        )  # дальше — колонка output, а не хвост имени
+    separator = next(line for line in lines if line.startswith("─"))
+    assert len(separator) == len(header)

@@ -7,13 +7,13 @@ import httpx
 import pytest
 
 from gc_core.model_router import ResolvedModel
+from vision_fakes import clear_image_rejects
 from gc_core.vision.rejects import (
     ImageRejects,
     mark_blind,
     next_image_cap,
     process_image_rejects,
     learn_image_cap,
-    reset_image_rejects_for_tests,
 )
 
 _URL = "http://ecs3:6002/v1/chat/completions"
@@ -80,7 +80,7 @@ def test_caps_only_decrease_and_separate_access_and_support():
 def test_process_registry_resets_in_place():
     registry = process_image_rejects()
     registry.limit(KEY, 1)
-    reset_image_rejects_for_tests()
+    clear_image_rejects()
     assert registry is process_image_rejects() and registry.cap(KEY) is None
 
 

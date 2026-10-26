@@ -464,11 +464,11 @@ async def test_wizard_model_list_footer_stops_promising_a_pick_without_matches(
         await pilot.pause()
         await pilot.pause()
         ed = scr._voice_endpoint_editor()
-        assert ed.model_list.is_open and ed.model_list.has_matches
+        assert ed.model_list.is_open and ed.model_list.visible_items
         assert "Enter — подставить" in _footer_widget(scr)
         scr.query_one("#voice-model", Input).value = "my-own-id"
         await pilot.pause()
-        assert ed.model_list.is_open and not ed.model_list.has_matches
+        assert ed.model_list.is_open and not ed.model_list.visible_items
         footer = _footer_widget(scr)
         assert (
             "выбор модели" not in footer and "Enter — подставить" not in footer

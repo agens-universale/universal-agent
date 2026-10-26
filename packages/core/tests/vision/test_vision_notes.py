@@ -9,6 +9,7 @@
 from types import SimpleNamespace
 
 import pytest
+from gc_testkit.settings import make_settings
 
 from gc_core import run_context as rc
 from gc_core.model_router import ResolvedModel
@@ -53,14 +54,17 @@ def no_tools(monkeypatch):
 
 
 async def test_context_factory_has_no_hook_by_default(no_tools):
-    ctx = await rc.acreate_run_context({"model": "M"})
+    ctx = await rc.acreate_run_context(
+        make_settings({"agent.model": "M", "logging.save_logs": False})
+    )
     assert ctx.on_trace_note is None
 
 
 async def test_context_factory_stores_the_hook(no_tools):
     sink: list = []
     ctx = await rc.acreate_run_context(
-        {"model": "M"}, on_trace_note=sink.append
+        make_settings({"agent.model": "M", "logging.save_logs": False}),
+        on_trace_note=sink.append,
     )
     assert ctx.on_trace_note == sink.append
 
@@ -68,23 +72,23 @@ async def test_context_factory_stores_the_hook(no_tools):
 async def test_subagent_context_inherits_the_hook(tmp_path):
     """Отказ «глаз» внутри субагента обязан дойти до ленты родителя."""
     config = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "logging_format": "jsonl",
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.format": "jsonl",
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
         "launch_root": str(tmp_path),
-        "use_local_subagents": True,
+        "agent.use_local_subagents": True,
     }
     sink: list = []
     parent_ctx = await rc.acreate_run_context(
-        config, on_trace_note=sink.append
+        make_settings(config), on_trace_note=sink.append
     )
     # `_build_child_ctx` читает только self._ctx и self._config — state-заглушка.
     child_ctx = await SubagentRunner(
-        parent_ctx, SimpleNamespace(), config
+        parent_ctx, SimpleNamespace(), make_settings(config)
     )._build_child_ctx("subagent_worker")
 
     assert child_ctx.on_trace_note == sink.append

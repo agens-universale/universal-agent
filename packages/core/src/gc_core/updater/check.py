@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import subprocess
-from typing import Callable, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 from gc_core.updater.source import UpdateSource
 
@@ -92,15 +92,19 @@ def update_available_from_state(state: dict, installed_commit) -> bool:
     )
 
 
-def _update_cfg(config: dict) -> dict:
-    return (config or {}).get("update") or {}
+def _update_cfg(settings: Any) -> dict:
+    """Секция ``update`` настроек (всё, что принимает ``settings_of``;
+    ``None`` — умолчания)."""
+    from gc_core.settings import settings_of
+
+    return settings_of(settings).update.model_dump()
 
 
-def auto_check_enabled(config: dict) -> bool:
+def auto_check_enabled(settings: Any) -> bool:
     # YAML `check: off` → bool False; трактуем «выкл» и для "off", и для False.
-    return _update_cfg(config).get("check", "auto") not in ("off", False)
+    return _update_cfg(settings).get("check", "auto") not in ("off", False)
 
 
-def extra_args(config: dict) -> list:
-    val = _update_cfg(config).get("extra_args") or []
+def extra_args(settings: Any) -> list:
+    val = _update_cfg(settings).get("extra_args") or []
     return list(val) if isinstance(val, list) else []

@@ -24,6 +24,7 @@ import os
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.list_files import ListFiles
 from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
+from gc_testkit.settings import make_settings
 
 # ---------------------------------------------------------------------------
 # Tree layout used in most tests (linear chain — BFS == DFS, kept for compat)
@@ -458,7 +459,7 @@ def test_walk_does_not_descend_into_denied_dir_via_nested_override():
     }
     cfg = {
         "launch_root": "/work",
-        "read_guard": {
+        "security.read_guard": {
             "enabled": True,
             "allowed_read_roots": ["*"],
             "denied_read_paths": ["/work/secret"],
@@ -468,7 +469,7 @@ def test_walk_does_not_descend_into_denied_dir_via_nested_override():
     t = bind_os_backend(
         ListFiles.__new__(ListFiles),
         FakeBackend(files),
-        config_dict=cfg,
+        settings=make_settings(cfg),
     )
 
     raw = t(path="/work", max_depth=5)

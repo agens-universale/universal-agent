@@ -35,6 +35,7 @@ import asyncio
 import functools
 import inspect
 import threading
+from dataclasses import dataclass
 from typing import Any, Callable, Generator
 
 
@@ -318,6 +319,76 @@ def _forbid_second_call(again: bool) -> None:
         )
 
 
+@dataclass(frozen=True)
+class GuardWrapper:
+    """Python-only metadata identifying our guard and its immediate inner call."""
+
+    flow: Callable[..., Generator]
+    inner: Callable[..., Any]
+    body_may_block: bool = False
+    owner: Callable[..., Any] | None = None
+
+
+def guard_wrapper(func: Callable[..., Any]) -> GuardWrapper | None:
+    candidate = getattr(func, "__gc_guard_wrapper__", None)
+    function = getattr(func, "__func__", func)
+    if isinstance(candidate, GuardWrapper) and candidate.owner is function:
+        return candidate
+    return None
+
+
+async def arun_guard_flow(
+    flow: Generator,
+    invoke: Callable[[], Any],
+    *,
+    body_may_block: bool = False,
+) -> Any:
+    """Drive the native guard around a supplied leaf or next guard callback."""
+    try:
+        if body_may_block:
+            needs_call, early = await _off_loop(
+                _start,
+                flow,
+                on_abandoned=lambda: _close_quietly(flow),
+            )
+        else:
+            needs_call, early = await _drive_async(flow)
+        if not needs_call:
+            return early
+        result = await invoke()
+        again, value = await _drive_async(flow, result)
+        _forbid_second_call(again)
+        return value
+    finally:
+        _close_quietly(flow)
+
+
+async def arun_guard_chain(
+    func: Callable[..., Any],
+    *args: Any,
+    invoke_leaf: Callable[[], Any],
+    **kwargs: Any,
+) -> Any:
+    """Run only explicitly marked security wrappers around a supplied effect.
+
+    Unknown decorators are not unwrapped. The caller must supply the matching
+    registered leaf implementation at the effect boundary.
+    """
+    descriptor = guard_wrapper(func)
+    if descriptor is None:
+        return await invoke_leaf()
+    return await arun_guard_flow(
+        descriptor.flow(*args, **kwargs),
+        lambda: arun_guard_chain(
+            descriptor.inner,
+            *args,
+            invoke_leaf=invoke_leaf,
+            **kwargs,
+        ),
+        body_may_block=descriptor.body_may_block,
+    )
+
+
 def dual_wrap(
     func: Callable[..., Any],
     flow: Callable[..., Generator],
@@ -348,58 +419,15 @@ def dual_wrap(
 
         @functools.wraps(func)
         async def awrapper(*args: Any, **kwargs: Any) -> Any:
-            gen = flow(*args, **kwargs)
-            # Тело гварда идёт ИНЛАЙН — от синхронной ветки ниже эта
-            # отличается ровно словом `await` перед вызовом тула.
-            #
-            # Раньше здесь стоял `asyncio.to_thread`, чтобы не морозить loop на
-            # время раздумий человека в режиме `ask`. Замеры показали, что
-            # платим мы за это всегда, а получаем почти никогда:
-            #   * тело — 15-25 мкс чистого CPU (signature, urlsplit, fnmatch,
-            #     json.dumps), нативной асинхронной формы у него нет;
-            #   * два похода в пул стоят 88 мкс — дороже переносимой работы;
-            #   * пул ОБЩИЙ, и те же тулы уводят туда разбор HTML
-            #     (fetch_url): на параллельных фетчах гвард вставал в очередь
-            #     за собственным тулом — 383 мс ожидания на 15 мкс работы.
-            #
-            # Блокирующие куски тела едут не вместе с телом, а поштучно —
-            # через его запросы (`AwaitOnCaller`, `OffLoop`), см. канал выше.
-            if body_may_block:
-                try:
-                    needs_call, early = await _off_loop(
-                        _start, gen, on_abandoned=lambda: _close_quietly(gen)
-                    )
-                except asyncio.CancelledError:
-                    # Вызывающего сняли, пока тело работало в своём потоке.
-                    # Поток мы не остановим — он в блокирующем вызове, и
-                    # прервать его нечем; это заявленное свойство
-                    # `run_abandonable`. Закрыть тело отсюда тоже нельзя, пока
-                    # оно исполняется, — уборку доделает `on_abandoned` в том
-                    # же потоке, когда тело вернётся.
-                    _close_quietly(gen)
-                    raise
-            else:
-                needs_call, early = await _drive_async(gen)
-            if not needs_call:
-                return early
-            try:
-                result = await func(*args, **kwargs)
-            except BaseException:
-                # Исключение тула пробрасываем как раньше, но тело закрываем:
-                # брошенный незакрытым генератор всплыл бы предупреждением
-                # интерпретатора уже в чужом месте.
-                gen.close()
-                raise
-            # Постобработка идёт ИНЛАЙН всегда, даже у тел с `body_may_block`.
-            #
-            # Постобработки нет ни у одного гварда в ядре: все `yield` — это
-            # `return (yield)`, то есть 0.3 мкс работы. Второй поток-демон на
-            # неё заводился по симметрии с `_start`, и это была чистая трата:
-            # у `run_abandonable` каждый вызов — свой поток, значит один
-            # `exec_command` стоил ДВУХ потоков вместо одного.
-            again, value = await _drive_async(gen, result)
-            _forbid_second_call(again)
-            return value
+            return await arun_guard_flow(
+                flow(*args, **kwargs),
+                lambda: func(*args, **kwargs),
+                body_may_block=body_may_block,
+            )
+
+        awrapper.__gc_guard_wrapper__ = GuardWrapper(
+            flow, func, body_may_block, awrapper
+        )
 
         return awrapper
 
@@ -418,6 +446,9 @@ def dual_wrap(
         _forbid_second_call(again)
         return value
 
+    wrapper.__gc_guard_wrapper__ = GuardWrapper(
+        flow, func, body_may_block, wrapper
+    )
     return wrapper
 
 

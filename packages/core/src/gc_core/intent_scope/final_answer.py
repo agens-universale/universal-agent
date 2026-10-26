@@ -1,7 +1,8 @@
-"""Post-accept intent log append for final prose answer (caller layer, not State)."""
+"""Completed turn outcomes in the intent log (caller layer, not State)."""
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -10,7 +11,8 @@ from gc_core.intent_scope.agent_logging import (
     log_intent_scope_skipped,
 )
 from gc_core.intent_scope.append import append_final_answer_to_current
-from gc_core.intent_scope.summarizer import asummarize_final_answer_line
+from gc_core.settings import settings_of
+from gc_core.utils.text_preview import head_tail_preview
 
 _logger = logging.getLogger(__name__)
 _LABEL = "final_answer"
@@ -21,6 +23,30 @@ def _append(state: Any, content: str, log: Any) -> None:
         log_intent_scope_delta_appended(
             log, tool_name=_LABEL, delta_chars=len(content)
         )
+
+
+def record_turn_finish_outcome(
+    *, arguments: str, outcome: str, state: Any
+) -> None:
+    """Разрешённый итог — в журнал до flush/compaction, без служебного запроса."""
+    payload = json.loads(arguments)
+    kind = str(payload.get("solution_type") or "").strip()
+    report = str(payload.get("task_report") or "").strip()
+    prefix = kind
+    if outcome in ("fail_open_error", "fail_open_limit"):
+        prefix += f" [{outcome}]"
+    prefix = f"{prefix}: " if prefix else ""
+    text = prefix + head_tail_preview(report, 1000 - len(prefix))
+    append_final_answer_to_current(state, text)
+
+
+def record_plan_outcome(*, plan_text: str, state: Any) -> None:
+    """Предложенный план — итог хода в журнал до flush: судья пары хода
+    исполнения видит, что пойдёт в работу. Префикс отличает план от отчёта о
+    сделанном."""
+    prefix = "plan: "
+    text = prefix + head_tail_preview(plan_text.strip(), 1000 - len(prefix))
+    append_final_answer_to_current(state, text)
 
 
 async def amaybe_record_final_answer_intent(
@@ -43,9 +69,8 @@ async def amaybe_record_final_answer_intent(
         log_intent_scope_skipped(log, tool_name=_LABEL, reason="empty_text")
         return
 
-    config_dict = getattr(ctx, "config_dict", {}) or {}
     if (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+        str(settings_of(ctx).backend.api_mode).strip().lower()
         != "chat_completions"
     ):
         log_intent_scope_skipped(
@@ -76,3 +101,11 @@ async def amaybe_record_final_answer_intent(
         return
 
     log_intent_scope_skipped(log, tool_name=_LABEL, reason="empty_summary")
+
+
+async def asummarize_final_answer_line(**kwargs):
+    from gc_core.intent_scope.summarizer import (
+        asummarize_final_answer_line as summarize,
+    )
+
+    return await summarize(**kwargs)

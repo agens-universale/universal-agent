@@ -6,13 +6,16 @@ from unittest.mock import patch
 
 from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.summarize.summary_spec import (
+    SUMMARY_SECTIONS,
     agent_summary_slice_mode,
-    hint_section_tags,
     slice_summary,
 )
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit.settings import fake_ctx
+
+_HINT_TAGS = tuple(s.tag for s in SUMMARY_SECTIONS if not s.agent_visible)
 
 
 class CompactionSummarySliceTest(unittest.TestCase):
@@ -77,9 +80,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
                 }
             ),
         )
-        ctx = types.SimpleNamespace(
-            config_dict={"summary_params": {}}, logger=None
-        )
+        ctx = fake_ctx({"summary": {}}, logger=None)
 
         with (
             patch(
@@ -102,7 +103,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
 
         short = slice_summary(full_xml, "short")
         self.assertEqual(seen["raw_summary"], short)
-        for tag in hint_section_tags():
+        for tag in _HINT_TAGS:
             self.assertNotIn(f"<{tag}>", seen["raw_summary"])
         self.assertEqual(trace["final_output"]["agent_summary_slice"], "short")
         self.assertEqual(trace["final_output"]["raw_summary"], full_xml)
@@ -161,9 +162,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
                 }
             ),
         )
-        ctx = types.SimpleNamespace(
-            config_dict={"summary_params": {}}, logger=None
-        )
+        ctx = fake_ctx({"summary": {}}, logger=None)
 
         with (
             patch(
@@ -186,7 +185,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
 
         full_slice = slice_summary(full_xml, "full")
         self.assertEqual(seen["raw_summary"], full_slice)
-        for tag in hint_section_tags():
+        for tag in _HINT_TAGS:
             self.assertIn(f"<{tag}>", seen["raw_summary"])
         self.assertEqual(trace["final_output"]["agent_summary_slice"], "full")
         self.assertEqual(trace["final_output"]["raw_summary"], full_xml)

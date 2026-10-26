@@ -19,8 +19,6 @@ import os
 import types
 
 import pytest
-from PIL import Image
-
 from gc_cli import cli
 from gc_core.attachments.model import (
     MAX_INPUT_BYTES,
@@ -39,6 +37,8 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.thread_store import save_thread_meta
 from gc_core.utils.format_messages import format_message_responses
+from gc_testkit.settings import make_settings
+from PIL import Image
 
 
 def _png(color: str = "red") -> bytes:
@@ -266,7 +266,12 @@ def test_console_trace_prints_content_not_the_attachment_records():
 def cli_env(monkeypatch, tmp_path):
     """`arun_cli` до исполнителя: конфиг, стамп, контекст и исполнитель подменены."""
     threads = tmp_path / "threads"
-    config = {"threads_data_path": str(threads), "console_trace": False}
+    config = make_settings(
+        {
+            "paths.threads_data_path": str(threads),
+            "logging.console_trace": False,
+        }
+    )
     rec = types.SimpleNamespace(
         arun_calls=[], stamped=False, ctx_built=False, staged_existed=[]
     )
@@ -275,10 +280,12 @@ def cli_env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
     monkeypatch.setattr(
         cli,
-        "load_config_ex",
-        lambda path, profile_override=None: (config, None),
+        "load_settings",
+        lambda path, profile_override=None: config,
     )
-    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *a, **k: None)
+    monkeypatch.setattr(
+        cli, "apply_cli_overrides", lambda loaded, **_kw: loaded
+    )
     monkeypatch.setattr(cli, "cli_forces_legacy_model", lambda cfg: False)
     monkeypatch.setattr(cli, "build_auth_connector", lambda cfg: None)
     from gc_core import startup_notices, upgrade_gate
@@ -442,7 +449,7 @@ async def test_images_with_structured_output_ride_the_turn_and_the_pocket_is_cle
     async def _close(self):
         closed.append(True)
 
-    async def _emit(*, format_text, response, config_dict, ctx, executor):
+    async def _emit(*, format_text, response, settings, ctx, executor):
         emitted.append((format_text, response))
         return 0
 

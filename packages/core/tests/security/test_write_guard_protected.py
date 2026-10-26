@@ -1,5 +1,4 @@
 import json
-import types
 
 from gc_core.security.path_policy import enforce_write_guard
 
@@ -14,10 +13,10 @@ class _Tool:
 
 
 def _ctx(cwd, confirm=False):
-    return types.SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        config={
             "launch_root": str(cwd),
-            "write_guard": {"enabled": True, "mode": "deny"},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         },
         is_tui=False,
         tui_confirm=None,
@@ -42,10 +41,10 @@ def test_operational_gc_write_denied_even_when_guard_disabled(
     from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
-    ctx = types.SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
-            "write_guard": {"enabled": False},
+            "security.write_guard": {"enabled": False},
         },
         is_tui=False,
         tui_confirm=None,
@@ -59,30 +58,36 @@ def test_operational_gc_write_denied_even_when_guard_disabled(
     )  # floor blocks even when write_guard disabled
 
 
-def test_skills_write_allowed(tmp_path, monkeypatch):
+def test_skills_write_is_not_silent(tmp_path, monkeypatch):
+    """Скилл — защищённый путь с вопросом: без человека запись не проходит."""
+    import io
+
     from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    # Без человека: при `pytest -s` вопрос не должен уйти в консоль.
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
     ctx = _ctx(tmp_path)
     (tmp_path / ".gc" / "skills" / "foo").mkdir(parents=True)
     res = _Tool(ctx).write(
         path=str(tmp_path / ".gc" / "skills" / "foo" / "SKILL.md"), content="x"
     )
-    assert json.loads(res)["ok"] is True
+    assert json.loads(res)["ok"] is False
+    assert json.loads(res)["error"]["type"] == "protected_path_denied"
 
 
 # ---------------------------------------------------------------------------
 # TUI repro — guard ask должен идти через confirm-порт, не stdin
 # ---------------------------------------------------------------------------
-import types as _types
+from gc_testkit.settings import fake_ctx
 
 
 def _ctx_ask_tui(launch_root, tui_confirm):
     """ctx для mode=ask в TUI-режиме."""
-    return _types.SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        config={
             "launch_root": str(launch_root),
-            "write_guard": {"enabled": True, "mode": "ask"},
+            "security.write_guard": {"enabled": True, "mode": "ask"},
         },
         is_tui=True,
         tui_confirm=tui_confirm,
@@ -104,12 +109,12 @@ def test_instruction_file_confirm_cached_by_decision_key(
 
     def tui_confirm(*, title, question, fields):
         calls.append(question)
-        return "once"
+        return "allow_once"
 
-    ctx = _types.SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
-            "write_guard": {"enabled": True, "mode": "deny"},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         },
         is_tui=True,
         tui_confirm=tui_confirm,
@@ -138,9 +143,7 @@ def test_write_guard_ask_tui_confirmed(tmp_path, monkeypatch):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     recorded = []
-    tui_confirm = lambda **kw: (
-        recorded.append(kw) or "once"
-    )  # 3-значный контракт: once=разрешить
+    tui_confirm = lambda **kw: recorded.append(kw) or "allow_once"
     ctx = _ctx_ask_tui(launch_root, tui_confirm)
 
     out_path = str(tmp_path / "outside.txt")
@@ -162,7 +165,7 @@ def test_write_guard_ask_tui_declined(tmp_path, monkeypatch):
     # launch_root — подкаталог; файл снаружи него → WriteGuardViolation
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    tui_confirm = lambda **kw: "deny"  # 3-значный контракт: deny=отклонить
+    tui_confirm = lambda **kw: "deny_once"
     ctx = _ctx_ask_tui(launch_root, tui_confirm)
 
     out_path = str(tmp_path / "outside.txt")

@@ -168,10 +168,9 @@ def _stub_optional_web_parsers() -> None:
 #: дереве. Поэтому гейт расширен проверкой самих загружаемых файлов: жёстко
 #: падать плагину нельзя (прогон может не иметь к заглушке никакого отношения),
 #: а молчать нельзя тем более — отказ обязан назвать себя.
-_STORE_SRC = "tools/session/stored_outputs/tool_call_outputs_store.py"
 _SIMPLE_TOOL_BASE_SRC = "tools/simple_tool_base.py"
 _SUBMIT_SOLUTION_SRC = "tools/turn/submit_solution.py"
-_PRELOAD_SOURCES = (_STORE_SRC, _SIMPLE_TOOL_BASE_SRC, _SUBMIT_SOLUTION_SRC)
+_PRELOAD_SOURCES = (_SIMPLE_TOOL_BASE_SRC, _SUBMIT_SOLUTION_SRC)
 
 
 def _missing_preload_sources() -> list[str]:
@@ -224,17 +223,14 @@ def preload_minimal_tools_package() -> None:
     stored_pkg.__path__ = [str(tools_dir / "session" / "stored_outputs")]
     sys.modules["gc_core.tools.session.stored_outputs"] = stored_pkg
     session_pkg.stored_outputs = stored_pkg
-    _load_file_module(
-        "gc_core.tools.session.stored_outputs.tool_call_outputs_store",
-        _STORE_SRC,
-    )
-    wrapping_mod = types.ModuleType(
-        "gc_core.tools.session.stored_outputs.wrapping"
-    )
+    # Хранилище выводов (`gc_core.execution.output_store`) — обычный модуль
+    # вне `gc_core.tools`, заглушке грузить его незачем. Обёртку вывода
+    # заменяем тождественной, как раньше на её старом пути в tools.
+    wrapping_mod = types.ModuleType("gc_core.execution.output_wrapping")
     wrapping_mod.maybe_store_and_wrap_tool_output = lambda tool_res, **_kw: (
         tool_res
     )
-    sys.modules["gc_core.tools.session.stored_outputs.wrapping"] = wrapping_mod
+    sys.modules["gc_core.execution.output_wrapping"] = wrapping_mod
 
     skills_pkg = types.ModuleType(_MOD_TOOLS_SKILLS)
     skills_pkg.__path__ = [str(tools_dir / "skills")]

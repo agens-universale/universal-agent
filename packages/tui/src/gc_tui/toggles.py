@@ -9,13 +9,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from gc_core.security.permission_mode import AVAILABLE_MODES
+from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 
 from gc_tui import palette as _pal
+from gc_tui.services.mode_pill import MODE_HINTS, mode_color
 from gc_tui.session_settings import (
     SESSION_KEYS,
-    effective_finish_gate_mode,
-    effective_text_answer_mode,
+    finish_gate_mode_of,
+    text_answer_mode_of,
 )
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -23,17 +26,30 @@ _TUI_FINISH_GATE_MODE = "tui.finish_gate_mode"
 _TUI_TEXT_ANSWER_MODE = "tui.text_answer_mode"
 
 
-def apply_finish_gate_mode(cfg: Dict[str, Any]) -> None:
-    """TUI-wiring: спроецировать эффективный режим /gate в runtime-ключи судьи.
+def tui_agent_settings(loaded):
+    """Настройки агента TUI поверх действующих: промпт-ассеты, адаптивный bounce
+    текстового ответа (`tui.text_answer_mode`) и проекция режима /gate.
 
-    Зовётся ТОЛЬКО из TUI-сборки конфига (tui/app.py::_build_real_executor):
-    CLI/server/swarm не зовут — у них глобальный agent.strict_turn_finish_validation
-    как был, и ключа finish_gate_smart нет вовсе. strict остаётся булевым
-    (mode != "off" → судья потенциально включён), smart — отдельным runtime-ключом
-    (спека §3): guard читает finish_gate_smart + State.turn_tool_calls."""
-    mode = effective_finish_gate_mode(cfg)
-    cfg["strict_turn_finish_validation"] = mode != "off"
-    cfg["finish_gate_smart"] = mode == "smart"
+    Принимает `LoadedSettings` и отдаёт новый. Проекция /gate — только здесь:
+    CLI/server/swarm её не делают, у них глобальный
+    `agent.strict_turn_finish_validation` как был и `finish_gate_smart` нет вовсе.
+    strict остаётся булевым (mode != "off" → судья потенциально включён), smart —
+    отдельным рантайм-сигналом (спека §3): guard читает `finish_gate_smart` +
+    `State.turn_tool_calls`."""
+    from gc_tui.services.prompt_assets import tui_special_instructions_path
+
+    instructions = tui_special_instructions_path()
+    mode = finish_gate_mode_of(loaded.settings)
+    return loaded.with_overrides(
+        {
+            "paths.chat_completions_special_instructions_path": instructions,
+            "agent.strict_turn_finish_validation": mode != "off",
+        },
+        layer="runtime",
+    ).with_runtime(
+        text_answer_mode=text_answer_mode_of(loaded.settings),
+        finish_gate_smart=mode == "smart",
+    )
 
 
 # --- /rigor: пресет как витрина над двумя ключами (спека §2, §6) --------------
@@ -58,21 +74,25 @@ def resolve_preset(values: Dict[str, str]) -> str:
     return PRESET_CUSTOM
 
 
-def resolve_rigor_state(cfg: Dict[str, Any]) -> str:
-    """Резолв /rigor от ЭФФЕКТИВНЫХ значений пары в cfg (то же правило коллизии,
-    что у витрины — через SESSION_KEYS[k].effective_value). state-callable /rigor."""
-    values = {k: SESSION_KEYS[k].effective_value(cfg) for k in RIGOR_KEYS}
+def resolve_rigor_state(settings: Any) -> str:
+    """Резолв /rigor от ЭФФЕКТИВНЫХ значений пары в настройках (то же правило
+    коллизии, что у витрины — через SESSION_KEYS[k].effective_value).
+    state-callable /rigor; `settings` — всё, что принимает `settings_of`."""
+    values = {k: SESSION_KEYS[k].effective_value(settings) for k in RIGOR_KEYS}
     return resolve_preset(values)
 
 
 @dataclass(frozen=True)
 class ToggleValue:
     """Одно значение тоггла: каноническое имя + подсказка (§5 спеки) + цвет ползунка
-    (§3 спеки; токен-константа tui/palette.py)."""
+    (§3 спеки; токен-константа tui/palette.py). `off_scale` (спека автороутинга
+    §3) — значение вне базовой шкалы (`/level`: `auto`): рисуется `render_track`
+    ПОСЛЕ двойного пробела, не в базовом треке."""
 
     value: str
     hint: str
     color: str
+    off_scale: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,7 +111,8 @@ class ToggleSpec:
     gate/answers/rigor ничего не меняют, только новые `models`-тогглы указывают
     свой. `show_track` — False у trackless-тоггла (`/profiles`: произвольное
     число профилей, шкала не имеет смысла — сразу значение-имя, спека §12.1).
-    `values_provider(app) -> значения` — динамический набор значений вместо
+    `values_provider(app, settings) -> значения` — состав для переданных настроек
+    (база окна для Settings или действующие для палитры) вместо
     статического `values` (профили из файлов, а не фиксированный список);
     `hint_provider(app, value) -> текст` — динамический hint вместо статического
     `ToggleValue.hint` (модель, резолвнутая Router'ом для `/level`; состав
@@ -103,11 +124,13 @@ class ToggleSpec:
     `app.switch_session_profile` (пересборка + notice + предохранитель,
     спека §9.1), не generic `apply_session_override`. `rebuild_on_apply` —
     False у `/level`: единственный тоггл, переключаемый БЕЗ `invalidate_runner`
-    (спека §6.4 — уровень фиксируется на ход инжектируемым провайдером, не
-    снимком executor)."""
+    (спека §6.4 — модель резолвится перед каждым вызовом по живому уровню
+    инжектируемого провайдера, /level действует со следующего вызова; снимок
+    executor тут не при чём)."""
 
     values: Tuple[ToggleValue, ...]
-    state: Callable[[Dict[str, Any]], str]
+    # Читатель действующего значения: настройки окна (`LoadedSettings`).
+    state: Callable[[Any], str]
     label: str
     summary: str
     dotted: str = ""
@@ -122,10 +145,19 @@ class ToggleSpec:
     # Trackless: чем показать пустое значение (у /profiles «без профиля» —
     # осмысленное состояние, не «не задано», ревизия 2026-07-28).
     empty_value_text: str = "—"
-    values_provider: Optional[Callable[[Any], Tuple[ToggleValue, ...]]] = None
+    values_provider: Optional[
+        Callable[[Any, Any], Tuple[ToggleValue, ...]]
+    ] = None
     hint_provider: Optional[Callable[[Any, str], str]] = None
+    # Почему значение сейчас не предлагается (набранное `/level auto` при
+    # недоступном автовыборе): `(app, value) -> причина | None`.
+    unavailable_hint: Optional[Callable[[Any, str], Optional[str]]] = None
     session_switch_profile: bool = False
     rebuild_on_apply: bool = True
+    # Значение, действующее в сессии, когда оно живёт не в переопределениях
+    # конфига (режим разрешений: Shift+Tab, флаг запуска): `(app) -> значение`.
+    # Без него действующее значение читается по настройкам окна.
+    session_state: Optional[Callable[[Any], str]] = None
 
     @property
     def names(self) -> Tuple[str, ...]:
@@ -137,7 +169,78 @@ LEVEL_ROLE_TEXT: Dict[str, str] = {
     "light": "быстрая и дешёвая: простые задачи",
     "default": "основная рабочая: повседневные задачи",
     "max": "самая сильная: сложные задачи",
+    "auto": "уровень меняется автоматически по ходу работы",
 }
+
+# Единственный владелец позиции `auto` (спека автороутинга §3): цвет — BRAND,
+# читается отсюда и палитрой/Настройками (через `level_values`), и футером
+# (задача 4) — литерал цвета не дублируется.
+AUTO_LEVEL_VALUE = ToggleValue("auto", "", _pal.BRAND, off_scale=True)
+
+
+def auto_unavailable_reason_cfg(cfg: Any) -> Optional[str]:
+    """Причина недоступности `auto` для данного конфига или None (спека
+    автороутинга §3): единственная точка чтения решения ядра
+    (`auto_routing.levels.auto_unavailable_reason`) в TUI — состав значений,
+    витрина state, хинт тоггла и другие витрины TUI за пределами этого модуля
+    (`app.py::display_router`, `app.py::auto_mode_active`,
+    `screens/config.py::_effective_model_name`) спрашивают отсюда или через
+    `auto_available_cfg`, условие не дублируют.
+    `force_legacy` — тем же детектом, что и стартовый нотис."""
+    from gc_core.auto_routing.levels import auto_unavailable_reason
+    from gc_core.config import cli_forces_legacy_model
+
+    return auto_unavailable_reason(
+        cfg, force_legacy=cli_forces_legacy_model(cfg)
+    )
+
+
+def auto_available_cfg(cfg: Any) -> bool:
+    """Доступна ли позиция `auto` тоггла `/level` для данного конфига."""
+    return auto_unavailable_reason_cfg(cfg) is None
+
+
+def level_values(
+    app: Any,  # noqa: ARG001  # сигнатура values_provider(app, settings)
+    settings: Any,
+) -> Tuple[ToggleValue, ...]:
+    """Состав значений `/level`: статичная тройка плюс `auto` вне шкалы, когда
+    фича доступна для ПЕРЕДАННЫХ настроек — база окна у Settings, действующие у
+    палитры (спека автороутинга §3, PR140 Р4)."""
+    values = TOGGLES["level"].values
+    if auto_available_cfg(settings):
+        return values + (AUTO_LEVEL_VALUE,)
+    return values
+
+
+def resolve_level_state(cfg: Any) -> str:
+    """Витрина эффективного `/level` (state-callable, спека автороутинга §3):
+    `auto` — когда конфиг реально хранит литерал `auto` И фича доступна
+    (в этой ветке `effective_level` при недоступности вернул бы `default`,
+    что соврало бы состоянию конфига); иначе — перевод через единственную
+    точку `effective_level` (легаси/недоступность и честный `light/default/max`
+    остаются её заботой)."""
+    from gc_core.auto_routing.levels import effective_level
+
+    available = auto_available_cfg(cfg)
+    if settings_of(cfg).level == "auto" and available:
+        return "auto"
+    return effective_level(settings_of(cfg).level, None, available)
+
+
+def level_unavailable_hint(app: Any, value: str) -> Optional[str]:
+    """Почему значения `value` сейчас нет в составе `/level`, или None. Выпасть
+    из состава может только `auto`; фраза причины — та же, что у нотиса ядра
+    (`startup_notices.auto_routing_unavailable_reason_text`), без хвоста про
+    default: набор уровень не меняет, действующий показывает футер."""
+    if value != AUTO_LEVEL_VALUE.value:
+        return None
+    reason = auto_unavailable_reason_cfg(_effective_settings(app))
+    if reason is None:
+        return None
+    from gc_core.startup_notices import auto_routing_unavailable_reason_text
+
+    return auto_routing_unavailable_reason_text(reason)
 
 
 def level_value_hint(app: Any, value: str) -> str:
@@ -145,7 +248,11 @@ def level_value_hint(app: Any, value: str) -> str:
     резолвнутая Router'ом ДЛЯ ЭТОГО уровня (не обязательно активного —
     `ModelRouter.resolve_level`), + роль уровня. Легаси/легаси-форс — честные
     пометки вместо модели+роли (канон §12.1); фоллбэк уровня — честная стрелка
-    «light → default» вместо модели притворного light-слота."""
+    «light → default» вместо модели притворного light-слота. `auto` (спека
+    автороутинга §3) — фиксированный текст роли ДО любого резолва: модели за
+    ней нет, уровень меняется автоматически по ходу работы."""
+    if value == "auto":
+        return LEVEL_ROLE_TEXT["auto"]
     from gc_core.model_router import AliasCircuitOpenError
 
     router = app.display_router()
@@ -193,7 +300,10 @@ def _discovered_profiles(app: Any) -> Dict[str, Any]:
     return discover_profiles(_profile_roots(app))
 
 
-def profile_values(app: Any) -> Tuple[ToggleValue, ...]:
+def profile_values(
+    app: Any,
+    settings: Any = None,  # noqa: ARG001  # сигнатура values_provider(app, settings)
+) -> Tuple[ToggleValue, ...]:
     """Алфавитный объединённый список профилей (спека §3.1/§12.1): тёзка — одна
     позиция (`discover_profiles` уже разрешает коллизию в пользу проектного).
     Цвет/hint не несут смысла здесь — trackless, `hint_provider` динамический."""
@@ -203,15 +313,35 @@ def profile_values(app: Any) -> Tuple[ToggleValue, ...]:
     )
 
 
-def _profile_slots_summary(cfg: Dict[str, Any]) -> str:
-    slots = cfg.get("slots") or {}
-    models = cfg.get("models") or {}
+def _model_names(models: Any) -> Dict[str, str]:
+    """Алиас → провайдерский id модели: записи реестра настроек (модели) либо
+    сырого документа файла профиля (словари)."""
+    names: Dict[str, str] = {}
+    for alias, entry in (models or {}).items():
+        model = (
+            entry.get("model")
+            if isinstance(entry, dict)
+            else getattr(entry, "model", None)
+        )
+        names[alias] = str(model or "")
+    return names
+
+
+def _settings_slots(settings: Any) -> Dict[str, Any]:
+    """Слоты уровней из настроек — словарём, как в документе профиля."""
+    return settings_of(settings).slots.model_dump()
+
+
+def _profile_slots_summary(
+    slots: Dict[str, Any], models: Dict[str, str]
+) -> str:
+    """«light m1 · default m2»: уровни со слотом, чей алиас есть в реестре
+    (`models` — алиас → id модели, см. `_model_names`)."""
     pairs = []
-    for level, alias in slots.items():
-        entry = models.get(alias)
-        if entry is None:
+    for level, alias in (slots or {}).items():
+        if alias not in models:
             continue
-        pairs.append((level, f"{level} {entry.get('model') or alias}"))
+        pairs.append((level, f"{level} {models[alias] or alias}"))
     pairs.sort(key=lambda pair: _LEVEL_ORDER.get(pair[0], 99))
     return " · ".join(text for _, text in pairs)
 
@@ -225,8 +355,7 @@ def _profile_mcp_rebuild_note(app: Any, value: str) -> str:
     # Битый или нечитаемый файл (человек правит руками) даёт пустой документ:
     # предупреждение о MCP просто не покажется.
     raw = _profile_file_doc(app, value)
-    # Во ВХОДНОМ документе секция называется `mcp: servers:` — плоский `mcp-servers`
-    # существует только в снимке flatten_app_config (config.py), а литеральный
+    # Во ВХОДНОМ документе секция называется `mcp: servers:` — литеральный
     # верхнеуровневый `mcp-servers:` схема профиля отвергает (docs/configuration.md).
     mcp = raw.get("mcp") if isinstance(raw, dict) else None
     servers = mcp.get("servers") if isinstance(mcp, dict) else None
@@ -246,10 +375,12 @@ def profile_value_hint(app: Any, value: str) -> str:
         if not names:
             return _PROFILE_EMPTY_HINT
         return f"не выбран · доступно: {', '.join(names)} · Enter — открыть список"
-    cfg = _effective_cfg(app)
+    settings = _effective_settings(app)
     ref = _discovered_profiles(app).get(value)
     parts = []
-    summary = _profile_slots_summary(cfg)
+    summary = _profile_slots_summary(
+        _settings_slots(settings), _model_names(settings_of(settings).models)
+    )
     if summary:
         parts.append(summary)
     if ref is not None:
@@ -316,7 +447,7 @@ def _cached_assembly_error(app: Any, name: str) -> str:
     хоть один файл сборки этого профиля — общий кэш для витрины списка
     (`profile_picker_options`, один проход на открытие) И хинта подвала
     (`profile_picker_hint`): какая из них первой спросила про имя, та и платит
-    единственную полную сборку (`probe_profile_assembly` → `load_config_ex`,
+    единственную полную сборку (`probe_profile_assembly` → `load_settings`,
     ~6 мс), вторая берёт готовый ответ. Без этого хинт пересобирал конфиг
     заново на каждый highlight и на каждый тик поллинга главного экрана
     (`ArgPicker.desired_height`, 0.25 с) — 4 раза в секунду на UI-потоке, пока
@@ -361,10 +492,8 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     без общего кэша с этим провайдером он звал бы пробу заново 4 раза в
     секунду, пока список просто открыт."""
     refs = _discovered_profiles(app)
-    effective = str(_effective_cfg(app).get("profile") or "")
-    base_pointer = str(
-        (getattr(app, "_config", None) or {}).get("profile") or ""
-    )
+    effective = runtime_of(_effective_settings(app)).active_profile or ""
+    base_pointer = runtime_of(_global_settings(app)).active_profile or ""
     none_status = _PROFILE_ACTIVE_STATUS if not effective else ""
     options = [(PROFILE_NONE_VALUE, "работать чистым конфигом", none_status)]
     for name in sorted(refs):
@@ -414,8 +543,14 @@ def profile_picker_hint(app: Any, value: Any) -> str:
     doc = _profile_file_doc(app, name)
     # Модели для подписи слота: из файла профиля, с фоллбэком на эффективный
     # реестр (профиль может ссылаться на алиасы нижних слоёв).
-    effective_models = _effective_cfg(app).get("models") or {}
-    merged_models = {**effective_models, **(doc.get("models") or {})}
+    effective_models = _model_names(
+        settings_of(_effective_settings(app)).models
+    )
+    doc_models = doc.get("models")
+    merged_models = {
+        **effective_models,
+        **_model_names(doc_models if isinstance(doc_models, dict) else {}),
+    }
     parts = []
     # Статус строки говорит ЧТО («✗ не применится»), подсказка — ПОЧЕМУ. Причина
     # идёт ПЕРВОЙ и целиком: текст ядра самодостаточен («<путь>: …»), а рядом с
@@ -423,8 +558,9 @@ def profile_picker_hint(app: Any, value: Any) -> str:
     reason = _cached_assembly_error(app, name)
     if reason:
         parts.append(reason)
+    doc_slots = doc.get("slots")
     summary = _profile_slots_summary(
-        {"slots": doc.get("slots") or {}, "models": merged_models}
+        doc_slots if isinstance(doc_slots, dict) else {}, merged_models
     )
     if summary:
         parts.append(summary)
@@ -444,9 +580,11 @@ def group_toggle_names(group: str) -> list:
 
 
 # Состав секции «Режимы работы» — упорядоченный список ГРУПП, а не одна группа.
-# Порядок блоков читается сверху вниз: сначала «как работаем» (строгость,
-# самопроверка, формат ответа), потом «чем» (уровень модели) — решение владельца.
-MODES_SECTION_GROUPS: Tuple[str, ...] = ("rigor", "level")
+# Порядок блоков сверху вниз — решение владельца: «чем работаем» (уровень
+# модели), «что агенту можно» (режим разрешений по умолчанию), «как строго
+# закрывать ход» (строгость, самопроверка, формат ответа). Выровнен с палитрой,
+# где `/level` идёт первым.
+MODES_SECTION_GROUPS: Tuple[str, ...] = ("level", "permissions", "rigor")
 
 
 def modes_section_names() -> list:
@@ -461,13 +599,33 @@ def modes_section_names() -> list:
     ]
 
 
-def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
-    """Набор значений тоггла для текущего состояния: динамический
-    (`values_provider(app)`, `/profiles`) либо статический (`spec.names`)."""
+def _toggle_values_for(
+    app: Any, name: str, settings: Any
+) -> Tuple[ToggleValue, ...]:
     spec = TOGGLES[name]
     if spec.values_provider is not None:
-        return tuple(v.value for v in spec.values_provider(app))
-    return spec.names
+        return spec.values_provider(app, settings)
+    return spec.values
+
+
+def effective_toggle_values(app: Any, name: str) -> Tuple[ToggleValue, ...]:
+    """Состав значений тоггла по действующим настройкам окна (база + сессия) —
+    палитра и всё, что показывает текущий контекст."""
+    return _toggle_values_for(app, name, _effective_settings(app))
+
+
+def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
+    return tuple(v.value for v in effective_toggle_values(app, name))
+
+
+def base_toggle_values(app: Any, name: str) -> Tuple[ToggleValue, ...]:
+    """Состав значений для секции Settings — по глобальной базе без сессии, тот же
+    источник, что `toggle_state_base`: значение и его доступность из одного места."""
+    return _toggle_values_for(app, name, _global_settings(app))
+
+
+def base_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
+    return tuple(v.value for v in base_toggle_values(app, name))
 
 
 TOGGLES: Dict[str, ToggleSpec] = {
@@ -478,12 +636,14 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue("default", "", _pal.RUN_COLOR),
             ToggleValue("max", "", _pal.ACCENT),
         ),
-        state=lambda cfg: str(cfg.get("level") or "default"),
+        values_provider=level_values,
+        state=resolve_level_state,
         label="уровень модели",
         summary="от лёгкой до максимальной сложности задачи",
         group="level",
         settings_label="уровень модели по умолчанию",
         hint_provider=level_value_hint,
+        unavailable_hint=level_unavailable_hint,
         rebuild_on_apply=False,
         palette_default=True,
     ),
@@ -491,7 +651,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         dotted="profile",
         values=(),
         values_provider=profile_values,
-        state=lambda cfg: str(cfg.get("profile") or ""),
+        state=lambda settings: str(runtime_of(settings).active_profile or ""),
         label="профили",
         summary="переключаемые наборы настроек",
         group="models",
@@ -500,6 +660,29 @@ TOGGLES: Dict[str, ToggleSpec] = {
         hint_provider=profile_value_hint,
         session_switch_profile=True,
         palette_default=True,
+    ),
+    # Только Настройки: команды палитры нет — режим ТЕКУЩЕЙ сессии переключает
+    # Shift+Tab. Строка правит конфиг; сессия без своего выбора следует ему
+    # сразу (правило «выбор сессии → конфиг», `mode_with_source`).
+    "mode": ToggleSpec(
+        dotted="security.permissions.default_mode",
+        values=tuple(
+            ToggleValue(
+                mode.value,
+                f"{MODE_HINTS[mode.value]} · в сессии — Shift+Tab",
+                mode_color(mode.value),
+            )
+            for mode in AVAILABLE_MODES
+        ),
+        state=lambda settings: str(
+            settings_of(settings).security.permissions.default_mode
+        ),
+        label="режим разрешений",
+        summary="что агенту можно без вопроса",
+        group="permissions",
+        settings_label="режим разрешений по умолчанию",
+        palette_default=False,
+        session_state=lambda app: app.effective_permission_mode(),
     ),
     "rigor": ToggleSpec(
         values=(
@@ -544,7 +727,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
                 _pal.ACCENT,
             ),
         ),
-        state=effective_finish_gate_mode,
+        state=finish_gate_mode_of,
         label="самопроверка выполнения задачи",
         summary="закрыт ли запрос",
         palette_default=False,
@@ -568,7 +751,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
                 _pal.ACCENT,
             ),
         ),
-        state=effective_text_answer_mode,
+        state=text_answer_mode_of,
         label="формат ответа",
         summary="допустим ли текст как финал хода",
         palette_default=False,
@@ -639,33 +822,55 @@ def _fit_value_hint(value: str, hint: str, width: int) -> str:
 
 
 def render_track(
-    spec: ToggleSpec, current: str, *, extra_lit: Any = None
+    spec: ToggleSpec,
+    current: str,
+    *,
+    extra_lit: Any = None,
+    values: Optional[Tuple[ToggleValue, ...]] = None,
 ) -> Text:
     """Канонический трек тоггла (спека §2–§3): ● на позиции current цветом
-    значения (bold), пустые позиции — ○ DEEP_DIM. `extra_lit` (спека §4.1,
-    /rigor, ревизия 4): None — 4-й позиции нет вовсе (бит-в-бит как было,
-    single-key тогглы); False — 4-я позиция ЗАРЕЗЕРВИРОВАНА, но пуста
-    (двойной пробел + один ПРОБЕЛ вместо глифа — custom не горит, никакого
-    намёка на выбираемую позицию, она больше не выбирается стрелкой вовсе);
-    True — 4-я `●` BRAND (эффективная пара нестандартна — custom применена),
-    при этом база вся тусклая. Только трек — колонки/подпись у потребителя."""
-    idx = spec.names.index(current) if current in spec.names else 0
+    значения (bold), пустые позиции — ○ DEEP_DIM. `values` (спека автороутинга
+    §3) — состав для рендера, по умолчанию `spec.values`; делится на базовую
+    шкалу (`off_scale=False`) и вне-шкальные значения (`off_scale=True`,
+    `/level`: `auto`) — база рисуется как раньше, вне-шкальные — ПОСЛЕ
+    двойного пробела, каждое своим `●` цветом значения при совпадении с
+    `current`, иначе тусклым `○`; `current` вне базовой шкалы — база вся
+    тусклая (idx не находится). Без вне-шкальных значений в `values` и без
+    `extra_lit` 4-й зоны нет вовсе (бит-в-бит как было). `extra_lit` (спека
+    §4.1, /rigor, ревизия 4) — отдельный, единственный на /rigor вне-шкальный
+    глиф custom (значение не входит ни в один трек `values`): None — зоны нет;
+    False — зона ЗАРЕЗЕРВИРОВАНА, но пуста (без тусклой ○ — custom не
+    выбирается стрелкой); True — `●` BRAND (custom применена), база вся
+    тусклая. Только трек — колонки/подпись у потребителя."""
+    values = values or spec.values
+    on_scale = tuple(v for v in values if not v.off_scale)
+    off_scale = tuple(v for v in values if v.off_scale)
+    on_names = tuple(v.value for v in on_scale)
+    idx = on_names.index(current) if current in on_names else -1
     t = Text()
-    for i, val in enumerate(spec.values):
+    for i, val in enumerate(on_scale):
         if i == idx and extra_lit is not True:
             t.append("●", style=f"bold {val.color}")
         else:
             t.append("○", style=_pal.DEEP_DIM)
-        if i < len(spec.values) - 1:
+        if i < len(on_scale) - 1:
             t.append(" ")
-    if extra_lit is not None:
-        t.append("  ")  # двойной пробел — отделяет вне-шкальную позицию custom
-        if extra_lit is True:
-            t.append("●", style=f"bold {_pal.BRAND}")
-        else:
-            t.append(
-                " "
-            )  # резерв: 4-я позиция пуста, без тусклой ○ (ревизия 4)
+    if off_scale or extra_lit is not None:
+        t.append("  ")  # двойной пробел — отделяет вне-шкальные позиции
+        for j, val in enumerate(off_scale):
+            if val.value == current:
+                t.append("●", style=f"bold {val.color}")
+            else:
+                t.append("○", style=_pal.DEEP_DIM)
+            if j < len(off_scale) - 1:
+                t.append(" ")
+        if extra_lit is not None:
+            if off_scale:
+                t.append(" ")
+            if extra_lit is True:
+                t.append("●", style=f"bold {_pal.BRAND}")
+            else:
+                t.append(" ")  # резерв: custom пуст, без тусклой ○ (ревизия 4)
     return t
 
 
@@ -676,46 +881,43 @@ def padded_track(
     extra_lit: Any,
     base_w: int,
     extra_w: int,
+    values: Optional[Tuple[ToggleValue, ...]] = None,
 ) -> Text:
     """Трек тоггла, выровненный по ЛЕВОМУ краю общего поля (ревизия 5, спека §6:
     системный контракт, владелец здесь — переиспользуют палитра и Settings).
-    `render_track` остаётся ядром без изменений — эта функция только паддит
-    его результат пробелами СПРАВА (не слева, как было): базовый трек — до
-    `base_w` (тройки друг под другом по левому краю), затем extra-зона
-    (двойной пробел + глиф/пробел custom-резерва, если `extra_w` > 0) — до
-    `extra_w`, пустая целиком у строк без своего резерва (`extra_lit=None`,
-    дети пресета) — место общее для всех видимых строк подвала."""
-    base_len = 2 * len(spec.values) - 1
-    full = render_track(spec, current, extra_lit=extra_lit)
+    `render_track` остаётся ЕДИНСТВЕННЫМ рендером — эта функция только паддит
+    его результат пробелами СПРАВА до общей ширины поля `base_w + extra_w`.
+    Вне-шкальная зона (двойной пробел + глифы `auto`/custom-резерва) стоит
+    вплотную к СВОЕЙ базе, а не в колонке после самой длинной базы секции:
+    базы разной длины (тройки и четвёрка режима разрешений) не отрывают
+    `auto` от его тройки (решение владельца). `values` (спека автороутинга
+    §3) — состав для `render_track`."""
+    values = values or spec.values
+    full = render_track(spec, current, extra_lit=extra_lit, values=values)
     t = Text()
-    t.append_text(full[:base_len])
-    t.append(" " * (base_w - base_len))
-    if extra_w:
-        extra_part = full[base_len:]
-        t.append_text(extra_part)
-        t.append(" " * (extra_w - len(extra_part.plain)))
+    t.append_text(full)
+    t.append(" " * (base_w + extra_w - len(full.plain)))
     return t
 
 
 def toggle_state(app: Any, name: str) -> str:
     """Текущее эффективное значение тоггла `name` (`gate` — через правило
-    коллизии, `answers` — сырое значение). Источник — эффективный конфиг
-    (база + сессионные переопределения), не `app._config`."""
-    getter = getattr(app, "effective_config", None)
-    cfg = (
-        getter() if callable(getter) else (getattr(app, "_config", None) or {})
-    )
-    return TOGGLES[name].state(cfg)
+    коллизии, `answers` — сырое значение). Источник — действующие настройки
+    (база + сессионные переопределения), не база окна; у тоггла с
+    `session_state` — оно (выбор сессии живёт вне конфига)."""
+    spec = TOGGLES[name]
+    if spec.session_state is not None:
+        return spec.session_state(app)
+    return spec.state(_effective_settings(app))
 
 
 def toggle_state_base(app: Any, name: str) -> str:
-    """Глобальное (файловое) значение тоггла `name`: из `app._config` БЕЗ
+    """Глобальное (файловое) значение тоггла `name`: из базы окна БЕЗ
     сессионных переопределений — то, что правит секция Settings (в отличие от
     `toggle_state`, отдающего эффективное = база + сессия). Читается тем же
     правилом коллизии (`TOGGLES[name].state`), что и эффективное, — иначе
     строка секции и оверрайд-пометка разошлись бы правилами."""
-    base = getattr(app, "_config", None) or {}
-    return TOGGLES[name].state(base)
+    return TOGGLES[name].state(_global_settings(app))
 
 
 def owning_preset_name(toggle_name: str) -> Optional[str]:
@@ -732,12 +934,11 @@ def owning_preset_name(toggle_name: str) -> Optional[str]:
     return None
 
 
-def cycle_value(name: str, current: str, direction: int) -> str:
-    """Следующее значение тоггла `name` по кругу (±1 по TOGGLES[name].names). Чистая
-    функция — ничего не пишет и не применяет; роутинг main.py (←/→/Enter на toggle-
-    строке) зовёт её от ТЕКУЩЕГО отображаемого состояния (`toggle_state`) прямо перед
-    `apply_toggle` — мгновенная модель, черновика нет."""
-    names = TOGGLES[name].names
+def cycle_in(names: list[str], current: str, direction: int) -> str:
+    """Следующее значение по кругу (±1) в произвольном списке `names`, начиная
+    от `current`. Единственная точка индексной формулы тоггл-цикла — источник
+    списка задаёт вызывающий (`effective_toggle_names` у `next_toggle_value` и
+    у `_modes_apply` в settings.py)."""
     idx = names.index(current) if current in names else 0
     return names[(idx + direction) % len(names)]
 
@@ -781,18 +982,19 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
     return toggle_state(app, name)
 
 
-def _global_cfg(app: Any) -> Dict[str, Any]:
-    return getattr(app, "_config", None) or {}
+def _global_settings(app: Any) -> Any:
+    """База окна (`LoadedSettings`) — то, что правит секция Settings."""
+    return app.base_settings()
 
 
-def _effective_cfg(app: Any) -> Dict[str, Any]:
-    getter = getattr(app, "effective_config", None)
-    return getter() if callable(getter) else _global_cfg(app)
+def _effective_settings(app: Any) -> Any:
+    """Действующие настройки окна (`LoadedSettings`): база + сессия."""
+    return app.effective_settings()
 
 
 def next_toggle_value(app: Any, name: str, direction: int) -> str:
     """Generic следующий шаг тоггла по кругу — та же формула, что у
-    `cycle_value`, но отправная точка читается через эффективное состояние
+    `cycle_in`, но отправная точка читается через эффективное состояние
     (`toggle_state(app, name)`), а не передаётся аргументом: preset-тогглу
     нужен резолв пары через конфиг приложения, single-key — просто текущее
     значение. Custom НЕ позиция трека (ревизия 4) — эффективное значение вне
@@ -807,8 +1009,7 @@ def next_toggle_value(app: Any, name: str, direction: int) -> str:
     current = toggle_state(app, name)
     if not names:
         return current
-    idx = names.index(current) if current in names else 0
-    return names[(idx + direction) % len(names)]
+    return cycle_in(names, current, direction)
 
 
 def preset_track_extra(app: Any, name: str) -> Any:
@@ -820,7 +1021,7 @@ def preset_track_extra(app: Any, name: str) -> Any:
     spec = TOGGLES[name]
     if not spec.preset_keys:
         return None
-    return spec.state(_effective_cfg(app)) == PRESET_CUSTOM
+    return spec.state(_effective_settings(app)) == PRESET_CUSTOM
 
 
 def preset_custom_hint(
@@ -840,9 +1041,13 @@ def preset_custom_hint(
     значения и рамка ВСЕГДА от базового конфига, независимо от сессионных
     оверрайдов пары (те уже показаны отдельным хвостом «в текущей сессии»)."""
     spec = TOGGLES[name]
-    cfg = _global_cfg(app) if scope == "global" else _effective_cfg(app)
-    x = SESSION_KEYS[spec.preset_keys[0]].effective_value(cfg)
-    y = SESSION_KEYS[spec.preset_keys[1]].effective_value(cfg)
+    settings = (
+        _global_settings(app)
+        if scope == "global"
+        else _effective_settings(app)
+    )
+    x = SESSION_KEYS[spec.preset_keys[0]].effective_value(settings)
+    y = SESSION_KEYS[spec.preset_keys[1]].effective_value(settings)
     if scope != "global":
         overrides = getattr(app, "_session_overrides", None) or {}
         if any(k in overrides for k in spec.preset_keys):
@@ -851,6 +1056,13 @@ def preset_custom_hint(
                 "шаг на пресет заменит пару · закрепить — в /settings"
             )
     return f"ваш дефолт: самопроверка {x}, формат {y} · менять в /settings"
+
+
+def toggle_unavailable_hint(app: Any, name: str, value: str) -> Optional[str]:
+    """Причина, по которой тоггл `name` сейчас не предлагает `value`, или None —
+    значение доступно либо у тоггла такой причины не бывает."""
+    provider = TOGGLES[name].unavailable_hint
+    return provider(app, value) if provider is not None else None
 
 
 def dynamic_toggle_hint(app: Any, name: str, value: str) -> str:

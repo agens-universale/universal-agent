@@ -1,5 +1,6 @@
+from dataclasses import replace
+
 import pytest
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import (
     CONSUMERS,
@@ -9,10 +10,9 @@ from gc_core.model_router import (
 )
 
 
-def _snapshot(raw: dict) -> dict:
-    """Реальный снимок config_dict — через настоящий flatten_app_config, не мок."""
-    app_cfg = AppConfig.model_validate(raw)
-    return flatten_app_config(app_cfg)
+def _snapshot(raw: dict) -> AppConfig:
+    """Настоящие провалидированные настройки (``AppConfig``), не мок."""
+    return AppConfig.model_validate(raw)
 
 
 def _router(
@@ -39,8 +39,8 @@ def test_consumers_constant_matches_spec():
         "summary",
         "intent_scope",
         "memory_compaction",
-        "auto_judge",
         "vision",
+        "routing_judge",
     )
     assert SUBAGENT_CONSUMER_PREFIX == "subagent:"
 
@@ -50,8 +50,7 @@ def test_consumer_registries_agree():
     пропуск любого молчит: без `_SCALAR_ASSIGN_FIELDS` Router игнорирует
     `assign.<имя>`, без `_ASSIGN_SCALAR_FIELDS` валидатор пропускает опечатку в
     алиасе, без поля схемы конфиг не грузится, без подписи notice отката и строка
-    /settings показывают сырое имя. Подписи `auto_judge` в транспортном словаре
-    нет намеренно — `utils/llm_chat_client.py`, комментарий над словарём."""
+    /settings показывают сырое имя."""
     from gc_core.config_modules.model_registry import AssignConfig
     from gc_core.config_modules.model_sections_validation import (
         _ASSIGN_SCALAR_FIELDS,
@@ -63,12 +62,12 @@ def test_consumer_registries_agree():
     assert set(_SCALAR_ASSIGN_FIELDS) == service
     assert set(_ASSIGN_SCALAR_FIELDS) == service
     assert set(AssignConfig.model_fields) - {"subagents"} == service
-    assert set(CONSUMER_RU_LABEL) == service - {"auto_judge"}
+    assert set(CONSUMER_RU_LABEL) == service
 
 
 def test_vision_without_binding_follows_the_active_level():
-    """«Глаза» без привязки — активная модель, по общему правилу, без особого
-    случая `auto_judge` (спека изображений §8)."""
+    """«Глаза» без привязки — активная модель, по общему правилу
+    (спека изображений §8)."""
     router = _router(
         {
             "models": {"a": {}, "b": {}, "c": {}},
@@ -211,23 +210,11 @@ def test_unbound_scalar_consumer_uses_active_level():
         },
         level="max",
     )
-    resolved = router.resolve("finish_gate")
+    # PR140 Р1: finish_gate теперь с фиксированным уровнем, активный уровень
+    # проверяем на потребителе вне таблицы unbound_level.
+    resolved = router.resolve("intent_scope")
     assert resolved.alias == "glm-local"
     assert "активный" in resolved.source and "max" in resolved.source
-
-
-def test_auto_judge_without_binding_uses_default_statically_not_active_level():
-    router = _router(
-        {
-            "models": {"a": {}, "b": {}, "c": {}},
-            "slots": {"light": "a", "default": "b", "max": "c"},
-        },
-        level="max",
-    )  # активный уровень max — auto_judge обязан игнорировать это
-    resolved = router.resolve("auto_judge")
-    assert resolved.alias == "b"
-    assert "default" in resolved.source
-    assert "auto_judge" in resolved.source
 
 
 def test_level_fallback_matrix_when_requested_slot_unset():
@@ -242,6 +229,21 @@ def test_level_fallback_matrix_when_requested_slot_unset():
     assert resolved.alias == "b"
     assert "фоллбэк" in resolved.source
     assert "light" in resolved.source and "default" in resolved.source
+
+
+def test_raw_auto_level_raises_honest_error_instead_of_key_error():
+    """`_resolve_level` индексирует
+    `LEVEL_FALLBACK[level]` — сырой литерал `auto` ("`level: auto`" не переведён
+    через `auto_routing.levels.effective_level`) раньше падал `KeyError: 'auto'`.
+    Честная ошибка вместо этого — молчаливого дефолта нет."""
+    router = _router(
+        {"models": {"b": {}}, "slots": {"default": "b"}}, level="auto"
+    )
+    with pytest.raises(ValueError) as excinfo:
+        router.resolve_level("auto")
+    message = str(excinfo.value)
+    assert "auto" in message
+    assert "effective_level" in message
 
 
 def test_single_model_registry_without_any_slot_resolves_to_it():
@@ -393,20 +395,16 @@ def test_model_url_inherited_from_own_backend_completions_url_override():
 
 
 def test_backend_overrides_only_explicitly_set_keys():
+    # chat_completion_kwargs на уровне алиаса схема отвергает (MODEL_LEVEL_UNSUPPORTED,
+    # kwargs алиаса — в `main`/`auxiliary`), поэтому явный ключ — таймаут.
     router = _router(
         {
-            "models": {
-                "flash": {
-                    "backend": {"chat_completion_kwargs": {"temperature": 0.2}}
-                }
-            },
+            "models": {"flash": {"backend": {"request_timeout_sec": 42}}},
             "slots": {"default": "flash"},
         }
     )
     resolved = router.resolve("main")
-    assert resolved.backend_overrides == {
-        "chat_completion_kwargs": {"temperature": 0.2}
-    }
+    assert resolved.backend_overrides == {"request_timeout_sec": 42}
 
 
 def test_tariff_passed_through_from_model_pricing():
@@ -483,7 +481,7 @@ def test_unbound_override_used_for_unbound_scalar_consumer():
         level="default",
         unbound_override=_pin(),
     )
-    assert router.resolve("summary").alias == "pinned"
+    assert router.resolve("intent_scope").alias == "pinned"
 
 
 def test_unbound_override_ignored_when_binding_is_level():
@@ -521,3 +519,126 @@ def test_unbound_override_ignored_when_binding_is_alias():
 def test_unbound_override_none_by_default_keeps_level_path():
     router = _router({"models": {"flash": {}}, "slots": {"default": "flash"}})
     assert router.resolve("main").alias == "flash"
+
+
+def test_command_judge_without_binding_uses_default_not_the_active_level():
+    """Судья команд (edit) и действий (auto) без привязки — уровнем default:
+    как классификатор у эталона, не моделью, которую человек выбрал для хода.
+    На max каждая проверка иначе шла бы в самую тяжёлую модель."""
+    router = _router(
+        {
+            "models": {"a": {}, "b": {}, "c": {}},
+            "slots": {"light": "a", "default": "b", "max": "c"},
+        },
+        level="max",
+    )
+    resolved = router.resolve("command_judge")
+    assert resolved.alias == "b"
+    assert "command_judge" in resolved.source and "default" in resolved.source
+
+
+def test_same_call_kit_ignores_only_the_source():
+    """Комплект вызова — всё, кроме витринного `source`: фоллбэк незаданного слота
+    и сам слот дают тот же запрос; одна модель с разными параметрами — нет."""
+    router = _router(
+        {
+            "models": {
+                "cold": {
+                    "model": "m-1",
+                    "main": {"temperature": 0.2},
+                },
+                "hot": {
+                    "model": "m-1",
+                    "main": {"temperature": 0.9},
+                },
+            },
+            "slots": {"light": "cold", "default": "hot"},
+        }
+    )
+    default = router.resolve_level("default")
+    fallback = router.resolve_level("max")  # max не задан → фоллбэк на default
+    assert (
+        fallback.source != default.source
+        and fallback.same_call_kit(default) is True
+    )
+    assert router.resolve_level("light").same_call_kit(default) is False
+
+
+def test_same_call_kit_compares_every_field_but_the_source():
+    """Один алиас, различие в одном поле: параметры, адрес и токен различают
+    комплекты вызова, витринное `source` — нет."""
+    kit = ResolvedModel(
+        alias="mid",
+        model="m-1",
+        url="http://127.0.0.1:8014/v1/chat/completions",
+        authorization=None,
+        backend_overrides={"temperature": 0.2},
+        tariff=None,
+        source="уровень default",
+    )
+    assert (
+        kit.same_call_kit(replace(kit, backend_overrides={"temperature": 0.9}))
+        is False
+    )
+    assert (
+        kit.same_call_kit(
+            replace(kit, url="http://127.0.0.1:8015/v1/chat/completions")
+        )
+        is False
+    )
+    assert (
+        kit.same_call_kit(replace(kit, authorization="Bearer other")) is False
+    )
+    assert (
+        kit.same_call_kit(replace(kit, source="фоллбэк max → default")) is True
+    )
+
+
+# --- модель main-трейса для заданного уровня вызова ---------------------------
+
+_TWO_LEVELS = {
+    "models": {
+        "small": {"url": "http://small/v1/chat/completions", "token": ""},
+        "big": {"url": "http://big/v1/chat/completions", "token": ""},
+    },
+    "slots": {"light": "small", "default": "big"},
+}
+
+
+def test_resolve_main_at_level_follows_the_given_level_not_the_live_one():
+    """Уровень вызова задаёт вызывающий (сегодня — закреплённый на ход): живой
+    `/level`, переключённый посреди хода, резолв не уводит."""
+    router = _router(_TWO_LEVELS, level="default")
+    assert router.resolve_main_at_level("light").alias == "small"
+    assert router.resolve("main").alias == "big"
+
+
+def test_resolve_main_at_level_without_a_level_is_the_live_resolve():
+    router = _router(_TWO_LEVELS, level="default")
+    assert router.resolve_main_at_level(None).alias == "big"
+
+
+def test_resolve_main_at_level_keeps_the_subagent_override():
+    """У дочернего Router'а модель заморожена в нём самом — уровень родителя её
+    не подменяет."""
+    parent = _router(_TWO_LEVELS, level="default")
+    child = parent.with_override(parent.resolve_level("light"))
+    assert child.resolve_main_at_level("default").alias == "small"
+
+
+def test_resolve_level_can_skip_the_breaker_for_showcase_reads():
+    """Порог сжатия — свойство записи модели: открытый предохранитель не должен
+    ронять его чтение. Рантайм-резолв по умолчанию отказывает, как и раньше."""
+    from gc_core.model_router import AliasCircuitOpenError
+
+    router = _router(_TWO_LEVELS, level="default")
+    router.breaker.trip("small", "5xx после ретраев")
+    with pytest.raises(AliasCircuitOpenError):
+        router.resolve_level("light")
+    with pytest.raises(AliasCircuitOpenError):
+        router.resolve_main_at_level("light")
+    assert router.resolve_level("light", check_breaker=False).alias == "small"
+    assert (
+        router.resolve_main_at_level("light", check_breaker=False).alias
+        == "small"
+    )

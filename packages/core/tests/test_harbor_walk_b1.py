@@ -5,6 +5,7 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend
+from gc_testkit.runtime_probe import probe_stdout
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
     WALK_OUTPUT_MAX_CHARS,
@@ -25,6 +26,9 @@ class FakeEnv:
         self.calls = []
 
     async def exec(self, command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         self.calls.append(command)
         return FakeExecResult(stdout="", return_code=0)
 
@@ -54,6 +58,9 @@ async def test_walk_uses_elevated_cap_not_tool_60k(loop_in_thread):
     assert len(body) < WALK_OUTPUT_MAX_CHARS
 
     async def big_walk(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         env.calls.append(command)
         return FakeExecResult(stdout=body, return_code=0)
 
@@ -67,6 +74,9 @@ async def test_walk_uses_elevated_cap_not_tool_60k(loop_in_thread):
     env.calls.clear()
 
     async def huge_tool(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         env.calls.append(command)
         return FakeExecResult(stdout="Y" * 100_000, return_code=0)
 
@@ -82,6 +92,9 @@ async def test_walk_hit_ceiling_raises(loop_in_thread):
     body = "a" * (ceiling + 50)
 
     async def over(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         return FakeExecResult(stdout=body, return_code=0)
 
     env.exec = over
@@ -98,6 +111,9 @@ async def test_listdir_hit_ceiling_raises(loop_in_thread):
     body = "x\tf\n" * 200
 
     async def over(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         return FakeExecResult(stdout=body, return_code=0)
 
     env.exec = over
@@ -110,6 +126,9 @@ async def test_walk_parse_ok_under_ceiling(loop_in_thread):
     env = FakeEnv()
 
     async def ok(command, **kw):
+        hit = probe_stdout(command)
+        if hit is not None:
+            return FakeExecResult(stdout=hit, return_code=0)
         return FakeExecResult(stdout="src\td\nsrc/a.py\tf\n", return_code=0)
 
     env.exec = ok

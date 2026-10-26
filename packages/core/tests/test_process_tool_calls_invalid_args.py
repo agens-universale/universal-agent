@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 from gc_core import processing_responses as pr
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _state(**extra):
@@ -27,9 +28,7 @@ def _state(**extra):
 
 
 def _ctx():
-    return SimpleNamespace(
-        config_dict={}, run_id="run", subagent_progress_sink=None, logger=None
-    )
+    return fake_ctx(run_id="run", subagent_progress_sink=None, logger=None)
 
 
 def _fc(name, call_id, arguments="{}"):

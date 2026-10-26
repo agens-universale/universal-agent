@@ -28,7 +28,6 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import yaml
-
 from gc_core import onboarding
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.model_registry import (
@@ -81,12 +80,14 @@ from gc_tui.services.probe_presentation import (
 )
 from gc_tui.services.settings_probe import accepted_literal_auth
 from gc_tui.services.yaml_view import safe_yaml_dump
+from gc_tui.widgets.action_row import ActionRow
 from gc_tui.widgets.paste_input import PasteInput
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _CLS_ONB_HINT_ONB_DYN = "onb-hint onb-dyn"
 _CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP = "onb-hint onb-dyn set-group-gap"
 _SEL_MEF_NOAUTH = "#mef-noauth"
+_SEL_MEF_PROXY = "#mef-proxy"
 _SEL_MEF_TOKEN = "#mef-token"
 _SEL_MEF_URL = "#mef-url"
 
@@ -112,6 +113,17 @@ def _list_outcome(models) -> str | None:
     if models is None:
         return LIST_FAILED
     return LIST_EMPTY if not models else None
+
+
+def _split_fetch_result(result) -> tuple:
+    """(models, payload) из ответа fetch: список, кортеж каталога или FetchOutcome."""
+    if isinstance(result, tuple) and len(result) == 2:
+        return result[0], result[1]
+    payload = getattr(result, "payload", None)
+    models = getattr(result, "models", result)
+    if payload is not None or hasattr(result, "models"):
+        return models, payload if isinstance(payload, dict) else None
+    return result, None
 
 
 _ALIAS_LABEL = "Алиас"
@@ -274,6 +286,40 @@ tool_choice: auto
 reasoning_effort: high
 ```
 
+OpenRouter и совместимые прокси (LiteLLM → OpenRouter). Не путать с блоками
+выше: `chat_template_kwargs` / native `thinking.type` сюда часто уходят с
+HTTP 200 и **молча игнорируются**, а reasoning у модели остаётся включённым.
+Диалект OpenRouter — объект `reasoning`:
+
+```yaml
+tool_choice: auto
+reasoning:
+  effort: none
+```
+
+Включить / усилить:
+
+```yaml
+tool_choice: auto
+reasoning:
+  effort: high
+```
+
+Если `effort: none` отвечает 400 «Reasoning is mandatory» (часть GLM на
+OpenRouter) — ставьте `minimal` или `low` вместо полного выключения:
+
+```yaml
+reasoning:
+  effort: minimal
+```
+
+Native DeepSeek Chat Completions (api.deepseek.com), не OpenRouter:
+
+```yaml
+thinking:
+  type: disabled
+```
+
 Модель без thinking API — только сэмплинг, без флагов рассуждения:
 
 ```yaml
@@ -283,12 +329,15 @@ tool_choice: auto
 ```
 
 `auxiliary` той же модели повторяет сэмплинг и гасит рассуждение тем диалектом,
-который понимает этот бэкенд. Для Qwen это `enable_thinking: false`, для GLM —
-`thinking: false` и `reasoning_effort: none`, для OpenAI — `reasoning_effort: none`.
+который понимает этот бэкенд. Для Qwen это `enable_thinking: false`, для GLM на
+vLLM — `thinking: false` и `reasoning_effort: none`, для OpenAI —
+`reasoning_effort: none`, для OpenRouter — `reasoning.effort: none` (или
+`minimal`/`low`, если `none` запрещён). Подробнее — docs/configuration.md,
+«Диалекты thinking».
 
 Поле `backend` — транспорт этой модели поверх общего подключения, не тело
-запроса. Пустое поле означает использование дефолтов конфига:
-действуют общий таймаут, SSL, прокси и лимит.
+запроса. Прокси этого эндпоинта задаёт поле «Прокси» выше, в этот блок
+его не писать. Пустое поле backend оставляет общий таймаут, SSL и лимит.
 Записанный ключ переписывает только себя, остальные ключи берутся с конфига.
 
 Можно ставить:
@@ -318,6 +367,35 @@ _STRIP_HINT = (
     "default — глобальный флаг · true — вырезать мысль из истории · "
     "false — копировать скрытое поле"
 )
+_SUMMARY_CHARS_LABEL = "Порог автосжатия контекста · символы"
+_SUMMARY_TOKENS_LABEL = "Порог автосжатия контекста · токены"
+# Что действует для порога, которого у записи нет (`_summary_in_effect`), говорят
+# два места: пустое поле — с префиксом «не задан», и строка под отменяющим нулём.
+_SUMMARY_GLOBAL = "действует общий порог для всех моделей: {value}"
+# Выключенный порог не «действует» — фраза без этого слова.
+_SUMMARY_GLOBAL_OFF = "общий порог для всех моделей выключен"
+_SUMMARY_OTHER_SET = "выключен, пока задан порог в {other}"
+_SUMMARY_UNSET = "не задан · {now}"
+# Запись профиля поверх записи основного конфига сливается с ней поключно, и у
+# порога три состояния: пусто — действует порог той записи; своё число; явный ноль
+# — её порог отменён (пишется в файл нулём), действует то, что называет строка.
+_SUMMARY_BASE = "действует порог из записи основного конфига: {value}"
+_SUMMARY_CANCELLED = (
+    "порог из записи основного конфига ({base}) отменён · {now}"
+)
+_SUMMARY_BAD_VALUE = "нужно целое число, не меньше 0"
+# Строки-действия (`widgets/action_row.py`): что это и чем открыть. Enter — на самой
+# строке, F-клавиша — из любого поля формы.
+_CARD_WINDOW = "Контекстное окно модели: {window} токенов"
+_CARD_WINDOW_UNREPORTED = "Контекстное окно модели: провайдер не сообщает"
+_CARD_KEYS = "Enter/F2 — открыть сведения провайдера о модели"
+# Сведений о модели нет — строка окна неактивна и называет причину.
+_CARD_UNKNOWN = "Контекстное окно модели: неизвестно · {why}"
+_CARD_NO_MODEL_ID = "id модели не указан"
+_CARD_NO_CATALOG = "каталог провайдера не загружен"
+_CARD_NOT_IN_CATALOG = "модели нет в каталоге провайдера"
+_HELP_ROW = ("Справка по параметрам модели", "Enter/F1 — открыть")
+_ACTION_ROWS = ("mef-model-meta", "mef-help-line")
 
 
 def _strip_choice(value) -> str:
@@ -327,6 +405,92 @@ def _strip_choice(value) -> str:
     if value is False:
         return "false"
     return "default"
+
+
+def _summary_trigger_text(value) -> str:
+    """Текст поля порога — с пробелами между разрядами, как его пишут серый текст
+    поля и строка окна. Нет ключа / нечисло / ``0`` — пусто (порог не задан)."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return ""
+    return _spaced(number) if number > 0 else ""
+
+
+def _spaced(number: int) -> str:
+    """Число с пробелами между разрядами: `1 048 576`."""
+    return f"{number:,}".replace(",", " ")
+
+
+def _summary_in_effect(effective: int, *, other_set: bool, other: str) -> str:
+    """Что действует для шкалы, порога которой у записи нет: общий порог числом,
+    «выключен» из-за соседнего порога либо выключенный общий."""
+    if effective > 0:
+        return _SUMMARY_GLOBAL.format(value=_spaced(effective))
+    if other_set:
+        return _SUMMARY_OTHER_SET.format(other=other)
+    return _SUMMARY_GLOBAL_OFF
+
+
+def _summary_scale_hint(
+    own: int | None, base: int, effective: int, *, other_set: bool, other: str
+) -> tuple[str, str]:
+    """(текст пустого поля, строка под полем) одной шкалы порога.
+
+    ``own`` — что поле значит для записи (`_own_summary_trigger`), ``base`` — порог
+    записи основного конфига под тем же именем, ``effective`` — что действует по
+    расчёту агента."""
+    now = _summary_in_effect(effective, other_set=other_set, other=other)
+    if own == 0:
+        return "", _SUMMARY_CANCELLED.format(base=_spaced(base), now=now)
+    if base > 0:
+        now = _SUMMARY_BASE.format(value=_spaced(base))
+    return _SUMMARY_UNSET.format(now=now), ""
+
+
+def _base_summary_trigger(base_entry: dict, key: str) -> int:
+    """Порог записи основного конфига под тем же именем; нет или не число — 0."""
+    value = base_entry.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value if value > 0 else 0
+
+
+def _summary_trigger_initial(initial: dict, key: str, base: int) -> str:
+    """Текст поля при открытии записи. Явный ноль или ключ без значения (YAML
+    null, загрузчик читает его как 0) поверх порога основного конфига — отмена, её
+    показываем нулём; в остальных случаях ноль значит «не задан»."""
+    value = initial.get(key)
+    cancels = value is None or (value == 0 and not isinstance(value, bool))
+    if base > 0 and key in initial and cancels:
+        return "0"
+    return _summary_trigger_text(value)
+
+
+def _own_summary_trigger(raw: str, base: int) -> int | None:
+    """Что поле порога значит для записи: число — свой порог; ноль поверх порога
+    основного конфига — ``0``, отмена (пишется в файл); иначе ``None`` — ключа нет."""
+    parsed = _parse_summary_trigger_field(raw)
+    if parsed:
+        return parsed
+    typed_zero = parsed == 0 and bool("".join((raw or "").split()))
+    return 0 if typed_zero and base > 0 else None
+
+
+def _parse_summary_trigger_field(raw: str) -> int | None:
+    """Разобрать поле порога. Пусто / ``0`` → 0. Нечисло → None (ошибка формы).
+
+    Пробелы между разрядами принимаются: форма сама показывает числа так."""
+    text = "".join((raw or "").split())
+    if not text:
+        return 0
+    try:
+        number = int(text)
+    except ValueError:
+        return None
+    if number < 0:
+        return None
+    return number
 
 
 def _completion_field_text(value) -> str:
@@ -342,6 +506,20 @@ def _completion_field_text(value) -> str:
     if value == {}:
         return "{}"
     return safe_yaml_dump(value).rstrip("\n")
+
+
+def _split_proxy(backend) -> tuple[str, object]:
+    """Вынуть `backend.proxy` в отдельное поле карточки.
+
+    В YAML-поле транспорта ключ не остаётся: иначе прокси правился бы в двух
+    местах. Пустой остаток секции — ``None`` (поля нет), не ``{}``."""
+    if not isinstance(backend, dict):
+        return "", backend
+    raw = backend.get("proxy")
+    if not isinstance(raw, str) or not raw.strip():
+        return "", backend
+    rest = {key: value for key, value in backend.items() if key != "proxy"}
+    return raw.strip(), rest or None
 
 
 _MODEL_PLACEHOLDER = "если не указать — id модели равен алиасу"
@@ -369,7 +547,10 @@ _PAIR_OWN = "Адрес и токен: свои"
 _PAIR_OWN_BACKEND = "Адрес и токен: свои — заданы полем backend, правятся там"
 # Поля пары — те, на которых работает «вернуть наследование» (§5). Галка в набор не входит:
 # она не поле, и её собственная клавиша (Space) на этой строке уже занята.
+# Прокси в набор не входит: это отдельная строка транспорта, Ctrl+U её не снимает.
 _PAIR_FIELDS = ("mef-url", "mef-token")
+_PROXY_LABEL = "Прокси (необязательно)"
+_PROXY_PLACEHOLDER = "напр. http://proxy:8080  или  socks5h://…"
 _TOKEN_SHARED_HINT = "токен приходит из раздела «Подключение»"
 # Тот же источник, что у шапки пары (`_PAIR_SHARED_BASE`): две подписи одного состояния
 # не имеют права называть два разных источника.
@@ -434,7 +615,7 @@ def _inherited(value: str) -> str:
 def entry_has_own_connection(entry) -> bool:
     """Несёт ли СЫРАЯ запись реестра своё подключение — ядровым определением §2
     (`connection_parts`) по обоим написаниям пары: `url`/`token` и
-    `backend.completions_url`/`proxy`/`chat_completion_headers.Authorization`. По
+    `backend.completions_url`/`chat_completion_headers.Authorization`. По
     совокупности, как `own_connection` формы: правило пары половин не пропускает.
 
     ОДИН предикат на всех, кто судит ЗАСЛОНЁННУЮ запись основного конфига под тёзкой:
@@ -456,18 +637,16 @@ def entry_has_own_connection(entry) -> bool:
             url=entry.get("url"),
             token=entry.get("token"),
             completions_url=backend.get("completions_url"),
-            proxy=backend.get("proxy"),
             authorization=headers.get("Authorization"),
         )
     )
-
 
 
 def _resolved_for_request(
     url: str, auth: str | None, *, normalize_token: bool = False
 ) -> tuple[str, str | None]:
     """Раскрыть `${ENV:VAR}`/`${FILE:...}` перед отправкой — тем же резолвером, что у
-    `config.load_config`: сама ссылка не адрес и не токен, и буквальный
+    загрузчика конфига: сама ссылка не адрес и не токен, и буквальный
     `Bearer ${ENV:TOK}` сервер отклоняет — проба врала «✗ токен отклонён» на исправном
     конфиге, а список не грузился никогда.
 
@@ -534,8 +713,11 @@ class ModelEntryForm(Vertical):
         base_aliases=frozenset(),
         base_entry: dict | None = None,
         interaction_gate=None,
+        global_config: dict | None = None,
     ) -> None:
         super().__init__(classes="onb-dyn")
+        # Действующий конфиг — из него пустое поле порога берёт общий порог.
+        self._global_config = global_config or {}
         # interaction_gate() -> bool — «хозяин забрал клавиатуру» (пикер
         # default-слота, баннер перезаписи ссылки): клавиши секция гейтит сама
         # (_route_registry_editor), а клик доходит до формы напрямую — без
@@ -578,8 +760,19 @@ class ModelEntryForm(Vertical):
             if "auxiliary" in initial and initial["auxiliary"] is None
             else initial.get("auxiliary")
         )
-        self._backend_text = _completion_field_text(initial.get("backend"))
+        self._proxy0, backend_rest = _split_proxy(initial.get("backend"))
+        self._backend_text = _completion_field_text(backend_rest)
         self._strip_think = _strip_choice(initial.get("strip_think"))
+        self._summary_chars0 = _summary_trigger_initial(
+            initial,
+            "summary_trigger_chars",
+            _base_summary_trigger(self._base0, "summary_trigger_chars"),
+        )
+        self._summary_tokens0 = _summary_trigger_initial(
+            initial,
+            "summary_trigger_tokens",
+            _base_summary_trigger(self._base0, "summary_trigger_tokens"),
+        )
         # Второе написание пары (`backend.completions_url` / `proxy` /
         # `chat_completion_headers.Authorization`) правится YAML-полем транспорта:
         # правило §2 считает его таким же своим подключением, и запись, задавшую пару
@@ -605,11 +798,13 @@ class ModelEntryForm(Vertical):
         self._verify = verify
         self._config_proxy = config_proxy
         if fetch is None:
-            from gc_core.model_picker import fetch_models
+            from gc_core.model_picker import fetch_models_catalog
 
-            from gc_tui.services.model_list_cache import make_cached_fetch
+            from gc_tui.services.model_list_cache import (
+                make_cached_catalog_fetch,
+            )
 
-            fetch = make_cached_fetch(fetch_models)
+            fetch = make_cached_catalog_fetch(fetch_models_catalog)
         if probe is None:
             # `probe_auth`, а не `probe`: вердикт об авторизации идёт СТРОГО по
             # chat/completions — у публичного `/models` (OpenRouter) он получился бы
@@ -631,15 +826,27 @@ class ModelEntryForm(Vertical):
             "mef-url",
             "mef-token",
             None,
+            "mef-proxy",
             "mef-model",
             "mef-alias",
+            "mef-model-meta",
+            "mef-summary-chars",
+            "mef-summary-tokens",
             "mef-strip",
             "mef-main",
             "mef-auxiliary",
             "mef-backend",
+            "mef-help-line",
         )
         self._idx = 0
         self._models: list = []
+        # Сырое тело ответа каталога — из него сведения о модели; в запись не
+        # пишется. Каталог принадлежит СВЯЗИ (адрес, авторизация), ОТВЕТ от которой
+        # получен: `_catalog_key` ставит `_on_models` по ключу своего запроса
+        # (`_pending_catalog_key`), а не намерение сходить.
+        self._models_payload: dict | None = None
+        self._catalog_key: tuple | None = None
+        self._pending_catalog_key: tuple | None = None
         # Чем кончилась последняя загрузка: None — не ходили или всё хорошо, иначе
         # готовая строка состояния. Пустой `_models` сам по себе двусмыслен — «ещё не
         # ходили», «сервер ответил пусто» и «не достучались» выглядят одинаково, а
@@ -703,7 +910,7 @@ class ModelEntryForm(Vertical):
             scroll_class="mef-model-scroll",
             hint_class="mef-model-hint",
             promise_empty=True,
-            rows_source=lambda: list(self._models),
+            rows_source=self._offered_models,
             render_row=self._model_row_text,
             matches=lambda m, q: q in m.id.lower(),
             value_of=lambda m: m.id,
@@ -734,9 +941,12 @@ class ModelEntryForm(Vertical):
             "url": self._url0,
             "token": "",
             "model": self._model0,
+            "summary_trigger_chars": self._summary_chars0,
+            "summary_trigger_tokens": self._summary_tokens0,
             "main": self._main_text,
             "auxiliary": self._aux_text,
             "backend": self._backend_text,
+            "proxy": self._proxy0,
             "strip_think": self._strip_think,
         }
 
@@ -815,11 +1025,36 @@ class ModelEntryForm(Vertical):
             "Authorization"
         )
 
+    def _inherited_proxy(self) -> str:
+        """Прокси, который уйдёт, если поле пустое.
+
+        Свой ключ модели сильнее общего: у тёзки это `backend.proxy` заслонённой
+        записи, иначе — `backend.proxy` эффективного конфига (`config_proxy`).
+        Пусто — ни того, ни другого, запрос пойдёт напрямую или через env."""
+        base = self._base_entry_now()
+        backend = base.get("backend")
+        backend = backend if isinstance(backend, dict) else {}
+        own = backend.get("proxy")
+        if isinstance(own, str) and own.strip():
+            return own.strip()
+        shared = self._config_proxy
+        if isinstance(shared, str) and shared.strip():
+            return shared.strip()
+        return ""
+
+    def _proxy_placeholder(self) -> str:
+        """Пустое поле — наследование. Текст называет прокси, который начнёт
+        действовать; своего значения в placeholder нет — оно стоит в поле."""
+        inherited = self._inherited_proxy()
+        if inherited:
+            return _inherited(onboarding.display_secret(inherited))
+        return _PROXY_PLACEHOLDER
+
     def _model_placeholder(self) -> str:
         """Пустое поле id: провайдерским id служит алиас — либо, у тёзки, `model`
         заслонённой записи (так сливает запись загрузчик). Источник id судится
         отдельно от источника пары: тень без подключения id всё равно даёт."""
-        model = self._base0.get("model")
+        model = self._base_entry_now().get("model")
         if isinstance(model, str) and model:
             return _MODEL_PLACEHOLDER_BASE.format(model=model)
         return _MODEL_PLACEHOLDER
@@ -888,6 +1123,51 @@ class ModelEntryForm(Vertical):
             return dict(self._backend0)
         return parsed if isinstance(parsed, dict) else {}
 
+    def _proxy_value(self) -> str:
+        """Свой прокси записи, без крайних пробелов.
+
+        До монтирования поля его знает только `initial`. Строка из одних
+        пробелов — пустое поле: ключ `proxy` не пишется."""
+        try:
+            return self._field_value("mef-proxy")
+        except NoMatches:
+            return self._proxy0
+
+    def _backend_for_request(self, backend: dict) -> dict:
+        """Снимок backend для пробы и списка: свой прокси поля побеждает YAML."""
+        data = dict(backend)
+        proxy = self._proxy_value()
+        if proxy:
+            data["proxy"] = proxy
+        return data
+
+    def _backend_with_proxy(self, backend: dict | None) -> dict | None:
+        """Секция backend, какой она уедет в файл.
+
+        Поле прокси — источник ключа `proxy`. Пустое поле снимает свой прокси,
+        который был при открытии. Явный пустой mapping (`{}`) не схлопывается
+        в отсутствие секции. Два разных прокси — поле и YAML — отказ."""
+        proxy = self._proxy_value()
+        data = dict(backend) if isinstance(backend, dict) else {}
+        yaml_proxy = data.get("proxy")
+        if (
+            proxy
+            and isinstance(yaml_proxy, str)
+            and yaml_proxy.strip()
+            and yaml_proxy.strip() != proxy
+        ):
+            raise ValueError(
+                "прокси задан и в поле, и в backend — оставьте что-то одно"
+            )
+        if proxy:
+            data["proxy"] = proxy
+            return data
+        if self._proxy0:
+            data.pop("proxy", None)
+        if not data:
+            return None if backend is None else data
+        return data
+
     def _pair_parts(self) -> tuple[bool, bool]:
         """Что запись задаёт СВОЕГО — (адрес, токен) — ядровым определением §2
         (`model_registry.connection_parts`), тем же, каким судит валидатор конфига.
@@ -916,7 +1196,6 @@ class ModelEntryForm(Vertical):
             completions_url=self._as_validator_sees(
                 backend.get("completions_url")
             ),
-            proxy=self._as_validator_sees(backend.get("proxy")),
             authorization=self._as_validator_sees(
                 headers.get("Authorization")
             ),
@@ -925,7 +1204,7 @@ class ModelEntryForm(Vertical):
     def _pair_env_missing(self) -> list[str]:
         """Имена переменных, из-за которых половина пары окажется пустой.
 
-        Спрашивается по ДОРЕЗОЛВНЫМ значениям тех же пяти полей, что судит
+        Спрашивается по ДОРЕЗОЛВНЫМ значениям тех же полей, что судит
         `_pair_parts`: после подстановки от ссылки не остаётся ничего, кроме пустой
         строки, и назвать причину уже нечем."""
         from gc_core.config_raw import missing_env_refs
@@ -938,7 +1217,6 @@ class ModelEntryForm(Vertical):
             self._token_value(),
             self._token_current,
             backend.get("completions_url"),
-            backend.get("proxy"),
             headers.get("Authorization"),
         ):
             for name in missing_env_refs(value):
@@ -961,7 +1239,6 @@ class ModelEntryForm(Vertical):
                 completions_url=self._as_validator_sees(
                     backend.get("completions_url")
                 ),
-                proxy=self._as_validator_sees(backend.get("proxy")),
                 authorization=self._as_validator_sees(
                     headers.get("Authorization")
                 ),
@@ -1117,7 +1394,7 @@ class ModelEntryForm(Vertical):
     def compose(self) -> ComposeResult:
         # Рамка одна и она всегда (канон §3.2.1): у поля со списком её рисует
         # группа, у одинокого поля — класс set-framed. Порядок полей — как в
-        # `_positions`: адрес → токен → id → алиас.
+        # `_positions`: адрес → токен → прокси → id → алиас.
         icls = "onb-dyn set-framed"
         # Строка состояния пары — НАД парой полей (§4): она про оба сразу, и пометки у
         # каждого поля разнесли бы одно состояние по двум подписям.
@@ -1151,6 +1428,13 @@ class ModelEntryForm(Vertical):
         yield Static(
             self._noauth_text(), id="mef-noauth", classes=self._noauth_cls()
         )
+        yield Static(_PROXY_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
+        yield PasteInput(
+            value="",
+            placeholder=self._proxy_placeholder(),
+            id="mef-proxy",
+            classes=icls,
+        )
         yield Static(_MODEL_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         # Поле id — со списком моделей (автоподгрузка при входе, Alt+↓ — перечитать),
         # значит внутри рамки-группы: рамка одна на поле и его список (спека §3.1).
@@ -1176,6 +1460,42 @@ class ModelEntryForm(Vertical):
             classes=icls,
         )
         yield Static(self._alias_hint(), classes=_CLS_ONB_HINT_ONB_DYN)
+        # Окно модели — над порогами, которые по нему подбирают. Строка стоит
+        # всегда. На входе каталога ещё нет, и она неактивна; дальше содержимое и
+        # активность ставит `_refresh_model_metadata` — на каждой смене id, связи
+        # или каталога.
+        yield ActionRow(
+            _CARD_UNKNOWN.format(
+                why=_CARD_NO_CATALOG if self._model0 else _CARD_NO_MODEL_ID
+            ),
+            action="card",
+            enabled=False,
+            id="mef-model-meta",
+            classes="onb-dyn",
+        )
+        yield Static(
+            _SUMMARY_CHARS_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP
+        )
+        (chars_unset, chars_note), (tokens_unset, tokens_note) = (
+            self._summary_hints(self._summary_chars0, self._summary_tokens0)
+        )
+        yield PasteInput(
+            value=self._summary_chars0,
+            placeholder=chars_unset,
+            id="mef-summary-chars",
+            classes=icls,
+        )
+        yield self._summary_note("mef-summary-chars-note", chars_note)
+        yield Static(
+            _SUMMARY_TOKENS_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP
+        )
+        yield PasteInput(
+            value=self._summary_tokens0,
+            placeholder=tokens_unset,
+            id="mef-summary-tokens",
+            classes=icls,
+        )
+        yield self._summary_note("mef-summary-tokens-note", tokens_note)
         yield Static(
             self._strip_text(),
             id="mef-strip",
@@ -1192,8 +1512,14 @@ class ModelEntryForm(Vertical):
             id="mef-main",
             classes="mef-yaml",
         )
-        yield Static("YAML: например, temperature: 0.2. Допустимые параметры зависят от API провайдера.", classes=_CLS_ONB_HINT_ONB_DYN)
-        yield Static("Словарь заменяет общий целиком; {} — без дополнительных параметров.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "YAML: например, temperature: 0.2. Допустимые параметры зависят от API провайдера.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
+        yield Static(
+            "Словарь заменяет общий целиком; {} — без дополнительных параметров.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(_AUX_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         yield TextArea(
             self._aux_text,
@@ -1203,7 +1529,10 @@ class ModelEntryForm(Vertical):
             id="mef-auxiliary",
             classes="mef-yaml",
         )
-        yield Static("Для сжатия истории и проверок ответа. Отдельно от main, например temperature: 0.1.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "Для сжатия истории и проверок ответа. Отдельно от main, например temperature: 0.1.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(
             _BACKEND_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP
         )
@@ -1215,7 +1544,10 @@ class ModelEntryForm(Vertical):
             id="mef-backend",
             classes="mef-yaml",
         )
-        yield Static("Переопределяет общие настройки: например request_timeout_sec: 120.", classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            "Переопределяет общие настройки: например request_timeout_sec: 120.",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+        )
         yield Static(
             connection_line_text(None),
             id="mef-probe-line",
@@ -1238,7 +1570,7 @@ class ModelEntryForm(Vertical):
         )
         error.display = False
         yield error
-        yield Static("F1 — справка по параметрам модели", classes="set-hint")
+        yield ActionRow(*_HELP_ROW, action="help", id="mef-help-line")
         help_text = Static(
             KWARGS_HINT,
             id="mef-kwargs-hint",
@@ -1254,6 +1586,7 @@ class ModelEntryForm(Vertical):
         # (живой смок 2026-08-04 «Подключения»). Состояние пары считаем ПОСЛЕ него —
         # оно выводится из поля.
         write_field(self._url_input, self._url0)
+        write_field(self.query_one(_SEL_MEF_PROXY, Input), self._proxy0)
         self._sync_pair_state()
         self._focus_position()
         # Строка «Alt+↓ — перечитать список» — с ПЕРВОГО кадра (канон
@@ -1262,6 +1595,26 @@ class ModelEntryForm(Vertical):
         # заходил на поле id (живой смок 2026-09-04).
         self._list.sync_hint()
         self.call_after_refresh(self._reset_open_scroll)
+        # После монтирования, не из него: ответ из кэша приходит мгновенно, а
+        # `_on_models` ответ для ещё не смонтированной формы отбрасывает.
+        self.call_after_refresh(self._preload_catalog)
+
+    def _preload_catalog(self) -> None:
+        """Каталог — сразу при открытии записи с id модели: строка окна модели не
+        должна ждать, пока курсор дойдёт до поля id. Запрос тихий (курсор стоит на
+        адресе — статусу списка под чужим полем не место) и занимает ключ
+        автоподгрузки: вход в поле id теми же адресом и токеном в сеть второй раз
+        не пойдёт. Запрос не ушёл (нет адреса, не раскрылась ссылка, битый backend)
+        — ключ свободен, и причину форма скажет на поле id сама."""
+        if not self._provider_model_id():
+            return
+        launched = self._list_gen
+        self._start_models_fetch(refresh=False, quiet=True)
+        if self._list_gen != launched:
+            self._autoload_key = (
+                self._current_url(),
+                self._current_auth_header(),
+            )
 
     def _reset_open_scroll(self) -> None:
         for parent in self.ancestors:
@@ -1330,6 +1683,10 @@ class ModelEntryForm(Vertical):
         обе про токен: галка «без авторизации» и общая пара (§4) — при общем адресе и
         поле, и сама галка неактивны, а почему, сказано в строке галки. Живёт отдельным
         предикатом, а не веткой в `move`: там ей место среди навигации."""
+        if position == "mef-model-meta":
+            return (
+                self.model_card() is None
+            )  # строка неактивна — открывать нечего
         if not self.own_connection():
             return position == "mef-token" or position is None
         return position == "mef-token" and self._no_auth
@@ -1415,12 +1772,16 @@ class ModelEntryForm(Vertical):
                 # перечитыванием.
                 self._autoload_key = key
                 self._start_models_fetch(refresh=False)
-            elif self._models:
+            elif self._offered_models():
                 # Список уже подгружен ЭТОЙ связью — показать варианты сразу, но
                 # по тому же правилу (`can_open`): над пустым полем сам, над
                 # набранным id — только по явному Alt+↓.
                 if not self._list.is_open:
                     self._list.open(filter_text=self._model_value())
+                # Счётчик — как в `_on_models`: список мог приехать, пока курсор
+                # был на другом поле (загрузка при открытии формы), и над набранным
+                # id он не раскрывается — без счётчика о нём не узнать.
+                self._show_models_count()
             elif self._list_status:
                 # Этими же параметрами уже сходили — пока курсор был на другом
                 # поле, сказать об исходе было негде. Дребезг загрузку не
@@ -1439,12 +1800,21 @@ class ModelEntryForm(Vertical):
             if target == "mef-strip"
             else strip_row.remove_class
         )("selected")
-        if target is None or target == "mef-strip":
-            # Галка и селектор — не Input: снять фокус явно, иначе прежний
-            # фокусный Input «съедал» бы Space и печать.
+        for action_row in self.query(ActionRow):
+            action_row.set_selected(action_row.id == target)
+        if self._on_row(target):
+            # Галка, селектор и строки-действия — не Input: снять фокус явно,
+            # иначе прежний фокусный Input «съедал» бы Space, Enter и печать.
             self.screen.set_focus(None)
         else:
             self.query_one(f"#{target}", Widget).focus()
+
+    @staticmethod
+    def _on_row(target) -> bool:
+        """Позиция — строка, а не поле ввода: фокуса у неё нет."""
+        return (
+            target is None or target == "mef-strip" or target in _ACTION_ROWS
+        )
 
     def refocus(self) -> None:
         """Вернуть ввод в поле под курсором — и только это.
@@ -1453,8 +1823,8 @@ class ModelEntryForm(Vertical):
         списки, а над пустым полем модели ещё и идёт за ними в сеть). Здесь курсор
         никуда не двигался — вернулось лишь право поля принимать клавиши."""
         target = self._positions[self._idx]
-        if target is None or target == "mef-strip":
-            self.screen.set_focus(None)  # галка и селектор: поля ввода нет
+        if self._on_row(target):
+            self.screen.set_focus(None)  # строка: поля ввода нет
         else:
             self.query_one(f"#{target}", Widget).focus()
 
@@ -1491,6 +1861,9 @@ class ModelEntryForm(Vertical):
         self.query_one(_SEL_MEF_NOAUTH, Static).update(self._noauth_text())
         self._sync_token_visibility()
         self._sync_pair_state()
+        # Галка меняет связь так же, как правка токена: вердикт пробы и каталог
+        # прежней связи больше не про эту (строку окна обновляет тот же вызов).
+        self._invalidate_probe()
         return True
 
     def cycle_strip_think(self) -> bool:
@@ -1615,6 +1988,7 @@ class ModelEntryForm(Vertical):
         # write_field глушит Input.Changed (иначе список сужался бы сам по себе) —
         # призрак алиаса пересчитываем руками, ему это событие и было нужно.
         self._refresh_alias_placeholder()
+        self._refresh_model_metadata()
         self._invalidate_probe()
 
     def reload_presets(self) -> bool:
@@ -1643,72 +2017,98 @@ class ModelEntryForm(Vertical):
         # Ручное перечитывание = автоподгрузка этими параметрами уже состоялась:
         # иначе уход с поля и возврат сходили бы в сеть ещё раз тем же ключом.
         self._autoload_key = (self._current_url(), self._current_auth_header())
-        return self._start_models_fetch(refresh=True)
+        self._start_models_fetch(refresh=True)
+        return True
 
-    def _start_models_fetch(self, *, refresh: bool) -> bool:
+    def _start_models_fetch(
+        self, *, refresh: bool, quiet: bool = False
+    ) -> None:
         """Уйти за списком моделей. `refresh=False` — автоподгрузка при входе в поле
-        (кэш годится), `True` — принудительное перечитывание по Alt+↓."""
+        (кэш годится), `True` — принудительное перечитывание по Alt+↓. `quiet` —
+        загрузка при открытии формы: курсор не на поле id, статус и отказы молчат.
+
+        Клавишу съедает вызывающий: здесь только статус и воркер. Запрос, который
+        не ушёл, виден по неизменному ``_list_gen``."""
+        say = (lambda _text: None) if quiet else self._set_status
         try:
-            backend = (
+            backend = self._backend_for_request(
                 parse_model_backend_text(self._yaml_text("mef-backend")) or {}
             )
         except ValueError as exc:
-            self._fail(f"backend: {exc}")
-            return True
+            if not quiet:
+                self._fail(f"backend: {exc}")
+            return
         url = self._current_url()
         if not url:
-            self._set_status(_LIST_NO_URL)
-        else:
-            env_missing = _env_missing_line(url, self._current_token_raw())
-            if env_missing:
-                self._set_status(env_missing)
-            else:
-                auth, normalize_token = self._current_auth_value()
-                # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
-                # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
-                # свежего (идиома `ModelEditor._start_fetch`).
-                self._list_gen += 1
-                gen = self._list_gen
-                self._set_status(LIST_LOADING)
-                # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
-                # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
-                # клавиши разведены по ролям, значит и по воркерам.
-                self.run_worker(
-                    lambda: self._fetch_blocking(
-                        url, auth, gen, refresh, normalize_token, backend
-                    ),
-                    thread=True,
-                    exclusive=True,
-                    group="model-entry-list",
-                    name="model-entry-list-fetch",
-                )
-        return True
+            say(_LIST_NO_URL)
+            return
+        env_missing = _env_missing_line(url, self._current_token_raw())
+        if env_missing:
+            say(env_missing)
+            return
+        auth, normalize_token = self._current_auth_value()
+        # Поколение бампаем ЗДЕСЬ: `exclusive=True` уже бегущий поток не
+        # останавливает, и ответ прошлой загрузки перемонтировал бы список поверх
+        # свежего (идиома `ModelEditor._start_fetch`).
+        self._list_gen += 1
+        gen = self._list_gen
+        self._pending_catalog_key = (
+            url,
+            self._current_auth_header(),
+        )
+        say(LIST_LOADING)
+        # `group` задан явно: `exclusive` отменяет соседей ПО ГРУППЕ, а не по `name`,
+        # и в общей группе «default» проба гасила бы летящий подбор и наоборот —
+        # клавиши разведены по ролям, значит и по воркерам.
+        self.run_worker(
+            lambda: self._fetch_blocking(
+                url, auth, gen, refresh, normalize_token, backend
+            ),
+            thread=True,
+            exclusive=True,
+            group="model-entry-list",
+            name="model-entry-list-fetch",
+        )
 
     def _fetch_blocking(
-        self, url: str, auth: str | None, gen: int, refresh: bool,
-        normalize_token: bool, backend: dict,
+        self,
+        url: str,
+        auth: str | None,
+        gen: int,
+        refresh: bool,
+        normalize_token: bool,
+        backend: dict,
     ) -> None:
         try:
             url, auth = _resolved_for_request(
                 url, auth, normalize_token=normalize_token
             )
             verify, config_proxy = self._resolved_transport(backend)
-            models = self._fetch(
+            result = self._fetch(
                 url,
                 auth,
                 verify=verify,
                 config_proxy=config_proxy,
                 refresh=refresh,
             )
+            models, payload = _split_fetch_result(result)
         except Exception:
             models = None
-        self.app.call_from_thread(self._on_models, models, gen, refresh)
+            payload = None
+        self.app.call_from_thread(
+            self._on_models, models, payload, gen, refresh
+        )
 
-    def _on_models(self, models, gen: int, refresh: bool) -> None:
+    def _on_models(self, models, payload, gen: int, refresh: bool) -> None:
         # Поколение протухло — ответ не про эту загрузку: не трогаем ни состояние,
         # ни DOM.
         if gen != self._list_gen or not self.is_mounted:
             return
+        self._models_payload = payload if isinstance(payload, dict) else None
+        # Ответ пришёл — и список, и сведения принадлежат связи этого запроса.
+        self._catalog_key = (
+            self._pending_catalog_key if models is not None else None
+        )
         if self._positions[self._idx] != "mef-model":
             # Курсор успел уйти с поля: список запоминаем (вернётся — раскроется
             # сам), но раскрывать и вешать счётчик под чужим полем нельзя. Провал
@@ -1717,6 +2117,7 @@ class ModelEntryForm(Vertical):
             # загрузку теми же параметрами не даст.
             self._models = list(models or [])
             self._list_status = _list_outcome(models)
+            self._refresh_model_metadata()
             return
         if not models:
             # Исход вместо молчания: сервер мог лежать, а клавиша выглядела бы
@@ -1725,6 +2126,7 @@ class ModelEntryForm(Vertical):
             self._list_status = _list_outcome(models)
             self._list.close()
             self._set_status(self._list_status)
+            self._refresh_model_metadata()
             return
         self._models = list(models)
         self._list_status = None
@@ -1734,8 +2136,13 @@ class ModelEntryForm(Vertical):
         # ответ раскрывался поверх набранного id, забирал ↑/↓ списку, и один Enter
         # молча подменял `gpt-4` на `gpt-4-turbo` (находка M6 ревью MR #80).
         self._list.open(forced=refresh, filter_text=self._model_value())
-        n = len(self._models)
-        self._set_status(f"{n} {plural_models(n)}")
+        self._show_models_count()
+        self._refresh_model_metadata()
+
+    def _show_models_count(self) -> None:
+        """Счётчик моделей под полем id — сколько предлагает список этой связи."""
+        n = len(self._offered_models())
+        self._set_status(f"{n} {plural_models(n)}" if n else "")
 
     def _set_status(self, text: str) -> None:
         """Строка состояния списка ПОД рамкой (§3.2.2: внутри рамки только выбор).
@@ -1756,6 +2163,9 @@ class ModelEntryForm(Vertical):
             return self._presets_ctrl.reload()
         if self.on_model_field:
             return self._list.reload()
+        if self.on_action_row:
+            self.query_one(f"#{self._positions[self._idx]}", ActionRow).press()
+            return True
         return False
 
     @property
@@ -1784,7 +2194,9 @@ class ModelEntryForm(Vertical):
             return True
         if self._list.is_open:
             self._list.close()
-            self._set_status("")  # счётчик свёрнутого списка ни о чём
+            # Счётчик остаётся: он про загруженный список этой связи, а не про
+            # раскрытый — как в редакторе резервной модели (`ModelEditor`).
+            self._show_models_count()
             return True
         return False
 
@@ -1795,12 +2207,77 @@ class ModelEntryForm(Vertical):
         self._url_input.placeholder = self._url_placeholder()
         self._invalidate_probe()
 
+    @staticmethod
+    def _summary_note(widget_id: str, text: str) -> Static:
+        """Строка под полем порога: пустая не занимает места (`display`)."""
+        note = Static(
+            text, id=widget_id, classes=_CLS_ONB_HINT_ONB_DYN, markup=False
+        )
+        note.display = bool(text)
+        return note
+
+    def _summary_hints(
+        self, chars_text: str, tokens_text: str
+    ) -> tuple[tuple[str, str], tuple[str, str]]:
+        """((пустое поле, строка под полем) символов, то же токенов) — по тому же
+        расчёту, которым пороги считает агент: форма не решает сама, что действует
+        при каком сочетании. Пустое поле наследует порог записи основного конфига."""
+        from gc_core.summarize.config import resolve_summary_limits
+
+        base_chars, base_tokens = self._summary_base()
+        own_chars = _own_summary_trigger(chars_text, base_chars)
+        own_tokens = _own_summary_trigger(tokens_text, base_tokens)
+        chars = base_chars if own_chars is None else own_chars
+        tokens = base_tokens if own_tokens is None else own_tokens
+        limits = resolve_summary_limits(
+            self._global_config, model_chars=chars, model_tokens=tokens
+        )
+        return (
+            _summary_scale_hint(
+                own_chars,
+                base_chars,
+                limits.chars_during,
+                other_set=tokens > 0,
+                other="токенах",
+            ),
+            _summary_scale_hint(
+                own_tokens,
+                base_tokens,
+                limits.tokens_during,
+                other_set=chars > 0,
+                other="символах",
+            ),
+        )
+
+    def _refresh_summary_placeholders(self) -> None:
+        chars = self.query_one("#mef-summary-chars", Input)
+        tokens = self.query_one("#mef-summary-tokens", Input)
+        hints = self._summary_hints(chars.value, tokens.value)
+        for field, (unset, note_text) in zip((chars, tokens), hints):
+            field.placeholder = unset
+            note = self.query_one(f"#{field.id}-note", Static)
+            note.update(note_text)
+            note.display = bool(note_text)
+
     def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id in ("mef-summary-chars", "mef-summary-tokens"):
+            self._refresh_summary_placeholders()
+            return
+        if event.input.id == "mef-alias":
+            # Алиас решает, действует ли запись основного конфига (её id и пороги),
+            # а без своего id сам служит провайдерским. Иначе он ни на что не влияет.
+            if self._base0:
+                self._refresh_summary_placeholders()
+                self.query_one(
+                    "#mef-model", Input
+                ).placeholder = self._model_placeholder()
+            if self._base0 or not self._model_value():
+                self._refresh_model_metadata()
         if event.input.id == "mef-model":
             value = event.input.value
             if self._list.is_open:
                 self._list.apply_filter(value)
-            elif self._models:
+            elif self._offered_models():
                 # Печать возвращает свёрнутый список с фильтром — как у адреса
                 # и голосового endpoint'а (`reopen_for_typing`: Esc вернёт
                 # исходный id, не набранное). Поле id было единственным соседом
@@ -1808,6 +2285,7 @@ class ModelEntryForm(Vertical):
                 # моделей раскрывать нечего — Alt+вниз остаётся походом в сеть.
                 self._list.reopen_for_typing(value)
             self._refresh_alias_placeholder()
+            self._refresh_model_metadata()
         elif event.input.id == "mef-url":
             # Канон 2026-08-17 в редакции 2026-08-18 (эталон — `ConnectionEditor`):
             # список раскрыт, пока значение складывается И есть из чего выбирать.
@@ -1841,10 +2319,14 @@ class ModelEntryForm(Vertical):
             self._sync_token_label()
         if event.input.id in ("mef-url", "mef-token"):
             # Печать в паре меняет её состояние: адрес — вход в «своё» и выход из него,
-            # набранный токен — вторая половина. Пересчитываем здесь же, как призрак
-            # алиаса в ветке поля id: своя правка — свой пересчёт.
+            # набранный токен — вторая половина. Прокси в пару не входит.
             self._sync_pair_state()
-        if event.input.id in ("mef-url", "mef-token", "mef-model"):
+        if event.input.id in (
+            "mef-url",
+            "mef-token",
+            "mef-model",
+            "mef-proxy",
+        ):
             self._invalidate_probe()
 
     def _invalidate_probe(self) -> None:
@@ -1853,6 +2335,9 @@ class ModelEntryForm(Vertical):
         общий рендер, что и все прочие вердикты (`connection_line_text(None)`)."""
         self._probe_gen += 1  # летящая проба тоже устарела
         self._set_probe_line(connection_line_text(None), reveal=False)
+        # Та же смена связи гасит строку окна модели: каталог прежнего сервера
+        # не про этот адрес (`model_card` сверяет ключ).
+        self._refresh_model_metadata()
 
     # --- проба (Ctrl+Space) ---
     def _current_url(self) -> str:
@@ -1867,8 +2352,6 @@ class ModelEntryForm(Vertical):
         own_url = self._url_value() or backend.get("completions_url")
         if own_url:
             return own_url
-        if backend.get("proxy"):
-            return self._inherited_url()
         return "" if self.own_connection() else self._inherited_url()
 
     def _current_auth_value(self) -> tuple[str | None, bool]:
@@ -1886,7 +2369,8 @@ class ModelEntryForm(Vertical):
         initial_backend = yaml.safe_load(self._backend_text) or {}
         initial_headers = (
             initial_backend.get("chat_completion_headers") or {}
-            if isinstance(initial_backend, dict) else {}
+            if isinstance(initial_backend, dict)
+            else {}
         )
         if not isinstance(initial_headers, dict):
             initial_headers = {}
@@ -1912,18 +2396,24 @@ class ModelEntryForm(Vertical):
             return None
         return self._current_auth_value()[0]
 
-    def _resolved_transport(self, backend: dict) -> tuple[bool | str, str | None]:
+    def _resolved_transport(
+        self, backend: dict
+    ) -> tuple[bool | str, str | None]:
         """Снимок транспорта формы раскрывается только в сетевом воркере."""
         from gc_core.config_modules.backend import BackendConfig
-        from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+        from gc_core.config_modules.env_interpolation import (
+            resolve_env_placeholders,
+        )
 
         values = {"use_ssl": self._verify, "proxy": self._config_proxy}
         values.update(self._base0.get("backend") or {})
         values.update(backend)
-        resolved = BackendConfig.model_validate(resolve_env_placeholders(values))
+        resolved = BackendConfig.model_validate(
+            resolve_env_placeholders(values)
+        )
         return resolved.use_ssl, resolved.proxy
 
-    def probe_connection(self) -> bool:
+    def probe_connection(self) -> None:
         """`Ctrl+Space`: проверить связь по тем значениям, что стоят в полях СЕЙЧАС.
         Это ПРОБА, не подбор списка (контракт п.4).
 
@@ -1936,39 +2426,43 @@ class ModelEntryForm(Vertical):
         без канарейки, то есть врала ровно там, где канон 2026-08-17 научился
         молчать. Текст вердикта — общий `connection_line_text`."""
         try:
-            backend = (
+            backend = self._backend_for_request(
                 parse_model_backend_text(self._yaml_text("mef-backend")) or {}
             )
         except ValueError as exc:
             self._fail(f"backend: {exc}")
-            return True
+            return
         url = self._current_url()
         if not url:
             self._set_probe_line(Text(_PROBE_NO_URL, style=DEEP_DIM))
-        else:
-            env_missing = _env_missing_line(url, self._current_token_raw())
-            if env_missing:
-                self._set_probe_line(Text(env_missing, style=WARN))
-            else:
-                auth, normalize_token = self._current_auth_value()
-                model = self._model_value()
-                self._probe_gen += 1
-                gen = self._probe_gen
-                self._set_probe_line(Text(_PROBE_RUNNING, style=DEEP_DIM))
-                self.run_worker(
-                    lambda: self._probe_blocking(
-                        url, auth, model, gen, normalize_token, backend
-                    ),
-                    thread=True,
-                    exclusive=True,
-                    group="model-entry-probe",
-                    name="model-entry-probe",
-                )
-        return True
+            return
+        env_missing = _env_missing_line(url, self._current_token_raw())
+        if env_missing:
+            self._set_probe_line(Text(env_missing, style=WARN))
+            return
+        auth, normalize_token = self._current_auth_value()
+        model = self._model_value()
+        self._probe_gen += 1
+        gen = self._probe_gen
+        self._set_probe_line(Text(_PROBE_RUNNING, style=DEEP_DIM))
+        self.run_worker(
+            lambda: self._probe_blocking(
+                url, auth, model, gen, normalize_token, backend
+            ),
+            thread=True,
+            exclusive=True,
+            group="model-entry-probe",
+            name="model-entry-probe",
+        )
 
     def _probe_blocking(
-        self, url: str, auth: str | None, model: str, gen: int,
-        normalize_token: bool, backend: dict,
+        self,
+        url: str,
+        auth: str | None,
+        model: str,
+        gen: int,
+        normalize_token: bool,
+        backend: dict,
     ) -> None:
         from gc_tui.services.settings_probe import (
             ProbeResult,
@@ -1990,7 +2484,10 @@ class ModelEntryForm(Vertical):
             )
         except Exception:
             result = ProbeResult(
-                "unknown", None, None, 0,
+                "unknown",
+                None,
+                None,
+                0,
                 "не удалось подготовить или проверить подключение; "
                 "проверьте backend и ссылки ENV/FILE",
             )
@@ -2008,16 +2505,27 @@ class ModelEntryForm(Vertical):
         if self._no_auth or not self.own_connection():
             return False
         field = self.query_one(_SEL_MEF_TOKEN, Input)
-        source = field.value.strip() or (self._token_current if self._own_token_active() else None)
+        source = field.value.strip() or (
+            self._token_current if self._own_token_active() else None
+        )
         if self._current_auth_value()[0] != source:
             return False
         value = accepted_literal_auth(source, accepted)
         if value is None:
             return False
+        # Принятая форма — тот же секрет той же связи: каталог и ключ автоподгрузки
+        # переезжают на новое написание, иначе свой каталог стал бы чужим.
+        before = self._connection_key()
         write_field(field, value)
         self._token_cleared = False
         self._sync_pair_state()
         self._sync_token_label()
+        after = self._connection_key()
+        # И ключ запроса, который ещё в пути: его ответ придёт уже после правки.
+        for name in ("_catalog_key", "_pending_catalog_key", "_autoload_key"):
+            if getattr(self, name) == before:
+                setattr(self, name, after)
+        self._refresh_model_metadata()
         return True
 
     def _set_probe_line(self, text: Text, *, reveal: bool = True) -> None:
@@ -2050,6 +2558,10 @@ class ModelEntryForm(Vertical):
     @property
     def on_strip_row(self) -> bool:
         return self._positions[self._idx] == "mef-strip"
+
+    @property
+    def on_action_row(self) -> bool:
+        return self._positions[self._idx] in _ACTION_ROWS
 
     @property
     def presets_open(self) -> bool:
@@ -2110,11 +2622,117 @@ class ModelEntryForm(Vertical):
             "url": self._field_value("mef-url"),
             "token": self._field_value("mef-token"),
             "model": self._field_value("mef-model"),
+            "summary_trigger_chars": self._field_value("mef-summary-chars"),
+            "summary_trigger_tokens": self._field_value("mef-summary-tokens"),
             "main": self._yaml_text("mef-main"),
             "auxiliary": self._yaml_text("mef-auxiliary"),
             "backend": self._yaml_text("mef-backend"),
+            "proxy": self._field_value("mef-proxy"),
             "strip_think": self._strip_think,
         }
+
+    def model_card(self) -> tuple[str, dict | list] | None:
+        """Карточка выбранной модели из каталога — `(id, объект)`; совпало несколько
+        объектов — списком. `None` — каталога этой связи нет или модели в нём нет."""
+        from gc_core.model_picker import match_model_objects
+
+        if not self._catalog_is_current():
+            return None
+        model_id = self._provider_model_id()
+        matched = match_model_objects(self._models_payload, model_id)
+        if not matched:
+            return None
+        return model_id, matched[0] if len(matched) == 1 else matched
+
+    def _alias_value(self) -> str:
+        try:
+            return self._field_value("mef-alias")
+        except NoMatches:
+            return self._alias0
+
+    def _base_entry_now(self) -> dict:
+        """Запись основного конфига, с которой запись сольётся ПОД ТЕКУЩИМ именем.
+        Она действует под именем: переименовали запись в форме — наследования нет
+        (занять имя другой записи основного конфига форма не даёт)."""
+        return self._base0 if self._alias_value() == self._alias0 else {}
+
+    def _summary_base(self) -> tuple[int, int]:
+        """Пороги записи основного конфига под текущим именем: (символы, токены)."""
+        base = self._base_entry_now()
+        return (
+            _base_summary_trigger(base, "summary_trigger_chars"),
+            _base_summary_trigger(base, "summary_trigger_tokens"),
+        )
+
+    def _provider_model_id(self) -> str:
+        """Id, с которым запись пойдёт к провайдеру: своё поле, иначе `model`
+        записи основного конфига под тем же именем, иначе алиас — так запись
+        сливает загрузчик и шлёт Router (то же правило у подсказки поля,
+        `_model_placeholder`)."""
+        own = self._model_value()
+        if own:
+            return own
+        base = self._base_entry_now().get("model")
+        if isinstance(base, str) and base:
+            return base
+        return self._alias_value()
+
+    def _connection_key(self) -> tuple:
+        return (self._current_url(), self._current_auth_header())
+
+    def _catalog_is_current(self) -> bool:
+        """Каталог (список моделей и сведения о них) принадлежит СВЯЗИ, ответ от
+        которой пришёл. После смены адреса, токена или галки он чужой, пока не
+        придёт ответ новой связи: намерение сходить (ключ автоподгрузки) каталог
+        своим не делает."""
+        return self._catalog_key == self._connection_key()
+
+    def _catalog_is_foreign(self) -> bool:
+        """Список моделей получен от ДРУГОЙ связи — предлагать из него нельзя."""
+        return self._catalog_key is not None and not self._catalog_is_current()
+
+    def _offered_models(self) -> list:
+        """Модели, которые список вправе предложить. Единственный источник строк
+        списка — отсечка стоит здесь, а не на каждом входе (приход курсора,
+        печать, Enter, Alt+↓): выбранного из чужого каталога id на этой связи нет."""
+        return [] if self._catalog_is_foreign() else list(self._models)
+
+    def _card_row_content(self) -> tuple[str, str, bool]:
+        """Строка окна модели: что сказать, чем открыть и активна ли она."""
+        from gc_core.model_picker import model_context_window
+
+        card = self.model_card()
+        if card is None:
+            if not self._provider_model_id():
+                why = _CARD_NO_MODEL_ID
+            elif (
+                not self._catalog_is_current() or self._models_payload is None
+            ):
+                why = _CARD_NO_CATALOG
+            else:
+                why = _CARD_NOT_IN_CATALOG
+            return _CARD_UNKNOWN.format(why=why), "", False
+        # Окно — из самих сведений о модели: тот же объект открывается по Enter.
+        objects = card[1] if isinstance(card[1], list) else [card[1]]
+        window = next(
+            (w for w in map(model_context_window, objects) if w), None
+        )
+        subject = (
+            _CARD_WINDOW.format(window=_spaced(window))
+            if window
+            else _CARD_WINDOW_UNREPORTED
+        )
+        return subject, _CARD_KEYS, True
+
+    def _refresh_model_metadata(self) -> None:
+        if not self.is_mounted:
+            return
+        try:
+            row = self.query_one("#mef-model-meta", ActionRow)
+        except NoMatches:
+            return
+        subject, keys, enabled = self._card_row_content()
+        row.set_content(subject, keys, enabled=enabled)
 
     def is_dirty(self) -> bool:
         try:
@@ -2210,6 +2828,10 @@ class ModelEntryForm(Vertical):
             backend = parse_model_backend_text(values["backend"])
         except ValueError as exc:
             return self._fail(f"backend: {exc}")
+        try:
+            backend = self._backend_with_proxy(backend)
+        except ValueError as exc:
+            return self._fail(str(exc))
         # §2: своё подключение задаётся ЦЕЛИКОМ — половину пары форма не сохраняет.
         # Иначе отказ пришёл бы от валидатора конфига, когда правка уже сделана.
         has_address, has_token = self._pair_parts()
@@ -2246,7 +2868,11 @@ class ModelEntryForm(Vertical):
             if isinstance(initial_headers, dict)
             else None
         )
-        if values["token"] and headers.get("Authorization") == initial_auth and initial_auth:
+        if (
+            values["token"]
+            and headers.get("Authorization") == initial_auth
+            and initial_auth
+        ):
             headers = dict(headers)
             headers.pop("Authorization")
             backend = {**backend, "chat_completion_headers": headers}
@@ -2267,7 +2893,25 @@ class ModelEntryForm(Vertical):
         self._clear_error()
         self._write_yaml("mef-main", main)
         self._write_yaml("mef-auxiliary", auxiliary)
-        self._write_yaml("mef-backend", backend)
+        # Прокси остаётся в поле карточки, не дублируется в YAML backend.
+        # Строку из блока кладём в поле сразу: ниже сохранение ещё может
+        # сорваться (порог, отмена ${ENV:…}, ошибка записи), и следующий
+        # submit читает форму заново. Иначе ключа нет ни в блоке, ни в поле,
+        # и повторное сохранение пишет модель без прокси.
+        shown_backend = backend
+        if isinstance(backend, dict):
+            raw = backend.get("proxy")
+            if isinstance(raw, str) and raw.strip():
+                shown_backend = {
+                    key: value
+                    for key, value in backend.items()
+                    if key != "proxy"
+                } or None
+                if not self._proxy_value():
+                    write_field(
+                        self.query_one(_SEL_MEF_PROXY, Input), raw.strip()
+                    )
+        self._write_yaml("mef-backend", shown_backend)
         fields: dict = {}
         if values["model"]:
             fields["model"] = values["model"]
@@ -2309,6 +2953,21 @@ class ModelEntryForm(Vertical):
             None
             if self._strip_think == "default"
             else self._strip_think == "true"
+        )
+        chars = _parse_summary_trigger_field(values["summary_trigger_chars"])
+        tokens = _parse_summary_trigger_field(values["summary_trigger_tokens"])
+        if chars is None:
+            return self._fail(f"{_SUMMARY_CHARS_LABEL}: {_SUMMARY_BAD_VALUE}")
+        if tokens is None:
+            return self._fail(f"{_SUMMARY_TOKENS_LABEL}: {_SUMMARY_BAD_VALUE}")
+        # Не задан — None: писатель снимает ключ. Ноль пишется только как отмена
+        # порога записи основного конфига (`_own_summary_trigger`).
+        base_chars, base_tokens = self._summary_base()
+        fields["summary_trigger_chars"] = _own_summary_trigger(
+            values["summary_trigger_chars"], base_chars
+        )
+        fields["summary_trigger_tokens"] = _own_summary_trigger(
+            values["summary_trigger_tokens"], base_tokens
         )
         return True, alias, fields
 

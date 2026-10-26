@@ -2,6 +2,7 @@
 
 from gc_core.processing_responses import partition_work_then_finish
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _async_noop(fn):
@@ -92,7 +93,7 @@ def test_process_tool_calls_skips_second_finish(monkeypatch):
             "arguments": "{}",
         },
     ]
-    ctx = type("C", (), {"config_dict": {}, "logger": None})()
+    ctx = fake_ctx(logger=None)
     outs = run_coro(
         pr.aprocess_tool_calls(messages, _State(), ctx, run_agent_func=None)
     )
@@ -153,7 +154,7 @@ def test_flush_non_blocking_outputs_before_ask_human(monkeypatch):
             "arguments": "{}",
         },
     ]
-    ctx = type("C", (), {"config_dict": {}, "logger": None})()
+    ctx = fake_ctx(logger=None)
     outs = run_coro(
         pr.aprocess_tool_calls(
             messages,
@@ -216,7 +217,7 @@ def test_successful_ask_human_skips_later_finish(monkeypatch):
             "arguments": "{}",
         },
     ]
-    ctx = type("C", (), {"config_dict": {}, "logger": None})()
+    ctx = fake_ctx(logger=None)
     outs = run_coro(
         pr.aprocess_tool_calls(
             messages,

@@ -6,7 +6,11 @@ import asyncio
 import logging
 from typing import Any
 
-from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.tools.turn.turn_close import (
+    close_view,
+    closing_reply_of,
+    without_repeated_body,
+)
 
 from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
 from gc_chat.responses.sse import encode_sse, is_terminal
@@ -18,6 +22,16 @@ logger = logging.getLogger(__name__)
 
 _TOOL_POLL_S = 0.05
 SYSTEM = "responses"
+
+
+def _log_forgotten_stop(task: asyncio.Task) -> None:
+    """Забрать ошибку стопа, который никто не ждёт."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    logger.exception("user stop did not settle", exc_info=exc)
 
 
 def outcome_of(agent: Any) -> str | None:
@@ -72,10 +86,6 @@ class TurnRun:
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
 
-    async def wait_finished(self) -> dict:
-        await self.done.wait()
-        return self.result()
-
     async def wait_client(self, request: Any) -> dict:
         while not self.done.is_set():
             if await _disconnected(request):
@@ -107,15 +117,15 @@ class TurnRun:
             if self.sealed:
                 return
             self.cancel_requested = True
-        async with self._seal_lock:
-            if self.sealed:
-                return
-        _stop_agent(self.agent)
+        from gc_core.user_stop import await_agent_stop
+
+        await await_agent_stop(self.agent)
 
     def _stop_if_open(self) -> None:
         if self.sealed or self.cancel_requested:
             return
-        asyncio.get_running_loop().create_task(self.request_stop())
+        task = asyncio.get_running_loop().create_task(self.request_stop())
+        task.add_done_callback(_log_forgotten_stop)
 
     async def _run(self) -> None:
         failed: BaseException | None = None
@@ -171,12 +181,19 @@ class TurnRun:
         async with self._emit_lock:
             events = self._tool_events()
             if failed is None and not self.cancel_requested:
-                answer = SubmitSolution.present_result(
-                    getattr(self.agent, "last_answer", None),
-                    shown=self._mapper.shown_answer,
-                )
-                events.extend(self._mapper.flush_unseen(answer))
+                events.extend(self._closing_events())
             _put(self._queue, events)
+
+    def _closing_events(self) -> list[dict]:
+        answer = getattr(self.agent, "last_answer", None)
+        close = close_view(answer, closing_reply_of(self.agent))
+        if close is None:
+            return self._mapper.flush_unseen(answer)
+        shown = bool(self._mapper.shown_answer)
+        close = without_repeated_body(close, self._mapper.last_message_text)
+        return self._mapper.append_answer(
+            close.render(markdown=True, after_shown_reply=shown)
+        )
 
     async def _seal(self, failed: BaseException | None) -> None:
         async with self._seal_lock:
@@ -236,12 +253,6 @@ async def _join(task: asyncio.Task) -> None:
         raise
     except Exception:
         logger.exception("responses tool watch")
-
-
-def _stop_agent(agent: Any) -> None:
-    stop = getattr(agent, "stop", None)
-    if stop is not None:
-        stop()
 
 
 async def _disconnected(request: Any) -> bool:

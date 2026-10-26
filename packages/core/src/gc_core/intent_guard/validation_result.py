@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +13,23 @@ _logger = logging.getLogger(__name__)
 _FINISH_GATE_ACTIONS = frozenset(
     {"accept", "fix_report", "continue_work", "fix_report_and_continue"}
 )
+
+# Последнее вхождение в сыром ответе (модель могла поправить себя).
+_TRACE_OK_RE = re.compile(
+    r'["\']?trace_ok["\']?\s*:\s*(true|false)', re.IGNORECASE
+)
+_REPORT_OK_RE = re.compile(
+    r'["\']?report_ok["\']?\s*:\s*(true|false)', re.IGNORECASE
+)
+_IS_QUESTION_RE = re.compile(
+    r'["\']?is_question["\']?\s*:\s*(true|false)', re.IGNORECASE
+)
+_ACTION_RE = re.compile(
+    r"""["']?action["']?\s*:\s*["']?"""
+    r"""(accept|fix_report_and_continue|fix_report|continue_work)["']?""",
+    re.IGNORECASE,
+)
+_SALVAGE_RAW_MAX_CHARS = 4000
 
 
 @dataclass
@@ -43,6 +61,75 @@ def fail_open_validation_result() -> ValidationResult:
         coverage_score=1.0,
         feedback_for_agent="",
         is_question=False,
+    )
+
+
+def _last_bool_match(pattern: re.Pattern[str], text: str) -> bool | None:
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return None
+    return matches[-1].group(1).lower() == "true"
+
+
+def _last_action_match(text: str) -> str | None:
+    matches = list(_ACTION_RE.finditer(text))
+    if not matches:
+        return None
+    token = matches[-1].group(1).strip().lower()
+    if token not in _FINISH_GATE_ACTIONS:
+        return None
+    return token
+
+
+def salvage_validator_axes(raw: str) -> ValidationResult | None:
+    """Если полный JSON не собрался, но в тексте есть оба ``trace_ok`` / ``report_ok``.
+
+    ``action`` вытаскиваем только если токен есть в тексте; иначе берём из матрицы
+    осей. Найденный ``action`` нормализуется по осям (как в строгом JSON-парсе).
+    Сырой ответ — в ``feedback_for_agent`` (усечённо) для логов; gaps пустые.
+    ``None`` — оси не найдены → вызывающий fail-open.
+    """
+    cleaned = project_text_for_model(raw or "", strip_think=True)
+    if not cleaned.strip():
+        return None
+    trace_ok = _last_bool_match(_TRACE_OK_RE, cleaned)
+    report_ok = _last_bool_match(_REPORT_OK_RE, cleaned)
+    if trace_ok is None or report_ok is None:
+        return None
+    is_question = _last_bool_match(_IS_QUESTION_RE, cleaned)
+    if is_question is None:
+        is_question = False
+    raw_action = _last_action_match(cleaned)
+    if raw_action is not None:
+        action = _normalized_action(raw_action, trace_ok, report_ok)
+    else:
+        action = expected_action_for_axes(
+            trace_ok=trace_ok, report_ok=report_ok
+        )
+    raw_clip = cleaned.strip()
+    if len(raw_clip) > _SALVAGE_RAW_MAX_CHARS:
+        raw_clip = raw_clip[:_SALVAGE_RAW_MAX_CHARS] + "…"
+    _logger.warning(
+        "finish_gate salvaged axes from unparseable reply "
+        "trace_ok=%s report_ok=%s action=%s action_from_text=%s raw_chars=%s",
+        trace_ok,
+        report_ok,
+        action,
+        raw_action,
+        len(cleaned),
+    )
+    return ValidationResult(
+        ok=trace_ok and report_ok,
+        action=action,
+        trace_ok=trace_ok,
+        report_ok=report_ok,
+        trace_gaps=[],
+        report_mismatches=[],
+        missing_requirements=[],
+        conflicts=[],
+        coverage_score=1.0 if (trace_ok and report_ok) else 0.0,
+        feedback_for_agent=raw_clip,
+        is_question=is_question,
     )
 
 

@@ -14,26 +14,37 @@ def _harness(editor):
     return _App()
 
 
-@pytest.mark.parametrize("source,accepted,expected", [
-    ("secret", "Bearer secret", "Bearer secret"),
-    ("Bearer secret", "secret", "secret"),
-    ("${ENV:TOKEN}", "Bearer secret", None),
-    ("${FILE:/secret}", "Bearer secret", None),
-    ("Basic secret", "Bearer secret", None),
-    ("secret", "Bearer different", None),
-])
+@pytest.mark.parametrize(
+    "source,accepted,expected",
+    [
+        ("secret", "Bearer secret", "Bearer secret"),
+        ("Bearer secret", "secret", "secret"),
+        ("${ENV:TOKEN}", "Bearer secret", None),
+        ("${FILE:/secret}", "Bearer secret", None),
+        ("Basic secret", "Bearer secret", None),
+        ("secret", "Bearer different", None),
+    ],
+)
 @pytest.mark.parametrize("typed", [True, False])
-async def test_accepted_literal_auth_updates_draft_but_never_secret_references(source, accepted, expected, typed):
+async def test_accepted_literal_auth_updates_draft_but_never_secret_references(
+    source, accepted, expected, typed
+):
     from gc_tui.editors.connection import ConnectionEditor
 
-    ed = ConnectionEditor(url_current="http://old/v1/chat/completions", auth_header=source)
+    ed = ConnectionEditor(
+        url_current="http://old/v1/chat/completions", auth_header=source
+    )
     async with _harness(ed).run_test() as pilot:
         if typed:
             ed.query_one("#conn-token", Input).value = source
         await pilot.pause()
         assert ed.apply_accepted_auth(accepted) is (expected is not None)
-        assert ed.query_one("#conn-token", Input).value == (expected if expected is not None else source if typed else "")
-        assert ed.submit()[1] == (expected if expected is not None else source if typed else None)
+        assert ed.query_one("#conn-token", Input).value == (
+            expected if expected is not None else source if typed else ""
+        )
+        assert ed.submit()[1] == (
+            expected if expected is not None else source if typed else None
+        )
 
 
 async def test_url_prefilled_token_empty():
@@ -940,7 +951,7 @@ async def test_typing_an_unmatched_address_returns_the_arrows_to_the_form():
             "#conn-url", Input
         ).value = "https://my-own-host.internal/v1"
         await pilot.pause()
-        assert ed._presets_ctrl.has_matches is False
+        assert not ed._presets_ctrl.visible_items
 
         ed.move(1)
         await pilot.pause()

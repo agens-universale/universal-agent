@@ -4,8 +4,10 @@ import json
 from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.summarize.config import resolve_summary_limits
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUMMARY, UsageAccount
 from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx
 
 
 class _FakeChildState:
@@ -28,8 +30,13 @@ def _runner_with_orchestrator():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None)
-    return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
+    ctx = fake_ctx(
+        {"agent.use_local_subagents": True},
+        logger=None,
+        run_id="r",
+        auth_connector=None,
+    )
+    return SubagentRunner(ctx, orch, ctx.settings), orch
 
 
 async def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
@@ -70,8 +77,11 @@ async def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
     monkeypatch.setattr(
         runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
     )
+    # Сжатие у ребёнка выключено: пороги нулевые (координатор — no-op).
     monkeypatch.setattr(
-        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+        runner_mod,
+        "resolve_summary_limits_at_level",
+        lambda cfg, router, level: resolve_summary_limits(None),
     )
 
     async def _create(*a, **k):
@@ -93,3 +103,15 @@ async def test_finally_merge_folds_child_usage_into_parent(monkeypatch):
     assert orch.usage.by_category["subagent"]["output"] == 22
     # Envelope содержит разбивку usage субагента
     assert "usage" in payload["meta"]
+
+
+def test_child_judge_usage_is_merged_once_with_model_identity():
+    runner, parent = _runner_with_orchestrator()
+    child = _FakeChildState()
+    child.usage.add("routing_judge", 40, 5, model="judge-model")
+    runner._push_usage_delta(child)
+    runner._push_usage_delta(child)
+    assert parent.usage.by_category["subagent"]["calls"] == 3
+    assert parent.usage.by_model["judge-model"]["input"] == 40
+    assert parent.usage.by_model["judge-model"]["output"] == 5
+    assert child.usage.by_category["routing_judge"]["calls"] == 1

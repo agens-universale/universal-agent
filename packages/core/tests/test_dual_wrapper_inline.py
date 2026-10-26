@@ -37,7 +37,7 @@ from gc_core.security.dual_wrapper import dual_wrap
 def _recording_flow(seen: dict):
     """Тело гварда, запоминающее, на каком потоке его исполнили."""
 
-    def _flow(*args, **kwargs):
+    def _flow(*_args, **_kwargs):
         seen["start"] = threading.get_ident()
         result = yield
         seen["finish"] = threading.get_ident()
@@ -64,14 +64,14 @@ async def test_async_guard_can_still_refuse_before_calling_the_tool():
     """Ранний отказ работает: тул не зовётся, ответ гварда доезжает."""
     called = {"n": 0}
 
-    def _blocking_flow(*args, **kwargs):
+    def _blocking_flow(*_args, **_kwargs):
         # Ранний отказ по контракту `_start`: тело завершается, НЕ отдав
         # управление. `yield` ниже недостижим и нужен лишь для того, чтобы
         # функция осталась генераторной.
         return {"blocked": True}
         yield  # pragma: no cover
 
-    async def target(x):
+    async def target(_x):
         called["n"] += 1
         return "не должно случиться"
 
@@ -89,7 +89,7 @@ async def test_async_guard_closes_the_body_when_the_tool_raises():
     """
     seen = {}
 
-    async def target(x):
+    async def target(_x):
         raise RuntimeError("тул упал")
 
     wrapped = dual_wrap(target, _recording_flow(seen))
@@ -110,7 +110,7 @@ async def test_guard_does_not_queue_behind_a_busy_default_executor():
     """
     seen = {}
 
-    async def target(x):
+    async def target(_x):
         return "ok"
 
     wrapped = dual_wrap(target, _recording_flow(seen))
@@ -153,3 +153,37 @@ def test_sync_guard_path_unchanged():
     assert wrapped("раз") == "ok:раз"
     assert seen["start"] == threading.get_ident()
     assert seen["finish"] == threading.get_ident()
+
+
+async def test_explicit_guard_chain_preserves_order_and_postprocessing():
+    from gc_core.security.dual_wrapper import arun_guard_chain, dual_wrap
+
+    trace = []
+
+    async def body(value):
+        trace.append("body")
+        return value
+
+    def inner(_value):
+        trace.append("inner_before")
+        result = yield
+        trace.append("inner_after")
+        return result + 1
+
+    def outer(_value):
+        trace.append("outer_before")
+        result = yield
+        trace.append("outer_after")
+        return result * 2
+
+    wrapped = dual_wrap(dual_wrap(body, inner), outer)
+    assert await wrapped(3) == 8
+    local_trace = list(trace)
+    trace.clear()
+
+    async def effect():
+        trace.append("body")
+        return 3
+
+    assert await arun_guard_chain(wrapped, 3, invoke_leaf=effect) == 8
+    assert trace == local_trace

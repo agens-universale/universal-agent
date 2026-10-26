@@ -98,21 +98,24 @@ def _digest(files: List[Tuple[str, bytes]]) -> str:
     return h.hexdigest()
 
 
-def should_provision(config_dict: Dict[str, Any], backend: Any) -> bool:
-    """docker/ssh/exec, провижининг не выключен, single-source не задан."""
+def should_provision(settings: Any, backend: Any) -> bool:
+    """docker/ssh/exec, провижининг не выключен, single-source не задан.
+
+    ``settings`` — всё, что принимают ``settings_of``/``runtime_of``.
+    """
+    from gc_core.settings import settings_of
+
     if not getattr(backend, "is_sandbox", False):
         return False
     try:
-        if parse_os_backend_kind(config_dict) not in PROVISIONED_KINDS:
+        if parse_os_backend_kind(settings) not in PROVISIONED_KINDS:
             return False
     except ValueError:
         return False
-    if str(config_dict.get("skills_data_path") or "").strip():
+    config = settings_of(settings)
+    if str(config.paths.skills_data_path or "").strip():
         return False  # Harbor-адаптер и CI: набор уже «там»
-    section = config_dict.get("os_backend")
-    return not (
-        isinstance(section, dict) and section.get("provision_skills") is False
-    )
+    return bool(config.os_backend.provision_skills)
 
 
 async def _remote_manifest(backend: Any, path: str) -> Optional[str]:
@@ -153,9 +156,12 @@ def _q(path: str) -> str:
     return shlex.quote(path)
 
 
-def _remote_root(config_dict: Dict[str, Any], backend: Any) -> Optional[str]:
+def _remote_root(settings: Any, backend: Any) -> Optional[str]:
     """Тот же корень, от которого guards считают ``.gc``: launch_root → project_root → cwd бэкенда."""
-    root = config_dict.get("launch_root") or config_dict.get("project_root")
+    from gc_core.settings import runtime_of
+
+    runtime = runtime_of(settings)
+    root = runtime.launch_root or runtime.project_root
     if not root and callable(getattr(backend, "default_cwd", None)):
         root = backend.default_cwd()
     return str(root) if root else None
@@ -181,7 +187,7 @@ async def _upload_set(
 
 async def aprovision_remote_skills(
     backend: Any,
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     run_logger: Optional[logging.Logger] = None,
 ) -> Optional[SkillsRegistry]:
@@ -192,9 +198,9 @@ async def aprovision_remote_skills(
     remote-бэкенд и скиллов не найдёт — ран идёт без них, с предупреждением.
     """
     log = run_logger or logger
-    if not should_provision(config_dict, backend):
+    if not should_provision(settings, backend):
         return None
-    launch_root = _remote_root(config_dict, backend)
+    launch_root = _remote_root(settings, backend)
     if not launch_root:
         return None
     remote_root = posixpath.join(launch_root, RUNTIME_SUBDIR)
@@ -230,7 +236,7 @@ async def aprovision_remote_skills(
         user_root=posixpath.join(remote_root, "user"),
         project_root=posixpath.join(remote_root, "project"),
         disable_skills=skills_registry_module.disabled_skills_from_config(
-            config_dict
+            settings
         ),
     )
 

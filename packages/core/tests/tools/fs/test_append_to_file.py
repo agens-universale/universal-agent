@@ -7,7 +7,7 @@ from gc_core.tools.arguments_validation import (
     parse_and_validate_tool_arguments,
 )
 from gc_core.tools.fs.append_to_file import AppendToFile
-from gc_core.tools.schema_optional import apply_openai_strict_parameters
+from gc_core.execution.tool_schema import apply_openai_strict_parameters
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 

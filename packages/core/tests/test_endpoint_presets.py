@@ -4,6 +4,7 @@ from gc_core.config_modules.endpoint_presets import (
     endpoint_presets_from_config,
 )
 from gc_core.config_modules.root import AppConfig
+from gc_testkit.settings import make_settings
 
 _EXPECTED = [
     ("OpenRouter", "https://openrouter.ai/api/v1/chat/completions"),
@@ -50,32 +51,29 @@ def test_default_presets_are_not_materialized_into_the_template():
 
 
 def test_from_config_missing_key_gives_default():
-    assert endpoint_presets_from_config({}) == list(DEFAULT_ENDPOINT_PRESETS)
+    assert endpoint_presets_from_config(make_settings({})) == list(
+        DEFAULT_ENDPOINT_PRESETS
+    )
 
 
 def test_from_config_reads_user_list():
-    cfg = {
-        "endpoint_presets": [
-            {"name": "My", "url": "http://x/v1/chat/completions"}
-        ]
-    }
+    cfg = make_settings(
+        {
+            "endpoint_presets": [
+                {"name": "My", "url": "http://x/v1/chat/completions"}
+            ]
+        }
+    )
     out = endpoint_presets_from_config(cfg)
     assert out == [
         EndpointPreset(name="My", url="http://x/v1/chat/completions")
     ]
 
 
-def test_from_config_invalid_entries_fall_back_to_default():
-    # сырой dict из TUI-тестов/легаси может быть не валидирован схемой
-    assert endpoint_presets_from_config(
-        {"endpoint_presets": "garbage"}
-    ) == list(DEFAULT_ENDPOINT_PRESETS)
-
-
-def test_load_config_flattens_custom_presets_into_config_dict(tmp_path):
-    """Регрессия (fix Important-1): flatten_app_config не пробрасывал
-    endpoint_presets — TUI видел только кодовый дефолт, пользовательские
-    пресеты из config.yml были мертвы."""
+def test_load_settings_carries_custom_presets(tmp_path):
+    """Регрессия (fix Important-1): пользовательские пресеты из config.yml
+    обязаны доезжать до настроек — однажды проекция их теряла, TUI видел только
+    кодовый дефолт, и пресеты из файла были мертвы."""
     from gc_core import config as cfgmod
 
     conf = tmp_path / "config.yml"
@@ -83,11 +81,11 @@ def test_load_config_flattens_custom_presets_into_config_dict(tmp_path):
         "endpoint_presets:\n  - name: My\n    url: http://x/v1/chat/completions\n",
         encoding="utf-8",
     )
-    config_dict = cfgmod.load_config(str(conf))
+    loaded = cfgmod.load_settings(str(conf))
 
-    assert config_dict["endpoint_presets"] == [
+    assert [p.model_dump() for p in loaded.settings.endpoint_presets] == [
         {"name": "My", "url": "http://x/v1/chat/completions"}
     ]
-    assert endpoint_presets_from_config(config_dict) == [
+    assert endpoint_presets_from_config(loaded) == [
         EndpointPreset(name="My", url="http://x/v1/chat/completions")
     ]

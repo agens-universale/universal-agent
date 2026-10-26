@@ -15,6 +15,7 @@ from gc_core.backends.capabilities import (
 )
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult
+from gc_core.backends.runtime_probe import RuntimeUnavailable
 from gc_core.utils.native_fs_search import build_grep_argv_flags
 from gc_testkit.harbor_fakes import FakeBackend
 
@@ -443,6 +444,55 @@ async def test_pipeline_probe_runs_the_production_wire():
     for cmd in piped:
         assert "-print0" in cmd
         assert "| xargs -0 -r " in cmd
+
+
+class _Recipe:
+    """command -v и подготовка каталога живые, сам рецепт падает заданным исключением."""
+
+    is_sandbox = True
+
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+    async def aexec(self, *args, **kwargs):
+        raise self.exc
+
+    async def aexec_raw(self, command, **kwargs):
+        if str(command).startswith("command -v"):
+            return ExecResult("/bin/grep\n", "", 0)
+        if str(command).startswith("mktemp"):
+            return ExecResult("/tmp/gc_probe_dead\n", "", 0)
+        if (
+            str(command).startswith("rm ")
+            or str(command).startswith("mkdir")
+            or "printf" in str(command)
+        ):
+            return ExecResult("", "", 0)
+        raise self.exc
+
+    async def aexec_argv(self, argv, **kwargs):
+        raise self.exc
+
+    async def arun_python(self, *args, **kwargs):
+        raise self.exc
+
+
+async def test_capability_probes_do_not_report_a_dead_runtime_as_false():
+    dead = _Recipe(RuntimeUnavailable())
+    for probe in (
+        aprobe_has_find,
+        aprobe_has_grep,
+        aprobe_grep_exclude_dir,
+        aprobe_grep_include,
+    ):
+        with pytest.raises(RuntimeUnavailable):
+            await probe(dead)
+
+
+async def test_capability_probe_crash_on_a_live_shell_is_false():
+    broken = _Recipe(OSError("grep recipe blew up"))
+    assert await aprobe_has_grep(broken) is False
+    assert await aprobe_has_find(broken) is False
 
 
 async def test_capable_box_reports_all_capabilities():

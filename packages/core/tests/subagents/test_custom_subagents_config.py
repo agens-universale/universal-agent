@@ -1,26 +1,25 @@
 """Конфиг-ключи agent.subagents_dir / agent.subagents_max_count."""
 
 import pytest
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from pydantic import ValidationError
 
 
-def _flat(agent_extra=None):
+def _agent(agent_extra=None):
     raw = {"agent": {**(agent_extra or {})}}
-    return flatten_app_config(AppConfig(**raw))
+    return AppConfig(**raw).agent
 
 
 def test_defaults():
-    flat = _flat()
-    assert flat["subagents_dir"] is None
-    assert flat["subagents_max_count"] == 20
+    agent = _agent()
+    assert agent.subagents_dir is None
+    assert agent.subagents_max_count == 20
 
 
-def test_values_reach_flat_config():
-    flat = _flat({"subagents_dir": "/tmp/agents", "subagents_max_count": 3})
-    assert flat["subagents_dir"] == "/tmp/agents"
-    assert flat["subagents_max_count"] == 3
+def test_values_reach_settings():
+    agent = _agent({"subagents_dir": "/tmp/agents", "subagents_max_count": 3})
+    assert agent.subagents_dir == "/tmp/agents"
+    assert agent.subagents_max_count == 3
 
 
 @pytest.mark.parametrize("bad", [0, -1])

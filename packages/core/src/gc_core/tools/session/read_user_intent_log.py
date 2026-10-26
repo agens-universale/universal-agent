@@ -14,10 +14,13 @@ _TOOL_NAME = "session_read_user_intent_log"
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class ReadUserIntentLog(AbstractSimpleTool):
+    # Тело исполняется в ядре (оркестрация или чистое состояние), не на
+    # воркере (execution.tool_effects.uses_leaf_effect).
+    effect_in_core = True
     tool_name = _TOOL_NAME
 
     def _default_limit(self) -> int:
-        cfg = intent_scope_from_config_dict(self._config_dict or {})
+        cfg = intent_scope_from_config_dict(self._settings_source)
         return int(
             cfg.read_page_record_limit
             or DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
@@ -30,9 +33,7 @@ class ReadUserIntentLog(AbstractSimpleTool):
         return deserialize_list(raw)
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         default_records = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
         return {
             "type": "function",
@@ -76,9 +77,7 @@ class ReadUserIntentLog(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         page_limit = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
         return f"""Tool name: session_read_user_intent_log
 Tool description: Read-only paginated access to closed user_intent_log (completed turns).

@@ -131,7 +131,9 @@ class LoopPulse:
         )
 
 
-def assert_loop_was_free(gaps, *, tick, allowed_stalls=1, label=""):
+def assert_loop_was_free(
+    gaps, *, tick, allowed_stalls=1, label="", stall_after=None
+):
     """Критерий «loop свободен» по РАСПРЕДЕЛЕНИЮ, а не по худшему интервалу.
 
     ``gaps`` — разрывы прогретого :class:`LoopPulse`, снятые под
@@ -157,10 +159,13 @@ def assert_loop_was_free(gaps, *, tick, allowed_stalls=1, label=""):
       сборщика (до 204 мс), и при нём блокирующие 0,2 с в пути тула проходили
       молча. Под глушителем сборщика этих пауз в окне нет.
 
-    Пропуском считается ``tick + 10 мс``, а не ``2 * tick`` (как в образце
-    ``parallel_agents._report``, где шаг 20 мс). При шаге 5 мс удвоение попадает
-    ВНУТРЬ обычного джиттера: измерено p95 = 9.4 мс. Абсолютный пол делает
-    определение одинаковым для любого шага.
+    Пропуском по умолчанию считается ``tick + 10 мс``, а не ``2 * tick`` (как в
+    образце ``parallel_agents._report``, где шаг 20 мс). При шаге 5 мс удвоение
+    попадает ВНУТРЬ обычного джиттера: измерено p95 = 9.4 мс. Абсолютный пол
+    делает определение одинаковым для любого шага. ``stall_after`` поднимает
+    порог явно: под нагрузкой планировщика короткие разрывы 20–40 мс не должны
+    считаться «повторным залипанием», а синхронные куски хранилища (~85 мс)
+    по-прежнему ловятся.
 
     p95 в сообщении — диагностика, не критерий (см. :meth:`LoopPulse.p95`).
     """
@@ -168,10 +173,12 @@ def assert_loop_was_free(gaps, *, tick, allowed_stalls=1, label=""):
 
     # Шаг не мельче кванта таймера ОС — см. LOOP_TIMER_QUANTUM.
     tick = max(tick, LOOP_TIMER_QUANTUM)
+    if stall_after is None:
+        stall_after = tick + 0.010
     assert gaps, f"{label}пульс не тикнул ни разу — loop был занят целиком"
     ordered = sorted(gaps)
     p50 = statistics.median(ordered)
-    stalls = [g for g in gaps if g >= tick + 0.010]
+    stalls = [g for g in gaps if g >= stall_after]
     detail = (
         f"{label}p50={p50 * 1000:.1f}мс p95={_p95(ordered) * 1000:.1f}мс "
         f"max={ordered[-1] * 1000:.1f}мс "

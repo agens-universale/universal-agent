@@ -1,14 +1,11 @@
 import json
 from typing import Any, Dict, Optional
 
+from gc_core.execution.tool_schema import coalesce_optional_string
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.read_guard import enforce_read_guard
-from gc_core.tools.schema_optional import coalesce_optional_string
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import decode_text_bytes, sha256_hex_of_bytes
-from gc_core.utils.fs_size_limits import (
-    DEFAULT_FS_READ_MAX_BYTES as DEFAULT_READ_FILE_MAX_BYTES,  # noqa: F401  # re-export для тестов
-)
 from gc_core.utils.fs_size_limits import (
     check_file_size,
     fs_read_max_bytes,
@@ -71,6 +68,9 @@ def _line_window(total_lines: int, offset, limit) -> "tuple[int, int]":
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class ReadFile(AbstractSimpleTool):
+    # A retry can observe newer files, but never repeats an external mutation.
+    effect_is_read_only = True
+
     def _result(
         self,
         *,
@@ -150,7 +150,7 @@ class ReadFile(AbstractSimpleTool):
         return None
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         description = {
             "type": "function",
             "name": "fs_read_file",
@@ -193,7 +193,7 @@ class ReadFile(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_read_file
 Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256.
 Input schema: {
@@ -282,7 +282,7 @@ Usage:
                 file_size_bytes=None,
             )
 
-        max_bytes = fs_read_max_bytes(self._config_dict)
+        max_bytes = fs_read_max_bytes(self._settings_source)
         if file_size_bytes is None and await self._backend.exists(path):
             return self._error_result(
                 path=path,

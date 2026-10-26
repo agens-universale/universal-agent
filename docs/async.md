@@ -21,13 +21,30 @@
 
 ```python
 from gc_core.aio import AsyncAgent
-from gc_core.config import load_config
+from gc_core.config import load_settings
 
-config = load_config("~/.gc/config.yml")
+config = load_settings("~/.gc/config.yml")
 
 async with await AsyncAgent.create(config) as agent:
     answer = await agent.run("почини падающие тесты", thread_id="t1")
 ```
+
+`AsyncAgent.create` принимает типизированные настройки: `LoadedSettings` из
+`load_settings` (файлы, слои, профиль, `${ENV}` — с происхождением каждого
+значения) или `AppConfig`. Плоский словарь не принимается — `TypeError`.
+Настройки неизменяемы; правка даёт новый провалидированный объект:
+
+```python
+from gc_core.settings import default_settings, override_settings
+
+cfg = default_settings(**{"agent.model": "my-model", "agent.max_steps": 20})
+strict = override_settings(cfg, {"security.command_moderation.mode": "deny"})
+# слой "cli" в происхождении
+loaded = config.with_overrides({"agent.max_steps": 5})
+```
+
+Недопустимое значение или неизвестный ключ — `ValidationError` сразу, а не
+сюрприз на середине хода.
 
 Живые дельты ответа:
 
@@ -70,14 +87,26 @@ MCP-сессии), в этот ход не попадает: цикл свою �
 from gc_core.attachments.model import ORIGIN_USER, chip_text, user_label
 from gc_core.attachments.store import ImageStore, amake_attachment
 
-store = ImageStore.for_config(config)   # тот же корень, что у агента и охраны путей
-shot = await amake_attachment(store, "screen.png", origin=ORIGIN_USER, label=user_label(1))
-answer = await agent.run(
-    f"{chip_text(1)} почему кнопка «Войти» съехала?", thread_id="t1", attachments=[[shot]]
+# тот же корень, что у агента и охраны путей
+store = ImageStore.for_config(config)
+shot = await amake_attachment(
+    store, "screen.png", origin=ORIGIN_USER, label=user_label(1)
 )
-more = await amake_attachment(store, "after.png", origin=ORIGIN_USER, label=user_label(2))
-agent.send({"role": "user", "content": f"{chip_text(2)} а так?",
-            "attachments": [more.to_dict()]})
+answer = await agent.run(
+    f"{chip_text(1)} почему кнопка «Войти» съехала?",
+    thread_id="t1",
+    attachments=[[shot]],
+)
+more = await amake_attachment(
+    store, "after.png", origin=ORIGIN_USER, label=user_label(2)
+)
+agent.send(
+    {
+        "role": "user",
+        "content": f"{chip_text(2)} а так?",
+        "attachments": [more.to_dict()],
+    }
+)
 ```
 
 Вложение — картинка в кармане процесса: `amake_attachment` читает файл (или байты
@@ -122,7 +151,7 @@ answer = await AgentExecutor(ctx).arun(
   поверхность для встраивающего с синхронным хранилищем; ядро её не зовёт — оно
   ходит через `a`-формы и адаптер `thread_store_async`. Убрать её значило бы
   отменить обещание «своё хранилище можно синхронное», ради которого контракт и
-  задуман (см. `docs/thread-store.md`). Рядом стоит `AsyncThreadStoreBase` для
+  задуман (см. `docs/sdk/thread-store-contract.md`). Рядом стоит `AsyncThreadStoreBase` для
   встраивающего с `redis.asyncio` или `asyncpg` — это ВТОРОЙ контракт, а не
   двойник первого.
 
@@ -130,8 +159,9 @@ answer = await AgentExecutor(ctx).arun(
   `archive_and_compact_summary_payload`) в этом списке раньше стояли по ошибке:
   это не контракт хранилища, а фасад ядра, и синхронных форм у него больше нет
   — только `afrom_config`, `apersist_batch` и `aarchive_and_compact_summary_payload`;
-* **долгоживущий stdio MCP** — `PersistentStdioSession.close`, `close_all` и
-  построчное чтение в `transport`. Их зовёт `atexit`, где loop'а уже нет, а
+* **долгоживущий stdio MCP** — `PersistentStdioSession.close`,
+  `close_everything` и построчное чтение в `transport`. Их зовёт `atexit`,
+  где loop'а уже нет, а
   обмен с процессом блокирующий по существу. Плюс синхронные `list_tools` /
   `call_tool` у `AgentRuntimeClient`: они обслуживают ровно этот транспорт и
   всему остальному отказывают громко.
@@ -179,7 +209,7 @@ class MyTool(AbstractSimpleTool):
 Прежняя третья ступень диспетчера (синхронный `__call__` → `asyncio.to_thread`)
 убрана. Она сторожила возможность, которой нет: зарегистрировать свой
 Python-класс-тул извне нельзя — `build_tools_data` собирает набор из
-`config_dict`, параметра у `acreate_run_context` нет, механизма плагинов нет.
+настроек, параметра у `acreate_run_context` нет, механизма плагинов нет.
 Точка расширения для чужих тулов — **MCP**, и она асинхронна насквозь.
 
 **Ограничение снято.** Раньше здесь стояло: у `FsBackend` есть асинхронные
@@ -362,7 +392,15 @@ agent = await AsyncAgent.create(cfg, log_handlers=[MyHandler()])
 ```
 
 Хендлер **добавляется** к файловому выводу ядра, а не заменяет его; отключить
-файл по-прежнему можно через `save_logs: false`.
+файл по-прежнему можно через `save_logs: false`. С `save_logs: false` ядро не
+создаёт ни каталога логов, ни файла прогона, ни `summary_trace_*.jsonl` — записи
+идут только в переданные обработчики (и в корневой логгер при
+`logging.propagate: true`):
+
+```python
+cfg = loaded.with_overrides({"logging.save_logs": False})
+agent = await AsyncAgent.create(cfg, log_handlers=[MyHandler()])
+```
 
 Цеплять хендлер к `ctx.logger` вручную ПОСЛЕ сборки тоже можно, но раньше это
 был единственный способ, и об этом никто не знал: ядро делает
@@ -387,9 +425,10 @@ logging:
 
 ```python
 from gc_core.backends.factory import resolve_os_backend
+from gc_core.tools.connect_mcp.registry import ToolsCache
 
-backend = resolve_os_backend(config_dict)  # harbor: + environment=…, loop=…
-cache = ToolsCache(config_dict, os_backend=backend)
+backend = resolve_os_backend(cfg)  # harbor: + environment=…, loop=…
+cache = ToolsCache(os_backend=backend)
 a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
 a2 = await AsyncAgent.create(
     cfg, tools_cache=cache, os_backend=backend
@@ -450,7 +489,12 @@ agent = await AsyncAgent.create(cfg, thread_store=MyDbStore())
 
 Всё остальное — одиннадцать методов, восемь свойств, которые легко нарушить,
 конформанс-набор, таблица лага для синхронного сетевого клиента — вынесено в
-отдельный документ: **[thread-store.md](thread-store.md)**.
+отдельный документ: **[sdk/thread-store-contract.md](sdk/thread-store-contract.md)**; руководство — [sdk/thread-store.md](sdk/thread-store.md).
+
+Промпты, AGENTS.md, скиллы и субагенты — общее для всех тредов агента — дают
+другое хранилище, **хранилище агента**:
+`AsyncAgent.create(settings, agent_store=...)`. По умолчанию — файлы по путям
+конфига, как раньше. Подробно: **[sdk/agent-store.md](sdk/agent-store.md)**.
 
 ## Хранилище с асинхронным клиентом
 

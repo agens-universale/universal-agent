@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from gc_core.security.permission_mode import mode_label
+from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -10,7 +12,7 @@ from textual.screen import Screen
 from textual.widgets import Input, Static
 
 from gc_tui.palette import DIM, MUTED
-from gc_tui.services.redact import redact_secrets
+from gc_tui.services.redact import redact_settings
 from gc_tui.services.yaml_view import (
     safe_yaml_dump,
     yaml_syntax_renderable,
@@ -52,17 +54,20 @@ def _filter_config_by_key(obj, q: str):
 
 
 def _paths_block(
-    config: dict,
+    settings,
     config_path: str | None,
     project_local: str | None,
     profile_path: str | None = None,
 ) -> Text:
     """Строки путей: метка (dim) + значение (ink); '(не задано)' — muted.
-    Заголовок блока живёт в border_title панели, не в тексте."""
+    Заголовок блока живёт в border_title панели, не в тексте. `settings` — всё,
+    что принимает `settings_of`."""
     from gc_core.project_memory import resolve_project_memory_path
 
+    paths = settings_of(settings).paths
+
     def path_or_unset(key):  # резолвнутый путь или метка
-        v = config.get(key)
+        v = getattr(paths, key, None)
         return str(v) if v else "(не задано)"
 
     rows = [("config.yml:", config_path or "(не определён)")]
@@ -87,7 +92,7 @@ def _paths_block(
     return t
 
 
-def _effective_model_name(config: dict) -> str:
+def _effective_model_name(config) -> str:
     """Действующая модель снимка — резолв `ModelRouter` (§6/§7), а не плоский ключ:
     тот же канон, что у футера (`main.py::_footer_model_name`) и `/status`. С волны B
     мастер `agent.model` не пишет вовсе, а на легаси-конфигах ключ может быть просто
@@ -97,15 +102,33 @@ def _effective_model_name(config: dict) -> str:
     быть внутренне согласованной. Резолв не удался (реестр нерезолвим, алиаса нет) —
     честный фоллбэк на плоский ключ, шапка не место для отказа.
 
-    Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4)."""
+    Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4).
+
+    `level: auto` (спека auto-routing §5.1) переводится через `effective_level`
+    ДО `ModelRouter` — сырой литерал `auto` иначе роняет `_resolve_level`
+    (`ValueError`), и шапка показала бы фоллбэк вместо модели default-слота.
+    Доступность фичи — через `gc_tui.toggles.auto_available_cfg` (единая точка
+    TUI, спека §3), не пересчитывается своим композитом `auto_available` +
+    `cli_forces_legacy_model`; core-аналог с той же логикой — только на
+    core-функциях (`gc_core.onboarding.effective_model`, слой не позволяет
+    ему знать про `gc_tui`)."""
+    from gc_core.auto_routing.levels import effective_level
+    from gc_core.config import cli_forces_legacy_model
     from gc_core.model_router import ModelRouter
     from gc_core.onboarding import MODEL_SENTINEL
 
-    name = config.get("model")
+    from gc_tui.toggles import auto_available_cfg
+
+    settings = settings_of(config)
+    name = settings.agent.model
     try:
+        available = auto_available_cfg(config)
         resolved = ModelRouter(
             config,
-            level_provider=lambda: config.get("level") or "default",
+            level_provider=lambda: effective_level(
+                settings.level, None, available
+            ),
+            force_legacy=cli_forces_legacy_model(config),
         ).resolve("main", check_breaker=False)
         name = resolved.alias or resolved.model
     except Exception:
@@ -113,10 +136,14 @@ def _effective_model_name(config: dict) -> str:
     return name if name and name != MODEL_SENTINEL else "—"
 
 
-def _profile_header_text(config: dict, profile_source: str | None) -> Text:
-    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local»."""
-    profile = config.get("profile") or None
-    level = config.get("level") or "default"
+def _profile_header_text(config, profile_source: str | None) -> Text:
+    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local».
+    Уровень — действующий, тем же правилом, что у палитры `/level`: `auto`, только
+    когда автовыбор доступен, иначе уровень, которым идёт работа."""
+    from gc_tui.toggles import resolve_level_state
+
+    profile = runtime_of(config).active_profile or None
+    level = resolve_level_state(config)
     model = _effective_model_name(config)
     t = Text()
     t.append("профиль: ", style=DIM)
@@ -133,57 +160,69 @@ def _profile_header_text(config: dict, profile_source: str | None) -> Text:
     return t
 
 
+#: Откуда взят действующий режим разрешений — словами для человека.
+_MODE_SOURCE_LABELS = {
+    "session": "выбран в этой сессии",
+    "config": "из конфига",
+    "default": "по умолчанию",
+}
+
+
+def _permission_mode_text(mode: str, source: str | None) -> Text:
+    """«режим разрешений: manual mode (выбран в этой сессии)» — в стиле шапки
+    профиля. В отличие от снимка ниже, режим меняется на лету (Shift+Tab)."""
+    t = Text()
+    t.append("режим разрешений: ", style=DIM)
+    t.append(mode_label(mode), style=MUTED)
+    label = _MODE_SOURCE_LABELS.get(source or "")
+    if label:
+        t.append(f" ({label})", style=DIM)
+    return t
+
+
 class ConfigScreen(Screen):
     def __init__(
         self,
         *,
-        config: dict | None = None,
+        settings=None,
         config_path: str | None = None,
         project_local: str | None = None,
         profile_source: str | None = None,
         profile_path: str | None = None,
+        permission_mode: str | None = None,
+        permission_mode_source: str | None = None,
     ) -> None:
         super().__init__()
-        self._config = config or {}
+        # Снимок базы окна (`LoadedSettings`) на момент открытия экрана.
+        self._settings = settings
         self._config_path = config_path
         self._project_local = project_local
         self._profile_source = profile_source
         self._profile_path = profile_path
+        self._permission_mode = permission_mode
+        self._permission_mode_source = permission_mode_source
         self._filter = ""
         self._yaml_w: Static | None = None
 
     def _profile_header(self) -> Text:
-        return _profile_header_text(self._config, self._profile_source)
+        return _profile_header_text(self._settings, self._profile_source)
+
+    def _redacted(self) -> dict:
+        """Настройки документом (секции как в config.yml), секреты скрыты."""
+        return redact_settings(settings_of(self._settings))
 
     def _yaml_text(self) -> str:
-        return safe_yaml_dump(redact_secrets(self._config))
+        return safe_yaml_dump(self._redacted())
 
     def _filtered_yaml_text(self) -> str:
         """YAML по текущему фильтру ключей; пустой фильтр → полный конфиг,
         нет совпадений → метка `(нет совпадений)`."""
-        cfg = redact_secrets(self._config)
+        cfg = self._redacted()
         q = self._filter.strip().lower()
         if not q:
             return safe_yaml_dump(cfg)
         filtered = _filter_config_by_key(cfg, q)
         return safe_yaml_dump(filtered) if filtered else _NO_MATCH
-
-    def rendered_text(self) -> str:
-        """Для тестов: заголовок профиля/уровня/модели + подсказка + пути + YAML одной строкой."""
-        return (
-            self._profile_header().plain
-            + "\n"
-            + _SNAPSHOT_HINT
-            + "\n"
-            + _paths_block(
-                self._config,
-                self._config_path,
-                self._project_local,
-                self._profile_path,
-            ).plain
-            + "\n"
-            + self._yaml_text()
-        )
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -193,12 +232,20 @@ class ConfigScreen(Screen):
                 )
             with VerticalScroll(id="trace", classes="quiet-focus"):
                 yield Static(self._profile_header(), classes="config-caption")
+                if self._permission_mode is not None:
+                    yield Static(
+                        _permission_mode_text(
+                            self._permission_mode, self._permission_mode_source
+                        ),
+                        id="config-permission-mode",
+                        classes="config-caption",
+                    )
                 yield Static(
                     _SNAPSHOT_HINT, classes="config-caption", markup=False
                 )
                 paths = Static(
                     _paths_block(
-                        self._config,
+                        self._settings,
                         self._config_path,
                         self._project_local,
                         self._profile_path,

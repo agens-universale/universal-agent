@@ -1,5 +1,6 @@
 """При meta.runtime.summarizing=True индикатор переходит в compressing."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -36,7 +37,9 @@ async def test_poll_switches_to_compressing(tmp_path):
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen

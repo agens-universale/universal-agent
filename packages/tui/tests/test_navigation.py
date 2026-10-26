@@ -1,5 +1,6 @@
 """Хоткеи, /back, /main, стек экранов."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -104,7 +105,7 @@ async def test_ctrl_d_opens_diff(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        config={"launch_root": str(tmp_path)}
+        settings=tui_settings({"launch_root": str(tmp_path)})
     ).run_test() as pilot:
         await pilot.press("ctrl+d")
         await pilot.pause()
@@ -145,7 +146,7 @@ async def test_f3_opens_diff(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        config={"launch_root": str(tmp_path)}
+        settings=tui_settings({"launch_root": str(tmp_path)})
     ).run_test() as pilot:
         await pilot.press("f3")
         await pilot.pause()
@@ -190,7 +191,9 @@ async def test_tab_visits_each_event_once(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -289,7 +292,9 @@ async def test_tab_skips_agent_continuation_rows(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

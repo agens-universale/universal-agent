@@ -5,12 +5,12 @@ from typing import Any, Dict, Type
 
 from jsonschema import Draft7Validator
 
-from gc_core.tools.connect_mcp.validation import _validate_tool_arguments
-from gc_core.tools.schema_optional import (
+from gc_core.execution.tool_schema import (
     normalize_optional_empty_as_omit,
     parameters_schema_for_local_validation,
-    resolve_optional_property_keys,
 )
+from gc_core.tools.connect_mcp.validation import _validate_tool_arguments
+from gc_core.tools.inject_tool_fields import strip_injected_tool_args
 
 
 def resolve_tool_arguments_feedback_hint(
@@ -40,151 +40,7 @@ def resolve_tool_arguments_feedback_hint(
     return text if text else None
 
 
-def _describe_schema_type(spec: Dict[str, Any]) -> str:
-    """Человекочитаемый тип поля для 'Correct call format'.
-    Раскрывает anyOf/oneOf (object|array|...), а не наивный <any>."""
-    if not isinstance(spec, dict):
-        return "any"
-    t = spec.get("type")
-    if isinstance(t, str):
-        return t
-    if isinstance(t, list):
-        return "|".join(str(x) for x in t if x != "null") or "any"
-    for key in ("anyOf", "oneOf"):
-        branches = spec.get(key)
-        if isinstance(branches, list):
-            types = _branch_type_names(branches)
-            if types:
-                return "|".join(types)
-    return "any"
-
-
-def _branch_type_names(branches: list) -> list[str]:
-    """Уникальные не-null типы веток anyOf/oneOf в порядке появления."""
-    types: list[str] = []
-    for b in branches:
-        bt = b.get("type") if isinstance(b, dict) else None
-        if isinstance(bt, str) and bt != "null" and bt not in types:
-            types.append(bt)
-    return types
-
-
-def _field_entries(params: Dict[str, Any]) -> "tuple[list[str], list[str]]":
-    """Строки полей для 'Correct call format': (обязательные, опциональные)."""
-    properties = params.get("properties", {}) or {}
-    required_fields = params.get("required", []) or []
-    optional_keys = set(resolve_optional_property_keys(params))
-    required_entries: list[str] = []
-    optional_entries: list[str] = []
-    for field, spec in properties.items():
-        ftype = _describe_schema_type(spec)
-        fdesc = spec.get("description", "")
-        fdesc_short = fdesc.split(".")[0] if fdesc else ""
-        entry = f'  "{field}": <{ftype}>'
-        if fdesc_short:
-            entry += f"  // {fdesc_short}"
-        if field not in optional_keys and field in required_fields:
-            required_entries.append(entry)
-        else:
-            optional_entries.append(entry)
-    return required_entries, optional_entries
-
-
-def _join_field_lines(all_field_lines: list[str]) -> str:
-    # Add comma after each field entry (non-comment lines), except the last one
-    body_lines = []
-    last_field_idx = max(
-        i
-        for i, line in enumerate(all_field_lines)
-        if not line.strip().startswith("//")
-    )
-    for i, line in enumerate(all_field_lines):
-        is_comment = line.strip().startswith("//")
-        is_last_field = not is_comment and i == last_field_idx
-        body_lines.append(line if is_comment or is_last_field else line + ",")
-    return "\n".join(body_lines)
-
-
-def _correct_call_format_body(expected_schema: Any) -> "str | None":
-    """Тело JSON-блока 'Correct call format' или None, если полей нет."""
-    params = (
-        expected_schema.get("parameters", {})
-        if isinstance(expected_schema, dict)
-        else {}
-    )
-    required_entries, optional_entries = _field_entries(params)
-    if not required_entries and not optional_entries:
-        return None
-    all_field_lines: list[str] = []
-    if required_entries:
-        all_field_lines.append("  // REQUIRED")
-        all_field_lines.extend(required_entries)
-    if optional_entries:
-        all_field_lines.append("  // OPTIONAL")
-        all_field_lines.extend(optional_entries)
-    return _join_field_lines(all_field_lines)
-
-
-class WrongFunctionArgumentsException(Exception):
-    def __init__(
-        self,
-        message: str,
-        received_args: str,
-        expected_schema: dict | None = None,
-        tool_name: str | None = None,
-        extra_hint: str | None = None,
-        call_id: str | None = None,
-    ):
-        super().__init__(message)
-        self.message = message
-        self.received_args = received_args
-        self.expected_schema = expected_schema
-        self.tool_name = tool_name
-        self.extra_hint = extra_hint
-        self.call_id = call_id
-
-    def to_tool_output(self) -> str:
-        """Отказ валидации как output вызова — тот же контракт, что у unknown_tool.
-
-        Батч не прерывается: этот JSON становится function_call_output упавшего
-        вызова, остальные вызовы хода исполняются.
-        """
-        payload = {
-            "ok": False,
-            "error": {
-                "type": "invalid_arguments",
-                "tool": self.tool_name,
-                "message": self.message,
-            },
-            "message": self.to_llm_feedback(),
-        }
-        return json.dumps(payload, ensure_ascii=False)
-
-    def to_llm_feedback(self) -> str:
-        """
-        Формирует четкое и структурированное сообщение об ошибке для LLM.
-        """
-        tool_label = f"`{self.tool_name}`" if self.tool_name else "tool"
-        feedback = f"❌ Wrong arguments for {tool_label}: {self.message}\n\n"
-
-        # Исходные аргументы уже находятся в парном function_call и связаны с
-        # этим output через call_id. Не дублируем проблемный payload в контекст.
-
-        if self.extra_hint:
-            hint = str(self.extra_hint).strip()
-            feedback += hint if hint.endswith("\n") else f"{hint}\n"
-            if not feedback.endswith("\n\n"):
-                feedback += "\n"
-
-        if self.expected_schema:
-            body = _correct_call_format_body(self.expected_schema)
-            if body is not None:
-                feedback += (
-                    f"Correct call format:\n```json\n{{\n{body}\n}}\n```\n\n"
-                )
-
-        feedback += "Fix the arguments and retry the tool call."
-        return feedback
+from gc_core.execution.arguments_error import WrongFunctionArgumentsException
 
 
 def _raise_wrong_function_arguments(
@@ -459,6 +315,78 @@ def _recover_arguments(
     return None
 
 
+def prepare_tool_arguments(
+    raw: str | Dict[str, Any] | None, entry: Dict[str, Any]
+) -> tuple[Dict[str, Any] | None, Dict[str, Any]]:
+    """Разбор JSON → `prepare_args_before_strip` фабрики → снятие служебных полей
+    (`entry["injected_fields"]`). Единственный путь для всех потребителей аргументов
+    (исполнение, вердикт финализатора, отпечаток loop-детектора, чтение оценок —
+    решение 6 канона автороутинга): служебное поле снимается ДО валидации схемы,
+    мусор в нём вызов не роняет. Возвращает `(аргументы_без_служебных, служебные)`;
+    `(None, {})` — не JSON-объект (валидация ниже даст честную ошибку по исходной строке)."""
+    if isinstance(raw, dict):
+        parsed: Any = dict(raw)
+    else:
+        text = "" if raw is None else str(raw).strip()
+        if not text:
+            # Пустые аргументы у тула без собственных параметров — пустой объект:
+            # служебные поля (`injected_fields`) параметрами тула не считаются,
+            # иначе инжект оценки в auto отбивал бы `""` у тула без параметров.
+            return ({}, {}) if _has_no_own_parameters(entry) else (None, {})
+        parsed = _json_or_none(text)
+    parsed = _fabric_prepared_object(parsed, entry)
+    if parsed is None:
+        return None, {}
+    injected = [
+        f for f in (entry.get("injected_fields") or []) if isinstance(f, str)
+    ]
+    service = {name: parsed[name] for name in injected if name in parsed}
+    return strip_injected_tool_args(parsed, injected_fields=injected), service
+
+
+def _json_or_none(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fabric_prepared_object(
+    parsed: Any, entry: Dict[str, Any]
+) -> "Dict[str, Any] | None":
+    """JSON-объект после `prepare_args_before_strip` фабрики; не объект до или
+    после хука — `None`."""
+    if not isinstance(parsed, dict):
+        return None
+    prepare = getattr(
+        entry.get("tool_fabric"), "prepare_args_before_strip", None
+    )
+    if callable(prepare):
+        parsed = prepare(parsed)
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _has_no_own_parameters(entry: Dict[str, Any]) -> bool:
+    """Все свойства схемы записи — служебные поля (`injected_fields`) либо их нет."""
+    spec = entry.get("spec")
+    if not isinstance(spec, dict):
+        return False
+    params = spec.get("parameters") if isinstance(spec, dict) else None
+    properties = params.get("properties") if isinstance(params, dict) else None
+    return set(properties or {}) <= set(entry.get("injected_fields") or [])
+
+
+def arguments_without_service_fields(raw: Any, entry: Dict[str, Any]) -> Any:
+    """Аргументы вызова для потребителей вне исполнения тула — возврат хода,
+    судья finish gate, intent-scope: служебные поля (`entry["injected_fields"]`)
+    сняты тем же помощником `prepare_tool_arguments`. Ничего не снято или
+    аргументы не JSON-объект — исходное значение байт в байт."""
+    args, service = prepare_tool_arguments(raw, entry)
+    if args is None or not service:
+        return raw
+    return json.dumps(args, ensure_ascii=False)
+
+
 def parse_and_validate_tool_arguments(
     *,
     tool_name: str,
@@ -466,6 +394,7 @@ def parse_and_validate_tool_arguments(
     tool_spec: Dict[str, Any],
     allow_empty_for_empty_schema: bool,
     tool_fabric: Type[Any] | None = None,
+    prepared: Dict[str, Any] | None = None,
     dropped_unknown: list[str] | None = None,
 ) -> Dict[str, Any]:
     params_schema = (
@@ -484,10 +413,14 @@ def parse_and_validate_tool_arguments(
         tool_fabric=tool_fabric,
         parsed_args=None,
     )
-    parsed_args = _parse_arguments_object(
-        arguments,
-        reject,
-        allow_empty=allow_empty_for_empty_schema and is_empty_schema,
+    parsed_args = (
+        prepared
+        if prepared is not None
+        else _parse_arguments_object(
+            arguments,
+            reject,
+            allow_empty=allow_empty_for_empty_schema and is_empty_schema,
+        )
     )
     if not isinstance(parsed_args, dict):
         _raise_wrong_function_arguments(
@@ -517,7 +450,11 @@ def parse_and_validate_tool_arguments(
         else:
             _raise_wrong_function_arguments(
                 message=str(e),
-                received_args=json.dumps(parsed_args, ensure_ascii=False),
+                received_args=(
+                    str(arguments)
+                    if prepared is not None
+                    else json.dumps(parsed_args, ensure_ascii=False)
+                ),
                 expected_schema=tool_spec,
                 tool_name=tool_name,
                 tool_fabric=tool_fabric,
@@ -529,10 +466,43 @@ def parse_and_validate_tool_arguments(
     return normalize_optional_empty_as_omit(parsed_args, params_schema)
 
 
+def tool_arguments_valid(
+    tool_name: str,
+    arguments: Any,
+    tools_data_: Dict[str, Dict[str, Any]],
+) -> bool:
+    """True, если аргументы прошли бы валидацию aapply_tool (те же правила и spec).
+
+    Неизвестный тул или запись без spec не судим (True): решать будет сам
+    aapply_tool. Исключение ловится здесь же, поэтому результат не зависит от
+    того, какое поколение модуля держит вызывающая сторона.
+    """
+    entry = tools_data_.get(tool_name) or {}
+    spec = entry.get("spec")
+    if not isinstance(spec, dict):
+        return True
+    try:
+        prepared, _service = prepare_tool_arguments(arguments, entry)
+        parse_and_validate_tool_arguments(
+            tool_name=tool_name,
+            arguments=arguments,
+            tool_spec=spec,
+            allow_empty_for_empty_schema=True,
+            tool_fabric=entry.get("tool_fabric"),
+            prepared=prepared,
+        )
+    except WrongFunctionArgumentsException:
+        return False
+    return True
+
+
 __all__ = [
     "WrongFunctionArgumentsException",
     "annotate_output_with_dropped_arguments",
+    "arguments_without_service_fields",
     "format_dropped_arguments_note",
     "parse_and_validate_tool_arguments",
+    "prepare_tool_arguments",
     "resolve_tool_arguments_feedback_hint",
+    "tool_arguments_valid",
 ]

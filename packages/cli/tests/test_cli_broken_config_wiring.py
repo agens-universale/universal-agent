@@ -20,6 +20,7 @@ import pytest
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_cli import cli
+from gc_core.settings import settings_of
 
 
 def _make_layer_unreadable(path, request):
@@ -234,7 +235,10 @@ def test_run_init_reaches_wizard_on_broken_config_interactive(
     # onboarding_wizard/setup_guide узнают «не настроено».
     from gc_core import onboarding
 
-    assert seen["cfg"].get("completions_url") == onboarding.URL_SENTINEL
+    assert (
+        settings_of(seen["cfg"]).backend.completions_url
+        == onboarding.URL_SENTINEL
+    )
 
 
 def test_run_init_passive_guide_on_broken_config_non_interactive(
@@ -420,15 +424,15 @@ def test_run_init_keeps_user_connection_when_only_profile_is_broken(
     )
 
     assert cli._run_init() == 0
-    cfg = seen["cfg"]
+    settings = settings_of(seen["cfg"])
     assert (
-        cfg.get("completions_url")
+        settings.backend.completions_url
         == "https://openrouter.ai/api/v1/chat/completions"
     )
-    assert (cfg.get("chat_completion_headers") or {}).get(
+    assert (settings.backend.chat_completion_headers or {}).get(
         "Authorization"
     ) == "Bearer sk-user-token"
-    assert list(cfg.get("models") or {}) == ["fast"]
+    assert list(settings.models or {}) == ["fast"]
 
 
 def test_run_init_tells_which_layer_was_dropped(monkeypatch, tmp_path, capsys):
@@ -622,3 +626,83 @@ def test_run_init_explains_an_unreadable_layer_instead_of_a_traceback(
     assert str(overlay) in err
     assert "не удалось прочитать" in err
     assert "Traceback" not in err
+
+
+def test_invalid_param_value_is_reported_without_the_value(
+    monkeypatch, tmp_path, capsys
+):
+    """Негодный `--param`: координата и причина, без значения (там токен)."""
+    base = tmp_path / "base.yml"
+    base.write_text("agent: {model: m}\n", encoding="utf-8")
+    ap = _reload_arg_parser_with_argv(
+        [
+            "gc-cli",
+            "--config",
+            str(base),
+            "--agent.max_steps=Bearer sk-SECRET-123",
+            "-q",
+            "x",
+        ],
+        monkeypatch,
+    )
+    monkeypatch.setattr(cli, "arg_parser", ap)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    rc = cli.main()
+
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "agent.max_steps" in captured.err
+    assert "sk-SECRET-123" not in captured.err + captured.out
+
+
+def test_flat_param_name_fails_with_path_hint(monkeypatch, tmp_path, capsys):
+    """Плоских имён `--param` нет: `--max_steps` — код 2 и подсказка пути."""
+    base = tmp_path / "base.yml"
+    base.write_text("agent: {model: m}\n", encoding="utf-8")
+    ap = _reload_arg_parser_with_argv(
+        ["gc-cli", "--config", str(base), "--max_steps", "50", "-q", "x"],
+        monkeypatch,
+    )
+    monkeypatch.setattr(cli, "arg_parser", ap)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    rc = cli.main()
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "неизвестная настройка --max_steps" in err
+    assert "--agent.max_steps" in err
+
+
+def test_registry_pair_violation_is_reported_without_traceback(
+    monkeypatch, tmp_path, capsys
+):
+    base = tmp_path / "base.yml"
+    base.write_text(
+        "agent: {model: m}\n"
+        "models:\n"
+        "  ds: {model: x, url: 'https://a.example/v1/chat/completions', token: T}\n",
+        encoding="utf-8",
+    )
+    ap = _reload_arg_parser_with_argv(
+        [
+            "gc-cli",
+            "--config",
+            str(base),
+            "--models.ds.url",
+            "https://evil.example/v1/chat/completions",
+            "-q",
+            "x",
+        ],
+        monkeypatch,
+    )
+    monkeypatch.setattr(cli, "arg_parser", ap)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    assert cli.main() == 2
+    err = capsys.readouterr().err
+    assert "models.ds" in err and "Traceback" not in err

@@ -10,11 +10,15 @@ import json
 
 import pytest
 from gc_core import processing_responses as pr
+from gc_core.auto_routing.policy import TOOL_CALL_ERROR
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _state():
     s = type("S", (), {})()
+    s.mode_announced = None
+    s.mark_turn_start = lambda: None
     s.messages = []
     s.steps = 0
     s.max_steps = 100
@@ -24,18 +28,20 @@ def _state():
     s.current_user_intent = []
     s.user_intent_log = []
     s.flush_current_user_intent = lambda: None
+    s.tick_signals = set()
     return s
 
 
-def _run_ctx():
+def _run_ctx(**extra):
     cd = {
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 1,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 1,
+        "agent.strict_turn_finish_validation": True,
         "text_answer_mode": "allow",
+        **extra,
     }
-    return type("C", (), {"config_dict": cd, "logger": None})()
+    return fake_ctx(cd, logger=None)
 
 
 def _bad_batch(call_id):
@@ -92,6 +98,7 @@ def test_invalid_args_reach_the_model_as_tool_output_and_exhaust_the_budget(
 
     assert result == "Agent tools call errors."
     assert state.terminal_outcome == "tool_errors"
+    assert TOOL_CALL_ERROR in state.tick_signals
     # Модель получила именно function_call_output на упавший вызов, а не user-сообщение.
     assert len(received_by_model) == 1
     outputs = [
@@ -171,10 +178,8 @@ def _run_two_bad_turns(monkeypatch, apply_tool, tool_name):
         pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None)
     )
 
-    ctx = _run_ctx()
-    ctx.config_dict["max_unknown_tool_repeats"] = (
-        100  # повтор одного имени — отдельный сторож, не о нём
-    )
+    # повтор одного имени — отдельный сторож, не о нём
+    ctx = _run_ctx(**{"agent.max_unknown_tool_repeats": 100})
     state = _state()
     result = run_coro(
         pr.arun_agent(

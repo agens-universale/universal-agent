@@ -98,20 +98,26 @@ async def test_download_file_guard_carries_the_abandoned_mark(
 
     entered, seen = threading.Event(), {}
 
-    def _slow_guard(self, dest):
+    def _slow_guard_flow(_self, _dest):
+        # Тело гарда — генератор: локально `_acheck_write_guard` гонит его
+        # целиком в потоке гвардов, вместе с ожиданием человека.
         entered.set()
         time.sleep(0.3)  # «человек думает» над y/n
         seen["abandoned"] = current_call_abandoned()
         return None
+        yield  # pragma: no cover — делает функцию генератором
 
-    monkeypatch.setattr(DownloadFile, "_check_write_guard", _slow_guard)
+    monkeypatch.setattr(DownloadFile, "_write_guard_flow", _slow_guard_flow)
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     tool = with_local_ctx(
         DownloadFile,
-        config_dict={
+        {
             "launch_root": str(launch_root),
-            "download": {"download_dir": "downloads", "max_bytes": 52_428_800},
+            "security.download": {
+                "download_dir": "downloads",
+                "max_bytes": 52_428_800,
+            },
         },
     )
 

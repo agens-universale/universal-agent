@@ -71,7 +71,9 @@ TURNS = [
 
 async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
     """Критерий 1: loop свободен всё время жизни агента — от сборки до закрытия."""
-    cfg = parity_config(tmp_path, monkeypatch)
+    # Типизированные настройки собираем ДО окна замера: валидация конфига —
+    # работа встраивающего, а не сборки агента.
+    settings = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
     from gc_testkit import (
@@ -90,7 +92,7 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
     # начале `create` тест не замечал.
     with quiet_gc_for_loop_timing():
         async with LoopPulse() as pulse:
-            async with await AsyncAgent.create(cfg) as agent:
+            async with await AsyncAgent.create(settings) as agent:
                 answer = await agent.run("поспи 0.3 секунды", thread_id="t1")
 
     assert answer
@@ -112,7 +114,9 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
     """Критерий 2: два прогона идут внахлёст, а не друг за другом."""
     from gc_testkit import quiet_gc_for_loop_timing
 
-    cfg_solo = parity_config(tmp_path / "solo", monkeypatch, model="solo")
+    cfg_solo = parity_config(
+        tmp_path / "solo", monkeypatch, **{"agent.model": "solo"}
+    )
     install_many(monkeypatch, {"solo": ScriptedBackend(list(TURNS))})
     # Оба замера — под заглушенным сборщиком. Иначе тест сравнивает не
     # параллельность, а то, сколько пауз поколения 2 попало в каждую фазу:
@@ -127,8 +131,12 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
         # По сценарию на агента: общий раздаёт ходы в порядке вызовов, и второй
         # агент забрал бы финализатор первого — тест мерил бы очередь, а не
         # параллельность.
-        cfg_a = parity_config(tmp_path / "a", monkeypatch, model="агент-а")
-        cfg_b = parity_config(tmp_path / "b", monkeypatch, model="агент-б")
+        cfg_a = parity_config(
+            tmp_path / "a", monkeypatch, **{"agent.model": "агент-а"}
+        )
+        cfg_b = parity_config(
+            tmp_path / "b", monkeypatch, **{"agent.model": "агент-б"}
+        )
         install_many(
             monkeypatch,
             {
@@ -160,19 +168,22 @@ def test_agent_runs_without_importing_frontends(tmp_path):
     script = """
 import asyncio, json, sys
 from gc_core.aio import AsyncAgent
+from gc_core.settings import LoadedSettings, RuntimeEnv, default_settings
 
 async def main():
-    agent = await AsyncAgent.create({{
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://acceptance.invalid/v1/chat/completions",
-        "model": "acceptance-model",
-        "threads_data_path": {threads!r},
-        "logs_dump_dir": {logs!r},
-        "save_logs": False,
-        "launch_root": {root!r},
-        "backend_request_timeout_sec": 60,
-        "max_steps": 1,
-    }})
+    agent = await AsyncAgent.create(LoadedSettings(
+        settings=default_settings(**{{
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://acceptance.invalid/v1/chat/completions",
+            "agent.model": "acceptance-model",
+            "paths.threads_data_path": {threads!r},
+            "paths.logs_dump_dir": {logs!r},
+            "logging.save_logs": False,
+            "backend.request_timeout_sec": 60,
+            "agent.max_steps": 1,
+        }}),
+        runtime=RuntimeEnv(launch_root={root!r}),
+    ))
     await agent.aclose()
 
 try:

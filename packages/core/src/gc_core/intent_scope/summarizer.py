@@ -4,8 +4,20 @@ import logging
 import os
 from typing import Any, List
 
+from gc_core.agent_store import (
+    DEFAULT_AGENT_STORE,
+    AgentResource,
+    AgentStore,
+    agent_store_of,
+    read_required_text,
+)
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.intent_scope import IntentScopeConfig
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
 from gc_core.intent_log.serialize import (
     deserialize_list,
     records_to_jsonl_lines,
@@ -16,36 +28,37 @@ from gc_core.intent_scope.agent_logging import (
 )
 from gc_core.message_format.dialog_history import truncate_text
 from gc_core.summarize.llm import arequest_summary_text
-from gc_core.utils.user_text import read_user_text
 
 _logger = logging.getLogger(__name__)
-
-# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_PROJECT_ROOT = str(bundled_root())
-_DEFAULT_PROMPT_PATH = os.path.join(
-    _PROJECT_ROOT, "prompts", "intent_scope_tool_summary_prompt.md"
-)
-_DEFAULT_FINAL_ANSWER_PROMPT_PATH = os.path.join(
-    _PROJECT_ROOT, "prompts", "intent_scope_final_answer_summary_prompt.md"
-)
 
 
 def _resolve_final_answer_prompt_path(ctx: Any) -> str:
     cfg = _scope_cfg(ctx)
     raw = str(cfg.intent_scope_final_answer_summary_prompt_path or "").strip()
     if not raw:
-        return _DEFAULT_FINAL_ANSWER_PROMPT_PATH
+        return str(
+            bundled_root()
+            / "prompts"
+            / "intent_scope_final_answer_summary_prompt.md"
+        )
     if os.path.isabs(raw):
         return raw
-    return os.path.abspath(os.path.join(_PROJECT_ROOT, raw))
+    return os.path.abspath(os.path.join(str(bundled_root()), raw))
 
 
-def _load_prompt_file(path: str) -> str:
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Intent scope prompt file not found: {path}")
+def _load_prompt_file(
+    path: str,
+    *,
+    store: AgentStore = DEFAULT_AGENT_STORE,
+    name: str = "intent_final",
+) -> str:
     # Путь задаёт конфиг (`intent_scope_*_prompt_path`) — файл человека, его
     # кодировку никто не проверял. Отказ обязан назвать файл.
-    system = read_user_text(path).strip()
+    system = read_required_text(
+        store,
+        AgentResource("prompt", name, path),
+        missing=f"Intent scope prompt file not found: {path}",
+    ).strip()
     if not system:
         raise ValueError(f"Intent scope prompt file is empty: {path}")
     return system
@@ -62,19 +75,21 @@ def _resolve_prompt_path(ctx: Any) -> str:
     cfg = _scope_cfg(ctx)
     raw = str(cfg.intent_scope_tool_summary_prompt_path or "").strip()
     if not raw:
-        return _DEFAULT_PROMPT_PATH
+        return str(
+            bundled_root() / "prompts" / "intent_scope_tool_summary_prompt.md"
+        )
     if os.path.isabs(raw):
         return raw
-    return os.path.abspath(os.path.join(_PROJECT_ROOT, raw))
+    return os.path.abspath(os.path.join(str(bundled_root()), raw))
 
 
 def _load_system_prompt(ctx: Any) -> str:
     prompt_path = _resolve_prompt_path(ctx)
-    if not os.path.exists(prompt_path):
-        raise FileNotFoundError(
-            f"Intent scope prompt file not found: {prompt_path}"
-        )
-    system = read_user_text(prompt_path).strip()
+    system = read_required_text(
+        agent_store_of(ctx),
+        AgentResource("prompt", "intent_tool", prompt_path),
+        missing=f"Intent scope prompt file not found: {prompt_path}",
+    ).strip()
     if not system:
         raise ValueError(f"Intent scope prompt file is empty: {prompt_path}")
     return system
@@ -133,7 +148,17 @@ async def asummarize_tool_intent_line(
 
     prior = list(getattr(state, "current_user_intent", []) or [])
     request_messages = [
-        {"role": "system", "content": _load_system_prompt(ctx)},
+        {
+            "role": "system",
+            "content": await aload_prompt_resource(
+                ctx,
+                PromptResourceRequest(
+                    "intent_tool",
+                    path=scope_cfg.intent_scope_tool_summary_prompt_path,
+                ),
+                local=lambda: _load_system_prompt(ctx),
+            ),
+        },
         {
             "role": "user",
             "content": _build_user_prompt(
@@ -155,6 +180,8 @@ async def asummarize_tool_intent_line(
             consumer="intent_scope",
             logger=log,
         )
+    except ExecutionFailure:
+        raise
     except Exception as exc:
         log.warning(
             "intent_scope summary_failed tool=%s error=%s",
@@ -226,8 +253,16 @@ async def asummarize_final_answer_line(
         request_messages = [
             {
                 "role": "system",
-                "content": _load_prompt_file(
-                    _resolve_final_answer_prompt_path(ctx)
+                "content": await aload_prompt_resource(
+                    ctx,
+                    PromptResourceRequest(
+                        "intent_final",
+                        path=scope_cfg.intent_scope_final_answer_summary_prompt_path,
+                    ),
+                    local=lambda: _load_prompt_file(
+                        _resolve_final_answer_prompt_path(ctx),
+                        store=agent_store_of(ctx),
+                    ),
                 ),
             },
             {
@@ -245,6 +280,8 @@ async def asummarize_final_answer_line(
             consumer="intent_scope",
             logger=log,
         )
+    except ExecutionFailure:
+        raise
     except Exception as exc:
         log.warning(
             "intent_scope summary_failed tool=final_answer error=%s",

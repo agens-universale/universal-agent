@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
+from gc_core.auto_routing.levels import auto_unavailable_reason
+from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules.pricing import resolve_model_tariff
+from gc_core.settings import AppConfig, LoadedSettings, settings_of
 
 
 class Notice(NamedTuple):
@@ -25,14 +28,11 @@ _DEPRECATED_KEYS = {"backend.stream": "tui.stream"}
 
 
 def _stop_tools_unknown(
-    config_dict: Dict[str, Any],
+    settings: AppConfig,
     builtin_tool_names: Set[str],
     known_tool_names: Optional[Set[str]] = None,
 ) -> List[Notice]:
-    raw = config_dict.get("stop_tools")
-    if not isinstance(raw, list):
-        return []
-    stop = {s.strip() for s in raw if isinstance(s, str) and s.strip()}
+    stop = {s.strip() for s in settings.agent.stop_tools if s.strip()}
     # Каталог до вычитания (builtin + то, что собрал build_tools_data: скиллы,
     # MCP, сабагенты). Сверять с уже отфильтрованным набором нельзя: успешно
     # снятый тул снова станет опечаткой. Отдельного вечного списка skills_* нет —
@@ -90,13 +90,41 @@ def _deprecated(deprecated_keys_used: Optional[List[str]]) -> List[Notice]:
     return out
 
 
-def _pricing_no_rates(config_dict: Dict[str, Any]) -> List[Notice]:
-    """Ставки не заданы: у провайдеров без фактической цены денег видно не будет."""
-    pricing = config_dict.get("pricing")
-    if not isinstance(pricing, dict) or not pricing.get("enabled"):
+def _configured_models(settings: AppConfig) -> List[str]:
+    """Модели провайдера, которыми конфиг ходит. При непустом реестре `models` —
+    его записи (как ModelRouter: `entry.model or alias`); иначе `agent.model`
+    (legacy-путь). Без повторов, в порядке появления."""
+    if settings.models:
+        names = [
+            entry.model or alias for alias, entry in settings.models.items()
+        ]
+    else:
+        names = [settings.agent.model]
+    return [name for name in dict.fromkeys(names) if name]
+
+
+def _pricing_no_rates(settings: AppConfig) -> List[Notice]:
+    """Ставки не заданы ни для одной модели конфига — прежнее уведомление; заданы
+    не для всех — уведомление со списком моделей без ставки (спека PR140 Р6)."""
+    pricing = settings.pricing
+    if not pricing.enabled:
         return []
-    if resolve_model_tariff(pricing, config_dict.get("model")) is not None:
+    models = _configured_models(settings)
+    unpriced = [m for m in models if resolve_model_tariff(pricing, m) is None]
+    if models and not unpriced:
         return []
+    if unpriced and len(unpriced) < len(models):
+        return [
+            Notice(
+                "info",
+                "pricing_partial_rates",
+                "pricing: нет ставки для моделей: "
+                + ", ".join(unpriced)
+                + ". Их стоимость будет отмечена «?» — задайте цены в "
+                "pricing.models (см. /config).",
+                highlights=("pricing.models",),
+            )
+        ]
     return [
         Notice(
             "info",
@@ -109,8 +137,8 @@ def _pricing_no_rates(config_dict: Dict[str, Any]) -> List[Notice]:
     ]
 
 
-def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
-    override = bool(config_dict.get("agentsmd_override"))
+def _agentsmd(settings: AppConfig, *, is_tui: bool) -> List[Notice]:
+    override = settings.tui.agentsmd_override
     if not override:
         return []
     if not is_tui:
@@ -123,7 +151,7 @@ def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
                 highlights=("--agentsmd-override",),
             )
         ]
-    if config_dict.get("agent_md_path"):
+    if settings.paths.agent_md_path:
         # В TUI при заданном пути: путь главнее флага → override не применён.
         # Эквивалент warning из build_instructions (условие: is_tui and agentsmd_override).
         return [
@@ -135,6 +163,49 @@ def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
             )
         ]
     return []
+
+
+def auto_routing_unavailable_reason_text(reason: str) -> str:
+    """Фраза причины недоступности автовыбора — одна на все входы (нотис при
+    старте, runtime-нотис TUI, ответ на набранный `/level auto`)."""
+    return f"автовыбор моделей недоступен: {reason}"
+
+
+def auto_routing_unavailable_message(
+    reason: str, *, forced_model: bool = False
+) -> str:
+    """Текст нотиса: фраза причины и то, что работает. Ответ на набранный
+    `/level auto` берёт одну фразу — набор уровень не меняет, и хвост про
+    default соврал бы на light и max. При `--model` идёт заданная модель, а не
+    уровень default."""
+    tail = "модель из --model" if forced_model else "уровень default"
+    return f"{auto_routing_unavailable_reason_text(reason)} — работает {tail}"
+
+
+def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
+    """`level: auto` выбран, а фича недоступна — один нотис с причиной (спека
+    auto-routing §6). Работает уровень default; палитра позицию auto не показывает."""
+    if str(settings_of(source).level or "").strip() != "auto":
+        return None
+    loaded = (
+        source
+        if isinstance(source, LoadedSettings)
+        else LoadedSettings(settings=settings_of(source))
+    )
+    forced_model = cli_forces_legacy_model(loaded)
+    reason = auto_unavailable_reason(loaded, force_legacy=forced_model)
+    if reason is None:
+        return None
+    return Notice(
+        "info",
+        "auto_routing_unavailable",
+        auto_routing_unavailable_message(reason, forced_model=forced_model),
+    )
+
+
+def _auto_routing(source: Any) -> List[Notice]:
+    notice = auto_routing_unavailable_notice(source)
+    return [notice] if notice is not None else []
 
 
 def _compat(compat_notices: Optional[List[str]]) -> List[Notice]:
@@ -160,28 +231,23 @@ def _upgrade(upgrade_info) -> List[Notice]:
     ]
 
 
-def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
+def _subagent_definitions(settings: AppConfig) -> List[Notice]:
     """Пропущенные файлы кастомных сабагентов и отброшенные имена.
 
     Дискавери зовём здесь намеренно: он читает несколько локальных .md и потому
-    дёшев (в отличие от MCP-дискавери, который ленив). Благодаря мемоизации в
-    config_dict повторного чтения не будет, а уведомления доступны сразу на
+    дёшев (в отличие от MCP-дискавери, который ленив). Уведомления доступны сразу на
     старте TUI, до первого запроса — иначе оператор узнал бы о пропущенном файле
     только после того, как сабагент не нашёлся.
 
     Молча пропущенный файл — ровно та же беда, что `stop_tools` с опечаткой:
     оператор что-то написал, оно не сработало, и в логе он это не увидит.
     """
-    if not str(config_dict.get("subagents_dir") or "").strip():
+    if not (settings.agent.subagents_dir or "").strip():
         return []
     try:
-        from gc_core.tools.subagents.registry import (
-            SUBAGENT_DIAGNOSTICS_KEY,
-            resolve_subagent_definitions,
-        )
+        from gc_core.tools.subagents.registry import subagent_diagnostics
 
-        resolve_subagent_definitions(config_dict)
-        records = config_dict.get(SUBAGENT_DIAGNOSTICS_KEY) or []
+        records = subagent_diagnostics(settings)
     except Exception:  # уведомления не должны ронять старт
         return []
 
@@ -274,7 +340,7 @@ def _basename(path: Any) -> str:
 
 
 def collect_startup_notices(
-    config_dict: Dict[str, Any],
+    settings: Any,
     builtin_tool_names: Set[str],
     mcp_status: Optional[Dict[str, Any]],
     *,
@@ -295,17 +361,23 @@ def collect_startup_notices(
     `known_tool_names` — каталог до вычитания ``stop_tools``. Без него
     валидатор видит только builtin: выключенный скилл-тул не считается
     известным, пока сборка не передала его имя.
+
+    ``settings`` — всё, что принимает ``settings_of`` (``LoadedSettings``,
+    ``AppConfig``, контекст).
     """
+    source = settings
+    settings = settings_of(settings)
     warns: List[Notice] = []
     infos: List[Notice] = []
     for n in (
-        _stop_tools_unknown(config_dict, builtin_tool_names, known_tool_names)
-        + _subagent_definitions(config_dict)
+        _stop_tools_unknown(settings, builtin_tool_names, known_tool_names)
+        + _subagent_definitions(settings)
         + _mcp_failed(mcp_status)
-        + _agentsmd(config_dict, is_tui=is_tui)
+        + _agentsmd(settings, is_tui=is_tui)
+        + _auto_routing(source)
         + list(extra)
         + _compat(compat_notices)
-        + _pricing_no_rates(config_dict)
+        + _pricing_no_rates(settings)
         + _deprecated(deprecated_keys_used)
         + _upgrade(upgrade_info)
     ):

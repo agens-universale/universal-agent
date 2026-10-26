@@ -10,6 +10,7 @@ import json
 from typing import Any
 
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, WINDOW_SIZE
+from gc_core.settings import AppConfig, settings_of
 
 _BRIEF_VALUE_LIMIT = 100
 # Слот в окне, если args разобрать нельзя: consecutive соседних маркированных
@@ -17,11 +18,9 @@ _BRIEF_VALUE_LIMIT = 100
 _UNPARSED_ARGS = {"_unparsed": True}
 
 
-def is_enabled(config_dict: dict[str, Any] | None) -> bool:
-    raw = (config_dict or {}).get("loop_detector")
-    if not isinstance(raw, dict):
-        return True
-    return bool(raw.get("enabled", True))
+def is_enabled(settings: Any) -> bool:
+    """``agent.loop_detector.enabled``; ``settings`` — то, что принимает ``settings_of``."""
+    return bool(settings_of(settings).agent.loop_detector.enabled)
 
 
 def fingerprint(tool_name: str, args: dict[str, Any]) -> str:
@@ -88,7 +87,7 @@ def clear(state: Any) -> None:
 
 def _injected_field_names(
     tools_data: dict[str, Any] | None,
-    config_dict: dict[str, Any] | None,
+    settings: AppConfig | None,
 ) -> list[str]:
     """Имена полей, которые навешивает inject_tool_fields (reason и любые другие)."""
     names: list[str] = []
@@ -102,9 +101,8 @@ def _injected_field_names(
             seen.add(text)
             names.append(text)
 
-    raw = (config_dict or {}).get("inject_tool_fields")
-    if isinstance(raw, dict):
-        for key in raw:
+    if settings is not None:
+        for key in settings.agent.inject_tool_fields:
             _add(key)
     for entry in (tools_data or {}).values():
         if not isinstance(entry, dict):
@@ -118,31 +116,19 @@ def _parse_stripped_args(
     tool_name: str,
     raw_arguments: str | dict[str, Any],
     tools_data: dict[str, Any] | None,
-    config_dict: dict[str, Any] | None = None,
+    settings: AppConfig | None = None,
 ) -> dict[str, Any] | None:
+    """Аргументы без служебных полей и с подготовкой фабрики инструмента."""
+    from gc_core.tools.arguments_validation import prepare_tool_arguments
+
     entry = (tools_data or {}).get(tool_name) or {}
-    if isinstance(raw_arguments, dict):
-        parsed: Any = dict(raw_arguments)
-    else:
-        try:
-            parsed = json.loads(raw_arguments or "{}")
-        except (TypeError, ValueError):
-            return None
-    if not isinstance(parsed, dict):
-        return None
-    fabric = entry.get("tool_fabric")
-    prepare = getattr(fabric, "prepare_args_before_strip", None)
-    if callable(prepare):
-        parsed = prepare(parsed)
-        if not isinstance(parsed, dict):
-            return None
-    injected = _injected_field_names(tools_data, config_dict)
-    if not injected:
-        return parsed
-    stripped = dict(parsed)
-    for field in injected:
-        stripped.pop(field, None)
-    return stripped
+    # Пустая строка — пустой объект, как у отпечатка до помощника: иначе повтор
+    # вызова без аргументов не считался бы вовсе.
+    entry = {
+        **entry,
+        "injected_fields": _injected_field_names(tools_data, settings),
+    }
+    return prepare_tool_arguments(raw_arguments or "{}", entry)[0]
 
 
 def _count_consecutive(window: list[str], fp: str) -> int:
@@ -169,13 +155,11 @@ def observe(
     tool_name: str,
     raw_arguments: str | dict[str, Any],
 ) -> None:
-    config_dict = getattr(ctx, "config_dict", None) or {}
-    if not is_enabled(config_dict):
+    settings = settings_of(ctx)
+    if not is_enabled(settings):
         return
     tools_data = getattr(ctx, "tools_data", None)
-    args = _parse_stripped_args(
-        tool_name, raw_arguments, tools_data, config_dict
-    )
+    args = _parse_stripped_args(tool_name, raw_arguments, tools_data, settings)
     fp = fingerprint(tool_name, args if args is not None else _UNPARSED_ARGS)
     _ensure_lists(state)
     state.loop_detector_window.append(fp)

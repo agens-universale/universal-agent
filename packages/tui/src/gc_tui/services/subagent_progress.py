@@ -1,43 +1,16 @@
 """TUI consumer for nested subagent progress + batch waiting/active phases.
 
 Runtime кладёт события в QueueSubagentProgressSink (worker-поток).
-Этот модуль — только UI: plan/apply действий, без оркестрации execute.
+Этот модуль — только UI: apply действий, без оркестрации execute.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, List, Literal, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from gc_core.attachments.model import attachments_of
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
-from gc_core.tools.subagents.progress import SubagentProgressEvent
-
-ProgressActionKind = Literal[
-    "mount_nested_tool",
-    "finish_nested_tool",
-    "mount_nested_prose",
-    "mount_nested_user",
-    "parent_heartbeat",
-    "show_ask_human",
-    "hide_ask_human",
-]
-
-
-@dataclass(frozen=True)
-class ProgressAction:
-    kind: ProgressActionKind
-    parent_call_id: str
-    tool_name: Optional[str] = None
-    tool_call_id: Optional[str] = None
-    args_summary: Optional[str] = None
-    prose: Optional[str] = None
-    ok: Optional[bool] = None
-    error_brief: Optional[str] = None
-    step: int = 0
-    max_steps: int = 0
-    last_tool: Optional[str] = None
-    via: Optional[str] = None
+from gc_core.execution.progress import SubagentProgressEvent
 
 
 def reconcile_batch_phases(rows: Sequence[Any]) -> None:
@@ -62,120 +35,6 @@ def reconcile_batch_phases(rows: Sequence[Any]) -> None:
         set_waiting = getattr(row, "set_waiting", None)
         if callable(set_waiting):
             set_waiting()
-
-
-def plan_progress_actions(
-    events: Sequence[SubagentProgressEvent],
-) -> List[ProgressAction]:
-    """Превратить drained events в список UI-действий (без виджетов).
-
-    Test-only: не покрывает развёрнутый путь session_todo (routed_todo) —
-    продовый путь для него SubagentProgressConsumer.apply_drained ниже."""
-    actions: List[ProgressAction] = []
-    last_tool: dict[str, Optional[str]] = {}
-
-    def _heartbeat(ev: SubagentProgressEvent) -> ProgressAction:
-        return ProgressAction(
-            kind="parent_heartbeat",
-            parent_call_id=ev.parent_call_id,
-            step=ev.step,
-            max_steps=ev.max_steps,
-            last_tool=last_tool.get(ev.parent_call_id),
-            tool_name=ev.tool_name,
-        )
-
-    for ev in events:
-        pid = ev.parent_call_id
-        if ev.kind == "tool_start":
-            if ev.tool_name:
-                last_tool[pid] = ev.tool_name
-            actions.append(
-                ProgressAction(
-                    kind="mount_nested_tool",
-                    parent_call_id=pid,
-                    tool_name=ev.tool_name,
-                    tool_call_id=ev.tool_call_id,
-                    args_summary=ev.args_summary or "",
-                    step=ev.step,
-                    max_steps=ev.max_steps,
-                )
-            )
-            actions.append(_heartbeat(ev))
-        elif ev.kind == "tool_end":
-            if ev.tool_name:
-                last_tool[pid] = ev.tool_name
-            actions.append(
-                ProgressAction(
-                    kind="finish_nested_tool",
-                    parent_call_id=pid,
-                    tool_name=ev.tool_name,
-                    tool_call_id=ev.tool_call_id,
-                    ok=ev.ok if ev.ok is not None else True,
-                    error_brief=ev.error_brief,
-                    step=ev.step,
-                    max_steps=ev.max_steps,
-                )
-            )
-            actions.append(_heartbeat(ev))
-        elif ev.kind == "intermediate_reply":
-            actions.append(
-                ProgressAction(
-                    kind="mount_nested_prose",
-                    parent_call_id=pid,
-                    tool_name=ev.tool_name,
-                    prose=ev.prose or "",
-                    step=ev.step,
-                    max_steps=ev.max_steps,
-                )
-            )
-            actions.append(_heartbeat(ev))
-        elif ev.kind == "user_message":
-            actions.append(
-                ProgressAction(
-                    kind="mount_nested_user",
-                    parent_call_id=pid,
-                    prose=ev.prose or "",
-                    step=ev.step,
-                    max_steps=ev.max_steps,
-                )
-            )
-            actions.append(_heartbeat(ev))
-        elif ev.kind == "ask_human":
-            actions.append(
-                ProgressAction(
-                    kind="show_ask_human",
-                    parent_call_id=pid,
-                    prose=ev.prose or "",
-                    via=ev.tool_name,
-                    tool_call_id=ev.tool_call_id,
-                    step=ev.step,
-                    max_steps=ev.max_steps,
-                )
-            )
-        elif ev.kind == "ask_human_done":
-            actions.append(
-                ProgressAction(
-                    kind="hide_ask_human",
-                    parent_call_id=pid,
-                    via=ev.tool_name,
-                    ok=ev.ok,
-                )
-            )
-        elif ev.kind in ("confirm", "confirm_done"):
-            # Баннер confirm уже открывает tui_confirm(via=…); здесь только heartbeat.
-            actions.append(_heartbeat(ev))
-        elif ev.kind in (
-            "finished",
-            "error",
-            "cancelled",
-            "started",
-            "heartbeat",
-            "usage",
-        ):
-            # Nested в живой сессии оставляем под parent (✓/✗); collapse — только
-            # при clear/смене треда.
-            actions.append(_heartbeat(ev))
-    return actions
 
 
 class SubagentProgressConsumer:

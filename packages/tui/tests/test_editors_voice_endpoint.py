@@ -555,7 +555,7 @@ async def test_lang_list_highlights_nothing_for_an_own_code():
     async with app.run_test():
         ed.lang_list.open(forced=True)
         assert not [r for r in _lang_rows(ed) if r.startswith("▸")]
-        assert ed.pick_language() is False
+        assert ed.pick_in("language") is False
         assert ed.query_one("#voice-lang", Input).value == "zz"
 
 
@@ -613,7 +613,7 @@ async def test_lang_list_pick_substitutes_and_collapses():
     async with app.run_test() as pilot:
         ed.lang_list.open(forced=True)
         ed.lang_list.apply_filter("франц")
-        assert ed.pick_language() is True
+        assert ed.pick_in("language") is True
         assert ed.query_one("#voice-lang", Input).value == "fr"
         assert ed.lang_list.is_open is False
         await pilot.pause()
@@ -704,7 +704,7 @@ async def test_lang_list_pick_keeps_what_it_put_in_the_field():
         ed.lang_list.open(forced=True)
         ed.query_one("#voice-lang", Input).value = "нем"
         await pilot.pause()
-        assert ed.pick_language() is True
+        assert ed.pick_in("language") is True
         assert ed.query_one("#voice-lang", Input).value == "de"
 
 
@@ -716,7 +716,7 @@ async def test_lang_list_pick_keeps_an_own_code_typed_over_the_filter():
         ed.lang_list.open(forced=True)
         ed.query_one("#voice-lang", Input).value = "zz"
         await pilot.pause()
-        assert ed.pick_language() is False
+        assert ed.pick_in("language") is False
         assert ed.query_one("#voice-lang", Input).value == "zz"
 
 
@@ -734,7 +734,7 @@ async def test_lang_list_pick_makes_the_new_value_the_baseline():
         ed.lang_list.open(forced=True)
         field.value = "англ"
         await pilot.pause()
-        assert ed.pick_language() is True and field.value == "en"
+        assert ed.pick_in("language") is True and field.value == "en"
         field.value = "англи"  # печать раскрывает список заново
         await pilot.pause()
         assert ed.lang_list.is_open
@@ -755,7 +755,7 @@ async def test_lang_list_own_code_becomes_the_baseline_too():
         field.value = "zz"
         await pilot.pause()
         assert (
-            ed.pick_language() is False
+            ed.pick_in("language") is False
         )  # подставлять нечего — сохранится введённое
         field.value = "zzz"
         await pilot.pause()
@@ -786,7 +786,7 @@ async def test_programmatic_write_leaves_the_cursor_inside_the_value():
         field.cursor_position = 4
         await pilot.pause()
         assert (
-            ed.pick_language() is True
+            ed.pick_in("language") is True
         )  # второй путь записи — подстановка кода
         assert field.value == "en"
         assert field.cursor_position <= len("en")
@@ -803,7 +803,7 @@ async def test_lang_list_move_gives_the_key_back_when_nothing_matches():
         ed.query_one("#voice-lang", Input).value = "zz"
         await pilot.pause()
         assert ed.lang_list.move(1) is False
-        assert ed.lang_list.has_matches is False
+        assert not ed.lang_list.visible_items
 
 
 async def test_lang_list_scrolls_the_hint_when_no_row_is_highlighted(
@@ -943,7 +943,7 @@ async def test_lang_list_does_not_open_without_the_field():
         ed.lang_list.open(forced=True)
         assert ed.lang_list.is_open is False
         assert not ed.query(".voice-lang-row")
-        assert ed.pick_language() is False
+        assert ed.pick_in("language") is False
 
 
 # --- список моделей endpoint'а: контракт контроллера --------------------------
@@ -1140,8 +1140,7 @@ async def test_model_list_failure_does_not_block_manual_entry():
             == "не удалось получить список — можно вписать вручную"
         )
         assert (
-            ed.model_list.move(1) is False
-            and ed.model_list.has_matches is False
+            ed.model_list.move(1) is False and not ed.model_list.visible_items
         )
         assert ed.pick_in("model") is False
         assert ed.query_one("#voice-model", Input).value == "my-own-stt"
@@ -1380,7 +1379,7 @@ async def test_model_list_reload_keeps_the_typed_filter_in_sync():
         ed.model_list.reload()
         assert await _settle(pilot, lambda: _model_rows(ed))
         assert _model_rows(ed) == ["▸ Systran/faster-whisper-small"]
-        assert ed.model_list.has_matches is True
+        assert ed.model_list.visible_items
 
 
 async def test_model_list_reload_of_a_collapsed_list_shows_everything():

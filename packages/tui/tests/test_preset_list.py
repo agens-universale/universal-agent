@@ -279,7 +279,7 @@ async def test_hint_calls_it_no_match_when_forced_open_has_no_highlight():
         host.query_one("#host-url", Input).value = own_url
         host.ctrl.open(forced=True)
         await pilot.pause()
-        assert host.ctrl.has_matches is True  # предусловие: строки все видны
+        assert host.ctrl.visible_items  # предусловие: строки все видны
         assert host.ctrl.selected_item is None  # но ни одна не подсвечена
         hint = str(host.query_one(".host-url-preset-hint").render())
         assert hint == PRESET_HINT_NO_MATCH

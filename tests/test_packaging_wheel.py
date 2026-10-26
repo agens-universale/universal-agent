@@ -1,4 +1,4 @@
-"""Контракт упаковки: шесть непересекающихся дистрибутивов из одного дерева.
+"""Контракт упаковки: непересекающиеся дистрибутивы из одного дерева.
 
 До 0.4.0 колесо было одно, и тест проверял, что в нём лежит ВСЁ, включая
 tui/styles.tcss. Потом tui, cli, server и менеджер MCP уехали в собственные
@@ -46,8 +46,10 @@ MANIFESTS = {
     "gc_tui": "packages/tui",
     "gc_server": "packages/server",
     "gc_mcp": "packages/mcp",
+    "gc_core_temporalio": "packages/temporalio",
     "gc_acp": "packages/acp",
     "gc_chat": "packages/chat",
+    "gc_a2a": "packages/a2a",
 }
 
 
@@ -72,7 +74,7 @@ def _build_all(out: Path) -> dict:
 
 @pytest.fixture(scope="module")
 def _dist_dir(tmp_path_factory):
-    """Каталог со собранными колёсами. Сборка шести колёс дорогая, поэтому она
+    """Каталог со собранными колёсами. Сборка всех колёс дорогая, поэтому она
     одна на модуль, а `wheels`/`wheel_infos` — два взгляда на один результат."""
     if shutil.which("uv") is None:
         pytest.skip("uv not on PATH")
@@ -85,7 +87,7 @@ def wheels(_dist_dir):
 
 
 @pytest.fixture(scope="module")
-def wheel_infos(_dist_dir, wheels):
+def wheel_infos(_dist_dir, wheels):  # noqa: ARG001 - build prerequisite fixture
     """`ZipInfo` по каждому файлу колеса — нужен там, где важны права доступа.
 
     Зависит от `wheels`, чтобы сборка гарантированно случилась: сам по себе
@@ -332,8 +334,13 @@ OWN_COMMANDS = {
     "gc_tui": {"gc-ua", "gc-voice"},
     "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
+    "gc_core_temporalio": {
+        "gc-temporal",
+        "gc-temporal-worker",
+    },
     "gc_acp": {"gc-acp"},
     "gc_chat": {"gc-chat"},
+    "gc_a2a": {"gc-a2a"},
 }
 
 
@@ -347,8 +354,9 @@ def test_each_distribution_declares_only_its_own_commands():
     прежний комментарий «пересечение симлинка безвредно» был неверен.
 
     Мета gc-ua из проверки исключена, и это НЕ значит, что она ни с чем не
-    пересекается: она объявляет ровно объединение команд листьев, то есть
-    пересекается с каждым. Прежний заголовок этого докстринга утверждал
+    пересекается: она объявляет объединение команд обязательных листьев.
+    Опциональный Temporal устанавливается отдельно и сюда не входит.
+    Прежний заголовок этого докстринга утверждал
     «ни одно имя не объявлено двумя дистрибутивами» — неправда, и сам тест об
     этом знает: ветка `elif name == "gc_ua"` требует именно объединения.
 
@@ -375,7 +383,13 @@ def test_each_distribution_declares_only_its_own_commands():
             # gc-core — БИБЛИОТЕКА: команды в PATH не кладёт.
             assert not got, f"{sub} — библиотека, точек входа быть не должно"
         elif name == "gc_ua":
-            expected = set().union(*OWN_COMMANDS.values())
+            expected = set().union(
+                *(
+                    commands
+                    for leaf, commands in OWN_COMMANDS.items()
+                    if leaf != "gc_core_temporalio"
+                )
+            )
             assert got == expected, sub
         else:
             assert got == OWN_COMMANDS[name], sub
@@ -418,7 +432,11 @@ def test_meta_pulls_every_profile():
         f"gc-mcp=={ver}",
         f"gc-acp=={ver}",
         f"gc-chat=={ver}",
+        f"gc-a2a=={ver}",
     }
+    assert root["project"]["optional-dependencies"]["temporal"] == [
+        f"gc-core-temporalio=={ver}"
+    ]
 
 
 def test_versions_are_pinned_together():
@@ -446,6 +464,7 @@ def test_versions_are_pinned_together():
         "packages/mcp",
         "packages/acp",
         "packages/chat",
+        "packages/a2a",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -458,6 +477,7 @@ def test_versions_are_pinned_together():
         "packages/mcp",
         "packages/acp",
         "packages/chat",
+        "packages/a2a",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")

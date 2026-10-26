@@ -15,6 +15,8 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from gc_core.security.confirm_port import call_with_optional
+
 from gc_tui.services.stdin_bridge import redirect_stdin
 
 if TYPE_CHECKING:
@@ -133,6 +135,13 @@ class AgentRunner:
             queue.Queue()
         )
         self._prebuild_messages: list[dict] = []
+        #: Режим разрешений, выбранный до сборки исполнителя (сборка ленивая, в
+        #: рабочем потоке): применяется, как только исполнитель появится.
+        self._permission_mode: Optional[str] = None
+        #: Решения по плану, принятые до сборки исполнителя: план принят
+        #: (режим, тред) и «Обсудить и доработать план» (тред).
+        self._plan_accepted: Optional[tuple] = None
+        self._plan_rework: Optional[str] = None
         #: Прогон ещё принимает сообщения в свою очередь. Ставится при запуске
         #: воркера и снимается им под `_lock` в том же шаге, где он убедился,
         #: что хвоста нет (`_close_or_take_tail`). Сообщение либо ляжет в
@@ -220,7 +229,61 @@ class AgentRunner:
                         ctx.ask_human = self._read_answer
                     except Exception:
                         pass
+                if self._permission_mode is not None and hasattr(
+                    self._executor, "set_permission_mode"
+                ):
+                    self._executor.set_permission_mode(self._permission_mode)
+                if self._plan_accepted is not None and hasattr(
+                    self._executor, "accept_plan"
+                ):
+                    self._executor.accept_plan(*self._plan_accepted)
+                if self._plan_rework is not None and hasattr(
+                    self._executor, "arm_plan_rework"
+                ):
+                    self._executor.arm_plan_rework(self._plan_rework)
             return self._executor
+
+    def set_permission_mode(self, mode: str) -> None:
+        """Донести выбранный режим разрешений до исполнителя (или до его сборки)."""
+        self._permission_mode = mode
+        executor = self._executor
+        if executor is not None and hasattr(executor, "set_permission_mode"):
+            executor.set_permission_mode(mode)
+
+    def clear_permission_mode(self) -> None:
+        """Снять выбор режима у исполнителя (или до его сборки)."""
+        self._permission_mode = None
+        executor = self._executor
+        if executor is not None and hasattr(executor, "clear_permission_mode"):
+            executor.clear_permission_mode()
+
+    def accept_plan(self, mode: str, thread_id: Optional[str]) -> None:
+        """Донести до исполнителя, что человек принял план (или до его сборки —
+        она идёт в рабочем потоке, ждать её здесь нельзя)."""
+        self._plan_accepted = (mode, thread_id)
+        executor = self._executor
+        if executor is not None and hasattr(executor, "accept_plan"):
+            executor.accept_plan(mode, thread_id)
+
+    def clear_plan(self, thread_id: Optional[str]) -> None:
+        """Человек убрал план сессии: отложенные решения по нему не нужны."""
+        if (
+            self._plan_accepted is not None
+            and self._plan_accepted[1] == thread_id
+        ):
+            self._plan_accepted = None
+        if self._plan_rework == thread_id:
+            self._plan_rework = None
+        executor = self._executor
+        if executor is not None and hasattr(executor, "clear_plan"):
+            executor.clear_plan(thread_id)
+
+    def arm_plan_rework(self, thread_id: Optional[str]) -> None:
+        """Донести до исполнителя «Доработать план» (или до его сборки)."""
+        self._plan_rework = thread_id
+        executor = self._executor
+        if executor is not None and hasattr(executor, "arm_plan_rework"):
+            executor.arm_plan_rework(thread_id)
 
     def warm(self) -> None:
         """Собрать executor в фоне (off-UI), без запуска run. Идемпотентно.
@@ -250,33 +313,65 @@ class AgentRunner:
             t = self._thread
         return t is not None and t.is_alive()
 
-    def pinned_level(self) -> Optional[str]:
-        """Read-only: уровень активного хода, зафиксированный `turn_boundary.begin_turn`
-        (`state.turn_level`) — не живой уровень сессии (тот меняется мгновенно на
-        /level; посреди хода запросы всё ещё идут на прежнем, спека Task 15).
+    def call_level(self) -> Optional[str]:
+        """Фактический уровень подготовленного вызова из State, независимо от режима.
 
-        None — executor ещё не построен / state нет / ход не начинали через
-        begin_turn (легаси/тестовые двойники). Не мутирует state."""
+        Чтение не строит executor и не меняет State. До первого решения — None.
+        """
         ex = self._executor
         if ex is None or not hasattr(ex, "get_state"):
             return None
-        state = ex.get_state()
-        if state is None:
-            return None
-        return getattr(state, "turn_level", None)
+        return getattr(ex.get_state(), "_call_level", None)
 
-    def pinned_router(self) -> Any:
+    def call_mode(self) -> Optional[str]:
+        """Режим незакрытого такта; выбранный в UI режим может уже быть другим."""
+        ex = self._executor
+        if ex is None or not hasattr(ex, "get_state"):
+            return None
+        memo = getattr(ex.get_state(), "_tick_decision", None)
+        if memo is None:
+            return None
+        return "auto" if memo[1] else "manual"
+
+    def executor_router(self) -> Any:
         """Read-only: Router, зафиксированный при сборке ЭТОГО executor'а
         (`AgentExecutor.get_model_router`) — не живой `app.display_router()` TUI,
-        который отражает /profiles мгновенно. Футер (Task 15) резолвит
-        `pinned_level()` этим Router'ом, чтобы «факт» посреди хода не
-        подменился моделью уже переключившегося профиля.
+        который отражает /profiles мгновенно. Футер резолвит модель бегущего хода
+        этим Router'ом по уровню подготовленного вызова: смена профиля
+        посреди хода не подменяет факт моделью нового профиля.
 
         None — executor ещё не построен / у него нет Router'а (легаси)."""
         ex = self._executor
         if ex is None or not hasattr(ex, "get_model_router"):
             return None
         return ex.get_model_router()
+
+    def next_call_selection(self) -> Optional[tuple[bool, str, str]]:
+        """Живой выбор следующего вызова в реестре работающего контекста."""
+        from gc_core.auto_routing.levels import auto_active, effective_level
+
+        router = self.executor_router()
+        ctx = getattr(self._executor, "_ctx", None)
+        if router is None or ctx is None:
+            return None
+        live = router.live_level()
+        available = getattr(ctx, "auto_available", True)
+        selected_auto = auto_active(router, live, available)
+        level = effective_level(live, None, available)
+        resolved = router.resolve_main_at_level(level, check_breaker=False)
+        return selected_auto, level, resolved.alias or resolved.model
+
+    def pinned_summary_limits(self) -> Any:
+        """Read-only: пороги сжатия, по которым работает ЭТОТ executor
+        (`AgentExecutor.summary_limits`) — его снимок конфига, его Router, уровень
+        подготовленного вызова. Индикатор контекста берёт знаменатель отсюда, а не из живого конфига
+        экрана: тот отражает /level и /profiles раньше, чем их увидит ход.
+
+        None — executor ещё не построен."""
+        ex = self._executor
+        if ex is None or not hasattr(ex, "summary_limits"):
+            return None
+        return ex.summary_limits()
 
     def usage_snapshot(self) -> Optional[tuple]:
         """Снимок usage от executor'а для футера: ``(session_meta, last_run_meta|None)``
@@ -558,6 +653,9 @@ class AgentRunner:
     def stop(self) -> None:
         """Кооперативная остановка — флаг на executor; run сам выйдет.
 
+        Отрисовку не держим: снятие идёт на цикле агента, этот вызов
+        возвращается сразу, и экран рисует отмену в том же кадре.
+
         Если executor ещё строится (фабрика не отработала) — ставим флаг, и
         worker-поток не запустит run после сборки.
         Также разблокирует агент-поток, зависший в confirm (fail-closed → False)."""
@@ -689,16 +787,19 @@ class AgentRunner:
             question: str,
             fields: list,
             via: str | None = None,
+            decision_key: str | None = None,
         ) -> str:
             self._confirm_event.clear()
             self._confirm_choice = "deny_once"
             try:
-                mounted = present(title, question, fields, via=via)
-            except TypeError:
-                try:
-                    mounted = present(title, question, fields)
-                except Exception:
-                    return "deny_once"
+                mounted = call_with_optional(
+                    present,
+                    title,
+                    question,
+                    fields,
+                    via=via,
+                    decision_key=decision_key,
+                )
             except Exception:
                 return "deny_once"
             # False = explicit fail; None/True — mounted (None = legacy present без ack).

@@ -4,7 +4,7 @@ import tempfile
 import types
 
 from gc_core.intent_log import deserialize_list
-from gc_core.summarize.compaction import amaybe_run_summary_compaction
+from gc_core.summarize.compaction import arun_summary_compaction
 from gc_core.thread_store import (
     ThreadSession,
     append_new_thread_messages,
@@ -12,6 +12,7 @@ from gc_core.thread_store import (
 )
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import intent_user_ask_texts
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -24,18 +25,18 @@ def _patch_chat_completion(monkeypatch, fake):
 
 
 def _ctx():
-    return types.SimpleNamespace(
-        config_dict={
-            "model": "test-model",
-            "completions_url": "http://example.test/v1/chat/completions",
-            "summary_params": {
+    return fake_ctx(
+        {
+            "agent.model": "test-model",
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "summary": {
                 "chat_completions_summary_trigger_chars": 1,
                 "incremental_batch_chars": 2,
                 "max_accumulated_summary_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },
-            "chat_completions_params": {
+            "chat_completions": {
                 "auxiliary_llm": {
                     "max_tokens": 8192,
                     "completion_kwargs": {},
@@ -90,7 +91,7 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             start_seq=0,
         )
         session = await ThreadSession.afrom_config(
-            config_dict={"threads_data_path": tmp_dir},
+            settings=make_settings({"paths.threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -106,7 +107,7 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
 
         monkeypatch.setattr(
             "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p: "prompt",
+            lambda _p, **_kw: "prompt",
         )
 
         async def _fake_summary(**_kwargs):
@@ -125,10 +126,10 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             _fake_patch_replace,
         )
 
-        assert await amaybe_run_summary_compaction(
+        await arun_summary_compaction(
             ctx=_ctx(),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: (
@@ -161,10 +162,10 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         )
         prev_offset = int(state.dialog_steps_offset)
         state.messages = session.get_full_history_messages()
-        assert await amaybe_run_summary_compaction(
+        await arun_summary_compaction(
             ctx=_ctx(),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: (
@@ -237,7 +238,7 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             start_seq=0,
         )
         session = await ThreadSession.afrom_config(
-            config_dict={"threads_data_path": tmp_dir},
+            settings=make_settings({"paths.threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -256,7 +257,7 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
 
         monkeypatch.setattr(
             "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p: "prompt",
+            lambda _p, **_kw: "prompt",
         )
 
         async def _fake_summary(**_kwargs):
@@ -275,10 +276,10 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             _fake_patch_replace,
         )
 
-        assert await amaybe_run_summary_compaction(
+        await arun_summary_compaction(
             ctx=_ctx(),
             state=state,
-            summary_trigger_chars=1,
+            trigger_threshold_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
             on_summary_applied=lambda event: (

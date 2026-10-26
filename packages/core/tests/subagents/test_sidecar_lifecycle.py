@@ -10,6 +10,7 @@ from gc_core.states import SharedStateData, State
 from gc_core.thread_store import read_subagent_trace
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _async_noop(fn):
@@ -33,8 +34,8 @@ def _state():
 
 
 def _child_ctx(tmp_path):
-    return SimpleNamespace(
-        config_dict={},
+    return fake_ctx(
+        {},
         run_id="run_c1",
         parent_call_id="call_sub_1",
         subagent_progress_sink=None,
@@ -93,20 +94,18 @@ def _orch_state():
 
 def _runner_cfg(tmp_path, *, trigger=0):
     return {
-        "save_logs": True,
-        "logs_dump_dir": str(tmp_path),
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "subagent_max_steps": 30,
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "m",
-        "system_prompt_id": "p",
-        "summary_params": {
+        "logging.save_logs": True,
+        "paths.logs_dump_dir": str(tmp_path),
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "agent.subagent_max_steps": 30,
+        "paths.skills_data_path": "",
+        "agent.model": "m",
+        "agent.system_prompt_id": "p",
+        "summary": {
             "chat_completions_summary_trigger_chars": trigger,
         },
-        "chat_completions_params": {
+        "chat_completions": {
             "auxiliary_llm": {"max_tokens": 128, "completion_kwargs": {}},
         },
     }
@@ -169,7 +168,7 @@ class TestSidecarFinished:
             system_id="cli",
             thread_id="task-1",
         )
-        runner = SubagentRunner(parent, _orch_state(), cfg)
+        runner = SubagentRunner(parent, _orch_state())
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.steps = 3
@@ -213,7 +212,7 @@ class TestSidecarFinished:
             system_id="cli",
             thread_id="task-1",
         )
-        runner = SubagentRunner(parent, _orch_state(), cfg)
+        runner = SubagentRunner(parent, _orch_state())
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.steps = 1
@@ -255,7 +254,7 @@ class TestSidecarChildSummary:
             system_id="cli",
             thread_id="task-1",
         )
-        runner = SubagentRunner(parent, _orch_state(), cfg)
+        runner = SubagentRunner(parent, _orch_state())
 
         async def fake_run_summary_compaction(**kwargs):
             # Двойник обязан вести себя как настоящий шов: колбэк по контракту

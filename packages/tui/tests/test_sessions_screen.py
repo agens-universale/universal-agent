@@ -1,5 +1,6 @@
 """SessionsScreen: карточки (2 строки), пагинация, фильтр веток, поиск, rename, preview."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 from datetime import UTC
 from pathlib import Path
@@ -196,7 +197,7 @@ async def test_card_shows_nonzero_session_cost(tmp_path):
     from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 2_000_000, 0)  # при input=1.0 → 2.0 ₽
+    acc.add(CATEGORY_MAIN, 2_000_000, 0, model="m")  # при input=1.0 → 2.0 ₽
     _seed(tmp_path, "cccccccc", "с ценой", token_usage=acc.to_meta())
     from gc_tui.app import TuiApp
     from gc_tui.screens.sessions import SessionsScreen
@@ -211,7 +212,7 @@ async def test_card_shows_nonzero_session_cost(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"pricing": pricing, "model": "m"},
+        settings=tui_settings({"pricing": pricing, "agent.model": "m"}),
     )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(
@@ -239,7 +240,9 @@ async def test_card_hides_zero_or_disabled_cost(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"pricing": {"enabled": False}, "model": "m"},
+        settings=tui_settings(
+            {"pricing": {"enabled": False}, "agent.model": "m"}
+        ),
     )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(

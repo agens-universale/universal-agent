@@ -15,6 +15,7 @@ from gc_core.thread_store import (
     delete_thread,
     touched_journal_path,
 )
+from gc_testkit.settings import make_settings
 
 
 def _seed_touched(threads: Path, system_id: str, thread_id: str) -> Path:
@@ -62,7 +63,7 @@ async def test_summary_leaves_touched_journal_intact(tmp_path):
     )
 
     session = await ThreadSession.afrom_config(
-        config_dict={"threads_data_path": str(threads)},
+        settings=make_settings({"paths.threads_data_path": str(threads)}),
         system_id="tui",
         thread_id=tid,
     )

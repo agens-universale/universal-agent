@@ -287,10 +287,10 @@ def build_swarm_config(
         if isinstance(p, str) and p.strip()
     ]
 
-    # agent_overrides пробрасываем из server_cfg как есть — materializer применит
-    # их к raw YAML с auto-wrap'ом flat → {agent: ...}, чтобы единая секция
-    # config_server.yml::agent_overrides работала и для webhook'а (cfg.update
-    # на flat-dict) и для swarm'а (deep_merge в raw YAML).
+    # agent_overrides пробрасываем из server_cfg как есть — materializer разложит
+    # пути через точку во вложенные секции и применит deep_merge'ем к raw YAML:
+    # единая секция config_server.yml::agent_overrides работает одинаково и для
+    # webhook'а, и для swarm'а.
     agent_overrides_raw = server_cfg.get("agent_overrides") or {}
     agent_overrides = (
         dict(agent_overrides_raw)

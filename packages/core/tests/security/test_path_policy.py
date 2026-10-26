@@ -12,6 +12,7 @@ from gc_core.security.path_policy import (
     normalize_path_for_policy,
 )
 from gc_testkit.helpers.crossplatform import require_symlinks
+from gc_testkit.settings import fake_ctx
 
 
 class _Logger:
@@ -97,18 +98,18 @@ def test_is_within_root_is_case_sensitive_by_default():
 def test_enforce_write_guard_returns_structured_error(tmp_path):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
-    config_dict = {
-        "launch_root": str(launch_root),
-        "write_guard": {"enabled": True},
-    }
+    ctx = fake_ctx(
+        {
+            "launch_root": str(launch_root),
+            "security.write_guard": {"enabled": True, "mode": "deny"},
+        }
+    )
 
     @enforce_write_guard(path_arg="path", operation="write")
-    def write(path: str, config_dict: dict) -> str:
+    def write(path: str, **kwargs) -> str:
         return json.dumps({"ok": True, "path": path})
 
-    result = json.loads(
-        write(str(tmp_path / "outside.txt"), config_dict=config_dict)
-    )
+    result = json.loads(write(str(tmp_path / "outside.txt"), ctx=ctx))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "write_guard_violation"
@@ -118,10 +119,10 @@ def test_enforce_write_guard_audits_blocked_decision(tmp_path):
     launch_root = tmp_path / "project"
     launch_root.mkdir()
     logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "launch_root": str(launch_root),
-            "write_guard": {"enabled": True},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         },
         logger=logger,
     )
@@ -151,10 +152,12 @@ def test_enforce_write_guard_uses_explicit_logger_when_provided(tmp_path):
         write(
             str(tmp_path / "outside.txt"),
             logger=logger,
-            config_dict={
-                "launch_root": str(launch_root),
-                "write_guard": {"enabled": True},
-            },
+            ctx=fake_ctx(
+                {
+                    "launch_root": str(launch_root),
+                    "security.write_guard": {"enabled": True, "mode": "deny"},
+                }
+            ),
         )
     )
 
@@ -170,10 +173,10 @@ def test_enforce_write_guard_prefers_explicit_logger_over_context_logger(
     launch_root.mkdir()
     explicit_logger = _Logger()
     context_logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "launch_root": str(launch_root),
-            "write_guard": {"enabled": True},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         },
         logger=context_logger,
     )
@@ -197,9 +200,7 @@ def test_enforce_write_guard_prefers_explicit_logger_over_context_logger(
 
 def test_audit_policy_decision_absent_trace_adds_no_key():
     logger = _Logger()
-    context = SimpleNamespace(
-        logger=logger, ctx=SimpleNamespace(config_dict={})
-    )
+    context = SimpleNamespace(logger=logger, ctx=fake_ctx())
 
     audit_policy_decision(
         context,
@@ -215,7 +216,7 @@ def test_audit_policy_decision_trace_is_inside_the_payload():
     logger = _Logger()
     context = SimpleNamespace(
         logger=logger,
-        ctx=SimpleNamespace(config_dict={"trace_id": "wf-42"}),
+        ctx=fake_ctx({"trace_id": "wf-42"}),
     )
 
     audit_policy_decision(

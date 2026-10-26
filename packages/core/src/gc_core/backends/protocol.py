@@ -77,6 +77,8 @@ class ExecResult:
     stderr: str = ""
     return_code: Any = _MISSING
     timed_out: bool = False
+    #: Команду снял стоп хода, не таймаут и не её собственный выход.
+    stopped_by_user: bool = False
     # Сохранён для потребителей вне exec (fs-поиск, MCP-обёртка): им
     # нужен только факт «поток обрезан», а не края. Выводится из потока.
     stdout_hit_capture_cap: bool = False
@@ -111,12 +113,6 @@ class ExecResult:
         )
 
 
-def bound_captured_stream(text: str, max_chars: int) -> tuple[str, bool]:
-    """Нормализовать готовый поток head+tail; вернуть ``(text, truncated)``."""
-    cs = captured_stream_from_text(text, max_chars)
-    return cs.text, cs.truncated
-
-
 def _rebound(
     stream: Optional[CapturedStream], text: str, max_chars: int
 ) -> CapturedStream:
@@ -138,6 +134,7 @@ def bound_exec_result(result: ExecResult, max_chars: int) -> ExecResult:
     return ExecResult(
         return_code=result.return_code,
         timed_out=result.timed_out,
+        stopped_by_user=bool(getattr(result, "stopped_by_user", False)),
         stdout_stream=stdout_stream,
         stderr_stream=stderr_stream,
     )
@@ -349,9 +346,10 @@ class FsBackend(ABC):
         чтения четырёх свойств, то есть держал поток пула на всё время проб, а
         существовал ровно потому, что пробы были синхронными.
 
-        Проба, упавшая сама по себе, пишет в кэш ``False`` и прогрев не
-        роняет: недоступный бэкенд всплывёт на первом настоящем вызове с
-        внятной ошибкой, а не здесь.
+        Проба, упавшая сама по себе на живой оболочке, пишет в кэш ``False``
+        и прогрев не роняет. ``RuntimeUnavailable`` — оболочка не ответила,
+        это не ответ про утилиту: исключение пробрасывается, кэш остаётся
+        пустым, следующий прогрев спросит снова.
         """
         from gc_core.backends.capabilities import (
             aprobe_grep_exclude_dir,
@@ -359,12 +357,15 @@ class FsBackend(ABC):
             aprobe_has_find,
             aprobe_has_grep,
         )
+        from gc_core.backends.runtime_probe import RuntimeUnavailable
 
         async def _fill(cache_attr: str, probe) -> bool:
             if getattr(self, cache_attr) is not None:
                 return bool(getattr(self, cache_attr))
             try:
                 value = bool(await probe(self))
+            except RuntimeUnavailable:
+                raise
             except Exception:
                 value = False
             setattr(self, cache_attr, value)

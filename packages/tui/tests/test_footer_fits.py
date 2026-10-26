@@ -31,12 +31,11 @@ import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static
-
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.ladder import STEP_HEAD
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.thread_store import edits_journal_path
+from gc_testkit.tui_support import as_settings, tui_settings
 from gc_tui.screens.diff import (
     ROW_ACCEPTED,
     ROW_GROUP,
@@ -45,6 +44,7 @@ from gc_tui.screens.diff import (
     DiffScreen,
     footer_text,
 )
+from textual.widgets import Static
 
 
 def _clipped(widget: Static) -> bool:
@@ -82,7 +82,9 @@ def _diff_screen(tmp_path: Path) -> DiffScreen:
     (root / "a.py").write_text("after\n", encoding="utf-8", newline="\n")
     return DiffScreen(
         launch_root=str(root),
-        config={"launch_root": str(root), "model": "M", "agent_edits": {}},
+        settings=as_settings(
+            {"launch_root": str(root), "agent.model": "M", "agent_edits": {}}
+        ),
         threads_dir=str(threads),
         system_id="cli",
         thread_id="th1",
@@ -96,7 +98,7 @@ async def test_diff_footer_is_whole_on_a_narrow_terminal(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(40, 20)) as pilot:
         screen = _diff_screen(tmp_path)
@@ -115,7 +117,7 @@ async def test_wide_terminal_keeps_the_air_line_under_the_footer(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(160, 20)) as pilot:
         screen = _diff_screen(tmp_path)
@@ -189,7 +191,7 @@ async def test_every_diff_footer_variant_is_whole_on_a_narrow_terminal(
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(40, 24)) as pilot:
         screen = _diff_screen(tmp_path)
@@ -209,7 +211,11 @@ async def test_sessions_footer_is_whole_on_a_narrow_terminal(tmp_path):
 
     threads = tmp_path / "threads"
     threads.mkdir(parents=True, exist_ok=True)
-    app = TuiApp(threads_dir=str(threads), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(threads),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(60, 20)) as pilot:
         screen = SessionsScreen(threads_dir=str(threads), system="cli")
         await pilot.app.push_screen(screen)
@@ -236,7 +242,7 @@ async def test_main_screen_footer_height_stays_fixed(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(30, 20)) as pilot:
         screen = pilot.app.screen
@@ -278,7 +284,9 @@ def _settings_screen(tmp_path: Path):
     from gc_tui.screens.settings import SettingsScreen
 
     return SettingsScreen(
-        config={"model": "M"}, config_path=None, on_apply=lambda: None
+        settings=as_settings({"agent.model": "M"}),
+        config_path=None,
+        on_apply=lambda: None,
     )
 
 
@@ -286,7 +294,7 @@ def _onboarding_screen(tmp_path: Path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     return OnboardingScreen(
-        config={"model": "M"},
+        settings=as_settings({"agent.model": "M"}),
         config_path=str(tmp_path / "c.yml"),
         review_all=True,
         on_commit=lambda: None,
@@ -301,7 +309,9 @@ def _post_update_screen(tmp_path: Path):
         new_version = "0.2.3"
 
     return PostUpdateScreen(
-        upgrade=_Upgrade(), config={}, config_path=str(tmp_path / "c.yml")
+        upgrade=_Upgrade(),
+        settings=as_settings({}),
+        config_path=str(tmp_path / "c.yml"),
     )
 
 
@@ -327,7 +337,7 @@ async def test_footer_stays_in_frame_on_a_low_terminal(
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=size) as pilot:
         screen = build(tmp_path)
@@ -380,7 +390,7 @@ async def test_keyboard_scrolls_the_content_area_both_ways(
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 10)) as pilot:
         screen = build(tmp_path)
@@ -421,7 +431,7 @@ async def test_scroll_key_is_named_only_while_it_works(
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 10)) as pilot:
         screen = build(tmp_path)
@@ -456,7 +466,7 @@ async def test_content_area_owns_keyboard_scrolling(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 10)) as pilot:
         screen = _settings_screen(tmp_path)
@@ -529,9 +539,11 @@ async def test_every_settings_section_reaches_its_bottom_by_keyboard(
         encoding="utf-8",
     )
     config = {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer secret-token"},
-        "model": "test-model",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer secret-token"
+        },
+        "agent.model": "test-model",
     }
 
     def _probe_fn(endpoint, auth, verify, model, **kw):
@@ -543,11 +555,13 @@ async def test_every_settings_section_reaches_its_bottom_by_keyboard(
         )
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=config
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(config),
     )
     async with app.run_test(size=size) as pilot:
         screen = SettingsScreen(
-            config=config,
+            settings=as_settings(config),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=_probe_fn,
@@ -601,22 +615,26 @@ async def test_ctrl_down_with_nothing_to_open_scrolls_the_section(
     Сперва `Ctrl+↑` — он раскрытием не занят и освобождает место внизу. Третья
     ветка того же класса — реестр моделей — сторожится у своей секции
     (`test_settings_models_section`): ей нужен конфиг с реестром."""
+    from form_harness import ok_probe
+    from gc_testkit.tui_support import open_settings_section
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
-    from gc_testkit.tui_support import open_settings_section
-    from form_harness import ok_probe
 
     config = {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer secret-token"},
-        "model": "test-model",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer secret-token"
+        },
+        "agent.model": "test-model",
     }
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=config
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(config),
     )
     async with app.run_test(size=(100, 12)) as pilot:
         screen = SettingsScreen(
-            config=config,
+            settings=as_settings(config),
             config_path=str(tmp_path / "config.yml"),
             on_apply=lambda: None,
             probe_fn=ok_probe(),
@@ -648,13 +666,15 @@ async def test_settings_section_cursor_carries_the_frame(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    config = {"model": "test-model"}
+    config = {"agent.model": "test-model"}
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=config
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(config),
     )
     async with app.run_test(size=(100, 12)) as pilot:
         screen = SettingsScreen(
-            config=config,
+            settings=as_settings(config),
             config_path=str(tmp_path / "c.yml"),
             on_apply=lambda: None,
         )
@@ -687,7 +707,7 @@ async def test_settings_menu_cursor_carries_the_frame(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 10)) as pilot:
         screen = _settings_screen(tmp_path)
@@ -743,8 +763,10 @@ def _viewer_screen(tmp_path: Path):
             flags=[],
         )
     )
-    config = {"launch_root": str(root), "model": "M", "agent_edits": {}}
-    view = EditsView(str(threads), "cli", "th1", str(root), config)
+    config = {"launch_root": str(root), "agent.model": "M", "agent_edits": {}}
+    view = EditsView(
+        str(threads), "cli", "th1", str(root), as_settings(config)
+    )
     files = [row.entry for row in view.session_view(SOURCE_SESSION).active]
     return DiffFileViewer(
         view=view, source=SOURCE_SESSION, files=files, index=0
@@ -789,7 +811,7 @@ async def test_frame_is_closed_and_the_footer_hugs_its_bottom_edge(
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=size) as pilot:
         screen = build(tmp_path)
@@ -833,7 +855,7 @@ async def test_scrollbar_runs_inside_the_frame(
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={"model": "M"},
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 10)) as pilot:
         screen = build(tmp_path)

@@ -1,10 +1,10 @@
 import unittest
-from types import SimpleNamespace
 
 from gc_core.utils.connect_backend import (
     acreate_call_headers,
     build_call_headers,
 )
+from gc_testkit.settings import fake_ctx
 
 
 class _StateStub:
@@ -14,11 +14,11 @@ class _StateStub:
 
 class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
     def test_uses_generic_chat_completion_headers(self):
-        ctx = SimpleNamespace(
-            config_dict={
-                "x_cl_id": 12345,
-                "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {
+        ctx = fake_ctx(
+            {
+                "agent.x_cl_id": "12345",
+                "backend.api_mode": "chat_completions",
+                "backend.chat_completion_headers": {
                     "HTTP-Referer": "https://example.org",
                     "X-OpenRouter-Title": "mini-cli",
                     "X-Custom": "v1",
@@ -32,11 +32,11 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers.get("X-Custom"), "v1")
 
     def test_uses_chat_completions_token_and_generic_headers(self):
-        ctx = SimpleNamespace(
-            config_dict={
-                "x_cl_id": 12345,
-                "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {
+        ctx = fake_ctx(
+            {
+                "agent.x_cl_id": "12345",
+                "backend.api_mode": "chat_completions",
+                "backend.chat_completion_headers": {
                     "Authorization": "Bearer sk-or-v1-token",
                     "HTTP-Referer": "https://example.org",
                     "X-OpenRouter-Title": "mini-cli",
@@ -56,11 +56,11 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
             def get_token(self):
                 return "auth-token"
 
-        ctx = SimpleNamespace(
-            config_dict={
-                "x_cl_id": 12345,
-                "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {
+        ctx = fake_ctx(
+            {
+                "agent.x_cl_id": "12345",
+                "backend.api_mode": "chat_completions",
+                "backend.chat_completion_headers": {
                     "Authorization": "Bearer chat-token"
                 },
             },
@@ -76,11 +76,11 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
 
         `GcCliExternal._apply_polar_session` routes Polar trajectories through this key.
         """
-        ctx = SimpleNamespace(
-            config_dict={
-                "x_cl_id": 12345,
-                "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {
+        ctx = fake_ctx(
+            {
+                "agent.x_cl_id": "12345",
+                "backend.api_mode": "chat_completions",
+                "backend.chat_completion_headers": {
                     "x-session-id": "sympy__sympy-12419"
                 },
             },
@@ -101,9 +101,7 @@ if __name__ == "__main__":
 def test_explicit_chat_mode_uses_model_headers_in_responses():
     from gc_core.model_router import ResolvedModel
 
-    ctx = SimpleNamespace(
-        config_dict={"backend_api_mode": "responses"}, auth_connector=None
-    )
+    ctx = fake_ctx({"backend.api_mode": "responses"}, auth_connector=None)
     resolved = ResolvedModel(
         alias="eyes",
         model="vision-model",
@@ -121,3 +119,29 @@ def test_explicit_chat_mode_uses_model_headers_in_responses():
     assert "Authorization" not in build_call_headers(
         _StateStub(), ctx, resolved
     )
+
+
+def test_string_instead_of_headers_or_kwargs_is_a_validation_error():
+    """Строка на месте словаря раньше молча становилась {} — запрос уходил
+    без заголовков. Теперь ошибка валидации без значения (там может быть
+    токен); пустая строка (``${HEADERS:-}``) — «не задано»."""
+    import pytest
+    from gc_core.config import apply_cli_overrides
+    from gc_testkit.settings import make_settings
+    from pydantic import ValidationError
+
+    for path in (
+        "backend.chat_completion_headers",
+        "backend.chat_completion_kwargs",
+    ):
+        with pytest.raises(ValidationError) as exc:
+            apply_cli_overrides(
+                make_settings(),
+                extra_overrides={path: "Authorization: Bearer sk-secret"},
+            )
+        assert path in str(exc.value)
+        assert "sk-secret" not in str(exc.value)
+        loaded = apply_cli_overrides(
+            make_settings(), extra_overrides={path: ""}
+        )
+        assert loaded.settings.backend.model_dump()[path.split(".")[1]] == {}

@@ -19,6 +19,7 @@ from gc_core.intent_guard.final_report_consistency import (
 from gc_core.intent_guard.trace_digest import FinishGateTraceDigest
 from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 _DIGEST_HANDOFF = {"artifacts": ["report.md"]}
 
@@ -39,8 +40,8 @@ def _validator_json(**overrides: object) -> str:
 def _ctx_state_digest(*, digest_handoff: dict | None = None):
     handoff = digest_handoff if digest_handoff is not None else _DIGEST_HANDOFF
     state = SimpleNamespace(messages=[{"role": "user", "content": "done?"}])
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         logger=None,
         auxiliary_llm=SimpleNamespace(
             max_tokens=8192,
@@ -491,3 +492,16 @@ def test_guard_prompt_still_rejects_content_contradictions():
     assert "handoff.artifacts" in prompt
     assert "report_mismatches" in prompt
     assert "contradict" in prompt.lower() or "contradiction" in prompt.lower()
+
+
+def test_guard_prompt_evidence_before_verdict():
+    """Списки свидетельств раньше ok/action; think-теги не приглашаем (парсер вырежет сам)."""
+    prompt = _load_guard_prompt()
+    schema_idx = prompt.index("## Output schema")
+    schema = prompt[schema_idx:]
+    assert schema.index('"trace_gaps"') < schema.index('"trace_ok"')
+    assert schema.index('"report_mismatches"') < schema.index('"report_ok"')
+    assert schema.index('"trace_ok"') < schema.index('"action"')
+    assert "Evidence before verdict" in prompt
+    assert "No reasoning in the reply" in prompt
+    assert "<think>" not in prompt

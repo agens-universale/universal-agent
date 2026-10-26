@@ -6,14 +6,17 @@ Two knobs (not one):
 
 ``fs_append_file`` is not under mutate: it checks a head sample and appends.
 
-Config (``fs_tools`` block, also flattened into ``config_dict``):
+Config (``settings.fs_tools``; ``settings`` — anything ``settings_of`` accepts):
 - ``max_read_bytes`` (default 8 MiB)
 - ``max_mutate_bytes`` (default 16 MiB)
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
+
+from gc_core.config_modules.fs_tools import FsToolsConfig
+from gc_core.settings import settings_of
 
 DEFAULT_FS_READ_MAX_BYTES = 8 * 1024 * 1024
 DEFAULT_FS_MUTATE_MAX_BYTES = 16 * 1024 * 1024
@@ -28,43 +31,34 @@ def _positive_int(raw: Any, default: int) -> int:
     return value if value > 0 else default
 
 
-def _fs_tools_section(
-    config: Optional[Mapping[str, Any]],
-) -> Mapping[str, Any]:
-    raw = (config or {}).get("fs_tools")
-    return raw if isinstance(raw, Mapping) else {}
+def _fs_tools(settings: Any) -> Optional[FsToolsConfig]:
+    """Секция ``settings.fs_tools``; ``None`` — конфига нет (берутся дефолты).
+
+    ``settings`` — всё, что принимает ``settings_of`` (контекст, настройки).
+    """
+    if settings is None:
+        return None
+    return settings_of(settings).fs_tools
 
 
-def fs_read_max_bytes(config: Optional[Mapping[str, Any]] = None) -> int:
+def fs_read_max_bytes(settings: Any = None) -> int:
     """Max on-disk size for full-file read / content search."""
-    fs = _fs_tools_section(config)
-    if "max_read_bytes" in fs:
-        return _positive_int(
-            fs.get("max_read_bytes"), DEFAULT_FS_READ_MAX_BYTES
-        )
-    return DEFAULT_FS_READ_MAX_BYTES
+    fs = _fs_tools(settings)
+    if fs is None:
+        return DEFAULT_FS_READ_MAX_BYTES
+    return _positive_int(fs.max_read_bytes, DEFAULT_FS_READ_MAX_BYTES)
 
 
-def fs_mutate_max_bytes(config: Optional[Mapping[str, Any]] = None) -> int:
+def fs_mutate_max_bytes(settings: Any = None) -> int:
     """Max on-disk size before mutate tools load the file into memory."""
-    fs = _fs_tools_section(config)
-    if "max_mutate_bytes" in fs:
-        return _positive_int(
-            fs.get("max_mutate_bytes"), DEFAULT_FS_MUTATE_MAX_BYTES
-        )
-    return DEFAULT_FS_MUTATE_MAX_BYTES
-
-
-def _find_in_files_section(
-    config: Optional[Mapping[str, Any]],
-) -> Mapping[str, Any]:
-    fs = _fs_tools_section(config)
-    raw = fs.get("find_in_files")
-    return raw if isinstance(raw, Mapping) else {}
+    fs = _fs_tools(settings)
+    if fs is None:
+        return DEFAULT_FS_MUTATE_MAX_BYTES
+    return _positive_int(fs.max_mutate_bytes, DEFAULT_FS_MUTATE_MAX_BYTES)
 
 
 def fs_find_in_files_max_bytes(
-    config: Optional[Mapping[str, Any]] = None,
+    settings: Any = None,
 ) -> int:
     """Unified file-size cap for ``fs_find_in_files`` (file or directory mode).
 
@@ -72,12 +66,13 @@ def fs_find_in_files_max_bytes(
     fall back to ``max_read_bytes`` / ``max_mutate_bytes`` — find_in_files has its
     own cap per spec.
     """
-    fif = _find_in_files_section(config)
-    if "max_file_bytes" in fif:
-        return _positive_int(
-            fif.get("max_file_bytes"), DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-        )
-    return DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    fs = _fs_tools(settings)
+    if fs is None:
+        return DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+    return _positive_int(
+        fs.find_in_files.max_file_bytes,
+        DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES,
+    )
 
 
 def file_too_large_error(

@@ -1,7 +1,7 @@
 import base64
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -12,7 +12,7 @@ from gc_core.utils.tool_report_paths import tool_report_abspath
 
 class SaveBase64File(AbstractSimpleTool):
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         return {
             "type": "function",
             "name": "fs_save_base64_file",
@@ -46,7 +46,7 @@ class SaveBase64File(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         return (
             "Tool name: fs_save_base64_file\n"
             "Tool description: Decodes base64 data and saves it as a binary file (e.g. PNG screenshot).\n"
@@ -149,7 +149,7 @@ class SaveBase64File(AbstractSimpleTool):
         if exists and is_recording(self._ctx):
             try:
                 if await self._backend.getsize(path) <= fs_mutate_max_bytes(
-                    self._config_dict
+                    self._settings_source
                 ):
                     old_bytes = await self._backend.read_bytes(path)
             except Exception:

@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from gc_core.config_modules.env_vars import project_gc_dir
@@ -28,6 +29,10 @@ def test_project_gc_dir_lazy_cwd_resolution(monkeypatch, tmp_path):
 
 def test_cli_ensure_project_gc_dir_uses_helper(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    # `gc_cli.cli` разбирает sys.argv при импорте (`-q` обязателен): тот же
+    # приём, что в test_cli_skill_flag.py, — иначе файл падает при запуске
+    # отдельно, на аргументах самого pytest.
+    monkeypatch.setattr(sys, "argv", ["gc-cli", "-q", "x"])
     from gc_cli.cli import _ensure_project_gc_dir
 
     _ensure_project_gc_dir()

@@ -1,7 +1,7 @@
 """gc-cli объявляет свой режим запуска — от него зависит запись журнала правок.
 
 Журнал правок в `gc-cli` (с ним — стенд и фоновые прогоны) по умолчанию не
-пишется: там его никто не смотрит. Ядро узнаёт CLI по служебному `run_mode`,
+пишется: там его никто не смотрит. Ядро узнаёт CLI по `RuntimeEnv.run_mode`,
 который ставит сам `gc-cli` — после загрузки конфига и CLI-оверрайдов."""
 
 import sys
@@ -15,11 +15,13 @@ sys.argv = ["gc-cli", "-q", "x"]
 def test_cli_declares_the_cli_run_mode():
     from gc_cli import cli as cli_module
 
-    fake_config_dict = {"console_trace": False}
+    from gc_testkit.settings import make_settings
+
+    fake_settings = make_settings({"logging.console_trace": False})
     captured = {}
 
-    async def _capture(config_dict, *args, **kwargs):
-        captured["config"] = config_dict
+    async def _capture(settings, *args, **kwargs):
+        captured["config"] = settings
         return SimpleNamespace(logger=MagicMock())
 
     with (
@@ -49,10 +51,12 @@ def test_cli_declares_the_cli_run_mode():
             ),
         ),
         patch.object(cli_module, "_bootstrap_user_config", return_value=False),
+        patch.object(cli_module, "load_settings", return_value=fake_settings),
         patch.object(
-            cli_module, "load_config_ex", return_value=(fake_config_dict, None)
+            cli_module,
+            "apply_cli_overrides",
+            side_effect=lambda loaded, **_kw: loaded,
         ),
-        patch.object(cli_module, "apply_cli_overrides"),
         patch.object(
             cli_module,
             "onboarding",
@@ -76,7 +80,7 @@ def test_cli_declares_the_cli_run_mode():
         mock_executor_cls.return_value.arun = _arun
         cli_module.main()
 
-    assert captured["config"]["run_mode"] == "cli"
+    assert captured["config"].runtime.run_mode == "cli"
 
 
 async def test_cli_init_declares_the_cli_run_mode_too():
@@ -86,16 +90,20 @@ async def test_cli_init_declares_the_cli_run_mode_too():
     библиотечный, и `agent_edits.record.cli` на нём бы не действовал."""
     from gc_cli import cli as cli_module
 
+    from gc_testkit.settings import make_settings
+
     captured = {}
 
-    async def _capture(config_dict, *args, **kwargs):
-        captured["config"] = config_dict
+    async def _capture(settings, *args, **kwargs):
+        captured["config"] = settings
         return SimpleNamespace(logger=MagicMock())
 
     executor = MagicMock()
     executor.return_value.arun = AsyncMock(return_value="ok")
     with (
-        patch.object(cli_module, "load_config", return_value={}),
+        patch.object(
+            cli_module, "load_settings", return_value=make_settings()
+        ),
         patch.object(cli_module, "build_auth_connector", return_value=None),
         patch.object(
             cli_module,
@@ -111,4 +119,4 @@ async def test_cli_init_declares_the_cli_run_mode_too():
     ):
         await cli_module._run_init_agents_md()
 
-    assert captured["config"]["run_mode"] == "cli"
+    assert captured["config"].runtime.run_mode == "cli"

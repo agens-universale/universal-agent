@@ -12,21 +12,26 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-def config_from_ctx(ctx: Any) -> dict:
-    config_dict = getattr(ctx, "config_dict", None) or {}
-    return config_dict if isinstance(config_dict, dict) else {}
+def _loaded(ctx: Any):
+    """Настройки контекста; без них (ядро как библиотека, двойник) — умолчания."""
+    from gc_core.settings import LoadedSettings, runtime_of, settings_of
+
+    try:
+        return LoadedSettings(
+            settings=settings_of(ctx), runtime=runtime_of(ctx)
+        )
+    except TypeError:
+        return LoadedSettings(settings=settings_of(None))
 
 
 def agent_edits_config(ctx: Any) -> dict:
-    """Секция ``agent_edits`` конфига на ctx — общая для обоих каналов записи."""
-    section = config_from_ctx(ctx).get("agent_edits") or {}
-    return section if isinstance(section, dict) else {}
+    """Секция ``agent_edits`` настроек ctx — общая для обоих каналов записи."""
+    return _loaded(ctx).settings.agent_edits.model_dump()
 
 
-# Служебный ключ конфига: режим запуска, объявленный фронтендом (в файле конфига
-# его нет, как и `launch_root`). TUI узнаётся по признаку контекста `is_tui` —
-# его ставит `acreate_run_context`, и дочерний контекст субагента его наследует.
-RUN_MODE_KEY = "run_mode"
+# Режим запуска объявляет фронтенд (``RuntimeEnv.run_mode``; в файле конфига
+# его нет, как и ``launch_root``). TUI узнаётся и по признаку контекста
+# ``is_tui`` — его ставит ``acreate_run_context``, дочерний контекст наследует.
 RUN_MODE_TUI = "tui"
 RUN_MODE_CLI = "cli"
 RUN_MODE_SERVER = "server"
@@ -38,17 +43,14 @@ def recording_enabled(ctx: Any) -> bool:
     Режим не объявлен (ядро как библиотека) или неизвестен — не пишем: журнал
     ведётся там, где его показывают или где его явно попросили.
     """
-    if getattr(ctx, "is_tui", False):
+    loaded = _loaded(ctx)
+    if getattr(ctx, "is_tui", False) or loaded.runtime.is_tui:
         mode = RUN_MODE_TUI
     else:
-        mode = config_from_ctx(ctx).get(RUN_MODE_KEY)
+        mode = loaded.runtime.run_mode
     if mode not in (RUN_MODE_TUI, RUN_MODE_CLI, RUN_MODE_SERVER):
         return False
-    record = agent_edits_config(ctx).get("record")
-    if not isinstance(record, dict):
-        record = {}
-    default = mode == RUN_MODE_TUI
-    return bool(record.get(mode, default))
+    return bool(getattr(loaded.settings.agent_edits.record, mode))
 
 
 def identity_from_ctx(ctx: Any) -> tuple[str, str, str] | None:
@@ -69,7 +71,7 @@ def identity_from_ctx(ctx: Any) -> tuple[str, str, str] | None:
 
 
 def launch_root_from_ctx(ctx: Any) -> str:
-    launch_root = config_from_ctx(ctx).get("launch_root") or ""
+    launch_root = _loaded(ctx).runtime.launch_root or ""
     if isinstance(launch_root, str) and launch_root.strip():
         return launch_root
     workspace = getattr(ctx, "workspace", None)
@@ -128,9 +130,4 @@ def section_limit(section: Mapping[str, Any], key: str, default: int) -> int:
 
 
 def protected_extra_from_ctx(ctx: Any) -> list:
-    protected = config_from_ctx(ctx).get("protected_paths") or {}
-    return (
-        list(protected.get("extra") or [])
-        if isinstance(protected, dict)
-        else []
-    )
+    return list(_loaded(ctx).settings.security.protected_paths.extra)

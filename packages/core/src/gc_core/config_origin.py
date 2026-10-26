@@ -76,13 +76,13 @@ def _overlay_paths(
     (спека §2, ось 2 — контент профиля ложится ПОВЕРХ всех файловых слоёв) активный
     профиль, если указатель резолвится. Указатель — общим резолвом
     `config_modules.layers.resolve_profile_pointer`: тот же мерж base+managed+
-    project, каким его резолвит `load_config_ex` (ось 1), а не `self._config`
+    project, каким его резолвит `load_settings` (ось 1), а не `self._config`
     вызывающего экрана — у origins() своя, независимая от него копия. Раньше эта
     функция мержила слои сама (четвёртая по счёту редакция того же правила —
     находка ревью), и её собственная копия молчала о профиле на битой базе иначе,
     чем резолвит следующий старт; теперь обе стороны — один код.
 
-    `profile_override` — как у `load_config_ex`: имя побеждает указатель, пустая
+    `profile_override` — как у `load_settings`: имя побеждает указатель, пустая
     строка снимает слой профиля вовсе, None — указатель из файлов. Сессия с
     `--profile` грузит не тот профиль, что назван в файле, и карта слоёв обязана
     считаться по тому же стеку (ревью: объяснение сломанного конфига называло
@@ -165,7 +165,9 @@ def origins(
 
     merged = deepcopy(merged)
     apply_compat(merged)
-    effective = {dotted: config_raw.value_at(merged, dotted) for dotted in keys}
+    effective = {
+        dotted: config_raw.value_at(merged, dotted) for dotted in keys
+    }
     kinds: Dict[str, str] = dict.fromkeys(keys, "")
     paths: Dict[str, Optional[str]] = dict.fromkeys(keys)
 

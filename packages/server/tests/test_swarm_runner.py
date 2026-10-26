@@ -754,7 +754,7 @@ def test_start_swarm_extended_mount_envs_empty_when_missing(
 
 
 # ---------------------------------------------------------------------------
-# Layered config merge (унификация со server-side load_config)
+# Layered config merge (унификация со server-side load_settings)
 # ---------------------------------------------------------------------------
 
 
@@ -837,8 +837,8 @@ def test_materialize_applies_swarm_env_paths(tmp_path, monkeypatch):
     assert written["paths"]["skills_data_path"] == "/swarm/skills"
 
 
-def test_materialize_applies_agent_overrides_flat(tmp_path):
-    """Flat agent_overrides (legacy webhook-формат) → авто-обёртка в agent: ."""
+def test_materialize_applies_agent_overrides_dotted(tmp_path):
+    """agent_overrides путями через точку → вложенные секции raw YAML."""
     import yaml as _yaml
 
     host_cfg = tmp_path / "host.yml"
@@ -848,20 +848,38 @@ def test_materialize_applies_agent_overrides_flat(tmp_path):
 
     swarm_cfg = {
         "agent_overrides": {
-            "stop_tools": ["write_to_file", "execute_command"],
-            "max_steps": 50,
+            "agent.stop_tools": ["write_to_file", "execute_command"],
+            "agent.max_steps": 50,
+            "backend.api_mode": "responses",
         },
     }
     runner._materialize_runtime_config(str(host_cfg), str(sandbox), swarm_cfg)
     written = _yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
 
-    # Flat overrides осели под agent: благодаря auto-wrap.
     # stop_tools — список → deep_merge конкатенирует + dedup; "write_to_file"
     # и "execute_command" должны присутствовать.
     assert "write_to_file" in written["agent"]["stop_tools"]
     assert "execute_command" in written["agent"]["stop_tools"]
     # max_steps скаляр → перезаписан overrides'ом.
     assert written["agent"]["max_steps"] == 50
+    assert written["backend"]["api_mode"] == "responses"
+
+
+def test_materialize_rejects_flat_agent_overrides_with_path_hint(tmp_path):
+    """Плоских имён (прежний webhook-формат) больше нет: ошибка с подсказкой."""
+    from gc_core.config_modules.path_hints import UnknownSettingError
+
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("agent:\n  max_steps: 100\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+
+    swarm_cfg = {"agent_overrides": {"max_steps": 50}}
+    with pytest.raises(UnknownSettingError) as exc:
+        runner._materialize_runtime_config(
+            str(host_cfg), str(sandbox), swarm_cfg
+        )
+    assert "agent.max_steps" in str(exc.value)
 
 
 def test_materialize_applies_agent_overrides_raw(tmp_path):
@@ -983,10 +1001,18 @@ def test_materialize_replaces_model_kwargs(tmp_path, monkeypatch):
     import yaml
 
     host = tmp_path / "host.yml"
-    host.write_text(yaml.safe_dump({"models": {"sample": {
-        "main": {"temperature": 0.9},
-        "auxiliary": {"temperature": 0.8},
-    }}}))
+    host.write_text(
+        yaml.safe_dump(
+            {
+                "models": {
+                    "sample": {
+                        "main": {"temperature": 0.9},
+                        "auxiliary": {"temperature": 0.8},
+                    }
+                }
+            }
+        )
+    )
     project = tmp_path / "project"
     (project / ".gc").mkdir(parents=True)
     (project / ".gc" / "config.yml").write_text(
@@ -994,23 +1020,41 @@ def test_materialize_replaces_model_kwargs(tmp_path, monkeypatch):
     )
     monkeypatch.chdir(project)
     sandbox = tmp_path / "sandbox"
-    runner._materialize_runtime_config(str(host), str(sandbox), {
-        "agent_overrides": {"models": {"sample": {"auxiliary": {}}}},
-    })
+    runner._materialize_runtime_config(
+        str(host),
+        str(sandbox),
+        {
+            # Правка по пути заменяет значение; запись ``models.<alias>``
+            # секцией заменилась бы целиком — потому адресуем поле записи.
+            "agent_overrides": {"models.sample.auxiliary": {}},
+        },
+    )
     written = yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
     assert written["models"]["sample"] == {"main": {}, "auxiliary": {}}
 
 
-def test_materialize_migrates_legacy_kwargs_before_overlay(tmp_path, monkeypatch):
+def test_materialize_migrates_legacy_kwargs_before_overlay(
+    tmp_path, monkeypatch
+):
     import yaml
 
     host = tmp_path / "host.yml"
-    host.write_text(yaml.safe_dump({"models": {"sample": {"main": {"temperature": 0.9}}}}))
+    host.write_text(
+        yaml.safe_dump({"models": {"sample": {"main": {"temperature": 0.9}}}})
+    )
     project = tmp_path / "project"
     (project / ".gc").mkdir(parents=True)
-    (project / ".gc" / "config.yml").write_text(yaml.safe_dump({"models": {"sample": {
-        "backend": {"chat_completion_kwargs": {"top_p": 0.2}},
-    }}}))
+    (project / ".gc" / "config.yml").write_text(
+        yaml.safe_dump(
+            {
+                "models": {
+                    "sample": {
+                        "backend": {"chat_completion_kwargs": {"top_p": 0.2}},
+                    }
+                }
+            }
+        )
+    )
     monkeypatch.chdir(project)
     sandbox = tmp_path / "sandbox"
     runner._materialize_runtime_config(str(host), str(sandbox), {})

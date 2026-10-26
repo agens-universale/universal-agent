@@ -81,6 +81,7 @@ async def test_nested_call_under_a_live_loop_keeps_the_outer_pool():
 async def test_holder_is_released_when_context_build_fails(monkeypatch):
     """Отказ сборки не должен навсегда занимать пул этого loop."""
     from gc_core.aio import agent as agent_mod
+    from gc_core.settings import default_settings
 
     async def _boom(*_a, **_kw):
         raise RuntimeError("MCP-дискавери отказала")
@@ -88,7 +89,9 @@ async def test_holder_is_released_when_context_build_fails(monkeypatch):
     monkeypatch.setattr(agent_mod, "acreate_run_context", _boom)
 
     with pytest.raises(RuntimeError):
-        await agent_mod.AsyncAgent.create({"model": "m"})
+        await agent_mod.AsyncAgent.create(
+            default_settings(**{"agent.model": "m"})
+        )
 
     loop = asyncio.get_running_loop()
     assert async_http._holder_count(loop) == 0, (

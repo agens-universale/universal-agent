@@ -1,20 +1,28 @@
 """The harbor adapter must not invent its own config — it must start from the schema.
 
-A bench runner has no YAML, so ``load_config`` cannot run and the adapter assembles
-``config_dict`` itself. While it hand-rolled that dict, every key added to ``AppConfig``
-and read hard by a consumer (``cfg["backend_request_timeout_sec"]`` in processing_responses /
-llm_chat_client / subagents.special_agent) was absent there, and the whole bench died with
-KeyError. Building on top of ``flatten_app_config(AppConfig())`` makes that impossible.
+A bench runner has no YAML, so ``load_settings`` cannot run and the adapter assembles
+the settings itself. While it hand-rolled a flat dict, every key added to ``AppConfig``
+and read hard by a consumer was absent there, and the whole bench died with KeyError.
+Now the adapter builds a real ``AppConfig`` (``LoadedSettings``) on top of the schema
+defaults, so the guarantee is stated in typed terms:
+
+* the result validates as ``AppConfig`` — every field exists by construction;
+* nothing differs from the schema defaults except what the bench and the profile
+  meant to change (no hidden values sneak in, no field goes missing);
+* profile keys (setting paths, nested sections) land on their paths; a typo or an
+  old flat name fails loudly with a path hint.
 
 Layering under test: schema defaults < bench defaults < profile overrides < runtime.
 """
 
 import sys
+from copy import deepcopy
 
 import pytest
 import yaml
-from gc_core.config import flatten_app_config
+from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.config_modules.root import AppConfig, resolve_paths
+from gc_core.settings import LoadedSettings
 from gc_testkit.paths import HARBOR
 
 _HARBOR_DIR = HARBOR
@@ -23,108 +31,206 @@ if str(_HARBOR_DIR) not in sys.path:
 
 from adapters.gc_cli_config import (
     bench_defaults,
-    build_gc_cli_config,
+    build_gc_cli_settings,
 )
 from gc_testkit.paths import ASSETS
 
 _PROMPTS = ASSETS / "prompts"
 _SKILLS = ASSETS / "skills"
+_URL = "http://127.0.0.1:9999/v1/chat/completions"
 
 
-def _config(overrides: dict | None = None) -> dict:
-    return build_gc_cli_config(
-        completions_url="http://127.0.0.1:9999/v1/chat/completions",
+def _loaded(overrides: dict | None = None) -> LoadedSettings:
+    return build_gc_cli_settings(
+        completions_url=_URL,
         model="test-model",
         prompts_dir=_PROMPTS,
         skills_dir=_SKILLS,
+        logs_dir=_HARBOR_DIR / "logs",
         config_dir=str(_HARBOR_DIR),
         overrides=overrides,
     )
 
 
-def _schema_defaults() -> dict:
-    app_cfg = AppConfig.model_validate({})
-    resolve_paths(app_cfg, str(_HARBOR_DIR))
-    return flatten_app_config(app_cfg)
+def _config(overrides: dict | None = None) -> AppConfig:
+    return _loaded(overrides).settings
 
 
-def test_bench_config_covers_every_schema_key():
-    missing = sorted(set(_schema_defaults()) - set(_config()))
+def _schema_defaults() -> AppConfig:
+    return resolve_paths(AppConfig.model_validate({}), str(_HARBOR_DIR))
 
-    assert missing == [], (
-        f"schema keys absent from the bench config: {missing}"
+
+def _leaves(value, prefix=()):
+    """Плоский вид дампа модели: путь листа → значение.
+
+    Словари раскрываются до листьев; пустой словарь листа не даёт — иначе
+    наполненный `{}` считался бы изменением и самого словаря, и его ключа.
+    """
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield from _leaves(item, (*prefix, str(key)))
+    else:
+        yield ".".join(prefix), value
+
+
+def _changed_paths(a: AppConfig, b: AppConfig) -> set[str]:
+    left = dict(_leaves(a.model_dump(mode="json")))
+    right = dict(_leaves(b.model_dump(mode="json")))
+    return {
+        path
+        for path in left.keys() | right.keys()
+        if left.get(path) != right.get(path)
+    }
+
+
+def test_bench_settings_validate_as_app_config():
+    """Every schema field exists: the settings re-validate from their own dump."""
+    config = _config()
+
+    assert isinstance(config, AppConfig)
+    assert AppConfig.model_validate(config.model_dump(by_alias=True)) == config
+
+
+def test_only_intended_fields_differ_from_schema_defaults():
+    """Schema defaults < bench defaults < runtime — and nothing else is touched."""
+    changed = _changed_paths(_schema_defaults(), _config())
+    intended = set(bench_defaults(_PROMPTS, _SKILLS)) | {
+        "backend.completions_url",
+        "agent.model",
+        "paths.logs_dump_dir",
+    }
+
+    assert changed <= intended, sorted(changed - intended)
+
+
+def test_profile_overrides_land_on_their_setting_paths():
+    """Paths and nested sections land on their paths; only the named fields change."""
+    base = _config()
+    config = _config(
+        {
+            "agent.max_steps": 20,
+            "backend.chat_completion_kwargs": {"tool_choice": "auto"},
+            "summary": {"max_message_chars": 1234},
+            "agent.no_tool_call_max_count": 7,
+        }
     )
+
+    assert _changed_paths(base, config) == {
+        "agent.max_steps",
+        "backend.chat_completion_kwargs.tool_choice",
+        "summary.max_message_chars",
+        "agent.no_tool_call_max_count",
+    }
+
+
+def test_unknown_profile_key_fails_loudly():
+    """A misspelt key used to ride along unread; now the schema rejects it."""
+    with pytest.raises(UnknownSettingError):
+        _config({"max_stepz": 5})
+    with pytest.raises(UnknownSettingError):
+        _config({"summary": {"max_message_charz": 5}})
+
+
+def test_old_flat_profile_key_fails_with_path_hint():
+    """Old flat ``config_dict`` names are gone; the error names the path."""
+    with pytest.raises(UnknownSettingError) as exc:
+        _config({"max_steps": 5})
+    assert "agent.max_steps" in str(exc.value)
 
 
 def test_keys_consumers_read_hard_are_present():
-    """A KeyError on any of these kills every trial of a bench run."""
+    """A missing field on any of these kills every trial of a bench run."""
     config = _config()
 
     assert (
-        config["backend_request_timeout_sec"]
+        config.backend.request_timeout_sec
         == AppConfig.model_validate({}).backend.request_timeout_sec
     )
 
 
 def test_bench_defaults_win_over_schema_defaults():
-    config = _config()
+    loaded = _loaded()
+    config = loaded.settings
 
-    assert config["backend_api_mode"] == "chat_completions"
-    assert config["os_backend"]["kind"] == "harbor"
-    assert config["read_guard"]["enabled"] is False
-    assert config["command_moderation"]["mode"] == "allow"
-    assert config["exec_timeout_sec"] == 600
-    assert AppConfig.model_validate({}).agent.exec_timeout_sec == 120
+    assert config.backend.api_mode == "chat_completions"
+    assert loaded.runtime.os_backend == "harbor"
+    assert config.os_backend.kind == "harbor"
+    assert config.security.read_guard.enabled is False
+    assert config.security.command_moderation.mode == "allow"
+    assert config.agent.exec_timeout_sec == 600
+    assert AppConfig.model_validate({}).agent.exec_timeout_sec == 200
+
+
+def test_profile_can_override_runtime_os_backend():
+    """`os_backend` is a runtime fact, not a setting: it goes to RuntimeEnv."""
+    assert _loaded({"os_backend": "local"}).runtime.os_backend == "local"
 
 
 def test_bench_does_not_set_generation_kwargs_without_profile():
-    assert _config()["chat_completion_kwargs"] == {}
+    assert _config().backend.chat_completion_kwargs == {}
 
 
 def test_bench_does_not_override_generation_token_settings():
     defaults = bench_defaults(_PROMPTS, _SKILLS)
-    assert "chat_completions_max_tokens" not in defaults
-    assert "use_max_tokens_param" not in defaults
+    assert "backend.chat_completions_max_tokens" not in defaults
+    assert "backend.use_max_tokens_param" not in defaults
 
     schema = _schema_defaults()
     config = _config()
     assert (
-        config["chat_completions_max_tokens"]
-        == schema["chat_completions_max_tokens"]
+        config.backend.chat_completions_max_tokens
+        == schema.backend.chat_completions_max_tokens
     )
-    assert config["use_max_tokens_param"] == schema["use_max_tokens_param"]
+    assert (
+        config.backend.use_max_tokens_param
+        == schema.backend.use_max_tokens_param
+    )
 
     explicit = _config(
-        {"chat_completions_max_tokens": 4096, "use_max_tokens_param": True}
+        {
+            "backend.chat_completions_max_tokens": 4096,
+            "backend.use_max_tokens_param": True,
+        }
     )
-    assert explicit["chat_completions_max_tokens"] == 4096
-    assert explicit["use_max_tokens_param"] is True
+    assert explicit.backend.chat_completions_max_tokens == 4096
+    assert explicit.backend.use_max_tokens_param is True
 
 
 def test_bench_does_not_override_agent_run_policy():
     defaults = bench_defaults(_PROMPTS, _SKILLS)
     schema = _schema_defaults()
-    for key in ("max_steps", "no_tool_call_max_count", "use_local_subagents"):
-        assert key not in defaults
-        assert _config()[key] == schema[key]
+    for field in (
+        "max_steps",
+        "no_tool_call_max_count",
+        "use_local_subagents",
+    ):
+        assert f"agent.{field}" not in defaults
+        assert getattr(_config().agent, field) == getattr(schema.agent, field)
 
     config = _config(
         {
-            "max_steps": 20,
-            "no_tool_call_max_count": 7,
-            "use_local_subagents": True,
+            "agent.max_steps": 20,
+            "agent.no_tool_call_max_count": 7,
+            "agent.use_local_subagents": True,
         }
     )
-    assert config["max_steps"] == 20
-    assert config["no_tool_call_max_count"] == 7
-    assert config["use_local_subagents"] is True
+    assert config.agent.max_steps == 20
+    assert config.agent.no_tool_call_max_count == 7
+    assert config.agent.use_local_subagents is True
 
 
 def test_profile_overrides_win_over_bench_defaults():
-    config = _config({"max_steps": 1000, "stop_tools": ["turn_ask_human"]})
+    config = _config(
+        {
+            "agent.max_steps": 1000,
+            "agent.stop_tools": ["turn_ask_human"],
+            "agent.exec_timeout_sec": 30,
+        }
+    )
 
-    assert config["max_steps"] == 1000
-    assert config["stop_tools"] == ["turn_ask_human"]
+    assert config.agent.max_steps == 1000
+    assert config.agent.stop_tools == ["turn_ask_human"]
+    assert config.agent.exec_timeout_sec == 30
 
 
 def _bench_audience(config):
@@ -135,13 +241,15 @@ def _bench_audience(config):
     tools = [
         entry["spec"] for entry in get_builtin_tools_data(config).values()
     ]
+    from gc_core.settings import settings_of
+
     router = ModelRouter(config, level_provider=lambda: "default")
     audience = compute_audience(
         router,
         request_resolved=router.resolve("main"),
-        api_mode=config["backend_api_mode"],
+        api_mode=settings_of(config).backend.api_mode,
         tool_in_set=view_tool_in_set(tools),
-        config=config,
+        settings=config,
     )
     return audience, tools
 
@@ -186,7 +294,7 @@ def test_stock_text_profiles_exclude_image_viewing(profile_name):
 
 
 def test_a_vision_experiment_can_explicitly_enable_images():
-    audience, _tools = _bench_audience(_config({"backend_vision": True}))
+    audience, _tools = _bench_audience(_config({"backend.vision": True}))
 
     assert audience.native is None  # true permits a probe, not pixels
     assert audience.tool_visible is True
@@ -195,32 +303,44 @@ def test_a_vision_experiment_can_explicitly_enable_images():
 def test_runtime_url_and_model_win_over_profile():
     config = _config(
         {
-            "completions_url": "http://stale/v1/chat/completions",
-            "model": "stale-model",
+            "backend.completions_url": "http://stale/v1/chat/completions",
+            "agent.model": "stale-model",
         }
     )
 
-    assert (
-        config["completions_url"]
-        == "http://127.0.0.1:9999/v1/chat/completions"
-    )
-    assert config["model"] == "test-model"
+    assert config.backend.completions_url == _URL
+    assert config.agent.model == "test-model"
 
 
 def test_nested_override_merges_instead_of_replacing():
     config = _config(
         {
-            "chat_completion_kwargs": {
+            "backend.chat_completion_kwargs": {
                 "tool_choice": "required",
                 "chat_template_kwargs": {"enable_thinking": True},
             }
         }
     )
 
-    assert config["chat_completion_kwargs"] == {
+    assert config.backend.chat_completion_kwargs == {
         "tool_choice": "required",
         "chat_template_kwargs": {"enable_thinking": True},
     }
+
+
+def test_provenance_names_the_layer_of_each_override():
+    loaded = _loaded({"agent.max_steps": 20})
+
+    assert loaded.provenance.source("agent.max_steps").layer == "bench_profile"
+    assert loaded.provenance.source("agent.exec_timeout_sec").layer == "bench"
+    assert loaded.provenance.source("agent.model").layer == "runtime"
+
+
+def test_profile_dict_is_not_mutated():
+    overrides = {"summary": {"max_message_chars": 1234}}
+    _config(overrides)
+
+    assert overrides == {"summary": {"max_message_chars": 1234}}
 
 
 @pytest.mark.parametrize(
@@ -261,7 +381,12 @@ async def test_stock_profiles_and_children_make_no_probe_with_attachment(
             ],
         )
         state.vision_probe_turn = "bench-root"
-        await pr._arequest_backend_canonical([message], state, ctx)
+        await pr._arequest_backend_canonical(
+            [message],
+            state,
+            ctx,
+            resolved=pr.resolve_main_for_call(state, ctx),
+        )
     assert len(spy.requests) == 2  # exactly the two working text calls
     assert all(
         b'"image_url"' not in r.content and b'"fs_view_image"' not in r.content
@@ -277,7 +402,19 @@ async def test_custom_image_bench_requires_successful_probe(
     from gc_core.tools.registry import get_builtin_tools_data
     from gc_core.vision import probe
     from test_image_rejection_retry import OK, _ctx, _state, _user_with_image
-    from test_vision_probe_flow import pngs
+    import base64
+    import json
+
+    def pngs(request):
+        # Как `vision/test_vision_probe_flow.pngs`: импорт из соседнего каталога
+        # работал только при прогоне всего набора (каталог уже в sys.path).
+        return [
+            base64.b64decode(part["image_url"]["url"].split(",")[1])
+            for message in json.loads(request.content).get("messages", [])
+            for part in message.get("content", [])
+            if isinstance(part, dict) and part.get("type") == "image_url"
+        ]
+
     from transport_fakes import install_transport
 
     challenge = probe.make_challenge(retry=False)
@@ -291,7 +428,7 @@ async def test_custom_image_bench_requires_successful_probe(
             else OK,
         ),
     )
-    config = _config({"backend_vision": True})
+    config = _loaded({"backend.vision": True})
     ctx = _ctx(tmp_path, config, [])
     att, message = _user_with_image(ctx.image_store)
     state = _state(
@@ -301,9 +438,230 @@ async def test_custom_image_bench_requires_successful_probe(
         ],
     )
     state.vision_probe_turn = "custom-image-bench"
-    await pr._arequest_backend_canonical([message], state, ctx)
+    await pr._arequest_backend_canonical(
+        [message], state, ctx, resolved=pr.resolve_main_for_call(state, ctx)
+    )
     assert len(spy.requests) == 2
     assert pngs(spy.requests[0]) == [challenge.png]
     assert pngs(spy.requests[1]) == [ctx.image_store.read_for_send(att)]
     assert state.vision_audience.native is not None
     assert b'"fs_view_image"' in spy.requests[1].content
+
+
+def test_two_level_numbers_reach_the_bench_config_and_a_profile_overrides_one_of_them():
+    """Конфиг бенча растёт из типизированной схемы: подключ `two_level` обязан в
+    нём быть, а профиль, назвавший одно число, второе не теряет."""
+    from gc_core.auto_routing.policy import RoutingParams
+
+    assert _config().agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10,
+        "strong_steps": 2,
+        "pair_threshold": 3,
+    }
+    config = _config(
+        {
+            "agent.auto_routing_two_level": {"strong_steps": 4},
+        }
+    )
+    assert config.agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10,
+        "strong_steps": 4,
+        "pair_threshold": 3,
+    }
+    params = RoutingParams.from_config(config)
+    assert (params.policy, params.weak_steps, params.strong_steps) == (
+        "two_level",
+        10,
+        4,
+    )
+
+
+def test_runtime_logs_directory_wins_over_profile():
+    config = _config({"paths.logs_dump_dir": "/tmp/unrelated-profile-logs"})
+    assert config.paths.logs_dump_dir == str(_HARBOR_DIR / "logs")
+
+
+def test_routing_defaults_reach_bench_settings_and_explicit_updates_win():
+    defaults = _config().agent
+    assert defaults.auto_routing is True
+    assert defaults.auto_routing_safe_level == "auto"
+    assert defaults.auto_routing_two_level.model_dump() == {
+        "weak_steps": 10,
+        "strong_steps": 2,
+        "pair_threshold": 3,
+    }
+    config = _config({"agent.auto_routing_two_level": {"weak_steps": 6}})
+    assert config.agent.auto_routing_two_level.model_dump() == {
+        "weak_steps": 6,
+        "strong_steps": 2,
+        "pair_threshold": 3,
+    }
+
+
+def test_setting_os_backend_kind_stays_separate_from_runtime_backend():
+    loaded = _loaded({"os_backend.kind": "local"})
+    assert loaded.settings.os_backend.kind == "local"
+    assert loaded.runtime.os_backend == "harbor"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"agent.max_steps": 20, "agent": {"no_tool_call_max_count": 7}},
+        {"agent": {"no_tool_call_max_count": 7}, "agent.max_steps": 20},
+    ],
+    ids=["dotted-first", "nested-first"],
+)
+def test_mixed_agent_overrides_preserve_independent_leaves(overrides):
+    before = deepcopy(overrides)
+    loaded = _loaded(overrides)
+
+    assert overrides == before
+    assert loaded.settings.agent.max_steps == 20
+    assert loaded.settings.agent.no_tool_call_max_count == 7
+    assert loaded.provenance.source("agent.max_steps").layer == "bench_profile"
+    assert (
+        loaded.provenance.source("agent.no_tool_call_max_count").layer
+        == "bench_profile"
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"backend.use_ssl": True, "backend": {"request_timeout_sec": 17}},
+        {"backend": {"request_timeout_sec": 17}, "backend.use_ssl": True},
+    ],
+    ids=["dotted-first", "nested-first"],
+)
+def test_mixed_backend_overrides_preserve_independent_leaves(overrides):
+    before = deepcopy(overrides)
+    loaded = _loaded(overrides)
+
+    assert overrides == before
+    assert loaded.settings.backend.use_ssl is True
+    assert loaded.settings.backend.request_timeout_sec == 17
+    assert loaded.provenance.source("backend.use_ssl").layer == "bench_profile"
+    assert (
+        loaded.provenance.source("backend.request_timeout_sec").layer
+        == "bench_profile"
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides, expected_max_steps",
+    [
+        (
+            {
+                "agent.max_steps": 20,
+                "agent": {"max_steps": 30, "no_tool_call_max_count": 7},
+            },
+            30,
+        ),
+        (
+            {
+                "agent": {"max_steps": 30, "no_tool_call_max_count": 7},
+                "agent.max_steps": 20,
+            },
+            20,
+        ),
+    ],
+    ids=["dotted-first", "nested-first"],
+)
+def test_mixed_duplicate_leaf_uses_last_value(overrides, expected_max_steps):
+    before = deepcopy(overrides)
+    config = _config(overrides)
+
+    assert overrides == before
+    assert config.agent.max_steps == expected_max_steps
+    assert config.agent.no_tool_call_max_count == 7
+
+
+@pytest.mark.parametrize(
+    "dotted_first", [True, False], ids=["dotted-first", "nested-first"]
+)
+def test_mixed_overrides_replace_list_and_dict_leaves(dotted_first):
+    pairs = [
+        ("agent.stop_tools", ["fs_read_file", "turn_ask_human"]),
+        ("agent", {"stop_tools": ["turn_ask_human"]}),
+        (
+            "backend.chat_completion_kwargs",
+            {"temperature": 0, "tool_choice": "auto"},
+        ),
+        ("backend", {"chat_completion_kwargs": {"tool_choice": "required"}}),
+    ]
+    overrides = dict(pairs if dotted_first else reversed(pairs))
+    before = deepcopy(overrides)
+    config = _config(overrides)
+
+    assert overrides == before
+    assert config.agent.stop_tools == (
+        ["turn_ask_human"]
+        if dotted_first
+        else ["fs_read_file", "turn_ask_human"]
+    )
+    assert config.backend.chat_completion_kwargs == (
+        {"tool_choice": "required"}
+        if dotted_first
+        else {"temperature": 0, "tool_choice": "auto"}
+    )
+
+
+@pytest.mark.parametrize(
+    "dotted_first", [True, False], ids=["dotted-first", "nested-first"]
+)
+def test_mixed_model_overrides_replace_whole_entry(dotted_first):
+    pairs = [
+        (
+            "models.weak",
+            {
+                "model": "first-model",
+                "url": "https://first.example/v1/chat/completions",
+                "token": "synthetic-token",
+            },
+        ),
+        ("models", {"weak": {"model": "second-model"}}),
+    ]
+    overrides = dict(pairs if dotted_first else reversed(pairs))
+    before = deepcopy(overrides)
+    config = _config(overrides)
+    entry = config.models["weak"]
+    token = entry.token.get_secret_value() if entry.token is not None else None
+
+    assert overrides == before
+    assert (entry.model, entry.url, token) == (
+        ("second-model", None, None)
+        if dotted_first
+        else (
+            "first-model",
+            "https://first.example/v1/chat/completions",
+            "synthetic-token",
+        )
+    )
+
+
+def test_mixed_overrides_keep_compat_notices_and_runtime_separate():
+    overrides = {
+        "agent.max_steps": 20,
+        "agent": {"no_tool_call_max_count": 7},
+        "models": {
+            "weak": {
+                "model": "test",
+                "backend": {"chat_completion_kwargs": {"temperature": 0}},
+            }
+        },
+        "os_backend": "local",
+        "notices": ("existing notice",),
+    }
+    before = deepcopy(overrides)
+    loaded = _loaded(overrides)
+
+    assert overrides == before
+    assert loaded.settings.models["weak"].main == {"temperature": 0}
+    assert loaded.runtime.os_backend == "local"
+    assert loaded.settings.os_backend.kind == "harbor"
+    assert loaded.runtime.notices[0] == "existing notice"
+    assert any(
+        "models.weak.backend.chat_completion_kwargs" in notice
+        for notice in loaded.runtime.notices[1:]
+    )

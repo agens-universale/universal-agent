@@ -1,7 +1,11 @@
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
+from gc_core.backends.runtime_probe import (
+    RuntimeUnavailable,
+    reraise_runtime_unavailable,
+)
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import (
@@ -63,7 +67,7 @@ def _normalize_newlines(content: str, newline: str) -> str:
 
 class WriteToFile(AbstractSimpleTool):
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         description = {
             "type": "function",
             "name": "fs_write_file",
@@ -128,7 +132,7 @@ class WriteToFile(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_write_file
 Tool description: Writes a file to the local filesystem.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to write to (must be absolute, not relative)."}, "content": {"type": "string", "description": "The complete content to write to the file."}, "make_dirs": {"type": "boolean", "description": "If true, create any missing parent folders before writing. Default false."}}, "required": ["path", "content"], "additionalProperties": false}
@@ -196,6 +200,8 @@ Usage:
             return {"type": "parent_not_found"}
         try:
             await self._backend.makedirs(parent)
+        except RuntimeUnavailable:
+            raise
         except Exception as e:
             return {"type": "mkdir_failed", "message": str(e)}
         return None
@@ -219,9 +225,11 @@ Usage:
             return None
         try:
             if await self._backend.getsize(path) <= fs_mutate_max_bytes(
-                self._config_dict
+                self._settings_source
             ):
                 return await self._backend.read_bytes(path)
+        except RuntimeUnavailable:
+            raise
         except Exception:
             return None
         return None
@@ -280,6 +288,7 @@ Usage:
             try:
                 await self._backend.copy(path, backup_path)
             except Exception as e:
+                reraise_runtime_unavailable(e)
                 return self._result(
                     ok=False,
                     path=path,
@@ -308,6 +317,7 @@ Usage:
             assert out_bytes is not None
             await self._backend.write_bytes(path, out_bytes)
         except Exception as e:
+            reraise_runtime_unavailable(e)
             return self._result(
                 ok=False,
                 path=path,

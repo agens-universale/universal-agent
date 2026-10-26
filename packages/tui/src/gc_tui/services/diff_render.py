@@ -362,21 +362,6 @@ class HunkBody:
         return self._accents
 
 
-def row_kinds(hunks: str) -> list[str]:
-    """Виды строк тела (`add`/`del`/`ctx`/`sep`) в порядке отрисовки.
-
-    Те же виды отдаёт `HunkBody.kinds`, и экраны берут их оттуда — вместе с
-    рендером тех же строк. Отдельная функция остаётся ВТОРЫМ МНЕНИЕМ: стражи
-    сверяют по ней разбор движка, и независимость этой пары (`_parse` + `_take`
-    без `max_lines`) — весь её смысл.
-    """
-    rows = _parse(hunks or "")
-    return [
-        row.kind
-        for row in _take(rows, sum(1 for r in rows if r.kind != "sep"))
-    ]
-
-
 def _append_row(
     text: Text,
     row: _Row,

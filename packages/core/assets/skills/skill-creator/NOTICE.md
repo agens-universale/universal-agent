@@ -27,11 +27,11 @@ upstream version:
   artefacts (if ever produced by experimental flows) are not bundled
   into the resulting `.skill` archive.
 
-All other files (`scripts/utils.py`, `scripts/__init__.py`, `LICENSE.txt`)
+All other files (`scripts/__init__.py`, `LICENSE.txt`)
 are unmodified copies.
 
 The following upstream files are NOT included in this distribution:
-`scripts/aggregate_benchmark.py`, `scripts/generate_report.py`,
+`scripts/utils.py`, `scripts/aggregate_benchmark.py`, `scripts/generate_report.py`,
 `scripts/run_loop.py`, `scripts/run_eval.py`,
 `scripts/improve_description.py`, `references/schemas.md`,
 `references/agents/{grader,analyzer,comparator}.md`,

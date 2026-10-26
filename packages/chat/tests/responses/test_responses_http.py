@@ -5,6 +5,7 @@ from gc_chat.main import main
 from gc_chat.responses.facade import ResponsesFacade
 from gc_chat.responses.http_api import create_app
 from gc_chat.responses.index_store import ResponseIndex
+from gc_testkit.settings import make_settings
 
 # Host-guard пускает только loopback (gc_chat.http_guard).
 LOOPBACK = "http://127.0.0.1"
@@ -40,16 +41,18 @@ def _app(tmp_path, *, token: str = "", origins: list[str] | None = None):
     threads.mkdir(exist_ok=True)
     agent = _Agent()
 
-    async def factory(config, **kwargs):
-        del config, kwargs
+    async def factory(settings, **kwargs):
+        del settings, kwargs
         return agent
 
     facade = ResponsesFacade(
-        config={
-            "model": "agent-model",
-            "chat_api_auth_token": token,
-            "chat_api_cors_origins": list(origins or []),
-        },
+        settings=make_settings(
+            {
+                "agent.model": "agent-model",
+                "chat_api.auth_token": token,
+                "chat_api.cors_origins": list(origins or []),
+            }
+        ),
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )
@@ -140,12 +143,12 @@ def test_non_stream_failure_is_500(tmp_path):
             raise RuntimeError("boom")
             yield ("answer", "")
 
-    async def factory(config, **kwargs):
-        del config, kwargs
+    async def factory(settings, **kwargs):
+        del settings, kwargs
         return Boom()
 
     facade = ResponsesFacade(
-        config={"model": "m"},
+        settings=make_settings(**{"agent.model": "m"}),
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )
@@ -163,13 +166,13 @@ def test_non_stream_failure_is_500(tmp_path):
 def test_harbor_exits_before_bind(monkeypatch, capsys):
     def load(path, profile_override=None):
         del path, profile_override
-        return {"os_backend": "harbor"}, None
+        return make_settings(os_backend="harbor")
 
     def run(coro):
         coro.close()
         raise AssertionError("bind")
 
-    monkeypatch.setattr("gc_chat.main.load_config_ex", load)
+    monkeypatch.setattr("gc_chat.main.load_settings", load)
     monkeypatch.setattr("gc_chat.main.asyncio.run", run)
     assert main(["--config", "c.yml"]) == 1
     captured = capsys.readouterr()
@@ -182,13 +185,15 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
 
     def load(path, profile_override=None):
         del path, profile_override
-        return {
-            "os_backend": "local",
-            "threads_data_path": str(tmp_path),
-            "model": "m",
-            "strict_turn_finish_validation": True,
-            "todo_params": {"reminder_steps": 9},
-        }, None
+        return make_settings(
+            {
+                "os_backend": "local",
+                "paths.threads_data_path": str(tmp_path),
+                "agent.model": "m",
+                "agent.strict_turn_finish_validation": True,
+                "todo.reminder_steps": 9,
+            }
+        )
 
     class FakeServer:
         def __init__(self, config) -> None:
@@ -199,7 +204,7 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
         async def serve(self) -> None:
             return None
 
-    monkeypatch.setattr("gc_chat.main.load_config_ex", load)
+    monkeypatch.setattr("gc_chat.main.load_settings", load)
     monkeypatch.setattr("gc_chat.main.uvicorn.Server", FakeServer)
     assert main(["--config", "c.yml"]) == 0
     assert captured["host"] == "127.0.0.1"
@@ -276,11 +281,13 @@ def test_wide_bind_skips_host_check(tmp_path):
     threads = tmp_path / "threads"
     threads.mkdir()
 
-    async def factory(config, **kwargs):
+    async def factory(settings, **kwargs):
         return _Agent()
 
     facade = ResponsesFacade(
-        config={"model": "m", "chat_api_host": "0.0.0.0"},
+        settings=make_settings(
+            **{"agent.model": "m", "chat_api.host": "0.0.0.0"}
+        ),
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )

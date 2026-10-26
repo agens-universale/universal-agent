@@ -10,11 +10,8 @@ from gc_core.summarize.summary_spec import (
     SUMMARY_SECTIONS,
     SUMMARY_SECTIONS_PLACEHOLDER,
     agent_summary_slice_mode,
-    agent_visible_section_tags,
     assemble_summary_xml,
     extract_summary_bodies,
-    format_section_tags_for_repair,
-    hint_section_tags,
     merge_summary_bodies,
     render_output_shape_for_prompt,
     render_sections_for_prompt,
@@ -80,11 +77,6 @@ class SummarySpecTest(unittest.TestCase):
             self.assertIn(f"<{section.tag}>", block)
             self.assertIn(section.description.strip().splitlines()[0], block)
 
-    def test_repair_lists_same_tags(self) -> None:
-        self.assertEqual(
-            tuple(format_section_tags_for_repair().split(", ")), section_tags()
-        )
-
     def test_merge_repair_keeps_preserved_tags(self) -> None:
         pad = "- test content for validation padding."
         invalid = assemble_summary_xml(
@@ -113,10 +105,11 @@ class SummarySpecTest(unittest.TestCase):
     def test_slice_short_only_agent_visible_tags(self) -> None:
         full = valid_summary_xml_for_tests()
         short = slice_summary(full, "short")
-        for tag in agent_visible_section_tags():
-            self.assertIn(f"<{tag}>", short)
-        for tag in hint_section_tags():
-            self.assertNotIn(f"<{tag}>", short)
+        for section in SUMMARY_SECTIONS:
+            if section.agent_visible:
+                self.assertIn(f"<{section.tag}>", short)
+            else:
+                self.assertNotIn(f"<{section.tag}>", short)
 
     def test_slice_full_all_canon_tags(self) -> None:
         full = assemble_summary_xml(
@@ -233,6 +226,65 @@ class SummarySpecTest(unittest.TestCase):
             "<summary><open_tasks>first</open_tasks><open_tasks>second</open_tasks></summary>"
         )
         self.assertEqual(bodies["open_tasks"], "second")
+
+    def test_extract_unclosed_tags_stops_at_next_canon_open(self) -> None:
+        raw = (
+            "<summary>"
+            "<task_and_context>ctx</task_and_context>"
+            "<open_tasks>mode: execution</open_tasks>"
+            "<do_not_redo>- tried X and failed\n"
+            "<last_verified_facts>- cmd → ok\n"
+            "<active_constraints>- py>=3.11\n"
+            "<recent_artifacts>- /abs/a -> draft"
+            "</summary>"
+        )
+        bodies = extract_summary_bodies(raw)
+        self.assertEqual(bodies["do_not_redo"], "- tried X and failed")
+        self.assertEqual(bodies["last_verified_facts"], "- cmd → ok")
+        self.assertEqual(bodies["active_constraints"], "- py>=3.11")
+        self.assertEqual(bodies["recent_artifacts"], "- /abs/a -> draft")
+        self.assertNotIn("<last_verified_facts>", bodies["do_not_redo"])
+
+    def test_extract_unclosed_tags_ignore_section_order(self) -> None:
+        raw = (
+            "<summary>"
+            "<last_verified_facts>- fact B\n"
+            "<do_not_redo>- dead A\n"
+            "</summary>"
+        )
+        bodies = extract_summary_bodies(raw)
+        self.assertEqual(bodies["last_verified_facts"], "- fact B")
+        self.assertEqual(bodies["do_not_redo"], "- dead A")
+
+    def test_merge_repaired_summary_recovers_unclosed_repair_tags(
+        self,
+    ) -> None:
+        pad = "- test content for validation padding."
+        invalid = assemble_summary_xml(
+            {
+                "task_and_context": f"keep-me\n{pad}",
+                "open_tasks": f"mode: execution\n{pad}",
+            }
+        )
+        repaired = (
+            "<summary>"
+            f"<do_not_redo>{pad}\n"
+            f"<last_verified_facts>{pad}\n"
+            f"<active_constraints>{pad}\n"
+            f"<recent_artifacts>{pad}"
+            "</summary>"
+        )
+        merged = merge_repaired_summary(
+            invalid_text=invalid, repaired_text=repaired
+        )
+        ok, reason = validate_summary_text(merged)
+        self.assertTrue(ok, reason)
+        self.assertIn("keep-me", merged)
+        bodies = extract_summary_bodies(merged)
+        self.assertEqual(bodies["do_not_redo"], pad)
+        self.assertEqual(bodies["last_verified_facts"], pad)
+        self.assertEqual(bodies["active_constraints"], pad)
+        self.assertEqual(bodies["recent_artifacts"], pad)
 
     def test_validate_accepts_short_all_n_a_sections(self) -> None:
         bodies = dict.fromkeys(section_tags(), "- n/a")

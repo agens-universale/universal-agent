@@ -6,7 +6,7 @@ import re
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
-from gc_core.utils.backend_errors import (
+from gc_core.execution.finish_reason import (
     FINISH_KIND_LENGTH,
     nonempty_reasoning_text,
     normalize_finish_reason,
@@ -105,9 +105,12 @@ def _nonempty_content(content):
     return content
 
 
-def _canonical_message_item(dct_choice, *, text, role, reasoning=None, response_id=None):
+def _canonical_message_item(
+    dct_choice, *, text, role, reasoning=None, response_id=None
+):
     item = {
-        "id": "msg_" + get_md5_hash({"response_id": response_id, "choice": dct_choice}),
+        "id": "msg_"
+        + get_md5_hash({"response_id": response_id, "choice": dct_choice}),
         "type": "message",
         "status": "completed",
         "content": [

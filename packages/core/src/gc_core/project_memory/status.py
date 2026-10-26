@@ -9,14 +9,14 @@ to the model. The agent learns *that* a memory exists and *roughly how big it is
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from gc_core.config_modules.project_memory import (
     DEFAULT_PROJECT_MEMORY_MAX_CHARS,
-    project_memory_limits_from_config_dict,
 )
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.project_memory import storage
+from gc_core.settings import settings_of
 
 _FILE_NAME = "project_memory.md"
 
@@ -38,19 +38,21 @@ _EMPTY_STATUS = (
 def build_project_memory_status_for_cwd(
     cwd: Optional[str] = None,
     *,
-    config_dict: dict | None = None,
+    settings: Any = None,
 ) -> str:
     """Resolve the project-local memory path and build the status string.
+
+    ``settings`` — то, что принимает ``settings_of`` (ctx, ``LoadedSettings``,
+    ``AppConfig``); ``None`` — умолчания.
 
     Callers that have no business knowing where memory lives use this entry
     point — internal file name and directory layout stay encapsulated.
     """
     from gc_core.config_modules.env_vars import project_gc_dir
 
-    limits = project_memory_limits_from_config_dict(config_dict)
     return build_project_memory_status(
         project_gc_dir(cwd) / _FILE_NAME,
-        max_chars=limits["max_chars"],
+        max_chars=settings_of(settings).project_memory.max_chars,
     )
 
 
@@ -58,18 +60,19 @@ def attach_status_to_prompt_vars(
     prompt_vars: dict,
     cwd: Optional[str] = None,
     *,
-    config_dict: dict | None = None,
+    settings: Any = None,
 ) -> None:
     """Add `longMemoryStatus` to the given prompt-variables dict.
 
     Не добавляет статус, если ``project_memory`` в ``stop_tools`` (D36).
+    ``settings`` — то, что принимает ``settings_of``; ``None`` — умолчания.
     """
-    stop = (config_dict or {}).get("stop_tools")
-    if isinstance(stop, list) and PROJECT_MEMORY_TOOL_NAME in stop:
+    settings = settings_of(settings)
+    if PROJECT_MEMORY_TOOL_NAME in settings.agent.stop_tools:
         return
     try:
         prompt_vars["longMemoryStatus"] = build_project_memory_status_for_cwd(
-            cwd, config_dict=config_dict
+            cwd, settings=settings
         )
     except Exception:  # pragma: no cover — memory must never break metadata
         return

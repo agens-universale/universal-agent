@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from gc_core.states import SharedStateData, State
 from gc_core.tools import aapply_tool
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     NOOP_SUBAGENT_PROGRESS_SINK,
     QueueSubagentProgressSink,
     SubagentProgressEvent,
@@ -16,6 +16,7 @@ from gc_core.tools.subagents.progress import (
 )
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _make_event(**overrides) -> SubagentProgressEvent:
@@ -126,16 +127,14 @@ def _make_state():
 
 def _make_ctx(tools_data, *, sink=None):
     cfg = {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
     }
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         tools_data=tools_data,
         auth_connector=None,
         logger=None,
@@ -214,17 +213,15 @@ class TestApplyToolPassesCallId:
 
 def _make_runner_config(tmp_path):
     return {
-        "save_logs": True,
-        "logs_dump_dir": str(tmp_path),
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "subagent_max_steps": 30,
-        "enabled_tools": [],
-        "skills_data_path": "",
-        "mcp_servers": [],
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "chat_completions_params": {
+        "logging.save_logs": True,
+        "paths.logs_dump_dir": str(tmp_path),
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "agent.subagent_max_steps": 30,
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
+        "chat_completions": {
             "auxiliary_llm": {"max_tokens": 8192, "completion_kwargs": {}},
         },
     }
@@ -235,7 +232,7 @@ class TestProcessToolCallsForwardsCallId:
         from gc_core.processing_responses import aprocess_tool_calls
 
         state = _make_state()
-        ctx = SimpleNamespace(config_dict={})
+        ctx = fake_ctx()
         seen: dict = {}
 
         async def _fake_apply_tool(**kwargs):
@@ -281,7 +278,7 @@ class TestRunnerWiresSinkOntoChildCtx:
         parent_ctx.tools_spec = []
         parent_ctx.tools_description = []
         parent_ctx.subagent_progress_sink = sink
-        runner = SubagentRunner(parent_ctx, orch, cfg)
+        runner = SubagentRunner(parent_ctx, orch)
         captured: dict = {}
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -314,7 +311,7 @@ class TestRunnerWiresSinkOntoChildCtx:
         parent_ctx.tools_data = {}
         parent_ctx.tools_spec = []
         parent_ctx.tools_description = []
-        runner = SubagentRunner(parent_ctx, orch, cfg)
+        runner = SubagentRunner(parent_ctx, orch)
         captured: dict = {}
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):

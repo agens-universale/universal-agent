@@ -15,7 +15,22 @@ import asyncio
 _TIMEOUT = 30.0
 
 
+def wait_idle(search, timeout: float) -> bool:
+    """True — всё, что отдано сеансу через `want`, посчитано и отдано в `on_result`
+    (или отброшено из-за закрытия), либо поток вышел; False — вышел таймаут. Не из
+    UI-потока: поток может ждать его внутри `on_result`. Читает условие и флаги
+    сеанса (`_cond`, `_pending`, `_busy`, `_exited`) — прод-коду ждать простоя не нужно."""
+    with search._cond:
+        return search._cond.wait_for(
+            lambda: (
+                (search._pending is None and not search._busy)
+                or search._exited
+            ),
+            timeout,
+        )
+
+
 async def settled(search) -> None:
     """Поток сеанса посчитал всё, что ему отдали, и отдал экрану — или вышел."""
-    if not await asyncio.to_thread(search.wait_idle, _TIMEOUT):
+    if not await asyncio.to_thread(wait_idle, search, _TIMEOUT):
         raise TimeoutError(f"поиск файлов не закончился за {_TIMEOUT} с")

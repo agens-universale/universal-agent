@@ -2,22 +2,24 @@
 циклят и применяют значение МГНОВЕННО (спека 2026-07-18 §1 — черновик
 отменён); Enter текстом (палитра уже закрыта) — только инфо-флеш."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
 def test_cycle_value_wraps_around():
-    """Чистая функция цикла: ±1 по кортежу values, по кругу, без записи."""
-    from gc_tui.toggles import cycle_value
+    """Цикл ±1 по names тоггла, по кругу, без записи."""
+    from gc_tui.toggles import TOGGLES, cycle_in
 
-    assert cycle_value("gate", "on", 1) == "off"  # (idx2+1)%3 -> off
-    assert (
-        cycle_value("gate", "off", 1) == "smart"
-    )  # было "on" -> теперь "smart"
-    assert cycle_value("gate", "smart", 1) == "on"
-    assert cycle_value("answers", "judge", 1) == "deny"
-    assert cycle_value("answers", "allow", 1) == "judge"
-    assert cycle_value("answers", "deny", 1) == "allow"
-    assert cycle_value("answers", "deny", -1) == "judge"
+    def cycle(name, current, direction):
+        return cycle_in(TOGGLES[name].names, current, direction)
+
+    assert cycle("gate", "on", 1) == "off"  # (idx2+1)%3 -> off
+    assert cycle("gate", "off", 1) == "smart"  # было "on" -> теперь "smart"
+    assert cycle("gate", "smart", 1) == "on"
+    assert cycle("answers", "judge", 1) == "deny"
+    assert cycle("answers", "allow", 1) == "judge"
+    assert cycle("answers", "deny", 1) == "allow"
+    assert cycle("answers", "deny", -1) == "judge"
 
 
 def test_palette_renders_toggle_state(monkeypatch):
@@ -75,7 +77,10 @@ async def test_palette_footer_hidden_when_no_toggle_commands(tmp_path):
     reg = CommandRegistry()
     reg.register(Command("help", (), "", "справка"))
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(reg, initial_filter="")
         await app.screen.mount(pal)
@@ -96,7 +101,10 @@ async def test_palette_footer_shows_docked_toggle_row(tmp_path):
     reg.register(Command("help", (), "", "справка"))
     reg.register(Command("rigor", (), "", "строгость: пресет", is_toggle=True))
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
             reg, initial_filter="", toggle_state=lambda name: "medium"
@@ -131,7 +139,10 @@ async def test_palette_footer_vertical_order(tmp_path):
     reg.register(Command("help", (), "", "справка"))
     reg.register(Command("rigor", (), "", "строгость: пресет", is_toggle=True))
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
             reg, initial_filter="", toggle_state=lambda name: "medium"
@@ -168,7 +179,10 @@ async def test_palette_toggle_row_visible_when_filter_empties_top_zone(
     reg.register(Command("help", (), "", "справка"))
     reg.register(Command("gate", (), "", "финиш-гейт", is_toggle=True))
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
             reg, initial_filter="ga", toggle_state=lambda name: "on"
@@ -207,7 +221,10 @@ async def test_palette_footer_not_hanging_below_border_with_full_list(
 
     reg = build_default_registry()
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
             reg, initial_filter="", toggle_state=lambda name: "on"
@@ -241,7 +258,7 @@ def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
     app._threads_dir = str(
@@ -288,7 +305,7 @@ def test_apply_toggle_writes_explicit_value_not_recomputed_direction(tmp_path):
     cfg_file.write_text(
         'tui:\n  text_answer_mode: "allow"\n', encoding="utf-8"
     )
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
 
@@ -310,7 +327,7 @@ def test_apply_toggle_rejects_value_outside_spec(tmp_path):
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
 
@@ -333,7 +350,7 @@ def test_apply_toggle_answers_three_values(tmp_path):
     cfg_file.write_text(
         'tui:\n  text_answer_mode: "judge"\n', encoding="utf-8"
     )
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
 
@@ -351,12 +368,13 @@ def test_gate_state_shows_effective_not_raw():
     """Глобальный strict=false явный + tui дефолт → провайдер отдаёт 'off' (эффективный)."""
     from gc_tui.toggles import toggle_state
 
+    from gc_testkit.settings import make_settings
+
     class _App:
-        _config = {
-            "tui_finish_gate_mode": "on",
-            "tui_finish_gate_mode_explicit": False,
-            "strict_turn_finish_explicit_false": True,
-        }
+        def effective_settings(self):
+            return make_settings(
+                **{"agent.strict_turn_finish_validation": False}
+            )
 
     assert toggle_state(_App(), "gate") == "off"
 
@@ -370,7 +388,7 @@ def _app_with_config(tmp_path, yaml_text):
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(yaml_text, encoding="utf-8")
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
     return app, cfg_file
@@ -819,14 +837,17 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
         == answers_plain.rindex("deny")
     )
 
-    # Имя+описание ребёнка — стилем DIM (весь head, включая слеш).
+    # Имя+описание ребёнка — стилем SUB_INK (весь head, включая слеш):
+    # на ступень светлее подсказок (DIM), но тише основных ключей (INK).
     dim_spans_gate = [
-        s for s in gate_row.spans if p.DIM.lower() in str(s.style).lower()
+        s for s in gate_row.spans if p.SUB_INK.lower() in str(s.style).lower()
     ]
     assert dim_spans_gate and dim_spans_gate[0].start == 0
     assert dim_spans_gate[0].end >= len(" /gate")
     dim_spans_answers = [
-        s for s in answers_row.spans if p.DIM.lower() in str(s.style).lower()
+        s
+        for s in answers_row.spans
+        if p.SUB_INK.lower() in str(s.style).lower()
     ]
     assert dim_spans_answers and dim_spans_answers[0].start == 0
 
@@ -835,20 +856,20 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     # не задет).
     gate_value_start = gate_plain.rindex("on")
     assert any(
-        p.DIM.lower() in str(s.style).lower()
+        p.SUB_INK.lower() in str(s.style).lower()
         and s.start <= gate_value_start < s.end
         for s in gate_row.spans
     )
     answers_value_start = answers_plain.rindex("deny")
     assert any(
-        p.DIM.lower() in str(s.style).lower()
+        p.SUB_INK.lower() in str(s.style).lower()
         and s.start <= answers_value_start < s.end
         for s in answers_row.spans
     )
 
     # Родитель /rigor НЕ дымится DIM-ом (обычный toggle-стиль строки).
     assert not any(
-        p.DIM.lower() in str(s.style).lower() for s in rigor_row.spans
+        p.SUB_INK.lower() in str(s.style).lower() for s in rigor_row.spans
     )
 
 
@@ -1013,7 +1034,10 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(
     from gc_tui.app import TuiApp
 
     reg = _reg_with_gate_answers(monkeypatch)
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(64, 24)) as pilot:
         pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
         await app.screen.mount(pal)
@@ -1209,7 +1233,9 @@ def test_five_value_toggle_works_generically(monkeypatch):
 
     txt = pal._format_toggle_row(reg.lookup("fake")).plain
     assert "○ ○ ● ○ ○" in txt and txt.rstrip().endswith("v2")
-    assert tg.cycle_value("fake", "v4", 1) == "v0"  # цикл по кругу
+    assert (
+        tg.cycle_in(tg.TOGGLES["fake"].names, "v4", 1) == "v0"
+    )  # цикл по кругу
     hint = pal._toggle_hint(reg.lookup("fake"))
     assert hint.startswith("v2 — подсказка 2")
 
@@ -1290,7 +1316,10 @@ async def test_palette_navigation_does_not_change_footer_row_count(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/"
@@ -1366,7 +1395,10 @@ async def test_group_separator_between_two_preset_groups(
     reg.register(Command("zzgroupb", (), "", "группа B", is_toggle=True))
     state = {"zzgroupa": "x", "zzgroupb": "p"}
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
             reg, initial_filter="", toggle_state=lambda n: state[n]
@@ -1399,7 +1431,10 @@ async def test_palette_filter_reveals_hidden_gate(tmp_path):
     from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
             reg, initial_filter="ga", toggle_state=lambda n: "on"
@@ -1420,7 +1455,10 @@ async def test_regular_row_hint_unaffected_by_visible_toggles(tmp_path):
     from gc_tui.widgets.command_palette import _HINT_NO_ARGS, CommandPalette
 
     reg = build_default_registry()
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
+    )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
             reg, initial_filter="", toggle_state=lambda n: "on"

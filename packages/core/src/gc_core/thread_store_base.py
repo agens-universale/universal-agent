@@ -133,7 +133,7 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
     (``redis.asyncio``, ``asyncpg``) — это :class:`AsyncThreadStoreBase`.
 
     Смысл каждого метода и восемь поведенческих свойств, которые легко
-    нарушить, — в ``thread_store_base`` и в ``docs/thread-store.md``.
+    нарушить, — в ``thread_store_base`` и в ``docs/sdk/thread-store-contract.md``.
     Проверить себя: ``gc_testkit.thread_store_conformance.assert_conforms``.
 
     **Необязательные способности** (в контракт не входят, объявляются по

@@ -8,29 +8,34 @@ from __future__ import annotations
 
 import contextlib
 import gc
-from copy import copy as shallow_copy
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
 from gc_core.config_modules.summary import SUMMARY_CHARS_PER_TOKEN
-from gc_core.message_policy.user_message_policy import (
-    extract_real_user_message_text,
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.message_keys import (
+    filter_messages_not_in_state as filter_messages_not_in_state,
 )
+from gc_core.execution.ports import port
+from gc_core.message_format.serialization import calc_history_chars_for_trigger
 from gc_core.summarize.compaction import (
     arun_summary_compaction,
     exceeded_summary_triggers,
     history_exceeds_summary_trigger,
+    without_system_messages,
 )
+from gc_core.summarize.config import ResolvedSummaryLimits
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
-    append_summary_trace_record,
+    aappend_summary_trace_record,
     log_compaction_failed,
     log_pre_run_max_rounds,
+    log_pre_run_no_progress,
     log_token_trigger_no_prompt_tokens,
 )
-from gc_core.thread_store import make_message_key
 
 if TYPE_CHECKING:
     from gc_core.run_context import RunContext
@@ -102,6 +107,23 @@ async def _asummarizing_flag(thread_session):
         await _aset_runtime_flag(ts, "summarizing", False)
 
 
+async def areset_run_flags(thread_session) -> None:
+    """Use an optional atomic store batch, retaining the custom-store path."""
+    if thread_session is None:
+        return
+    reset = getattr(thread_session.port, "areset_run_flags", None)
+    if callable(reset):
+        await reset(
+            thread_session.system_id,
+            thread_session.thread_id,
+            session_meta=thread_session.meta,
+        )
+        return
+    await areset_stale_summarizing_flag(thread_session)
+    await aset_tui_finalizing(thread_session, False)
+    await aset_tui_finish_gate_checking(thread_session, False)
+
+
 async def areset_stale_summarizing_flag(thread_session) -> None:
     """Снять залипший ``summarizing`` при старте: форма одна, синхронной нет."""
     if thread_session is None:
@@ -134,191 +156,18 @@ async def aset_tui_finish_gate_checking(thread_session, active: bool) -> None:
     await _aset_runtime_flag(thread_session, "finish_gate_checking", active)
 
 
-def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:
-    """True, если ``messages`` заканчивается на ``suffix`` (поэлементное ``==``)."""
-    if not suffix or len(messages) < len(suffix):
-        return False
-    return messages[-len(suffix) :] == suffix
-
-
-def filter_messages_not_in_state(
-    state_messages: list[dict],
-    batch: list[dict],
-) -> list[dict]:
-    """
-    Сообщения из ``batch``, которых ещё нет в ``state_messages`` (по ``make_message_key``).
-
-    Каноническая история живёт только в ``state.messages``: при продолжении треда
-    батч для backend может повторять уже загруженный хвост — в state дописываем лишь новое.
-    """
-    if not batch:
-        return []
-    known = {
-        make_message_key(m) for m in state_messages if isinstance(m, dict)
-    }
-    out: list[dict] = []
-    for msg in batch:
-        if not isinstance(msg, dict):
-            continue
-        key = make_message_key(msg)
-        if key in known:
-            continue
-        out.append(msg)
-        known.add(key)
-    return out
-
-
-def remove_exact_suffix_if_matches(
-    messages: list[dict], suffix: list[dict]
-) -> bool:
-    """
-    Если ``messages`` заканчивается на последовательность ``suffix``, удалить этот суффикс
-    только с хвоста (совпадение по списку и поэлементному ``==``). Иначе не менять историю.
-
-    Не изменяет середину ``messages``.
-    """
-    if not suffix or len(messages) < len(suffix):
-        return False
-    if messages[-len(suffix) :] != suffix:
-        return False
-    del messages[-len(suffix) :]
-    return True
-
-
-def _preserved_user_ask_batch(
-    current_messages: list[dict],
-    message_keys_already_persisted: frozenset[str] | None,
-) -> list[dict]:
-    scoped_messages = current_messages
-    if message_keys_already_persisted is not None:
-        incoming = [
-            m
-            for m in current_messages
-            if isinstance(m, dict)
-            and make_message_key(m) not in message_keys_already_persisted
-        ]
-        scoped_messages = incoming if incoming else [current_messages[-1]]
-    last = scoped_messages[-1]
-    out: list[dict] = []
-    for msg in scoped_messages[:-1]:
-        if not isinstance(msg, dict):
-            continue
-        if str(msg.get("role", "")).strip().lower() != "user":
-            continue
-        if not (extract_real_user_message_text(msg) or msg.get("attachments")):
-            continue
-        out.append(msg)
-    out.append(last)
-    return out
-
-
-def _preserved_function_output_batch(
-    current_messages: list[dict], state_messages: list[dict]
-) -> list[dict]:
-    outputs = [
-        m
-        for m in current_messages
-        if isinstance(m, dict) and m.get("type") in _FUNCTION_OUTPUT_TYPES
-    ]
-    batches: list[dict] = []
-    seen_calls: set[str] = set()
-    for output in outputs:
-        call_id_raw = output.get("call_id")
-        if (
-            not isinstance(call_id_raw, str)
-            or not call_id_raw
-            or call_id_raw in seen_calls
-        ):
-            continue
-        call_msg = find_function_call_for_id(
-            call_id_raw,
-            current_messages=current_messages,
-            state_messages=state_messages,
-        )
-        if call_msg is None:
-            continue
-        seen_calls.add(call_id_raw)
-        batches.extend((shallow_copy(call_msg), shallow_copy(output)))
-    batches.extend(shallow_copy(m) for m in _technical_tail(current_messages))
-    return batches
-
-
-def build_preserved_batch(
-    *,
-    current_messages: list[dict],
-    mode: str,
-    state_messages: list[dict],
-    message_keys_already_persisted: frozenset[str] | None = None,
-) -> list[dict]:
-    """
-    Собирает сообщения текущего backend-вызова, которые нужно сохранить от compaction.
-
-    ``state_messages`` — полный канонический ``state.messages`` на момент вызова
-    pre-backend hook (до удаления суффикса текущего батча). Нужна для разрешения
-    пар ``function_call`` → ``*_output``.
-
-    Для режима ``user_ask``: если передан непустой ``message_keys_already_persisted``,
-    сообщения режутся до **входа текущего шага** — только те элементы ``current_messages``,
-    чей ключ не был известен треду до ``persist_batch`` этого шага (уже сохранённые
-    ключи считаются повторным контекстом, а не новым входом шага). Из входа
-    остаются реплики человека, user-сообщения с вложениями (картинка тула или
-    ответа на вопрос агента — сводка её не несёт) и последнее сообщение.
-
-    Для режима ``function_call_output``: пары «вызов → ответ» и за ними технический
-    хвост батча — user-сообщения после последнего ответа (напоминание loop detector,
-    картинки тулов) в исходном порядке. Реплик человека в таком батче нет
-    (``check_mode``).
-    """
-    if not current_messages:
-        return []
-    if mode == "user_ask":
-        return _preserved_user_ask_batch(
-            current_messages, message_keys_already_persisted
-        )
-    if mode == "function_call_output":
-        return _preserved_function_output_batch(
-            current_messages, state_messages
-        )
-    return []
-
-
-def _technical_tail(messages: list[dict]) -> list[dict]:
-    """User-сообщения после последнего ответа тула — в исходном порядке."""
-    tail: list[dict] = []
-    for m in reversed(messages):
-        if not isinstance(m, dict) or m.get("type") in _FUNCTION_OUTPUT_TYPES:
-            break
-        if str(m.get("role", "")).strip().lower() == "user":
-            tail.append(m)
-    tail.reverse()
-    return tail
-
-
-def find_function_call_for_id(
-    call_id: str,
-    *,
-    current_messages: list[dict],
-    state_messages: list[dict],
-) -> dict | None:
-    """Сначала ищет вызов в ``current_messages``, затем во всём ``state_messages``."""
-    if not isinstance(call_id, str) or not call_id:
-        return None
-    for seq in (current_messages, state_messages):
-        found = _find_function_call_in(seq or (), call_id)
-        if found is not None:
-            return found
-    return None
-
-
-def _find_function_call_in(seq, call_id: str) -> dict | None:
-    for m in seq:
-        if (
-            isinstance(m, dict)
-            and m.get("type") in _FUNCTION_CALL_TYPES
-            and m.get("call_id") == call_id
-        ):
-            return m
-    return None
+from gc_core.execution.preserved_batch import (
+    _messages_tail_matches,
+)
+from gc_core.execution.preserved_batch import (
+    build_preserved_batch as build_preserved_batch,
+)
+from gc_core.execution.preserved_batch import (
+    find_function_call_for_id as find_function_call_for_id,
+)
+from gc_core.execution.preserved_batch import (
+    remove_exact_suffix_if_matches as remove_exact_suffix_if_matches,
+)
 
 
 class RunSummaryCoordinator:
@@ -335,6 +184,9 @@ class RunSummaryCoordinator:
         is_cli_mode: bool,
         pre_backend_trigger_reason: str,
         logger: Any | None = None,
+        limits_provider: Callable[[], ResolvedSummaryLimits] | None = None,
+        deferred_startup_compaction: bool = False,
+        startup_progress_guard: bool = True,
     ) -> None:
         self._ctx = ctx
         self._state = state
@@ -343,16 +195,40 @@ class RunSummaryCoordinator:
         self._turn_end_trigger_chars = turn_end_trigger_chars
         self._summary_trigger_tokens = summary_trigger_tokens
         self._turn_end_trigger_tokens = turn_end_trigger_tokens
+        self._limits_provider = limits_provider
+        self._startup_compaction_pending = deferred_startup_compaction
+        self._startup_progress_guard = startup_progress_guard
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
-        self._proj_tags = projection_tags_from_config(
-            getattr(ctx, "config_dict", None)
-        )
+        # Теги читаются при сжатии, не в конструкторе: нулевой порог — no-op,
+        # и контекст без настроек (заглушка ребёнка) до settings_of не доходит.
+        self._proj_tags: tuple[str, ...] | None = None
         # Слепой токенный порог: был ли уже хук (значит, и главный запрос) и
         # сказано ли об этом в лог в этом прогоне.
         self._backend_requested = False
         self._blind_token_trigger_warned = False
+
+    def _refresh_limits(self) -> None:
+        """Пороги срабатывания на момент проверки: от провайдера модели истории;
+        без провайдера остаётся снимок конструктора. Батч и лимит диалога сюда не
+        входят — их считает само сжатие (`compaction.arun_summary_compaction`)."""
+        if self._limits_provider is None:
+            return
+        limits = self._limits_provider()
+        self._summary_trigger_chars = limits.chars_during
+        self._summary_trigger_tokens = limits.tokens_during
+        self._turn_end_trigger_chars = limits.chars_after
+        self._turn_end_trigger_tokens = limits.tokens_after
+
+    def _projection_tags(self) -> tuple[str, ...]:
+        if self._proj_tags is None:
+            self._proj_tags = projection_tags_from_config(self._ctx)
+        return self._proj_tags
+
+    def _collect_garbage(self) -> None:
+        collect = getattr(self._ctx, "collect_garbage", None) or gc.collect
+        collect()
 
     async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
@@ -362,7 +238,7 @@ class RunSummaryCoordinator:
             suffix = archive_result.get("archive_suffix")
             if isinstance(suffix, str) and suffix.strip():
                 event["archive_suffix"] = suffix.strip()
-        append_summary_trace_record(
+        await aappend_summary_trace_record(
             self._ctx,
             trigger_reason=str(event.get("trigger_reason") or ""),
             trace_data=event.get("summary_trace", {}),
@@ -384,6 +260,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        self._refresh_limits()
         if (
             self._summary_trigger_chars <= 0
             and self._summary_trigger_tokens <= 0
@@ -396,7 +273,7 @@ class RunSummaryCoordinator:
                     state=state,
                     summary_trigger_chars=self._summary_trigger_chars,
                     summary_trigger_tokens=self._summary_trigger_tokens,
-                    tags=self._proj_tags,
+                    tags=self._projection_tags(),
                     strip_think=True,
                 )
                 if not hits:
@@ -427,9 +304,12 @@ class RunSummaryCoordinator:
                 # некого, следующий круг вёл бы только их.
                 if self._summary_trigger_chars <= 0:
                     break
+                self._refresh_limits()
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             if rounds > 0:
-                gc.collect()
+                self._collect_garbage()
+        except ExecutionFailure:
+            raise
         except Exception as summarize_exc:
             log_compaction_failed(
                 logger,
@@ -452,6 +332,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        self._refresh_limits()
         async with _asummarizing_flag(self._thread_session):
             await arun_summary_compaction(
                 ctx=self._ctx,
@@ -462,7 +343,7 @@ class RunSummaryCoordinator:
                 trigger_threshold_chars=self._summary_trigger_chars,
             )
         # C1: старая история отцеплена компакцией — собираем циклический мусор.
-        gc.collect()
+        self._collect_garbage()
 
     def _warn_if_token_trigger_blind(self) -> None:
         """Раз за прогон сказать в лог, что токенный порог не может сработать.
@@ -480,7 +361,7 @@ class RunSummaryCoordinator:
                 state=self._state,
                 summary_trigger_chars=self._summary_trigger_tokens
                 * SUMMARY_CHARS_PER_TOKEN,
-                tags=self._proj_tags,
+                tags=self._projection_tags(),
                 strip_think=True,
             )
         ):
@@ -497,81 +378,173 @@ class RunSummaryCoordinator:
         current_messages: list[dict],
         mode: str,
     ) -> None:
-        """Компакция прямо перед вызовом backend'а (основная реализация).
+        """Сжатие после выбора модели; первый вызов догоняет стартовую историю."""
+        startup = self._startup_compaction_pending
+        self._startup_compaction_pending = False
+        reason = "pre_run" if startup else self._pre_backend_trigger_reason
+        rounds = _PRE_RUN_SUMMARY_MAX_ROUNDS if startup else 1
+        guard_progress = startup and self._startup_progress_guard
+        for done in range(1, rounds + 1):
+            before_chars = (
+                self._history_chars(self._state.messages)
+                if guard_progress
+                else 0
+            )
+            compacted = await self._acompact_backend_batch(
+                current_messages, mode, reason
+            )
+            if (
+                not compacted
+                or not startup
+                or self._summary_trigger_chars <= 0
+            ):
+                return
+            if guard_progress and self._startup_stalled(
+                current_messages, before_chars
+            ):
+                self._log_startup_stop(done)
+                return
+        if self._startup_trigger_exceeded():
+            log_pre_run_max_rounds(
+                self._logger,
+                thread_id=getattr(self._thread_session, "thread_id", None),
+                max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
+            )
 
-        Уезжает в ``arun_agent`` аргументом ``pre_backend_compaction_hook``:
-        корутинную функцию цикл ждёт нативно, без потока из пула.
-        """
-        state = self._state
-        if state.backend_api_mode != "chat_completions":
-            return
-        if (
-            self._summary_trigger_chars <= 0
-            and self._summary_trigger_tokens <= 0
-        ):
-            return
-        if self._summary_trigger_tokens > 0:
-            self._warn_if_token_trigger_blind()
-        hits = exceeded_summary_triggers(
-            state=state,
-            summary_trigger_chars=self._summary_trigger_chars,
-            summary_trigger_tokens=self._summary_trigger_tokens,
-            tags=self._proj_tags,
+    def _startup_stalled(
+        self, current_messages: list[dict], before_chars: int
+    ) -> bool:
+        """Нет прогресса: текущий батч сам выше порога или история не сократилась."""
+        return (
+            self._history_chars(current_messages) > self._summary_trigger_chars
+            or self._history_chars(self._state.messages) >= before_chars
+        )
+
+    def _log_startup_stop(self, rounds: int) -> None:
+        """Ранняя остановка стартового сжатия — в лог, если порог всё ещё превышен."""
+        if self._startup_trigger_exceeded():
+            log_pre_run_no_progress(
+                self._logger,
+                thread_id=getattr(self._thread_session, "thread_id", None),
+                rounds=rounds,
+            )
+
+    def _startup_trigger_exceeded(self) -> bool:
+        return bool(
+            exceeded_summary_triggers(
+                state=self._state,
+                summary_trigger_chars=self._summary_trigger_chars,
+                summary_trigger_tokens=self._summary_trigger_tokens,
+                tags=self._projection_tags(),
+                strip_think=True,
+            )
+        )
+
+    def _history_chars(self, messages: list[dict]) -> int:
+        return calc_history_chars_for_trigger(
+            without_system_messages(messages),
+            tags=self._projection_tags(),
             strip_think=True,
         )
+
+    async def _acompact_backend_batch(
+        self, current_messages: list[dict], mode: str, trigger_reason: str
+    ) -> bool:
+        """Сжать полный контекст, сохранив текущий батч для отправки модели."""
+        state = self._state
+        hits = self._backend_batch_trigger_hits()
         if not hits:
-            return
+            return False
         exceeded_chars, exceeded_tokens = _hit_pair(hits)
 
         state_tail = getattr(state, "messages", None)
         if not isinstance(state_tail, list):
-            return
-
-        keys_before_commit: frozenset[str] | None = None
-        ts = self._thread_session
-        if ts is not None:
-            snap = getattr(ts, "known_keys_snapshot_before_last_batch", None)
-            if isinstance(snap, frozenset):
-                keys_before_commit = snap
+            return False
 
         preserved_batch = build_preserved_batch(
             current_messages=list(current_messages),
             mode=str(mode),
             state_messages=list(state_tail),
-            message_keys_already_persisted=keys_before_commit,
+            message_keys_already_persisted=self._keys_persisted_before_last_batch(),
         )
         suffix_exact = list(current_messages)
         if not _messages_tail_matches(state_tail, suffix_exact):
-            return
+            return False
 
-        # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
-        # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
-        async with _asummarizing_flag(self._thread_session):
-            await arun_summary_compaction(
-                ctx=self._ctx,
-                state=state,
-                trigger_reason=self._pre_backend_trigger_reason,
-                is_cli_mode=self._is_cli_mode,
-                on_summary_applied=self.on_summary_applied,
-                trigger_threshold_chars=self._summary_trigger_chars,
-                exceeded_chars=exceeded_chars,
-                exceeded_tokens=exceeded_tokens,
-                kept_messages=preserved_batch,
-            )
-        msgs = getattr(state, "messages", None)
-        if isinstance(msgs, list):
-            msgs.extend(preserved_batch)
+        # State заменяется до callback: текущий батч должен вернуться даже
+        # при сбое трассы, снятия флага или отмене после применения сводки.
+        completed = False
+        try:
+            async with _asummarizing_flag(self._thread_session):
+                await arun_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    trigger_reason=trigger_reason,
+                    is_cli_mode=self._is_cli_mode,
+                    on_summary_applied=self.on_summary_applied,
+                    trigger_threshold_chars=self._summary_trigger_chars,
+                    exceeded_chars=exceeded_chars,
+                    exceeded_tokens=exceeded_tokens,
+                    kept_messages=preserved_batch,
+                )
+            completed = True
+        finally:
+            msgs = getattr(state, "messages", None)
+            if completed or self._restore_after_failed_compaction(
+                msgs, state_tail
+            ):
+                if isinstance(msgs, list):
+                    msgs.extend(
+                        filter_messages_not_in_state(msgs, preserved_batch)
+                    )
+                if self._thread_session is not None and preserved_batch:
+                    await self._thread_session.apersist_batch(
+                        preserved_batch,
+                        previous_response_id=state.previous_response_id,
+                    )
+                current_messages[:] = preserved_batch
+                self._collect_garbage()
+        return True
 
-        if self._thread_session is not None and preserved_batch:
-            await self._thread_session.apersist_batch(
-                preserved_batch,
-                previous_response_id=state.previous_response_id,
-            )
+    def _backend_batch_trigger_hits(self) -> Any:
+        """Сработавшие триггеры сжатия перед вызовом бэкенда; пусто — сжимать
+        не нужно (не `chat_completions` или триггеры выключены)."""
+        if self._state.backend_api_mode != "chat_completions":
+            return None
+        self._refresh_limits()
+        if (
+            self._summary_trigger_chars <= 0
+            and self._summary_trigger_tokens <= 0
+        ):
+            return None
+        if self._summary_trigger_tokens > 0:
+            self._warn_if_token_trigger_blind()
+        return exceeded_summary_triggers(
+            state=self._state,
+            summary_trigger_chars=self._summary_trigger_chars,
+            summary_trigger_tokens=self._summary_trigger_tokens,
+            tags=self._projection_tags(),
+            strip_think=True,
+        )
 
-        # После суммаризации + extend следующий шаг обрабатывает только preserved_batch.
-        current_messages[:] = preserved_batch
-        # C1: старый хвост current_messages отцеплен — собираем циклический мусор.
-        gc.collect()
+    def _keys_persisted_before_last_batch(self) -> frozenset[str] | None:
+        snap = getattr(
+            self._thread_session, "known_keys_snapshot_before_last_batch", None
+        )
+        return snap if isinstance(snap, frozenset) else None
+
+    def _restore_after_failed_compaction(
+        self, msgs: Any, state_tail: list
+    ) -> bool:
+        """Возвращать ли батч после сбоя сжатия. История не заменена — нет:
+        батч в ней остался; заменена — решает патч исполнения (durable-истории
+        до патча возврата не делали)."""
+        if not isinstance(msgs, list) or msgs is state_tail:
+            return False
+        execution_patch = port(self._ctx, "execution_patch")
+        return execution_patch is None or execution_patch(
+            "summary-batch-preservation-v1"
+        )
 
     async def aturn_end_compact_if_needed(self) -> None:
         """Compaction после accept ``turn_finish`` (turn-end trigger).
@@ -582,6 +555,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        self._refresh_limits()
         if (
             self._turn_end_trigger_chars <= 0
             and self._turn_end_trigger_tokens <= 0
@@ -591,7 +565,7 @@ class RunSummaryCoordinator:
             state=state,
             summary_trigger_chars=self._turn_end_trigger_chars,
             summary_trigger_tokens=self._turn_end_trigger_tokens,
-            tags=self._proj_tags,
+            tags=self._projection_tags(),
             strip_think=True,
         )
         if not hits:
@@ -612,7 +586,9 @@ class RunSummaryCoordinator:
                     exceeded_tokens=exceeded_tokens,
                 )
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
-            gc.collect()
+            self._collect_garbage()
+        except ExecutionFailure:
+            raise
         except Exception as summarize_exc:
             log_compaction_failed(
                 logger,

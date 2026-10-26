@@ -20,10 +20,11 @@ MCP-серверов, переживание между тестами.
 from typing import Any, Dict
 
 from gc_core.tools.connect_mcp.registry import ToolsCache
+from gc_testkit.settings import make_settings
 
 
 def _cfg(servers: Dict[str, Any]) -> Dict[str, Any]:
-    return {"mcp-servers": servers, "mcp-meta": {"tools-cache-ttl": 3600}}
+    return {"mcp.servers": servers, "mcp.meta": {"tools-cache-ttl": 3600}}
 
 
 def test_rebind_keeps_the_payload():
@@ -45,6 +46,20 @@ def test_rebind_keeps_the_payload():
     cache.rebind(_cfg(dict(servers)))  # новый словарь, тот же набор
 
     assert cache._data is not None, "rebind выбросил содержимое"
+    assert cache._is_valid(cache._make_cache_key(servers), ttl=3600) is True
+
+
+def test_owner_cache_needs_no_config():
+    """Кэш приложения создаётся без внутреннего словаря MCP: сборка контекста
+    сама перепривязывает его к своим серверам (``rebind``)."""
+    import time
+
+    cache = ToolsCache(os_backend=None)
+    servers = {"srv": {"transport": "stdio", "command": "x"}}
+    cache.rebind(_cfg(servers))
+    cache._data = {"mcp_srv_tool": {"tool": {}, "metadata": {}}}
+    cache._cache_key = cache._make_cache_key(servers)
+    cache._fetched_at = time.time()
     assert cache._is_valid(cache._make_cache_key(servers), ttl=3600) is True
 
 
@@ -125,5 +140,7 @@ async def test_default_is_unchanged_behaviour():
         aget_mcp_tools_data_for_config,
     )
 
-    tools, status = await aget_mcp_tools_data_for_config({"mcp-servers": {}})
+    tools, status = await aget_mcp_tools_data_for_config(
+        make_settings({"mcp.servers": {}})
+    )
     assert tools == {} and status == {}

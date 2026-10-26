@@ -10,8 +10,13 @@ import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from gc_core.agent_executor import AgentExecutor
-from gc_core.config import build_auth_connector, cli_forces_legacy_model
+from gc_core.config import (
+    cli_forces_legacy_model,
+)
+from gc_core.config_modules.auth import build_auth_connector
+from gc_core.message_policy.mode_messages import headless_mode_warning_text
 from gc_core.run_context import acreate_run_context
+from gc_core.security.permission_mode import headless_mode_warning
 from gc_core.thread_store import (
     load_thread_messages,
     load_thread_meta,
@@ -26,7 +31,7 @@ from gc_core.utils.generate_message_id import (
 
 from gc_server.rest_api.agent_execution_registry import agent_run_registry
 from gc_server.rest_api.server_config import (
-    build_agent_config_for_server,
+    build_agent_settings_for_server,
     load_server_config,
 )
 from gc_server.rest_api.utils import ensure_task_id, normalize_system
@@ -38,6 +43,7 @@ from gc_server.server_cleanup_threads import (
 )
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
+_JSON_SUFFIX = ".json"
 _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
 
 
@@ -66,14 +72,12 @@ except ImportError as e:
 try:
     # Обе функции читают конфиг на импорте модуля: сломанный config_server.yml
     # (load_server_config сам не защищён — голый open/yaml.safe_load) или
-    # сломанный агентский config.yml (build_agent_config_for_server → load_config)
+    # сломанный агентский config.yml (build_agent_settings_for_server → load_settings)
     # иначе роняли бы импорт server голым traceback'ом ещё до старта uvicorn —
     # тот же приём, что config_modules/env_vars.py уже применяет к битым
     # GC_*-переменным окружения.
     SERVER_CONFIG: Dict[str, Any] = load_server_config()
-    BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(
-        SERVER_CONFIG
-    )
+    BASE_AGENT_SETTINGS = build_agent_settings_for_server(SERVER_CONFIG)
 except (ValueError, OSError, yaml.YAMLError) as exc:
     raise SystemExit(
         f"[gc] сервер не стартовал: конфиг не загружается ({exc})"
@@ -98,7 +102,7 @@ app = FastAPI()
 register_cleanup_threads_on_startup(
     app,
     server_config=SERVER_CONFIG,
-    base_agent_config=BASE_AGENT_CONFIG,
+    base_agent_settings=BASE_AGENT_SETTINGS,
     logger=logger,
 )
 
@@ -431,6 +435,26 @@ def _request_task_identifiers(payload: dict) -> tuple[str, str | None]:
     return task_id, trace_id
 
 
+def _log_ignored_trace_id(trace_id, system, task_id):
+    if trace_id:
+        # Единственное место в дизайне, где trace может быть легитимно
+        # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
+        # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
+        # потери есть именованное событие, а не молчание.
+        logger.warning(
+            "trace_id_ignored: trace_id=%s system=%s task_id=%s",
+            trace_id,
+            system,
+            task_id,
+            extra={
+                "event": "trace_id_ignored",
+                "system": system,
+                "task_id": task_id,
+                "trace_id": trace_id,
+            },
+        )
+
+
 @app.post("/events/webhook")
 async def events_webhook(request: Request):
     payload = await _read_request_payload(request)
@@ -471,23 +495,7 @@ async def events_webhook(request: Request):
             make_message=_make_user_message,
             content=message_str,
         ):
-            if trace_id:
-                # Единственное место в дизайне, где trace может быть легитимно
-                # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
-                # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
-                # потери есть именованное событие, а не молчание.
-                logger.warning(
-                    "trace_id_ignored: trace_id=%s system=%s task_id=%s",
-                    trace_id,
-                    system,
-                    task_id,
-                    extra={
-                        "event": "trace_id_ignored",
-                        "system": system,
-                        "task_id": task_id,
-                        "trace_id": trace_id,
-                    },
-                )
+            _log_ignored_trace_id(trace_id, system, task_id)
             return {
                 "status": "queued",
                 "payload": payload,
@@ -543,16 +551,17 @@ async def events_webhook(request: Request):
     # Всё, что может упасть после взятия брони, — внутри `try`: бронь, не
     # снятая из-за исключения до него, навсегда усыпила бы вебхуки задачи.
     try:
-        config_dict = dict(BASE_AGENT_CONFIG)
-        if trace_id:
-            # Shallow copy достаточно: значение — скаляр. Мутировать
-            # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
-            config_dict["trace_id"] = trace_id
-        auth_connector = build_auth_connector(config_dict)
+        # Настройки процесса неизменяемы; trace_id — рантайм этого прогона.
+        loaded = (
+            BASE_AGENT_SETTINGS.with_runtime(trace_id=trace_id)
+            if trace_id
+            else BASE_AGENT_SETTINGS
+        )
+        auth_connector = build_auth_connector(loaded)
         # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх
         # непустого реестра моделей — тот же контракт, что CLI --model
         # (agent_overrides перекрывают config.yml так же, как CLI-аргументы).
-        force_legacy = cli_forces_legacy_model(config_dict)
+        force_legacy = cli_forces_legacy_model(loaded)
         if force_legacy:
             logger.warning(
                 "agent_overrides: уровни отключены на этот запуск (легаси-форс)"
@@ -562,7 +571,7 @@ async def events_webhook(request: Request):
         # всё это время, а с переездом прогоны стали тасками на общем loop,
         # поэтому заморозка била разом по всем эндпоинтам и всем идущим прогонам.
         ctx = await acreate_run_context(
-            config_dict,
+            loaded,
             auth_connector=auth_connector,
             force_legacy=force_legacy,
         )
@@ -622,7 +631,7 @@ async def get_thread_logs(system: str, task_id: str):
         )
 
     try:
-        threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
+        threads_dir = resolve_threads_dir(BASE_AGENT_SETTINGS)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -655,7 +664,7 @@ def _thread_log_entry(meta: dict, name: str) -> dict:
     task_id = meta.get("thread_id")
     if not isinstance(task_id, str) or not task_id.strip():
         # legacy fallback: meta_<thread_id>.json
-        task_id = name.removeprefix("meta_").removesuffix(".json")
+        task_id = name.removeprefix("meta_").removesuffix(_JSON_SUFFIX)
 
     updated_at = meta.get("updated_at") or meta.get("created_at")
     messages_count = meta.get("messages_count")
@@ -678,7 +687,7 @@ async def get_all_thread_logs():
     а также удобно построить UI "журнала".
     """
     try:
-        threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
+        threads_dir = resolve_threads_dir(BASE_AGENT_SETTINGS)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -693,7 +702,9 @@ async def get_all_thread_logs():
         names = [
             n
             for n in os.listdir(threads_dir)
-            if n.startswith("meta_") and n.endswith(".json")
+            if n.startswith("meta_")
+            and n.endswith(_JSON_SUFFIX)
+            and "__pre_summary__" not in n
         ]
     except FileNotFoundError:
         return {"status": "ok", "logs": []}
@@ -985,6 +996,13 @@ async def healthcheck():
     return {"status": "ok"}
 
 
+#: Как вернуть edit на сервере — для предупреждения о режиме без человека.
+_EDIT_MODE_HINT = (
+    "в config_server.yml — agent_overrides: "
+    "security.permissions.default_mode: edit"
+)
+
+
 #: Уровни, которые понимает uvicorn. `logging` знает и другие написания
 #: (`WARN`, `FATAL`), а uvicorn делает по значению прямой `LOG_LEVELS[level]` и
 #: падает KeyError. До этой ветки `server.log_level` читался и НИКУДА не
@@ -1061,6 +1079,14 @@ def serve() -> int:
             SERVER_CONFIG.get("config_path") or "минимальный дефолт",
             host,
             port,
+        )
+
+    # Режим, который без человека не работает: на сервере спросить некого.
+    # Предупреждение, а не отказ — сервер стартует.
+    headless_mode = headless_mode_warning(BASE_AGENT_SETTINGS)
+    if headless_mode is not None:
+        logger.warning(
+            "%s", headless_mode_warning_text(headless_mode, _EDIT_MODE_HINT)
         )
 
     # Было "src.server:app": под установленным колесом (sources = ["src"]) модуль

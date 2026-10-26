@@ -1,8 +1,18 @@
-from gc_tui.services.model_list_cache import clear_cache, make_cached_fetch
+from gc_tui.services.model_list_cache import (
+    _CACHE,
+    _CATALOG_CACHE,
+    make_cached_catalog_fetch,
+    make_cached_fetch,
+)
+
+
+def _clear_caches() -> None:
+    _CACHE.clear()
+    _CATALOG_CACHE.clear()
 
 
 def test_second_call_same_key_hits_cache():
-    clear_cache()
+    _CACHE.clear()
     calls = []
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -16,7 +26,7 @@ def test_second_call_same_key_hits_cache():
 
 
 def test_key_includes_url_auth_proxy():
-    clear_cache()
+    _CACHE.clear()
     calls = []
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -31,7 +41,7 @@ def test_key_includes_url_auth_proxy():
 
 
 def test_error_not_cached():
-    clear_cache()
+    _CACHE.clear()
     state = {"fail": True}
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -49,7 +59,7 @@ def test_error_not_cached():
 
 
 def test_none_result_not_cached():
-    clear_cache()
+    _CACHE.clear()
     results = [None, [1]]
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -69,7 +79,7 @@ def test_refresh_bypasses_the_cache_and_rewrites_the_key():
     редактора не меняется — без обхода клавиша была бы детерминированным no-op.
     Свежий ответ ложится в тот же ключ, иначе следующий обычный вызов вернул бы
     только что опровергнутый список."""
-    clear_cache()
+    _CACHE.clear()
     results = [[1], [1, 2]]
     calls = []
 
@@ -92,7 +102,7 @@ def test_refresh_bypasses_the_cache_and_rewrites_the_key():
 def test_failed_refresh_keeps_the_cached_list():
     """Неудачное перечитывание ключ НЕ гасит: иначе «сервер моргнул» стёр бы
     нормальный список, и следующий вход в поле пошёл бы в сеть за тем же самым."""
-    clear_cache()
+    _CACHE.clear()
     results = [[1], None]
 
     def fetch(url, auth, verify=True, config_proxy=None):
@@ -102,3 +112,73 @@ def test_failed_refresh_keeps_the_cached_list():
     assert cached("http://a", None) == [1]
     assert cached("http://a", None, refresh=True) is None  # сервер не ответил
     assert cached("http://a", None) == [1], "кэш затёрт неудачей"
+
+
+# --- каталог формы записи: своё хранилище, общий с редакторами ключ ---
+
+
+def _catalog_fetch(calls):
+    def fetch(url, auth, verify=True, config_proxy=None):
+        calls.append("catalog")
+        return [{"id": "m1"}], {"data": [{"id": "m1", "context_length": 8}]}
+
+    return fetch
+
+
+def _list_fetch(calls):
+    def fetch(url, auth, verify=True, config_proxy=None):
+        calls.append("list")
+        return [{"id": "m1"}]
+
+    return fetch
+
+
+def test_catalog_does_not_leak_into_the_list_cache():
+    """Форма записи кэширует пару (список, тело ответа), а `ModelEditor` и мастер
+    по тому же ключу (url, auth, verify, proxy) ждут СПИСОК: общий словарь отдавал
+    им кортеж, и `{m.id for m in models}` падал на первом же входе в редактор."""
+    _clear_caches()
+    calls = []
+    catalog = make_cached_catalog_fetch(_catalog_fetch(calls))
+    listing = make_cached_fetch(_list_fetch(calls))
+    catalog("http://a", "tok")
+    assert listing("http://a", "tok") == [{"id": "m1"}]
+    assert calls == ["catalog", "list"]
+
+
+def test_list_does_not_leak_into_the_catalog_cache():
+    """Обратный порядок: список без тела ответа оставил бы форму без карточки
+    модели до ручного перечитывания."""
+    _clear_caches()
+    calls = []
+    listing = make_cached_fetch(_list_fetch(calls))
+    catalog = make_cached_catalog_fetch(_catalog_fetch(calls))
+    listing("http://a", "tok")
+    models, payload = catalog("http://a", "tok")
+    assert models == [{"id": "m1"}]
+    assert payload == {"data": [{"id": "m1", "context_length": 8}]}
+    assert calls == ["list", "catalog"]
+
+
+def test_catalog_second_call_hits_cache_and_refresh_bypasses_it():
+    _clear_caches()
+    calls = []
+    catalog = make_cached_catalog_fetch(_catalog_fetch(calls))
+    first = catalog("http://a", "tok")
+    assert catalog("http://a", "tok") == first
+    assert calls == ["catalog"]
+    catalog("http://a", "tok", refresh=True)
+    assert calls == ["catalog", "catalog"]
+
+
+def test_empty_catalog_is_not_cached():
+    """Правило то же, что у списка: пустой ответ ключ не занимает."""
+    _clear_caches()
+    results = [([], {"data": []}), ([{"id": "m1"}], {"data": [{"id": "m1"}]})]
+
+    def fetch(url, auth, verify=True, config_proxy=None):
+        return results.pop(0)
+
+    catalog = make_cached_catalog_fetch(fetch)
+    assert catalog("http://a", None) == ([], {"data": []})
+    assert catalog("http://a", None)[0] == [{"id": "m1"}]

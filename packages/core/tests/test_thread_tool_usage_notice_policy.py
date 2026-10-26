@@ -10,6 +10,7 @@ from gc_core.message_policy.tool_usage_notice.policy import (
     update_tool_usage_notice_after_persist,
 )
 from gc_core.states import State
+from gc_testkit.settings import make_settings
 
 
 def _state() -> State:
@@ -153,15 +154,17 @@ def test_collect_tool_usage_notices_skips_below_threshold():
 
 
 def test_subagent_bootstrap_text_when_policy_enabled():
-    cfg = {
-        "tool_usage_notice": [
-            {
-                "tool_name": "session_memory",
-                "step_messages_count": 10,
-                "notice_message": "nudge",
-            }
-        ]
-    }
+    cfg = make_settings(
+        {
+            "tool_usage_notice": [
+                {
+                    "tool_name": "session_memory",
+                    "step_messages_count": 10,
+                    "notice_message": "nudge",
+                }
+            ]
+        }
+    )
     text = subagent_thread_memory_bootstrap_text(cfg, {"state": "progress"})
     assert text is not None
     assert "Thread memory" in text
@@ -169,7 +172,10 @@ def test_subagent_bootstrap_text_when_policy_enabled():
 
 
 def test_subagent_bootstrap_text_disabled_without_rules():
-    assert subagent_thread_memory_bootstrap_text({}, {"state": "x"}) is None
+    assert (
+        subagent_thread_memory_bootstrap_text(make_settings(), {"state": "x"})
+        is None
+    )
 
 
 def test_build_subagent_bootstrap_empty_registers():

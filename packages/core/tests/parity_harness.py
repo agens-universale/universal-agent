@@ -313,19 +313,39 @@ def judge_accept() -> dict:
     )
 
 
-def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> dict:
-    """Полный конфиг прогона — через настоящий ``load_config``, а не руками.
+def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> Any:
+    """Полные настройки прогона (``LoadedSettings``) — через настоящий
+    ``load_settings``, а не руками.
 
-    Собирать словарь по ключам вручную нельзя: цикл агента читает десятки
-    значений (``backend_request_timeout_sec``, лимиты суммаризации, политики
-    безопасности), и любой пропущенный всплывёт как KeyError посреди прогона.
+    Собирать настройки по ключам вручную нельзя: цикл агента читает десятки
+    значений (``backend.request_timeout_sec``, лимиты суммаризации, политики
+    безопасности), и любой пропущенный разошёлся бы с продом посреди прогона.
     Пусть дефолты приезжают оттуда же, откуда в проде.
 
     Слои поверх базового конфига нейтрализованы: без этого прогон читал бы
     настоящие ``~/.gc/config.local.yml`` и ``<cwd>/.gc/config.yml``, и
     воспроизводимость зависела бы от машины.
+
+    ``overrides`` — пути через точку (``**{"agent.max_steps": 1}``); см.
+    ``with_path_overrides``.
     """
     from gc_core import config as cfgmod
+
+    conf, prompt = _parity_files(tmp_path, monkeypatch)
+    loaded = cfgmod.load_settings(str(conf))
+    loaded = loaded.with_overrides(
+        {
+            "paths.threads_data_path": str(tmp_path / "threads"),
+            "paths.logs_dump_dir": str(tmp_path / "logs"),
+            "paths.chat_completions_system_prompt_path": str(prompt),
+            "logging.console_trace": False,
+        }
+    ).with_runtime(launch_root=str(tmp_path))
+    return with_path_overrides(loaded, overrides)
+
+
+def _parity_files(tmp_path: Path, monkeypatch) -> tuple:
+    """Базовый ``config.yml`` и системный промпт прогона; слои выше — нейтрально."""
     from gc_core.config_modules import env_vars as _env_vars
 
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -338,10 +358,8 @@ def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> dict:
     monkeypatch.setattr(
         _env_vars, "managed_config_path", lambda: tmp_path / "absent.local.yml"
     )
-
     prompt = tmp_path / "system_prompt.md"
     prompt.write_text("SYSTEM PROMPT", encoding="utf-8")
-
     conf = tmp_path / "config.yml"
     conf.write_text(
         "backend:\n"
@@ -357,14 +375,53 @@ def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> dict:
         "  save_logs: false\n",
         encoding="utf-8",
     )
-    cfg = cfgmod.load_config(str(conf))
-    cfg["threads_data_path"] = str(tmp_path / "threads")
-    cfg["logs_dump_dir"] = str(tmp_path / "logs")
-    cfg["launch_root"] = str(tmp_path)
-    cfg["chat_completions_system_prompt_path"] = str(prompt)
-    cfg["console_trace"] = False
-    cfg.update(overrides)
-    return cfg
+    return conf, prompt
+
+
+#: Рантайм-ключи (то, что вычисляет запуск, а не задаёт файл).
+_RUNTIME_KEYS = {
+    "launch_root",
+    "project_root",
+    "trace_id",
+    "text_answer_mode",
+    "finish_gate_smart",
+    "os_backend",
+}
+
+
+def with_path_overrides(loaded: Any, overrides: dict) -> Any:
+    """``LoadedSettings`` с правками по путям через точку: рантайм-ключи — в
+    ``RuntimeEnv``, остальное — в настройки с валидацией схемы (негодное
+    значение — ``ValidationError``).
+
+    Правка ЗАМЕНЯЕТ значение по пути (как прежняя правка плоского словаря) и
+    идёт без ``resolve_paths``: производные значения загрузки (например
+    ``summary.incremental_batch_chars`` от порога) не пересчитываются — ровно
+    как прежде, когда плоский вид правили после ``load_config``. Иначе прогон
+    матрицы разошёлся бы с эталоном не из-за кода, а из-за стенда.
+    """
+    import copy
+    from dataclasses import replace
+
+    from gc_core.config_modules.root import AppConfig
+    from gc_core.settings import _alias_path
+
+    runtime = {k: v for k, v in overrides.items() if k in _RUNTIME_KEYS}
+    updates = {k: v for k, v in overrides.items() if k not in _RUNTIME_KEYS}
+    if updates:
+        document = loaded.settings.model_dump(by_alias=True)
+        for dotted, value in updates.items():
+            keys = _alias_path(AppConfig, dotted.split("."))
+            node = document
+            for key in keys[:-1]:
+                nxt = node.get(key)
+                node[key] = nxt = dict(nxt) if isinstance(nxt, dict) else {}
+                node = nxt
+            node[keys[-1]] = copy.deepcopy(value)
+        loaded = replace(loaded, settings=AppConfig.model_validate(document))
+    if runtime:
+        loaded = loaded.with_runtime(**runtime)
+    return loaded
 
 
 #: Поля, которые меняются от прогона к прогону и сравнению не подлежат.
@@ -396,17 +453,18 @@ def strip_volatile(obj: Any) -> Any:
 
 
 def run_thread_dump(
-    config_dict: dict, system_id: str, thread_id: str
+    settings: Any, system_id: str, thread_id: str
 ) -> list[dict]:
     """Дамп ``data_<system>_<thread>.jsonl`` без недетерминированных полей.
 
+    ``settings`` — настройки прогона (всё, что принимает ``settings_of``).
     Путь считает ``thread_store`` — повторять его формат здесь нельзя: имя
     файла уже менялось (legacy-формат без system), и копия разъехалась бы молча.
     """
     from gc_core.thread_store import _thread_paths, resolve_threads_dir
 
     data_path, _meta = _thread_paths(
-        resolve_threads_dir(config_dict), system_id, thread_id
+        resolve_threads_dir(settings), system_id, thread_id
     )
     path = Path(data_path)
     if not path.exists():

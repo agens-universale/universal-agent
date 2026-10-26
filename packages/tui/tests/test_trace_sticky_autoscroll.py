@@ -5,6 +5,7 @@
 сами прижали → отпускаем). Сравнение идёт с `_last_auto_y` (наша последняя
 позиция прижатия), а не с `max_scroll_y` (он растёт от контента)."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -30,7 +31,9 @@ def _app(tmp_path):
     return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
     )
 
 

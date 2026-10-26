@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
-from gc_core.tools.subagents.progress import (
+from gc_core.execution.progress import (
     brief_args_summary,
     todo_items_from_arguments,
 )
@@ -146,3 +146,12 @@ def test_brief_summary_truncates_long_current_item():
     assert len(out) <= 81, f"сводка длиной {len(out)}: {out[:120]}"
     assert out.startswith("чек-лист 0/1 · ")
     assert out.endswith("…")
+
+
+def test_brief_args_summary_keeps_normal_read_file_arguments():
+    assert (
+        brief_args_summary(
+            json.dumps({"path": "a.py", "offset": 9}), tool_name="fs_read_file"
+        )
+        == "path='a.py', offset=9"
+    )

@@ -26,9 +26,11 @@ _USD_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 def _cost_label(config: dict, token_usage) -> str | None:
     """Вызов продового `_session_cost_label` с подставленным приложением."""
+    from gc_testkit.settings import make_settings
     from gc_tui.screens.sessions import SessionsScreen
 
-    holder = SimpleNamespace(app=SimpleNamespace(_config=config))
+    loaded = make_settings(config)
+    holder = SimpleNamespace(app=SimpleNamespace(base_settings=lambda: loaded))
     return SessionsScreen._session_cost_label(
         holder, SimpleNamespace(token_usage=token_usage)
     )
@@ -42,8 +44,16 @@ def _billed_meta(cost: float) -> dict:
 
 def test_card_cost_uses_endpoint_currency():
     pytest.importorskip("textual")
-    ru = {"model": "m", "pricing": _PRICING, "completions_url": _RU_URL}
-    usd = {"model": "m", "pricing": _PRICING, "completions_url": _USD_URL}
+    ru = {
+        "agent.model": "m",
+        "pricing": _PRICING,
+        "backend.completions_url": _RU_URL,
+    }
+    usd = {
+        "agent.model": "m",
+        "pricing": _PRICING,
+        "backend.completions_url": _USD_URL,
+    }
     assert _cost_label(ru, _billed_meta(7.5)) == "7.50 ₽"
     assert _cost_label(usd, _billed_meta(7.5)) == "7.50 $"
 
@@ -52,12 +62,33 @@ def test_card_cost_without_fact_uses_tariff():
     pytest.importorskip("textual")
     acc = UsageAccount()
     acc.add(
-        CATEGORY_MAIN, 1_000_000, 100_000
+        CATEGORY_MAIN, 1_000_000, 100_000, model="m"
     )  # факта нет — считается по тарифу
-    config = {"model": "m", "pricing": _PRICING, "completions_url": _RU_URL}
+    config = {
+        "agent.model": "m",
+        "pricing": _PRICING,
+        "backend.completions_url": _RU_URL,
+    }
     assert _cost_label(config, acc.to_meta()) == "120.0 ₽"
 
 
 def test_card_without_usage_gives_none():
     pytest.importorskip("textual")
-    assert _cost_label({"model": "m", "pricing": _PRICING}, None) is None
+    assert _cost_label({"agent.model": "m", "pricing": _PRICING}, None) is None
+
+
+def test_card_prices_legacy_usage_at_agent_model_rate():
+    pytest.importorskip("textual")
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)  # модель вызова не записана
+    config = {"agent.model": "m", "pricing": _PRICING}
+    assert _cost_label(config, acc.to_meta()) == "120.0 ₽"
+
+
+def test_card_shows_unknown_for_legacy_usage_without_agent_tariff():
+    pytest.importorskip("textual")
+    acc = UsageAccount()
+    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)
+    pricing = {"enabled": True, "models": {"other": {"input": 1, "output": 1}}}
+    config = {"agent.model": "m", "pricing": pricing}
+    assert _cost_label(config, acc.to_meta()) == "?"

@@ -15,21 +15,19 @@ import re
 from pathlib import Path
 
 import pytest
-
-from gc_core.config_modules import env_vars
-from gc_core.runtime_notices import clear_runtime_notices
 from gc_core.agent_edits.deltas import FileEntry
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.thread_store import edits_journal_path
+from gc_testkit.tui_support import as_settings, span_style, tui_settings
 from gc_tui.palette import ACCENT, BRIGHT, DEEP_DIM, ERR, INK, MUTED, OK
 from gc_tui.screens.diff import (
     ACCEPTED_GLYPH,
-    MARK_ACCEPTED,
     APPROX,
     EMPTY_SESSION,
     EMPTY_TURN,
+    MARK_ACCEPTED,
     MARK_EXTERNAL,
     MARK_SHELL,
     NO_THREAD,
@@ -68,8 +66,6 @@ from gc_tui.services.edits_view import (
     RowStep,
     SettledRow,
 )
-from gc_testkit.tui_support import span_style
-
 
 # --- фикстуры данных ---------------------------------------------------------
 
@@ -155,7 +151,11 @@ class _Workspace:
 
     @property
     def config(self) -> dict:
-        return {"launch_root": str(self.root), "model": "M", "agent_edits": {}}
+        return {
+            "launch_root": str(self.root),
+            "agent.model": "M",
+            "agent_edits": {},
+        }
 
     def write(self, rel: str, text: str) -> None:
         path = self.root / rel
@@ -184,7 +184,7 @@ class _Workspace:
     def screen(self, **kwargs) -> DiffScreen:
         return DiffScreen(
             launch_root=str(self.root),
-            config=self.config,
+            settings=as_settings(self.config),
             threads_dir=str(self.threads_dir),
             system_id="cli",
             thread_id="th1",
@@ -1099,7 +1099,9 @@ async def test_live_screen_advertises_ctrl_u_from_an_active_accepted_row(
     )  # чисто относительно принятого — уходит в группу
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1152,7 +1154,9 @@ async def test_footer_wraps_not_clips_at_narrow_widths(tmp_path):
     ws.accept("group.py", "v1\n")  # чисто относительно принятого — в группе
 
     app = TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     )
     async with app.run_test(size=(100, 24)) as pilot:
         scr = ws.screen()
@@ -1536,12 +1540,12 @@ async def test_diff_command_opens_screen(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import DiffScreen
     from gc_tui.screens.main import TraceScreen
-    from gc_tui.app import TuiApp
-    from gc_tui.screens.main import TraceScreen
 
     ws = _Workspace(tmp_path)
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
         await pilot.app.screen._handle_command("diff")
@@ -1553,8 +1557,6 @@ async def test_diff_command_opens_screen(tmp_path):
 async def test_header_shows_source_and_cumulative_counters(tmp_path):
     """Числа шапки — итог по файлам источника, а не сумма шагов журнала."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen
     from gc_tui.app import TuiApp
 
     ws = _Workspace(tmp_path)
@@ -1568,7 +1570,9 @@ async def test_header_shows_source_and_cumulative_counters(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1605,7 +1609,9 @@ async def test_body_frame_holds_full_height_and_keeps_rows_whole(
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=size) as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1649,7 +1655,9 @@ async def test_shift_tab_switches_source_in_place_without_pushing_screen(
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1692,7 +1700,9 @@ async def test_tab_switches_between_active_part_and_group_remembering_position(
     ws.accept("done.py", "v1\n")  # чисто относительно принятого → группа
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1736,7 +1746,9 @@ async def test_tab_is_silent_without_a_group(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1773,7 +1785,9 @@ async def test_tab_returns_to_the_remembered_row_inside_the_group(tmp_path):
 
     ws = _group_workspace(tmp_path)
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1808,7 +1822,9 @@ async def test_tab_returns_to_the_group_row_when_the_group_is_collapsed(
 
     ws = _group_workspace(tmp_path)
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1845,7 +1861,9 @@ async def test_tab_returns_to_the_group_row_when_the_remembered_file_is_gone(
 
     ws = _group_workspace(tmp_path)
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1883,7 +1901,9 @@ async def test_tab_is_silent_when_the_active_part_is_empty(tmp_path):
     ws.accept("a.py", "v1\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1917,8 +1937,8 @@ async def test_tab_without_a_group_still_stops_and_prevents_default(tmp_path):
     pytest.importorskip("textual")
     from unittest.mock import patch
 
-    from textual import events
     from gc_tui.app import TuiApp
+    from textual import events
 
     ws = _Workspace(tmp_path)
     for idx in range(2):
@@ -1928,7 +1948,9 @@ async def test_tab_without_a_group_still_stops_and_prevents_default(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1959,7 +1981,9 @@ async def test_selected_row_has_caret_and_selected_class(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -1985,7 +2009,9 @@ async def test_arrows_wrap_and_home_end(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2024,7 +2050,9 @@ async def test_pgdn_moves_by_page_and_clamps(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2068,7 +2096,9 @@ async def test_long_list_keeps_rows_one_line_high(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2094,7 +2124,9 @@ async def test_row_wider_than_body_is_cropped_not_wrapped(tmp_path):
     ws.journal.append(_rec("a.py", ts=1.0, op="create", add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test(size=(50, 24)) as pilot:
         scr = ws.screen()
         scr._row_width = lambda: 70  # намеренно шире тела
@@ -2135,7 +2167,9 @@ async def test_narrow_terminal_keeps_rows_one_line_high(tmp_path):
 
     for width in (50, 40):
         async with TuiApp(
-            threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+            threads_dir=str(ws.threads_dir),
+            system="cli",
+            settings=tui_settings(ws.config),
         ).run_test(size=(width, 24)) as pilot:
             scr = ws.screen()
             await pilot.app.push_screen(scr)
@@ -2170,7 +2204,9 @@ async def test_cursor_index_is_clamped_to_the_list(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2198,7 +2234,9 @@ async def test_click_selects_row(tmp_path):
         )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2217,7 +2255,9 @@ async def test_empty_states_per_source(tmp_path):
 
     ws = _Workspace(tmp_path)
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2242,11 +2282,13 @@ async def test_incomplete_thread_identity_shows_no_data_not_crash(tmp_path):
 
     ws = _Workspace(tmp_path)
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = DiffScreen(
             launch_root=str(ws.root),
-            config=ws.config,
+            settings=as_settings(ws.config),
             threads_dir=str(ws.threads_dir),
             system_id="cli",
             thread_id=None,
@@ -2271,7 +2313,9 @@ async def test_footer_offers_accept_regardless_of_git_mode(tmp_path):
         ws.write("a.py", "a\n")
         ws.journal.append(_rec("a.py", ts=1.0, op="create", add=1, del_=0))
         async with TuiApp(
-            threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+            threads_dir=str(ws.threads_dir),
+            system="cli",
+            settings=tui_settings(ws.config),
         ).run_test() as pilot:
             scr = ws.screen()
             await pilot.app.push_screen(scr)
@@ -2301,7 +2345,9 @@ async def test_footer_shows_accepted_wording_on_a_marked_row(tmp_path):
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2331,7 +2377,9 @@ async def test_footer_shows_group_wording_and_ctrl_u_on_the_group_row(
     ws.accept("a.py", "v1\n")  # принят вручную — снимать есть с кого
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2367,7 +2415,9 @@ async def test_footer_on_group_rows_advertises_u_only_where_it_lives(tmp_path):
     ws.accept("manual.py", "v1\n")  # чисто относительно принятого — в группе
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2416,7 +2466,9 @@ async def test_footer_hides_revert_when_the_row_has_no_reliable_base(tmp_path):
     ws.journal.append(_rec("a.py", ts=1.0))  # правка есть, снимка сессии нет
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2445,7 +2497,9 @@ async def test_a_reserved_row_separates_the_flash_from_the_footer(tmp_path):
     ws.journal.append(_rec("a.py", ts=1.0))
 
     app = TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     )
     async with app.run_test(size=(160, 24)) as pilot:
         scr = ws.screen()
@@ -2486,7 +2540,9 @@ async def test_footer_actions_follow_the_cursor_between_rows(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2529,7 +2585,9 @@ async def test_group_viewer_body_is_the_session_cumulative_not_journal_records(
     ws.accept("a.py", "было\nстало\n")  # принят и чист → уходит в группу
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2566,7 +2624,9 @@ async def test_group_viewer_keeps_approx_when_group_numbers_came_from_the_journa
     )  # принят и чист → уходит в группу
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2596,7 +2656,9 @@ async def test_group_viewer_footer_advertises_neither_accept_nor_revert(
     ws.accept("a.py", "v1\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2625,7 +2687,9 @@ async def test_row_shows_counters_next_to_marks_not_instead(tmp_path):
     ws.journal.append(_rec("a.py", call_id=None, ts=1.0, add=1, del_=0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2650,7 +2714,9 @@ async def test_header_counts_active_only_and_empty_state_rule(tmp_path):
     ws.accept("a.py", "v1\n")  # a.py уходит в settled — активных нет
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2683,7 +2749,9 @@ async def test_cursor_walks_into_expanded_group(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2729,7 +2797,9 @@ async def test_enter_toggles_group_and_opens_settled_viewer(tmp_path):
     ws.accept("a.py", "v1\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2763,7 +2833,9 @@ async def test_click_on_group_row_toggles_expansion(tmp_path):
     ws.accept("a.py", "v1\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2790,7 +2862,9 @@ async def test_revert_and_git_add_keys_are_noop_on_group_row(tmp_path):
     ws.accept("a.py", "v1\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2822,7 +2896,9 @@ async def test_group_viewer_hides_dead_keys(tmp_path):
     ws.accept("manual.py", "v1\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2868,7 +2944,9 @@ async def test_u_is_dead_on_a_settled_row_accepted_only_by_commit(tmp_path):
     ws.journal.append(_rec("a.py", ts=1.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2903,7 +2981,9 @@ async def test_double_click_group_row_single_toggle(tmp_path):
     ws.accept("a.py", "v1\n")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -2941,7 +3021,9 @@ async def test_u_resets_from_the_turn_source_when_the_file_has_an_accepted_base(
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen(source=SOURCE_TURN)
         await pilot.app.push_screen(scr)
@@ -2989,7 +3071,9 @@ async def test_ctrl_u_finds_accepted_files_from_the_turn_source(tmp_path):
     ws.journal.append(_rec("plain.py", ts=1.2, call_id="c2"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen(source=SOURCE_TURN)
         await pilot.app.push_screen(scr)
@@ -3034,7 +3118,9 @@ async def test_ctrl_u_confirm_counts_the_file_that_risks_nothing_too(tmp_path):
     ws.accept("kept.py", "v1\n")  # диск равен принятому — терять нечего
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3071,7 +3157,9 @@ async def test_ctrl_u_without_a_single_loss_resets_at_once(tmp_path):
         ws.accept(name, "v1\n")  # диск равен принятому у обоих
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3096,7 +3184,9 @@ async def test_ctrl_u_cyrillic_lower_resets_all(tmp_path):
 
     ws = _Workspace(tmp_path)
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3128,8 +3218,6 @@ async def test_footer_does_not_promise_accepted_target_outside_the_session_ladde
     import shutil
     import subprocess
 
-    from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen
     from gc_tui.app import TuiApp
 
     if shutil.which("git") is None:
@@ -3165,7 +3253,7 @@ async def test_footer_does_not_promise_accepted_target_outside_the_session_ladde
     ws.journal.append(_rec("a.py", ts=1.0))
 
     view = EditsView(
-        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+        str(ws.threads_dir), "cli", "th1", str(ws.root), as_settings(ws.config)
     )
     view.accept(["a.py"])  # принято состояние "v2\n"
     ws.write("a.py", "v3\n")
@@ -3186,7 +3274,9 @@ async def test_footer_does_not_promise_accepted_target_outside_the_session_ladde
     ws.journal.append(_rec("a.py", ts=3.0, call_id="c3"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3267,7 +3357,7 @@ async def test_u_resets_in_session_source_when_a_later_commit_wins_the_tiebreak(
     ws.journal.append(_rec("a.py", ts=1.0))
 
     view = EditsView(
-        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+        str(ws.threads_dir), "cli", "th1", str(ws.root), as_settings(ws.config)
     )
     view.accept(["a.py"])  # принято состояние "v2\n"
     ws.write("a.py", "v3\n")
@@ -3288,7 +3378,9 @@ async def test_u_resets_in_session_source_when_a_later_commit_wins_the_tiebreak(
     ws.journal.append(_rec("a.py", ts=3.0, call_id="c3"))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3341,7 +3433,9 @@ async def test_turn_with_all_edits_undone_says_so(tmp_path):
     # диск совпал с началом хода: правки этого хода не осталось
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen(source=SOURCE_TURN)
         await pilot.app.push_screen(scr)
@@ -3420,7 +3514,7 @@ def test_external_legend_says_nothing_about_how_much_of_the_file_is_foreign():
     """
     from gc_tui.screens.diff import LEGEND_EXTERNAL, MARK_EXTERNAL
 
-    assert LEGEND_EXTERNAL == f"{MARK_EXTERNAL} — есть правки не от агента"
+    assert f"{MARK_EXTERNAL} — есть правки не от агента" == LEGEND_EXTERNAL
     for scope in ("весь", "все строки", "целиком", "полностью", "часть"):
         assert scope not in LEGEND_EXTERNAL
 
@@ -3443,7 +3537,9 @@ async def test_turn_marks_a_file_whose_content_is_the_accepted_one(tmp_path):
     ws.accept("a.py", "v1\n")  # принято ровно то, что на диске
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen(source=SOURCE_TURN)
         await pilot.app.push_screen(scr)
@@ -3476,7 +3572,9 @@ async def test_screen_admits_the_list_is_incomplete_after_a_command_cut_by_the_c
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3521,7 +3619,9 @@ async def test_x_hides_the_cut_command_note_until_the_app_exits(tmp_path):
         ]
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3574,7 +3674,9 @@ async def test_x_removes_only_the_note_without_rebuilding_the_list(tmp_path):
     )
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3604,9 +3706,8 @@ async def test_list_rows_are_mounted_in_one_call(tmp_path, monkeypatch):
     строке это квадрат — 10 000 файлов открывались 96 секунд (замер, после
     подъёма потолка записи шелл-канала до 10 000 путей)."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
-
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
 
     ws = _Workspace(tmp_path)
     for i in range(30):
@@ -3614,7 +3715,9 @@ async def test_list_rows_are_mounted_in_one_call(tmp_path, monkeypatch):
         ws.journal.append(_rec(f"f{i}.py", turn="t1", ts=float(i)))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3651,7 +3754,9 @@ async def test_cursor_step_repaints_only_the_rows_that_changed(
         ws.journal.append(_rec(f"f{i}.py", turn="t1", ts=float(i)))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3691,7 +3796,6 @@ async def test_actions_on_a_busy_snapshot_index_warn_instead_of_crashing(
     чтение индекса ломается везде, где случится."""
     pytest.importorskip("textual")
     from gc_core.agent_edits.snapshots import SnapshotStore
-
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import EDITS_UNREADABLE
 
@@ -3701,7 +3805,9 @@ async def test_actions_on_a_busy_snapshot_index_warn_instead_of_crashing(
     ws.journal.append(_rec("a.py", turn="t1", ts=1.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
@@ -3738,11 +3844,9 @@ async def test_viewer_body_on_a_busy_snapshot_index_says_so_instead_of_crashing(
     пересобирает тело уже под занятым замком."""
     pytest.importorskip("textual")
     from gc_core.agent_edits.snapshots import SnapshotStore
-
-    from textual.widgets import Static
-
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import EDITS_UNREADABLE
+    from textual.widgets import Static
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "new\n")
@@ -3750,7 +3854,9 @@ async def test_viewer_body_on_a_busy_snapshot_index_says_so_instead_of_crashing(
     ws.journal.append(_rec("a.py", turn="t1", ts=1.0))
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen(source=SOURCE_TURN)
         await pilot.app.push_screen(scr)
@@ -3797,7 +3903,9 @@ async def test_revert_that_cannot_be_reported_still_reloads_and_says_so(
         raise OSError("файл треда занят")
 
     async with TuiApp(
-        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+        threads_dir=str(ws.threads_dir),
+        system="cli",
+        settings=tui_settings(ws.config),
     ).run_test() as pilot:
         scr = ws.screen(on_undo_feedback=cannot_tell)
         await pilot.app.push_screen(scr)

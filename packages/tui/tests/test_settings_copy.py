@@ -1,6 +1,7 @@
 """Ctrl+C на экране настроек: выделение копируется, пустое выделение — no-op
 (приложение НЕ выходит в терминал)."""
 
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 from gc_testkit.tui_support import wait_until
 
@@ -21,11 +22,11 @@ async def test_ctrl_c_copies_selection_on_settings(tmp_path, monkeypatch):
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     copied = {}
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -65,10 +66,10 @@ async def test_ctrl_c_no_selection_is_noop_on_settings(tmp_path, monkeypatch):
     )
     cfg = tmp_path / "c.yml"
     cfg.write_text("backend: {}\n", encoding="utf-8")
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,

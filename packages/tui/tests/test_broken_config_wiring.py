@@ -161,7 +161,7 @@ def test_init_config_passive_guide_on_broken_config_non_interactive(
 ):
     """`gc-ua --init-config` на РЕАЛЬНОМ сломанном config.yml (non-interactive)
     обязан довести до пассивного гайда, а не упасть тем же трейсбеком, что и
-    обычный запуск — `load_config_ex(None)` внутри ветки init-config игнорирует
+    обычный запуск — `load_settings(None)` внутри ветки init-config игнорирует
     --config и всегда целится в дефолтный путь, поэтому поломка изолируется
     подменой env_vars.env, а не флагом --config."""
     pytest.importorskip("textual")
@@ -209,7 +209,7 @@ def test_init_config_reaches_review_mode_on_broken_config_interactive(
 
     class _FakeApp:
         def __init__(self, **kw):
-            captured["config"] = kw.get("config")
+            captured["config"] = kw["settings"]
 
         def set_config_path(self, path):
             pass
@@ -245,7 +245,10 @@ def test_init_config_reaches_review_mode_on_broken_config_interactive(
     # адреса — тот же, каким onboarding_wizard/setup_guide узнают «не настроено».
     from gc_core import onboarding
 
-    assert captured["config"].get("completions_url") == onboarding.URL_SENTINEL
+    assert (
+        captured["config"].settings.backend.completions_url
+        == onboarding.URL_SENTINEL
+    )
     assert (
         captured["notice_args"][0] == ""
     )  # активного профиля нет — восстановление сняло его
@@ -417,7 +420,7 @@ def _capturing_app(monkeypatch):
 
     class _FakeApp:
         def __init__(self, **kw):
-            captured["config"] = kw.get("config")
+            captured["config"] = kw["settings"]
             captured["app"] = (
                 self  # признаки ставятся атрибутами уже после создания
             )
@@ -462,15 +465,16 @@ def test_init_config_keeps_user_connection_when_only_profile_is_broken(
 
     assert rc == 0
     assert captured.get("ran") is True
-    cfg = captured["config"]
+    cfg = captured["config"].settings
     assert (
-        cfg.get("completions_url")
+        cfg.backend.completions_url
         == "https://openrouter.ai/api/v1/chat/completions"
     )
-    assert (cfg.get("chat_completion_headers") or {}).get(
-        "Authorization"
-    ) == "Bearer sk-user-token"
-    assert list(cfg.get("models") or {}) == ["fast"]
+    assert (
+        cfg.backend.chat_completion_headers.get("Authorization")
+        == "Bearer sk-user-token"
+    )
+    assert list(cfg.models) == ["fast"]
 
 
 def test_init_config_passive_guide_on_broken_profile_tells_the_truth(
@@ -686,6 +690,44 @@ def test_the_repair_wizard_is_not_handed_the_profile_flag(
     assert rc == 0
     assert captured.get("ran") is True  # дошли до сборки приложения
     assert captured.get("profile_override") is None  # …и флаг в неё не уехал
+
+
+def test_the_repair_wizard_is_not_handed_the_level_flag(monkeypatch, tmp_path):
+    """Симметрия флагов запуска: `--level` гасится под `--init-config` тем же
+    правилом, что и `--profile` в тесте выше — чинилка читает и пишет
+    пользовательский файл, флаги, назвавшие ДРУГОЙ конфиг, там не в счёт."""
+    pytest.importorskip("textual")
+    _isolate_default_config_at(tmp_path, monkeypatch)
+    (tmp_path / "config.yml").write_text(
+        "this is: : : not [valid yaml }\n", encoding="utf-8"
+    )
+
+    captured: dict = {}
+    from gc_tui import app as tui_app
+
+    class _FakeApp:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def set_config_path(self, path):
+            pass
+
+        def _maybe_notice_profile_activation(self, *a, **k):
+            pass
+
+        def run(self):
+            captured["ran"] = True
+
+    monkeypatch.setattr(tui_app, "TuiApp", _FakeApp)
+
+    import gc_tui as tui_mod
+
+    monkeypatch.setattr(tui_mod, "_interactive", lambda: True, raising=False)
+
+    rc = tui_mod.main(argv=["--init-config", "--level", "max"])
+    assert rc == 0
+    assert captured.get("ran") is True  # дошли до сборки приложения
+    assert captured.get("level_override") is None  # …и флаг в неё не уехал
 
 
 def test_main_explains_an_unreadable_layer_instead_of_a_traceback(

@@ -1,6 +1,7 @@
 """ArgPicker integration в TraceScreen: триггер на /export <space>, фильтр, Tab,
 Enter (выполняет export), Esc, mutex с командной палитрой."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_core.thread_store import append_new_thread_messages
 from gc_tui.services.stores.file_store import FileTaskStore
@@ -10,7 +11,9 @@ def _mk_app(tmp_path):
     from gc_tui.app import TuiApp
 
     return TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
 
 

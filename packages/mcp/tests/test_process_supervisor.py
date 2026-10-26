@@ -23,7 +23,6 @@ from recommended_mcp.process_supervisor import (
     remove_pid,
     stop_command_daemons,
     terminate_pid,
-    terminate_process,
     terminate_processes,
     write_pid,
 )
@@ -113,7 +112,7 @@ def test_terminate_process_returns_fast_for_own_child() -> None:
     )
     time.sleep(0.3)
     started = time.monotonic()
-    terminate_process(proc)
+    terminate_processes([proc])
     elapsed = time.monotonic() - started
     assert elapsed < 1.0
     assert is_pid_alive(proc.pid) is False
@@ -189,7 +188,7 @@ def test_terminate_process_kills_child_ignoring_sigterm(
     child = None
     try:
         child = _read_child_pid(pid_file)
-        terminate_process(proc, graceful_timeout=1.0)
+        terminate_processes([proc], graceful_timeout=1.0)
         assert _alive_after(child) is False
     finally:
         _kill_leftovers(proc, child)
@@ -207,7 +206,7 @@ def test_terminate_process_kills_group_of_dead_leader(tmp_path: Path) -> None:
         os.waitid(
             os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT
         )  # дождаться, не забирая
-        terminate_process(proc, graceful_timeout=1.0)
+        terminate_processes([proc], graceful_timeout=1.0)
         assert _alive_after(child) is False
     finally:
         _kill_leftovers(proc, child)
@@ -230,7 +229,7 @@ def test_terminate_process_leaves_group_of_reaped_leader_alone(
         os, "killpg", lambda pgid, sig: signalled.append((pgid, sig))
     )
 
-    terminate_process(proc)
+    terminate_processes([proc])
 
     assert signalled == []
 
@@ -240,7 +239,10 @@ def test_terminate_process_leaves_group_of_reaped_leader_alone(
 )
 @pytest.mark.parametrize(
     "terminate",
-    [terminate_process, lambda proc, **kw: terminate_pid(proc.pid, **kw)],
+    [
+        lambda proc, **kw: terminate_processes([proc], **kw),
+        lambda proc, **kw: terminate_pid(proc.pid, **kw),
+    ],
     ids=["process", "pid"],
 )
 def test_orphans_of_exited_leader_do_not_hold_full_timeout(

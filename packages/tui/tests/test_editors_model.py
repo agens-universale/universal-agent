@@ -578,7 +578,9 @@ async def test_filter_moves_cursor_to_anchor_when_selection_filtered_out():
             ed.submit() != "openai/gpt-5.6-terra"
         )  # не подменяет выбор по позиции
         assert ed._list.selected_item.model.id == "gigacode"
-        assert ed.submit() == "glm-5.2-fp8"  # фильтр не меняет подтверждённый выбор
+        assert (
+            ed.submit() == "glm-5.2-fp8"
+        )  # фильтр не меняет подтверждённый выбор
         assert ed.mark() == "gigacode"
         assert ed.submit() == "gigacode"
 
@@ -940,7 +942,9 @@ async def test_reload_keeps_the_row_under_the_cursor(tmp_path):
         await wait_until(
             pilot, lambda: len(_row_texts(ed)) == 3, "список перечитан"
         )
-        assert ed._list.selected_item.model.id == "b/two", "курсор уехал на якорь"
+        assert ed._list.selected_item.model.id == "b/two", (
+            "курсор уехал на якорь"
+        )
         assert ed.peek() == "b/two", "выбор уехал на якорь"
 
 

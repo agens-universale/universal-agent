@@ -7,6 +7,7 @@
 """
 
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
+from gc_testkit.settings import make_settings
 
 
 def test_skills_tool_names_have_no_prefix_collision():
@@ -26,7 +27,9 @@ def test_builtin_and_skills_tool_names_have_no_prefix_collision():
     from gc_core.tools.registry import all_builtin_tool_names
 
     names = sorted(
-        all_builtin_tool_names({"backend_api_mode": "chat_completions"})
+        all_builtin_tool_names(
+            make_settings({"backend.api_mode": "chat_completions"})
+        )
         | set(get_skills_tools_data(None))
     )
     assert FS_VIEW_IMAGE_NAME in names

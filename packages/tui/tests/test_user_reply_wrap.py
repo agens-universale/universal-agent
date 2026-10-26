@@ -19,6 +19,7 @@ from gc_tui.messages import OpenImageRequest
 from gc_tui.palette import DIM
 from gc_tui.widgets.user_reply import NestedUserReply, UserReplyContainer
 from image_helpers import make_attachment_file
+from gc_testkit.tui_support import tui_settings
 
 #: Колонки и подложка реплики — как в styles.tcss приложения (кромка и поля
 #: сужают содержимое на 3 ячейки).
@@ -338,7 +339,7 @@ async def test_app_copies_the_message_text_of_a_wrapped_reply(
     att = make_attachment_file(8, tmp_path, source=OUTSIDE)
     text = f"{chip_text(8)} глянь"
     threads, tid = _thread_with_reply(tmp_path, text, att)
-    app = TuiApp(threads_dir=threads, system="cli", config={})
+    app = TuiApp(threads_dir=threads, system="cli", settings=tui_settings({}))
     async with app.run_test(size=(60, 30)) as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause(0.3)

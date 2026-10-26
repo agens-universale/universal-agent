@@ -17,6 +17,7 @@ from gc_core.security.command_moderation import (
     decide_command_execution,
     moderate_command_execution,
 )
+from gc_testkit.settings import fake_ctx, make_settings
 
 # ---------------------------------------------------------------------------
 # C1 Часть 2: judge-unavailable → confirm-порт
@@ -52,11 +53,15 @@ def test_judge_unavailable_deny_mode_blocks_when_no_confirm(monkeypatch):
 
 
 def test_judge_unavailable_deny_mode_blocks_when_confirm_rejected(monkeypatch):
-    """deny + судья недоступен + пользователь отказал → fail-closed."""
+    """deny + судья недоступен + пользователь отказал → блок, и это отказ
+    человека, а не «судья недоступен»: причину и инструкцию модели гард
+    возьмёт по исходу вопроса."""
     monkeypatch.setattr(cm, "confirm_available", lambda ctx: True)
     dec = decide_command_execution("deny", None, False, False, ctx=object())
     assert dec.allowed is False
-    assert dec.reason_code == "judge_unavailable"
+    assert dec.decision == "cancelled"
+    assert dec.reason_code == "user_confirmation"
+    assert dec.error_type == "unsafe_command_cancelled_by_user"
 
 
 def test_decision_never_asks_the_human_itself(monkeypatch):
@@ -85,7 +90,7 @@ def test_judge_unavailable_allow_mode_skips_confirm(monkeypatch):
     assert not called  # confirm_available не должен вызываться для mode=allow
 
 
-def test_judge_unavailable_no_ctx_still_blocks(monkeypatch):
+def test_judge_unavailable_no_ctx_still_blocks():
     """Без ctx confirm недоступен → fail-closed (обратная совместимость)."""
     # confirm_available получит ctx=None и вернёт False (no isatty в тестовой среде)
     dec = decide_command_execution("deny", None, False, None)
@@ -121,9 +126,10 @@ def test_build_judge_payload_includes_never_touch_paths(monkeypatch, tmp_path):
     assert "never_touch_paths" in payload
     paths_in_payload = payload["never_touch_paths"]
     assert isinstance(paths_in_payload, list)
-    assert len(paths_in_payload) == 2
-    assert str(instr) in paths_in_payload
-    assert str(oper) in paths_in_payload
+    # служебные, файлы инструкций и `.git` проекта
+    assert sorted(paths_in_payload) == sorted(
+        [str(instr), str(oper), str(tmp_path / ".git")]
+    )
 
 
 def test_build_judge_payload_never_touch_paths_empty_on_error(
@@ -131,7 +137,7 @@ def test_build_judge_payload_never_touch_paths_empty_on_error(
 ):
     """При ошибке protected_paths → never_touch_paths пустой список (не падаем)."""
 
-    def bad_ps(cwd):
+    def bad_ps(_cwd):
         raise RuntimeError("cannot load")
 
     monkeypatch.setattr(cm, "_get_protected_paths", bad_ps)
@@ -158,7 +164,6 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     Ctx передаётся в wrapper через kwarg ctx; resolve_tool_context пробрасывает
     его в ToolSecurityContext.ctx, откуда wrapper берёт его для decide_command_execution.
     """
-    from types import SimpleNamespace
 
     received_ctx: list = []
 
@@ -183,10 +188,10 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
         cm, "_default_judge_client", lambda *a, **k: _judge_is_down
     )
 
-    fake_ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "deny"},
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
         },
         logger=None,
     )
@@ -194,12 +199,77 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     @moderate_command_execution(
         payload_arg="command", tool_name="exec_command"
     )
-    def run(command: str, ctx=None) -> str:
+    def run(command: str, ctx=None) -> str:  # noqa: ARG001 - guard reads the named arguments
         return json.dumps({"ok": True})
 
-    result = json.loads(run("echo hello", ctx=fake_ctx))
+    result = json.loads(run("echo hello", ctx=ctx))
 
     assert result["ok"] is True, "confirm-порт должен разрешить выполнение"
-    assert received_ctx and received_ctx[0] is fake_ctx, (
+    assert received_ctx and received_ctx[0] is ctx, (
         "ctx должен быть проброшен в confirm_available"
+    )
+
+
+def test_prepared_never_touch_snapshot_never_loads_host_paths(
+    monkeypatch, tmp_path
+):
+    def forbidden(_cwd):
+        raise AssertionError(
+            "prepared command context must not read host paths"
+        )
+
+    monkeypatch.setattr(cm, "_get_protected_paths", forbidden)
+    for snapshot in ([], [str(tmp_path / ".gc")]):
+        context = ModerationContext(
+            tool_name="exec_command",
+            launch_root=str(tmp_path),
+            cwd=str(tmp_path),
+            prepared_never_touch_paths=snapshot,
+        )
+        payload = build_judge_payload("exec_command", "echo ok", context)
+        assert payload["never_touch_paths"] == snapshot
+        assert payload["never_touch_paths"] is not snapshot
+
+
+def test_command_host_probe_includes_real_protected_snapshot(tmp_path):
+    from gc_core.execution.guard_contracts import GuardProbeRequest
+    from gc_core.security.guard_probe import evaluate_guard_probe
+
+    request = GuardProbeRequest(
+        "command_host", "exec_command", str(tmp_path), str(tmp_path)
+    )
+    facts = evaluate_guard_probe(request, settings=make_settings())
+    expected = cm.load_never_touch_paths(str(tmp_path))
+    assert expected
+    assert facts.data["never_touch_paths"] == expected
+
+
+def test_commands_that_only_mention_git_are_not_floored(tmp_path):
+    """`grep --exclude-dir .git`, `find -not -path './.git/*'` — частые команды,
+    которые лишь называют `.git`. Пол их не трогает: запись в `.git` командой
+    и так видят судьи и режим; закрытая дыра — молчаливая запись файловыми
+    тулами."""
+    from gc_core.security.command_guard import scan_command_for_protected
+
+    for cmd in (
+        "grep -r foo . --exclude-dir .git",
+        "find . -type f -not -path './.git/*'",
+        "tree -I .git",
+    ):
+        assert scan_command_for_protected(cmd, cwd=str(tmp_path)) == "allow", (
+            cmd
+        )
+
+
+def test_command_judge_sees_the_project_git_as_never_touch(tmp_path):
+    """Пол команды с `.git` не спрашивает (их много: `grep --exclude-dir .git`),
+    поэтому судья команд edit должен знать, что `.git` защищён: `cp … .git/hooks/`
+    он сочтёт опасным и спросит человека. Судье действий auto `.git` в этот
+    список не идёт — там запись в `.git` оценивается правилами, не запретом."""
+    from gc_core.security.command_moderation import load_never_touch_paths
+
+    git_dir = str(tmp_path / ".git")
+    assert git_dir in load_never_touch_paths(str(tmp_path))
+    assert git_dir not in load_never_touch_paths(
+        str(tmp_path), instructions=False
     )

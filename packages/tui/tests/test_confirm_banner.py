@@ -1,11 +1,12 @@
+from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_tui.widgets.confirm_banner import (
     _OPTIONS,
+    _OPTIONS_PLAIN,
     ConfirmBanner,
     _fmt_field_value,
     _fmt_payload_value,
     _is_payload_label,
-    choice_for,
 )
 
 
@@ -24,13 +25,60 @@ def test_banner_has_four_options():
     assert labels[3] == "Запретить разово"
 
 
-def test_choice_for_maps_indices():
-    assert choice_for(0) == "allow_remember"
-    assert choice_for(1) == "allow_once"
-    assert choice_for(2) == "deny_remember"
-    assert choice_for(3) == "deny_once"
-    assert choice_for(-1) == "deny_remember"
-    assert choice_for(99) == "deny_remember"
+def test_plain_options_keep_keys_and_ids_but_do_not_mention_commands():
+    """Вопрос про запись, чтение, адрес или MCP — не про команду: «подобных»
+    там нет, запоминается ровно это действие. Клавиши и ответы те же."""
+    assert [(k, c) for k, _, c in _OPTIONS_PLAIN] == [
+        (k, c) for k, _, c in _OPTIONS
+    ]
+    labels = [lab for _, lab, _ in _OPTIONS_PLAIN]
+    assert labels == [
+        "Разрешить в этой сессии",
+        "Разрешить разово",
+        "Запретить в этой сессии",
+        "Запретить разово",
+    ]
+    assert not any("команд" in lab or "подобн" in lab for lab in labels)
+
+
+@pytest.mark.parametrize(
+    "decision_key,command",
+    [
+        ("command:rm -rf x", True),
+        ("command:print(1)", True),
+        ("write:/p/a.py", False),
+        ("read:/p/a.py", False),
+        ("url:https://example.com", False),
+        ("mcp:ddgs:search", False),
+        ("skill_exec:skills_run_script:pdf:x.py", False),
+        (None, False),
+    ],
+)
+def test_banner_picks_labels_by_the_decision_key(decision_key, command):
+    """«И подобные» — ровно там, где ответ «в сессии» уйдёт судье команд:
+    вид вопроса берётся из ключа решения, а не из названий строк."""
+    banner = ConfirmBanner(
+        banner_title="t",
+        question="q?",
+        # название строки на подписи не влияет: тут «Команда» при ключе записи
+        fields=[("Команда", "x")],
+        decision_key=decision_key,
+    )
+    assert banner.options is (_OPTIONS if command else _OPTIONS_PLAIN)
+
+
+def test_selected_choice_maps_indices():
+    banner = ConfirmBanner(banner_title="t", question="q?")
+    choices = []
+    for index in range(4):
+        banner.selected = index
+        choices.append(banner.selected_choice())
+    assert choices == [
+        "allow_remember",
+        "allow_once",
+        "deny_remember",
+        "deny_once",
+    ]
 
 
 def test_is_payload_label_case_insensitive():
@@ -106,7 +154,9 @@ async def test_banner_renders_payload_and_meta_fields(tmp_path):
     from textual.widgets import Static
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -153,7 +203,9 @@ async def test_banner_long_payload_keeps_options_visible(tmp_path):
         for i in range(40)
     )
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(100, 28)) as pilot:
         scr = pilot.app.screen
@@ -208,7 +260,9 @@ async def test_banner_hugs_short_content(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(100, 40)) as pilot:
         scr = pilot.app.screen
@@ -236,7 +290,9 @@ async def test_banner_body_scrolls_from_keyboard(tmp_path):
 
     long_code = "\n".join(f"line_{i} = {i}" for i in range(60))
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -270,7 +326,9 @@ async def test_scroll_keys_do_not_answer_the_banner(tmp_path):
 
     long_code = "\n".join(f"line_{i}" for i in range(60))
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -283,3 +341,22 @@ async def test_scroll_keys_do_not_answer_the_banner(tmp_path):
         await pilot.pause()
 
         assert scr._confirm_active is True
+
+
+@pytest.mark.parametrize("mode", ["manual", "auto"])
+def test_command_question_outside_edit_names_exactly_this_command(mode):
+    """Вне edit судьи команд нет: ответ «в сессии» покрывает ровно эту команду,
+    и подпись говорит именно это, без «и подобные»."""
+    banner = ConfirmBanner(
+        banner_title="t",
+        question="q?",
+        fields=[("Команда", "sleep 20")],
+        decision_key="command:sleep 20",
+        permission_mode=mode,
+    )
+    assert [label for _key, label, _choice in banner.options] == [
+        "Разрешить эту команду в сессии",
+        "Разрешить разово",
+        "Запретить эту команду в сессии",
+        "Запретить разово",
+    ]

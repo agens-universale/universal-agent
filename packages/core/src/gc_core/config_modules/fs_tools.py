@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -12,7 +12,7 @@ class FsFindInFilesConfig(BaseModel):
     affix_or / complex). Overrides are optional; defaults match the spec.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_file_bytes: int = Field(
         default=16 * 1024 * 1024,
@@ -88,23 +88,13 @@ class FsFindInFilesConfig(BaseModel):
 
 
 def parse_find_in_files_config(
-    config_dict: Optional[dict[str, Any]] = None,
+    settings: Any = None,
 ) -> FsFindInFilesConfig:
-    """Read ``fs_tools.find_in_files`` from a raw config dict.
+    """``fs_tools.find_in_files`` настроек (всё, что принимает ``settings_of``)."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
 
-    Invalid nested values fall back to class defaults (same as runtime tools).
-    """
-    fif_raw: Any = {}
-    if isinstance(config_dict, dict):
-        fs_raw = config_dict.get("fs_tools", {})
-        if isinstance(fs_raw, dict):
-            fif_raw = fs_raw.get("find_in_files", {}) or {}
-    try:
-        return FsFindInFilesConfig.model_validate(
-            fif_raw if isinstance(fif_raw, dict) else {}
-        )
-    except Exception:
-        return FsFindInFilesConfig()
+    return settings_of(settings).fs_tools.find_in_files
 
 
 class FsFindFilesByNameConfig(BaseModel):
@@ -115,7 +105,7 @@ class FsFindFilesByNameConfig(BaseModel):
     ``max_visited`` is a walk safety cap, not a caller argument.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     default_max_matches: int = Field(
         default=100,
@@ -141,29 +131,18 @@ class FsFindFilesByNameConfig(BaseModel):
 
 
 def parse_find_files_by_name_config(
-    config_dict: Optional[dict[str, Any]] = None,
+    settings: Any = None,
 ) -> FsFindFilesByNameConfig:
-    """Read ``fs_tools.find_files_by_name`` from a raw config dict.
+    """``fs_tools.find_files_by_name`` настроек (всё, что принимает ``settings_of``)."""
+    from gc_core.settings import settings_of
 
-    Invalid nested values fall back to class defaults (same as runtime tools).
-    """
-    ffbn_raw: Any = {}
-    if isinstance(config_dict, dict):
-        fs_raw = config_dict.get("fs_tools", {})
-        if isinstance(fs_raw, dict):
-            ffbn_raw = fs_raw.get("find_files_by_name", {}) or {}
-    try:
-        return FsFindFilesByNameConfig.model_validate(
-            ffbn_raw if isinstance(ffbn_raw, dict) else {}
-        )
-    except Exception:
-        return FsFindFilesByNameConfig()
+    return settings_of(settings).fs_tools.find_files_by_name
 
 
 class FsToolsConfig(BaseModel):
     """Caps for FS tools that load whole-file content into memory."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_read_bytes: int = Field(
         default=8 * 1024 * 1024,

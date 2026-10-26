@@ -1,5 +1,4 @@
 import json
-import tempfile
 from types import SimpleNamespace
 
 import pytest
@@ -14,14 +13,8 @@ from gc_core.persistence.schema import (
     meta_has_persisted_agent_state,
     validate_thread_meta_for_load,
 )
-from gc_core.persistence.state_repository import StateRepository
-from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.states import State
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
-    ToolCallOutputRecord,
-    ToolCallOutputsStore,
-)
 
 
 def _make_state() -> State:
@@ -48,102 +41,6 @@ def _user_ask_record(content: str, *, turn: int = 1) -> dict:
         "tool_name": None,
         "content": content,
     }
-
-
-def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
-    state = _make_state()
-    state.shared.working_memory = {
-        "goal": "ship",
-        "constraints": "no legacy",
-        "state": "active",
-    }
-    state.shared.notes_md = "notes"
-    state.shared.fetch_url_cache = {"https://x": "body"}
-    state.user_intent_log = deserialize_list([_user_ask_record("closed turn")])
-    state.current_user_intent = deserialize_list(
-        [_user_ask_record("open turn", turn=2)]
-    )
-    state.user_turn_seq = 2
-    state.project_memory_content_hash = "lm_hash"
-    state.tool_usage_notice_cnt = {"session_memory": 3}
-    state.messages = [{"role": "user", "content": "hi", "id": "u1"}]
-    state.dialog_steps_offset = 7
-    state.tool_call_outputs_store = ToolCallOutputsStore(max_entries=5)
-    state.tool_call_outputs_store.put(
-        ToolCallOutputRecord(
-            output_ref="ref1",
-            source_tool="fs_read_file",
-            call_id="c1",
-            total_chars=4,
-            text="data",
-        )
-    )
-    original_id = state.state_id
-
-    payload = StateSerializer.serialize(state)
-    restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
-
-    assert restored.state_id == original_id
-    assert restored.shared.working_memory["goal"] == "ship"
-    assert restored.shared.notes_md == "notes"
-    assert restored.shared.fetch_url_cache == {"https://x": "body"}
-    assert restored.user_intent_log[0].content == "closed turn"
-    assert restored.current_user_intent[0].content == "open turn"
-    assert restored.user_turn_seq == 2
-    assert restored.project_memory_content_hash == "lm_hash"
-    assert restored.tool_usage_notice_cnt == {"session_memory": 3}
-    assert restored.messages == [{"role": "user", "content": "hi", "id": "u1"}]
-    assert restored.dialog_steps_offset == 7
-    assert restored.tool_call_outputs_store.peek("ref1") is not None
-    assert restored.tool_call_outputs_store.peek("ref1").text == "data"
-    # serialize() pops "logger" from the snapshot; restore must default it back
-    # to None rather than leaving state.__dict__ without the key (AttributeError).
-    assert restored.logger is None
-
-
-def test_load_state_from_snapshot_defaults_logger_to_none():
-    state = _make_state()
-    state.logger = SimpleNamespace(warning=lambda *a, **kw: None)
-
-    payload = StateSerializer.serialize(state)
-    assert "logger" not in payload
-
-    restored = StateSerializer.deserialize(json.loads(json.dumps(payload)))
-    assert restored.logger is None
-
-
-def test_state_serializer_roundtrip_has_v2_schema_and_working_memory():
-    state = _make_state()
-    state.shared.working_memory = {"goal": "ship v2", "knowledge": "fact"}
-    state.shared.notes_md = "notes"
-
-    payload = StateSerializer.serialize(state)
-    assert payload["state_schema_version"] == STATE_SCHEMA_VERSION
-    assert "memory_files" not in payload
-    assert payload["shared"]["working_memory"]["goal"] == "ship v2"
-
-    raw_json = json.dumps(payload, ensure_ascii=False)
-    restored = StateSerializer.deserialize(json.loads(raw_json))
-    assert restored.shared.working_memory["goal"] == "ship v2"
-    assert restored.shared.notes_md == "notes"
-
-
-def test_from_snapshot_rejects_legacy_memory_files_in_snapshot():
-    state = _make_state()
-    payload = StateSerializer.serialize(state)
-    payload["shared"]["memory_files"] = {"journal": "legacy"}
-
-    with pytest.raises(StateSchemaError, match="memory_files"):
-        StateSerializer.deserialize(payload)
-
-
-def test_from_snapshot_rejects_missing_state_schema_version():
-    state = _make_state()
-    payload = StateSerializer.serialize(state)
-    del payload["state_schema_version"]
-
-    with pytest.raises(StateSchemaError, match="state_schema_version"):
-        StateSerializer.deserialize(payload)
 
 
 def test_thread_meta_mapper_shared_from_meta_v2():
@@ -223,35 +120,6 @@ def test_merge_state_into_meta_writes_v2_shared():
     assert "memory_files" not in meta["shared"]
 
 
-def test_state_repository_file_roundtrip():
-    state = _make_state()
-    state.shared.working_memory = {"knowledge": "persisted"}
-
-    with tempfile.NamedTemporaryFile(
-        mode="w+", suffix=".json", delete=False
-    ) as tmp:
-        path = tmp.name
-
-    try:
-        StateRepository.save_snapshot({state.state_id: state}, path)
-        loaded = StateRepository.load_snapshot(path)
-        assert state.state_id in loaded
-        assert (
-            loaded[state.state_id].shared.working_memory["knowledge"]
-            == "persisted"
-        )
-    finally:
-        import os
-
-        os.unlink(path)
-
-
-def test_state_serializer_roundtrip_from_state_factory():
-    state = _make_state()
-    payload = StateSerializer.serialize(state)
-    assert payload["state_schema_version"] == STATE_SCHEMA_VERSION
-
-
 def test_get_thread_memory_registers_only_working_memory():
     from gc_core.message_policy.tool_usage_notice.policy import (
         get_thread_memory_registers_from_shared,
@@ -261,3 +129,39 @@ def test_get_thread_memory_registers_only_working_memory():
         working_memory={"state": "ok"},
     )
     assert get_thread_memory_registers_from_shared(shared) == {"state": "ok"}
+
+
+def test_execution_snapshot_retains_routing_progress_through_json():
+    from gc_core.auto_routing.policy import Decision
+
+    state = _make_state()
+    state.current_level = "light"
+    state.steps_in_turn = 17
+    state.steps_on_current_level = 4
+    state.turn_safe_level = "default"
+    state.tick_signals = {"loop"}
+    decision = Decision("light", "hold", ("loop",), False)
+    state._tick_decision = ("auto", True, decision, "light")
+    restored = State.from_execution_snapshot(
+        json.loads(json.dumps(state.to_execution_snapshot()))
+    )
+    assert restored.current_level == "light"
+    assert restored.steps_in_turn == 17
+    assert restored.steps_on_current_level == 4
+    assert restored.turn_safe_level == "default"
+    assert restored.tick_signals == {"loop"}
+    assert restored._tick_decision == ("auto", True, decision, "light")
+
+
+def test_execution_snapshot_before_routing_fields_restores_defaults():
+    from gc_core.auto_routing.state_ops import ROUTING_FIELDS
+
+    state = _make_state()
+    payload = state.to_execution_snapshot()
+    for name in (*ROUTING_FIELDS, "turn_messages_start"):
+        payload["data"].pop(name, None)
+    restored = State.from_execution_snapshot(payload)
+    assert restored.current_level is None and restored.tick_signals == set()
+    assert restored.turn_messages_start is None
+    restored.mark_turn_start()
+    assert restored.turn_messages_start == len(restored.messages)

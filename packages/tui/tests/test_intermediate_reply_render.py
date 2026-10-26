@@ -1,5 +1,6 @@
 """Рендер intermediate_reply (· проза) и error_msg ([!] красный) в трейсе."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_tui.models import TraceEvent
 
@@ -11,7 +12,9 @@ async def test_intermediate_reply_renders_as_dot_prose(tmp_path):
     from gc_tui.widgets.trace_row import TraceRow
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -41,7 +44,9 @@ async def test_error_msg_renders_red_bang(tmp_path):
     from gc_tui.widgets.trace_row import TraceRow
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen

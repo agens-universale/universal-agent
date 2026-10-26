@@ -41,6 +41,8 @@ def _cost_display(report: CostReport, *, compact: bool) -> Optional[str]:
 
     ``compact`` — формат футера, без пробела перед валютой («0.5₽», не «0.5 ₽»).
     """
+    if report.unknown_only:
+        return "?"
     if not report.has_cost:
         return None
     has_provider = any(
@@ -76,6 +78,8 @@ def format_nonzero_cost(
     if account.is_empty():
         return None
     report: CostReport = compute_cost(account, pricing, model, endpoint_url)
+    if report.unknown_only:
+        return "?"
     if not any(amount > 0 for amount in report.by_currency.values()):
         return None
     return _cost_display(report, compact=False)
@@ -187,19 +191,3 @@ def compose_adaptive_footer_right(
     out.append("\n")
     out.append_text(_join(usage, sep))
     return out
-
-
-def render_usage_meter(
-    session_meta: Any,
-    last_run_meta: Any,
-    pricing: Any,
-    model: str | None,
-    endpoint_url: str | None = None,
-) -> Text | None:
-    """Rich-Text «запрос …/… · сессия …/…» одной строкой или None (совместимость)."""
-    request, session = usage_segments(
-        session_meta, last_run_meta, pricing, model, endpoint_url
-    )
-    if session is None:
-        return None
-    return _join([s for s in (request, session) if s is not None])

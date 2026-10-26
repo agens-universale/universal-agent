@@ -52,11 +52,6 @@ class McpSectionEditor(Vertical):
             else None
         )
 
-    @property
-    def current_action(self) -> str | None:
-        """Курсор на строке-действии ⤓/⟳: "missing"/"update"/None."""
-        return self._action_kind
-
     def compose(self) -> ComposeResult:
         for i, row in enumerate(self._managed):
             selected = i == self._idx and self._action_kind is None
@@ -198,10 +193,6 @@ class McpSectionEditor(Vertical):
         self._states[name] = st
         self._refresh_rows()
         self.refresh_action_rows()
-
-    def status_ready(self, name: str) -> bool:
-        """Статус строки пришёл (Ctrl+U/Del активны только тогда, §4)."""
-        return name in self._states
 
     # --- строки-действия ⤓/⟳ (за разделителем, скрываются если нечего делать) ---
     def _missing_names(self) -> list:

@@ -7,6 +7,7 @@ timeout ~5с → clear_selection(); runner не стопается.
 from __future__ import annotations
 
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 pytest.importorskip("textual")
 
@@ -17,7 +18,9 @@ async def test_trace_screen_has_freeze_field(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         assert hasattr(pilot.app.screen, "_select_freeze_since")
@@ -30,7 +33,9 @@ async def test_ui_frozen_for_select_predicate(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -46,7 +51,9 @@ async def test_poll_freeze_skips_stick(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -77,7 +84,9 @@ async def test_poll_freeze_sets_since(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -97,7 +106,9 @@ async def test_poll_freeze_timeout_clears(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -126,7 +137,9 @@ async def test_thinking_indicator_tick_gated_by_selecting(
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         ind = ThinkingIndicator()
@@ -154,7 +167,9 @@ async def test_tool_call_row_pulse_gated_by_selecting(tmp_path, monkeypatch):
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         row = ToolCallRow(call_id="c1", tool_name="tool", args_summary="x=1")
@@ -187,7 +202,9 @@ async def test_refresh_stream_content_gated_by_selecting(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -255,7 +272,9 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -292,3 +311,109 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
         # orphan/MCP тоже должны выполняться (до ранней ветки None)
         assert calls["orphan"] >= 1
         assert calls["mcp"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
+    """F3: записи, пришедшие во время выделения, рисуются первым тиком после
+    отпускания мыши — под заморозкой хвост не читается, курсор стоит."""
+    import json
+
+    from gc_core.thread_store import append_new_thread_messages
+    from gc_tui.app import TuiApp
+
+    def _append(seq: int, *msgs: dict) -> None:
+        append_new_thread_messages(
+            str(tmp_path), "cli", "t1", list(msgs), set(), start_seq=seq
+        )
+
+    _append(0, {"id": "u1", "role": "user", "content": "первая"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task("t1")
+        await pilot.pause(0.05)
+        frozen = [True]
+        monkeypatch.setattr(scr, "_ui_frozen_for_select", lambda: frozen[0])
+        _append(
+            1,
+            {"id": "u2", "role": "user", "content": "под выделением"},
+            {
+                "id": "fc1",
+                "type": "function_call",
+                "name": "fs_read_file",
+                "call_id": "c1",
+                "arguments": json.dumps({"path": "a.py"}),
+            },
+            {
+                "id": "fo1",
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": "ok",
+            },
+        )
+        tail_events = scr._store.tail_events
+        reads = []
+
+        def _counted(*args, **kwargs):
+            reads.append(frozen[0])
+            return tail_events(*args, **kwargs)
+
+        monkeypatch.setattr(scr._store, "tail_events", _counted)
+        scr._poll_active()
+        scr._poll_active()
+        frozen[0] = False
+        scr._poll_active()
+        await pilot.pause(0.05)
+        ids = [e.message_id for e in scr._task_events]
+        size = (tmp_path / "data_cli_t1.jsonl").stat().st_size
+
+    assert True not in reads
+    assert {"u2", "fc1", "fo1"} <= set(ids)
+    assert ids.count("u2") == 1
+    assert scr._cursor.position_token == size
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_under_selection_drawn_once(tmp_path, monkeypatch):
+    """Ответ из стрима дописан в файл под выделением: после отпускания —
+    одна строка ответа, стрим-блок снят."""
+    from gc_core.thread_store import append_new_thread_messages
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.stream_block import StreamBlock
+
+    def _append(seq: int, msg: dict) -> None:
+        append_new_thread_messages(
+            str(tmp_path), "cli", "t1", [msg], set(), start_seq=seq
+        )
+
+    _append(0, {"id": "u1", "role": "user", "content": "вопрос"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task("t1")
+        await pilot.pause(0.05)
+        block = StreamBlock()
+        scr._stream_block = block
+        scr._trace_mount(block)
+        frozen = [True]
+        monkeypatch.setattr(scr, "_ui_frozen_for_select", lambda: frozen[0])
+        _append(1, {"id": "a1", "role": "assistant", "content": "ответ"})
+        scr._poll_active()
+        assert scr._stream_block is block
+        frozen[0] = False
+        scr._poll_active()
+        await pilot.pause(0.05)
+        answers = [e for e in scr._task_events if e.message_id == "a1"]
+        mounted = block in scr.query_one("#trace").children
+
+    assert len(answers) == 1
+    assert scr._stream_block is None and not mounted

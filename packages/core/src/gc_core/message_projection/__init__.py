@@ -17,7 +17,7 @@
 
 Entrypoint'ы: ``project_text_for_model``, ``project_assistant_text``,
 ``effective_for_model_tags``. Параметры ``tags`` / ``strip_think`` передаёт
-вызывающий (из ``config_dict``), модуль состояние не хранит.
+вызывающий (из настроек ``strip_tags_projection``), модуль состояние не хранит.
 """
 
 from __future__ import annotations

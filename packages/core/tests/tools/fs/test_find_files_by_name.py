@@ -5,6 +5,7 @@ import pytest
 from gc_core.config_modules.fs_tools import FsFindFilesByNameConfig
 from gc_core.tools.fs.find_files_by_name import FindFilesByName
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_testkit.settings import make_settings
 from pydantic import ValidationError
 
 
@@ -12,7 +13,7 @@ def _tool(extra=None):
     cfg = {}
     if extra:
         cfg["fs_tools"] = {"find_files_by_name": extra}
-    return with_local_ctx(FindFilesByName, config_dict=cfg)
+    return with_local_ctx(FindFilesByName, cfg)
 
 
 def test_find_by_basename_anywhere(tmp_path: Path):
@@ -281,8 +282,8 @@ def test_tool_description_uses_live_config_limits():
             }
         }
     }
-    spec = FindFilesByName.tool_description(config_dict=cfg)
-    prompt = FindFilesByName.prompt_description(config_dict=cfg)
+    spec = FindFilesByName.tool_description(make_settings(cfg))
+    prompt = FindFilesByName.prompt_description(make_settings(cfg))
     mm = spec["parameters"]["properties"]["max_matches"]
     assert mm["maximum"] == 11
     assert "Default 7" in mm["description"]
@@ -295,14 +296,16 @@ def test_builtin_tools_data_schema_uses_live_config():
     from gc_core.tools.registry import get_builtin_tools_data
 
     tools = get_builtin_tools_data(
-        {
-            "fs_tools": {
-                "find_files_by_name": {
-                    "default_max_matches": 7,
-                    "hard_max_matches": 11,
+        make_settings(
+            {
+                "fs_tools": {
+                    "find_files_by_name": {
+                        "default_max_matches": 7,
+                        "hard_max_matches": 11,
+                    }
                 }
             }
-        }
+        )
     )
     entry = tools["fs_find_files_by_name"]
     mm = entry["spec"]["parameters"]["properties"]["max_matches"]
@@ -412,9 +415,7 @@ def test_walk_prunes_hard_excludes_in_the_backend(tmp_path, monkeypatch):
     from gc_testkit.helpers.tool_ctx import with_local_ctx
 
     (tmp_path / "app.py").write_text("x\n", encoding="utf-8")
-    tool = with_local_ctx(
-        FindFilesByName, config_dict={"launch_root": str(tmp_path)}
-    )
+    tool = with_local_ctx(FindFilesByName, {"launch_root": str(tmp_path)})
     backend_cls = type(tool._backend)
     seen = {}
     original = backend_cls.iter_walk_entries

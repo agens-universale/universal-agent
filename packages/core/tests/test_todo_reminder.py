@@ -2,7 +2,9 @@ from gc_core.message_policy.todo_reminder import (
     apply_todo_reminder,
     build_todo_reminder_text,
 )
+from gc_core.settings import LoadedSettings
 from gc_core.states import SharedStateData, State
+from gc_testkit.settings import make_settings
 
 OPEN_ITEMS = [
     {"content": "Шаг 1", "status": "completed"},
@@ -26,7 +28,7 @@ def _state(items) -> State:
     )
 
 
-CFG = {"todo_params": {"reminder_steps": 3}}
+CFG = make_settings({"todo": {"reminder_steps": 3}})
 
 
 def _tick(state, cfg=CFG, step_messages=None):
@@ -89,7 +91,7 @@ def test_counter_resets_when_tool_used_in_batch():
 
 def test_zero_steps_disables():
     state = _state(OPEN_ITEMS)
-    cfg = {"todo_params": {"reminder_steps": 0}}
+    cfg = make_settings({"todo": {"reminder_steps": 0}})
     for _ in range(20):
         assert _tick(state, cfg=cfg) == []
     assert state.todo_reminder_cnt == 0
@@ -97,10 +99,12 @@ def test_zero_steps_disables():
 
 def test_stop_tools_disables():
     state = _state(OPEN_ITEMS)
-    cfg = {
-        "todo_params": {"reminder_steps": 1},
-        "stop_tools": ["session_todo"],
-    }
+    cfg = make_settings(
+        {
+            "todo": {"reminder_steps": 1},
+            "agent.stop_tools": ["session_todo"],
+        }
+    )
     assert _tick(state, cfg=cfg) == []
 
 
@@ -171,8 +175,8 @@ def test_reminder_counter_survives_meta_merge_to_base():
 # --- мягкая подсказка «заведи чек-лист» -------------------------------------
 
 
-def _cfg(steps: int = 1) -> dict:
-    return {"todo_params": {"reminder_steps": steps}}
+def _cfg(steps: int = 1) -> LoadedSettings:
+    return make_settings({"todo": {"reminder_steps": steps}})
 
 
 def _state(todos=None, cnt: int = 0):

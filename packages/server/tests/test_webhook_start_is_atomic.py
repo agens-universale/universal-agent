@@ -84,7 +84,7 @@ def harness(monkeypatch):
     registry = AgentRunRegistry()
     h = SimpleNamespace(registry=registry, plan=[], builds=0, agents=[])
 
-    async def _build(config_dict, **kwargs):
+    async def _build(loaded, **kwargs):
         step = h.plan.pop(0) if h.plan else {}
         h.builds += 1
         if step.get("entered") is not None:

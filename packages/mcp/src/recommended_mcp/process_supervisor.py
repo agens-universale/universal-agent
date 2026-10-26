@@ -287,12 +287,6 @@ def terminate_processes(
     )
 
 
-def terminate_process(
-    proc: subprocess.Popen, *, graceful_timeout: float = 5.0
-) -> None:
-    terminate_processes([proc], graceful_timeout=graceful_timeout)
-
-
 class RunSupervisor:
     """Запускает daemon-команды, следит за PID-файлами, гасит детей при выходе."""
 
