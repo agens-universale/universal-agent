@@ -38,15 +38,26 @@ def finish(report="done"):
     )
 
 
+class _Recorded(list):
+    """Тела запросов; ``headers`` — их заголовки (имена в нижнем регистре)."""
+
+    def __init__(self):
+        super().__init__()
+        self.headers = []
+
+
 @pytest.fixture
 def scripted_http():
-    requests, script = [], []
+    requests, script = _Recorded(), []
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass
 
         def do_POST(self):
+            requests.headers.append(
+                {name.lower(): value for name, value in self.headers.items()}
+            )
             requests.append(
                 json.loads(
                     self.rfile.read(int(self.headers["content-length"]))
