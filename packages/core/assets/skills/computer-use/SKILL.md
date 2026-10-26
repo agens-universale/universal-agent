@@ -2,7 +2,7 @@
 id: "computer-use"
 name: "Computer Use — Windows GUI control"
 description: "You MUST load this skill BEFORE any call to computer_* tools (computer_launch_app, computer_click, computer_type, computer_get_state, computer_scroll, computer_shortcut, computer_key, computer_switch, computer_resize, computer_drag, computer_wait). Triggers in the user's request: 'открой/запусти/закрой приложение X', 'кликни/нажми кнопку/ссылку/меню', 'введи/набери/напечатай текст', 'сохрани файл', 'переключись на окно', 'прокрути', 'нажми сочетание клавиш'. Applications: Excel, Word, Outlook, PowerPoint, Блокнот, Калькулятор, 1С, Chrome, internal corporate applications. This skill covers tool-call ordering, using element_id from get_state, and handling common errors."
-version: "0.1.2"
+version: "0.1.3"
 ---
 
 # Computer Use — Windows GUI control
@@ -79,7 +79,7 @@ For **any** GUI action, follow this order:
 ## Operating rules
 
 1. **Always start with `computer_get_state`.** Without it, you do not know
-   which elements exist on the screen. Do not call `computer_click`
+   which elements exist on the screen. You MUST NOT call `computer_click`
    / `computer_type` / `computer_scroll` without a preceding successful
    `computer_get_state` in the same sequence of steps.
 

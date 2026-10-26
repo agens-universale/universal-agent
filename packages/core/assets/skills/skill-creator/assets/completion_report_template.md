@@ -6,8 +6,8 @@ in Step 5 of the self-check flow. Fill in **all 5 sections** below and
 save the result to `<workspace>/completion_report.md`.
 
 If a section genuinely has nothing to report, write `Нет.` and move on.
-**Do NOT write empty reports** such as “всё хорошо, готов к
-распространению”. Half a page of template prose without specifics
+**Do NOT write empty reports** such as "всё хорошо, готов к
+распространению". Half a page of template prose without specifics
 is useless.
 
 ---
@@ -70,8 +70,8 @@ is useless.
    the specific list of fixes from the session context (subagent review
    reports via task_report, or your own files if saved in
    `text_review_report.md` / `self_check_report.md`).
-   Be specific (“добавил syllable validation шаг”, “убрал
-   штамп `капли стучат` из примеров”), not “исправил пробелы”.
+   Be specific ("добавил syllable validation шаг", "убрал
+   штамп `капли стучат` из примеров"), not "исправил пробелы".
 
 2. **Accepted limitations** — this section is critical for future
    **improve-existing** work. If the model does something poorly and you
@@ -80,8 +80,9 @@ is useless.
    on the same problem.
 
 3. **Открытые вопросы** — keep it brief, without explanations. Use a
-   TODO list for future iterations. If the content is fine, honestly write `Нет.`.
+   TODO list for future iterations. If the content is fine,
+   honestly write `Нет.`.
 
-4. **Do NOT write empty reports** such as “всё хорошо, готов к распространению”.
+4. **Do NOT write empty reports** such as "всё хорошо, готов к распространению".
    If a section genuinely has nothing to report, write `Нет.` and move on.
    Half a page of template prose without specifics is useless.
