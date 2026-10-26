@@ -78,6 +78,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     "parent_call_id": DATA,
     "permission_store": DATA,
     "project_gc_dir": DATA,
+    "record_model_choice": FRONTEND
+    + ": запись смены модели в тред; durable её не пишет, как итог хода",
     "project_memory_io": BOUND,
     "prompt_loader": BOUND,
     "prompt_resource": BOUND,
