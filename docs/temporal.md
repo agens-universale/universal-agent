@@ -399,6 +399,15 @@ worker = Worker(
 - Промпт больше 1 МБ в истории — `ApplicationError` типа
   `HistoryLimitExceeded` до запуска шага; ход не уложился в запись истории —
   `ApplicationError` типа `TurnFailed`.
+- Внешний трейс шага (например, от оркестратора) — `agent_step(...,
+  trace_id="…")` (или `RunRequest.trace_id`). Он уходит заголовком в каждый
+  запрос к модели шага — при `agent.trace_header_enabled: true` — и к
+  MCP-серверам с `trace_header_enabled: true`; субагенты шага шлют тот же
+  трейс. Имя заголовка — `agent.trace_id_header_name` (по умолчанию
+  `x_trace_id` для модели и `trace_id` для MCP), например `X-Trace-id`. У
+  каждого шага свой трейс; без `trace_id` заголовка нет. Кривое значение
+  (перевод строки, не latin-1, длиннее 200 символов) — `ApplicationError`
+  типа `InvalidTraceId` до запуска шага.
 - Воркер процесса несёт `AgentPlugin`. Сбой сессии шага — `ChildWorkflowError`
   в коде workflow. Код своего workflow не входит в `default_build_id()`: при
   versioning задавайте `build_id` с учётом своего кода.
