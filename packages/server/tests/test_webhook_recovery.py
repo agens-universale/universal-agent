@@ -735,19 +735,18 @@ async def test_task_failing_right_after_claim_is_not_recovered_again(
     """Ревью, раунд 4: ход, упавший сразу после захвата треда (проверка
     состояния треда), оставлял отметку хода и аренду — восстановление
     поднимало упавшую задачу каждый обход, без предела попыток."""
-    import gc_core.agent_executor as ae
-    from gc_core.persistence.schema import StateSchemaError
-
     seen = _install(monkeypatch)
-
-    def broken(*_args, **_kwargs):
-        raise StateSchemaError("устаревший ключ памяти")
-
-    monkeypatch.setattr(ae, "shared_from_session", broken)
     stores = await aopen_process_stores(_settings(tmp_path))
     surface = await _surface(tmp_path, stores)
     try:
         await _crashed_run(stores.threads)
+        # Тред прежней версии: устаревший ключ памяти — его отвергает
+        # проверка состояния уже после захвата треда.
+        writer = SessionWriter(stores.threads, KEY, owner="seed/1/legacy")
+        await writer.aclaim()
+        await writer.acommit(set_extra={"memory_files": ["x.md"]})
+        await writer.aside(set_runtime=RuntimeStatus(turn="running"))
+        await writer.arelease()
         first = await arecover_once(surface, now=utc_now())
         await _settled(surface)
         again = await arecover_once(surface, now=utc_now())

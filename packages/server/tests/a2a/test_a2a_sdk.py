@@ -920,9 +920,23 @@ async def test_two_tasks_never_run_in_one_dialog_at_once(tmp_path, stores):
     from gc_core.threads.models import SideChange
     from gc_server.a2a.task_store import FRONTEND
 
+    running = {"now": 0, "max": 0}
+
+    class Counted(FakeAgent):
+        """Считает ходы, идущие в диалоге одновременно."""
+
+        async def stream(self, prompt, **kwargs):
+            running["now"] += 1
+            running["max"] = max(running["max"], running["now"])
+            try:
+                async for item in super().stream(prompt, **kwargs):
+                    yield item
+            finally:
+                running["now"] -= 1
+
     hold = asyncio.Event()
-    holding = FakeAgent(("hold", hold))
-    later = FakeAgent()
+    holding = Counted(("hold", hold))
+    later = Counted()
     first = _surface(tmp_path, stores, [holding])
     second = _surface(tmp_path, stores, [later])
     second_claiming = asyncio.Event()
@@ -970,10 +984,10 @@ async def test_two_tasks_never_run_in_one_dialog_at_once(tmp_path, stores):
         _send(_client(second), _message("два", context_id=context))
     )
     await asyncio.sleep(0.5)
-    overlapped = bool(holding.calls) and bool(later.calls)
     hold.set()
     done = await asyncio.wait_for(asyncio.gather(one, two), 10)
-    assert not overlapped
+    assert running["max"] == 1
+    assert len(holding.calls) == len(later.calls) == 1
     assert [task.status.state for task in done] == [
         pb.TASK_STATE_COMPLETED,
         pb.TASK_STATE_COMPLETED,
