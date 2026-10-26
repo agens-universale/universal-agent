@@ -68,13 +68,7 @@ from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import SUB_INK as _SUB_INK
 from gc_tui.services.duration_format import format_timer
-from gc_tui.services.tool_blocks import (
-    COMMAND_PREVIEW_LINES,
-    Parts,
-    WordRole,
-    counts_text,
-    shown_when_folded,
-)
+from gc_tui.services.tool_blocks import Parts, WordRole, counts_text
 from gc_tui.services.trace_glyphs import (
     CALL_GLYPH,
     CALL_UNDONE_GLYPH,
@@ -309,6 +303,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         # раскрытия — части под строкой (`RanParts`, по первой нужде);
         # ключ тогла фраз частей.
         self._command_rest: tuple[str, ...] = ()
+        self._command_shown = 0
         self._ran: Optional[RanParts] = None
         self._has_output = False
         self._parts_expanded = False
@@ -438,14 +433,16 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._word_role = role
         self._update()
 
-    def set_command(self, lines: tuple[str, ...]) -> None:
+    def set_command(self, lines: tuple[str, ...], *, shown: int) -> None:
         """Команда `Ran` построчно: первая — объект строки, остальные —
-        продолжение под ней (колонка 4)."""
+        продолжение под ней (колонка 4); ``shown`` — сколько строк видно
+        свёрнутой, решение блока."""
         if not lines:
             return
         self._target = lines[0]
         self._fitted = (-1, lines[0])
         self._command_rest = tuple(lines[1:])
+        self._command_shown = shown
         self._update()
 
     def set_output(self, texts: OutputTexts) -> None:
@@ -690,13 +687,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return text
 
     def _append_command_rest(self, text: Text, style: str) -> None:
-        """Продолжение команды под строкой: в свёрнутом виде — до двух
-        строк (§4.0; одну скрытую не прячем — `shown_when_folded`),
-        раскрытом — все; длинная строка — `…` по ширине."""
+        """Продолжение команды под строкой: в свёрнутом виде — сколько
+        решил блок (§4.0, `set_command`), раскрытом — все; длинная строка
+        — `…` по ширине."""
         rest = self._command_rest
         if not self._parts_expanded:
-            n = len(rest) + 1
-            rest = rest[: shown_when_folded(n, COMMAND_PREVIEW_LINES) - 1]
+            rest = rest[: self._command_shown - 1]
         width = self._content_width()
         for line in rest:
             if width > 2:

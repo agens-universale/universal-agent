@@ -230,10 +230,9 @@ class ToolBlocksView:
         self.apply(self.model.member_added(key, category, waiting=waiting))
         if self.model.kind_of(key) != BlockKind.RAN or not command:
             return
-        row.set_command(command)
-        n = len(command)
-        hidden = n - shown_when_folded(n, COMMAND_PREVIEW_LINES)
-        self._command_hidden[key] = hidden
+        shown = shown_when_folded(len(command), COMMAND_PREVIEW_LINES)
+        row.set_command(command, shown=shown)
+        self._command_hidden[key] = len(command) - shown
         if self._command_hidden[key]:
             self._ran_parts(key, RanResult(output=None))
 
