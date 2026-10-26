@@ -139,7 +139,7 @@ class CommandPalette(VerticalScroll):
         # `_values_for` берёт статический `TOGGLES[name].values`.
         self._toggle_values = toggle_values
         self._skills = skills
-        # Текущее значение обычной команды (`/model`, `/profiles`) — правая
+        # Текущее значение обычной команды (`/model`, `/profile`) — правая
         # колонка вместо хоткея; не инъецировано — значений нет.
         self._command_value = command_value
         # Значения на одну перерисовку: ширина правой колонки и строки
@@ -343,7 +343,7 @@ class CommandPalette(VerticalScroll):
 
         `hint_provider` (спека §12.1) — динамический hint
         вместо статического `ToggleValue.hint`, читается через инъекцию
-        `toggle_dynamic_hint`. Пустое состояние /profiles (`current` пусто,
+        `toggle_dynamic_hint`. Пустое состояние /profile (`current` пусто,
         профилей нет) — hint возвращается ЦЕЛИКОМ, без обёртки
         «значение — …  ·  клавиши»: цикла без позиций нет, обёртка была бы
         бессмысленной (канон §12.1 — текст пустого состояния дословно)."""
@@ -532,8 +532,8 @@ class CommandPalette(VerticalScroll):
         self, toggles: list[Command], track_w: int, label_w: int
     ) -> int:
         """Ширина правого блока тоггл-строк от общей колонки `col`: трек +
-        2 + подпись, у trackless (/profiles) — само значение. Общая для всех
-        строк — значение /profiles начинается там же, где треки."""
+        2 + подпись, у trackless (/profile) — само значение. Общая для всех
+        строк — значение /profile начинается там же, где треки."""
         widths = [
             track_w + 2 + label_w
             if TOGGLES[c.name].show_track
@@ -608,7 +608,7 @@ class CommandPalette(VerticalScroll):
             head = head[: col - 4] + "…"
 
         if not spec.show_track:
-            # Trackless (спека §12.1, /profiles): без шкалы — сразу значение-имя
+            # Trackless (спека §12.1, /profile): без шкалы — сразу значение-имя
             # в общей колонке трека (`col`), без слайдера/резерва
             # (произвольное число профилей — шкала не имеет смысла).
             text = Text(head.ljust(col))

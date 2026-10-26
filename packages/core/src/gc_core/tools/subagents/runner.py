@@ -625,7 +625,7 @@ class SubagentRunner:
                     code="subagent_ctx_build_failed",
                     message=(
                         f"субагент {tool_name}: {exc.alias} недоступна: "
-                        f"{exc.reason}. Выберите другую модель /model или профиль /profiles."
+                        f"{exc.reason}. Выберите другую модель /model или профиль /profile."
                     ),
                     retryable=True,
                 ),
@@ -1245,7 +1245,7 @@ class SubagentRunner:
                 raise RuntimeError(
                     f"субагент {tool_name}: пин {exc.alias} и активная модель "
                     f"{active_exc.resolved.model} (алиас {active_exc.alias}) недоступны "
-                    f"(предохранитель). Выберите другую модель /model или профиль /profiles."
+                    f"(предохранитель). Выберите другую модель /model или профиль /profile."
                 ) from active_exc
             who = f"субагент {tool_name}"
             logger = getattr(self._ctx, "logger", None)

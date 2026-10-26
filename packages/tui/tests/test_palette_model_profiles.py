@@ -1,4 +1,4 @@
-"""`/model` и `/profiles` в палитре команд + футер из Router (спеки
+"""`/model` и `/profile` в палитре команд + футер из Router (спеки
 docs/specs/2026-07-23-profiles-design.md §12.1-§12.2 и
 docs/specs/2026-10-25-model-knob-design.md §6.2).
 
@@ -51,14 +51,14 @@ def _registry_app(tmp_path, monkeypatch, config=None):
     return app
 
 
-# --- /model и /profiles — обычные команды, значение справа (спека §6.2) -----
+# --- /model и /profile — обычные команды, значение справа (спека §6.2) -----
 
 
 @pytest.mark.asyncio
 async def test_model_and_profiles_are_plain_commands_with_values_right(
     tmp_path, monkeypatch
 ):
-    """`/model` и `/profiles` — строки верхнего списка, не ручки подвала;
+    """`/model` и `/profile` — строки верхнего списка, не ручки подвала;
     в колонке клавиш — текущее значение: знак + имя модели и «без профиля»."""
     pytest.importorskip("textual")
     from gc_tui import palette as p
@@ -67,16 +67,16 @@ async def test_model_and_profiles_are_plain_commands_with_values_right(
     app = _registry_app(tmp_path, monkeypatch)
     reg = build_default_registry()
     assert not reg.lookup("model").is_toggle
-    assert not reg.lookup("profiles").is_toggle
+    assert not reg.lookup("profile").is_toggle
     async with app.run_test(size=(100, 40)) as pilot:
         pal = _wire_palette(app, reg)
         await app.screen.mount(pal)
         await pilot.pause()
 
         regular = [c.name for c in pal._visible_rows()]
-        assert regular[:4] == ["help", "sessions", "model", "profiles"]
+        assert regular[:4] == ["help", "sessions", "model", "profile"]
         model_row = pal._format_row(reg.lookup("model"))
-        profiles_row = pal._format_row(reg.lookup("profiles"))
+        profiles_row = pal._format_row(reg.lookup("profile"))
         help_row = pal._format_row(reg.lookup("help"))
 
     assert model_row.plain.rstrip().endswith("● glm-4.6")
@@ -128,7 +128,39 @@ def test_models_alias_resolves_via_registry_lookup():
     assert cmd is not None and cmd.name == "model"
 
 
-# --- /profiles: цикл по алфавиту, тёзка — одна позиция, состав+источник -----
+# --- Тихий алиас `profiles` -> /profile --------------------------------------
+
+
+def test_profiles_alias_resolves_and_stays_hidden():
+    """Прежнее имя `/profiles` резолвится в `/profile`, но отдельной строкой
+    палитры не стоит: фильтр `profiles` находит одну строку `/profile`."""
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    reg = build_default_registry()
+    assert reg.lookup("profiles").name == "profile"
+    assert "profiles" not in [c.name for c in reg.list_commands()]
+    pal = CommandPalette(reg, initial_filter="profiles")
+    assert [c.name for c in pal._visible_rows()] == ["profile"]
+    pal = CommandPalette(reg, initial_filter="prof")
+    assert [c.name for c in pal._visible_rows()] == ["profile"]
+
+
+@pytest.mark.asyncio
+async def test_typed_profiles_alias_runs_profile_command(
+    tmp_path, monkeypatch
+):
+    """Набранное `/profiles <имя>` — та же команда, что `/profile <имя>`."""
+    pytest.importorskip("textual")
+    app = _registry_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        hints = []
+        pilot.app.screen._show_footer_refusal = hints.append
+        await pilot.app.screen._handle_command("profiles nope")
+        assert hints and 'профиль "nope" не найден' in hints[0]
+
+
+# --- /profile: цикл по алфавиту, тёзка — одна позиция, состав+источник -----
 
 
 def test_profile_values_deduplicate_namesake_project_wins(
@@ -353,14 +385,14 @@ async def test_footer_updates_on_level_switch(tmp_path, monkeypatch):
         assert scr._compose_footer_right().plain.startswith("● glm-max")
 
 
-# --- Fix round 1 (ревью): битый профиль-файл не роняет hint /profiles ------
+# --- Fix round 1 (ревью): битый профиль-файл не роняет hint /profile ------
 
 
 def test_profiles_hint_survives_syntactically_broken_yaml(
     tmp_path, monkeypatch
 ):
     """Синтаксически битый профиль-файл (юзер правит руками, волна A), найденный
-    `discover_profiles` по glob, не должен ронять навигацию/рендер `/profiles` —
+    `discover_profiles` по glob, не должен ронять навигацию/рендер `/profile` —
     MCP-предупреждение просто не показывается (yaml.YAMLError наравне с OSError)."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "profiles").mkdir()
@@ -463,7 +495,7 @@ def test_build_real_executor_force_legacy_false_without_cli_model_override(
     assert captured["force_legacy"] is False
 
 
-# --- Пикер /profiles (спека §12.1, ревизия 2026-07-28) ----------------------
+# --- Пикер /profile (спека §12.1, ревизия 2026-07-28) ----------------------
 
 
 def _picker_app(tmp_path, monkeypatch, *, base_profile="", session=None):
@@ -578,14 +610,14 @@ def test_profile_picker_hint_none_value(tmp_path, monkeypatch):
 
 
 def test_profiles_picker_opens_on_the_active_row(tmp_path, monkeypatch):
-    """Пикер `/profiles` открывается на строке «активен»: действующий
+    """Пикер `/profile` открывается на строке «активен»: действующий
     профиль, без профиля — «без профиля» (смок, раунд 2, п. 7)."""
     pytest.importorskip("textual")
     from gc_tui.commands import build_default_registry
     from gc_tui.toggles import profile_picker_options
     from gc_tui.widgets.arg_picker import ArgPicker
 
-    cmd = build_default_registry().lookup("profiles")
+    cmd = build_default_registry().lookup("profile")
     for i, base_profile in enumerate(("smoke", "")):
         case_dir = tmp_path / f"case{i}"
         case_dir.mkdir()
@@ -600,7 +632,7 @@ def test_profiles_picker_opens_on_the_active_row(tmp_path, monkeypatch):
 def test_profiles_command_has_dynamic_picker_wiring():
     from gc_tui.commands import build_default_registry
 
-    cmd = build_default_registry().lookup("profiles")
+    cmd = build_default_registry().lookup("profile")
     assert cmd.args == "[профиль]"
     assert cmd.arg_options_provider is not None
     assert cmd.arg_hint_provider is not None
@@ -669,31 +701,31 @@ def _bare_trace_screen(monkeypatch, app):
     return scr
 
 
-def test_cmd_profiles_dash_removes_session_profile(tmp_path, monkeypatch):
+def test_cmd_profile_dash_removes_session_profile(tmp_path, monkeypatch):
     app = _picker_app(tmp_path, monkeypatch, session={"profile": "smoke"})
     calls = []
     app.switch_session_profile = lambda name: calls.append(name)
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._cmd_profiles("без профиля")
+    scr._cmd_profile("без профиля")
     assert calls == [""]
 
 
-def test_cmd_profiles_known_name_switches(tmp_path, monkeypatch):
+def test_cmd_profile_known_name_switches(tmp_path, monkeypatch):
     app = _picker_app(tmp_path, monkeypatch)
     calls = []
     app.switch_session_profile = lambda name: calls.append(name)
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._cmd_profiles("smoke")
+    scr._cmd_profile("smoke")
     assert calls == ["smoke"]
 
 
-def test_cmd_profiles_unknown_name_honest_refusal(tmp_path, monkeypatch):
+def test_cmd_profile_unknown_name_honest_refusal(tmp_path, monkeypatch):
     app = _picker_app(tmp_path, monkeypatch)
     calls, hints = [], []
     app.switch_session_profile = lambda name: calls.append(name)
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
-    scr._cmd_profiles("wrok")
+    scr._cmd_profile("wrok")
     assert calls == []
     assert hints and "wrok" in hints[0] and "smoke" in hints[0]
 
@@ -705,9 +737,7 @@ def _raiser(exc):
     return _fn
 
 
-def test_cmd_profiles_write_failure_shows_hint_not_crash(
-    tmp_path, monkeypatch
-):
+def test_cmd_profile_write_failure_shows_hint_not_crash(tmp_path, monkeypatch):
     """Каталог тредов недоступен: `apply_session_override` откатывает и ре-райзит
     OSError. Из обработчика клавиш исключение уронило бы приложение — команда
     показывает то же «✗ не сохранено», что и палитра."""
@@ -716,7 +746,7 @@ def test_cmd_profiles_write_failure_shows_hint_not_crash(
     app.switch_session_profile = _raiser(OSError("read-only"))
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
-    scr._cmd_profiles("smoke")
+    scr._cmd_profile("smoke")
     assert hints and "не сохранено" in hints[0] and "read-only" in hints[0]
 
 
@@ -732,12 +762,12 @@ def test_refusal_hint_outlives_the_ephemeral_default(tmp_path, monkeypatch):
     scr._show_footer_hint = lambda text, **kw: seen.append(
         (text, kw.get("seconds"))
     )
-    scr._cmd_profiles("smoke")
+    scr._cmd_profile("smoke")
     assert seen and "не сохранено" in seen[0][0]
     assert seen[0][1] == 5.0
 
 
-def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(
+def test_cmd_profile_dash_write_failure_shows_hint_not_crash(
     tmp_path, monkeypatch
 ):
     app = _picker_app(tmp_path, monkeypatch, session={"profile": "smoke"})
@@ -745,11 +775,11 @@ def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(
     app.switch_session_profile = _raiser(OSError("disk full"))
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
-    scr._cmd_profiles("без профиля")
+    scr._cmd_profile("без профиля")
     assert hints and "не сохранено" in hints[0]
 
 
-def test_cmd_profiles_vanished_profile_shows_hint_not_crash(
+def test_cmd_profile_vanished_profile_shows_hint_not_crash(
     tmp_path, monkeypatch
 ):
     """Файл профиля исчез между листингом и выбором — пере-мерж внутри
@@ -759,17 +789,17 @@ def test_cmd_profiles_vanished_profile_shows_hint_not_crash(
     app.switch_session_profile = _raiser(ValueError("профиль не найден"))
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
-    scr._cmd_profiles("smoke")
+    scr._cmd_profile("smoke")
     assert hints and "не сохранено" in hints[0]
 
 
-def test_cmd_profiles_no_arg_opens_picker(tmp_path, monkeypatch):
+def test_cmd_profile_no_arg_opens_picker(tmp_path, monkeypatch):
     app = _picker_app(tmp_path, monkeypatch)
     opened = []
     scr = _bare_trace_screen(monkeypatch, app)
     scr._open_command_picker = lambda name: opened.append(name)
-    scr._cmd_profiles("")
-    assert opened == ["profiles"]
+    scr._cmd_profile("")
+    assert opened == ["profile"]
 
 
 def _add_unassemblable_profile(tmp_path) -> None:
@@ -782,7 +812,7 @@ def _add_unassemblable_profile(tmp_path) -> None:
     )
 
 
-def test_cmd_profiles_refuses_a_profile_that_does_not_assemble(
+def test_cmd_profile_refuses_a_profile_that_does_not_assemble(
     tmp_path, monkeypatch
 ):
     """Вход 1 (набранная команда), НАСТОЯЩИЙ `switch_session_profile`, не мок:
@@ -796,7 +826,7 @@ def test_cmd_profiles_refuses_a_profile_that_does_not_assemble(
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
 
-    scr._cmd_profiles("broken-enc")
+    scr._cmd_profile("broken-enc")
 
     assert hints and "не сохранено" in hints[0]
     assert "broken-enc.yml" in hints[0]
@@ -804,8 +834,8 @@ def test_cmd_profiles_refuses_a_profile_that_does_not_assemble(
 
 
 def test_apply_toggle_profiles_propagates_the_refusal(tmp_path, monkeypatch):
-    """Вход 2 (палитра): у `/profiles` ←/→ и Enter раскрывают пикер, а его выбор
-    уходит в тот же `_cmd_profiles` — но generic-путь `apply_toggle` остаётся
+    """Вход 2 (палитра): у `/profile` ←/→ и Enter раскрывают пикер, а его выбор
+    уходит в тот же `_cmd_profile` — но generic-путь `apply_toggle` остаётся
     объявленным API тоггла. Он обязан ПРОПУСКАТЬ отказ наружу: оба обработчика в
     `main.py` ловят `(ValueError, OSError)` и показывают «✗ не сохранено»;
     проглоченное здесь исключение вернуло бы тихий фоллбэк через чёрный ход."""
@@ -1057,14 +1087,14 @@ async def test_palette_rebuild_asks_each_command_value_once(
     tmp_path, monkeypatch
 ):
     """Перерисовка списка (стрелка, символ фильтра): значение `/model`
-    (роутер витрины) и `/profiles` считается один раз на рендер, а не на
+    (роутер витрины) и `/profile` считается один раз на рендер, а не на
     каждую строку, которой нужна ширина правой колонки."""
     pytest.importorskip("textual")
     from gc_tui.commands import build_default_registry
 
     app = _registry_app(tmp_path, monkeypatch)
     reg = build_default_registry()
-    calls = {"model": 0, "profiles": 0}
+    calls = {"model": 0, "profile": 0}
 
     def counting(cmd):
         calls[cmd.name] = calls.get(cmd.name, 0) + 1
@@ -1076,11 +1106,11 @@ async def test_palette_rebuild_asks_each_command_value_once(
         pal = CommandPalette(reg, initial_filter="", command_value=counting)
         await app.screen.mount(pal)
         await pilot.pause()
-        calls.update(model=0, profiles=0)
+        calls.update(model=0, profile=0)
 
         pal.move_selection(1)
 
-        assert calls["model"] == 1 and calls["profiles"] == 1
+        assert calls["model"] == 1 and calls["profile"] == 1
 
 
 def test_apply_model_choice_has_no_end_of_task_notice_while_run_is_live(

@@ -1634,7 +1634,7 @@ async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choic
 # `gc-ua --profile ""` — путь отхода, который советует `explain_broken_config`:
 # профиль в файле назван, но в ЭТОМ запуске не работает. Витрина, спросившая диск
 # без действующего оверрайда, называет слой, которого в стеке нет, — и прячет за
-# ним точку починки. Сессионный выбор `/profiles` — та же ось: он тоже часть
+# ним точку починки. Сессионный выбор `/profile` — та же ось: он тоже часть
 # «действующего», и витрина обязана видеть его немедленно.
 
 
@@ -1690,7 +1690,7 @@ async def test_registry_origin_judges_the_launch_stack_not_the_pointer(
 
 async def test_registry_origin_sees_the_session_choice(tmp_path, monkeypatch):
     """Обратная сторона того же правила: указатель в файле пуст, а профиль выбран
-    в сессии (`/profiles`) — реестр перекрыт ИМ, и витрина обязана сказать это
+    в сессии (`/profile`) — реестр перекрыт ИМ, и витрина обязана сказать это
     сразу, не дожидаясь записи выбора в файл (её не будет)."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()

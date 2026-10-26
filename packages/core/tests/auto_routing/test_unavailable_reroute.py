@@ -236,7 +236,7 @@ def test_manual_breaker_error_suggests_model_command(monkeypatch):
     with pytest.raises(MainModelUnavailable) as excinfo:
         _ask(s, ctx)
     message = str(excinfo.value)
-    assert "Выберите другую модель /model или профиль /profiles." in message
+    assert "Выберите другую модель /model или профиль /profile." in message
     assert "/level" not in message
 
 

@@ -210,7 +210,7 @@ def test_rigor_toggle_spec_shape():
 def test_rigor_is_first_and_details_hidden_by_default():
     from gc_tui.toggles import TOGGLES, group_toggle_names
 
-    # rigor — первый в СВОЕЙ группе (спека §12.1: /level и /profiles — новая
+    # rigor — первый в СВОЕЙ группе (спека §12.1: /level и /profile — новая
     # группа «чем работаем» выше rigor, отдельная семья, group_toggle_names).
     assert group_toggle_names("rigor")[0] == "rigor"
     assert TOGGLES["gate"].palette_default is False

@@ -105,23 +105,23 @@ class ToggleSpec:
     `preset_keys` — непусто ⇔ тоггл-пресет над этими ключами (значение = имя пресета
     от резолвера, применение раскладывается в пару; спека §6).
 
-    Профили v2 (спека §12.1, group «чем работаем» — `/profiles`):
+    Профили v2 (спека §12.1, group «чем работаем» — `/profile`):
     `group` — семья тоггла для потребителей, которым нужна ТОЛЬКО «rigor»-семья
     (Settings «Режимы работы» — секция про самопроверку/формат ответа, не про
     модели; см. `group_toggle_names`); дефолт `"rigor"` — существующие
     gate/answers/rigor ничего не меняют, только новые `models`-тогглы указывают
-    свой. `show_track` — False у trackless-тоггла (`/profiles`: произвольное
+    свой. `show_track` — False у trackless-тоггла (`/profile`: произвольное
     число профилей, шкала не имеет смысла — сразу значение-имя, спека §12.1).
     `values_provider(app, settings) -> значения` — состав для переданных настроек
     (база окна для Settings или действующие для палитры) вместо
     статического `values` (профили из файлов, а не фиксированный список);
     `hint_provider(app, value) -> текст` — динамический hint вместо статического
     `ToggleValue.hint` (уровни модели для `model`; состав профиля для
-    `/profiles`) — оба переносятся с прототипа `feat/model-profiles`
+    `/profile`) — оба переносятся с прототипа `feat/model-profiles`
     (адаптация под flat-группы ревизий 5-7: без `group`-based разделителей —
     граница «models»→«rigor» уже покрыта существующим правилом «черта перед
     preset-родителем, который не первый», т.к. `/rigor` сам такой родитель).
-    `session_switch_profile` — True у `/profiles`: применение идёт через
+    `session_switch_profile` — True у `/profile`: применение идёт через
     `app.switch_session_profile` (пересборка + notice + предохранитель,
     спека §9.1), не generic `apply_session_override`."""
 
@@ -139,7 +139,7 @@ class ToggleSpec:
     # файл — уточнение «по умолчанию» верно только во втором и соврало бы в первой.
     settings_label: str = ""
     show_track: bool = True
-    # Trackless: чем показать пустое значение (у /profiles «без профиля» —
+    # Trackless: чем показать пустое значение (у /profile «без профиля» —
     # осмысленное состояние, не «не задано», ревизия 2026-07-28).
     empty_value_text: str = "—"
     values_provider: Optional[
@@ -217,7 +217,7 @@ def _model_value(app: Any, settings: Any) -> Text:
     return model_value(app, settings)
 
 
-# --- /profiles: trackless-строка, циклический выбор файла-профиля -----------
+# --- /profile: trackless-строка, циклический выбор файла-профиля -----------
 _PROFILE_EMPTY_HINT = "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · пример — в /settings → Профили"
 _LEVEL_ORDER = {"light": 0, "default": 1, "max": 2}
 
@@ -305,7 +305,7 @@ def _profile_mcp_rebuild_note(app: Any, value: str) -> str:
 
 
 def profile_value_hint(app: Any, value: str) -> str:
-    """Динамический hint `/profiles` (спека §12.1): состав слотов + источник
+    """Динамический hint `/profile` (спека §12.1): состав слотов + источник
     (проектный/глобальный) +, если целевой профиль переопределяет `mcp.servers`,
     предупреждение цены переключения. Пустое состояние — текст спеки дословно."""
     if not value:
@@ -339,19 +339,19 @@ PROFILE_NONE_VALUE = "без профиля"
 
 def profile_name(app: Any) -> str:
     """Действующий профиль окна: имя или «без профиля» — значение палитры
-    и стартовая строка пикера `/profiles`."""
+    и стартовая строка пикера `/profile`."""
     return toggle_state(app, "profiles") or PROFILE_NONE_VALUE
 
 
 def profile_value(app: Any) -> Text:
-    """Значение `/profiles` в правой колонке палитры."""
+    """Значение `/profile` в правой колонке палитры."""
     return Text(profile_name(app))
 
 
 _PROFILE_NONE_HINT = (
     "настройки берутся только из config.yml — файл профиля не подмешивается"
 )
-# Отметка действующего профиля — одна на пикер `/profiles` и секцию «Профили»
+# Отметка действующего профиля — одна на пикер `/profile` и секцию «Профили»
 # /settings (`_profile_row_text`/`_none_row_text`): зелёное слово (OK)
 # колонкой сразу за именем (решение смока 2026-10-25).
 PROFILE_ACTIVE_STATUS = "активен"
@@ -417,7 +417,7 @@ def _cached_assembly_error(app: Any, name: str) -> str:
 
 
 def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
-    """Опции пикера `/profiles` (спека §12.1, ревизия 2026-07-28; статус-колонка —
+    """Опции пикера `/profile` (спека §12.1, ревизия 2026-07-28; статус-колонка —
     задача 10, решение смока 2026-08-10): первым — «— без профиля» (сессионное
     снятие, §9.1), затем профили по алфавиту объединённого списка. 3-tuple
     (value, описание, статус): описание — источник + «(как в конфиге)» у
@@ -876,7 +876,7 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
     не пишется. single-key — прежняя запись одного ключа (apply_session_override).
     Откатывается целиком при OSError; вызывающий показывает «✗ не сохранено».
 
-    `/profiles` (`session_switch_profile`, спека §9.1) — применяет через
+    `/profile` (`session_switch_profile`, спека §9.1) — применяет через
     `app.switch_session_profile` (пересборка + notice + сброс предохранителя —
     отдельная семантика, не generic single-key путь)."""
     spec = TOGGLES[name]
@@ -920,7 +920,7 @@ def next_toggle_value(app: Any, name: str, direction: int) -> str:
     `spec.names` (отображаемый custom) трактуется как idx 0, шаг с него по
     кругу уводит на пресет; custom этой функцией никогда не возвращается.
 
-    `/profiles` (спека §12.1) — набор значений динамический
+    `/profile` (спека §12.1) — набор значений динамический
     (`effective_toggle_names`, а не статический `TOGGLES[name].names`); пустой
     набор (профили не настроены) — цикл no-op, возвращает текущее значение
     (пустую строку)."""

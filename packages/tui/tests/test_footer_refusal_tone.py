@@ -43,7 +43,7 @@ def _profile_not_found(scr, monkeypatch):
     from gc_tui import toggles
 
     monkeypatch.setattr(toggles, "effective_toggle_names", lambda a, n: [])
-    scr._cmd_profiles("нет-такого")
+    scr._cmd_profile("нет-такого")
 
 
 def _model_unknown(scr, monkeypatch):

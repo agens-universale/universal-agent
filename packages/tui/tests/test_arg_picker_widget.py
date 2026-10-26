@@ -92,7 +92,7 @@ def test_two_tuple_row_still_plain_str_backward_compat():
 
 
 def test_three_tuple_row_renders_status_column_colored():
-    """3-tuple опции (/profiles) — статус колонкой сразу за именем, ЗЕЛЁНЫМ
+    """3-tuple опции (/profile) — статус колонкой сразу за именем, ЗЕЛЁНЫМ
     (OK), как активный маркер в /settings (`_profile_row_text`); у
     неактивных место пустое, описание — после колонки, SUB_INK."""
     pytest.importorskip("textual")
@@ -130,7 +130,7 @@ def test_three_tuple_row_renders_status_column_colored():
 def test_three_tuple_status_visible_even_with_empty_description():
     """Ревью-фикс: пустое описание не должно молча ронять статус — 3-tuple с
     `desc=""` и непустым `status` всё равно рисует статус (контракт для
-    будущих потребителей общего виджета, не только /profiles)."""
+    будущих потребителей общего виджета, не только /profile)."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
@@ -170,7 +170,7 @@ def test_set_filter_resets_selection_to_zero():
 def test_hint_provider_not_called_twice_for_the_same_selection():
     """`_build_footer` и `desired_height` спрашивали хинт КАЖДЫЙ по-своему —
     два полных вызова провайдера на одну и ту же подсветку (найдено на
-    /profiles: провайдер внутри зовёт полную сборку конфига, ~6 мс). Один и тот
+    /profile: провайдер внутри зовёт полную сборку конфига, ~6 мс). Один и тот
     же выбор обязан стоить один вызов, кто бы из двух его первым ни спросил."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
@@ -190,7 +190,7 @@ def test_hint_provider_not_called_twice_for_the_same_selection():
 
 def test_hint_provider_not_called_again_on_repeated_desired_height():
     """Повторный `desired_height` без смены выбора не зовёт провайдер (полная
-    сборка конфига для /profiles) снова."""
+    сборка конфига для /profile) снова."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 

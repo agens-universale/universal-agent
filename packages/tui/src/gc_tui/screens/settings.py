@@ -803,7 +803,7 @@ class SettingsScreen(Screen):
 
     def _config_profile(self):
         """Профиль, под которым собрана база экрана (указатель файлов либо флаг
-        запуска `--profile`); None — без профиля. Сессионный выбор `/profiles`
+        запуска `--profile`); None — без профиля. Сессионный выбор `/profile`
         сюда не входит — экран правит файлы, а не сессию."""
         return runtime_of(self._settings).active_profile or None
 
@@ -994,7 +994,7 @@ class SettingsScreen(Screen):
         Ответ один на всё приложение — `runtime.active_profile` из
         `effective_settings()`: загрузчик кладёт туда ДЕЙСТВУЮЩЕЕ имя (флаг запуска
         `--profile` и сессионный
-        выбор `/profiles` включительно), а не указатель из файла; своей редакции
+        выбор `/profile` включительно), а не указатель из файла; своей редакции
         вопроса «какой профиль действует» здесь не заводим — она разошлась бы с
         футером и `/config` на первой же правке.
 
@@ -4765,7 +4765,7 @@ class SettingsScreen(Screen):
         session_overrides = getattr(self.app, "_session_overrides", None) or {}
         session_name = session_overrides.get("profile")
         if session_name:
-            effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profiles)'
+            effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profile)'
         else:
             effect = self._launch_profile_effect("") or _MSG_APPLIES_NEXT_TURN
         self._render_view()
@@ -4775,7 +4775,7 @@ class SettingsScreen(Screen):
         """Space на строке профиля (клавиша перевешена решением В1 волны B). «Уже
         активен» — сравнение с КОНФИГ-указателем (`_config_profile()`, то, что
         реально пишет активация), не с сессионным выбором: сессия — отдельный
-        механизм (`/profiles`), запись файла её не трогает."""
+        механизм (`/profile`), запись файла её не трогает."""
         config_active = self._file_profile_pointer()
         if name == config_active:
             self._title_note("уже активен")
@@ -4811,7 +4811,7 @@ class SettingsScreen(Screen):
         session_overrides = getattr(self.app, "_session_overrides", None) or {}
         session_name = session_overrides.get("profile")
         if session_name and session_name != name:
-            effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profiles)'
+            effect = f'текущая сессия остаётся на "{session_name}" (сессионный выбор /profile)'
         else:
             effect = (
                 self._launch_profile_effect(name) or _MSG_APPLIES_NEXT_TURN
@@ -5133,7 +5133,7 @@ class SettingsScreen(Screen):
     def _reload_after_profile_file_change(self, done: str) -> bool:
         """Перечитать конфиг после файловой операции над профилем — та же
         последовательность, что у активации рядом. Перечитка нужна и когда профиль
-        не был активен: сессионный выбор (`/profiles`) мог указывать именно на этот
+        не был активен: сессионный выбор (`/profile`) мог указывать именно на этот
         файл, и санацию (§9.2) делает именно она (`app.reload_config` →
         `sanitize_session_profile` + notice). False — перечитать не удалось, о чём
         уже сказано notice'ом (сама операция при этом состоялась)."""
@@ -5229,9 +5229,9 @@ class SettingsScreen(Screen):
         флагом запуска обещание про следующий ход уступает место эффекту флага."""
         after = self._session_profile_name()
         if after and after != before:
-            return f"сессионный выбор /profiles переехал на «{after}»"
+            return f"сессионный выбор /profile переехал на «{after}»"
         if after:
-            return f"текущая сессия остаётся на «{after}» (сессионный выбор /profiles)"
+            return f"текущая сессия остаётся на «{after}» (сессионный выбор /profile)"
         if before:
             acting = self._config_profile() or "без профиля"
             return f"сессионный выбор «{before}» снят — действует «{acting}»"
@@ -5438,7 +5438,7 @@ class SettingsScreen(Screen):
                 f"Указатель на профиль лежит в {pinned} — снимите его там, иначе следующий запуск не соберётся."
             )
         if self._session_profile_name() == name:
-            parts.append("Сессионный выбор /profiles тоже снимется.")
+            parts.append("Сессионный выбор /profile тоже снимется.")
         if getattr(self.app, "_profile_override", None) == name:
             # Флаг --profile называет удаляемый профиль — удаление его снимет
             # (см. `_delete_profile`), и запуск переедет: следствие необратимое,
@@ -6703,7 +6703,7 @@ class SettingsScreen(Screen):
         session_profile = session_overrides.get("profile")
         if session_profile:
             lines.append(
-                f'сессия остаётся на профиле "{session_profile}" (/profiles) — сброс базы это не меняет'
+                f'сессия остаётся на профиле "{session_profile}" (/profile) — сброс базы это не меняет'
             )
         from gc_core import onboarding
 

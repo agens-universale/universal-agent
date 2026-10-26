@@ -338,7 +338,7 @@ def test_disabled_row_is_dim_and_not_taken():
 
 @pytest.mark.asyncio
 async def test_old_two_and_three_tuples_still_work(tmp_path, monkeypatch):
-    """Старые 2-кортежи (/export) и 3-кортежи (/profiles) нормализуются в
+    """Старые 2-кортежи (/export) и 3-кортежи (/profile) нормализуются в
     PickerOption: значения, описания и статус на месте."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker, PickerOption
@@ -357,7 +357,7 @@ async def test_old_two_and_three_tuples_still_work(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     async with _mk_app(tmp_path).run_test() as pilot:
-        pilot.app.query_one("#cmdinput").text = "/profiles "
+        pilot.app.query_one("#cmdinput").text = "/profile "
         await pilot.pause(0.1)
         rows = pilot.app.query_one(ArgPicker)._visible_rows()
         assert rows and all(isinstance(r, PickerOption) for r in rows)
@@ -446,7 +446,7 @@ async def test_enter_with_unknown_profile_reaches_its_refusal(
     async with _registry_app(tmp_path).run_test() as pilot:
         hints = []
         pilot.app.screen._show_footer_refusal = hints.append
-        await _type_and_enter(pilot, "/profiles nope")
+        await _type_and_enter(pilot, "/profile nope")
         assert hints and 'профиль "nope" не найден' in hints[0]
 
 
@@ -504,9 +504,9 @@ async def test_model_picker_opens_on_the_current_choice(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("typed", ["/model ", "/profiles "])
+@pytest.mark.parametrize("typed", ["/model ", "/profile "])
 async def test_choice_pickers_say_enter_selects(tmp_path, monkeypatch, typed):
-    """`/model` и `/profiles` только выбирают значение — строка клавиш
+    """`/model` и `/profile` только выбирают значение — строка клавиш
     говорит «Enter выбрать»; `/export` запускает действие — «выполнить»."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker

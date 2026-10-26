@@ -4,7 +4,7 @@
 .palette-row / .palette-hint) и модель состояния (filter + selected index).
 Опции — `PickerOption` (value, описание, статус, знак слева, доступность,
 черта); старые кортежи `(value, desc)` (`/export`) и `(value, desc, status)`
-(`/profiles`) нормализуются в него же. Строка со статусом или знаком —
+(`/profile`) нормализуются в него же. Строка со статусом или знаком —
 `Text`: знак, имя, колонка статуса сразу за именем (цветом OK, ✗-отказ —
 ERR; у строк без статуса место пустое), описание последним — `SUB_INK`, оно
 и ужимается при нехватке ширины; без статуса и знака — простой `str`. Черта (`separator`) не выбирается и видна, только если по
@@ -24,7 +24,7 @@ from gc_tui import palette as _pal
 from gc_tui.widgets.palette_rows import PaletteRowsMixin
 
 # Строка клавиш: Enter запускает действие (`/export`) или только выбирает
-# значение (`/model`, `/profiles` — `Command.arg_picks`).
+# значение (`/model`, `/profile` — `Command.arg_picks`).
 RUN_KEYS_HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
 PICK_KEYS_HINT = "↑↓ выбрать · Tab дополнить · Enter выбрать · Esc закрыть"
 
@@ -70,11 +70,11 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         # говорит о клавишах, и чужие обещания здесь соврали бы).
         self._keys_hint = keys_hint
         self._selected = self._start_index(initial_value)
-        # Динамический хинт подсвеченного пункта (спека §12.1, /profiles: состав
+        # Динамический хинт подсвеченного пункта (спека §12.1, /profile: состав
         # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
         self._hint_provider = hint_provider
         # Тексты хинтов по значению (см. `_hint_text`): место под хинт
-        # резервируется по всем видимым строкам, и провайдер (у /profiles —
+        # резервируется по всем видимым строкам, и провайдер (у /profile —
         # проба сборки конфига) не должен звучать на каждый ход стрелкой.
         self._hint_texts: dict[Optional[str], str] = {}
         self._hint_static: Optional[Static] = None

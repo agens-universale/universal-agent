@@ -47,7 +47,7 @@ class Command:
     # не здесь (§ CLAUDE.md Architecture).
     is_toggle: bool = False
     # Динамические варианты аргумента (app -> [(value, описание)]): ArgPicker для
-    # команд, чей список известен только в рантайме (/profiles — файлы профилей).
+    # команд, чей список известен только в рантайме (/profile — файлы профилей).
     # Взаимоисключимо с arg_options; хинт подвала пикера — arg_hint_provider.
     arg_options_provider: Optional[Callable[[Any], tuple]] = None
     arg_hint_provider: Optional[Callable[[Any, Optional[str]], str]] = None
@@ -55,10 +55,10 @@ class Command:
     # открывается (`/model` — действующий выбор).
     arg_current_provider: Optional[Callable[[Any], Optional[str]]] = None
     # Enter по строке пикера только выбирает значение (`/model`,
-    # `/profiles`), а не запускает действие: строка клавиш — «Enter выбрать».
+    # `/profile`), а не запускает действие: строка клавиш — «Enter выбрать».
     arg_picks: bool = False
     # Текущее значение команды (app -> Text) — палитра показывает его в
-    # правой колонке вместо хоткея (`/model` — знак модели, `/profiles` —
+    # правой колонке вместо хоткея (`/model` — знак модели, `/profile` —
     # имя профиля).
     value_provider: Optional[Callable[[Any], Optional[Text]]] = None
 
@@ -141,8 +141,8 @@ def build_default_registry() -> CommandRegistry:
             value_provider=model_value,
         ),
         Command(
-            "profiles",
-            (),
+            "profile",
+            ("profiles",),
             "[профиль]",
             _cap(
                 f"{TOGGLES['profiles'].label}: {TOGGLES['profiles'].summary}"

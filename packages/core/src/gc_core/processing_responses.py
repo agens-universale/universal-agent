@@ -494,7 +494,7 @@ def _raise_honest_main_unavailable(
     )
     message = (
         f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
-        f"{resolved.url}: {reason}. Выберите другую модель /model или профиль /profiles."
+        f"{resolved.url}: {reason}. Выберите другую модель /model или профиль /profile."
     )
     advice = _endpoint_path_advice(ctx, resolved.url, source_exc)
     if advice:
@@ -894,7 +894,7 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     и, если активный алиас уже в предохранителе (trip прошлого хода /
     персистированный breaker при attach), поднимает честную ошибку класса 2 ДО
     похода в транспорт — с той же моделью/endpoint/причиной и подсказкой /model
-    //profiles, что и `_arequest_backend_canonical`.
+    /profile, что и `_arequest_backend_canonical`.
 
     В ручном режиме `begin_turn` резолвит `main` с проверкой предохранителя,
     поэтому открытый алиас прилетает сюда сырым `AliasCircuitOpenError`;

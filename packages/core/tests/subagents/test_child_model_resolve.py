@@ -191,7 +191,7 @@ class TestChildModelResolve:
             _await(runner._build_child_ctx(tool_name="subagent_planner"))
 
         message = str(excinfo.value)
-        assert "Выберите другую модель /model или профиль /profiles." in (
+        assert "Выберите другую модель /model или профиль /profile." in (
             message
         )
         assert "/level" not in message

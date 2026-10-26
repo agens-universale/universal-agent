@@ -1011,7 +1011,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _footer_model_name(self) -> str:
         """Действующая модель СЛЕДУЮЩЕГО хода из Router (спека §12.2), не
         плоский ключ `cfg["model"]`: должна отражать активный уровень/профиль
-        сразу после /level или /profiles, до пересборки executor (Router
+        сразу после /level или /profile, до пересборки executor (Router
         витрин строится от `effective_settings()` на каждый вызов, §6.4).
 
         Легаси-плейсхолдер шаблона (Task 14) — не имя модели, показывать нечего."""
@@ -1532,7 +1532,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         Пока ход идёт — те, по которым сжимает РАБОТАЮЩИЙ агент
         (`runner.pinned_summary_limits`): его снимок конфига и уровень
         подготовленного вызова. /level действует со следующего нового вызова,
-        /profiles требует пересборки runner, и по живым данным бар показывал бы не тот порог, по которому
+        /profile требует пересборки runner, и по живым данным бар показывал бы не тот порог, по которому
         реально сработает сжатие. Вне хода — живой конфиг и живой Router: это
         пороги СЛЕДУЮЩЕГО хода."""
         runner = getattr(self.app, "active_runner", None)
@@ -7353,7 +7353,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._mount_input_overlay(picker)
 
     def _open_command_picker(self, name: str) -> None:
-        """Раскрыть пикер значения команды (`/model`, `/profiles`): текст
+        """Раскрыть пикер значения команды (`/model`, `/profile`): текст
         `/<name> ` в input → on_text_area_changed (состояние 3) сам откроет
         ArgPicker с динамическими опциями и хинтом подвала."""
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
@@ -9540,8 +9540,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         if name == "voice":
             self._voice_toggle()
             return
-        if name == "profiles":
-            self._cmd_profiles(arg)
+        if name == "profile":
+            self._cmd_profile(arg)
             return
         if name == "model":
             self._cmd_model(arg)
@@ -9551,13 +9551,13 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._toggle_info_command(name)
             return
 
-    def _cmd_profiles(self, arg: str) -> None:
-        """`/profiles [профиль]` (спека §12.1, ревизия 2026-07-28): без аргумента —
+    def _cmd_profile(self, arg: str) -> None:
+        """`/profile [профиль]` (спека §12.1, ревизия 2026-07-28): без аргумента —
         раскрыть пикер; «—» — сессионное снятие профиля (§9.1: работать чистым
         конфигом); имя — сессионный выбор; неизвестное имя — честный отказ."""
         value = arg.strip()
         if not value:
-            self._open_command_picker("profiles")
+            self._open_command_picker("profile")
             return
         if value == PROFILE_NONE_VALUE:
             target = ""

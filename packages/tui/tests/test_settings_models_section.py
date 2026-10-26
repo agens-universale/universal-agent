@@ -1701,7 +1701,7 @@ async def test_escape_collapses_the_picker_without_writing(tmp_path):
 async def test_arrows_do_not_page_values_on_a_collapsed_row(tmp_path):
     """←/→ на свёрнутой строке НЕ листают значения: список произвольный (алиасы
     реестра), треком он не виден, и вслепую его не листают — та же ревизия §12.1,
-    что перевела `/profiles` с цикла на пикер."""
+    что перевела `/profile` с цикла на пикер."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
         before = cfg_file.read_bytes()
         ed = _editor(scr)

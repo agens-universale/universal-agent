@@ -418,7 +418,7 @@ def test_reload_config_keeps_the_profile_named_by_the_flag(_profile_stack):
 
 
 def test_session_choice_still_wins_over_the_profile_flag(_profile_stack):
-    """Выбор из приложения (`/profiles`) сильнее флага запуска — как и сильнее
+    """Выбор из приложения (`/profile`) сильнее флага запуска — как и сильнее
     указателя файла: сессионное снятие профиля при флаге `corp` действует."""
     cfg_file, profiles = _profile_stack
     (profiles / "corp.yml").write_text(
