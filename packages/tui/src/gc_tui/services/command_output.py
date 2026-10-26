@@ -2,8 +2,9 @@
 
 Конверт exec-тула (`exec_command`, `exec_python`, `skills_run_script`) →
 `CommandOutput`: строки `stdout`, затем `stderr` (порядок чередования
-каналов неизвестен), превью и счёт скрытого. Текст команды — один рендер
-для всех источников: сырые аргументы вызова построчно, без `cd <корень> &&`.
+каналов неизвестен), хвост свёрнутого вида и счёт скрытого над ним. Текст
+команды — один рендер для всех источников: сырые аргументы вызова
+построчно, без `cd <корень> &&`.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from rich.text import Text
 
 from gc_tui.models import CommandOutput
 from gc_tui.services.plural import plural_form
-from gc_tui.services.tool_blocks import OUTPUT_PREVIEW_LINES
+from gc_tui.services.tool_blocks import output_tail
 from gc_tui.services.tool_preview import unwrap_tool_output_dict
 
 #: Конверты exec-тулов по ключу `tool`: где лежат каналы и код — в самом
@@ -107,15 +108,15 @@ def parse_command_output(output: Any) -> Optional[CommandOutput]:
             channel.insert(marker_at, omitted_line(omitted))
         lines += channel
         omitted_total += omitted
-    preview = tuple(content[:OUTPUT_PREVIEW_LINES])
+    tail, hidden = output_tail(content)
     return CommandOutput(
         lines=tuple(lines),
         omitted_chars=omitted_total,
         exit_code=_exit_code(data),
         timed_out=bool(data.get("timed_out")),
         background=isinstance(data.get("background"), dict),
-        preview=preview,
-        hidden=len(content) - len(preview),
+        tail=tail,
+        hidden=hidden,
     )
 
 

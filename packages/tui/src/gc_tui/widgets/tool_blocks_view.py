@@ -34,6 +34,7 @@ from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.tool_blocks import (
     AGENT_WINDOW,
     COMMAND_PREVIEW_LINES,
+    OUTPUT_SLOT,
     BlockEdit,
     BlockKind,
     CallTimers,
@@ -43,10 +44,10 @@ from gc_tui.services.tool_blocks import (
     SetConsequence,
     SetDiffShare,
     SetEditTail,
-    SetExpanded,
     SetHeader,
     SetMode,
     SetPhrase,
+    SetRanParts,
     SetTimer,
     SetVisible,
     SetWord,
@@ -57,34 +58,28 @@ from gc_tui.services.tool_blocks import (
 )
 from gc_tui.services.trace_render import level_prefix
 from gc_tui.widgets.no_select import NoSelectStatic
+from gc_tui.widgets.ran_output import OutputTexts
 from gc_tui.widgets.tool_call_row import LOOK_STYLE, ToolCallRow, parts_text
 
 #: Класс скрытого виджета блока (`display: none`): вне окна, ждущий.
 HIDDEN_CLASS = "-block-hidden"
 
 
-def _lines_text(head: Optional[Text], lines: Sequence[str]) -> Text:
-    text = Text()
-    if head is not None:
-        text.append_text(head)
-    for line in lines:
-        if text.plain:
-            text.append("\n")
-        text.append(line, style=DIM)
-    return text
+def _lines_text(lines: Sequence[str]) -> Text:
+    return Text("\n".join(lines), style=DIM)
 
 
-def output_texts(ran: RanResult) -> Optional[tuple[Text, Text]]:
-    """Следствие `Ran` (§4.1): свёрнутое и раскрытое. Первая строка —
-    код выхода или таймаут (`ERR`) сверх превью; фон — одна строка; нет
-    вывода — `(нет вывода)`. Вне окна retention раскрытие — превью и
-    подсказка. Не конверт exec — следствия от вывода нет."""
+def output_texts(ran: RanResult) -> Optional[OutputTexts]:
+    """Вывод `Ran` (§4.1, решение 2026-10-26): код выхода или таймаут
+    (`ERR`) — сверх превью; свёрнутый — хвост, раскрытый — весь; фон —
+    одна строка; нет вывода — `(нет вывода)`. Вне окна retention раскрытие
+    — хвост и подсказка. Не конверт exec — вывода нет."""
     out = ran.output
     if out is None:
         return None
     if out.background:
         line = Text("запущено в фоне · вывод не сохраняется", style=DIM)
-        return line, line
+        return OutputTexts(None, line, line)
     head = None
     if out.timed_out:
         head = Text("превышено время ожидания", style=ERR)
@@ -92,12 +87,11 @@ def output_texts(ran: RanResult) -> Optional[tuple[Text, Text]]:
         head = Text(f"код выхода {out.exit_code}", style=ERR)
     if head is None and not out.lines:
         line = Text("(нет вывода)", style=DIM)
-        return line, line
-    collapsed = _lines_text(head, out.preview)
+        return OutputTexts(None, line, line)
+    full = out.lines
     if ran.light:
-        full = (*out.preview, RETENTION_DETAIL_HINT)
-        return collapsed, _lines_text(head, full)
-    return collapsed, _lines_text(head, out.lines)
+        full = (*out.tail, RETENTION_DETAIL_HINT)
+    return OutputTexts(head, _lines_text(out.tail), _lines_text(full))
 
 
 def _reason(ev: TraceEvent, ran: Optional[RanResult]) -> str:
@@ -279,7 +273,7 @@ class ToolBlocksView:
         решений модели: окно и фразы ставятся по ним)."""
         texts = output_texts(ran)
         if texts is not None:
-            row.set_output(*texts)
+            row.set_output(texts)
         files = tuple(
             replace(file, compact=file.key in ran.compact)
             for file in ran.files
@@ -531,11 +525,17 @@ class ToolBlocksView:
             diff.set_collapsed_max_lines(d.rows)
         diff.set_column(d.column)
 
-    def _set_expanded(self, d: SetExpanded) -> None:
-        """Раскрытие частей `Ran`: вся команда и весь вывод."""
+    def _set_ran_parts(self, d: SetRanParts) -> None:
+        """Части `Ran`: раскрытие и фразы скрытого в самой строке; их клик
+        — тот же тогл, что у `− свернуть` под строкой."""
         row = self._row(self.model.first_call(d.block) or "")
         if row is not None:
-            row.set_parts_expanded(d.expanded)
+            row.set_parts(
+                d.expanded,
+                command=d.command,
+                output=d.output,
+                key=phrase_key(d.block, OUTPUT_SLOT),
+            )
 
 
 def _last_call(model: ToolBlocks, block: str) -> Callable[[], Optional[str]]:
@@ -554,7 +554,7 @@ _HANDLERS: dict[type, Callable[[ToolBlocksView, Decision], None]] = {
     SetWord: ToolBlocksView._set_word,
     SetEditTail: ToolBlocksView._set_edit_tail,
     SetDiffShare: ToolBlocksView._set_diff_share,
-    SetExpanded: ToolBlocksView._set_expanded,
+    SetRanParts: ToolBlocksView._set_ran_parts,
 }
 
 

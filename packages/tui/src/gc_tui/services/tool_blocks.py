@@ -32,7 +32,7 @@ from gc_tui.services.plural import (
 
 #: Видимых элементов в окне блока: членов, файлов, событий субагента.
 WINDOW = 3
-#: Строк превью вывода команды.
+#: Строк свёрнутого вывода команды — его хвост (`output_tail`).
 OUTPUT_PREVIEW_LINES = 3
 #: Строк команды `Ran` в свёрнутом виде: первая в строке и продолжение.
 COMMAND_PREVIEW_LINES = 3
@@ -44,10 +44,12 @@ GROUP_COLLAPSE_PHRASE = "− свернуть группу"
 #: `└ … ещё N` и строка `Agent` у исполнителя.
 AGENT_WINDOW = "agent"
 NOT_STARTED_REASON = "не запущено (стоп)"
-#: Места фраз: под файлом (`<файл>:more`), под строкой `Ran` (вывод) и
-#: окна файлов блока (маркер над файлами, `− свернуть` внизу).
+#: Места фраз: под файлом (`<файл>:more`), под строкой `Ran` (`− свернуть`
+#: раскрытых команды и вывода; их фразы раскрытия — в самой строке, где
+#: скрытое, и шлют тот же ключ) и окна файлов блока (маркер над файлами,
+#: `− свернуть` внизу).
 _MORE = "more"
-_OUTPUT = "output"
+OUTPUT_SLOT = "output"
 _WINDOW_SLOTS = ("top", "files", "bottom")
 #: Причина идущего члена, оборванного остановкой хода.
 CANCELLED_REASON = "отменено"
@@ -152,6 +154,21 @@ def more_lines_phrase(n: int) -> str:
     """Фраза раскрытия под тем, что она раскрывает (дифф файла, вывод
     команды): `+ ещё N строк`."""
     return f"+ ещё {n} {lines_word(n)}"
+
+
+def more_lines_above(n: int) -> str:
+    """Фраза над хвостом вывода команды, там, где вывод начинается:
+    `… ещё N строк` — скрытое выше хвоста."""
+    return f"… ещё {n} {lines_word(n)}"
+
+
+def output_tail(lines: Sequence[str]) -> tuple[tuple[str, ...], int]:
+    """Свёрнутый вывод команды (решение 2026-10-26): последние
+    `OUTPUT_PREVIEW_LINES` строк и число скрытых над ними. Вывод растёт —
+    хвост сдвигается, скрытых больше; одно правило для живой ленты,
+    возврата и превью."""
+    tail = tuple(lines[-OUTPUT_PREVIEW_LINES:]) if lines else ()
+    return tail, len(lines) - len(tail)
 
 
 def _failure_parts(errors: int, refusals: int) -> Parts:
@@ -411,15 +428,20 @@ class SetDiffShare:
 
 
 @dataclass(frozen=True)
-class SetExpanded:
-    """Строка `Ran` раскрыта: вся команда и весь вывод."""
+class SetRanParts:
+    """Части строки `Ran`: раскрыта (вся команда и весь вывод) или нет;
+    фразы раскрытия в самой строке, где скрытое (`None` — нет): под
+    продолжением команды и над хвостом вывода. `− свернуть` раскрытой —
+    фраза блока под строкой."""
 
     block: str
     expanded: bool
+    command: Optional[str] = None
+    output: Optional[str] = None
 
     @property
     def ident(self) -> tuple:
-        return ("SetExpanded", self.block)
+        return ("SetRanParts", self.block)
 
 
 Decision = Union[
@@ -434,7 +456,7 @@ Decision = Union[
     SetWord,
     SetEditTail,
     SetDiffShare,
-    SetExpanded,
+    SetRanParts,
 ]
 
 
@@ -862,7 +884,7 @@ class ToolBlocks:
         block = self._resolve(key)
         if block is None or block.headed:
             return None
-        if key == phrase_key(block.key, _OUTPUT):
+        if key == phrase_key(block.key, OUTPUT_SLOT):
             return block.members[0].key
         files = {f.key for f in self._files(block)}
         if key in files:
@@ -1225,9 +1247,10 @@ class ToolBlocks:
         return out + self._outcome_of(member)
 
     def _ran(self, block: _Block) -> list[Decision]:
-        """Строка `Running` / `Ran` и её части (§4.0, §4.2): фраза команды
-        и вывода — под строкой, над файлами; окно правок команды, у каждого
-        файла — своя фраза под диффом."""
+        """Строка `Running` / `Ran` и её части (§4.0, §4.2, решение
+        2026-10-26): раскрывают там, где скрытое (`SetRanParts`), сворачивают
+        внизу — `− свернуть` под строкой, над файлами; окно правок команды,
+        у каждого файла — своя фраза под диффом."""
         member = block.members[0]
         word = header_word(BlockKind.RAN, live=not member.done)
         out = [*self._single(block), SetWord(member.key, word, role="command")]
@@ -1239,12 +1262,11 @@ class ToolBlocks:
         files = parts.files
         # Под строкой команды, над файлами: файлы монтируются под строку.
         place = {"before": files[0].key} if files else {"after": key}
-        n = self._output_lines(block)
-        output = None
-        if n:
-            opened = key in self._open
-            output = COLLAPSE_PHRASE if opened else more_lines_phrase(n)
-        out += self._phrase(block.key, _OUTPUT, output, **place)
+        opened = key in self._open
+        collapse = None
+        if opened and self._output_lines(block):
+            collapse = COLLAPSE_PHRASE
+        out += self._phrase(block.key, OUTPUT_SLOT, collapse, **place)
         more = more_phrase(layout.more) if layout.more else None
         out += self._phrase(block.key, "files", more, **place)
         last = key
@@ -1261,9 +1283,9 @@ class ToolBlocks:
         out += self._phrase(block.key, "unrecorded", unrecorded, after=last)
         if unrecorded is not None:
             last = phrase_key(block.key, "unrecorded")
-        collapse = self._collapse(block, layout)
-        out += self._phrase(block.key, "bottom", collapse, after=last)
-        out.append(SetExpanded(block.key, key in self._open))
+        window = self._collapse(block, layout)
+        out += self._phrase(block.key, "bottom", window, after=last)
+        out.append(_ran_parts(block.key, parts, opened=opened))
         return out
 
     def _head(self, block: _Block, prefix: Parts = ()) -> SetHeader:
@@ -1348,6 +1370,20 @@ class ToolBlocks:
         return SetTimer(member.key, self._timers.get(member.key))
 
 
+def _ran_parts(block: str, parts: _RanParts, *, opened: bool) -> SetRanParts:
+    """Фразы раскрытия частей `Ran` — каждая там, где скрытое: строки
+    команды — под её продолжением, вывода — над хвостом."""
+    if opened:
+        return SetRanParts(block, True)
+    hidden_command, hidden_output = parts.command_hidden, parts.output_hidden
+    return SetRanParts(
+        block,
+        False,
+        command=more_lines_phrase(hidden_command) if hidden_command else None,
+        output=more_lines_above(hidden_output) if hidden_output else None,
+    )
+
+
 def _edit_word(member: _Member) -> str:
     if not member.done:
         return header_word(BlockKind.EDITS, live=True)
@@ -1398,6 +1434,6 @@ def _is_default(decision: Decision) -> bool:
         return decision.visible
     if isinstance(decision, SetEditTail):
         return not decision.parts
-    if isinstance(decision, SetExpanded):
-        return not decision.expanded
+    if isinstance(decision, SetRanParts):
+        return decision == SetRanParts(decision.block, False)
     return False

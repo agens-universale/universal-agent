@@ -398,7 +398,7 @@ async def test_ran_output_and_files_phrases_under_owners():
         view.add_call(row, C.RUN, waiting=False)
         view.started(row)
         out = tuple(f"out {i}" for i in range(6))
-        output = CommandOutput(out, 0, 0, False, False, out[:3], 3)
+        output = CommandOutput(out, 0, 0, False, False, out[-3:], 3)
         files = tuple(
             _edit_of(_record(f"x1:{name}.py", 8)) for name in ("a", "b")
         )
@@ -406,14 +406,14 @@ async def test_ran_output_and_files_phrases_under_owners():
         await pilot.pause()
         lines = [line for line in _shown_lines(app) if line]
         assert lines[1:5] == [
-            "   └ out 0",
-            "     out 1",
-            "     out 2",
-            "     + ещё 3 строки",
+            "   └ … ещё 3 строки",
+            "     out 3",
+            "     out 4",
+            "     out 5",
         ]
         assert lines[5].startswith("     Edited x1:a.py.py")
         phrases = [line for line in lines if "+ ещё" in line]
-        assert phrases == ["     + ещё 3 строки"] + ["     + ещё 5 строк"] * 2
+        assert phrases == ["     + ещё 5 строк"] * 2
         file_row = next(
             r for r in app.query(ToolCallRow) if r.call_id == "x1:b.py"
         )
@@ -422,13 +422,13 @@ async def test_ran_output_and_files_phrases_under_owners():
         await pilot.pause()
         lines = _shown_lines(app)
         assert sum("+line" in line for line in lines) == 3 + 8
-        assert "     out 5" not in lines
+        assert "     out 0" not in lines
         row.focus()
         await pilot.press("space")
         await pilot.pause()
         lines = _shown_lines(app)
         assert sum("+line" in line for line in lines) == 16
-        assert "     out 5" in lines
+        assert "   └ out 0" in lines
 
 
 def _nested_lines(app) -> list[str]:
@@ -611,39 +611,45 @@ async def test_set_result_without_model_keeps_old_row():
 def _output(lines, **kw):
     from gc_tui.models import CommandOutput
 
-    preview = tuple(lines[:3])
+    tail = tuple(lines[-3:])
     return CommandOutput(
         lines=tuple(lines),
         omitted_chars=0,
         exit_code=kw.get("exit_code", 0),
         timed_out=kw.get("timed_out", False),
         background=kw.get("background", False),
-        preview=preview,
-        hidden=len(lines) - len(preview),
+        tail=tail,
+        hidden=len(lines) - len(tail),
     )
 
 
 def test_output_texts_light_shows_retention_hint():
-    """Вне окна retention раскрытие — превью и подсказка, не весь вывод."""
+    """Вне окна retention раскрытие — хвост и подсказка, не весь вывод."""
     from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
     from gc_tui.services.block_edits import RanResult
     from gc_tui.widgets.tool_blocks_view import output_texts
 
     out = _output(["a", "b", "c", "d"])
-    collapsed, expanded = output_texts(RanResult(output=out, light=True))
-    assert collapsed.plain == "a\nb\nc"
-    assert expanded.plain == f"a\nb\nc\n{RETENTION_DETAIL_HINT}"
+    texts = output_texts(RanResult(output=out, light=True))
+    assert texts.head is None
+    assert texts.tail.plain == "b\nc\nd"
+    assert texts.full.plain == f"b\nc\nd\n{RETENTION_DETAIL_HINT}"
 
 
 def test_output_texts_head_lines():
     from gc_tui.services.block_edits import RanResult
     from gc_tui.widgets.tool_blocks_view import output_texts
 
-    failed, _ = output_texts(RanResult(output=_output([], exit_code=2)))
-    assert failed.plain == "код выхода 2"
-    assert str(failed.spans[0].style) == palette.ERR
-    empty, _ = output_texts(RanResult(output=_output([])))
-    assert empty.plain == "(нет вывода)"
+    failed = output_texts(RanResult(output=_output(["e"], exit_code=2)))
+    assert failed.head.plain == "код выхода 2"
+    assert str(failed.head.style) == palette.ERR
+    assert failed.tail.plain == failed.full.plain == "e"
+    bare = output_texts(RanResult(output=_output([], exit_code=2)))
+    assert bare.head.plain == "код выхода 2"
+    assert bare.tail.plain == ""
+    empty = output_texts(RanResult(output=_output([])))
+    assert empty.head is None
+    assert empty.tail.plain == "(нет вывода)"
     assert output_texts(RanResult(output=None)) is None
 
 

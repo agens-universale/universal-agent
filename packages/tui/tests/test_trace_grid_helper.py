@@ -93,14 +93,37 @@ P4_03_EXPLORED = [
     _prose("Ретраи берут коды из RETRY_ON — 503 там нет."),
 ]
 
+# Свёрнутый вывод — хвост; фраза — над ним, в колонке вывода (решение
+# 2026-10-26): раскрывают там, где скрытое.
 P4_07_RAN = [
     _prose("Прогоню тесты ретраев."),
     BLANK,
     _head(OK, "Ran", '  uv run pytest tests -q -k "retry and 503" · 6с'),
-    _out(".......F......                     [100%]", lead=True),
-    _out("=================== FAILURES ===================", lead=False),
-    _out("____________ test_retry_503 ____________", lead=False),
-    _ctl("+ ещё 10 строк"),
+    _lead_ctl("… ещё 10 строк"),
+    _out("FAILED tests/test_client.py::test_retry_503", lead=False),
+    _out("=========== 1 failed, 13 passed in 0.4s ===========", lead=False),
+    _out("make: *** [test] Error 1", lead=False),
+]
+
+# Ненулевой код — первой строкой, фраза — под ним, над хвостом.
+P4_07_RAN_FAILED = [
+    _head(ERR, "Ran", "  make test · 6с"),
+    _r(f"{_pad(2)}└ код выхода 2", ("код выхода 2", ERR)),
+    _ctl("… ещё 10 строк"),
+    _out("FAILED tests/test_client.py::test_retry_503", lead=False),
+    _out("make: *** [test] Error 1", lead=False),
+]
+
+# Многострочная команда: фраза команды — под её продолжением.
+P4_RAN_MULTILINE = [
+    _head(OK, "Ran", "  python - <<'EOF' · 2с"),
+    _r(f"{_pad(4)}import json", ("import json", SUB_INK)),
+    _r(f"{_pad(4)}print(1)", ("print(1)", SUB_INK)),
+    _ctl("+ ещё 2 строки"),
+    _lead_ctl("… ещё 11 строк"),
+    _out("line 12", lead=False),
+    _out("line 13", lead=False),
+    _out("line 14", lead=False),
 ]
 
 P4_10_RAN_FILES = [
@@ -213,12 +236,12 @@ P4_EDITED_PER_FILE = [
     _ctl("− свернуть"),
 ]
 
-# `Ran` с выводом и файлами: фраза вывода — под выводом, над файлами.
+# `Ran` с выводом и файлами: фраза вывода — над хвостом, файлы — ниже.
 P4_RAN_OUTPUT_AND_FILES = [
     _head(OK, "Ran", "  python gen.py · 2с"),
-    _out("записано 5 кодов", lead=True),
+    _lead_ctl("… ещё 4 строки"),
+    _out("записано 5 кодов", lead=False),
     _out("готово", lead=False),
-    _ctl("+ ещё 4 строки"),
     _file("client/retry_table.py", " (+18)          ❐", verb="Added"),
     _diff(1, "+", '"""Сгенерировано."""', 4),
     _ctl("+ ещё 17 строк"),
@@ -267,6 +290,8 @@ P4_22_EDIT_IN_GROUP = [
     [
         P4_03_EXPLORED,
         P4_07_RAN,
+        P4_07_RAN_FAILED,
+        P4_RAN_MULTILINE,
         P4_10_RAN_FILES,
         P4_14_EDITED_3,
         P4_14_HUNK_GAP,
@@ -281,6 +306,8 @@ P4_22_EDIT_IN_GROUP = [
     ids=[
         "p4-03",
         "p4-07",
+        "p4-07-failed",
+        "ran-multiline",
         "p4-10",
         "p4-14",
         "p4-14-hunk-gap",
@@ -489,6 +516,17 @@ async def test_trace_rows_without_scrollbar_columns():
     assert {row.cell_len for row in rows} == {width}
     assert width == 38
     assert len(rows) == height
+
+
+def test_ran_error_top_phrase_not_a_reason():
+    """Упавшая без кода выхода команда с длинным выводом: первая `└` —
+    фраза над хвостом, не причина; цвет причины с неё не спрашивается."""
+    rows = [
+        _head(ERR, "Ran", "  make · 1с"),
+        _lead_ctl("… ещё 4 строки"),
+        _out("x", lead=False),
+    ]
+    assert_trace_grid(rows, origin=ORIGIN)
 
 
 def test_executed_failure_may_have_no_timer():

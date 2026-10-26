@@ -136,6 +136,7 @@ _MEMORY = (
 
 
 _SCRIPT = "python - <<'EOF'\nimport json\nprint(1)\nprint(2)\nEOF"
+_X1_OUT = "F\nE\nfailed 1\nerror 1\n2 failed\n"
 _NESTED_READ = json.dumps({"tool": "fs_read_file", "ok": True, "lines": 7})
 
 
@@ -143,7 +144,7 @@ def _before_agent() -> list[dict]:
     return [
         _say("a1", "Посмотрю клиент."),
         *[p for i in range(4) for p in _read(i)],
-        *_run("x1", "uv run pytest -q", "F\nfailed 1\n", exit_code=1),
+        *_run("x1", "uv run pytest -q", _X1_OUT, exit_code=1),
         *[p for m in _MEMORY for p in _memory(*m)],
         _say("a2", "Поправлю."),
         *[p for i in range(3) for p in _edit(i)],
@@ -441,7 +442,7 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     # Влезающие диффы — целиком, с контекстом, без фразы; e2 (9
     # изменённых и 2 контекста при 10) — изменённые и верхний контекст,
     # фраза под его диффом — оставшаяся строка. У многострочной команды
-    # фраза — под её выводом.
+    # фраза — под её продолжением, над выводом.
     assert sum(t.endswith(" ctx") for t in texts) == 9
     file_phrase = [
         i for i, t in enumerate(texts) if t == "     + ещё 1 строка"
@@ -449,15 +450,20 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert len(file_phrase) == 1
     assert texts[file_phrase[0] - 1].split()[1:] == ["+v8"]
     phrases = [i for i, t in enumerate(texts) if t == "     + ещё 2 строки"]
-    assert [texts[i - 1] for i in phrases] == ["   └ 1"]
-    ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
-    assert texts[ran + 1 : ran + 4] == [
-        "   └ код выхода 1",
-        "     F",
-        "     failed 1",
+    assert [texts[i - 1 : i + 2] for i in phrases] == [
+        ["     print(1)", "     + ещё 2 строки", "   └ 1"]
     ]
-    assert texts[ran + 4].startswith(" ")
-    assert "└" not in texts[ran + 4]
+    # Вывод свёрнут к хвосту, фраза — над ним; код выхода — первым.
+    ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
+    assert texts[ran + 1 : ran + 6] == [
+        "   └ код выхода 1",
+        "     … ещё 2 строки",
+        "     failed 1",
+        "     error 1",
+        "     2 failed",
+    ]
+    assert texts[ran + 6].startswith(" ")
+    assert "└" not in texts[ran + 6]
     start = texts.index(" ● Memory")
     assert texts[start : start + 5] == [
         " ● Memory",
