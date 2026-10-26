@@ -5,7 +5,9 @@
 блока; 2 — текст заголовка и ``└`` первого члена (у одиночной строки — и её
 ``└ следствие``); 4 — члены группы, управление (``… ещё N``, ``+ ещё N
 строк``, ``− свернуть``), диффы членов (и разделитель ханков ``⋮`` под
-номерами), продолжение превью; 6 — ``└ следствие`` члена. После ``Agent``
+номерами), продолжение превью; 6 — ``└ следствие`` члена. Фраза ``+ ещё N
+строк`` стоит под тем, что раскрывает (дифф файла, вывод команды): не
+посреди диффа и не под другой фразой. После ``Agent``
 в колонке ``c``: ``└ задача`` — в ``c + 2`` (перенос — в ``c + 4``),
 маркер окна ``… ещё N`` — без ``└``, в ``c + 2`` (колонка вложенных
 глифов, под всеми следствиями ``Agent``), ``− свернуть`` раскрытого окна —
@@ -144,13 +146,12 @@ class _Grid:
         col = len(body) - len(body.lstrip(" "))
         ch = body[col]
         is_event = ch in _GLYPHS
-        if self._pending is not None and not (is_event and col <= self._base):
-            self._fail(self._pending, "фраза раскрытия не последняя в блоке")
-        self._pending = None
+        in_diff = bool(_DIFF.match(body) or _HUNK_GAP.match(body))
+        self._settle_pending(in_diff and not is_event)
         text = body[col:]
         if is_event:
             self._event(n, row, body, col)
-        elif _DIFF.match(body) or _HUNK_GAP.match(body):
+        elif in_diff:
             self._diff(n, body)
         elif text.startswith("└ "):
             self._branch(n, row, text[2:], col)
@@ -162,6 +163,13 @@ class _Grid:
             self._prev = ("wrap", self._prev[1])
         else:
             self._fail(n, f"текст в колонке {col}")
+
+    def _settle_pending(self, in_diff: bool) -> None:
+        """Фраза раскрытия стоит под тем, что раскрывает: строка диффа
+        под ней — фраза посреди диффа."""
+        if self._pending is not None and in_diff:
+            self._fail(self._pending, "фраза раскрытия посреди диффа")
+        self._pending = None
 
     def _after_member(self) -> bool:
         """Перенос длинного текста члена — под его текстом."""
@@ -253,6 +261,8 @@ class _Grid:
         if text.startswith("+ "):
             if not _EXPAND.fullmatch(text):
                 self._fail(n, "фраза раскрытия не «+ ещё N строк»")
+            if self._prev is not None and self._prev[0] == "ctl":
+                self._fail(n, "фраза раскрытия не под тем, что раскрывает")
             self._pending = n
         self._prev = ("ctl", col)
 

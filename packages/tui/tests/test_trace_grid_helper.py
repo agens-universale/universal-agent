@@ -195,6 +195,37 @@ P4_14_OPEN_CONTEXT = [
     _ctl("− свернуть"),
 ]
 
+# Фраза — под тем, что раскрывает (решение 2026-10-26): у каждого
+# обрезанного файла своя, под его диффом; у файла целиком — нет.
+P4_EDITED_PER_FILE = [
+    _head(OK, "Edited", " 3 файла (+12 −0)"),
+    _file("a.py", " (+5 −0) · 1с          ❐", lead=True),
+    _diff(1, "+", "a = 1", 4),
+    _diff(2, "+", "b = 2", 4),
+    _ctl("+ ещё 3 строки"),
+    BLANK,
+    _file("b.py", " (+2 −0) · 1с          ❐"),
+    _diff(1, "+", "c = 3", 4),
+    _diff(2, "+", "d = 4", 4),
+    BLANK,
+    _file("c.py", " (+5 −0) · 1с          ❐"),
+    _diff(1, "+", "e = 5", 4),
+    _ctl("− свернуть"),
+]
+
+# `Ran` с выводом и файлами: фраза вывода — под выводом, над файлами.
+P4_RAN_OUTPUT_AND_FILES = [
+    _head(OK, "Ran", "  python gen.py · 2с"),
+    _out("записано 5 кодов", lead=True),
+    _out("готово", lead=False),
+    _ctl("+ ещё 4 строки"),
+    _file("client/retry_table.py", " (+18)          ❐", verb="Added"),
+    _diff(1, "+", '"""Сгенерировано."""', 4),
+    _ctl("+ ещё 17 строк"),
+    BLANK,
+    _file("client/legacy_retry.py", "", verb="Deleted"),
+]
+
 P4_19_FAILURES = [
     _prose("Посмотрю конфиг клиента и настройки окружения."),
     BLANK,
@@ -240,6 +271,8 @@ P4_22_EDIT_IN_GROUP = [
         P4_14_EDITED_3,
         P4_14_HUNK_GAP,
         P4_14_OPEN_CONTEXT,
+        P4_EDITED_PER_FILE,
+        P4_RAN_OUTPUT_AND_FILES,
         P4_18_AGENT,
         P4_18_AGENT_EXPANDED,
         P4_19_FAILURES,
@@ -252,6 +285,8 @@ P4_22_EDIT_IN_GROUP = [
         "p4-14",
         "p4-14-hunk-gap",
         "p4-14-open-context",
+        "edited-per-file",
+        "ran-output-and-files",
         "p4-18",
         "p4-18-expanded",
         "p4-19",
@@ -344,9 +379,23 @@ VIOLATIONS = {
         ],
         "строка 3: управление в колонке 4, ждали 6",
     ),
-    "expand-phrase-not-last": (
-        [*_EXPLORED_LEAD, _ctl("+ ещё 3 строки"), _member("Read", "b", "1с")],
-        "строка 3: фраза раскрытия не последняя в блоке",
+    "expand-phrase-inside-diff": (
+        [
+            _head(OK, "Edited", " 2 файла (+9 −0)"),
+            _file("a.py", " (+5 −0)", lead=True),
+            _diff(1, "+", "a = 1", 4),
+            _ctl("+ ещё 4 строки"),
+            _diff(2, "+", "b = 2", 4),
+        ],
+        "строка 4: фраза раскрытия посреди диффа",
+    ),
+    "expand-phrase-under-control": (
+        [
+            _head(OK, "Edited", " 4 файла (+9 −0)"),
+            _lead_ctl("… ещё 1"),
+            _ctl("+ ещё 4 строки"),
+        ],
+        "строка 3: фраза раскрытия не под тем, что раскрывает",
     ),
     "single-ran-reason-not-glyph-colour": (
         [
