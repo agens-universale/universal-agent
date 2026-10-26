@@ -63,6 +63,17 @@ class MemoryKV(KV):
         if self._data.pop(key, None) is not None:
             self._keys.remove(key)
 
+    conditional_delete = True
+
+    async def delete_if(self, key: str, version: str) -> bool:
+        await self._step("delete", key)
+        found = self._data.get(key)
+        if found is None or str(found[1]) != version:
+            return False
+        del self._data[key]
+        self._keys.remove(key)
+        return True
+
     async def scan(
         self, prefix: str, *, start_after: str = "", limit: int = 1000
     ) -> list[str]:

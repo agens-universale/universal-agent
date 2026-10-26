@@ -77,6 +77,8 @@ from gc_stores.kv.head import Chunk, Head
 from gc_stores.rows import HISTORY, dumps, id_key, message_key, stamp
 
 _log = logging.getLogger("gc_stores")
+#: Сколько живёт надгробие удалённого треда (как у SQL и файлового).
+TOMBSTONE_TTL = timedelta(days=1)
 
 #: Сколько раз шаг записи повторяется, если заголовок успели переписать.
 ATTEMPTS = 16
@@ -731,7 +733,9 @@ class KvThreadStore(ThreadStore):
                 return _Done([])
             check_deletable(live.row.lease)
             after = await self._thread_keys(key, live)
-            return _Write(live.tombstone(), list(live.aliases), after)
+            return _Write(
+                live.tombstone(self._clock()), list(live.aliases), after
+            )
 
         await self._drop_aliases(key, await self._mutate(key, step))
 
@@ -755,10 +759,14 @@ class KvThreadStore(ThreadStore):
         return found.data
 
     async def prune_receipts(self, older_than: timedelta) -> int:
-        """Убрать объекты квитанций старше ``older_than``. Квитанция
-        последней записи треда живёт в его заголовке до следующей записи."""
+        """Убрать объекты квитанций старше ``older_than`` и надгробия
+        старше суток (фенсинг удалённого треда: аренды со сроком к этому
+        времени истекли), как SQL. Квитанция последней записи треда живёт
+        в его заголовке до следующей записи. Возвращает число убранных
+        квитанций."""
         await self._ready()
-        cutoff = self._clock() - older_than
+        now = self._clock()
+        cutoff = now - older_than
         removed = 0
         for name in await _scan_all(self._kv, keys.RECEIPTS):
             found = await self._kv.get(name)
@@ -768,7 +776,24 @@ class KvThreadStore(ThreadStore):
             if at < cutoff:
                 await self._kv.delete(name)
                 removed += 1
+        await self._reap_tombstones(now - TOMBSTONE_TTL)
         return removed
+
+    async def _reap_tombstones(self, cutoff: datetime) -> None:
+        """Надгробия старше ``cutoff`` — удалением по версии: тред,
+        пересозданный после чтения надгробия, остаётся. Без такого удаления
+        (S3) надгробия не трогаются."""
+        if not self._kv.conditional_delete:
+            return
+        for name in await _scan_all(self._kv, keys.THREADS):
+            if not name.endswith("/h"):
+                continue
+            found = await self._kv.get(name)
+            if found is None:
+                continue
+            head = Head.loads(found.data)
+            if head.deleted and head.row.updated_at < cutoff:
+                await self._kv.delete_if(name, found.version)
 
     async def sweep(self, older_than: timedelta = timedelta(hours=1)) -> int:
         """Убрать сироты прерванных записей старше ``older_than``: куски,

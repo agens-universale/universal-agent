@@ -73,11 +73,14 @@ class Head:
             deleted=True,
         )
 
-    def tombstone(self) -> Head:
+    def tombstone(self, now: datetime) -> Head:
+        """Надгробие удалённого треда: поколение и эпоха — фенсинг его
+        писателей; ``updated_at`` — время удаления (по нему надгробие
+        убирает обслуживание)."""
         row = ThreadRow(
             key=self.row.key,
             created_at=self.row.created_at,
-            updated_at=self.row.updated_at,
+            updated_at=now,
         )
         row.generation = self.row.generation + 1
         row.lease_epoch = self.row.lease_epoch

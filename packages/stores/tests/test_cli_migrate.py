@@ -81,3 +81,32 @@ def test_migrate_s3_writes_the_key_format(s3_config, s3_prefixes, capsys):
     assert main(["migrate", "--check", *args]) == 1
     assert main(["migrate", *args]) == 0
     assert "версия схемы: 1" in capsys.readouterr().out
+
+
+def test_maintain_prunes_the_thread_store_sqlite(tmp_path, capsys):
+    """Ревью, раунд 4: без gc-serve (gc-cli и TUI на базе) квитанции и
+    надгробия хранилища тредов копились без предела — их убирает
+    ``gc-stores maintain`` (в cron)."""
+    import asyncio
+
+    from gc_core.threads.models import SideChange, ThreadKey
+    from gc_stores.sqlite import SQLiteThreadStore
+
+    path = tmp_path / "t.db"
+    assert main(["migrate", "--store", "sqlite", "--path", str(path)]) == 0
+
+    async def seed() -> None:
+        store = SQLiteThreadStore(str(path))
+        try:
+            await store.append_side(
+                ThreadKey(system="cli", thread="t"),
+                SideChange(op_id="old", patch_frontend=("t", {"x": 1})),
+            )
+        finally:
+            await store.close()
+
+    asyncio.run(seed())
+    capsys.readouterr()
+    args = ["--store", "sqlite", "--path", str(path)]
+    assert main(["maintain", "--receipts-hours", "0", *args]) == 0
+    assert "квитанций убрано: 1" in capsys.readouterr().out

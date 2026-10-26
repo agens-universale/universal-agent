@@ -67,6 +67,25 @@ async def test_conditional_put_loses_to_a_concurrent_writer(
         await kv.close()
 
 
+async def test_conditional_delete_spares_a_rewritten_key(
+    redis_url, redis_prefixes
+):
+    """Удаление по версии под ``WATCH``: на нём держится уборка надгробий
+    тредов — пересозданный тред она не трогает."""
+    kv = RedisKV(redis_url, prefix=redis_prefixes.new())
+    try:
+        assert kv.conditional_delete
+        v1 = await kv.put("k", b"1", if_version=None)
+        v2 = await kv.put("k", b"2", if_version=v1)
+        assert await kv.delete_if("k", v1) is False
+        assert (await kv.get("k")).data == b"2"
+        assert await kv.delete_if("k", v2) is True
+        assert await kv.get("k") is None
+        assert await kv.scan("") == []
+    finally:
+        await kv.close()
+
+
 async def test_scan_orders_bytes_and_pages(redis_url, redis_prefixes):
     kv = RedisKV(redis_url, prefix=redis_prefixes.new())
     try:
