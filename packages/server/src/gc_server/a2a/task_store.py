@@ -27,6 +27,7 @@ from a2a.utils.task import (
     decode_list_tasks_cursor,
     encode_list_tasks_cursor,
 )
+from gc_core.threads.errors import OperationMismatch
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import SideChange, ThreadKey, ThreadRecord
 from google.protobuf.json_format import MessageToDict, ParseDict
@@ -128,7 +129,17 @@ class ThreadTaskStore(TaskStore):
             patch[FINAL + task.id] = seq
         if task.status.state == pb.TASK_STATE_CANCELED:
             patch.update(await self._arelease(key, task.id))
-        await self._threads.update_frontend(key, FRONTEND, patch)
+        try:
+            await self._threads.update_frontend(
+                key,
+                FRONTEND,
+                patch,
+                # Первый итог главнее: поздний итог зомби (ход упавшего
+                # инстанса после FAILED восстановления) его не перетирает.
+                op_id=f"a2a-final:{task.id}" if final else None,
+            )
+        except OperationMismatch:
+            return  # итог задачи уже записан
 
     async def _arelease(self, key: ThreadKey, task_id: str) -> dict[str, Any]:
         """Отменённая задача уходит из очереди диалога. SDK пишет отмену

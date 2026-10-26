@@ -120,18 +120,29 @@ class OwnerRegistry:
                 registry_key(key), LeaseRequest(owner=key, ttl=self._ttl)
             )
             self._since = _now()
-            await self._threads.update_frontend(
-                DIRECTORY, DIRECTORY_SECTION, {key: {"since": self._since}}
-            )
+            try:
+                await self._threads.update_frontend(
+                    DIRECTORY, DIRECTORY_SECTION, {key: {"since": self._since}}
+                )
+            except BaseException:
+                # Реестр вне каталога никто не найдёт: аренду — назад.
+                await self._arelease_quietly(key, record.lease)
+                raise
             self._lease, self._generation = record.lease, record.generation
             self._live, self._removed, self._renewals = {}, 0, 0
             self.key = key
-            self._keeper = asyncio.create_task(self._akeep())
+            self._keeper = asyncio.create_task(self._akeep(key))
             return key
 
     async def aadd(self, entry_id: str, data: dict[str, Any]) -> str:
-        """Запись «в работе»; возвращает ключ реестра (для отметок)."""
+        """Запись «в работе»; возвращает ключ реестра (для отметок).
+
+        Аренда на исходе (процесс стоял) — сперва продлить: запись в реестр,
+        который уже разобрали и удалили, воскресила бы его вне каталога."""
         key = await self.aensure()
+        if self._expiring():
+            await self._arenew()
+            key = await self.aensure()
         self._live[entry_id] = data
         await self._threads.update_frontend(
             registry_key(key), self._section, {entry_id: data}
@@ -160,6 +171,10 @@ class OwnerRegistry:
             ),
         )
 
+    def _expiring(self) -> bool:
+        lease = self._lease
+        return lease is None or lease_expired(lease, utc_now() + self._ttl / 2)
+
     async def astop(self) -> None:
         """Остановка процесса: продление — стоп, аренда — отпустить, чтобы
         задачи разобрали сразу, а не через срок."""
@@ -169,17 +184,39 @@ class OwnerRegistry:
             await asyncio.gather(keeper, return_exceptions=True)
         key, lease = self.key, self._lease
         self.key = self._lease = None
-        if key is None or lease is None:
+        if key is not None and lease is not None:
+            await self._arelease_quietly(key, lease)
+
+    async def _arelease_quietly(self, key: str, lease: Lease | None) -> None:
+        if lease is None:
             return
         try:
             await self._threads.store.release(registry_key(key), lease)
         except Exception:  # аренда истечёт сама
             logger.warning("owners: аренда реестра не отпущена", exc_info=True)
 
-    async def _akeep(self) -> None:
-        while self.key is not None:
+    async def _adrop_revived(self, key: str, lease: Lease | None) -> None:
+        await self._arelease_quietly(key, lease)
+        try:
+            await self._threads.store.delete(
+                registry_key(key), op_id=f"owners-revived-{uuid.uuid4().hex}"
+            )
+        except Exception:  # пустой тред без каталога вреда не несёт
+            logger.warning("owners: пустой реестр не удалён", exc_info=True)
+
+    async def _akeep(self, key: str) -> None:
+        """Продление своего ключа; заведён новый реестр — этот цикл ушёл.
+        Сбой — повтор на следующем шаге: потерю решает срок аренды."""
+        while self.key == key:
             await asyncio.sleep(self._renew_seconds)
-            await self._arenew()
+            if self.key != key:
+                return
+            try:
+                await self._arenew()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("owners: продление реестра", exc_info=True)
 
     async def _arenew(self) -> None:
         key = self.key
@@ -198,16 +235,28 @@ class OwnerRegistry:
             else:
                 logger.warning("owners: продление не удалось", exc_info=True)
             return
+        held = self._lease
         if record.generation != self._generation:
-            # Реестр разобрали и удалили — продление завело новый тред.
+            # Реестр разобрали и удалили — продление завело пустой тред:
+            # убрать его, реестр уже не наш.
+            await self._adrop_revived(key, record.lease)
+            await self._alost()
+            return
+        if held is not None and record.lease.epoch != held.epoch:
+            # Аренда истекала — реестр мог взять восстановитель (и разобрать
+            # часть записей): он уже не наш.
+            await self._arelease_quietly(key, record.lease)
             await self._alost()
             return
         self._lease = record.lease
         self._renewals += 1
         if self._renewals % REASSERT_EVERY == 0:
-            await self._threads.update_frontend(
-                DIRECTORY, DIRECTORY_SECTION, {key: {"since": self._since}}
-            )
+            try:
+                await self._threads.update_frontend(
+                    DIRECTORY, DIRECTORY_SECTION, {key: {"since": self._since}}
+                )
+            except Exception:  # следующая попытка — через REASSERT_EVERY
+                logger.warning("owners: запись в каталог", exc_info=True)
 
     async def _alost(self) -> None:
         self.key = self._lease = None

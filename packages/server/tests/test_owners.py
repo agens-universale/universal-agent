@@ -225,3 +225,116 @@ async def test_directory_is_compacted_and_live_owners_reassert(threads):
         assert key in await _directory(threads)
     finally:
         await registry.astop()
+
+
+class _FlakyThreads:
+    """Фасад тредов, у которого запись в каталог один раз падает
+    сетевой ошибкой."""
+
+    def __init__(self, threads) -> None:
+        self._threads = threads
+        self.failures = 1
+
+    def __getattr__(self, name):
+        return getattr(self._threads, name)
+
+    async def update_frontend(self, key, name, patch, **kwargs):
+        if key == owners.DIRECTORY and self.failures:
+            self.failures -= 1
+            raise ConnectionError("сеть моргнула")
+        return await self._threads.update_frontend(key, name, patch, **kwargs)
+
+
+async def test_transient_error_does_not_stop_the_heartbeat(threads):
+    """Ревью, C2: сбой повторной записи в каталог убивал продление — живой
+    процесс через срок выглядел мёртвым."""
+    registry = _registry(threads)
+    key = await registry.aensure()
+    flaky = _FlakyThreads(threads)
+    registry._threads = flaky
+    registry._renewals = owners.REASSERT_EVERY - 1
+    try:
+        await asyncio.sleep(1.0)
+        assert flaky.failures == 0
+        assert registry.key == key
+        assert await owners.adead(threads, own=None, now=utc_now()) == []
+    finally:
+        await registry.astop()
+
+
+async def test_add_after_a_stall_does_not_revive_a_dropped_registry(threads):
+    """Ревью, I1a: процесс завис дольше срока, его реестр разобрали и
+    удалили; новая запись не воскрешает удалённый реестр вне каталога —
+    продление вскрывает потерю, запись ложится в новый реестр."""
+    registry = _registry(threads)
+    key = await registry.aensure()
+    await _crash(registry)
+    assert await owners.aclaim_dead(threads, key, owner="recover", ttl=TTL)
+    await owners.adrop(threads, key)
+    again = await registry.aadd("c|b", {"ctx": "c", "task": "b"})
+    try:
+        assert again != key
+        assert await threads.get(owners.registry_key(key)) is None
+        assert again in await _directory(threads)
+    finally:
+        await registry.astop()
+
+
+async def test_lease_lapsed_without_a_recoverer_is_still_a_loss(threads):
+    """Ревью, I1d: аренда истекла (её мог взять и отпустить восстановитель,
+    разобрав часть записей) — продление со сменой эпохи — потеря."""
+    lost = asyncio.Event()
+
+    async def on_lost() -> None:
+        lost.set()
+
+    registry = _registry(threads, on_lost=on_lost)
+    await registry.aensure()
+    await _crash(registry)
+    await registry._arenew()
+    assert lost.is_set()
+    assert registry.key is None
+
+
+async def test_one_heartbeat_per_registry_after_a_loss(threads):
+    """Ревью, M1: продление прежнего ключа не продлевает новый реестр."""
+
+    async def on_lost() -> None:
+        await registry.aensure()
+
+    registry = _registry(threads, on_lost=on_lost)
+    await registry.aensure()
+    old = registry._keeper
+    await _crash(registry)
+    old_task = asyncio.create_task(registry._akeep(registry.key))
+    await asyncio.sleep(0.3)
+    try:
+        assert old_task.done()
+        assert registry._keeper is not None
+        assert not registry._keeper.done()
+    finally:
+        old_task.cancel()
+        del old
+        await registry.astop()
+
+
+async def test_failed_directory_write_does_not_leave_an_orphan(threads):
+    """Ревью, M5: реестр взят, а запись в каталог упала — аренда отпущена,
+    повтор заводит реестр заново (а не держит невидимый)."""
+    registry = _registry(threads)
+    registry._threads = _FlakyThreads(threads)
+    with pytest.raises(ConnectionError):
+        await registry.aensure()
+    assert registry.key is None
+    key = await registry.aensure()
+    try:
+        assert key in await _directory(threads)
+        held = [
+            record.key.thread
+            async for record in threads.iter_threads(system=owners.SYSTEM)
+            if record.lease is not None
+            and not lease_expired(record.lease, utc_now())
+        ]
+        assert held == [key]
+    finally:
+        await registry.astop()

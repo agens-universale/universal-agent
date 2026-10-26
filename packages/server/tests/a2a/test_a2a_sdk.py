@@ -966,7 +966,12 @@ async def test_two_tasks_never_run_in_one_dialog_at_once(tmp_path, stores):
 
     async def enqueue_early(self, context_id, task_id, cwd):
         # Время приёма раньше чужого, а запись — после чужого чтения.
-        entry = {"at": "2000-01-01T00:00:00+00:00", "instance": "gc1"}
+        owner = await self._aregister(context_id, task_id)
+        entry = {
+            "at": "2000-01-01T00:00:00+00:00",
+            "instance": "gc1",
+            "owner": owner,
+        }
         self._waiting[task_id] = entry
         await second_claiming.wait()
         await self._threads.store.append_side(
@@ -1073,19 +1078,29 @@ async def test_queued_task_is_in_the_registry_with_its_owner(tmp_path, stores):
     await _until_gone(stores, surface.executor, entry)
 
 
-async def test_lost_registry_interrupts_own_turns(tmp_path, stores):
+async def test_lost_registry_resolves_own_tasks(tmp_path, stores):
     """Реестр потерян (продление опоздало, его взял восстановитель): свои
-    ходы снимаются как прерванные — итог запишет восстановитель."""
+    ходы сняты, свои задачи — идущая и ждущая очереди — ``FAILED``, их
+    отметки сняты, диалог свободен (ревью, I1: не перекладывать на
+    восстановителя — он мог уже разобрать реестр)."""
     agent = FakeAgent(("hold", asyncio.Event()))
     surface = _surface(tmp_path, stores, [agent])
     client = _client(surface)
     task = await _send(client, _message("долго"), return_immediately=True)
     await _until(client, task.id, pb.TASK_STATE_WORKING)
+    queued = await _send(
+        client,
+        _message("следом", context_id=task.context_id),
+        return_immediately=True,
+    )
     await surface.executor._aon_owners_lost()
     assert agent.stopped.is_set()
-    await asyncio.sleep(0.1)
-    after = await client.get_task(pb.GetTaskRequest(id=task.id))
-    assert after.status.state == pb.TASK_STATE_WORKING
+    for task_id in (task.id, queued.id):
+        await _until(client, task_id, pb.TASK_STATE_FAILED)
+    record = await stores.threads.get_thread(dialog_key(task.context_id))
+    state = record.frontend["a2a"]
+    assert state.get("running") is None
+    assert state.get("q:" + queued.id) is None
 
 
 class _CountingStore:
@@ -1272,3 +1287,186 @@ def test_recovery_runs_every_five_minutes():
     from gc_server.a2a import surface
 
     assert surface.RECOVERY_INTERVAL_SECONDS == 300.0
+
+
+async def test_cancel_while_the_agent_is_created_frees_the_dialog(
+    tmp_path, stores
+):
+    """Ревью, C1: отмена во время медленного старта агента — SDK снимает
+    ``execute`` до уборки. Отметка хода с живым владельцем не держит диалог:
+    следующая задача доходит до COMPLETED."""
+    agent = FakeAgent()
+    surface = _surface(tmp_path, stores, [])
+    creating, gate = asyncio.Event(), asyncio.Event()
+
+    async def slow_factory(settings, **_kw):
+        creating.set()
+        await gate.wait()
+        agent.settings = settings
+        return agent
+
+    surface.executor._agent_factory = slow_factory
+    client = _client(surface)
+    first = await _send(client, _message("один"), return_immediately=True)
+    await asyncio.wait_for(creating.wait(), 5)
+    await client.cancel_task(pb.CancelTaskRequest(id=first.id))
+    gate.set()
+    second = await _send(
+        client,
+        _message("два", context_id=first.context_id),
+        return_immediately=True,
+    )
+    done = await _until(client, second.id, pb.TASK_STATE_COMPLETED)
+    assert done.status.state == pb.TASK_STATE_COMPLETED
+
+
+async def test_own_leftover_entry_is_reconciled(tmp_path, stores):
+    """Ревью, C1: уборка не прошла (сбой хранилища) — запись своего реестра
+    без хода в памяти разбирает проход восстановления самого процесса:
+    отметка снята, итог не тронут, диалог свободен."""
+    from gc_core.threads.facade import Threads
+    from gc_server.a2a.executor import entry_id
+    from gc_server.a2a.task_store import FRONTEND, RUNNING
+
+    surface = _surface(tmp_path, stores, [FakeAgent()])
+    client = _client(surface)
+    done = await _send(client, _message("сделай"))
+    # Своя уборка хода закончилась (идёт после ответа пиру).
+    await _until_gone(
+        stores, surface.executor, entry_id(done.context_id, done.id)
+    )
+    owner = await surface.executor._owners.aadd(
+        entry_id(done.context_id, done.id),
+        {"ctx": done.context_id, "task": done.id},
+    )
+    key = dialog_key(done.context_id)
+    await Threads(stores.threads).update_frontend(
+        key, FRONTEND, {RUNNING: {"task": done.id, "owner": owner}}
+    )
+    assert await surface.executor.arecover_once() == 0
+    record = await stores.threads.get_thread(key)
+    assert record.frontend["a2a"].get(RUNNING) is None
+    await _until_gone(
+        stores, surface.executor, entry_id(done.context_id, done.id)
+    )
+    after = await client.get_task(pb.GetTaskRequest(id=done.id))
+    assert after.status.state == pb.TASK_STATE_COMPLETED
+
+
+async def test_server_stop_does_not_start_queued_tasks(tmp_path, stores):
+    """Ревью, I2: остановка сервера не запускает ждущих очереди — иначе
+    захват после остановки ставил отметку без владельца. Обе задачи
+    разбирает восстановление другого инстанса."""
+    dying = _surface(tmp_path, stores, [FakeAgent(("hold", asyncio.Event()))])
+    client = _client(dying)
+    first = await _send(client, _message("один"), return_immediately=True)
+    await _until(client, first.id, pb.TASK_STATE_WORKING)
+    queued = await _send(
+        client,
+        _message("два", context_id=first.context_id),
+        return_immediately=True,
+    )
+    await dying.astop()
+    await asyncio.sleep(0.2)
+    record = await stores.threads.get_thread(dialog_key(first.context_id))
+    running = record.frontend["a2a"].get("running")
+    assert running is None or running.get("task") == first.id
+    survivor = _surface(tmp_path, stores, [])
+    assert await survivor.executor.arecover_once() == 2
+    failed = await _client(survivor).get_task(pb.GetTaskRequest(id=queued.id))
+    assert failed.status.state == pb.TASK_STATE_FAILED
+
+
+async def test_result_is_saved_before_the_dialog_is_freed(tmp_path, stores):
+    """Ревью, I3: итог пишет SDK в фоне — отметку хода снимают, когда итог
+    уже в хранилище, иначе падение между ними оставило бы задачу WORKING
+    без отметки."""
+    surface = _surface(tmp_path, stores, [FakeAgent()])
+    seen: list = []
+    real = surface.executor._afree
+
+    async def free(context_id, task_id):
+        latest = await surface.executor._tasks.latest(task_id)
+        seen.append(latest.status.state)
+        return await real(context_id, task_id)
+
+    surface.executor._afree = free
+    done = await _send(_client(surface), _message("сделай"))
+    assert done.status.state == pb.TASK_STATE_COMPLETED
+    for _ in range(200):  # уборка идёт после ответа пиру
+        if seen:
+            break
+        await asyncio.sleep(0.01)
+    assert seen and seen[0] == pb.TASK_STATE_COMPLETED
+
+
+async def test_first_final_result_wins(stores):
+    """Ревью, I4: поздний итог зомби не перетирает FAILED восстановления."""
+    from gc_core.threads.facade import Threads
+    from gc_server.a2a.task_store import ThreadTaskStore
+
+    tasks = ThreadTaskStore(Threads(stores.threads))
+    task = pb.Task(
+        id="t-final",
+        context_id="c-final",
+        status=pb.TaskStatus(state=pb.TASK_STATE_FAILED),
+    )
+    await tasks.save(task, None)
+    task.status.state = pb.TASK_STATE_COMPLETED
+    await tasks.save(task, None)
+    assert (await tasks.get("t-final", None)).status.state == (
+        pb.TASK_STATE_FAILED
+    )
+
+
+async def _orphan_setup(tmp_path, stores, *, foreign_running: bool):
+    from gc_core.threads.facade import Threads
+    from gc_server.a2a.executor import entry_id
+    from gc_server.a2a.task_store import FRONTEND, RUNNING, ThreadTaskStore
+
+    threads = Threads(stores.threads)
+    task = pb.Task(
+        id="t-orphan",
+        context_id="c-orphan",
+        status=pb.TaskStatus(state=pb.TASK_STATE_WORKING),
+    )
+    await ThreadTaskStore(threads).save(task, None)
+    if foreign_running:
+        await threads.update_frontend(
+            dialog_key("c-orphan"),
+            FRONTEND,
+            {RUNNING: {"task": "t-orphan", "owner": "elsewhere-1"}},
+        )
+    dying = _surface(tmp_path, stores, [])
+    _fast_owners(dying)
+    await dying.executor._owners.aadd(
+        entry_id("c-orphan", "t-orphan"),
+        {"ctx": "c-orphan", "task": "t-orphan"},
+    )
+    await _crash(dying)
+    survivor = _surface(tmp_path, stores, [])
+    return survivor, await survivor.executor.arecover_once()
+
+
+async def test_entry_of_a_task_that_never_started_is_failed(tmp_path, stores):
+    """Умер между записью в реестр и отметкой в диалоге: задача так и не
+    начнётся — FAILED, а не навсегда WORKING."""
+    survivor, failed = await _orphan_setup(
+        tmp_path, stores, foreign_running=False
+    )
+    assert failed == 1
+    after = await _client(survivor).get_task(pb.GetTaskRequest(id="t-orphan"))
+    assert after.status.state == pb.TASK_STATE_FAILED
+
+
+async def test_entry_of_a_task_running_elsewhere_is_left_alone(
+    tmp_path, stores
+):
+    """Задачу уже ведёт другой инстанс (ответ на вопрос пришёл туда):
+    устаревшая запись мёртвого реестра её не трогает."""
+    survivor, failed = await _orphan_setup(
+        tmp_path, stores, foreign_running=True
+    )
+    assert failed == 0
+    after = await _client(survivor).get_task(pb.GetTaskRequest(id="t-orphan"))
+    assert after.status.state == pb.TASK_STATE_WORKING
