@@ -92,8 +92,9 @@ def test_two_tuple_row_still_plain_str_backward_compat():
 
 
 def test_three_tuple_row_renders_status_column_colored():
-    """3-tuple опции (/profiles) — статус третьим элементом рендерится ЗЕЛЁНЫМ
-    (OK), ровно как активный маркер в /settings (`_profile_row_text`)."""
+    """3-tuple опции (/profiles) — статус колонкой сразу за именем, ЗЕЛЁНЫМ
+    (OK), как активный маркер в /settings (`_profile_row_text`); у
+    неактивных место пустое, описание — после колонки, SUB_INK."""
     pytest.importorskip("textual")
     from gc_tui import palette as pal
     from gc_tui.widgets.arg_picker import ArgPicker
@@ -101,27 +102,29 @@ def test_three_tuple_row_renders_status_column_colored():
     opts = [
         ("без профиля", "работать чистым конфигом", ""),
         ("openrouter", "глобальный (как в конфиге)", ""),
-        ("smoke", "глобальный", "● активен"),
+        ("smoke", "глобальный", "активен"),
     ]
     p = ArgPicker(opts, initial_filter="")
 
     none_row = p._format_row(opts[0])
     active_row = p._format_row(opts[2])
 
-    # описание начинается в общей колонке, как у 2-tuple опций
+    # описание начинается в общей колонке, после колонки статуса
     assert none_row.plain.index("работать") == active_row.plain.index(
         "глобальный"
     )
-    # статус — самая правая часть строки, только у активной
-    assert active_row.plain.rstrip().endswith("● активен")
+    status_at = active_row.plain.index("активен")
+    assert active_row.plain[:status_at].rstrip() == " smoke"
+    assert status_at < active_row.plain.index("глобальный")
     assert "активен" not in none_row.plain
+    assert none_row.plain[status_at : status_at + 7].strip() == ""
 
-    spans = [
-        s
+    styles = {
+        active_row.plain[s.start : s.end]: str(s.style)
         for s in active_row.spans
-        if active_row.plain[s.start : s.end] == "● активен"
-    ]
-    assert spans and str(spans[0].style) == pal.OK
+    }
+    assert styles["активен"] == pal.OK
+    assert styles["глобальный"] == pal.SUB_INK
 
 
 def test_three_tuple_status_visible_even_with_empty_description():
@@ -131,30 +134,26 @@ def test_three_tuple_status_visible_even_with_empty_description():
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
-    p = ArgPicker([("x", "", "● активен")], initial_filter="")
-    row = p._format_row(("x", "", "● активен"))
-    assert "● активен" in row.plain
+    p = ArgPicker([("x", "", "активен")], initial_filter="")
+    row = p._format_row(("x", "", "активен"))
+    assert "активен" in row.plain
 
 
-def test_status_column_aligns_to_longest_visible_description():
-    """Колонка статуса выровнена по самому длинному ОПИСАНИЮ среди видимых
-    строк — тот же принцип, каким уже паддится value-колонка (_value_col_w)."""
+def test_status_column_width_is_widest_visible_status():
+    """Колонка статуса — по самому широкому статусу среди видимых строк:
+    длинный статус соседа сдвигает описание правее, имя и статус — нет."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
-    short_opts = [("smoke", "глобальный", "● активен")]
+    short_opts = [("smoke", "глобальный", "активен")]
     long_opts = [
-        ("openrouter", "глобальный (как в конфиге)", ""),
-        ("smoke", "глобальный", "● активен"),
+        ("smoke", "глобальный", "активен"),
+        ("bad", "проектный", "✗ не применится"),
     ]
-    p_short = ArgPicker(short_opts, initial_filter="")
-    p_long = ArgPicker(long_opts, initial_filter="")
-
-    idx_short = p_short._format_row(short_opts[0]).plain.index("● активен")
-    idx_long = p_long._format_row(long_opts[1]).plain.index("● активен")
-    # более длинное описание в списке сдвигает статус правее — колонка
-    # считается по самой длинной видимой строке, не по своей
-    assert idx_long > idx_short
+    row_short = ArgPicker(short_opts)._format_row(short_opts[0]).plain
+    row_long = ArgPicker(long_opts)._format_row(long_opts[0]).plain
+    assert row_short.index("активен") == row_long.index("активен")
+    assert row_long.index("глобальный") > row_short.index("глобальный")
 
 
 def test_set_filter_resets_selection_to_zero():

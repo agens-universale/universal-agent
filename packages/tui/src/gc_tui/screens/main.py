@@ -7155,6 +7155,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                         prefix=rest,
                         hint_provider=hint_provider,
                         initial_value=current(self.app) if current else None,
+                        picks=cmd_obj.arg_picks,
                     )
                 else:
                     self._arg_picker.set_filter(rest)
@@ -7287,16 +7288,22 @@ class TraceScreen(TraceFollowMixin, Screen):
         prefix: str,
         hint_provider=None,
         initial_value=None,
+        picks: bool = False,
     ) -> None:
         if self._arg_picker is not None:
             return
-        from gc_tui.widgets.arg_picker import ArgPicker
+        from gc_tui.widgets.arg_picker import (
+            PICK_KEYS_HINT,
+            RUN_KEYS_HINT,
+            ArgPicker,
+        )
 
         picker = ArgPicker(
             options,
             initial_filter=prefix,
             hint_provider=hint_provider,
             initial_value=initial_value,
+            keys_hint=PICK_KEYS_HINT if picks else RUN_KEYS_HINT,
         )
         self._arg_picker = picker
         self._mount_input_overlay(picker)

@@ -346,11 +346,10 @@ def profile_value(app: Any) -> Text:
 _PROFILE_NONE_HINT = (
     "настройки берутся только из config.yml — файл профиля не подмешивается"
 )
-# Тот же литерал, что и активный маркер секции «Профили» /settings
-# (`_profile_row_text`/`_none_row_text` в tui/screens/settings.py) — статус
-# пикера красится тем же цветом (OK), правая колонка ArgPicker (задача 10,
-# решение смока 2026-08-10).
-_PROFILE_ACTIVE_STATUS = "● активен"
+# Отметка действующего профиля — одна на пикер `/profiles` и секцию «Профили»
+# /settings (`_profile_row_text`/`_none_row_text`): зелёное слово (OK)
+# колонкой сразу за именем (решение смока 2026-10-25).
+PROFILE_ACTIVE_STATUS = "активен"
 # Тот же вердикт, что у гейта выбора (`TuiApp.probe_profile_assembly`), но ДО
 # нажатия: отказ после Enter — половина дела, человек уже успел выбрать
 # (решение владельца по живому смоку).
@@ -417,9 +416,9 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     задача 10, решение смока 2026-08-10): первым — «— без профиля» (сессионное
     снятие, §9.1), затем профили по алфавиту объединённого списка. 3-tuple
     (value, описание, статус): описание — источник + «(как в конфиге)» у
-    профиля конфиг-указателя; статус — «● активен» ОТДЕЛЬНЫМ элементом (не
+    профиля конфиг-указателя; статус — «активен» ОТДЕЛЬНЫМ элементом (не
     частью описания) у ровно одной строки — той, что действует сейчас
-    (`ArgPicker` красит его правой колонкой, см. `arg_picker.py`).
+    (`ArgPicker` ставит его колонкой за именем, см. `arg_picker.py`).
 
     Второй статус — «✗ не применится» у профиля, с которым конфиг не собирается
     (тот же судья, что у гейта выбора). Действующий профиль его не получает,
@@ -439,7 +438,7 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     refs = _discovered_profiles(app)
     effective = runtime_of(_effective_settings(app)).active_profile or ""
     base_pointer = runtime_of(_global_settings(app)).active_profile or ""
-    none_status = _PROFILE_ACTIVE_STATUS if not effective else ""
+    none_status = PROFILE_ACTIVE_STATUS if not effective else ""
     options = [(PROFILE_NONE_VALUE, "работать чистым конфигом", none_status)]
     for name in sorted(refs):
         ref = refs[name]
@@ -447,7 +446,7 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
         if name == base_pointer:
             desc += " (как в конфиге)"
         if name == effective:
-            status = _PROFILE_ACTIVE_STATUS  # действующий уже собрался — пробы не надо
+            status = PROFILE_ACTIVE_STATUS  # действующий уже собрался — пробы не надо
         else:
             status = (
                 _PROFILE_BROKEN_STATUS

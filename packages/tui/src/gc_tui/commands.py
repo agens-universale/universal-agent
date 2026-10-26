@@ -53,6 +53,9 @@ class Command:
     # Текущее значение аргумента (app -> value): на нём ArgPicker
     # открывается (`/model` — действующий выбор).
     arg_current_provider: Optional[Callable[[Any], Optional[str]]] = None
+    # Enter по строке пикера только выбирает значение (`/model`,
+    # `/profiles`), а не запускает действие: строка клавиш — «Enter выбрать».
+    arg_picks: bool = False
     # Текущее значение команды (app -> Text) — палитра показывает его в
     # правой колонке вместо хоткея (`/model` — знак модели, `/profiles` —
     # имя профиля).
@@ -133,6 +136,7 @@ def build_default_registry() -> CommandRegistry:
             arg_options_provider=model_picker_options,
             arg_hint_provider=model_picker_hint,
             arg_current_provider=model_name,
+            arg_picks=True,
             value_provider=model_value,
         ),
         Command(
@@ -144,6 +148,7 @@ def build_default_registry() -> CommandRegistry:
             ),
             arg_options_provider=profile_picker_options,
             arg_hint_provider=profile_picker_hint,
+            arg_picks=True,
             value_provider=profile_value,
         ),
         Command(

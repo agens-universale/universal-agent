@@ -2,11 +2,12 @@
 
 Зеркало `SkillPicker`/`CommandPalette`: те же CSS-классы (.palette /
 .palette-row / .palette-hint) и модель состояния (filter + selected index).
-Опции — `PickerOption` (value, описание, статус справа, знак слева,
-доступность, черта); старые кортежи `(value, desc)` (`/export`) и
-`(value, desc, status)` (`/profiles`) нормализуются в него же. Строка со
-статусом или знаком — `Text` (статус цветом OK, ✗-отказ — ERR); без них —
-простой `str`. Черта (`separator`) не выбирается и видна, только если по
+Опции — `PickerOption` (value, описание, статус, знак слева, доступность,
+черта); старые кортежи `(value, desc)` (`/export`) и `(value, desc, status)`
+(`/profiles`) нормализуются в него же. Строка со статусом или знаком —
+`Text`: знак, имя, колонка статуса сразу за именем (цветом OK, ✗-отказ —
+ERR; у строк без статуса место пустое), описание последним — `SUB_INK`, оно
+и ужимается при нехватке ширины; без статуса и знака — простой `str`. Черта (`separator`) не выбирается и видна, только если по
 обе её стороны есть видимые строки; недоступная строка (`enabled=False`)
 видна приглушённой, Enter её не берёт."""
 
@@ -22,11 +23,14 @@ from textual.widgets import Rule, Static
 from gc_tui import palette as _pal
 from gc_tui.widgets.palette_rows import PaletteRowsMixin
 
-_HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
+# Строка клавиш: Enter запускает действие (`/export`) или только выбирает
+# значение (`/model`, `/profiles` — `Command.arg_picks`).
+RUN_KEYS_HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
+PICK_KEYS_HINT = "↑↓ выбрать · Tab дополнить · Enter выбрать · Esc закрыть"
 
 
 class PickerOption(NamedTuple):
-    """Строка пикера: значение, описание, статус справа, знак слева."""
+    """Строка пикера: значение, описание, статус за именем, знак слева."""
 
     value: str
     desc: str
@@ -57,7 +61,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         hint_provider: Optional[Callable[[Optional[str]], str]] = None,
         *,
         initial_value: Optional[str] = None,
-        keys_hint: Optional[str] = _HINT,
+        keys_hint: Optional[str] = RUN_KEYS_HINT,
     ) -> None:
         super().__init__(classes="palette")
         self._options = [_as_option(opt) for opt in options]
@@ -121,14 +125,11 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
             o.status or o.lead or not o.enabled for o in self._choice_rows()
         )
 
-    def _desc_col_w(self) -> int:
-        """Ширина description-колонки у строк со статусом: описание паддится
-        до самого длинного описания среди ВИДИМЫХ строк + 3 пробела — статус
-        (правая колонка) стартует в одном месте у всех строк."""
-        descs = [o.desc for o in self._choice_rows()]
-        if not descs or not any(descs):
-            return 0
-        return max(len(d) for d in descs) + 3
+    def _status_col_w(self) -> int:
+        """Ширина колонки статуса: самый широкий статус среди ВИДИМЫХ строк
+        + 3 пробела; статусов нет — колонки нет."""
+        widths = [len(o.status) for o in self._choice_rows() if o.status]
+        return max(widths) + 3 if widths else 0
 
     def _lead_col_w(self) -> int:
         """Ширина колонки знака: по самому широкому знаку среди видимых."""
@@ -146,9 +147,8 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
     def _format_row(self, opt: tuple) -> str | Text:
         """Строка списка: без статуса и знака у всех видимых строк — простой
         `str` (другие пикеры — /export и т.п. — не должны заметить правку);
-        иначе `Text`: знак, значение, описание и правый статус цветом OK
-        (✗-отказ — ERR). Недоступная строка: знак цветной, остальное
-        приглушено."""
+        иначе `Text`: знак, значение, статус, описание. Недоступная строка:
+        знак цветной, остальное приглушено."""
         opt = _as_option(opt)
         if not self._rich_rows():
             if not opt.desc:
@@ -161,22 +161,29 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
             t.append(opt.value)
         else:
             t.append(opt.value.ljust(self._value_col_w()))
-            t.append(opt.desc.ljust(self._desc_col_w()))
-        if opt.status:
-            # Цвет — по смыслу статуса: ✗-отказ («не применится») зелёным
-            # цветом достижения читался бы как «всё в порядке». Правило по
-            # глифу, а не по литералу: пикер не знает ни про профили, ни про
-            # их тексты.
-            t.append(
-                opt.status,
-                style=_pal.ERR if opt.status.startswith("✗") else _pal.OK,
-            )
+            self._append_status(t, opt.status)
+            t.append(opt.desc, style=_pal.SUB_INK)
         if not opt.enabled:
-            # Знак сохраняет свои цвета, приглушены имя, описание, статус.
+            # Знак сохраняет свои цвета, приглушены имя, статус, описание.
             t = Text.assemble(
                 t[:body_start], Text(t.plain[body_start:], style=_pal.DIM)
             )
         return t
+
+    def _append_status(self, t: Text, status: str) -> None:
+        """Статус в своей колонке. Цвет — по смыслу: ✗-отказ («не
+        применится») зелёным цветом достижения читался бы как «всё в
+        порядке». Правило по глифу, а не по литералу: пикер не знает ни про
+        профили, ни про их тексты."""
+        width = self._status_col_w()
+        if not width:
+            return
+        if status:
+            t.append(
+                status,
+                style=_pal.ERR if status.startswith("✗") else _pal.OK,
+            )
+        t.append(" " * (width - len(status)))
 
     def _row_widget(self, row: PickerOption, classes: str) -> Static | Rule:
         if row.separator:

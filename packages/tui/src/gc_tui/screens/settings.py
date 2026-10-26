@@ -39,6 +39,7 @@ from gc_tui.form_frame import (
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
 from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
 from gc_tui.services.probe_presentation import connection_line_text
+from gc_tui.toggles import PROFILE_ACTIVE_STATUS, PROFILE_NONE_VALUE
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
 # Клавиша сохранения настроек.
@@ -434,7 +435,8 @@ def fit_mode_pairs(pairs: list[str], width: int) -> str:
     return " · ".join(out) + tail if out else "…"
 
 
-# Отступ хвоста строки профиля (слоты и секции-оверлеи) от колонки «● активен».
+# Отступ хвоста строки профиля (слоты и секции-оверлеи) от колонки источника
+# и колонки «активен» от описания.
 _PROFILE_TAIL_GAP = 3
 
 
@@ -5578,8 +5580,21 @@ class SettingsScreen(Screen):
         self._notice(f"✗ {file_exc}")
 
     def _profiles_name_width(self, rows: list[dict]) -> int:
+        """Колонка имени — общая у профилей и «без профиля»: колонка
+        «активен» стоит сразу за ней у всех строк."""
         names = [r["name"] for r in rows if r["kind"] == "profile"]
-        return max((len(n) for n in names), default=0) + 3
+        names.append(PROFILE_NONE_VALUE)
+        return max(len(n) for n in names) + 3
+
+    @staticmethod
+    def _append_active_marker(t: Text, active: bool) -> None:
+        """Колонка «активен» сразу за именем; у неактивной строки — пусто."""
+        width = len(PROFILE_ACTIVE_STATUS) + _PROFILE_TAIL_GAP
+        if active:
+            t.append(PROFILE_ACTIVE_STATUS, style=OK)
+            t.append(" " * _PROFILE_TAIL_GAP)
+        else:
+            t.append(" " * width)
 
     def _profiles_row_width(self) -> int:
         """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же
@@ -5598,18 +5613,15 @@ class SettingsScreen(Screen):
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
         t.append(f"{name:<{name_w}}", style=INK)
+        self._append_active_marker(t, name == config_active)
         source = "проектный" if ref.root_kind == "project" else "глобальный"
         t.append(f"{source:<11}", style=DIM)
-        active_marker = "● активен"
-        if name == config_active:
-            t.append(active_marker, style=OK)
-            if (
-                self._project_sets_profile_pointer()
-                and ref.root_kind != "project"
-            ):
-                t.append(" · выбран проектом", style=DEEP_DIM)
-        else:
-            t.append(" " * len(active_marker), style=DEEP_DIM)
+        if (
+            name == config_active
+            and self._project_sets_profile_pointer()
+            and ref.root_kind != "project"
+        ):
+            t.append(" · выбран проектом", style=DEEP_DIM)
         summary = self._profile_summary(ref.path)
         tail = ""
         if summary.slots:
@@ -5652,19 +5664,14 @@ class SettingsScreen(Screen):
         return t
 
     def _none_row_text(self, rows: list[dict], selected: bool) -> Text:
-        """Строка «— без профиля»: глобальная деактивация; `● активен` — когда
+        """Строка «— без профиля»: глобальная деактивация; «активен» — когда
         конфиг-указатель пуст."""
         config_active = self._config_profile()
         name_w = self._profiles_name_width(rows)
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
-        label = "без профиля"
-        t.append(label.ljust(max(name_w + 11, len(label) + 3)), style=INK)
-        active_marker = "● активен"
-        if config_active is None:
-            t.append(active_marker, style=OK)
-        else:
-            t.append(" " * len(active_marker), style=DEEP_DIM)
+        t.append(PROFILE_NONE_VALUE.ljust(name_w), style=INK)
+        self._append_active_marker(t, config_active is None)
         session_overrides = getattr(self.app, "_session_overrides", None) or {}
         if (
             session_overrides.get("profile") == ""

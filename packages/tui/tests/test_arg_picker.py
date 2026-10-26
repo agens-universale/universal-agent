@@ -277,7 +277,7 @@ def _model_like_options():
         ),
         PickerOption("", "", separator=True),
         PickerOption("glm-flash", ""),
-        PickerOption("giga-max", "", "● активна"),
+        PickerOption("giga-max", "", "активна"),
         PickerOption("", "", separator=True),
         PickerOption("qwen-coder", ""),
     ]
@@ -349,9 +349,11 @@ async def test_old_two_and_three_tuples_still_work(tmp_path, monkeypatch):
         PickerOption("json", "данные"),
     ]
     assert p._format_row(p._visible_rows()[0]) == " txt    вся сессия"
-    p3 = ArgPicker([("smoke", "глобальный", "● активен")])
-    assert p3._visible_rows()[0].status == "● активен"
-    assert p3._format_row(p3._visible_rows()[0]).plain.endswith("● активен")
+    p3 = ArgPicker([("smoke", "глобальный", "активен")])
+    assert p3._visible_rows()[0].status == "активен"
+    assert p3._format_row(p3._visible_rows()[0]).plain == (
+        " smoke   активен   глобальный"
+    )
 
     monkeypatch.chdir(tmp_path)
     async with _mk_app(tmp_path).run_test() as pilot:
@@ -499,3 +501,36 @@ async def test_model_picker_opens_on_the_current_choice(tmp_path, monkeypatch):
         pilot.app.query_one("#cmdinput").text = "/model "
         await pilot.pause(0.1)
         assert pilot.app.query_one(ArgPicker).selected_value() == "giga-max"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", ["/model ", "/profiles "])
+async def test_choice_pickers_say_enter_selects(tmp_path, monkeypatch, typed):
+    """`/model` и `/profiles` только выбирают значение — строка клавиш
+    говорит «Enter выбрать»; `/export` запускает действие — «выполнить»."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = typed
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        keys = [str(w.render()) for w in picker.query(".palette-keys")]
+        assert keys[-1] == (
+            "↑↓ выбрать · Tab дополнить · Enter выбрать · Esc закрыть"
+        )
+
+
+@pytest.mark.asyncio
+async def test_action_picker_keeps_enter_runs(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/export "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        keys = [str(w.render()) for w in picker.query(".palette-keys")]
+        assert "Enter выполнить" in keys[-1]

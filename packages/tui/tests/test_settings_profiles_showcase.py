@@ -441,8 +441,8 @@ async def test_overlay_suffix_is_spaced_off_the_active_marker(
         await _open_profiles(pilot, scr)
         line = next(l for l in _profiles_rows_text(scr) if "work" in l)
     assert "+voice" in line, line
-    assert "активен+voice" not in line, line
-    assert "активен   +voice" in line, line
+    assert "глобальный+voice" not in line, line
+    assert "глобальный    +voice" in line, line
 
 
 async def test_active_base_profile_selected_by_project_config_shows_marker_and_hint(
@@ -450,7 +450,8 @@ async def test_active_base_profile_selected_by_project_config_shows_marker_and_h
 ):
     """Спека §12.3: активный профиль из БАЗОВОГО корня, выбранный проектным
     `.gc/config.yml` (не сам профиль — только указатель), — строка несёт
-    «глобальный» (источник ФАЙЛА профиля) + «● активен» + «· выбран проектом»;
+    «активен» сразу за именем + «глобальный» (источник ФАЙЛА профиля) +
+    «· выбран проектом»;
     hint выделенной строки — «выбор задан .gc/config.yml проекта» (ревью Task 13,
     Important-находка: settings.py:1094-1097/1129-1131, ветка `_project_sets_
     profile_pointer() and ref.root_kind != "project"` — было без регресс-теста)."""
@@ -484,8 +485,9 @@ async def test_active_base_profile_selected_by_project_config_shows_marker_and_h
         assert row["ref"].root_kind == "base"
         lines = _profiles_rows_text(scr)
         home_line = next(l for l in lines if "home" in l)
-        assert "глобальный" in home_line
-        assert "● активен" in home_line
+        assert "●" not in home_line
+        name_end = home_line.index("home") + len("home")
+        assert home_line[name_end:].lstrip().startswith("активен   глобальный")
         assert "выбран проектом" in home_line
         scr._profiles_idx = next(
             i for i, r in enumerate(rows) if r["kind"] == "profile"
@@ -1154,7 +1156,8 @@ def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
 
 
 async def test_none_row_first_active_marker(tmp_path, monkeypatch):
-    """«— без профиля» — первая строка; при пустом указателе `● активен` на ней.
+    """«— без профиля» — первая строка; при пустом указателе «активен» на ней
+    в той же колонке, что у профилей (сразу за именем).
 
     Черты в секции больше нет: она отделяла строку уровня, а уровень переехал в
     «Режимы работы» (2026-08-27) — секция снова однородный список профилей."""
@@ -1175,7 +1178,12 @@ async def test_none_row_first_active_marker(tmp_path, monkeypatch):
         rows = scr._profiles_rows()
         assert rows[0]["kind"] == "none"
         lines = _profiles_rows_text(scr)
-        assert "без профиля" in lines[0] and "● активен" in lines[0]
+        assert "без профиля" in lines[0] and "●" not in lines[0]
+        home = next(l for l in lines if "home" in l)
+        status_at = lines[0].index("активен")
+        assert lines[0][:status_at].rstrip().endswith("без профиля")
+        assert home[status_at : status_at + 7].strip() == ""
+        assert home.index("глобальный") > status_at
         assert not list(scr.query(".set-group-sep"))  # отделять больше нечего
         hint = scr._profiles_hint_text(rows)
         assert hint == "профиль не выбран — действует чистый конфиг"
@@ -1581,7 +1589,7 @@ async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choic
     и при сессионном выборе врала: «действует чистый конфиг», когда действует
     профиль из сессии — тот самый, который в это же время показывает футер.
 
-    Остальная секция не врёт: маркер `● активен` честно про глобальное состояние
+    Остальная секция не врёт: маркер «активен» честно про глобальное состояние
     (её предмет — файл), а строка профиля несёт хвост «выбран в текущей сессии».
     Правится ровно фраза о действии."""
     from gc_tui import app as app_mod

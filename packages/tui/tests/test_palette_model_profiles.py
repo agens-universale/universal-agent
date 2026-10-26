@@ -507,7 +507,7 @@ def test_profile_picker_options_none_first_marks(tmp_path, monkeypatch):
     by_name = {name: (desc, status) for name, desc, status in options}
     assert "глобальный" in by_name["alpha"][0]
     assert by_name["smoke"][0] == "глобальный (как в конфиге)"
-    assert by_name["smoke"][1] == "● активен"
+    assert by_name["smoke"][1] == "активен"
     assert by_name["alpha"][1] == ""
     assert by_name["без профиля"][1] == ""
 
@@ -519,7 +519,7 @@ def test_profile_picker_options_none_marked_active_when_no_profile(
 
     app = _picker_app(tmp_path, monkeypatch)
     options = profile_picker_options(app)
-    assert options[0][0] == "без профиля" and options[0][2] == "● активен"
+    assert options[0][0] == "без профиля" and options[0][2] == "активен"
 
 
 def test_profile_picker_options_exactly_one_active_row(tmp_path, monkeypatch):
@@ -624,7 +624,7 @@ def test_arg_picker_paints_a_refusal_status_as_an_error():
 
     picker = ArgPicker(
         [
-            ("normal", "глобальный", "● активен"),
+            ("normal", "глобальный", "активен"),
             ("broken", "глобальный", "✗ не применится"),
         ]
     )
@@ -853,13 +853,13 @@ def test_profile_picker_leaves_healthy_profiles_without_a_status(
 
     by_name = {name: status for name, _, status in profile_picker_options(app)}
     assert by_name["alpha"] == "" and by_name["smoke"] == ""
-    assert by_name["без профиля"] == "● активен"
+    assert by_name["без профиля"] == "активен"
 
 
 def test_profile_picker_keeps_active_marker_on_a_broken_active_profile(
     tmp_path, monkeypatch
 ):
-    """Действующий профиль помечен «● активен», даже если его файл испортили под
+    """Действующий профиль помечен «активен», даже если его файл испортили под
     ногами: он УЖЕ применён и работает, а «не применится» звало бы человека
     чинить выбор, который никуда не переключается. Два статуса в одной колонке
     не показываем — приоритет у того, что описывает текущее состояние."""
@@ -869,7 +869,7 @@ def test_profile_picker_keeps_active_marker_on_a_broken_active_profile(
     _add_unassemblable_profile(tmp_path)
 
     by_name = {name: status for name, _, status in profile_picker_options(app)}
-    assert by_name["broken-enc"] == "● активен"
+    assert by_name["broken-enc"] == "активен"
 
 
 def test_profile_picker_hint_names_the_reason_a_profile_will_not_apply(
