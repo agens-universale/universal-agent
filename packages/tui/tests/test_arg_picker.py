@@ -743,3 +743,88 @@ async def test_typed_profile_during_run_is_refused_in_footer(
         pilot.app.active_runner.running = False
         await pilot.app.screen._handle_command("profile work")
         assert switched == ["work"]
+
+
+def _keys_text(picker):
+    return [w.render() for w in picker.query(".palette-keys")][-1]
+
+
+def _warn_part(text):
+    from gc_tui import palette
+    from textual.color import Color
+
+    warn = Color.parse(palette.WARN)
+    return "".join(
+        text.plain[s.start : s.end]
+        for s in text.spans
+        if getattr(s.style, "foreground", None) is not None
+        and s.style.foreground.rgb == warn.rgb
+    )
+
+
+@pytest.mark.asyncio
+async def test_locked_enter_lights_reason_until_cursor_moves(
+    tmp_path, monkeypatch
+):
+    """Enter в запертом пикере зажигает причину цветом WARN; сдвиг курсора
+    возвращает обычный вид; высота и открытость пикера не меняются."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    app, switched = _profile_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        height = picker.desired_height
+        assert _warn_part(_keys_text(picker)) == ""
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        assert _warn_part(_keys_text(picker)) == (
+            "профиль можно сменить, когда ход закончится"
+        )
+        assert picker.desired_height == height
+        assert switched == []
+        await pilot.press("down")
+        await pilot.pause(0.1)
+        assert _warn_part(_keys_text(picker)) == ""
+
+
+@pytest.mark.asyncio
+async def test_locked_enter_light_times_out(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from gc_tui.widgets import arg_picker
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.setattr(arg_picker, "FLASH_SECONDS", 0.2)
+    app, _ = _profile_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        await pilot.press("enter")
+        await pilot.pause(0.05)
+        picker = pilot.app.query_one(ArgPicker)
+        assert _warn_part(_keys_text(picker)) != ""
+        await pilot.pause(0.4)
+        picker = pilot.app.query_one(ArgPicker)
+        assert _warn_part(_keys_text(picker)) == ""
+
+
+@pytest.mark.asyncio
+async def test_unlocked_enter_does_not_light(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    app, switched = _profile_app(tmp_path, monkeypatch)
+    app.active_runner.running = False
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        picker.flash_lock()
+        assert _warn_part(_keys_text(picker)) == ""
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(ArgPicker)) == 0
+        assert len(switched) == 1

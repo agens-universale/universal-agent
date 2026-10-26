@@ -7765,6 +7765,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Видимую недоступную строку (auto без автовыбора) Enter не берёт.
         if self._arg_picker is not None:
             if self._arg_picker.selected_disabled():
+                self._arg_picker.flash_lock()
                 return
             value = self._arg_picker.selected_value()
             self._close_arg_picker()

@@ -30,6 +30,8 @@ PICK_KEYS_HINT = "↑↓ выбрать · Tab дополнить · Enter вы�
 # Выбор закрыт (`Command.arg_lock_provider`): листать можно, причина — в
 # строке клавиш вместо обещания Enter.
 LOCKED_KEYS_HINT = "↑↓ смотреть · Esc закрыть · {reason}"
+# Сколько горит причина после Enter при закрытом выборе.
+FLASH_SECONDS = 2.0
 
 
 class PickerOption(NamedTuple):
@@ -77,6 +79,10 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         # перечитывает её через `sync_lock`.
         self._lock_provider = lock_provider
         self._lock = lock_provider() if lock_provider else None
+        # Enter при закрытом выборе: причина в строке клавиш горит WARN,
+        # пока не истёк таймер или не сдвинулся курсор.
+        self._flash = False
+        self._flash_timer = None
         self._selected = self._start_index(initial_value)
         # Динамический хинт подсвеченного пункта (спека §12.1, /profile: состав
         # слотов профиля) — строкой над статичной клавиш-подсказкой подвала.
@@ -87,6 +93,33 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         self._hint_texts: dict[Optional[str], str] = {}
         self._hint_static: Optional[Static] = None
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
+
+    def _keys_renderable(self) -> str | Text | None:
+        """Строка клавиш с рендером: причина закрытого выбора — WARN, пока
+        горит ответ на Enter; высота не меняется (текст тот же)."""
+        line = self.keys_line()
+        if line is None or not (self._flash and self._lock is not None):
+            return line
+        text = Text(line)
+        text.stylize(_pal.WARN, len(line) - len(self._lock))
+        return text
+
+    def flash_lock(self) -> None:
+        """Ответ на Enter при закрытом выборе: подсветить причину."""
+        if self._lock is None:
+            return
+        self._set_flash(True)
+        self._flash_timer = self.set_timer(
+            FLASH_SECONDS, lambda: self._set_flash(False)
+        )
+
+    def _set_flash(self, on: bool) -> None:
+        if self._flash_timer is not None:
+            self._flash_timer.stop()
+            self._flash_timer = None
+        if self._flash != on:
+            self._flash = on
+            self._rebuild()
 
     def _build_footer(self) -> Vertical:
         """Докнутый подвал (паттерн CommandPalette._build_footer): hint — ПОСЛЕДНИЙ
@@ -110,7 +143,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         if self._keys_hint is not None:
             children.append(
                 Static(
-                    self.keys_line(),
+                    self._keys_renderable(),
                     classes="palette-hint palette-keys",
                     markup=False,
                 )
@@ -229,6 +262,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
             if not rows[idx].separator:
                 break
         self._selected = idx
+        self._set_flash(False)
         self._rebuild()
 
     def _apply_size(self) -> None:
@@ -333,6 +367,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         lock = self._lock_provider()
         if lock != self._lock:
             self._lock = lock
+            self._flash = False
             self._rebuild()
 
     def selected_value(self) -> Optional[str]:
@@ -376,4 +411,5 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
     def set_filter(self, text: str) -> None:
         self._filter = text
         self._selected = self._first_enabled()
+        self._set_flash(False)
         self._rebuild()
