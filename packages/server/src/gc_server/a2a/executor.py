@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import uuid
 from collections import OrderedDict
 from datetime import timedelta
 from typing import Any
@@ -31,6 +32,7 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.tasks import TaskUpdater
 from a2a.types import a2a_pb2 as pb
 from gc_core.execution.environment import utc_now
+from gc_core.threads.errors import OperationMismatch
 from gc_core.threads.facade import Threads
 from gc_core.threads.instance import instance_id
 from gc_core.threads.models import ThreadKey, ThreadRecord
@@ -72,6 +74,9 @@ _STOPS = frozenset(
 )
 #: Ключи состояния фронтенда ``a2a`` треда диалога.
 _CWD_KEY = "cwd"
+#: Последний захват диалога (ход задачи): ``op_id`` следующего захвата —
+#: от него, так из инстансов, прочитавших один снимок, диалог берёт один.
+_CLAIM_KEY = "claim"
 #: Как часто ждущая в очереди задача проверяет диалог (и отмечается живой).
 QUEUE_POLL_SECONDS = 2.0
 #: Сколько молчит ожидание или ход умершего инстанса, прежде чем
@@ -316,13 +321,13 @@ class GcAgentExecutor(AgentExecutor):
         task_id, context_id = task.id, task.context_id
         key = dialog_key(context_id)
         state = dialog_state(await self._threads.get(key))
-        if state.get(WAITING) != task_id:
-            # Ответ уже принят (повтор с другого инстанса) или задачу
-            # отменили: этот запрос задачу не меняет.
+        if state.get(WAITING) != task_id or not await self._aclaim_dialog(
+            key, state, task_id, {WAITING: None}
+        ):
+            # Ответ уже принят (повтор с другого инстанса, в том числе
+            # одновременный) или задачу отменили: этот запрос задачу не
+            # меняет.
             return
-        await self._threads.update_frontend(
-            key, FRONTEND, {WAITING: None, RUNNING: self._claim(task_id)}
-        )
         await self._arun_claimed(
             updater, task_id, context_id, state.get(_CWD_KEY), [], answer=text
         )
@@ -414,17 +419,14 @@ class GcAgentExecutor(AgentExecutor):
                             key, FRONTEND, {QUEUE + task_id: None}
                         )
                     return False
-                if self._dialog_free(record, state) and _queue(state)[:1] == [
-                    (task_id, state[QUEUE + task_id])
-                ]:
-                    await self._threads.update_frontend(
-                        key,
-                        FRONTEND,
-                        {
-                            QUEUE + task_id: None,
-                            RUNNING: self._claim(task_id),
-                        },
+                if (
+                    self._dialog_free(record, state)
+                    and _queue(state)[:1]
+                    == [(task_id, state[QUEUE + task_id])]
+                    and await self._aclaim_dialog(
+                        key, state, task_id, {QUEUE + task_id: None}
                     )
+                ):
                     return True
                 await asyncio.sleep(QUEUE_POLL_SECONDS)
                 await self._threads.update_frontend(
@@ -438,6 +440,32 @@ class GcAgentExecutor(AgentExecutor):
     @staticmethod
     def _claim(task_id: str) -> dict[str, Any]:
         return {"task": task_id, "instance": instance_id(), "at": _now()}
+
+    async def _aclaim_dialog(
+        self,
+        key: ThreadKey,
+        state: dict[str, Any],
+        task_id: str,
+        patch: dict[str, Any],
+    ) -> bool:
+        """Занять диалог ходом задачи. Инстансы, прочитавшие тот же снимок
+        (голова очереди разошлась, два ответа на вопрос), пишут одну
+        операцию с разными захватами: хранилище примет первую, остальным —
+        ``OperationMismatch``, и они хода не начинают."""
+        try:
+            await self._threads.update_frontend(
+                key,
+                FRONTEND,
+                {
+                    **patch,
+                    RUNNING: self._claim(task_id),
+                    _CLAIM_KEY: uuid.uuid4().hex,
+                },
+                op_id=f"a2a-claim:{state.get(_CLAIM_KEY)}",
+            )
+        except OperationMismatch:
+            return False
+        return True
 
     @staticmethod
     def _dialog_free(

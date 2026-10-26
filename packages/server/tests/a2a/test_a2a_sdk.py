@@ -804,3 +804,177 @@ async def test_slow_agent_start_is_not_taken_for_dead(
     gate.set()
     done = await _until(client, task.id, pb.TASK_STATE_COMPLETED)
     assert done.status.state == pb.TASK_STATE_COMPLETED
+
+
+class _GatedThreads:
+    """Обёртка ``Threads``: ``update_frontend``, чей патч подходит под
+    ``match``, сперва ждёт ``gate`` — один раз."""
+
+    def __init__(self, threads, match, gate):
+        self._threads = threads
+        self._match = match
+        self._gate = gate
+
+    def __getattr__(self, name):
+        return getattr(self._threads, name)
+
+    async def update_frontend(self, key, name, patch, **kwargs):
+        if self._gate is not None and self._match(patch):
+            gate, self._gate = self._gate, None
+            await gate()
+        return await self._threads.update_frontend(key, name, patch, **kwargs)
+
+
+async def test_late_index_does_not_hide_the_final_snapshot(stores):
+    """Ревью, раунд 4: индекс снимка и его запись — разные обращения.
+    Отмена с другого инстанса легла между записью снимка владельца и его
+    индексом — индекс указал на нефинальный снимок, и задача навсегда
+    осталась ``INPUT_REQUIRED``, хотя её отменили."""
+    from gc_core.threads.facade import Threads
+    from gc_server.a2a.task_store import ThreadTaskStore
+
+    release, blocked = asyncio.Event(), asyncio.Event()
+
+    async def gate():
+        blocked.set()
+        await release.wait()
+
+    def index_only(patch):
+        return any(k.startswith("task:") for k in patch) and not any(
+            k.startswith("f:") for k in patch
+        )
+
+    plain = ThreadTaskStore(Threads(stores.threads))
+    working = pb.Task(
+        id="t4",
+        context_id="c4",
+        status=pb.TaskStatus(state=pb.TASK_STATE_WORKING),
+    )
+    await plain.save(working, None)
+    owner = ThreadTaskStore(
+        _GatedThreads(Threads(stores.threads), index_only, gate)
+    )
+    asked = pb.Task()
+    asked.CopyFrom(working)
+    asked.status.state = pb.TASK_STATE_INPUT_REQUIRED
+    late = asyncio.create_task(owner.save(asked, None))
+    await blocked.wait()  # снимок владельца записан, индекс — ещё нет
+    canceled = pb.Task()
+    canceled.CopyFrom(working)
+    canceled.status.state = pb.TASK_STATE_CANCELED
+    await plain.save(canceled, None)
+    release.set()
+    await late
+    stored = await plain.get("t4", None)
+    assert stored.status.state == pb.TASK_STATE_CANCELED
+
+
+def _gate_both(surfaces, match):
+    """Оба инстанса доходят до записи, подходящей под ``match``, и пишут
+    её одновременно (тот же прочитанный снимок диалога)."""
+    barrier = asyncio.Barrier(len(surfaces))
+    for surface in surfaces:
+        executor = surface.executor
+        executor._threads = _GatedThreads(
+            executor._threads, match, barrier.wait
+        )
+
+
+async def test_answer_racing_on_two_instances_runs_once(tmp_path, stores):
+    """Ревью, раунд 4: два ответа на вопрос задачи одновременно на двух
+    инстансах — оба занимали диалог и запускали ход; проигравший ставил
+    общей задаче FAILED. Теперь ход с ответом — один, итог — COMPLETED."""
+    hold = asyncio.Event()
+    asking = FakeAgent(("ask", "какой цвет?"), ("hold", hold))
+    other = FakeAgent()
+    first = _surface(tmp_path, stores, [asking])
+    second = _surface(tmp_path, stores, [other])
+    asked = await _send(_client(first), _message("покрась"))
+    assert asked.status.state == pb.TASK_STATE_INPUT_REQUIRED
+    _gate_both(
+        (first, second),
+        lambda patch: "waiting" in patch and bool(patch.get("running")),
+    )
+
+    def answer():
+        return _message("синий", task_id=asked.id, context_id=asked.context_id)
+
+    sends = [
+        asyncio.create_task(_send(_client(surface), answer()))
+        for surface in (first, second)
+    ]
+    await asyncio.sleep(0.3)
+    hold.set()
+    await asyncio.wait_for(asyncio.gather(*sends, return_exceptions=True), 10)
+    stored = await _until(_client(first), asked.id, pb.TASK_STATE_COMPLETED)
+    assert stored.status.state == pb.TASK_STATE_COMPLETED
+    assert asking.answers + other.answers == ["синий"]
+
+
+async def test_two_tasks_never_run_in_one_dialog_at_once(tmp_path, stores):
+    """Ревью, раунд 4: голова очереди разошлась у двух инстансов (запись
+    очереди с ранним временем легла после чужого чтения) — оба сочли
+    диалог своим и запустили два хода в одном треде. Теперь второй ждёт."""
+    import types
+
+    from gc_core.threads.models import SideChange
+    from gc_server.a2a.task_store import FRONTEND
+
+    hold = asyncio.Event()
+    holding = FakeAgent(("hold", hold))
+    later = FakeAgent()
+    first = _surface(tmp_path, stores, [holding])
+    second = _surface(tmp_path, stores, [later])
+    second_claiming = asyncio.Event()
+    barrier = asyncio.Barrier(2)
+
+    def queue_claim(patch):
+        return bool(patch.get("running")) and any(
+            k.startswith("q:") and v is None for k, v in patch.items()
+        )
+
+    async def gate_first():
+        await barrier.wait()
+
+    async def gate_second():
+        second_claiming.set()
+        await barrier.wait()
+
+    for surface, gate in ((first, gate_first), (second, gate_second)):
+        executor = surface.executor
+        executor._threads = _GatedThreads(executor._threads, queue_claim, gate)
+
+    async def enqueue_early(self, context_id, task_id, cwd):
+        # Время приёма раньше чужого, а запись — после чужого чтения.
+        entry = {"at": "2000-01-01T00:00:00+00:00", "instance": "gc1"}
+        self._waiting[task_id] = entry
+        await second_claiming.wait()
+        await self._threads.store.append_side(
+            dialog_key(context_id),
+            SideChange(
+                op_id=f"q_{task_id}",
+                patch_frontend=(
+                    FRONTEND,
+                    {"cwd": cwd, "q:" + task_id: {**entry, "seen": "x"}},
+                ),
+            ),
+        )
+
+    first.executor._aenqueue = types.MethodType(enqueue_early, first.executor)
+    context = "ctx-two"
+    one = asyncio.create_task(
+        _send(_client(first), _message("один", context_id=context))
+    )
+    await asyncio.sleep(0.05)
+    two = asyncio.create_task(
+        _send(_client(second), _message("два", context_id=context))
+    )
+    await asyncio.sleep(0.5)
+    overlapped = bool(holding.calls) and bool(later.calls)
+    hold.set()
+    done = await asyncio.wait_for(asyncio.gather(one, two), 10)
+    assert not overlapped
+    assert [task.status.state for task in done] == [
+        pb.TASK_STATE_COMPLETED,
+        pb.TASK_STATE_COMPLETED,
+    ]
