@@ -487,20 +487,34 @@ async def test_canceling_a_waiting_task_frees_the_dialog(tmp_path, stores):
     await _until(client, queued.id, pb.TASK_STATE_COMPLETED)
 
 
-async def test_recovery_fails_the_task_of_a_dead_instance(
-    tmp_path, stores, monkeypatch
-):
-    """Ход на инстансе, который умер (отметка хода молчит, аренды нет), —
-    задача ``FAILED`` с причиной; диалог свободен для очереди."""
+def _fast_owners(*surfaces) -> None:
+    """Реестр владельца с коротким сроком: смерть видна за доли секунды."""
     from datetime import timedelta
 
-    monkeypatch.setattr(a2a_executor, "STALE_AFTER", timedelta(0))
+    for surface in surfaces:
+        surface.executor._owners._ttl = timedelta(seconds=0.3)
+        surface.executor._owners._renew_seconds = 0.1
+
+
+async def _crash(surface) -> None:
+    """Инстанс умер: продление реестра остановилось, аренда не отпущена."""
+    keeper = surface.executor._owners._keeper
+    if keeper is not None:
+        keeper.cancel()
+    await asyncio.sleep(0.45)
+
+
+async def test_recovery_fails_the_task_of_a_dead_instance(tmp_path, stores):
+    """Ход на инстансе, который умер (аренда его реестра истекла), —
+    задача ``FAILED`` с причиной; диалог свободен для очереди."""
     dying = _surface(tmp_path, stores, [FakeAgent(("hold", asyncio.Event()))])
     survivor = _surface(tmp_path, stores, [])
+    _fast_owners(dying, survivor)
     task = await _send(
         _client(dying), _message("долго"), return_immediately=True
     )
     await _until(_client(dying), task.id, pb.TASK_STATE_WORKING)
+    await _crash(dying)
     assert await survivor.executor.arecover_once() == 1
     failed = await _client(survivor).get_task(pb.GetTaskRequest(id=task.id))
     assert failed.status.state == pb.TASK_STATE_FAILED
@@ -640,14 +654,10 @@ async def test_canceling_a_running_task_frees_the_dialog_at_once(
     await _until(client, queued.id, pb.TASK_STATE_COMPLETED)
 
 
-async def test_server_stop_leaves_the_task_to_recovery(
-    tmp_path, stores, monkeypatch
-):
-    """Остановка сервера — прерывание, не отмена: отметка хода остаётся, и
-    восстановление другого инстанса прерывает задачу (FAILED)."""
-    from datetime import timedelta
-
-    monkeypatch.setattr(a2a_executor, "STALE_AFTER", timedelta(0))
+async def test_server_stop_leaves_the_task_to_recovery(tmp_path, stores):
+    """Остановка сервера — прерывание, не отмена: отметка хода остаётся, а
+    реестр отпущен — восстановление другого инстанса прерывает задачу
+    (FAILED) сразу, не дожидаясь срока аренды."""
     dying = _surface(tmp_path, stores, [FakeAgent(("hold", asyncio.Event()))])
     task = await _send(
         _client(dying), _message("долго"), return_immediately=True
@@ -775,18 +785,14 @@ async def test_snapshot_never_rolls_back_a_final_state(stores):
     assert stored.status.state == pb.TASK_STATE_CANCELED
 
 
-async def test_slow_agent_start_is_not_taken_for_dead(
-    tmp_path, stores, monkeypatch
-):
-    """Ревью, раунд 2 (R16): агент создаётся дольше ``STALE_AFTER`` (медленный
-    MCP) — отметка хода живая (пульс), восстановление другого инстанса её
-    не прерывает, задача доходит до COMPLETED."""
-    from datetime import timedelta
-
-    monkeypatch.setattr(a2a_executor, "STALE_AFTER", timedelta(seconds=0.3))
+async def test_slow_agent_start_is_not_taken_for_dead(tmp_path, stores):
+    """Ревью, раунд 2 (R16): агент создаётся дольше срока аренды реестра
+    (медленный MCP) — реестр продлевается, восстановление другого инстанса
+    задачу не прерывает, она доходит до COMPLETED."""
     agent = FakeAgent()
     first = _surface(tmp_path, stores, [])
     second = _surface(tmp_path, stores, [])
+    _fast_owners(first, second)
     creating, gate = asyncio.Event(), asyncio.Event()
 
     async def slow_factory(settings, **_kw):
@@ -992,3 +998,277 @@ async def test_two_tasks_never_run_in_one_dialog_at_once(tmp_path, stores):
         pb.TASK_STATE_COMPLETED,
         pb.TASK_STATE_COMPLETED,
     ]
+
+
+async def _registry_entries(stores, executor) -> dict:
+    from gc_server import owners
+
+    key = executor._owners.key
+    if key is None:
+        return {}
+    record = await stores.threads.get_thread(owners.registry_key(key))
+    return owners.entries(record, "a2a")
+
+
+async def _until_gone(stores, executor, entry: str) -> None:
+    for _ in range(200):
+        if entry not in await _registry_entries(stores, executor):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"{entry} всё ещё в реестре")
+
+
+async def test_task_is_in_the_owner_registry_while_it_runs(tmp_path, stores):
+    """Находка №13: задачу «в работе» видно в реестре владельца, отметка
+    хода в диалоге называет его — восстановление читает реестры, а не все
+    диалоги."""
+    hold = asyncio.Event()
+    surface = _surface(tmp_path, stores, [FakeAgent(("hold", hold))])
+    client = _client(surface)
+    task = await _send(client, _message("долго"), return_immediately=True)
+    await _until(client, task.id, pb.TASK_STATE_WORKING)
+    entry = f"{task.context_id}|{task.id}"
+    assert entry in await _registry_entries(stores, surface.executor)
+    record = await stores.threads.get_thread(dialog_key(task.context_id))
+    running = record.frontend["a2a"]["running"]
+    assert running["owner"] == surface.executor._owners.key
+    assert "at" in running
+    hold.set()
+    await _until(client, task.id, pb.TASK_STATE_COMPLETED)
+    await _until_gone(stores, surface.executor, entry)
+
+
+async def test_waiting_for_an_answer_is_not_in_the_registry(tmp_path, stores):
+    """Задача, ждущая ответа пира, процесса не держит: в реестре её нет, и
+    восстановление её не трогает (очередь за вопросом — без срока)."""
+    surface = _surface(tmp_path, stores, [FakeAgent(("ask", "какой цвет?"))])
+    asked = await _send(_client(surface), _message("покрась"))
+    assert asked.status.state == pb.TASK_STATE_INPUT_REQUIRED
+    await _until_gone(
+        stores, surface.executor, f"{asked.context_id}|{asked.id}"
+    )
+    record = await stores.threads.get_thread(dialog_key(asked.context_id))
+    assert record.frontend["a2a"]["waiting"] == asked.id
+
+
+async def test_queued_task_is_in_the_registry_with_its_owner(tmp_path, stores):
+    hold = asyncio.Event()
+    surface = _surface(tmp_path, stores, [FakeAgent(("hold", hold))])
+    client = _client(surface)
+    first = await _send(client, _message("один"), return_immediately=True)
+    await _until(client, first.id, pb.TASK_STATE_WORKING)
+    second = await _send(
+        client,
+        _message("два", context_id=first.context_id),
+        return_immediately=True,
+    )
+    entry = f"{second.context_id}|{second.id}"
+    assert entry in await _registry_entries(stores, surface.executor)
+    record = await stores.threads.get_thread(dialog_key(first.context_id))
+    queued = record.frontend["a2a"]["q:" + second.id]
+    assert queued["owner"] == surface.executor._owners.key
+    assert "seen" not in queued
+    hold.set()
+    await _until(client, second.id, pb.TASK_STATE_COMPLETED)
+    await _until_gone(stores, surface.executor, entry)
+
+
+async def test_lost_registry_interrupts_own_turns(tmp_path, stores):
+    """Реестр потерян (продление опоздало, его взял восстановитель): свои
+    ходы снимаются как прерванные — итог запишет восстановитель."""
+    agent = FakeAgent(("hold", asyncio.Event()))
+    surface = _surface(tmp_path, stores, [agent])
+    client = _client(surface)
+    task = await _send(client, _message("долго"), return_immediately=True)
+    await _until(client, task.id, pb.TASK_STATE_WORKING)
+    await surface.executor._aon_owners_lost()
+    assert agent.stopped.is_set()
+    await asyncio.sleep(0.1)
+    after = await client.get_task(pb.GetTaskRequest(id=task.id))
+    assert after.status.state == pb.TASK_STATE_WORKING
+
+
+class _CountingStore:
+    """Хранилище, считающее чтения: восстановление не должно читать диалоги
+    живых и давно закрытых задач."""
+
+    READS = ("get_thread", "read_stream", "list_threads")
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.reads = 0
+        self.listed = 0
+
+    def __getattr__(self, name):
+        attr = getattr(self._inner, name)
+        if name not in self.READS:
+            return attr
+
+        async def counted(*args, **kwargs):
+            self.reads += 1
+            self.listed += name == "list_threads"
+            return await attr(*args, **kwargs)
+
+        return counted
+
+
+def _count_reads(surface):
+    from gc_core.threads.facade import Threads
+    from gc_server.a2a.task_store import ThreadTaskStore
+
+    counting = _CountingStore(surface.executor._threads.store)
+    threads = Threads(counting)
+    surface.executor._threads = threads
+    surface.executor._tasks = ThreadTaskStore(threads)
+    surface.executor._owners._threads = threads
+    return counting
+
+
+async def _dialogs(stores, first: int, count: int) -> None:
+    from gc_core.threads.models import SideChange
+
+    for n in range(first, first + count):
+        await stores.threads.append_side(
+            dialog_key(f"old-{n}"),
+            SideChange(op_id=f"old-{n}", patch_frontend=("a2a", {"cwd": "/"})),
+        )
+
+
+async def _dead_task(tmp_path, stores):
+    dying = _surface(tmp_path, stores, [FakeAgent(("hold", asyncio.Event()))])
+    _fast_owners(dying)
+    task = await _send(
+        _client(dying), _message("долго"), return_immediately=True
+    )
+    await _until(_client(dying), task.id, pb.TASK_STATE_WORKING)
+    await _crash(dying)
+    return dying, task
+
+
+async def test_recovery_reads_only_registries_not_dialogs(tmp_path, stores):
+    """Находка №13: проход читает каталог, реестры и диалоги задач мёртвых
+    — число чтений не растёт с историей диалогов, списка тредов нет."""
+    survivor = _surface(tmp_path, stores, [])
+    _fast_owners(survivor)
+    counting = _count_reads(survivor)
+    await _dialogs(stores, 0, 20)
+    await _dead_task(tmp_path, stores)
+    counting.reads = 0
+    assert await survivor.executor.arecover_once() == 1
+    few = counting.reads
+    await _dialogs(stores, 20, 300)
+    await _dead_task(tmp_path, stores)
+    counting.reads = 0
+    assert await survivor.executor.arecover_once() == 1
+    assert counting.reads == few
+    assert counting.listed == 0
+
+
+async def test_one_recoverer_takes_a_dead_registry(tmp_path, stores):
+    first = _surface(tmp_path, stores, [])
+    second = _surface(tmp_path, stores, [])
+    _fast_owners(first, second)
+    _dying, task = await _dead_task(tmp_path, stores)
+    taken = await asyncio.gather(
+        first.executor.arecover_once(), second.executor.arecover_once()
+    )
+    assert sum(taken) == 1
+    failed = await _client(first).get_task(pb.GetTaskRequest(id=task.id))
+    assert failed.status.state == pb.TASK_STATE_FAILED
+
+
+async def test_turn_holding_the_dialog_lease_is_not_interrupted(
+    tmp_path, stores
+):
+    """Аренда треда диалога жива (ход зомби ещё пишет) — задачу не трогают,
+    запись реестра ждёт следующего прохода; аренду отпустили — прервана."""
+    from datetime import timedelta
+
+    from gc_core.threads.models import LeaseRequest
+
+    survivor = _surface(tmp_path, stores, [])
+    _fast_owners(survivor)
+    _dying, task = await _dead_task(tmp_path, stores)
+    key = dialog_key(task.context_id)
+    held = await stores.threads.claim(
+        key, LeaseRequest(owner="zombie", ttl=timedelta(minutes=1))
+    )
+    assert await survivor.executor.arecover_once() == 0
+    await stores.threads.release(key, held.lease)
+    await asyncio.sleep(0.45)  # аренда восстановителя на реестре истекла
+    assert await survivor.executor.arecover_once() == 1
+
+
+async def test_orphan_entry_is_dropped_without_touching_the_task(
+    tmp_path, stores
+):
+    """Запись реестра без отметки в диалоге (процесс умер между снятием
+    отметки и снятием записи) снимается, итог задачи не меняется."""
+    from gc_server import owners
+    from gc_server.a2a.executor import entry_id
+
+    dying = _surface(tmp_path, stores, [FakeAgent()])
+    survivor = _surface(tmp_path, stores, [])
+    _fast_owners(dying, survivor)
+    done = await _send(_client(dying), _message("сделай"))
+    assert done.status.state == pb.TASK_STATE_COMPLETED
+    key = await dying.executor._owners.aadd(
+        entry_id(done.context_id, done.id),
+        {"ctx": done.context_id, "task": done.id},
+    )
+    await _crash(dying)
+    assert await survivor.executor.arecover_once() == 0
+    assert await stores.threads.get_thread(owners.registry_key(key)) is None
+    after = await _client(survivor).get_task(pb.GetTaskRequest(id=done.id))
+    assert after.status.state == pb.TASK_STATE_COMPLETED
+
+
+async def test_zombie_late_result_does_not_override_failed(tmp_path, stores):
+    hold = asyncio.Event()
+    dying = _surface(tmp_path, stores, [FakeAgent(("hold", hold))])
+    survivor = _surface(tmp_path, stores, [])
+    _fast_owners(dying, survivor)
+    task = await _send(
+        _client(dying), _message("долго"), return_immediately=True
+    )
+    await _until(_client(dying), task.id, pb.TASK_STATE_WORKING)
+    await _crash(dying)
+    assert await survivor.executor.arecover_once() == 1
+    hold.set()
+    await asyncio.sleep(0.3)
+    after = await _client(survivor).get_task(pb.GetTaskRequest(id=task.id))
+    assert after.status.state == pb.TASK_STATE_FAILED
+
+
+async def test_waiting_mark_without_the_question_event_is_recovered(
+    tmp_path, stores
+):
+    """Процесс умер между отметкой ожидания и событием пиру: задача так и
+    не стала ``INPUT_REQUIRED`` — она ``FAILED``, диалог свободен."""
+    from gc_server.a2a.task_store import FRONTEND, RUNNING, WAITING
+
+    dying = _surface(tmp_path, stores, [FakeAgent(("hold", asyncio.Event()))])
+    survivor = _surface(tmp_path, stores, [])
+    _fast_owners(dying, survivor)
+    task = await _send(
+        _client(dying), _message("долго"), return_immediately=True
+    )
+    await _until(_client(dying), task.id, pb.TASK_STATE_WORKING)
+    key = dialog_key(task.context_id)
+    from gc_core.threads.facade import Threads
+
+    await Threads(stores.threads).update_frontend(
+        key, FRONTEND, {RUNNING: None, WAITING: task.id}
+    )
+    await _crash(dying)
+    assert await survivor.executor.arecover_once() == 1
+    record = await stores.threads.get_thread(key)
+    assert record.frontend["a2a"].get(WAITING) is None
+    failed = await _client(survivor).get_task(pb.GetTaskRequest(id=task.id))
+    assert failed.status.state == pb.TASK_STATE_FAILED
+
+
+def test_recovery_runs_every_five_minutes():
+    from gc_server.a2a import surface
+
+    assert surface.RECOVERY_INTERVAL_SECONDS == 300.0
