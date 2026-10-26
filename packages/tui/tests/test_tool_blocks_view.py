@@ -11,14 +11,18 @@ import pytest
 from gc_core.agent_edits.journal import EditRecord
 from gc_core.constants.tool_display import DisplayCategory as C
 from gc_testkit.paths import TUI_PKG
-from gc_testkit.trace_grid import assert_trace_grid, trace_rows
+from gc_testkit.trace_grid import (
+    assert_trace_grid,
+    record_frames,
+    trace_rows,
+)
 from rich.style import Style
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 
 from gc_tui import palette
 from gc_tui.messages import BlockToggle
-from gc_tui.models import TraceEvent
+from gc_tui.models import CommandOutput, TraceEvent
 from gc_tui.services.diff_render import diff_line_count
 from gc_tui.services.tool_blocks import BlockEdit, CallTimers, ToolBlocks
 from gc_tui.widgets import tool_call_row
@@ -711,3 +715,107 @@ async def test_call_timer_is_core_time_and_turn_end_keeps_it():
         end_turn(app.views, app.timers, outcome, settled=False)
         await pilot.pause()
         assert row._render_content().plain.endswith("· 13с")
+
+
+# --- тогл — один кадр -------------------------------------------------------
+
+_LONG = "packages/tui/src/gc_tui/widgets/very/long/directory/module_{}"
+
+
+async def _one_frame(pilot, frames, level: str, key: str) -> list[str]:
+    """Тогл ``key`` уровня ``level`` ложится одним кадром: после него —
+    ровно один новый, без промежуточного."""
+    await pilot.pause()
+    del frames[:-1]
+    pilot.app.post_message(BlockToggle(level, key))
+    for _ in range(4):
+        await pilot.pause()
+    assert len(frames) == 2, frames[1:]
+    return frames[-1]
+
+
+def _long_reads(view, n: int) -> None:
+    for i in range(n):
+        key = f"r{i}"
+        row = _row(key, target=_LONG.format(i) + ".py", depth=view.depth)
+        view.add_call(row, C.READ, waiting=False)
+        view.started(row)
+        view.result(row, _ev(key, "12 строк"), None)
+
+
+@pytest.mark.asyncio
+async def test_explored_window_toggle_one_frame(monkeypatch):
+    """Строка, скрытая окном с монтирования, ни разу не раскладывалась:
+    объект сокращается по ширине ленты заранее — раскрытие окна не рисует
+    несокращённый (перенесённый) объект кадром раньше."""
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 30)) as pilot:
+        _long_reads(app.view(), 4)
+        opened = await _one_frame(pilot, frames, "", "block:0:top")
+        assert_trace_grid(trace_rows(app), origin=ORIGIN)
+        # Четыре члена — по строке: объект сокращён, хвост на месте.
+        members = [line for line in opened if "Read  packages/" in line]
+        assert len(members) == 4
+        assert members[0].startswith("   └ Read  packages/")
+        assert all(line.endswith("… · 12 строк") for line in members)
+        await _one_frame(pilot, frames, "", "block:0:bottom")
+
+
+@pytest.mark.asyncio
+async def test_files_window_and_file_phrase_toggle_one_frame(monkeypatch):
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 40)) as pilot:
+        view = app.view()
+        for i in range(5):
+            _apply_edit(view, _LONG.format(i), 2)
+        await _one_frame(pilot, frames, "", "block:0:top")
+        assert_trace_grid(trace_rows(app), origin=ORIGIN)
+        await _one_frame(pilot, frames, "", "block:0:bottom")
+        _apply_edit(view, "long", 8)
+        await _one_frame(pilot, frames, "", "long:more")
+        await _one_frame(pilot, frames, "", "long:more")
+
+
+@pytest.mark.asyncio
+async def test_agent_window_toggle_one_frame(monkeypatch, steady_blink):
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 40)) as pilot:
+        top = app.view()
+        agent = _row("a1", label="Agent", target="проверка")
+        top.add_call(agent, C.AGENT, waiting=False)
+        trace = app.query_one("#trace", VerticalScroll)
+        model = ToolBlocks(app.timers, diff_preview=3, agent_window=True)
+        nested = ToolBlocksView(_Host(trace), model, level="a1", depth=1)
+        nested.set_owner(agent)
+        app.views["a1"] = nested
+        for i in range(4):
+            row = _row(f"n{i}", label="Run", target=_LONG.format(i), depth=1)
+            nested.add_call(row, C.RUN, waiting=False)
+            nested.started(row)
+            nested.result(row, _ev(f"n{i}"), None)
+        await _one_frame(pilot, frames, "a1", "agent:top")
+        await _one_frame(pilot, frames, "a1", "agent:bottom")
+
+
+@pytest.mark.asyncio
+async def test_ran_output_toggle_one_frame(monkeypatch):
+    """Вывод `Ran` раскрывается на месте, без перемонтирования строк."""
+    from gc_tui.services.block_edits import RanResult
+
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 40)) as pilot:
+        view = app.view()
+        row = _row("x1", label="Run", target="make")
+        view.add_call(row, C.RUN, waiting=False)
+        view.started(row)
+        out = tuple(f"out {i}" for i in range(9))
+        output = CommandOutput(out, 0, 0, False, False, out[-3:], 6)
+        view.result(row, _ev("x1"), None, ran=RanResult(output))
+        opened = await _one_frame(pilot, frames, "", "block:0:output")
+        assert "   └ out 0" in opened
+        closed = await _one_frame(pilot, frames, "", "block:0:output")
+        assert "   └ … ещё 6 строк" in closed

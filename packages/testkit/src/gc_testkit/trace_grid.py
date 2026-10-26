@@ -71,6 +71,33 @@ def trace_rows(
     return rows
 
 
+def record_frames(monkeypatch: Any, selector: str = "#trace") -> list:
+    """Кадры ленты, которые экран отдаёт на вывод: после каждого прохода
+    композитора — текст строк области ``selector``; кадр, равный прошлому,
+    не пишется. Перемена, легшая одним кадром, добавляет ровно один —
+    промежуточное состояние (перекладка в несколько шагов) видно лишним."""
+    from textual.css.query import NoMatches
+    from textual.screen import Screen
+
+    frames: list[list[str]] = []
+    refresh = Screen._compositor_refresh
+
+    def spy(screen: Any) -> None:
+        refresh(screen)
+        if screen is not screen.app.screen:
+            return
+        try:
+            rows = trace_rows(screen.app, selector)
+        except NoMatches:
+            return
+        frame = [row.plain.rstrip() for row in rows]
+        if not frames or frames[-1] != frame:
+            frames.append(frame)
+
+    monkeypatch.setattr(Screen, "_compositor_refresh", spy)
+    return frames
+
+
 def _rows_of(screen: Any, types: tuple[type, ...]) -> set[int]:
     if not types:
         return set()
@@ -287,4 +314,4 @@ class _Grid:
         self._prev = ("member", col)
 
 
-__all__ = ["assert_trace_grid", "trace_rows"]
+__all__ = ["assert_trace_grid", "record_frames", "trace_rows"]

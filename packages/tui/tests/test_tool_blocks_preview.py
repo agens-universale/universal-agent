@@ -29,7 +29,11 @@ from gc_core.thread_store import (
     append_turn_outcome_record,
     edits_journal_path,
 )
-from gc_testkit.trace_grid import assert_trace_grid, trace_rows
+from gc_testkit.trace_grid import (
+    assert_trace_grid,
+    record_frames,
+    trace_rows,
+)
 from gc_testkit.tui_support import tui_settings
 from rich.style import Style
 
@@ -593,6 +597,45 @@ async def test_preview_collapse_brings_header_into_view(tmp_path):
         await pilot.pause()
         top = trace.scroll_offset.y
         assert top <= header.virtual_region.y < top + trace.size.height
+
+
+def _long_read(i):
+    name = "fs_read_file"
+    path = f"packages/tui/src/gc_tui/widgets/very/long/directory/m{i}.py"
+    output = json.dumps({"tool": name, "ok": True, "lines": 10 + i})
+    return [_call(f"r{i}", name, {"path": path}), _out(f"r{i}", name, output)]
+
+
+async def _toggle_frames(pilot, screen, frames, key) -> None:
+    """Тогл ``key`` экрана ``screen`` — ровно один новый кадр."""
+    from gc_tui.messages import BlockToggle
+
+    await pilot.pause()
+    del frames[:-1]
+    screen.post_message(BlockToggle("", key))
+    for _ in range(4):
+        await pilot.pause()
+    assert len(frames) == 2, frames[1:]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["reopen", "preview"])
+async def test_window_toggle_one_frame(tmp_path, monkeypatch, where):
+    """Раскрытие и свёртка окна — одним кадром и в ленте, открытой
+    заново, и в превью: строки, скрытые окном с монтирования, сокращены
+    по ширине ленты заранее (у низа ленты и с прокруткой — §9.3)."""
+    frames = record_frames(monkeypatch)
+    thread = _Thread(tmp_path, status="stopped")
+    thread.add(*[p for i in range(4) for p in _long_read(i)])
+    thread.add(_say("a1", "Готово."))
+    async with _app(tmp_path).run_test(size=(70, 24)) as pilot:
+        if where == "preview":
+            screen = await _open_preview(pilot)
+        else:
+            screen = pilot.app.screen
+            screen.attach_active_task(TID, is_resume=True)
+        await _toggle_frames(pilot, screen, frames, "block:0:top")
+        await _toggle_frames(pilot, screen, frames, "block:0:bottom")
 
 
 @pytest.mark.asyncio

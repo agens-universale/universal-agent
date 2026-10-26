@@ -47,6 +47,7 @@ from __future__ import annotations
 import time
 from typing import Callable, Literal, Optional
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -721,7 +722,29 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return word, _SUB_INK
 
     def _content_width(self) -> int:
-        return self._content_static.size.width if self._content_static else 0
+        """Ширина content-колонки; ещё не раскладывалась — та, что даст
+        раскладка (`_row_width` без префикса и ❐)."""
+        static = self._content_static
+        if static is not None and static.size.width > 0:
+            return static.size.width
+        width = self._row_width() - self._render_prefix().cell_len
+        if width > 0 and self.has_class("edited"):
+            # ❐: `width: auto` и поле справа в одну клетку.
+            width -= cell_len(copy_glyph()) + 1
+        return max(0, width)
+
+    def _row_width(self) -> int:
+        """Ширина строки. Строка, скрытая блоком с монтирования (вне окна),
+        ещё не раскладывалась — её ширина та же, что у ленты (строка в ней
+        во всю ширину): объект сокращается заранее, и первый показ
+        (раскрытие окна) — один кадр, без несокращённого объекта до
+        `Resize`."""
+        if self.size.width > 0:
+            return self.size.width
+        parent = self.parent
+        if isinstance(parent, Widget):
+            return parent.scrollable_content_region.width
+        return 0
 
     def _tail_room(self, label_cols: int, sep: int = 2) -> Optional[int]:
         """Сколько клеток хвосту, когда объект сжат до своего минимума
@@ -805,7 +828,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         if self._agent_task:
             # Тело `└` — на 4 правее глифа; ширина — от самой строки: её
             # Resize приходит раньше раскладки колонок.
-            cols = self.size.width - len(level_prefix(self._level)) - 4
+            cols = self._row_width() - len(level_prefix(self._level)) - 4
             task = fit_lines(self._agent_task, cols, AGENT_TASK_LINES)
             bodies.insert(0, Text(task, style=_DIM))
         return bodies
