@@ -4,6 +4,8 @@
 версии `PATCHED_TEXTUAL`: на иной патч не ставится, протяжка ниже ленты
 не работает, в журнал уходит предупреждение, страж
 `test_textual_compat.py` падает с напоминанием пересмотреть модуль.
+Исключение — `mounted` и `paint_after_mount`: только публичный API, к
+версии не привязаны.
 
 Ошибка Textual 8.2.8 (апстрим #6639): `SelectStart.pointer_start_offset`
 прибавляет сдвиг прокрутки контейнера вместо вычитания — при прокрутке во
@@ -122,7 +124,6 @@ def paint_after_mount(widget: Widget) -> None:
     if widget.is_mounted or not isinstance(parent, Widget):
         return
     batch = widget.app.batch_update()
-    batch.__enter__()
 
     async def release() -> None:
         try:
@@ -134,7 +135,10 @@ def paint_after_mount(widget: Widget) -> None:
         finally:
             batch.__exit__(None, None, None)
 
+    # Сначала путь отпускания, потом удержание: задача стартует не раньше
+    # следующего такта, а не заведённая задача экран не держит.
     task = asyncio.get_running_loop().create_task(release())
+    batch.__enter__()
     _PAINT_HOLDS.add(task)
     task.add_done_callback(_PAINT_HOLDS.discard)
 
