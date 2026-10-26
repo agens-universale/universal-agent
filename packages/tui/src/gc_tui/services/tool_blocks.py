@@ -220,8 +220,6 @@ class BlockEdit:
     #: Логических строк диффа с контекстом; 0 — диффа нет (бинарь,
     #: удаление).
     diff_lines: int
-    #: Из них изменённых (`+` и `-`): из них свёрнутое превью (§6.3).
-    changed_lines: int
     size_bytes: Optional[int]
     has_record: bool
     #: Что кладёт в буфер ❐ строки файла; пусто — кнопки нет.
@@ -250,10 +248,6 @@ def _edit_tail(edit: Optional[BlockEdit]) -> Parts:
 
 def _lines(edit: Optional[BlockEdit]) -> int:
     return edit.diff_lines if edit is not None and edit.has_diff else 0
-
-
-def _changed(edit: Optional[BlockEdit]) -> int:
-    return edit.changed_lines if edit is not None and edit.has_diff else 0
 
 
 # --- решения -------------------------------------------------------------
@@ -401,7 +395,7 @@ class SetEditTail:
 
 @dataclass(frozen=True)
 class SetDiffShare:
-    """Дифф файла: ``rows`` изменённых строк превью (`None` — раскрыт,
+    """Дифф файла: ``rows`` строк превью (`None` — раскрыт,
     целиком с контекстом) в колонке ``column``. Смонтировать при первом
     решении."""
 
@@ -552,28 +546,27 @@ class _RanParts:
 
 @dataclass(frozen=True)
 class _File:
-    """Файл блока для окна и счёта скрытого: строк диффа с контекстом и
-    изменённых из них; у компактного тело не показано — скрыты все
-    строки."""
+    """Файл блока для окна и счёта скрытого: строк диффа с контекстом; у
+    компактного тело не показано — скрыты все строки."""
 
     key: str
     lines: int
-    changed: int
     compact: bool = False
 
     def hidden(self, rows: int) -> int:
-        """Строк, которые добавит раскрытие: превью — первые ``rows``
-        изменённых, раскрытый — весь дифф с контекстом (§6.3)."""
+        """Строк, которые добавит раскрытие. Превью — ``rows`` строк файла
+        (сначала изменённые, потом ближайший контекст; отбирает
+        `diff_render`), показано `min(lines, rows)` (§6.3)."""
         if self.compact:
             return self.lines
-        return self.lines - min(self.changed, rows)
+        return self.lines - min(self.lines, rows)
 
     def body(self, rows: Optional[int]) -> bool:
         """Есть ли под файлом тело сейчас: раскрытый — весь дифф, свёрнутый
-        — превью изменённых строк; у компактного превью нет."""
+        — превью; у компактного превью нет."""
         if rows is None:
             return self.lines > 0
-        return not self.compact and min(self.changed, rows) > 0
+        return not self.compact and min(self.lines, rows) > 0
 
 
 @dataclass(frozen=True)
@@ -607,7 +600,7 @@ def _accepts(group: Optional[_Block], member: _Member) -> bool:
 class ToolBlocks:
     """Модель блоков одного уровня ленты: верхнего или субагента.
 
-    ``diff_preview`` — изменённых строк свёрнутого превью диффа на файл
+    ``diff_preview`` — строк свёрнутого превью диффа на файл
     (`agent_edits.trace_inline_max_lines`). ``agent_window`` — уровень
     субагента: окно последних `WINDOW` событий (блок — одно событие), над
     ним `└ … ещё N`; строка видна, если видна и в своём блоке, и в окне
@@ -1055,7 +1048,6 @@ class ToolBlocks:
             _File(
                 key,
                 _lines(edit),
-                _changed(edit),
                 edit is not None and edit.compact,
             )
             for key, edit in edits
@@ -1078,8 +1070,8 @@ class ToolBlocks:
 
     def _layout(self, block: _Block) -> _Layout:
         """Окно из последних `WINDOW` файлов (раскрыто — все) и раскрытие
-        каждого файла (§6.3): превью — первые изменённые строки, раскрытый
-        — весь дифф с контекстом."""
+        каждого файла (§6.3): превью — бюджет строк файла, раскрытый —
+        весь дифф с контекстом."""
         files = self._files(block)
         rows = {f.key: self._rows(f) for f in files}
         hidden = {f.key: f.hidden(self._preview) for f in files}

@@ -303,15 +303,16 @@ async def test_body_right_under_tool_row(tmp_path):
     async with _screen(tmp_path, tid) as scr:
         lines = _screen_lines(scr)
         tool = next(i for i, s in enumerate(lines) if "Edited src/app.py" in s)
-        # Свёрнутое превью — только изменённые строки: первой идёт `-`.
-        body = next(i for i, s in enumerate(lines) if "return 1" in s)
+        # Дифф с контекстом влезает в превью — целиком: первой идёт
+        # строка контекста.
+        body = next(i for i, s in enumerate(lines) if "def f()" in s)
         next_tool = next(i for i, s in enumerate(lines) if "Ran  " in s)
 
         assert body == tool + 1
         diff = scr.query_one(DiffBlock)
         row = scr.query_one(ToolCallRow)
         assert diff.region.x - row.region.x == 2
-        assert lines[body][diff.region.x : diff.region.x + 3] == "  2"
+        assert lines[body][diff.region.x : diff.region.x + 3] == "  1"
         assert lines[next_tool - 1] == ""
 
 
@@ -346,7 +347,8 @@ async def test_row_fill_reaches_the_block_edge(tmp_path, width):
         await pilot.pause(0.3)
         block = pilot.app.screen.query_one(DiffBlock)
         rows = block.query_one(".block-body", Static).visual.plain.split("\n")
-        assert len(rows[0]) == len(rows[1]) == block.size.width
+        # Залиты строки правки (`-` и `+`), контекст идёт без заливки.
+        assert len(rows[1]) == len(rows[2]) == block.size.width
 
 
 @pytest.mark.asyncio

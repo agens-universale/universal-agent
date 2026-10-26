@@ -499,21 +499,32 @@ async def test_ran_gap_only_after_diff_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ran_file_preview_is_changed_lines_only(tmp_path):
-    """Файл под `Ran` — правило превью то же (решение 2026-10-23): в
-    свёрнутом виде только изменённые строки, фраза считает и контекст,
-    раскрытие показывает дифф целиком."""
+async def test_ran_file_preview_budget_changes_then_context(tmp_path):
+    """Файл под `Ran` — правило превью то же (решение 2026-10-26): 6
+    изменённых и 6 контекста при бюджете 10 — изменённые и 4 ближайших
+    строки контекста, фраза — 2 скрытые; раскрытие — дифф целиком."""
     thread = _Thread(tmp_path)
-    hunks = "@@ -1,7 +1,7 @@\n a\n b\n c\n-old\n+new\n e\n f\n g\n"
+    hunks = (
+        "@@ -1,9 +1,9 @@\n a\n b\n c\n-o1\n-o2\n-o3\n+n1\n+n2\n+n3\n"
+        " e\n f\n g\n"
+    )
     _journal(tmp_path, _shell_record("a.py", hunks=hunks))
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         await _open(pilot)
         await _tail(pilot, thread, _run("x1", "make"), _out("x1", ""))
         lines = _rows(pilot)
         assert lines[3:] == [
-            "      4 -old",
-            "      4 +new",
-            "    + ещё 6 строк",
+            "      2  b",
+            "      3  c",
+            "      4 -o1",
+            "      5 -o2",
+            "      6 -o3",
+            "      4 +n1",
+            "      5 +n2",
+            "      6 +n3",
+            "      7  e",
+            "      8  f",
+            "    + ещё 2 строки",
         ]
         await _toggle(pilot)
         assert "      1  a" in _rows(pilot)

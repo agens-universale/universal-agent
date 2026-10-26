@@ -19,7 +19,7 @@ from textual.containers import VerticalScroll
 from gc_tui import palette
 from gc_tui.messages import BlockToggle
 from gc_tui.models import TraceEvent
-from gc_tui.services.diff_render import diff_changed_count, diff_line_count
+from gc_tui.services.diff_render import diff_line_count
 from gc_tui.services.tool_blocks import BlockEdit, CallTimers, ToolBlocks
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.diff_block import DiffBlock
@@ -236,7 +236,6 @@ def _edit_of(record: EditRecord) -> BlockEdit:
         add=record.add,
         rem=record.del_,
         diff_lines=diff_line_count(record.hunks),
-        changed_lines=diff_changed_count(record.hunks),
         size_bytes=None,
         has_record=True,
         copy_text="diff",
@@ -254,11 +253,12 @@ def _apply_edit(view, key: str, lines: int, *, context: bool = False):
 
 
 @pytest.mark.asyncio
-async def test_group_preview_changed_lines_then_full_diff():
-    """Блок `Edited 2 файла`: свёрнуто — у каждого файла первые 3
-    изменённые строки без контекста и своя фраза под диффом, она считает
-    и контекст; файл раскрывается сам, заголовок — весь блок. Сетка
-    колонок — во всех видах."""
+async def test_group_preview_budget_then_full_diff():
+    """Блок `Edited 2 файла`, бюджет 3 строки на файл: у `a` (1 изменённая
+    и 3 контекста) — изменённая и два ближайших контекста; у `b` (5
+    изменённых) — первые 3 без контекста. Под каждым диффом своя фраза —
+    скрытые строки файла; файл раскрывается сам, заголовок — весь блок.
+    Сетка колонок — во всех видах."""
     app = _App()
     async with app.run_test(size=(80, 40)) as pilot:
         view = app.view()
@@ -268,14 +268,14 @@ async def test_group_preview_changed_lines_then_full_diff():
         rows = trace_rows(app)
         assert_trace_grid(rows, origin=ORIGIN)
         lines = [line for line in _plain(rows) if line]
-        assert not any("ctx" in line for line in lines)
+        assert sum("ctx" in line for line in lines) == 1
         assert sum("+line" in line for line in lines) == 4
-        # a: 3 строки контекста; b: 3 контекста и 2 изменённые сверх 3 —
-        # каждая фраза под диффом своего файла.
+        # a: скрыт дальний контекст; b: 3 контекста и 2 изменённые сверх 3
+        # — каждая фраза под диффом своего файла.
         phrases = [i for i, line in enumerate(lines) if "+ ещё" in line]
         b_row = next(i for i, line in enumerate(lines) if "b.py" in line)
         assert [lines[i] for i in phrases] == [
-            "     + ещё 3 строки",
+            "     + ещё 1 строка",
             "     + ещё 5 строк",
         ]
         assert phrases[0] < b_row < phrases[1] == len(lines) - 1

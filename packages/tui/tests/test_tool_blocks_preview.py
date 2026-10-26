@@ -174,8 +174,9 @@ def _hunks(n: int) -> str:
 
 def _journal(tmp_path) -> None:
     journal = EditsJournal(edits_journal_path(str(tmp_path), "cli", TID))
-    for i in range(3):
-        journal.append(_record(f"e{i}", f"e{i}.py", n=5 + i))
+    # e2 не влезает в превью (11 строк при 10): частичный контекст.
+    for i, n in enumerate((5, 6, 9)):
+        journal.append(_record(f"e{i}", f"e{i}.py", n=n))
     # Дельта шелла перечисляет файлы не по пути: порядок — билдера.
     for path, n in (("gen.py", 4), ("a_gen.py", 1)):
         journal.append(
@@ -433,19 +434,22 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert preview == reopen
     assert live_heads == reopen_heads == preview_heads
     texts = [text for text, _ in preview]
-    assert any("Edited 3 файла (+18 −0)" in t for t in texts)
+    assert any("Edited 3 файла (+20 −0)" in t for t in texts)
     added = [t.split()[1] for t in texts if t.startswith("     Added ")]
     assert added == ["a_gen.py", "gen.py"]
     assert any("Agent  Worker" in t for t in texts)
-    # Свёрнутые диффы — только изменённые строки, контекста нет.
-    assert not any(t.endswith(" ctx") for t in texts)
-    # Фраза — под тем, что раскрывает: под диффом каждого файла (две
-    # строки контекста скрыты) — три правки и два файла команды, строкой
-    # выше — строка диффа; у многострочной команды — под её выводом.
+    # Влезающие диффы — целиком, с контекстом, без фразы; e2 (9
+    # изменённых и 2 контекста при 10) — изменённые и верхний контекст,
+    # фраза под его диффом — оставшаяся строка. У многострочной команды
+    # фраза — под её выводом.
+    assert sum(t.endswith(" ctx") for t in texts) == 9
+    file_phrase = [
+        i for i, t in enumerate(texts) if t == "     + ещё 1 строка"
+    ]
+    assert len(file_phrase) == 1
+    assert texts[file_phrase[0] - 1].split()[1:] == ["+v8"]
     phrases = [i for i, t in enumerate(texts) if t == "     + ещё 2 строки"]
-    assert len(phrases) == 6
-    assert all(texts[i - 1].split()[1][0] == "+" for i in phrases[:5])
-    assert texts[phrases[5] - 1] == "   └ 1"
+    assert [texts[i - 1] for i in phrases] == ["   └ 1"]
     ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
     assert texts[ran + 1 : ran + 4] == [
         "   └ код выхода 1",

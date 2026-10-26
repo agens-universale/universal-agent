@@ -33,10 +33,11 @@ get_selection()->None) — иначе в буфер попадала бы его
   нём номера строк, маркеры и хвостовые пробелы фоновой заливки.
 
 Под блоком ленты (`in_block=True`, спека P4 §5, §6.3, §6.4) дифф подчиняется
-блоку: своего хвоста нет, раскрытие задаёт блок (`set_expanded`), число
-изменённых строк превью — модель (`set_collapsed_max_lines`), колонку — класс
+блоку: своего хвоста нет, раскрытие задаёт блок (`set_expanded`), бюджет
+строк превью — модель (`set_collapsed_max_lines`), колонку — класс
 `diff-single` / `diff-member` (`set_column`); всё без перемонтирования.
-Свёрнутый — только первые изменённые строки, без контекста; раскрытый — дифф
+Свёрнутый — влезает целиком — весь дифф, иначе сначала изменённые строки,
+потом ближайший контекст (`render_hunks(preview=True)`); раскрытый — дифф
 журнала целиком. Строки не режутся по рядам: на узком окне превью выше.
 """
 
@@ -236,7 +237,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
                 wrap=True,
                 min_gutter=_BLOCK_GUTTER if self._in_block else 1,
                 logical=self._in_block,
-                changed_only=self._in_block and not expanded,
+                preview=self._in_block and not expanded,
             )
             self._cache[key] = cached
         return cached

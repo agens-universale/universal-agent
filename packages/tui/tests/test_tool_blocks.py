@@ -771,11 +771,8 @@ def _edits_model(preview: int = 3):
     return ToolBlocks(timers, diff_preview=preview), _Fold()
 
 
-def _edit(
-    key, *, verb="Edited", add=1, rem=0, lines=10, changed=None, size=None
-):
-    """Правка: ``lines`` строк диффа с контекстом, из них ``changed``
-    изменённых (`None` — все)."""
+def _edit(key, *, verb="Edited", add=1, rem=0, lines=10, size=None):
+    """Правка: ``lines`` строк диффа с контекстом."""
     return BlockEdit(
         key=key,
         path=f"{key}.py",
@@ -783,7 +780,6 @@ def _edit(
         add=add,
         rem=rem,
         diff_lines=lines,
-        changed_lines=lines if changed is None else changed,
         size_bytes=size,
         has_record=True,
     )
@@ -934,29 +930,33 @@ def test_single_edit_fits_no_phrase():
     assert model.toggle("a") == []
 
 
-def test_one_changed_line_phrase_counts_context():
-    """Одна изменённая строка — два ряда (− и +); фраза — строки, которые
-    добавит раскрытие, контекст в их числе (решение 2026-10-23)."""
-    model, fold = _edits_model()
-    _apply(model, fold, "a", _edit("a", lines=8, changed=2))
-    assert fold.share("a") == SetDiffShare("a", 3, "single")
-    assert fold.phrase("a", "more") == "+ ещё 6 строк"
+def test_one_line_edit_fits_budget_without_phrase():
+    """Правка одной строки с контекстом (8 строк) при бюджете 10 — дифф
+    целиком, фразы нет, раскрывать нечего (решение 2026-10-26)."""
+    model, fold = _edits_model(preview=10)
+    _apply(model, fold, "a", _edit("a", lines=8))
+    assert fold.share("a") == SetDiffShare("a", 10, "single")
+    assert ("SetPhrase", "a", "more") not in fold.state
+    assert model.toggle("a") == []
+
+
+def test_phrase_counts_rows_over_budget():
+    """6 изменённых и 6 контекста при бюджете 10: показано 10 строк,
+    фраза — оставшиеся 2 (решение 2026-10-26)."""
+    model, fold = _edits_model(preview=10)
+    _apply(model, fold, "a", _edit("a", lines=12))
+    assert fold.phrase("a", "more") == "+ ещё 2 строки"
     fold(model.toggle("a"))
     assert fold.share("a") == SetDiffShare("a", None, "single")
+    assert fold.phrase("a", "more") == "− свернуть"
 
 
-def test_five_changed_lines_show_three():
-    model, fold = _edits_model()
-    _apply(model, fold, "a", _edit("a", lines=11, changed=5))
-    assert fold.phrase("a", "more") == "+ ещё 8 строк"
-
-
-def test_preview_setting_is_changed_lines_per_file():
-    """`trace_inline_max_lines` — изменённых строк на файл, и в блоке
-    тоже: доли нет."""
+def test_preview_setting_is_rows_per_file():
+    """`trace_inline_max_lines` — строк превью на файл, и в блоке тоже:
+    доли нет."""
     model, fold = _edits_model(preview=5)
     for key in "abc":
-        _apply(model, fold, key, _edit(key, lines=12, changed=6))
+        _apply(model, fold, key, _edit(key, lines=12))
     assert [fold.share(k).rows for k in "abc"] == [5, 5, 5]
     assert [fold.phrase(k, "more") for k in "abc"] == ["+ ещё 7 строк"] * 3
 
@@ -988,7 +988,7 @@ def test_single_to_block_transition():
 def test_three_files_each_full_preview():
     model, fold = _edits_model()
     for key in "abc":
-        _apply(model, fold, key, _edit(key, lines=7, changed=3))
+        _apply(model, fold, key, _edit(key, lines=7))
     assert [fold.share(k).rows for k in "abc"] == [3, 3, 3]
     assert [fold.mode(k).gap for k in "abc"] == [False, True, True]
     assert [fold.mode(k).lead for k in "abc"] == [True, False, False]
@@ -1189,7 +1189,6 @@ def _files(*specs):
             add=lines,
             rem=0,
             diff_lines=lines,
-            changed_lines=lines,
             size_bytes=None,
             has_record=True,
         )
@@ -1198,20 +1197,18 @@ def _files(*specs):
 
 
 def test_ran_files_phrase_counts_context():
-    """Файл под `Ran` — то же правило: превью из изменённых строк, фраза
-    считает и контекст."""
-    from dataclasses import replace
-
+    """Файл под `Ran` — то же правило: бюджет строк файла, фраза — строки
+    сверх него."""
     model, fold = _edits_model()
     _ran(model, fold)
-    files = [replace(f, changed_lines=2) for f in _files(("Edited", 8))]
+    files = _files(("Edited", 8))
     fold(
         model.ran_parts(
             "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
         )
     )
     assert fold.share("x:f0") == SetDiffShare("x:f0", 3, "member")
-    assert fold.phrase("x:f0", "more") == "+ ещё 6 строк"
+    assert fold.phrase("x:f0", "more") == "+ ещё 5 строк"
     assert ("SetPhrase", "block:0", "bottom") not in fold.state
 
 
@@ -1538,7 +1535,6 @@ def test_ran_preview_ignores_binary_and_deleted():
             add=0,
             rem=0,
             diff_lines=0,
-            changed_lines=0,
             size_bytes=12,
             has_record=True,
         ),
@@ -1549,7 +1545,6 @@ def test_ran_preview_ignores_binary_and_deleted():
             add=0,
             rem=0,
             diff_lines=0,
-            changed_lines=0,
             size_bytes=None,
             has_record=True,
         ),

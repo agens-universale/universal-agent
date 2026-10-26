@@ -334,13 +334,14 @@ async def test_nested_block_keeps_nested_indent_and_tie(tmp_path):
             for strip in scr.app.screen._compositor.render_strips()
         ]
         row = next(i for i, s in enumerate(lines) if "Edited a.py" in s)
-        # Свёрнутое превью — только изменённые строки: первой идёт `-`.
-        body = next(i for i, s in enumerate(lines) if "return 1" in s)
+        # Дифф с контекстом влезает в превью — целиком: первой идёт
+        # строка контекста.
+        body = next(i for i, s in enumerate(lines) if "def f()" in s)
         assert body == row + 1
         nested = scr.query_one("#trace").query(ToolCallRow)[1]
         assert block.region.x - nested.region.x == 4
         x = block.region.x
-        assert lines[body][x : x + 3] == "  2"
+        assert lines[body][x : x + 3] == "  1"
 
 
 @pytest.mark.asyncio
