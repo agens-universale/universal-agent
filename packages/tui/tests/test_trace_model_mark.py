@@ -201,6 +201,34 @@ async def test_idle_consecutive_changes_collapse_into_one_mark(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_idle_three_changes_leave_one_rule(tmp_path):
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _activate(app, tmp_path)
+        for choice in ("max", "qwen-coder", "light"):
+            scr._cmd_model(choice)
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        await _assert_rule(pilot, mark, "● glm-flash")
+
+
+@pytest.mark.asyncio
+async def test_idle_return_to_previous_model_leaves_no_rule(tmp_path):
+    """max → qwen-coder → max между ходами: модель до первой черты была
+    max, смены нет — черты нет."""
+    app = _app(tmp_path, choice="max")
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _activate(app, tmp_path)
+        scr._cmd_model("qwen-coder")
+        await pilot.pause()
+        scr._cmd_model("max")
+        await pilot.pause()
+        assert _marks(scr) == []
+
+
+@pytest.mark.asyncio
 async def test_idle_changes_with_event_between_keep_both(tmp_path):
     app = _app(tmp_path)
     async with app.run_test() as pilot:
@@ -352,6 +380,23 @@ async def test_running_consecutive_applied_marks_collapse(tmp_path):
         await _assert_rule(pilot, mark, "● qwen-coder")
         kids = list(_trace(scr).children)
         assert isinstance(kids[kids.index(mark) - 1], ToolCallRow)
+
+
+@pytest.mark.asyncio
+async def test_running_return_to_previous_model_leaves_no_rule(tmp_path):
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        runner = _busy(app, tmp_path)
+        _call(scr, "c1", 1)
+        scr._cmd_model("max")
+        await pilot.pause()
+        await _apply(pilot, scr, app, "max", "giga-max")
+        runner.applied = "max"
+        scr._cmd_model("default")
+        await pilot.pause()
+        await _apply(pilot, scr, app, "default", "glm-4.6")
+        assert _marks(scr) == []
 
 
 @pytest.mark.asyncio

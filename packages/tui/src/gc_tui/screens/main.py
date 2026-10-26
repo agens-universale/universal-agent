@@ -479,18 +479,23 @@ def _append_sign(
 
 
 def _with_pending_row(
-    row1: Text, anchor: int, pending: Text, *, with_name: bool
+    row1: Text,
+    anchor: int,
+    pending: Text,
+    *,
+    with_name: bool,
+    name_cols: int | None,
 ) -> Text:
     """Строка 1 и под ней знак выбора, ждущего ближайшего шага (раунд 3
     смока): его точки кончаются в колонке `anchor`, где кончаются точки
-    модели хода, имя — в колонке её имени. Обе строки одной ширины:
-    колонка выровнена вправо, и выравнивание держат отступы."""
-    dots, name = model_sign.parts(pending)
-    row2 = dots.copy()
-    if with_name:
-        row2.append(" ")
-        row2.append_text(name)
-    lead = anchor - dots.cell_len
+    модели хода, имя — в колонке её имени (ужатое, как имя модели хода,
+    до `name_cols`). Обе строки одной ширины: колонка выровнена вправо, и
+    выравнивание держат отступы."""
+    row2 = Text()
+    dots_end = _append_sign(
+        row2, pending, with_name=with_name, name_cols=name_cols
+    )
+    lead = anchor - dots_end
     first = Text.assemble(" " * max(-lead, 0), row1)
     second = Text.assemble(" " * max(lead, 0), row2)
     width = max(first.cell_len, second.cell_len)
@@ -1287,6 +1292,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 anchor,
                 snapshot.pending,
                 with_name=with_model_name,
+                name_cols=model_cols,
             )
 
         def width_of(result: Text) -> int:
@@ -5187,7 +5193,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         elif self._last_model_choice() == event.choice:
             return  # уже применена на месте окном старта рана
         else:
-            self._mount_applied_mark(event.choice)
+            self._mount_applied_mark(event.choice, None)
         self._refresh_footer()
 
     def _last_model_choice(self) -> str | None:
@@ -5209,19 +5215,28 @@ class TraceScreen(TraceFollowMixin, Screen):
             trace.move_child(mark, before=tail[0])
         self._drop_mark_before(mark)
 
-    def _mount_applied_mark(self, choice: str) -> None:
-        mark = self._new_model_mark(choice, pending=False)
+    def _mount_applied_mark(self, choice: str, before: str | None) -> None:
+        mark = self._new_model_mark(choice, pending=False, before=before)
         self._trace_mount(mark)
         self._drop_mark_before(mark)
 
     def _drop_mark_before(self, mark: ModelMark) -> None:
         """Отметки подряд не копятся (раунд 3 смока): черта сразу за другой,
-        без событий между ними, заменяет её — и между ходами, и в ходе."""
+        без событий между ними, заменяет её — и между ходами, и в ходе.
+        Вернулись к модели, что была до заменённой черты (`before`), —
+        смены не было: уходит и новая черта.
+
+        Соседство — по `children` ленты: скрытый виджет между чертами
+        тоже событие, схлопывание он запирает."""
         kids = list(self.query_one(_SEL_TRACE, VerticalScroll).children)
         at = kids.index(mark)
         previous = kids[at - 1] if at > 0 else None
-        if isinstance(previous, ModelMark) and not previous.pending:
-            previous.remove()
+        if not isinstance(previous, ModelMark) or previous.pending:
+            return
+        previous.remove()
+        mark.before = previous.before
+        if mark.before == mark.choice:
+            mark.remove()
 
     def _settle_pending_mark(self) -> None:
         """Ран кончился, строка итога стоит, поток стопа вышел, а тихая
@@ -5270,12 +5285,15 @@ class TraceScreen(TraceFollowMixin, Screen):
             None,
         )
 
-    def _new_model_mark(self, choice: str, *, pending: bool) -> ModelMark:
+    def _new_model_mark(
+        self, choice: str, *, pending: bool, before: str | None
+    ) -> ModelMark:
         return ModelMark(
             choice,
             self._footer_slots(),
             alias=self._choice_alias(choice),
             pending=pending,
+            before=before,
         )
 
     def _mark_model_choice(self, choice: str) -> None:
@@ -5290,7 +5308,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             if choice == previous:
                 self._hint_already_working(choice)
             else:
-                self._mount_applied_mark(choice)
+                self._mount_applied_mark(choice, previous)
             return
         applied_fn = getattr(self.app.active_runner, "applied_choice", None)
         applied = applied_fn() if callable(applied_fn) else None
@@ -5303,7 +5321,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         elif mark is not None:
             mark.set_choice(choice, self._choice_alias(choice))
         else:
-            self._trace_mount(self._new_model_mark(choice, pending=True))
+            self._trace_mount(
+                self._new_model_mark(choice, pending=True, before=applied)
+            )
 
     def _hint_already_working(self, choice: str) -> None:
         name = self._choice_alias(choice) or choice

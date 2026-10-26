@@ -287,6 +287,47 @@ async def test_no_pending_when_idle(tmp_path):
         assert plain.startswith("● giga-max") and "\n" not in plain
 
 
+@pytest.mark.asyncio
+async def test_narrow_footer_squeezes_pending_name_like_current(
+    tmp_path, monkeypatch
+):
+    """Узко: имя выбора во второй строке ужимается по середине тем же
+    потолком, что имя модели хода, — колонки имён совпадают."""
+    current, chosen = (
+        "provider/long-model-alpha-1",
+        "provider/long-model-beta-222",
+    )
+    registry = {
+        "models": {current: {}, chosen: {}},
+        "slots": {"default": current, "max": chosen},
+    }
+    app = _app(tmp_path, "default", registry)
+    _run(
+        app,
+        _runner(
+            app,
+            level="default",
+            mode="manual",
+            applied="default",
+            registry=registry,
+        ),
+    )
+    async with app.run_test(size=(160, 24)):
+        scr = app.screen
+        monkeypatch.setattr(scr, "_context_meter", lambda: None)
+        avail = len(current) + 2
+        monkeypatch.setattr(
+            scr, "_footer_right_available_width", lambda: avail
+        )
+        app.apply_model_choice("max")
+        row1, row2 = _rows(scr)
+        assert "…" in row2 and row2.lstrip().startswith("● provider/")
+        assert len(row2) <= avail
+        col = row2.index("provider/")
+        assert row1.index("provider/") == col
+        app.active_runner = None
+
+
 def test_no_applied_fade_ramp_in_palette():
     assert not hasattr(palette, "MODEL_APPLIED_SHADES")
     assert "MODEL_APPLIED_SHADES" not in palette._RAMP_PEAKS

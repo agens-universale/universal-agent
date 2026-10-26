@@ -28,7 +28,10 @@ _AUTO = "auto"
 
 
 class ModelMark(ConsequenceTraceRow):
-    """Строка смены модели; `pending` — выбор ещё ждёт ближайшего шага."""
+    """Строка смены модели; `pending` — выбор ещё ждёт ближайшего шага.
+
+    `before` — выбор, действовавший до этой смены (None — неизвестен): по
+    нему схлопывание отметок подряд узнаёт возврат к прежней модели."""
 
     def __init__(
         self,
@@ -37,7 +40,9 @@ class ModelMark(ConsequenceTraceRow):
         *,
         alias: str | None = None,
         pending: bool,
+        before: str | None = None,
     ) -> None:
+        self.before = before
         self._choice = choice
         self._alias = alias
         self._slots = slots
