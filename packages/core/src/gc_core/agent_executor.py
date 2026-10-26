@@ -578,6 +578,12 @@ class AgentExecutor:
         # он реально отправит сообщение.
         self._plan_rework_thread: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
+        #: Ответ последнего законченного цикла и признак, что цикл дошёл до
+        #: конца. Отмена, легшая в уборку после цикла (остановка сервера),
+        #: выходит из ``arun`` исключением, хотя ход уже записан: вызывающий
+        #: берёт его итог отсюда.
+        self.last_response: Any = None
+        self.loop_finished = False
         #: Вопрос, на котором приостановлен последний ход (``{call_id,
         #: question}``), или ``None``.
         self.last_pending_question: Optional[dict] = None
@@ -1770,6 +1776,7 @@ class AgentExecutor:
                 ),
             )
             loop_finished = True
+            self.last_response, self.loop_finished = response, True
             self.last_terminal_outcome = getattr(
                 state, "terminal_outcome", None
             )

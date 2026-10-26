@@ -905,3 +905,48 @@ async def test_accepted_task_has_a_status_on_every_instance(
     assert seen["status"] == "queued"
     assert seen["pending_messages"] == 1
     assert cancelled == {"status": "cancelling"}
+
+
+async def test_server_stop_after_a_finished_turn_keeps_its_result(
+    monkeypatch, tmp_path
+):
+    """Остановка сервера легла в хвост законченного хода (ход в треде уже
+    закрыт, прогон ещё не вернулся): итог хода — в статус задачи. Раньше
+    статус оставался running со stopped_by, а восстановление тред не
+    видело (ход не идёт, входящие пусты) — задача висела навсегда."""
+    from gc_core import agent_executor
+
+    _install(monkeypatch)
+    in_tail, release_calls = asyncio.Event(), []
+    real_release = agent_executor._arelease_lease
+
+    async def hold_first_release(thread_session, logger):
+        release_calls.append(1)
+        if len(release_calls) == 1:
+            in_tail.set()
+            await asyncio.Event().wait()  # снимет только остановка сервера
+        await real_release(thread_session, logger)
+
+    monkeypatch.setattr(agent_executor, "_arelease_lease", hold_first_release)
+    stores = await aopen_process_stores(_settings(tmp_path))
+    surface = await _surface(tmp_path, stores)
+    events: list = []
+    surface.notify = lambda key, status: events.append(status["status"])
+    try:
+        await surface.asubmit(
+            KEY,
+            {"id": "u1", "role": "user", "content": "задача"},
+            op_id=None,
+            trace_id=None,
+        )
+        await asyncio.wait_for(in_tail.wait(), 10)
+        record = await stores.threads.get_thread(KEY)
+        assert record.runtime.turn is None  # ход в треде уже закрыт
+        await surface.astop()
+        record = await stores.threads.get_thread(KEY)
+    finally:
+        await stores.aclose()
+    status = task_status.status_of(record)
+    assert status["status"] == "completed"
+    assert json.loads(status["result"])["task_report"] == "готово"
+    assert events == ["completed"]

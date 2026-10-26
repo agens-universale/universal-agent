@@ -614,10 +614,16 @@ class WebhookSurface:
         if current is None or current.get("run_id") != run.notes["run_id"]:
             return
         if run.ending == "interrupted":
-            # Остановка сервера: задачу продолжит восстановление, а эта
-            # попытка — не сбой хода (деплои не исчерпают попытки).
-            await task_status.aset_status(threads, key, stopped_by="shutdown")
-            return
+            if not _turn_done(run, record):
+                # Остановка сервера: задачу продолжит восстановление, а эта
+                # попытка — не сбой хода (деплои не исчерпают попытки).
+                await task_status.aset_status(
+                    threads, key, stopped_by="shutdown"
+                )
+                return
+            # Остановка легла в уборку законченного хода: ход в треде
+            # закрыт, продолжать восстановлению нечего — итог есть.
+            run.ending, run.result = "completed", run.executor.last_response
         final = _final_fields(run)
         final["recovery_attempts"] = 0
         if final["status"] in ("failed", "cancelled") and record is not None:
@@ -643,6 +649,16 @@ class WebhookSurface:
             self.callbacks.send(
                 url, make_event(status["status"], key, jsonable(status))
             )
+
+
+def _turn_done(run: ActiveRun, record: ThreadRecord | None) -> bool:
+    """Цикл прогона дошёл до конца, и ход в треде закрыт: остановка сервера
+    сняла только уборку после хода."""
+    return (
+        getattr(run.executor, "loop_finished", False)
+        and record is not None
+        and record.runtime.turn != "running"
+    )
 
 
 def _final_fields(run: ActiveRun) -> Dict[str, Any]:
