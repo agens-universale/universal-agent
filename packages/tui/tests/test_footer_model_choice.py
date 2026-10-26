@@ -1,6 +1,7 @@
 """Футер и выбор модели (спека model-knob §6.5): знак модели, ожидающий
 выбор `  ✧ ` и применённый `✦`, который по событию один раз гаснет."""
 
+from itertools import pairwise
 from types import SimpleNamespace
 
 import pytest
@@ -195,7 +196,7 @@ def test_applied_shades_single_monotonic_fade():
     assert shades[0] == BRIGHT.lower()
     assert shades[-1] == palette.BG.lower()
     lum = [sum(int(c[i : i + 2], 16) for i in (1, 3, 5)) for c in shades]
-    assert all(x > y for x, y in zip(lum, lum[1:]))
+    assert all(x > y for x, y in pairwise(lum))
     try:
         palette.apply_background((0x21, 0x27, 0x33))
         rebased = palette.MODEL_APPLIED_SHADES
