@@ -629,11 +629,36 @@ def test_timers_registry_clear():
     assert timers.get("a") is None
 
 
-def test_paused_resumed_no_block_change():
+def test_paused_member_stops_header_breathing():
+    """Член ждёт человека — глиф заголовка статичный (`wait`), прочее в
+    блоке не меняется; продолжение — снова `run`."""
     model, fold, _ = _model()
-    _reads(model, fold, 1, done=False)
-    assert model.paused("c0") == []
-    assert model.resumed("c0") == []
+    _reads(model, fold, 1)
+    _reads(model, fold, 1, start=1, done=False)
+    assert model.paused("c1") == [
+        SetHeader("block:0", "Exploring", "wait", ())
+    ]
+    assert model.resumed("c1") == [
+        SetHeader("block:0", "Exploring", "run", ())
+    ]
+
+
+def test_paused_member_refused_settles_header():
+    """Отказ во время ожидания — заголовок по исходу, не `wait`."""
+    model, fold, _ = _model()
+    _reads(model, fold, 1)
+    _reads(model, fold, 1, start=1, done=False)
+    fold(model.paused("c1"))
+    fold(model.result("c1", "refused", reason="запрет", executed=False))
+    assert fold.header().glyph == "ok"
+
+
+def test_paused_single_row_no_block_change():
+    model, fold, _ = _model()
+    fold(model.member_added("r", C.RUN, waiting=False))
+    fold(model.started("r"))
+    assert model.paused("r") == []
+    assert model.resumed("r") == []
 
 
 @pytest.mark.parametrize("cat", [C.FETCH])

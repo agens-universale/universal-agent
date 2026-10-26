@@ -222,3 +222,51 @@ def test_waited_is_fixed_after_end_wait():
     mono.now += 6
 
     assert clock.waited() == 4
+
+
+# ---- время вызова для живого счёта фронтенда -----------------------------
+
+
+def test_call_elapsed_counts_from_call_start():
+    clock, mono = _clock()
+    mono.now += 3
+    clock.begin_call("c1")
+    mono.now += 12.5
+    assert clock.call_elapsed("c1") == 12.5
+
+
+def test_call_elapsed_after_record_is_recorded_rounded():
+    """Законченный вызов — то же время, что войдёт в запись итога хода."""
+    clock, mono = _clock()
+    clock.begin_call("c1")
+    mono.now += 13.04
+    clock.record_call("c1", 13.04)
+    mono.now += 5
+    assert clock.call_elapsed("c1") == clock.calls()["c1"] == 13.0
+
+
+def test_call_elapsed_stands_during_human_wait():
+    clock, mono = _clock()
+    clock.begin_call("c1")
+    mono.now += 2
+    clock.begin_wait()
+    mono.now += 30
+    assert clock.call_elapsed("c1") == 2
+    clock.end_wait()
+    mono.now += 1
+    assert clock.call_elapsed("c1") == 3
+
+
+def test_wait_before_call_start_is_not_subtracted():
+    clock, mono = _clock()
+    clock.begin_wait()
+    mono.now += 30
+    clock.end_wait()
+    assert clock.begin_call("c1") == 30
+    mono.now += 4
+    assert clock.call_elapsed("c1") == 4
+
+
+def test_call_elapsed_of_unknown_call_is_none():
+    clock, _ = _clock()
+    assert clock.call_elapsed("c1") is None

@@ -44,13 +44,66 @@ async def test_human_wait_pauses_nested_rows(tmp_path):
         scr._active_calls["r"] = root
         scr._apply_human_wait(True)
         assert nested._pulse_timer is None
-        assert "‖" in nested._prefix_static.content.plain
+        assert "●" in nested._prefix_static.content.plain
+        assert "‖" not in nested._prefix_static.content.plain
         assert root._pulse_timer is None
 
         scr._apply_human_wait(False)
         assert nested._pulse_timer is not None
         assert "●" in nested._prefix_static.content.plain
         assert root._pulse_timer is not None
+
+
+@pytest.mark.asyncio
+async def test_confirm_tail_only_on_asking_nested_row(tmp_path):
+    """Спросил вложенный вызов: хвост `· ждёт разрешения` — у него, строка
+    `Agent` — только статичный `●`."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        root = await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
+        scr._active_calls["r"] = root
+        scr.show_confirm_banner("Действие", "Разрешить?", call_id="n")
+        scr._apply_human_wait(True)
+        assert "ждёт разрешения" in nested._render_content().plain
+        assert "ждёт разрешения" not in root._render_content().plain
+        assert root._pulse_timer is None
+
+        scr._hide_confirm_banner()
+        scr._apply_human_wait(False)
+        assert "ждёт разрешения" not in nested._render_content().plain
+        assert nested._pulse_timer is not None
+
+
+@pytest.mark.asyncio
+async def test_confirm_tail_on_asking_top_row(tmp_path):
+    """Спросила строка верхнего уровня — хвост у неё."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        root = await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
+        scr._active_calls["r"] = root
+        scr.show_confirm_banner("Действие", "Разрешить?", call_id="r")
+        scr._apply_human_wait(True)
+        assert "ждёт разрешения" in root._render_content().plain
+        assert "ждёт разрешения" not in nested._render_content().plain
+
+
+@pytest.mark.asyncio
+async def test_ask_human_wait_has_no_tail(tmp_path):
+    """ask_human: все живые строки — статичный `●`, хвоста нет нигде."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        root = await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
+        scr._active_calls["r"] = root
+        scr._apply_human_wait(True)
+        for row in (root, nested):
+            assert row._pulse_timer is None
+            assert "ждёт разрешения" not in row._render_content().plain
 
 
 @pytest.mark.asyncio

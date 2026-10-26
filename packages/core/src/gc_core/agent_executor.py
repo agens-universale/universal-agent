@@ -1755,6 +1755,13 @@ class AgentExecutor:
             return None
         return clock.effective_start()
 
+    def turn_call_elapsed(self, call_id: str) -> float | None:
+        """Время вызова текущего хода по его часам (идущего — живое,
+        законченного — как в записи итога) — для таймера строки фронтенда.
+        Часов нет или вызов им не известен — ``None``."""
+        clock = current_turn_clock(self._ctx)
+        return clock.call_elapsed(call_id) if clock is not None else None
+
     async def acompact_thread(
         self, thread_id: str, system: str | None = None
     ) -> bool:

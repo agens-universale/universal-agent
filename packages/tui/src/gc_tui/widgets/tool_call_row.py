@@ -65,7 +65,7 @@ from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import SUB_INK as _SUB_INK
-from gc_tui.services.duration_format import format_duration
+from gc_tui.services.duration_format import format_timer
 from gc_tui.services.tool_blocks import (
     COMMAND_PREVIEW_LINES,
     Parts,
@@ -95,14 +95,12 @@ from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.static_content import update_if_changed
 
-# Running-строка на человеко-ожидании (confirm / ask_human): статичный глиф
-# паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
-# эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
-_PAUSE_GLYPH = "‖"
+# Running-строка на человеко-ожидании (confirm / ask_human): `●` в базовом
+# амбере не дышит, elapsed заморожен. Строка, спросившая разрешения, вместо
+# таймера несёт этот хвост цветом живого таймера.
+_ASKING_TAIL = " · ждёт разрешения"
 # Пустая клетка справа у полной строки: хвост не прижат к полосе прокрутки.
 _RIGHT_GUTTER = 1
-#: Застывший таймер — с этой длительности; быстрее — без таймера.
-_FROZEN_TIMER_MIN_S = 1.0
 # Между подписью и объектом; слово с тем же разделителем (`Running` /
 # `Ran`) — подпись команды.
 _CAPTION_SEP = "  "
@@ -143,6 +141,8 @@ _HEADER_GLYPH: dict[str, tuple[str, str]] = {
     "ok": (CALL_GLYPH, _OK),
     "error": (CALL_GLYPH, _ERR),
     "halted": (CALL_UNDONE_GLYPH, _DIM),
+    # Член блока ждёт человека: идущий глиф без дыхания.
+    "wait": (CALL_GLYPH, _RUN),
 }
 
 RowMode = Literal["single", "header", "member"]
@@ -287,6 +287,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         # Пауза тикера на время человеко-ожидания (confirm / ask_human).
         self._paused_at: Optional[float] = None
         self._paused_total: float = 0.0
+        # Пауза — вопрос разрешения этого вызова: хвост вместо таймера.
+        self._asking = False
         # Конец исполнения — для застывших часов строки (`set_elapsed`).
         self._ended_at: Optional[float] = None
         # Режим блока P4 и то, что задаёт модель блоков.
@@ -305,6 +307,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._output: Optional[tuple[Text, Text]] = None
         self._parts_expanded = False
         self._detail: Optional[Callable[[], Optional[str]]] = None
+        # Часы хода ядра: время вызова по `call_id` или None (не знают).
+        self._clock: Optional[Callable[[str], Optional[float]]] = None
         #: `(уровень, ключ)` строки в модели блоков — для пробела.
         self.block_key: Optional[tuple[str, str]] = None
 
@@ -373,6 +377,13 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def set_detail_source(self, source: Callable[[], Optional[str]]) -> None:
         self._detail = source
+
+    def set_clock_source(
+        self, source: Callable[[str], Optional[float]]
+    ) -> None:
+        """Время вызова по часам хода ядра — таймеру строки вместо её
+        собственных часов, пока ядро вызов знает."""
+        self._clock = source
 
     def set_mode(
         self,
@@ -550,14 +561,20 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             return
         self._update()
 
-    def pause(self) -> None:
-        """Заморозить elapsed на человеко-ожидании. Waiting/done — no-op."""
-        if self._paused_at is None and self._is_live:
-            self._paused_at = time.monotonic()
-            self._update()
+    def pause(self, *, asking: bool = False) -> None:
+        """Заморозить elapsed на человеко-ожидании; ``asking`` — ждут
+        разрешения на этот вызов. Waiting/done — no-op."""
+        if self._is_live:
+            changed = self._paused_at is None or self._asking != asking
+            if self._paused_at is None:
+                self._paused_at = time.monotonic()
+            self._asking = asking
+            if changed:
+                self._update()
         self._sync_pulse()
 
     def resume(self) -> None:
+        self._asking = False
         if self._paused_at is not None:
             self._paused_total += time.monotonic() - self._paused_at
             self._paused_at = None
@@ -565,6 +582,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._sync_pulse()
 
     def _elapsed_s(self, until: Optional[float] = None) -> int:
+        """Секунды вызова: по часам ядра — то же время, что потом принесёт
+        запись итога хода; без них — часы строки (видят вызов позже его
+        старта: с первой записи о нём в треде)."""
+        core = self._clock(self.call_id) if self._clock is not None else None
+        if core is not None:
+            return int(core)
         now = self._paused_at or until or time.monotonic()
         return int(now - self._start_monotonic - self._paused_total)
 
@@ -581,7 +604,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             if self._waiting:
                 return CALL_WAITING_GLYPH, _DIM
             if self._paused_at is not None:
-                return _PAUSE_GLYPH, _RUN
+                return CALL_GLYPH, _RUN
             # Мигает исчезая: в паузе — пустая клетка той же ширины.
             on = blink_on(self._pulse_frame)
             return (CALL_GLYPH if on else " "), _RUN
@@ -729,10 +752,10 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         быстрее секунды — без таймера."""
         if self._frozen is None or self._is_live or self._waiting:
             return
-        if self._frozen < _FROZEN_TIMER_MIN_S:
-            return
-        text.append(" · ", style=_DIM)
-        text.append(format_duration(self._frozen), style=_DIM)
+        timer = format_timer(self._frozen)
+        if timer is not None:
+            text.append(" · ", style=_DIM)
+            text.append(timer, style=_DIM)
 
     @property
     def _ends_with_line(self) -> bool:
@@ -773,14 +796,17 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             return
         if self._waiting:
             return
-        elapsed = format_duration(self._elapsed_s())
+        if self._asking and self._paused_at is not None:
+            text.append(_ASKING_TAIL, style=_RUN)
+            return
+        timer = format_timer(self._elapsed_s())
+        timer_cols = len(" · ") + len(timer) if timer else 0
         if self._live_status:
-            note = _fit_note(
-                f" · {self._live_status}", room, len(" · ") + len(elapsed)
-            )
+            note = _fit_note(f" · {self._live_status}", room, timer_cols)
             text.append(note, style=_DIM)
-        text.append(" · ", style=_DIM)
-        text.append(elapsed, style=_RUN)
+        if timer is not None:
+            text.append(" · ", style=_DIM)
+            text.append(timer, style=_RUN)
 
     def on_click(self, event: events.Click) -> None:
         """Клик по ❐ копирует дифф правки и строку не выделяет.

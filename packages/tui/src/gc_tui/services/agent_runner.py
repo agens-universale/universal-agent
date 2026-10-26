@@ -353,6 +353,13 @@ class AgentRunner:
             return None
         return probe()
 
+    def call_elapsed(self, call_id: str) -> Optional[float]:
+        """Время вызова по часам хода ядра — для таймера строки ленты:
+        идущего — живое, законченного — как в записи итога хода.
+        Исполнителя или вызова на часах нет — None."""
+        probe = getattr(self._executor, "turn_call_elapsed", None)
+        return probe(call_id) if probe is not None else None
+
     def produced_output(self) -> bool:
         """Текущий прогон уже что-то выдал или сделал (решает ядро:
         ``State.produced_output``) — отправку не откатить. Иная работа
@@ -880,6 +887,7 @@ class AgentRunner:
             fields: list,
             via: str | None = None,
             decision_key: str | None = None,
+            call_id: str | None = None,
         ) -> str:
             self._confirm_event.clear()
             self._confirm_choice = "deny_once"
@@ -895,6 +903,7 @@ class AgentRunner:
                     fields,
                     via=via,
                     decision_key=decision_key,
+                    call_id=call_id,
                 )
             except Exception:
                 return "deny_once"

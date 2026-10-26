@@ -652,6 +652,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         # confirm banner state (T2)
         self._confirm_banner = None  # type: Optional["ConfirmBanner"]
         self._confirm_active: bool = False
+        # Чей вызов ждёт разрешения в баннере (хвост его строки ленты).
+        self._confirm_call_id: Optional[str] = None
         self._plan_banner = None  # type: Optional["PlanApprovalBanner"]
         # Выбрано «Обсудить и доработать план»: следующее сообщение человека —
         # замечания к плану, о чём в ленте остаётся строка.
@@ -3806,6 +3808,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 mcp_servers=mcp_servers,
                 agent=ev.agent,
             )
+            row.set_clock_source(self._core_call_elapsed)
             self._active_calls[row.call_id] = row
             # Durable anchor for nested (reopen / after parent result pop).
             if (ev.tool_name or "").startswith("subagent_") and row.call_id:
@@ -4152,6 +4155,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             mcp_tools=mcp_tools,
             mcp_servers=mcp_servers,
         )
+        row.set_clock_source(self._core_call_elapsed)
         if tool_call_id:
             self._nested_tool_rows[tool_call_id] = row
         category, _ = tool_caption(
@@ -4609,6 +4613,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         fields: list | None = None,
         via: str | None = None,
         decision_key: str | None = None,
+        call_id: str | None = None,
     ) -> None:
         """Смонтировать ConfirmBanner и переключить в режим одиночной клавиши.
 
@@ -4616,7 +4621,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         Скрывает #input-row, убирает фокус с TextArea — «y»/«n» доходят до
         Screen.on_key и не поглощаются TextArea. fields — структурированные
         детали решения (Tool/Path/Command/Reason/Risk) из confirm-порта.
-        via — метка субагента для child HITL (опционально)."""
+        via — метка субагента для child HITL (опционально); call_id —
+        спросивший вызов: его строка ленты ждёт разрешения."""
         from gc_tui.widgets.confirm_banner import ConfirmBanner
 
         if self._confirm_active:
@@ -4631,6 +4637,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._confirm_banner = banner
         self._confirm_active = True
+        self._confirm_call_id = call_id or None
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
         self._mount_sticky_banner(banner, inp_row)
         inp_row.add_class("hidden")
@@ -4649,6 +4656,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _hide_confirm_banner(self) -> None:
         """Снять ConfirmBanner и восстановить поле ввода."""
         self._confirm_active = False
+        self._confirm_call_id = None
         self._return_focus_to_input()
         if self._confirm_banner is not None:
             try:
@@ -5776,9 +5784,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         """
         view = self._top_blocks()
         for row in self._active_calls.values():
-            view.paused(row) if human_wait else view.resumed(row)
-            row.refresh_running_elapsed()
-        self._pause_nested_rows(human_wait)
+            self._apply_row_wait(view, row, human_wait)
+        for nested_view, row in self._nested_rows():
+            self._apply_row_wait(nested_view, row, human_wait)
+
+    def _apply_row_wait(self, view, row, human_wait: bool) -> None:
+        """Пауза или продолжение строки через исполнитель её уровня; хвост
+        ожидания — только у вызова, спросившего разрешения."""
+        if human_wait:
+            asking = self._confirm_active and (
+                row.call_id == self._confirm_call_id
+            )
+            view.paused(row, asking=asking)
+        else:
+            view.resumed(row)
+        row.refresh_running_elapsed()
 
     def _nested_rows(self):
         """Вложенные строки вызовов с исполнителем своего уровня."""
@@ -5787,12 +5807,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             view = self._block_views.get(level) if level else None
             if view is not None:
                 yield view, row
-
-    def _pause_nested_rows(self, human_wait: bool) -> None:
-        """Вложенные строки субагента — через модель своего уровня."""
-        for view, row in self._nested_rows():
-            view.paused(row) if human_wait else view.resumed(row)
-            row.refresh_running_elapsed()
 
     def _interrupt_nested_rows(self) -> None:
         """Инвариант «прервано» для вложенных строк субагента — через
@@ -6270,6 +6284,14 @@ class TraceScreen(TraceFollowMixin, Screen):
         ):
             return
         self._thinking.set_started_at(probe())
+
+    def _core_call_elapsed(self, call_id: str) -> Optional[float]:
+        """Время вызова по часам хода ядра — таймеру строки ленты: живой и
+        застывший счёт сходятся с записью итога хода. Раннера или вызова
+        на часах нет — None."""
+        runner = getattr(self.app, "active_runner", None)
+        probe = getattr(runner, "call_elapsed", None)
+        return probe(call_id) if probe is not None else None
 
     def _poll_trace_tail(self) -> None:
         """Дочитать и отрисовать хвост записей активного треда."""

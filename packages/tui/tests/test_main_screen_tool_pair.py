@@ -73,9 +73,9 @@ async def test_call_then_output_mutates_in_place(tmp_path):
         (header,) = [r for r in rows if r.mode == "header"]
         (row,) = [r for r in rows if r.call_id == "c1"]
         assert len(rows) == 2
-        # running: content несёт подпись + объект + elapsed
+        # running: подпись + объект; elapsed — с целой секунды
         content = str(row.query_one(".trace-content").render())
-        assert content.startswith("Read  src/x.py · ")
+        assert content.startswith("Read  src/x.py")
         assert "●" in str(header.query_one(".trace-prefix").render())
 
         # 2) добавляем output, ждём polling (>= 1s)

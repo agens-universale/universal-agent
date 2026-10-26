@@ -882,6 +882,42 @@ async def test_nested_call_lands_in_parent_clock(run, monkeypatch):
     assert parent.calls() == {"nested": 4.0}
 
 
+async def test_running_call_counts_on_turn_clock(run, monkeypatch):
+    """Идущий вызов — на часах хода с его старта (живой счёт фронтенда);
+    законченный — то же время, что в карте записи итога."""
+    monkeypatch.setattr(pr, "time", SimpleNamespace(monotonic=run.mono))
+    clock = TurnClock.start(mono=run.mono, wall=turn_clock.utc_now)
+    turn_clock.bind_turn_clock(run.ctx, clock)
+    seen = []
+
+    async def _invoke(name, arguments, state, ctx, run_agent_func, call_id):
+        run.mono.now += 12.6
+        seen.append(clock.call_elapsed("live"))
+        run.mono.now += 0.44
+        return '{"ok": true}', False
+
+    monkeypatch.setattr(pr, "_ainvoke_tool", _invoke)
+    state = State(
+        verbose=False,
+        model="mid",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=10,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
+    await pr.aprocess_tool_calls(
+        messages=[_read("live")],
+        state=state,
+        ctx=run.ctx,
+        run_agent_func=None,
+    )
+
+    assert seen == [pytest.approx(12.6)]
+    assert clock.call_elapsed("live") == clock.calls()["live"] == 13.0
+
+
 async def test_ask_human_is_not_a_timed_call(run):
     def _answer(_question):
         run.mono.now += 30.0

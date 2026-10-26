@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 
 def _duration_parts(seconds: float) -> tuple[tuple[int, str], ...]:
     """(число, единица) длительности: до двух старших разрядов."""
@@ -26,6 +28,18 @@ def format_duration(seconds: float) -> str:
     Отрицательное трактуется как 0; дробные секунды усекаются к int.
     """
     return " ".join(f"{n}{unit}" for n, unit in _duration_parts(seconds))
+
+
+#: Таймер вызова и хода — живой и застывший — с целой секунды.
+TIMER_MIN_S = 1.0
+
+
+def format_timer(seconds: float) -> Optional[str]:
+    """Таймер для ленты: длительность от `TIMER_MIN_S`; быстрее — `None`,
+    таймера нет (ни «0с» у идущего, ни у вызова быстрее секунды)."""
+    if seconds < TIMER_MIN_S:
+        return None
+    return format_duration(seconds)
 
 
 def format_compact_int(n: int) -> str:

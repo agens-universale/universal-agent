@@ -307,3 +307,13 @@ def test_closed_clock_gives_no_live_count_until_next_turn():
 def test_executor_without_clock_reads_none():
     executor = AgentExecutor(SimpleNamespace())
     assert executor.turn_effective_start() is None
+
+
+def test_executor_reads_call_time_from_turn_clock():
+    ctx, clock, mono = _clocked()
+    executor = AgentExecutor(ctx)
+    clock.begin_call("c1")
+    mono.now += 6
+    assert executor.turn_call_elapsed("c1") == 6
+    assert executor.turn_call_elapsed("c2") is None
+    assert AgentExecutor(SimpleNamespace()).turn_call_elapsed("c1") is None

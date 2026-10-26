@@ -251,6 +251,7 @@ def _ask_choice(
                 ),
                 via=via,
                 decision_key=decision_key,
+                call_id=_asking_call_id(),
             )
             result = coerce_confirm_choice(choice)
         else:
@@ -277,6 +278,13 @@ def _ask_choice(
             args_summary=title,
         )
     return result
+
+
+def _asking_call_id() -> str | None:
+    """Чей вызов спрашивает: ``call_id`` привязки диспетчера (вопрос
+    стадии режима идёт до тела тула, но внутри привязки)."""
+    scope = current_call()
+    return scope.call_id if scope is not None else None
 
 
 def _note_outcome(outcome: str | None) -> None:

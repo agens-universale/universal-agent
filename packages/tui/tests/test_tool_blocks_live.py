@@ -227,7 +227,7 @@ async def test_exploring_live_then_done(tmp_path):
         lines = _rows(pilot)
         assert "● Exploring" in lines
         assert "  └ … ещё 2" in lines
-        assert any(line.startswith("    Read  f4.py · ") for line in lines)
+        assert "    Read  f4.py" in lines
         assert not any("f1.py" in line for line in lines)
         await _tail(pilot, thread, _read_out(4))
         lines = _rows(pilot)
@@ -643,6 +643,88 @@ async def test_reopen_member_without_result(tmp_path):
         assert not any("прервано" in line for line in lines)
 
 
+def _glyph_at(row: ToolCallRow) -> str:
+    return row._prefix_static.content.plain.strip()[:1]
+
+
+async def _ask(pilot, call_id) -> None:
+    """Вызов ``call_id`` спросил разрешения: баннер и пауза ленты."""
+    scr = pilot.app.screen
+    scr.show_confirm_banner("Действие", "Разрешить?", call_id=call_id)
+    scr._apply_human_wait(True)
+    await pilot.pause()
+
+
+async def _answer(pilot) -> None:
+    scr = pilot.app.screen
+    scr._hide_confirm_banner()
+    scr._apply_human_wait(False)
+    await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_asking_explored_member_tail_header_static(tmp_path):
+    """Член `Exploring` спросил: у члена хвост вместо таймера и нет
+    глифа, у заголовка `●` не дышит, но его вид прежний."""
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        await _tail(pilot, thread, _read(0), _read_out(0), _read(1))
+        (header,) = _headers(scr)
+        await _ask(pilot, "r1")
+        lines = _rows(pilot)
+        assert "● Exploring" in lines
+        assert "    Read  f1.py · ждёт разрешения" in lines
+        assert header._pulse_timer is None
+        await _answer(pilot)
+        assert "    Read  f1.py" in _rows(pilot)
+        assert header._pulse_timer is not None
+
+
+@pytest.mark.asyncio
+async def test_asking_edit_row_tail(tmp_path):
+    """Идущая правка под блоком `Edited` спросила: статичный `●`, слово
+    правки и хвост; блок над ней не меняется."""
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        for key, path in (("e1", "a.py"), ("e2", "b.py")):
+            await _tail(
+                pilot,
+                thread,
+                _call(key, "fs_write_file", {"path": path}),
+                _out(key, "fs_write_file"),
+            )
+        before = [line for line in _rows(pilot) if "a.py" in line]
+        await _tail(
+            pilot, thread, _call("e3", "fs_write_file", {"path": "c.py"})
+        )
+        await _ask(pilot, "e3")
+        lines = _rows(pilot)
+        assert [line for line in lines if "a.py" in line] == before
+        (row,) = [line for line in lines if "c.py" in line]
+        assert row.endswith("c.py · ждёт разрешения")
+        assert row.startswith("● ")
+        assert _row(scr, "e3")._pulse_timer is None
+
+
+@pytest.mark.asyncio
+async def test_asking_command_keeps_running_word(tmp_path):
+    """Команда спросила: `● Running  ls · ждёт разрешения`; ответ «да» —
+    хвост уходит."""
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        await _tail(
+            pilot, thread, _call("x1", "exec_command", {"command": "ls"})
+        )
+        await _ask(pilot, "x1")
+        assert "● Running  ls · ждёт разрешения" in _rows(pilot)
+        assert _glyph_at(_row(scr, "x1")) == "●"
+        await _answer(pilot)
+        assert "● Running  ls" in _rows(pilot)
+
+
 @pytest.mark.asyncio
 async def test_child_question_pauses_agent_via_model(tmp_path, monkeypatch):
     """Вопрос ребёнка ставит паузу строке `Agent` через исполнитель
@@ -652,9 +734,9 @@ async def test_child_question_pauses_agent_via_model(tmp_path, monkeypatch):
     seen: list[tuple[str, str]] = []
     paused, resumed = ToolBlocksView.paused, ToolBlocksView.resumed
 
-    def _paused(self, row):
+    def _paused(self, row, **kw):
         seen.append(("paused", row.call_id))
-        paused(self, row)
+        paused(self, row, **kw)
 
     def _resumed(self, row):
         seen.append(("resumed", row.call_id))

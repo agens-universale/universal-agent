@@ -53,6 +53,8 @@ class TurnClock:
         # Время завершившихся вызовов хода без ожидания человека. Карта —
         # транзиентная часть часов; персистентная истина — запись итога.
         self._calls: dict[str, float] = {}
+        # Идущие вызовы: старт и ожидания хода на старте — живой счёт.
+        self._open: dict[str, tuple[float, float]] = {}
 
     @classmethod
     def start(cls, *, mono: Mono, wall: Wall) -> "TurnClock":
@@ -92,11 +94,35 @@ class TurnClock:
         with self._lock:
             return self._waited_until(self._now())
 
+    def begin_call(self, call_id: str) -> float:
+        """Старт вызова (без ``call_id`` — не считается) → ожидания хода на
+        старте: ожидания до вызова из его времени не вычитаются."""
+        with self._lock:
+            now = self._now()
+            waited = self._waited_until(now)
+            if self._ended is None and call_id:
+                self._open[call_id] = (now, waited)
+            return waited
+
     def record_call(self, call_id: str, seconds: float) -> None:
         """Время завершившегося вызова; после закрытия хода — ничего."""
         with self._lock:
+            self._open.pop(call_id, None)
             if self._ended is None and call_id:
                 self._calls[call_id] = seconds
+
+    def call_elapsed(self, call_id: str) -> float | None:
+        """Время вызова для живого счёта фронтенда: идущего — от старта без
+        ожиданий человека; законченного — то же, что в ``calls()``."""
+        with self._lock:
+            if call_id in self._calls:
+                return round(self._calls[call_id], 1)
+            opened = self._open.get(call_id)
+            if opened is None:
+                return None
+            start, waited = opened
+            now = self._now()
+            return now - start - (self._waited_until(now) - waited)
 
     def calls(self) -> dict[str, float]:
         """Копия карты ``{call_id: секунды}``, округление до 0,1."""
@@ -147,17 +173,18 @@ def current_turn_clock(ctx: Any) -> TurnClock | None:
     return clock if isinstance(clock, TurnClock) else None
 
 
-def turn_waited(ctx: Any) -> float:
-    """Ожидания человека текущего хода на «сейчас»; часов нет — 0."""
+def begin_call_time(ctx: Any, call_id: str | None) -> float:
+    """Старт вызова на часах хода → ожидания человека на его старте
+    (для ``record_call_time``); часов нет — 0."""
     clock = current_turn_clock(ctx)
-    return clock.waited() if clock is not None else 0.0
+    return clock.begin_call(call_id or "") if clock is not None else 0.0
 
 
 def record_call_time(
     ctx: Any, call_id: str | None, elapsed: float, waited_at_start: float
 ) -> None:
     """Время вызова — в часы хода, без ожиданий человека за время вызова
-    (``waited_at_start`` — ``turn_waited`` на его старте)."""
+    (``waited_at_start`` — ``begin_call_time`` на его старте)."""
     clock = current_turn_clock(ctx)
     if clock is not None:
         waited = clock.waited() - waited_at_start

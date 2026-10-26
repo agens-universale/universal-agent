@@ -2017,6 +2017,7 @@ class TuiApp(App):
         fields: list,
         via: str | None = None,
         decision_key: str | None = None,
+        call_id: str | None = None,
     ) -> bool:
         """Агент-поток → UI: баннер на TraceScreen. True = mounted, False = fail.
 
@@ -2039,6 +2040,7 @@ class TuiApp(App):
                     fields,
                     via=via,
                     decision_key=decision_key,
+                    call_id=call_id,
                 )
             except Exception:
                 return False

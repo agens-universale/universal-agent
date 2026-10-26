@@ -101,10 +101,10 @@ from gc_core.execution.progress import (
 )
 from gc_core.execution.turn_clock import (
     TurnClock,
+    begin_call_time,
     bind_turn_clock,
     record_call_time,
     turn_clock_sources,
-    turn_waited,
 )
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import (
@@ -2110,7 +2110,6 @@ async def _aexecute_tool_call(
     operations = port(ctx, "operations")
     clock = operations.monotonic if operations is not None else time.monotonic
     started_at = clock()
-    waited_at_start = turn_waited(ctx)
 
     # Live-прогресс субагента: «тул пошёл». На обычном parent-прогоне — no-op.
     # Sidecar persist параллельно (нужен thread identity; sink не требуется).
@@ -2120,6 +2119,10 @@ async def _aexecute_tool_call(
         not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
     )
     emit_tool_row = persist_tool_trace
+    # Старт на часах хода — у вызова со строкой ленты: её живой счёт.
+    waited_at_start = begin_call_time(
+        ctx, call_id_str if emit_tool_row else None
+    )
     # Sidecar-запись вызова — ДО события начала: команду длиннее потолка
     # события TUI читает оттуда, и к приходу события запись обязана быть.
     if persist_tool_trace:

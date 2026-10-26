@@ -4,7 +4,9 @@ from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
 
 def test_compressing_state_renders_fixed_text():
-    ind = ThinkingIndicator(state="compressing")
+    ind = ThinkingIndicator(
+        state="compressing", started_at=0.0, clock=lambda: 5.0
+    )
     txt = ind._render_text().plain
     assert "сжимаю контекст" in txt
     assert "с)" in txt  # elapsed присутствует

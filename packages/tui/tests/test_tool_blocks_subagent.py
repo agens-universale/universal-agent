@@ -490,7 +490,7 @@ async def test_nested_finishing_live(tmp_path):
         await _emit(pilot, _progress([_FINISH])[:1])
         rows = trace_rows(pilot.app, exclude=(TurnLine,))
         lines = _rows(pilot)
-    assert _agent_rows(lines)[-1] == "  ● Finishing · 0с"
+    assert _agent_rows(lines)[-1] == "  ● Finishing"
     row = next(r for r in rows if "Finishing" in r.plain)
     glyph = row.plain.index("●")
     styles = [s.style for s in row.spans if s.start <= glyph < s.end]

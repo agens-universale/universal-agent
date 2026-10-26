@@ -122,7 +122,8 @@ def test_running_and_interrupted_tails():
     row = build_call_row(
         call_id="c1", wire_name="exec_command", args_summary="ls", level=0
     )
-    assert _content(row).startswith("Run  ls · ")
+    # До целой секунды живого таймера нет.
+    assert _content(row) == "Run  ls"
     row.mark_interrupted()
     assert _content(row) == "Run  ls · прервано"
 

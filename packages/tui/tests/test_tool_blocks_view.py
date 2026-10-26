@@ -500,3 +500,43 @@ async def test_ran_file_row_opens_command_detail():
             r for r in app.query(ToolCallRow) if r.call_id == "x1:gen.py"
         )
         assert file_row.detail_call_id == "x1"
+
+
+@pytest.mark.asyncio
+async def test_call_timer_is_core_time_and_turn_end_keeps_it():
+    """Таймер вызова — по часам ядра: живой — время вызова, застывший на
+    конце — то же время, что потом принесёт запись итога хода (`calls`).
+    Часы самой строки видят вызов позже его старта: на 13 с сна они
+    насчитали бы 12,6 с, и на конце хода строка прыгала бы `12с → 13с`."""
+    from gc_core.persistence.turn_outcome import TurnOutcome
+
+    from gc_tui.widgets.tool_blocks_view import end_turn
+
+    core = {"w": 12.4}
+    app = _App()
+    async with app.run_test(size=(80, 24)) as pilot:
+        view = app.view()
+        row = ToolCallRow(call_id="w", label="Wait", target="13")
+        row.set_clock_source(core.get)
+        view.add_call(row, C.WAIT, waiting=False)
+        view.started(row)
+        row._start_monotonic -= 11.2
+        assert row._render_content().plain.endswith("· 12с")
+        row._start_monotonic -= 1.4
+        core["w"] = 13.0
+        view.result(row, _ev("w"), None)
+        await pilot.pause()
+        assert row._render_content().plain.endswith("· 13с")
+        outcome = TurnOutcome(
+            status="done",
+            reason=None,
+            opened_by=None,
+            started_at="2026-10-26T10:00:00.000Z",
+            ended_at="2026-10-26T10:00:28.000Z",
+            duration_sec=28.0,
+            error=None,
+            calls={"w": 13.0},
+        )
+        end_turn(app.views, app.timers, outcome, settled=False)
+        await pilot.pause()
+        assert row._render_content().plain.endswith("· 13с")

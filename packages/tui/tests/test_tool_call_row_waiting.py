@@ -51,7 +51,8 @@ def test_set_active_promotes_waiting_to_running():
     )
     row.set_active()
     assert "●" in str(row._render_prefix())
-    assert "·" in str(row._render_content())  # elapsed · Ns
+    row._start_monotonic -= 1  # живой таймер — с целой секунды
+    assert "· 1с" in str(row._render_content())
 
 
 def test_refresh_elapsed_noop_while_waiting():
