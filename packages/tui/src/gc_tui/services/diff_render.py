@@ -606,18 +606,22 @@ def _nearest_context(rows: list[_Row]) -> list[_Row]:
     """Строки контекста по близости к изменённым своего хэнка; равные по
     близости — поровну с краёв (первая, последняя, вторая…), так что
     остаток бюджета делится между хэнками и сторонами."""
-    ranked: list[tuple[int, _Row]] = []
-    for hunk in _hunks(rows):
-        marks = [i for i, row in enumerate(hunk) if row.kind in _CHANGED]
-        ranked += [
-            (min(abs(i - j) for j in marks), row)
-            for i, row in enumerate(hunk)
-            if row.kind == "ctx" and marks
-        ]
+    ranked = [pair for hunk in _hunks(rows) for pair in _distances(hunk)]
     out: list[_Row] = []
     for near in sorted({d for d, _row in ranked}):
         out += _from_edges([row for d, row in ranked if d == near])
     return out
+
+
+def _distances(hunk: list[_Row]) -> list[tuple[int, _Row]]:
+    """Строки контекста хэнка с расстоянием до ближайшей изменённой; в
+    хэнке без изменённых — ничего."""
+    marks = [i for i, row in enumerate(hunk) if row.kind in _CHANGED]
+    return [
+        (min(abs(i - j) for j in marks), row)
+        for i, row in enumerate(hunk)
+        if row.kind == "ctx" and marks
+    ]
 
 
 def _hunks(rows: list[_Row]) -> list[list[_Row]]:
