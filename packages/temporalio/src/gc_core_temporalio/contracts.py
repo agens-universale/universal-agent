@@ -95,6 +95,10 @@ class RunRequest:
     #: сверяет его со своим профилем на подготовке хода. ``None`` — без
     #: сверки (CLI, JSON-клиенты).
     settings_fingerprint: dict[str, str] | None = None
+    #: Внешний trace_id сессии (оркестратор): уходит заголовком в модель и
+    #: MCP каждого хода и субагентов (``agent.trace_header_enabled``,
+    #: ``trace_header_enabled`` сервера). ``None`` — без трейса.
+    trace_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,10 @@ class ActivityCall:
     schema_version: int = 1
     resource_owner: ResourceOwnerRef | None = None
     child_context: dict[str, Any] | None = None
+    #: trace_id сессии (``RunRequest.trace_id``): воркер строит контекст
+    #: хода с ним в рантайме — в каждом вызове, чтобы и пересобранный после
+    #: рестарта контекст получил тот же трейс.
+    trace_id: str | None = None
 
 
 @dataclass
