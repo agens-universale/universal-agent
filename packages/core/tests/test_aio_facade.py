@@ -10,6 +10,7 @@ from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
     install,
+    install_many,
     judge_accept,
     parity_config,
 )
@@ -107,9 +108,21 @@ async def test_facade_does_not_block_the_loop(tmp_path, monkeypatch):
 
 async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
     """Два агента на одном loop — без потока на каждого."""
-    cfg_a = parity_config(tmp_path / "a", monkeypatch)
-    cfg_b = parity_config(tmp_path / "b", monkeypatch)
-    install(monkeypatch, ScriptedBackend(_scenario("раз") + _scenario("два")))
+    # Свой сценарий на модель: общая лента раздаёт ходы в порядке вызовов,
+    # и второй агент забирает финализатор и вердикт судьи первого.
+    cfg_a = parity_config(
+        tmp_path / "a", monkeypatch, **{"agent.model": "агент-а"}
+    )
+    cfg_b = parity_config(
+        tmp_path / "b", monkeypatch, **{"agent.model": "агент-б"}
+    )
+    install_many(
+        monkeypatch,
+        {
+            "агент-а": ScriptedBackend(_scenario("раз")),
+            "агент-б": ScriptedBackend(_scenario("два")),
+        },
+    )
 
     before = threading.active_count()
     a = await AsyncAgent.create(cfg_a)
