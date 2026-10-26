@@ -32,7 +32,7 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
   (`detail_call_id`);
 - member — член блока: без глифа, текст в колонке 4 (`└ ` в колонке 2 у
   первого видимого), глагол `DIM`, объект и хвост `MUTED`, идущий — `INK`;
-  `└` следствия — на шаг глубже текста.
+  `└` следствия — под началом текста.
 `Ran` (`set_command`, `set_output`, `set_parts`): продолжение команды —
 строками под первой (колонка 4), под ним и вывод — части `RanParts`
 (хвост вывода, фразы раскрытия там, где скрытое); раскрытие — вся команда
@@ -407,7 +407,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._current = current
         self.set_class(mode == "member", "-member")
         self.set_class(gap, "-gap")
-        depth = 2 if mode == "member" else 0
+        # `└` члена — под началом его текста (колонка 4), как `└` одиночной
+        # строки под её текстом (колонка 2).
+        depth = 1 if mode == "member" else 0
         self._consequence_slot.set_level(self._level + depth)
         self._sync_pulse()
         self._update()

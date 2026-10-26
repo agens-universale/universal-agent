@@ -190,7 +190,8 @@ async def test_failed_member_reason_and_timer():
         assert_trace_grid(rows, origin=ORIGIN)
         reason = _line(rows, "не найден")
         col = reason.plain.index("не найден")
-        assert col == ORIGIN + 8
+        # `└` члена — под началом его текста (колонка 4), причина — на +2.
+        assert col == ORIGIN + 6
         assert _colour(reason, col) == palette.ERR.lower()
         failed = _line(rows, "e.py")
         assert _colour(failed, failed.plain.index("e.py")) == (
@@ -442,6 +443,24 @@ def _nested_lines(app) -> list[str]:
     start = next(i for i, r in enumerate(rows) if "Edited" in r.plain)
     assert_trace_grid(rows[start:], origin=ORIGIN + 2)
     return _plain(rows)
+
+
+@pytest.mark.asyncio
+async def test_nested_member_reason_under_member_text():
+    """Уровень субагента — та же лестница на +2: `└` причины члена — под
+    началом его текста."""
+    app = _App()
+    async with app.run_test(size=(80, 24)) as pilot:
+        view = app.view("sub1", depth=1)
+        _read(view, "n0")
+        _read(view, "n1", summary="не найден", outcome="error")
+        await pilot.pause()
+        rows = trace_rows(app)
+        member = _line(rows, "n1.py")
+        reason = _line(rows, "не найден")
+        text = member.plain.index("Read")
+        assert reason.plain.index("└") == text == ORIGIN + 2 + 4
+        assert reason.plain.index("не найден") == text + 2
 
 
 @pytest.mark.asyncio

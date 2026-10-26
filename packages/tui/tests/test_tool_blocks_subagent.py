@@ -800,7 +800,7 @@ async def test_stop_mid_nested_explored_live_reopen_preview(tmp_path):
         "    └ Read  client/m0.py · 2с",
         "      Read  client/m1.py · 2с",
         "      Read  client/m9.py",
-        "        └ отменено",
+        "      └ отменено",
     ]
     # Остановленный посреди вызов после переоткрытия — без таймера: в
     # `calls` его нет (спека §3.4, «Непокрыто»); остальное — одно.
@@ -842,6 +842,6 @@ async def test_stopped_nested_orphan_call_reopen_preview(tmp_path):
         "  ○ Explored",
         "    └ Read  client/m0.py",
         "      Read  client/m9.py",
-        "        └ отменено",
+        "      └ отменено",
     ]
     assert preview == reopen

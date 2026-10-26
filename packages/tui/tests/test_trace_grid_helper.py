@@ -57,7 +57,7 @@ def _ctl(text: str, x: int = 0) -> Text:
 
 
 def _cons(text: str, colour: str, x: int = 0) -> Text:
-    return _r(f"{_pad(x + 6)}└ {text}", (text, colour))
+    return _r(f"{_pad(x + 4)}└ {text}", (text, colour))
 
 
 def _out(text: str, *, lead: bool, x: int = 0) -> Text:
@@ -285,6 +285,17 @@ P4_22_EDIT_IN_GROUP = [
 ]
 
 
+# Следствие члена — под началом его текста, и на уровне субагента: там
+# сетка сдвинута на +2 вместе с глифом.
+P4_NESTED_MEMBER_REASON = [
+    _head(OK, "Agent", "  worker · 1с"),
+    _lead_ctl("проверка клиента"),
+    _head(ERR, "Explored", x=2),
+    _member("Read", "client/legacy.py", lead=True, x=2),
+    _cons("не найден", ERR, x=2),
+]
+
+
 @pytest.mark.parametrize(
     "rows",
     [
@@ -302,6 +313,7 @@ P4_22_EDIT_IN_GROUP = [
         P4_18_AGENT_EXPANDED,
         P4_19_FAILURES,
         P4_22_EDIT_IN_GROUP,
+        P4_NESTED_MEMBER_REASON,
     ],
     ids=[
         "p4-03",
@@ -318,6 +330,7 @@ P4_22_EDIT_IN_GROUP = [
         "p4-18-expanded",
         "p4-19",
         "p4-22",
+        "nested-member-reason",
     ],
 )
 def test_mockup_passes(rows):
@@ -334,9 +347,13 @@ VIOLATIONS = {
         [*_EXPLORED_LEAD, _r("     ● Read  b.py", ("●", OK))],
         "строка 3: глиф в колонке 4",
     ),
-    "member-branch-in-col-4": (
+    "member-branch-without-member": (
         [_head(OK, "Explored"), _r("     └ Read  a.py · 1с")],
-        "строка 2: `└` в колонке 4",
+        "строка 2: следствие не под текстом своего члена",
+    ),
+    "member-reason-in-col-6": (
+        [*_EXPLORED_LEAD, _r("       └ не найден", ("не найден", ERR))],
+        "строка 3: `└` в колонке 6",
     ),
     "control-in-col-6": (
         [*_EXPLORED_LEAD, _r("       + ещё 3 строки", ("+ ещё", MUTED))],
@@ -427,7 +444,7 @@ VIOLATIONS = {
     "single-ran-reason-not-glyph-colour": (
         [
             _head(ERR, "Ran", "  make docs · 1с"),
-            _cons("код выхода 2", DIM, -4),
+            _cons("код выхода 2", DIM, -2),
         ],
         "строка 2: причина одиночного вызова не цветом исхода",
     ),

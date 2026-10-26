@@ -789,6 +789,6 @@ async def test_preview_stopped_orphan_call_equals_reopen(tmp_path):
         " ○ Explored",
         "   └ Read  client/m0.py · 10 строк",
         "     Read  client/m1.py",
-        "       └ отменено",
+        "     └ отменено",
     ]
     assert preview == reopen
