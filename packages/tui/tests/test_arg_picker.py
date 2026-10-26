@@ -264,11 +264,16 @@ async def test_short_hint_still_reserves_one_line(tmp_path):
 
 
 def _model_like_options():
+    from gc_tui import palette as pal
     from gc_tui.widgets.arg_picker import PickerOption
+    from rich.text import Text
 
     return [
         PickerOption(
-            "auto", "модель выбирается по ходу работы", enabled=False
+            "auto",
+            "модель выбирается автоматически по ходу работы",
+            lead=Text("●", style=pal.BRAND),
+            enabled=False,
         ),
         PickerOption("", "", separator=True),
         PickerOption("glm-flash", ""),
@@ -319,7 +324,11 @@ def test_disabled_row_is_dim_and_not_taken():
     assert p.selected_value() == "auto"
     assert p.selected_disabled()
     row = p._format_row(p._visible_rows()[0])
-    assert {str(s.style) for s in row.spans} == {pal.DIM}
+    # Знак сохраняет цвет, приглушены только имя и описание.
+    dot = row.plain.index("●")
+    styled = {(s.start, s.end): str(s.style) for s in row.spans}
+    assert styled[(dot, dot + 1)] == pal.BRAND
+    assert styled[(dot + 2, len(row.plain))] == pal.DIM
     p.set_filter("")
     assert p.selected_value() == "glm-flash"
     assert not p.selected_disabled()

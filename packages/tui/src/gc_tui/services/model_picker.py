@@ -18,7 +18,8 @@ from gc_tui.toggles import auto_unavailable_reason_cfg, shown_choice
 from gc_tui.widgets.arg_picker import PickerOption
 
 AUTO = "auto"
-AUTO_DESC = "модель выбирается по ходу работы"
+AUTO_DESC = "модель выбирается автоматически по ходу работы"
+AUTO_UNAVAILABLE_DESC = "недоступен — {reason}"
 ACTIVE_STATUS = "● активна"
 UNAVAILABLE_HINT = "недоступна в этой сессии"
 LEGACY_HINT = "легаси: выбор модели появится с реестром моделей"
@@ -76,13 +77,25 @@ def _level_models(slots: dict, models: Any) -> list[str]:
     return out
 
 
-def _legacy_options(router: Any) -> tuple[PickerOption, ...]:
+def _auto_desc(loaded: Any) -> str:
+    """Описание `auto`: у недоступного — причина ядра вместо обычного
+    текста."""
+    reason = auto_unavailable_reason_cfg(loaded)
+    if reason is None:
+        return AUTO_DESC
+    return AUTO_UNAVAILABLE_DESC.format(reason=reason)
+
+
+def _legacy_options(router: Any, loaded: Any) -> tuple[PickerOption, ...]:
     """Легаси: выбор не действует — auto и плоская модель видны, но не
     выбираются; плоская модель — та, что работает."""
     model = router.resolve("main", check_breaker=False).model
     return (
         PickerOption(
-            AUTO, AUTO_DESC, lead=model_sign.dots(AUTO, {}), enabled=False
+            AUTO,
+            _auto_desc(loaded),
+            lead=model_sign.dots(AUTO, {}),
+            enabled=False,
         ),
         _SEPARATOR,
         PickerOption(
@@ -105,7 +118,7 @@ def model_picker_options(
     loaded = _loaded(app, settings)
     router = _router(app, loaded)
     if _legacy(router):
-        return _legacy_options(router)
+        return _legacy_options(router, loaded)
     slots = _slots(loaded)
     models = settings_of(loaded).models
     levels = _level_models(slots, models)
@@ -118,7 +131,7 @@ def model_picker_options(
         return PickerOption(value, desc, status, lead, enabled)
 
     available = auto_unavailable_reason_cfg(loaded) is None
-    options = [row(AUTO, AUTO_DESC, available)]
+    options = [row(AUTO, _auto_desc(loaded), available)]
     for block in (levels, rest):
         if block:
             options += [_SEPARATOR, *(row(alias) for alias in block)]

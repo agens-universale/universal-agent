@@ -67,7 +67,7 @@ def test_picker_order_auto_levels_rest(tmp_path, monkeypatch):
         "deepseek-v3",
     ]
     auto = model_picker_options(app)[0]
-    assert auto.desc == "модель выбирается по ходу работы"
+    assert auto.desc == "модель выбирается автоматически по ходу работы"
     assert auto.enabled
 
 
@@ -208,6 +208,7 @@ def test_picker_auto_disabled_with_reason(tmp_path, monkeypatch):
     )
     auto = model_picker_options(app)[0]
     assert auto.value == "auto" and not auto.enabled
+    assert auto.desc == "недоступен — выключен настройкой auto_routing"
     assert model_picker_hint(app, "auto") == (
         "auto — автовыбор моделей недоступен: выключен настройкой auto_routing"
     )

@@ -147,7 +147,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         """Строка списка: без статуса и знака у всех видимых строк — простой
         `str` (другие пикеры — /export и т.п. — не должны заметить правку);
         иначе `Text`: знак, значение, описание и правый статус цветом OK
-        (✗-отказ — ERR). Недоступная строка целиком приглушена."""
+        (✗-отказ — ERR). Недоступная строка: знак цветной, остальное приглушено."""
         opt = _as_option(opt)
         if not self._rich_rows():
             if not opt.desc:
@@ -155,6 +155,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
             return f" {opt.value.ljust(self._value_col_w())}{opt.desc}"
         t = Text(" ")
         t.append_text(self._lead_text(opt))
+        body_start = len(t.plain)
         if not opt.desc and not opt.status:
             t.append(opt.value)
         else:
@@ -170,8 +171,10 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
                 style=_pal.ERR if opt.status.startswith("✗") else _pal.OK,
             )
         if not opt.enabled:
-            t = Text(t.plain)
-            t.stylize(_pal.DIM)
+            # Знак сохраняет свои цвета, приглушены имя, описание, статус.
+            t = Text.assemble(
+                t[:body_start], Text(t.plain[body_start:], style=_pal.DIM)
+            )
         return t
 
     def _row_widget(self, row: PickerOption, classes: str) -> Static | Rule:
