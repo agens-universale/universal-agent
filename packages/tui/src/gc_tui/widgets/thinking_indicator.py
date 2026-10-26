@@ -37,7 +37,11 @@ from gc_tui.palette import GLOW_SHADES
 from gc_tui.palette import PROCESSING_SHADES as _PROCESSING_SHADES
 from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
-from gc_tui.services.duration_format import format_compact_int, format_duration
+from gc_tui.services.duration_format import (
+    format_compact_int,
+    format_duration,
+    format_timer,
+)
 from gc_tui.services.trace_glyphs import blink_on
 from gc_tui.services.turn_outcome import OUTCOMES
 
@@ -290,8 +294,9 @@ class ThinkingIndicator(Static):
         токены стрима и размышление."""
         parts: list[str] = []
         if self._started_at is not None:
-            elapsed = int(self._clock() - self._started_at)
-            parts.append(format_duration(elapsed))
+            timer = format_timer(int(self._clock() - self._started_at))
+            if timer is not None:
+                parts.append(timer)
         if self._state != _STATE_THINKING:
             return parts
         units = self._sink.progress_units() if self._sink is not None else 0

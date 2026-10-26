@@ -45,8 +45,9 @@ NOT_STARTED_REASON = "не запущено (стоп)"
 #: Причина идущего члена, оборванного остановкой хода.
 CANCELLED_REASON = "отменено"
 
-#: Вид глифа заголовка блока.
-GlyphLook = Literal["run", "ok", "error", "halted"]
+#: Вид глифа заголовка блока; `wait` — идёт, но член ждёт человека: `●`
+#: без дыхания.
+GlyphLook = Literal["run", "wait", "ok", "error", "halted"]
 #: Вид цвета куска текста; токен палитры назначает исполнитель.
 Look = Literal[
     "run", "ok", "error", "refused", "halted", "dim", "ink", "muted"
@@ -473,6 +474,8 @@ class _Member:
     # Без результата: процесс оборвался или стоп до старта.
     interrupted: bool = False
     not_started: bool = False
+    #: Ждёт человека (confirm / ask_human) — живая лента, не запись.
+    paused: bool = False
     edit: Optional[BlockEdit] = None
 
     @property
@@ -747,11 +750,19 @@ class ToolBlocks:
         return []
 
     def paused(self, call_id: str) -> list[Decision]:
-        """Ожидание человека: пауза — часы самой строки, блок не меняется."""
-        return []
+        """Ожидание человека: часы и хвост — у самой строки; у блока
+        `●` заголовка перестаёт дышать (`wait`)."""
+        return self._set_paused(call_id, True)
 
     def resumed(self, call_id: str) -> list[Decision]:
-        return []
+        return self._set_paused(call_id, False)
+
+    def _set_paused(self, call_id: str, paused: bool) -> list[Decision]:
+        member = self._members.get(call_id)
+        if member is None or member.paused == paused:
+            return []
+        member.paused = paused
+        return self._render(self._block_of[call_id])
 
     def event_closing(self) -> list[Decision]:
         """Событие ленты не из группы закрыло открытую группу."""
@@ -1194,6 +1205,8 @@ class ToolBlocks:
         errors = sum(m.outcome == "error" for m in members)
         refusals = sum(m.outcome == "refused" for m in members)
         live = running and not stopped
+        if glyph == "run" and any(m.live and m.paused for m in members):
+            glyph = "wait"
         return SetHeader(
             block.key,
             header_word(block.kind, live=live, verb=block.verb),

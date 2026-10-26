@@ -76,3 +76,13 @@ async def test_hidden_before_mount_starts_paused():
     async with _Host(w).run_test() as pilot:
         await pilot.pause()
         assert w._anim_timer._active.is_set() is False
+
+
+def test_live_count_hidden_below_one_second():
+    """Счёт хода индикатора — с целой секунды (владелец 2026-10-26)."""
+    now = {"t": 100.0}
+    w = ThinkingIndicator(started_at=100.0, clock=lambda: now["t"])
+    now["t"] = 100.9
+    assert w._live_parts() == []
+    now["t"] = 101.0
+    assert w._live_parts() == ["1с"]

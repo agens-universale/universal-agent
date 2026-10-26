@@ -258,6 +258,37 @@ def test_decision_key_reaches_the_tui_presenter():
     assert seen["decision_key"] == "write:/p/a.py"
 
 
+def test_asking_call_id_reaches_the_tui_presenter():
+    """Чей вызов спросил — `call_id` привязки вызова доезжает до показа
+    вопроса (по нему интерфейс помечает спросившую строку)."""
+    from gc_core.security.call_scope import call_scope
+    from gc_core.security.confirm_port import request_confirm
+
+    seen = {}
+
+    def tui_confirm(*, title, question, fields, call_id=None):
+        seen["call_id"] = call_id
+        return "allow_once"
+
+    ctx = _ctx(is_tui=True, tui_confirm=tui_confirm)
+    with call_scope(state=None, call_id="call_7", tool_name="exec_command"):
+        assert request_confirm(title="t", question="q?", fields=[], ctx=ctx)
+    assert seen["call_id"] == "call_7"
+
+
+def test_presenter_without_call_id_still_asked():
+    """Показ без параметра `call_id` (упрощённые реализации) — работает."""
+    from gc_core.security.call_scope import call_scope
+    from gc_core.security.confirm_port import request_confirm
+
+    def tui_confirm(*, title, question, fields):
+        return "allow_once"
+
+    ctx = _ctx(is_tui=True, tui_confirm=tui_confirm)
+    with call_scope(state=None, call_id="call_7", tool_name="exec_command"):
+        assert request_confirm(title="t", question="q?", fields=[], ctx=ctx)
+
+
 def test_declared_channel_wins_over_the_autodetection(monkeypatch):
     """Канал объявил человека — так и есть, что бы ни нашла автопроверка:
     ACP без терминала и без turn_ask_human — с человеком; сервер и A2A с

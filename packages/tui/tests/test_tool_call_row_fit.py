@@ -33,6 +33,13 @@ def _line_height(row) -> int:
     return row.query_one(Horizontal).size.height
 
 
+async def _aged(pilot, row) -> None:
+    """Идущая строка 5 с: живой таймер виден с целой секунды."""
+    row._start_monotonic -= 5
+    row._update()
+    await pilot.pause()
+
+
 def _app(build):
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -67,9 +74,10 @@ async def test_running_long_command_keeps_timer_on_one_line(width, level):
     ).run_test(size=(width, 20)) as pilot:
         await pilot.pause()
         row = pilot.app.query_one(ToolCallRow)
+        await _aged(pilot, row)
         line = _first_line(row)
         assert line.startswith("Run  cd /Users/")
-        assert line.endswith(" · 0с")
+        assert line.endswith(" · 5с")
         assert "…" in line
         assert _line_height(row) == 1
         assert row.size.height == 1
@@ -137,13 +145,13 @@ async def test_resize_refits_target():
         size=(120, 20)
     ) as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        await pilot.pause()
+        await _aged(pilot, row)
         wide = _first_line(row)
         await pilot.resize_terminal(60, 20)
         await pilot.pause()
         narrow = _first_line(row)
         assert len(narrow) < len(wide)
-        assert narrow.endswith(" · 0с")
+        assert narrow.endswith(" · 5с")
         assert _line_height(row) == 1
 
 
@@ -195,7 +203,7 @@ async def test_preview_row_fits_one_line(width):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("width", _WIDTHS)
-@pytest.mark.parametrize("elapsed", (0, 6, 3725))
+@pytest.mark.parametrize("elapsed", (1, 6, 3725))
 async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
     """С полосой прокрутки хвост ` · N с` виден целиком левее полосы:
     ширина под объект считается от content-колонки, полоса в неё не входит."""
@@ -270,10 +278,10 @@ async def test_long_live_status_keeps_timer():
     ) as pilot:
         row = pilot.app.query_one(ToolCallRow)
         row.set_live_status(_LONG_TAIL)
-        await pilot.pause()
+        await _aged(pilot, row)
         line = _first_line(row)
         assert _line_height(row) == 1
-        assert line.endswith("… · 0с")
+        assert line.endswith("… · 5с")
         assert len(_shown_target(line, "Run")) >= CALL_TARGET_MIN_COLS
 
 

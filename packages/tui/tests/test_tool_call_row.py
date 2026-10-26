@@ -492,13 +492,15 @@ def test_frozen_timer_only_from_one_second(seconds, tail):
     assert row._render_content().plain == f"Read  a.py{tail}"
 
 
-def test_live_timer_shows_zero_seconds():
-    """Идущий вызов — амберный таймер с самого старта, и «· 0с» тоже."""
+@pytest.mark.parametrize("seconds, tail", [(0, ""), (1, " · 1с")])
+def test_live_timer_only_from_one_second(seconds, tail):
+    """Идущий вызов: до целой секунды — без таймера, только дыхание `●`
+    (владелец 2026-10-26)."""
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    row = ToolCallRow(call_id="c1", label="t", target="")
-    row._elapsed_s = lambda: 0
-    assert row._render_content().plain.endswith("· 0с")
+    row = ToolCallRow(call_id="c1", label="Read", target="a.py")
+    row._elapsed_s = lambda: seconds
+    assert row._render_content().plain == f"Read  a.py{tail}"
 
 
 def test_pulse_tick_advances_pulse_while_running():

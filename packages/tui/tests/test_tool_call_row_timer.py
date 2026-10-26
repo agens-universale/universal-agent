@@ -93,23 +93,61 @@ async def test_pause_stops_timer_and_resume_restarts():
         assert row._pulse_timer is not None
 
 
+def _glyph_styles(prefix, glyph: str) -> list[str]:
+    at = prefix.plain.index(glyph)
+    return [str(sp.style) for sp in prefix.spans if sp.start <= at < sp.end]
+
+
 @pytest.mark.asyncio
-async def test_pause_shows_pause_glyph_and_resume_restores():
+async def test_pause_shows_static_run_dot_and_resume_restores():
+    """Человеко-ожидание: статичный янтарный `●` (не `‖`), без дыхания;
+    таймер строки застыл, хвоста ожидания нет — строка не спрашивала."""
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
+        row._elapsed_s = lambda until=None: 3
         row.pause()
         await pilot.pause()
         prefix = row._prefix_static.content
-        assert "‖" in prefix.plain
-        assert "●" not in prefix.plain
-        at = prefix.plain.index("‖")
-        glyph_styles = [
-            str(sp.style) for sp in prefix.spans if sp.start <= at < sp.end
-        ]
-        assert glyph_styles == [RUN_COLOR]
+        assert "‖" not in prefix.plain
+        assert _glyph_styles(prefix, "●") == [RUN_COLOR]
+        assert row._pulse_timer is None
+        assert row._render_content().plain == "t · 3с"
         row.resume()
         await pilot.pause()
-        assert "●" in row._prefix_static.content.plain
+        assert row._pulse_timer is not None
+
+
+@pytest.mark.asyncio
+async def test_asking_row_tail_replaces_timer():
+    """Строка, спросившая разрешения: на месте таймера — `· ждёт
+    разрешения` цветом живого таймера; ответ «да» — таймер и дыхание."""
+    async with _make_app().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row._elapsed_s = lambda until=None: 3
+        row.pause(asking=True)
+        await pilot.pause()
+        content = row._render_content()
+        assert content.plain == "t · ждёт разрешения"
+        at = content.plain.index("ждёт")
+        styles = [str(s.style) for s in content.spans if s.start <= at]
+        assert styles[-1] == RUN_COLOR
+        assert _glyph_styles(row._prefix_static.content, "●") == [RUN_COLOR]
+        row.resume()
+        await pilot.pause()
+        assert row._render_content().plain == "t · 3с"
+        assert row._pulse_timer is not None
+
+
+@pytest.mark.asyncio
+async def test_asking_row_refused_gives_undone_glyph():
+    """Отказ после вопроса — `○` и `└` причины, хвоста ожидания нет."""
+    async with _make_app().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.pause(asking=True)
+        row.set_result(summary="запрещено", outcome="refused")
+        await pilot.pause()
+        assert "○" in row._prefix_static.content.plain
+        assert "ждёт" not in row._render_content().plain
 
 
 @pytest.mark.asyncio

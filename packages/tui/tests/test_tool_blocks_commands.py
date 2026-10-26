@@ -195,9 +195,8 @@ async def test_running_no_output(tmp_path):
         await _open(pilot)
         await _tail(pilot, thread, _run("x1", "uv run pytest -q"))
         lines = _rows(pilot)
-        assert any(
-            line.startswith("● Running  uv run pytest -q · ") for line in lines
-        )
+        # До целой секунды — без таймера.
+        assert "● Running  uv run pytest -q" in lines
         assert not any("└" in line for line in lines)
         row = _frame_row(pilot, "uv run pytest")
         assert _colour(row, "uv run pytest") == INK.lower()

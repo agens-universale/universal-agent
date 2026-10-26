@@ -328,8 +328,9 @@ class ToolBlocksView:
         row.mark_interrupted()
         self.apply(self.model.interrupted(row.call_id, started=started))
 
-    def paused(self, row: ToolCallRow) -> None:
-        row.pause()
+    def paused(self, row: ToolCallRow, *, asking: bool = False) -> None:
+        """Человеко-ожидание; ``asking`` — разрешения ждёт этот вызов."""
+        row.pause(asking=asking)
         self.apply(self.model.paused(row.call_id))
 
     def resumed(self, row: ToolCallRow) -> None:

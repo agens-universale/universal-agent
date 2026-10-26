@@ -72,3 +72,15 @@ def test_format_round_int(n, expected):
 )
 def test_format_size(n, expected):
     assert format_size(n) == expected
+
+
+@pytest.mark.parametrize(
+    "seconds,expected",
+    [(0, None), (0.9, None), (1, "1с"), (1.0, "1с"), (65, "1м 5с")],
+)
+def test_format_timer_only_from_one_second(seconds, expected):
+    """Таймер (живой и застывший) — с целой секунды; быстрее — без него
+    (владелец 2026-10-26)."""
+    from gc_tui.services.duration_format import format_timer
+
+    assert format_timer(seconds) == expected
