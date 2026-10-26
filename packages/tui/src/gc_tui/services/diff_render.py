@@ -114,7 +114,7 @@ def render_hunks(
     wrap: bool = False,
     min_gutter: int = 1,
     logical: bool = False,
-    changed_only: bool = False,
+    preview: bool = False,
 ) -> DiffRender:
     """Хэнки журнала правок → `rich.Text` с номерами строк и подсветкой.
 
@@ -140,9 +140,10 @@ def render_hunks(
     P4, §6.3): строка не режется по рядам, перенос делает превью выше, и
     скрытое — ровно строки сверх бюджета.
 
-    `changed_only` — только строки `+` и `-`, без контекста: свёрнутое
-    превью под блоком ленты (решение 2026-10-23). Разделитель хэнков `⋮`
-    остаётся между хэнками, как в полном теле.
+    `preview` — свёрнутое превью под блоком ленты (решения 2026-10-23 и
+    2026-10-26): `max_lines` — один бюджет строк файла, сначала изменённые,
+    потом ближайший к ним контекст (`_preview_rows`). Разделитель хэнков
+    `⋮` остаётся между хэнками, как в полном теле.
 
     Рисует тело ЦЕЛИКОМ — этого и хочет блок ленты. Тому, кто рисует его
     участками, нужен `HunkBody`: там та же картинка, но по заказанным строкам.
@@ -156,7 +157,7 @@ def render_hunks(
         wrap=wrap,
         min_gutter=min_gutter,
         logical=logical,
-        changed_only=changed_only,
+        preview=preview,
     )
     return DiffRender(
         body.render(),
@@ -170,11 +171,6 @@ def render_hunks(
 def diff_line_count(hunks: str) -> int:
     """Логических строк тела диффа (без заголовков) — без отрисовки."""
     return sum(1 for row in _parse(hunks or "") if row.kind != "sep")
-
-
-def diff_changed_count(hunks: str) -> int:
-    """Изменённых строк тела диффа (`+` и `-`) — без отрисовки."""
-    return sum(1 for row in _parse(hunks or "") if row.kind in _CHANGED)
 
 
 def copyable_hunks(hunks: str, *, path: str) -> str:
@@ -242,7 +238,7 @@ class HunkBody:
         wrap: bool = False,
         min_gutter: int = 1,
         logical: bool = False,
-        changed_only: bool = False,
+        preview: bool = False,
     ) -> None:
         rows = _parse(hunks or "")
         # Ширина колонки номеров — по ВСЕМУ телу, а не по отобранной части:
@@ -257,12 +253,16 @@ class HunkBody:
             default=1,
         )
         self._gutter_w = max(self._gutter_w, min_gutter)
+        # Лимита нет — не ограничиваем ВОВСЕ. Подставлять сюда число
+        # логических строк нельзя: бюджет считается в рядах, и перенесённая
+        # строка «не влезала» бы, исчезая целиком.
+        limit = None if max_lines is None else max(0, max_lines)
         # Строки, перед которыми выброшен контекст: на них рвётся группа
         # «удалено / добавлено» — пары акцентов те же, что в полном хэнке.
-        after_gap: set[int] = set()
-        if changed_only:
-            rows, after_gap = _drop_context(rows)
         total = sum(1 for row in rows if row.kind != "sep")
+        after_gap: set[int] = set()
+        if preview:
+            rows, after_gap = _preview_rows(rows, limit)
         # Перенос — ЯВНЫЙ, а не следствие известной ширины: ширину передают и
         # экраны правок, но там строка не переносится (по дизайну у них
         # прокрутка вбок, а на нерасползающейся высоте держится ленивое тело).
@@ -271,10 +271,6 @@ class HunkBody:
             if wrap and fill_width is not None
             else None
         )
-        # Лимита нет — не ограничиваем ВОВСЕ. Подставлять сюда число
-        # логических строк нельзя: бюджет считается в рядах, и перенесённая
-        # строка «не влезала» бы, исчезая целиком.
-        limit = None if max_lines is None else max(0, max_lines)
         # `logical` — бюджет в строках файла: ряды переноса не считаются,
         # и строка целиком (потолка рядов нет).
         self.rows = _take(rows, limit, None if logical else self._wrap_w)
@@ -586,13 +582,79 @@ def _take(
     return taken
 
 
-def _drop_context(rows: list[_Row]) -> tuple[list[_Row], set[int]]:
-    """Тело без строк контекста и `id` строк, перед которыми он был."""
+def _preview_rows(
+    rows: list[_Row], limit: int | None
+) -> tuple[list[_Row], set[int]]:
+    """Строки свёрнутого превью (§6.3) — один бюджет ``limit`` на файл.
+
+    Дифф с контекстом влезает — весь, как раскрытый. Иначе все изменённые
+    строки и ближайший к ним контекст на остаток бюджета; изменённых больше
+    бюджета — только они (первые ``limit`` отрежет `_take`). Показано всегда
+    `min(строк, limit)` — на этом счёте модель ленты строит фразу.
+    """
+    body = [row for row in rows if row.kind != "sep"]
+    if limit is None or len(body) <= limit:
+        return rows, set()
+    keep = {id(row) for row in body if row.kind in _CHANGED}
+    if len(keep) < limit:
+        near = _nearest_context(rows)[: limit - len(keep)]
+        keep |= {id(row) for row in near}
+    return _keep(rows, keep)
+
+
+def _nearest_context(rows: list[_Row]) -> list[_Row]:
+    """Строки контекста по близости к изменённым своего хэнка; равные по
+    близости — поровну с краёв (первая, последняя, вторая…), так что
+    остаток бюджета делится между хэнками и сторонами."""
+    ranked = [pair for hunk in _hunks(rows) for pair in _distances(hunk)]
+    out: list[_Row] = []
+    for near in sorted({d for d, _row in ranked}):
+        out += _from_edges([row for d, row in ranked if d == near])
+    return out
+
+
+def _distances(hunk: list[_Row]) -> list[tuple[int, _Row]]:
+    """Строки контекста хэнка с расстоянием до ближайшей изменённой; в
+    хэнке без изменённых — ничего."""
+    marks = [i for i, row in enumerate(hunk) if row.kind in _CHANGED]
+    return [
+        (min(abs(i - j) for j in marks), row)
+        for i, row in enumerate(hunk)
+        if row.kind == "ctx" and marks
+    ]
+
+
+def _hunks(rows: list[_Row]) -> list[list[_Row]]:
+    """Строки тела по хэнкам (разделитель `⋮` — граница)."""
+    hunks: list[list[_Row]] = [[]]
+    for row in rows:
+        if row.kind == "sep":
+            hunks.append([])
+        else:
+            hunks[-1].append(row)
+    return hunks
+
+
+def _from_edges(items: list[_Row]) -> list[_Row]:
+    """Первая, последняя, вторая, предпоследняя…"""
+    out: list[_Row] = []
+    lo, hi = 0, len(items) - 1
+    while lo <= hi:
+        out.append(items[lo])
+        if lo != hi:
+            out.append(items[hi])
+        lo, hi = lo + 1, hi - 1
+    return out
+
+
+def _keep(rows: list[_Row], keep: set[int]) -> tuple[list[_Row], set[int]]:
+    """Тело из строк ``keep`` (по `id`) с разделителями и `id` строк,
+    перед которыми что-то выброшено."""
     kept: list[_Row] = []
     after_gap: set[int] = set()
     dropped = False
     for row in rows:
-        if row.kind == "ctx":
+        if row.kind != "sep" and id(row) not in keep:
             dropped = True
             continue
         if dropped:

@@ -21,7 +21,6 @@ from gc_core.config_modules.agent_edits import (
 from gc_tui.models import CommandOutput
 from gc_tui.services.diff_render import (
     copyable_hunks,
-    diff_changed_count,
     diff_line_count,
 )
 from gc_tui.services.edits_lookup import EditsLookup
@@ -50,8 +49,7 @@ class RanResult:
 
 
 def edit_settings(section: Mapping[str, Any]) -> tuple[int, int]:
-    """Секция `agent_edits` → (изменённых строк свёрнутого превью диффа
-    на файл, окно раскрытых ходов `replay_expanded_turns`). Окно `-1` — не
+    """Секция `agent_edits` → (строк свёрнутого превью диффа на файл, окно раскрытых ходов `replay_expanded_turns`). Окно `-1` — не
     режем (ровно `0` в конфиге); прочий мусор — дефолт, общим правилом
     ядра."""
     preview = section_limit(
@@ -84,7 +82,6 @@ def _edit_of(record: EditRecord, *, key: str, verb: str) -> BlockEdit:
         add=record.add,
         rem=record.del_,
         diff_lines=lines,
-        changed_lines=diff_changed_count(record.hunks),
         size_bytes=record.size_bytes,
         has_record=True,
         copy_text=copyable_hunks(record.hunks, path=record.path),
@@ -168,8 +165,8 @@ def diff_block_for(
     compact: bool,
     event_no: int = 0,
 ) -> DiffBlock:
-    """`DiffBlock` файла под блоком: превью ``rows`` изменённых строк,
-    колонка ``column``."""
+    """`DiffBlock` файла под блоком: превью ``rows`` строк, колонка
+    ``column``."""
     return DiffBlock.for_record(
         record,
         event_no=event_no,

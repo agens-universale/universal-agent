@@ -147,11 +147,10 @@ def _body_lines(block: DiffBlock) -> int:
     return block.query_one(".block-body", Static).visual.plain.count("\n") + 1
 
 
-def _phrase(scr, block: str) -> BlockAction:
-    """Фраза раскрытия внизу блока ``block`` верхнего уровня (P4 §4.0)."""
-    return next(
-        w for w in scr.query(BlockAction) if w.key == f"{block}:bottom"
-    )
+def _phrase(scr, call: str) -> BlockAction:
+    """Фраза раскрытия под диффом файла правки ``call`` (решение
+    2026-10-26)."""
+    return next(w for w in scr.query(BlockAction) if w.key == f"{call}:more")
 
 
 def _turns_thread(
@@ -195,9 +194,9 @@ async def test_replay_expands_only_last_turns(tmp_path):
             True,
         ]
         # Компактный блок — без тела; своего хвоста под блоком нет, все
-        # его строки считает фраза блока (P4 §6.3).
+        # его строки считает фраза файла (P4 §6.3).
         assert not blocks[0].query(".diff-more")
-        assert _phrase(pilot.app.screen, "block:0").phrase == "+ ещё 3 строки"
+        assert _phrase(pilot.app.screen, "c1").phrase == "+ ещё 3 строки"
 
 
 @pytest.mark.asyncio
@@ -224,7 +223,7 @@ async def test_compact_block_expands_on_click(tmp_path):
     ) as pilot:
         block = _blocks(pilot.app.screen)[0]
         assert not _has_body(block)
-        phrase = _phrase(pilot.app.screen, "block:0")
+        phrase = _phrase(pilot.app.screen, "c1")
         phrase.on_click(
             events.Click(
                 widget=phrase,

@@ -415,7 +415,7 @@ async def test_failed_edit_rows(tmp_path):
         lines = _rows(pilot)
         assert "● Edited 2 файла (+4 −2) · 1 ошибка" in lines
         assert any(line.startswith("    b.py") for line in lines)
-        assert "      └ не найден фрагмент" in lines
+        assert "    └ не найден фрагмент" in lines
 
 
 # --- застывшие таймеры -------------------------------------------------
@@ -574,8 +574,8 @@ async def test_stop_mid_exploring(tmp_path):
         await pilot.pause()
         lines = _rows(pilot)
         assert "○ Explored" in lines
-        assert "      └ отменено" in lines
-        assert "      └ не запущено (стоп)" in lines
+        assert "    └ отменено" in lines
+        assert "    └ не запущено (стоп)" in lines
         assert not any("прервано" in line for line in lines)
         assert line.region.y > _row(scr, "r2").region.y
 
@@ -601,8 +601,8 @@ async def test_stop_results_from_core(tmp_path):
         await _tail(pilot, thread)
         lines = _rows(pilot)
         assert "○ Explored" in lines
-        assert "      └ отменено" in lines
-        assert "      └ не запущено (стоп)" in lines
+        assert "    └ отменено" in lines
+        assert "    └ не запущено (стоп)" in lines
 
 
 @pytest.mark.asyncio
@@ -622,7 +622,7 @@ async def test_limit_halted_member_keeps_glyph(tmp_path):
         )
         lines = _rows(pilot)
         assert "● Explored" in lines
-        assert "      └ лимит вызовов" in lines
+        assert "    └ лимит вызовов" in lines
 
 
 @pytest.mark.asyncio

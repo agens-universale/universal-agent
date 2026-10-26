@@ -1,9 +1,10 @@
-"""Скрипт повышения версий видит новый дистрибутив gc-a2a."""
+"""Скрипт bump_version покрывает все манифесты workspace и их gc-* пины."""
 
 import importlib.util
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+NEW = "9.9.9"
 
 
 def _bump():
@@ -15,24 +16,44 @@ def _bump():
     return module
 
 
-def test_pin_pattern_accepts_gc_a2a():
+def test_pin_pattern_accepts_workspace_packages():
     bump = _bump()
-    matched = bump.PIN_RE.search('"gc-a2a==0.4.0"')
-    assert matched is not None
-    assert matched.group(1) == "gc-a2a"
-    assert bump.PIN_RE.search('"gc-core==1.2.3"').group(1) == "gc-core"
+    for pkg in ("gc-a2a", "gc-core", "gc-core-temporalio"):
+        matched = bump.PIN_RE.search(f'"{pkg}==1.2.3"')
+        assert matched is not None
+        assert matched.group(1) == pkg
 
 
-def test_dry_run_bumps_a2a_manifest_and_core_pin():
+def test_manifests_cover_all_package_pyprojects():
     bump = _bump()
-    manifest = REPO / "packages" / "a2a" / "pyproject.toml"
-    assert manifest in bump.MANIFESTS
-    before = manifest.read_text(encoding="utf-8")
-    changes = bump._bump_manifest(manifest, "9.9.9", True)
-    changes += bump._bump_pins(manifest, "9.9.9", True)
-    root_changes = bump._bump_pins(REPO / "pyproject.toml", "9.9.9", True)
-    assert manifest.read_text(encoding="utf-8") == before
-    text = "\n".join(changes + root_changes)
-    assert "packages/a2a/pyproject.toml: version 0.4.0 → 9.9.9" in text
-    assert "packages/a2a/pyproject.toml: gc-core 0.4.0 → 9.9.9" in text
-    assert "pyproject.toml: gc-a2a 0.4.0 → 9.9.9" in text
+    expected = {REPO / "pyproject.toml"}
+    expected.update((REPO / "packages").glob("*/pyproject.toml"))
+    assert set(bump.MANIFESTS) == expected
+
+
+def test_dry_run_bumps_all_manifests_from_disk():
+    bump = _bump()
+    snapshots = {p: p.read_text(encoding="utf-8") for p in bump.MANIFESTS}
+
+    expected: list[str] = []
+    for path, text in snapshots.items():
+        rel = path.relative_to(REPO)
+        for m in bump.VERSION_RE.finditer(text):
+            old = m.group(2)
+            if old != NEW:
+                expected.append(f"  {rel}: version {old} → {NEW}")
+        for m in bump.PIN_RE.finditer(text):
+            pkg = m.group(1)
+            old = m.group(0).split("==")[1].rstrip('"')
+            if old != NEW:
+                expected.append(f"  {rel}: {pkg} {old} → {NEW}")
+
+    actual: list[str] = []
+    for path in bump.MANIFESTS:
+        actual += bump._bump_manifest(path, NEW, True)
+        actual += bump._bump_pins(path, NEW, True)
+
+    assert actual == expected
+    assert expected, "ожидали хотя бы одно изменение версии/пина"
+    for path, before in snapshots.items():
+        assert path.read_text(encoding="utf-8") == before

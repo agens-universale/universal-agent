@@ -6,6 +6,8 @@ pilot-тестами. Страж версии падает при обновле
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 import json
 from pathlib import Path
 
@@ -434,3 +436,114 @@ async def test_trace_screen_drag_over_end_pill_scrolls_trace(tmp_path):
         assert "трока" in lines[0]
         assert lines[-1] == "строка 79"
         await pilot.mouse_up("#trace-end-pill", offset=(1, 0))
+
+
+class _Host(App):
+    """Пустой экран с контейнером для строк `paint_after_mount`."""
+
+    def compose(self):
+        yield VerticalScroll(id="host")
+
+
+def _hold(row: Static) -> int:
+    """Отдать строку `mount()` и придержать экран; счёт пакета сразу
+    после."""
+    app = row.app if row.parent else None
+    textual_compat.paint_after_mount(row)
+    return app._batch_count if app else 0
+
+
+async def _in_app(pilot, act: Callable[[], object]) -> object:
+    """Выполнить ``act`` в обработчике приложения, как в продукте:
+    активное приложение — своё, а не прошлого теста."""
+    out: list = []
+    pilot.app.call_later(lambda: out.append(act()))
+    await wait_until(pilot, lambda: bool(out), "выполнено")
+    return out[0]
+
+
+async def _released(pilot) -> int:
+    await wait_until(
+        pilot, lambda: not textual_compat._PAINT_HOLDS, "отпущено"
+    )
+    return pilot.app._batch_count
+
+
+def _mount_and_hold(app: App) -> tuple[Static, int]:
+    row = Static("row")
+    app.query_one("#host").mount(row)
+    return row, _hold(row)
+
+
+@pytest.mark.asyncio
+async def test_paint_after_mount_releases_after_mount():
+    app = _Host()
+    async with app.run_test() as pilot:
+        row, held = await _in_app(pilot, lambda: _mount_and_hold(app))
+        assert (held, await _released(pilot)) == (1, 0)
+        assert row.is_mounted
+
+
+@pytest.mark.asyncio
+async def test_paint_after_mount_releases_on_timeout(monkeypatch):
+    async def never(parent, widgets):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(textual_compat, "mounted", never)
+    monkeypatch.setattr(textual_compat, "_PAINT_HOLD_LIMIT", 0.05)
+    app = _Host()
+    async with app.run_test() as pilot:
+        _, held = await _in_app(pilot, lambda: _mount_and_hold(app))
+        assert (held, await _released(pilot)) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_paint_after_mount_noop_when_mounted_or_orphan():
+    app = _Host()
+    async with app.run_test() as pilot:
+        row = Static("row")
+        await app.query_one("#host").mount(row)
+        held = await _in_app(pilot, lambda: _hold(row))
+        orphan = await _in_app(pilot, lambda: _hold(Static("orphan")))
+        assert (held, orphan) == (0, 0)
+        assert not textual_compat._PAINT_HOLDS
+
+
+@pytest.mark.asyncio
+async def test_paint_after_mount_releases_when_removed_before_mount():
+    app = _Host()
+
+    def mount_hold_remove() -> int:
+        row, held = _mount_and_hold(app)
+        row.remove()
+        return held
+
+    async with app.run_test() as pilot:
+        held = await _in_app(pilot, mount_hold_remove)
+        assert (held, await _released(pilot)) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_paint_after_mount_failure_leaves_no_hold(monkeypatch):
+    """Не удалось завести отпускание — экран не замирает, даже пока
+    ошибка с её кадрами жива (журнал, обработчик выше)."""
+    app = _Host()
+
+    def broken_loop():
+        raise RuntimeError("loop")
+
+    def mount_hold_fail() -> int:
+        row = Static("row")
+        app.query_one("#host").mount(row)
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                textual_compat.asyncio, "get_running_loop", broken_loop
+            )
+            with pytest.raises(RuntimeError) as failure:
+                textual_compat.paint_after_mount(row)
+        assert failure.value.__traceback__ is not None
+        return app._batch_count
+
+    async with app.run_test() as pilot:
+        assert await _in_app(pilot, mount_hold_fail) == 0
+        assert not textual_compat._PAINT_HOLDS

@@ -283,10 +283,10 @@ def _dirs(tmp_path):
 
 _RAN_5 = [
     "  ● Ran  make test",
-    "    └ line 0",
-    "      line 1",
+    "    └ … ещё 2 строки",
     "      line 2",
-    "      + ещё 2 строки",
+    "      line 3",
+    "      line 4",
 ]
 
 
@@ -418,8 +418,8 @@ async def test_nested_multiline_command_live(tmp_path):
         "  ● Ran  python - <<'EOF'",
         "      import json",
         "      print(1)",
-        "    └ 1",
         "      + ещё 2 строки",
+        "    └ 1",
     ]
 
 

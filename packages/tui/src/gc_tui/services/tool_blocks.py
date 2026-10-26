@@ -32,16 +32,25 @@ from gc_tui.services.plural import (
 
 #: Видимых элементов в окне блока: членов, файлов, событий субагента.
 WINDOW = 3
-#: Строк превью вывода команды.
+#: Строк свёрнутого вывода команды — его хвост (`output_tail`).
 OUTPUT_PREVIEW_LINES = 3
 #: Строк команды `Ran` в свёрнутом виде: первая в строке и продолжение.
 COMMAND_PREVIEW_LINES = 3
 
 COLLAPSE_PHRASE = "− свернуть"
+#: `− свернуть` окна (`… ещё N`): прячет строки группы, а не содержимое.
+GROUP_COLLAPSE_PHRASE = "− свернуть группу"
 #: Ключ окна субагента в модели его уровня (спека §7): фраза окна
 #: `└ … ещё N` и строка `Agent` у исполнителя.
 AGENT_WINDOW = "agent"
 NOT_STARTED_REASON = "не запущено (стоп)"
+#: Места фраз: под файлом (`<файл>:more`), под строкой `Ran` (`− свернуть`
+#: раскрытых команды и вывода; их фразы раскрытия — в самой строке, где
+#: скрытое, и шлют тот же ключ) и окна файлов блока (маркер над файлами,
+#: `− свернуть` внизу).
+_MORE = "more"
+OUTPUT_SLOT = "output"
+_WINDOW_SLOTS = ("top", "files", "bottom")
 #: Причина идущего члена, оборванного остановкой хода.
 CANCELLED_REASON = "отменено"
 
@@ -136,14 +145,40 @@ def header_word(
     return verb or done
 
 
+def shown_when_folded(total: int, limit: int) -> int:
+    """Сколько из ``total`` показать свёрнутым при пределе ``limit``
+    (решение 2026-10-26): фраза `ещё N` занимает строку, как и один
+    скрытый элемент, — одного не прячем. До `limit + 1` — всё, без фразы;
+    больше — `limit`, скрыто не меньше двух. Одно правило для окон членов,
+    файлов и `Agent`, хвоста вывода, команды и бюджета диффа."""
+    return total if total <= limit + 1 else limit
+
+
 def more_phrase(n: int) -> str:
     """Маркер окна над членами: `… ещё N`."""
     return f"… ещё {n}"
 
 
 def more_lines_phrase(n: int) -> str:
-    """Единственная фраза раскрытия, внизу блока: `+ ещё N строк`."""
+    """Фраза раскрытия под тем, что она раскрывает (дифф файла, вывод
+    команды): `+ ещё N строк`."""
     return f"+ ещё {n} {lines_word(n)}"
+
+
+def more_lines_above(n: int) -> str:
+    """Фраза над хвостом вывода команды, там, где вывод начинается:
+    `… ещё N строк` — скрытое выше хвоста."""
+    return f"… ещё {n} {lines_word(n)}"
+
+
+def output_tail(lines: Sequence[str]) -> tuple[tuple[str, ...], int]:
+    """Свёрнутый вывод команды (решение 2026-10-26): последние
+    `OUTPUT_PREVIEW_LINES` строк и число скрытых над ними. Вывод растёт —
+    хвост сдвигается, скрытых больше; одно правило для живой ленты,
+    возврата и превью."""
+    shown = shown_when_folded(len(lines), OUTPUT_PREVIEW_LINES)
+    tail = tuple(lines[len(lines) - shown :])
+    return tail, len(lines) - len(tail)
 
 
 def _failure_parts(errors: int, refusals: int) -> Parts:
@@ -214,8 +249,6 @@ class BlockEdit:
     #: Логических строк диффа с контекстом; 0 — диффа нет (бинарь,
     #: удаление).
     diff_lines: int
-    #: Из них изменённых (`+` и `-`): из них свёрнутое превью (§6.3).
-    changed_lines: int
     size_bytes: Optional[int]
     has_record: bool
     #: Что кладёт в буфер ❐ строки файла; пусто — кнопки нет.
@@ -244,10 +277,6 @@ def _edit_tail(edit: Optional[BlockEdit]) -> Parts:
 
 def _lines(edit: Optional[BlockEdit]) -> int:
     return edit.diff_lines if edit is not None and edit.has_diff else 0
-
-
-def _changed(edit: Optional[BlockEdit]) -> int:
-    return edit.changed_lines if edit is not None and edit.has_diff else 0
 
 
 # --- решения -------------------------------------------------------------
@@ -395,7 +424,7 @@ class SetEditTail:
 
 @dataclass(frozen=True)
 class SetDiffShare:
-    """Дифф файла: ``rows`` изменённых строк превью (`None` — раскрыт,
+    """Дифф файла: ``rows`` строк превью (`None` — раскрыт,
     целиком с контекстом) в колонке ``column``. Смонтировать при первом
     решении."""
 
@@ -409,15 +438,20 @@ class SetDiffShare:
 
 
 @dataclass(frozen=True)
-class SetExpanded:
-    """Блок `Ran` раскрыт: вся команда и весь вывод."""
+class SetRanParts:
+    """Части строки `Ran`: раскрыта (вся команда и весь вывод) или нет;
+    фразы раскрытия в самой строке, где скрытое (`None` — нет): под
+    продолжением команды и над хвостом вывода. `− свернуть` раскрытой —
+    фраза блока под строкой."""
 
     block: str
     expanded: bool
+    command: Optional[str] = None
+    output: Optional[str] = None
 
     @property
     def ident(self) -> tuple:
-        return ("SetExpanded", self.block)
+        return ("SetRanParts", self.block)
 
 
 Decision = Union[
@@ -432,7 +466,7 @@ Decision = Union[
     SetWord,
     SetEditTail,
     SetDiffShare,
-    SetExpanded,
+    SetRanParts,
 ]
 
 
@@ -530,10 +564,13 @@ class _Block:
 
     def window(self) -> list[_Member]:
         shown = self.shown()
-        return shown if self.expanded else shown[-WINDOW:]
+        if self.expanded:
+            return shown
+        return shown[len(shown) - shown_when_folded(len(shown), WINDOW) :]
 
     def expandable(self) -> bool:
-        return self.headed and len(self.shown()) > WINDOW
+        n = len(self.shown())
+        return self.headed and shown_when_folded(n, WINDOW) < n
 
 
 @dataclass(frozen=True)
@@ -546,43 +583,43 @@ class _RanParts:
 
 @dataclass(frozen=True)
 class _File:
-    """Файл блока для окна и счёта скрытого: строк диффа с контекстом и
-    изменённых из них; у компактного тело не показано — скрыты все
-    строки."""
+    """Файл блока для окна и счёта скрытого: строк диффа с контекстом; у
+    компактного тело не показано — скрыты все строки."""
 
     key: str
     lines: int
-    changed: int
     compact: bool = False
 
     def hidden(self, rows: int) -> int:
-        """Строк, которые добавит раскрытие: превью — первые ``rows``
-        изменённых, раскрытый — весь дифф с контекстом (§6.3)."""
+        """Строк, которые добавит раскрытие. Превью — ``rows`` строк файла
+        (сначала изменённые, потом ближайший контекст; отбирает
+        `diff_render`), показано `min(lines, rows)` (§6.3)."""
         if self.compact:
             return self.lines
-        return self.lines - min(self.changed, rows)
+        return self.lines - shown_when_folded(self.lines, rows)
 
     def body(self, rows: Optional[int]) -> bool:
         """Есть ли под файлом тело сейчас: раскрытый — весь дифф, свёрнутый
-        — превью изменённых строк; у компактного превью нет."""
+        — превью; у компактного превью нет."""
         if rows is None:
             return self.lines > 0
-        return not self.compact and min(self.changed, rows) > 0
+        return not self.compact and min(self.lines, rows) > 0
 
 
 @dataclass(frozen=True)
 class _Layout:
-    """Окно файлов блока и счёт скрытого."""
+    """Окно файлов блока и раскрытие каждого файла."""
 
     window: tuple[str, ...]
-    #: Изменённых строк превью на видимый файл; `None` — раскрыт,
-    #: целиком.
-    rows: Optional[int]
+    #: Строк превью по файлу (сначала изменения, затем контекст);
+    #: `None` — раскрыт, целиком.
+    rows: Mapping[str, Optional[int]]
+    #: Строк, которые добавит раскрытие файла (`+ ещё N строк` под ним).
+    hidden: Mapping[str, int]
     #: Скрытых файлов над окном сейчас (`… ещё M`).
     more: int
-    #: Скрытых логических строк в свёрнутом виде (`+ ещё N строк`).
-    lines: int
-    expandable: bool
+    #: Окно файлов что-то скрывает в свёрнутом виде.
+    windowed: bool
     #: Видимые файлы с телом: после них — пустая строка (§6.2).
     bodied: frozenset[str] = frozenset()
 
@@ -601,7 +638,7 @@ def _accepts(group: Optional[_Block], member: _Member) -> bool:
 class ToolBlocks:
     """Модель блоков одного уровня ленты: верхнего или субагента.
 
-    ``diff_preview`` — изменённых строк свёрнутого превью диффа на файл
+    ``diff_preview`` — строк свёрнутого превью диффа на файл
     (`agent_edits.trace_inline_max_lines`). ``agent_window`` — уровень
     субагента: окно последних `WINDOW` событий (блок — одно событие), над
     ним `└ … ещё N`; строка видна, если видна и в своём блоке, и в окне
@@ -616,6 +653,9 @@ class ToolBlocks:
     ) -> None:
         self._timers = timers
         self._preview = diff_preview
+        # Раскрытые владельцы фраз: файлы (дифф целиком) и строки `Ran`
+        # (вся команда и весь вывод); переживают живые обновления.
+        self._open: set[str] = set()
         self._count = 0
         self._blocks: list[_Block] = []
         self._block_of: dict[str, _Block] = {}
@@ -711,6 +751,8 @@ class ToolBlocks:
         block.parts = _RanParts(
             command_hidden, output_hidden, tuple(files), unrecorded
         )
+        for file in files:
+            self._block_of[file.key] = block
         return self._render(block)
 
     def interrupted(self, call_id: str, *, started: bool) -> list[Decision]:
@@ -784,14 +826,50 @@ class ToolBlocks:
         return self.event_closing()
 
     def toggle(self, key: str) -> list[Decision]:
-        """Раскрыть / свернуть блок по ключу блока, фразы или члена (или
-        окно субагента); нечего скрывать — решений нет."""
+        """Раскрыть / свернуть по ключу (§5, решение 2026-10-26): строка
+        файла и его фраза — только его дифф; фраза вывода — вывод `Ran`;
+        маркер окна и `− свернуть` блока — окно; заголовок блока, строка
+        команды и прочие члены — блок целиком. Нечего скрывать — решений
+        нет."""
         if self._is_window(key):
             return self._toggle_window()
         block = self._resolve(key)
-        if block is None or not self._expandable(block):
+        if block is None:
+            return []
+        if block.headed:
+            if not block.expandable():
+                return []
+            block.expanded = not block.expanded
+            return self._render(block)
+        if key in (phrase_key(block.key, s) for s in _WINDOW_SLOTS):
+            return self._toggle_files(block)
+        owner = self.owner_of(key)
+        if owner is None:
+            return self._toggle_all(block)
+        if owner not in self._owners(block):
+            return []
+        self._open ^= {owner}
+        return self._render(block)
+
+    def _toggle_files(self, block: _Block) -> list[Decision]:
+        if not self._layout(block).windowed:
             return []
         block.expanded = not block.expanded
+        return self._render(block)
+
+    def _toggle_all(self, block: _Block) -> list[Decision]:
+        """Весь блок: окно файлов, каждый файл и вывод — раскрыть, если
+        хоть что-то свёрнуто, иначе свернуть всё."""
+        owners = set(self._owners(block))
+        windowed = self._layout(block).windowed
+        if not owners and not windowed:
+            return []
+        opened = owners <= self._open and (block.expanded or not windowed)
+        if opened:
+            self._open -= owners
+        else:
+            self._open |= owners
+        block.expanded = windowed and not opened
         return self._render(block)
 
     def timers_updated(self, calls: Iterable[str]) -> list[Decision]:
@@ -813,6 +891,20 @@ class ToolBlocks:
         """Вид блока строки ``key``."""
         block = self._resolve(key)
         return block.kind if block is not None else None
+
+    def owner_of(self, key: str) -> Optional[str]:
+        """Владелец фразы или строки ``key``: файл (строка файла, его
+        фраза) или строка `Ran` (фраза вывода); прочее — `None`."""
+        block = self._resolve(key)
+        if block is None or block.headed:
+            return None
+        if key == phrase_key(block.key, OUTPUT_SLOT):
+            return block.members[0].key
+        files = {f.key for f in self._files(block)}
+        if key in files:
+            return key
+        base = key.removesuffix(":" + _MORE)
+        return base if base != key and base in files else None
 
     def block_of(self, key: str) -> Optional[str]:
         """Ключ блока по ключу блока, его фразы или строки."""
@@ -861,7 +953,7 @@ class ToolBlocks:
 
     def _toggle_window(self) -> list[Decision]:
         assert self._window is not None
-        if len(self._events) <= WINDOW:
+        if not self._agent_windowed():
             return []
         self._window.expanded = not self._window.expanded
         return self._window_changes()
@@ -870,7 +962,13 @@ class ToolBlocks:
         assert self._window is not None
         if self._window.expanded:
             return self._events
-        return self._events[-WINDOW:]
+        n = len(self._events)
+        return self._events[n - shown_when_folded(n, WINDOW) :]
+
+    def _agent_windowed(self) -> bool:
+        """Окно субагента что-то скрывает в свёрнутом виде."""
+        n = len(self._events)
+        return shown_when_folded(n, WINDOW) < n
 
     def _shown(self, key: str) -> bool:
         return self._window is None or key in self._shown_events()
@@ -894,12 +992,12 @@ class ToolBlocks:
                 out += self._diff([SetVisible(key, visible)])
         hidden = len(self._events) - len(shown)
         more = more_phrase(hidden) if hidden else None
-        expanded = self._window.expanded and len(self._events) > WINDOW
-        collapse = COLLAPSE_PHRASE if expanded else None
+        expanded = self._window.expanded and self._agent_windowed()
+        collapse = GROUP_COLLAPSE_PHRASE if expanded else None
         # Маркер — под строкой `Agent`; `− свернуть` — последней строкой
         # блока `Agent`: в конце уровня, его держит там хвост уровня.
-        decisions = self._phrase(self._window, "top", more, after=AGENT_WINDOW)
-        decisions += self._phrase(self._window, "bottom", collapse)
+        decisions = self._phrase(AGENT_WINDOW, "top", more, after=AGENT_WINDOW)
+        decisions += self._phrase(AGENT_WINDOW, "bottom", collapse)
         return out + self._diff(decisions)
 
     def _windowed(
@@ -960,8 +1058,8 @@ class ToolBlocks:
             block.pending = False
             block.verb = member.verb if member.outcome == "ok" else None
             return self._render(block)
-        out = self._phrase(block, "top", None)
-        out += self._phrase(block, "bottom", None)
+        out = self._phrase(block.key, "top", None)
+        out += self._phrase(block.key, "bottom", None)
         self._blocks.remove(block)
         del self._block_of[block.key]
         if block.key in self._events:
@@ -982,72 +1080,91 @@ class ToolBlocks:
             wanted = self._single(block)
         return self._diff(self._windowed(block, wanted))
 
-    def _expandable(self, block: _Block) -> bool:
-        if block.headed:
-            return block.expandable()
+    def _files(self, block: _Block) -> list[_File]:
+        """Файлы блока правок (члены) или под командой `Ran`."""
         if block.kind == BlockKind.EDITS:
-            return self._edits_layout(block).expandable
-        if block.kind == BlockKind.RAN and block.parts is not None:
-            return self._ran_layout(block).expandable
-        return False
-
-    def _layout(
-        self,
-        files: Sequence[_File],
-        *,
-        expanded: bool,
-        extra_lines: int = 0,
-        extra_more: int = 0,
-    ) -> _Layout:
-        """Окно из последних `WINDOW` файлов и счёт скрытого (§6.3):
-        строки, которые раскрытие добавит видимым, и все строки скрытых."""
-        rows = self._preview
-        tail = files[-WINDOW:]
-        in_tail = {f.key for f in tail}
-        lines = extra_lines + sum(f.hidden(rows) for f in tail)
-        lines += sum(f.lines for f in files if f.key not in in_tail)
-        more = len(files) - len(tail) + extra_more
-        expandable = bool(lines or more)
-        if expanded and expandable:
-            keys = tuple(f.key for f in files)
-            bodied = frozenset(f.key for f in files if f.body(None))
-            return _Layout(keys, None, 0, lines, True, bodied)
-        keys = tuple(f.key for f in tail)
-        bodied = frozenset(f.key for f in tail if f.body(rows))
-        return _Layout(keys, rows, more, lines, expandable, bodied)
-
-    def _edits_layout(self, block: _Block) -> _Layout:
-        files = [
+            edits = [(m.key, m.applied) for m in block.members]
+        elif block.kind == BlockKind.RAN and block.parts is not None:
+            edits = [(f.key, f) for f in block.parts.files]
+        else:
+            return []
+        return [
             _File(
-                m.key,
-                _lines(m.applied),
-                _changed(m.applied),
-                m.applied is not None and m.applied.compact,
+                key,
+                _lines(edit),
+                edit is not None and edit.compact,
             )
-            for m in block.members
+            for key, edit in edits
         ]
-        return self._layout(files, expanded=block.expanded)
 
-    def _ran_layout(self, block: _Block) -> _Layout:
+    def _output_lines(self, block: _Block) -> int:
+        """Строк, которые добавит раскрытие строки `Ran`: команда и
+        вывод."""
         parts = block.parts
-        assert parts is not None
-        return self._layout(
-            [
-                _File(f.key, _lines(f), _changed(f), f.compact)
-                for f in parts.files
-            ],
-            expanded=block.expanded,
-            extra_lines=parts.command_hidden + parts.output_hidden,
-            extra_more=parts.unrecorded,
+        if block.kind != BlockKind.RAN or parts is None:
+            return 0
+        return parts.command_hidden + parts.output_hidden
+
+    def _owners(self, block: _Block) -> list[str]:
+        """Владельцы фраз блока, которым есть что раскрыть."""
+        owners = [f.key for f in self._files(block) if f.hidden(self._preview)]
+        if self._output_lines(block):
+            owners.append(block.members[0].key)
+        return owners
+
+    def _layout(self, block: _Block) -> _Layout:
+        """Окно из последних `WINDOW` файлов (раскрыто — все) и раскрытие
+        каждого файла (§6.3): превью — бюджет строк файла, раскрытый —
+        весь дифф с контекстом."""
+        files = self._files(block)
+        rows = {f.key: self._rows(f) for f in files}
+        hidden = {f.key: f.hidden(self._preview) for f in files}
+        unrecorded = block.parts.unrecorded if block.parts else 0
+        total = len(files) + unrecorded
+        folded = shown_when_folded(total, WINDOW) < total
+        tail = files[-WINDOW:] if folded else files
+        more = total - len(tail) if folded else 0
+        shown = files if block.expanded and more else tail
+        return _Layout(
+            window=tuple(f.key for f in shown),
+            rows=rows,
+            hidden=hidden,
+            more=0 if block.expanded else more,
+            windowed=bool(more),
+            bodied=frozenset(f.key for f in shown if f.body(rows[f.key])),
         )
 
-    def _bottom(self, block: _Block, layout: _Layout) -> Optional[str]:
-        """Единственная фраза раскрытия внизу блока."""
-        if not layout.expandable:
+    def _rows(self, file: _File) -> Optional[int]:
+        if file.key in self._open and file.hidden(self._preview):
             return None
-        if block.expanded:
-            return COLLAPSE_PHRASE
-        return more_lines_phrase(layout.lines) if layout.lines else None
+        # Бюджет растёт на одну строку, если скрыта была бы только она.
+        budget = self._preview
+        return max(budget, shown_when_folded(file.lines, budget))
+
+    def _file_phrase(
+        self, key: str, edit: Optional[BlockEdit], layout: _Layout
+    ) -> tuple[list[Decision], str]:
+        """Фраза файла под его диффом (решение 2026-10-26): свёрнут —
+        `+ ещё N строк` его скрытых строк, раскрыт — `− свернуть`; файлу
+        без скрытого и вне окна фразы нет. Второе — последний виджет
+        файла."""
+        end = _after_file(key, edit)
+        n = layout.hidden.get(key, 0)
+        text = None
+        if n and key in layout.window:
+            folded = layout.rows[key] is not None
+            text = more_lines_phrase(n) if folded else COLLAPSE_PHRASE
+        out = self._phrase(key, _MORE, text, after=end)
+        return out, phrase_key(key, _MORE) if text else end
+
+    def _collapse(self, block: _Block, layout: _Layout) -> Optional[str]:
+        """`− свернуть` окна файлов внизу блока — фраза блока только у
+        окна; строки диффов она не считает."""
+        return (
+            GROUP_COLLAPSE_PHRASE
+            if block.expanded and layout.windowed
+            else None
+        )
 
     def _diff(self, wanted: list[Decision]) -> list[Decision]:
         out: list[Decision] = []
@@ -1082,7 +1199,7 @@ class ToolBlocks:
             first = block.members[0].key
             out += [MountHeader(block.key, before=first), self._head(block)]
         out += self._phrase(
-            block,
+            block.key,
             "top",
             more_phrase(hidden) if hidden else None,
             after=block.key,
@@ -1092,9 +1209,9 @@ class ToolBlocks:
         for member in block.members:
             out += self._member(member, lead=member is lead)
             out.append(SetVisible(member.key, member in window))
-        collapse = COLLAPSE_PHRASE if block.expanded else None
+        collapse = GROUP_COLLAPSE_PHRASE if block.expanded else None
         out += self._phrase(
-            block,
+            block.key,
             "bottom",
             collapse if block.expandable() else None,
             after=block.members[-1].key,
@@ -1105,7 +1222,7 @@ class ToolBlocks:
         """Одиночная правка или блок `Added N` / `Edited N` (§6.2)."""
         members = block.members
         single = len(members) == 1
-        layout = self._edits_layout(block)
+        layout = self._layout(block)
         out: list[Decision] = []
         if not single:
             n = len(members)
@@ -1125,17 +1242,16 @@ class ToolBlocks:
                 self._head(block, prefix),
             ]
         more = more_phrase(layout.more) if layout.more else None
-        out += self._phrase(block, "top", more, after=block.key)
+        out += self._phrase(block.key, "top", more, after=block.key)
+        last = block.key
         for member in members:
             out += self._edit_row(member, layout, single=single)
-        last = members[-1]
-        out += self._phrase(
-            block,
-            "bottom",
-            self._bottom(block, layout),
-            after=_after_file(last.key, last.applied),
-        )
-        return out
+            phrase, last = self._file_phrase(
+                member.key, member.applied, layout
+            )
+            out += phrase
+        collapse = self._collapse(block, layout)
+        return out + self._phrase(block.key, "bottom", collapse, after=last)
 
     def _edit_row(
         self, member: _Member, layout: _Layout, *, single: bool
@@ -1155,37 +1271,46 @@ class ToolBlocks:
         return out + self._outcome_of(member)
 
     def _ran(self, block: _Block) -> list[Decision]:
-        """Строка `Running` / `Ran` и её части: окно правок команды, одна
-        фраза внизу блока (§4.0, §4.2)."""
+        """Строка `Running` / `Ran` и её части (§4.0, §4.2, решение
+        2026-10-26): раскрывают там, где скрытое (`SetRanParts`), сворачивают
+        внизу — `− свернуть` под строкой, над файлами; окно правок команды,
+        у каждого файла — своя фраза под диффом."""
         member = block.members[0]
         word = header_word(BlockKind.RAN, live=not member.done)
         out = [*self._single(block), SetWord(member.key, word, role="command")]
         parts = block.parts
         if parts is None:
             return out
-        layout = self._ran_layout(block)
-        key = block.members[0].key
+        layout = self._layout(block)
+        key = member.key
         files = parts.files
+        # Под строкой команды, над файлами: файлы монтируются под строку.
+        place = {"before": files[0].key} if files else {"after": key}
+        opened = key in self._open
+        collapse = None
+        if opened and self._output_lines(block):
+            collapse = COLLAPSE_PHRASE
+        out += self._phrase(block.key, OUTPUT_SLOT, collapse, **place)
         more = more_phrase(layout.more) if layout.more else None
-        if files:
-            out += self._phrase(block, "files", more, before=files[0].key)
-        else:
-            out += self._phrase(block, "files", more, after=key)
+        out += self._phrase(block.key, "files", more, **place)
+        last = key
         for edit in files:
             out.append(_file_mode(edit.key, layout, lead=False))
             out.append(SetVisible(edit.key, edit.key in layout.window))
             out += _file_parts(edit.key, edit, layout, "member")
-        last = _after_file(files[-1].key, files[-1]) if files else key
+            phrase, last = self._file_phrase(edit.key, edit, layout)
+            out += phrase
         k = parts.unrecorded
         unrecorded = None
-        if block.expanded and k:
+        # Окно не прячет — строка видна и свёрнутой (одну не прячем).
+        if k and not layout.more:
             unrecorded = f"ещё {k} {files_word(k)} не записано"
-        out += self._phrase(block, "unrecorded", unrecorded, after=last)
+        out += self._phrase(block.key, "unrecorded", unrecorded, after=last)
         if unrecorded is not None:
             last = phrase_key(block.key, "unrecorded")
-        bottom = self._bottom(block, layout)
-        out += self._phrase(block, "bottom", bottom, after=last)
-        out.append(SetExpanded(block.key, block.expanded))
+        window = self._collapse(block, layout)
+        out += self._phrase(block.key, "bottom", window, after=last)
+        out.append(_ran_parts(block.key, parts, opened=opened))
         return out
 
     def _head(self, block: _Block, prefix: Parts = ()) -> SetHeader:
@@ -1216,22 +1341,23 @@ class ToolBlocks:
 
     def _phrase(
         self,
-        block: _Block,
+        owner: str,
         slot: str,
         text: Optional[str],
         *,
         after: Optional[str] = None,
         before: Optional[str] = None,
     ) -> list[Decision]:
-        """Фраза нужна — смонтировать (переставить) и задать текст; не
-        нужна, но уже выдана — скрыть."""
+        """Фраза ``slot`` владельца ``owner`` (блок, файл, окно `Agent`)
+        нужна — смонтировать (переставить) и задать текст; не нужна, но уже
+        выдана — скрыть."""
         if text is not None:
             return [
-                MountPhrase(block.key, slot, after=after, before=before),
-                SetPhrase(block.key, slot, text),
+                MountPhrase(owner, slot, after=after, before=before),
+                SetPhrase(owner, slot, text),
             ]
-        if ("SetPhrase", block.key, slot) in self._issued:
-            return [SetPhrase(block.key, slot, None)]
+        if ("SetPhrase", owner, slot) in self._issued:
+            return [SetPhrase(owner, slot, None)]
         return []
 
     def _member(self, member: _Member, *, lead: bool) -> list[Decision]:
@@ -1269,6 +1395,20 @@ class ToolBlocks:
         return SetTimer(member.key, self._timers.get(member.key))
 
 
+def _ran_parts(block: str, parts: _RanParts, *, opened: bool) -> SetRanParts:
+    """Фразы раскрытия частей `Ran` — каждая там, где скрытое: строки
+    команды — под её продолжением, вывода — над хвостом."""
+    if opened:
+        return SetRanParts(block, True)
+    hidden_command, hidden_output = parts.command_hidden, parts.output_hidden
+    return SetRanParts(
+        block,
+        False,
+        command=more_lines_phrase(hidden_command) if hidden_command else None,
+        output=more_lines_above(hidden_output) if hidden_output else None,
+    )
+
+
 def _edit_word(member: _Member) -> str:
     if not member.done:
         return header_word(BlockKind.EDITS, live=True)
@@ -1302,7 +1442,7 @@ def _file_parts(
     монтируется до первого раскрытия."""
     out: list[Decision] = [SetEditTail(key, _edit_tail(edit))]
     if edit is not None and edit.has_diff and key in layout.window:
-        out.append(SetDiffShare(key, layout.rows, column))
+        out.append(SetDiffShare(key, layout.rows[key], column))
     return out
 
 
@@ -1319,6 +1459,6 @@ def _is_default(decision: Decision) -> bool:
         return decision.visible
     if isinstance(decision, SetEditTail):
         return not decision.parts
-    if isinstance(decision, SetExpanded):
-        return not decision.expanded
+    if isinstance(decision, SetRanParts):
+        return decision == SetRanParts(decision.block, False)
     return False

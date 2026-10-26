@@ -3,14 +3,17 @@
 Правило — перенос ``grid_check`` макетов P4 (спека P4 §3.1). Колонки
 считаются от колонки ``●`` своего уровня: 0 — глиф события и заголовка
 блока; 2 — текст заголовка и ``└`` первого члена (у одиночной строки — и её
-``└ следствие``); 4 — члены группы, управление (``… ещё N``, ``+ ещё N
-строк``, ``− свернуть``), диффы членов (и разделитель ханков ``⋮`` под
-номерами), продолжение превью; 6 — ``└ следствие`` члена. После ``Agent``
-в колонке ``c``: ``└ задача`` — в ``c + 2`` (перенос — в ``c + 4``),
-маркер окна ``… ещё N`` — без ``└``, в ``c + 2`` (колонка вложенных
-глифов, под всеми следствиями ``Agent``), ``− свернуть`` раскрытого окна —
-там же, в ``c + 2`` без ``└``, вложенные глифы — в ``c + 2``, и база сетки
-сдвигается туда же.
+``└ следствие``); 4 — члены группы, управление (``… ещё N``, ``… ещё N
+строк`` над хвостом вывода — на месте его первой строки, с ``└`` в 2, если
+она первая; ``+ ещё N строк``, ``− свернуть``), диффы членов (и
+разделитель ханков ``⋮`` под номерами), хвост вывода, ``└ следствие``
+члена — под началом его текста. Фраза ``+ ещё N строк`` стоит под тем,
+что раскрывает (дифф файла, продолжение команды): не посреди диффа и не
+под другой фразой. После ``Agent`` в колонке ``c``: ``└ задача`` — в
+``c + 2`` (перенос — в ``c + 4``), маркер окна ``… ещё N`` — без ``└``, в
+``c + 2`` (колонка вложенных глифов, под всеми следствиями ``Agent``),
+``− свернуть`` раскрытого окна — там же, в ``c + 2`` без ``└``, вложенные
+глифы — в ``c + 2``, и база сетки сдвигается туда же.
 
 ``rich`` и ``gc_tui`` импортируются лениво: тест-кит от них не зависит.
 """
@@ -66,6 +69,33 @@ def trace_rows(
             row.append(segment.text, segment.style)
         rows.append(row)
     return rows
+
+
+def record_frames(monkeypatch: Any, selector: str = "#trace") -> list:
+    """Кадры ленты, которые экран отдаёт на вывод: после каждого прохода
+    композитора — текст строк области ``selector``; кадр, равный прошлому,
+    не пишется. Перемена, легшая одним кадром, добавляет ровно один —
+    промежуточное состояние (перекладка в несколько шагов) видно лишним."""
+    from textual.css.query import NoMatches
+    from textual.screen import Screen
+
+    frames: list[list[str]] = []
+    refresh = Screen._compositor_refresh
+
+    def spy(screen: Any) -> None:
+        refresh(screen)
+        if screen is not screen.app.screen:
+            return
+        try:
+            rows = trace_rows(screen.app, selector)
+        except NoMatches:
+            return
+        frame = [row.plain.rstrip() for row in rows]
+        if not frames or frames[-1] != frame:
+            frames.append(frame)
+
+    monkeypatch.setattr(Screen, "_compositor_refresh", spy)
+    return frames
 
 
 def _rows_of(screen: Any, types: tuple[type, ...]) -> set[int]:
@@ -144,13 +174,12 @@ class _Grid:
         col = len(body) - len(body.lstrip(" "))
         ch = body[col]
         is_event = ch in _GLYPHS
-        if self._pending is not None and not (is_event and col <= self._base):
-            self._fail(self._pending, "фраза раскрытия не последняя в блоке")
-        self._pending = None
+        in_diff = bool(_DIFF.match(body) or _HUNK_GAP.match(body))
+        self._settle_pending(in_diff and not is_event)
         text = body[col:]
         if is_event:
             self._event(n, row, body, col)
-        elif _DIFF.match(body) or _HUNK_GAP.match(body):
+        elif in_diff:
             self._diff(n, body)
         elif text.startswith("└ "):
             self._branch(n, row, text[2:], col)
@@ -162,6 +191,13 @@ class _Grid:
             self._prev = ("wrap", self._prev[1])
         else:
             self._fail(n, f"текст в колонке {col}")
+
+    def _settle_pending(self, in_diff: bool) -> None:
+        """Фраза раскрытия стоит под тем, что раскрывает: строка диффа
+        под ней — фраза посреди диффа."""
+        if self._pending is not None and in_diff:
+            self._fail(self._pending, "фраза раскрытия посреди диффа")
+        self._pending = None
 
     def _after_member(self) -> bool:
         """Перенос длинного текста члена — под его текстом."""
@@ -196,15 +232,16 @@ class _Grid:
     def _branch(self, n: int, row: Any, text: str, col: int) -> None:
         if self._agent_level() and text.startswith(_MORE):
             self._fail(n, "маркер окна `Agent` с `└`")
-        reason = self._fg(row, col + 2)
-        self._check_timer(n, text, reason, col)
-        self._check_reason_colour(n, reason, col)
+        ctl = text.startswith(_CTL)
+        if not ctl:
+            reason = self._fg(row, col + 2)
+            self._check_timer(n, text, reason, col)
+            self._check_reason_colour(n, reason, col)
         if col == self._base + 2:
-            kind = "ctl" if text.startswith(_CTL) else "member"
-            self._prev = (kind, col + 2)
-        elif col == self._base + 6:
+            self._prev = ("ctl" if ctl else "member", col + 2)
+        elif col == self._base + 4:
             if self._prev != ("member", self._base + 4):
-                self._fail(n, "следствие не на шаг глубже своего члена")
+                self._fail(n, "следствие не под текстом своего члена")
             self._prev = ("cons", col)
         elif self._nest is not None and col == self._nest:
             self._prev = ("ctl", col + 2)  # «└ … ещё N» субагента
@@ -213,7 +250,7 @@ class _Grid:
 
     def _check_timer(self, n: int, text: str, reason: str, col: int) -> None:
         """У неисполненного вызова таймера нет."""
-        if col not in (self._base + 2, self._base + 6):
+        if col not in (self._base + 2, self._base + 4):
             return
         if not self._prev or self._prev[0] not in ("event", "member"):
             return
@@ -224,7 +261,7 @@ class _Grid:
             self._fail(n, "у неисполненного вызова есть таймер")
 
     def _check_reason_colour(self, n: int, reason: str, col: int) -> None:
-        if col == self._base + 6 and reason not in (
+        if col == self._base + 4 and reason not in (
             self._err,
             self._refused,
             self._dim,
@@ -253,6 +290,8 @@ class _Grid:
         if text.startswith("+ "):
             if not _EXPAND.fullmatch(text):
                 self._fail(n, "фраза раскрытия не «+ ещё N строк»")
+            if self._prev is not None and self._prev[0] == "ctl":
+                self._fail(n, "фраза раскрытия не под тем, что раскрывает")
             self._pending = n
         self._prev = ("ctl", col)
 
@@ -275,4 +314,4 @@ class _Grid:
         self._prev = ("member", col)
 
 
-__all__ = ["assert_trace_grid", "trace_rows"]
+__all__ = ["assert_trace_grid", "record_frames", "trace_rows"]

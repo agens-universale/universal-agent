@@ -11,15 +11,19 @@ import pytest
 from gc_core.agent_edits.journal import EditRecord
 from gc_core.constants.tool_display import DisplayCategory as C
 from gc_testkit.paths import TUI_PKG
-from gc_testkit.trace_grid import assert_trace_grid, trace_rows
+from gc_testkit.trace_grid import (
+    assert_trace_grid,
+    record_frames,
+    trace_rows,
+)
 from rich.style import Style
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 
 from gc_tui import palette
 from gc_tui.messages import BlockToggle
-from gc_tui.models import TraceEvent
-from gc_tui.services.diff_render import diff_changed_count, diff_line_count
+from gc_tui.models import CommandOutput, TraceEvent
+from gc_tui.services.diff_render import diff_line_count
 from gc_tui.services.tool_blocks import BlockEdit, CallTimers, ToolBlocks
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.diff_block import DiffBlock
@@ -186,7 +190,8 @@ async def test_failed_member_reason_and_timer():
         assert_trace_grid(rows, origin=ORIGIN)
         reason = _line(rows, "не найден")
         col = reason.plain.index("не найден")
-        assert col == ORIGIN + 8
+        # `└` члена — под началом его текста (колонка 4), причина — на +2.
+        assert col == ORIGIN + 6
         assert _colour(reason, col) == palette.ERR.lower()
         failed = _line(rows, "e.py")
         assert _colour(failed, failed.plain.index("e.py")) == (
@@ -236,7 +241,6 @@ def _edit_of(record: EditRecord) -> BlockEdit:
         add=record.add,
         rem=record.del_,
         diff_lines=diff_line_count(record.hunks),
-        changed_lines=diff_changed_count(record.hunks),
         size_bytes=None,
         has_record=True,
         copy_text="diff",
@@ -254,30 +258,69 @@ def _apply_edit(view, key: str, lines: int, *, context: bool = False):
 
 
 @pytest.mark.asyncio
-async def test_group_preview_changed_lines_then_full_diff():
-    """Блок `Edited 2 файла`: свёрнуто — у каждого файла первые 3
-    изменённые строки без контекста, фраза считает и контекст; раскрыто —
-    дифф целиком. Сетка колонок — в обоих видах."""
+async def test_group_preview_budget_then_full_diff():
+    """Блок `Edited 2 файла`, бюджет 3 строки на файл: у `a` (2 изменённые
+    и 3 контекста) — изменённые и ближайший контекст; у `b` (5
+    изменённых) — первые 3 без контекста. Под каждым диффом своя фраза —
+    скрытые строки файла; файл раскрывается сам, заголовок — весь блок.
+    Сетка колонок — во всех видах."""
     app = _App()
     async with app.run_test(size=(80, 40)) as pilot:
         view = app.view()
-        _apply_edit(view, "a", 1, context=True)
+        _apply_edit(view, "a", 2, context=True)
         _apply_edit(view, "b", 5, context=True)
         await pilot.pause()
         rows = trace_rows(app)
         assert_trace_grid(rows, origin=ORIGIN)
         lines = [line for line in _plain(rows) if line]
-        assert not any("ctx" in line for line in lines)
-        assert sum("+line" in line for line in lines) == 4
-        # a: 3 строки контекста; b: 3 контекста и 2 изменённые сверх 3.
-        assert lines[-1] == "     + ещё 8 строк"
+        assert sum("ctx" in line for line in lines) == 1
+        assert sum("+line" in line for line in lines) == 5
+        # a: скрыт дальний контекст; b: 3 контекста и 2 изменённые сверх 3
+        # — каждая фраза под диффом своего файла.
+        phrases = [i for i, line in enumerate(lines) if "+ ещё" in line]
+        b_row = next(i for i, line in enumerate(lines) if "b.py" in line)
+        assert [lines[i] for i in phrases] == [
+            "     + ещё 2 строки",
+            "     + ещё 5 строк",
+        ]
+        assert phrases[0] < b_row < phrases[1] == len(lines) - 1
         view.toggle("a")
         await pilot.pause()
         rows = trace_rows(app)
         assert_trace_grid(rows, origin=ORIGIN)
         lines = _plain(rows)
+        # Раскрыт только a: его две строки `ctx` (третья — пустая).
+        assert sum("ctx" in line for line in lines) == 2
+        assert sum("+line" in line for line in lines) == 5
+        assert "     − свернуть" in lines
+        view.toggle("block:0")
+        await pilot.pause()
+        rows = trace_rows(app)
+        assert_trace_grid(rows, origin=ORIGIN)
+        lines = _plain(rows)
         assert sum("ctx" in line for line in lines) == 4
-        assert sum("+line" in line for line in lines) == 6
+        assert sum("+line" in line for line in lines) == 7
+        assert sum(line == "     − свернуть" for line in lines) == 2
+
+
+@pytest.mark.asyncio
+async def test_diff_one_row_over_budget_shown_whole():
+    """Бюджет 3: дифф в 4 строки — целиком и без фразы, и с контекстом
+    (1 изменённая и 3 контекста), и без него (4 изменённые)."""
+    app = _App()
+    async with app.run_test(size=(80, 40)) as pilot:
+        view = app.view()
+        _apply_edit(view, "a", 1, context=True)
+        _apply_edit(view, "b", 4)
+        await pilot.pause()
+        rows = trace_rows(app)
+        assert_trace_grid(rows, origin=ORIGIN)
+        lines = _plain(rows)
+        assert sum("ctx" in line for line in lines) == 2
+        assert sum("+line" in line for line in lines) == 5
+        assert not any("ещё" in line for line in lines)
+        assert view.model.toggle("a") == []
+        assert view.model.toggle("b") == []
 
 
 @pytest.mark.asyncio
@@ -302,7 +345,172 @@ async def test_single_to_block_keeps_same_diffblock():
         lines = _plain(rows)
         assert " ● Edited 2 файла (+16 −0)" in lines
         assert any(line.startswith("   └ a.py (+8 −0)  ") for line in lines)
-        assert [line for line in lines if line][-1] == "     + ещё 10 строк"
+        phrases = [line for line in lines if "+ ещё" in line]
+        assert phrases == ["     + ещё 5 строк"] * 2
+        assert [line for line in lines if line][-1] == "     + ещё 5 строк"
+
+
+def _phrase_of(app, key: str) -> BlockAction:
+    return next(p for p in app.query(BlockAction) if p.key == key)
+
+
+def _shown_lines(app) -> list[str]:
+    rows = trace_rows(app)
+    assert_trace_grid(rows, origin=ORIGIN)
+    return _plain(rows)
+
+
+@pytest.mark.asyncio
+async def test_file_phrase_click_expands_only_its_file():
+    """Фраза под диффом файла (решение 2026-10-26): клик раскрывает
+    только этот файл, под ним — `− свернуть`; соседи свёрнуты."""
+    app = _App()
+    async with app.run_test(size=(80, 50)) as pilot:
+        view = app.view()
+        for key in "abc":
+            _apply_edit(view, key, 8)
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum(line == "     + ещё 5 строк" for line in lines) == 3
+        await pilot.click(_phrase_of(app, "a:more"))
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum("+line" in line for line in lines) == 8 + 3 + 3
+        assert _phrase_of(app, "a:more").phrase == "− свернуть"
+        assert _phrase_of(app, "b:more").phrase == "+ ещё 5 строк"
+        a_end = lines.index("     − свернуть")
+        assert "b.py" in lines[a_end + 2]
+
+
+@pytest.mark.asyncio
+async def test_space_on_header_toggles_block_on_file_row_its_diff():
+    """Пробел на заголовке — весь блок, на строке файла — его дифф."""
+    app = _App()
+    async with app.run_test(size=(80, 60)) as pilot:
+        view = app.view()
+        rows = [_apply_edit(view, key, 8) for key in "abc"]
+        await pilot.pause()
+        header = next(w for w in app.query(ToolCallRow) if w.mode == "header")
+        header.focus()
+        await pilot.press("space")
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum("+line" in line for line in lines) == 24
+        assert sum(line == "     − свернуть" for line in lines) == 3
+        await pilot.press("space")
+        await pilot.pause()
+        assert sum("+line" in line for line in _shown_lines(app)) == 9
+        rows[1].focus()
+        await pilot.press("space")
+        await pilot.pause()
+        assert sum("+line" in line for line in _shown_lines(app)) == 14
+        assert _phrase_of(app, "b:more").phrase == "− свернуть"
+        assert _phrase_of(app, "a:more").phrase == "+ ещё 5 строк"
+
+
+@pytest.mark.asyncio
+async def test_ran_output_and_files_phrases_under_owners():
+    """`Ran` с выводом и файлами: фраза вывода — под выводом, над
+    файлами; у каждого обрезанного файла — своя под его диффом. Пробел на
+    строке файла — только его дифф, на строке команды — всё."""
+    from gc_tui.models import CommandOutput
+    from gc_tui.services.block_edits import RanResult
+
+    app = _App()
+    async with app.run_test(size=(80, 60)) as pilot:
+        view = app.view()
+        row = _row("x1", label="Run", target="make")
+        view.add_call(row, C.RUN, waiting=False)
+        view.started(row)
+        out = tuple(f"out {i}" for i in range(6))
+        output = CommandOutput(out, 0, 0, False, False, out[-3:], 3)
+        files = tuple(
+            _edit_of(_record(f"x1:{name}.py", 8)) for name in ("a", "b")
+        )
+        view.result(row, _ev("x1"), None, ran=RanResult(output, files=files))
+        await pilot.pause()
+        lines = [line for line in _shown_lines(app) if line]
+        assert lines[1:5] == [
+            "   └ … ещё 3 строки",
+            "     out 3",
+            "     out 4",
+            "     out 5",
+        ]
+        assert lines[5].startswith("     Edited x1:a.py.py")
+        phrases = [line for line in lines if "+ ещё" in line]
+        assert phrases == ["     + ещё 5 строк"] * 2
+        file_row = next(
+            r for r in app.query(ToolCallRow) if r.call_id == "x1:b.py"
+        )
+        file_row.focus()
+        await pilot.press("space")
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum("+line" in line for line in lines) == 3 + 8
+        assert "     out 0" not in lines
+        row.focus()
+        await pilot.press("space")
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum("+line" in line for line in lines) == 16
+        assert "   └ out 0" in lines
+
+
+def _nested_lines(app) -> list[str]:
+    """Строки вложенного уровня от его первого блока: сетка — от колонки
+    его глифов (мини-лента ставит пустую строку под `Agent`)."""
+    rows = trace_rows(app)
+    start = next(i for i, r in enumerate(rows) if "Edited" in r.plain)
+    assert_trace_grid(rows[start:], origin=ORIGIN + 2)
+    return _plain(rows)
+
+
+@pytest.mark.asyncio
+async def test_nested_member_reason_under_member_text():
+    """Уровень субагента — та же лестница на +2: `└` причины члена — под
+    началом его текста."""
+    app = _App()
+    async with app.run_test(size=(80, 24)) as pilot:
+        view = app.view("sub1", depth=1)
+        _read(view, "n0")
+        _read(view, "n1", summary="не найден", outcome="error")
+        await pilot.pause()
+        rows = trace_rows(app)
+        member = _line(rows, "n1.py")
+        reason = _line(rows, "не найден")
+        text = member.plain.index("Read")
+        assert reason.plain.index("└") == text == ORIGIN + 2 + 4
+        assert reason.plain.index("не найден") == text + 2
+
+
+@pytest.mark.asyncio
+async def test_nested_edits_phrase_under_each_file():
+    """Правки субагента — то же правило на уровень глубже: фраза под
+    диффом каждого обрезанного файла, клик раскрывает только его."""
+    app = _App()
+    async with app.run_test(size=(80, 50)) as pilot:
+        top = app.view()
+        agent = _row("a1", label="Agent", target="проверка")
+        top.add_call(agent, C.AGENT, waiting=False)
+        trace = app.query_one("#trace", VerticalScroll)
+        model = ToolBlocks(app.timers, diff_preview=3, agent_window=True)
+        nested = ToolBlocksView(_Host(trace), model, level="a1", depth=1)
+        nested.set_owner(agent)
+        app.views["a1"] = nested
+        _apply_edit(nested, "a", 8)
+        _apply_edit(nested, "b", 2)
+        _apply_edit(nested, "c", 8)
+        await pilot.pause()
+        lines = _nested_lines(app)
+        phrases = [i for i, line in enumerate(lines) if "+ ещё" in line]
+        assert [lines[i] for i in phrases] == ["       + ещё 5 строк"] * 2
+        b_row = next(i for i, line in enumerate(lines) if "b.py" in line)
+        assert phrases[0] < b_row < phrases[1]
+        await pilot.click(_phrase_of(app, "a:more"))
+        await pilot.pause()
+        lines = _nested_lines(app)
+        assert sum("+line" in line for line in lines) == 8 + 2 + 3
+        assert _phrase_of(app, "c:more").phrase == "+ ещё 5 строк"
 
 
 @pytest.mark.asyncio
@@ -310,11 +518,11 @@ async def test_two_levels_route_toggle_to_own_model():
     app = _App()
     async with app.run_test(size=(80, 40)) as pilot:
         top = app.view()
-        for i in range(4):
+        for i in range(5):
             _read(top, f"t{i}")
         top.apply(top.model.event_closing())
         nested = app.view("sub1", depth=1)
-        nested_rows = [_read(nested, f"n{i}") for i in range(4)]
+        nested_rows = [_read(nested, f"n{i}") for i in range(5)]
         await pilot.pause()
         nested_phrase = [
             p for p in app.query(BlockAction) if p.level == "sub1"
@@ -327,7 +535,7 @@ async def test_two_levels_route_toggle_to_own_model():
             for r in app.query(ToolCallRow)
             if r.call_id.startswith("t") and not r.display
         ]
-        assert len(hidden_top) == 1
+        assert len(hidden_top) == 2
 
 
 @pytest.mark.asyncio
@@ -335,7 +543,7 @@ async def test_issued_widgets():
     app = _App()
     async with app.run_test(size=(80, 24)) as pilot:
         view = app.view()
-        rows = [_read(view, f"c{i}") for i in range(4)]
+        rows = [_read(view, f"c{i}") for i in range(5)]
         await pilot.pause()
         header = next(w for w in app.query(ToolCallRow) if w.mode == "header")
         phrase = app.query_one(BlockAction)
@@ -355,9 +563,13 @@ async def test_hidden_focused_row_moves_focus_to_header():
         await pilot.pause()
         _read(view, "c3")
         await pilot.pause()
+        # Четвёртый член окно не сворачивает — фокус на месте.
+        assert app.focused is rows[0]
+        _read(view, "c4")
+        await pilot.pause()
         header = next(w for w in app.query(ToolCallRow) if w.mode == "header")
         assert app.focused is header
-        assert header.detail_call_id == "c3"
+        assert header.detail_call_id == "c4"
 
 
 @pytest.mark.asyncio
@@ -382,7 +594,7 @@ async def test_hidden_by_agent_window_moves_focus_to_agent_row():
         row.focus()
         await pilot.pause()
         assert app.focused is row
-        for i in range(3):
+        for i in range(4):
             prose = Static(f"проза {i}")
             await trace.mount(prose)
             nested.event_added(prose)
@@ -395,7 +607,7 @@ async def test_phrase_not_in_tab_chain_and_hover_accent():
     app = _App()
     async with app.run_test(size=(80, 24)) as pilot:
         view = app.view()
-        for i in range(4):
+        for i in range(5):
             _read(view, f"c{i}")
         await pilot.pause()
         phrase = app.query_one(BlockAction)
@@ -403,8 +615,8 @@ async def test_phrase_not_in_tab_chain_and_hover_accent():
         assert phrase not in app.screen.focus_chain
         await pilot.hover(phrase)
         await pilot.pause()
-        line = _line(trace_rows(app), "… ещё 1")
-        col = line.plain.index("… ещё 1")
+        line = _line(trace_rows(app), "… ещё 2")
+        col = line.plain.index("… ещё 2")
         assert _colour(line, col) == palette.ACCENT.lower()
 
 
@@ -446,39 +658,45 @@ async def test_set_result_without_model_keeps_old_row():
 def _output(lines, **kw):
     from gc_tui.models import CommandOutput
 
-    preview = tuple(lines[:3])
+    tail = tuple(lines[-3:])
     return CommandOutput(
         lines=tuple(lines),
         omitted_chars=0,
         exit_code=kw.get("exit_code", 0),
         timed_out=kw.get("timed_out", False),
         background=kw.get("background", False),
-        preview=preview,
-        hidden=len(lines) - len(preview),
+        tail=tail,
+        hidden=len(lines) - len(tail),
     )
 
 
 def test_output_texts_light_shows_retention_hint():
-    """Вне окна retention раскрытие — превью и подсказка, не весь вывод."""
+    """Вне окна retention раскрытие — хвост и подсказка, не весь вывод."""
     from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
     from gc_tui.services.block_edits import RanResult
     from gc_tui.widgets.tool_blocks_view import output_texts
 
     out = _output(["a", "b", "c", "d"])
-    collapsed, expanded = output_texts(RanResult(output=out, light=True))
-    assert collapsed.plain == "a\nb\nc"
-    assert expanded.plain == f"a\nb\nc\n{RETENTION_DETAIL_HINT}"
+    texts = output_texts(RanResult(output=out, light=True))
+    assert texts.head is None
+    assert texts.tail.plain == "b\nc\nd"
+    assert texts.full.plain == f"b\nc\nd\n{RETENTION_DETAIL_HINT}"
 
 
 def test_output_texts_head_lines():
     from gc_tui.services.block_edits import RanResult
     from gc_tui.widgets.tool_blocks_view import output_texts
 
-    failed, _ = output_texts(RanResult(output=_output([], exit_code=2)))
-    assert failed.plain == "код выхода 2"
-    assert str(failed.spans[0].style) == palette.ERR
-    empty, _ = output_texts(RanResult(output=_output([])))
-    assert empty.plain == "(нет вывода)"
+    failed = output_texts(RanResult(output=_output(["e"], exit_code=2)))
+    assert failed.head.plain == "код выхода 2"
+    assert str(failed.head.style) == palette.ERR
+    assert failed.tail.plain == failed.full.plain == "e"
+    bare = output_texts(RanResult(output=_output([], exit_code=2)))
+    assert bare.head.plain == "код выхода 2"
+    assert bare.tail.plain == ""
+    empty = output_texts(RanResult(output=_output([])))
+    assert empty.head is None
+    assert empty.tail.plain == "(нет вывода)"
     assert output_texts(RanResult(output=None)) is None
 
 
@@ -540,3 +758,143 @@ async def test_call_timer_is_core_time_and_turn_end_keeps_it():
         end_turn(app.views, app.timers, outcome, settled=False)
         await pilot.pause()
         assert row._render_content().plain.endswith("· 13с")
+
+
+# --- тогл — один кадр -------------------------------------------------------
+
+_LONG = "packages/tui/src/gc_tui/widgets/very/long/directory/module_{}"
+
+
+async def _one_frame(pilot, frames, level: str, key: str) -> list[str]:
+    """Тогл ``key`` уровня ``level`` ложится одним кадром: после него —
+    ровно один новый, без промежуточного."""
+    await pilot.pause()
+    del frames[:-1]
+    pilot.app.post_message(BlockToggle(level, key))
+    for _ in range(4):
+        await pilot.pause()
+    assert len(frames) == 2, frames[1:]
+    return frames[-1]
+
+
+def _long_reads(view, n: int) -> None:
+    for i in range(n):
+        key = f"r{i}"
+        row = _row(key, target=_LONG.format(i) + ".py", depth=view.depth)
+        view.add_call(row, C.READ, waiting=False)
+        view.started(row)
+        view.result(row, _ev(key, "12 строк"), None)
+
+
+@pytest.mark.asyncio
+async def test_explored_window_toggle_one_frame(monkeypatch):
+    """Строка, скрытая окном с монтирования, ни разу не раскладывалась:
+    объект сокращается по ширине ленты заранее — раскрытие окна не рисует
+    несокращённый (перенесённый) объект кадром раньше."""
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 30)) as pilot:
+        _long_reads(app.view(), 5)
+        opened = await _one_frame(pilot, frames, "", "block:0:top")
+        assert_trace_grid(trace_rows(app), origin=ORIGIN)
+        # Пять членов — по строке: объект сокращён, хвост на месте.
+        members = [line for line in opened if "Read  packages/" in line]
+        assert len(members) == 5
+        assert members[0].startswith("   └ Read  packages/")
+        assert all(line.endswith("… · 12 строк") for line in members)
+        await _one_frame(pilot, frames, "", "block:0:bottom")
+
+
+async def _one_frame_after(pilot, frames, action) -> list[str]:
+    """Живое событие ``action`` ложится одним кадром."""
+    await pilot.pause()
+    del frames[:-1]
+    action()
+    for _ in range(4):
+        await pilot.pause()
+    assert len(frames) == 2, frames[1:]
+    return frames[-1]
+
+
+@pytest.mark.asyncio
+async def test_group_live_growth_one_frame(monkeypatch, steady_blink):
+    """Идущая группа растёт: 4 члена — видны все, без фразы; пятый
+    сворачивает окно до 3 и `… ещё 2` — каждый шаг одним кадром."""
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 30)) as pilot:
+        view = app.view()
+
+        def add(i: int) -> None:
+            row = _row(f"r{i}", target=f"m{i}.py")
+            view.add_call(row, C.READ, waiting=False)
+            view.started(row)
+
+        for i in range(3):
+            add(i)
+        four = await _one_frame_after(pilot, frames, lambda: add(3))
+        assert sum("Read  m" in line for line in four) == 4
+        assert not any("ещё" in line for line in four)
+        five = await _one_frame_after(pilot, frames, lambda: add(4))
+        assert sum("Read  m" in line for line in five) == 3
+        assert "   └ … ещё 2" in five
+        assert_trace_grid(trace_rows(app), origin=ORIGIN)
+
+
+@pytest.mark.asyncio
+async def test_files_window_and_file_phrase_toggle_one_frame(monkeypatch):
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 40)) as pilot:
+        view = app.view()
+        for i in range(5):
+            _apply_edit(view, _LONG.format(i), 2)
+        await _one_frame(pilot, frames, "", "block:0:top")
+        assert_trace_grid(trace_rows(app), origin=ORIGIN)
+        await _one_frame(pilot, frames, "", "block:0:bottom")
+        _apply_edit(view, "long", 8)
+        await _one_frame(pilot, frames, "", "long:more")
+        await _one_frame(pilot, frames, "", "long:more")
+
+
+@pytest.mark.asyncio
+async def test_agent_window_toggle_one_frame(monkeypatch, steady_blink):
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 40)) as pilot:
+        top = app.view()
+        agent = _row("a1", label="Agent", target="проверка")
+        top.add_call(agent, C.AGENT, waiting=False)
+        trace = app.query_one("#trace", VerticalScroll)
+        model = ToolBlocks(app.timers, diff_preview=3, agent_window=True)
+        nested = ToolBlocksView(_Host(trace), model, level="a1", depth=1)
+        nested.set_owner(agent)
+        app.views["a1"] = nested
+        for i in range(5):
+            row = _row(f"n{i}", label="Run", target=_LONG.format(i), depth=1)
+            nested.add_call(row, C.RUN, waiting=False)
+            nested.started(row)
+            nested.result(row, _ev(f"n{i}"), None)
+        await _one_frame(pilot, frames, "a1", "agent:top")
+        await _one_frame(pilot, frames, "a1", "agent:bottom")
+
+
+@pytest.mark.asyncio
+async def test_ran_output_toggle_one_frame(monkeypatch):
+    """Вывод `Ran` раскрывается на месте, без перемонтирования строк."""
+    from gc_tui.services.block_edits import RanResult
+
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 40)) as pilot:
+        view = app.view()
+        row = _row("x1", label="Run", target="make")
+        view.add_call(row, C.RUN, waiting=False)
+        view.started(row)
+        out = tuple(f"out {i}" for i in range(9))
+        output = CommandOutput(out, 0, 0, False, False, out[-3:], 6)
+        view.result(row, _ev("x1"), None, ran=RanResult(output))
+        opened = await _one_frame(pilot, frames, "", "block:0:output")
+        assert "   └ out 0" in opened
+        closed = await _one_frame(pilot, frames, "", "block:0:output")
+        assert "   └ … ещё 6 строк" in closed

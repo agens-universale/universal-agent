@@ -29,7 +29,11 @@ from gc_core.thread_store import (
     append_turn_outcome_record,
     edits_journal_path,
 )
-from gc_testkit.trace_grid import assert_trace_grid, trace_rows
+from gc_testkit.trace_grid import (
+    assert_trace_grid,
+    record_frames,
+    trace_rows,
+)
 from gc_testkit.tui_support import tui_settings
 from rich.style import Style
 
@@ -136,6 +140,7 @@ _MEMORY = (
 
 
 _SCRIPT = "python - <<'EOF'\nimport json\nprint(1)\nprint(2)\nEOF"
+_X1_OUT = "F\nE\nfailed 1\nerror 1\n2 failed\n"
 _NESTED_READ = json.dumps({"tool": "fs_read_file", "ok": True, "lines": 7})
 
 
@@ -143,7 +148,7 @@ def _before_agent() -> list[dict]:
     return [
         _say("a1", "Посмотрю клиент."),
         *[p for i in range(4) for p in _read(i)],
-        *_run("x1", "uv run pytest -q", "F\nfailed 1\n", exit_code=1),
+        *_run("x1", "uv run pytest -q", _X1_OUT, exit_code=1),
         *[p for m in _MEMORY for p in _memory(*m)],
         _say("a2", "Поправлю."),
         *[p for i in range(3) for p in _edit(i)],
@@ -174,8 +179,9 @@ def _hunks(n: int) -> str:
 
 def _journal(tmp_path) -> None:
     journal = EditsJournal(edits_journal_path(str(tmp_path), "cli", TID))
-    for i in range(3):
-        journal.append(_record(f"e{i}", f"e{i}.py", n=5 + i))
+    # e2 не влезает в превью (11 строк при 10): частичный контекст.
+    for i, n in enumerate((5, 6, 9)):
+        journal.append(_record(f"e{i}", f"e{i}.py", n=n))
     # Дельта шелла перечисляет файлы не по пути: порядок — билдера.
     for path, n in (("gen.py", 4), ("a_gen.py", 1)):
         journal.append(
@@ -433,24 +439,36 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert preview == reopen
     assert live_heads == reopen_heads == preview_heads
     texts = [text for text, _ in preview]
-    assert any("Edited 3 файла (+18 −0)" in t for t in texts)
+    assert any("Edited 3 файла (+20 −0)" in t for t in texts)
     added = [t.split()[1] for t in texts if t.startswith("     Added ")]
     assert added == ["a_gen.py", "gen.py"]
     assert any("Agent  Worker" in t for t in texts)
-    # Свёрнутые диффы — только изменённые строки, контекста нет.
-    assert not any(t.endswith(" ctx") for t in texts)
-    ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
-    assert texts[ran + 1 : ran + 4] == [
-        "   └ код выхода 1",
-        "     F",
-        "     failed 1",
+    # Влезающие диффы — целиком, с контекстом, без фразы; e2 (9
+    # изменённых и 2 контекста при 10) — тоже целиком: одну строку фраза
+    # не прячет. У многострочной команды фраза — под её продолжением, над
+    # выводом.
+    assert sum(t.endswith(" ctx") for t in texts) == 10
+    assert not any("ещё 1" in t for t in texts)
+    phrases = [i for i, t in enumerate(texts) if t == "     + ещё 2 строки"]
+    assert [texts[i - 1 : i + 2] for i in phrases] == [
+        ["     print(1)", "     + ещё 2 строки", "   └ 1"]
     ]
-    assert texts[ran + 4].startswith(" ")
-    assert "└" not in texts[ran + 4]
+    # Вывод свёрнут к хвосту, фраза — над ним; код выхода — первым.
+    ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
+    assert texts[ran + 1 : ran + 6] == [
+        "   └ код выхода 1",
+        "     … ещё 2 строки",
+        "     failed 1",
+        "     error 1",
+        "     2 failed",
+    ]
+    assert texts[ran + 6].startswith(" ")
+    assert "└" not in texts[ran + 6]
+    # Четыре члена `Memory` — видны все.
     start = texts.index(" ● Memory")
     assert texts[start : start + 5] == [
         " ● Memory",
-        "   └ … ещё 1",
+        "   └ Write  goal · 1с",
         "     Read  project · 1с",
         "     Append  state · 1с",
         "     List · 1с",
@@ -576,6 +594,45 @@ async def test_preview_collapse_brings_header_into_view(tmp_path):
         await pilot.pause()
         top = trace.scroll_offset.y
         assert top <= header.virtual_region.y < top + trace.size.height
+
+
+def _long_read(i):
+    name = "fs_read_file"
+    path = f"packages/tui/src/gc_tui/widgets/very/long/directory/m{i}.py"
+    output = json.dumps({"tool": name, "ok": True, "lines": 10 + i})
+    return [_call(f"r{i}", name, {"path": path}), _out(f"r{i}", name, output)]
+
+
+async def _toggle_frames(pilot, screen, frames, key) -> None:
+    """Тогл ``key`` экрана ``screen`` — ровно один новый кадр."""
+    from gc_tui.messages import BlockToggle
+
+    await pilot.pause()
+    del frames[:-1]
+    screen.post_message(BlockToggle("", key))
+    for _ in range(4):
+        await pilot.pause()
+    assert len(frames) == 2, frames[1:]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["reopen", "preview"])
+async def test_window_toggle_one_frame(tmp_path, monkeypatch, where):
+    """Раскрытие и свёртка окна — одним кадром и в ленте, открытой
+    заново, и в превью: строки, скрытые окном с монтирования, сокращены
+    по ширине ленты заранее (у низа ленты и с прокруткой — §9.3)."""
+    frames = record_frames(monkeypatch)
+    thread = _Thread(tmp_path, status="stopped")
+    thread.add(*[p for i in range(5) for p in _long_read(i)])
+    thread.add(_say("a1", "Готово."))
+    async with _app(tmp_path).run_test(size=(70, 24)) as pilot:
+        if where == "preview":
+            screen = await _open_preview(pilot)
+        else:
+            screen = pilot.app.screen
+            screen.attach_active_task(TID, is_resume=True)
+        await _toggle_frames(pilot, screen, frames, "block:0:top")
+        await _toggle_frames(pilot, screen, frames, "block:0:bottom")
 
 
 @pytest.mark.asyncio
@@ -729,6 +786,6 @@ async def test_preview_stopped_orphan_call_equals_reopen(tmp_path):
         " ○ Explored",
         "   └ Read  client/m0.py · 10 строк",
         "     Read  client/m1.py",
-        "       └ отменено",
+        "     └ отменено",
     ]
     assert preview == reopen

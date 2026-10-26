@@ -204,14 +204,24 @@ async def test_preview_row_fits_one_line(width):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("width", _WIDTHS)
 @pytest.mark.parametrize("elapsed", (1, 6, 3725))
-async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
+async def test_running_tail_not_under_scrollbar(
+    tmp_path, monkeypatch, width, elapsed
+):
     """С полосой прокрутки хвост ` · N с` виден целиком левее полосы:
-    ширина под объект считается от content-колонки, полоса в неё не входит."""
+    ширина под объект считается от content-колонки, полоса в неё не входит.
+    Часы строки стоят: проверяется место под хвост, а не ход таймера."""
     pytest.importorskip("textual")
+    from types import SimpleNamespace
+
     from gc_tui.app import TuiApp
     from gc_tui.services.duration_format import format_duration
+    from gc_tui.widgets import tool_call_row
     from textual.containers import VerticalScroll
 
+    clock = [1000.0]
+    monkeypatch.setattr(
+        tool_call_row, "time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test(size=(width, 24)) as pilot:
         trace = pilot.app.screen.query_one("#trace", VerticalScroll)
@@ -222,7 +232,7 @@ async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
         row = _row("exec_command", _CMD)
         trace.mount(row)
         await pilot.pause()
-        row._start_monotonic -= elapsed
+        clock[0] += elapsed
         row._update()
         trace.scroll_end(animate=False)
         await pilot.pause()

@@ -72,7 +72,7 @@ class ConsequenceSlot(Vertical):
         self._composed = False
 
     def set_level(self, level: int) -> None:
-        """Уровень `└`: у члена блока — на шаг глубже его текста."""
+        """Уровень `└`: у члена блока — под началом его текста."""
         if level == self._level:
             return
         self._level = level

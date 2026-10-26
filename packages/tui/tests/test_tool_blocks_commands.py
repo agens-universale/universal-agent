@@ -215,19 +215,22 @@ async def test_ran_preview_and_more(tmp_path):
         )
         lines = _rows(pilot)
         assert lines[1].startswith("● Ran  pytest")
-        assert lines[2:6] == [
-            "  └ line 0",
-            "    line 1",
-            "    line 2",
-            "    + ещё 11 строк",
+        # Свёрнутый вывод — хвост; фраза — над ним, где вывод начинается
+        # (решение 2026-10-26).
+        assert lines[2:] == [
+            "  └ … ещё 11 строк",
+            "    line 11",
+            "    line 12",
+            "    line 13",
         ]
         row = _frame_row(pilot, "pytest")
         assert _colour(row, "pytest") == SUB_INK.lower()
-        assert _colour(_frame_row(pilot, "line 1"), "line 1") == DIM.lower()
+        assert _colour(_frame_row(pilot, "line 12"), "line 12") == DIM.lower()
         await _toggle(pilot)
         lines = _rows(pilot)
-        assert "    line 13" in lines
-        assert lines[-1] == "    − свернуть"
+        assert lines[2:4] == ["  └ line 0", "    line 1"]
+        assert lines[-2:] == ["    line 13", "    − свернуть"]
+        assert len(lines) == 2 + 14 + 1
 
 
 @pytest.mark.asyncio
@@ -250,22 +253,24 @@ async def test_ran_empty(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ran_failed_exit_code(tmp_path):
+@pytest.mark.parametrize(
+    "n,tail",
+    [
+        # 4 строки — видны все: одну строку фраза не прячет.
+        (4, ["    err 0", "    err 1", "    err 2", "    err 3"]),
+        (5, ["    … ещё 2 строки", "    err 2", "    err 3", "    err 4"]),
+    ],
+)
+async def test_ran_failed_exit_code(tmp_path, n, tail):
     thread = _Thread(tmp_path)
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         await _open(pilot)
-        out = _envelope("", _lines(4, "err"), exit_code=2)
+        out = _envelope("", _lines(n, "err"), exit_code=2)
         await _tail(pilot, thread, _run("x1", "make docs"), _out("x1", out))
         lines = _rows(pilot)
         assert lines[1].startswith("● Ran  make docs")
         assert _colour(_frame_row(pilot, "Ran  make"), "●") == ERR.lower()
-        assert lines[2:7] == [
-            "  └ код выхода 2",
-            "    err 0",
-            "    err 1",
-            "    err 2",
-            "    + ещё 1 строка",
-        ]
+        assert lines[2:] == ["  └ код выхода 2", *tail]
         assert _colour(_frame_row(pilot, "код выхода"), "код") == ERR.lower()
         assert not any("· код выхода" in line for line in lines)
 
@@ -360,7 +365,12 @@ async def test_ran_omitted_marker(tmp_path):
             _out("x1", _envelope(channel)),
         )
         lines = _rows(pilot)
-        assert lines[-1] == "    + ещё 3 строки"
+        assert lines[2:] == [
+            "  └ … ещё 3 строки",
+            "    h3",
+            "    t0",
+            "    t1",
+        ]
         assert not any("пропущено" in line for line in lines)
         await _toggle(pilot)
         lines = _rows(pilot)
@@ -401,13 +411,16 @@ async def test_ran_refused(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ran_files_one_phrase(tmp_path):
+async def test_ran_phrases_under_owners(tmp_path):
+    """Фраза — под тем, что раскрывает (решение 2026-10-26): фраза вывода
+    — под выводом, над файлами; файлы, показанные целиком, — без фраз."""
     thread = _Thread(tmp_path)
     _journal(
         tmp_path,
         _shell_record("a.py", n=2),
         _shell_record("new.py", "create", n=10),
         _shell_record("b.py", n=2),
+        _shell_record("c.py", n=2),
         _shell_record("gone.py", "delete", hunks="", flags=["no_diff"]),
     )
     async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
@@ -419,26 +432,30 @@ async def test_ran_files_one_phrase(tmp_path):
             _out("x1", _envelope(_lines(10))),
         )
         lines = _rows(pilot)
-        assert lines[2:5] == ["  └ line 0", "    line 1", "    line 2"]
-        assert lines[5] == "    … ещё 1"
+        assert lines[2:6] == [
+            "  └ … ещё 7 строк",
+            "    line 7",
+            "    line 8",
+            "    line 9",
+        ]
+        assert lines[6] == "    … ещё 2"
         assert any(
             line.startswith("    Added new.py (+10 −0)") for line in lines
         )
         assert "    Deleted gone.py" in lines
-        # Одна фраза — в самом низу: 7 строк вывода, 7 строк new.py сверх
-        # превью в 3 изменённые и 2 строки скрытого a.py.
-        assert lines[-1] == "    + ещё 16 строк"
-        assert sum("+ ещё" in line for line in lines) == 1
+        # Видимые файлы влезают в превью целиком — своих фраз нет; a.py и
+        # b.py скрыты окном.
+        assert not any("+ ещё" in line for line in lines)
         trace = scr.query_one("#trace", VerticalScroll)
         files = [
             r
             for r in trace.query(ToolCallRow)
             if r.call_id.startswith("x1:") and r.display
         ]
-        # По пути: a.py (скрыт), b.py, gone.py, new.py; после `Deleted`
-        # тела нет — new.py без пустой строки.
+        # По пути: a.py, b.py (скрыты), c.py, gone.py, new.py; после
+        # `Deleted` тела нет — new.py без пустой строки.
         assert [r.call_id for r in files] == [
-            "x1:b.py",
+            "x1:c.py",
             "x1:gone.py",
             "x1:new.py",
         ]
@@ -497,28 +514,40 @@ async def test_ran_gap_only_after_diff_file(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ran_file_preview_is_changed_lines_only(tmp_path):
-    """Файл под `Ran` — правило превью то же (решение 2026-10-23): в
-    свёрнутом виде только изменённые строки, фраза считает и контекст,
-    раскрытие показывает дифф целиком."""
+async def test_ran_file_preview_budget_changes_then_context(tmp_path):
+    """Файл под `Ran` — правило превью то же (решение 2026-10-26): 6
+    изменённых и 6 контекста при бюджете 10 — изменённые и 4 ближайших
+    строки контекста, фраза — 2 скрытые; раскрытие — дифф целиком."""
     thread = _Thread(tmp_path)
-    hunks = "@@ -1,7 +1,7 @@\n a\n b\n c\n-old\n+new\n e\n f\n g\n"
+    hunks = (
+        "@@ -1,9 +1,9 @@\n a\n b\n c\n-o1\n-o2\n-o3\n+n1\n+n2\n+n3\n"
+        " e\n f\n g\n"
+    )
     _journal(tmp_path, _shell_record("a.py", hunks=hunks))
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         await _open(pilot)
         await _tail(pilot, thread, _run("x1", "make"), _out("x1", ""))
         lines = _rows(pilot)
         assert lines[3:] == [
-            "      4 -old",
-            "      4 +new",
-            "    + ещё 6 строк",
+            "      2  b",
+            "      3  c",
+            "      4 -o1",
+            "      5 -o2",
+            "      6 -o3",
+            "      4 +n1",
+            "      5 +n2",
+            "      6 +n3",
+            "      7  e",
+            "      8  f",
+            "    + ещё 2 строки",
         ]
         await _toggle(pilot)
         assert "      1  a" in _rows(pilot)
 
 
 @pytest.mark.asyncio
-async def test_ran_files_unrecorded(tmp_path):
+async def test_ran_files_unrecorded_fit_window(tmp_path):
+    """Файл и 3 незаписанных — 4 элемента окна: видно всё, фразы нет."""
     thread = _Thread(tmp_path)
     _journal(tmp_path, _shell_record("a.py", n=1, paths=4))
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
@@ -530,10 +559,27 @@ async def test_ran_files_unrecorded(tmp_path):
             _out("x1", _envelope("ok\n")),
         )
         lines = _rows(pilot)
-        assert "    … ещё 3" in lines
+        assert "    ещё 3 файла не записано" in lines
+        assert not any("… ещё" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_ran_files_unrecorded(tmp_path):
+    thread = _Thread(tmp_path)
+    _journal(tmp_path, _shell_record("a.py", n=1, paths=5))
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(
+            pilot,
+            thread,
+            _run("x1", "codegen"),
+            _out("x1", _envelope("ok\n")),
+        )
+        lines = _rows(pilot)
+        assert "    … ещё 4" in lines
         await _toggle(pilot)
         lines = _rows(pilot)
-        assert "    ещё 3 файла не записано" in lines
+        assert "    ещё 4 файла не записано" in lines
 
 
 # --- многострочная команда --------------------------------------------------
@@ -554,14 +600,36 @@ async def test_ran_multiline_command(tmp_path):
         )
         lines = _rows(pilot)
         assert lines[1].startswith("● Ran  python - <<'EOF'")
-        assert lines[2:6] == [
+        # Фраза команды — под её продолжением, где скрытые строки.
+        assert lines[2:] == [
             "    import json",
             "    print(1)",
-            "  └ 1",
             "    + ещё 2 строки",
+            "  └ 1",
         ]
         row = _frame_row(pilot, "import json")
         assert _colour(row, "import json") == SUB_INK.lower()
+
+
+@pytest.mark.asyncio
+async def test_ran_four_line_command_all_shown(tmp_path):
+    """Команда в 4 строки — видна целиком: одну строку фраза не прячет."""
+    thread = _Thread(tmp_path)
+    script = "python - <<'EOF'\nimport json\nprint(1)\nEOF"
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(
+            pilot, thread, _run("x1", script), _out("x1", _envelope("1\n"))
+        )
+        lines = _rows(pilot)
+        assert lines[2:] == [
+            "    import json",
+            "    print(1)",
+            "    EOF",
+            "  └ 1",
+        ]
+        await _toggle(pilot)
+        assert _rows(pilot)[2:] == lines[2:]
 
 
 @pytest.mark.asyncio
@@ -576,8 +644,15 @@ async def test_ran_multiline_command_and_long_output(tmp_path):
             _out("x1", _envelope(_lines(14))),
         )
         lines = _rows(pilot)
-        assert lines[-1] == "    + ещё 13 строк"
-        assert sum("+ ещё" in line for line in lines) == 1
+        assert lines[2:] == [
+            "    import json",
+            "    print(1)",
+            "    + ещё 2 строки",
+            "  └ … ещё 11 строк",
+            "    line 11",
+            "    line 12",
+            "    line 13",
+        ]
         await _toggle(pilot)
         lines = _rows(pilot)
         assert "    x = 2" in lines and "    EOF" in lines
@@ -616,3 +691,49 @@ async def test_single_line_command_as_before(tmp_path):
         lines = _rows(pilot)
         assert lines[1].startswith("● Ran  ls")
         assert lines[2:] == ["  └ a"]
+
+
+@pytest.mark.asyncio
+async def test_ran_short_output_whole_without_phrase(tmp_path):
+    """Вывод в превью влезает — показан целиком, фраз нет."""
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        await _open(pilot)
+        await _tail(
+            pilot, thread, _run("x1", "ls"), _out("x1", _envelope(_lines(3)))
+        )
+        assert _rows(pilot)[2:] == ["  └ line 0", "    line 1", "    line 2"]
+
+
+@pytest.mark.asyncio
+async def test_ran_click_top_phrase_expands_collapse_at_bottom(tmp_path):
+    """Клик по `… ещё N строк` над хвостом раскрывает весь вывод, клик по
+    `− свернуть` под ним — сворачивает к хвосту."""
+    from gc_tui.widgets.tool_blocks_view import BlockAction
+
+    thread = _Thread(tmp_path)
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        out = _envelope(_lines(6), exit_code=1)
+        await _tail(pilot, thread, _run("x1", "make"), _out("x1", out))
+        phrase = next(w for w in scr.query(".ran-phrase") if w.display)
+        assert "… ещё 3 строки" in str(phrase.render())
+        await pilot.click(phrase)
+        await pilot.pause()
+        lines = _rows(pilot)
+        assert lines[2:5] == ["  └ код выхода 1", "    line 0", "    line 1"]
+        assert lines[-1] == "    − свернуть"
+        collapse = next(
+            w
+            for w in scr.query(BlockAction)
+            if w.display and w.phrase == "− свернуть"
+        )
+        await pilot.click(collapse)
+        await pilot.pause()
+        assert _rows(pilot)[2:] == [
+            "  └ код выхода 1",
+            "    … ещё 3 строки",
+            "    line 3",
+            "    line 4",
+            "    line 5",
+        ]

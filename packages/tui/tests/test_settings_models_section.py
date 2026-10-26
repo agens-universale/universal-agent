@@ -2336,20 +2336,19 @@ _SECOND_WRITING = (
 async def test_own_connection_in_the_second_writing_gets_no_inherited_tail(
     tmp_path,
 ):
-    """§6: хвост «· адрес из «Подключения»» означает УНАСЛЕДОВАННУЮ пару. Запись,
-    задавшая своё подключение вторым написанием (`backend.completions_url`, `proxy`),
-    показывала свой хост И этот хвост — ложь, которая была тут и до правила: гейт
-    смотрел на один ключ `url`, а сам адрес считался с учётом `backend`.
+    """§6: хвост «· адрес из «Подключения»» означает УНАСЛЕДОВАННЫЙ адрес.
+    Своё второе написание адреса (`backend.completions_url`) хвост гасит: иначе
+    строка показывала свой хост и «из «Подключения»» разом. Гейт — ядровое
+    определение §2 (`model_registry.connection_parts`), то же, каким пару считают
+    обе точки валидации и форма записи.
 
-    Судит гейт ЯДРОВЫМ определением §2 (`model_registry.connection_parts`) — тем же,
-    каким пару считают обе точки валидации и форма записи. Прокси — тоже своё
-    подключение (решение владельца 1): он решает, куда физически уйдёт запрос, и
-    звать такой адрес «из «Подключения»» значит называть чужую половину источником."""
+    Прокси в адрес не входит: это транспорт, не свой url. Запись только с
+    `backend.proxy` по-прежнему ходит на хост «Подключения», и хвост остаётся."""
     async with _section(tmp_path, _SECOND_WRITING) as (pilot, scr, _cfg_file):
         await pilot.pause()
         ed = _editor(scr)
         assert ed._address_cell("second") == "my-host"
-        assert ed._address_cell("proxied") == "host"
+        assert ed._address_cell("proxied") == "host · адрес из «Подключения»"
 
 
 async def test_the_address_column_shrinks_but_the_pointer_stays_whole(
@@ -3800,6 +3799,10 @@ async def _open_action_row(pilot, scr, form, row: str, how: str, key: str):
         await pilot.pause()
         await pilot.press("enter")
     else:
+        # Строка справки — последняя в форме и на окне 80 строк стоит на нижней
+        # рамке `#set-scroll`: клик без прокрутки попадает в рамку, а не в строку.
+        form.query_one(f"#{row}").scroll_visible(animate=False)
+        await pilot.pause()
         await pilot.click(f"#{row}")
 
 

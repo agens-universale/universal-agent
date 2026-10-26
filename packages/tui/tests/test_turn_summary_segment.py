@@ -545,6 +545,38 @@ async def _turn_with_edits(pilot, tmp_path, tid):
     return scr, ind
 
 
+def _hover_at(pilot, widget, dx):
+    """Навести указатель на клетку виджета и оставить его там.
+
+    `pilot.hover` запоминает координату, потом делает `pause()` и только затем
+    ищет виджет: за паузу раскладка успевает сдвинуть индикатор. Прямая
+    доставка берёт клетку уже после раскладки. `mouse_position` обязан
+    совпасть с ней: следующий кадр сверяет указатель с этой точкой и иначе
+    шлёт `Leave`, который гасит подсветку.
+    """
+    from textual.events import MouseMove
+    from textual.geometry import Offset
+
+    x = widget.region.x + dx
+    y = widget.region.y
+    pilot.app.mouse_position = Offset(x, y)
+    pilot.app.screen._forward_event(
+        MouseMove(
+            widget,
+            x,
+            y,
+            0,
+            0,
+            0,
+            False,
+            False,
+            False,
+            screen_x=x,
+            screen_y=y,
+        )
+    )
+
+
 def _post_gesture(pilot, widget, down_dx, up_dx=None, *, button=1):
     """Положить нажатие и отпускание в очередь приложения — БЕЗ ожидания.
 
@@ -707,11 +739,15 @@ async def test_hover_over_segment_lightens_it_and_leaving_dims_back(tmp_path):
         _scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
 
-        await pilot.hover(ind, offset=(start + 1, 0))
+        _hover_at(pilot, ind, start + 1)
         await pilot.pause()
         assert ind._summary_hover is True
 
-        await pilot.hover(ind, offset=(0, 0))
+        _hover_at(pilot, ind, 0)
+        await pilot.pause()
+        assert ind._summary_hover is False
+
+        _hover_at(pilot, ind, 0)
         await pilot.pause()
         assert ind._summary_hover is False
 

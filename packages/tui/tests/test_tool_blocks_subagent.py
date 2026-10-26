@@ -72,6 +72,18 @@ def _p418() -> list[tuple]:
     ]
 
 
+def _p418_long() -> list[tuple]:
+    """`p4-18` на два события и одно чтение длиннее: 5 событий, 5 чтений —
+    окна прячут по два."""
+    return [
+        ("prose", "Начинаю."),
+        ("prose", "Смотрю, где клиент берёт таймаут."),
+        *[_read(i) for i in range(5)],
+        _ran(0),
+        ("prose", "Клиент читает таймаут из конфига."),
+    ]
+
+
 def _output(name: str) -> str:
     """Вывод вызова — конверт тула без сводки: хвоста у строки нет."""
     return json.dumps({"tool": name, "ok": True})
@@ -315,9 +327,8 @@ def _write_reopen(tmp_path, steps, *, calls) -> None:
 @pytest.mark.asyncio
 async def test_p418_live_equals_reopen(tmp_path):
     """`p4-18-agent`: вживую, после возврата и в превью — один список
-    строк; под заголовком-ролью — задача `└` (часть блока, не событие),
-    окно 3 последних события, `… ещё 1` — в колонке вложенных глифов,
-    без `└` (владелец 2026-10-23)."""
+    строк; под заголовком-ролью — задача `└` (часть блока, не событие).
+    4 события и 4 чтения — видно всё: одну строку окно не прячет."""
     steps = _p418()
     calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
     live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
@@ -335,12 +346,45 @@ async def test_p418_live_equals_reopen(tmp_path):
     assert _agent_rows(live) == [
         "● Agent  Worker · 2с",
         "  └ проверка клиента",
-        "  … ещё 1",
+        "  ● Смотрю, где клиент берёт таймаут.",
         "  ● Explored",
-        "    └ … ещё 1",
+        "    └ Read  client/m0.py · 2с",
         "      Read  client/m1.py · 2с",
         "      Read  client/m2.py · 2с",
         "      Read  client/m3.py · 2с",
+        "  ● Ran  uv run pytest -q · 2с",
+        "  ● Клиент читает таймаут из конфига.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_p418_long_windows_live_equals_reopen(tmp_path):
+    """5 событий и 5 чтений: окно 3 последних события и `… ещё 2` — в
+    колонке вложенных глифов, без `└`; у `Explored` — `└ … ещё 2`;
+    вживую, после возврата и в превью одинаково."""
+    steps = _p418_long()
+    calls = {cid: 2.0 for cid in [AGENT, *_call_ids(steps)]}
+    live_dir, reopen_dir = tmp_path / "live", tmp_path / "reopen"
+    live_dir.mkdir()
+    reopen_dir.mkdir()
+    async with _app(live_dir).run_test(size=(100, 40)) as pilot:
+        live = await _live(pilot, live_dir, steps, calls=calls)
+    _write_reopen(reopen_dir, steps, calls=calls)
+    async with _app(reopen_dir).run_test(size=(100, 40)) as pilot:
+        scr = await _open(pilot)
+        reopen = _rows(pilot)
+        await _push_preview(pilot, scr)
+        preview = _rows(pilot)
+    assert live == reopen == preview
+    assert _agent_rows(live) == [
+        "● Agent  Worker · 2с",
+        "  └ проверка клиента",
+        "  … ещё 2",
+        "  ● Explored",
+        "    └ … ещё 2",
+        "      Read  client/m2.py · 2с",
+        "      Read  client/m3.py · 2с",
+        "      Read  client/m4.py · 2с",
         "  ● Ran  uv run pytest -q · 2с",
         "  ● Клиент читает таймаут из конфига.",
     ]
@@ -362,14 +406,14 @@ async def test_failed_agent_marker_below_consequences(
     done = _CANCELLED if stopped else _FAILED
     thread.add(_agent_call(), dict(_agent_done(), output=done))
     thread.record({}, stopped=stopped)
-    _sidecar(tmp_path, _p418())
+    _sidecar(tmp_path, _p418_long())
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         await _open(pilot)
         lines = _agent_rows(_rows(pilot))
     assert lines[1:4] == [
         "  └ проверка клиента",
         f"  └ {reason}",
-        "  … ещё 1",
+        "  … ещё 2",
     ]
 
 
@@ -414,7 +458,7 @@ async def test_nested_finish_row_last_event(tmp_path):
     assert live == reopen == preview
     assert _agent_rows(live)[1:] == [
         "  └ проверка клиента",
-        "  … ещё 1",
+        "  ● Смотрю.",
         "  ● Explored",
         "    └ Read  client/m0.py · 2с",
         "  ● Готово.",
@@ -503,25 +547,25 @@ async def test_agent_window_expands_on_click(tmp_path):
     `− свернуть` — последней строкой блока `Agent` в колонке маркера
     `… ещё N` (колонка вложенных глифов, без `└`); клик по ней — снова
     окно."""
-    steps = _p418()
+    steps = _p418_long()
     _write_reopen(tmp_path, steps, calls={})
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         scr = await _open(pilot)
         (phrase,) = _window_phrases(scr, "top")
-        assert phrase.phrase == "… ещё 1"
+        assert phrase.phrase == "… ещё 2"
         await pilot.click(phrase)
         await pilot.pause()
         lines = _agent_rows(_rows(pilot))
         assert lines[1] == "  └ проверка клиента"
-        assert lines[2] == "  ● Смотрю, где клиент берёт таймаут."
-        assert lines[-1] == "  − свернуть"
+        assert lines[2] == "  ● Начинаю."
+        assert lines[-1] == "  − свернуть группу"
         assert not any("└ − свернуть" in line for line in lines)
         (collapse,) = _window_phrases(scr, "bottom")
         await pilot.click(collapse)
         await pilot.pause()
         lines = _agent_rows(_rows(pilot))
-        assert lines[2] == "  … ещё 1"
-        assert "  ● Смотрю, где клиент берёт таймаут." not in lines
+        assert lines[2] == "  … ещё 2"
+        assert "  ● Начинаю." not in lines
         assert not any("свернуть" in line for line in lines)
 
 
@@ -537,7 +581,7 @@ def _window_phrases(scr, slot: str) -> list:
 async def test_agent_collapse_stays_last_on_new_event(tmp_path):
     """Окно раскрыто, субагент идёт: новое событие встаёт над
     `− свернуть` — фраза остаётся последней строкой блока `Agent`."""
-    steps = _p418()
+    steps = _p418_long()
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         thread = _Thread(tmp_path)
         scr = await _open(pilot)
@@ -548,7 +592,7 @@ async def test_agent_collapse_stays_last_on_new_event(tmp_path):
         await pilot.pause()
         await _emit(pilot, _progress([("prose", "Ещё одно событие.")]))
         lines = _agent_rows(_rows(pilot))
-        assert lines[-2:] == ["  ● Ещё одно событие.", "  − свернуть"]
+        assert lines[-2:] == ["  ● Ещё одно событие.", "  − свернуть группу"]
 
 
 @pytest.mark.asyncio
@@ -800,7 +844,7 @@ async def test_stop_mid_nested_explored_live_reopen_preview(tmp_path):
         "    └ Read  client/m0.py · 2с",
         "      Read  client/m1.py · 2с",
         "      Read  client/m9.py",
-        "        └ отменено",
+        "      └ отменено",
     ]
     # Остановленный посреди вызов после переоткрытия — без таймера: в
     # `calls` его нет (спека §3.4, «Непокрыто»); остальное — одно.
@@ -842,6 +886,6 @@ async def test_stopped_nested_orphan_call_reopen_preview(tmp_path):
         "  ○ Explored",
         "    └ Read  client/m0.py",
         "      Read  client/m9.py",
-        "        └ отменено",
+        "      └ отменено",
     ]
     assert preview == reopen

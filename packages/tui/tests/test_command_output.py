@@ -44,9 +44,10 @@ def _lines(n: int) -> str:
     return "".join(f"line {i}\n" for i in range(n))
 
 
-def test_preview_three_of_fourteen():
+def test_tail_three_of_fourteen():
+    """Свёрнутый вывод — хвост: последние строки (решение 2026-10-26)."""
     parsed = parse_command_output(_envelope(_lines(14)))
-    assert parsed.preview == ("line 0", "line 1", "line 2")
+    assert parsed.tail == ("line 11", "line 12", "line 13")
     assert parsed.hidden == 11
     assert len(parsed.lines) == 14
     assert parsed.exit_code == 0
@@ -70,8 +71,22 @@ def test_truncated_channel_marker_between_head_and_tail():
     parsed = parse_command_output(_envelope(stdout))
     assert parsed.lines == ("a", "b", "… пропущено 1 200 символов", "y", "z")
     assert parsed.omitted_chars == 1200
-    assert parsed.preview == ("a", "b", "y")
-    assert parsed.hidden == 1
+    # Четыре строки вывода — видны все: одну строку фраза не прячет.
+    assert parsed.tail == ("a", "b", "y", "z")
+    assert parsed.hidden == 0
+
+
+def test_tail_five_lines_hides_two():
+    stdout = {
+        "truncated": True,
+        "head": "a\nb\nc\n",
+        "tail": "y\nz\n",
+        "total_chars": 1210,
+        "omitted_chars": 1200,
+    }
+    parsed = parse_command_output(_envelope(stdout))
+    assert parsed.tail == ("c", "y", "z")
+    assert parsed.hidden == 2
 
 
 def test_omitted_line_plural():
@@ -98,7 +113,7 @@ def test_background_has_no_lines():
     )
     assert parsed.background is True
     assert parsed.lines == ()
-    assert parsed.preview == ()
+    assert parsed.tail == ()
     assert parsed.hidden == 0
 
 

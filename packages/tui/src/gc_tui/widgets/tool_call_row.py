@@ -32,10 +32,11 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
   (`detail_call_id`);
 - member — член блока: без глифа, текст в колонке 4 (`└ ` в колонке 2 у
   первого видимого), глагол `DIM`, объект и хвост `MUTED`, идущий — `INK`;
-  `└` следствия — на шаг глубже текста.
-`Ran` (`set_command`, `set_output`, `set_parts_expanded`): продолжение
-команды — строками под первой (колонка 4), вывод — первым следствием `└`;
-раскрытие — вся команда и весь вывод.
+  `└` следствия — под началом текста.
+`Ran` (`set_command`, `set_output`, `set_parts`): продолжение команды —
+строками под первой (колонка 4), под ним и вывод — части `RanParts`
+(хвост вывода, фразы раскрытия там, где скрытое); раскрытие — вся команда
+и весь вывод.
 Застывший таймер (`set_elapsed`; имя `set_timer` занято
 таймерами Textual) появляется только по решению модели: строка
 без модели выглядит как прежде. Вызов быстрее секунды — без таймера.
@@ -46,6 +47,7 @@ from __future__ import annotations
 import time
 from typing import Callable, Literal, Optional
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -66,12 +68,7 @@ from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import SUB_INK as _SUB_INK
 from gc_tui.services.duration_format import format_timer
-from gc_tui.services.tool_blocks import (
-    COMMAND_PREVIEW_LINES,
-    Parts,
-    WordRole,
-    counts_text,
-)
+from gc_tui.services.tool_blocks import Parts, WordRole, counts_text
 from gc_tui.services.trace_glyphs import (
     CALL_GLYPH,
     CALL_UNDONE_GLYPH,
@@ -93,6 +90,7 @@ from gc_tui.widgets.block_panel import (
 from gc_tui.widgets.click_model import ClickModelMixin
 from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
+from gc_tui.widgets.ran_output import RAN_PHRASE_CLASS, OutputTexts, RanParts
 from gc_tui.widgets.static_content import update_if_changed
 
 # Running-строка на человеко-ожидании (confirm / ask_human): `●` в базовом
@@ -301,11 +299,15 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._block_consequence: Optional[Text] = None
         self._edit_tail: Optional[Text] = None
         self._word_role: WordRole = "edit"
-        # `Ran`: продолжение команды (строки после первой) и вывод
-        # (свёрнутый, раскрытый) — следствием под строкой.
+        # `Ran`: продолжение команды (строки после первой); вывод и фразы
+        # раскрытия — части под строкой (`RanParts`, по первой нужде);
+        # ключ тогла фраз частей.
         self._command_rest: tuple[str, ...] = ()
-        self._output: Optional[tuple[Text, Text]] = None
+        self._command_shown = 0
+        self._ran: Optional[RanParts] = None
+        self._has_output = False
         self._parts_expanded = False
+        self._parts_key: Optional[str] = None
         self._detail: Optional[Callable[[], Optional[str]]] = None
         # Часы хода ядра: время вызова по `call_id` или None (не знают).
         self._clock: Optional[Callable[[str], Optional[float]]] = None
@@ -327,6 +329,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             yield _CopyButton(
                 copy_glyph(), classes="block-copy trace-action", markup=False
             )
+        if self._ran is not None:
+            yield self._ran
         yield self._consequence_slot
 
     def on_mount(self) -> None:
@@ -385,6 +389,14 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         собственных часов, пока ядро вызов знает."""
         self._clock = source
 
+    def refit(self) -> None:
+        """Строку показывают: ни разу не разложенная (скрыта с
+        монтирования) пересобирается по ширине ленты сейчас — при сборке
+        ширины могло ещё не быть, и первый показ нарисовал бы объект
+        несокращённым."""
+        if self.size.width == 0:
+            self._update()
+
     def set_mode(
         self,
         mode: RowMode,
@@ -399,7 +411,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._current = current
         self.set_class(mode == "member", "-member")
         self.set_class(gap, "-gap")
-        depth = 2 if mode == "member" else 0
+        # `└` члена — под началом его текста (колонка 4), как `└` одиночной
+        # строки под её текстом (колонка 2).
+        depth = 1 if mode == "member" else 0
         self._consequence_slot.set_level(self._level + depth)
         self._sync_pulse()
         self._update()
@@ -419,25 +433,50 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._word_role = role
         self._update()
 
-    def set_command(self, lines: tuple[str, ...]) -> None:
+    def set_command(self, lines: tuple[str, ...], *, shown: int) -> None:
         """Команда `Ran` построчно: первая — объект строки, остальные —
-        продолжение под ней (колонка 4)."""
+        продолжение под ней (колонка 4); ``shown`` — сколько строк видно
+        свёрнутой, решение блока."""
         if not lines:
             return
         self._target = lines[0]
         self._fitted = (-1, lines[0])
         self._command_rest = tuple(lines[1:])
+        self._command_shown = shown
         self._update()
 
-    def set_output(self, collapsed: Text, expanded: Text) -> None:
-        """Вывод `Ran` — первое следствие под строкой: превью и весь."""
-        self._output = (collapsed, expanded)
+    def set_output(self, texts: OutputTexts) -> None:
+        """Вывод `Ran` под строкой: код выхода, хвост и весь; новый вывод
+        того же вызова (стрим) — тот же виджет, хвост сдвигается."""
+        self._has_output = True
+        self._ran_parts().set_output(texts)
         self._update()
 
-    def set_parts_expanded(self, expanded: bool) -> None:
-        """Блок `Ran` раскрыт: вся команда и весь вывод."""
+    def set_parts(
+        self,
+        expanded: bool,
+        *,
+        command: Optional[str],
+        output: Optional[str],
+        key: str,
+    ) -> None:
+        """Части `Ran` по решению модели: раскрыта ли строка (вся команда
+        и весь вывод) и фразы скрытого — под продолжением команды и над
+        хвостом вывода; клик по ним шлёт тогл ``key``."""
         self._parts_expanded = expanded
+        self._parts_key = key
+        self._ran_parts().set_state(
+            expanded=expanded, command=command, output=output
+        )
         self._update()
+
+    def _ran_parts(self) -> RanParts:
+        """Части `Ran` — по первой нужде: у прочих строк виджетов нет."""
+        if self._ran is None:
+            self._ran = RanParts(self._level)
+            if self._content_static is not None:
+                self.mount(self._ran, before=self._consequence_slot)
+        return self._ran
 
     def set_elapsed(self, seconds: Optional[float]) -> None:
         """Застывший таймер: ``seconds`` или, если `None`, часы строки на
@@ -648,11 +687,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return text
 
     def _append_command_rest(self, text: Text, style: str) -> None:
-        """Продолжение команды под строкой: в свёрнутом виде — до двух
-        строк (§4.0), раскрытом — все; длинная строка — `…` по ширине."""
+        """Продолжение команды под строкой: в свёрнутом виде — сколько
+        решил блок (§4.0, `set_command`), раскрытом — все; длинная строка
+        — `…` по ширине."""
         rest = self._command_rest
         if not self._parts_expanded:
-            rest = rest[: COMMAND_PREVIEW_LINES - 1]
+            rest = rest[: self._command_shown - 1]
         width = self._content_width()
         for line in rest:
             if width > 2:
@@ -691,7 +731,29 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         return word, _SUB_INK
 
     def _content_width(self) -> int:
-        return self._content_static.size.width if self._content_static else 0
+        """Ширина content-колонки; ещё не раскладывалась — та, что даст
+        раскладка (`_row_width` без префикса и ❐)."""
+        static = self._content_static
+        if static is not None and static.size.width > 0:
+            return static.size.width
+        width = self._row_width() - self._render_prefix().cell_len
+        if width > 0 and self.has_class("edited"):
+            # ❐: `width: auto` и поле справа в одну клетку.
+            width -= cell_len(copy_glyph()) + 1
+        return max(0, width)
+
+    def _row_width(self) -> int:
+        """Ширина строки. Строка, скрытая блоком с монтирования (вне окна),
+        ещё не раскладывалась — её ширина та же, что у ленты (строка в ней
+        во всю ширину): объект сокращается заранее, и первый показ
+        (раскрытие окна) — один кадр, без несокращённого объекта до
+        `Resize`."""
+        if self.size.width > 0:
+            return self.size.width
+        parent = self.parent
+        if isinstance(parent, Widget):
+            return parent.scrollable_content_region.width
+        return 0
 
     def _tail_room(self, label_cols: int, sep: int = 2) -> Optional[int]:
         """Сколько клеток хвосту, когда объект сжат до своего минимума
@@ -769,16 +831,13 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         bodies = list(self._consequences)
         if self._block_consequence is not None:
             bodies.insert(0, self._block_consequence)
-        elif self._ends_with_line and self._result and self._output is None:
+        elif self._ends_with_line and self._result and not self._has_output:
             style = _OUTCOME_LOOK[self._outcome][2]
             bodies.insert(0, Text(self._result, style=style))
-        if self._output is not None:
-            collapsed, expanded = self._output
-            bodies.insert(0, expanded if self._parts_expanded else collapsed)
         if self._agent_task:
             # Тело `└` — на 4 правее глифа; ширина — от самой строки: её
             # Resize приходит раньше раскладки колонок.
-            cols = self.size.width - len(level_prefix(self._level)) - 4
+            cols = self._row_width() - len(level_prefix(self._level)) - 4
             task = fit_lines(self._agent_task, cols, AGENT_TASK_LINES)
             bodies.insert(0, Text(task, style=_DIM))
         return bodies
@@ -809,13 +868,18 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             text.append(timer, style=_RUN)
 
     def on_click(self, event: events.Click) -> None:
-        """Клик по ❐ копирует дифф правки и строку не выделяет.
+        """Клик по ❐ копирует дифф правки и строку не выделяет; по фразе
+        частей `Ran` — раскрывает или сворачивает их.
 
         Остальные клики — клик-модель строки; Ctrl+клик по кнопке открывает
         событие, как с любой точки строки. `prevent_default()` на входе и
         явный super(): иначе Textual по MRO вызвал бы миксин вторым."""
         event.prevent_default()
         widget = getattr(event, "widget", None)
+        if widget is not None and widget.has_class(RAN_PHRASE_CLASS):
+            event.stop()
+            self._toggle_parts()
+            return
         if (
             not event.ctrl
             and widget is not None
@@ -826,6 +890,13 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._flash_copied()
             return
         super().on_click(event)
+
+    def _toggle_parts(self) -> None:
+        """Клик по фразе частей `Ran` — тогл её владельца в модели."""
+        if self.block_key is not None and self._parts_key is not None:
+            from gc_tui.messages import BlockToggle
+
+            self.post_message(BlockToggle(self.block_key[0], self._parts_key))
 
     def _open_request(self) -> Optional[Message]:
         # Клик/Enter → детальный экран call + output.

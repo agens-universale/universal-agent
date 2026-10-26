@@ -842,3 +842,16 @@ def test_agent_word_role_name_is_ink():
     assert content.plain.startswith("Agent  worker")
     assert _style_at(content, "Agent") == f"bold {INK}"
     assert _style_at(content, "worker") == INK
+
+
+@pytest.mark.parametrize("shown", [1, 3, 5])
+def test_folded_command_shows_count_from_model(shown):
+    """Свёрнутая команда показывает столько строк, сколько решил блок
+    (`shown`): строка сама их не пересчитывает."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    lines = ("a1", "b2", "c3", "d4", "e5")
+    row = ToolCallRow(call_id="r1", label="Run", target="")
+    row.set_command(lines, shown=shown)
+    content = row._render_content().plain
+    assert [ln for ln in lines if ln in content] == list(lines[:shown])
