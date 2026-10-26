@@ -715,10 +715,6 @@ def _choice_records(tmp_path: Path) -> list:
     ]
 
 
-def _label(mark: ModelMark) -> str:
-    return mark._content.plain.strip("─ ")
-
-
 async def _attached(pilot, app: TuiApp) -> object:
     scr = app.screen
     scr.attach_active_task(_TID, is_resume=True)
@@ -748,7 +744,8 @@ async def test_profile_switch_changing_next_model_replaces_rule(tmp_path):
         )
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        assert [_label(m) for m in _marks(scr)] == ["● qwen-coder"]
+        (restored,) = _marks(scr)
+        await _assert_rule(pilot, restored, "● qwen-coder")
 
 
 @pytest.mark.asyncio
@@ -855,6 +852,8 @@ async def test_empty_trace_profile_switch_keeping_model_adds_none(tmp_path):
 
 
 async def _finish_run(pilot, app: TuiApp) -> None:
+    """Тик застаёт ход бегущим, затем ход кончается."""
+    await _ticks(pilot, 1)
     app.active_runner.running = False
     await _ticks(pilot)
     app.active_runner = None
@@ -911,3 +910,54 @@ async def test_choice_dropped_at_run_end_is_followed(tmp_path):
         last = _marks(scr)[-1]
         # glm-flash теперь на двух уровнях — две точки.
         await _assert_rule(pilot, last, "●● glm-flash")
+
+
+async def _run_with_slot_change(pilot, app: TuiApp, tmp_path: Path) -> _Runner:
+    """Ход на `default` (glm-4.6 по конфигу старта хода); во время хода
+    перечитанный конфиг делает default моделью qwen-coder."""
+    runner = _Runner("default")
+    app.active_runner = runner
+    await pilot.pause()
+    _write_config(tmp_path, slots={"default": "qwen-coder"})
+    app.reload_config()
+    await pilot.pause()
+    return runner
+
+
+@pytest.mark.asyncio
+async def test_empty_trace_baseline_is_model_the_run_ran_on(tmp_path):
+    """Опора пустой ленты после хода — модель, на которой ход шёл (его
+    Router), а не то, во что выбор резолвит уже сменённый конфиг."""
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
+
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        await _run_with_slot_change(pilot, app, tmp_path)
+        assert _marks(scr) == []
+        await _finish_run(pilot, app)
+        (mark,) = _marks(scr)
+        await _assert_rule(pilot, mark, "● qwen-coder")
+        assert _choice_records(tmp_path) == [
+            ModelChoiceRecord("default", "qwen-coder", "glm-4.6")
+        ]
+
+
+@pytest.mark.asyncio
+async def test_follow_waits_for_stop_thread_to_exit(tmp_path):
+    """Стоп: поток хода ещё дорабатывает — сверки нет; вышел — сверка на
+    тике, черта модели следующего хода."""
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        runner = await _run_with_slot_change(pilot, app, tmp_path)
+        await _ticks(pilot, 1)
+        app.last_stop_requested = True
+        scr._stopping_runner = runner
+        app.active_runner = None
+        await _ticks(pilot)
+        assert _marks(scr) == []
+        runner.running = False
+        await _ticks(pilot)
+        (mark,) = _marks(scr)
+        await _assert_rule(pilot, mark, "● qwen-coder")

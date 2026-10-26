@@ -793,6 +793,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Остановленный раннер, чей поток ещё дорабатывает (стоп
         # кооперативный): строка итога мигает «■» (решение 26).
         self._stopping_runner = None
+        # Сверка отметки модели, которую должен конец хода, пока ход не
+        # позади (поток стопа жив): `(опора,)`; долга нет — None.
+        self._owed_follow: Optional[tuple[Optional[str]]] = None
         self._was_summarizing: bool = (
             False  # для baseline last_compact_msg_count
         )
@@ -2508,6 +2511,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         отправки этого вида: в открытой сессии её не было, откатывать нечего
         до новой отправки."""
         self._stopping_runner = None
+        self._owed_follow = None
         self._last_user_message_id = None
         self._closed_turn_summary = None
 
@@ -5339,10 +5343,28 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
 
     def _run_model(self, runner) -> str | None:
-        """Модель, которой шёл закончившийся ход; неизвестна — None."""
+        """Модель, на которой шёл закончившийся ход: применённый выбор
+        через Router его executor'а (конфиг старта хода), а не через уже
+        сменённый конфиг окна; неизвестна — None."""
+        from gc_core.model_choice import model_of
+
         applied_fn = getattr(runner, "applied_choice", None)
-        applied = applied_fn() if callable(applied_fn) else None
-        return self._choice_model(applied) if applied else None
+        router_fn = getattr(runner, "executor_router", None)
+        if not callable(applied_fn) or not callable(router_fn):
+            return None
+        applied, router = applied_fn(), router_fn()
+        if not applied or router is None:
+            return None
+        return model_of(router, applied)
+
+    def _pay_owed_follow(self) -> None:
+        """Сверка, отложенная концом хода (поток стопа ещё жил), — как
+        только ход действительно позади; долг гасится."""
+        if self._owed_follow is None or not self._between_turns():
+            return
+        (baseline,) = self._owed_follow
+        self._owed_follow = None
+        self._follow_next_model(baseline)
 
     def _pending_model_mark(self) -> Optional[ModelMark]:
         """Тихая отметка — всегда в прижатом хвосте ленты."""
@@ -5969,7 +5991,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._show_turn_outcome(word, plan_proposed, outcome, edits=edits)
         if on_screen:
             self._settle_pending_mark()
-            self._follow_next_model(self._run_model(runner))
+            self._owed_follow = (self._run_model(runner),)
+            self._pay_owed_follow()
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
@@ -6294,6 +6317,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._poll_trace_tail()
             self._drain_trace_notes()
             self._settle_pending_mark()
+            self._pay_owed_follow()
             # Ход кончился, хвост дочитан: впущенное уже сверено. Остальное
             # ядро может держать до следующего прогона (сообщение во время
             # `/compact`) — в поле только снятое у него. После стопа
