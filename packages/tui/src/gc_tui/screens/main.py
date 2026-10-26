@@ -1059,6 +1059,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         model = self._choice_alias(choice) or choice
         return model_sign.sign(model, slots, name_style=name_style)
 
+    def _choice_model(self, choice: str) -> str:
+        """Модель выбора для сравнения смен — как `ModelMark.model`."""
+        return self._choice_alias(choice) or choice
+
     def _choice_alias(self, choice: str) -> str | None:
         """Модель, в которую выбор резолвит витрина; у `auto` её нет."""
         if choice == "auto":
@@ -2015,7 +2019,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         транскрибации. Но и не забываем: помечаем flow устаревшим, и он уйдёт, как
         только вернётся в idle (`_on_voice_state`). Раньше здесь стоял голый `return`,
         и обещание докстринга «пересоберётся на следующем Ctrl+T» не исполнял никто —
-        диктовки до конца сессии шли на прежний адрес (находка ревью коллеги)."""
+        диктовки до конца сессии шли на прежний адрес (находка ревью коллеги).
+
+        Сюда приходит и смена профиля: отметка модели в ленте сверяется с
+        моделью следующего хода (`_follow_next_model`)."""
+        self._follow_next_model()
         if self._voice is None:
             return
         if self._voice.state != "idle":
@@ -5213,9 +5221,31 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _last_model_choice(self) -> str | None:
         """Выбор последней отметки модели в ленте; отметок нет — None."""
+        mark = self._last_model_mark()
+        return mark.choice if mark is not None else None
+
+    def _last_model_mark(self) -> Optional[ModelMark]:
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         marks = trace.query(ModelMark)
-        return marks.last().choice if marks else None
+        return marks.last() if marks else None
+
+    def _follow_next_model(self) -> None:
+        """Смена между ходами (профиль, «модель по умолчанию», перечитанный
+        конфиг) увела следующий ход на другую модель, чем у последней
+        отметки ленты, — черта, как у `/model` между ходами: склейка с
+        соседней, возврат к прежней модели — без черты, запись в тред.
+        Во время хода и пока отметка ждёт применения лента не трогается;
+        отметок нет — ленте нечему противоречить."""
+        if self._run_in_progress() or self._pending_model_mark() is not None:
+            return
+        last = self._last_model_mark()
+        if last is None:
+            return
+        choice = current_choice(self.app)
+        if self._choice_model(choice) == last.model:
+            return
+        self._mount_applied_mark(choice, last.model)
+        self._write_model_choice(choice, last.model)
 
     def _apply_pending_mark(
         self, mark: ModelMark, choice: str, alias: str | None
@@ -5329,8 +5359,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             if choice == previous:
                 self._hint_already_working(choice)
             else:
-                self._mount_applied_mark(choice, previous)
-                self._write_model_choice(choice, previous)
+                before = self._choice_model(previous)
+                self._mount_applied_mark(choice, before)
+                self._write_model_choice(choice, before)
             return
         applied_fn = getattr(self.app.active_runner, "applied_choice", None)
         applied = applied_fn() if callable(applied_fn) else None
@@ -5343,8 +5374,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         elif mark is not None:
             mark.set_choice(choice, self._choice_alias(choice))
         else:
+            before = self._choice_model(applied) if applied else None
             self._trace_mount(
-                self._new_model_mark(choice, pending=True, before=applied)
+                self._new_model_mark(choice, pending=True, before=before)
             )
 
     def _hint_already_working(self, choice: str) -> None:

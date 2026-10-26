@@ -371,7 +371,7 @@ async def test_change_during_run_is_written_where_it_applied(
     at = rows.index(record)
     before = [row for row in rows[:at] if row["type"] == "message"]
     assert parse_model_choice(record) == ModelChoiceRecord(
-        "max", "big", "light"
+        "max", "big", "fast"
     )
     assert record["seq"] == before[-1]["seq"]
     assert before[-1]["payload"].get("type") == "function_call_output"
@@ -389,7 +389,7 @@ async def test_change_at_run_end_is_written_after_turn_outcome(
         "model_choice",
     ]
     assert parse_model_choice(rows[-1]) == ModelChoiceRecord(
-        "max", "big", "light"
+        "max", "big", "fast"
     )
     assert rows[-1]["seq"] == rows[-2]["seq"]
 
@@ -416,7 +416,7 @@ async def test_applied_choice_reaches_recorder_with_previous_choice(
     await _tick(state, ctx)
     await _tick(state, ctx)
 
-    assert records == [ModelChoiceRecord("max", "big", "light")]
+    assert records == [ModelChoiceRecord("max", "big", "fast")]
 
 
 async def test_subagent_calls_record_nothing(tmp_path, monkeypatch):

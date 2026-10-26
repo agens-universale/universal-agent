@@ -43,9 +43,9 @@ _CFG = {
     "models": {"glm-flash": {}, "glm-4.6": {}, "giga-max": {}, "qwen": {}},
     "slots": _SLOTS,
 }
-_TO_MAX = ModelChoiceRecord("max", "giga-max", "default")
-_TO_QWEN = ModelChoiceRecord("qwen", "qwen", "max")
-_BACK_TO_DEFAULT = ModelChoiceRecord("default", "glm-4.6", "max")
+_TO_MAX = ModelChoiceRecord("max", "giga-max", "glm-4.6")
+_TO_QWEN = ModelChoiceRecord("qwen", "qwen", "giga-max")
+_BACK_TO_DEFAULT = ModelChoiceRecord("default", "glm-4.6", "giga-max")
 
 
 def _user(mid: str) -> dict:

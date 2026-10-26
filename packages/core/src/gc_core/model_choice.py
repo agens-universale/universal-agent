@@ -5,7 +5,8 @@
 основного вызова главного трейса и завершение рана сообщают фронтенду о
 смене через хук `RunContext.on_model_choice_applied` и отдают запись смены
 для треда (`ModelChoiceRecord`). Сравниваются выборы, а не модели; решения
-внутри `auto` событием не считаются.
+внутри `auto` событием не считаются. Прежний выбор запись несёт моделью
+(`model_of`): по ней фронтенд узнаёт возврат к прежней модели.
 """
 
 from __future__ import annotations
@@ -50,7 +51,16 @@ def note_applied(
     hook = getattr(ctx, "on_model_choice_applied", None)
     if hook is not None:
         hook(ModelChoiceApplied(choice, alias, at_run_end))
-    return ModelChoiceRecord(choice, alias, before)
+    return ModelChoiceRecord(choice, alias, model_of(router, before))
+
+
+def model_of(router: Any, choice: str | None) -> str | None:
+    """Модель выбора для сравнения смен: `auto` — сам выбор, уровень или
+    алиас — модель, в которую он резолвится; выбора нет — `None`."""
+    if choice is None or choice == AUTO:
+        return choice
+    resolved = router.resolve_main_at(choice, check_breaker=False)
+    return resolved.alias or choice
 
 
 async def anote_applied(state: Any, ctx: Any, choice: str) -> None:

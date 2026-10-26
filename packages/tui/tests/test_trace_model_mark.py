@@ -584,7 +584,7 @@ async def test_idle_change_is_written_and_restored(tmp_path):
         await pilot.pause()
         record = _thread_rows(tmp_path)[-1]
         assert parse_model_choice(record) == ModelChoiceRecord(
-            "max", "giga-max", "default"
+            "max", "giga-max", "glm-4.6"
         )
         assert record["seq"] == 2
         assert len(_marks(scr)) == 1
@@ -622,3 +622,233 @@ async def test_change_before_first_message_is_not_written(tmp_path):
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
         assert _marks(scr) == []
+
+
+# ---- отметка следует за моделью следующего хода (смок, п.15) ------------
+#
+# Смена между ходами, меняющая модель следующего хода (профиль, «модель по
+# умолчанию» в Настройках, перечитанный конфиг), ставит черту так же, как
+# `/model`: склейка с соседней, возврат к прежней модели — без черты, запись
+# в тред. Сравнивается модель, а не выбор. Отметок в ленте нет — ленте
+# нечему противоречить, черты нет. Во время хода лента не трогается.
+
+_CONFIG = {
+    "backend": {
+        "api_mode": "chat_completions",
+        "completions_url": "http://base/v1/chat/completions",
+    },
+    "models": {"glm-flash": {}, "glm-4.6": {}, "qwen-coder": {}},
+    "slots": {"light": "glm-flash", "default": "glm-4.6"},
+    "model": "default",
+}
+
+
+def _write_config(tmp_path: Path, **changes) -> Path:
+    import yaml
+
+    body = {
+        **_CONFIG,
+        "paths": {"threads_data_path": str(tmp_path / "threads")},
+        **changes,
+    }
+    path = tmp_path / "config.yml"
+    path.write_text(yaml.safe_dump(body), encoding="utf-8")
+    return path
+
+
+def _write_profile(tmp_path: Path, name: str, body: dict) -> None:
+    import yaml
+
+    path = tmp_path / "profiles" / f"{name}.yml"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(yaml.safe_dump(body), encoding="utf-8")
+
+
+def _config_app(tmp_path: Path) -> TuiApp:
+    """Окно на настоящем config.yml и профилях рядом с ним; тред с одним
+    ходом."""
+    from gc_core.config import load_settings
+
+    threads = tmp_path / "threads"
+    _write_thread(threads)
+    _write_dialog(threads)
+    cfg = _write_config(tmp_path)
+    _write_profile(tmp_path, "work", {"slots": {"light": "qwen-coder"}})
+    _write_profile(tmp_path, "keep", {"slots": {"default": "qwen-coder"}})
+    app = TuiApp(
+        threads_dir=str(threads),
+        system="cli",
+        settings=load_settings(str(cfg)),
+    )
+    app.set_config_path(str(cfg))
+    return app
+
+
+def _write_history_with_rule(threads: Path) -> None:
+    """Ход, черта «glm-4.6» (смена в ходе, без сессионного выбора), ещё
+    ход: последняя отметка ленты — glm-4.6, за ней сообщения."""
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
+    from gc_core.thread_store import (
+        append_model_choice_record,
+        append_new_thread_messages,
+    )
+
+    record = ModelChoiceRecord("default", "glm-4.6", "glm-flash")
+    append_model_choice_record(str(threads), "cli", _TID, record, seq=2)
+    msgs = [
+        {"id": "u2", "role": "user", "content": "ещё вопрос"},
+        {"id": "a2", "role": "assistant", "content": "ещё ответ"},
+    ]
+    append_new_thread_messages(
+        str(threads), "cli", _TID, msgs, set(), start_seq=2
+    )
+
+
+def _choice_records(tmp_path: Path) -> list:
+    from gc_core.persistence.model_choice_record import parse_model_choice
+
+    return [
+        parse_model_choice(r)
+        for r in _thread_rows(tmp_path)
+        if r["type"] == "model_choice"
+    ]
+
+
+def _label(mark: ModelMark) -> str:
+    return mark._content.plain.strip("─ ")
+
+
+async def _attached(pilot, app: TuiApp) -> object:
+    scr = app.screen
+    scr.attach_active_task(_TID, is_resume=True)
+    app.tui_state.active_task_id = _TID
+    await pilot.pause()
+    return scr
+
+
+@pytest.mark.asyncio
+async def test_profile_switch_changing_next_model_replaces_rule(tmp_path):
+    """Смок: /model light (черта glm-flash), профиль, где light — другая
+    модель: черта одна — новой модели, в треде запись смены."""
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
+
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        scr._cmd_model("light")
+        await pilot.pause()
+        app.switch_session_profile("work")
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        await _assert_rule(pilot, mark, "● qwen-coder")
+        assert list(_trace(scr).children)[-1] is mark
+        assert _choice_records(tmp_path)[-1] == ModelChoiceRecord(
+            "light", "qwen-coder", "glm-flash"
+        )
+        scr.attach_active_task(_TID, is_resume=True)
+        await pilot.pause()
+        assert [_label(m) for m in _marks(scr)] == ["● qwen-coder"]
+
+
+@pytest.mark.asyncio
+async def test_profile_switch_keeping_next_model_adds_no_rule(tmp_path):
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        scr._cmd_model("light")
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        written = _choice_records(tmp_path)
+        app.switch_session_profile("keep")
+        await pilot.pause()
+        assert _marks(scr) == [mark]
+        await _assert_rule(pilot, mark, "● glm-flash")
+        assert _choice_records(tmp_path) == written
+
+
+@pytest.mark.asyncio
+async def test_config_change_back_to_model_before_rule_leaves_none(tmp_path):
+    """/model light (черта glm-flash вместо glm-4.6), перечитанный конфиг
+    делает light снова glm-4.6: смены модели нет — черты нет. Выбор при
+    этом прежний: сравнивается модель."""
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        scr._cmd_model("light")
+        await pilot.pause()
+        _write_config(tmp_path, slots={"light": "glm-4.6"})
+        app.reload_config()
+        await pilot.pause()
+        assert _marks(scr) == []
+
+
+@pytest.mark.asyncio
+async def test_settings_model_default_write_adds_rule(tmp_path):
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
+    from gc_tui.screens.settings import SettingsScreen
+
+    app = _config_app(tmp_path)
+    _write_history_with_rule(tmp_path / "threads")
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        (restored,) = _marks(scr)
+        settings = SettingsScreen(
+            settings=app.base_settings(),
+            config_path=app._config_path,
+            on_apply=app.reload_config,
+        )
+        app.push_screen(settings)
+        await pilot.pause()
+        settings._write_model_default("light")
+        await pilot.pause()
+        first, mark = _marks(scr)
+        assert first is restored
+        await _assert_rule(pilot, mark, "● glm-flash")
+        assert list(_trace(scr).children)[-1] is mark
+        assert _choice_records(tmp_path)[-1] == ModelChoiceRecord(
+            "light", "glm-flash", "glm-4.6"
+        )
+
+
+@pytest.mark.asyncio
+async def test_config_reload_changing_next_model_adds_rule(tmp_path):
+    app = _config_app(tmp_path)
+    _write_history_with_rule(tmp_path / "threads")
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        _write_config(tmp_path, slots={"default": "qwen-coder"})
+        app.reload_config_if_changed()
+        await pilot.pause()
+        _, mark = _marks(scr)
+        await _assert_rule(pilot, mark, "● qwen-coder")
+
+
+@pytest.mark.asyncio
+async def test_change_without_rules_in_trace_adds_none(tmp_path):
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        app.switch_session_profile("keep")
+        await pilot.pause()
+        assert _marks(scr) == []
+        assert _choice_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_config_change_during_run_leaves_trace_alone(tmp_path):
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        scr._cmd_model("light")
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        written = _choice_records(tmp_path)
+        app.active_runner = _Runner("light")
+        _write_config(tmp_path, slots={"light": "qwen-coder"})
+        app.reload_config()
+        await pilot.pause()
+        assert _marks(scr) == [mark]
+        await _assert_rule(pilot, mark, "● glm-flash")
+        assert _choice_records(tmp_path) == written
+        app.active_runner.running = False
+        app.active_runner = None

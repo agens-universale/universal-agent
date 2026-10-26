@@ -33,8 +33,9 @@ _AUTO = "auto"
 class ModelMark(ConsequenceTraceRow):
     """Строка смены модели; `pending` — выбор ещё ждёт ближайшего шага.
 
-    `before` — выбор, действовавший до этой смены (None — неизвестен): по
-    нему схлопывание отметок подряд узнаёт возврат к прежней модели."""
+    `before` — модель, которой шла работа до этой смены (`model`
+    прежнего выбора; None — неизвестна): по ней схлопывание отметок подряд
+    узнаёт возврат к прежней модели."""
 
     def __init__(
         self,
@@ -61,6 +62,14 @@ class ModelMark(ConsequenceTraceRow):
     def choice(self) -> str:
         """Выбор, который показывает отметка."""
         return self._choice
+
+    @property
+    def model(self) -> str:
+        """Модель отметки для сравнения смен: у `auto` — сам выбор, иначе
+        модель, в которую выбор резолвится."""
+        if self._choice == _AUTO:
+            return _AUTO
+        return self._alias or self._choice
 
     def set_choice(self, choice: str, alias: str | None) -> None:
         """Новый выбор той же отметки: строка заменяется на месте."""
@@ -152,5 +161,5 @@ def drop_mark_before(mark: ModelMark) -> None:
         return
     previous.remove()
     mark.before = previous.before
-    if mark.before == mark.choice:
+    if mark.before == mark.model:
         mark.remove()
