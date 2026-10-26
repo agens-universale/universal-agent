@@ -78,7 +78,6 @@ class ResponsesFacade:
         self._agents: OrderedDict[str, Any] = OrderedDict()
         self._busy: set[str] = set()
         self._live: dict[str, TurnRun] = {}
-        self._gate = asyncio.Lock()
         self._create_lock = asyncio.Lock()
 
     async def open(self, body: Any) -> TurnRun:
@@ -138,22 +137,28 @@ class ResponsesFacade:
         self._agents.clear()
 
     async def _reserve(self, incoming: IncomingTurn) -> tuple[str, str]:
-        async with self._gate:
-            if incoming.previous_response_id is None:
-                thread_id = validate_thread_id(str(uuid.uuid4()))
-                cwd = self.new_dialog_cwd(incoming.cwd_sent)
-            else:
-                record = await self._index.load(incoming.previous_response_id)
-                if record is None:
-                    raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
-                thread_id = record.thread_id
-                cwd = cwd_for_continue(incoming.cwd_sent, record.cwd)
-            if thread_id in self._busy:
-                raise ApiError(409, _CONFLICT, "turn already running")
-            if incoming.previous_response_id is not None:
+        # Чтения хранилища — вне замков: на базе они сетевые, и общий замок
+        # ставил бы в очередь открытие ходов во всех диалогах. Проверка и
+        # бронь — один шаг без ``await`` между ними.
+        if incoming.previous_response_id is None:
+            thread_id = validate_thread_id(str(uuid.uuid4()))
+            cwd = self.new_dialog_cwd(incoming.cwd_sent)
+        else:
+            record = await self._index.load(incoming.previous_response_id)
+            if record is None:
+                raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
+            thread_id = record.thread_id
+            cwd = cwd_for_continue(incoming.cwd_sent, record.cwd)
+        if thread_id in self._busy:
+            raise ApiError(409, _CONFLICT, "turn already running")
+        self._busy.add(thread_id)
+        if incoming.previous_response_id is not None:
+            try:
                 await self._refuse_foreign_turn(thread_id)
-            self._busy.add(thread_id)
-            return thread_id, cwd
+            except BaseException:
+                self._busy.discard(thread_id)
+                raise
+        return thread_id, cwd
 
     async def _refuse_foreign_turn(self, thread_id: str) -> None:
         """Тред диалога ведёт другой инстанс (его аренда жива) — 409:

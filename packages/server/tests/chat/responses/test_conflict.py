@@ -465,3 +465,42 @@ async def test_cancel_of_a_turn_run_by_another_instance(tmp_path):
     assert agent.calls[0]["cancel_target"] == handle.response_id
     agent.release.set()
     await _finished(handle)
+
+
+async def test_slow_dialog_lookup_does_not_hold_other_dialogs(tmp_path):
+    """Ревью, раунд 4: открытие хода держало общий замок процесса, пока
+    читало индекс ответов и аренду треда — на базе все диалоги вставали в
+    очередь за сетевым чтением одного."""
+    release = asyncio.Event()
+    agent = FakeAgent(release)
+    facade = _facade(tmp_path, agent)
+    first = await facade.open({"model": "ui", "input": "первый"})
+    release.set()
+    await _finished(first)
+    reading, gate = asyncio.Event(), asyncio.Event()
+    real_load = facade._index.load
+
+    async def slow_load(response_id):
+        reading.set()
+        await gate.wait()
+        return await real_load(response_id)
+
+    facade._index.load = slow_load
+    continuing = asyncio.create_task(
+        facade.open(
+            {
+                "model": "ui",
+                "input": "дальше",
+                "previous_response_id": first.response_id,
+            }
+        )
+    )
+    await reading.wait()
+    try:
+        fresh = await asyncio.wait_for(
+            facade.open({"model": "ui", "input": "новый диалог"}), 2
+        )
+    finally:
+        gate.set()
+    assert (await _finished(fresh))["status"] == "completed"
+    assert (await _finished(await continuing))["status"] == "completed"
