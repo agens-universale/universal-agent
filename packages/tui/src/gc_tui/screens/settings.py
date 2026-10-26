@@ -4578,6 +4578,15 @@ class SettingsScreen(Screen):
         rows.append({"kind": "add"})
         return rows
 
+    def _profiles_active_index(self) -> int:
+        """Строка с отметкой «активен» — стартовый курсор секции: профиль
+        базы экрана, без профиля — «без профиля» (первая строка)."""
+        active = self._config_profile()
+        rows = self._profiles_rows()
+        return next(
+            (i for i, r in enumerate(rows) if r.get("name") == active), 0
+        )
+
     def _profiles_on_add_row(self) -> bool:
         """Курсор — на строке «+ добавить профиль…» (последняя): у неё свой
         футер, клавиши объектов на ней не работают."""
@@ -7059,6 +7068,8 @@ class SettingsScreen(Screen):
         self._profiles_name_prompt = None
         self._profiles_delete_name = None
         self._profiles_open = None
+        if i == _PROFILES:
+            self._profiles_idx = self._profiles_active_index()
         if i == _UPDATE:
             self._update_idx = (
                 None  # пересчитать дефолт-курсор при (пере)входе в секцию

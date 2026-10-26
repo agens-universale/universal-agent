@@ -337,10 +337,15 @@ def profile_value_hint(app: Any, value: str) -> str:
 PROFILE_NONE_VALUE = "без профиля"
 
 
+def profile_name(app: Any) -> str:
+    """Действующий профиль окна: имя или «без профиля» — значение палитры
+    и стартовая строка пикера `/profiles`."""
+    return toggle_state(app, "profiles") or PROFILE_NONE_VALUE
+
+
 def profile_value(app: Any) -> Text:
-    """Значение `/profiles` в правой колонке палитры: имя или «без
-    профиля»."""
-    return Text(toggle_state(app, "profiles") or PROFILE_NONE_VALUE)
+    """Значение `/profiles` в правой колонке палитры."""
+    return Text(profile_name(app))
 
 
 _PROFILE_NONE_HINT = (

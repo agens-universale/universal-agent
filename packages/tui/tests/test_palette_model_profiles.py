@@ -577,6 +577,26 @@ def test_profile_picker_hint_none_value(tmp_path, monkeypatch):
     )
 
 
+def test_profiles_picker_opens_on_the_active_row(tmp_path, monkeypatch):
+    """Пикер `/profiles` открывается на строке «активен»: действующий
+    профиль, без профиля — «без профиля» (смок, раунд 2, п. 7)."""
+    pytest.importorskip("textual")
+    from gc_tui.commands import build_default_registry
+    from gc_tui.toggles import profile_picker_options
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    cmd = build_default_registry().lookup("profiles")
+    for i, base_profile in enumerate(("smoke", "")):
+        case_dir = tmp_path / f"case{i}"
+        case_dir.mkdir()
+        app = _picker_app(case_dir, monkeypatch, base_profile=base_profile)
+        current = cmd.arg_current_provider(app)
+        picker = ArgPicker(
+            list(profile_picker_options(app)), initial_value=current
+        )
+        assert picker.selected_value() == (base_profile or "без профиля")
+
+
 def test_profiles_command_has_dynamic_picker_wiring():
     from gc_tui.commands import build_default_registry
 

@@ -1235,6 +1235,7 @@ async def test_deactivate_writes_empty_pointer_to_base_config(
         await _open_profiles(pilot, scr)
         rows = scr._profiles_rows()
         assert rows[0]["kind"] == "none"
+        scr._profiles_idx = 0  # вход — на «home» (активен), шаг на снятие
         hint_before = scr._profiles_hint_text(rows)
         assert f"Space — деактивировать (запись: {base_cfg}" in hint_before
         scr._deactivate_profile()
@@ -1816,3 +1817,32 @@ async def test_voice_override_text_ignores_a_profile_out_of_the_stack(
         await pilot.pause()
 
         assert scr._voice_override_text() is None
+
+
+async def test_profiles_section_opens_on_the_active_row(tmp_path, monkeypatch):
+    """Курсор при входе в «Профили» — на строке с отметкой «активен»:
+    действующий профиль, а без профиля — «без профиля»; повторный вход
+    возвращает его туда же (смок, раунд 2, п. 7)."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    for name in ("alpha", "work", "zeta"):
+        _write(tmp_path / "base" / "profiles" / f"{name}.yml", "models: {}\n")
+
+    for profile, expected in (("work", "work"), ("", None)):
+        config = {**_base_dict(), "profile": profile}
+        app = app_mod.TuiApp(settings=tui_settings(config))
+        async with app.run_test() as pilot:
+            scr = _mk_screen(config=config, config_path=base_cfg)
+            app.push_screen(scr)
+            await pilot.pause()
+            await _open_profiles(pilot, scr)
+            row = scr._profiles_rows()[scr._profiles_idx]
+            assert row.get("name") == expected, row
+            assert (row["kind"] == "none") == (expected is None)
+            scr._profiles_idx = len(scr._profiles_rows()) - 1
+            await _open_profiles(pilot, scr)
+            assert scr._profiles_rows()[scr._profiles_idx] == row

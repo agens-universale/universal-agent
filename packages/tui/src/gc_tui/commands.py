@@ -22,6 +22,7 @@ from gc_tui.services.model_picker import (
 )
 from gc_tui.toggles import (
     TOGGLES,
+    profile_name,
     profile_picker_hint,
     profile_picker_options,
     profile_value,
@@ -148,6 +149,7 @@ def build_default_registry() -> CommandRegistry:
             ),
             arg_options_provider=profile_picker_options,
             arg_hint_provider=profile_picker_hint,
+            arg_current_provider=profile_name,
             arg_picks=True,
             value_provider=profile_value,
         ),
