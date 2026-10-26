@@ -329,13 +329,19 @@ class SyncThreadStoreAdapter:
         Свойство, как ``areplace_messages``: ``ThreadSession`` решает по
         ``getattr(port, "aappend_turn_outcome", None)``, писать ли запись.
         """
-        if not callable(getattr(self._store, "append_turn_outcome", None)):
+        return self._optional_append("append_turn_outcome")
+
+    @property
+    def aappend_model_choice(self):
+        """Запись смены модели — если хранилище её умеет (как итог хода)."""
+        return self._optional_append("append_model_choice")
+
+    def _optional_append(self, name: str):
+        if not callable(getattr(self._store, name, None)):
             return None
 
-        async def _aappend(system_id, thread_id, outcome, *, seq):
-            self._call(
-                "append_turn_outcome", system_id, thread_id, outcome, seq=seq
-            )
+        async def _aappend(system_id, thread_id, value, *, seq):
+            self._call(name, system_id, thread_id, value, seq=seq)
 
         return _aappend
 

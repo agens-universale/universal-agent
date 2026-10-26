@@ -5,12 +5,18 @@
 подготовка без закрытия такта.
 """
 
+import json
+
 from gc_core import processing_responses as pr
 from gc_core.agent_executor import AgentExecutor
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.policy import Decision
 from gc_core.model_choice import ModelChoiceApplied
 from gc_core.model_router import ModelRouter
+from gc_core.persistence.model_choice_record import (
+    ModelChoiceRecord,
+    parse_model_choice,
+)
 from gc_core.run_context import acreate_run_context
 from gc_core.states import State
 from gc_core.turn_boundary import begin_turn
@@ -336,3 +342,99 @@ async def test_subagent_calls_emit_nothing(tmp_path, monkeypatch):
 
     assert events == []
     assert state.applied_choice == "light"
+
+
+def _thread_rows(tmp_path):
+    path = tmp_path / "threads" / "data_cli_choice.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def _choice_rows(rows):
+    return [row for row in rows if row["type"] == "model_choice"]
+
+
+async def test_change_during_run_is_written_where_it_applied(
+    tmp_path, monkeypatch
+):
+    """Запись встаёт за последним сообщением перед применением: после
+    вывода тула первого шага, до ответа второго."""
+    await _run(
+        tmp_path,
+        monkeypatch,
+        "light",
+        [_work(), _work(), _finish()],
+        {1: "max"},
+    )
+
+    rows = _thread_rows(tmp_path)
+    (record,) = _choice_rows(rows)
+    at = rows.index(record)
+    before = [row for row in rows[:at] if row["type"] == "message"]
+    assert parse_model_choice(record) == ModelChoiceRecord(
+        "max", "big", "light"
+    )
+    assert record["seq"] == before[-1]["seq"]
+    assert before[-1]["payload"].get("type") == "function_call_output"
+    assert rows[at + 1]["type"] == "message"
+
+
+async def test_change_at_run_end_is_written_after_turn_outcome(
+    tmp_path, monkeypatch
+):
+    await _run(tmp_path, monkeypatch, "light", [_finish()], {1: "max"})
+
+    rows = _thread_rows(tmp_path)
+    assert [row["type"] for row in rows[-2:]] == [
+        "turn_outcome",
+        "model_choice",
+    ]
+    assert parse_model_choice(rows[-1]) == ModelChoiceRecord(
+        "max", "big", "light"
+    )
+    assert rows[-1]["seq"] == rows[-2]["seq"]
+
+
+async def test_run_without_change_writes_no_record(tmp_path, monkeypatch):
+    await _run(tmp_path, monkeypatch, "max", [_work(), _finish()], {})
+
+    assert _choice_rows(_thread_rows(tmp_path)) == []
+
+
+async def test_applied_choice_reaches_recorder_with_previous_choice(
+    tmp_path, monkeypatch
+):
+    selected, ctx, state, _events = await _prepared(
+        tmp_path, monkeypatch, "light"
+    )
+    records = []
+
+    async def recorder(record):
+        records.append(record)
+
+    ctx.record_model_choice = recorder
+    selected["model"] = "max"
+    await _tick(state, ctx)
+    await _tick(state, ctx)
+
+    assert records == [ModelChoiceRecord("max", "big", "light")]
+
+
+async def test_subagent_calls_record_nothing(tmp_path, monkeypatch):
+    selected, ctx, state, _events = await _prepared(
+        tmp_path, monkeypatch, "light"
+    )
+    records = []
+
+    async def recorder(record):
+        records.append(record)
+
+    ctx.record_model_choice = recorder
+    ctx.model_router = ModelRouter(
+        ctx,
+        choice_provider=lambda: selected["model"],
+        is_subagent_child=True,
+    )
+    selected["model"] = "max"
+    await _tick(state, ctx)
+
+    assert records == []

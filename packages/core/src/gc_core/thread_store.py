@@ -47,6 +47,10 @@ from gc_core.persistence.meta_ownership import (
     merge_runtime_into_meta,
     resolve_runtime_flag_name,
 )
+from gc_core.persistence.model_choice_record import (
+    MODEL_CHOICE_TYPE,
+    ModelChoiceRecord,
+)
 from gc_core.persistence.thread_meta_mapper import (
     ThreadMetaMapper,
     read_optional_nonneg_int,
@@ -935,15 +939,75 @@ def append_turn_outcome_record(
     ``seq`` — номер последнего сообщения хода: запись нового номера не
     занимает, счётчики сообщений не двигаются.
     """
+    _append_side_record(
+        threads_dir,
+        system_id,
+        thread_id,
+        {"type": TURN_OUTCOME_TYPE, "outcome": outcome.to_payload()},
+        seq=seq,
+    )
+
+
+def append_model_choice_record(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    record: ModelChoiceRecord,
+    *,
+    seq: int,
+) -> None:
+    """Дописать запись смены модели в живой ``data_*.jsonl``.
+
+    ``seq`` — номер последнего сообщения перед применением смены: запись
+    нового номера не занимает, счётчики сообщений не двигаются.
+    """
+    _append_side_record(
+        threads_dir,
+        system_id,
+        thread_id,
+        {"type": MODEL_CHOICE_TYPE, "model": record.to_payload()},
+        seq=seq,
+    )
+
+
+def append_model_choice_after_last_message(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    record: ModelChoiceRecord,
+) -> bool:
+    """Смена модели между ходами — за последним сообщением треда.
+
+    Треда ещё нет (ни одного сообщения) — записи нет. Возвращает, записано
+    ли. Вызывать, когда рана на тред нет (как откат реплики)."""
+    _, _, last_seq = load_thread_messages(threads_dir, system_id, thread_id)
+    if last_seq == 0:
+        return False
+    append_model_choice_record(
+        threads_dir, system_id, thread_id, record, seq=last_seq
+    )
+    return True
+
+
+def _append_side_record(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    body: Dict[str, Any],
+    *,
+    seq: int,
+) -> None:
+    """Запись не-сообщения в тот же конверт, что у сообщений: ``body`` —
+    её ``type`` и ключ полезной нагрузки."""
     ensure_threads_dir(threads_dir)
     data_path, _ = _thread_paths(threads_dir, system_id, thread_id)
     record = {
-        "type": TURN_OUTCOME_TYPE,
+        "type": body["type"],
         "thread_id": thread_id,
         "system": sanitize_system_id(system_id),
         "seq": seq,
         "ts": _utc_now_iso(),
-        "outcome": outcome.to_payload(),
+        **{k: v for k, v in body.items() if k != "type"},
     }
     with open(data_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -1464,9 +1528,29 @@ class ThreadSession:
         Пустой тред записи не получает. ``seq`` — номер последнего
         сообщения, счётчик сессии не двигается. Возвращает, записано ли.
         """
+        return await self._aappend_side_record(
+            "aappend_turn_outcome", outcome, discarded=discarded
+        )
+
+    async def aappend_model_choice(
+        self, record: ModelChoiceRecord, *, discarded: bool
+    ) -> bool:
+        """Записать смену модели за последним записанным сообщением.
+
+        Та же необязательная возможность и те же правила, что у итога хода
+        (``aappend_turn_outcome``): durable-хранилищу и пустому треду
+        записи нет. Возвращает, записано ли.
+        """
+        return await self._aappend_side_record(
+            "aappend_model_choice", record, discarded=discarded
+        )
+
+    async def _aappend_side_record(
+        self, capability: str, value: Any, *, discarded: bool
+    ) -> bool:
         from gc_core.thread_store_durable import durable_store_capability
 
-        appender = getattr(self.port, "aappend_turn_outcome", None)
+        appender = getattr(self.port, capability, None)
         if not callable(appender):
             return False
         if durable_store_capability(self.port) is not None:
@@ -1478,7 +1562,7 @@ class ThreadSession:
         await appender(
             self.system_id,
             self.thread_id,
-            outcome,
+            value,
             seq=self.persisted_messages_count,
         )
         return True

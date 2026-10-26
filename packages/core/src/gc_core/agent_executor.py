@@ -47,6 +47,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.model_choice import note_applied
+from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.persistence.turn_outcome import (
     USER_STOP,
@@ -1111,20 +1112,46 @@ class AgentExecutor:
                 task.uncancel()
         await self.aclose_run_accounting()
 
-    def _note_choice_at_run_end(self, state: State) -> None:
+    def _note_choice_at_run_end(
+        self, state: State
+    ) -> Optional[ModelChoiceRecord]:
         """Выбор, так и не дошедший до вызова, применяется завершением рана.
-        Сбой резолва или хука фронтенда не срывает уборку рана: в лог."""
+        Возвращает запись смены — её пишут после итога хода, как её строку
+        показывает лента. Сбой резолва или хука фронтенда не срывает уборку
+        рана: в лог."""
         router = self.get_model_router()
         if router is None:
-            return
+            return None
         try:
-            note_applied(
+            return note_applied(
                 state, self._ctx, router.live_choice(), at_run_end=True
             )
         except Exception:
             logger = getattr(self._ctx, "logger", None)
             if logger is not None:
                 logger.warning("model_choice_applied_failed", exc_info=True)
+            return None
+
+    async def _arecord_model_choice(
+        self, record: Optional[ModelChoiceRecord]
+    ) -> None:
+        """Записать смену модели в тред за последним записанным сообщением.
+
+        Зовут подготовка вызова (через `RunContext.record_model_choice`) и
+        завершение рана. Сбой записи — предупреждение в журнал прогона, ран
+        он не роняет."""
+        session = self._thread_session
+        state = self.get_state()
+        if record is None or session is None or state is None:
+            return
+        try:
+            await session.aappend_model_choice(
+                record, discarded=is_persist_discarded(state)
+            )
+        except Exception:
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("model_choice_write_failed", exc_info=True)
 
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
         # Keep the unconsumed queue before the await; messages arriving during
@@ -1319,6 +1346,7 @@ class AgentExecutor:
             ),
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
+        self._ctx.record_model_choice = self._arecord_model_choice
         self._ctx.is_cli_mode = is_cli_mode
 
         # Старые истории сохраняют порядок команд. Новые исполнения проверяют
@@ -1440,7 +1468,7 @@ class AgentExecutor:
             raise
         finally:
             _stop_bound.__exit__(None, None, None)
-            self._note_choice_at_run_end(state)
+            choice_record = self._note_choice_at_run_end(state)
             state_ops.leave(state)
             state.turn_level = None
             try:
@@ -1449,6 +1477,7 @@ class AgentExecutor:
                 # доходит, а `asyncio.timeout` и TaskGroup вызывающего
                 # опираются на `cancelling()`.
                 await self._arecord_turn_outcome(None, error=run_error)
+                await self._arecord_model_choice(choice_record)
             finally:
                 teardown_cancel = await self._ateardown_run(_owner_reset)
 

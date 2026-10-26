@@ -5,7 +5,16 @@ import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+)
 
 from gc_core.agent_store import (
     DEFAULT_AGENT_STORE,
@@ -61,6 +70,7 @@ from gc_core.utils.prod_auth import AuthConnector
 
 if TYPE_CHECKING:
     from gc_core.model_choice import ModelChoiceApplied
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
     from gc_core.vision.notes import TraceNote
 
 
@@ -129,11 +139,17 @@ class RunContext:
     # ответ). Не задан — `vision.notes.emit_trace_note`
     # пишет предупреждение в `logger` (CLI, сервер, SDK).
     on_trace_note: Optional[Callable[[TraceNote], None]] = None
-    # Живое событие «выбор модели применён» (`gc_core.model_choice`); в тред
-    # не пишется. Дочернему контексту не передаётся: субагент событий не даёт.
+    # Живое событие «выбор модели применён» (`gc_core.model_choice`).
+    # Дочернему контексту не передаётся: субагент событий не даёт.
     on_model_choice_applied: Optional[Callable[[ModelChoiceApplied], None]] = (
         None
     )
+    # Запись той же смены в тред: ставит исполнитель на время рана (пишет
+    # через тред-сессию). Фронтенду не принадлежит, дочернему контексту не
+    # передаётся.
+    record_model_choice: Optional[
+        Callable[[ModelChoiceRecord], Awaitable[None]]
+    ] = None
     # Порт «спросить человека»: обычная функция или корутинная. Не задан —
     # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.

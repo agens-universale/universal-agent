@@ -20,8 +20,10 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
+from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_core.thread_store import (
+    append_model_choice_record,
     append_new_thread_messages,
     append_subagent_trace_record,
     append_turn_outcome_record,
@@ -47,6 +49,7 @@ from gc_core.thread_store_types import (
 #: Пишущие файловые функции (по имени: часть импортируется по месту).
 _WRITE_HELPERS = frozenset(
     {
+        "append_model_choice_record",
         "append_new_thread_messages",
         "append_subagent_trace_record",
         "append_turn_outcome_record",
@@ -341,6 +344,26 @@ class FileThreadStore(ThreadStoreBase):
             system_id,
             thread_id,
             outcome,
+            seq=seq,
+        )
+
+    def append_model_choice(
+        self,
+        system_id: str,
+        thread_id: str,
+        record: ModelChoiceRecord,
+        *,
+        seq: int,
+    ) -> None:
+        """Дописать запись смены модели (необязательная возможность, как
+        ``append_turn_outcome``). ``seq`` — номер последнего сообщения
+        перед применением смены."""
+        self._call(
+            append_model_choice_record,
+            self._dir,
+            system_id,
+            thread_id,
+            record,
             seq=seq,
         )
 

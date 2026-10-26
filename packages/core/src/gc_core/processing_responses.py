@@ -159,7 +159,7 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.message_policy.user_stop import (
     not_started_due_to_user_stop_output,
 )
-from gc_core.model_choice import note_applied
+from gc_core.model_choice import anote_applied
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
@@ -836,7 +836,7 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
     """Единая точка выбора модели перед основным запросом.
 
     Записывает фактический уровень в State; только на новом такте логирует
-    решение и сверяет применённый выбор (`model_choice.note_applied`).
+    решение и сверяет применённый выбор (`model_choice.anote_applied`).
     Повтор запроса после переполнения контекста получает то же решение.
     Канонические схемы инструментов проецируются транспортом для выбранной модели."""
     active, decision, effective, is_new = await aroute_before_call(state, ctx)
@@ -847,7 +847,7 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
         effective,
     )
     if is_new:
-        note_applied(state, ctx, state._tick_decision[0])
+        await anote_applied(state, ctx, state._tick_decision[0])
         log_routing_decision(
             getattr(ctx, "logger", None) or _fallback_logger,
             state,

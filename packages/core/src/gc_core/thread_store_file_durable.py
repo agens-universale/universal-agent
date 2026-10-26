@@ -32,6 +32,9 @@ class DurableFileThreadStore(FileThreadStore):
     #: записи нет.
     append_turn_outcome = None
 
+    #: Записи смены модели нет — по той же причине.
+    append_model_choice = None
+
     #: Слияние меты — чтением и записью через журнал: функцию слияния
     #: операция журнала не сериализует.
     update_meta = ThreadStoreBase.update_meta
