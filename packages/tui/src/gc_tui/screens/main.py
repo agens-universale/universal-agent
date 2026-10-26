@@ -3724,6 +3724,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 mcp_servers=mcp_servers,
                 agent=ev.agent,
             )
+            row.set_clock_source(self._core_call_elapsed)
             self._active_calls[row.call_id] = row
             # Durable anchor for nested (reopen / after parent result pop).
             if (ev.tool_name or "").startswith("subagent_") and row.call_id:
@@ -4070,6 +4071,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             mcp_tools=mcp_tools,
             mcp_servers=mcp_servers,
         )
+        row.set_clock_source(self._core_call_elapsed)
         if tool_call_id:
             self._nested_tool_rows[tool_call_id] = row
         category, _ = tool_caption(
@@ -6054,6 +6056,14 @@ class TraceScreen(TraceFollowMixin, Screen):
         ):
             return
         self._thinking.set_started_at(probe())
+
+    def _core_call_elapsed(self, call_id: str) -> Optional[float]:
+        """Время вызова по часам хода ядра — таймеру строки ленты: живой и
+        застывший счёт сходятся с записью итога хода. Раннера или вызова
+        на часах нет — None."""
+        runner = getattr(self.app, "active_runner", None)
+        probe = getattr(runner, "call_elapsed", None)
+        return probe(call_id) if probe is not None else None
 
     def _poll_trace_tail(self) -> None:
         """Дочитать и отрисовать хвост записей активного треда."""

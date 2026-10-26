@@ -582,6 +582,19 @@ def test_turn_effective_start_delegates_to_current_turn_clock():
         runner.wait(timeout=1.0)
 
 
+def test_call_elapsed_delegates_to_turn_clock_of_executor():
+    from gc_tui.services.agent_runner import AgentRunner
+
+    class _Calls:
+        def turn_call_elapsed(self, call_id):
+            return {"c1": 13.0}.get(call_id)
+
+    runner = AgentRunner(executor=_Calls())
+    assert runner.call_elapsed("c1") == 13.0
+    assert runner.call_elapsed("c2") is None
+    assert AgentRunner(executor=object()).call_elapsed("c1") is None
+
+
 def test_stop_releases_run_waiting_for_human_answer():
     """Ход ждёт ответа человека в `ask_human`: `stop()` будит ожидание, и
     поток хода кончается — переход и выход его не ждут вечно."""

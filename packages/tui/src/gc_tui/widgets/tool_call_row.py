@@ -307,6 +307,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._output: Optional[tuple[Text, Text]] = None
         self._parts_expanded = False
         self._detail: Optional[Callable[[], Optional[str]]] = None
+        # Часы хода ядра: время вызова по `call_id` или None (не знают).
+        self._clock: Optional[Callable[[str], Optional[float]]] = None
         #: `(уровень, ключ)` строки в модели блоков — для пробела.
         self.block_key: Optional[tuple[str, str]] = None
 
@@ -375,6 +377,13 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def set_detail_source(self, source: Callable[[], Optional[str]]) -> None:
         self._detail = source
+
+    def set_clock_source(
+        self, source: Callable[[str], Optional[float]]
+    ) -> None:
+        """Время вызова по часам хода ядра — таймеру строки вместо её
+        собственных часов, пока ядро вызов знает."""
+        self._clock = source
 
     def set_mode(
         self,
@@ -573,6 +582,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._sync_pulse()
 
     def _elapsed_s(self, until: Optional[float] = None) -> int:
+        """Секунды вызова: по часам ядра — то же время, что потом принесёт
+        запись итога хода; без них — часы строки (видят вызов позже его
+        старта: с первой записи о нём в треде)."""
+        core = self._clock(self.call_id) if self._clock is not None else None
+        if core is not None:
+            return int(core)
         now = self._paused_at or until or time.monotonic()
         return int(now - self._start_monotonic - self._paused_total)
 

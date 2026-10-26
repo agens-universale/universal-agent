@@ -353,6 +353,13 @@ class AgentRunner:
             return None
         return probe()
 
+    def call_elapsed(self, call_id: str) -> Optional[float]:
+        """Время вызова по часам хода ядра — для таймера строки ленты:
+        идущего — живое, законченного — как в записи итога хода.
+        Исполнителя или вызова на часах нет — None."""
+        probe = getattr(self._executor, "turn_call_elapsed", None)
+        return probe(call_id) if probe is not None else None
+
     def produced_output(self) -> bool:
         """Текущий прогон уже что-то выдал или сделал (решает ядро:
         ``State.produced_output``) — отправку не откатить. Иная работа
