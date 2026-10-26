@@ -13,7 +13,8 @@ DEFAULT_MAX_DIFF_CHARS = 100_000
 DEFAULT_HUNK_CONTEXT_LINES = 3
 DEFAULT_MAX_DIFF_SOURCE_BYTES = 2_000_000
 DEFAULT_SHELL_TRACKING = True
-#: Изменённых строк на файл в свёрнутом превью диффа в ленте TUI.
+#: Строк свёрнутого превью диффа на файл в ленте TUI: сначала
+#: изменения, затем контекст.
 DEFAULT_TRACE_INLINE_MAX_LINES = 10
 DEFAULT_REPLAY_EXPANDED_TURNS = 20
 DEFAULT_TURN_SUMMARY_IN_STATUS = True
