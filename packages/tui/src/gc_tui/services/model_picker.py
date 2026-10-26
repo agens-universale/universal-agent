@@ -82,11 +82,11 @@ def _level_models(slots: dict, models: Any) -> list[str]:
 
 
 def _level_desc(alias: str, slots: dict) -> str:
-    """Описание модели в пикере: роль её уровня, список уровней — у модели
-    нескольких уровней, пусто — без уровня."""
+    """Описание модели в пикере: «<уровень> · <роль>» у модели одного
+    уровня, список уровней — у модели нескольких, пусто — без уровня."""
     levels = model_sign.levels_of(alias, slots)
     if len(levels) == 1:
-        return LEVEL_ROLE_TEXT[levels[0]]
+        return f"{levels[0]} · {LEVEL_ROLE_TEXT[levels[0]]}"
     if not levels:
         return ""
     return f"уровни {', '.join(levels[:-1])} и {levels[-1]}"

@@ -156,8 +156,9 @@ def test_picker_marks_current_active(tmp_path, monkeypatch):
 
 
 def test_picker_desc_names_model_role(tmp_path, monkeypatch):
-    """Описание строки: у auto — режим, у модели одного уровня — роль
-    уровня, у модели нескольких уровней — их список, без уровня — пусто."""
+    """Описание строки: у auto — режим, у модели одного уровня — имя
+    уровня и его роль («light · быстрая…»), у модели нескольких уровней —
+    их список без ролей, без уровня — пусто (смок, раунд 2, п. 6)."""
     from gc_tui.services.model_picker import AUTO_DESC, model_picker_options
     from gc_tui.toggles import LEVEL_ROLE_TEXT
 
@@ -167,9 +168,9 @@ def test_picker_desc_names_model_role(tmp_path, monkeypatch):
     }
     assert descs == {
         "auto": AUTO_DESC,
-        "glm-flash": LEVEL_ROLE_TEXT["light"],
-        "glm-4.6": LEVEL_ROLE_TEXT["default"],
-        "giga-max": LEVEL_ROLE_TEXT["max"],
+        "glm-flash": f"light · {LEVEL_ROLE_TEXT['light']}",
+        "glm-4.6": f"default · {LEVEL_ROLE_TEXT['default']}",
+        "giga-max": f"max · {LEVEL_ROLE_TEXT['max']}",
         "qwen-coder": "",
         "deepseek-v3": "",
     }
@@ -307,9 +308,9 @@ def test_picker_row_status_column_follows_name(tmp_path, monkeypatch):
     status_at = active.index("активна")
     assert active[:status_at].rstrip().endswith("glm-4.6")
     assert flash[status_at : status_at + len("активна")].strip() == ""
-    assert active.index("основная") == flash.index("быстрая")
+    assert active.index("default ·") == flash.index("light ·")
     desc = rows["glm-flash"]
-    start = desc.plain.index("быстрая")
+    start = desc.plain.index("light ·")
     styles = {(s.start, str(s.style)) for s in desc.spans}
     assert (start, p.SUB_INK) in styles
 
