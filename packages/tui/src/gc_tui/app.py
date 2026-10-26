@@ -38,6 +38,7 @@ from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
+from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.services.session_lock import is_held_by_other
 from gc_tui.services.stream_sink import StreamSink
 from gc_tui.services.trace_note_sink import TraceNoteSink
@@ -1330,9 +1331,13 @@ class TuiApp(App):
         сессионный оверрайд (персист + restore на attach — существующим
         механизмом), но с эффектами, специфичными для профиля — предохранитель
         и кэш пере-мержа сбрасывает `set_session_override`; здесь — то, что
-        специфично для МОМЕНТА выбора: boot-frozen-diff notice и, при живом ране,
-        notice отложенного применения (пересборка сама откладывается существующим
-        `invalidate_runner` — единый механизм с обычной перечиткой конфига).
+        специфично для МОМЕНТА выбора: boot-frozen-diff notice.
+
+        Во время хода смена отклоняется (`ValueError` с фразой
+        `profile_lock`): профиль действует только со следующего хода, и выбор
+        посреди хода разошёлся бы с самим ходом. Замок — здесь, у единственной
+        точки сессионной смены; входы интерфейса спрашивают тот же предикат,
+        чтобы отказать своими словами до попытки.
 
         Профиль, с которым конфиг не собирается, отклоняется ДО применения:
         `_profile_remerge` деградирует на прежнюю базу молча для рендера, и без
@@ -1344,6 +1349,9 @@ class TuiApp(App):
 
         Снятие (`name == ""`) пробы не знает — это дверь наружу, и судить её по
         сборке снимаемого значило бы запереть человека внутри битого выбора."""
+        refusal = profile_switch_refusal(self)
+        if refusal is not None:
+            raise ValueError(refusal)
         base_name = self.base_settings().runtime.active_profile or None
         if name and name != base_name:
             self.probe_profile_assembly(name)
@@ -1353,19 +1361,7 @@ class TuiApp(App):
         self._notice_boot_frozen_diff(old_effective, self.effective_settings())
         self._notice_auto_routing_unavailable()
         self._notify_screen_config_changed()
-        runner = self.active_runner
-        live = runner is not None and runner.is_running()
         self.invalidate_runner()
-        if live:
-            what = f'профиль "{name}"' if name else "отключение профиля"
-            push_runtime_notice(
-                Notice(
-                    "info",
-                    "profile_switch_deferred",
-                    f"{what}: подключения и реестр моделей применятся после завершения текущей задачи",
-                    (),
-                )
-            )
 
     def _notice_profile_source_change(
         self, old_source: Optional[tuple]
@@ -1854,7 +1850,7 @@ class TuiApp(App):
             _release_runner(self.active_runner)
             self.active_runner = None
             self._runner_stale = False
-            # Снятие выбора, отложенное сменой профиля посреди хода.
+            # Снятие выбора, отложенное перечиткой конфига посреди хода.
             self.sanitize_session_model()
         if self.active_runner is not None:
             return self.active_runner

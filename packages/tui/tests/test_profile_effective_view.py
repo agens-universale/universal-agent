@@ -1971,105 +1971,14 @@ def test_session_profile_auto_activates_runtime_and_level_changes_next_call(
     assert state.turn_level is None
 
 
-@pytest.mark.asyncio
-async def test_session_profile_level_is_live_while_running_registry_stays_a_snapshot(
-    tmp_path, monkeypatch
-):
-    from gc_core.agent_executor import AgentExecutor
-    from gc_core.runtime_notices import (
-        clear_runtime_notices,
-        collect_runtime_notices,
-    )
-    from gc_core.auto_routing.state_ops import close_tick
-    from gc_core.config import load_settings
-    from gc_core.processing_responses import aprepare_main_call
-    from gc_core.run_context import acreate_run_context
-    from gc_core.states import State
-    from gc_core.turn_boundary import begin_turn
-    from gc_tui.app import TuiApp
-    from gc_tui.services.agent_runner import AgentRunner
-
-    monkeypatch.chdir(tmp_path)
-    config_path = tmp_path / "config.yml"
-    config_path.write_text(
-        "model: default\nbackend:\n  api_mode: chat_completions\n"
-        "  completions_url: http://local/v1/chat/completions\n"
-        "logging:\n  save_logs: false\n"
-        "models:\n  fast: {}\n  mid: {}\n"
-        "slots:\n  light: fast\n  default: mid\n  max: mid\n",
-        encoding="utf-8",
-    )
-    profiles = tmp_path / "profiles"
-    profiles.mkdir()
-    (profiles / "automatic.yml").write_text(
-        "model: auto\nmodels:\n  next-model: {}\n"
-        "slots:\n  default: next-model\n  max: next-model\n",
-        encoding="utf-8",
-    )
-    app = TuiApp(settings=load_settings(str(config_path)))
-    app.set_config_path(str(config_path))
-    ctx = await acreate_run_context(
-        app.effective_settings(),
-        is_tui=True,
-        choice_provider=app._choice_provider,
-    )
-    state = State(
-        verbose=False,
-        model="mid",
-        tools_spec=ctx.tools_spec,
-        tools_descr=ctx.tools_description,
-        skills_list=[],
-        max_steps=10,
-        system_prompt_id="test",
-        use_server_subagents=False,
-    )
-    executor = AgentExecutor(ctx)
-    executor._bind_state(state, discard_writes_after_stop=False)
-    begin_turn(state, ctx)
-    assert (await aprepare_main_call(state, ctx)).alias == "mid"
-    runner = AgentRunner(executor=executor)
-    monkeypatch.setattr(runner, "is_running", lambda: True)
-    app.active_runner = runner
-
-    clear_runtime_notices()
-    app.switch_session_profile("automatic")
-
-    assert app._choice_provider() == "auto"
-    assert app.display_router().resolve("main").alias == "next-model"
-    assert "next-model" not in ctx.settings.models
-    assert (
-        await aprepare_main_call(state, ctx)
-    ).alias == "mid"  # current call is unchanged
-    app.tui_state.active_task_id = "live-profile"
-    async with app.run_test(size=(120, 24)):
-        snapshot = app.screen._footer_head_snapshot()
-        assert snapshot.sign.plain.split()[-1] == "mid"
-        assert snapshot.mode_auto is False
-        assert snapshot.pending.plain == "● auto"
-        close_tick(state, state._call_level)
-        assert (
-            await aprepare_main_call(state, ctx)
-        ).alias == "mid"  # next AUTO uses this runner's registry
-        snapshot = app.screen._footer_head_snapshot()
-        assert snapshot.sign.plain.split()[-1] == "mid"
-        assert snapshot.mode_auto is True
-        assert snapshot.pending is None
-    assert runner.call_mode() == "auto"
-    notice = next(
-        n
-        for n in collect_runtime_notices()
-        if n.code == "profile_switch_deferred"
-    )
-    assert "подключения и реестр моделей" in notice.message
-    clear_runtime_notices()
-    app.active_runner = None
-
-
 @pytest.mark.parametrize("running_available", [True, False])
 @pytest.mark.parametrize("profile_available", [True, False])
 async def test_footer_uses_running_auto_availability_after_profile_switch(
     tmp_path, monkeypatch, running_available, profile_available
 ):
+    """Профиль сменился посреди хода внешней правкой указателя в config.yml
+    (сессионная смена во время хода заперта): футер судит доступность AUTO
+    по раннеру идущего хода, а не по новому профилю."""
     from gc_core.agent_executor import AgentExecutor
     from gc_core.auto_routing.state_ops import close_tick
     from gc_core.config import load_settings
@@ -2123,7 +2032,12 @@ async def test_footer_uses_running_auto_availability_after_profile_switch(
     runner = AgentRunner(executor=executor)
     monkeypatch.setattr(runner, "is_running", lambda: True)
     app.active_runner = runner
-    app.switch_session_profile("changed")
+    config.write_text(
+        "profile: changed\n" + config.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    app.reload_config()
+    assert app.effective_settings().runtime.active_profile == "changed"
     app.tui_state.active_task_id = "live-profile"
     try:
         async with app.run_test(size=(120, 24)):

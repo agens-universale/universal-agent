@@ -4774,13 +4774,19 @@ class SettingsScreen(Screen):
         self._render_view()
         self._flash(f"Профиль деактивирован — {_shown_path(target)}. {effect}")
 
-    def _refuse_profile_switch(self) -> bool:
+    def _refuse_profile_switch(self, *, rerender: bool = False) -> bool:
         """Во время хода профиль не меняется: отказ той же фразой, что у
-        `/profile`. True — отказано."""
+        `/profile`. Им же заперты удаление и переименование профиля и сброс
+        конфига — все они переписывают указатель `profile:`. `rerender` —
+        отказ на подтверждении: баннер снимается перерисовкой, реплика ложится
+        после неё. True — отказано."""
         refusal = profile_switch_refusal(self.app)
-        if refusal is not None:
-            self._notice(f"✗ {refusal}")
-        return refusal is not None
+        if refusal is None:
+            return False
+        if rerender:
+            self._render_view()
+        self._notice(f"✗ {refusal}")
+        return True
 
     def _activate_profile(self, name: str, ref) -> None:
         """Space на строке профиля (клавиша перевешена решением В1 волны B). «Уже
@@ -5112,6 +5118,8 @@ class SettingsScreen(Screen):
     ) -> None:
         """Поднять инлайн-ввод имени (контракт п.5): поле раскрывается на месте —
         под своей строкой при переименовании, под списком при создании."""
+        if mode == "rename" and self._refuse_profile_switch():
+            return
         ref = (
             None
             if original is None
@@ -5283,6 +5291,10 @@ class SettingsScreen(Screen):
         if error:
             self._notice(f"✗ не переименовано: {error}")
             return
+        if profile_switch_refusal(self.app) is not None:
+            self._profiles_name_prompt = None
+            self._refuse_profile_switch(rerender=True)
+            return
         row = self._profile_row_by_name(original)
         if row is None:
             self._cancel_profile_name_prompt()  # файл исчез под ногами — показать как есть
@@ -5410,6 +5422,8 @@ class SettingsScreen(Screen):
         )
 
     def _request_delete_profile(self, name: str) -> None:
+        if self._refuse_profile_switch():
+            return
         row = self._profile_row_by_name(name)
         if row is not None:
             # Отказ НА ВХОДЕ, тем же предикатом, что и сама операция: поднимать
@@ -5465,8 +5479,9 @@ class SettingsScreen(Screen):
     def _confirm_delete_profile(self) -> None:
         name = self._profiles_delete_name
         self._profiles_delete_name = None
-        if name is not None:
-            self._delete_profile(name)
+        if name is None or self._refuse_profile_switch(rerender=True):
+            return
+        self._delete_profile(name)
 
     def _delete_profile(self, name: str) -> None:
         """Enter в confirm-баннере: файл уезжает в бэкап конвенцией `config_sync`
@@ -6677,7 +6692,7 @@ class SettingsScreen(Screen):
 
     def _request_reset(self) -> None:
         """Enter на «Сбросить конфиг к умолчанию»: confirm-баннер (канон §5)."""
-        if self._reset_awaiting_confirm:
+        if self._reset_awaiting_confirm or self._refuse_profile_switch():
             return
         self._reset_awaiting_confirm = True
         self._render_view()
@@ -6690,6 +6705,8 @@ class SettingsScreen(Screen):
         if not self._reset_awaiting_confirm:
             return
         self._reset_awaiting_confirm = False
+        if self._refuse_profile_switch(rerender=True):
+            return
         if not self._writable():
             self._render_view()
             self._notice("✗ пакетный шаблон не сбрасывается")

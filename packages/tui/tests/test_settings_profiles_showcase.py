@@ -1892,3 +1892,57 @@ async def test_profile_activation_is_refused_while_a_run_is_going(
                 "✗ профиль можно сменить, когда ход закончится"
             )
         app.active_runner = None
+
+
+async def test_profile_delete_and_rename_are_refused_while_a_run_is_going(
+    tmp_path, monkeypatch
+):
+    """Удаление и переименование профиля переписывают указатель `profile:` —
+    во время хода оба отказывают той же фразой: ни баннера удаления, ни
+    поля имени; начатое до хода отказывает на подтверждении."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
+    home = _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    cfg = dict(_base_dict(), profile="home")
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=cfg, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        before = base_cfg.read_text(encoding="utf-8")
+
+        def refused():
+            notice = scr.query_one("#set-notice", Static)
+            return str(notice.render()) == (
+                "✗ профиль можно сменить, когда ход закончится"
+            )
+
+        app.active_runner = _LiveRunner()
+        scr._request_delete_profile("home")
+        await pilot.pause()
+        assert scr._profiles_delete_name is None and refused()
+        scr._begin_profile_name_prompt("rename", "home")
+        await pilot.pause()
+        assert scr._profiles_name_prompt is None and refused()
+
+        app.active_runner = None  # начато до хода, подтверждено во время
+        scr._request_delete_profile("home")
+        app.active_runner = _LiveRunner()
+        scr._confirm_delete_profile()
+        await pilot.pause()
+        assert refused()
+        scr._rename_profile("home", "work")
+        await pilot.pause()
+        assert refused()
+
+        assert home.exists()
+        assert base_cfg.read_text(encoding="utf-8") == before
+        app.active_runner = None
