@@ -1793,3 +1793,53 @@ def test_force_reinstall_copy_failure_keeps_old_install(tmp_path, monkeypatch):
     assert (dest / "skills" / "demo-skill" / "SKILL.md").is_file()
     assert not (dest.parent / "keep-demo.new").exists()
     assert [p.name for p in installed.list_installed()] == ["keep-demo"]
+
+
+def test_install_with_mcp_env_var_unset_succeeds_and_says_so(
+    tmp_path, monkeypatch
+):
+    """Переменная нужна при запуске агента, не при установке плагина."""
+    from gc_core.plugins import installed
+
+    monkeypatch.delenv("GC_T_TOKEN", raising=False)
+    root = _make_plugin(tmp_path, name="gh")
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "github": {
+                    "type": "http",
+                    "url": "https://api.example/mcp/",
+                    "headers": {"Authorization": "Bearer ${GC_T_TOKEN}"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with installed.prepare(str(root)) as prepared:
+        summary = prepared.summary()
+        info = prepared.commit()
+
+    assert info.name == "gh"
+    assert "mcp github: https://api.example/mcp/" in summary
+    assert any("GC_T_TOKEN" in line for line in summary)
+
+
+def test_mcp_server_named_like_plugin_gets_short_key(tmp_path):
+    """``context7`` вместо ``context7_context7``: короче имена инструментов."""
+    from gc_core.config_modules.root import AppConfig, resolve_paths
+
+    root = _make_plugin(tmp_path, name="ctx")
+    (root / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "ctx": {"type": "http", "url": "https://e.x/mcp"},
+                "other": {"type": "http", "url": "https://e.x/other"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    runtime.reset_plugin_cache()
+    cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    out = resolve_paths(cfg, str(tmp_path))
+    assert {"ctx", "ctx_other"} <= set(out.mcp.servers)
+    assert "ctx_ctx" not in out.mcp.servers

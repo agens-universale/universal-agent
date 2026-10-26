@@ -517,8 +517,17 @@ def plugin_mcp_servers(paths: list[str]) -> dict[str, dict[str, Any]]:
     for plugin in load_plugins(list(paths)):
         for name, spec in plugin.mcp_servers.items():
             if _data_dir_ready(plugin, name, spec):
-                out[f"{safe(plugin.name)}_{safe(name)}"] = spec
+                out[_mcp_key(safe(plugin.name), safe(name))] = spec
     return out
+
+
+def _mcp_key(plugin: str, server: str) -> str:
+    """``<плагин>_<сервер>``; сервер с именем плагина — просто ``<плагин>``.
+
+    Имя MCP-инструмента ``mcp_<ключ>_<тул>`` у OpenAI-совместимых бэкендов
+    ограничено 64 символами, удвоенный префикс (``context7_context7``) его съедает.
+    """
+    return plugin if server == plugin else f"{plugin}_{server}"
 
 
 def _data_dir_ready(plugin: Plugin, name: str, spec: dict[str, Any]) -> bool:

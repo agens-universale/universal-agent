@@ -150,9 +150,7 @@ def test_playwright_mcp_is_stdio_npx(tmp_path):
         ),
     )
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
-    server = resolve_paths(cfg, str(tmp_path)).mcp.servers[
-        "playwright_playwright"
-    ]
+    server = resolve_paths(cfg, str(tmp_path)).mcp.servers["playwright"]
     assert server.transport == "stdio"
     assert server.command == "npx"
     assert server.args == ["@playwright/mcp@latest"]

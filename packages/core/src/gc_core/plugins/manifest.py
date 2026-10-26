@@ -396,6 +396,9 @@ def _parse_mcp_servers(raw: Any, root: Path) -> McpParse:
         try:
             expanded = _with_env(_with_plugin_root(spec, root))
         except KeyError as exc:
+            # Сервер верный, переменная нужна при запуске агента: в сводке
+            # установки он есть, в конфиг не попадает, пока её не задали.
+            shown[str(name)] = _mcp_shown(transport, spec)
             _skip(problems, name, f"env var {exc.args[0]} is not set")
             continue
         out[str(name)] = _mcp_entry(expanded, root)

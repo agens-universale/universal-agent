@@ -289,6 +289,7 @@ def prepare(
             plugin.skills_dir
             or plugin.hooks
             or plugin.mcp_servers
+            or plugin.mcp_servers_raw
             or plugin.commands
             or plugin.agents
         ):
