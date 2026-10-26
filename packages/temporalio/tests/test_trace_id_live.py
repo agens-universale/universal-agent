@@ -138,7 +138,8 @@ async def test_session_with_invalid_trace_fails_without_retries(
     monkeypatch,
     scripted_http,  # noqa: F811
 ):
-    """RunRequest в обход agent_step: тот же отказ без вечных повторов."""
+    """RunRequest в обход agent_step: тот же отказ InvalidTraceId — до хода,
+    без activities подготовки и уборки контекста."""
     monkeypatch.chdir(tmp_path)
     url, requests, _script = scripted_http
     request = RunRequest(
@@ -150,5 +151,5 @@ async def test_session_with_invalid_trace_fails_without_retries(
         )
     cause = failure.value.cause
     assert isinstance(cause, ApplicationError)
-    assert "trace_id" in str(cause)
+    assert cause.type == "InvalidTraceId"
     assert len(requests) == 0
