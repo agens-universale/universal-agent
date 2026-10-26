@@ -1,7 +1,9 @@
-"""Отметка смены модели в живой ленте (спека model-knob §6.4): между
-ходами — обычная `✦ Model`, во время хода — тихая `✧ Model` у низа ленты,
-событие «выбор применён» делает её обычной на месте или после строки
-итога хода. Только живая: в тред не пишется."""
+"""Отметка смены модели в живой ленте (спека model-knob §6.4, раунд 3
+смока): между ходами — черта во всю ширину `──── знак ────`, во время
+хода — знак с тусклым именем и следствием у низа ленты; событие «выбор
+применён» делает её чертой на месте или после строки итога хода.
+Отметки подряд не копятся: новая заменяет предыдущую. Только живая: в
+тред не пишется."""
 
 import json
 from pathlib import Path
@@ -14,7 +16,8 @@ from gc_core.model_choice import ModelChoiceApplied
 from gc_testkit.settings import make_settings
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
-from gc_tui.palette import DIM, INK, MUTED, SUB_INK
+from gc_tui.palette import ACCENT, DEEP_DIM, DIM, MUTED, TRACK
+from gc_tui.services.model_sign import FREE_COLOR
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.trace_mapper import map_message
 from gc_tui.widgets.model_mark import ModelMark
@@ -37,7 +40,7 @@ _CFG = {
     "agent.auto_routing": True,
     **_REGISTRY,
 }
-_PENDING_NOTE = "переключится на ближайшем шаге"
+_PENDING_NOTE = "модель переключится на ближайшем шаге"
 
 
 class _Runner:
@@ -147,25 +150,85 @@ def _push(app: TuiApp, event: ModelChoiceApplied) -> None:
     app._trace_note_sink.push(_TID, event)
 
 
+async def _assert_rule(pilot, mark: ModelMark, label: str) -> None:
+    """Черта во всю ширину строки: `──── label ────`, полосы TRACK,
+    подпись DEEP_DIM, без колонки глифа и следствий. Пауза — пересборка
+    под ширину после раскладки."""
+    await pilot.pause()
+    plain = mark._content.plain
+    assert str(mark._prefix) == ""
+    assert len(plain) == mark.size.width > len(label) + 4
+    assert plain.strip("─") == f" {label} "
+    assert plain.startswith("──") and plain.endswith("──")
+    left = len(plain) - len(plain.lstrip("─"))
+    right = len(plain) - len(plain.rstrip("─"))
+    assert abs(left - right) <= 1
+    assert _style_of(mark._content, "─") == TRACK
+    name = label.split(" ", 1)[1]
+    assert _style_of(mark._content, name) == DEEP_DIM
+    assert _notes(mark) == []
+
+
 @pytest.mark.asyncio
-async def test_idle_change_mounts_applied_mark_and_each_stays(tmp_path):
+async def test_idle_change_mounts_rule_mark(tmp_path):
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = app.screen
         _activate(app, tmp_path)
         scr._cmd_model("max")
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        assert list(_trace(scr).children)[-1] is mark
+        assert not mark.pending
+        await _assert_rule(pilot, mark, "● giga-max")
+        assert _style_of(mark._content, "●") == ACCENT
+
+
+@pytest.mark.asyncio
+async def test_idle_consecutive_changes_collapse_into_one_mark(tmp_path):
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _activate(app, tmp_path)
+        scr._cmd_model("max")
+        await pilot.pause()
+        scr._cmd_model("qwen-coder")
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        assert list(_trace(scr).children)[-1] is mark
+        await _assert_rule(pilot, mark, "● qwen-coder")
+        assert _style_of(mark._content, "●") == FREE_COLOR
+
+
+@pytest.mark.asyncio
+async def test_idle_changes_with_event_between_keep_both(tmp_path):
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _activate(app, tmp_path)
+        scr._cmd_model("max")
+        scr._mount_standalone("предупреждение", "warn")
         scr._cmd_model("qwen-coder")
         await pilot.pause()
         first, second = _marks(scr)
-        assert list(_trace(scr).children)[-2:] == [first, second]
-        assert not first.pending and not second.pending
-        assert first._prefix.plain == "✦ "
-        assert first._content.plain == "Model  ● giga-max"
-        assert second._content.plain == "Model  ● qwen-coder"
-        assert _notes(first) == []
-        assert _style_of(first._prefix, "✦") == SUB_INK
-        assert _style_of(first._content, "Model") == SUB_INK
-        assert _style_of(first._content, "giga-max") == INK
+        await _assert_rule(pilot, first, "● giga-max")
+        await _assert_rule(pilot, second, "● qwen-coder")
+
+
+@pytest.mark.asyncio
+async def test_rule_follows_width_on_resize(tmp_path):
+    app = _app(tmp_path)
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = app.screen
+        _activate(app, tmp_path)
+        scr._cmd_model("max")
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        wide = len(mark._content.plain)
+        await pilot.resize_terminal(70, 30)
+        await pilot.pause()
+        assert len(mark._content.plain) == mark.size.width < wide
+        await _assert_rule(pilot, mark, "● giga-max")
 
 
 @pytest.mark.asyncio
@@ -180,13 +243,13 @@ async def test_running_change_mounts_pending_at_bottom_below_new_events(
         await pilot.pause()
         (mark,) = _marks(scr)
         assert mark.pending
-        assert mark._prefix.plain == "✧ "
-        assert mark._content.plain == "Model  ● giga-max"
-        assert _notes(mark) == [_PENDING_NOTE]
-        assert _style_of(mark._prefix, "✧") == MUTED
-        assert _style_of(mark._content, "Model") == DIM
+        assert mark._prefix.plain == "● "
+        assert _style_of(mark._prefix, "●") == ACCENT
+        assert mark._content.plain == "giga-max"
         assert _style_of(mark._content, "giga-max") == DIM
-        assert _style_of(mark._consequences[0], "переключится") == MUTED
+        assert _notes(mark) == [_PENDING_NOTE]
+        assert _style_of(mark._consequences[0], "модель") == MUTED
+        assert "Model" not in mark._content.plain
         _call(scr, "c1", 1)
         scr._mount_standalone("предупреждение", "warn")
         await pilot.pause()
@@ -208,7 +271,9 @@ async def test_second_change_replaces_pending(tmp_path):
         await pilot.pause()
         assert _marks(scr) == [mark]
         assert mark.pending
-        assert mark._content.plain == "Model  ● qwen-coder"
+        assert mark._prefix.plain == "● "
+        assert _style_of(mark._prefix, "●") == FREE_COLOR
+        assert mark._content.plain == "qwen-coder"
         assert _notes(mark) == [_PENDING_NOTE]
 
 
@@ -249,13 +314,63 @@ async def test_applied_event_turns_pending_into_mark_in_place(tmp_path):
         await pilot.pause()
         assert _marks(scr) == [mark]
         assert not mark.pending
-        assert mark._prefix.plain == "✦ "
-        assert _notes(mark) == []
+        await _assert_rule(pilot, mark, "● giga-max")
+        assert not hasattr(scr, "_applied_frame")  # без анимации
         _call(scr, "c2", 2)
         await pilot.pause()
         kids = list(_trace(scr).children)
         assert kids.index(mark) < len(kids) - 1
         assert isinstance(kids[-1], ToolCallRow)
+
+
+async def _apply(pilot, scr, app, choice: str, alias: str) -> None:
+    _push(app, ModelChoiceApplied(choice, alias))
+    scr._drain_trace_notes()
+    await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_running_consecutive_applied_marks_collapse(tmp_path):
+    """Во время хода: применённая отметка, за ней сразу ещё одна — без
+    событий между ними — остаётся одна, последняя."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        runner = _busy(app, tmp_path)
+        _call(scr, "c1", 1)
+        scr._cmd_model("max")
+        await pilot.pause()
+        await _apply(pilot, scr, app, "max", "giga-max")
+        runner.applied = "max"
+        scr._cmd_model("qwen-coder")
+        await pilot.pause()
+        first, pending = _marks(scr)
+        assert pending.pending and not first.pending
+        await _apply(pilot, scr, app, "qwen-coder", "qwen-coder")
+        (mark,) = _marks(scr)
+        assert mark is pending
+        await _assert_rule(pilot, mark, "● qwen-coder")
+        kids = list(_trace(scr).children)
+        assert isinstance(kids[kids.index(mark) - 1], ToolCallRow)
+
+
+@pytest.mark.asyncio
+async def test_running_applied_marks_with_event_between_keep_both(tmp_path):
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        runner = _busy(app, tmp_path)
+        scr._cmd_model("max")
+        await pilot.pause()
+        await _apply(pilot, scr, app, "max", "giga-max")
+        runner.applied = "max"
+        _call(scr, "c1", 1)
+        scr._cmd_model("qwen-coder")
+        await pilot.pause()
+        await _apply(pilot, scr, app, "qwen-coder", "qwen-coder")
+        first, second = _marks(scr)
+        await _assert_rule(pilot, first, "● giga-max")
+        await _assert_rule(pilot, second, "● qwen-coder")
 
 
 async def _ticks(pilot, n: int = 4) -> None:
@@ -281,6 +396,7 @@ async def test_choice_seeded_at_run_start_applies_pending_in_place(tmp_path):
         assert runner.is_running()
         assert _marks(scr) == [mark]
         assert not mark.pending
+        await _assert_rule(pilot, mark, "● giga-max")
         _push(app, ModelChoiceApplied("max", "giga-max"))
         _call(scr, "c1", 1)
         await _ticks(pilot, 1)
@@ -317,7 +433,7 @@ async def test_run_end_event_places_mark_after_turn_line(tmp_path, with_event):
         await _ticks(pilot)
         assert _marks(scr) == [mark]
         assert not mark.pending
-        assert mark._content.plain == "Model  ● giga-max"
+        await _assert_rule(pilot, mark, "● giga-max")
         assert _after_turn_line(scr, mark)
 
 

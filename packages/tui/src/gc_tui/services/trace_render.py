@@ -226,6 +226,25 @@ def compaction_labels(num: Optional[int], comp: Mapping) -> list[str]:
     return labels
 
 
+def full_width_rule(label: Text, width: int, *, bar_style: str) -> Text:
+    """Подпись между полосами во всю ширину ``width``: `──── label ────`.
+
+    Единственный сборщик меток-черт ленты (сжатие контекста, смена
+    модели): полосы — ``bar_style``, не короче `_RULE_MIN`; подпись не
+    влезла — обрезается с `…`. Пробелы вокруг подписи — её стилем."""
+    from rich.text import Text
+
+    middle = label.copy()
+    middle.truncate(max(width - 2 * _RULE_MIN - 2, 1), overflow="ellipsis")
+    middle.pad(1)
+    bars = max(width - middle.cell_len, 2 * _RULE_MIN)
+    text = Text()
+    text.append(_RULE * (bars // 2), style=bar_style)
+    text.append_text(middle)
+    text.append(_RULE * (bars - bars // 2), style=bar_style)
+    return text
+
+
 def compaction_rule(
     num: Optional[int], comp: Mapping, width: int, *, expanded: bool
 ) -> Text:
@@ -242,18 +261,10 @@ def compaction_rule(
     arrow = "▾" if expanded else "▸"
     budget = width - 2 * _RULE_MIN - len(f" {arrow}  ")
     labels = compaction_labels(num, comp)
-    label = next((x for x in labels if cell_len(x) <= budget), None)
-    if label is None:
-        label = Text(labels[-1])
-        label.truncate(max(budget, 1), overflow="ellipsis")
-        label = label.plain
-    middle = f" {arrow} {label} "
-    bars = max(width - cell_len(middle), 2 * _RULE_MIN)
-    text = Text()
-    text.append(_RULE * (bars // 2), style=FRAME_ARCHIVE)
-    text.append(middle, style=DIM)
-    text.append(_RULE * (bars - bars // 2), style=FRAME_ARCHIVE)
-    return text
+    label = next((x for x in labels if cell_len(x) <= budget), labels[-1])
+    return full_width_rule(
+        Text(f"{arrow} {label}", style=DIM), width, bar_style=FRAME_ARCHIVE
+    )
 
 
 def _segments(text: str, lead: Optional[Text]) -> list:

@@ -5178,18 +5178,16 @@ class TraceScreen(TraceFollowMixin, Screen):
                 self._mount_standalone(note.text, "warn")
 
     def _apply_choice_event(self, event: ModelChoiceApplied) -> None:
-        """Выбор применён (спека model-knob §6.4, §6.5): тихая отметка
-        становится обычной на своём месте; её нет — обычная отметка над
-        прижатым хвостом. Футер переключается сразу."""
+        """Выбор применён (спека model-knob §6.4, §6.5): отметка ожидания
+        становится чертой на своём месте; её нет — черта над прижатым
+        хвостом. Футер переключается сразу."""
         mark = self._pending_model_mark()
         if mark is not None:
             self._apply_pending_mark(mark, event.choice, event.alias)
         elif self._last_model_choice() == event.choice:
             return  # уже применена на месте окном старта рана
         else:
-            self._trace_mount(
-                self._new_model_mark(event.choice, pending=False)
-            )
+            self._mount_applied_mark(event.choice)
         self._refresh_footer()
 
     def _last_model_choice(self) -> str | None:
@@ -5201,7 +5199,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _apply_pending_mark(
         self, mark: ModelMark, choice: str, alias: str | None
     ) -> None:
-        """Тихая отметка — обычной, над прижатым хвостом без неё: реплики
+        """Отметка ожидания — чертой, над прижатым хвостом без неё: реплики
         очереди над ней остаются внизу, у ↑."""
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         tail = [w for w in self._pinned_tail(trace) if w is not mark]
@@ -5209,12 +5207,27 @@ class TraceScreen(TraceFollowMixin, Screen):
         mark.apply()
         if tail:
             trace.move_child(mark, before=tail[0])
+        self._drop_mark_before(mark)
+
+    def _mount_applied_mark(self, choice: str) -> None:
+        mark = self._new_model_mark(choice, pending=False)
+        self._trace_mount(mark)
+        self._drop_mark_before(mark)
+
+    def _drop_mark_before(self, mark: ModelMark) -> None:
+        """Отметки подряд не копятся (раунд 3 смока): черта сразу за другой,
+        без событий между ними, заменяет её — и между ходами, и в ходе."""
+        kids = list(self.query_one(_SEL_TRACE, VerticalScroll).children)
+        at = kids.index(mark)
+        previous = kids[at - 1] if at > 0 else None
+        if isinstance(previous, ModelMark) and not previous.pending:
+            previous.remove()
 
     def _settle_pending_mark(self) -> None:
         """Ран кончился, строка итога стоит, поток стопа вышел, а тихая
         отметка осталась — выбор применён завершением рана (событие
         `at_run_end` пришло или опоздало) или до засева применённого на
-        старте: отметка — обычной после строки итога, текущим выбором.
+        старте: отметка — чертой после строки итога, текущим выбором.
         Зовётся тиком после хвоста и пометок и концом рана. Сначала
         дешёвые проверки, отметка ищется только в прижатом хвосте."""
         if self._run_in_progress():
@@ -5235,7 +5248,7 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _settle_started_run_mark(self) -> None:
         """Окно старта рана: выбор сделан до засева применённого — ран уже
-        идёт им, и события не будет. Тихая отметка этого выбора — обычной
+        идёт им, и события не будет. Тихая отметка этого выбора — чертой
         на месте, тем же путём, что событие."""
         from gc_core.model_choice import ModelChoiceApplied
 
@@ -5267,8 +5280,8 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _mark_model_choice(self, choice: str) -> None:
         """Сессионный выбор модели и его отметка в ленте (спека model-knob
-        §6.4). Между ходами — обычная отметка в конце ленты, каждая
-        остаётся; во время хода — тихая у низа, новый выбор её заменяет;
+        §6.4). Между ходами — черта в конце ленты (черта сразу за чертой
+        её заменяет); во время хода — тихая у низа, новый выбор её заменяет;
         выбор той модели, что уже работает, — без отметки, с подсказкой.
         Выбор пишется до отметки: не сохранился — отметки нет."""
         if not self._run_in_progress():
@@ -5277,7 +5290,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             if choice == previous:
                 self._hint_already_working(choice)
             else:
-                self._trace_mount(self._new_model_mark(choice, pending=False))
+                self._mount_applied_mark(choice)
             return
         applied_fn = getattr(self.app.active_runner, "applied_choice", None)
         applied = applied_fn() if callable(applied_fn) else None
