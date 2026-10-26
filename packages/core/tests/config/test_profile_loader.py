@@ -238,10 +238,15 @@ def test_profile_content_overlays_project_config(isolated_cwd, tmp_path):
 def test_model_from_profile_beats_project_but_loses_to_cli(
     isolated_cwd, tmp_path
 ):
+    """Слово уровня — выбор только при непустом реестре: без реестра флаг
+    уходит в легаси `agent.model`."""
     from gc_core.config import apply_cli_overrides, load_settings
 
     base_config = tmp_path / "base_config.yml"
-    _write_yaml(base_config, _MINIMAL_BASE)
+    _write_yaml(
+        base_config,
+        {**_MINIMAL_BASE, "models": {"a": {}}, "slots": {"default": "a"}},
+    )
 
     _write_yaml(
         isolated_cwd / ".gc" / "config.yml",
