@@ -158,7 +158,7 @@ def test_switch_session_profile_signals_the_screen(tmp_path, monkeypatch):
     seen = []
 
     class _FakeMain:
-        def config_reloaded(self):
+        def config_reloaded(self, baseline=None):
             seen.append(True)
 
     monkeypatch.setattr(type(app), "is_running", property(lambda self: True))

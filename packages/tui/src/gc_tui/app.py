@@ -848,7 +848,7 @@ class TuiApp(App):
         self._notice_profile_source_change(old_source)
         self._notice_boot_frozen_diff(old_effective, self.effective_settings())
         self._notice_auto_routing_unavailable()
-        self._notify_screen_config_changed()
+        self._notify_screen_config_changed(old_effective)
 
     def _plan_reload(self) -> _ReloadPlan:
         """Собрать новое состояние окна в локальных переменных — без единой
@@ -998,8 +998,10 @@ class TuiApp(App):
         previous = self._settings.runtime.launch_root
         return apply_tui_runtime(loaded, launch_root=previous)
 
-    def _notify_screen_config_changed(self) -> None:
-        """Сказать главному экрану, что действующий конфиг сменился.
+    def _notify_screen_config_changed(self, old_effective) -> None:
+        """Сказать главному экрану, что действующий конфиг сменился;
+        `old_effective` — действующие настройки до смены: по ним экран
+        знает модель, которой шёл бы следующий ход до неё.
 
         Экран кэширует куски конфига один раз на секцию (голосовой flow строится
         на voice-секцию), поэтому сигнал обязателен КАЖДОМУ пути смены: и
@@ -1008,9 +1010,11 @@ class TuiApp(App):
         профиль со своей секцией `voice` оставлял Ctrl+T на прежнем endpoint)."""
         if not self.is_running:
             return
+        from gc_tui.services.model_picker import model_name
+
         main = self._main_screen()
         if main is not None and hasattr(main, "config_reloaded"):
-            main.config_reloaded()
+            main.config_reloaded(model_name(self, old_effective))
 
     def reload_config_if_changed(self) -> None:
         """Гейт свежести окна: перечитать базу (reload_config), только если мтайм-набор
@@ -1360,7 +1364,7 @@ class TuiApp(App):
         self.sanitize_session_model()
         self._notice_boot_frozen_diff(old_effective, self.effective_settings())
         self._notice_auto_routing_unavailable()
-        self._notify_screen_config_changed()
+        self._notify_screen_config_changed(old_effective)
         self.invalidate_runner()
 
     def _notice_profile_source_change(

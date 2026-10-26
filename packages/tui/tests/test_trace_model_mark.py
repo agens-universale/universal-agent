@@ -629,8 +629,9 @@ async def test_change_before_first_message_is_not_written(tmp_path):
 # Смена между ходами, меняющая модель следующего хода (профиль, «модель по
 # умолчанию» в Настройках, перечитанный конфиг), ставит черту так же, как
 # `/model`: склейка с соседней, возврат к прежней модели — без черты, запись
-# в тред. Сравнивается модель, а не выбор. Отметок в ленте нет — ленте
-# нечему противоречить, черты нет. Во время хода лента не трогается.
+# в тред. Сравнивается модель, а не выбор. Отметок в ленте нет — сверка с
+# моделью, которой пошёл бы ход до смены. Во время хода лента не
+# трогается: сверка — после конца хода, с моделью хода.
 
 _CONFIG = {
     "backend": {
@@ -824,18 +825,48 @@ async def test_config_reload_changing_next_model_adds_rule(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_change_without_rules_in_trace_adds_none(tmp_path):
+async def test_empty_trace_profile_switch_changing_model_adds_rule(tmp_path):
+    """Ход без отметок шёл glm-4.6; профиль, где default — qwen-coder:
+    черта, как у `/model`, с той же записью."""
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
+
     app = _config_app(tmp_path)
     async with app.run_test() as pilot:
         scr = await _attached(pilot, app)
+        assert _marks(scr) == []
         app.switch_session_profile("keep")
+        await pilot.pause()
+        (mark,) = _marks(scr)
+        await _assert_rule(pilot, mark, "● qwen-coder")
+        assert _choice_records(tmp_path) == [
+            ModelChoiceRecord("default", "qwen-coder", "glm-4.6")
+        ]
+
+
+@pytest.mark.asyncio
+async def test_empty_trace_profile_switch_keeping_model_adds_none(tmp_path):
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        app.switch_session_profile("work")
         await pilot.pause()
         assert _marks(scr) == []
         assert _choice_records(tmp_path) == []
 
 
+async def _finish_run(pilot, app: TuiApp) -> None:
+    app.active_runner.running = False
+    await _ticks(pilot)
+    app.active_runner = None
+    await pilot.pause()
+
+
 @pytest.mark.asyncio
-async def test_config_change_during_run_leaves_trace_alone(tmp_path):
+async def test_config_change_during_run_is_followed_after_run(tmp_path):
+    """Во время хода лента не трогается; ход кончился — черта модели
+    следующего хода и запись."""
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
+
     app = _config_app(tmp_path)
     async with app.run_test() as pilot:
         scr = await _attached(pilot, app)
@@ -850,5 +881,33 @@ async def test_config_change_during_run_leaves_trace_alone(tmp_path):
         assert _marks(scr) == [mark]
         await _assert_rule(pilot, mark, "● glm-flash")
         assert _choice_records(tmp_path) == written
-        app.active_runner.running = False
-        app.active_runner = None
+        await _finish_run(pilot, app)
+        last = _marks(scr)[-1]
+        await _assert_rule(pilot, last, "● qwen-coder")
+        assert _choice_records(tmp_path)[-1] == ModelChoiceRecord(
+            "light", "qwen-coder", "glm-flash"
+        )
+
+
+@pytest.mark.asyncio
+async def test_choice_dropped_at_run_end_is_followed(tmp_path):
+    """Перечитанный во время хода конфиг убрал выбранную модель: выбор
+    снимается в конце хода, черта следует за моделью следующего хода."""
+    app = _config_app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = await _attached(pilot, app)
+        scr._cmd_model("qwen-coder")
+        await pilot.pause()
+        app.active_runner = _Runner("qwen-coder")
+        _write_config(
+            tmp_path,
+            models={"glm-flash": {}, "glm-4.6": {}},
+            slots={"light": "glm-flash", "default": "glm-flash"},
+        )
+        app.reload_config()
+        await pilot.pause()
+        await _finish_run(pilot, app)
+        assert "model" not in app._session_overrides
+        last = _marks(scr)[-1]
+        # glm-flash теперь на двух уровнях — две точки.
+        await _assert_rule(pilot, last, "●● glm-flash")

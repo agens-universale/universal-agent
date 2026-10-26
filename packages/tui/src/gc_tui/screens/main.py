@@ -136,6 +136,7 @@ from gc_tui.services.mode_pill import (
 from gc_tui.services.model_picker import (
     current_choice,
     model_choice_refusal,
+    model_name,
 )
 from gc_tui.services.notices_ui import format_notices_badge
 from gc_tui.services.profile_lock import profile_switch_refusal
@@ -2010,7 +2011,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         return self._voice
 
-    def config_reloaded(self) -> None:
+    def config_reloaded(self, baseline: str | None = None) -> None:
         """Hot-reload конфига (app.reload_config): сбросить кэш voice-flow — он держит
         voice-секцию, снятую при сборке, и без сброса смена endpoint'а в /settings
         не подействовала бы до перезапуска.
@@ -2022,8 +2023,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         диктовки до конца сессии шли на прежний адрес (находка ревью коллеги).
 
         Сюда приходит и смена профиля: отметка модели в ленте сверяется с
-        моделью следующего хода (`_follow_next_model`)."""
-        self._follow_next_model()
+        моделью следующего хода (`_follow_next_model`); `baseline` — модель,
+        которой шёл бы ход до смены."""
+        self._follow_next_model(baseline)
         if self._voice is None:
             return
         if self._voice.state != "idle":
@@ -5229,23 +5231,35 @@ class TraceScreen(TraceFollowMixin, Screen):
         marks = trace.query(ModelMark)
         return marks.last() if marks else None
 
-    def _follow_next_model(self) -> None:
+    def _follow_next_model(self, baseline: str | None = None) -> None:
         """Смена между ходами (профиль, «модель по умолчанию», перечитанный
-        конфиг) увела следующий ход на другую модель, чем у последней
-        отметки ленты, — черта, как у `/model` между ходами: склейка с
-        соседней, возврат к прежней модели — без черты, запись в тред.
-        Во время хода и пока отметка ждёт применения лента не трогается;
-        отметок нет — ленте нечему противоречить."""
-        if self._run_in_progress() or self._pending_model_mark() is not None:
+        конфиг, снятый в конце хода выбор) увела следующий ход на другую
+        модель, чем показывает лента, — черта, как у `/model` между ходами:
+        склейка с соседней, возврат к прежней модели — без черты, запись в
+        тред. Лента показывает модель последней отметки; отметок нет —
+        `baseline`, модель, которой шёл бы ход до смены (или которой шёл
+        закончившийся ход). Вне промежутка между ходами и пока отметка
+        ждёт применения лента не трогается."""
+        pending = self._pending_model_mark()
+        if not self._between_turns() or pending is not None:
             return
         last = self._last_model_mark()
-        if last is None:
+        shown = last.model if last is not None else baseline
+        if shown is None or model_name(self.app) == shown:
             return
         choice = current_choice(self.app)
-        if self._choice_model(choice) == last.model:
-            return
-        self._mount_applied_mark(choice, last.model)
-        self._write_model_choice(choice, last.model)
+        self._mount_applied_mark(choice, shown)
+        self._write_model_choice(choice, shown)
+
+    def _between_turns(self) -> bool:
+        """Ход не идёт, не стартует и не дорабатывает (поток стопа, строка
+        «думает»): только тогда отметка модели встаёт чертой в ленте."""
+        return not (
+            self._run_in_progress()
+            or self._run_pending
+            or self._stopping_alive()
+            or self._thinking is not None
+        )
 
     def _apply_pending_mark(
         self, mark: ModelMark, choice: str, alias: str | None
@@ -5299,11 +5313,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._run_in_progress():
             self._settle_started_run_mark()
             return
-        if (
-            self._run_pending
-            or self._stopping_alive()
-            or self._thinking is not None
-        ):
+        if not self._between_turns():
             return
         mark = self._pending_model_mark()
         if mark is None:
@@ -5327,6 +5337,12 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._apply_choice_event(
                 ModelChoiceApplied(applied, self._choice_alias(applied))
             )
+
+    def _run_model(self, runner) -> str | None:
+        """Модель, которой шёл закончившийся ход; неизвестна — None."""
+        applied_fn = getattr(runner, "applied_choice", None)
+        applied = applied_fn() if callable(applied_fn) else None
+        return self._choice_model(applied) if applied else None
 
     def _pending_model_mark(self) -> Optional[ModelMark]:
         """Тихая отметка — всегда в прижатом хвосте ленты."""
@@ -5953,6 +5969,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._show_turn_outcome(word, plan_proposed, outcome, edits=edits)
         if on_screen:
             self._settle_pending_mark()
+            self._follow_next_model(self._run_model(runner))
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
