@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-CARD_VERSION = "0.4.0"
+CARD_VERSION = "0.5.0"
 
 
 def http_origin(host: str, port: int) -> str:

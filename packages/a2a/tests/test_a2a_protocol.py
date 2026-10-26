@@ -17,7 +17,7 @@ async def test_card_matches_the_channel_defaults(tmp_path):
             "protocolVersion": "1.0",
         }
     ]
-    assert card["version"] == "0.4.0"
+    assert card["version"] == "0.5.0"
     assert card["capabilities"] == {
         "streaming": False,
         "pushNotifications": False,
