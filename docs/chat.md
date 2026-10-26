@@ -60,7 +60,7 @@ gc-serve chat a2a webhook        # вместе с другими поверхн
 | `chat.port` | `8090` | Порт |
 | `chat.auth_token` | `server.auth_token` | Пусто — без Bearer. Иначе каждый `/v1/` несёт `Authorization: Bearer <token>` |
 | `chat.cors_origins` | `[]` | Пусто — CORS выключен. Непусто — только эти origin. `"*"` из списка выбрасывается |
-| `chat.launch_root` | `null` | cwd нового хода, если в запросе нет абсолютного `metadata.cwd` |
+| `chat.launch_root` | `null` | Корень ходов: cwd нового хода без абсолютного `metadata.cwd`; `metadata.cwd` — только внутри, иначе 400; пусто — каталог процесса |
 | `chat.text_answer_mode` | `allow` | `deny` / `judge` / `allow` |
 | `chat.finish_gate_mode` | `off` | `off` / `on` / `smart` (в YAML — в кавычках) |
 | `chat.todo_reminder_steps` | `0` | Напоминания `session_todo`; `0` — выкл |

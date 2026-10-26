@@ -66,7 +66,9 @@ class FakeAgent:
         return None
 
 
-def _facade(tmp_path, agent: FakeAgent) -> ResponsesFacade:
+def _facade(
+    tmp_path, agent: FakeAgent, launch_root: str | None = None
+) -> ResponsesFacade:
     threads = tmp_path / "threads"
     threads.mkdir()
 
@@ -76,7 +78,7 @@ def _facade(tmp_path, agent: FakeAgent) -> ResponsesFacade:
 
     return ResponsesFacade(
         settings=make_settings(**{"agent.model": "from-config"}),
-        section=ChatConfig(host="127.0.0.1", launch_root=None),
+        section=ChatConfig(host="127.0.0.1", launch_root=launch_root),
         agent_factory=factory,
         index=ResponseIndex.for_threads_dir(str(threads)),
     )
@@ -208,7 +210,7 @@ async def test_get_survives_a_new_facade(tmp_path):
 async def test_cwd_mismatch_does_not_start(tmp_path):
     agent = FakeAgent(asyncio.Event())
     agent._hold = False
-    facade = _facade(tmp_path, agent)
+    facade = _facade(tmp_path, agent, launch_root=str(tmp_path))
     work = tmp_path / "work"
     work.mkdir()
     handle = await facade.open(
