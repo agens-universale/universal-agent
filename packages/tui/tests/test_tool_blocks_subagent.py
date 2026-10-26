@@ -514,7 +514,7 @@ async def test_agent_window_expands_on_click(tmp_path):
         lines = _agent_rows(_rows(pilot))
         assert lines[1] == "  └ проверка клиента"
         assert lines[2] == "  ● Смотрю, где клиент берёт таймаут."
-        assert lines[-1] == "  − свернуть"
+        assert lines[-1] == "  − свернуть группу"
         assert not any("└ − свернуть" in line for line in lines)
         (collapse,) = _window_phrases(scr, "bottom")
         await pilot.click(collapse)
@@ -548,7 +548,7 @@ async def test_agent_collapse_stays_last_on_new_event(tmp_path):
         await pilot.pause()
         await _emit(pilot, _progress([("prose", "Ещё одно событие.")]))
         lines = _agent_rows(_rows(pilot))
-        assert lines[-2:] == ["  ● Ещё одно событие.", "  − свернуть"]
+        assert lines[-2:] == ["  ● Ещё одно событие.", "  − свернуть группу"]
 
 
 @pytest.mark.asyncio

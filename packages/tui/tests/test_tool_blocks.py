@@ -13,6 +13,7 @@ from gc_core.constants.tool_display import DisplayCategory as C
 from gc_tui.services.tool_blocks import (
     AGENT_WINDOW,
     COLLAPSE_PHRASE,
+    GROUP_COLLAPSE_PHRASE,
     BlockEdit,
     BlockKind,
     CallTimers,
@@ -507,7 +508,7 @@ def test_toggle_open_close():
     fold(model.toggle("block:0:top"))
     assert all(fold.visible(f"c{i}") for i in range(5))
     assert fold.phrase("block:0", "top") is None
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("block:0", "bottom") == GROUP_COLLAPSE_PHRASE
     assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
         "block:0", "bottom", after="c4"
     )
@@ -538,7 +539,7 @@ def test_expanded_survives_finish():
     fold(model.toggle("block:0"))
     fold(model.result("c4", "ok", reason="", executed=None))
     assert fold.header().word == "Explored"
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("block:0", "bottom") == GROUP_COLLAPSE_PHRASE
     assert all(fold.visible(f"c{i}") for i in range(5))
 
 
@@ -722,7 +723,7 @@ def test_memory_session_and_project_one_block_window():
     ]
     fold(model.toggle("block:0"))
     assert all(fold.visible(f"m{i}") for i in range(5))
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("block:0", "bottom") == GROUP_COLLAPSE_PHRASE
     fold(model.toggle("block:0"))
     assert fold.visible("m0") is False
 
@@ -1091,7 +1092,7 @@ def test_ten_files_window_and_details():
     assert all(fold.visible(k) for k in keys)
     assert fold.share("f0") == SetDiffShare("f0", 3, "member")
     assert fold.phrase("f0", "more") == "+ ещё 2 строки"
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("block:0", "bottom") == GROUP_COLLAPSE_PHRASE
     assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
         "block:0", "bottom", after="f9:more"
     )
@@ -1122,7 +1123,7 @@ def test_header_toggles_whole_block_file_toggles_own():
     assert all(fold.visible(k) for k in keys)
     assert [fold.share(k).rows for k in keys] == [None] * 4
     assert [fold.phrase(k, "more") for k in keys] == [COLLAPSE_PHRASE] * 4
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("block:0", "bottom") == GROUP_COLLAPSE_PHRASE
     fold(model.toggle("block:0"))
     assert [fold.visible(k) for k in keys] == [False, True, True, True]
     assert [fold.share(k).rows for k in keys[1:]] == [3, 3, 3]
@@ -1299,7 +1300,7 @@ def test_ran_parts_files():
     assert fold.share(keys[0]) == SetDiffShare(keys[0], 3, "member")
     assert fold.phrase("block:0", "files") is None
     assert fold.phrase("block:0", "output") == "+ ещё 10 строк"
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("block:0", "bottom") == GROUP_COLLAPSE_PHRASE
     # Пробел на строке файла — только его дифф; на строке команды — всё.
     fold(model.toggle(keys[1]))
     assert fold.share(keys[1]).rows is None
@@ -1330,7 +1331,7 @@ def test_ran_parts_unrecorded():
     assert fold.state[("MountPhrase", "block:0", "unrecorded")] == MountPhrase(
         "block:0", "unrecorded", after=files[-1].key
     )
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("block:0", "bottom") == GROUP_COLLAPSE_PHRASE
     assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
         "block:0", "bottom", after="block:0:unrecorded"
     )
@@ -1615,7 +1616,7 @@ def test_agent_visibility_conjunction():
     ]  # fmt: skip
     # `− свернуть` окна — последней строкой блока `Agent`, в конце уровня.
     assert fold.phrase(AGENT_WINDOW, "top") is None
-    assert fold.phrase(AGENT_WINDOW, "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase(AGENT_WINDOW, "bottom") == GROUP_COLLAPSE_PHRASE
     assert fold.state[("MountPhrase", AGENT_WINDOW, "bottom")] == (
         MountPhrase(AGENT_WINDOW, "bottom")
     )

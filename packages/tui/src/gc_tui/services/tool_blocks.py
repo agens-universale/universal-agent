@@ -38,6 +38,8 @@ OUTPUT_PREVIEW_LINES = 3
 COMMAND_PREVIEW_LINES = 3
 
 COLLAPSE_PHRASE = "− свернуть"
+#: `− свернуть` окна (`… ещё N`): прячет строки группы, а не содержимое.
+GROUP_COLLAPSE_PHRASE = "− свернуть группу"
 #: Ключ окна субагента в модели его уровня (спека §7): фраза окна
 #: `└ … ещё N` и строка `Agent` у исполнителя.
 AGENT_WINDOW = "agent"
@@ -949,7 +951,7 @@ class ToolBlocks:
         hidden = len(self._events) - len(shown)
         more = more_phrase(hidden) if hidden else None
         expanded = self._window.expanded and len(self._events) > WINDOW
-        collapse = COLLAPSE_PHRASE if expanded else None
+        collapse = GROUP_COLLAPSE_PHRASE if expanded else None
         # Маркер — под строкой `Agent`; `− свернуть` — последней строкой
         # блока `Agent`: в конце уровня, его держит там хвост уровня.
         decisions = self._phrase(AGENT_WINDOW, "top", more, after=AGENT_WINDOW)
@@ -1112,7 +1114,11 @@ class ToolBlocks:
     def _collapse(self, block: _Block, layout: _Layout) -> Optional[str]:
         """`− свернуть` окна файлов внизу блока — фраза блока только у
         окна; строки диффов она не считает."""
-        return COLLAPSE_PHRASE if block.expanded and layout.windowed else None
+        return (
+            GROUP_COLLAPSE_PHRASE
+            if block.expanded and layout.windowed
+            else None
+        )
 
     def _diff(self, wanted: list[Decision]) -> list[Decision]:
         out: list[Decision] = []
@@ -1157,7 +1163,7 @@ class ToolBlocks:
         for member in block.members:
             out += self._member(member, lead=member is lead)
             out.append(SetVisible(member.key, member in window))
-        collapse = COLLAPSE_PHRASE if block.expanded else None
+        collapse = GROUP_COLLAPSE_PHRASE if block.expanded else None
         out += self._phrase(
             block.key,
             "bottom",

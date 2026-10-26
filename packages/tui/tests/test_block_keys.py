@@ -326,7 +326,7 @@ async def test_click_phrases_expand_and_collapse(tmp_path):
             for w in scr.query(BlockAction)
             if w.display and not w.has_class(HIDDEN_CLASS)
         ]
-        assert collapse.phrase == "− свернуть"
+        assert collapse.phrase == "− свернуть группу"
         await pilot.click(collapse)
         await pilot.pause()
         assert _shown(scr, "r0", "r1") == [False, False]
