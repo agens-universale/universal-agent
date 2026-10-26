@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -32,6 +33,21 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     return (msg[:120] + "…") if len(msg) > 121 else (msg or name)
 
 
+# OpenAI-совместимые бэкенды ограничивают имя функции 64 символами: один тул
+# длиннее отклоняет весь запрос к модели.
+MAX_TOOL_NAME_LEN = 64
+
+
+def mcp_tool_full_name(server_name: str, base_name: str) -> str:
+    """Имя тула для модели ``mcp_<сервер>_<тул>``; длиннее предела — укорочено
+    с хешем полного имени. Вызов идёт по метаданным записи, а не по имени."""
+    name = f"mcp_{server_name}_{base_name}"
+    if len(name) <= MAX_TOOL_NAME_LEN:
+        return name
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    return f"{name[: MAX_TOOL_NAME_LEN - 9]}_{digest}"
+
+
 def _normalize_tool(
     server_name: str,
     tool: Dict[str, Any],
@@ -55,7 +71,7 @@ def _normalize_tool(
     if not base_name:
         return None
 
-    combined_name = f"mcp_{server_name}_{base_name}"
+    combined_name = mcp_tool_full_name(server_name, base_name)
 
     base_description = tool.get("description") or ""
     extra_desc = f"\n\nFrom server: {server_display_name}"
@@ -357,7 +373,7 @@ async def _abuild_tools_registry(
             base = tool.get("name")
             if not base:
                 continue
-            all_tools[f"mcp_{name}_{base}"] = _registry_entry(
+            all_tools[mcp_tool_full_name(name, base)] = _registry_entry(
                 name, server_cfg=cfg, tool=tool
             )
     return all_tools, status_map

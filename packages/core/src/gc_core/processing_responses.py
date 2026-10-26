@@ -2703,19 +2703,22 @@ class _AgentLoop:
         запроса."""
         if not _mode_requires_backend_call(mode):
             return messages
-        if backend_mode == "chat_completions":
+        chat = backend_mode == "chat_completions"
+        if chat:
             await aprepare_main_call(self.state, self.ctx)
             if self._stopped_before_call():
                 return None
             await self._apre_backend_compaction(messages, mode)
-            # UserPromptSubmit — до служебных добавок (подсказка, SessionStart):
-            # хук смотрит на последнее сообщение, это должен быть запрос.
-            if mode == "user_ask":
-                messages = await self._aapply_plugin_user_prompt(messages)
+        # Хуки плагинов — в любом api_mode, как хуки инструментов и Stop.
+        # UserPromptSubmit — до служебных добавок (подсказка, SessionStart):
+        # хук смотрит на последнее сообщение, это должен быть запрос.
+        if mode == "user_ask":
+            messages = await self._aapply_plugin_user_prompt(messages)
+        if chat:
             messages = await self._aapply_tool_usage_notice(messages)
-            messages = await self._aapply_plugin_session_start(messages)
-            if self._stopped_before_call():
-                return None
+        messages = await self._aapply_plugin_session_start(messages)
+        if chat and self._stopped_before_call():
+            return None
         return await self._aannounce_mode(messages)
 
     def _stopped_before_call(self) -> bool:

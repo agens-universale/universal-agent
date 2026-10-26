@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -163,16 +164,16 @@ class PreparedInstall:
             for h in m.hooks
         ]
         for name, srv in plugin.mcp_servers_raw.items():
-            if srv.get("url"):
-                lines.append(f"mcp {name}: {srv['url']}")
-            else:
-                cmd = " ".join(
-                    [
-                        str(srv.get("command", "")),
-                        *map(str, srv.get("args", [])),
-                    ]
-                )
-                lines.append(f"mcp {name}: {cmd}")
+            target = srv.get("url") or " ".join(
+                [str(srv.get("command", "")), *map(str, srv.get("args", []))]
+            )
+            env_vars = srv.get("env_vars")
+            reads = (
+                f" (читает переменные окружения: {', '.join(env_vars)})"
+                if env_vars
+                else ""
+            )
+            lines.append(f"mcp {name}: {target}{reads}")
         lines.extend(plugin.mcp_problems)
         skills = 0
         if plugin.skills_dir:
@@ -188,9 +189,16 @@ class PreparedInstall:
         return lines
 
     def differs_from(self, name: str) -> bool:
-        """Отличаются ли хуки или MCP от установленной копии ``name``."""
-        old = load_plugin(self._root / _safe_name(name))
-        return old is None or _exec_surface(old) != _exec_surface(self.plugin)
+        """Отличается ли от установленной копии ``name`` хоть что-то, что может
+        выполниться: хуки и MCP в манифестах или содержимое файлов плагина
+        (скрипты хуков и skills, локальные MCP-серверы)."""
+        installed = self._root / _safe_name(name)
+        old = load_plugin(installed)
+        return (
+            old is None
+            or _exec_surface(old) != _exec_surface(self.plugin)
+            or _tree_digest(installed) != _tree_digest(self._plugin_dir)
+        )
 
     def ensure_free(self, force: bool = False) -> None:
         """``ValueError``, если плагин с этим именем уже установлен (без ``force``)."""
@@ -242,6 +250,20 @@ def _replace_dir(src: Path, dest: Path) -> None:
     shutil.rmtree(old, ignore_errors=True)
 
 
+def _tree_digest(root: Path) -> str:
+    """Хеш путей и содержимого всех файлов каталога (без ``.git``)."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        rel = path.relative_to(root)
+        if ".git" in rel.parts:
+            continue
+        digest.update(rel.as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _exec_surface(plugin: Plugin) -> set[tuple]:
     """Всё, что плагин запускает: хуки и MCP как в файлах (без подстановок,
     env и headers), чтобы путь копии и окружение не считались изменением."""
@@ -259,6 +281,7 @@ def _exec_surface(plugin: Plugin) -> set[tuple]:
             srv.get("command"),
             tuple(srv.get("args") or ()),
             srv.get("url"),
+            tuple(srv.get("env_vars") or ()),
         )
         for name, srv in plugin.mcp_servers_raw.items()
     }

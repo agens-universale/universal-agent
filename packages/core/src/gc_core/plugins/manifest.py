@@ -343,12 +343,41 @@ McpParse = tuple[
 ]
 
 
-def _mcp_shown(transport: str, spec: dict[str, Any]) -> dict[str, Any]:
-    """Запись как в файле, без подстановок: что показать и с чем сравнить."""
-    return {
+def _mcp_shown(
+    transport: str, spec: dict[str, Any], env_vars: tuple[str, ...] = ()
+) -> dict[str, Any]:
+    """Запись как в файле, без подстановок: что показать и с чем сравнить.
+
+    ``env_vars`` — переменные окружения, которые запись читает: плагин может
+    передать любую из них на свой сервер, поэтому их видно в сводке.
+    """
+    shown = {
         "transport": transport,
         **{k: spec[k] for k in _MCP_SHOWN_KEYS if k in spec},
     }
+    if env_vars:
+        shown["env_vars"] = list(env_vars)
+    return shown
+
+
+_PLUGIN_ROOT_VARS = frozenset({"CLAUDE_PLUGIN_ROOT", "GC_PLUGIN_ROOT"})
+
+
+def _strings(value: Any) -> list[str]:
+    """Все строки записи (значения во вложенных списках и словарях)."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, list):
+        return [s for v in value for s in _strings(v)]
+    return []
+
+
+def _env_refs(value: Any) -> tuple[str, ...]:
+    """Имена ``${VAR}`` во всей записи (кроме пути плагина), по порядку."""
+    names = (m.group(1) for s in _strings(value) for m in _ENV_REF.finditer(s))
+    return tuple(dict.fromkeys(n for n in names if n not in _PLUGIN_ROOT_VARS))
 
 
 def _mcp_transport(spec: dict[str, Any]) -> str:
@@ -398,11 +427,11 @@ def _parse_mcp_servers(raw: Any, root: Path) -> McpParse:
         except KeyError as exc:
             # Сервер верный, переменная нужна при запуске агента: в сводке
             # установки он есть, в конфиг не попадает, пока её не задали.
-            shown[str(name)] = _mcp_shown(transport, spec)
+            shown[str(name)] = _mcp_shown(transport, spec, _env_refs(spec))
             _skip(problems, name, f"env var {exc.args[0]} is not set")
             continue
         out[str(name)] = _mcp_entry(expanded, root)
-        shown[str(name)] = _mcp_shown(transport, spec)
+        shown[str(name)] = _mcp_shown(transport, spec, _env_refs(spec))
     return out, shown, problems
 
 

@@ -108,3 +108,57 @@ async def test_user_prompt_hook_and_command_run_on_first_turn(
     first_request = json.dumps(backend.calls[0], ensure_ascii=False)
     assert "BOOT" in first_request
     assert "SAY-HI there" in first_request
+
+
+@pytest.mark.parametrize("backend_mode", ["chat_completions", "responses"])
+async def test_session_hooks_run_in_every_backend_mode(
+    tmp_path, monkeypatch, backend_mode
+):
+    """SessionStart и UserPromptSubmit не зависят от api_mode, как и хуки
+    инструментов и Stop."""
+    from types import SimpleNamespace
+
+    from gc_core import processing_responses as pr
+    from gc_core import run_context as rc
+
+    cfg = parity_config(tmp_path, monkeypatch)
+    ctx = await rc.acreate_run_context(cfg)
+    state = SimpleNamespace(messages=[], parent_state_id=None, state_id="s")
+    loop = pr._AgentLoop(
+        state,
+        ctx,
+        get_full_history_messages=None,
+        persist_messages_callback=None,
+        pre_backend_compaction_hook=None,
+        turn_end_compaction_hook=None,
+        force_compact_hook=None,
+        get_pending_messages=None,
+        check_stop=None,
+        session_meta=None,
+        mark_finalizing=None,
+        mark_finish_gate_checking=None,
+    )
+    called = []
+
+    async def record(name, messages):
+        called.append(name)
+        return messages
+
+    async def no_judge(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(pr, "aprepare_main_call", no_judge)
+    monkeypatch.setattr(
+        loop, "_aapply_plugin_user_prompt", lambda m: record("prompt", m)
+    )
+    monkeypatch.setattr(
+        loop, "_aapply_plugin_session_start", lambda m: record("start", m)
+    )
+    monkeypatch.setattr(
+        loop, "_aannounce_mode", lambda m: record("announce", m)
+    )
+
+    await loop._aprepare_main_request(
+        [{"role": "user", "content": "hi"}], "user_ask", backend_mode
+    )
+    assert called == ["prompt", "start", "announce"]

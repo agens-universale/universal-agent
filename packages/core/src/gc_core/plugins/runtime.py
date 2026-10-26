@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shlex
 from dataclasses import dataclass
@@ -45,7 +46,7 @@ MAX_STOP_CONTINUATIONS = 3
 _SESSION_SOURCE = "startup"
 BLOCKED_ERROR = "blocked_by_plugin"
 
-_cache: dict[tuple[str, ...], tuple[Plugin, ...]] = {}
+_cache: dict[tuple[tuple[str, tuple[int, int]], ...], tuple[Plugin, ...]] = {}
 
 
 @dataclass(frozen=True)
@@ -85,8 +86,20 @@ def configured_paths(cfg: Any, *, fetch: bool = False) -> list[str]:
     return paths
 
 
+def _dir_stamp(path: str) -> tuple[int, int]:
+    """Отпечаток каталога плагина: ``update`` подменяет каталог целиком (новый
+    inode; время изменения ``copytree`` копирует из источника, его мало)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return (-1, -1)
+    return (st.st_ino, st.st_mtime_ns)
+
+
 def load_plugins(paths: list[str]) -> tuple[Plugin, ...]:
-    key = tuple(paths)
+    # В ключе и время изменения каталогов: долгоживущий процесс (TUI, сервер)
+    # после ``gc-plugin update`` читает плагин заново, а не держит старые хуки.
+    key = tuple((p, _dir_stamp(p)) for p in paths)
     if key not in _cache:
         unique: dict[str, Plugin] = {}
         for path in paths:
