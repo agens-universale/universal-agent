@@ -256,8 +256,9 @@ def _apply_edit(view, key: str, lines: int, *, context: bool = False):
 @pytest.mark.asyncio
 async def test_group_preview_changed_lines_then_full_diff():
     """Блок `Edited 2 файла`: свёрнуто — у каждого файла первые 3
-    изменённые строки без контекста, фраза считает и контекст; раскрыто —
-    дифф целиком. Сетка колонок — в обоих видах."""
+    изменённые строки без контекста и своя фраза под диффом, она считает
+    и контекст; файл раскрывается сам, заголовок — весь блок. Сетка
+    колонок — во всех видах."""
     app = _App()
     async with app.run_test(size=(80, 40)) as pilot:
         view = app.view()
@@ -269,15 +270,32 @@ async def test_group_preview_changed_lines_then_full_diff():
         lines = [line for line in _plain(rows) if line]
         assert not any("ctx" in line for line in lines)
         assert sum("+line" in line for line in lines) == 4
-        # a: 3 строки контекста; b: 3 контекста и 2 изменённые сверх 3.
-        assert lines[-1] == "     + ещё 8 строк"
+        # a: 3 строки контекста; b: 3 контекста и 2 изменённые сверх 3 —
+        # каждая фраза под диффом своего файла.
+        phrases = [i for i, line in enumerate(lines) if "+ ещё" in line]
+        b_row = next(i for i, line in enumerate(lines) if "b.py" in line)
+        assert [lines[i] for i in phrases] == [
+            "     + ещё 3 строки",
+            "     + ещё 5 строк",
+        ]
+        assert phrases[0] < b_row < phrases[1] == len(lines) - 1
         view.toggle("a")
+        await pilot.pause()
+        rows = trace_rows(app)
+        assert_trace_grid(rows, origin=ORIGIN)
+        lines = _plain(rows)
+        # Раскрыт только a: его две строки `ctx` (третья — пустая).
+        assert sum("ctx" in line for line in lines) == 2
+        assert sum("+line" in line for line in lines) == 4
+        assert "     − свернуть" in lines
+        view.toggle("block:0")
         await pilot.pause()
         rows = trace_rows(app)
         assert_trace_grid(rows, origin=ORIGIN)
         lines = _plain(rows)
         assert sum("ctx" in line for line in lines) == 4
         assert sum("+line" in line for line in lines) == 6
+        assert sum(line == "     − свернуть" for line in lines) == 2
 
 
 @pytest.mark.asyncio
@@ -302,7 +320,154 @@ async def test_single_to_block_keeps_same_diffblock():
         lines = _plain(rows)
         assert " ● Edited 2 файла (+16 −0)" in lines
         assert any(line.startswith("   └ a.py (+8 −0)  ") for line in lines)
-        assert [line for line in lines if line][-1] == "     + ещё 10 строк"
+        phrases = [line for line in lines if "+ ещё" in line]
+        assert phrases == ["     + ещё 5 строк"] * 2
+        assert [line for line in lines if line][-1] == "     + ещё 5 строк"
+
+
+def _phrase_of(app, key: str) -> BlockAction:
+    return next(p for p in app.query(BlockAction) if p.key == key)
+
+
+def _shown_lines(app) -> list[str]:
+    rows = trace_rows(app)
+    assert_trace_grid(rows, origin=ORIGIN)
+    return _plain(rows)
+
+
+@pytest.mark.asyncio
+async def test_file_phrase_click_expands_only_its_file():
+    """Фраза под диффом файла (решение 2026-10-26): клик раскрывает
+    только этот файл, под ним — `− свернуть`; соседи свёрнуты."""
+    app = _App()
+    async with app.run_test(size=(80, 50)) as pilot:
+        view = app.view()
+        for key in "abc":
+            _apply_edit(view, key, 8)
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum(line == "     + ещё 5 строк" for line in lines) == 3
+        await pilot.click(_phrase_of(app, "a:more"))
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum("+line" in line for line in lines) == 8 + 3 + 3
+        assert _phrase_of(app, "a:more").phrase == "− свернуть"
+        assert _phrase_of(app, "b:more").phrase == "+ ещё 5 строк"
+        a_end = lines.index("     − свернуть")
+        assert "b.py" in lines[a_end + 2]
+
+
+@pytest.mark.asyncio
+async def test_space_on_header_toggles_block_on_file_row_its_diff():
+    """Пробел на заголовке — весь блок, на строке файла — его дифф."""
+    app = _App()
+    async with app.run_test(size=(80, 60)) as pilot:
+        view = app.view()
+        rows = [_apply_edit(view, key, 8) for key in "abc"]
+        await pilot.pause()
+        header = next(w for w in app.query(ToolCallRow) if w.mode == "header")
+        header.focus()
+        await pilot.press("space")
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum("+line" in line for line in lines) == 24
+        assert sum(line == "     − свернуть" for line in lines) == 3
+        await pilot.press("space")
+        await pilot.pause()
+        assert sum("+line" in line for line in _shown_lines(app)) == 9
+        rows[1].focus()
+        await pilot.press("space")
+        await pilot.pause()
+        assert sum("+line" in line for line in _shown_lines(app)) == 14
+        assert _phrase_of(app, "b:more").phrase == "− свернуть"
+        assert _phrase_of(app, "a:more").phrase == "+ ещё 5 строк"
+
+
+@pytest.mark.asyncio
+async def test_ran_output_and_files_phrases_under_owners():
+    """`Ran` с выводом и файлами: фраза вывода — под выводом, над
+    файлами; у каждого обрезанного файла — своя под его диффом. Пробел на
+    строке файла — только его дифф, на строке команды — всё."""
+    from gc_tui.models import CommandOutput
+    from gc_tui.services.block_edits import RanResult
+
+    app = _App()
+    async with app.run_test(size=(80, 60)) as pilot:
+        view = app.view()
+        row = _row("x1", label="Run", target="make")
+        view.add_call(row, C.RUN, waiting=False)
+        view.started(row)
+        out = tuple(f"out {i}" for i in range(6))
+        output = CommandOutput(out, 0, 0, False, False, out[:3], 3)
+        files = tuple(
+            _edit_of(_record(f"x1:{name}.py", 8)) for name in ("a", "b")
+        )
+        view.result(row, _ev("x1"), None, ran=RanResult(output, files=files))
+        await pilot.pause()
+        lines = [line for line in _shown_lines(app) if line]
+        assert lines[1:5] == [
+            "   └ out 0",
+            "     out 1",
+            "     out 2",
+            "     + ещё 3 строки",
+        ]
+        assert lines[5].startswith("     Edited x1:a.py.py")
+        phrases = [line for line in lines if "+ ещё" in line]
+        assert phrases == ["     + ещё 3 строки"] + ["     + ещё 5 строк"] * 2
+        file_row = next(
+            r for r in app.query(ToolCallRow) if r.call_id == "x1:b.py"
+        )
+        file_row.focus()
+        await pilot.press("space")
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum("+line" in line for line in lines) == 3 + 8
+        assert "     out 5" not in lines
+        row.focus()
+        await pilot.press("space")
+        await pilot.pause()
+        lines = _shown_lines(app)
+        assert sum("+line" in line for line in lines) == 16
+        assert "     out 5" in lines
+
+
+def _nested_lines(app) -> list[str]:
+    """Строки вложенного уровня от его первого блока: сетка — от колонки
+    его глифов (мини-лента ставит пустую строку под `Agent`)."""
+    rows = trace_rows(app)
+    start = next(i for i, r in enumerate(rows) if "Edited" in r.plain)
+    assert_trace_grid(rows[start:], origin=ORIGIN + 2)
+    return _plain(rows)
+
+
+@pytest.mark.asyncio
+async def test_nested_edits_phrase_under_each_file():
+    """Правки субагента — то же правило на уровень глубже: фраза под
+    диффом каждого обрезанного файла, клик раскрывает только его."""
+    app = _App()
+    async with app.run_test(size=(80, 50)) as pilot:
+        top = app.view()
+        agent = _row("a1", label="Agent", target="проверка")
+        top.add_call(agent, C.AGENT, waiting=False)
+        trace = app.query_one("#trace", VerticalScroll)
+        model = ToolBlocks(app.timers, diff_preview=3, agent_window=True)
+        nested = ToolBlocksView(_Host(trace), model, level="a1", depth=1)
+        nested.set_owner(agent)
+        app.views["a1"] = nested
+        _apply_edit(nested, "a", 8)
+        _apply_edit(nested, "b", 2)
+        _apply_edit(nested, "c", 8)
+        await pilot.pause()
+        lines = _nested_lines(app)
+        phrases = [i for i, line in enumerate(lines) if "+ ещё" in line]
+        assert [lines[i] for i in phrases] == ["       + ещё 5 строк"] * 2
+        b_row = next(i for i, line in enumerate(lines) if "b.py" in line)
+        assert phrases[0] < b_row < phrases[1]
+        await pilot.click(_phrase_of(app, "a:more"))
+        await pilot.pause()
+        lines = _nested_lines(app)
+        assert sum("+line" in line for line in lines) == 8 + 2 + 3
+        assert _phrase_of(app, "c:more").phrase == "+ ещё 5 строк"
 
 
 @pytest.mark.asyncio

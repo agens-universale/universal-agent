@@ -124,7 +124,8 @@ class BlockHost(Protocol):
 
 class BlockAction(NoSelectStatic):
     """Фраза блока: `… ещё N`, `+ ещё N строк`, `− свернуть`. Маркер окна
-    над членами — с `└ ` в колонке 2, прочие — в колонке 4; обе фразы окна
+    над членами — с `└ ` в колонке 2, прочие — в колонке 4 (фраза файла —
+    под его диффом, фраза вывода — под строкой `Ran`); обе фразы окна
     `Agent` — без `└`, в колонке его вложенных глифов (`mark` пуст); клик
     — тогл. Строка незаписанных файлов кликом ничего не делает."""
 
@@ -300,7 +301,8 @@ class ToolBlocksView:
             level=self.depth,
             path_target=True,
         )
-        line.block_key = (self.level, row.call_id)
+        # Пробел на строке файла — только его дифф (решение 2026-10-26).
+        line.block_key = (self.level, file.key)
         # Enter на строке файла — экран деталей самой команды.
         line.set_detail_source(lambda: row.call_id)
         line.set_word(file.verb)
@@ -350,8 +352,12 @@ class ToolBlocksView:
         self.apply(self.model.timers_updated(calls))
 
     def head_widget(self, key: str) -> Optional[Widget]:
-        """Верх блока ключа ``key`` (блока, фразы или члена): заголовок, у
-        блока без заголовка — его первая строка."""
+        """Верх раскрытого по ключу ``key``: у файла и вывода `Ran` — их
+        строка; у блока (его фразы или члена) — заголовок, у блока без
+        заголовка — его первая строка."""
+        owner = self.model.owner_of(key)
+        if owner is not None:
+            return self._widgets.get(owner)
         block = self.model.block_of(key)
         if block is None:
             return None

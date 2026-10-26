@@ -862,14 +862,19 @@ def test_single_edit_share():
     assert fold.word("a") == "Added"
     assert fold.tail("a") == " (+37 −0)"
     assert fold.share("a") == SetDiffShare("a", 3, "single")
-    assert fold.phrase("block:0", "bottom") == "+ ещё 34 строки"
-    assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
-        "block:0", "bottom", after=diff_key("a")
+    # Фраза — под диффом своего файла, фразы блока нет (2026-10-26).
+    assert fold.phrase("a", "more") == "+ ещё 34 строки"
+    assert fold.state[("MountPhrase", "a", "more")] == MountPhrase(
+        "a", "more", after=diff_key("a")
     )
+    assert ("SetPhrase", "block:0", "bottom") not in fold.state
     assert not any(k[0] == "MountHeader" for k in fold.state)
     fold(model.toggle("a"))
     assert fold.share("a") == SetDiffShare("a", None, "single")
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("a", "more") == COLLAPSE_PHRASE
+    fold(model.toggle("a:more"))
+    assert fold.share("a") == SetDiffShare("a", 3, "single")
+    assert fold.phrase("a", "more") == "+ ещё 34 строки"
 
 
 def test_compact_edit_phrase_counts_all_lines():
@@ -880,10 +885,10 @@ def test_compact_edit_phrase_counts_all_lines():
     model, fold = _edits_model()
     edit = replace(_edit("a", lines=3), compact=True)
     _apply(model, fold, "a", edit)
-    assert fold.phrase("block:0", "bottom") == "+ ещё 3 строки"
+    assert fold.phrase("a", "more") == "+ ещё 3 строки"
     fold(model.toggle("a"))
     assert fold.share("a") == SetDiffShare("a", None, "single")
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("a", "more") == COLLAPSE_PHRASE
 
 
 def test_compact_ran_file_counts_all_lines():
@@ -898,7 +903,8 @@ def test_compact_ran_file_counts_all_lines():
             "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
         )
     )
-    assert fold.phrase("block:0", "bottom") == "+ ещё 2 строки"
+    assert fold.phrase("x:a", "more") == "+ ещё 2 строки"
+    assert ("SetPhrase", "block:0", "bottom") not in fold.state
 
 
 def test_edit_comes_with_result():
@@ -924,7 +930,7 @@ def test_single_edit_fits_no_phrase():
     model, fold = _edits_model()
     _apply(model, fold, "a", _edit("a", lines=2))
     assert fold.share("a") == SetDiffShare("a", 3, "single")
-    assert ("SetPhrase", "block:0", "bottom") not in fold.state
+    assert ("SetPhrase", "a", "more") not in fold.state
     assert model.toggle("a") == []
 
 
@@ -934,7 +940,7 @@ def test_one_changed_line_phrase_counts_context():
     model, fold = _edits_model()
     _apply(model, fold, "a", _edit("a", lines=8, changed=2))
     assert fold.share("a") == SetDiffShare("a", 3, "single")
-    assert fold.phrase("block:0", "bottom") == "+ ещё 6 строк"
+    assert fold.phrase("a", "more") == "+ ещё 6 строк"
     fold(model.toggle("a"))
     assert fold.share("a") == SetDiffShare("a", None, "single")
 
@@ -942,7 +948,7 @@ def test_one_changed_line_phrase_counts_context():
 def test_five_changed_lines_show_three():
     model, fold = _edits_model()
     _apply(model, fold, "a", _edit("a", lines=11, changed=5))
-    assert fold.phrase("block:0", "bottom") == "+ ещё 8 строк"
+    assert fold.phrase("a", "more") == "+ ещё 8 строк"
 
 
 def test_preview_setting_is_changed_lines_per_file():
@@ -952,7 +958,7 @@ def test_preview_setting_is_changed_lines_per_file():
     for key in "abc":
         _apply(model, fold, key, _edit(key, lines=12, changed=6))
     assert [fold.share(k).rows for k in "abc"] == [5, 5, 5]
-    assert fold.phrase("block:0", "bottom") == "+ ещё 21 строка"
+    assert [fold.phrase(k, "more") for k in "abc"] == ["+ ещё 7 строк"] * 3
 
 
 def test_single_to_block_transition():
@@ -987,15 +993,19 @@ def test_three_files_each_full_preview():
     assert [fold.mode(k).gap for k in "abc"] == [False, True, True]
     assert [fold.mode(k).lead for k in "abc"] == [True, False, False]
     assert fold.head_text() == "Edited 3 файла (+3 −0)"
-    # Контекст каждого файла (3 × 4) — то, что добавит раскрытие.
-    assert fold.phrase("block:0", "bottom") == "+ ещё 12 строк"
+    # Контекст своего файла (4) — под каждым файлом, фразы блока нет.
+    assert [fold.phrase(k, "more") for k in "abc"] == ["+ ещё 4 строки"] * 3
+    assert [fold.state[("MountPhrase", k, "more")].after for k in "abc"] == [
+        diff_key(k) for k in "abc"
+    ]
+    assert ("SetPhrase", "block:0", "bottom") not in fold.state
 
 
 def test_group_without_hidden_lines_has_no_phrase():
     model, fold = _edits_model()
     for key in "abc":
         _apply(model, fold, key, _edit(key, lines=2))
-    assert ("SetPhrase", "block:0", "bottom") not in fold.state
+    assert not any(k[0] == "SetPhrase" for k in fold.state)
 
 
 def test_added_then_edited_two_blocks():
@@ -1068,16 +1078,75 @@ def test_ten_files_window_and_details():
     assert fold.phrase("block:0", "top") == "… ещё 7"
     assert [fold.visible(k) for k in keys] == [False] * 7 + [True] * 3
     assert [fold.share(k).rows for k in keys[-3:]] == [3, 3, 3]
-    # Скрытые строки видимых файлов (3 × 2) и все строки скрытых (7 × 5).
-    assert fold.phrase("block:0", "bottom") == "+ ещё 41 строка"
+    # Фраза — у каждого видимого файла (5 − 3), фразы блока нет.
+    assert [fold.phrase(k, "more") for k in keys[-3:]] == [
+        "+ ещё 2 строки"
+    ] * 3
+    assert [fold.phrase(k, "more") for k in keys[:7]] == [None] * 7
+    assert ("SetPhrase", "block:0", "bottom") not in fold.state
     assert fold.mode("f7") == SetMode("f7", "member")
     assert fold.mode("f8") == SetMode("f8", "member", gap=True)
-    fold(model.toggle("block:0:bottom"))
+    # Маркер окна раскрывает окно файлов: превью файлов прежнее.
+    fold(model.toggle("block:0:top"))
     assert all(fold.visible(k) for k in keys)
-    assert fold.share("f0") == SetDiffShare("f0", None, "member")
+    assert fold.share("f0") == SetDiffShare("f0", 3, "member")
+    assert fold.phrase("f0", "more") == "+ ещё 2 строки"
     assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
+        "block:0", "bottom", after="f9:more"
+    )
     assert fold.phrase("block:0", "top") is None
     assert fold.mode("f0") == SetMode("f0", "member", lead=True)
+    fold(model.toggle("block:0:bottom"))
+    assert [fold.visible(k) for k in keys] == [False] * 7 + [True] * 3
+    assert fold.phrase("block:0", "bottom") is None
+
+
+def test_header_toggles_whole_block_file_toggles_own():
+    """Пробел на заголовке — все файлы, окно и диффы целиком; на строке
+    файла — только его дифф; клик по фразе файла — тоже только он."""
+    model, fold = _edits_model()
+    keys = [f"f{i}" for i in range(4)]
+    for key in keys:
+        _apply(model, fold, key, _edit(key, lines=5))
+    fold(model.toggle("f2"))
+    assert [fold.share(k).rows for k in keys[1:]] == [3, None, 3]
+    assert [fold.phrase(k, "more") for k in keys[1:]] == [
+        "+ ещё 2 строки",
+        COLLAPSE_PHRASE,
+        "+ ещё 2 строки",
+    ]
+    fold(model.toggle("f3:more"))
+    assert fold.share("f3").rows is None
+    fold(model.toggle("block:0"))
+    assert all(fold.visible(k) for k in keys)
+    assert [fold.share(k).rows for k in keys] == [None] * 4
+    assert [fold.phrase(k, "more") for k in keys] == [COLLAPSE_PHRASE] * 4
+    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    fold(model.toggle("block:0"))
+    assert [fold.visible(k) for k in keys] == [False, True, True, True]
+    assert [fold.share(k).rows for k in keys[1:]] == [3, 3, 3]
+    assert fold.phrase("block:0", "bottom") is None
+
+
+def test_file_expansion_survives_live_updates():
+    """Раскрытый файл остаётся раскрытым, когда в блок встают новые
+    правки (и одиночная становится членом блока)."""
+    model, fold = _edits_model()
+    _apply(model, fold, "a", _edit("a", lines=8))
+    fold(model.toggle("a"))
+    _apply(model, fold, "b", _edit("b", lines=8))
+    assert fold.share("a") == SetDiffShare("a", None, "member")
+    assert fold.phrase("a", "more") == COLLAPSE_PHRASE
+    assert fold.share("b") == SetDiffShare("b", 3, "member")
+    assert fold.phrase("b", "more") == "+ ещё 5 строк"
+
+
+def test_space_on_bodiless_file_does_nothing():
+    model, fold = _edits_model()
+    _apply(model, fold, "a", _edit("a", lines=8))
+    _apply(model, fold, "b", outcome="error", reason="не найден")
+    assert model.toggle("b") == []
 
 
 def test_binary_size_tail():
@@ -1142,7 +1211,8 @@ def test_ran_files_phrase_counts_context():
         )
     )
     assert fold.share("x:f0") == SetDiffShare("x:f0", 3, "member")
-    assert fold.phrase("block:0", "bottom") == "+ ещё 6 строк"
+    assert fold.phrase("x:f0", "more") == "+ ещё 6 строк"
+    assert ("SetPhrase", "block:0", "bottom") not in fold.state
 
 
 def test_ran_parts_command_only():
@@ -1153,9 +1223,9 @@ def test_ran_parts_command_only():
             "x", command_hidden=3, output_hidden=0, files=(), unrecorded=0
         )
     )
-    assert fold.phrase("block:0", "bottom") == "+ ещё 3 строки"
-    assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
-        "block:0", "bottom", after="x"
+    assert fold.phrase("block:0", "output") == "+ ещё 3 строки"
+    assert fold.state[("MountPhrase", "block:0", "output")] == MountPhrase(
+        "block:0", "output", after="x"
     )
 
 
@@ -1167,7 +1237,7 @@ def test_ran_parts_output_only():
             "x", command_hidden=0, output_hidden=11, files=(), unrecorded=0
         )
     )
-    assert fold.phrase("block:0", "bottom") == "+ ещё 11 строк"
+    assert fold.phrase("block:0", "output") == "+ ещё 11 строк"
 
 
 def test_ran_parts_command_and_output():
@@ -1178,13 +1248,13 @@ def test_ran_parts_command_and_output():
             "x", command_hidden=3, output_hidden=11, files=(), unrecorded=0
         )
     )
-    assert fold.phrase("block:0", "bottom") == "+ ещё 14 строк"
-    out = fold(model.toggle("block:0:bottom"))
+    assert fold.phrase("block:0", "output") == "+ ещё 14 строк"
+    out = fold(model.toggle("block:0:output"))
     assert SetExpanded("block:0", True) in out
-    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    assert fold.phrase("block:0", "output") == COLLAPSE_PHRASE
     out = fold(model.toggle("x"))
     assert SetExpanded("block:0", False) in out
-    assert fold.phrase("block:0", "bottom") == "+ ещё 14 строк"
+    assert fold.phrase("block:0", "output") == "+ ещё 14 строк"
 
 
 def test_ran_parts_one_line_no_output():
@@ -1219,15 +1289,31 @@ def test_ran_parts_files():
     assert [fold.mode(k).gap for k in keys[1:]] == [False, True, True]
     assert not any(fold.mode(k).lead for k in keys)
     assert fold.tail(keys[1]) == " (+4 −0)"
-    # Одна фраза внизу: 10 строк вывода + 3 × 1 видимых + 4 скрытого.
-    assert fold.phrase("block:0", "bottom") == "+ ещё 17 строк"
-    assert fold.state[("MountPhrase", "block:0", "bottom")] == MountPhrase(
-        "block:0", "bottom", after=diff_key(keys[-1])
+    # Каждая фраза — под своим: вывод под строкой команды (над файлами),
+    # у каждого видимого файла — своя; фразы блока нет.
+    assert fold.phrase("block:0", "output") == "+ ещё 10 строк"
+    assert fold.state[("MountPhrase", "block:0", "output")] == MountPhrase(
+        "block:0", "output", before=keys[0]
     )
+    assert [fold.phrase(k, "more") for k in keys[1:]] == ["+ ещё 1 строка"] * 3
+    assert ("SetPhrase", "block:0", "bottom") not in fold.state
     fold(model.toggle("block:0:files"))
     assert all(fold.visible(k) for k in keys)
-    assert fold.share(keys[0]) == SetDiffShare(keys[0], None, "member")
+    assert fold.share(keys[0]) == SetDiffShare(keys[0], 3, "member")
     assert fold.phrase("block:0", "files") is None
+    assert fold.phrase("block:0", "output") == "+ ещё 10 строк"
+    assert fold.phrase("block:0", "bottom") == COLLAPSE_PHRASE
+    # Пробел на строке файла — только его дифф; на строке команды — всё.
+    fold(model.toggle(keys[1]))
+    assert fold.share(keys[1]).rows is None
+    assert fold.share(keys[2]).rows == 3
+    out = fold(model.toggle("x"))
+    assert SetExpanded("block:0", True) in out
+    assert [fold.share(k).rows for k in keys] == [None] * 4
+    out = fold(model.toggle("x"))
+    assert SetExpanded("block:0", False) in out
+    assert [fold.share(k).rows for k in keys[1:]] == [3] * 3
+    assert [fold.visible(k) for k in keys] == [False, True, True, True]
 
 
 def test_ran_parts_unrecorded():
@@ -1314,7 +1400,8 @@ def test_compact_file_gap_follows_body():
     _apply(model, fold, "a", replace(_edit("a", lines=4), compact=True))
     _apply(model, fold, "b", _edit("b", lines=4))
     assert fold.mode("b").gap is False
-    fold(model.toggle("block:0:bottom"))
+    assert fold.phrase("a", "more") == "+ ещё 4 строки"
+    fold(model.toggle("a:more"))
     assert fold.mode("b").gap is True
 
 
@@ -1378,12 +1465,14 @@ def test_place_results_out_of_order_keep_mount_order():
     assert fold.mode("g1") == SetMode("g1", "member", lead=True)
     assert fold.mode("e1") == SetMode("e1", "member", gap=True)
     assert fold.mode("e2") == SetMode("e2", "member", gap=True)
-    # Фраза — под последним по месту файлом, не между файлами.
-    assert fold.state[("MountPhrase", block, "bottom")] == MountPhrase(
-        block, "bottom", after=diff_key("e2")
-    )
-    assert fold.phrase(block, "bottom") == "+ ещё 21 строка"
+    # Фраза — под диффом каждого файла.
+    for key in ("g1", "e1", "e2"):
+        assert fold.state[("MountPhrase", key, "more")] == MountPhrase(
+            key, "more", after=diff_key(key)
+        )
+        assert fold.phrase(key, "more") == "+ ещё 7 строк"
     assert fold.head_text(block) == "Edited 3 файла (+3 −0)"
+    assert ("SetPhrase", block, "bottom") not in fold.state
 
 
 def test_place_out_of_order_window_by_mount():
@@ -1402,14 +1491,12 @@ def test_place_out_of_order_window_by_mount():
     assert [fold.visible(k) for k in keys] == [False, False, True, True, True]
     assert fold.mode("g3") == SetMode("g3", "member")
     assert fold.mode("e1") == SetMode("e1", "member", gap=True)
-    assert fold.state[("MountPhrase", block, "bottom")] == MountPhrase(
-        block, "bottom", after=diff_key("e2")
-    )
+    assert ("SetPhrase", block, "bottom") not in fold.state
 
 
-def test_place_deferred_single_phrase_hidden_on_join():
-    """Ждавшая правка успела показаться одиночной (своя фраза) — при
-    входе в группу её фраза прячется."""
+def test_place_deferred_single_phrase_stays_on_join():
+    """Ждавшая правка успела показаться одиночной (фраза под её диффом) —
+    при входе в группу фраза остаётся её, под тем же диффом."""
     model, fold = _edits_model()
     _pending(model, fold, "g1")
     _done(model, fold, "g1", _edit("g1", lines=2))
@@ -1417,16 +1504,15 @@ def test_place_deferred_single_phrase_hidden_on_join():
     _pending(model, fold, "e2")
     _done(model, fold, "e2", _edit("e2", lines=40))
     own = ("SetPhrase",)
-    phrases = [k for k in fold.state if k[:1] == own and k[2] == "bottom"]
-    assert any(fold.state[k].text for k in phrases)
+    assert fold.phrase("e2", "more") == "+ ещё 37 строк"
     _done(model, fold, "e1", _edit("e1", lines=2))
-    block = model.block_of("g1")
+    assert model.block_of("e2") == model.block_of("g1")
     visible = [
         k
         for k in fold.state
         if k[:1] == own and fold.state[k].text is not None
     ]
-    assert visible == [("SetPhrase", block, "bottom")]
+    assert visible == [("SetPhrase", "e2", "more")]
 
 
 # --- превью не зависит от числа файлов (решение 2026-10-23) ---------------

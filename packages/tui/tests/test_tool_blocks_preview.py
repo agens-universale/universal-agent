@@ -439,6 +439,13 @@ async def test_live_equals_reopen_equals_preview(tmp_path):
     assert any("Agent  Worker" in t for t in texts)
     # Свёрнутые диффы — только изменённые строки, контекста нет.
     assert not any(t.endswith(" ctx") for t in texts)
+    # Фраза — под тем, что раскрывает: под диффом каждого файла (две
+    # строки контекста скрыты) — три правки и два файла команды, строкой
+    # выше — строка диффа; у многострочной команды — под её выводом.
+    phrases = [i for i, t in enumerate(texts) if t == "     + ещё 2 строки"]
+    assert len(phrases) == 6
+    assert all(texts[i - 1].split()[1][0] == "+" for i in phrases[:5])
+    assert texts[phrases[5] - 1] == "   └ 1"
     ran = texts.index(next(t for t in texts if "Ran  uv run pytest" in t))
     assert texts[ran + 1 : ran + 4] == [
         "   └ код выхода 1",

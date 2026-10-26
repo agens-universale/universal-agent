@@ -401,7 +401,9 @@ async def test_ran_refused(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ran_files_one_phrase(tmp_path):
+async def test_ran_phrases_under_owners(tmp_path):
+    """Фраза — под тем, что раскрывает (решение 2026-10-26): фраза вывода
+    — под выводом, над файлами; файлы, показанные целиком, — без фраз."""
     thread = _Thread(tmp_path)
     _journal(
         tmp_path,
@@ -420,14 +422,14 @@ async def test_ran_files_one_phrase(tmp_path):
         )
         lines = _rows(pilot)
         assert lines[2:5] == ["  └ line 0", "    line 1", "    line 2"]
-        assert lines[5] == "    … ещё 1"
+        assert lines[5] == "    + ещё 7 строк"
+        assert lines[6] == "    … ещё 1"
         assert any(
             line.startswith("    Added new.py (+10 −0)") for line in lines
         )
         assert "    Deleted gone.py" in lines
-        # Одна фраза — в самом низу: 7 строк вывода и 2 строки скрытого
-        # a.py; new.py (10 строк) влезает в превью целиком.
-        assert lines[-1] == "    + ещё 9 строк"
+        # Видимые файлы влезают в превью целиком — своих фраз нет; a.py
+        # скрыт окном.
         assert sum("+ ещё" in line for line in lines) == 1
         trace = scr.query_one("#trace", VerticalScroll)
         files = [
