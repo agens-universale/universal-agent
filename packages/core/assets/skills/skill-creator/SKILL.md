@@ -2,7 +2,7 @@
 id: "skill-creator"
 name: "skill-creator"
 description: "Lean workflow for creating and improving skills: capture intent, single-question interview (max 5 questions), draft SKILL.md, two-pass self-check (text-review + run + hybrid review), package as skill-<id>.zip with demo artifacts. Layer-aware (system/user/project) — for new skills always asks where to put them; for improving existing skills handles the source layer correctly (in-place for project/user, override for system). Use when the user wants to create, draft, improve, refactor, fix, or package a skill — even if they don't explicitly mention 'skill-creator'."
-version: "0.2.0"
+version: "0.2.1"
 ---
 
 # Skill Creator
@@ -235,16 +235,17 @@ propose the default and ask the user to confirm or correct.
 - **No checkboxes, no enumerated options.** Examples in parentheses are OK
   ("e.g., JSON array, JSON object with `data` field, plain text — describe
   freely") but no "1./2./3." structures requiring the user to pick one.
-- **Limits (только про content-questions):**
+- **Limits (content questions only):**
   - Target **2-3 questions** (soft).
   - Hard cap **5 questions**. Past 5 you're over-clarifying or asking the
     wrong questions.
   - Prioritize: most consequential ambiguities first (output format, scope,
     critical edge cases). Trivial details default or assume.
-  - **Не считается в budget:** служебные вопросы про destination layer
-    («куда положить — в проект или для всех проектов?») и про
-    разрешение id-коллизии. Это setup-вопросы, не content. После них
-    у тебя ещё есть полные 2-3 content-вопроса.
+  - **Not counted toward the budget:** setup questions about the
+    destination layer ("куда положить — в проект или для всех проектов?")
+    and resolving ID collisions. These are setup questions, not content
+    questions. After them, you still have the full 2-3 content questions
+    available.
 - **Read the user's tone:** if answers shrink to "ok / yes / whatever" —
   stop asking, finalize remaining gaps as `## Assumptions` in the new
   SKILL.md.
