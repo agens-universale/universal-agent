@@ -7,6 +7,7 @@ import re
 from typing import Optional
 
 from gc_core.attachments.model import attachments_of, chip_of, wh_text
+from gc_core.auto_routing.levels import AUTO
 from gc_core.message_policy.user_message_policy import (
     is_technical_user_message_text,
     resolve_technical_user_content_type,
@@ -224,7 +225,7 @@ def _model_choice_lines(rec: dict) -> list[str]:
     record = parse_model_choice(rec)
     if record is None:
         return []
-    name = record.alias if record.choice != "auto" else None
+    name = record.alias if record.choice != AUTO else None
     return [f"────────── модель: {name or record.choice} ──────────", ""]
 
 
