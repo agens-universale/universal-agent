@@ -66,7 +66,6 @@ _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
 #: Прогон восстановления: адрес обратного вызова задачи остаётся прежним.
 KEEP_CALLBACK = object()
 #: Как часто забывать квитанции старше окна идемпотентности.
-_RECEIPTS_PRUNE_SECONDS = 3600
 
 
 def webhook_settings(runtime: ServerRuntime, name: str = "webhook"):
@@ -154,13 +153,11 @@ class WebhookSurface:
         self.registry = AgentRunRegistry()
         self._pruner: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
-        self._receipts: asyncio.Task | None = None
         self.callbacks = CallbackSender(self.config.callbacks)
 
     # --- жизненный цикл ----------------------------------------------------
 
     async def astart(self) -> None:
-        self._receipts = asyncio.create_task(self._areceipts_loop())
         if self.config.recovery.enabled:
             from gc_server.webhook.recovery import arecover_forever
 
@@ -186,10 +183,8 @@ class WebhookSurface:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.callbacks.aclose()
-        background = [
-            t for t in (self._pruner, self.recovery_task, self._receipts) if t
-        ]
-        self._pruner = self.recovery_task = self._receipts = None
+        background = [t for t in (self._pruner, self.recovery_task) if t]
+        self._pruner = self.recovery_task = None
         for task in background:
             task.cancel()
         await asyncio.gather(*background, return_exceptions=True)
@@ -398,29 +393,11 @@ class WebhookSurface:
             and (record.state.inbox_seq >= seq)
         )
 
-    async def aprune_receipts(self, *, older_than: timedelta) -> int:
-        """Забыть квитанции старше окна идемпотентности."""
-        return await self.threads().prune(older_than)
-
     async def amaintain_once(self) -> None:
-        """Обслуживание хранилища тредов: квитанции старше окна
-        идемпотентности (и надгробия) и — у хранилища, которое умеет
-        (Redis, S3), — сироты прерванных записей (``sweep``)."""
-        window = timedelta(hours=self.config.idempotency_ttl_hours)
-        await self.aprune_receipts(older_than=window)
-        sweep = getattr(self.threads().store, "sweep", None)
-        if callable(sweep):
-            await sweep()
-
-    async def _areceipts_loop(self) -> None:
-        while True:
-            try:
-                await self.amaintain_once()
-            except Exception:
-                logger.warning(
-                    "обслуживание хранилища тредов не удалось", exc_info=True
-                )
-            await asyncio.sleep(_RECEIPTS_PRUNE_SECONDS)
+        """Обслуживание хранилища тредов — его ведёт процесс
+        (``ServerRuntime.amaintain_forever``), при любом наборе
+        поверхностей."""
+        await self.runtime.amaintain_once()
 
     async def acancel(self, key: ThreadKey) -> Dict[str, Any] | None:
         """Отменить ход задачи с любого инстанса: поток ``control`` треда

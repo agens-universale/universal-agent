@@ -155,3 +155,50 @@ async def test_two_surfaces_answer_on_their_own_ports(tmp_path):
     assert health.json() == {"status": "ok"}
     assert models.status_code == 200
     assert wrong.status_code == 404  # health вебхука не на порту chat
+
+
+async def test_store_is_maintained_without_the_webhook_surface(tmp_path):
+    """Ревью, раунд 4: квитанции, надгробия и сироты хранилища в базе
+    чистил только цикл поверхности вебхука — ``gc-serve chat`` и
+    ``gc-serve a2a`` копили их без предела. Обслуживает процесс."""
+    from datetime import timedelta
+
+    from gc_core.stores import Stores
+    from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+
+    pruned: list = []
+    swept: list = []
+
+    class Maintained(MemoryThreadStore):
+        async def prune_receipts(self, older_than):
+            pruned.append(older_than)
+            return 0
+
+        async def sweep(self, older_than=timedelta(hours=1)):
+            swept.append(older_than)
+            return 0
+
+    runtime = ServerRuntime(
+        base=make_settings(
+            {
+                "agent.model": "m",
+                "paths.threads_data_path": str(tmp_path / "threads"),
+                "storage": {"threads": {"type": "redis", "url": "redis://x"}},
+            }
+        ),
+        config=_cfg(chat={"port": _free_port()}),
+        stores=Stores(threads=Maintained(), agent=object()),
+    )
+    stop = asyncio.Event()
+    serving = asyncio.create_task(
+        aserve(runtime, [build_surface(runtime, "chat")], stop=stop)
+    )
+    try:
+        for _ in range(200):
+            if pruned and swept:
+                break
+            await asyncio.sleep(0.02)
+    finally:
+        stop.set()
+        await asyncio.wait_for(serving, 15)
+    assert pruned and swept
