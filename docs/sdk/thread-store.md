@@ -16,7 +16,7 @@ AGENTS.md, скиллы и субагенты — общее для всех т�
 
 | Хранилище | Где | Когда |
 |---|---|---|
-| `FileThreadStore` | `gc_core.thread_store_file` | по умолчанию в SDK, CLI, TUI, сервере: файлы `data_*.jsonl` (строка — запись `message` или итог хода `turn_outcome`) и `meta_*.json` в `paths.threads_data_path` |
+| `FileThreadStore` | `gc_core.thread_store_file` | по умолчанию в SDK, CLI, TUI, сервере: файлы `data_*.jsonl` (строка — запись `message`, итог хода `turn_outcome` или смена модели `model_choice`) и `meta_*.json` в `paths.threads_data_path` |
 | `MemoryThreadStore` | `gc_testkit.memory_thread_store` | тесты; образец своего хранилища |
 | `DurableFileThreadStore` | `gc_core.thread_store_file_durable` | Temporal: те же файлы плюс служебный каталог `.store/` |
 | `SQLiteThreadStore` | `gc_core_temporalio.storage.sqlite` | Temporal: один файл базы |
@@ -156,6 +156,10 @@ def test_my_durable_store():
   карта не пишется, кривое значение разбор отбрасывает, запись остаётся.
   Откат реплики снимает запись её хода. Подробно — в
   [контракте](thread-store-contract.md).
+- **Смена модели** — `append_model_choice(system_id, thread_id, record, *,
+  seq)`: строка `{"type": "model_choice", …, "model"}` за последним
+  сообщением перед применением смены. Правила — как у итога хода: есть
+  только у `FileThreadStore`, durable-хранилище её гасит.
 
 ## Где что лежит
 
