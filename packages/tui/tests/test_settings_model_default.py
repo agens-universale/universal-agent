@@ -361,8 +361,9 @@ async def test_override_warning_names_session_model(tmp_path, monkeypatch):
 
 
 async def test_menu_preview_shows_model(tmp_path, monkeypatch):
-    """Превью «Режимов работы» в меню называет модель, а не слово
-    уровня."""
+    """Превью «Режимов работы» в меню называет модель словами, а не
+    словом уровня, и без знака: сводка — серый текст, точки в ней не
+    различают уровни."""
     monkeypatch.chdir(tmp_path)
     app, _ = _app_with_config(tmp_path, 'model: "max"\n' + _REGISTRY)
     async with app.run_test() as pilot:
@@ -378,7 +379,7 @@ async def test_menu_preview_shows_model(tmp_path, monkeypatch):
 
         preview = scr._row_value(_MODES).plain
 
-        assert preview.startswith("модель: ● big")
+        assert preview.startswith("модель: big ·")
 
 
 async def test_missing_active_profile_file_refuses_not_base(

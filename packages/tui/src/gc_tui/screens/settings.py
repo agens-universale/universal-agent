@@ -3978,9 +3978,9 @@ class SettingsScreen(Screen):
         from gc_tui.toggles import TOGGLES, toggle_state_base
 
         spec = TOGGLES[name]
-        if spec.value_text is None:
-            return toggle_state_base(self.app, name)
-        return spec.value_text(self.app, self.app.base_settings()).plain
+        if spec.value_words is not None:
+            return spec.value_words(self.app, self.app.base_settings())
+        return toggle_state_base(self.app, name)
 
     def _mount_modes_section(self, frame: Vertical) -> None:
         from gc_tui.toggles import TOGGLES, modes_section_names
