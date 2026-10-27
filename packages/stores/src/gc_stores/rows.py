@@ -51,6 +51,7 @@ THREAD_COLUMNS: tuple[str, ...] = (
     "lease_owner",
     "lease_epoch",
     "lease_expires_at",
+    "lease_token",
     "created_at",
     "updated_at",
 )
@@ -106,6 +107,7 @@ class ThreadRow:
     lease_owner: str | None = None
     lease_epoch: int = 0
     lease_expires_at: datetime | None = None
+    lease_token: str | None = None
 
     @classmethod
     def from_db(cls, row: Any) -> ThreadRow:
@@ -131,6 +133,7 @@ class ThreadRow:
             lease_owner=row["lease_owner"],
             lease_epoch=row["lease_epoch"],
             lease_expires_at=row["lease_expires_at"],
+            lease_token=row.get("lease_token"),
         )
 
     def values(
@@ -152,16 +155,19 @@ class ThreadRow:
             owner=self.lease_owner,
             epoch=self.lease_epoch,
             expires_at=self.lease_expires_at,
+            token=self.lease_token,
         )
 
     def grant(self, lease: Lease) -> None:
         self.lease_owner = lease.owner
         self.lease_epoch = lease.epoch
         self.lease_expires_at = lease.expires_at
+        self.lease_token = lease.token
 
     def drop_lease(self) -> None:
         self.lease_owner = None
         self.lease_expires_at = None
+        self.lease_token = None
 
     def stream_high(self) -> dict[str, int]:
         return {name: seq for name, seq in self.max_seq.items() if seq}

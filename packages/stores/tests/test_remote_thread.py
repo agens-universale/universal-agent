@@ -168,6 +168,8 @@ _REFUSED = {
     "check_side_writes_to_durable_thread",
     "check_delete_spares_a_durable_thread",
     "check_concurrent_alias_race",
+    "check_conditional_frontend",
+    "check_lease_token_fences_commit_and_release",
 }
 
 

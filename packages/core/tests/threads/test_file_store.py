@@ -6,8 +6,6 @@ import re
 from datetime import timedelta
 
 import pytest
-from gc_testkit import develop_files as develop
-from gc_testkit import develop_files
 from gc_core.threads import file_tx
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import (
@@ -17,10 +15,64 @@ from gc_core.threads.models import (
     ThreadKey,
     ThreadQuery,
 )
+from gc_testkit import develop_files
+from gc_testkit import develop_files as develop
 from gc_testkit.legacy_threads import LEGACY_THREADS, install_legacy_threads
 from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
 
 KEY = ThreadKey(system="cli", thread="t1")
+
+
+@pytest.mark.parametrize("durability", ["atomic", "fsync"])
+async def test_alias_journal_is_recovered_before_another_thread_claims_it(
+    tmp_path, monkeypatch, durability
+):
+    from gc_core.thread_store_journal import JournalRecoveryError
+
+    store = FileThreadStore(tmp_path, durability=durability)
+    other = ThreadKey(system="cli", thread="other")
+    target = "_apply_plain" if durability == "atomic" else "_recover"
+    original = getattr(file_tx, target)
+
+    def crash(*_args):
+        raise JournalRecoveryError("interrupted publication")
+
+    monkeypatch.setattr(file_tx, target, crash)
+    with pytest.raises(JournalRecoveryError):
+        await store.append_side(
+            KEY,
+            SideChange(
+                op_id="a",
+                add_aliases=["shared"],
+                append=[("inbox", [{"content": "work"}])],
+            ),
+        )
+    monkeypatch.setattr(file_tx, target, original)
+    reopened = FileThreadStore(tmp_path, durability=durability)
+    with pytest.raises(ValueError, match="алиас"):
+        await reopened.append_side(
+            other, SideChange(op_id="b", add_aliases=["shared"])
+        )
+    assert await reopened.resolve_alias("shared") == KEY
+    assert len(await reopened.read_stream(KEY, "inbox")) == 1
+
+
+async def test_stale_lease_is_rejected_after_tombstone_gc(tmp_path):
+    from gc_core.threads.errors import OwnershipError
+
+    store = FileThreadStore(tmp_path)
+    old = (await store.claim(KEY, LeaseRequest(owner="same"))).lease
+    await store.release(KEY, old)
+    await store.delete(KEY, op_id="delete")
+    assert store.sweep_tombstones(timedelta(seconds=-1)) >= 1
+    current = (await store.claim(KEY, LeaseRequest(owner="same"))).lease
+    assert old.epoch == current.epoch == 1
+    with pytest.raises(OwnershipError):
+        await store.commit(
+            KEY, ThreadChange(op_id="late", lease=old, expected_revision=0)
+        )
+    await store.release(KEY, old)
+    assert (await store.get_thread(KEY)).lease == current
 
 
 def run(coro):
@@ -218,3 +270,46 @@ def test_legacy_named_thread_moves_to_canonical_file(tmp_path):
     )
     entries = run(store.read_stream(KEY, "messages"))
     assert [e.seq for e in entries] == [1, 2]
+
+
+def test_two_file_writers_cannot_publish_the_same_alias(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from time import sleep
+
+    gate = Barrier(2)
+    original = FileThreadStore._alias_owner
+
+    def slow_owner(self, alias):
+        owner = original(self, alias)
+        sleep(0.03)  # увеличиваем окно между проверкой и публикацией
+        return owner
+
+    monkeypatch.setattr(FileThreadStore, "_alias_owner", slow_owner)
+
+    def write(name):
+        store = FileThreadStore(tmp_path)
+        key = ThreadKey(system="cli", thread=name)
+        gate.wait(timeout=5)
+        try:
+            run(
+                store.append_side(
+                    key, SideChange(op_id=name, add_aliases=["shared"])
+                )
+            )
+        except ValueError:
+            return None
+        return key
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(write, ["first", "second"]))
+    winners = [key for key in results if key is not None]
+    assert len(winners) == 1
+    store = FileThreadStore(tmp_path)
+    assert run(store.resolve_alias("shared")) == winners[0]
+    loser = ThreadKey(
+        system="cli",
+        thread="second" if winners[0].thread == "first" else "first",
+    )
+    run(store.delete(loser, op_id="delete-loser"))
+    assert run(store.resolve_alias("shared")) == winners[0]

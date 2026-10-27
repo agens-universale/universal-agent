@@ -211,8 +211,16 @@ class SessionWriter:
         return (
             held is not None
             and record.lease is not None
-            and record.lease.epoch != held.epoch
-            and record.revision != self.revision
+            and (
+                (
+                    record.lease.token != held.token
+                    and record.lease.epoch <= held.epoch
+                )
+                or (
+                    record.lease.epoch != held.epoch
+                    and record.revision != self.revision
+                )
+            )
         )
 
     async def _arelease_quietly(self, lease: Lease | None) -> None:

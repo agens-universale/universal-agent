@@ -7,10 +7,15 @@
 from __future__ import annotations
 
 import copy
+import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
-from gc_core.threads.errors import InvalidCursor, OwnershipError
+from gc_core.threads.errors import (
+    InvalidCursor,
+    OwnershipError,
+    ThreadConflict,
+)
 from gc_core.threads.models import (
     INBOX,
     JsonObject,
@@ -97,16 +102,20 @@ def granted_lease(
         if current.owner != request.owner:
             raise OwnershipError(f"тред ведёт {current.owner!r}")
         epoch = current.epoch
+        token = current.token
     else:
         epoch = last_epoch + 1
-    return Lease(owner=request.owner, epoch=epoch, expires_at=expires)
+        token = uuid.uuid4().hex
+    return Lease(
+        owner=request.owner, epoch=epoch, expires_at=expires, token=token
+    )
 
 
 def check_writer(current: Lease | None, lease: Lease, now: datetime) -> None:
     """Пишущий ``commit`` держит текущую живую аренду — иначе отказ."""
     if current is None:
         raise OwnershipError("запись без claim")
-    if (current.owner, current.epoch) != (lease.owner, lease.epoch):
+    if not same_lease(current, lease):
         raise OwnershipError("аренда сменилась: запись по чужой эпохе")
     if lease_expired(current, now):
         raise OwnershipError("аренда истекла")
@@ -135,10 +144,26 @@ def check_side_writer(current: Lease | None, change: SideChange) -> None:
         )
 
 
+def check_frontend(
+    frontend: dict[str, JsonObject], change: SideChange
+) -> None:
+    """Проверка снимка под тем же замком/CAS, что и запись сбоку."""
+    if (
+        change.expected_frontend is not None
+        and frontend != change.expected_frontend
+    ):
+        raise ThreadConflict("состояние frontend изменилось")
+
+
 def same_lease(current: Lease | None, lease: Lease) -> bool:
-    return current is not None and (current.owner, current.epoch) == (
+    return current is not None and (
+        current.owner,
+        current.epoch,
+        current.token,
+    ) == (
         lease.owner,
         lease.epoch,
+        lease.token,
     )
 
 

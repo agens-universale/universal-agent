@@ -358,8 +358,8 @@ def test_kill_process_tree_no_sigkill_if_died_during_grace(monkeypatch):
         sent_signals.append(sigval)
 
     monkeypatch.setattr("os.killpg", fake_killpg)
-    # PID мёртв сразу после SIGTERM.
-    monkeypatch.setattr(lc, "_is_pid_alive", lambda pid: False)
+    # Вся группа мертва сразу после SIGTERM.
+    monkeypatch.setattr(lc, "_is_group_alive", lambda pid: False)
     lc._kill_process_tree(12345, grace_period=0.05)
 
     assert sent_signals == [sig_mod.SIGTERM]  # без SIGKILL

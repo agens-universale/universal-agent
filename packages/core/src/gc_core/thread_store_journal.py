@@ -226,7 +226,9 @@ def _physical_read_scope(directory, base):
         )
     with _locks_guard:
         lock = _locks.setdefault(str(base), threading.RLock())
-    with lock, _locked_file(base):
+    from gc_core.threads.file_namespace import namespace_scope
+
+    with namespace_scope(directory), lock, _locked_file(base):
         token = _held.set((*_held.get(), str(base)))
         try:
             _recover(Path(directory).absolute(), base)

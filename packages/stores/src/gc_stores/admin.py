@@ -35,8 +35,12 @@ class ResourceWriter(Protocol):
         *,
         project: str | None = None,
         source: str | None = None,
-    ) -> None:
-        """Записать (или заменить) ресурс."""
+        preserve_manual: bool = False,
+    ) -> bool:
+        """Записать ресурс атомарно; False — ручной ресурс защищён.
+
+        preserve_manual проверяется в момент публикации, а не по списку.
+        """
 
     async def delete_resource(
         self, kind: ResourceKind, name: str, *, project: str | None = None

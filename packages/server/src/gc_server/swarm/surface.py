@@ -89,6 +89,7 @@ class SwarmSurface:
         #: не закрывает — недоставленное он увидит после записи.
         self._submitting: dict[str, int] = {}
         self._proxy_watch: asyncio.Task | None = None
+        self._kill_tasks: set[asyncio.Task] = set()
         # Чтение meta → решение «отказ или старт» → запись meta и Popen —
         # одним куском: два одинаковых запроса не запускают две песочницы.
         self._start_lock = threading.Lock()
@@ -126,6 +127,7 @@ class SwarmSurface:
             watch.cancel()
         try:
             await self._astop_sandboxes()
+            await asyncio.gather(*self._kill_tasks, return_exceptions=True)
         finally:
             await self._aclose_proxies(list(self._proxies))
 
@@ -141,7 +143,7 @@ class SwarmSurface:
             killed = self._terminate_groups(active_ids)
             await asyncio.sleep(_KILL_GRACE_S)
             for sid, pid in killed:
-                if swarm_lifecycle._is_pid_alive(pid):
+                if swarm_lifecycle._is_group_alive(pid):
                     try:
                         os.killpg(pid, signal.SIGKILL)
                     except OSError:
@@ -438,7 +440,9 @@ class SwarmSurface:
         if self.monitor is not None:
             self.monitor.unregister_active(sid)
         if killed:
-            asyncio.get_running_loop().create_task(self._akill_later(killed))
+            task = asyncio.create_task(self._akill_later(killed))
+            self._kill_tasks.add(task)
+            task.add_done_callback(self._kill_tasks.discard)
         return {"status": "cancelling"}
 
     async def alist(
@@ -518,14 +522,9 @@ class SwarmSurface:
         вебхука: песочница читала бы и дописывала чужую историю."""
         if not self._in_store:
             return
-        record = await self.runtime.threads("swarm").get(key)
-        if record is not None and "swarm" not in record.frontend:
-            raise http_error(
-                409,
-                "task belongs to the webhook surface",
-                system=key.system,
-                task_id=key.thread,
-            )
+        from gc_server.thread_ownership import claim_surface
+
+        await claim_surface(self.runtime.threads("swarm"), key, "swarm")
 
     async def _pending(self, key: ThreadKey) -> int:
         if not self._in_store:
@@ -560,7 +559,7 @@ class SwarmSurface:
     async def _akill_later(self, killed: list[tuple[str, int]]) -> None:
         await asyncio.sleep(_KILL_GRACE_S)
         for _sid, pid in killed:
-            if swarm_lifecycle._is_pid_alive(pid):
+            if swarm_lifecycle._is_group_alive(pid):
                 try:
                     os.killpg(pid, signal.SIGKILL)
                 except OSError:

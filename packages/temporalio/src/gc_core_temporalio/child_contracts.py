@@ -28,6 +28,7 @@ class ChildRequest:
     #: Аренда треда родителя: трасса субагента идёт в его тред.
     store_owner_id: str | None
     store_owner_epoch: int | None
+    store_owner_token: str | None = None
 
 
 @dataclass(frozen=True)

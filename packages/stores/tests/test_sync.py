@@ -39,6 +39,36 @@ from gc_core.agent_store import ProjectKey
 from gc_stores.sync import sync_directory
 
 
+@pytest.mark.parametrize("backend", ["sqlite", "kv"])
+async def test_bundled_sync_preserves_manual_write_after_listing(
+    tmp_path, backend
+):
+    from gc_stores.kv.agent_store import KvAgentStore
+    from gc_stores.kv.memory import MemoryKV
+    from gc_stores.sync import SyncReport, _put
+
+    store = (
+        _store(tmp_path)
+        if backend == "sqlite"
+        else KvAgentStore(MemoryKV(), agent_id="a", backend="memory")
+    )
+    try:
+        snapshot = {}
+        await store.put_resource("prompt", "system", b"manual")
+        report = SyncReport()
+        await _put(
+            store,
+            snapshot,
+            report,
+            ("prompt", "system", b"bundled", None, "bundled@new"),
+            dry_run=False,
+        )
+        assert await store.read("prompt", "system") == b"manual"
+        assert not report.written
+    finally:
+        await store.close()
+
+
 def _layout(root, files):
     for rel, text in files.items():
         path = root.joinpath(*rel.split("/"))

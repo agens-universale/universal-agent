@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from gc_core.execution.environment import utc_now
-from gc_core.threads.errors import OwnershipError
+from gc_core.threads.errors import OwnershipError, ThreadConflict
 from gc_core.threads.facade import Threads
 from gc_core.threads.instance import instance_id
 from gc_core.threads.models import (
@@ -155,21 +155,15 @@ class OwnerRegistry:
             return
         self._live.pop(entry_id, None)
         self._removed += 1
-        if self._removed < COMPACT_AFTER:
-            await self._threads.update_frontend(
-                registry_key(key), self._section, {entry_id: None}
-            )
-            return
-        # Пишет в свой реестр только этот процесс: секция целиком из памяти
-        # (запись, ушедшая раньше снимка, в нём есть; позже — ляжет поверх).
-        self._removed = 0
-        await self._threads.store.append_side(
-            registry_key(key),
-            SideChange(
-                op_id=f"owners-compact-{uuid.uuid4().hex}",
-                set_frontend=(self._section, dict(self._live)),
-            ),
+        await self._threads.update_frontend(
+            registry_key(key), self._section, {entry_id: None}
         )
+        if self._removed < COMPACT_AFTER:
+            return
+        self._removed = 0
+        record = await self._threads.get(registry_key(key))
+        if record is not None:
+            await _acompact(self._threads, record, self._section)
 
     def _expiring(self) -> bool:
         lease = self._lease
@@ -242,7 +236,10 @@ class OwnerRegistry:
             await self._adrop_revived(key, record.lease)
             await self._alost()
             return
-        if held is not None and record.lease.epoch != held.epoch:
+        if held is not None and (
+            record.lease.epoch != held.epoch
+            or record.lease.token != held.token
+        ):
             # Аренда истекала — реестр мог взять восстановитель (и разобрать
             # часть записей): он уже не наш.
             await self._arelease_quietly(key, record.lease)
@@ -288,24 +285,34 @@ async def adead(threads: Threads, *, own: str | None, now: datetime) -> list:
 async def _acompact_directory(
     threads: Threads, directory: ThreadRecord | None
 ) -> None:
-    """Каталог без вычеркнутых ключей, когда их накопилось много. Запись
-    реестра, легшая одновременно, может пропасть — живой реестр вписывает
-    себя снова (``REASSERT_EVERY``)."""
+    """Каталог без вычеркнутых ключей; свежая запись не затирается."""
     if directory is None:
         return
     raw = directory.frontend.get(DIRECTORY_SECTION) or {}
     if sum(value is None for value in raw.values()) < DIRECTORY_COMPACT_AT:
         return
-    await threads.store.append_side(
-        DIRECTORY,
-        SideChange(
-            op_id=f"owners-dir-compact-{uuid.uuid4().hex}",
-            set_frontend=(
-                DIRECTORY_SECTION,
-                entries(directory, DIRECTORY_SECTION),
+    await _acompact(threads, directory, DIRECTORY_SECTION)
+
+
+async def _acompact(
+    threads: Threads, record: ThreadRecord, section: str
+) -> None:
+    """Уплотняем сохранённый снимок, только пока он актуален.
+
+    Конкурентная запись выигрывает; уборка повторится в следующий раз.
+    Это относится и к общему каталогу, где замок процесса не помогает.
+    """
+    try:
+        await threads.store.append_side(
+            record.key,
+            SideChange(
+                op_id=f"owners-compact-{uuid.uuid4().hex}",
+                expected_frontend=record.frontend,
+                set_frontend=(section, entries(record, section)),
             ),
-        ),
-    )
+        )
+    except ThreadConflict:
+        pass
 
 
 async def aclaim_dead(

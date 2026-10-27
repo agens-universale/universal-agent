@@ -1250,6 +1250,69 @@ async def check_concurrent_create(
     )
 
 
+async def check_conditional_frontend(store: ThreadStore, clock: FakeClock):
+    del clock
+    await store.append_side(
+        KEY,
+        SideChange(
+            op_id="first",
+            expected_frontend={},
+            patch_frontend=("a", {"owner": "one"}),
+        ),
+    )
+    try:
+        await store.append_side(
+            KEY,
+            SideChange(
+                op_id="stale",
+                expected_frontend={},
+                patch_frontend=("a", {"owner": "two"}),
+                append=[("inbox", [{"content": "must not land"}])],
+            ),
+        )
+    except ThreadConflict:
+        pass
+    else:
+        raise ConformanceError("устаревший снимок frontend принят")
+    record = await store.get_thread(KEY)
+    _expect(
+        record.frontend == {"a": {"owner": "one"}}, "потерян победитель CAS"
+    )
+    _expect(
+        not await store.read_stream(KEY, "inbox"), "отказ CAS оставил входящее"
+    )
+
+
+async def check_lease_token_fences_commit_and_release(
+    store: ThreadStore, clock: FakeClock
+):
+    del clock
+    old = await _claim(store)
+    await store.release(KEY, old)
+    await store.delete(KEY, op_id="delete")
+    current = (
+        await store.claim(KEY, LeaseRequest(owner=old.owner, ttl=MINUTE))
+    ).lease
+    _expect(
+        current.token is not None and current.token != old.token,
+        "повтор токена аренды",
+    )
+    forged = old.model_copy(update={"epoch": current.epoch})
+    await store.release(KEY, forged)
+    _expect(
+        (await store.get_thread(KEY)).lease == current,
+        "старая аренда сняла новую",
+    )
+    try:
+        await store.commit(
+            KEY, _change("stale", 0, forged, append_messages=_msgs("old"))
+        )
+    except OwnershipError:
+        pass
+    else:
+        raise ConformanceError("старое удостоверение записало новый тред")
+
+
 CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_missing_thread,
     check_claim_creates_thread,
@@ -1312,6 +1375,8 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_concurrent_same_op_id,
     check_concurrent_alias_race,
     check_concurrent_create,
+    check_conditional_frontend,
+    check_lease_token_fences_commit_and_release,
 )
 
 

@@ -45,6 +45,7 @@ from gc_core.threads.errors import (
     OwnershipError,
     ThreadConflict,
 )
+from gc_core.threads.file_namespace import namespace_scope
 from gc_core.threads.meta_map import (
     ARCHIVE_SUFFIX_KEY,
     meta_from_parts,
@@ -69,6 +70,7 @@ from gc_core.threads.models import (
 )
 from gc_core.threads.rules import (
     check_deletable,
+    check_frontend,
     check_side_writer,
     check_writer,
     granted_lease,
@@ -271,9 +273,12 @@ class FileThreadStore(ThreadStore):
     def _base(self, key: ThreadKey) -> Path:
         return _control_path(self._dir, key.system, key.thread)
 
-    def _scope(self, key: ThreadKey):
+    @contextlib.contextmanager
+    def _scope(self, key: ThreadKey, *, aliases: bool = False):
         os.makedirs(self._dir, exist_ok=True)
-        return thread_read_scope(self._dir, key.system, key.thread)
+        with namespace_scope(self._dir, exclusive=aliases):
+            with thread_read_scope(self._dir, key.system, key.thread):
+                yield
 
     @contextlib.contextmanager
     def _read_scope(self, key: ThreadKey):
@@ -875,7 +880,7 @@ class FileThreadStore(ThreadStore):
     # --- запись ---------------------------------------------------------------------
 
     async def commit(self, key: ThreadKey, change: ThreadChange) -> Receipt:
-        with self._scope(key):
+        with self._scope(key, aliases=bool(change.add_aliases)):
             base = self._base(key)
             replayed = self._replayed(base, change)
             if replayed is not None:
@@ -895,7 +900,7 @@ class FileThreadStore(ThreadStore):
         for stream, _items in change.append:
             if check_stream_name(stream) == _HISTORY:
                 raise ValueError("историю треда пишет только commit")
-        with self._scope(key):
+        with self._scope(key, aliases=bool(change.add_aliases)):
             base = self._base(key)
             replayed = self._replayed(base, change)
             if replayed is not None:
@@ -905,6 +910,12 @@ class FileThreadStore(ThreadStore):
             # по его аренде; состояние фронтенда — любой процесс.
             current = self._lease(v2) if self._exists(key, v2) else None
             check_side_writer(current, change)
+            parts = (
+                parts_from_meta(self._meta(key))
+                if self._exists(key, v2)
+                else None
+            )
+            check_frontend(parts.frontend if parts else {}, change)
             if not self._exists(key, v2):
                 v2 = self._created(v2)
             return self._side(key, control, v2, change)
@@ -1019,7 +1030,7 @@ class FileThreadStore(ThreadStore):
         self._drop_leftovers(key)
 
     def _delete_thread(self, key: ThreadKey, op_id: str) -> None:
-        with self._scope(key):
+        with self._scope(key, aliases=True):
             base = self._base(key)
             control, v2 = self._load(key)
             if not (self._exists(key, v2) or v2.get("leftovers")):
@@ -1202,7 +1213,11 @@ class FileThreadStore(ThreadStore):
         # Архивы журналов старых версий: суммаризация их больше не заводит.
         files.extend(root.glob(f"touched_{stem}__pre_summary__*.json"))
         files.extend(root.glob(f"edits_{stem}__pre_summary__*.jsonl"))
-        files.extend(self._alias_path(a) for a in v2["aliases"])
+        files.extend(
+            self._alias_path(a)
+            for a in v2["aliases"]
+            if self._alias_owner(a) == key
+        )
         return [Path(f) for f in files if Path(f).exists()]
 
     # --- файл плана для человека -----------------------------------------------

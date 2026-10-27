@@ -66,6 +66,7 @@ class SessionResume:
     #: Эпоха аренды треда, взятой прошлым run: новый run пишет по ней без
     #: нового захвата.
     store_owner_epoch: int | None = None
+    store_owner_token: str | None = None
     #: Отпечаток настроек, принятый из сообщений (``settings_fingerprint``).
     message_fingerprint: dict[str, str] | None = None
     #: ``answer``/``formatted_answer``/``post_error`` — те же, что в итоге

@@ -290,6 +290,7 @@ class Threads:
         *,
         target: str | None = None,
         op_id: str | None = None,
+        upto_inbox_seq: int | None = None,
     ) -> Receipt:
         """Отменить ход треда с любого процесса: запись в поток ``control``
         с границей — последним номером входящего потока на момент отмены.
@@ -303,7 +304,9 @@ class Threads:
         from gc_core.execution.environment import utc_now
 
         record = await self.store.get_thread(key)
-        upto = record.max_seq.get(INBOX, 0) if record is not None else 0
+        upto = upto_inbox_seq
+        if upto is None:
+            upto = record.max_seq.get(INBOX, 0) if record is not None else 0
         entry = {
             "type": "cancel",
             "at": utc_now().isoformat(),
