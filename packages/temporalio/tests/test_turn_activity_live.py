@@ -188,35 +188,40 @@ async def test_cancel_during_real_mcp_call_releases_thread_and_process(
 async def stream_mcp(tmp_path):
     import socket
 
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    audit = tmp_path / "http-mcp.jsonl"
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        str(Path(__file__).with_name("mcp_fixture_server.py")),
-        "streamable-http",
-        str(port),
-        str(audit),
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
+    processes, servers = [], []
     try:
-        async with asyncio.timeout(15):
-            while True:
-                try:
-                    _, writer = await asyncio.open_connection(
-                        "127.0.0.1", port
-                    )
-                    writer.close()
-                    await writer.wait_closed()
-                    break
-                except OSError:
-                    await asyncio.sleep(0.05)
-        yield f"http://127.0.0.1:{port}/mcp", audit
+        for index in range(2):
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.1", 0))
+                port = sock.getsockname()[1]
+            audit = tmp_path / f"http-mcp-{index}.jsonl"
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                str(Path(__file__).with_name("mcp_fixture_server.py")),
+                "streamable-http",
+                str(port),
+                str(audit),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            processes.append(process)
+            async with asyncio.timeout(15):
+                while True:
+                    try:
+                        _, writer = await asyncio.open_connection(
+                            "127.0.0.1", port
+                        )
+                        writer.close()
+                        await writer.wait_closed()
+                        break
+                    except OSError:
+                        await asyncio.sleep(0.05)
+            servers.append((f"http://127.0.0.1:{port}/mcp", audit))
+        yield servers
     finally:
-        process.terminate()
-        await asyncio.wait_for(process.wait(), 10)
+        for process in processes:
+            process.terminate()
+            await asyncio.wait_for(process.wait(), 10)
 
 
 @pytest.mark.parametrize("cancel", [False, True])
@@ -231,13 +236,14 @@ async def test_stream_mcp_closed_in_its_opening_task(
 
     monkeypatch.chdir(tmp_path)
     url, _requests, script = scripted_http
-    mcp_url, audit = stream_mcp
+    _url, audit = stream_mcp[1]
     script.extend(
         [
+            [call("first", "mcp_counter_increment", {"delay": 0})],
             [
                 call(
                     "one",
-                    "mcp_counter_increment",
+                    "mcp_other_increment",
                     {"delay": 30 if cancel else 0},
                 )
             ],
@@ -245,20 +251,37 @@ async def test_stream_mcp_closed_in_its_opening_task(
             [finish("done")],
         ]
     )
-    closed_in_owner = []
+    closed_in_owner, close_errors = [], []
+
+    class ObserveExit:
+        def __init__(self, cm):
+            self.cm = cm
+
+        async def __aexit__(self, *args):
+            try:
+                return await self.cm.__aexit__(*args)
+            except Exception as exc:
+                close_errors.append(exc)
+                raise
+
     close_stack = _SESSION_MANAGER._aclose_stack
 
     async def observe_close(cms, *, opened_in=None):
         closed_in_owner.append(opened_in is asyncio.current_task())
-        await close_stack(cms, opened_in=opened_in)
+        await close_stack([ObserveExit(cm) for cm in cms], opened_in=opened_in)
 
     monkeypatch.setattr(_SESSION_MANAGER, "_aclose_stack", observe_close)
     settings = agent_settings(url, tmp_path).with_overrides(
         {
-            "mcp.servers.counter": {
-                "transport": "stream_http",
-                "url": mcp_url,
-                "persistent_session": True,
+            "mcp.servers": {
+                name: {
+                    "transport": "stream_http",
+                    "url": server[0],
+                    "persistent_session": True,
+                }
+                for name, server in zip(
+                    ("counter", "other"), stream_mcp, strict=True
+                )
             },
         }
     )
@@ -286,7 +309,7 @@ async def test_stream_mcp_closed_in_its_opening_task(
                 json.loads(m["output"])
                 for m in messages
                 if m.get("type") == "function_call_output"
-                and m.get("call_id") in {"one", "two"}
+                and m.get("call_id") in {"first", "two"}
             ]
             counters = [
                 json.loads(value["result"]["content"][0]["text"])
@@ -294,6 +317,7 @@ async def test_stream_mcp_closed_in_its_opening_task(
             ]
             assert [counter["count"] for counter in counters] == [1, 2]
         assert closed_in_owner and all(closed_in_owner)
+        assert not close_errors, close_errors
         assert await thread_owner(store, "sdk", "http") is None
     finally:
         if not task.done():

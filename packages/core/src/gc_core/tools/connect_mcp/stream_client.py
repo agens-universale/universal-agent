@@ -212,7 +212,9 @@ class _PersistentSessionManager:
         keys = [
             k for k in self._cm_stacks if k[0] == owner and k[1] == loop_id
         ]
-        for key in keys:
+        # SDK sessions enter nested anyio scopes in their owner task.
+        # Close servers in reverse opening order, not just each server's stack.
+        for key in reversed(keys):
             cms = self._cm_stacks.pop(key, None)
             self._sessions.pop(key, None)
             self._loops.pop(key, None)
