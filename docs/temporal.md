@@ -193,7 +193,98 @@ uv run --project /path/to/universal-agent --extra temporal \
   Нет ни инструмента, ни статуса памяти в промпте, ни обращений к файлу.
   Долгоживущие факты сессии — `session_memory`, она в треде.
 
-### Размещение
+### Целый ход в одной activity
+
+`AgentActivity` — дополнительный режим для приложений, которым нужен весь
+ход SDK на одном процессе. Он не заменяет `AgentPlugin` и
+`UniversalAgentWorkflow`: прежний пошаговый durable-запуск сохраняется.
+В новом режиме модель, MCP, инструменты и обработка результата выполняются
+внутри одной обычной activity `universal_agent.run`.
+
+На воркере (профили и креды не передаются через историю Temporal):
+
+```python
+from datetime import timedelta
+from gc_core_temporalio import AgentActivity
+from temporalio.worker import Worker
+
+async def publish_files(request, answer):
+    # Выгрузить локальные файлы здесь, на том же процессе, где работал агент.
+    # Вернуть JSON-данные: например, список ссылок на артефакты.
+    return await upload_to_storage(request.context["folder"])
+
+runner = AgentActivity(
+    {"shop": settings},
+    thread_store=store,  # общий PostgresThreadStore для нескольких реплик
+    postprocess=publish_files,
+)
+async with Worker(
+    client,
+    task_queue="orders",
+    workflows=[OrderWorkflow],
+    activities=[runner.run],
+    max_concurrent_activities=1,
+    graceful_shutdown_timeout=timedelta(minutes=45),
+):
+    await stop_event.wait()
+```
+
+В бизнес-workflow импортируйте только контракт
+`gc_core_temporalio.turn_activity_contracts` (он безопасен для песочницы):
+
+```python
+from datetime import timedelta
+from temporalio import workflow
+from temporalio.common import RetryPolicy
+from gc_core_temporalio.turn_activity_contracts import (
+    AgentActivityRequest, AgentActivityResult,
+)
+
+result = await workflow.execute_activity(
+    "universal_agent.run",
+    AgentActivityRequest(
+        agent="shop", prompt="Собери отчёт", thread_id="order-42",
+        trace_id="trace-42", context={"folder": "artifacts/order-42"},
+    ),
+    result_type=AgentActivityResult,
+    start_to_close_timeout=timedelta(minutes=45),
+    schedule_to_close_timeout=timedelta(hours=3),
+    heartbeat_timeout=timedelta(seconds=30),
+    cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+    retry_policy=RetryPolicy(
+        maximum_attempts=3, initial_interval=timedelta(minutes=1),
+    ),
+)
+# result.answer — ответ SDK; result.output — результат publish_files.
+```
+
+Одна попытка остаётся на одном процессе, поэтому несколько реплик могут
+слушать общую очередь. Heartbeat начинается до подготовки MCP и работает
+до конца postprocess; по умолчанию интервал 10 секунд. Отмена доходит до
+SDK, его контекст закрывается. Приложение останавливает Worker и затем
+закрывает общее хранилище. При штатном обновлении дайте активной activity
+время завершиться, согласовав таймаут остановки Worker и контейнера.
+
+Ограничения этого режима:
+
+- Повтор запускает **весь ход заново**, включая postprocess. Сохранённая
+  история треда читается из хранилища, но это не replay вызовов инструментов.
+  Уже выполненные внешние действия могут повториться. Пример явно выбирает
+  три попытки; приложение вправе задать другую RetryPolicy.
+- Таймаут/потеря heartbeat не доказывает, что старый процесс остановился.
+  Защита треда остаётся в ThreadStore, а идемпотентность внешних действий —
+  ответственность приложения и инструментов.
+- Постоянный workspace общий для activities процесса. Для такого workspace
+  начните с `max_concurrent_activities=1`; разные каталоги требуют отдельных
+  процессов/изолированного OS-бэкенда. Этот API не меняет cwd.
+- История в Postgres не переносит локальные файлы на другую реплику.
+  Нужные следующему ходу файлы сохраняйте и восстанавливайте отдельно.
+- Настройки — обычные настройки SDK; скрытых durable-переопределений нет.
+  Отключите ненужную память проекта и файловые журналы в серверном профиле.
+  Канал человека выключен; вопросы и подтверждения требуют отдельного
+  прикладного протокола.
+
+### Размещение пошагового режима
 
 - **Один процесс — один рабочий каталог.** Cwd воркера равен `workspace`
   профилей; для другого каталога — другой процесс.
