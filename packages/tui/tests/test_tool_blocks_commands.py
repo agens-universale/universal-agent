@@ -632,37 +632,113 @@ async def test_ran_four_line_command_all_shown(tmp_path):
         assert _rows(pilot)[2:] == lines[2:]
 
 
-@pytest.mark.asyncio
-async def test_ran_multiline_command_and_long_output(tmp_path):
+_FOLDED = [
+    "    import json",
+    "    print(1)",
+    "    + ещё 2 строки",
+    "  └ … ещё 11 строк",
+    "    line 11",
+    "    line 12",
+    "    line 13",
+]
+_COMMAND_OPEN = [
+    "    import json",
+    "    print(1)",
+    "    x = 2",
+    "    EOF",
+    "    − свернуть",
+]
+
+
+async def _click_phrase(pilot, text):
+    """Клик по видимой фразе ``text`` строки `Ran`."""
+    scr = pilot.app.screen
+    phrase = next(
+        w
+        for w in scr.query(".ran-phrase, .block-action")
+        if w.display and str(w.render()).strip().endswith(text)
+    )
+    await pilot.click(phrase)
+    await pilot.pause()
+    await pilot.pause()
+
+
+async def _long_ran(pilot, tmp_path):
     thread = _Thread(tmp_path)
+    await _open(pilot)
+    await _tail(
+        pilot,
+        thread,
+        _run("x1", _SCRIPT),
+        _out("x1", _envelope(_lines(14))),
+    )
+    assert _rows(pilot)[2:] == _FOLDED
+
+
+@pytest.mark.asyncio
+async def test_ran_command_phrase_expands_only_command(tmp_path):
+    """Фраза команды раскрывает только команду (решение 2026-10-27):
+    `− свернуть` — под командой, где была фраза; вывод свёрнут."""
     async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
-        await _open(pilot)
-        await _tail(
-            pilot,
-            thread,
-            _run("x1", _SCRIPT),
-            _out("x1", _envelope(_lines(14))),
-        )
+        await _long_ran(pilot, tmp_path)
+        await _click_phrase(pilot, "+ ещё 2 строки")
+        assert _rows(pilot)[2:] == [*_COMMAND_OPEN, *_FOLDED[3:]]
+        await _click_phrase(pilot, "− свернуть")
+        assert _rows(pilot)[2:] == _FOLDED
+
+
+@pytest.mark.asyncio
+async def test_ran_output_phrase_expands_only_output(tmp_path):
+    """Фраза вывода раскрывает только вывод: `− свернуть` — внизу, под
+    выводом; команда свёрнута."""
+    async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
+        await _long_ran(pilot, tmp_path)
+        await _click_phrase(pilot, "… ещё 11 строк")
         lines = _rows(pilot)
-        assert lines[2:] == [
-            "    import json",
-            "    print(1)",
-            "    + ещё 2 строки",
-            "  └ … ещё 11 строк",
-            "    line 11",
-            "    line 12",
-            "    line 13",
-        ]
-        await _toggle(pilot)
+        assert lines[2:6] == [*_FOLDED[:3], "  └ line 0"]
+        assert lines[-2:] == ["    line 13", "    − свернуть"]
+        assert len(lines) == 2 + 3 + 14 + 1
+        await _click_phrase(pilot, "− свернуть")
+        assert _rows(pilot)[2:] == _FOLDED
+
+
+@pytest.mark.asyncio
+async def test_ran_both_open_two_collapses(tmp_path):
+    """Оба раскрыты — у каждой части свой `− свернуть`: под командой и
+    под выводом; пробел на строке `Ran` сворачивает оба."""
+    async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
+        await _long_ran(pilot, tmp_path)
+        await _click_phrase(pilot, "+ ещё 2 строки")
+        await _click_phrase(pilot, "… ещё 11 строк")
         lines = _rows(pilot)
-        assert "    x = 2" in lines and "    EOF" in lines
-        assert "    line 13" in lines
-        assert lines.index("    EOF") < lines.index("  └ line 0")
+        assert lines[2:8] == [*_COMMAND_OPEN, "  └ line 0"]
         assert lines[-1] == "    − свернуть"
+        await _toggle(pilot, "x1")
+        assert _rows(pilot)[2:] == _FOLDED
+
+
+@pytest.mark.asyncio
+async def test_ran_space_toggles_command_and_output(tmp_path):
+    """Пробел на строке `Ran` — как на заголовке блока: свёрнуто хоть
+    что-то — раскрыть оба, иначе свернуть оба."""
+    async with _app(tmp_path).run_test(size=(100, 60)) as pilot:
+        await _long_ran(pilot, tmp_path)
+        await _toggle(pilot, "x1")
+        lines = _rows(pilot)
+        assert lines[2:8] == [*_COMMAND_OPEN, "  └ line 0"]
+        assert lines[-2:] == ["    line 13", "    − свернуть"]
+        await _toggle(pilot, "x1")
+        assert _rows(pilot)[2:] == _FOLDED
+        await _click_phrase(pilot, "+ ещё 2 строки")
+        await _toggle(pilot, "x1")
+        assert _rows(pilot)[-1] == "    − свернуть"
+        assert "  └ line 0" in _rows(pilot)
 
 
 @pytest.mark.asyncio
 async def test_running_multiline_expand_survives_done(tmp_path):
+    """Раскрытая идущая команда остаётся раскрытой с приходом вывода;
+    `− свернуть` команды — под ней, над выводом."""
     thread = _Thread(tmp_path)
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         await _open(pilot)
@@ -671,12 +747,11 @@ async def test_running_multiline_expand_survives_done(tmp_path):
         assert lines[1].startswith("● Running  python - <<'EOF'")
         assert lines[-1] == "    + ещё 2 строки"
         await _toggle(pilot)
-        assert "    EOF" in _rows(pilot)
+        assert _rows(pilot)[2:] == _COMMAND_OPEN
         await _tail(pilot, thread, _out("x1", _envelope("1\n")))
         lines = _rows(pilot)
         assert lines[1].startswith("● Ran  python - <<'EOF'")
-        assert "    EOF" in lines
-        assert lines[-1] == "    − свернуть"
+        assert lines[2:] == [*_COMMAND_OPEN, "  └ 1"]
 
 
 @pytest.mark.asyncio

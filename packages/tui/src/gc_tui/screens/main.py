@@ -3993,7 +3993,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
         except Exception as exc:
             self.log.warning(f"правки команды не прочитаны: {exc!r}")
-            return RanResult(output=ev.command, light=is_light_payload(ev))
+            return RanResult(output=ev.command)
 
     def _end_turn_blocks(self, outcome: TurnOutcome) -> None:
         """Итог хода — моделям блоков всех уровней (таймеры, стоп)."""

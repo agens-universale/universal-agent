@@ -50,6 +50,9 @@ NOT_STARTED_REASON = "не запущено (стоп)"
 #: `− свернуть` внизу).
 _MORE = "more"
 OUTPUT_SLOT = "output"
+COMMAND_SLOT = "command"
+#: Части строки `Ran`, раскрываемые каждая своей фразой.
+_RAN_SLOTS = (COMMAND_SLOT, OUTPUT_SLOT)
 _WINDOW_SLOTS = ("top", "files", "bottom")
 #: Причина идущего члена, оборванного остановкой хода.
 CANCELLED_REASON = "отменено"
@@ -439,15 +442,17 @@ class SetDiffShare:
 
 @dataclass(frozen=True)
 class SetRanParts:
-    """Части строки `Ran`: раскрыта (вся команда и весь вывод) или нет;
-    фразы раскрытия в самой строке, где скрытое (`None` — нет): под
-    продолжением команды и над хвостом вывода. `− свернуть` раскрытой —
-    фраза блока под строкой."""
+    """Части строки `Ran` (решение 2026-10-27): команда и вывод
+    раскрываются независимо. Фраза команды — под её продолжением
+    (`+ ещё K строк`, раскрыта — `− свернуть` там же); фраза вывода — над
+    хвостом (`… ещё N строк`, раскрыт — фразы нет: `− свернуть` вывода —
+    фраза блока под строкой); `None` — нет."""
 
     block: str
-    expanded: bool
     command: Optional[str] = None
     output: Optional[str] = None
+    command_open: bool = False
+    output_open: bool = False
 
     @property
     def ident(self) -> tuple:
@@ -653,8 +658,9 @@ class ToolBlocks:
     ) -> None:
         self._timers = timers
         self._preview = diff_preview
-        # Раскрытые владельцы фраз: файлы (дифф целиком) и строки `Ran`
-        # (вся команда и весь вывод); переживают живые обновления.
+        # Раскрытые владельцы фраз: файлы (дифф целиком) и части строк
+        # `Ran` (фразы команды и вывода блока); переживают живые
+        # обновления.
         self._open: set[str] = set()
         self._count = 0
         self._blocks: list[_Block] = []
@@ -826,11 +832,11 @@ class ToolBlocks:
         return self.event_closing()
 
     def toggle(self, key: str) -> list[Decision]:
-        """Раскрыть / свернуть по ключу (§5, решение 2026-10-26): строка
-        файла и его фраза — только его дифф; фраза вывода — вывод `Ran`;
-        маркер окна и `− свернуть` блока — окно; заголовок блока, строка
-        команды и прочие члены — блок целиком. Нечего скрывать — решений
-        нет."""
+        """Раскрыть / свернуть по ключу (§5, решения 2026-10-26/27):
+        строка файла и его фраза — только его дифф; фраза команды `Ran` —
+        только команда, фраза вывода — только вывод; маркер окна и
+        `− свернуть` блока — окно; заголовок блока, строка команды и
+        прочие члены — блок целиком. Нечего скрывать — решений нет."""
         if self._is_window(key):
             return self._toggle_window()
         block = self._resolve(key)
@@ -843,7 +849,7 @@ class ToolBlocks:
             return self._render(block)
         if key in (phrase_key(block.key, s) for s in _WINDOW_SLOTS):
             return self._toggle_files(block)
-        owner = self.owner_of(key)
+        owner = key if key in _ran_keys(block) else self.owner_of(key)
         if owner is None:
             return self._toggle_all(block)
         if owner not in self._owners(block):
@@ -894,11 +900,12 @@ class ToolBlocks:
 
     def owner_of(self, key: str) -> Optional[str]:
         """Владелец фразы или строки ``key``: файл (строка файла, его
-        фраза) или строка `Ran` (фраза вывода); прочее — `None`."""
+        фраза) или строка `Ran` (фразы команды и вывода); прочее —
+        `None`."""
         block = self._resolve(key)
         if block is None or block.headed:
             return None
-        if key == phrase_key(block.key, OUTPUT_SLOT):
+        if key in _ran_keys(block):
             return block.members[0].key
         files = {f.key for f in self._files(block)}
         if key in files:
@@ -1097,19 +1104,14 @@ class ToolBlocks:
             for key, edit in edits
         ]
 
-    def _output_lines(self, block: _Block) -> int:
-        """Строк, которые добавит раскрытие строки `Ran`: команда и
-        вывод."""
-        parts = block.parts
-        if block.kind != BlockKind.RAN or parts is None:
-            return 0
-        return parts.command_hidden + parts.output_hidden
-
     def _owners(self, block: _Block) -> list[str]:
-        """Владельцы фраз блока, которым есть что раскрыть."""
+        """Владельцы фраз блока, которым есть что раскрыть: файлы и части
+        строки `Ran` (ключи их фраз)."""
         owners = [f.key for f in self._files(block) if f.hidden(self._preview)]
-        if self._output_lines(block):
-            owners.append(block.members[0].key)
+        parts = block.parts
+        if block.kind == BlockKind.RAN and parts is not None:
+            hidden = (parts.command_hidden, parts.output_hidden)
+            owners += [k for k, n in zip(_ran_keys(block), hidden) if n]
         return owners
 
     def _layout(self, block: _Block) -> _Layout:
@@ -1286,9 +1288,9 @@ class ToolBlocks:
         files = parts.files
         # Под строкой команды, над файлами: файлы монтируются под строку.
         place = {"before": files[0].key} if files else {"after": key}
-        opened = key in self._open
+        command, output = (k in self._open for k in _ran_keys(block))
         collapse = None
-        if opened and self._output_lines(block):
+        if output and parts.output_hidden:
             collapse = COLLAPSE_PHRASE
         out += self._phrase(block.key, OUTPUT_SLOT, collapse, **place)
         more = more_phrase(layout.more) if layout.more else None
@@ -1310,7 +1312,9 @@ class ToolBlocks:
             last = phrase_key(block.key, "unrecorded")
         window = self._collapse(block, layout)
         out += self._phrase(block.key, "bottom", window, after=last)
-        out.append(_ran_parts(block.key, parts, opened=opened))
+        out.append(
+            _ran_parts(block.key, parts, command=command, output=output)
+        )
         return out
 
     def _head(self, block: _Block, prefix: Parts = ()) -> SetHeader:
@@ -1395,17 +1399,35 @@ class ToolBlocks:
         return SetTimer(member.key, self._timers.get(member.key))
 
 
-def _ran_parts(block: str, parts: _RanParts, *, opened: bool) -> SetRanParts:
-    """Фразы раскрытия частей `Ran` — каждая там, где скрытое: строки
-    команды — под её продолжением, вывода — над хвостом."""
-    if opened:
-        return SetRanParts(block, True)
-    hidden_command, hidden_output = parts.command_hidden, parts.output_hidden
+def _ran_keys(block: _Block) -> tuple[str, ...]:
+    """Ключи фраз частей строки `Ran` — команды и вывода; они же —
+    раскрытые в `_open`."""
+    if block.kind != BlockKind.RAN:
+        return ()
+    return tuple(phrase_key(block.key, slot) for slot in _RAN_SLOTS)
+
+
+def _ran_parts(
+    block: str, parts: _RanParts, *, command: bool, output: bool
+) -> SetRanParts:
+    """Части `Ran`, каждая со своим раскрытием: фраза команды — под её
+    продолжением (раскрыта — `− свернуть` там же), фраза вывода — над
+    хвостом, пока он свёрнут."""
+    command_text = output_text = None
+    if parts.command_hidden:
+        command_text = (
+            COLLAPSE_PHRASE
+            if command
+            else more_lines_phrase(parts.command_hidden)
+        )
+    if parts.output_hidden and not output:
+        output_text = more_lines_above(parts.output_hidden)
     return SetRanParts(
         block,
-        False,
-        command=more_lines_phrase(hidden_command) if hidden_command else None,
-        output=more_lines_above(hidden_output) if hidden_output else None,
+        command=command_text,
+        output=output_text,
+        command_open=command and bool(parts.command_hidden),
+        output_open=output and bool(parts.output_hidden),
     )
 
 
@@ -1460,5 +1482,5 @@ def _is_default(decision: Decision) -> bool:
     if isinstance(decision, SetEditTail):
         return not decision.parts
     if isinstance(decision, SetRanParts):
-        return decision == SetRanParts(decision.block, False)
+        return decision == SetRanParts(decision.block)
     return False

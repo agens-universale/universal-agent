@@ -30,10 +30,10 @@ from gc_tui.messages import BlockToggle
 from gc_tui.models import TraceEvent
 from gc_tui.palette import DIM, ERR
 from gc_tui.services.block_edits import RanResult, diff_block_for
-from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
 from gc_tui.services.tool_blocks import (
     AGENT_WINDOW,
     COMMAND_PREVIEW_LINES,
+    COMMAND_SLOT,
     OUTPUT_SLOT,
     BlockEdit,
     BlockKind,
@@ -74,8 +74,9 @@ def _lines_text(lines: Sequence[str]) -> Text:
 def output_texts(ran: RanResult) -> Optional[OutputTexts]:
     """Вывод `Ran` (§4.1, решение 2026-10-26): код выхода или таймаут
     (`ERR`) — сверх превью; свёрнутый — хвост, раскрытый — весь; фон —
-    одна строка; нет вывода — `(нет вывода)`. Вне окна retention раскрытие
-    — хвост и подсказка. Не конверт exec — вывода нет."""
+    одна строка; нет вывода — `(нет вывода)`. Вывод разобран до облегчения
+    retention: раскрытый — весь вывод записи и вне окна. Не конверт exec —
+    вывода нет."""
     out = ran.output
     if out is None:
         return None
@@ -90,10 +91,7 @@ def output_texts(ran: RanResult) -> Optional[OutputTexts]:
     if head is None and not out.lines:
         line = Text("(нет вывода)", style=DIM)
         return OutputTexts(None, line, line)
-    full = out.lines
-    if ran.light:
-        full = (*out.tail, RETENTION_DETAIL_HINT)
-    return OutputTexts(head, _lines_text(out.tail), _lines_text(full))
+    return OutputTexts(head, _lines_text(out.tail), _lines_text(out.lines))
 
 
 def _reason(ev: TraceEvent, ran: Optional[RanResult]) -> str:
@@ -533,15 +531,20 @@ class ToolBlocksView:
         diff.set_column(d.column)
 
     def _set_ran_parts(self, d: SetRanParts) -> None:
-        """Части `Ran`: раскрытие и фразы скрытого в самой строке; их клик
-        — тот же тогл, что у `− свернуть` под строкой."""
+        """Части `Ran`: раскрытие команды и вывода и их фразы в самой
+        строке; клик по фразе вывода — тот же тогл, что у `− свернуть`
+        под строкой."""
         row = self._row(self.model.first_call(d.block) or "")
         if row is not None:
             row.set_parts(
-                d.expanded,
+                command_open=d.command_open,
+                output_open=d.output_open,
                 command=d.command,
                 output=d.output,
-                key=phrase_key(d.block, OUTPUT_SLOT),
+                keys=(
+                    phrase_key(d.block, COMMAND_SLOT),
+                    phrase_key(d.block, OUTPUT_SLOT),
+                ),
             )
 
 

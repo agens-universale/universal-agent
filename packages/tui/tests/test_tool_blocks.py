@@ -1225,7 +1225,8 @@ def test_ran_files_phrase_counts_context():
 
 def test_ran_parts_command_only():
     """Скрытые строки команды — фраза под её продолжением, в строке
-    `Ran`; `− свернуть` — под строкой, когда раскрыто."""
+    `Ran`; раскрыта — `− свернуть` там же, под командой (решение
+    2026-10-27); фразы под выводом нет."""
     model, fold = _edits_model()
     _ran(model, fold)
     fold(
@@ -1233,21 +1234,21 @@ def test_ran_parts_command_only():
             "x", command_hidden=3, output_hidden=0, files=(), unrecorded=0
         )
     )
+    assert fold.parts() == SetRanParts("block:0", command="+ ещё 3 строки")
+    assert fold.phrase("block:0", "output") is None
+    fold(model.toggle("block:0:command"))
     assert fold.parts() == SetRanParts(
-        "block:0", False, command="+ ещё 3 строки"
+        "block:0", command=COLLAPSE_PHRASE, command_open=True
     )
     assert fold.phrase("block:0", "output") is None
-    fold(model.toggle("block:0:output"))
-    assert fold.parts() == SetRanParts("block:0", True)
-    assert fold.phrase("block:0", "output") == COLLAPSE_PHRASE
-    assert fold.state[("MountPhrase", "block:0", "output")] == MountPhrase(
-        "block:0", "output", after="x"
-    )
+    fold(model.toggle("block:0:command"))
+    assert fold.parts() == SetRanParts("block:0", command="+ ещё 3 строки")
 
 
 def test_ran_parts_output_only():
     """Вывод свёрнут к хвосту: фраза `… ещё N строк` — над ним, где вывод
-    начинается (решение 2026-10-26); под строкой фразы нет."""
+    начинается (решение 2026-10-26); раскрыт — `− свернуть` под строкой,
+    внизу вывода."""
     model, fold = _edits_model()
     _ran(model, fold)
     fold(
@@ -1255,15 +1256,20 @@ def test_ran_parts_output_only():
             "x", command_hidden=0, output_hidden=11, files=(), unrecorded=0
         )
     )
-    assert fold.parts() == SetRanParts(
-        "block:0", False, output="… ещё 11 строк"
-    )
+    assert fold.parts() == SetRanParts("block:0", output="… ещё 11 строк")
     assert fold.phrase("block:0", "output") is None
+    fold(model.toggle("block:0:output"))
+    assert fold.parts() == SetRanParts("block:0", output_open=True)
+    assert fold.phrase("block:0", "output") == COLLAPSE_PHRASE
+    assert fold.state[("MountPhrase", "block:0", "output")] == MountPhrase(
+        "block:0", "output", after="x"
+    )
 
 
-def test_ran_parts_command_and_output():
-    """Каждая скрытая часть — своя фраза там, где скрыта; одно состояние
-    раскрытия строки `Ran`, `− свернуть` — внизу, под выводом."""
+def test_ran_parts_command_and_output_independent():
+    """Фраза раскрывает то, рядом с чем стоит (решение 2026-10-27):
+    команда и вывод — два состояния строки `Ran`; `− свернуть` команды —
+    под командой, вывода — внизу; пробел на строке — оба."""
     model, fold = _edits_model()
     _ran(model, fold)
     fold(
@@ -1272,18 +1278,66 @@ def test_ran_parts_command_and_output():
         )
     )
     collapsed = SetRanParts(
-        "block:0",
-        False,
-        command="+ ещё 3 строки",
-        output="… ещё 11 строк",
+        "block:0", command="+ ещё 3 строки", output="… ещё 11 строк"
     )
     assert fold.parts() == collapsed
-    out = fold(model.toggle("block:0:output"))
-    assert SetRanParts("block:0", True) in out
-    assert fold.phrase("block:0", "output") == COLLAPSE_PHRASE
-    out = fold(model.toggle("x"))
-    assert collapsed in out
+    fold(model.toggle("block:0:command"))
+    assert fold.parts() == SetRanParts(
+        "block:0",
+        command=COLLAPSE_PHRASE,
+        output="… ещё 11 строк",
+        command_open=True,
+    )
     assert fold.phrase("block:0", "output") is None
+    fold(model.toggle("block:0:output"))
+    opened = SetRanParts(
+        "block:0", command=COLLAPSE_PHRASE, command_open=True, output_open=True
+    )
+    assert fold.parts() == opened
+    assert fold.phrase("block:0", "output") == COLLAPSE_PHRASE
+    fold(model.toggle("block:0:command"))
+    assert fold.parts() == SetRanParts(
+        "block:0", command="+ ещё 3 строки", output_open=True
+    )
+    # Пробел на строке `Ran`: свёрнуто хоть что-то — раскрыть оба.
+    fold(model.toggle("x"))
+    assert fold.parts() == opened
+    fold(model.toggle("x"))
+    assert fold.parts() == collapsed
+    assert fold.phrase("block:0", "output") is None
+
+
+def test_ran_parts_open_survives_live_updates():
+    """Раскрытая идущая команда остаётся раскрытой, когда приходит вывод;
+    раскрытие вывода переживает новый вывод (стрим)."""
+    model, fold = _edits_model()
+    _ran(model, fold)
+    fold(
+        model.ran_parts(
+            "x", command_hidden=3, output_hidden=0, files=(), unrecorded=0
+        )
+    )
+    fold(model.toggle("block:0:command"))
+    fold(
+        model.ran_parts(
+            "x", command_hidden=3, output_hidden=11, files=(), unrecorded=0
+        )
+    )
+    assert fold.parts() == SetRanParts(
+        "block:0",
+        command=COLLAPSE_PHRASE,
+        output="… ещё 11 строк",
+        command_open=True,
+    )
+    fold(model.toggle("block:0:output"))
+    fold(
+        model.ran_parts(
+            "x", command_hidden=3, output_hidden=12, files=(), unrecorded=0
+        )
+    )
+    assert fold.parts().output_open
+    assert fold.parts().command_open
+    assert fold.phrase("block:0", "output") == COLLAPSE_PHRASE
 
 
 def test_output_tail_last_lines_and_hidden():
@@ -1335,9 +1389,7 @@ def test_ran_parts_files():
     assert fold.tail(keys[2]) == " (+5 −0)"
     # Каждая фраза — где скрытое: вывод — над хвостом, в строке `Ran`;
     # у каждого видимого файла — своя под диффом; фразы блока нет.
-    assert fold.parts() == SetRanParts(
-        "block:0", False, output="… ещё 10 строк"
-    )
+    assert fold.parts() == SetRanParts("block:0", output="… ещё 10 строк")
     assert fold.phrase("block:0", "output") is None
     more = [fold.phrase(k, "more") for k in keys[2:]]
     assert more == ["+ ещё 2 строки"] * 3
@@ -1353,14 +1405,14 @@ def test_ran_parts_files():
     assert fold.share(keys[1]).rows is None
     assert fold.share(keys[2]).rows == 3
     out = fold(model.toggle("x"))
-    assert SetRanParts("block:0", True) in out
+    assert SetRanParts("block:0", output_open=True) in out
     assert fold.phrase("block:0", "output") == COLLAPSE_PHRASE
     assert fold.state[("MountPhrase", "block:0", "output")] == MountPhrase(
         "block:0", "output", before=keys[0]
     )
     assert [fold.share(k).rows for k in keys] == [None] * 5
     out = fold(model.toggle("x"))
-    assert SetRanParts("block:0", False, output="… ещё 10 строк") in out
+    assert SetRanParts("block:0", output="… ещё 10 строк") in out
     assert [fold.share(k).rows for k in keys[2:]] == [3] * 3
     assert [fold.visible(k) for k in keys] == [False, False, True, True, True]
 

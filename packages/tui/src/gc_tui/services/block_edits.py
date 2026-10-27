@@ -30,7 +30,6 @@ from gc_tui.services.tool_blocks import (
     command_file_verb,
     edit_verb,
 )
-from gc_tui.services.trace_retention import is_light_payload
 from gc_tui.widgets.diff_block import DiffBlock
 
 
@@ -42,8 +41,6 @@ class RanResult:
     output: Optional[CommandOutput]
     files: Sequence[BlockEdit] = ()
     unrecorded: int = 0
-    #: Запись вне окна retention: всего вывода при раскрытии нет.
-    light: bool = False
     #: Ключи файлов с компактным диффом (ход вне раскрытых).
     compact: frozenset[str] = field(default_factory=frozenset)
 
@@ -129,7 +126,6 @@ def ran_result_of(
         output=ev.command,
         files=files,
         unrecorded=unrecorded,
-        light=is_light_payload(ev),
         compact=compact,
     )
 

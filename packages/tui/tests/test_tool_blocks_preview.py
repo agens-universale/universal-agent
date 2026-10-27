@@ -635,6 +635,54 @@ async def test_window_toggle_one_frame(tmp_path, monkeypatch, where):
         await _toggle_frames(pilot, screen, frames, "block:0:bottom")
 
 
+def _ran_texts(pilot) -> list[str]:
+    texts = [text for text, _ in _frame(pilot)]
+    start = next(i for i, t in enumerate(texts) if "Ran  python" in t)
+    return texts[start + 1 :]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["reopen", "preview"])
+async def test_ran_command_and_output_toggle_apart(
+    tmp_path, monkeypatch, where
+):
+    """Команда и вывод `Ran` раскрываются каждая своей фразой, одним
+    кадром — и после возврата, и в превью (решение 2026-10-27)."""
+    frames = record_frames(monkeypatch)
+    thread = _Thread(tmp_path, status="stopped")
+    script = "python - <<'EOF'\nimport json\nprint(1)\nx = 2\nEOF"
+    stdout = "".join(f"line {i}\n" for i in range(9))
+    thread.add(*_run("x1", script, stdout))
+    thread.add(_say("a1", "Готово."))
+    async with _app(tmp_path).run_test(size=(70, 60)) as pilot:
+        if where == "preview":
+            screen = await _open_preview(pilot)
+        else:
+            screen = pilot.app.screen
+            screen.attach_active_task(TID, is_resume=True)
+        await pilot.pause()
+        folded = _ran_texts(pilot)
+        assert folded[:4] == [
+            "     import json",
+            "     print(1)",
+            "     + ещё 2 строки",
+            "   └ … ещё 6 строк",
+        ]
+        await _toggle_frames(pilot, screen, frames, "block:0:command")
+        assert _ran_texts(pilot)[2:5] == [
+            "     x = 2",
+            "     EOF",
+            "     − свернуть",
+        ]
+        assert _ran_texts(pilot)[5] == "   └ … ещё 6 строк"
+        await _toggle_frames(pilot, screen, frames, "block:0:output")
+        assert _ran_texts(pilot)[5] == "   └ line 0"
+        await _toggle_frames(pilot, screen, frames, "block:0:command")
+        texts = _ran_texts(pilot)
+        assert texts[2:4] == ["     + ещё 2 строки", "   └ line 0"]
+        assert "     − свернуть" in texts[4:]
+
+
 @pytest.mark.asyncio
 async def test_preview_old_turn_compact(tmp_path):
     """Ход вне `replay_expanded_turns` — компактный вид и в превью."""

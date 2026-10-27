@@ -1,11 +1,13 @@
 """Части строки `Ran` под командой (спека P4 §4.0, §4.1, решение
 2026-10-26): раскрывают там, где скрытое, сворачивают внизу.
 
-Сверху вниз: фраза скрытых строк команды — под её продолжением; первая
-строка вывода `└ код выхода N` (таймаут) — сверх превью; фраза
-`… ещё N строк` — там, где вывод начинается; хвост вывода (свёрнутый) или
-весь вывод (раскрытый). `└` — у первой видимой строки вывода, прочие — в
-колонке текста. `− свернуть` раскрытой строки — фраза блока под строкой.
+Сверху вниз: фраза команды — под её продолжением (`+ ещё K строк`,
+раскрыта — `− свернуть` там же); первая строка вывода `└ код выхода N`
+(таймаут) — сверх превью; фраза `… ещё N строк` — там, где вывод
+начинается; хвост вывода (свёрнутый) или весь вывод (раскрытый). `└` — у
+первой видимой строки вывода, прочие — в колонке текста. Команда и вывод
+раскрываются независимо (решение 2026-10-27); `− свернуть` раскрытого
+вывода — фраза блока под строкой.
 
 Виджеты частей создаются один раз и дальше обновляются на месте:
 раскрытие и свёртка ложатся одним кадром, а растущий вывод (стрим)
@@ -41,8 +43,8 @@ class OutputTexts:
 
 
 class RanPhrase(NoSelectStatic):
-    """Фраза раскрытия в строке `Ran`. Клик шлёт тогл через строку
-    (`ToolCallRow.on_click`); фокус не двигает."""
+    """Фраза раскрытия в строке `Ran`. Клик шлёт тогл ``toggle_key``
+    через строку (`ToolCallRow.on_click`); фокус не двигает."""
 
     DEFAULT_CSS = "RanPhrase { width: 1fr; height: auto; }"
     FOCUS_ON_CLICK = False
@@ -53,6 +55,7 @@ class RanPhrase(NoSelectStatic):
             classes=f"trace-action block-action {RAN_PHRASE_CLASS}",
             markup=False,
         )
+        self.toggle_key: Optional[str] = None
 
     def show(self, lead: Text, phrase: Optional[str]) -> None:
         self.display = phrase is not None
@@ -104,7 +107,7 @@ class RanParts(Vertical):
         self._phrase = RanPhrase()
         self._body = _OutputLine()
         self._texts: Optional[OutputTexts] = None
-        self._expanded = False
+        self._output_open = False
         self._command_phrase: Optional[str] = None
         self._output_phrase: Optional[str] = None
         self._sync()
@@ -122,14 +125,17 @@ class RanParts(Vertical):
     def set_state(
         self,
         *,
-        expanded: bool,
+        output_open: bool,
         command: Optional[str],
         output: Optional[str],
+        keys: tuple[str, str],
     ) -> None:
-        """Раскрыта ли строка и фразы скрытого (`None` — нет)."""
-        self._expanded = expanded
+        """Раскрыт ли вывод, фразы команды и вывода (`None` — нет) и
+        ключи их тоглов."""
+        self._output_open = output_open
         self._command_phrase = command
         self._output_phrase = output
+        self._command.toggle_key, self._phrase.toggle_key = keys
         self._sync()
 
     def _sync(self) -> None:
@@ -142,7 +148,7 @@ class RanParts(Vertical):
         phrase = None if texts is None else self._output_phrase
         body = None
         if texts is not None:
-            body = texts.full if self._expanded else texts.tail
+            body = texts.full if self._output_open else texts.tail
             body = body if body.plain else None
         first = next((p for p in (head, phrase, body) if p is not None), None)
         self._head.show(self._lead(head is first), head)

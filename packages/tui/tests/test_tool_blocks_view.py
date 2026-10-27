@@ -670,17 +670,74 @@ def _output(lines, **kw):
     )
 
 
-def test_output_texts_light_shows_retention_hint():
-    """Вне окна retention раскрытие — хвост и подсказка, не весь вывод."""
-    from gc_tui.services.footer_slot import RETENTION_DETAIL_HINT
-    from gc_tui.services.block_edits import RanResult
+def _stored_ran(stdout):
+    """Законченная команда из записи треда вне окна retention: конверт
+    `function_call_output`, как его пишет exec-тул, разобран маппером и
+    облегчён."""
+    import json
+
+    from gc_tui.services.block_edits import ran_result_of
+    from gc_tui.services.trace_mapper import map_message
+    from gc_tui.services.trace_retention import (
+        apply_payload_retention,
+        is_light_payload,
+    )
+
+    envelope = {
+        "tool": "exec_command",
+        "ok": True,
+        "command": "make",
+        "exit_code": 0,
+        "timed_out": False,
+        "error": None,
+        "stdout": stdout,
+        "stderr": {"content": "", "total_chars": 0},
+    }
+    payload = {
+        "type": "function_call_output",
+        "call_id": "x1",
+        "output": json.dumps(envelope, ensure_ascii=False),
+    }
+    ev = map_message(payload, no=2, ts="t")
+    apply_payload_retention(ev, seg_in_window=False)
+    assert is_light_payload(ev)
+    return ran_result_of(None, ev, window=1)
+
+
+def test_output_texts_outside_retention_shows_what_phrase_counts():
+    """Вне окна retention вывод разобран до облегчения: раскрытие — весь
+    вывод записи, ровно столько строк сверх хвоста, сколько обещает
+    `… ещё N строк` (смоук: 21 над хвостом, раскрыто — 4)."""
     from gc_tui.widgets.tool_blocks_view import output_texts
 
-    out = _output(["a", "b", "c", "d"])
-    texts = output_texts(RanResult(output=out, light=True))
-    assert texts.head is None
-    assert texts.tail.plain == "b\nc\nd"
-    assert texts.full.plain == f"b\nc\nd\n{RETENTION_DETAIL_HINT}"
+    text = "".join(f"line {i}\n" for i in range(24))
+    ran = _stored_ran({"content": text, "total_chars": len(text)})
+    texts = output_texts(ran)
+    assert ran.output.hidden == 21
+    assert texts.tail.plain.split("\n") == ["line 21", "line 22", "line 23"]
+    assert texts.full.plain.split("\n") == [f"line {i}" for i in range(24)]
+
+
+def test_output_texts_truncated_record_shows_head_and_tail():
+    """Обрезанный в записи канал: раскрытие — голова, строка пропуска и
+    хвост; фраза считает строки записи без строки пропуска (§4.1)."""
+    from gc_tui.widgets.tool_blocks_view import output_texts
+
+    head = "".join(f"h{i}\n" for i in range(4))
+    tail = "".join(f"t{i}\n" for i in range(5))
+    ran = _stored_ran(
+        {
+            "truncated": True,
+            "head": head,
+            "tail": tail,
+            "omitted_chars": 1200,
+            "total_chars": 1300,
+        }
+    )
+    full = output_texts(ran).full.plain.split("\n")
+    record = [f"h{i}" for i in range(4)] + [f"t{i}" for i in range(5)]
+    assert full == [*record[:4], "… пропущено 1 200 символов", *record[4:]]
+    assert ran.output.hidden == len(record) - 3
 
 
 def test_output_texts_head_lines():
@@ -898,3 +955,31 @@ async def test_ran_output_toggle_one_frame(monkeypatch):
         assert "   └ out 0" in opened
         closed = await _one_frame(pilot, frames, "", "block:0:output")
         assert "   └ … ещё 6 строк" in closed
+
+
+@pytest.mark.asyncio
+async def test_ran_command_and_output_toggle_one_frame(monkeypatch):
+    """Команда и вывод `Ran` раскрываются каждая своей фразой, пробел на
+    строке — обе; каждый тогл — один кадр (решение 2026-10-27)."""
+    from gc_tui.services.block_edits import RanResult
+
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 40)) as pilot:
+        view = app.view()
+        row = _row("x1", label="Run", target="make")
+        command = tuple(f"step {i}" for i in range(6))
+        view.add_call(row, C.RUN, waiting=False, command=command)
+        view.started(row)
+        out = tuple(f"out {i}" for i in range(9))
+        output = CommandOutput(out, 0, 0, False, False, out[-3:], 6)
+        view.result(row, _ev("x1"), None, ran=RanResult(output))
+        opened = await _one_frame(pilot, frames, "", "block:0:command")
+        assert "     step 5" in opened and "   └ … ещё 6 строк" in opened
+        opened = await _one_frame(pilot, frames, "", "block:0:output")
+        assert "   └ out 0" in opened
+        assert sum(line == "     − свернуть" for line in opened) == 2
+        closed = await _one_frame(pilot, frames, "", "x1")
+        assert "     + ещё 3 строки" in closed
+        assert "   └ … ещё 6 строк" in closed
+        await _one_frame(pilot, frames, "", "x1")
