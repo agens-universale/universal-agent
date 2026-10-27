@@ -955,3 +955,31 @@ async def test_ran_output_toggle_one_frame(monkeypatch):
         assert "   └ out 0" in opened
         closed = await _one_frame(pilot, frames, "", "block:0:output")
         assert "   └ … ещё 6 строк" in closed
+
+
+@pytest.mark.asyncio
+async def test_ran_command_and_output_toggle_one_frame(monkeypatch):
+    """Команда и вывод `Ran` раскрываются каждая своей фразой, пробел на
+    строке — обе; каждый тогл — один кадр (решение 2026-10-27)."""
+    from gc_tui.services.block_edits import RanResult
+
+    frames = record_frames(monkeypatch)
+    app = _App()
+    async with app.run_test(size=(60, 40)) as pilot:
+        view = app.view()
+        row = _row("x1", label="Run", target="make")
+        command = tuple(f"step {i}" for i in range(6))
+        view.add_call(row, C.RUN, waiting=False, command=command)
+        view.started(row)
+        out = tuple(f"out {i}" for i in range(9))
+        output = CommandOutput(out, 0, 0, False, False, out[-3:], 6)
+        view.result(row, _ev("x1"), None, ran=RanResult(output))
+        opened = await _one_frame(pilot, frames, "", "block:0:command")
+        assert "     step 5" in opened and "   └ … ещё 6 строк" in opened
+        opened = await _one_frame(pilot, frames, "", "block:0:output")
+        assert "   └ out 0" in opened
+        assert sum(line == "     − свернуть" for line in opened) == 2
+        closed = await _one_frame(pilot, frames, "", "x1")
+        assert "     + ещё 3 строки" in closed
+        assert "   └ … ещё 6 строк" in closed
+        await _one_frame(pilot, frames, "", "x1")

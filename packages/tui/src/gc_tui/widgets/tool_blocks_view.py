@@ -33,6 +33,7 @@ from gc_tui.services.block_edits import RanResult, diff_block_for
 from gc_tui.services.tool_blocks import (
     AGENT_WINDOW,
     COMMAND_PREVIEW_LINES,
+    COMMAND_SLOT,
     OUTPUT_SLOT,
     BlockEdit,
     BlockKind,
@@ -530,15 +531,20 @@ class ToolBlocksView:
         diff.set_column(d.column)
 
     def _set_ran_parts(self, d: SetRanParts) -> None:
-        """Части `Ran`: раскрытие и фразы скрытого в самой строке; их клик
-        — тот же тогл, что у `− свернуть` под строкой."""
+        """Части `Ran`: раскрытие команды и вывода и их фразы в самой
+        строке; клик по фразе вывода — тот же тогл, что у `− свернуть`
+        под строкой."""
         row = self._row(self.model.first_call(d.block) or "")
         if row is not None:
             row.set_parts(
-                d.expanded,
+                command_open=d.command_open,
+                output_open=d.output_open,
                 command=d.command,
                 output=d.output,
-                key=phrase_key(d.block, OUTPUT_SLOT),
+                keys=(
+                    phrase_key(d.block, COMMAND_SLOT),
+                    phrase_key(d.block, OUTPUT_SLOT),
+                ),
             )
 
 

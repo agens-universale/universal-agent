@@ -35,8 +35,8 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинного об
   `└` следствия — под началом текста.
 `Ran` (`set_command`, `set_output`, `set_parts`): продолжение команды —
 строками под первой (колонка 4), под ним и вывод — части `RanParts`
-(хвост вывода, фразы раскрытия там, где скрытое); раскрытие — вся команда
-и весь вывод.
+(хвост вывода, фразы раскрытия там, где скрытое); команда и вывод
+раскрываются каждая своей фразой.
 Застывший таймер (`set_elapsed`; имя `set_timer` занято
 таймерами Textual) появляется только по решению модели: строка
 без модели выглядит как прежде. Вызов быстрее секунды — без таймера.
@@ -90,7 +90,7 @@ from gc_tui.widgets.block_panel import (
 from gc_tui.widgets.click_model import ClickModelMixin
 from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
-from gc_tui.widgets.ran_output import RAN_PHRASE_CLASS, OutputTexts, RanParts
+from gc_tui.widgets.ran_output import OutputTexts, RanParts, RanPhrase
 from gc_tui.widgets.static_content import update_if_changed
 
 # Running-строка на человеко-ожидании (confirm / ask_human): `●` в базовом
@@ -299,15 +299,14 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._block_consequence: Optional[Text] = None
         self._edit_tail: Optional[Text] = None
         self._word_role: WordRole = "edit"
-        # `Ran`: продолжение команды (строки после первой); вывод и фразы
-        # раскрытия — части под строкой (`RanParts`, по первой нужде);
-        # ключ тогла фраз частей.
+        # `Ran`: продолжение команды (строки после первой) и его
+        # раскрытие; вывод и фразы раскрытия — части под строкой
+        # (`RanParts`, по первой нужде).
         self._command_rest: tuple[str, ...] = ()
         self._command_shown = 0
         self._ran: Optional[RanParts] = None
         self._has_output = False
-        self._parts_expanded = False
-        self._parts_key: Optional[str] = None
+        self._command_open = False
         self._detail: Optional[Callable[[], Optional[str]]] = None
         # Часы хода ядра: время вызова по `call_id` или None (не знают).
         self._clock: Optional[Callable[[str], Optional[float]]] = None
@@ -454,19 +453,20 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
 
     def set_parts(
         self,
-        expanded: bool,
         *,
+        command_open: bool,
+        output_open: bool,
         command: Optional[str],
         output: Optional[str],
-        key: str,
+        keys: tuple[str, str],
     ) -> None:
-        """Части `Ran` по решению модели: раскрыта ли строка (вся команда
-        и весь вывод) и фразы скрытого — под продолжением команды и над
-        хвостом вывода; клик по ним шлёт тогл ``key``."""
-        self._parts_expanded = expanded
-        self._parts_key = key
+        """Части `Ran` по решению модели: раскрыты ли команда и вывод
+        (каждая часть — своё) и их фразы — под продолжением команды и над
+        хвостом вывода; клик по фразе шлёт тогл её ключа из ``keys``
+        (команды, вывода)."""
+        self._command_open = command_open
         self._ran_parts().set_state(
-            expanded=expanded, command=command, output=output
+            output_open=output_open, command=command, output=output, keys=keys
         )
         self._update()
 
@@ -691,7 +691,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         решил блок (§4.0, `set_command`), раскрытом — все; длинная строка
         — `…` по ширине."""
         rest = self._command_rest
-        if not self._parts_expanded:
+        if not self._command_open:
             rest = rest[: self._command_shown - 1]
         width = self._content_width()
         for line in rest:
@@ -876,9 +876,9 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         явный super(): иначе Textual по MRO вызвал бы миксин вторым."""
         event.prevent_default()
         widget = getattr(event, "widget", None)
-        if widget is not None and widget.has_class(RAN_PHRASE_CLASS):
+        if isinstance(widget, RanPhrase):
             event.stop()
-            self._toggle_parts()
+            self._toggle_parts(widget.toggle_key)
             return
         if (
             not event.ctrl
@@ -891,12 +891,12 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             return
         super().on_click(event)
 
-    def _toggle_parts(self) -> None:
-        """Клик по фразе частей `Ran` — тогл её владельца в модели."""
-        if self.block_key is not None and self._parts_key is not None:
+    def _toggle_parts(self, key: Optional[str]) -> None:
+        """Клик по фразе частей `Ran` — тогл её ключа в модели."""
+        if self.block_key is not None and key is not None:
             from gc_tui.messages import BlockToggle
 
-            self.post_message(BlockToggle(self.block_key[0], self._parts_key))
+            self.post_message(BlockToggle(self.block_key[0], key))
 
     def _open_request(self) -> Optional[Message]:
         # Клик/Enter → детальный экран call + output.
