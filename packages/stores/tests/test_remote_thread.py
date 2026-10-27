@@ -148,8 +148,10 @@ async def test_blobs_of_the_task_only():
 
 
 #: Проверки конформанса, упирающиеся в запрещённое прокси: список и
-#: удаление тредов, алиасы, чистка квитанций, чужой тред.
+#: удаление тредов, алиасы, чистка квитанций, чужой тред, входящие сервера.
 _REFUSED = {
+    "check_side_creates_thread",
+    "check_inbox_moves_updated_at",
     "check_missing_thread",
     "check_untimed_lease",
     "check_frontend_streams",
@@ -421,5 +423,39 @@ async def test_proxy_frame_is_bounded():
                 KEY, b"\1" * (13 * 1024 * 1024), mime="image/png"
             )
         assert len(backing._blobs) == 1
+    finally:
+        await proxy.aclose()
+
+
+@pytest.mark.parametrize("stream", ["inbox", "control"])
+async def test_sandbox_cannot_write_the_servers_streams(stream):
+    """Ревью, раунд 4: входящие и отмены пишет сервер. Песочница, дописав
+    себе сообщение во входящие, продолжала бы себя новыми ходами и
+    процессами мимо потолка задачи; запись в ``control`` подделала бы
+    отмену."""
+    proxy, client = await _pair()
+    try:
+        with pytest.raises(PermissionError):
+            await client.append_side(
+                KEY,
+                SideChange(
+                    op_id=f"forged-{stream}",
+                    append=[(stream, [{"role": "user", "content": "ещё"}])],
+                ),
+            )
+    finally:
+        await proxy.aclose()
+
+
+async def test_sandbox_writes_the_streams_of_its_turn():
+    """Потоки хода — трасса субагентов, журнал правок, лента TUI —
+    песочнице открыты."""
+    proxy, client = await _pair()
+    try:
+        for stream in ("subagent_events", "edits", "tui.events"):
+            await client.append_side(
+                KEY,
+                SideChange(op_id=f"own-{stream}", append=[(stream, [{}])]),
+            )
     finally:
         await proxy.aclose()

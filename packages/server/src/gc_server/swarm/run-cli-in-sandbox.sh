@@ -269,19 +269,45 @@ fi
 
 # --- Запуск CLI и захват exit code ---
 
+# Сервер снимает песочницу сигналом группе обёртки (os.killpg: отмена,
+# дедлайн, лимиты, остановка). GNU timeout без --foreground уводит себя и CLI
+# в свою группу — туда сигнал сам не дойдёт. Поэтому запуск — в фоне, а
+# обёртка пересылает TERM/INT его группе; timeout на присланный сигнал гасит
+# CLI и через --kill-after добивает, даже если SIGKILL сервера заденет только
+# bash. Без timeout запуск в группе обёртки — пересылка уходит процессу.
+CHILD_PID=""
+forward_signal() {
+  [[ -n "${CHILD_PID}" ]] || return 0
+  kill -TERM -- -"${CHILD_PID}" 2>/dev/null \
+    || kill -TERM "${CHILD_PID}" 2>/dev/null
+}
+
+run_forwarding_signals() {
+  # stdin фонового запуска — как у обёртки, а не /dev/null.
+  exec 3<&0
+  "$@" <&3 3<&- >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}" &
+  CHILD_PID=$!
+  exec 3<&-
+  trap forward_signal TERM INT
+  wait "${CHILD_PID}"
+  EXIT_CODE=$?
+  # wait прерван пересланным сигналом — дождаться настоящего выхода.
+  while kill -0 "${CHILD_PID}" 2>/dev/null; do
+    wait "${CHILD_PID}"
+    EXIT_CODE=$?
+  done
+  trap - TERM INT
+}
+
 # Защита под set -u: пустой массив через ${arr[@]+"${arr[@]}"} (bash 3.2-safe).
 # set +e локально, чтобы поймать exit code даже при ошибке.
 set +e
 if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
-  ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
-    "${BWRAP_CMD[@]}" -- "${CLI_CMD[@]}" \
-    >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}"
-  EXIT_CODE=$?
+  run_forwarding_signals ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
+    "${BWRAP_CMD[@]}" -- "${CLI_CMD[@]}"
 else
-  ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
-    "${CLI_CMD[@]}" \
-    >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}"
-  EXIT_CODE=$?
+  run_forwarding_signals ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
+    "${CLI_CMD[@]}"
 fi
 set -e
 

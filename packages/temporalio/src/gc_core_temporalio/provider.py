@@ -87,7 +87,7 @@ class WorkerVersioningConfig(BaseModel):
     enabled: bool = False
     deployment_name: str = Field(default="ua-agent", min_length=1)
     #: Номер сборки; по умолчанию — версия пакета ``gc-core-temporalio`` и
-    #: хэш кода (``0.4.0+a1b2c3d4e5f6``): правка без подъёма версии — тоже
+    #: хэш кода (``0.5.0+a1b2c3d4e5f6``): правка без подъёма версии — тоже
     #: новая сборка, иначе Temporal отдал бы закреплённые ходы новому коду.
     build_id: str | None = Field(default=None, min_length=1)
     #: Объявить эту сборку текущей при старте воркера — для одного воркера

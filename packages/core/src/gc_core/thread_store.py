@@ -533,6 +533,11 @@ class ThreadSession:
         # прогона без залипших флагов обходится без записи.
         if runtime == self.runtime:
             return
+        if self.writer.gave_up_lease:
+            # Тред отпущен или потерян: его runtime ведёт другой ход, а
+            # запись сбоку хранилище по сроку не фенсит — поздняя отметка
+            # затёрла бы его.
+            return
         await self.writer.aside(set_runtime=runtime)
         self.runtime = runtime
 

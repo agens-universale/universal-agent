@@ -88,7 +88,7 @@ def test_window_is_the_receipt_lifetime(surface):
     body = {"task_id": "t1", "message": "сделай"}
     headers = {"Idempotency-Key": "k-4"}
     client.post("/v1/tasks", json=body, headers=headers)
-    run_sync(surface.aprune_receipts(older_than=timedelta(seconds=-1)))
+    run_sync(surface.threads().prune(timedelta(seconds=-1)))
     client.post("/v1/tasks", json=body, headers=headers)
     assert len(_inbox(surface)) == 2
 

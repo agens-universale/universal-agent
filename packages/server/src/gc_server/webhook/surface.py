@@ -66,7 +66,6 @@ _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
 #: Прогон восстановления: адрес обратного вызова задачи остаётся прежним.
 KEEP_CALLBACK = object()
 #: Как часто забывать квитанции старше окна идемпотентности.
-_RECEIPTS_PRUNE_SECONDS = 3600
 
 
 def webhook_settings(runtime: ServerRuntime, name: str = "webhook"):
@@ -154,13 +153,11 @@ class WebhookSurface:
         self.registry = AgentRunRegistry()
         self._pruner: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
-        self._receipts: asyncio.Task | None = None
         self.callbacks = CallbackSender(self.config.callbacks)
 
     # --- жизненный цикл ----------------------------------------------------
 
     async def astart(self) -> None:
-        self._receipts = asyncio.create_task(self._areceipts_loop())
         if self.config.recovery.enabled:
             from gc_server.webhook.recovery import arecover_forever
 
@@ -186,10 +183,8 @@ class WebhookSurface:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.callbacks.aclose()
-        background = [
-            t for t in (self._pruner, self.recovery_task, self._receipts) if t
-        ]
-        self._pruner = self.recovery_task = self._receipts = None
+        background = [t for t in (self._pruner, self.recovery_task) if t]
+        self._pruner = self.recovery_task = None
         for task in background:
             task.cancel()
         await asyncio.gather(*background, return_exceptions=True)
@@ -310,7 +305,17 @@ class WebhookSurface:
                 **pending,
             }
         if status is None:
-            return None
+            if not pending["pending_messages"]:
+                return None
+            # Принята, а прогона ещё нет (строит другой инстанс, сборка
+            # упала или инстанс умер до захвата): задача есть на любом.
+            return {
+                "status": "queued",
+                **base,
+                "thread_id": key.thread,
+                "started_at": None,
+                **pending,
+            }
         return {**task_status.status_body(status, record, base), **pending}
 
     async def asubmit(
@@ -388,29 +393,11 @@ class WebhookSurface:
             and (record.state.inbox_seq >= seq)
         )
 
-    async def aprune_receipts(self, *, older_than: timedelta) -> int:
-        """Забыть квитанции старше окна идемпотентности."""
-        return await self.threads().prune(older_than)
-
     async def amaintain_once(self) -> None:
-        """Обслуживание хранилища тредов: квитанции старше окна
-        идемпотентности (и надгробия) и — у хранилища, которое умеет
-        (Redis, S3), — сироты прерванных записей (``sweep``)."""
-        window = timedelta(hours=self.config.idempotency_ttl_hours)
-        await self.aprune_receipts(older_than=window)
-        sweep = getattr(self.threads().store, "sweep", None)
-        if callable(sweep):
-            await sweep()
-
-    async def _areceipts_loop(self) -> None:
-        while True:
-            try:
-                await self.amaintain_once()
-            except Exception:
-                logger.warning(
-                    "обслуживание хранилища тредов не удалось", exc_info=True
-                )
-            await asyncio.sleep(_RECEIPTS_PRUNE_SECONDS)
+        """Обслуживание хранилища тредов — его ведёт процесс
+        (``ServerRuntime.amaintain_forever``), при любом наборе
+        поверхностей."""
+        await self.runtime.amaintain_once()
 
     async def acancel(self, key: ThreadKey) -> Dict[str, Any] | None:
         """Отменить ход задачи с любого инстанса: поток ``control`` треда
@@ -418,7 +405,7 @@ class WebhookSurface:
         from gc_server.webhook.api_v1 import FINAL
 
         status = await self.astatus(key)
-        settled = status is None or status["status"] in FINAL
+        settled = status is None or status["status"] in FINAL | {"queued"}
         if settled and not await self._aundelivered(key):
             return None if status is None else {"status": status["status"]}
         try:
@@ -607,11 +594,13 @@ class WebhookSurface:
         }
         if callback_url is not KEEP_CALLBACK:
             fields["callback_url"] = callback_url
-        await task_status.aset_status(
-            self.threads(),
-            ThreadKey(system=system, thread=thread_id),
-            **fields,
-        )
+        key = ThreadKey(system=system, thread=thread_id)
+        threads = self.threads()
+        if not _pending(await threads.get(key)):
+            # Всё уже доставлено — задачу довёл другой прогон, этот сейчас
+            # сдаст тред (InboxDrained). Статус ведёт тот, кто её довёл.
+            return
+        await task_status.aset_status(threads, key, **fields)
 
     async def _amark_finished(self, run: ActiveRun) -> None:
         """Итог прогона — в статус задачи, если статус всё ещё его: тред
@@ -625,10 +614,16 @@ class WebhookSurface:
         if current is None or current.get("run_id") != run.notes["run_id"]:
             return
         if run.ending == "interrupted":
-            # Остановка сервера: задачу продолжит восстановление, а эта
-            # попытка — не сбой хода (деплои не исчерпают попытки).
-            await task_status.aset_status(threads, key, stopped_by="shutdown")
-            return
+            if not _turn_done(run, record):
+                # Остановка сервера: задачу продолжит восстановление, а эта
+                # попытка — не сбой хода (деплои не исчерпают попытки).
+                await task_status.aset_status(
+                    threads, key, stopped_by="shutdown"
+                )
+                return
+            # Остановка легла в уборку законченного хода: ход в треде
+            # закрыт, продолжать восстановлению нечего — итог есть.
+            run.ending, run.result = "completed", run.executor.last_response
         final = _final_fields(run)
         final["recovery_attempts"] = 0
         if final["status"] in ("failed", "cancelled") and record is not None:
@@ -654,6 +649,16 @@ class WebhookSurface:
             self.callbacks.send(
                 url, make_event(status["status"], key, jsonable(status))
             )
+
+
+def _turn_done(run: ActiveRun, record: ThreadRecord | None) -> bool:
+    """Цикл прогона дошёл до конца, и ход в треде закрыт: остановка сервера
+    сняла только уборку после хода."""
+    return (
+        getattr(run.executor, "loop_finished", False)
+        and record is not None
+        and record.runtime.turn != "running"
+    )
 
 
 def _final_fields(run: ActiveRun) -> Dict[str, Any]:

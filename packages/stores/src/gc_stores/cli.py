@@ -10,6 +10,11 @@
 хранилище агента; ``--with-defaults`` — и умолчания пакета gc-core
 (после обновления gc-ua — заново; без каталога — только они),
 ``--prune`` — убрать лишнее, ``--dry-run`` — только отчёт.
+
+``gc-stores maintain --store …`` — обслуживание хранилища тредов: квитанции
+старше окна идемпотентности, надгробия старше суток, сироты прерванных
+записей (Redis, S3). ``gc-serve`` делает это сам раз в час; без него (gc-cli
+и TUI на базе) — эту команду, например из cron.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from gc_stores import migrations
@@ -67,6 +73,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     sync.add_argument(
         "--dry-run", action="store_true", help="только показать, что будет"
+    )
+    maintain = commands.add_parser(
+        "maintain",
+        help="убрать старые квитанции, надгробия и сироты хранилища тредов",
+    )
+    add_connection_args(maintain)
+    maintain.add_argument(
+        "--receipts-hours",
+        type=float,
+        default=24.0,
+        help="окно идемпотентности: квитанции старше — убрать (24)",
     )
     return parser
 
@@ -141,7 +158,21 @@ async def _sync(args: argparse.Namespace) -> int:
     return 0
 
 
-_COMMANDS = {"migrate": _migrate, "sync": _sync}
+async def _maintain(args: argparse.Namespace) -> int:
+    store = open_thread_store(args)
+    try:
+        receipts = await store.prune_receipts(
+            timedelta(hours=args.receipts_hours)
+        )
+        sweep = getattr(store, "sweep", None)
+        orphans = await sweep() if callable(sweep) else 0
+    finally:
+        await store.close()
+    print(f"квитанций убрано: {receipts}, сирот: {orphans}")
+    return 0
+
+
+_COMMANDS = {"migrate": _migrate, "sync": _sync, "maintain": _maintain}
 
 
 def main(argv: list[str] | None = None) -> int:

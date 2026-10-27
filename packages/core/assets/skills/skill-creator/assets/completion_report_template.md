@@ -1,18 +1,18 @@
-# completion_report шаблон для skill-creator self-check Step 5
+# completion_report template for skill-creator self-check Step 5
 
-Загружается агентом через
+The agent loads this asset through
 `skills_read_asset(skill_id='skill-creator', slug='completion_report_template')`
-в Step 5 self-check флоу. Заполни **все 5 секций** структуры ниже и
-сохрани результат в `<workspace>/completion_report.md`.
+in Step 5 of the self-check flow. Fill in **all 5 sections** below and
+save the result to `<workspace>/completion_report.md`.
 
-Если в какой-то секции реально нечего сказать — пиши «Нет.» и переходи
-дальше. **НЕ пиши пустых отчётов** типа «всё хорошо, готов к
-распространению». Полстраницы template-prose без конкретики
-бесполезны.
+If a section genuinely has nothing to report, write `Нет.` and move on.
+**Do NOT write empty reports** such as "всё хорошо, готов к
+распространению". Half a page of template prose without specifics
+is useless.
 
 ---
 
-## Структура шаблона
+## Template structure
 
 ```markdown
 # Completion Report — <skill-id>
@@ -64,23 +64,25 @@
 
 ---
 
-## Правила заполнения (важно)
+## Filling rules (important)
 
-1. **Эволюция версий** — НЕ ленись общими формулировками. Возьми
-   конкретный список фиксов из контекста сессии (review-отчёты
-   субагентов через task_report, или твои own files если ты их
-   сохранил в `text_review_report.md` / `self_check_report.md`).
-   Перечисляй конкретно («добавил syllable validation шаг», «убрал
-   штамп `капли стучат` из примеров»), не «исправил пробелы».
+1. **Эволюция версий** — do NOT fall back on generic wording. Take
+   the specific list of fixes from the session context (subagent review
+   reports via task_report, or your own files if saved in
+   `text_review_report.md` / `self_check_report.md`).
+   Be specific ("добавил syllable validation шаг", "убрал
+   штамп `капли стучат` из примеров"), not "исправил пробелы".
 
-2. **Accepted limitations** — критичная секция для **improve-existing**
-   в будущем. Если модель плохо что-то делает и ты решил это принять
-   как known limitation, а не фиксить в SKILL.md — обязательно запиши.
-   Без этого следующая сессия будет тратить итерацию на ту же проблему.
+2. **Accepted limitations** — this section is critical for future
+   **improve-existing** work. If the model does something poorly and you
+   accept it as a known limitation rather than fixing it in SKILL.md,
+   you must record it. Otherwise, the next session will waste an iteration
+   on the same problem.
 
-3. **Открытые вопросы** — пиши кратко, без объяснений. TODO-лист для
-   следующих итераций. Если по содержанию всё ок — честно пиши «Нет.».
+3. **Открытые вопросы** — keep it brief, without explanations. Use a
+   TODO list for future iterations. If the content is fine,
+   honestly write `Нет.`.
 
-4. **НЕ пиши пустых отчётов** типа «всё хорошо, готов к распространению».
-   Если в секции реально нечего сказать — пиши «Нет.» и переходи
-   дальше. Полстраницы template-prose без конкретики бесполезны.
+4. **Do NOT write empty reports** such as "всё хорошо, готов к распространению".
+   If a section genuinely has nothing to report, write `Нет.` and move on.
+   Half a page of template prose without specifics is useless.

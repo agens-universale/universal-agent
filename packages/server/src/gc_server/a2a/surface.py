@@ -38,8 +38,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _CHANNEL_HIDDEN_TOOLS = (INTERMEDIATE_REPLY_TOOL_NAME,)
-#: Как часто восстановление ищет задачи упавших инстансов (как у вебхука).
-RECOVERY_INTERVAL_SECONDS = 30.0
+#: Как часто восстановление ищет задачи упавших инстансов: проход читает
+#: каталог реестров владельцев, а не диалоги (gc_server.owners).
+RECOVERY_INTERVAL_SECONDS = 300.0
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 NO_SDK = (
     "поверхность a2a работает на a2a-sdk: установите gc-server[a2a] "

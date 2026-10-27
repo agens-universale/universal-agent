@@ -27,6 +27,7 @@ from a2a.utils.task import (
     decode_list_tasks_cursor,
     encode_list_tasks_cursor,
 )
+from gc_core.threads.errors import OperationMismatch
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import SideChange, ThreadKey, ThreadRecord
 from google.protobuf.json_format import MessageToDict, ParseDict
@@ -47,7 +48,8 @@ WAITING = "waiting"
 QUEUE = "q:"
 #: Отменённая задача: ``x:<taskId>`` → ``true`` (в очередь не встанет).
 CANCELED = "x:"
-#: Задача с итогом: ``f:<taskId>`` → ``true`` (снимок итога не откатить).
+#: Задача с итогом: ``f:<taskId>`` → номер снимка итога (снимок итога не
+#: откатить; у данных прежней версии — ``true``).
 FINAL = "f:"
 FINAL_STATES = frozenset(
     {
@@ -77,12 +79,22 @@ def dialog_state(record: ThreadRecord | None) -> dict[str, Any]:
 
 
 def task_index(record: ThreadRecord | None) -> dict[str, Any]:
-    """Индекс задач диалога: ``task_id`` → ``seq`` последнего снимка."""
-    return {
+    """Индекс задач диалога: ``task_id`` → ``seq`` последнего снимка.
+
+    Снимок итога главнее индекса: индекс пишется отдельно от снимка, и
+    запоздалый индекс нефинального снимка (ход владельца после отмены с
+    другого инстанса) лёг бы поверх итога."""
+    state = dialog_state(record)
+    index = {
         name[len(TASK_PREFIX) :]: value
-        for name, value in dialog_state(record).items()
+        for name, value in state.items()
         if name.startswith(TASK_PREFIX) and value is not None
     }
+    for task_id in index:
+        final = state.get(FINAL + task_id)
+        if type(final) is int:
+            index[task_id] = final
+    return index
 
 
 class ThreadTaskStore(TaskStore):
@@ -111,14 +123,23 @@ class ThreadTaskStore(TaskStore):
         )
         # Индекс — отдельной записью: номер снимка известен после записи.
         # Упади процесс между ними — индекс укажет прежний снимок задачи.
-        patch: dict[str, Any] = {
-            TASK_PREFIX + task.id: receipt.max_seq.get(TASKS_STREAM)
-        }
+        seq = receipt.max_seq.get(TASKS_STREAM)
+        patch: dict[str, Any] = {TASK_PREFIX + task.id: seq}
         if final:
-            patch[FINAL + task.id] = True
+            patch[FINAL + task.id] = seq
         if task.status.state == pb.TASK_STATE_CANCELED:
             patch.update(await self._arelease(key, task.id))
-        await self._threads.update_frontend(key, FRONTEND, patch)
+        try:
+            await self._threads.update_frontend(
+                key,
+                FRONTEND,
+                patch,
+                # Первый итог главнее: поздний итог зомби (ход упавшего
+                # инстанса после FAILED восстановления) его не перетирает.
+                op_id=f"a2a-final:{task.id}" if final else None,
+            )
+        except OperationMismatch:
+            return  # итог задачи уже записан
 
     async def _arelease(self, key: ThreadKey, task_id: str) -> dict[str, Any]:
         """Отменённая задача уходит из очереди диалога. SDK пишет отмену

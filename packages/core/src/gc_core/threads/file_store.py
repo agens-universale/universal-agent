@@ -72,6 +72,7 @@ from gc_core.threads.rules import (
     check_side_writer,
     check_writer,
     granted_lease,
+    in_list_order,
     info_after_set,
     page_of,
     patched_frontend,
@@ -787,13 +788,26 @@ class FileThreadStore(ThreadStore):
             return self._record(key, v2)
 
     async def list_threads(self, query: ThreadQuery) -> Page[ThreadRecord]:
+        return page_of(self._matching(query), query)
+
+    async def list_all_threads(self, query: ThreadQuery) -> list[ThreadRecord]:
+        """Все треды по фильтру одним проходом (курсор и ``limit`` не
+        смотрятся). Порядок списка — по ``updated_at`` из meta каждого
+        треда, так что любая страница ``list_threads`` читает весь каталог:
+        фасад обходит файловое хранилище этим, а не N/страница проходами."""
+        return in_list_order(self._matching(query), query)
+
+    def _matching(self, query: ThreadQuery) -> list[ThreadRecord]:
         # Треды, чьи файлы не менялись с ``updated_after``, отсеиваются по
         # mtime до чтения meta: обход восстановления — stat, а не разбор
-        # каждого треда каталога. Обход — на месте, не в потоке: фасад над
+        # каждого треда каталога. Тред чужой системы — до блокировки и
+        # сборки записи. Обход — на месте, не в потоке: фасад над
         # файловым хранилищем зовут и синхронно (``run_sync`` в TUI).
         since = _mtime_floor(query.updated_after)
         records = []
         for key in self._known_keys(since):
+            if query.system is not None and key.system != query.system:
+                continue
             try:
                 record = self._listed(key)
             except (OSError, ValueError):
@@ -803,7 +817,7 @@ class FileThreadStore(ThreadStore):
                 continue
             if record is not None:
                 records.append(record)
-        return page_of(records, query)
+        return records
 
     def _listed(self, key: ThreadKey) -> ThreadRecord | None:
         with self._read_scope(key):

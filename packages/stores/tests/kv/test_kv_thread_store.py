@@ -151,3 +151,67 @@ async def test_sweep_removes_orphans_only():
     assert [
         r.key for r in (await store.list_threads(ThreadQuery())).items
     ] == [KEY]
+
+
+class _Clock:
+    def __init__(self) -> None:
+        from datetime import UTC, datetime
+
+        self.now = datetime(2026, 10, 1, tzinfo=UTC)
+
+    def __call__(self):
+        return self.now
+
+
+async def _deleted_thread(store, key):
+    await store.append_side(
+        key,
+        SideChange(op_id=f"make-{key.thread}", patch_frontend=("t", {"x": 1})),
+    )
+    await store.delete(key, op_id=f"drop-{key.thread}")
+
+
+async def test_old_tombstones_are_reaped_by_maintenance():
+    """Ревью, раунд 4: заголовки-надгробия удалённых тредов не убирал
+    никто — chat completions оставлял по одному на запрос. Обслуживание
+    убирает надгробия старше суток (как SQL), свежие — фенсинг — живут."""
+    from gc_stores.kv import keys
+
+    kv, clock = MemoryKV(), _Clock()
+    store = KvThreadStore(kv, clock=clock)
+    old = ThreadKey(system="completions", thread="old")
+    fresh = ThreadKey(system="completions", thread="fresh")
+    await _deleted_thread(store, old)
+    clock.now += timedelta(days=1, minutes=1)
+    await _deleted_thread(store, fresh)
+    await store.prune_receipts(timedelta(hours=24))
+    assert await kv.get(keys.head_key(old)) is None
+    assert await kv.get(keys.head_key(fresh)) is not None
+
+
+async def test_reaping_spares_a_thread_recreated_meanwhile():
+    """Тред пересоздали между чтением надгробия и его удалением — живой
+    заголовок не удаляется (удаление по версии)."""
+    from gc_stores.kv import keys
+
+    clock = _Clock()
+    recreated: dict = {}
+
+    class Racing(MemoryKV):
+        async def delete_if(self, key, version):
+            if key.endswith("/h") and not recreated:
+                recreated["done"] = True
+                await store.append_side(
+                    KEY,
+                    SideChange(op_id="again", patch_frontend=("t", {"y": 2})),
+                )
+            return await super().delete_if(key, version)
+
+    kv = Racing()
+    store = KvThreadStore(kv, clock=clock)
+    await _deleted_thread(store, KEY)
+    clock.now += timedelta(days=2)
+    await store.prune_receipts(timedelta(hours=24))
+    assert recreated
+    assert await kv.get(keys.head_key(KEY)) is not None
+    assert (await store.get_thread(KEY)).frontend == {"t": {"y": 2}}
