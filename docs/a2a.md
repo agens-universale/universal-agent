@@ -58,7 +58,7 @@ uv tool install "gc-server[a2a] @ git+https://gitverse.ru/gigacode-ai/universal-
     {"url": "http://127.0.0.1:8091/rpc", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"},
     {"url": "http://127.0.0.1:8091", "protocolBinding": "HTTP+JSON", "protocolVersion": "1.0"}
   ],
-  "version": "0.4.0",
+  "version": "0.5.0",
   "capabilities": {"streaming": true, "pushNotifications": false},
   "defaultInputModes": ["text/plain"],
   "defaultOutputModes": ["text/plain"],
