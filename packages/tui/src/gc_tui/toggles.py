@@ -608,7 +608,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
     # Только Настройки: команды палитры нет — режим ТЕКУЩЕЙ сессии переключает
     # Shift+Tab. Строка правит конфиг; сессия без своего выбора следует ему
     # сразу (правило «выбор сессии → конфиг», `mode_with_source`).
-    "mode": ToggleSpec(
+    "permissions": ToggleSpec(
         dotted="security.permissions.default_mode",
         values=tuple(
             ToggleValue(

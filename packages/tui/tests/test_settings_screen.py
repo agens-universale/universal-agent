@@ -4165,7 +4165,7 @@ async def test_modes_session_line_survives_a_narrow_window(tmp_path):
     app, cfg_file = _app_with_config(
         tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
     )
-    async with app.run_test(size=(72, 24)) as pilot:
+    async with app.run_test(size=(73, 24)) as pilot:
         scr = await _open_modes_section(pilot)
         app.set_session_override("tui.finish_gate_mode", "off")
         scr._render_view()
@@ -4198,7 +4198,7 @@ async def test_session_line_label_is_dim_italic_and_value_has_its_track_colour(
     async with app.run_test(size=(140, 30)) as pilot:
         scr = await _open_modes_section(pilot)
         app.set_permission_mode("plan")
-        text = scr._mode_row_text("mode", selected=False)
+        text = scr._mode_row_text("permissions", selected=False)
 
         def style_at(idx):
             return " ".join(
@@ -4208,7 +4208,7 @@ async def test_session_line_label_is_dim_italic_and_value_has_its_track_colour(
         label = style_at(text.plain.index("в текущей сессии:"))
         assert "italic" in label and DEEP_DIM.lower() in label
         plan_colour = next(
-            v.color for v in TOGGLES["mode"].values if v.value == "plan"
+            v.color for v in TOGGLES["permissions"].values if v.value == "plan"
         )
         assert text.plain.split("\n")[1].endswith("plan")
         assert plan_colour.lower() in style_at(text.plain.rindex("plan"))
@@ -5373,7 +5373,7 @@ def test_modes_section_goes_model_then_permissions_then_rigor():
 
     assert modes_section_names() == [
         "model",
-        "mode",
+        "permissions",
         "rigor",
         "gate",
         "answers",
@@ -5831,9 +5831,10 @@ async def test_mode_row_writes_the_default_permission_mode(tmp_path):
     app, cfg_file = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("mode")
-        row = scr._mode_row_text("mode", selected=False).plain
-        assert "mode · режим разрешений по умолчанию" in row
+        scr._modes_idx = modes_row_index("permissions")
+        row = scr._mode_row_text("permissions", selected=False).plain
+        assert "permissions · режим разрешений по умолчанию" in row
+        assert row.lstrip().startswith("permissions")
         assert row.rstrip().endswith("edit")
 
         await pilot.press("right")  # edit -> manual
@@ -5861,7 +5862,7 @@ async def test_mode_row_hint_is_the_footer_description_of_the_mode(tmp_path):
     )
     async with app.run_test(size=(120, 30)) as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("mode")
+        scr._modes_idx = modes_row_index("permissions")
 
         hint = scr._modes_hint_text()
         assert MODE_HINTS["manual"] in hint
@@ -5878,11 +5879,12 @@ async def test_mode_row_shows_the_mode_chosen_in_this_session(tmp_path):
     async with app.run_test(size=(140, 30)) as pilot:
         scr = await _open_modes_section(pilot)
         assert (
-            "в текущей сессии" not in scr._mode_row_text("mode", False).plain
+            "в текущей сессии"
+            not in scr._mode_row_text("permissions", False).plain
         )
 
         app.set_permission_mode("plan")
-        row = scr._mode_row_text("mode", selected=False).plain
+        row = scr._mode_row_text("permissions", selected=False).plain
 
         assert row.split("\n")[0].rstrip().endswith("edit")
         assert _session_line(row) == "  в текущей сессии: plan"

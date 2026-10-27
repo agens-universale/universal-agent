@@ -408,7 +408,7 @@ def test_modes_section_keeps_model_row():
     список (спека §6.6); ручки уровня нет."""
     from gc_tui.toggles import TOGGLES, modes_section_names
 
-    assert modes_section_names()[:2] == ["model", "mode"]
+    assert modes_section_names()[:2] == ["model", "permissions"]
     spec = TOGGLES["model"]
     assert spec.settings_label == "модель по умолчанию"
     assert spec.group == "model"

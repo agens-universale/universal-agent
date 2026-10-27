@@ -80,8 +80,8 @@ def test_default_permission_mode_is_a_settings_only_toggle():
     from gc_tui.commands import build_default_registry
     from gc_tui.toggles import TOGGLES
 
-    assert "mode" in TOGGLES
-    assert build_default_registry().lookup("mode") is None
+    assert "permissions" in TOGGLES
+    assert build_default_registry().lookup("permissions") is None
 
 
 def test_new_session_key_works_without_code_changes(monkeypatch):
