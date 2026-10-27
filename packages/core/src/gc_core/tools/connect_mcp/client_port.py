@@ -48,7 +48,6 @@ async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
     from gc_core.user_stop import (
         STOP_WAIT_ONLY,
         UserStopInterrupt,
-        await_cancelled,
         current_tool_call,
         current_user_stop,
     )
@@ -59,9 +58,13 @@ async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
     if stop.requested:
         raise UserStopInterrupt(kind="mcp", started=False)
     _, call_id = current_tool_call()
-    task = asyncio.create_task(body())
+    # MCP SDK enters anyio scopes here. Calls and teardown must stay in
+    # the same task, including subsequent calls on a persistent session.
+    task = asyncio.current_task()
+    cancelled_by_stop = False
 
     async def _release():
+        nonlocal cancelled_by_stop
         # Сессию не закрываем. Для долгоживущего stdio сигнал — уведомление
         # ``notifications/cancelled`` с id запроса; поздний ответ этого id
         # сессия сама не примет. ``False`` — запрос был, записать не удалось:
@@ -72,7 +75,7 @@ async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
         if callable(cancel):
             outcome = cancel()
         if not task.done():
-            task.cancel()
+            cancelled_by_stop = task.cancel()
         if outcome is False:
             return STOP_WAIT_ONLY
 
@@ -84,13 +87,11 @@ async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
             mcp_server=str(getattr(client, "server_name", "") or ""),
             release=_release,
         ):
-            return await task
-    except UserStopInterrupt as exc:
-        if not exc.started:
-            await await_cancelled(task)
-        raise
+            return await body()
     except asyncio.CancelledError:
         if stop.requested:
+            if cancelled_by_stop:
+                task.uncancel()
             raise UserStopInterrupt(kind="mcp", started=True)
         raise
 

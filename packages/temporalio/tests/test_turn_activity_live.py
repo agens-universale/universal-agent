@@ -7,7 +7,6 @@ from pathlib import Path
 
 import psutil
 import pytest
-
 from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio import AgentActivity, AgentActivityRequest
 from live_support import call, temporal_cli, thread_messages, thread_owner
@@ -179,6 +178,123 @@ async def test_cancel_during_real_mcp_call_releases_thread_and_process(
         async with asyncio.timeout(5):
             while psutil.pid_exists(pid):
                 await asyncio.sleep(0.05)
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.fixture
+async def stream_mcp(tmp_path):
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    audit = tmp_path / "http-mcp.jsonl"
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(Path(__file__).with_name("mcp_fixture_server.py")),
+        "streamable-http",
+        str(port),
+        str(audit),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        async with asyncio.timeout(15):
+            while True:
+                try:
+                    _, writer = await asyncio.open_connection(
+                        "127.0.0.1", port
+                    )
+                    writer.close()
+                    await writer.wait_closed()
+                    break
+                except OSError:
+                    await asyncio.sleep(0.05)
+        yield f"http://127.0.0.1:{port}/mcp", audit
+    finally:
+        process.terminate()
+        await asyncio.wait_for(process.wait(), 10)
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_stream_mcp_closed_in_its_opening_task(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+    stream_mcp,
+    cancel,
+):
+    from gc_core.tools.connect_mcp.stream_client import _SESSION_MANAGER
+
+    monkeypatch.chdir(tmp_path)
+    url, _requests, script = scripted_http
+    mcp_url, audit = stream_mcp
+    script.extend(
+        [
+            [
+                call(
+                    "one",
+                    "mcp_counter_increment",
+                    {"delay": 30 if cancel else 0},
+                )
+            ],
+            [call("two", "mcp_counter_increment", {"delay": 0})],
+            [finish("done")],
+        ]
+    )
+    closed_in_owner = []
+    close_stack = _SESSION_MANAGER._aclose_stack
+
+    async def observe_close(cms, *, opened_in=None):
+        closed_in_owner.append(opened_in is asyncio.current_task())
+        await close_stack(cms, opened_in=opened_in)
+
+    monkeypatch.setattr(_SESSION_MANAGER, "_aclose_stack", observe_close)
+    settings = agent_settings(url, tmp_path).with_overrides(
+        {
+            "mcp.servers.counter": {
+                "transport": "stream_http",
+                "url": mcp_url,
+                "persistent_session": True,
+            },
+        }
+    )
+    store = FileThreadStore(str(tmp_path / "threads"))
+    runner = AgentActivity({"a": settings}, thread_store=store)
+    env = ActivityEnvironment()
+    task = asyncio.create_task(
+        env.run(runner.run, AgentActivityRequest("a", "go", "http"))
+    )
+    try:
+        if cancel:
+            async with asyncio.timeout(15):
+                while (
+                    not audit.exists()
+                    or '"increment"' not in audit.read_text()
+                ):
+                    await asyncio.sleep(0.05)
+            env.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 10)
+        else:
+            await asyncio.wait_for(task, 30)
+            messages = await thread_messages(store, "sdk", "http")
+            outputs = [
+                json.loads(m["output"])
+                for m in messages
+                if m.get("type") == "function_call_output"
+                and m.get("call_id") in {"one", "two"}
+            ]
+            counters = [
+                json.loads(value["result"]["content"][0]["text"])
+                for value in outputs
+            ]
+            assert [counter["count"] for counter in counters] == [1, 2]
+        assert closed_in_owner and all(closed_in_owner)
+        assert await thread_owner(store, "sdk", "http") is None
     finally:
         if not task.done():
             task.cancel()

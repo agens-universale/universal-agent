@@ -640,6 +640,10 @@ async def _acall_under_stop(tool_name: str, call_id: str, fn, args):
         return await _body()
     if stop.requested:
         raise UserStopInterrupt(kind="tool", started=False)
+    if tool_name.startswith("mcp_"):
+        # The MCP transport registers its own stop handler. Keep persistent
+        # anyio sessions in the agent task, which also closes them.
+        return await _body()
     task = asyncio.create_task(_body())
 
     async def _release() -> None:
