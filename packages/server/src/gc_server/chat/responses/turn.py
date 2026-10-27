@@ -173,10 +173,11 @@ class TurnRun(TurnLifecycle):
                 self._record.created_at,
                 status,
                 body,
+                reservation=self._record.reservation,
             )
             await self._index.save(self._record)
             self.sealed = True
-            self._release_busy(self.thread_id, self.response_id)
+            await self._release_busy(self.thread_id, self.response_id)
             self.done.set()
 
     async def _tool_events(self) -> list[dict]:

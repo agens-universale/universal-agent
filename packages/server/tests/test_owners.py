@@ -200,6 +200,35 @@ async def test_registry_section_does_not_grow_with_finished_tasks(threads):
         await registry.astop()
 
 
+async def test_compaction_cannot_erase_a_concurrent_add(threads, monkeypatch):
+    registry = owners.OwnerRegistry(threads, section="a2a")
+    entered, resume = asyncio.Event(), asyncio.Event()
+    original = threads.store.append_side
+
+    async def delayed(key, change):
+        if change.set_frontend is not None:
+            entered.set()
+            await resume.wait()
+        return await original(key, change)
+
+    key = await registry.aadd("old", {"task": "old"})
+    registry._removed = owners.COMPACT_AFTER - 1
+    monkeypatch.setattr(threads.store, "append_side", delayed)
+    compact = asyncio.create_task(registry.aremove("old"))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        await registry.aadd("new", {"task": "new"})
+        resume.set()
+        await compact
+        persisted = owners.entries(
+            await threads.get(owners.registry_key(key)), "a2a"
+        )
+        assert persisted == {"new": {"task": "new"}}
+    finally:
+        resume.set()
+        await registry.astop()
+
+
 async def test_directory_is_compacted_and_live_owners_reassert(threads):
     """Каталог копит вычеркнутые ключи (по одному на запуск процесса):
     восстановитель переписывает его, живой реестр вписывает себя заново."""

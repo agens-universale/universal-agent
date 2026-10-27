@@ -44,6 +44,7 @@ from gc_core.threads.models import (
 )
 from gc_core.threads.rules import (
     check_deletable,
+    check_frontend,
     check_side_writer,
     check_writer,
     granted_lease,
@@ -330,6 +331,7 @@ class MemoryThreadStore(ThreadStore):
         self._check_aliases(key, change.add_aliases)
         existing = self._threads.get(key)
         check_side_writer(existing.lease if existing else None, change)
+        check_frontend(existing.frontend if existing else {}, change)
         thread = self._thread(key)
         if change.set_runtime is not None:
             thread.runtime = change.set_runtime

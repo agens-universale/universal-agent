@@ -360,7 +360,7 @@ async def test_failed_run_records_its_inbox_boundary(monkeypatch, tmp_path):
         threads = Threads(stores.threads)
         await threads.submit(KEY, {"id": "u1", "role": "user", "content": "x"})
         await task_status.aset_status(
-            threads, KEY, status="running", run_id="r1"
+            threads, KEY, status="running", run_id="r1", inbox_started_upto=1
         )
         run = ActiveRun(
             key="k",
@@ -660,7 +660,7 @@ async def test_cancelled_run_records_its_inbox_boundary(monkeypatch, tmp_path):
         threads = Threads(stores.threads)
         await threads.submit(KEY, {"id": "u1", "role": "user", "content": "x"})
         await task_status.aset_status(
-            threads, KEY, status="running", run_id="r1"
+            threads, KEY, status="running", run_id="r1", inbox_started_upto=1
         )
         run = ActiveRun(
             key="k",

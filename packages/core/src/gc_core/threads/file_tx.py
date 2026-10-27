@@ -155,9 +155,18 @@ def publish(
         "control": control,
         "receipt": receipt,
     }
+    from gc_core.threads.file_namespace import pending_path
+
+    aliases = any(Path(c["path"]).parts[0] == "aliases" for c in changes.items)
+    marker = pending_path(directory)
+    if aliases:
+        # Эксклюзивный namespace замок держится вызывающим до публикации.
+        _write(marker, base.name.encode())
     if durability == "fsync":
         _write(base / PENDING, _json(journal))
         _recover(directory, base)
+        if aliases:
+            marker.unlink(missing_ok=True)
         return
     _plain_write(base / PENDING, _json(journal))
     for change in journal["changes"]:
@@ -165,6 +174,8 @@ def publish(
     _plain_write(base / CONTROL, _json(control))
     _plain_write(receipt_path(base, receipt["operation_id"]), _json(receipt))
     (base / PENDING).unlink()
+    if aliases:
+        marker.unlink(missing_ok=True)
 
 
 def move_aside(base: Path, trash: Path) -> None:

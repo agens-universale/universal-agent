@@ -1,17 +1,15 @@
 """``KvAgentStore`` — хранилище агента на KV (Redis, S3).
 
-Ресурс — сырые байты по ключу ``res/<агент>/<проект или _>/<вид>/<путь>``
-(агент и проект — hex, путь — как есть: каталоги скиллов выводятся
-списком по префиксу). Версии и метки источников ресурсов агента — в его
-манифесте ``res/<агент>/manifest``: запись ресурса — сам ресурс, затем
-условная запись манифеста (повтор при гонке). Упавшая посередине запись
-чинится списком ресурсов: ресурс без записи в манифесте попадает в него
-как ресурс человека, запись без ресурса уходит. Память проекта — ``mem/<агент>/<проект>``,
+Ресурс по ключу ``res/<агент>/<проект или _>/<вид>/<путь>`` содержит
+байты и источник в одном условно обновляемом объекте. Манифест кеширует
+сведения; список сверяет его с объектами. Старые сырые ресурсы читаются
+с источником из манифеста. Память проекта — ``mem/<агент>/<проект>``,
 запись с проверкой версии — условной записью ключа.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from typing import Any
@@ -35,6 +33,23 @@ from gc_stores.kv.base import KV, ensure_format, guarded, read_format
 
 _AGENT_LEVEL = "_"
 _ATTEMPTS = 16
+_RESOURCE_V2 = b"GC_RESOURCE_V2\x00"
+
+
+def _resource_document(
+    data: bytes, legacy: dict | None = None
+) -> tuple[bytes, dict]:
+    if data.startswith(_RESOURCE_V2):
+        doc = json.loads(data[len(_RESOURCE_V2) :])
+        content = base64.b64decode(doc["data"])
+        return content, {
+            "version": hashlib.sha256(content).hexdigest(),
+            "source": doc["source"],
+        }
+    return data, {
+        "version": hashlib.sha256(data).hexdigest(),
+        "source": (legacy or {}).get("source", HEALED_SOURCE),
+    }
 
 
 def _scope(project: str | None) -> str:
@@ -152,7 +167,7 @@ class KvAgentStore(AgentStore):
         if found is None:
             return None
         await self._check_stale()
-        return found.data
+        return _resource_document(found.data)[0]
 
     async def list(
         self,
@@ -276,30 +291,35 @@ class KvAgentStore(AgentStore):
     async def _heal(
         self, manifest: dict[str, Any], scopes: set[str]
     ) -> dict[str, Any]:
-        """Манифест по ресурсам ``scopes``: ресурс без записи — источник
-        неизвестен (``HEALED_SOURCE``: упасть между ресурсом и манифестом мог
-        и ``sync --with-defaults`` — умолчания пакета такой ресурс обновят),
-        запись без ресурса — прочь."""
+        """Список по объектам ресурсов; манифест — лишь кеш.
+
+        Только старый сырой объект без манифеста получает HEALED_SOURCE.
+        Новый объект сохраняет источник даже при обрыве обновления кеша.
+        """
         stored: dict[str, str] = {}
         for scope in scopes:
             stored.update(await self._stored(scope))
         patch: dict[str, dict | None] = {}
+        authoritative = dict(manifest)
         for entry, key in stored.items():
-            if entry not in manifest:
-                found = await self._kv.get(key)
-                if found is not None:
-                    patch[entry] = {
-                        "version": hashlib.sha256(found.data).hexdigest(),
-                        "source": HEALED_SOURCE,
-                    }
+            found = await self._kv.get(key)
+            if found is not None:
+                _content, info = _resource_document(
+                    found.data, manifest.get(entry)
+                )
+                authoritative[entry] = info
+                if manifest.get(entry) != info:
+                    patch[entry] = info
         for entry in manifest:
             if entry.split("|", 1)[0] in scopes and entry not in stored:
                 patch[entry] = None
+                authoritative.pop(entry, None)
         if not patch:
             return manifest
         await self._patch_manifest(patch, only_if_absent=True)
-        healed, _version = await self._manifest()
-        return healed
+        # Манифест — кеш каталога. Байты и источник одной версии берутся
+        # из единого объекта, даже если другой писатель обновляет кеш.
+        return authoritative
 
     async def put_resource(
         self,
@@ -309,15 +329,42 @@ class KvAgentStore(AgentStore):
         *,
         project: str | None = None,
         source: str | None = None,
-    ) -> None:
+        preserve_manual: bool = False,
+    ) -> bool:
         await self._ready()
         path = name.strip("/")
         scope = _scope(project)
-        await self._kv.put_any(self._resource(scope, kind, path), data)
+        key = self._resource(scope, kind, path)
+        entry = f"{scope}|{kind}|{path}"
+        document = (
+            _RESOURCE_V2
+            + json.dumps(
+                {
+                    "data": base64.b64encode(data).decode("ascii"),
+                    "source": source,
+                }
+            ).encode()
+        )
+        for _ in range(_ATTEMPTS):
+            current = await self._kv.get(key)
+            if preserve_manual and current is not None:
+                manifest, _version = await self._manifest()
+                _body, info = _resource_document(
+                    current.data, manifest.get(entry)
+                )
+                if info["source"] is None:
+                    return False
+            if await self._kv.put(
+                key, document, if_version=current.version if current else None
+            ):
+                break
+        else:
+            raise RuntimeError("ресурс агента правят наперегонки")
         await self._update_manifest(
-            f"{scope}|{kind}|{path}",
+            entry,
             {"version": hashlib.sha256(data).hexdigest(), "source": source},
         )
+        return True
 
     async def delete_resource(
         self, kind: ResourceKind, name: str, *, project: str | None = None

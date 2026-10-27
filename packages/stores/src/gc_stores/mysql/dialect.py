@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -74,6 +75,38 @@ class MySQLDialect(Dialect):
             name,
         )
         return found is not None
+
+    async def execute_migration(self, conn: Conn, statement: str) -> None:
+        # ADD COLUMN коммитится до записи версии миграции. Повтор после
+        # обрыва допустим только при точном совместимом определении.
+        match = re.fullmatch(
+            r"ALTER TABLE (\w+) ADD COLUMN `?(\w+)`? (DATETIME\(6\)|VARCHAR\(32\)) NULL;?",
+            " ".join(
+                line.strip()
+                for line in statement.splitlines()
+                if not line.lstrip().startswith("--")
+            ).strip(),
+            re.IGNORECASE,
+        )
+        if match:
+            table, column, kind = match.groups()
+            row = await conn.fetchrow(
+                "SELECT COLUMN_TYPE AS kind, IS_NULLABLE AS nullable "
+                "FROM information_schema.columns WHERE table_schema = DATABASE() "
+                "AND table_name = %s AND column_name = %s",
+                table,
+                column,
+            )
+            if row is not None:
+                if (
+                    row["kind"].lower() != kind.lower()
+                    or row["nullable"] != "YES"
+                ):
+                    raise ValueError(
+                        f"MySQL: несовместимое определение {table}.{column}"
+                    )
+                return
+        await conn.execute(statement)
 
     @asynccontextmanager
     async def migration_session(self, db: Database) -> AsyncIterator[Conn]:

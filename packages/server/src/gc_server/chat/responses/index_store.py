@@ -17,13 +17,20 @@ import json
 import os
 import re
 import tempfile
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from gc_core.thread_store import validate_thread_id
+from gc_core.threads.errors import ThreadConflict
 from gc_core.threads.facade import Threads
 from gc_core.threads.file_store import FileThreadStore
-from gc_core.threads.models import JsonObject, ThreadKey, ThreadRecord
+from gc_core.threads.models import (
+    JsonObject,
+    SideChange,
+    ThreadKey,
+    ThreadRecord,
+)
 from gc_core.utils.atomic_io import atomic_replace
 
 SYSTEM = "responses"
@@ -47,6 +54,7 @@ class ResponseRecord:
     created_at: int
     status: str
     response: dict
+    reservation: str | None = None
 
 
 def thread_key(thread_id: str) -> ThreadKey:
@@ -80,13 +88,42 @@ class ResponseIndex:
             "updated_at": record.created_at,
             "status": record.status,
         }
-        await self.threads.append_frontend(
-            key,
-            _STREAM,
-            [{"response_id": record.response_id, **_payload(record)}],
-            aliases=[record.response_id],
-            patch=(_FRONTEND, summary),
-        )
+        for _ in range(16):
+            current = await self.threads.get(key)
+            frontend = current.frontend if current else {}
+            admission = frontend.get(_FRONTEND, {}).get("admission") or {}
+            own = (
+                record.reservation is None
+                or admission.get("token") == record.reservation
+            )
+            if not own and record.status == "in_progress":
+                raise ThreadConflict("бронь диалога потеряна до запуска")
+            try:
+                await self.threads.store.append_side(
+                    key,
+                    SideChange(
+                        op_id=f"response-{uuid.uuid4().hex}",
+                        expected_frontend=frontend,
+                        append=[
+                            (
+                                _STREAM,
+                                [
+                                    {
+                                        "response_id": record.response_id,
+                                        **_payload(record),
+                                    }
+                                ],
+                            )
+                        ],
+                        add_aliases=[record.response_id],
+                        patch_frontend=(_FRONTEND, summary) if own else None,
+                    ),
+                )
+                break
+            except ThreadConflict:
+                continue
+        else:
+            raise ThreadConflict("сводка диалога меняется быстрее записи")
         self._write_legacy(record)
 
     async def load(self, response_id: str) -> ResponseRecord | None:

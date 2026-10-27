@@ -129,11 +129,11 @@ async def _acontinue(
     stopped = status.get("stopped_by") == "shutdown"
 
     async def prepare() -> bool:
+        if _claimed_recently(status, record):
+            return False  # в том числе последнюю попытку уже строит сосед
         if attempts >= MAX_RECOVERY_ATTEMPTS and not stopped:
             await _agive_up(surface, threads, record)
             return False
-        if _claimed_recently(status, record):
-            return False  # этот сбой продолжает другой инстанс
         if not await _aclaim(threads, record, status, attempts, stopped):
             return False
         if record.runtime.turn == "running":
@@ -217,6 +217,7 @@ async def afinish_abandoned(
     *,
     status: str,
     op: str,
+    inbox_upto: int | None = None,
     **fields: object,
 ) -> None:
     """Итог задачи, чей ход вести некому (инстанс упал): статус,
@@ -229,7 +230,9 @@ async def afinish_abandoned(
     final = {
         "status": status,
         **fields,
-        "inbox_upto": record.max_seq.get("inbox", 0),
+        "inbox_upto": record.max_seq.get("inbox", 0)
+        if inbox_upto is None
+        else inbox_upto,
     }
     await task_status.aset_status(threads, key, **final)
     runtime = runtime_rules.with_turn(record.runtime, running=False)

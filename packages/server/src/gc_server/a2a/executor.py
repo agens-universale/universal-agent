@@ -294,12 +294,10 @@ class GcAgentExecutor(AgentExecutor):
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         try:
             cwd = await self._cwd_for(context)
+            # Проверка cwd и принятие в очередь — одна условная запись.
+            await self._aenqueue(context.context_id, context.task_id, cwd)
         except _CwdError:
             cwd = None
-        else:
-            # Место в очереди — до ответа пиру: задача, о приёме которой
-            # он узнал, в очереди диалога раньше следующей.
-            await self._aenqueue(context.context_id, context.task_id, cwd)
         try:
             if task is None:
                 await event_queue.enqueue_event(
@@ -511,12 +509,37 @@ class GcAgentExecutor(AgentExecutor):
         найдут по реестру."""
         owner = await self._aregister(context_id, task_id)
         entry = {"at": _now(), "instance": instance_id(), "owner": owner}
+        from gc_core.threads.errors import ThreadConflict
+        from gc_core.threads.models import SideChange
+
+        key = dialog_key(context_id)
+        try:
+            while True:
+                record = await self._threads.get(key)
+                current = dialog_state(record).get(_CWD_KEY)
+                if current is not None and current != cwd:
+                    raise _CwdError(cwd)
+                try:
+                    await self._threads.store.append_side(
+                        key,
+                        SideChange(
+                            op_id=f"a2a-enqueue-{uuid.uuid4().hex}",
+                            expected_frontend=record.frontend
+                            if record
+                            else {},
+                            patch_frontend=(
+                                FRONTEND,
+                                {_CWD_KEY: cwd, QUEUE + task_id: entry},
+                            ),
+                        ),
+                    )
+                    break
+                except ThreadConflict:
+                    continue
+        except BaseException:
+            await self._arelease_entry(context_id, task_id)
+            raise
         self._waiting[task_id] = entry
-        await self._threads.update_frontend(
-            dialog_key(context_id),
-            FRONTEND,
-            {_CWD_KEY: cwd, QUEUE + task_id: entry},
-        )
 
     async def _aawait_turn(self, context_id: str, task_id: str) -> bool:
         """Дождаться своей очереди: диалог свободен (нет хода, никто не

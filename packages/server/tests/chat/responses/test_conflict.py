@@ -506,3 +506,80 @@ async def test_slow_dialog_lookup_does_not_hold_other_dialogs(tmp_path):
         gate.set()
     assert (await _finished(fresh))["status"] == "completed"
     assert (await _finished(await continuing))["status"] == "completed"
+
+
+async def test_two_instances_reserve_before_building_agents(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    first = _facade(tmp_path, agent)
+    initial = await first.open({"model": "m", "input": "initial"})
+    await _finished(initial)
+    second = ResponsesFacade(
+        settings=first._settings,
+        agent_factory=first._agent_factory,
+        index=ResponseIndex.for_threads_dir(str(tmp_path / "threads")),
+    )
+    entered, resume = asyncio.Event(), asyncio.Event()
+    original = first._agent_for
+
+    async def building(thread_id, cwd):
+        entered.set()
+        await resume.wait()
+        return await original(thread_id, cwd)
+
+    first._agent_for = building
+    body = {
+        "model": "m",
+        "input": "next",
+        "previous_response_id": initial.response_id,
+    }
+    opening = asyncio.create_task(first.open(body))
+    await asyncio.wait_for(entered.wait(), 2)
+    try:
+        with pytest.raises(ApiError) as caught:
+            await second.open(body)
+        assert caught.value.status == 409
+        assert second._agents == {}
+    finally:
+        resume.set()
+    assert (await _finished(await opening))["status"] == "completed"
+    await first.shutdown()
+    await second.shutdown()
+
+
+async def test_late_finalizer_cannot_replace_new_admission_summary(tmp_path):
+    from dataclasses import replace
+    from gc_core.threads.models import SideChange
+    from gc_server.chat.responses.index_store import ResponseRecord, thread_key
+
+    index = ResponseIndex.for_threads_dir(str(tmp_path / "threads"))
+    key = thread_key("dialog")
+    await index.threads.store.append_side(
+        key,
+        SideChange(
+            op_id="new-owner",
+            patch_frontend=("chat", {"admission": {"token": "new"}}),
+        ),
+    )
+    winner = ResponseRecord(
+        "resp_00000000-0000-0000-0000-000000000001",
+        "dialog",
+        "/",
+        None,
+        1,
+        "in_progress",
+        {},
+        reservation="new",
+    )
+    await index.save(winner)
+    await index.save(
+        replace(
+            winner,
+            response_id="resp_00000000-0000-0000-0000-000000000002",
+            status="failed",
+            reservation="old",
+        )
+    )
+    summary = index.summary(await index.threads.get(key))
+    assert summary["latest_response_id"] == winner.response_id
+    assert summary["status"] == "in_progress"

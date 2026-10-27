@@ -85,6 +85,10 @@ class Dialect(ABC):
         ``ValueError``."""
         del agent_id, project_id, path
 
+    async def execute_migration(self, conn: Conn, statement: str) -> None:
+        """Один шаг DDL; MySQL дополняет проверкой частичного применения."""
+        await conn.execute(statement)
+
     def check_ids(self, *values: str) -> None:
         """Ключи (id треда, алиас, op_id) влезают в колонки базы; иначе —
         ``ValueError``, а не обрезка."""

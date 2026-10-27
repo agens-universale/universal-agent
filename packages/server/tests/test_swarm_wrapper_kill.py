@@ -102,3 +102,55 @@ def test_server_signal_to_the_wrapper_group_reaches_the_cli(tmp_path):
         if wrapper.poll() is None:
             wrapper.kill()
             wrapper.wait()
+
+
+def test_sigkill_reaches_cli_which_ignores_term(tmp_path):
+    """CLI обязан погибнуть за grace сервера, не через 30 секунд timeout."""
+    cli = tmp_path / "cli"
+    pidfile = tmp_path / "pid"
+    cli.write_text(
+        f"#!/bin/sh\ntrap '' TERM\necho $$ > '{pidfile}'\nwhile :; do sleep 1; done\n"
+    )
+    cli.chmod(0o755)
+    env = {
+        **os.environ,
+        "SWARM_ID": "swarm_g_kill",
+        "SWARM_THREADS_DIR": str(tmp_path / "threads"),
+        "SWARM_SANDBOX_PATH": str(tmp_path / "sandbox"),
+        "SWARM_SANDBOX_TOOL": "none",
+        "SWARM_CLI_COMMAND": str(cli),
+        "SWARM_CLI_VENV_ROOT": "",
+        "SWARM_PAYLOAD_JSON": "{}",
+        "SWARM_LIMIT_TIMEOUT_SECONDS": "60",
+    }
+    wrapper = subprocess.Popen(
+        ["bash", str(WRAPPER)],
+        env=env,
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    cli_pid = None
+    try:
+        assert _wait(lambda: pidfile.exists() and pidfile.read_text().strip())
+        cli_pid = int(pidfile.read_text())
+        assert os.getpgid(cli_pid) == wrapper.pid
+        os.killpg(wrapper.pid, signal.SIGTERM)
+        time.sleep(0.1)
+        assert _alive(cli_pid)
+        os.killpg(wrapper.pid, signal.SIGKILL)
+        wrapper.wait(timeout=3)
+
+        def stopped():
+            stat = Path(f"/proc/{cli_pid}/stat")
+            return not _alive(cli_pid) or (
+                stat.exists() and stat.read_text().split()[2] == "Z"
+            )
+
+        assert _wait(stopped), "CLI пережил принудительную остановку сервера"
+    finally:
+        if cli_pid is not None and _alive(cli_pid):
+            os.kill(cli_pid, signal.SIGKILL)
+        if wrapper.poll() is None:
+            os.killpg(wrapper.pid, signal.SIGKILL)
+            wrapper.wait()

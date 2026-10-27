@@ -1470,3 +1470,37 @@ async def test_entry_of_a_task_running_elsewhere_is_left_alone(
     assert failed == 0
     after = await _client(survivor).get_task(pb.GetTaskRequest(id="t-orphan"))
     assert after.status.state == pb.TASK_STATE_WORKING
+
+
+async def test_concurrent_first_enqueues_cannot_choose_different_roots(
+    tmp_path, stores, monkeypatch
+):
+    first = _surface(tmp_path, stores).executor
+    second = _surface(tmp_path, stores).executor
+    threads = first._threads
+    assert second._threads.store is threads.store
+    original = threads.store.get_thread
+    ready, reads = asyncio.Event(), 0
+    key = dialog_key("same-dialog")
+
+    async def simultaneous(key_arg):
+        nonlocal reads
+        record = await original(key_arg)
+        if key_arg == key and reads < 2:
+            reads += 1
+            if reads == 2:
+                ready.set()
+            await asyncio.wait_for(ready.wait(), 3)
+        return record
+
+    monkeypatch.setattr(threads.store, "get_thread", simultaneous)
+    results = await asyncio.gather(
+        first._aenqueue("same-dialog", "one", "/one"),
+        second._aenqueue("same-dialog", "two", "/two"),
+        return_exceptions=True,
+    )
+    assert sum(r is None for r in results) == 1
+    assert sum(isinstance(r, a2a_executor._CwdError) for r in results) == 1
+    state = a2a_executor.dialog_state(await original(key))
+    assert len([k for k in state if k.startswith("q:")]) == 1
+    assert state["cwd"] in {"/one", "/two"}

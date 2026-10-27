@@ -151,6 +151,7 @@ if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
 
   BWRAP_CMD=(
     bwrap
+    --die-with-parent
     --unshare-all
     --share-net
     --dev /dev
@@ -262,7 +263,7 @@ if command -v timeout >/dev/null 2>&1; then
   # SIGTERM (15) c grace-period 30s, потом SIGKILL (9).
   # Grace нужен чтобы CLI успел сделать summary compaction если она в процессе
   # (см. swarm_spec.md §6, «Суммаризация в swarm-режиме»).
-  TIMEOUT_PREFIX=(timeout --kill-after=30 --signal=TERM "${SWARM_LIMIT_TIMEOUT_SECONDS}")
+  TIMEOUT_PREFIX=(timeout --foreground --kill-after=30 --signal=TERM "${SWARM_LIMIT_TIMEOUT_SECONDS}")
 else
   TIMEOUT_PREFIX=()
 fi
@@ -270,16 +271,15 @@ fi
 # --- Запуск CLI и захват exit code ---
 
 # Сервер снимает песочницу сигналом группе обёртки (os.killpg: отмена,
-# дедлайн, лимиты, остановка). GNU timeout без --foreground уводит себя и CLI
-# в свою группу — туда сигнал сам не дойдёт. Поэтому запуск — в фоне, а
-# обёртка пересылает TERM/INT его группе; timeout на присланный сигнал гасит
-# CLI и через --kill-after добивает, даже если SIGKILL сервера заденет только
-# bash. Без timeout запуск в группе обёртки — пересылка уходит процессу.
+# дедлайн, лимиты, остановка). --foreground сохраняет timeout и CLI в
+# группе обёртки: SIGKILL сервера достигает их за тот же grace-период.
+# bwrap также завершает свою PID namespace при смерти родителя.
+# Прямой TERM обёртке пересылается дочернему процессу; сигнал всей группе
+# уже получает каждый её участник.
 CHILD_PID=""
 forward_signal() {
   [[ -n "${CHILD_PID}" ]] || return 0
-  kill -TERM -- -"${CHILD_PID}" 2>/dev/null \
-    || kill -TERM "${CHILD_PID}" 2>/dev/null
+  kill -TERM "${CHILD_PID}" 2>/dev/null
 }
 
 run_forwarding_signals() {

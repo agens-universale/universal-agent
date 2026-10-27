@@ -180,6 +180,9 @@ class Lease(_Model):
     owner: str = Field(min_length=1)
     epoch: int = Field(ge=1)
     expires_at: AwareDatetime | None = None
+    #: Уникальное удостоверение выдачи: не повторяется после уборки
+    #: надгробия. None сохраняет совместимость с уже выданными арендами.
+    token: str | None = None
 
 
 class StreamEntry(_Model):
@@ -239,6 +242,10 @@ class SideChange(_Model):
     """
 
     op_id: str = Field(min_length=1)
+    #: Условная запись: frontend должен целиком совпадать со снимком.
+    #: None — без условия; {} — ещё нет ни одной секции. Проверяется
+    #: атомарно с публикацией, не зависит от срока хранения квитанций.
+    expected_frontend: dict[str, JsonObject] | None = None
     #: Аренда пишущего, если она у него есть. Запись хода (статус, потоки,
     #: алиасы) в тред с бессрочной арендой (durable-исполнитель) проходит
     #: только по ней: чужой процесс не перепишет статус живой сессии.
@@ -326,6 +333,8 @@ def change_digest(change: ThreadChange | SideChange) -> str:
     ``OperationMismatch``.
     """
     payload = change.model_dump(mode="json", exclude={"lease"})
+    if payload.get("expected_frontend") is None:
+        payload.pop("expected_frontend", None)
     canonical = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )

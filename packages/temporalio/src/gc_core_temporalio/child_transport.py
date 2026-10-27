@@ -346,9 +346,9 @@ def install_subagents(
     return transport
 
 
-def _lease_parts(store) -> tuple[str | None, int | None]:
-    """Владелец и эпоха аренды треда сессии (нет аренды — ``None``)."""
+def _lease_parts(store) -> tuple[str | None, int | None, str | None]:
+    """Владелец, эпоха и токен аренды треда сессии (нет аренды — ``None``)."""
     lease = getattr(store, "lease", None)
     if lease is None:
-        return None, None
-    return lease.owner, lease.epoch
+        return None, None, None
+    return lease.owner, lease.epoch, lease.token

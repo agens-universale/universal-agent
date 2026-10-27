@@ -54,6 +54,7 @@ from gc_core.threads.models import (
 )
 from gc_core.threads.rules import (
     check_deletable,
+    check_frontend,
     check_side_writer,
     check_writer,
     granted_lease,
@@ -368,12 +369,14 @@ class KvThreadStore(ThreadStore):
     async def _drop_aliases(self, key: ThreadKey, aliases: list[str]) -> None:
         """Снять резервы удалённого треда — только свои: резерв, который
         успел перейти к другому треду, остаётся ему."""
+        if not self._kv.conditional_delete:
+            return  # резерв можно безопасно перехватить через CAS, но не удалить
         for alias in aliases:
             name = keys.alias_key(alias)
             try:
                 found = await self._kv.get(name)
                 if found is not None and _reservation(found.data)[0] == key:
-                    await self._kv.delete(name)
+                    await self._kv.delete_if(name, found.version)
             except Exception:  # уборка не отменяет удаление
                 _log.warning("kv: не снят резерв %s", name, exc_info=True)
 
@@ -664,6 +667,7 @@ class KvThreadStore(ThreadStore):
             now = self._clock()
             new = live.copy() if live else Head.fresh(key, now, head)
             check_side_writer(new.row.lease, change)
+            check_frontend(new.row.frontend, change)
             base = None if head is None else head.loaded_version
             reserved = await self._reserve_aliases(
                 key, new, change.add_aliases, now, base
@@ -919,44 +923,51 @@ class _Sweeper:
         self._kv = store._kv
         self._cutoff = cutoff
 
-    async def _old_chunk(self, name: str) -> bool:
+    async def _old_chunk(self, name: str) -> Versioned | None:
         found = await self._kv.get(name)
         if found is None:
-            return False
+            return None
         at = datetime.fromisoformat(json.loads(found.data)["at"])
-        return at < self._cutoff
+        return found if at < self._cutoff else None
 
     async def chunks(self) -> int:
+        if not self._kv.conditional_delete:
+            return 0
         removed = 0
-        referenced: dict[str, set[str]] = {}
         for name in await _scan_all(self._kv, keys.THREADS):
             prefix, sep, chunk_id = name.rpartition("/c/")
             if not sep:
                 continue
-            if prefix not in referenced:
-                referenced[prefix] = await self._referenced(prefix)
-            if chunk_id not in referenced[prefix] and await self._old_chunk(
-                name
-            ):
-                await self._kv.delete(name)
-                removed += 1
+            found = await self._old_chunk(name)
+            if found is not None and await self._fence_chunk(prefix, chunk_id):
+                removed += int(await self._kv.delete_if(name, found.version))
         return removed
 
-    async def _referenced(self, prefix: str) -> set[str]:
-        found = await self._kv.get(prefix + "/h")
-        head = None if found is None else _live(Head.loads(found.data))
-        if head is None:
-            return set()
-        return {
-            c.id
+    async def _fence_chunk(self, prefix: str, chunk_id: str) -> bool:
+        system, thread = prefix[len(keys.THREADS) :].split("/")
+        key = ThreadKey(system=keys.dec(system), thread=keys.dec(thread))
+        head, version = await self._store._head(key)
+        if head is not None and any(
+            c.id == chunk_id
             for chunks in (
                 *head.streams.values(),
                 *head.archive_chunks.values(),
             )
             for c in chunks
-        }
+        ):
+            return False
+        try:
+            # Отсекаем писателя, загрузившего кусок до публикации head.
+            # После CAS старый писатель обязан перечитать head и пересобрать
+            # запись с новыми случайными id кусков.
+            await self._store._fence(key, head, version)
+        except _FenceRaced:
+            return False
+        return True
 
     async def aliases(self) -> int:
+        if not self._kv.conditional_delete:
+            return 0
         removed = 0
         for name in await _scan_all(self._kv, keys.ALIASES):
             found = await self._kv.get(name)
@@ -964,11 +975,16 @@ class _Sweeper:
                 continue
             owner, at, _base = _reservation(found.data)
             alias = keys.dec(name[len(keys.ALIASES) :])
-            if at < self._cutoff and not await self._store._listed(
-                owner, alias
+            head, version = await self._store._head(owner)
+            if at >= self._cutoff or (
+                head is not None and not head.deleted and alias in head.aliases
             ):
-                await self._kv.delete(name)
-                removed += 1
+                continue
+            try:
+                await self._store._fence(owner, head, version)
+            except _FenceRaced:
+                continue
+            removed += int(await self._kv.delete_if(name, found.version))
         return removed
 
     async def index(self) -> int:

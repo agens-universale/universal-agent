@@ -555,6 +555,8 @@ class AgentExecutor:
         #: Последний ``seq`` управляющего потока на старте хода: отмены до
         #: него к этому ходу не относятся.
         self._control_seen = 0
+        self._inbox_first: int | None = None
+        self.cancelled_inbox_upto: int | None = None
         #: Цель хода для отмены с другого процесса (``request_cancel(target=)``).
         self._cancel_target: Optional[str] = None
         self._state: State | None = None
@@ -1506,6 +1508,8 @@ class AgentExecutor:
     ) -> Any:
         """Один ход ``arun``: тред, подготовка, цикл, учёт."""
         self._cancel_target = cancel_target
+        self._inbox_first = None
+        self.cancelled_inbox_upto = None
         with self._lock:
             # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
             # объекта, `stop_run` в сетапе этого хода (чтение треда, сборка
@@ -1873,10 +1877,12 @@ class AgentExecutor:
             self._inbox_seen = cut
             entries = [entry for entry in entries if entry.seq > cut]
             if not entries:
+                self.cancelled_inbox_upto = cut
                 state.stop_requested = True
                 self.stop_run()
                 return []
         if entries:
+            self._inbox_first = entries[0].seq
             state.inbox_seq = entries[-1].seq
         self._inbox_seen = int(state.inbox_seq or 0)
         return [_inbox_message(entry) for entry in entries]
@@ -1911,12 +1917,25 @@ class AgentExecutor:
         if not entries:
             return
         self._control_seen = entries[-1].seq
-        if any(
-            entry.data.get("type") == "cancel"
-            and entry.data.get("target") in (None, self._cancel_target)
-            for entry in entries
-        ):
-            self.stop_run()
+        for entry in entries:
+            data = entry.data
+            if data.get("type") != "cancel":
+                continue
+            target = data.get("target")
+            upto = data.get("upto_inbox_seq")
+            if target is not None:
+                applies = target == self._cancel_target
+            else:
+                first = self._inbox_first
+                applies = (
+                    first is None or type(upto) is not int or upto >= first
+                )
+            if applies:
+                if type(upto) is int:
+                    self.cancelled_inbox_upto = max(
+                        self.cancelled_inbox_upto or 0, upto
+                    )
+                self.stop_run()
 
     def _enqueue_inbox(self, entries: list) -> None:
         """Записи потока — прямо в очередь хода (не субагенту: отметку
