@@ -193,7 +193,8 @@ async def test_space_on_running_block_new_members_visible(tmp_path):
 
 @pytest.mark.asyncio
 async def test_space_on_agent_row_toggles_agent_window(tmp_path):
-    """Пробел на строке `Agent` — окно его событий: все / 3 последних."""
+    """Пробел на строке `Agent` — окно его событий: все / 3 последних.
+    Пять событий: одну строку окно не прячет, скрыто два."""
     thread = _Thread(tmp_path)
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
         scr = await _open(pilot)
@@ -202,7 +203,7 @@ async def test_space_on_agent_row_toggles_agent_window(tmp_path):
             thread,
             _call("a1", "subagent_worker", {"task": "проверь"}),
         )
-        for i in range(4):
+        for i in range(5):
             _emit(pilot, "a1", f"шаг {i}")
         scr._drain_subagent_progress()
         await pilot.pause()
@@ -210,12 +211,13 @@ async def test_space_on_agent_row_toggles_agent_window(tmp_path):
             w for w in _trace(scr).children if w.has_class("nested-prose")
         ]
         assert [w.has_class(HIDDEN_CLASS) for w in prose] == [
-            True, False, False, False,
+            True, True, False, False, False,
         ]  # fmt: skip
         await _press_on(pilot, _row(scr, "a1"), "space")
         assert not any(w.has_class(HIDDEN_CLASS) for w in prose)
         await _press_on(pilot, _row(scr, "a1"), "space")
         assert prose[0].has_class(HIDDEN_CLASS)
+        assert prose[1].has_class(HIDDEN_CLASS)
 
 
 def _emit(pilot, pid, prose):
