@@ -30,7 +30,7 @@ PICK_KEYS_HINT = "↑↓ выбрать · Tab дополнить · Enter вы�
 # Выбор закрыт (`Command.arg_lock_provider`): листать можно, причина — в
 # строке клавиш вместо обещания Enter.
 LOCKED_KEYS_HINT = "↑↓ смотреть · Esc закрыть · {reason}"
-# Сколько горит причина после Enter при закрытом выборе.
+# Сколько горит причина после Enter на невыбираемом.
 FLASH_SECONDS = 2.0
 
 
@@ -79,8 +79,9 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         # перечитывает её через `sync_lock`.
         self._lock_provider = lock_provider
         self._lock = lock_provider() if lock_provider else None
-        # Enter при закрытом выборе: причина в строке клавиш горит WARN,
-        # пока не истёк таймер или не сдвинулся курсор.
+        # Enter на невыбираемом: строка с причиной (клавиш при замке, хинт
+        # недоступной строки) горит WARN, пока не истёк таймер или не
+        # сдвинулся курсор.
         self._flash = False
         self._flash_timer = None
         self._selected = self._start_index(initial_value)
@@ -104,9 +105,21 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         text.stylize(_pal.WARN, len(line) - len(self._lock))
         return text
 
-    def flash_lock(self) -> None:
-        """Ответ на Enter при закрытом выборе: подсветить причину."""
-        if self._lock is None:
+    def _hint_renderable(self) -> str | Text:
+        """Хинт подсвеченной строки: причина недоступной строки — WARN,
+        пока горит ответ на Enter."""
+        text = self._hint_text(self.selected_value())
+        if self._flash and self._lock is None:
+            warn = Text(text)
+            warn.stylize(_pal.WARN)
+            return warn
+        return text
+
+    def flash_reason(self) -> None:
+        """Ответ на Enter на невыбираемом: подсветить строку с причиной
+        (замок — строка клавиш, недоступная строка — её хинт). Причины
+        нет — гореть нечему."""
+        if self._lock is None and not self._hint_text(self.selected_value()):
             return
         self._set_flash(True)
         self._flash_timer = self.set_timer(
@@ -131,7 +144,7 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
             # palette-keys и у динамического хинта: воздух над ним, отделяющий
             # хинт от строк списка (ревизия 2026-07-28 по живому смоку).
             hint = Static(
-                self._hint_text(self.selected_value()),
+                self._hint_renderable(),
                 classes="palette-hint palette-keys",
                 markup=False,
             )

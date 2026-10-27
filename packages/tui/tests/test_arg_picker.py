@@ -822,9 +822,74 @@ async def test_unlocked_enter_does_not_light(tmp_path, monkeypatch):
         pilot.app.query_one("#cmdinput").text = "/profile "
         await pilot.pause(0.1)
         picker = pilot.app.query_one(ArgPicker)
-        picker.flash_lock()
+        picker.flash_reason()
         assert _warn_part(_keys_text(picker)) == ""
         await pilot.press("enter")
         await pilot.pause(0.1)
         assert len(pilot.app.query(ArgPicker)) == 0
         assert len(switched) == 1
+
+
+def _disabled_hint_picker():
+    from gc_tui.widgets.arg_picker import ArgPicker, PickerOption
+
+    hints = {"auto": "автовыбор недоступен: нет модели"}
+    return ArgPicker(
+        [
+            PickerOption("auto", "", enabled=False),
+            PickerOption("glm", ""),
+            PickerOption("giga", ""),
+        ],
+        hint_provider=lambda v: hints.get(v, ""),
+    )
+
+
+@pytest.mark.asyncio
+async def test_disabled_row_enter_lights_hint_line():
+    """Enter на недоступной строке зажигает её хинт цветом WARN; курсор
+    и фильтр гасят; высота не меняется; у доступной строки хинт не горит."""
+    pytest.importorskip("textual")
+    from textual.app import App
+
+    class _App(App):
+        def compose(self):
+            yield _disabled_hint_picker()
+
+    async with _App().run_test() as pilot:
+        picker = pilot.app.query_one("ArgPicker")
+        picker.set_filter("a")
+        picker.set_filter("auto")
+        await pilot.pause()
+        assert picker.selected_disabled()
+        height = picker.desired_height
+        hint = lambda: [w.render() for w in picker.query(".palette-keys")][0]
+        assert _warn_part(hint()) == ""
+        picker.flash_reason()
+        await pilot.pause()
+        assert _warn_part(hint()) == "автовыбор недоступен: нет модели"
+        assert picker.desired_height == height
+        picker.set_filter("")
+        picker.set_filter("auto")
+        await pilot.pause()
+        assert _warn_part(hint()) == ""
+        picker.flash_reason()
+        picker.set_filter("")
+        await pilot.pause()
+        assert not picker.selected_disabled()
+        picker.flash_reason()
+        await pilot.pause()
+        assert _warn_part(hint()) == ""
+
+
+@pytest.mark.asyncio
+async def test_disabled_row_without_hint_flashes_nothing():
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker, PickerOption
+
+    p = ArgPicker(
+        [PickerOption("auto", "", enabled=False), PickerOption("a", "")],
+        hint_provider=lambda v: "",
+        initial_filter="auto",
+    )
+    p.flash_reason()
+    assert p._flash is False
