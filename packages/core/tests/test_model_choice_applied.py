@@ -8,6 +8,7 @@
 import json
 import logging
 
+import pytest
 from gc_core import processing_responses as pr
 from gc_core.agent_executor import AgentExecutor
 from gc_core.auto_routing import state_ops
@@ -127,30 +128,40 @@ async def _run(
     return events, backend.models
 
 
-async def _prepared(tmp_path, monkeypatch, initial):
-    """Главный трейс у точки подготовки: выбор, контекст, State, события.
-    Применённый выбор — как на старте рана."""
-    selected = {"model": initial}
-    cfg = parity_config(tmp_path, monkeypatch, **CONFIG)
-    ctx = await acreate_run_context(
-        cfg, choice_provider=lambda: selected["model"]
-    )
-    state = State(
-        verbose=False,
-        model="m",
-        tools_spec=ctx.tools_spec,
-        tools_descr=ctx.tools_description,
-        skills_list=[],
-        max_steps=10,
-        system_prompt_id="test",
-        use_server_subagents=False,
-    )
-    state.backend_api_mode = "chat_completions"
-    begin_turn(state, ctx)
-    state.applied_choice = initial
-    events = []
-    ctx.on_model_choice_applied = events.append
-    return selected, ctx, state, events
+@pytest.fixture
+def prepared(tmp_path, monkeypatch):
+    """Главный трейс у точки подготовки: `await prepared(выбор)` даёт
+    выбор, контекст, State и события. Применённый выбор — как на старте
+    рана. Логгеры контекстов освобождаются после теста."""
+    loggers = []
+
+    async def make(initial):
+        selected = {"model": initial}
+        cfg = parity_config(tmp_path, monkeypatch, **CONFIG)
+        ctx = await acreate_run_context(
+            cfg, choice_provider=lambda: selected["model"]
+        )
+        loggers.append(ctx.logger)
+        state = State(
+            verbose=False,
+            model="m",
+            tools_spec=ctx.tools_spec,
+            tools_descr=ctx.tools_description,
+            skills_list=[],
+            max_steps=10,
+            system_prompt_id="test",
+            use_server_subagents=False,
+        )
+        state.backend_api_mode = "chat_completions"
+        begin_turn(state, ctx)
+        state.applied_choice = initial
+        events = []
+        ctx.on_model_choice_applied = events.append
+        return selected, ctx, state, events
+
+    yield make
+    for logger in loggers:
+        release_run_logger(logger)
 
 
 class _Records(logging.Handler):
@@ -202,12 +213,8 @@ async def test_change_during_run_emits_once_on_next_main_call(
     assert models == ["fast", "big", "big"]
 
 
-async def test_two_changes_before_next_call_emit_only_the_last(
-    tmp_path, monkeypatch
-):
-    selected, ctx, state, events = await _prepared(
-        tmp_path, monkeypatch, "light"
-    )
+async def test_two_changes_before_next_call_emit_only_the_last(prepared):
+    selected, ctx, state, events = await prepared("light")
     await _tick(state, ctx)
     selected["model"] = "max"
     selected["model"] = "mid"
@@ -218,11 +225,9 @@ async def test_two_changes_before_next_call_emit_only_the_last(
 
 
 async def test_event_names_the_choice_of_the_prepared_call(
-    tmp_path, monkeypatch
+    prepared, monkeypatch
 ):
-    selected, ctx, state, events = await _prepared(
-        tmp_path, monkeypatch, "light"
-    )
+    selected, ctx, state, events = await prepared("light")
     real = pr.aroute_before_call
 
     async def route_then_change(state, ctx):
@@ -238,10 +243,8 @@ async def test_event_names_the_choice_of_the_prepared_call(
     assert events == [ModelChoiceApplied("max", "big")]
 
 
-async def test_retry_of_same_tick_emits_nothing(tmp_path, monkeypatch):
-    selected, ctx, state, events = await _prepared(
-        tmp_path, monkeypatch, "light"
-    )
+async def test_retry_of_same_tick_emits_nothing(prepared):
+    selected, ctx, state, events = await prepared("light")
     await pr.aprepare_main_call(state, ctx)
     selected["model"] = "max"
     retried = await pr.aprepare_main_call(state, ctx)
@@ -253,10 +256,8 @@ async def test_retry_of_same_tick_emits_nothing(tmp_path, monkeypatch):
     assert events == [ModelChoiceApplied("max", "big")]
 
 
-async def test_auto_internal_level_change_emits_nothing(tmp_path, monkeypatch):
-    selected, ctx, state, events = await _prepared(
-        tmp_path, monkeypatch, "auto"
-    )
+async def test_auto_internal_level_change_emits_nothing(prepared, monkeypatch):
+    selected, ctx, state, events = await prepared("auto")
     levels = iter(["light", "max", "default"])
     monkeypatch.setattr(
         pr,
@@ -269,12 +270,8 @@ async def test_auto_internal_level_change_emits_nothing(tmp_path, monkeypatch):
     assert events == []
 
 
-async def test_manual_same_model_as_auto_decision_is_a_change(
-    tmp_path, monkeypatch
-):
-    selected, ctx, state, events = await _prepared(
-        tmp_path, monkeypatch, "auto"
-    )
+async def test_manual_same_model_as_auto_decision_is_a_change(prepared):
+    selected, ctx, state, events = await prepared("auto")
     first = await _tick(state, ctx)
     selected["model"] = "mid"
     second = await _tick(state, ctx)
@@ -307,14 +304,10 @@ async def test_stop_with_pending_choice_emits_at_run_end(
     assert models == ["fast"]
 
 
-async def test_failing_choice_hook_mid_run_does_not_abort_the_call(
-    tmp_path, monkeypatch
-):
+async def test_failing_choice_hook_mid_run_does_not_abort_the_call(prepared):
     """Хук события посреди рана бросает — вызов готовится той моделью,
     выбор считается применённым (им ран и работает), сбой — в лог."""
-    selected, ctx, state, _events = await _prepared(
-        tmp_path, monkeypatch, "light"
-    )
+    selected, ctx, state, _events = await prepared("light")
     ctx.on_model_choice_applied = _raise
     records = _Records(ctx.logger)
     await _tick(state, ctx)
@@ -365,10 +358,8 @@ async def test_failing_choice_hook_does_not_skip_run_teardown(
     assert "model_choice_applied_failed" in records[0].messages
 
 
-async def test_subagent_calls_emit_nothing(tmp_path, monkeypatch):
-    selected, ctx, state, events = await _prepared(
-        tmp_path, monkeypatch, "light"
-    )
+async def test_subagent_calls_emit_nothing(prepared):
+    selected, ctx, state, events = await prepared("light")
     ctx.model_router = ModelRouter(
         ctx,
         choice_provider=lambda: selected["model"],
@@ -437,12 +428,8 @@ async def test_run_without_change_writes_no_record(tmp_path, monkeypatch):
     assert _choice_rows(_thread_rows(tmp_path)) == []
 
 
-async def test_applied_choice_reaches_recorder_with_previous_choice(
-    tmp_path, monkeypatch
-):
-    selected, ctx, state, _events = await _prepared(
-        tmp_path, monkeypatch, "light"
-    )
+async def test_applied_choice_reaches_recorder_with_previous_choice(prepared):
+    selected, ctx, state, _events = await prepared("light")
     records = []
 
     async def recorder(record):
@@ -456,10 +443,8 @@ async def test_applied_choice_reaches_recorder_with_previous_choice(
     assert records == [ModelChoiceRecord("max", "big", "fast")]
 
 
-async def test_subagent_calls_record_nothing(tmp_path, monkeypatch):
-    selected, ctx, state, _events = await _prepared(
-        tmp_path, monkeypatch, "light"
-    )
+async def test_subagent_calls_record_nothing(prepared):
+    selected, ctx, state, _events = await prepared("light")
     records = []
 
     async def recorder(record):
