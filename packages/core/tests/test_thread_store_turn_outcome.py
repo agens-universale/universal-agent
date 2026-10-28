@@ -71,8 +71,8 @@ async def test_record_is_anchored_to_last_message_of_the_turn(tmp_path):
 
 
 async def test_anchor_of_message_without_id_is_the_id_readers_see(tmp_path):
-    """Ответ модели без ``id``: хранилище даёт ему id на чтении — запись
-    привязана к нему, а не пропускает привязку."""
+    """Ответ модели без ``id``: файловое хранилище даёт ему id на чтении —
+    запись привязана к нему, а не пропускает привязку."""
     store = FileThreadStore(str(tmp_path))
     session = await _session(store)
     answer = {"type": "message", "role": "assistant", "content": "ответ"}
@@ -84,6 +84,27 @@ async def test_anchor_of_message_without_id_is_the_id_readers_see(tmp_path):
 
     last = (await store.read_stream(KEY, "messages"))[-1].data["id"]
     assert [t["after"] for t in await _turns(store)] == [last]
+
+
+async def test_anchor_without_id_on_store_without_read_ids_is_null():
+    """Хранилище, которое id на чтении не синтезирует (память, базы, KV):
+    привязки нет, запись видна по реплике хода ``opened_by``."""
+    store = MemoryThreadStore()
+    session = await _session(store)
+    answer = {"type": "message", "role": "assistant", "content": "ответ"}
+    await session.apersist_batch(
+        [_user("u1"), answer], previous_response_id=None
+    )
+
+    await session.aappend_turn_outcome(_outcome(), discarded=False)
+
+    (turn,) = await _turns(store)
+    assert turn["after"] is None
+    assert turn_shown_in(turn, await _ids_or_none(store))
+
+
+async def _ids_or_none(store):
+    return {e.data.get("id") for e in await store.read_stream(KEY, "messages")}
 
 
 async def test_record_sets_last_turn_in_runtime(tmp_path):

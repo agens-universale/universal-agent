@@ -601,7 +601,9 @@ class ThreadSession:
 
     async def _alast_message_id(self) -> Optional[str]:
         """``id`` последнего записанного сообщения — тот, что видят
-        читатели: у сообщения без ``id`` его даёт хранилище на чтении."""
+        читатели. У сообщения без ``id`` — тот, что хранилище даёт на
+        чтении (два чтения); синтезирует его только файловое хранилище,
+        у остальных — ``None``."""
         mid = self.history_messages[-1].get("id")
         if not (isinstance(mid, str) and mid):
             record = await self.writer.retried(
