@@ -380,16 +380,18 @@ def test_sync_keeps_the_new_name_when_both_sections_are_in_one_file(
     from gc_testkit.paths import ASSETS
 
     template = (ASSETS / "config.default.yml").read_text(encoding="utf-8")
-    new = "agent_edits:\n  trace_inline_max_lines: 99\n"
+    new = "agent_edits:\n  trace_diff_preview_lines: 99\n"
     old = (
-        "diff_tui:\n  trace_inline_max_lines: 11\n  replay_expanded_turns: 4\n"
+        "diff_tui:\n"
+        "  trace_diff_preview_lines: 11\n"
+        "  replay_expanded_turns: 4\n"
     )
     user = new + old if new_first else old + new
     cfg, _ = _run_sync(tmp_path, user=user, template=template)
     parsed = yaml.safe_load(cfg.read_text(encoding="utf-8"))
 
     assert "diff_tui" not in parsed
-    assert parsed["agent_edits"]["trace_inline_max_lines"] == 99
+    assert parsed["agent_edits"]["trace_diff_preview_lines"] == 99
     # лист, заданный только старым именем, не теряется — как у загрузчика
     assert parsed["agent_edits"]["replay_expanded_turns"] == 4
 
@@ -466,3 +468,20 @@ def test_strip_removed_drops_emptied_top_level_section_from_text():
     assert stripped == ["update.check_interval_days"]
     assert out_text == "logging:\n  level: INFO\n"
     assert raw == {"logging": {"level": "INFO"}}
+
+
+def test_sync_drops_old_trace_inline_max_lines(tmp_path):
+    """Ключ со сменившимся смыслом sync не переносит: старое значение — только
+    в бэкапе, в файле — новый ключ с умолчанием шаблона."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "agent_edits:\n  trace_inline_max_lines: 30\n", encoding="utf-8"
+    )
+    report = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t"
+    )
+
+    assert report.removed == ["agent_edits.trace_inline_max_lines"]
+    edits = yaml.safe_load(cfg.read_text(encoding="utf-8"))["agent_edits"]
+    assert "trace_inline_max_lines" not in edits
+    assert edits["trace_diff_preview_lines"] == 10

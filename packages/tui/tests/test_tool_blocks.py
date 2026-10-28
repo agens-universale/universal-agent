@@ -963,7 +963,7 @@ def test_phrase_counts_rows_over_budget():
 
 
 def test_preview_setting_is_rows_per_file():
-    """`trace_inline_max_lines` — строк превью на файл, и в блоке тоже:
+    """`trace_diff_preview_lines` — строк превью на файл, и в блоке тоже:
     доли нет."""
     model, fold = _edits_model(preview=5)
     for key in "abc":

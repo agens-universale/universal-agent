@@ -3856,7 +3856,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if view is None:
             model = ToolBlocks(
                 self._call_timers,
-                diff_preview=self._trace_inline_max_lines(),
+                diff_preview=self._trace_diff_preview_lines(),
             )
             view = ToolBlocksView(
                 _TraceBlockHost(self), model, level="", depth=0
@@ -3988,7 +3988,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if view is None:
             model = ToolBlocks(
                 self._call_timers,
-                diff_preview=self._trace_inline_max_lines(),
+                diff_preview=self._trace_diff_preview_lines(),
                 agent_window=True,
             )
             view = ToolBlocksView(
@@ -4337,8 +4337,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Секция `agent_edits` базовых настроек окна — словарём."""
         return self.app.base_settings().settings.agent_edits.model_dump()
 
-    def _trace_inline_max_lines(self) -> int:
-        """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
+    def _trace_diff_preview_lines(self) -> int:
+        """Строк превью диффа на файл —
+        `agent_edits.trace_diff_preview_lines`."""
         return edit_settings(self._agent_edits_section())[0]
 
     def _replay_expanded_turns(self) -> int:

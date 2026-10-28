@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import Iterable, Literal, Mapping, Optional, Sequence, Union
 
 from gc_core.agent_edits.journal import EditRecord
-from gc_core.config_modules.agent_edits import DEFAULT_TRACE_INLINE_MAX_LINES
+from gc_core.config_modules.agent_edits import DEFAULT_TRACE_DIFF_PREVIEW_LINES
 from gc_core.constants.tool_display import DisplayCategory
 
 from gc_tui.models import ResultOutcome
@@ -644,7 +644,7 @@ class ToolBlocks:
     """Модель блоков одного уровня ленты: верхнего или субагента.
 
     ``diff_preview`` — строк свёрнутого превью диффа на файл
-    (`agent_edits.trace_inline_max_lines`). ``agent_window`` — уровень
+    (`agent_edits.trace_diff_preview_lines`). ``agent_window`` — уровень
     субагента: окно последних `WINDOW` событий (блок — одно событие), над
     ним `└ … ещё N`; строка видна, если видна и в своём блоке, и в окне
     (§7)."""
@@ -653,7 +653,7 @@ class ToolBlocks:
         self,
         timers: CallTimers,
         *,
-        diff_preview: int = DEFAULT_TRACE_INLINE_MAX_LINES,
+        diff_preview: int = DEFAULT_TRACE_DIFF_PREVIEW_LINES,
         agent_window: bool = False,
     ) -> None:
         self._timers = timers

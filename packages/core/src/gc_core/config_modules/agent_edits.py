@@ -15,7 +15,7 @@ DEFAULT_MAX_DIFF_SOURCE_BYTES = 2_000_000
 DEFAULT_SHELL_TRACKING = True
 #: Строк свёрнутого превью диффа на файл в ленте TUI: сначала
 #: изменения, затем контекст.
-DEFAULT_TRACE_INLINE_MAX_LINES = 10
+DEFAULT_TRACE_DIFF_PREVIEW_LINES = 10
 DEFAULT_REPLAY_EXPANDED_TURNS = 20
 DEFAULT_TURN_SUMMARY_IN_STATUS = True
 
@@ -57,7 +57,7 @@ class AgentEditsConfig(BaseModel):
     hunk_context_lines: int = DEFAULT_HUNK_CONTEXT_LINES
     max_diff_source_bytes: int = DEFAULT_MAX_DIFF_SOURCE_BYTES
     shell_tracking: bool = DEFAULT_SHELL_TRACKING
-    trace_inline_max_lines: int = DEFAULT_TRACE_INLINE_MAX_LINES
+    trace_diff_preview_lines: int = DEFAULT_TRACE_DIFF_PREVIEW_LINES
     replay_expanded_turns: int = DEFAULT_REPLAY_EXPANDED_TURNS
     turn_summary_in_status: bool = DEFAULT_TURN_SUMMARY_IN_STATUS
     record: AgentEditsRecordConfig = Field(

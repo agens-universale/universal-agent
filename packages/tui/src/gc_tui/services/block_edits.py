@@ -15,7 +15,7 @@ from gc_core.agent_edits.ctx import section_limit
 from gc_core.agent_edits.journal import EditRecord
 from gc_core.config_modules.agent_edits import (
     DEFAULT_REPLAY_EXPANDED_TURNS,
-    DEFAULT_TRACE_INLINE_MAX_LINES,
+    DEFAULT_TRACE_DIFF_PREVIEW_LINES,
 )
 
 from gc_tui.models import CommandOutput
@@ -50,7 +50,7 @@ def edit_settings(section: Mapping[str, Any]) -> tuple[int, int]:
     режем (ровно `0` в конфиге); прочий мусор — дефолт, общим правилом
     ядра."""
     preview = section_limit(
-        section, "trace_inline_max_lines", DEFAULT_TRACE_INLINE_MAX_LINES
+        section, "trace_diff_preview_lines", DEFAULT_TRACE_DIFF_PREVIEW_LINES
     )
     raw = section.get("replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS)
     if isinstance(raw, int) and not isinstance(raw, bool) and raw == 0:
