@@ -154,9 +154,10 @@ class _Running:
 
     def __init__(self, tid):
         self._last_target = (tid, "cli")
+        self.running = True
 
     def is_running(self):
-        return True
+        return self.running
 
     def stop(self):
         pass
@@ -191,7 +192,12 @@ async def test_pill_clear_of_error_reason_rows(tmp_path):
     _write_task(tmp_path, "o3e")
     async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
         scr, pill = await _pill_with_indicator(pilot, "o3e")
-        scr._thinking.set_error("RuntimeError: " + "сбой " * 60)
+        # Упавший ход — как у раннера: поток прогона мёртв, причина —
+        # у приложения; тик держит «✕ Ошибка» с ней же.
+        error = "RuntimeError: " + "сбой " * 60
+        pilot.app.active_runner.running = False
+        pilot.app.last_runner_error = error
+        scr._thinking.set_error(error)
         scr._thinking.set_state("failed")
         scr._sync_indicator_reserve()
         await _relayout(pilot, scr)
