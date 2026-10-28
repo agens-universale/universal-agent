@@ -10,6 +10,7 @@ import json
 
 import pytest
 from gc_testkit.tui_support import tui_settings
+from gc_tui.services.stores.record_view import tui_section
 from gc_tui.palette import DIM
 
 _TID = "lerr0000000000000000000000000001a"
@@ -129,7 +130,7 @@ async def test_live_failure_shows_and_stores_reason(tmp_path):
         scr._poll_active()
         await pilot.pause()
         assert _indicator_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
-        tui = scr._store.get_task_meta(_TID)["tui"]
+        tui = tui_section(scr._store.get_record(_TID))
         assert tui["last_error"] == "ReadError: boom"
         # Причина — под индикатором, не отдельной строкой `!` в ленте.
         rows = [r for r in scr.query(TraceRow) if r.has_class("line-error")]
@@ -169,7 +170,7 @@ async def test_new_turn_clears_reason(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(_TID)
         scr._prepare_for_new_run()
-        tui = scr._store.get_task_meta(_TID)["tui"]
+        tui = tui_section(scr._store.get_record(_TID))
         assert tui["last_error"] is None
 
 

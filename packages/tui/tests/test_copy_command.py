@@ -148,8 +148,8 @@ class _Store:
     def read_segments(self, task_id, system=None):
         return self._segments
 
-    def get_task_meta(self, task_id, system=None):
-        return {}
+    def get_record(self, task_id, system=None):
+        return None
 
     def update_tui_meta(self, task_id, patch, system=None):
         pass

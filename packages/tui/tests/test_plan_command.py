@@ -44,7 +44,7 @@ class _Runner:
 def _approve(threads_dir, thread_id, mode):
     """Статус «утверждён» в плане сессии, остальная мета — как была."""
     from gc_core.plan_store import PLAN_STATUS_APPROVED
-    from gc_core.thread_store import load_thread_meta, save_thread_meta
+    from gc_testkit.develop_files import load_thread_meta, save_thread_meta
 
     meta = load_thread_meta(threads_dir, "cli", thread_id)
     meta["shared"]["plan"].update(

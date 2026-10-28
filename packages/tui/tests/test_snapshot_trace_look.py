@@ -1,6 +1,6 @@
 """Вид ленты P3a одним кадром: колонки, реплика, следствия, сжатие.
 
-Тред пишется настоящими функциями `gc_core.thread_store`: до сжатия — первая
+Тред пишется через хранилище v2, как его пишет ход: до сжатия — первая
 реплика с ответом, затем сжатие и после него — реплика со скиллом,
 промежуточная реплика, `Read`, `Edit` с диффом из журнала правок, упавший
 `Run`, субагент с вложенными репликой и вызовом, строка `!` без владельца и
@@ -22,18 +22,15 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_subagent_trace_record,
-    archive_and_replace_thread_files,
-    edits_journal_path,
-    load_thread_meta,
-    save_thread_meta,
-)
+from gc_core.thread_store import edits_journal_path
+from gc_core.threads.facade import run_sync
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
+from gc_testkit.thread_writes import acompact, subagent_record
+from gc_tui.services.stores.file_store import FileTaskStore
 
 _SYS = "cli"
 _TID = "7f3a9b1c"
-_SUFFIX = "20261021_120000"
 _SUB_CALL = "call_sub_1"
 _HUNKS = (
     "--- \n+++ \n@@ -11,3 +11,3 @@\n RETRIES = 3\n"
@@ -83,11 +80,8 @@ def _error_msg(mid: str, text: str) -> dict:
     return _user(mid, f'<technical type="error_message">{text}</technical>')
 
 
-def _append(tmp_path, msgs: list[dict], start: int) -> int:
-    append_new_thread_messages(
-        str(tmp_path), _SYS, _TID, msgs, set(), start_seq=start
-    )
-    return start + len(msgs)
+def _append(tmp_path, msgs: list[dict]) -> None:
+    FileTaskStore(str(tmp_path), _SYS).append_messages(_TID, msgs)
 
 
 def _after_compaction() -> list[dict]:
@@ -137,7 +131,6 @@ def _after_compaction() -> list[dict]:
 
 
 def _write_thread(tmp_path) -> None:
-    save_thread_meta(str(tmp_path), _SYS, _TID, {})
     _append(
         tmp_path,
         [
@@ -148,19 +141,10 @@ def _write_thread(tmp_path) -> None:
                 "читает его при создании сессии, ретраев сейчас нет.",
             ),
         ],
-        0,
     )
-    meta = load_thread_meta(str(tmp_path), _SYS, _TID)
-    archive_and_replace_thread_files(
-        str(tmp_path), _SYS, _TID, [_summary()], archive_suffix=_SUFFIX
-    )
-    save_thread_meta(
-        str(tmp_path),
-        _SYS,
-        _TID,
-        {**meta, "last_summary_archive_suffix": _SUFFIX},
-    )
-    _append(tmp_path, _after_compaction(), 1)
+    key = ThreadKey(system=_SYS, thread=_TID)
+    run_sync(acompact(FileThreadStore(str(tmp_path)), key, [_summary()]))
+    _append(tmp_path, _after_compaction())
 
 
 def _write_edit_journal(tmp_path) -> None:
@@ -183,7 +167,7 @@ def _write_edit_journal(tmp_path) -> None:
 
 
 def _sidecar(tmp_path, kind: str, payload: dict) -> None:
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         _SYS,
         _TID,

@@ -6,6 +6,7 @@
 
 from gc_testkit.paths import TUI_PKG
 from gc_testkit.tui_support import tui_settings
+from gc_tui.services.stores.record_view import tui_section
 import pytest
 from rich.style import Style
 
@@ -233,7 +234,7 @@ def _activate(app, scr, threads) -> None:
 
 
 def _meta_skills(scr) -> list:
-    return (scr._store.get_task_meta(_TID).get("tui") or {}).get("skills", [])
+    return tui_section(scr._store.get_record(_TID)).get("skills", [])
 
 
 async def _unknown_skill_session(pilot, tmp_path, *, running: bool):

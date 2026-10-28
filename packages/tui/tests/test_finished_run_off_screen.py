@@ -11,7 +11,8 @@ import time
 
 import pytest
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
-from gc_core.thread_store import edits_journal_path, save_thread_meta
+from gc_core.thread_store import edits_journal_path
+from gc_testkit.develop_files import save_thread_meta
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.turn_outcome import DONE_LABEL_PLAN
 

@@ -323,7 +323,7 @@ async def test_reopen_shows_rejected_reply_and_stopped_call(tmp_path):
             },
         ),
     ):
-        append_subagent_trace_record(
+        subagent_record(
             d,
             "cli",
             tid,
