@@ -98,6 +98,7 @@ _RUNTIME_FIELDS = (
     "image_seq",
     "mcp_tools",
     "trace_ids",
+    "last_turn",
 )
 _RUN_FLAGS = ("summarizing", "finalizing", "finish_gate_checking")
 

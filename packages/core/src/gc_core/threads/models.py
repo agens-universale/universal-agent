@@ -30,9 +30,12 @@ from gc_core.thread_paths import sanitize_system_id, validate_thread_id
 JsonObject = dict[str, Any]
 
 CoreStream = Literal[
-    "messages", "subagent_events", "edits", "inbox", "control"
+    "messages", "subagent_events", "edits", "inbox", "control", "turns"
 ]
 CORE_STREAMS: frozenset[str] = frozenset(get_args(CoreStream))
+#: Поток итогов хода: одна запись на закрытый ход, привязанная к его
+#: сообщениям (``gc_core.persistence.turn_outcome``).
+TURNS = "turns"
 #: Входящий поток треда: сообщения в идущий или следующий ход с любого
 #: процесса (``Threads.submit``).
 INBOX = "inbox"
@@ -158,6 +161,9 @@ class RuntimeStatus(_OpenModel):
     image_seq: int | None = None
     mcp_tools: Any = None
     trace_ids: list[str] | None = None
+    #: Короткий итог последнего закрытого хода (``status``, ``reason``) —
+    #: для списка тредов без чтения потока ``turns``.
+    last_turn: JsonObject | None = None
 
     @field_serializer("flags")
     def _sorted_flags(self, flags: frozenset[str]) -> list[str]:
