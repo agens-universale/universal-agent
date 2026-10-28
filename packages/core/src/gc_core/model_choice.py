@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,26 +31,47 @@ class ModelChoiceApplied:
 
 
 def note_applied(
-    state: Any, ctx: Any, choice: str, *, at_run_end: bool = False
+    state: Any, ctx: Any, choice: str
 ) -> ModelChoiceRecord | None:
-    """Сверить выбор с применённым; сменился — запомнить, сообщить хуку и
-    вернуть запись смены для треда (`None` — смены нет).
+    """Сверить выбор подготовленного вызова с применённым; сменился —
+    запомнить, сообщить хуку и вернуть запись смены для треда (`None` —
+    смены нет).
 
     Только главный трейс: подготовка вызова субагента событий не даёт.
-    Посреди рана модель — цель только что подготовленного вызова.
+    Посреди рана модель — цель только что подготовленного вызова."""
+    return _note(state, ctx, lambda _router: choice, at_run_end=False)
 
-    Сбой резолва модели или хука фронтенда не срывает ни вызов посреди
-    рана, ни уборку на его завершении: в лог, записи смены нет. Выбор
-    остаётся применённым — ран им работает; событие этой смены теряется,
-    повтора на следующем такте нет."""
+
+def note_applied_at_run_end(state: Any, ctx: Any) -> ModelChoiceRecord | None:
+    """`note_applied` на завершении рана: выбор, так и не дошедший до
+    вызова, — живой выбор Router'а, его читает сама сверка."""
+    return _note(
+        state, ctx, lambda router: router.live_choice(), at_run_end=True
+    )
+
+
+def _note(
+    state: Any,
+    ctx: Any,
+    read_choice: Callable[[Any], str],
+    at_run_end: bool,
+) -> ModelChoiceRecord | None:
+    """Сверка выбора под защитой.
+
+    Сбой чтения выбора, резолва модели или хука фронтенда не срывает ни
+    вызов посреди рана, ни уборку на его завершении: в лог, записи смены
+    нет. Применённый до сбоя выбор остаётся применённым — ран им
+    работает; событие этой смены теряется, повтора на следующем такте
+    нет."""
     router = getattr(ctx, "model_router", None)
     if router is None or router.is_subagent_child:
         return None
-    before = state.applied_choice
-    if before == choice:
-        return None
-    state.applied_choice = choice
     try:
+        choice = read_choice(router)
+        before = state.applied_choice
+        if before == choice:
+            return None
+        state.applied_choice = choice
         return _announce(state, ctx, router, before, choice, at_run_end)
     except Exception:
         logger = getattr(ctx, "logger", None)
@@ -66,15 +88,17 @@ def _announce(
     choice: str,
     at_run_end: bool,
 ) -> ModelChoiceRecord:
-    """Сообщить хуку о применённой смене и собрать её запись для треда."""
+    """Собрать запись применённой смены для треда и сообщить о ней хуку:
+    событие без записи не уходит."""
     target = choice if at_run_end else state._call_level
     alias = None
     if target != AUTO:
         alias = router.resolve_main_at(target, check_breaker=False).alias
+    record = ModelChoiceRecord(choice, alias, model_of(router, before))
     hook = getattr(ctx, "on_model_choice_applied", None)
     if hook is not None:
         hook(ModelChoiceApplied(choice, alias, at_run_end))
-    return ModelChoiceRecord(choice, alias, model_of(router, before))
+    return record
 
 
 def model_of(router: Any, choice: str | None) -> str | None:

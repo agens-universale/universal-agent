@@ -9,6 +9,7 @@ import json
 import logging
 
 import pytest
+from gc_core import model_choice
 from gc_core import processing_responses as pr
 from gc_core.agent_executor import AgentExecutor
 from gc_core.auto_routing import state_ops
@@ -71,6 +72,14 @@ class _Backend(ScriptedBackend):
         return super().next_payload(request_payload)
 
 
+def _read_choice(selected):
+    """Выбор окна; исключение вместо выбора — канал выбора бросает."""
+    value = selected["model"]
+    if isinstance(value, Exception):
+        raise value
+    return value
+
+
 def _work():
     return assistant_tool_call("exec_calculator", {"expression": "3 * 4"})
 
@@ -91,7 +100,8 @@ async def _run(
     executor_spy=None,
 ):
     """Ран с выбором `initial`; `changes[n]` — выбор, заданный во время
-    n-го запроса; `stop_on` — номер запроса, во время которого человек
+    n-го запроса (исключение — канал выбора бросает с этого запроса);
+    `stop_on` — номер запроса, во время которого человек
     жмёт стоп; `hook` — свой приёмник события вместо списка.
     Возвращает события и модели запросов."""
     selected = {"model": initial}
@@ -107,7 +117,7 @@ async def _run(
 
     backend = install(monkeypatch, _Backend(turns, on_call))
     ctx = await acreate_run_context(
-        cfg, choice_provider=lambda: selected["model"]
+        cfg, choice_provider=lambda: _read_choice(selected)
     )
     events = []
     ctx.on_model_choice_applied = hook or events.append
@@ -319,31 +329,41 @@ async def test_failing_choice_hook_mid_run_does_not_abort_the_call(prepared):
     assert records.messages.count("model_choice_applied_failed") == 1
 
 
+class _RunEndSpy:
+    """Шпион завершения рана: шаги уборки по порядку и записи лога рана."""
+
+    def __init__(self, monkeypatch):
+        self.calls = []
+        self.records = None
+        leave = state_ops.leave
+
+        def spy_leave(*args, **kwargs):
+            self.calls.append("leave")
+            return leave(*args, **kwargs)
+
+        monkeypatch.setattr(state_ops, "leave", spy_leave)
+
+    def __call__(self, executor):
+        self.records = _Records(executor._ctx.logger)
+        self._wrap(executor, "_arecord_turn_outcome", "record")
+        self._wrap(executor, "_ateardown_run", "teardown")
+
+    def _wrap(self, executor, name, step):
+        real = getattr(executor, name)
+
+        async def wrapped(*args, **kwargs):
+            self.calls.append(step)
+            return await real(*args, **kwargs)
+
+        setattr(executor, name, wrapped)
+
+
 async def test_failing_choice_hook_does_not_skip_run_teardown(
     tmp_path, monkeypatch
 ):
     """Хук события на завершении бросает — запись итога и уборка рана
     всё равно выполняются, ран завершается штатно."""
-    calls = []
-
-    records = []
-
-    def spy(executor):
-        records.append(_Records(executor._ctx.logger))
-        record = executor._arecord_turn_outcome
-        teardown = executor._ateardown_run
-
-        async def arecord(*args, **kwargs):
-            calls.append("record")
-            return await record(*args, **kwargs)
-
-        async def ateardown(*args, **kwargs):
-            calls.append("teardown")
-            return await teardown(*args, **kwargs)
-
-        executor._arecord_turn_outcome = arecord
-        executor._ateardown_run = ateardown
-
+    spy = _RunEndSpy(monkeypatch)
     await _run(
         tmp_path,
         monkeypatch,
@@ -354,8 +374,49 @@ async def test_failing_choice_hook_does_not_skip_run_teardown(
         executor_spy=spy,
     )
 
-    assert calls[-2:] == ["record", "teardown"]
-    assert "model_choice_applied_failed" in records[0].messages
+    assert spy.calls[-3:] == ["leave", "record", "teardown"]
+    assert "model_choice_applied_failed" in spy.records.messages
+
+
+async def test_failing_choice_read_at_run_end_does_not_skip_teardown(
+    tmp_path, monkeypatch
+):
+    """Канал выбора бросает на завершении рана — выход из рана, запись
+    итога и уборка всё равно выполняются, событий нет, сбой — в лог."""
+    spy = _RunEndSpy(monkeypatch)
+    events, models = await _run(
+        tmp_path,
+        monkeypatch,
+        "light",
+        [_finish()],
+        {1: RuntimeError("window is gone")},
+        executor_spy=spy,
+    )
+
+    assert models == ["fast"]
+    assert events == []
+    assert spy.calls[-3:] == ["leave", "record", "teardown"]
+    assert "model_choice_applied_failed" in spy.records.messages
+
+
+async def test_failing_previous_model_resolve_emits_no_event(
+    prepared, monkeypatch
+):
+    """Резолв прежней модели для записи бросает — событие без записи
+    смены не уходит: хук не зовётся, сбой — в лог."""
+    selected, ctx, state, events = await prepared("light")
+    records = _Records(ctx.logger)
+    monkeypatch.setattr(model_choice, "model_of", _raise_resolve)
+    selected["model"] = "max"
+    resolved = await _tick(state, ctx)
+
+    assert resolved.alias == "big"
+    assert events == []
+    assert records.messages.count("model_choice_applied_failed") == 1
+
+
+def _raise_resolve(_router, _choice):
+    raise RuntimeError("registry is gone")
 
 
 async def test_subagent_calls_emit_nothing(prepared):

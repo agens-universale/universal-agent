@@ -46,7 +46,7 @@ from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
-from gc_core.model_choice import note_applied
+from gc_core.model_choice import note_applied_at_run_end
 from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.persistence.turn_outcome import (
@@ -1112,20 +1112,6 @@ class AgentExecutor:
                 task.uncancel()
         await self.aclose_run_accounting()
 
-    def _note_choice_at_run_end(
-        self, state: State
-    ) -> Optional[ModelChoiceRecord]:
-        """Выбор, так и не дошедший до вызова, применяется завершением рана.
-        Возвращает запись смены — её пишут после итога хода, как её строку
-        показывает лента. Сбой резолва или хука фронтенда уборку рана не
-        срывает — его гасит `note_applied`."""
-        router = self.get_model_router()
-        if router is None:
-            return None
-        return note_applied(
-            state, self._ctx, router.live_choice(), at_run_end=True
-        )
-
     async def _arecord_model_choice(
         self, record: Optional[ModelChoiceRecord]
     ) -> None:
@@ -1462,7 +1448,9 @@ class AgentExecutor:
             raise
         finally:
             _stop_bound.__exit__(None, None, None)
-            choice_record = self._note_choice_at_run_end(state)
+            # Выбор, так и не дошедший до вызова; запись смены пишут после
+            # итога хода — так её строку показывает лента.
+            choice_record = note_applied_at_run_end(state, self._ctx)
             state_ops.leave(state)
             state.turn_level = None
             try:
