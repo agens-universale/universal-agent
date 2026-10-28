@@ -443,3 +443,51 @@ async def test_no_undo_after_leaving_the_thread_view():
         scr._leave_thread_view()
 
         assert scr._can_cancel_with_undo() is False
+
+
+@pytest.mark.asyncio
+async def test_orphan_cleanup_keeps_claim_on_store_error(tmp_path, caplog):
+    """Сбой хранилища при удалении не снимает заявку: тик повторяет её, в
+    лог — одна запись на заявку; после сбоя удаление проходит."""
+    pytest.importorskip("textual")
+    from gc_testkit.develop_files import load_thread_messages
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        tid, msg_id = "t1", "m_orphan"
+        store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
+        scr._store = store
+        session = await _worker_session(tmp_path, tid)
+        await session.apersist_batch(
+            [{"role": "user", "content": "x", "id": msg_id}],
+            previous_response_id=None,
+        )
+        await session.arelease_lease()
+        app.tui_state.active_task_id = tid
+        app.active_runner = None
+        scr._pending_orphan_cleanups = [(None, tid, msg_id)]
+
+        real_discard = store.discard_message_by_id
+
+        def broken(*_args, **_kwargs):
+            raise OSError("диск недоступен")
+
+        store.discard_message_by_id = broken
+        with caplog.at_level("WARNING", logger="gc_tui.screens.main"):
+            scr._run_orphan_cleanups()
+            scr._run_orphan_cleanups()
+        assert scr._pending_orphan_cleanups == [(None, tid, msg_id)]
+        assert len(caplog.records) == 1
+
+        store.discard_message_by_id = real_discard
+        scr._run_orphan_cleanups()
+        msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
+        assert all(m.get("id") != msg_id for m in msgs)
+        assert scr._pending_orphan_cleanups == []

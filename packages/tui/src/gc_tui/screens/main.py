@@ -699,6 +699,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Заявки на отложенное удаление осиротевших реплик: список
         # (runner, task_id, message_id). Исполняются в poll, когда тред idle.
         self._pending_orphan_cleanups: list[tuple] = []
+        # id реплик, чей сбой удаления уже в логе: одна запись на заявку.
+        self._orphan_cleanup_logged: set[str] = set()
         # Флаг состояния runner на предыдущем тике — для детекта спадающего фронта.
         self._was_running: bool = False
         # Прогон, чей исход ещё не записан: раннер, которого тик застал
@@ -8395,8 +8397,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Заявка _pending_orphan_cleanups (см. выше) — backstop на микро-гонку
         # «persist ровно в момент удаления».
         if tid is not None and msg_id:
-            # Тред ещё держит остановленный ход — удалит заявка.
-            with contextlib.suppress(OwnershipError):
+            # Тред ещё держит остановленный ход или сбой — удалит заявка.
+            with contextlib.suppress(Exception):
                 self._discard_orphan_and_resync(tid, msg_id)
         # НЕ монтируем [stopped] — это и есть "undo".
         self._close_undone_run(old_runner, msg_id)
@@ -8451,20 +8453,15 @@ class TraceScreen(TraceFollowMixin, Screen):
         уже снят точечно) и дочитывает то, что легло после курсора, — ответ
         и итог нового хода не теряются. Запись итога снятого хода остаётся
         в потоке сиротой: её строку лента не показывает.
-        Тред держит другой ход (его аренда) — `OwnershipError` вызывающему:
+        False — сообщения в треде уже нет. Тред держит другой ход
+        (`OwnershipError`) или сбой хранилища — исключение вызывающему:
         удалять позже."""
         if self._store is None:
             return False
-        try:
-            tags, strip_think = self._projection_from_app_config()
-            removed = self._store.discard_message_by_id(
-                tid, msg_id, tags=tags, strip_think=strip_think
-            )
-        except OwnershipError:
-            raise
-        except Exception:
-            return False
-        return removed
+        tags, strip_think = self._projection_from_app_config()
+        return self._store.discard_message_by_id(
+            tid, msg_id, tags=tags, strip_think=strip_think
+        )
 
     def _run_orphan_cleanups(self) -> None:
         """Удалить осиротевшие реплики из треда, когда тред idle (нет активного
@@ -8486,13 +8483,33 @@ class TraceScreen(TraceFollowMixin, Screen):
             if old_busy or thread_busy:
                 still_pending.append((old_runner, tid, msg_id))
                 continue
-            try:
-                self._discard_orphan_and_resync(tid, msg_id)
-            except OwnershipError:
-                # Раннер уже не бежит, а аренду его хода ещё не сняли (или
-                # тред держит другой процесс): заявка ждёт следующего тика.
+            if not self._orphan_cleanup_done(tid, msg_id):
                 still_pending.append((old_runner, tid, msg_id))
         self._pending_orphan_cleanups = still_pending
+
+    def _orphan_cleanup_done(self, tid: str, msg_id: str) -> bool:
+        """Одна попытка удалить реплику по заявке. Заявка снимается только
+        удалением или отсутствием сообщения; любой отказ оставляет её до
+        следующего тика."""
+        try:
+            self._discard_orphan_and_resync(tid, msg_id)
+        except OwnershipError:
+            # Раннер уже не бежит, а аренду его хода ещё не сняли (или
+            # тред держит другой процесс).
+            return False
+        except Exception:
+            if msg_id not in self._orphan_cleanup_logged:
+                self._orphan_cleanup_logged.add(msg_id)
+                _log.warning(
+                    "откат: удалить реплику %s из треда %s не удалось,"
+                    " повтор на следующем тике",
+                    msg_id,
+                    tid,
+                    exc_info=True,
+                )
+            return False
+        self._orphan_cleanup_logged.discard(msg_id)
+        return True
 
     def _reset_history_navigation(self) -> None:
         """Выход из режима history-навигации. Зовётся при правке input или send."""
