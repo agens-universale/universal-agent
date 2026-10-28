@@ -2701,7 +2701,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._mount_turn_line(outcome)
             return
         payload = rec.get("payload")
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or self._is_withdrawn(payload):
             return
         # Реплика после записи — начало следующего хода (и та, что экран
         # уже показал сам: важна позиция в файле, а не повтор).
@@ -2732,6 +2732,15 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._last_event_kind = "_finalized"
         else:
             self._last_event_kind = ev.kind
+
+    def _is_withdrawn(self, payload: dict) -> bool:
+        """Реплика открытого треда снята откатом, а тред её ещё держит
+        (заявка на удаление ждёт освобождения треда): в историю ленты она не
+        входит — ни перерисовкой, ни хвостом."""
+        mid, tid = payload.get("id"), self._active_task_id
+        return mid is not None and any(
+            claim[1:] == (tid, mid) for claim in self._pending_orphan_cleanups
+        )
 
     def _mount_turn_line(self, outcome: TurnOutcome) -> None:
         """Строка хода — на месте его записи (через `_trace_mount`, значит
@@ -2827,10 +2836,10 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._edits_baseline_taken = False
             self._capture_edits_baseline()
 
-    def _drop_turn_lines(self, msg_id: str) -> None:
+    def _withdraw_from_history(self, msg_id: str) -> None:
         """Откат реплики `msg_id`: её нет в истории ленты — запись её хода
         стала сиротой (`turn_shown_in`), дочитанная позже строки не даст;
-        уже смонтированная строка уходит."""
+        строка, вставшая до отката (запись дочитана раньше Esc), уходит."""
         self._rendered_ids.discard(msg_id)
         for line in self.query(TurnLine):
             if line.opened_by == msg_id:
@@ -8345,12 +8354,16 @@ class TraceScreen(TraceFollowMixin, Screen):
         """
         from gc_tui.widgets.user_reply import UserReplyContainer
 
-        # Заявка на удаление осиротевшей реплики (по id, когда тред idle).
+        # Сначала, до стопа: реплика уходит из истории ленты (заявка на её
+        # удаление из треда — до освобождения треда). Запись итога её хода
+        # с этого момента сирота на любом пути чтения — строки не будет.
         old_runner = getattr(self.app, "active_runner", None)
         tid = self.app.tui_state.active_task_id
         msg_id = self._last_user_message_id
         if tid is not None and msg_id and self._store is not None:
             self._pending_orphan_cleanups.append((old_runner, tid, msg_id))
+        if msg_id:
+            self._withdraw_from_history(msg_id)
 
         # Удалить последний UserReplyContainer
         # В поле возвращается снимаемая реплика, её `plain_text` (скилл
@@ -8430,7 +8443,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             pass
 
     def _discard_orphan_and_resync(self, tid: str, msg_id: str) -> bool:
-        """Удалить запись реплики по id и снять строку её хода в ленте.
+        """Удалить запись снятой реплики из треда по id (из истории ленты
+        она ушла откатом: `_withdraw_from_history`).
 
         Курсор трейса не трогается: удаление сообщения номера остальных не
         меняет (версия истории та же), тик ничего не перерисовывает (виджет
@@ -8450,8 +8464,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             raise
         except Exception:
             return False
-        if removed and tid == self._active_task_id:
-            self._drop_turn_lines(msg_id)
         return removed
 
     def _run_orphan_cleanups(self) -> None:

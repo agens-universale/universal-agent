@@ -527,6 +527,95 @@ def _prepare_one_turn(tmp_path):
     _Thread(tmp_path).turn(1)
 
 
+async def _worker_session(tmp_path):
+    """Сессия хода воркера: держит аренду треда с записи реплики до конца
+    хода — немедленное удаление реплики откатом ей отказано."""
+    from gc_core.thread_store import ThreadSession
+    from gc_core.threads.file_store import FileThreadStore
+
+    return await ThreadSession.afrom_config(
+        settings=None,
+        system_id="cli",
+        thread_id=TID,
+        store=FileThreadStore(str(tmp_path)),
+    )
+
+
+_ESC_FLOWS = {
+    # Запись стопа легла до первого тика после Esc; поток ещё жив.
+    "record_then_tick": ("record", "tick", "exit", "tick"),
+    # Тик раньше записи, поток ещё жив.
+    "tick_then_record": ("tick", "record", "tick", "exit", "tick"),
+    # Поток вышел с записью между тиками: спадающий фронт прогона.
+    "exit_with_record": ("record", "exit", "tick"),
+    # Уход в другую сессию и возврат, пока аренда хода не снята.
+    "reopen_while_leased": ("reopen", "record", "tick", "exit", "tick"),
+}
+
+
+async def _esc_step(step, pilot, tmp_path, ctx):
+    scr, ts, runner = ctx["scr"], ctx["ts"], ctx["runner"]
+    if step == "record":
+        await ts.aappend_turn_outcome(
+            _outcome(2, "m_orphan", status="stopped", reason="user_stop"),
+            discarded=True,
+        )
+    elif step == "exit":
+        await ts.arelease_lease()
+        runner._running = False
+    elif step == "reopen":
+        ctx["scr"] = await _reopen(pilot, tmp_path)
+    else:
+        for _ in range(3):
+            scr._poll_tick()
+            await pilot.pause()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flow", sorted(_ESC_FLOWS))
+async def test_esc_undo_never_draws_cancelled_line(
+    tmp_path, monkeypatch, flow
+):
+    """Отправка и сразу Esc, ход воркера держит аренду: ни в одном кадре
+    ленты нет ни строки «■ Отменено», ни снятой реплики — в любом порядке
+    записи стопа, тиков и выхода потока; строка прошлого хода цела."""
+    from gc_testkit.trace_grid import record_frames
+
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        pilot.app.tui_state.active_task_id = TID
+        runner = _FakeRunner()
+        runner.produced_output = lambda: False
+        pilot.app.active_runner = runner
+        scr._prepare_for_new_run()
+        ts = await _worker_session(tmp_path)
+        await ts.apersist_batch(
+            [_reply("m_orphan", "отменяю")], previous_response_id=None
+        )
+        scr._last_user_message_id = "m_orphan"
+        scr._poll_tick()  # тик застал прогон и дочитал реплику
+        await pilot.pause()
+        assert _trace_lines(scr.query_one("#trace"))[-1] == "› отменяю"
+        frames = record_frames(monkeypatch)
+
+        scr._cmd_stop()  # Esc: вывода нет, поле пустое — откат
+        await pilot.pause()
+        ctx = {"scr": scr, "ts": ts, "runner": runner}
+        for step in _ESC_FLOWS[flow]:
+            await _esc_step(step, pilot, tmp_path, ctx)
+
+        scr = ctx["scr"]
+        drawn = [row for frame in frames for row in frame]
+        assert not [row for row in drawn if "Отменено" in row]
+        assert not [row for row in drawn if "отменяю" in row]
+        assert not scr._pending_orphan_cleanups
+        line = _fresh_line(scr)
+        assert (line.opened_by, line.text.plain) == ("u1", _done_line(1))
+        assert _shown_openers(tmp_path) == ["u1"]
+        assert _preview_openers(tmp_path) == ["u1"]
+
+
 async def _tailed_send_setup(pilot, tmp_path):
     """Как `_undo_setup`, но реплика `m_orphan` уже дочитана хвостом из
     треда: она в истории ленты, как вживую до Esc."""
