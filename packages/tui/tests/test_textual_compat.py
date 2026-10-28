@@ -186,6 +186,20 @@ async def test_other_version_anchored_scroll_is_plain_anchor(monkeypatch):
     assert await _anchored_scroll_y() < 0
 
 
+def test_other_version_scroll_skips_private_anchor_state(monkeypatch):
+    """На чужой версии прокрутка не трогает приватное состояние якоря:
+    его может не быть, и тогда падала бы каждая прокрутка ленты."""
+    from textual.widget import Widget
+
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    scroll = textual_compat.AnchoredScroll()
+    del scroll._anchored, scroll._anchor_released
+
+    scroll.set_reactive(Widget.scroll_y, 5)
+
+    assert scroll.scroll_y == 5
+
+
 class _TallAnchored(App):
     """Якорная лента выше окна: тридцать строк в окне на десять."""
 

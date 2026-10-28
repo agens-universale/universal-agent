@@ -102,7 +102,8 @@ class AnchoredScroll(VerticalScroll):
 
     def set_reactive(self, reactive, value) -> None:
         scroll = reactive in (Widget.scroll_y, Widget.scroll_target_y)
-        if scroll and self._anchor_held() and textual_is_patched_version():
+        # Версия — до приватного состояния якоря: на иной его может не быть.
+        if scroll and textual_is_patched_version() and self._anchor_held():
             value = self._anchor_y
         super().set_reactive(reactive, value)
 
