@@ -23,14 +23,12 @@ from gc_core.execution.progress import (
 )
 from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_subagent_trace_record,
-    append_turn_outcome_record,
     edits_journal_path,
 )
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import subagent_record, turn_outcome_record
 from gc_testkit.trace_grid import assert_trace_grid, trace_rows
 from gc_testkit.tui_support import tui_settings
-
 from gc_tui.widgets import tool_call_row
 from gc_tui.widgets.turn_line import TurnLine
 
@@ -138,7 +136,7 @@ class _Call:
             ("call", call),
             ("result" if self.ok else "error", end),
         ):
-            append_subagent_trace_record(
+            subagent_record(
                 str(tmp_path),
                 "cli",
                 TID,
@@ -190,7 +188,7 @@ class _Thread:
             error=None,
             calls=calls,
         )
-        append_turn_outcome_record(self.dir, "cli", TID, outcome, seq=self.seq)
+        turn_outcome_record(self.dir, "cli", TID, outcome)
 
 
 _AGENT_CALL = {

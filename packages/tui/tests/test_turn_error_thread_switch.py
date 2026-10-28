@@ -8,10 +8,8 @@ import json
 
 import pytest
 from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-)
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings
 
 _A = "aaaa0000000000000000000000000001a"
@@ -45,7 +43,7 @@ def _failed_turn(tmp_path, tid):
         duration_sec=7.0,
         error={"type": "MainModelUnavailable", "message": _REASON},
     )
-    append_turn_outcome_record(str(tmp_path), "cli", tid, outcome, seq=1)
+    turn_outcome_record(str(tmp_path), "cli", tid, outcome)
 
 
 def _fresh_text(scr) -> str:

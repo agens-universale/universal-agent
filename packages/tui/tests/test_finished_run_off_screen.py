@@ -13,7 +13,11 @@ import pytest
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_core.thread_store import edits_journal_path
-from gc_testkit.develop_files import save_thread_meta
+from gc_testkit.develop_files import (
+    append_new_thread_messages,
+    save_thread_meta,
+)
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.turn_outcome import DONE_LABEL_PLAN
 
@@ -59,7 +63,7 @@ def _turn(tmp_path, tid, *, reason, duration):
         duration_sec=duration,
         error=None,
     )
-    append_turn_outcome_record(str(tmp_path), "cli", tid, outcome, seq=1)
+    turn_outcome_record(str(tmp_path), "cli", tid, outcome)
 
 
 def _write_b(tmp_path):

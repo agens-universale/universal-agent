@@ -251,10 +251,8 @@ async def test_elapsed_live_equals_reopen_from_turn_record(tmp_path):
     import time
 
     from gc_core.persistence.turn_outcome import TurnOutcome
-    from gc_core.thread_store import (
-        append_new_thread_messages,
-        append_turn_outcome_record,
-    )
+    from gc_testkit.develop_files import append_new_thread_messages
+    from gc_testkit.thread_writes import turn_outcome_record
 
     app = _app(tmp_path)
     async with app.run_test() as pilot:
@@ -274,7 +272,7 @@ async def test_elapsed_live_equals_reopen_from_turn_record(tmp_path):
             [{"id": "u1", "role": "user", "content": "q"}],
             set(),
         )
-        append_turn_outcome_record(
+        turn_outcome_record(
             str(tmp_path),
             "cli",
             TID_A,
@@ -287,7 +285,6 @@ async def test_elapsed_live_equals_reopen_from_turn_record(tmp_path):
                 duration_sec=5.0,
                 error=None,
             ),
-            seq=1,
         )
         runner._running = False
         scr._poll_active()

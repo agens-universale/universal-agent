@@ -38,6 +38,7 @@ from gc_core.persistence.turn_outcome import (
     TurnOutcome,
     is_turn_outcome_record,
     parse_turn_outcome,
+    turn_shown_in,
 )
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
@@ -2694,9 +2695,14 @@ class TraceScreen(TraceFollowMixin, Screen):
     ) -> None:
         if is_turn_outcome_record(rec):
             # Итог хода — не сообщение ленты: строка последнего хода, пока
-            # после записи не началась реплика.
+            # после записи не началась реплика. Сирота (сообщения её хода
+            # в ленте нет: откат, сброс) строки не даёт.
             outcome = parse_turn_outcome(rec)
-            if outcome is None or self._is_undone_reply(outcome.opened_by):
+            if (
+                outcome is None
+                or not turn_shown_in(rec, self._rendered_ids)
+                or self._is_undone_reply(outcome.opened_by)
+            ):
                 return
             self._last_turn_outcome = outcome
             self._outcome_superseded = False
@@ -2836,8 +2842,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._capture_edits_baseline()
 
     def _drop_turn_lines(self, msg_id: str) -> None:
-        """Откат реплики `msg_id`: строка её хода уходит вместе с записью
-        (запись могла быть уже дочитана хвостом и смонтирована)."""
+        """Откат реплики `msg_id`: запись её хода стала сиротой — строка
+        уходит (запись могла быть уже дочитана хвостом и смонтирована)."""
         for line in self.query(TurnLine):
             if line.opened_by == msg_id:
                 line.remove()
@@ -8435,30 +8441,23 @@ class TraceScreen(TraceFollowMixin, Screen):
             pass
 
     def _discard_orphan_and_resync(self, tid: str, msg_id: str) -> bool:
-        """Удалить запись реплики по id (с записью итога её хода и строкой
-        хода в ленте) и пересинхронизировать курсор трейса.
+        """Удалить запись реплики по id и снять строку её хода в ленте.
 
-        Без ресинка poll увидит ужавшийся data_*.jsonl как «file truncated» →
-        stream_reset → полная перерисовка трейса (моргание). Курсор
-        переносится в переписанный файл на то же прочитанное: тик ничего не
-        перерисовывает (виджет уже снят точечно) и дочитывает то, что легло
-        после курсора, — ответ и запись итога нового хода не теряются."""
+        Курсор трейса не трогается: удаление сообщения номера остальных не
+        меняет (версия истории та же), тик ничего не перерисовывает (виджет
+        уже снят точечно) и дочитывает то, что легло после курсора, — ответ
+        и итог нового хода не теряются. Запись итога снятого хода остаётся
+        в потоке сиротой: её строку лента не показывает."""
         if self._store is None:
             return False
-        own = tid == self._active_task_id
         try:
             tags, strip_think = self._projection_from_app_config()
-            removed, cursor = self._store.discard_message_by_id(
-                tid,
-                msg_id,
-                tags=tags,
-                strip_think=strip_think,
-                cursor=self._cursor if own else None,
+            removed = self._store.discard_message_by_id(
+                tid, msg_id, tags=tags, strip_think=strip_think
             )
         except Exception:
             return False
-        if removed and own:
-            self._cursor = cursor
+        if removed and tid == self._active_task_id:
             self._drop_turn_lines(msg_id)
         return removed
 

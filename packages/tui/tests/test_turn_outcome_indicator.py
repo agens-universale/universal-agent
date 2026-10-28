@@ -18,13 +18,12 @@ import pytest
 from gc_core.execution.environment import utc_now
 from gc_core.execution.turn_clock import TurnClock
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-)
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record, turn_records
 from gc_testkit.tui_fixtures.stub_executor import StubExecutor
 from gc_testkit.tui_support import tui_settings, wait_until
 from gc_tui.services.relative_time import format_turn_clock, parse_iso_utc
+from gc_tui.services.stores.record_view import tui_section
 
 TID = "tout0000000000000000000000000001a"
 OTHER = "tout0000000000000000000000000002b"
@@ -84,7 +83,7 @@ def _record(tmp_path, *, seq, status="done", reason=None, **kw):
         duration_sec=kw.get("dur", 12.0),
         error=kw.get("error"),
     )
-    append_turn_outcome_record(str(tmp_path), "cli", TID, outcome, seq=seq)
+    turn_outcome_record(str(tmp_path), "cli", TID, outcome)
 
 
 def _records(tmp_path, tid):
@@ -94,11 +93,7 @@ def _records(tmp_path, tid):
 
 
 def _outcomes(tmp_path, tid):
-    return [
-        r["outcome"]
-        for r in _records(tmp_path, tid)
-        if r.get("type") == "turn_outcome"
-    ]
+    return [r["outcome"] for r in turn_records(str(tmp_path), "cli", tid)]
 
 
 def _app(tmp_path):
@@ -276,7 +271,7 @@ async def test_done_turn_line_from_record_live_and_reopen(
         )
         assert len(scr.query(UserReplyContainer)) == 1
         assert scr._pending_user_widgets == {}
-        tui = scr._store.get_task_meta(tid)["tui"]
+        tui = tui_section(scr._store.get_record(tid))
         assert tui["status"] == "completed"
         assert "last_error" not in tui
         assert set(tui["last_indicator"]) == {"edits"}
@@ -544,7 +539,7 @@ async def test_error_turn_from_record_with_reason(tmp_path):
         assert rows[0] == f"✕ Ошибка · {_hm('2026-10-22T11:50:00Z')}"
         assert rows[1].lstrip().startswith("└ RuntimeError: сбой")
         assert len(rows) == 4  # голова + причина до трёх строк
-        tui = scr._store.get_task_meta(TID)["tui"]
+        tui = tui_section(scr._store.get_record(TID))
         assert tui["status"] == "failed"
         assert "last_error" not in tui
 
@@ -567,7 +562,7 @@ async def test_limit_turn_from_record(tmp_path):
             "⏹ Остановлено: превышен лимит шагов · "
             f"{_hm('2026-10-22T12:02:00Z')}"
         )
-        assert scr._store.get_task_meta(TID)["tui"]["status"] == "stopped"
+        assert tui_section(scr._store.get_record(TID))["status"] == "stopped"
 
 
 @pytest.mark.asyncio
@@ -704,7 +699,7 @@ async def test_tail_started_between_ticks_settles_previous_run(tmp_path):
         runner.run_seq = 2
         scr._poll_active()
         assert settled == [2]
-        assert scr._store.get_task_meta(TID)["tui"]["status"] == "running"
+        assert tui_section(scr._store.get_record(TID))["status"] == "running"
         runner.running = False
         scr._poll_active()
         assert len(settled) == 2

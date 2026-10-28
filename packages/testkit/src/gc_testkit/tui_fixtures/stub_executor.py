@@ -12,8 +12,8 @@ from gc_core.execution.environment import utc_now
 from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.execution.turn_clock import Mono, TurnClock
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
-from gc_core.thread_store import append_turn_outcome_record
 
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_fixtures.scenarios import (
     DEFAULT_OUTCOME,
     SCENARIO_OUTCOMES,
@@ -24,7 +24,7 @@ from gc_testkit.tui_fixtures.scenarios import (
 class StubExecutor:
     """Записывает сценарий событий в data_*.jsonl с реалистичными паузами.
 
-    Ход закрывается, как у ядра, записью итога: у сценария — с закреплённым
+    Ход закрывается, как у ядра, записью итога в поток ``turns``: у сценария — с закреплённым
     временем (`DEFAULT_OUTCOME` / `SCENARIO_OUTCOMES`), у остановленного —
     `stopped/user_stop` по часам хода (конец — момент стопа)."""
 
@@ -149,12 +149,12 @@ class StubExecutor:
         if fields is None:
             return
         outcome = TurnOutcome(opened_by=_opened_by(written), **fields)
-        append_turn_outcome_record(
+        turn_outcome_record(
             str(self.threads_dir),
             system,
             thread_id,
             outcome,
-            seq=written[-1].get("seq", 0),
+            after=(written[-1].get("payload") or {}).get("id"),
         )
 
     def _outcome_fields(self) -> Optional[dict]:

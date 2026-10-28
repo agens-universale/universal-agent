@@ -134,17 +134,33 @@ def outcome_word(*, failed: bool, stopped: bool, reason: str | None) -> str:
     return _LIMIT_WORDS.get(reason, "completed")
 
 
+def _word(status: str, reason: str | None) -> str:
+    word = outcome_word(
+        failed=status == "error",
+        stopped=status == "stopped" and reason not in _LIMIT_WORDS,
+        reason=reason,
+    )
+    return _ALIASES.get(word, word)
+
+
 def kind_of(outcome: TurnOutcome) -> tuple[str, bool]:
     """Слово `OUTCOMES` и флаг «ход кончился планом» по записи итога.
     Остановка с причиной, которой словарь не знает, — остановка."""
-    word = outcome_word(
-        failed=outcome.status == "error",
-        stopped=outcome.status == "stopped"
-        and outcome.reason not in _LIMIT_WORDS,
-        reason=outcome.reason,
-    )
     plan = outcome.status == "done" and outcome.reason == _PLAN_REASON
-    return _ALIASES.get(word, word), plan
+    return _word(outcome.status, outcome.reason), plan
+
+
+def status_of_last_turn(last_turn: object) -> str | None:
+    """Статус сессии по короткому итогу последнего хода
+    (``runtime.last_turn``); итога нет или он кривой — None."""
+    if not isinstance(last_turn, dict):
+        return None
+    status, reason = last_turn.get("status"), last_turn.get("reason")
+    if status not in ("done", "stopped", "error"):
+        return None
+    return meta_status_of(
+        _word(status, reason if isinstance(reason, str) else None)
+    )
 
 
 def outcome_error(outcome: TurnOutcome) -> str | None:

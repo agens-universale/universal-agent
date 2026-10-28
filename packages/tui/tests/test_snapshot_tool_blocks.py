@@ -22,11 +22,10 @@ pytest.importorskip("pytest_textual_snapshot")
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_subagent_trace_record,
-    append_turn_outcome_record,
     edits_journal_path,
 )
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import subagent_record, turn_outcome_record
 
 _SYS = "cli"
 _TID = "7f3a9b1c"
@@ -152,9 +151,7 @@ def _write_thread(tmp_path, payloads: list[dict], calls: dict, edits) -> None:
         error=None,
         calls=calls,
     )
-    append_turn_outcome_record(
-        str(tmp_path), _SYS, _TID, outcome, seq=len(messages)
-    )
+    turn_outcome_record(str(tmp_path), _SYS, _TID, outcome)
 
 
 def _hunks(groups: list[list[tuple[str, int, str]]]) -> str:
@@ -264,7 +261,7 @@ _AGENT = "call_agent_1"
 
 
 def _sidecar(tmp_path, kind: str, payload: dict) -> None:
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         _SYS,
         _TID,

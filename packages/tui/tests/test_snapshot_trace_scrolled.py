@@ -110,7 +110,7 @@ def _write_thread(tmp_path) -> None:
 
 def _record_outcome(tmp_path, *, seq: int) -> None:
     from gc_core.persistence.turn_outcome import TurnOutcome
-    from gc_core.thread_store import append_turn_outcome_record
+    from gc_testkit.thread_writes import turn_outcome_record
 
     def iso(moment):
         return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -124,7 +124,7 @@ def _record_outcome(tmp_path, *, seq: int) -> None:
         duration_sec=72.0,
         error=None,
     )
-    append_turn_outcome_record(str(tmp_path), "cli", _TID, outcome, seq=seq)
+    turn_outcome_record(str(tmp_path), "cli", _TID, outcome)
 
 
 def test_trace_scrolled_snapshot(snap_compare, tmp_path, monkeypatch):

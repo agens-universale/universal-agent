@@ -1,12 +1,13 @@
 """Индикатор живёт в фиксированной #indicator-bar (вне скролла #trace) —
 растущий стрим не может на него наложиться."""
 
-from gc_testkit.tui_support import tui_settings
 import json
 import threading
 from pathlib import Path
 
 import pytest
+from gc_testkit.tui_support import tui_settings
+from gc_tui.services.stores.record_view import tui_section
 
 
 def _write_task(tmp_path, tid):
@@ -273,7 +274,7 @@ class _ScriptedExecutor:
         self.release[step].wait(10)
 
     def _messages(self, tid, *payloads):
-        from gc_core.thread_store import append_new_thread_messages
+        from gc_testkit.develop_files import append_new_thread_messages
 
         append_new_thread_messages(
             self.dir, "cli", tid, list(payloads), set(), start_seq=self.seq
@@ -282,7 +283,7 @@ class _ScriptedExecutor:
 
     def _record(self, tid, opened_by, minute):
         from gc_core.persistence.turn_outcome import TurnOutcome
-        from gc_core.thread_store import append_turn_outcome_record
+        from gc_testkit.thread_writes import turn_outcome_record
 
         outcome = TurnOutcome(
             status="done",
@@ -293,12 +294,12 @@ class _ScriptedExecutor:
             duration_sec=12.0,
             error=None,
         )
-        append_turn_outcome_record(self.dir, "cli", tid, outcome, seq=self.seq)
+        turn_outcome_record(self.dir, "cli", tid, outcome)
 
     def _flag(self, tid, flag, active):
-        from gc_core.thread_store import patch_runtime_flag
+        from gc_testkit.thread_writes import runtime_flag
 
-        patch_runtime_flag(self.dir, "cli", tid, flag, active=active)
+        runtime_flag(self.dir, "cli", tid, flag, active=active)
 
     def _answer(self, text):
         return {
@@ -339,26 +340,13 @@ class _ScriptedExecutor:
         self._flag(tid, "summarizing", False)
 
     def _compact(self, tid):
-        from gc_core.thread_store import (
-            archive_and_replace_thread_files,
-            load_thread_meta,
-            save_thread_meta,
-        )
+        from gc_testkit.tui_support import compact_thread
 
-        suffix = "20261022_113500"
-        meta = load_thread_meta(self.dir, "cli", tid)
-        archive_and_replace_thread_files(
+        compact_thread(
             self.dir,
             "cli",
             tid,
             [{"id": "s1", "role": "user", "content": _summary("c")}],
-            archive_suffix=suffix,
-        )
-        save_thread_meta(
-            self.dir,
-            "cli",
-            tid,
-            {**meta, "last_summary_archive_suffix": suffix},
         )
 
     def stop_run(self):
@@ -540,7 +528,7 @@ async def test_turn_end_one_movement_per_layout_frame(tmp_path):
 
 def _history(tmp_path, tid, n):
     """`n` пар реплика-ответ в треде: лента выше окна."""
-    from gc_core.thread_store import append_new_thread_messages
+    from gc_testkit.develop_files import append_new_thread_messages
 
     rows = []
     for i in range(n):
@@ -705,7 +693,7 @@ async def test_error_rising_edge_ignored_for_settled_run(tmp_path):
         scr._poll_tick()
         assert finished == [run]
         assert statuses == ["failed"]
-        tui = scr._store.get_task_meta(tid)["tui"]
+        tui = tui_section(scr._store.get_record(tid))
         assert tui["status"] == "failed"
 
 

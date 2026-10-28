@@ -15,12 +15,10 @@ import pytest
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-    edits_journal_path,
-)
+from gc_core.thread_store import edits_journal_path
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.paths import module_dir
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings, wait_until
 from gc_tui.services.trace_render import build_turn_line
 from gc_tui.services.turn_outcome import (
@@ -55,7 +53,7 @@ def _done_turn(tmp_path, tid):
         duration_sec=12.0,
         error=None,
     )
-    append_turn_outcome_record(str(tmp_path), "cli", tid, outcome, seq=1)
+    turn_outcome_record(str(tmp_path), "cli", tid, outcome)
 
 
 def _append_edit(
@@ -993,7 +991,6 @@ async def _line_app_requests(line, gestures):
     """Свежая строка со сводкой в тестовом приложении: жесты по ней и
     запросы экрана изменений, которые до приложения дошли."""
     from gc_tui.messages import OpenEditsScreenRequest
-
     from test_turn_line_widget import LineApp
 
     class _App(LineApp):

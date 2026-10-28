@@ -12,10 +12,8 @@ import json
 
 import pytest
 from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-)
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.stores.record_view import tui_section
 
@@ -49,7 +47,7 @@ def _write_task(tmp_path, tui: dict | None = None, reason: str = ""):
         duration_sec=1.0,
         error={"type": reason.split(":")[0], "message": reason},
     )
-    append_turn_outcome_record(str(tmp_path), "cli", _TID, outcome, seq=1)
+    turn_outcome_record(str(tmp_path), "cli", _TID, outcome)
 
 
 def _app(tmp_path):

@@ -18,13 +18,12 @@ from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
-from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-)
+from gc_core.persistence.turn_outcome import TurnOutcome, parse_turn_outcome
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record, turn_records
 from gc_testkit.tui_support import tui_settings, wait_until
 from gc_tui.services.relative_time import parse_iso_utc
+from gc_tui.services.stores.record_view import tui_section
 
 TID = "tline000000000000000000000000001a"
 OTHER = "tline000000000000000000000000002b"
@@ -115,12 +114,11 @@ class _Thread:
         self.seq += len(payloads)
 
     def record(self, n, opened_by, **kw):
-        append_turn_outcome_record(
+        turn_outcome_record(
             self.dir,
             "cli",
             self.tid,
             _outcome(n, opened_by, **kw),
-            seq=self.seq,
         )
 
     def turn(self, n, *, record=True):
@@ -135,11 +133,22 @@ def _records(tmp_path, tid=TID):
     return [json.loads(line) for line in lines if line.strip()]
 
 
+def _shown_openers(tmp_path, tid=TID):
+    """Записи итога, которые отдаёт полное чтение треда (без сирот)."""
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    records, _cursor = FileTaskStore(str(tmp_path)).read_all_events(tid)
+    return [
+        r["outcome"]["opened_by"]
+        for r in records
+        if r.get("type") == "turn_outcome"
+    ]
+
+
 def _outcome_openers(tmp_path, tid=TID):
     return [
         r["outcome"]["opened_by"]
-        for r in _records(tmp_path, tid)
-        if r.get("type") == "turn_outcome"
+        for r in turn_records(str(tmp_path), "cli", tid)
     ]
 
 
@@ -530,7 +539,10 @@ async def test_undo_with_record_before_discard_leaves_no_line(tmp_path):
         scr._poll_trace_tail()
         await pilot.pause()
 
-        assert _outcome_openers(tmp_path) == ["u1"]
+        # Запись снятого хода остаётся в потоке сиротой: ни лента, ни
+        # полное чтение треда её не показывают.
+        assert _outcome_openers(tmp_path) == ["u1", "m_orphan"]
+        assert _shown_openers(tmp_path) == ["u1"]
         assert _record_openers(scr) == ["u1"]
         # Прошлый ход снова последний (S10 §3.8, В2).
         assert _turn_lines(scr)[0].has_class(LATEST)
@@ -541,8 +553,8 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
     tmp_path,
 ):
     """Поток старого прогона пишет запись уже после немедленного отката:
-    тик дочитывает её, но строки снятой реплики нет; backstop снимает
-    запись из файла."""
+    тик дочитывает её, но строки снятой реплики нет; запись — сирота,
+    backstop её не трогает."""
     _prepare_one_turn(tmp_path)
     async with _app(tmp_path).run_test() as pilot:
         scr, thread, runner = await _undo_setup(pilot, tmp_path)
@@ -561,7 +573,10 @@ async def test_undo_with_record_after_discard_backstop_removes_line(
         await pilot.pause()
 
         assert not scr._pending_orphan_cleanups
-        assert _outcome_openers(tmp_path) == ["u1"]
+        # Запись снятого хода остаётся в потоке сиротой: ни лента, ни
+        # полное чтение треда её не показывают.
+        assert _outcome_openers(tmp_path) == ["u1", "m_orphan"]
+        assert _shown_openers(tmp_path) == ["u1"]
         assert _record_openers(scr) == ["u1"]
         assert scr._last_turn_outcome.opened_by == "u1"
         tail = scr._store.tail_events(TID, scr._cursor)
@@ -664,8 +679,8 @@ async def test_backstop_after_resend_keeps_unread_new_turn_records(
 @pytest.mark.asyncio
 async def test_undo_after_record_was_tailed_removes_mounted_line(tmp_path):
     """Запись дочитана хвостом и смонтирована до отката (курсор за ней):
-    откат снимает строку по `opened_by` и пересинхронизирует курсор —
-    без перестройки ленты."""
+    откат снимает строку по `opened_by`, курсор остаётся — без
+    перестройки ленты."""
     _prepare_one_turn(tmp_path)
     async with _app(tmp_path).run_test() as pilot:
         scr, thread, _runner = await _undo_setup(pilot, tmp_path)
@@ -679,7 +694,10 @@ async def test_undo_after_record_was_tailed_removes_mounted_line(tmp_path):
         scr._cancel_with_undo()
         await pilot.pause()
 
-        assert _outcome_openers(tmp_path) == ["u1"]
+        # Запись снятого хода остаётся в потоке сиротой: ни лента, ни
+        # полное чтение треда её не показывают.
+        assert _outcome_openers(tmp_path) == ["u1", "m_orphan"]
+        assert _shown_openers(tmp_path) == ["u1"]
         assert _record_openers(scr) == ["u1"]
         tail = scr._store.tail_events(TID, scr._cursor)
         assert tail.stream_reset is False
@@ -869,9 +887,25 @@ def _summary_text(text):
 
 
 def _write_rows(path, rows):
+    """Сообщения — строками файла; записи итога возвращаются с привязкой к
+    сообщению перед ними: их пишет `_record_outcomes`, когда файлы готовы."""
+    pending, after = [], None
     with open(path, "w", encoding="utf-8") as f:
         for row in rows:
+            if row.get("type") == "turn_outcome":
+                pending.append((row["outcome"], after))
+                continue
+            after = row["payload"]["id"]
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return pending
+
+
+def _record_outcomes(tmp_path, pending):
+    for payload, after in pending:
+        outcome = parse_turn_outcome(
+            {"type": "turn_outcome", "outcome": payload}
+        )
+        turn_outcome_record(str(tmp_path), "cli", TID, outcome, after=after)
 
 
 def _msg_row(seq, payload):
@@ -900,7 +934,7 @@ def write_compacted_thread(tmp_path):
     """Сжатие конца хода 2: ходы 1–2 с записями — в архиве, в живом
     файле сводка и ход 3."""
     _write_meta(tmp_path, tui={"status": "completed"})
-    _write_rows(
+    pending = _write_rows(
         tmp_path / f"data_cli_{TID}__pre_summary__20261022_113300.jsonl",
         [
             _msg_row(1, _reply("u1")),
@@ -911,7 +945,7 @@ def write_compacted_thread(tmp_path):
             _outcome_row(4, 2, "u2"),
         ],
     )
-    _write_rows(
+    pending += _write_rows(
         tmp_path / f"data_cli_{TID}.jsonl",
         [
             _msg_row(
@@ -927,6 +961,7 @@ def write_compacted_thread(tmp_path):
             _outcome_row(3, 3, "u3"),
         ],
     )
+    _record_outcomes(tmp_path, pending)
 
 
 COMPACTED_TRACE = [
@@ -957,7 +992,7 @@ async def test_last_archived_turn_is_indicator_until_next_turn(tmp_path):
     """Сжатие конца последнего хода: его запись — в архиве, за ней только
     сводка — строка последнего хода остаётся свежей над маркером."""
     _write_meta(tmp_path, tui={"status": "completed"})
-    _write_rows(
+    pending = _write_rows(
         tmp_path / f"data_cli_{TID}__pre_summary__20261022_113300.jsonl",
         [
             _msg_row(1, _reply("u1")),
@@ -978,6 +1013,7 @@ async def test_last_archived_turn_is_indicator_until_next_turn(tmp_path):
             ),
         ],
     )
+    _record_outcomes(tmp_path, pending)
     async with _app(tmp_path).run_test() as pilot:
         scr = await _open(pilot)
         (line,) = _turn_lines(scr)
@@ -1131,27 +1167,14 @@ async def test_fast_failed_run_reply_delivered_in_same_tick_is_shown_once(
 
 
 def _compact_files(tmp_path, suffix="20261022_113500"):
-    """Сжатие на диске, как у ядра: живой файл — в архив, новый — со
-    сводкой, мета с эпохой сжатия."""
-    from gc_core.thread_store import (
-        archive_and_replace_thread_files,
-        load_thread_meta,
-        save_thread_meta,
-    )
+    """Сжатие, как у ядра: история — в архив, вместо неё — сводка."""
+    from gc_testkit.tui_support import compact_thread
 
-    meta = load_thread_meta(str(tmp_path), "cli", TID)
-    archive_and_replace_thread_files(
+    compact_thread(
         str(tmp_path),
         "cli",
         TID,
         [{"id": f"s{suffix}", "role": "user", "content": _summary_text("c")}],
-        archive_suffix=suffix,
-    )
-    save_thread_meta(
-        str(tmp_path),
-        "cli",
-        TID,
-        {**meta, "last_summary_archive_suffix": suffix},
     )
 
 
@@ -1496,7 +1519,7 @@ async def test_bar_removal_deferred_under_select_freeze(tmp_path):
         scr._poll_tick()
         assert bar.has_class("-turn")
         assert _held(line)
-        tui = scr._store.get_task_meta(TID)["tui"]
+        tui = tui_section(scr._store.get_record(TID))
         assert tui["status"] == "completed"
 
         frozen[0] = False

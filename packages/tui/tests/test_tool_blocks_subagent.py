@@ -22,11 +22,8 @@ from gc_core.execution.progress import (
     tool_args_summary,
 )
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_subagent_trace_record,
-    append_turn_outcome_record,
-)
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import subagent_record, turn_outcome_record
 from gc_testkit.trace_grid import assert_trace_grid, trace_rows
 from gc_testkit.tui_support import tui_settings
 from textual.containers import VerticalScroll
@@ -179,7 +176,7 @@ def _sidecar(tmp_path, steps: list[tuple], pid: str = AGENT) -> None:
                 ),
             ]
         for kind, payload in records:
-            append_subagent_trace_record(
+            subagent_record(
                 str(tmp_path),
                 "cli",
                 TID,
@@ -227,7 +224,7 @@ class _Thread:
             error=None,
             calls=calls,
         )
-        append_turn_outcome_record(self.dir, "cli", TID, outcome, seq=self.seq)
+        turn_outcome_record(self.dir, "cli", TID, outcome)
 
 
 def _agent_call(pid: str = AGENT) -> dict:
@@ -797,7 +794,7 @@ def _cancelled_sidecar(tmp_path, call_id: str) -> None:
     }
     end = {"call_id": call_id, "output": _CANCELLED}
     for kind, payload in (("call", call), ("error", end)):
-        append_subagent_trace_record(
+        subagent_record(
             str(tmp_path),
             "cli",
             TID,
@@ -867,7 +864,7 @@ async def test_stopped_nested_orphan_call_reopen_preview(tmp_path):
         "arguments": json.dumps({"path": "client/m9.py"}),
         "call_id": "n9",
     }
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         "cli",
         TID,

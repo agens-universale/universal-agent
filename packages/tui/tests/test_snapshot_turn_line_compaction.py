@@ -13,25 +13,21 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from gc_testkit.tui_support import SNAPSHOT_NOW, tui_settings
+from gc_testkit.tui_support import SNAPSHOT_NOW, compact_thread, tui_settings
 
 pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
 from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
+from gc_testkit.develop_files import (
     append_new_thread_messages,
-    append_turn_outcome_record,
-    archive_and_replace_thread_files,
-    load_thread_meta,
-    save_thread_meta,
 )
+from gc_testkit.thread_writes import turn_outcome_record
 
 _SYS = "cli"
 _TID = "7f3a9b1c"
 # Конец хода — за 8 минут до «сейчас» эталонов (`pinned_snapshot_clock`).
 _ENDED = SNAPSHOT_NOW - timedelta(minutes=8)
-_SUFFIX = "20261022_143500"
 
 
 def _iso(moment: datetime) -> str:
@@ -70,7 +66,7 @@ def _write_thread(tmp_path) -> None:
         duration_sec=72.0,
         error=None,
     )
-    append_turn_outcome_record(str(tmp_path), _SYS, _TID, outcome, seq=2)
+    turn_outcome_record(str(tmp_path), _SYS, _TID, outcome)
 
 
 def _compact(tmp_path) -> None:
@@ -78,19 +74,11 @@ def _compact(tmp_path) -> None:
         '<technical type="dialog_summary">'
         "<summary>таймаут клиента поднят до 30 с</summary></technical>"
     )
-    meta = load_thread_meta(str(tmp_path), _SYS, _TID)
-    archive_and_replace_thread_files(
+    compact_thread(
         str(tmp_path),
         _SYS,
         _TID,
         [{"id": "s1", "role": "user", "content": summary}],
-        archive_suffix=_SUFFIX,
-    )
-    save_thread_meta(
-        str(tmp_path),
-        _SYS,
-        _TID,
-        {**meta, "last_summary_archive_suffix": _SUFFIX},
     )
 
 
