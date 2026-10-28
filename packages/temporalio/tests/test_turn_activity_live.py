@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -19,10 +20,12 @@ from test_workflow_controls import finish, scripted_http  # noqa: F401
 from turn_activity_workflow_fixture import TurnActivityWorkflow
 
 
+@pytest.mark.parametrize("log_format", ["text", "jsonl"])
 async def test_whole_turn_retry_postprocess_and_continuation(
     tmp_path,
     monkeypatch,
     scripted_http,  # noqa: F811
+    log_format,
 ):
     monkeypatch.chdir(tmp_path)
     url, requests, script = scripted_http
@@ -52,10 +55,28 @@ async def test_whole_turn_retry_postprocess_and_continuation(
             raise RuntimeError("upload failed: retry the entire turn")
         return {"artifact": target.read_text(), "tag": request.context["tag"]}
 
+    class Capture(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+            self.closed_by_agent = False
+
+        def emit(self, record):
+            self.records.append(record)
+
+        def close(self):
+            self.closed_by_agent = True
+            super().close()
+
+    handler = Capture()
     settings = agent_settings(url, tmp_path).with_overrides(
         {
             "agent.trace_header_enabled": True,
             "agent.trace_id_header_name": "X-Trace-id",
+            "logging.format": log_format,
+            "logging.save_logs": False,
+            "logging.console_trace": False,
+            "logging.propagate": False,
         }
     )
     runner = AgentActivity(
@@ -63,6 +84,7 @@ async def test_whole_turn_retry_postprocess_and_continuation(
         thread_store=store,
         postprocess=postprocess,
         heartbeat_interval=0.1,
+        log_handlers=[handler],
     )
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=temporal_cli()
@@ -103,6 +125,12 @@ async def test_whole_turn_retry_postprocess_and_continuation(
                 ),
                 60,
             )
+    assert not handler.closed_by_agent
+    assert {record.trace_id for record in handler.records} == {
+        "trace-1",
+        "trace-2",
+    }
+    assert len({record.run_id for record in handler.records}) == 3
     assert attempts == [1, 2, 1]
     assert "retried" in json.dumps(first.answer)
     assert first.output == {"artifact": "artifact", "tag": "one"}

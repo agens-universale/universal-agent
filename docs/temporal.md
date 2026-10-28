@@ -229,6 +229,16 @@ async with Worker(
     await stop_event.wait()
 ```
 
+Обработчики логов приложения передаются через
+`AgentActivity(..., log_handlers=[handler])`, как у `AgentPlugin`.
+Они подключаются к SDK на каждой попытке и остаются открытыми после её
+завершения; закрывает их приложение. Для вывода только через эти обработчики
+задайте в профиле `logging.format: jsonl`, `logging.save_logs: false`,
+`logging.console_trace: false` и `logging.propagate: false`. Так SDK сохраняет
+поля событий и контекст запуска, а формат строки (например, JSON приложения)
+определяет обработчик. `propagate: false` предотвращает повторную доставку
+через root; уровни и фильтры обработчиков настраивает приложение.
+
 В бизнес-workflow импортируйте только контракт
 `gc_core_temporalio.turn_activity_contracts` (он безопасен для песочницы):
 

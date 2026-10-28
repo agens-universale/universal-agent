@@ -8,7 +8,8 @@
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable, Mapping
+import logging
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,12 @@ class AgentActivity:
     (например, выгружает файлы в S3). Его ошибка повторяет ВЕСЬ запуск, если
     RetryPolicy разрешает повтор. Callback должен возвращать JSON-данные.
 
+    ``log_handlers`` — обработчики приложения, передаются в SDK при каждой
+    попытке. Приложение владеет ими; завершение агента их не закрывает.
+    Для вывода только через них задайте ``logging.format=jsonl``,
+    ``logging.save_logs=false``, ``logging.console_trace=false`` и
+    ``logging.propagate=false`` в профиле агента.
+
     Heartbeat работает от подготовки MCP до конца postprocess. На вызове
     задайте heartbeat_timeout больше heartbeat_interval и общий таймаут.
     Рабочий каталог — cwd процесса: объект никогда не вызывает chdir.
@@ -49,6 +56,7 @@ class AgentActivity:
         thread_store: Any,
         postprocess: Postprocess | None = None,
         heartbeat_interval: float = 10,
+        log_handlers: Sequence[logging.Handler] = (),
     ):
         if not agents or thread_store is None:
             raise ValueError("AgentActivity requires agents and thread_store")
@@ -58,6 +66,7 @@ class AgentActivity:
         self.thread_store = thread_store
         self.postprocess = postprocess
         self.heartbeat_interval = heartbeat_interval
+        self.log_handlers = tuple(log_handlers)
         self.workspace = Path.cwd().resolve()
 
     def _settings(self, request):
@@ -98,7 +107,9 @@ class AgentActivity:
         heartbeat = asyncio.create_task(self._heartbeat())
         try:
             async with await AsyncAgent.create(
-                settings, thread_store=self.thread_store
+                settings,
+                thread_store=self.thread_store,
+                log_handlers=self.log_handlers,
             ) as agent:
                 answer = await agent.run(
                     request.prompt,
