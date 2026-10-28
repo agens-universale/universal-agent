@@ -723,6 +723,113 @@ def test_completion_sends_status_and_a_short_preview():
     assert "kind" not in update
 
 
+def test_write_file_card_omits_the_file_body():
+    """Текст записи остаётся у модели. Карточка показывает путь и флаги."""
+    body = "# Заголовок\n\n$x$ " + ("слово " * 200)
+    seen: set[str] = set()
+    report = report_from_record(
+        _call(
+            "fs_write_file",
+            "c1",
+            {"path": "docs/note.md", "content": body, "make_dirs": True},
+        ),
+        seen,
+    )
+    dumped = json.dumps(report, ensure_ascii=False)
+    assert "Заголовок" not in dumped
+    assert "$x$" not in dumped
+    assert report["rawInput"] == {
+        "path": "docs/note.md",
+        "make_dirs": True,
+    }
+    assert (
+        report["title"] == "fs_write_file(path='docs/note.md', make_dirs=True)"
+    )
+
+
+def test_other_file_writes_omit_the_written_text():
+    body = "старый текст $y$"
+    cases = (
+        (
+            "fs_append_file",
+            {"path": "a.txt", "content": body, "separator": "\n"},
+            {"path": "a.txt", "separator": "\n"},
+        ),
+        (
+            "fs_search_and_replace",
+            {
+                "path": "a.txt",
+                "search": body,
+                "replace": body,
+                "occurrence": "all",
+            },
+            {"path": "a.txt", "occurrence": "all"},
+        ),
+        (
+            "fs_save_base64_file",
+            {"path": "a.bin", "data": body},
+            {"path": "a.bin"},
+        ),
+        (
+            "fs_apply_file_edits",
+            {
+                "path": "a.txt",
+                "edits": [
+                    {"search": body, "replace": body, "occurrence": "first"}
+                ],
+                "dry_run": True,
+            },
+            {
+                "path": "a.txt",
+                "edits": [{"occurrence": "first"}],
+                "dry_run": True,
+            },
+        ),
+    )
+    for index, (name, arguments, expected) in enumerate(cases):
+        report = report_from_record(_call(name, f"c{index}", arguments), set())
+        assert report["rawInput"] == expected
+        assert "$y$" not in json.dumps(report, ensure_ascii=False)
+
+
+def test_read_file_card_omits_the_file_body():
+    """Тело файла остаётся у модели. Карточка ACP его не рисует."""
+    seen: set[str] = set()
+    report_from_record(
+        _call("fs_read_file", "c1", {"path": "dedup.py", "offset": 80}),
+        seen,
+    )
+    body = "def chain_files():\n    return r'\\bheader\\s*\\('\n" * 40
+    update = report_from_record(
+        {
+            "type": "function_call_output",
+            "call_id": "c1",
+            "output": json.dumps(
+                {
+                    "tool": "fs_read_file",
+                    "ok": True,
+                    "path": "/tmp/dedup.py",
+                    "start_line": 80,
+                    "end_line": 199,
+                    "total_lines": 579,
+                    "truncated": True,
+                    "returned_chars": len(body),
+                    "error": None,
+                    "content": body,
+                }
+            ),
+        },
+        seen,
+    )
+    text = update["content"][0]["content"]["text"]
+    assert "def chain_files" not in text
+    payload = json.loads(text)
+    assert payload["path"] == "/tmp/dedup.py"
+    assert payload["start_line"] == 80
+    assert payload["returned_chars"] == len(body)
+    assert "content" not in payload
+
+
 def test_empty_result_completes_without_content():
     seen: set[str] = set()
     report_from_record(_call("fs_read_file", "c1", {"path": "a.py"}), seen)

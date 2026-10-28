@@ -17,7 +17,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from gc_core.constants.tool_names import (
+    FS_APPEND_FILE_NAME,
+    FS_APPLY_FILE_EDITS_NAME,
     FS_READ_FILE_NAME,
+    FS_SAVE_BASE64_FILE_NAME,
+    FS_SEARCH_AND_REPLACE_NAME,
+    FS_WRITE_FILE_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
     SESSION_THINK_TOOL_NAME,
     TURN_FINALIZING_TOOLS,
@@ -199,7 +204,9 @@ def _call_report(
     parsed = _argument_object(arguments)
     if parsed is None:
         return report
-    report["rawInput"] = _truncate_values(parsed)
+    shown = _arguments_for_card(name, parsed)
+    report["title"] = _title(name, shown)
+    report["rawInput"] = _truncate_values(shown)
     locations = _locations(name, parsed)
     if locations is not None:
         report["locations"] = locations
@@ -291,6 +298,58 @@ def _locations(name: str, arguments: dict) -> list[dict] | None:
     return [item]
 
 
+# Текст файла в аргументах. В карточке он рисуется как markdown и раздувает
+# вёрстку так же, как тело чтения. Сам вызов эти поля по-прежнему получает.
+_FILE_TEXT_KEYS = {
+    FS_WRITE_FILE_NAME: frozenset({"content"}),
+    FS_APPEND_FILE_NAME: frozenset({"content"}),
+    FS_SAVE_BASE64_FILE_NAME: frozenset({"data"}),
+    FS_SEARCH_AND_REPLACE_NAME: frozenset({"search", "replace"}),
+}
+_EDIT_TEXT_KEYS = frozenset({"search", "replace"})
+
+
+def _arguments_for_card(name: str, arguments: dict) -> dict:
+    """Аргументы карточки без текста, который тул пишет в файл."""
+    hidden = _FILE_TEXT_KEYS.get(name)
+    if hidden is not None:
+        return {
+            key: value for key, value in arguments.items() if key not in hidden
+        }
+    if name != FS_APPLY_FILE_EDITS_NAME:
+        return arguments
+    shown = dict(arguments)
+    edits = shown.get("edits")
+    if not isinstance(edits, list):
+        return shown
+    shown["edits"] = [_edit_for_card(item) for item in edits]
+    return shown
+
+
+def _edit_for_card(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+    return {
+        key: value for key, value in item.items() if key not in _EDIT_TEXT_KEYS
+    }
+
+
+def _without_read_body(value: Any) -> Any:
+    """Карточка чтения показывает метаданные, не текст файла.
+
+    Плагин гоняет тело карточки через markdown. Исходник с ``$`` и
+    обратными слэшами на этом пути зацикливает вёрстку. Модели файл
+    по-прежнему приходит целиком, из карточки уходит только ``content``.
+    """
+    if not isinstance(value, dict) or value.get("tool") != FS_READ_FILE_NAME:
+        return value
+    if "content" not in value:
+        return value
+    shown = dict(value)
+    shown.pop("content", None)
+    return shown
+
+
 def _preview_text(output: Any) -> str | None:
     """Начало результата, не длиннее потолка карточки."""
     if output is None:
@@ -303,6 +362,7 @@ def _preview_text(output: Any) -> str | None:
             value = json.loads(output)
         except json.JSONDecodeError:
             value = output
+    value = _without_read_body(value)
     if value is None or value == "":
         return None
     if isinstance(value, str):
