@@ -51,6 +51,12 @@ uv tool install "gc-acp @ git+https://gitverse.ru/gigacode-ai/universal-agent#su
 uv pip install "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores"
 ```
 
+К инструменту `gc-cli` тот же пакет ставится `--with` в его окружение, а
+команда `gc-stores` — `--with-executables-from gc-stores`. Готовая строка —
+[Хранилище](configuration.md#хранилище-storage). У `gc-server` драйвер — extra
+самого пакета (`gc-server[postgres]`), библиотека `gc-stores` уже в
+зависимостях.
+
 `--with-executables-from gc-mcp` у узких профилей не украшение: `uv` выносит в
 `PATH` команды только запрошенного дистрибутива, а `gc-mcp` приезжает
 зависимостью и остаётся внутри venv инструмента. Без флага `gc-mcp` и
