@@ -698,12 +698,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Заявки на отложенное удаление осиротевших реплик: список
         # (runner, task_id, message_id). Исполняются в poll, когда тред idle.
         self._pending_orphan_cleanups: list[tuple] = []
-        # Реплики, снятые откатом отправки, по тредам: запись итога их хода
-        # остановленный поток может дописать позже (висит в повторах HTTP) —
-        # экран её не показывает, чистка лишь снимает её из файла. Живёт до
-        # чистки сирот треда, а не до смены треда: ушёл и вернулся, пока
-        # поток висит, — запись в файле ещё может лечь.
-        self._undone_reply_ids: dict[str, set[str]] = {}
         # Флаг состояния runner на предыдущем тике — для детекта спадающего фронта.
         self._was_running: bool = False
         # Прогон, чей исход ещё не записан: раннер, которого тик застал
@@ -2698,11 +2692,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             # после записи не началась реплика. Сирота (сообщения её хода
             # в ленте нет: откат, сброс) строки не даёт.
             outcome = parse_turn_outcome(rec)
-            if (
-                outcome is None
-                or not turn_shown_in(rec, self._rendered_ids)
-                or self._is_undone_reply(outcome.opened_by)
-            ):
+            if outcome is None or not turn_shown_in(rec, self._rendered_ids):
                 return
             self._last_turn_outcome = outcome
             self._outcome_superseded = False
@@ -2741,11 +2731,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._last_event_kind = "_finalized"
         else:
             self._last_event_kind = ev.kind
-
-    def _is_undone_reply(self, msg_id: Optional[str]) -> bool:
-        """Реплика открытого треда снята откатом отправки."""
-        undone = self._undone_reply_ids.get(self._active_task_id, ())
-        return msg_id is not None and msg_id in undone
 
     def _mount_turn_line(self, outcome: TurnOutcome) -> None:
         """Строка хода — на месте его записи (через `_trace_mount`, значит
@@ -2842,8 +2827,10 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._capture_edits_baseline()
 
     def _drop_turn_lines(self, msg_id: str) -> None:
-        """Откат реплики `msg_id`: запись её хода стала сиротой — строка
-        уходит (запись могла быть уже дочитана хвостом и смонтирована)."""
+        """Откат реплики `msg_id`: её нет в истории ленты — запись её хода
+        стала сиротой (`turn_shown_in`), дочитанная позже строки не даст;
+        уже смонтированная строка уходит."""
+        self._rendered_ids.discard(msg_id)
         for line in self.query(TurnLine):
             if line.opened_by == msg_id:
                 line.remove()
@@ -8363,7 +8350,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         msg_id = self._last_user_message_id
         if tid is not None and msg_id and self._store is not None:
             self._pending_orphan_cleanups.append((old_runner, tid, msg_id))
-            self._undone_reply_ids.setdefault(tid, set()).add(msg_id)
 
         # Удалить последний UserReplyContainer
         # В поле возвращается снимаемая реплика, её `plain_text` (скилл
@@ -8482,17 +8468,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 still_pending.append((old_runner, tid, msg_id))
                 continue
             self._discard_orphan_and_resync(tid, msg_id)
-            self._forget_undone_reply(tid, msg_id)
         self._pending_orphan_cleanups = still_pending
-
-    def _forget_undone_reply(self, tid: str, msg_id: str) -> None:
-        """Чистка сироты прошла: записи её хода в файле больше нет."""
-        undone = self._undone_reply_ids.get(tid)
-        if undone is None:
-            return
-        undone.discard(msg_id)
-        if not undone:
-            del self._undone_reply_ids[tid]
 
     def _reset_history_navigation(self) -> None:
         """Выход из режима history-навигации. Зовётся при правке input или send."""

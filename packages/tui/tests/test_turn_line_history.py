@@ -527,6 +527,103 @@ def _prepare_one_turn(tmp_path):
     _Thread(tmp_path).turn(1)
 
 
+async def _tailed_send_setup(pilot, tmp_path):
+    """Как `_undo_setup`, но реплика `m_orphan` уже дочитана хвостом из
+    треда: она в истории ленты, как вживую до Esc."""
+    scr = await _open(pilot)
+    pilot.app.tui_state.active_task_id = TID
+    runner = _FakeRunner()
+    pilot.app.active_runner = runner
+    scr._prepare_for_new_run()
+    thread = _Thread(tmp_path)
+    thread.seq = 2
+    thread.messages(_reply("m_orphan", "отменяю"))
+    scr._last_user_message_id = "m_orphan"
+    scr._poll_trace_tail()
+    await pilot.pause()
+    assert _trace_lines(scr.query_one("#trace"))[-1] == "› отменяю"
+    return scr, thread, runner
+
+
+def _preview_openers(tmp_path, tid=TID):
+    """Записи итога в сегментах превью сессии."""
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    segments = FileTaskStore(str(tmp_path)).read_segments(tid)
+    return [
+        m["outcome"]["opened_by"]
+        for s in segments
+        for m in s["messages"]
+        if m.get("type") == "turn_outcome"
+    ]
+
+
+async def _poll_ticks(pilot, scr, n=3):
+    for _ in range(n):
+        scr._poll_tick()
+        await pilot.pause()
+
+
+def _write_stop_record(thread):
+    thread.record(2, "m_orphan", status="stopped", reason="user_stop")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record_first", [True, False])
+async def test_undo_of_tailed_reply_leaves_no_line_in_any_order(
+    tmp_path, record_first
+):
+    """Реплика уже в ленте, Esc-откат сразу после отправки: запись стопа
+    её хода приходит до отката или после него (и после чистки сироты) —
+    строки «■ Отменено» нет ни вживую, ни после переоткрытия, ни в превью;
+    строка прошлого хода цела и свежая."""
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, thread, runner = await _tailed_send_setup(pilot, tmp_path)
+        if record_first:
+            _write_stop_record(thread)
+            scr._poll_trace_tail()
+            await pilot.pause()
+            assert _record_openers(scr) == ["u1", "m_orphan"]
+
+        scr._cancel_with_undo()
+        await pilot.pause()
+        assert _record_openers(scr) == ["u1"]
+        if not record_first:
+            _write_stop_record(thread)
+        runner._running = False
+        await _poll_ticks(pilot, scr)
+
+        assert not scr._pending_orphan_cleanups
+        assert _record_openers(scr) == ["u1"]
+        line = _fresh_line(scr)
+        assert (line.opened_by, line.text.plain) == ("u1", _done_line(1))
+        assert _shown_openers(tmp_path) == ["u1"]
+        assert _preview_openers(tmp_path) == ["u1"]
+        scr = await _reopen(pilot, tmp_path)
+        assert _record_openers(scr) == ["u1"]
+
+
+@pytest.mark.asyncio
+async def test_stop_without_undo_keeps_cancelled_line(tmp_path):
+    """Тот же ход без отката — обычный стоп: строка «■ Отменено · ЧЧ:ММ»
+    под его репликой, вживую, после переоткрытия и в превью."""
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, thread, runner = await _tailed_send_setup(pilot, tmp_path)
+        _write_stop_record(thread)
+        runner._running = False
+        await _poll_ticks(pilot, scr)
+
+        expected = f"■ Отменено · {_hm(_ended(2))}"
+        assert _record_openers(scr) == ["u1", "m_orphan"]
+        assert _turn_lines(scr)[-1].text.plain.startswith(expected)
+        assert _shown_openers(tmp_path) == ["u1", "m_orphan"]
+        assert _preview_openers(tmp_path) == ["u1", "m_orphan"]
+        scr = await _reopen(pilot, tmp_path)
+        assert _record_openers(scr) == ["u1", "m_orphan"]
+
+
 @pytest.mark.asyncio
 async def test_undo_with_record_before_discard_leaves_no_line(tmp_path):
     _prepare_one_turn(tmp_path)
@@ -610,8 +707,8 @@ async def test_late_stop_record_after_leaving_and_returning_shows_no_line(
     tmp_path,
 ):
     """Откат, уход в другой тред и возврат, пока остановленный поток висит
-    в повторах: его поздняя запись стопа строки не даёт. Набор снятых
-    реплик треда живёт до его чистки."""
+    в повторах: его поздняя запись стопа строки не даёт — реплики её хода
+    в истории нет."""
     _prepare_one_turn(tmp_path)
     _write_thread(tmp_path, OTHER, tui={"status": "completed"})
     async with _app(tmp_path).run_test() as pilot:
@@ -631,7 +728,7 @@ async def test_late_stop_record_after_leaving_and_returning_shows_no_line(
         old._running = False
         scr._run_orphan_cleanups()
         await pilot.pause()
-        assert TID not in scr._undone_reply_ids
+        assert not scr._pending_orphan_cleanups
         assert _record_openers(scr) == ["u1"]
 
 
