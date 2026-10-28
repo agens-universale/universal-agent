@@ -144,6 +144,10 @@ class Threads:
         parts.append(await self.store.read_stream(key, _HISTORY))
         return parts
 
+    async def turns(self, key: ThreadKey) -> list[StreamEntry]:
+        """Поток итогов хода ``turns`` целиком."""
+        return await self.store.read_stream(key, TURNS)
+
     async def subagent_events(self, key: ThreadKey) -> list[StreamEntry]:
         return await self.store.read_stream(key, "subagent_events")
 
@@ -388,7 +392,7 @@ class Threads:
         (``recount``) и ``last_turn``, если сиротой стала последняя запись
         ``turns``. Видимость записи — по всей истории (архивы и живая), как
         у ленты; архивы читаются только в этом случае."""
-        turns = [e.data for e in await self.store.read_stream(key, TURNS)]
+        turns = [e.data for e in await self.turns(key)]
         orphaned = bool(turns) and turn_anchor(turns[-1]) == message_id
         if orphaned:
             parts = await self.parts(key)

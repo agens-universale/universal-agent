@@ -469,7 +469,7 @@ async def _aparts_and_turns(
     threads: Threads, key: ThreadKey
 ) -> tuple[list[list[StreamEntry]], list[dict]]:
     parts = await threads.parts(key)
-    entries = await threads.store.read_stream(key, TURNS) if parts else []
+    entries = await threads.turns(key) if parts else []
     return parts, [_turn_envelope(key, e) for e in entries]
 
 

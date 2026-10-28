@@ -197,6 +197,17 @@ def _turn(threads, opened_by, status, reason=None):
     return write()
 
 
+def test_turns_reads_turn_outcome_stream(threads):
+    async def scenario():
+        assert await threads.turns(KEY) == []
+        await threads.append_messages(KEY, _msgs("u1"))
+        await _turn(threads, "u1", "done")
+        (entry,) = await threads.turns(KEY)
+        assert entry.data["outcome"]["opened_by"] == "u1"
+
+    asyncio.run(scenario())
+
+
 def test_discard_of_last_turn_opener_recounts_last_turn(threads):
     """Снята реплика, открывшая последний ход: короткий итог — от
     последнего хода, чья реплика осталась в истории (то же правило
