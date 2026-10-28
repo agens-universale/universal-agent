@@ -375,44 +375,133 @@ def _jira_meta(title: str) -> dict:
 
 
 class _RecordStore:
-    """Запись треда с ревизией; считает чтения."""
+    """Запись треда со снимком MCP; считает чтения."""
 
     def __init__(self, title: str) -> None:
         self.reads = 0
-        self.revision = 1
         self.title = title
 
     def get_record(self, task_id, system=None):
         from gc_testkit.develop_files import record_from_meta
 
         self.reads += 1
-        record = record_from_meta(_jira_meta(self.title), thread=task_id)
-        return record.model_copy(update={"revision": self.revision})
+        return record_from_meta(_jira_meta(self.title), thread=task_id)
+
+
+def _cursor(seq: int):
+    from gc_tui.models import TaskCursor
+
+    return TaskCursor(
+        position_token=seq, ordering_key=None, storage_epoch=None
+    )
+
+
+def _screen_on_record(scr, store, seq: int = 1) -> None:
+    """Экран на треде шпиона. Шпион умеет только запись: тест меряет
+    синхронно и до первого `await` снимает его (`scr._store = None`),
+    иначе таймер опроса спросил бы у него хвост."""
+    scr.app._mcp_snapshot = None
+    scr._store = store
+    scr._active_task_id = "t1"
+    scr._cursor = _cursor(seq)
 
 
 @pytest.mark.asyncio
-async def test_record_mcp_snapshot_read_once_per_tick_until_revision_changes():
-    """Без boot-снимка подписи MCP берутся из записи треда: за тик опроса
-    она читается один раз на серию строк, заново — после новой ревизии."""
+async def test_record_mcp_snapshot_not_read_per_call_row():
+    """Вне тика опроса строки вызова не читают запись треда каждая:
+    снимок MCP читается один раз, пока хвост ленты стоит."""
     pytest.importorskip("textual")
     store = _RecordStore("Создать задачу")
-    app = _app_without_warm_build()
-    async with app.run_test() as pilot:
-        app._mcp_snapshot = None
+    async with _app_without_warm_build().run_test() as pilot:
         scr = pilot.app.screen
-        scr._store = store
-        scr._active_task_id = "t1"
-        scr._in_poll_tick = True
+        _screen_on_record(scr, store)
         for _ in range(5):
             tools, _servers = scr._mcp_tool_info()
+        scr._store = None
         assert store.reads == 1
         assert tools["mcp_jira_create_issue"]["title"] == "Создать задачу"
 
-        scr._tick_record_cache = None  # следующий тик
-        store.title, store.revision = "Новая задача", 2
+
+@pytest.mark.asyncio
+async def test_record_mcp_snapshot_refreshes_after_side_write():
+    """Снимок MCP — боковая запись начала хода, ревизию не растит. Строки
+    его вызовов приходят новыми записями хвоста — по ним кэш и обновляется."""
+    pytest.importorskip("textual")
+    store = _RecordStore("Создать задачу")
+    async with _app_without_warm_build().run_test() as pilot:
+        scr = pilot.app.screen
+        _screen_on_record(scr, store)
+        scr._mcp_tool_info()
+        store.title = "Новая задача"  # боковая запись снимка
+        scr._cursor = _cursor(2)  # хвост дочитал вызовы нового хода
         tools, _servers = scr._mcp_tool_info()
+        scr._store = None
         assert tools["mcp_jira_create_issue"]["title"] == "Новая задача"
-        scr._in_poll_tick = False
+
+
+@pytest.mark.asyncio
+async def test_reopen_renders_mcp_rows_with_one_record_read():
+    """Переоткрытие длинной сессии: N строк MCP-вызовов — не больше
+    одного чтения записи треда, подписи из снимка."""
+    pytest.importorskip("textual")
+    store = _RecordStore("Создать задачу")
+    calls = [
+        {
+            "ts": "",
+            "payload": {
+                "type": "function_call",
+                "name": "mcp_jira_create_issue",
+                "call_id": f"m{i}",
+                "arguments": json.dumps({"key": f"PROJ-{i}"}),
+            },
+        }
+        for i in range(20)
+    ]
+    async with _app_without_warm_build().run_test() as pilot:
+        scr = pilot.app.screen
+        _screen_on_record(scr, store)
+        scr._render_records(calls)
+        scr._store = None
+        assert store.reads <= 1
+        await pilot.pause()
+        assert _content(_live_row(scr, "m19")).startswith(
+            "jira · Создать задачу"
+        )
+
+
+@pytest.mark.asyncio
+async def test_compaction_step_rows_see_snapshot_of_the_step():
+    """Шаг сжатия несёт записи за прежним курсором: его строки вызовов
+    подписаны снимком, прочитанным уже после шага."""
+    pytest.importorskip("textual")
+    from gc_tui.models import CompactionStep
+
+    store = _RecordStore("Создать задачу")
+    call = {
+        "ts": "",
+        "payload": {
+            "type": "function_call",
+            "name": "mcp_jira_create_issue",
+            "call_id": "m1",
+            "arguments": json.dumps({"key": "PROJ-1"}),
+        },
+    }
+    step = CompactionStep(
+        archive_tail=[],
+        segment_index=1,
+        compacted_by={"synthesis": "сводка"},
+        window_ids=frozenset(),
+        live_records=[call],
+    )
+    async with _app_without_warm_build().run_test() as pilot:
+        scr = pilot.app.screen
+        _screen_on_record(scr, store)
+        scr._mcp_tool_info()
+        store.title = "Новая задача"  # снимок нового хода
+        scr._apply_compaction(step, _cursor(2))
+        scr._store = None
+        await pilot.pause()
+        assert _content(_live_row(scr, "m1")).startswith("jira · Новая задача")
 
 
 # ---- пути от корня проекта (спека P3 §10, решение владельца) ----

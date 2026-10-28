@@ -5251,8 +5251,8 @@ class TraceScreen(Screen):
     def _mcp_tool_info(self) -> tuple[dict, tuple]:
         """Подписи MCP из снимка рантайма: (wire→McpToolInfo, серверы).
 
-        Пересчёт — только при смене источника (`_mcp_snapshot_key`): строки
-        вызова за тик опроса читают запись треда один раз."""
+        Пересчёт — только при смене источника (`_mcp_snapshot_key`): серия
+        строк вызова читает запись треда один раз."""
         from gc_core.constants.tool_display import (
             mcp_servers_of,
             mcp_tools_from_snapshot,
@@ -5274,14 +5274,16 @@ class TraceScreen(Screen):
         """Ключ источника снимка MCP: при том же ключе снимок не разбирается.
 
         Boot-снимок — сам объект (в ключе он и жив, id не переиспользуется);
-        иначе — тред и ревизия его записи (снимок тика, `_tick_record`)."""
+        иначе — тред и курсор хвоста ленты, без ввода-вывода. Снимок пишется
+        в начале хода, до записей его вызовов, а строка вызова рисуется из
+        записей, прочитанных до неё: курсор сдвинут до отрисовки — снимок,
+        прочитанный при новом курсоре, не старше её хода."""
         snap = getattr(self.app, "_mcp_snapshot", None)
         if snap is not None:
             return ("app", id(snap), snap)
-        record = self._tick_record()
-        if record is None:
+        if self._store is None or self._active_task_id is None:
             return ("none",)
-        return ("record", self._active_task_id, record.revision)
+        return ("tail", self._active_task_id, self._cursor)
 
     def _pending_wire_match(self, client_id: str, polled_content: str) -> bool:
         """Проверить, что pending-запись с этим client_id имеет wire_content,
@@ -5858,14 +5860,15 @@ class TraceScreen(Screen):
         """Шаг сжатия — обычная порция записей плюс маркер (спека 3.2).
 
         Строки до сжатия, карты экрана, индикатор, баннер подтверждения и
-        прокрутка остаются. Сбой — откат полной перерисовкой."""
+        прокрутка остаются. Сбой — откат полной перерисовкой. Курсор — до
+        отрисовки, как у хвоста: по нему строки берут снимок MCP."""
+        self._cursor = next_cursor
         try:
             self._append_compaction_step(step)
         except Exception:
             _log.exception("шаг сжатия не применён, трейс перерисован")
             self._rebuild_from_store()
             return
-        self._cursor = next_cursor
         self._refresh_header()
 
     def _append_compaction_step(self, step: CompactionStep) -> None:
