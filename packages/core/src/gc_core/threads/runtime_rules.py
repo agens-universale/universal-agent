@@ -137,3 +137,10 @@ def with_trace_id(rt: RuntimeStatus, trace_id: str) -> RuntimeStatus:
 def with_mcp_tools(rt: RuntimeStatus, snapshot: Any) -> RuntimeStatus:
     """Снимок «сервер MCP → тулы» для экрана ``/mcp``."""
     return _set(rt, mcp_tools=snapshot)
+
+
+def with_last_turn(
+    rt: RuntimeStatus, last_turn: Mapping[str, Any]
+) -> RuntimeStatus:
+    """Короткий итог последнего закрытого хода (``status``, ``reason``)."""
+    return _set(rt, last_turn=dict(last_turn))

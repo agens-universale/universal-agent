@@ -1,16 +1,23 @@
-"""Запись «итог хода» в файле треда: схема v1 и её разбор.
+"""Итог хода: схема v1, запись потока ``turns`` и её разбор.
 
-Строка ``data_*.jsonl`` с ``type: "turn_outcome"``; полезная нагрузка —
-под ключом ``outcome`` (не ``payload``: читатели считают ``payload``
-сообщением). Модуль — только формат: фактов не вычисляет, времени
-«сейчас» не знает. Схема расширяется без новой версии только
-необязательными полями — разбор лишние ключи игнорирует.
+Запись потока ``turns`` хранилища: ``{"after": <id>, "outcome": {...}}``.
+``after`` — ``id`` последнего сообщения хода на момент записи (место строки
+итога в ленте); полезная нагрузка — под ключом ``outcome`` (не
+``payload``: читатели считают ``payload`` сообщением). Фронтенд отдаёт
+запись читателям конвертом с ``type: "turn_outcome"``. Модуль — только
+формат: фактов не вычисляет, времени «сейчас» не знает. Схема
+расширяется без новой версии только необязательными полями — разбор
+лишние ключи игнорирует.
+
+Запись показывается, только пока сообщение её хода есть в истории
+(``turn_shown_in``): откат реплики и сброс истории поток не трогают —
+их записи остаются сиротами и не видны.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, get_args
+from typing import Any, Container, Literal, Mapping, get_args
 
 TURN_OUTCOME_TYPE = "turn_outcome"
 TURN_OUTCOME_VERSION = 1
@@ -57,13 +64,35 @@ class TurnOutcome:
         return payload
 
 
+def turn_entry(outcome: TurnOutcome, *, after: str | None) -> dict[str, Any]:
+    """Запись потока ``turns``: итог хода за сообщением ``after``."""
+    return {"after": after, "outcome": outcome.to_payload()}
+
+
+def last_turn_of(outcome: TurnOutcome) -> dict[str, Any]:
+    """Короткий итог хода для ``runtime.last_turn`` треда."""
+    return {"status": outcome.status, "reason": outcome.reason}
+
+
+def turn_shown_in(record: Mapping[str, Any], ids: Container[str]) -> bool:
+    """Запись видна, пока сообщение её хода есть в истории ``ids``:
+    реплика, открывшая ход, а у хода без реплики — его последнее
+    сообщение. Сирота (откат, сброс истории) — не видна."""
+    payload = record.get("outcome")
+    opened_by = (
+        payload.get("opened_by") if isinstance(payload, Mapping) else None
+    )
+    anchor = opened_by or record.get("after")
+    return isinstance(anchor, str) and anchor in ids
+
+
 def is_turn_outcome_record(record: Mapping[str, Any]) -> bool:
-    """Строка файла треда — запись итога хода."""
+    """Конверт записи треда — запись итога хода."""
     return record.get("type") == TURN_OUTCOME_TYPE
 
 
 def parse_turn_outcome(record: Mapping[str, Any]) -> TurnOutcome | None:
-    """Итог из строки файла треда; чужая или кривая запись — ``None``."""
+    """Итог из конверта записи; чужая или кривая запись — ``None``."""
     if not is_turn_outcome_record(record):
         return None
     payload = record.get("outcome")

@@ -22,25 +22,27 @@ from gc_core.execution import turn_clock
 from gc_core.execution.turn_clock import TurnClock, current_turn_clock
 from gc_core.persistence.turn_outcome import (
     CANCELLED,
+    TURN_OUTCOME_TYPE,
     USER_STOP,
     is_turn_outcome_record,
     parse_turn_outcome,
+    turn_shown_in,
 )
 from gc_core.run_context import acreate_run_context
 from gc_core.security.log_redaction import MASK
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core.states import State
-from gc_core.thread_store import (
-    ThreadSession,
-    discard_message_by_id,
-    load_thread_messages,
-)
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store import ThreadSession
+from gc_core.threads.errors import ThreadBusy
+from gc_core.threads.facade import Threads, run_sync
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
 from gc_core.utils.connect_backend import _aguard_model_call
 from gc_core.utils.logging_module import release_run_logger
 
 _SYS = "test"
 _TID = "t1"
+_KEY = ThreadKey(system=_SYS, thread=_TID)
 _LIMITS = (
     "step_limit",
     "tool_call_limit",
@@ -165,14 +167,32 @@ class _Run:
         finally:
             release_run_logger(self.ctx.logger)
 
-    def lines(self) -> list[dict]:
-        path = self.threads / f"data_{_SYS}_{_TID}.jsonl"
-        if not path.exists():
-            return []
-        return [json.loads(x) for x in path.read_text().splitlines()]
+    def messages(self) -> list[dict]:
+        entries = run_sync(self.store.read_stream(_KEY, "messages"))
+        return [
+            {"type": "message", "seq": e.seq, "payload": e.data}
+            for e in entries
+        ]
 
     def records(self) -> list[dict]:
-        return [r for r in self.lines() if is_turn_outcome_record(r)]
+        """Записи потока итогов — конвертами, как их видят читатели."""
+        entries = run_sync(self.store.read_stream(_KEY, "turns"))
+        return [
+            {"type": TURN_OUTCOME_TYPE, "seq": e.seq, **e.data}
+            for e in entries
+        ]
+
+    def lines(self) -> list[dict]:
+        """История с записями итога за сообщением своей привязки."""
+        lines = self.messages()
+        for record in self.records():
+            at = next(
+                i
+                for i, line in enumerate(lines)
+                if line.get("payload", {}).get("id") == record["after"]
+            )
+            lines.insert(at + 1, record)
+        return lines
 
 
 @pytest.fixture
@@ -207,7 +227,7 @@ async def test_finish_writes_done_after_last_message(run):
     assert outcome.error is None
     assert outcome.started_at.endswith("Z")
     assert outcome.ended_at.endswith("Z")
-    assert lines[-1]["seq"] == lines[-2]["seq"]
+    assert lines[-1]["after"] == lines[-2]["payload"]["id"]
 
 
 async def test_accepted_text_writes_done(tmp_path, monkeypatch):
@@ -244,13 +264,43 @@ async def test_next_turn_model_does_not_see_record(run):
     second_request = run.requests[-1]
     assert all(m.get("type") != "turn_outcome" for m in second_request)
     assert all("outcome" not in m for m in second_request)
-    messages, _ = load_thread_messages(str(run.threads), _SYS, _TID)[:2]
-    assert all("outcome" not in m for m in messages)
+    assert all("outcome" not in m["payload"] for m in run.messages())
     lines = run.lines()
     kinds = [r["type"] for r in lines]
     assert kinds.count("turn_outcome") == 2
     first_outcome = kinds.index("turn_outcome")
     assert lines[first_outcome + 1]["payload"]["id"] == "m2"
+
+
+async def test_record_lands_before_turn_idle_and_lease_release(
+    run, monkeypatch
+):
+    """Итог хода пишется по аренде хода: до отметки «ход окончен» и до
+    того, как тред отпущен другому процессу."""
+    seen: list = []
+    mark, release = ThreadSession.amark_turn, ThreadSession.arelease_lease
+
+    async def _mark(session, *, running):
+        if not running:
+            seen.append(("idle", len(run.records())))
+        return await mark(session, running=running)
+
+    async def _release(session):
+        seen.append(("release", len(run.records())))
+        return await release(session)
+
+    monkeypatch.setattr(ThreadSession, "amark_turn", _mark)
+    monkeypatch.setattr(ThreadSession, "arelease_lease", _release)
+
+    async def _fail():
+        raise RuntimeError("boom")
+
+    run.script = [[_finish("f1")], _fail]
+    await run.arun("первый", "m1")
+    with pytest.raises(RuntimeError):
+        await run.arun("второй", "m2")
+
+    assert seen == [("idle", 1), ("release", 1), ("idle", 2), ("release", 2)]
 
 
 async def test_record_lands_before_turn_end_compaction(run, monkeypatch):
@@ -295,11 +345,14 @@ async def test_subagent_loop_writes_nothing_and_keeps_parent_clock(run):
 
     run.script = [_first, [_finish("f2")]]
 
+    async def _pending():
+        return queue.pop() if queue else []
+
     await pr.arun_agent(
         [{"role": "user", "content": "задача", "id": "m_task"}],
         child,
         run.ctx,
-        get_pending_messages=lambda: queue.pop() if queue else [],
+        get_pending_messages=_pending,
     )
 
     assert len(run.requests) == 2
@@ -427,17 +480,23 @@ async def test_discarded_stop_does_not_flush_deferred(run, monkeypatch):
     assert seen == [True]
 
 
-async def test_esc_rollback_removes_record(run):
+async def test_esc_rollback_orphans_record(run):
+    """Откат реплики снимает только сообщение: запись её хода остаётся в
+    потоке сиротой и не видна читателям."""
+
     async def _stop():
         run.ex.stop_run()
         return [_finish()]
 
     run.script = [_stop]
     await run.arun(discard_writes_after_stop=True)
-    assert len(run.records()) == 1
+    (record,) = run.records()
+    assert turn_shown_in(record, {"m_user"})
 
-    assert discard_message_by_id(str(run.threads), _SYS, _TID, "m_user")
-    assert run.records() == []
+    assert await Threads(run.store).discard_message(_KEY, "m_user")
+    ids = {m["payload"]["id"] for m in run.messages()}
+    assert run.records() == [record]
+    assert not turn_shown_in(record, ids)
 
 
 def _stop_in_setup(run, monkeypatch) -> None:
@@ -515,8 +574,8 @@ async def test_limit_outcome_is_stopped_with_reason(run, limit):
         return None
 
     run.monkeypatch.setattr(ae, "arun_agent", _loop)
-    run.store.append_messages(
-        _SYS, _TID, [{"role": "user", "content": "x", "id": "m_old"}]
+    await Threads(run.store).append_messages(
+        _KEY, [{"role": "user", "content": "x", "id": "m_old"}]
     )
     await run.arun()
 
@@ -632,9 +691,15 @@ async def test_error_before_loop_writes_nothing(run):
     assert run.records() == []
 
 
-async def test_record_write_failure_does_not_fail_run(run, monkeypatch):
+@pytest.mark.parametrize(
+    "error", [OSError("disk full"), ThreadBusy("тред ведёт другой процесс")]
+)
+async def test_record_write_failure_does_not_fail_run(run, monkeypatch, error):
+    """Сбой записи и отказ по аренде (``OwnershipError``) — предупреждение
+    в журнал прогона, ход не падает."""
+
     async def _broken(*_a, **_kw):
-        raise OSError("disk full")
+        raise error
 
     monkeypatch.setattr(ThreadSession, "aappend_turn_outcome", _broken)
     run.script = [[_finish()]]

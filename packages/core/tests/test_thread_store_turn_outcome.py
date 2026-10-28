@@ -1,28 +1,23 @@
-"""Запись итога хода в файле треда: место, ``seq``, откат, сжатие."""
+"""Итог хода — поток ``turns`` хранилища v2: привязка, runtime, сироты."""
 
-import json
-
-from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_paths import sanitize_system_id
-from gc_core.thread_store import (
-    ThreadSession,
-    append_new_thread_messages,
-    append_turn_outcome_record,
-    discard_message_by_id,
-    load_thread_messages,
-    load_thread_meta,
-)
-from gc_core.thread_store_async import SyncThreadStoreAdapter
-from gc_core.thread_store_file import FileThreadStore
-from gc_core.thread_store_file_durable import DurableFileThreadStore
-from gc_testkit.memory_thread_store import MemoryThreadStore
+import pytest
+from gc_core.persistence.turn_outcome import TurnOutcome, turn_shown_in
+from gc_core.thread_store import ThreadSession
+from gc_core.threads.errors import ThreadBusy
+from gc_core.threads.facade import Threads
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import LeaseRequest, ThreadKey
+from gc_core.threads.session_writer import SessionWriter
+from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 from gc_testkit.settings import make_settings
 
+KEY = ThreadKey(system="cli", thread="t")
 
-def _outcome(opened_by="u1"):
+
+def _outcome(opened_by="u1", status="done", reason=None):
     return TurnOutcome(
-        status="done",
-        reason=None,
+        status=status,
+        reason=reason,
         opened_by=opened_by,
         started_at="2026-10-22T11:30:53.004Z",
         ended_at="2026-10-22T11:32:05.118Z",
@@ -48,232 +43,195 @@ async def _session(store):
     )
 
 
-def _rows(path):
-    return [json.loads(line) for line in path.read_text().splitlines()]
+async def _turns(store):
+    return [e.data for e in await store.read_stream(KEY, "turns")]
 
 
-def _live(tmp_path):
-    return _rows(tmp_path / "data_cli_t.jsonl")
+async def _ids(store):
+    return {e.data["id"] for e in await store.read_stream(KEY, "messages")}
 
 
-def _kinds(rows):
-    return [
-        row["payload"]["id"] if row["type"] == "message" else row["type"]
-        for row in rows
-    ]
-
-
-async def test_record_follows_last_message_with_its_seq(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+async def test_record_is_anchored_to_last_message_of_the_turn(tmp_path):
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
     await session.apersist_batch(
         [_user("u1"), _answer("a1")], previous_response_id=None
     )
 
     assert await session.aappend_turn_outcome(_outcome(), discarded=False)
 
-    rows = _live(tmp_path)
-    assert _kinds(rows) == ["u1", "a1", "turn_outcome"]
-    assert rows[2]["seq"] == 2
-    assert rows[2]["thread_id"] == "t"
-    assert rows[2]["system"] == "cli"
-    assert rows[2]["outcome"] == _outcome().to_payload()
-    assert isinstance(rows[2]["ts"], str)
-    assert "payload" not in rows[2]
-    assert session.persisted_messages_count == 2
+    assert await _turns(store) == [
+        {"after": "a1", "outcome": _outcome().to_payload()}
+    ]
+    record = await store.get_thread(KEY)
+    assert record.max_seq["messages"] == 2
+    assert record.info.messages_count == 2
 
 
-async def test_loader_skips_record_and_next_message_gets_next_seq(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+async def test_anchor_of_message_without_id_is_the_id_readers_see(tmp_path):
+    """Ответ модели без ``id``: хранилище даёт ему id на чтении — запись
+    привязана к нему, а не пропускает привязку."""
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
+    answer = {"type": "message", "role": "assistant", "content": "ответ"}
     await session.apersist_batch(
-        [_user("u1"), _answer("a1")], previous_response_id=None
+        [_user("u1"), answer], previous_response_id=None
     )
+
     await session.aappend_turn_outcome(_outcome(), discarded=False)
 
-    messages, _, max_seq = load_thread_messages(str(tmp_path), "cli", "t")
-    assert [m["id"] for m in messages] == ["u1", "a1"]
-    assert max_seq == 2
-
-    await session.apersist_batch([_user("u2")], previous_response_id=None)
-    assert [row["seq"] for row in _live(tmp_path)] == [1, 2, 2, 3]
+    last = (await store.read_stream(KEY, "messages"))[-1].data["id"]
+    assert [t["after"] for t in await _turns(store)] == [last]
 
 
-async def test_record_does_not_touch_messages_count(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
-    await session.apersist_batch(
-        [_user("u1"), _answer("a1")], previous_response_id=None
+async def test_record_sets_last_turn_in_runtime(tmp_path):
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
+    await session.apersist_batch([_user("u1")], previous_response_id=None)
+
+    await session.aappend_turn_outcome(
+        _outcome(status="stopped", reason="step_limit"), discarded=False
     )
-    await session.aappend_turn_outcome(_outcome(), discarded=False)
 
-    assert load_thread_meta(str(tmp_path), "cli", "t")["messages_count"] == 2
-
-
-def test_envelope_system_is_sanitized_like_message_lines(tmp_path):
-    append_new_thread_messages(
-        str(tmp_path), "My CLI", "t", [_user("u1")], set()
-    )
-    append_turn_outcome_record(str(tmp_path), "My CLI", "t", _outcome(), seq=1)
-
-    path = tmp_path / f"data_{sanitize_system_id('My CLI')}_t.jsonl"
-    message, record = _rows(path)
-    assert record["system"] == sanitize_system_id("My CLI")
-    assert record["system"] == message["system"]
+    runtime = (await store.get_thread(KEY)).runtime
+    assert runtime.last_turn == {"status": "stopped", "reason": "step_limit"}
+    assert runtime.live_msg_count == 1
+    assert session.runtime == runtime
 
 
 async def test_deferred_messages_are_written_before_record(tmp_path):
-    # persist: turn сейчас включается только у durable-хранилища, а оно
-    # записей не пишет. Флаг ставится руками: страж порядка самой операции.
-    session = await _session(FileThreadStore(str(tmp_path)))
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
     session._defer_persist = True
     await session.apersist_batch([_user("u1")], previous_response_id=None)
     await session.apersist_batch([_answer("a1")], previous_response_id=None)
 
     assert await session.aappend_turn_outcome(_outcome(), discarded=False)
 
-    rows = _live(tmp_path)
-    assert _kinds(rows) == ["u1", "a1", "turn_outcome"]
-    assert rows[2]["seq"] == 2
+    assert await _ids(store) == {"u1", "a1"}
+    assert [t["after"] for t in await _turns(store)] == ["a1"]
 
 
 async def test_discarded_turn_does_not_flush_deferred(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
     await session.apersist_batch([_user("u1")], previous_response_id=None)
     session._defer_persist = True
     await session.apersist_batch([_answer("a1")], previous_response_id=None)
 
     assert await session.aappend_turn_outcome(_outcome(), discarded=True)
 
-    rows = _live(tmp_path)
-    assert _kinds(rows) == ["u1", "turn_outcome"]
-    assert rows[1]["seq"] == 1
+    assert await _ids(store) == {"u1"}
+    assert [t["after"] for t in await _turns(store)] == ["u1"]
 
 
 async def test_empty_thread_gets_no_record(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
 
     assert not await session.aappend_turn_outcome(_outcome(), discarded=False)
-    assert not (tmp_path / "data_cli_t.jsonl").exists()
+    assert await store.get_thread(KEY) is None
 
 
-async def test_store_without_capability_gets_no_record():
+async def test_any_store_records_the_turn():
     store = MemoryThreadStore()
     session = await _session(store)
     await session.apersist_batch([_user("u1")], previous_response_id=None)
 
-    assert not await session.aappend_turn_outcome(_outcome(), discarded=False)
-    assert [m["id"] for m in store.load_messages("cli", "t")] == ["u1"]
+    assert await session.aappend_turn_outcome(_outcome(), discarded=False)
+
+    assert [t["after"] for t in await _turns(store)] == ["u1"]
 
 
-def test_adapter_exposes_capability_only_when_store_has_it(tmp_path):
-    memory = SyncThreadStoreAdapter(MemoryThreadStore())
-    assert memory.aappend_turn_outcome is None
-    durable = DurableFileThreadStore(str(tmp_path))
-    assert SyncThreadStoreAdapter(durable).aappend_turn_outcome is None
-    plain = SyncThreadStoreAdapter(FileThreadStore(str(tmp_path)))
-    assert callable(plain.aappend_turn_outcome)
-
-
-async def test_durable_store_writes_no_record_and_recovers(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
+async def test_durable_owner_records_the_turn_by_its_lease():
+    """Тред с бессрочной арендой (durable-исполнитель): запись хода сбоку
+    проходит только по ней — итог хода пишется."""
+    store = MemoryThreadStore()
+    request = LeaseRequest(owner="workflow", ttl=None)
+    lease = (await store.claim(KEY, request)).lease
     session = await _session(store)
-    await session.apersist_batch(
-        [_user("u1"), _answer("a1")], previous_response_id=None
+    session.writer = SessionWriter(
+        store, KEY, owner="workflow", ttl=None, lease=lease
     )
-    before = (tmp_path / "data_cli_t.jsonl").read_bytes()
+    await session.apersist_batch([_user("u1")], previous_response_id=None)
+
+    assert await session.aappend_turn_outcome(_outcome(), discarded=False)
+
+    assert [t["after"] for t in await _turns(store)] == ["u1"]
+
+
+async def test_foreign_durable_owner_refuses_the_record():
+    """Тред ведёт durable-исполнитель, своей аренды у сессии нет: запись
+    отказана (``OwnershipError`` → ``ThreadBusy``), поток не тронут."""
+    store = MemoryThreadStore()
+    session = await _session(store)
+    await session.apersist_batch([_user("u1")], previous_response_id=None)
+    await session.arelease_lease()
+    await store.claim(KEY, LeaseRequest(owner="workflow", ttl=None))
+    session.writer._released = False
+
+    with pytest.raises(ThreadBusy):
+        await session.aappend_turn_outcome(_outcome(), discarded=False)
+    assert await _turns(store) == []
+
+
+async def test_released_thread_gets_no_late_record(tmp_path):
+    """Тред отпущен: его может вести другой ход — поздняя запись итога
+    затёрла бы его runtime."""
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
+    await session.apersist_batch([_user("u1")], previous_response_id=None)
+    await session.arelease_lease()
 
     assert not await session.aappend_turn_outcome(_outcome(), discarded=False)
-
-    assert (tmp_path / "data_cli_t.jsonl").read_bytes() == before
-    await session.apersist_batch([_user("u2")], previous_response_id=None)
-    snapshot = DurableFileThreadStore(str(tmp_path)).read_snapshot("cli", "t")
-    assert [m["id"] for m in snapshot.state.messages] == ["u1", "a1", "u2"]
-    assert snapshot.state.max_seq == 3
-
-
-async def _two_turns(tmp_path):
-    """Ход ``u0`` с записью, затем ход ``u1`` с ответом."""
-    session = await _session(FileThreadStore(str(tmp_path)))
-    await session.apersist_batch(
-        [_user("u0"), _answer("a0")], previous_response_id=None
-    )
-    await session.aappend_turn_outcome(_outcome("u0"), discarded=False)
-    await session.apersist_batch(
-        [_user("u1"), _answer("a1")], previous_response_id=None
-    )
-    return session
-
-
-async def test_discard_removes_reply_and_its_record_only(tmp_path):
-    session = await _two_turns(tmp_path)
-    await session.aappend_turn_outcome(_outcome("u1"), discarded=False)
-
-    assert discard_message_by_id(str(tmp_path), "cli", "t", "u1")
-
-    rows = _live(tmp_path)
-    assert _kinds(rows) == ["u0", "a0", "turn_outcome", "a1"]
-    assert rows[2]["outcome"]["opened_by"] == "u0"
-    assert load_thread_meta(str(tmp_path), "cli", "t")["messages_count"] == 3
-
-
-async def test_second_discard_removes_record_written_after_first(tmp_path):
-    await _two_turns(tmp_path)
-    assert discard_message_by_id(str(tmp_path), "cli", "t", "u1")
-    append_turn_outcome_record(
-        str(tmp_path), "cli", "t", _outcome("u1"), seq=3
-    )
-
-    assert discard_message_by_id(str(tmp_path), "cli", "t", "u1")
-
-    assert _kinds(_live(tmp_path)) == ["u0", "a0", "turn_outcome", "a1"]
-    assert load_thread_meta(str(tmp_path), "cli", "t")["messages_count"] == 3
-    assert not discard_message_by_id(str(tmp_path), "cli", "t", "u1")
-
-
-async def test_record_without_opener_survives_discard(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
-    await session.apersist_batch(
-        [_user("u1"), _answer("a1")], previous_response_id=None
-    )
-    await session.aappend_turn_outcome(_outcome(None), discarded=False)
-
-    assert discard_message_by_id(str(tmp_path), "cli", "t", "u1")
-
-    assert _kinds(_live(tmp_path)) == ["a1", "turn_outcome"]
+    assert await _turns(store) == []
 
 
 def _summary_payload():
     return {"summary_message_content": "сводка", "dialog_steps_offset": 1}
 
 
-async def test_turn_end_compaction_archives_record_with_turn(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+async def test_compaction_keeps_record_visible_by_its_reply(tmp_path):
+    """Сжатие конца хода уносит сообщения хода в архив, поток итогов не
+    трогает: реплика хода — в истории треда (архив), запись видна."""
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
     await session.apersist_batch(
         [_user("u1"), _answer("a1")], previous_response_id=None
     )
     await session.aappend_turn_outcome(_outcome(), discarded=False)
 
-    result = await session.aarchive_and_compact_summary_payload(
-        _summary_payload()
-    )
+    await session.aarchive_and_compact_summary_payload(_summary_payload())
 
-    (archive,) = tmp_path.glob("data_cli_t__pre_summary__*.jsonl")
-    assert _kinds(_rows(archive)) == ["u1", "a1", "turn_outcome"]
-    live = _live(tmp_path)
-    assert len(live) == 1
-    assert live[0]["payload"]["id"] == result["newly_summarized_message_id"]
+    (record,) = await _turns(store)
+    archive = (await store.get_thread(KEY)).archives[0].id
+    archived = {e.data["id"] for e in await store.read_archive(KEY, archive)}
+    assert turn_shown_in(record, archived | await _ids(store))
 
 
-async def test_mid_turn_compaction_record_follows_turn_messages(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+async def test_undone_reply_leaves_an_orphan_record(tmp_path):
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
     await session.apersist_batch([_user("u1")], previous_response_id=None)
-    result = await session.aarchive_and_compact_summary_payload(
-        _summary_payload()
-    )
-    await session.apersist_batch([_answer("a1")], previous_response_id=None)
+    await session.aappend_turn_outcome(_outcome("u1"), discarded=True)
+    await session.arelease_lease()
 
-    assert await session.aappend_turn_outcome(_outcome(), discarded=False)
+    assert await Threads(store).discard_message(KEY, "u1")
 
-    summary_id = result["newly_summarized_message_id"]
-    rows = _live(tmp_path)
-    assert _kinds(rows) == [summary_id, "a1", "turn_outcome"]
-    assert rows[2]["seq"] == 2
-    assert load_thread_meta(str(tmp_path), "cli", "t")["messages_count"] == 2
+    (record,) = await _turns(store)
+    assert not turn_shown_in(record, await _ids(store))
+
+
+async def test_reset_history_orphans_old_records(tmp_path):
+    """Сброс треда (``-n``): поток итогов остаётся, его записи — сироты:
+    у сообщений нового разговора другие id."""
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
+    await session.apersist_batch([_user("u1")], previous_response_id=None)
+    await session.aappend_turn_outcome(_outcome("u1"), discarded=False)
+    await session.writer.acommit(reset_history=True)
+    fresh = await _session(store)
+    await fresh.apersist_batch([_user("u2")], previous_response_id=None)
+
+    (record,) = await _turns(store)
+    assert not turn_shown_in(record, await _ids(store))
