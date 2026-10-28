@@ -2232,6 +2232,12 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def on_mount(self) -> None:
         self.query_one(_SEL_CMDINPUT, CommandTextArea).focus()
+        # Автопрокрутка выделения Textual плюс протяжка ниже ленты (спека
+        # P3 §2.7): над накладками, полем ввода и футером лента едет вниз,
+        # конец выделения остаётся в ленте.
+        textual_compat.hook_auto_scroll(
+            self, lambda: self.query_one_optional(_SEL_TRACE)
+        )
         self._show_brand()
         self._render_startup_notices()
         # Per-project история input-реплик: project_dir известен со старта
@@ -3948,7 +3954,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if view is None:
             model = ToolBlocks(
                 self._call_timers,
-                diff_preview=self._trace_inline_max_lines(),
+                diff_preview=self._trace_diff_preview_lines(),
             )
             view = ToolBlocksView(
                 _TraceBlockHost(self), model, level="", depth=0
@@ -4080,7 +4086,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if view is None:
             model = ToolBlocks(
                 self._call_timers,
-                diff_preview=self._trace_inline_max_lines(),
+                diff_preview=self._trace_diff_preview_lines(),
                 agent_window=True,
             )
             view = ToolBlocksView(
@@ -4429,8 +4435,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Секция `agent_edits` базовых настроек окна — словарём."""
         return self.app.base_settings().settings.agent_edits.model_dump()
 
-    def _trace_inline_max_lines(self) -> int:
-        """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
+    def _trace_diff_preview_lines(self) -> int:
+        """Строк превью диффа на файл —
+        `agent_edits.trace_diff_preview_lines`."""
         return edit_settings(self._agent_edits_section())[0]
 
     def _replay_expanded_turns(self) -> int:
@@ -5811,20 +5818,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._reasoning_clock.start("stream")
         else:
             self._reasoning_clock.stop("stream")
-
-    def _check_auto_scroll(
-        self, select_widget, mouse_coordinate, delta_y
-    ) -> None:
-        """Автопрокрутка выделения Textual плюс протяжка ниже ленты (спека
-        P3 §2.7): над накладками, полем ввода и футером лента едет вниз,
-        конец выделения остаётся в ленте (`textual_compat`)."""
-        textual_compat.check_auto_scroll(
-            self,
-            self.query_one_optional(_SEL_TRACE),
-            select_widget,
-            mouse_coordinate,
-            delta_y,
-        )
 
     def on_mouse_move(self, _event: events.MouseMove) -> None:
         """F5: движение мыши при выделении — активность, сторож ждёт."""

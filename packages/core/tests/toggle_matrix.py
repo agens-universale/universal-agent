@@ -954,7 +954,7 @@ NOT_IN_MATRIX = {
     # гоняет CLI-прогон, до ленты TUI он не доходит. Покрытие — наборы TUI
     # `test_trace_diff_block.py`, `test_trace_diff_replay.py`,
     # `test_turn_summary_segment.py`.
-    "agent_edits.trace_inline_max_lines": "только TUI: свёртка инлайн-диффа в ленте",
+    "agent_edits.trace_diff_preview_lines": "только TUI: свёртка инлайн-диффа в ленте",
     "agent_edits.replay_expanded_turns": "только TUI: окно развёрнутых ходов при открытии треда",
     "agent_edits.turn_summary_in_status": "только TUI: сводка правок в строке-итоге хода",
     # Запись журнала правок по режиму запуска: пишет отдельный канал (журнал и

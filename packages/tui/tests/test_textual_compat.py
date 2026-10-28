@@ -186,6 +186,20 @@ async def test_other_version_anchored_scroll_is_plain_anchor(monkeypatch):
     assert await _anchored_scroll_y() < 0
 
 
+def test_other_version_scroll_skips_private_anchor_state(monkeypatch):
+    """На чужой версии прокрутка не трогает приватное состояние якоря:
+    его может не быть, и тогда падала бы каждая прокрутка ленты."""
+    from textual.widget import Widget
+
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    scroll = textual_compat.AnchoredScroll()
+    del scroll._anchored, scroll._anchor_released
+
+    scroll.set_reactive(Widget.scroll_y, 5)
+
+    assert scroll.scroll_y == 5
+
+
 class _TallAnchored(App):
     """Якорная лента выше окна: тридцать строк в окне на десять."""
 
@@ -246,18 +260,9 @@ class _BelowScreenApp(_Lines):
     """Стенд repro2.py с протяжкой ниже ленты, как у TraceScreen."""
 
     def on_mount(self) -> None:
-        screen = self.screen
-
-        def check(select_widget, mouse_coordinate, delta_y):
-            textual_compat.check_auto_scroll(
-                screen,
-                self.query_one("#t"),
-                select_widget,
-                mouse_coordinate,
-                delta_y,
-            )
-
-        screen._check_auto_scroll = check
+        textual_compat.hook_auto_scroll(
+            self.screen, lambda: self.query_one("#t")
+        )
 
 
 @pytest.mark.asyncio
@@ -547,3 +552,54 @@ async def test_paint_after_mount_failure_leaves_no_hold(monkeypatch):
     async with app.run_test() as pilot:
         assert await _in_app(pilot, mount_hold_fail) == 0
         assert not textual_compat._PAINT_HOLDS
+
+
+def _trace_app(tmp_path, tid):
+    from gc_tui.app import TuiApp
+
+    _write_task(tmp_path, tid)
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_trace_screen_hooks_auto_scroll_on_patched_version(tmp_path):
+    from textual.screen import Screen
+
+    async with _trace_app(tmp_path, "sel3").run_test(size=(80, 24)) as pilot:
+        hook = pilot.app.screen._check_auto_scroll
+        assert getattr(hook, "__func__", None) is not Screen._check_auto_scroll
+
+
+@pytest.mark.asyncio
+async def test_other_version_trace_screen_keeps_stock_auto_scroll(
+    tmp_path, monkeypatch
+):
+    """Чужая версия Textual: хук не ставится, выделение идёт через
+    автопрокрутку Textual как есть — её сигнатура экрану не важна."""
+    from textual.screen import Screen
+
+    stock = Screen._check_auto_scroll
+    calls = []
+
+    def recorded(self, *args, **kwargs):
+        calls.append(args)
+        return stock(self, *args, **kwargs)
+
+    monkeypatch.setattr(Screen, "_check_auto_scroll", recorded)
+    monkeypatch.setattr(textual, "__version__", "9.0.0")
+    async with _trace_app(tmp_path, "sel4").run_test(size=(80, 24)) as pilot:
+        scr = await _tall_trace(pilot, "sel4")
+        assert scr._check_auto_scroll.__func__ is recorded
+        await pilot.mouse_down("#trace", offset=(4, 2))
+        await pilot.hover("#trace", offset=(6, 5))
+        await pilot.hover("#cmdinput", offset=(4, 0))
+        await pilot.pause()
+        await pilot.mouse_up("#cmdinput", offset=(4, 0))
+        await pilot.pause()
+        assert calls

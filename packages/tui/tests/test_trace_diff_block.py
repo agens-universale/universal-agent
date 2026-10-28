@@ -530,7 +530,7 @@ async def test_lookup_failure_does_not_break_trace(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_collapse_threshold_comes_from_config(tmp_path):
-    """Порог свёртки берётся из agent_edits.trace_inline_max_lines; под
+    """Порог свёртки берётся из agent_edits.trace_diff_preview_lines; под
     блоком (P4 §4.0) своего хвоста у диффа нет — одна фраза блока."""
     tid = "threshold"
     _write_thread(
@@ -547,7 +547,7 @@ async def test_collapse_threshold_comes_from_config(tmp_path):
     )
 
     async with _screen(
-        tmp_path, tid, config={"agent_edits": {"trace_inline_max_lines": 3}}
+        tmp_path, tid, config={"agent_edits": {"trace_diff_preview_lines": 3}}
     ) as scr:
         from gc_tui.widgets.tool_blocks_view import BlockAction
 
@@ -615,7 +615,7 @@ def _focus_fixture(tmp_path, tid: str) -> None:
 #: Лимит для тестов фокуса: блок обрезан (сноска есть) и при этом короток.
 _FOCUS_CONFIG = {
     "agent.model": "M",
-    "agent_edits": {"trace_inline_max_lines": 5},
+    "agent_edits": {"trace_diff_preview_lines": 5},
 }
 
 
@@ -737,7 +737,7 @@ async def test_tail_follows_the_width(tmp_path):
     async with _pilot(
         tmp_path,
         tid,
-        {"agent.model": "M", "agent_edits": {"trace_inline_max_lines": 30}},
+        {"agent.model": "M", "agent_edits": {"trace_diff_preview_lines": 30}},
     ) as pilot:
         scr = pilot.app.screen
         block = scr.query_one(DiffBlock)

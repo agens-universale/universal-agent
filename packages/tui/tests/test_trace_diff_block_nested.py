@@ -366,7 +366,7 @@ async def test_nested_collapse_threshold_comes_from_config(tmp_path):
     )
 
     async with _screen(
-        tmp_path, tid, config={"agent_edits": {"trace_inline_max_lines": 3}}
+        tmp_path, tid, config={"agent_edits": {"trace_diff_preview_lines": 3}}
     ) as scr:
         block = scr.query_one(DiffBlock)
         body = block.query_one(".block-body", Static).visual.plain

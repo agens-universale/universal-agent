@@ -102,7 +102,8 @@ class AnchoredScroll(VerticalScroll):
 
     def set_reactive(self, reactive, value) -> None:
         scroll = reactive in (Widget.scroll_y, Widget.scroll_target_y)
-        if scroll and self._anchor_held() and textual_is_patched_version():
+        # Версия — до приватного состояния якоря: на иной его может не быть.
+        if scroll and textual_is_patched_version() and self._anchor_held():
             value = self._anchor_y
         super().set_reactive(reactive, value)
 
@@ -274,3 +275,24 @@ def check_auto_scroll(
     keep_select_end_in(screen, container, mouse_coordinate)
     if was_running or abs(delta_y) >= 1:
         auto_scroll_below(screen, container, mouse_coordinate[1])
+
+
+def hook_auto_scroll(
+    screen: Screen, container: Callable[[], Widget | None]
+) -> bool:
+    """Поставить `check_auto_scroll` хуком `_check_auto_scroll` экрана;
+    `container` — лента на момент движения мыши.
+
+    Только для `PATCHED_TEXTUAL`: на иной версии хук не ставится, экран
+    остаётся с автопрокруткой Textual как есть — смена её сигнатуры или
+    пропажа метода выделение не ломает. `True` — хук поставлен."""
+    if not textual_is_patched_version():
+        return False
+
+    def check(select_widget, mouse_coordinate, delta_y) -> None:
+        check_auto_scroll(
+            screen, container(), select_widget, mouse_coordinate, delta_y
+        )
+
+    screen._check_auto_scroll = check
+    return True

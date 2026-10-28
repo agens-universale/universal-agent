@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterable, Optional, Protocol, Sequence
 
 from gc_core.config_modules.agent_edits import (
     DEFAULT_REPLAY_EXPANDED_TURNS,
-    DEFAULT_TRACE_INLINE_MAX_LINES,
+    DEFAULT_TRACE_DIFF_PREVIEW_LINES,
 )
 from rich.text import Text
 from textual import events
@@ -662,5 +662,5 @@ class PreviewBlocks:
     views: BlockViews = field(default_factory=BlockViews)
     timers: CallTimers = field(default_factory=CallTimers)
     edits_lookup: Any = None
-    diff_preview: int = DEFAULT_TRACE_INLINE_MAX_LINES
+    diff_preview: int = DEFAULT_TRACE_DIFF_PREVIEW_LINES
     expanded_turns: int = DEFAULT_REPLAY_EXPANDED_TURNS

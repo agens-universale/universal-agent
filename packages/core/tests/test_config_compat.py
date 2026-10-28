@@ -208,20 +208,20 @@ def test_old_section_in_a_higher_layer_still_overrides_the_new_one_below(
     global_cfg = tmp_path / "global.yml"
     global_cfg.write_text(
         "backend:\n  api_mode: chat_completions\n"
-        "agent_edits:\n  trace_inline_max_lines: 30\n  snapshots_max_files: 500\n",
+        "agent_edits:\n  trace_diff_preview_lines: 30\n  snapshots_max_files: 500\n",
         encoding="utf-8",
     )
     proj = tmp_path / "proj"
     (proj / ".gc").mkdir(parents=True)
     (proj / ".gc" / "config.yml").write_text(
-        "diff_tui:\n  trace_inline_max_lines: 50\n  cache_max_orig: 42\n",
+        "diff_tui:\n  trace_diff_preview_lines: 50\n  cache_max_orig: 42\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(proj)
 
     loaded = load_settings(str(global_cfg))
 
-    assert loaded.settings.agent_edits.trace_inline_max_lines == 50
+    assert loaded.settings.agent_edits.trace_diff_preview_lines == 50
     assert loaded.settings.agent_edits.snapshots_max_files == 42
     assert any(
         "config.yml" in n and "diff_tui" in n for n in loaded.runtime.notices
@@ -245,7 +245,7 @@ def test_notice_for_a_file_sync_does_not_update_asks_to_edit_it_by_hand(
     global_cfg = tmp_path / "global.yml"
     global_cfg.write_text(
         "backend:\n  api_mode: chat_completions\n"
-        "diff_tui:\n  trace_inline_max_lines: 30\n",
+        "diff_tui:\n  trace_diff_preview_lines: 30\n",
         encoding="utf-8",
     )
     proj = tmp_path / "proj"
@@ -277,12 +277,12 @@ def test_overrides_with_the_old_section_name_still_apply():
     from gc_core.config import apply_cli_overrides
     from gc_testkit.settings import make_settings
 
-    base = make_settings({"agent_edits.trace_inline_max_lines": 30})
+    base = make_settings({"agent_edits.trace_diff_preview_lines": 30})
     loaded = apply_cli_overrides(
-        base, extra_overrides={"diff_tui": {"trace_inline_max_lines": 50}}
+        base, extra_overrides={"diff_tui": {"trace_diff_preview_lines": 50}}
     )
 
-    assert loaded.settings.agent_edits.trace_inline_max_lines == 50
+    assert loaded.settings.agent_edits.trace_diff_preview_lines == 50
     assert any("diff_tui" in n for n in loaded.runtime.notices)
 
 
@@ -390,3 +390,54 @@ def test_model_wins_over_level_in_one_layer():
     raw = {"level": "auto", "model": "giga"}
     compat.apply_compat(raw)
     assert raw == {"model": "giga"}
+
+
+def test_old_trace_inline_max_lines_is_dropped_not_carried(
+    tmp_path, monkeypatch
+):
+    """Ключ сменил смысл (было «30 экранных строк», стало «строк превью на
+    файл») и имя: старое значение не переносится — действует умолчание
+    нового ключа, уведомление называет замену."""
+    from gc_core.config import load_settings
+    from gc_core.config_modules import env_vars
+    from gc_core.config_modules.env_vars import EnvVars
+
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path))
+    monkeypatch.chdir(tmp_path)
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "backend:\n  api_mode: chat_completions\n"
+        "agent_edits:\n  trace_inline_max_lines: 30\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_settings(str(cfg))
+
+    assert loaded.settings.agent_edits.trace_diff_preview_lines == 10
+    (note,) = [
+        n for n in loaded.runtime.notices if "trace_inline_max_lines" in n
+    ]
+    assert "trace_diff_preview_lines" in note
+    assert "устарел и игнорируется" in note
+
+
+def test_trace_diff_preview_lines_is_read(tmp_path, monkeypatch):
+    from gc_core.config import load_settings
+    from gc_core.config_modules import env_vars
+    from gc_core.config_modules.env_vars import EnvVars
+
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path))
+    monkeypatch.chdir(tmp_path)
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "backend:\n  api_mode: chat_completions\n"
+        "agent_edits:\n  trace_diff_preview_lines: 7\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_settings(str(cfg))
+
+    assert loaded.settings.agent_edits.trace_diff_preview_lines == 7
+    assert not [n for n in loaded.runtime.notices if "agent_edits" in n]

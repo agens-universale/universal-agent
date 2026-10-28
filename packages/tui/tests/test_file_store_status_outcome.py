@@ -78,9 +78,44 @@ def _outcome_record(seq: int, opened_by: str, status: str, reason=None):
     }
 
 
+def _row_status(store: FileTaskStore, task) -> str | None:
+    return store.turn_status(task.thread_id, task.status)
+
+
+def test_list_tasks_reads_no_thread_data(tmp_path, monkeypatch):
+    """Список — только мета: хвосты data_*.jsonl читает строка списка
+    (`turn_status`), а не `list_tasks` (экран зовёт его на каждый символ
+    фильтра). Статус списка — исход из меты."""
+    from gc_tui.services.stores import file_store
+
+    for tid in ("a", "b", "c"):
+        _write_meta(
+            tmp_path, "cli", tid, {"thread_id": tid, "status": "completed"}
+        )
+        _write_records(
+            tmp_path,
+            tid,
+            _reply(1, "u1"),
+            _outcome_record(1, "u1", "stopped", reason="tool_errors"),
+        )
+    reads: list = []
+    real = file_store._last_turn_outcome
+    monkeypatch.setattr(
+        file_store,
+        "_last_turn_outcome",
+        lambda path: reads.append(path) or real(path),
+    )
+
+    tasks = FileTaskStore(threads_dir=str(tmp_path)).list_tasks()
+
+    assert reads == []
+    assert [t.status for t in tasks] == ["completed"] * 3
+
+
 def test_list_status_comes_from_last_turn_outcome_record(tmp_path):
     """Тред из CLI: в мете исход «completed», последняя запись итога —
-    остановка лимитом ошибок. Список верит записи хода: «остановлено»."""
+    остановка лимитом ошибок. Строка списка верит записи хода:
+    «остановлено»."""
     _write_meta(
         tmp_path, "cli", "a", {"thread_id": "a", "status": "completed"}
     )
@@ -96,7 +131,7 @@ def test_list_status_comes_from_last_turn_outcome_record(tmp_path):
     _write_records(tmp_path, "b", _reply(1, "u1"))
 
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
-    by_id = {t.thread_id: t.status for t in store.list_tasks()}
+    by_id = {t.thread_id: _row_status(store, t) for t in store.list_tasks()}
 
     assert by_id == {"a": "stopped", "b": "completed"}
 
@@ -120,7 +155,7 @@ def test_running_meta_wins_over_earlier_turn_record(tmp_path):
 
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
 
-    assert [t.status for t in store.list_tasks()] == ["running"]
+    assert [_row_status(store, t) for t in store.list_tasks()] == ["running"]
 
 
 def test_reply_after_last_record_falls_back_to_meta(tmp_path):
@@ -139,4 +174,4 @@ def test_reply_after_last_record_falls_back_to_meta(tmp_path):
 
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
 
-    assert [t.status for t in store.list_tasks()] == ["failed"]
+    assert [_row_status(store, t) for t in store.list_tasks()] == ["failed"]

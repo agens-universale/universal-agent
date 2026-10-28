@@ -852,3 +852,75 @@ async def test_search_matches_subtitle(tmp_path):
         text = _rows_text(pilot)
         assert "Написать тесты" in text
         assert "Починить парсер" not in text
+
+
+def _outcome_line(tid: str, status: str, reason=None) -> str:
+    from gc_core.persistence.turn_outcome import TurnOutcome
+
+    outcome = TurnOutcome(
+        status=status,
+        reason=reason,
+        opened_by=f"m_{tid}",
+        started_at="2026-10-22T10:00:00Z",
+        ended_at="2026-10-22T10:01:00Z",
+        duration_sec=60.0,
+        error=None,
+    )
+    rec = {"type": "turn_outcome", "seq": 2, "outcome": outcome.to_payload()}
+    return json.dumps(rec, ensure_ascii=False) + "\n"
+
+
+def _spy_tail_reads(monkeypatch) -> list:
+    from gc_tui.services.stores import file_store
+
+    reads: list = []
+    real = file_store._last_turn_outcome
+    monkeypatch.setattr(
+        file_store,
+        "_last_turn_outcome",
+        lambda path: reads.append(Path(path).name) or real(path),
+    )
+    return reads
+
+
+@pytest.mark.asyncio
+async def test_page_reads_tails_of_visible_rows_once(tmp_path, monkeypatch):
+    """Хвост треда читает только нарисованная строка, и один раз за жизнь
+    экрана: перерисовка фильтром и массовое удаление хвостов не читают.
+    Статус строки — из записи итога хода, не из меты."""
+    pytest.importorskip("textual")
+    for i in range(30):
+        tid = f"t{i:07d}"
+        _seed(
+            tmp_path,
+            tid,
+            f"промпт {i}",
+            updated_at=f"2026-06-{30 - i:02d}T00:00:00+00:00",
+        )
+        with (Path(tmp_path) / f"data_cli_{tid}.jsonl").open(
+            "a", encoding="utf-8"
+        ) as f:
+            f.write(_outcome_line(tid, "done"))
+    reads = _spy_tail_reads(monkeypatch)
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.mass_delete import MassDeleteScreen
+    from gc_tui.screens.sessions import SessionsScreen
+    from textual.widgets import Input
+
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
+        scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        page = {f"data_cli_{t.thread_id}.jsonl" for t in scr._page_items()}
+        assert len(page) == 25
+        assert sorted(reads) == sorted(page)
+        # мета «stopped», запись итога — done
+        assert "выполнено" in _rows_text(pilot)
+        scr.query_one("#sessions-filter", Input).value = "промпт"
+        await pilot.pause()
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, MassDeleteScreen)
+        assert sorted(reads) == sorted(page)

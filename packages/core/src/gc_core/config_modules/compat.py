@@ -44,6 +44,9 @@ REMOVED: Dict[str, str] = {
     "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",
     "agent_edits.preview_context_lines": "экран правок считает дифф по журналу; контекст хэнков — agent_edits.hunk_context_lines",
     "agent_edits.full_file_max_lines": "порога больше нет: клавиша f на экране правок показывает файл целиком",
+    # Смысл сменился («экранных строк» → «строк превью на файл»), значение
+    # не переносится: RENAMES молча дал бы старому числу новый смысл.
+    "agent_edits.trace_inline_max_lines": "смысл сменился: ключ заменён на agent_edits.trace_diff_preview_lines — строк превью диффа на файл, старое значение не переносится",
     # На уровне модели никогда не применялись: протокол, поток и строгость
     # схем тулов действуют на весь бэкенд.
     "models.*.backend.api_mode": "на уровне модели не применяется — задайте в общей секции backend",

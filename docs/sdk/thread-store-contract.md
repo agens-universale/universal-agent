@@ -399,7 +399,9 @@ messages)` — или его асинхронная форма `aarchive_and_rep
 `messages_count` meta и третий элемент `load_thread_state` не двигаются.
 
 Поля `outcome` (v1): `status` — `done` | `stopped` | `error`; `reason` —
-`null`, `plan_proposed`, `user_stop` или причина лимита
+`null`, `plan_proposed`, `user_stop` (запрошенный стоп или Ctrl+C),
+`cancelled` (отмена задачи хода без запроса стопа; aio-поток при отмене
+сам запрашивает стоп, и его ход пишется `user_stop`) или причина лимита
 (`State.terminal_outcome`: `step_limit`, `token_limit` и др.);
 `opened_by` — `id` реплики, открывшей ход (`null` у хода без реплики,
 например континуации утверждённого плана); `started_at`, `ended_at` — UTC
@@ -492,7 +494,9 @@ meta, откат реплики удаляет запись, но не номе�
 и медиа инструментов у себя. Для этого достаточно двух синхронных методов:
 
 ```python
-def write_thread_file(self, system_id, thread_id, name, data: bytes) -> None: ...
+def write_thread_file(
+    self, system_id, thread_id, name, data: bytes
+) -> None: ...
 def read_thread_file(self, system_id, thread_id, name) -> bytes | None: ...
 ```
 

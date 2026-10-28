@@ -21,6 +21,7 @@ from gc_core.config_modules.root import AppConfig
 from gc_core.execution import turn_clock
 from gc_core.execution.turn_clock import TurnClock, current_turn_clock
 from gc_core.persistence.turn_outcome import (
+    CANCELLED,
     USER_STOP,
     is_turn_outcome_record,
     parse_turn_outcome,
@@ -545,7 +546,10 @@ async def test_backend_error_writes_masked_error(run):
     assert key not in path.read_text()
 
 
-async def test_cancelled_run_writes_user_stop(run):
+async def test_cancelled_run_writes_cancelled(run):
+    """Отмена без запроса стопа — не стоп пользователя: отменить задачу
+    может и вызывающий код (таймаут, остановка приложения)."""
+
     async def _cancel():
         raise asyncio.CancelledError
 
@@ -554,10 +558,10 @@ async def test_cancelled_run_writes_user_stop(run):
         await run.arun()
 
     outcomes = _only_outcomes(run)
-    assert [(o.status, o.reason) for o in outcomes] == [("stopped", USER_STOP)]
+    assert [(o.status, o.reason) for o in outcomes] == [("stopped", CANCELLED)]
 
 
-async def test_task_cancel_writes_user_stop(run):
+async def test_task_cancel_writes_cancelled(run):
     started = asyncio.Event()
 
     async def _hang():
@@ -575,6 +579,28 @@ async def test_task_cancel_writes_user_stop(run):
     # Запись под отменой не снимает её с задачи: `asyncio.timeout` и
     # TaskGroup вызывающего опираются на счётчик.
     assert task.cancelling() > 0
+    outcomes = _only_outcomes(run)
+    assert [(o.status, o.reason) for o in outcomes] == [("stopped", CANCELLED)]
+
+
+async def test_stop_then_task_cancel_writes_user_stop(run):
+    """Стоп запрошен (`stop_run`), затем задачу отменили: отмена —
+    следствие стопа, исход — стоп пользователя."""
+    started = asyncio.Event()
+
+    async def _hang():
+        started.set()
+        await asyncio.sleep(30)
+        return [_finish()]
+
+    run.script = [_hang]
+    task = asyncio.ensure_future(run.arun())
+    await started.wait()
+    run.ex.stop_run()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
     outcomes = _only_outcomes(run)
     assert [(o.status, o.reason) for o in outcomes] == [("stopped", USER_STOP)]
 
@@ -718,7 +744,13 @@ def _executor_with_state(**state_fields) -> AgentExecutor:
             {"stop_requested": True},
             ("stopped", USER_STOP),
         ),
-        (None, asyncio.CancelledError(), {}, ("stopped", USER_STOP)),
+        (None, asyncio.CancelledError(), {}, ("stopped", CANCELLED)),
+        (
+            None,
+            asyncio.CancelledError(),
+            {"stop_requested": True},
+            ("stopped", USER_STOP),
+        ),
         (None, KeyboardInterrupt(), {}, ("stopped", USER_STOP)),
         (None, RuntimeError("x"), {}, ("error", None)),
         *[

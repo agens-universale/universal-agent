@@ -425,7 +425,7 @@ async def test_detail_diff_rebuilds_on_width_change(tmp_path):
 
 @pytest.mark.asyncio
 async def test_detail_card_full_diff_without_collapse(tmp_path):
-    """Дифф в карточке — целиком, без свёртки по trace_inline_max_lines."""
+    """Дифф в карточке — целиком, без свёртки по trace_diff_preview_lines."""
     tid = "detail_full"
     _write_thread(
         tmp_path,
@@ -441,7 +441,7 @@ async def test_detail_card_full_diff_without_collapse(tmp_path):
     )
 
     async with _pilot(
-        tmp_path, tid, config={"agent_edits": {"trace_inline_max_lines": 3}}
+        tmp_path, tid, config={"agent_edits": {"trace_diff_preview_lines": 3}}
     ) as pilot:
         await _open_detail(pilot)
         diff = pilot.app.screen.query_one(".detail-diff", Static).visual.plain
@@ -474,7 +474,8 @@ async def test_detail_card_for_non_file_tool_unchanged(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("value", [0, -5, True])
 async def test_broken_inline_threshold_keeps_body(tmp_path, value):
-    """Битый trace_inline_max_lines не даёт пустого тела: минимум одна строка."""
+    """Битый trace_diff_preview_lines не даёт пустого тела: минимум одна
+    строка."""
     tid = f"broken_{value}"
     _write_thread(
         tmp_path,
@@ -492,7 +493,7 @@ async def test_broken_inline_threshold_keeps_body(tmp_path, value):
     async with _pilot(
         tmp_path,
         tid,
-        config={"agent_edits": {"trace_inline_max_lines": value}},
+        config={"agent_edits": {"trace_diff_preview_lines": value}},
     ) as pilot:
         block = pilot.app.screen.query_one(DiffBlock)
         assert _has_body(block)

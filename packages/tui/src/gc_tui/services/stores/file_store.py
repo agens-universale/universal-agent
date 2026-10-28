@@ -111,7 +111,11 @@ class FileTaskStore:
             except (OSError, json.JSONDecodeError):
                 continue
             tid = meta.get("thread_id") or meta_path.stem[len(prefix) :]
-            status = self._list_status(tid, meta)
+            # Статус — только из меты: хвост треда читает строка списка
+            # (turn_status), иначе список читал бы все треды проекта.
+            status = (meta.get("tui") or {}).get("status") or meta.get(
+                "status"
+            )
             updated = meta.get("updated_at", "")
             msgs = int(meta.get("messages_count", 0))
             tui_meta = meta.get("tui") or {}
@@ -137,18 +141,20 @@ class FileTaskStore:
         items.sort(key=lambda s: s.updated_at, reverse=True)
         return items[offset : offset + limit]
 
-    def _list_status(self, task_id: str, meta: dict) -> Optional[str]:
-        """Исход сессии для списка. Источник — запись итога последнего
-        хода (её пишет ядро в любом фронтенде); мета — для живого хода
-        и тредов без записей: TUI-владелец пишет в meta.tui.status
-        (completed/stopped/failed), верхний meta.status — CLI/server.
-        Нет ничего → None (список не выдумывает «stopped»)."""
-        status = (meta.get("tui") or {}).get("status") or meta.get("status")
-        if status in _LIVE_STATUSES:
-            return status
+    def turn_status(
+        self, task_id: str, meta_status: Optional[str]
+    ) -> Optional[str]:
+        """Исход сессии для строки списка. Источник — запись итога
+        последнего хода (её пишет ядро в любом фронтенде); meta_status
+        (статус из list_tasks) — для живого хода и тредов без записей:
+        TUI-владелец пишет в meta.tui.status (completed/stopped/failed),
+        верхний meta.status — CLI/server. Нет ничего → None (список не
+        выдумывает «stopped»). Читает хвост data-файла треда."""
+        if meta_status in _LIVE_STATUSES:
+            return meta_status
         outcome = _last_turn_outcome(self._data_path(task_id, self._system))
         if outcome is None:
-            return status
+            return meta_status
         return meta_status_of(kind_of(outcome)[0])
 
     # ---- per-task -----------------------------------------------------
