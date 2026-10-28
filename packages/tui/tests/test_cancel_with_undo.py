@@ -1,10 +1,24 @@
 """TraceScreen cancel-with-undo: откат отправки, пока ядро не отметило
 вывод прогона (`produced_output` раннера)."""
 
-from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
+from gc_testkit.develop_files import meta_of
+from gc_testkit.tui_support import tui_settings
+
+
+async def _worker_session(tmp_path, tid):
+    """Сессия хода воркера над файловым тредом (берёт аренду на записи)."""
+    from gc_core.thread_store import ThreadSession
+    from gc_core.threads.file_store import FileThreadStore
+
+    return await ThreadSession.afrom_config(
+        settings=None,
+        system_id="cli",
+        thread_id=tid,
+        store=FileThreadStore(str(tmp_path)),
+    )
 
 
 @pytest.mark.asyncio
@@ -101,7 +115,7 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
         )
         scr._trace_mount(UserReplyContainer("исходный запрос", event_no=0))
         await pilot.pause()
-        pum = (scr._store.get_task_meta(tid).get("tui") or {}).get(
+        pum = (meta_of(scr._store.get_record(tid)).get("tui") or {}).get(
             "pending_user_messages", []
         )
         assert len(pum) == 1  # запись записана
@@ -110,7 +124,7 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
         scr._cmd_stop()
         await pilot.pause()
 
-        pum2 = (scr._store.get_task_meta(tid).get("tui") or {}).get(
+        pum2 = (meta_of(scr._store.get_record(tid)).get("tui") or {}).get(
             "pending_user_messages", []
         )
         assert pum2 == [], (
@@ -121,9 +135,10 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
 @pytest.mark.asyncio
 async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
     """Быстрая отмена ставит заявку, а poll (когда тред idle) удаляет осиротевшую
-    реплику из data_*.jsonl по её id."""
+    реплику из data_*.jsonl по её id — после того, как остановленный ход
+    отпустит тред."""
     pytest.importorskip("textual")
-    from gc_core.thread_store import ThreadSession, load_thread_messages
+    from gc_testkit.develop_files import load_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.widgets.user_reply import UserReplyContainer
@@ -154,17 +169,7 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
 
         # Симулируем, что worker уже записал реплику в тред (persist до ответа).
-        ts = ThreadSession(
-            threads_dir=str(tmp_path),
-            system_id="cli",
-            thread_id=tid,
-            history_messages=[],
-            known_message_keys=set(),
-            persisted_messages_count=0,
-            meta={},
-            previous_response_id=None,
-            backend_api_mode="chat_completions",
-        )
+        ts = await _worker_session(tmp_path, tid)
         await ts.apersist_batch(
             [{"role": "user", "content": "отменяю", "id": msg_id}],
             previous_response_id=None,
@@ -179,11 +184,19 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
         scr._cmd_stop()  # вывода нет + пустой input → cancel-with-undo
         await pilot.pause()
 
-        # Немедленное удаление: реплики в треде уже нет (не ждём остановки worker'а).
+        # Тред ещё держит остановленный ход (аренда его сессии), а раннер
+        # уже не бежит: тик опроса удалить не может — запись в чужой ход
+        # дала бы ThreadBusy. Заявка остаётся, реплика пока на месте.
+        scr._run_orphan_cleanups()
+        assert scr._pending_orphan_cleanups
         msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
-        assert all(
-            m.get("id") != msg_id for m in msgs
-        )  # осиротевшая удалена сразу
+        assert any(m.get("id") == msg_id for m in msgs)
+
+        # Ход закончился и отпустил тред — опрос удаляет осиротевшую.
+        await ts.arelease_lease()
+        scr._run_orphan_cleanups()
+        msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
+        assert all(m.get("id") != msg_id for m in msgs)
 
 
 @pytest.mark.asyncio
@@ -192,7 +205,6 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
     tail_events НЕ репортит stream_reset (иначе была бы полная перерисовка =
     моргание)."""
     pytest.importorskip("textual")
-    from gc_core.thread_store import ThreadSession
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
     from gc_tui.widgets.user_reply import UserReplyContainer
@@ -221,17 +233,7 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
         app.tui_state.active_task_id = tid
         scr._active_task_id = tid
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
-        await ThreadSession(
-            threads_dir=str(tmp_path),
-            system_id="cli",
-            thread_id=tid,
-            history_messages=[],
-            known_message_keys=set(),
-            persisted_messages_count=0,
-            meta={},
-            previous_response_id=None,
-            backend_api_mode="chat_completions",
-        ).apersist_batch(
+        await (await _worker_session(tmp_path, tid)).apersist_batch(
             [{"role": "user", "content": "ты тут?", "id": msg_id}],
             previous_response_id=None,
         )
@@ -258,7 +260,7 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
 async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
     """Пока на треде активен run — удаление откладывается (нет гонки с дозаписью)."""
     pytest.importorskip("textual")
-    from gc_core.thread_store import ThreadSession, load_thread_messages
+    from gc_testkit.develop_files import load_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
 
@@ -278,17 +280,7 @@ async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
         scr = pilot.app.screen
         tid, msg_id = "t1", "m_orphan"
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
-        await ThreadSession(
-            threads_dir=str(tmp_path),
-            system_id="cli",
-            thread_id=tid,
-            history_messages=[],
-            known_message_keys=set(),
-            persisted_messages_count=0,
-            meta={},
-            previous_response_id=None,
-            backend_api_mode="chat_completions",
-        ).apersist_batch(
+        await (await _worker_session(tmp_path, tid)).apersist_batch(
             [{"role": "user", "content": "x", "id": msg_id}],
             previous_response_id=None,
         )
@@ -451,3 +443,51 @@ async def test_no_undo_after_leaving_the_thread_view():
         scr._leave_thread_view()
 
         assert scr._can_cancel_with_undo() is False
+
+
+@pytest.mark.asyncio
+async def test_orphan_cleanup_keeps_claim_on_store_error(tmp_path, caplog):
+    """Сбой хранилища при удалении не снимает заявку: тик повторяет её, в
+    лог — одна запись на заявку; после сбоя удаление проходит."""
+    pytest.importorskip("textual")
+    from gc_testkit.develop_files import load_thread_messages
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        tid, msg_id = "t1", "m_orphan"
+        store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
+        scr._store = store
+        session = await _worker_session(tmp_path, tid)
+        await session.apersist_batch(
+            [{"role": "user", "content": "x", "id": msg_id}],
+            previous_response_id=None,
+        )
+        await session.arelease_lease()
+        app.tui_state.active_task_id = tid
+        app.active_runner = None
+        scr._pending_orphan_cleanups = [(None, tid, msg_id)]
+
+        real_discard = store.discard_message_by_id
+
+        def broken(*_args, **_kwargs):
+            raise OSError("диск недоступен")
+
+        store.discard_message_by_id = broken
+        with caplog.at_level("WARNING", logger="gc_tui.screens.main"):
+            scr._run_orphan_cleanups()
+            scr._run_orphan_cleanups()
+        assert scr._pending_orphan_cleanups == [(None, tid, msg_id)]
+        assert len(caplog.records) == 1
+
+        store.discard_message_by_id = real_discard
+        scr._run_orphan_cleanups()
+        msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
+        assert all(m.get("id") != msg_id for m in msgs)
+        assert scr._pending_orphan_cleanups == []

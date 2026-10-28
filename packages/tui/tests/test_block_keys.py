@@ -17,7 +17,7 @@ from gc_core.execution.progress import (
     QueueSubagentProgressSink,
     SubagentProgressEvent,
 )
-from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.tui_support import tui_settings
 from textual.containers import VerticalScroll
 

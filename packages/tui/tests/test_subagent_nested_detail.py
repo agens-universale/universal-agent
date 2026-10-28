@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store import append_subagent_trace_record
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
+from gc_testkit.thread_writes import subagent_record
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.subagent_sidecar_mapper import (
     detail_from_sidecar_records,
     resolve_nested_tool_detail,
@@ -147,7 +147,7 @@ def _write_parent_and_sidecar(tmp_path: Path, tid: str) -> None:
         encoding="utf-8",
     )
     d = str(tmp_path)
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -161,7 +161,7 @@ def _write_parent_and_sidecar(tmp_path: Path, tid: str) -> None:
             "call_id": "call_child_9",
         },
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,

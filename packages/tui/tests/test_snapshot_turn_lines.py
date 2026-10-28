@@ -22,10 +22,8 @@ pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
 
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-)
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record
 
 _SYS = "cli"
 _TID = "7f3a9b1c"
@@ -66,7 +64,7 @@ def _turn(tmp_path, seq, n, question, answer, outcome) -> int:
         start_seq=seq,
     )
     seq += 2
-    append_turn_outcome_record(str(tmp_path), _SYS, _TID, outcome, seq=seq)
+    turn_outcome_record(str(tmp_path), _SYS, _TID, outcome)
     return seq
 
 

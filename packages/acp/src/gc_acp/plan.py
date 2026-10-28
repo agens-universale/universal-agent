@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from gc_core.persistence.schema import TODO_STATUSES, normalize_session_todo
-from gc_core.thread_store import load_thread_meta
+from gc_core.threads.facade import Threads
+from gc_core.threads.models import ThreadKey, ThreadRecord
 from gc_core.usage.account import COST_EPSILON, MONEY_FIELD, UsageAccount
-
-from gc_acp.session_index import ACP_SYSTEM
 
 _PLAN = "plan"
 _INFO = "session_info_update"
@@ -86,30 +85,36 @@ def context_window_size(settings: Any, choice: str) -> int | None:
     return None
 
 
-def todos_from_meta(threads_dir: str, session_id: str) -> list[dict[str, str]]:
-    meta = _meta(threads_dir, session_id)
-    shared = meta.get("shared")
-    if not isinstance(shared, dict):
+async def thread_record(
+    threads: Threads, key: ThreadKey
+) -> ThreadRecord | None:
+    """Запись треда; треда нет или он не читается — ``None``."""
+    try:
+        return await threads.get(key)
+    except (OSError, ValueError):
+        return None
+
+
+def todos_from_record(record: ThreadRecord | None) -> list[dict[str, str]]:
+    if record is None:
         return []
-    return normalize_session_todo(shared.get("session_todo"))
+    return normalize_session_todo(record.state.todo)
 
 
-def used_tokens_from_meta(threads_dir: str, session_id: str) -> int | None:
-    meta = _meta(threads_dir, session_id)
-    value = meta.get("last_main_prompt_tokens")
+def used_tokens_from_record(record: ThreadRecord | None) -> int | None:
+    value = record.state.last_prompt_tokens if record else None
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
         return value
     return None
 
 
-def usage_account_from_meta(
-    threads_dir: str, session_id: str
+def usage_account_from_record(
+    record: ThreadRecord | None,
 ) -> UsageAccount | None:
-    meta = _meta(threads_dir, session_id)
-    raw = meta.get("token_usage")
-    if raw is None:
+    """Расход треда; расход не записан — ``None``."""
+    if record is None or not record.usage.by_category:
         return None
-    return UsageAccount.from_meta(raw)
+    return UsageAccount.from_meta(record.usage.model_dump())
 
 
 def agent_state(agent: Any) -> Any | None:
@@ -142,16 +147,15 @@ def usage_from_agent(agent: Any, *, settings: Any, choice: str) -> dict | None:
     return usage_update(used=used, size=size, account=account)
 
 
-def usage_from_meta(
-    threads_dir: str,
-    session_id: str,
+def usage_from_record(
+    record: ThreadRecord | None,
     *,
     settings: Any,
     choice: str,
 ) -> dict | None:
-    used = used_tokens_from_meta(threads_dir, session_id)
+    used = used_tokens_from_record(record)
     size = context_window_size(settings, choice)
-    account = usage_account_from_meta(threads_dir, session_id)
+    account = usage_account_from_record(record)
     return usage_update(used=used, size=size, account=account)
 
 
@@ -167,11 +171,3 @@ def _single_cost(account: UsageAccount | None) -> dict | None:
     if not isinstance(amount, (int, float)) or amount < COST_EPSILON:
         return None
     return {"amount": float(amount), "currency": currency}
-
-
-def _meta(threads_dir: str, session_id: str) -> dict:
-    try:
-        meta = load_thread_meta(threads_dir, ACP_SYSTEM, session_id)
-    except (OSError, ValueError):
-        return {}
-    return meta if isinstance(meta, dict) else {}

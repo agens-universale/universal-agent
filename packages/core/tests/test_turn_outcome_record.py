@@ -5,7 +5,10 @@ from gc_core.persistence.turn_outcome import (
     USER_STOP,
     TurnOutcome,
     is_turn_outcome_record,
+    last_turn_of,
     parse_turn_outcome,
+    turn_entry,
+    turn_shown_in,
 )
 
 STARTED = "2026-10-22T11:30:53.004Z"
@@ -181,3 +184,50 @@ def test_unknown_key_next_to_calls_is_ignored():
     payload = _outcome(calls={"c1": 3}).to_payload() | {"later": 1}
 
     assert parse_turn_outcome(_envelope(payload)).calls == {"c1": 3}
+
+
+# ---- запись потока `turns` и правило сироты ---------------------------------
+
+
+def test_entry_carries_anchor_and_payload():
+    outcome = _outcome()
+
+    entry = turn_entry(outcome, after="m_9")
+
+    assert entry == {"after": "m_9", "outcome": outcome.to_payload()}
+
+
+def test_envelope_of_entry_parses_back():
+    outcome = _outcome()
+    record = {"type": TURN_OUTCOME_TYPE, **turn_entry(outcome, after="m_9")}
+
+    assert parse_turn_outcome(record) == outcome
+
+
+def test_record_is_shown_while_its_reply_is_in_history():
+    record = turn_entry(_outcome(opened_by="m_1"), after="m_9")
+
+    assert turn_shown_in(record, {"m_1", "m_9"}) is True
+    assert turn_shown_in(record, {"m_9"}) is False
+
+
+def test_record_without_reply_is_anchored_by_last_message():
+    record = turn_entry(_outcome(opened_by=None), after="m_9")
+
+    assert turn_shown_in(record, {"m_9"}) is True
+    assert turn_shown_in(record, set()) is False
+
+
+def test_record_without_any_anchor_is_an_orphan():
+    record = turn_entry(_outcome(opened_by=None), after=None)
+
+    assert turn_shown_in(record, {"m_1"}) is False
+
+
+def test_last_turn_is_status_and_reason():
+    outcome = _outcome(status="stopped", reason="step_limit")
+
+    assert last_turn_of(outcome) == {
+        "status": "stopped",
+        "reason": "step_limit",
+    }

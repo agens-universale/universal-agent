@@ -1,24 +1,17 @@
-"""Запись смены модели в файле треда: место, ``seq``, хранилища, сжатие,
-запись между ходами."""
+"""Смена модели — поток ``model_choices`` хранилища v2: привязка к
+последнему записанному сообщению, запись в ходе и между ходами."""
 
-import json
-
-from gc_core.persistence.model_choice_record import (
-    ModelChoiceRecord,
-    parse_model_choice,
-)
-from gc_core.thread_store import (
-    ThreadSession,
-    append_model_choice_after_last_message,
-    load_thread_messages,
-    load_thread_meta,
-)
-from gc_core.thread_store_async import SyncThreadStoreAdapter
-from gc_core.thread_store_file import FileThreadStore
-from gc_core.thread_store_file_durable import DurableFileThreadStore
-from gc_testkit.memory_thread_store import MemoryThreadStore
+import pytest
+from gc_core.persistence.model_choice_record import ModelChoiceRecord
+from gc_core.thread_store import ThreadSession
+from gc_core.threads.errors import ThreadBusy
+from gc_core.threads.facade import Threads
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import LeaseRequest, ThreadKey
+from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 from gc_testkit.settings import make_settings
 
+KEY = ThreadKey(system="cli", thread="t")
 RECORD = ModelChoiceRecord(choice="max", alias="big", before="light")
 
 
@@ -39,142 +32,109 @@ async def _session(store):
     )
 
 
-def _rows(path):
-    return [json.loads(line) for line in path.read_text().splitlines()]
+async def _choices(store):
+    return [e.data for e in await store.read_stream(KEY, "model_choices")]
 
 
-def _live(tmp_path):
-    return _rows(tmp_path / "data_cli_t.jsonl")
+async def _ids(store):
+    return [e.data["id"] for e in await store.read_stream(KEY, "messages")]
 
 
-def _kinds(rows):
-    return [
-        row["payload"]["id"] if row["type"] == "message" else row["type"]
-        for row in rows
-    ]
-
-
-async def test_record_follows_last_message_with_its_seq(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+async def test_record_is_anchored_to_last_written_message(tmp_path):
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
     await session.apersist_batch(
         [_user("u1"), _answer("a1")], previous_response_id=None
     )
 
     assert await session.aappend_model_choice(RECORD, discarded=False)
 
-    rows = _live(tmp_path)
-    assert _kinds(rows) == ["u1", "a1", "model_choice"]
-    assert rows[2]["seq"] == 2
-    assert rows[2]["thread_id"] == "t"
-    assert rows[2]["system"] == "cli"
-    assert "payload" not in rows[2]
-    assert parse_model_choice(rows[2]) == RECORD
-    assert session.persisted_messages_count == 2
+    assert await _choices(store) == [
+        {"after": "a1", "model": RECORD.to_payload()}
+    ]
+    record = await store.get_thread(KEY)
+    assert record.max_seq["messages"] == 2
+    assert record.info.messages_count == 2
+    assert await _ids(store) == ["u1", "a1"]
 
 
-async def test_record_is_not_a_message(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
-    await session.apersist_batch(
-        [_user("u1"), _answer("a1")], previous_response_id=None
-    )
-    await session.aappend_model_choice(RECORD, discarded=False)
-
-    messages, _, max_seq = load_thread_messages(str(tmp_path), "cli", "t")
-    assert [m["id"] for m in messages] == ["u1", "a1"]
-    assert max_seq == 2
-    assert load_thread_meta(str(tmp_path), "cli", "t")["messages_count"] == 2
-    await session.apersist_batch([_user("u2")], previous_response_id=None)
-    assert [row["seq"] for row in _live(tmp_path)] == [1, 2, 2, 3]
-
-
-async def test_empty_thread_gets_no_record(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
-
-    assert not await session.aappend_model_choice(RECORD, discarded=False)
-    assert not (tmp_path / "data_cli_t.jsonl").exists()
-
-
-async def test_store_without_capability_gets_no_record():
-    store = MemoryThreadStore()
+async def test_deferred_messages_are_written_before_record(tmp_path):
+    store = FileThreadStore(str(tmp_path))
     session = await _session(store)
+    session._defer_persist = True
     await session.apersist_batch([_user("u1")], previous_response_id=None)
+    await session.apersist_batch([_answer("a1")], previous_response_id=None)
 
-    assert not await session.aappend_model_choice(RECORD, discarded=False)
-    assert [m["id"] for m in store.load_messages("cli", "t")] == ["u1"]
+    assert await session.aappend_model_choice(RECORD, discarded=False)
 
-
-def test_adapter_exposes_capability_only_when_store_has_it(tmp_path):
-    memory = SyncThreadStoreAdapter(MemoryThreadStore())
-    assert memory.aappend_model_choice is None
-    durable = DurableFileThreadStore(str(tmp_path))
-    assert SyncThreadStoreAdapter(durable).aappend_model_choice is None
-    plain = SyncThreadStoreAdapter(FileThreadStore(str(tmp_path)))
-    assert callable(plain.aappend_model_choice)
-
-
-async def test_durable_store_writes_no_record_and_recovers(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
-    session = await _session(store)
-    await session.apersist_batch(
-        [_user("u1"), _answer("a1")], previous_response_id=None
-    )
-    before = (tmp_path / "data_cli_t.jsonl").read_bytes()
-
-    assert not await session.aappend_model_choice(RECORD, discarded=False)
-
-    assert (tmp_path / "data_cli_t.jsonl").read_bytes() == before
-    await session.apersist_batch([_user("u2")], previous_response_id=None)
-    snapshot = DurableFileThreadStore(str(tmp_path)).read_snapshot("cli", "t")
-    assert [m["id"] for m in snapshot.state.messages] == ["u1", "a1", "u2"]
+    assert await _ids(store) == ["u1", "a1"]
+    assert [c["after"] for c in await _choices(store)] == ["a1"]
 
 
 async def test_discarded_turn_does_not_flush_deferred(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
     await session.apersist_batch([_user("u1")], previous_response_id=None)
     session._defer_persist = True
     await session.apersist_batch([_answer("a1")], previous_response_id=None)
 
     assert await session.aappend_model_choice(RECORD, discarded=True)
 
-    rows = _live(tmp_path)
-    assert _kinds(rows) == ["u1", "model_choice"]
-    assert rows[1]["seq"] == 1
+    assert await _ids(store) == ["u1"]
+    assert [c["after"] for c in await _choices(store)] == ["u1"]
 
 
-async def test_turn_end_compaction_archives_record_with_turn(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
-    await session.apersist_batch(
-        [_user("u1"), _answer("a1")], previous_response_id=None
-    )
-    await session.aappend_model_choice(RECORD, discarded=False)
+async def test_empty_thread_gets_no_record(tmp_path):
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
 
-    await session.aarchive_and_compact_summary_payload(
-        {"summary_message_content": "сводка", "dialog_steps_offset": 1}
-    )
+    assert not await session.aappend_model_choice(RECORD, discarded=False)
+    assert await store.get_thread(KEY) is None
 
-    (archive,) = tmp_path.glob("data_cli_t__pre_summary__*.jsonl")
-    assert _kinds(_rows(archive)) == ["u1", "a1", "model_choice"]
-    assert [row["type"] for row in _live(tmp_path)] == ["message"]
+
+async def test_any_store_records_the_change():
+    store = MemoryThreadStore()
+    session = await _session(store)
+    await session.apersist_batch([_user("u1")], previous_response_id=None)
+
+    assert await session.aappend_model_choice(RECORD, discarded=False)
+
+    assert [c["after"] for c in await _choices(store)] == ["u1"]
 
 
 async def test_between_turns_record_follows_last_message(tmp_path):
-    session = await _session(FileThreadStore(str(tmp_path)))
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
     await session.apersist_batch(
         [_user("u1"), _answer("a1")], previous_response_id=None
     )
+    await session.arelease_lease()
 
-    assert append_model_choice_after_last_message(
-        str(tmp_path), "cli", "t", RECORD
-    )
+    assert await Threads(store).append_model_choice(KEY, RECORD)
 
-    rows = _live(tmp_path)
-    assert _kinds(rows) == ["u1", "a1", "model_choice"]
-    assert rows[2]["seq"] == 2
-    assert parse_model_choice(rows[2]) == RECORD
+    assert await _choices(store) == [
+        {"after": "a1", "model": RECORD.to_payload()}
+    ]
+    assert await _ids(store) == ["u1", "a1"]
 
 
-def test_between_turns_without_thread_writes_nothing(tmp_path):
-    assert not append_model_choice_after_last_message(
-        str(tmp_path), "cli", "t", RECORD
-    )
-    assert not (tmp_path / "data_cli_t.jsonl").exists()
+async def test_between_turns_without_thread_writes_nothing(tmp_path):
+    store = FileThreadStore(str(tmp_path))
+
+    assert not await Threads(store).append_model_choice(KEY, RECORD)
+
+    assert await store.get_thread(KEY) is None
+
+
+async def test_between_turns_on_busy_thread_is_refused():
+    """Тред держит ход другого владельца: запись между ходами отказана
+    (``ThreadBusy``), поток не тронут."""
+    store = MemoryThreadStore()
+    session = await _session(store)
+    await session.apersist_batch([_user("u1")], previous_response_id=None)
+    await session.arelease_lease()
+    await store.claim(KEY, LeaseRequest(owner="workflow", ttl=None))
+
+    with pytest.raises(ThreadBusy):
+        await Threads(store).append_model_choice(KEY, RECORD)
+    assert await _choices(store) == []

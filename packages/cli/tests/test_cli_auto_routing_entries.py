@@ -31,6 +31,10 @@ _THREE_MODELS = (
 )
 
 
+async def _init_prompt(**_kw):
+    return "prompt"
+
+
 @pytest.fixture(autouse=True)
 def _restore_arg_parser():
     """Вернуть модулю разбора аргументов пин-argv файла: перезагрузка с чужим
@@ -144,8 +148,8 @@ def test_init_agents_md_prints_the_same_startup_notices(monkeypatch, capsys):
     )
     monkeypatch.setattr(cli, "AgentExecutor", _Executor)
     monkeypatch.setattr(
-        "gc_core.instructions.init_agents_md.build_init_prompt",
-        lambda **kw: "prompt",
+        "gc_core.instructions.init_agents_md.abuild_init_prompt",
+        _init_prompt,
     )
     monkeypatch.setattr(
         "gc_core.security.confirm_port.confirm_available", lambda ctx: True
@@ -207,8 +211,8 @@ def test_init_flags_reach_typed_settings_and_actual_router(
     monkeypatch.setattr(cli, "build_auth_connector", lambda loaded: None)
     monkeypatch.setattr(cli, "AgentExecutor", _InitExecutor)
     monkeypatch.setattr(
-        "gc_core.instructions.init_agents_md.build_init_prompt",
-        lambda **kw: "prompt",
+        "gc_core.instructions.init_agents_md.abuild_init_prompt",
+        _init_prompt,
     )
 
     assert run_coro(cli._run_init_agents_md()) == 0

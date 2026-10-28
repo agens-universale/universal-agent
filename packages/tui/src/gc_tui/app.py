@@ -2183,9 +2183,10 @@ class TuiApp(App):
             runner.clear_permission_mode()
 
     def adopt_thread_permission_mode(
-        self, meta: dict | None, *, resumed: bool = False
+        self, saved: str | None, *, resumed: bool = False
     ) -> None:
-        """Принять режим, сохранённый в открываемой сессии.
+        """Принять режим ``saved``, сохранённый в открываемой сессии
+        (``state.permission_mode`` записи треда).
 
         ``resumed`` — сессию открыли (пикер), а не создали в этом окне: без
         сохранённого режима у неё действует ``default_mode`` конфига, а не
@@ -2198,9 +2199,7 @@ class TuiApp(App):
 
         # Режим из другой сборки или убранный из списка — как его нет:
         # движок отвергает неизвестный режим исключением.
-        mode = coerce_mode(
-            ((meta or {}).get("shared") or {}).get("permission_mode")
-        )
+        mode = coerce_mode(saved)
         if mode is not None:
             self.set_permission_mode(mode.value)
         elif resumed:
@@ -2490,9 +2489,10 @@ class TuiApp(App):
             return
         try:
             from gc_tui.services.copy_buffer import push_copy_buffer
+            from gc_tui.services.stores.record_view import tui_section
 
-            meta = store.get_task_meta(task_id) or {}
-            existing = (meta.get("tui") or {}).get("copy_buffer") or ""
+            record = store.get_record(task_id)
+            existing = tui_section(record).get("copy_buffer") or ""
             new_buf = push_copy_buffer(existing, payload)
             store.update_tui_meta(task_id, {"copy_buffer": new_buf})
         except Exception:

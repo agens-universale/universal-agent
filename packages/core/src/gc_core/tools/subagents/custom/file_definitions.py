@@ -17,11 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
-from gc_core.agent_store import (
-    AgentResource,
-    agent_store_of,
-    read_resource_text,
-)
+from gc_core.agent_store import agent_store_of, aread_text
 from gc_core.settings import settings_of
 
 # Имя сабагента = имя тула. Префикс обязателен: по нему `is_subagent_tool`
@@ -239,7 +235,7 @@ def _warn(
         diagnostics.append({"code": extra["event"], **fields})
 
 
-def discover_subagent_definitions(
+async def adiscover_subagent_definitions(
     settings: Any,
     *,
     builtin_names: Sequence[str] | set[str],
@@ -268,10 +264,9 @@ def discover_subagent_definitions(
     )
     base_dir = str(raw_dir).strip() if raw_dir is not None else ""
     store = agent_store_of(settings)
-    directory = AgentResource("subagents", "", base_dir or None)
 
-    entries = _definition_entries(
-        store, directory, base_dir, logger=logger, diagnostics=diagnostics
+    entries = await _adefinition_entries(
+        store, base_dir, logger=logger, diagnostics=diagnostics
     )
     taken: Dict[str, SubagentDefinition] = {}
     builtin = set(builtin_names)
@@ -280,11 +275,10 @@ def discover_subagent_definitions(
         if not entry.endswith(".md"):
             continue
         path = os.path.join(base_dir, entry) if base_dir else entry
-        definition = _read_definition(
+        definition = await _aread_definition(
             store,
             entry,
             path,
-            base_dir,
             logger=logger,
             diagnostics=diagnostics,
         )
@@ -297,9 +291,8 @@ def discover_subagent_definitions(
     return list(taken.values())
 
 
-def _definition_entries(
+async def _adefinition_entries(
     store: Any,
-    directory: AgentResource,
     base_dir: str,
     *,
     logger: Optional[logging.Logger],
@@ -308,7 +301,9 @@ def _definition_entries(
     """Имена файлов папки сабагентов; недоступная папка — пусто (с варнингом)."""
     try:
         return [
-            name for name, kind in store.list_dir(directory) if kind == "file"
+            entry.name
+            for entry in await store.list("subagent")
+            if entry.type == "file"
         ]
     except (FileNotFoundError, NotADirectoryError):
         # Папка не задана — кастомных нет (своё хранилище может отдать их и
@@ -327,20 +322,19 @@ def _definition_entries(
         _warn(
             logger,
             "subagents_dir_unreadable dir=%s error=%s",
-            directory.label,
+            store.label("subagent", ""),
             exc,
             event="subagents_dir_unreadable",
             diagnostics=diagnostics,
-            dir=directory.label,
+            dir=store.label("subagent", ""),
         )
         return []
 
 
-def _read_definition(
+async def _aread_definition(
     store: Any,
     entry: str,
     path: str,
-    base_dir: str,
     *,
     logger: Optional[logging.Logger],
     diagnostics: Optional[List[Dict[str, Any]]],
@@ -353,11 +347,7 @@ def _read_definition(
         # весь старт агента, хотя обещание модуля — «битый файл не лишает
         # оператора остальных».
         return parse_subagent_file(
-            path,
-            read_resource_text(
-                store,
-                AgentResource("subagents", entry, path if base_dir else None),
-            ),
+            path, await aread_text(store, "subagent", entry)
         )
     except (
         OSError,
@@ -435,7 +425,7 @@ __all__ = [
     "NAME_RE",
     "SubagentDefinition",
     "SubagentDefinitionError",
-    "discover_subagent_definitions",
+    "adiscover_subagent_definitions",
     "parse_subagent_file",
     "resolve_max_count",
 ]

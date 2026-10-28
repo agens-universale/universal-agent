@@ -532,7 +532,7 @@ def test_txt_export_lists_image_paths(tmp_path):
         }
     ]
     out = export_thread(
-        segments, fmt="txt", meta={}, thread_id="t", system="cli"
+        segments, fmt="txt", api_mode="", thread_id="t", system="cli"
     )
     assert (
         f"    └ {chip_text(8)} · png 1456×819 · {att.path}" in out.splitlines()

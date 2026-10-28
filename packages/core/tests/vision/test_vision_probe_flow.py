@@ -113,7 +113,9 @@ async def test_auth_retry_and_second_image_confirmation_admit_native_pixels(
     assert len(spy.requests) == 4
     assert spy.requests[0].content == spy.requests[1].content
     assert pngs(spy.requests[2]) == [second.png]
-    assert pngs(spy.requests[3]) == [ctx.image_store.read_for_send(att)]
+    assert pngs(spy.requests[3]) == [
+        (await ctx.image_store.aread_for_send(att))
+    ]
     assert [r.headers["Authorization"] for r in spy.requests] == [
         "Bearer secret",
         "secret",
@@ -125,7 +127,9 @@ async def test_auth_retry_and_second_image_confirmation_admit_native_pixels(
     await pr._arequest_backend_canonical([message], st, ctx)
     assert len(spy.requests) == 5
     assert spy.requests[-1].headers["Authorization"] == "secret"
-    assert pngs(spy.requests[-1]) == [ctx.image_store.read_for_send(att)]
+    assert pngs(spy.requests[-1]) == [
+        (await ctx.image_store.aread_for_send(att))
+    ]
 
 
 @pytest.mark.parametrize(
@@ -175,7 +179,9 @@ async def test_native_pixels_require_successful_probe(
         pngs(r) == [challenge.png] for r in spy.requests[:expected_probes]
     )
     expected = (
-        [ctx.image_store.read_for_send(att)] if answer == "correct" else []
+        [(await ctx.image_store.aread_for_send(att))]
+        if answer == "correct"
+        else []
     )
     assert all(pngs(r) == expected for r in spy.requests[expected_probes:])
 

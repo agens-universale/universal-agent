@@ -13,10 +13,8 @@ import pytest
 pytest.importorskip("textual")
 
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-)
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.services.relative_time import parse_iso_utc
@@ -70,7 +68,7 @@ def _stop_record(tmp_path, tid=_A):
         duration_sec=12.0,
         error=None,
     )
-    append_turn_outcome_record(str(tmp_path), "cli", tid, outcome, seq=1)
+    turn_outcome_record(str(tmp_path), "cli", tid, outcome)
 
 
 class _SlowRunner:

@@ -1,3 +1,6 @@
+from gc_testkit.develop_files import meta_of
+
+
 def test_build_mcp_tools_snapshot_groups_by_server():
     from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
     from gc_testkit.settings import make_settings
@@ -112,15 +115,22 @@ def test_snapshot_without_status_defaults_unknown():
     assert snap["office"]["tools"] == []
 
 
-def test_update_runtime_meta_mcp_tools_visible_to_filestore(tmp_path):
+async def test_session_mcp_tools_visible_to_filestore(tmp_path):
     # Контракт: ядро пишет runtime.mcp_tools, TUI читает тот же meta-файл.
-    from gc_core.thread_store import update_runtime_meta
+    from gc_core.thread_store import ThreadSession
+    from gc_core.threads.file_store import FileThreadStore
     from gc_tui.services.stores.file_store import FileTaskStore
 
     snap = {"search": [{"name": "mcp_search_web", "description": "web"}]}
-    update_runtime_meta(str(tmp_path), "cli", "t1", {"mcp_tools": snap})
+    session = await ThreadSession.afrom_config(
+        settings=None,
+        system_id="cli",
+        thread_id="t1",
+        store=FileThreadStore(tmp_path),
+    )
+    await session.aset_mcp_tools(snap)
     store = FileTaskStore(str(tmp_path), system="cli")
-    meta = store.get_task_meta("t1")
+    meta = meta_of(store.get_record("t1"))
     assert (
         meta.get("runtime", {}).get("mcp_tools", {}).get("search")[0]["name"]
         == "mcp_search_web"

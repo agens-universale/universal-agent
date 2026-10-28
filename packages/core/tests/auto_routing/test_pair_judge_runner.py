@@ -197,7 +197,7 @@ def test_durable_judge_uses_resource_and_clock_ports_without_local_reads(
         raise AssertionError("local resource or clock read inside workflow")
 
     ctx.prompt_resource = resource
-    monkeypatch.setattr(judge_runner, "_load_judge_prompt", forbidden)
+    monkeypatch.setattr(judge_runner, "aload_judge_prompt", forbidden)
     monkeypatch.setattr(
         judge_runner, "time", SimpleNamespace(monotonic=forbidden)
     )
@@ -236,7 +236,7 @@ def test_missing_durable_ports_propagate_failure(monkeypatch, missing):
 
 def test_worker_resource_loader_reads_the_configured_pair_prompt(tmp_path):
     from gc_core.execution.resources import PromptResourceRequest
-    from gc_core.resource_loading import load_prompt_resource
+    from gc_core.resource_loading import aload_prompt_resource_here
 
     own = tmp_path / "pair.md"
     own.write_text("Configured worker pair prompt.", encoding="utf-8")
@@ -244,8 +244,10 @@ def test_worker_resource_loader_reads_the_configured_pair_prompt(tmp_path):
         {"paths.chat_completions_routing_pair_judge_prompt_path": str(own)}
     )
     assert (
-        load_prompt_resource(
-            PromptResourceRequest("routing_pair_judge"), ctx=ctx
+        run_coro(
+            aload_prompt_resource_here(
+                PromptResourceRequest("routing_pair_judge"), ctx=ctx
+            )
         )
         == "Configured worker pair prompt."
     )

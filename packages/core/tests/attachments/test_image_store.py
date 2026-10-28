@@ -30,10 +30,11 @@ from gc_core.attachments.store import (
     IMAGES_DIRNAME,
     STAGING_DIRNAME,
     ImageStore,
+    acommit_to_run_thread,
     amake_attachment,
-    commit_to_run_thread,
 )
 from gc_core.security.media_roots import media_roots
+from gc_testkit import run_coro
 from gc_testkit.settings import make_settings
 from PIL import Image
 
@@ -220,22 +221,22 @@ def test_jpeg_gets_the_jpg_extension(tmp_path):
 def test_commit_copies_into_the_thread_and_is_idempotent(tmp_path):
     store = ImageStore(str(tmp_path), pid=111)
     staged = _stage(store)
-    committed = store.commit(staged, "CLI", "t1")
+    committed = run_coro(store.acommit(staged, "CLI", "t1"))
     assert committed.path == os.path.join(
         str(tmp_path), f"cli_t1_{staged.id}.png"
     )
     assert committed == replace(staged, path=committed.path)
     assert os.path.exists(staged.path)  # копия, карман не тронут
-    assert store.commit(committed, "CLI", "t1") == committed
-    assert store.commit(staged, "CLI", "t1") == committed
+    assert run_coro(store.acommit(committed, "CLI", "t1")) == committed
+    assert run_coro(store.acommit(staged, "CLI", "t1")) == committed
 
 
-def test_commit_to_run_thread_copies_into_the_bound_thread(tmp_path):
+async def test_commit_to_run_thread_copies_into_the_bound_thread(tmp_path):
     store = ImageStore(str(tmp_path), pid=111)
     staged = _stage(store)
     ctx = SimpleNamespace(image_store=store, system_id="cli", thread_id="t1")
-    assert commit_to_run_thread(ctx, staged) == store.commit(
-        staged, "cli", "t1"
+    assert await acommit_to_run_thread(ctx, staged) == (
+        await store.acommit(staged, "cli", "t1")
     )
 
 
@@ -250,18 +251,20 @@ def test_commit_to_run_thread_copies_into_the_bound_thread(tmp_path):
         },  # контекст без хранилища
     ],
 )
-def test_commit_to_run_thread_keeps_the_pocket_attachment(tmp_path, fields):
+async def test_commit_to_run_thread_keeps_the_pocket_attachment(
+    tmp_path, fields
+):
     store = ImageStore(str(tmp_path), pid=111)
     staged = _stage(store)
     ctx = SimpleNamespace(**{"image_store": store, **fields})
-    assert commit_to_run_thread(ctx, staged) == staged
+    assert await acommit_to_run_thread(ctx, staged) == staged
 
 
 def test_commit_without_the_pocket_file_keeps_the_attachment(tmp_path):
     store = ImageStore(str(tmp_path), pid=111)
     staged = _stage(store)
     store.clear_own_staging()
-    assert store.commit(staged, "cli", "t1") == staged
+    assert run_coro(store.acommit(staged, "cli", "t1")) == staged
 
 
 def test_commit_on_a_full_disk_keeps_the_attachment_and_warns(
@@ -278,7 +281,7 @@ def test_commit_on_a_full_disk_keeps_the_attachment_and_warns(
     monkeypatch.setattr(store_module, "_write_atomic", _no_space)
 
     with caplog.at_level(logging.WARNING, logger=store_module.__name__):
-        assert store.commit(staged, "cli", "t1") == staged
+        assert run_coro(store.acommit(staged, "cli", "t1")) == staged
     assert "No space left on device" in caplog.text
     assert os.listdir(tmp_path) == [STAGING_DIRNAME]
 
@@ -288,18 +291,20 @@ def test_commit_with_an_unreadable_pocket_file_keeps_the_attachment(tmp_path):
     unreadable = replace(
         _stage(store), path=str(tmp_path)
     )  # каталог вместо файла
-    assert store.commit(unreadable, "cli", "t1") == unreadable
+    assert run_coro(store.acommit(unreadable, "cli", "t1")) == unreadable
 
 
 def test_snapshot_writes_straight_into_the_thread(tmp_path):
     store = ImageStore(str(tmp_path), pid=111)
-    att = store.snapshot(
-        _image(),
-        "cli",
-        "t1",
-        origin=ORIGIN_TOOL,
-        label=TOOL_LABEL,
-        source="shots/login.png",
+    att = run_coro(
+        store.asnapshot(
+            _image(),
+            "cli",
+            "t1",
+            origin=ORIGIN_TOOL,
+            label=TOOL_LABEL,
+            source="shots/login.png",
+        )
     )
     assert att.path == os.path.join(str(tmp_path), f"cli_t1_{att.id}.png")
     assert (att.origin, att.label, att.source) == (
@@ -313,25 +318,27 @@ def test_snapshot_writes_straight_into_the_thread(tmp_path):
 def test_thread_ids_are_validated(tmp_path):
     store = ImageStore(str(tmp_path), pid=111)
     with pytest.raises(ValueError):
-        store.commit(_stage(store), "cli", "../escape")
+        run_coro(store.acommit(_stage(store), "cli", "../escape"))
 
 
 def test_read_for_send_checks_the_hash(tmp_path):
     store = ImageStore(str(tmp_path), pid=111)
-    att = store.commit(_stage(store), "cli", "t1")
-    assert store.read_for_send(att) == _image().data
+    att = run_coro(store.acommit(_stage(store), "cli", "t1"))
+    assert run_coro(store.aread_for_send(att)) == _image().data
     with open(att.path, "wb") as handle:
         handle.write(_png(color=(200, 0, 0)))
-    assert store.read_for_send(att) is None
+    assert run_coro(store.aread_for_send(att)) is None
     os.remove(att.path)
-    assert store.read_for_send(att) is None
+    assert run_coro(store.aread_for_send(att)) is None
 
 
 def test_delete_thread_images_removes_only_that_thread(tmp_path):
     store = ImageStore(str(tmp_path), pid=111)
-    mine = store.commit(_stage(store), "cli", "a")
-    neighbour = store.commit(_stage(store, color=(1, 2, 3)), "cli", "a_b")
-    other_system = store.commit(_stage(store), "tui", "a")
+    mine = run_coro(store.acommit(_stage(store), "cli", "a"))
+    neighbour = run_coro(
+        store.acommit(_stage(store, color=(1, 2, 3)), "cli", "a_b")
+    )
+    other_system = run_coro(store.acommit(_stage(store), "tui", "a"))
     store.delete_thread_images("cli", "a")
     assert not os.path.exists(mine.path)
     assert os.path.exists(neighbour.path)

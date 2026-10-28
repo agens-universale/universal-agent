@@ -17,12 +17,10 @@ pytest.importorskip("textual")
 
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-    edits_journal_path,
-)
+from gc_core.thread_store import edits_journal_path
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.paths import TUI_PKG
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.trace_grid import assert_trace_grid, trace_rows
 from gc_testkit.tui_support import tui_settings
 from textual.containers import VerticalScroll
@@ -94,7 +92,7 @@ class _Thread:
             error=None,
             calls=calls,
         )
-        append_turn_outcome_record(self.dir, "cli", TID, outcome, seq=self.seq)
+        turn_outcome_record(self.dir, "cli", TID, outcome)
 
 
 def _reply(mid="u1", text="сделай"):

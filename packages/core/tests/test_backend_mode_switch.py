@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gc_testkit.module_snapshot import restore_gc_modules, save_gc_modules
 from gc_testkit.paths import module_dir
+from helpers.module_snapshot import ModuleSnapshot
 from gc_testkit.settings import fake_ctx, make_settings
 
 
@@ -19,9 +19,22 @@ def _switch_mode(ctx, config_dict: dict, mode: str) -> None:
     ctx.settings, ctx.runtime = loaded.settings, loaded.runtime
 
 
+def _restore_tools_and_dependents() -> None:
+    # Ровно прежние модули, а не свежий импорт: код, загруженный до теста,
+    # держит прежнюю копию исполнителя, и подмена по модулю у следующих
+    # тестов била бы мимо — тест молча гонял бы живой агент.
+    if _SNAPSHOT is not None:
+        _SNAPSHOT.restore()
+
+
+_SNAPSHOT: ModuleSnapshot | None = None
+
+
 def _stub_tools_modules() -> None:
+    global _SNAPSHOT
+    _SNAPSHOT = ModuleSnapshot()
     # Верхнеуровневый `tools` конфликтует с другими окружениями — минимальный stub
-    # только на время этого теста (снимок модулей — в самом тесте).
+    # только на время этого теста (см. _restore_tools_and_dependents).
     for name in list(sys.modules):
         if name == "gc_core.tools" or name.startswith("gc_core.tools."):
             sys.modules.pop(name, None)
@@ -76,17 +89,14 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
     # Корутинные тесты: `unittest.TestCase` их не запускает — метод
     # просто возвращает корутину, и проверка молча не выполняется.
     async def test_switch_responses_completions_responses_same_thread(self):
-        saved_modules = save_gc_modules()
         _stub_tools_modules()
         try:
             from gc_core import agent_executor as agent_executor_module
             from gc_core import processing_responses as processing_module
-            from gc_core.thread_store import (
-                load_thread_meta,
-                resolve_threads_dir,
-            )
+            from gc_core.thread_store import resolve_threads_dir
+            from gc_testkit.develop_files import load_thread_meta
         except Exception:
-            restore_gc_modules(saved_modules)
+            _restore_tools_and_dependents()
             raise
 
         responses_calls = []
@@ -327,7 +337,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                         meta,
                     )
         finally:
-            restore_gc_modules(saved_modules)
+            _restore_tools_and_dependents()
 
 
 if __name__ == "__main__":

@@ -33,6 +33,8 @@ uv run --directory packages/mcp/external/vendor/computer-mcp pytest -m "not wind
 | `packages/server/tests` | server и swarm | 216 |
 | `packages/mcp/tests` | рецепты и менеджер MCP | 159 |
 | `packages/cli/tests` | CLI | 129 |
+| `packages/temporalio/tests` | Temporal (живые — при `temporal` CLI) | 303 |
+| `packages/stores/tests` | хранилища на базах (Postgres — при `GC_TEST_POSTGRES_DSN`) | 29 |
 | `tests` | репозиторий целиком: колёса, литералы модулей, принадлежность тестов | 66 |
 | `external/litellm/tests` | батарейка LiteLLM Proxy | 13 |
 
@@ -72,6 +74,10 @@ cd packages/core && uv run --project ../.. pytest -q
   отдельный `conftest.py` в пакете для этого не нужен.
 - `gc_testkit.helpers`, `gc_testkit.intent_fixtures`, `gc_testkit.tui_support`,
   `gc_testkit.tui_fixtures`, `gc_testkit.harbor_fakes` — импортируемые хелперы.
+- Хранилища: `memory_thread_store_v2` / `memory_agent_store` — образцы в
+  памяти, `thread_store_conformance_v2` / `agent_store_conformance` —
+  конформанс-наборы, которыми проверяются и наши хранилища (файлы, SQLite,
+  Postgres), и чужие (`assert_conforms`).
 
 В тест-ките лежит только то, что нужно наборам НЕСКОЛЬКИХ пакетов и не зависит от
 их файлов. `gc_testkit.tui_support` — три функции про экраны вообще (`wait_until`,
@@ -121,6 +127,11 @@ Temporal через `temporal` CLI. Без CLI они пропускаются; 
 REQUIRE_TEMPORAL=1 uv run pytest packages/temporalio/tests
 ```
 
+Тред под Temporal пишется через провод хранилища v2 (прокси workflow →
+activities воркера): разницы, куски и повторы после записи проверяет
+`test_thread_store.py` без сервера, число activities треда на шаг закреплено
+в `test_workflow_live.py`.
+
 Новый ввод-вывод ядра без решения для Temporal ловят тесты без CLI:
 `test_port_contract.py` (каждый необязательный атрибут контекста и порт —
 привязан в Temporal или объяснён) и проверка полноты в `test_parity_live.py`
@@ -128,6 +139,27 @@ REQUIRE_TEMPORAL=1 uv run pytest packages/temporalio/tests
 пропусков с причиной). В коде ядра без порта используйте
 `gc_core.execution.ports.port(ctx, "<имя>")`: под Temporal отсутствие порта —
 отказ хода, а не локальный запасной путь в коде workflow.
+
+## Postgres
+
+Тесты `packages/stores/tests` берут базу из `GC_TEST_POSTGRES_DSN`; без
+переменной тесты с базой пропускаются, `REQUIRE_POSTGRES=1` делает её
+отсутствие ошибкой. Каждое хранилище в тестах живёт на своей схеме
+(`gc_test_<id>`), схемы удаляются в конце теста — подойдёт любая база, где
+пользователю можно создавать схемы.
+
+```bash
+# временный кластер (Homebrew Postgres), только TCP
+initdb -D /tmp/gc-pg -U postgres --auth=trust -E UTF8
+pg_ctl -D /tmp/gc-pg -o "-p 55432 -c unix_socket_directories='' -c listen_addresses=127.0.0.1" -l /tmp/gc-pg.log start
+GC_TEST_POSTGRES_DSN=postgresql://postgres@127.0.0.1:55432/postgres REQUIRE_POSTGRES=1 \
+    uv run pytest packages/stores/tests
+```
+
+Набор: конформанс контракта v2 (`assert_conforms`) и старый асинхронный набор
+через порт сессии (путь, которым ходит агент), плюс то, чего конформанс не
+видит: два инстанса на одной базе, данные байт в байт, часы базы, схема у
+пользователя без права `CREATE`.
 
 ## Windows
 

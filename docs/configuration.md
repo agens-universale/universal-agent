@@ -278,14 +278,14 @@ gc-cli config schema --output config.schema.json
 ### Как передать
 
 - `gc-cli --trace-id <id>` — обычный запуск.
-- поле `trace_id` в теле `POST /events/webhook` — серверный режим. Поле снимается
+- поле `trace_id` в теле `POST /v1/tasks` — серверный режим (вебхук и swarm). Поле снимается
   из payload до того, как payload уходит в сообщение модели, поэтому в промпт оно
   не попадает.
 
 Значение — не длиннее 200 символов и без управляющих символов (CR, LF, tab).
 Невалидное отклоняется до начала работы, по-разному в зависимости от интейка:
 `gc-cli` падает на старте (traceback и ненулевой код возврата — так же, как на любой
-ошибке валидации конфига), а `POST /events/webhook` и `POST /swarm/run` отвечают
+ошибке валидации конфига), а `POST /v1/tasks` вебхука и swarm отвечает
 `400` с телом `{"status": "error", "payload": "invalid trace_id: ..."}`, при этом
 агент не стартует, а сервер продолжает работать. Пустая или состоящая только
 из пробелов строка означает отсутствие trace_id — и тогда не меняется ничего.
@@ -354,7 +354,7 @@ mcp:
 - Охвачены записи per-run логгера. Модульные логгеры (часть MCP-дискавери,
   транспортные ретраи) идут мимо и trace не несут.
 - `gc-cli --init` флаг не читает: это не оркестрируемый ран.
-- Swarm-раны трассируются: `POST /swarm/run` принимает `trace_id` тем же полем тела, снимает его из payload и передаёт в песочницу через `SWARM_TRACE_ID`, откуда обёртка добавляет `--trace-id`. Внутри песочницы дальше всё как в обычном ране. Через конфиг трейс передать нельзя — ребёнку материализуется сырой YAML, и неизвестный верхнеуровневый ключ будет отвергнут валидацией.
+- Swarm-раны трассируются: `POST /v1/tasks` порта swarm принимает `trace_id` тем же полем тела, снимает его из payload и передаёт в песочницу через `SWARM_TRACE_ID`, откуда обёртка добавляет `--trace-id`. Внутри песочницы дальше всё как в обычном ране. Через конфиг трейс передать нельзя — ребёнку материализуется сырой YAML, и неизвестный верхнеуровневый ключ будет отвергнут валидацией.
 - При `logging.redact_secrets.enabled` trace, похожий на секрет (`sk-…`, `eyJ…`),
   будет замаскирован в записях логов, но не в имени файла и не в `summary_trace_*.jsonl` —
   этот сток пишется сырым `open()`/`json.dumps`, мимо фильтра и форматтера.
@@ -437,6 +437,33 @@ mcp:
   Из CLI: `--agentsmd-override`.
 - Файл `AGENTS.md` генерируется командой `gc-cli --init` (агент сканирует репозиторий и
   создаёт/обновляет `AGENTS.md` через `write_to_file`).
+- Слои отдаёт хранилище агента: у файлового (по умолчанию) это файлы выше; у
+  хранилища агента в базе — все слои, включая проектные, из базы
+  ([хранилища на базах](sdk/stores.md)).
+
+### Имя проекта (`agent.project_id`)
+
+Ресурсы проекта — `.gc/AGENTS.md`, `AGENTS.md`, скиллы `.gc/skills` и память
+проекта — в хранилище агента в базе ключуются id проекта. По умолчанию это
+slug пути каталога, и у того же репозитория в контейнере или на другом хосте он
+другой. `agent.project_id` задаёт имя явно: латинские буквы, цифры, `.`, `_`,
+`-`, не с точки, до 128 символов.
+
+```yaml
+agent:
+  project_id: billing
+```
+
+Файловому хранилищу оно не нужно: память лежит в `.gc/project_memory.md`
+проекта. В общей базе имя проекта задаёт оператор (конфиг сервиса, SDK), а не
+`.gc/config.yml` репозитория — иначе репозиторий может назваться чужим проектом.
+
+Обратная сторона имени по умолчанию: оно — только путь. Разные репозитории
+на одном пути (`/workspace` в контейнерах) получают одно имя и в общей базе
+делят память, `AGENTS.md` и скиллы проекта; slug не различает и пути вида
+`/srv/a/b-c` и `/srv/a-b/c`. В общей базе с несколькими репозиториями
+задавайте `agent.project_id` каждому сервису или держите проекты на разных
+путях.
 
 ## Security policy
 
@@ -724,8 +751,8 @@ Makefile без вопроса в plan и manual.
 **Без человека** спросить некого, и вопрос становится отказом «спросить некого»: в
 `manual` запись, команды вне списка только-чтения и сетевые запросы запрещены, а запись в
 каталог `.git`, скиллы и настройки инструментов — отказ и в `edit`. Это `gc-cli` без
-терминала (и бенчмарк), сервер `gc-serve`, A2A, `gc-chat` (у HTTP-процесса терминала
-нет), swarm и воркер Temporal без канала ответа человека. Канал объявляет это о себе сам:
+терминала (и бенчмарк), сервер `gc-serve` — вебхук, A2A, chat (у HTTP-поверхности
+терминала нет), swarm и воркер Temporal без канала ответа человека. Канал объявляет это о себе сам:
 сервер, swarm (обёртка запускает `gc-cli --external-request`) и A2A — «человека нет», ACP —
 «человек есть» (вопросы уходят в IDE), TUI и `gc-cli` без этого флага не объявляют, и ядро проверяет порт ответа, TUI или терминал при включённом
 `turn_ask_human`. Если человек есть, но ответа не пришло (таймаут, отмена, клиент не умеет
@@ -1273,11 +1300,11 @@ raw/Bearer или обновление токена при 401 допустим�
 `--security.read_guard.mode ask`). Путь — тот же, что в `config.yml` и в
 `gc-cli config explain`.
 
-Тот же контракт у `gc-cli`, `gc-acp` и `gc-chat`: путь через точку и флаги
-`--model`, `--completions_url`. Свои флаги ACP и chat — ещё
-`--config` и `--profile`. `gc-acp` пропускает чужие флаги клиентов без точки
-(JetBrains — позиционный `acp`, `--experimental`) с пометкой в stderr;
-`gc-chat` на них отвечает ошибкой.
+Тот же контракт у `gc-cli`, `gc-acp` и `gc-serve`: путь через точку и флаги
+`--model`, `--completions_url`. Свои флаги ACP и сервера — ещё `--config` и
+`--profile` (у сервера и `--server-config`). `gc-acp` пропускает чужие флаги
+клиентов без точки (JetBrains — позиционный `acp`, `--experimental`) с
+пометкой в stderr; `gc-serve` на них отвечает ошибкой.
 
 - Прежние плоские имена (`--max_steps`, `--summary_params`) **не принимаются**:
   это ошибка при старте. Если у схемы есть настройка с тем же последним сегментом
@@ -1691,11 +1718,109 @@ ddgs-mcp --http
 Удалённой стороне нужны GNU `stat`/`find`, `sh`, `cat`, `base64`, `sha256sum`; `python3` — для `run_python_code`, MCP `execute_on: os_backend` и `fetch_url_execute_on: os_backend`; `bash` — для фоновых команд (`run_in_background`), как и в Harbor.
 Правило разделения: хост — панель управления агента (конфиг, AGENTS.md, `project_memory`, треды и логи, MCP с `execute_on: agent`); среда исполнения — всё, с чем работает модель (`fs_*`, `exec_*`, фон, скиллы, MCP с `execute_on: os_backend`, при `fetch_url_execute_on: os_backend` — и сеть `exec_fetch_url`). `download_file` для remote-kind снят: он писал бы на хост.
 Чистка `sandboxes/`: `python -m gc_server.swarm.cleanup … --core-sandboxes-dir ~/.local/state/gc/sandboxes`.
-## HTTP-процесс gc-chat
+### Входящий поток треда (`thread_store.inbox_poll_seconds`)
 
-Секция `chat_api` живёт в том же `config.yml`, что и агент. Читает её только процесс `gc-chat`: и `POST /v1/responses`, и `POST /v1/chat/completions` на одном порту. В шаблон CLI и в `demo_config.yml` она не входит: без секции схема подставляет дефолты (`127.0.0.1:8090`, без токена, любой origin, проза `allow`, finish-gate `off`, напоминания `session_todo` выключены).
+Сообщения в идущий ход с другого процесса или инстанса (вебхук сервера, swarm,
+`Threads.submit` в SDK) лежат в потоке `inbox` треда. Ход опрашивает поток раз
+в `thread_store.inbox_poll_seconds` секунд (по умолчанию `1.0`) — тем же
+опросом он видит и отмену из потока `control`. Под Temporal опроса нет.
 
-Аннотированный образец для копирования в свой конфиг — [`demo_config_chat.yml`](../demo_config_chat.yml). Обзор процесса — [chat.md](chat.md); детальный контракт Responses — [responses.md](responses.md).
+## Хранилище (`storage`)
+
+Где лежат треды и ресурсы агента (промпты, AGENTS.md, скиллы, память). Без
+секции — файлы, как раньше. Две части выбираются независимо:
+
+```yaml
+storage:
+  threads:                       # история, состояние сессий, вложения
+    type: postgres
+    dsn: "${FILE:/run/secrets/pg_dsn}"
+  agent:                         # промпты, скиллы, память
+    type: postgres
+    dsn: "${FILE:/run/secrets/pg_dsn}"
+    agent_id: coder              # обязателен для агента в базе
+  ensure_schema: false           # true — накатить схему при открытии
+```
+
+| `type` | Параметры | Драйвер |
+|---|---|---|
+| `files` (умолчание) | — (каталоги из `paths.*`) | — |
+| `postgres` | `dsn`, `schema`, `pool_options` | `gc-stores[postgres]` |
+| `mysql` | `dsn`, `pool_options` | `gc-stores[mysql]` |
+| `sqlite` | `path` | — |
+| `redis` | `url`, `prefix` | `gc-stores[redis]` |
+| `s3` | `bucket`, `prefix`, `endpoint_url`, `region` (ключи — переменные AWS) | `gc-stores[s3]` |
+| `пакет.модуль:функция` | любые — функция получает их словарём (часть `agent` — и `agent_id`) | своё |
+
+Строка подключения — значение обязательного параметра. `${FILE:…}` и
+`${ENV:…}` подставляют её из файла или окружения и сами адресом не являются.
+
+| `type` | Куда писать | Пример |
+|---|---|---|
+| `postgres` | `dsn` | `postgresql://user:password@host:5432/database` |
+| `mysql` | `dsn` | `mysql://user:password@host:3306/database` |
+| `sqlite` | `path` | `/var/lib/gc/agents.db` |
+| `redis` | `url` | `redis://:password@host:6379/0` |
+| `s3` | `bucket` | `agents` |
+
+У Postgres схема таблиц — ключ `schema`, не часть `dsn` (по умолчанию
+`public`). У MySQL тот же адрес пишется и как `mysql+asyncmy://…`; хост и
+порт по умолчанию — `127.0.0.1` и `3306`. У SQLite это путь к файлу, не URL. У Redis
+`prefix` по умолчанию `gc:`; номер базы — последний сегмент URL (`/0`).
+У S3 одной строки подключения нет: бакет обязателен, остальное по желанию,
+ключи — переменные AWS, не параметры секции.
+
+```yaml
+threads:
+  type: s3
+  bucket: agents
+  prefix: gc/
+  endpoint_url: http://minio:9000   # AWS — ключ не задавать
+  region: us-east-1
+```
+
+- **Кто открывает.** Ядро знает только схему секции; открывают хранилище
+  `gc-serve` (один раз на процесс, до открытия портов) и `gc-cli` (на запуск).
+  Пакет `gc-stores` у `gc-server` уже есть, драйвер — extra
+  (`gc-server[postgres]` и соседние, [server.md](server.md#установка));
+  SQLite — без extra. Голый `gc-cli` от `gc-stores` не зависит: без пакета в
+  том же окружении нефайловый `storage` — код 1 и подсказка, какой extra
+  поставить. Из рабочей копии драйверы уже в dev-группе, отдельно ничего не
+  ставится: `uv run gc-cli --config ./config.yml`. Как инструмент — в то же
+  окружение, что и `gc-cli`; уже стоящий инструмент переустанавливается с
+  `--force`:
+
+```bash
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" \
+  --with-executables-from gc-mcp \
+  --with "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores" \
+  --with-executables-from gc-stores
+```
+
+Вместо `postgres` — `mysql`, `redis`, `s3` или `all`. Для SQLite extra нет:
+`--with "gc-stores @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores"`.
+`--with-executables-from gc-stores` выносит в `PATH` команду `gc-stores`
+(`migrate`, `sync`). Дальше обычный запуск: `gc-cli --config ./config.yml`.
+TUI и `gc-acp` хранят только в файлах: нефайловая часть — отказ при старте.
+SDK — `gc_stores.configured.aopen_configured(settings)` и
+`AsyncAgent.create(settings, stores=…)` ([sdk/stores.md](sdk/stores.md)).
+
+- **Одна база на обе части** (тот же `type` и те же параметры) — одно
+  подключение.
+- **Схема** сверяется при открытии: не накатана или старая — отказ с подсказкой
+  `gc-stores migrate --config <config.yml>`; `ensure_schema: true` накатывает
+  недостающее сама (нужно право `CREATE`). Ресурсы агента в базу кладёт
+  `gc-stores sync <каталог> --config <config.yml>`.
+- **Секреты.** Подключение — через `${FILE:…}` / `${ENV:…}`. В выводе
+  `config explain` `dsn` скрыт целиком, у остальных параметров — пароль в URL
+  (`redis://:***@host`).
+- **Только свой конфиг.** Слой проекта (`<repo>/.gc/config.yml` и профили из
+  него) `storage` не задаёт — выбрасывается с уведомлением: чужой репозиторий
+  увёл бы историю в свою базу или запустил бы свою фабрику.
+
+Секции `chat_api` и `a2a` из config.yml переехали в config_server.yml (секции
+`chat` и `a2a`, [server.md](server.md#config_serveryml)); здесь они больше не
+читаются — уведомление при загрузке.
 
 ## Где gc-cli хранит runtime-данные
 
@@ -1724,6 +1849,7 @@ Override через переменные окружения: `GC_HOME` (корн
 - **scalar** (число, строка, bool) — project переопределяет global.
 - **dict** — рекурсивный deep merge: project расширяет/переопределяет ключи внутри.
 - **list / array** — конкатенация + dedup: project только **расширяет** список, не сбрасывает (важно для security-полей вроде `agent.stop_tools` или `command_moderation.url_policy.url_blacklist`).
+- **только свой конфиг** — `security.permissions.readonly_commands` и `storage` из проектного слоя не действуют (уведомление при загрузке): это доверие пользователя, а не настройка репозитория.
 
 Пример проектного `<your-repo>/.gc/config.yml`:
 

@@ -15,13 +15,15 @@ from threading import Lock
 from typing import Any
 
 from gc_core.message_policy.chat_completions import repair_tool_call_pairing
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.persistence.session_state import (
+    hydrate_state,
+    shared_from_session,
+)
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.settings import settings_of
 from gc_core.states import State
 from gc_core.summarize.config import parse_summary_trigger_chars
 from gc_core.thread_store import ThreadSession
-from gc_core.thread_store_async import aupdate_port_meta
 from gc_core.usage.account import UsageAccount
 
 
@@ -49,13 +51,35 @@ async def acompact_thread(
         thread_id=thread_id,
         # Хранилище встраивающего, если он его передал.
         store=getattr(ctx, "thread_store", None),
+        # Сжатие переписывает историю: тред, который ведёт ход, — ThreadBusy.
+        claim=True,
     )
+    try:
+        return await _acompact_session(
+            ctx, thread_session, _lock=_lock, self_state=self_state
+        )
+    finally:
+        await thread_session.arelease_lease()
+
+
+async def _acompact_session(
+    ctx: Any,
+    thread_session: ThreadSession,
+    *,
+    _lock: Lock | None,
+    self_state: State | None,
+) -> bool:
+    """Сжатие загруженного и взятого треда."""
+    settings = settings_of(ctx)
+    system_id = thread_session.system_id
+    thread_id = thread_session.thread_id
     thread_session.history_messages = repair_tool_call_pairing(
         thread_session.history_messages,
         keep_latest_unanswered=False,
     )
-    meta = getattr(thread_session, "meta", None) or {}
-    thread_shared = ThreadMetaMapper.shared_from_meta(meta)
+    thread_shared = shared_from_session(
+        thread_session.state, thread_session.extra
+    )
 
     state = await State.acreate(
         verbose=settings.agent.verbose,
@@ -71,16 +95,12 @@ async def acompact_thread(
         workspace_config=ctx,
     )
     state.backend_api_mode = "chat_completions"
-    state.usage = UsageAccount.from_meta(meta.get("token_usage"))
-    state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
-    (
-        state.last_main_prompt_tokens,
-        state.last_main_prompt_message_count,
-    ) = ThreadMetaMapper.read_prompt_token_fields(meta)
-    state.init_user_intent_log(meta.get("user_intent_log"))
-    state.init_current_user_intent(meta.get("current_user_intent"))
-    state.init_user_turn_seq(meta.get("user_turn_seq"))
-    state.infer_user_turn_seq_if_missing()
+    hydrate_state(
+        state,
+        thread_session.state,
+        thread_session.usage,
+        thread_session.notice,
+    )
     state.messages = [
         _shallow_copy_msg(m)
         for m in thread_session.history_messages
@@ -99,20 +119,19 @@ async def acompact_thread(
     ctx.on_summary_applied = coord.on_summary_applied
     await coord.aforce_compact_once(trigger_reason="manual")
 
-    # Компакция сохраняет thread meta из ts.meta (старый token_usage переносится
-    # как есть) — поэтому обновлённый кумулятив (baseline + summary) персистим
-    # отдельно и обновляем live-state, чтобы TUI-футер сразу увидел рост.
-    # ВАЖНО: пишем в TOP-LEVEL ``token_usage`` (его гидрирует run()), НЕ через
-    # update_tui_meta — тот кладёт под вложенный meta["tui"], откуда run() не читает
-    # → на следующем прогоне summary «пропадал» (откат кумулятива).
+    # Компакция пишет расход из снимка сессии (старый кумулятив) — поэтому
+    # обновлённый кумулятив (baseline + summary) персистим отдельным шагом и
+    # обновляем live-state, чтобы TUI-футер сразу увидел рост. Пишем в часть
+    # ``Usage`` (её гидрирует run()), а не в секцию TUI, откуда run() не
+    # читает: иначе на следующем прогоне summary «пропадал».
     try:
-        port = thread_session.port
-        token_usage = state.usage.to_meta()
-        await aupdate_port_meta(
-            port,
-            system_id,
-            thread_id,
-            lambda meta: {**meta, "token_usage": token_usage},
+        from gc_core.persistence.session_state import usage_from_state
+
+        await thread_session.apersist_batch(
+            [],
+            previous_response_id=thread_session.previous_response_id,
+            session=thread_session.state,
+            usage=usage_from_state(state),
         )
     except Exception:
         pass

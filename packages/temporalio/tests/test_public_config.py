@@ -248,6 +248,25 @@ def test_default_settings_round_trip_and_transport_flags():
     assert rebuilt.runtime == RuntimeEnv()
 
 
+def test_registry_only_model_counts_as_transport():
+    """Модель только в реестре ``models``: ``backend.completions_url`` пуст,
+    а судье команд есть куда идти — иначе fail-closed блокирует команды."""
+    settings = AppConfig.model_validate(
+        {
+            "models": {
+                "cheap": {
+                    "model": "vendor/cheap",
+                    "url": "http://models.local/v1/chat/completions",
+                    "token": "",
+                }
+            },
+            "slots": {"light": "cheap", "default": "cheap", "max": "cheap"},
+        }
+    )
+    assert settings.backend.completions_url == ""
+    assert public_config_snapshot(settings).model_transport_configured
+
+
 def test_routing_identity_and_currencies_survive_without_transport():
     loaded = rich()
     public = public_config_snapshot(loaded)

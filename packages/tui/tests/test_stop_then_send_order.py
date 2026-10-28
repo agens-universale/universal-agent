@@ -18,10 +18,8 @@ import pytest
 pytest.importorskip("textual")
 
 from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-)
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings, wait_until
 
 TID = "stopsend0000000000000000000000001a"
@@ -41,13 +39,14 @@ def _write_meta(tmp_path, tid):
 
 
 def _records(tmp_path):
-    path = tmp_path / f"data_cli_{TID}.jsonl"
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    return FileTaskStore(str(tmp_path)).read_all_events(TID)[0]
 
 
 def _order(tmp_path) -> list[str]:
-    """Порядок файла: `id` сообщений, `rec:<opened_by>` записей итога."""
+    """Порядок ленты: `id` сообщений, `rec:<opened_by>` записей итога (по
+    привязке к сообщению хода)."""
     out = []
     for r in _records(tmp_path):
         if r.get("type") == "turn_outcome":
@@ -88,9 +87,7 @@ class _Thread:
             error=None,
         )
         with self.lock:
-            append_turn_outcome_record(
-                self.dir, "cli", TID, outcome, seq=self.seq
-            )
+            turn_outcome_record(self.dir, "cli", TID, outcome)
 
 
 class _Executor:

@@ -105,9 +105,9 @@ META_KEY = "session_settings"
 BREAKER_META_KEY = "circuit_breaker"
 
 
-def read_breaker_from_meta(meta: Dict[str, Any]) -> Dict[str, str]:
-    """Снимок предохранителя моделей (спека §8) из метаданных треда."""
-    return dict(((meta or {}).get("tui") or {}).get(BREAKER_META_KEY) or {})
+def read_breaker_from_tui(tui: Dict[str, Any]) -> Dict[str, str]:
+    """Снимок предохранителя моделей (спека §8) из секции TUI треда."""
+    return dict((tui or {}).get(BREAKER_META_KEY) or {})
 
 
 def to_breaker_meta_patch(snapshot: Dict[str, str]) -> Dict[str, Any]:
@@ -115,13 +115,13 @@ def to_breaker_meta_patch(snapshot: Dict[str, str]) -> Dict[str, Any]:
     return {BREAKER_META_KEY: dict(snapshot or {})}
 
 
-def read_from_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
-    """Переопределения из метаданных треда (`FileTaskStore.get_task_meta`).
+def read_from_tui(tui: Dict[str, Any]) -> Dict[str, Any]:
+    """Переопределения из секции TUI треда (``record_view.tui_section``).
 
     Форма хранения известна только здесь: читателей у неё больше одного, и
-    выражение вида `meta["tui"]["session_settings"]`, расписанное по экранам,
+    выражение вида `tui["session_settings"]`, расписанное по экранам,
     третьим читателем породило бы третью копию."""
-    stored = dict(((meta or {}).get("tui") or {}).get(META_KEY) or {})
+    stored = dict((tui or {}).get(META_KEY) or {})
     legacy = stored.pop("level", None)
     if legacy is not None:
         stored.setdefault("model", legacy)

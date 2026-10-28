@@ -7,7 +7,7 @@ from typing import Any, Dict
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
 
-# Корень bundled-ассетов. Раньше брался из rest_api.server_config — это была
+# Корень bundled-ассетов. Раньше брался из загрузчика конфига сервера — это была
 # единственная зависимость swarm → server, причём там PROJECT_ROOT объявлен как
 # тот же str(bundled_root()) над ядром. Импортируем напрямую, чтобы swarm
 # зависел только от core.
@@ -126,7 +126,7 @@ def _user_config_dir(server_cfg: Dict[str, Any], explicit: str | None) -> str:
     Приоритет: явный аргумент `config_dir` → каталог прочитанного
     config_server.yml (ключ `config_path`, его кладёт `load_server_config`) →
     CWD. CWD в хвосте не наугад: это первый кандидат в поиске самого
-    config_server.yml (см. `rest_api.server_config._server_config_candidates`),
+    config_server.yml (см. `gc_server.config._candidates`),
     так что при «файла нет вовсе» относительный путь смотрит туда же, куда
     смотрел поиск.
     """
@@ -163,6 +163,7 @@ def build_swarm_config(
       - agentmd_path: str (абсолютный путь)
       - skills_dir: str (абсолютный путь)
       - skills_dir_configured: bool — путь назван человеком, а не взят дефолтом
+      - thread_in_store: bool — тред задачи в хранилище тредов сервера
     """
     raw_swarm = server_cfg.get("swarm") or {}
 
@@ -316,6 +317,7 @@ def build_swarm_config(
         "agent_dep_dir": agent_dep_dir,
         "extra_mounts": extra_mounts,
         "agent_overrides": agent_overrides,
+        "thread_in_store": bool(raw_swarm.get("thread_in_store", False)),
     }
 
 

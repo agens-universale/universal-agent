@@ -406,3 +406,13 @@ def test_level_flag_errors_with_model_hint(monkeypatch, tmp_path, capsys):
         _start(monkeypatch, tmp_path, ["--level", "max"])
     assert exc.value.code == 2
     assert "--model" in capsys.readouterr().err
+
+
+def test_backend_rejection_refuses_database_storage():
+    """ACP хранит только в файлах: storage в базе — отказ до протокола."""
+    text = backend_rejection(
+        make_settings(
+            {"storage": {"threads": {"type": "sqlite", "path": "t.db"}}}
+        )
+    )
+    assert text is not None and "storage.threads" in text

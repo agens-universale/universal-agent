@@ -33,6 +33,7 @@ from gc_core.constants.tool_names import (
 )
 from gc_core.onboarding import explain_broken_config
 from gc_core.settings import LoadedSettings
+from gc_core.stores import files_only_rejection
 from gc_core.tools.connect_mcp.registry import ToolsCache
 
 from gc_acp.facade import AcpFacade
@@ -157,7 +158,11 @@ apply_acp_turn_contract = apply_acp_runtime_defaults
 
 
 def backend_rejection(loaded: Any) -> str | None:
-    """Harbor и неизвестный os_backend — до цикла протокола."""
+    """Harbor, неизвестный os_backend и хранилище в базе — до цикла
+    протокола."""
+    storage = files_only_rejection(loaded, program="gc-acp")
+    if storage is not None:
+        return storage
     try:
         kind = parse_os_backend_kind(loaded)
     except ValueError as exc:

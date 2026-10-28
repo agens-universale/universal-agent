@@ -23,7 +23,7 @@ from gc_core.structured_output import (
     StructuredOutputError,
     arephrase_turn_outcome,
 )
-from gc_core.thread_store_durable import ThreadStoreOperation
+from gc_core.threads.models import Lease, LeaseRequest, ThreadKey
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 
@@ -46,6 +46,7 @@ from gc_core_temporalio.sizes import (
     cut_to_payload,
     payload_size,
 )
+from gc_core_temporalio.thread_store_contracts import lease_owner
 from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_core_temporalio.thread_store_transport import ThreadStoreTransport
 
@@ -227,6 +228,7 @@ class UniversalAgentWorkflow:
         self.post_error = None
         self.terminal_outcome = None
         self.resumed_store = None
+        self.resumed_store_token = None
         #: Прокси треда с подтверждённым владением (после claim или resume).
         self.store = None
         self.owner_released = False
@@ -577,10 +579,10 @@ class UniversalAgentWorkflow:
             raise ValueError("Unsupported session resume")
         self.closed = self.closed or resume.closed
         if resume.store_owner_epoch is not None:
-            self.resumed_store = (
-                resume.store_owner_epoch,
-                resume.store_generation or 0,
-            )
+            # Эпоха аренды треда: run после Continue-As-New пишет по ней
+            # без нового захвата.
+            self.resumed_store = resume.store_owner_epoch
+            self.resumed_store_token = resume.store_owner_token
         self.human_replies = dict(resume.human_replies)
         self.reply_receipts = dict(resume.reply_receipts)
         self.undelivered = list(resume.undelivered)
@@ -651,48 +653,23 @@ class UniversalAgentWorkflow:
         if prepared.activity_settings:
             self.operations.activity_settings = prepared.activity_settings
         self.store_settings = self.operations.activity_settings["thread_store"]
-        if store is None and self.resumed_store is not None:
-            epoch, generation = self.resumed_store
-            store = TemporalThreadStore(
-                start.store_id,
-                ThreadStoreTransport(
-                    task_queue=start.resource_queue,
-                    settings=self.store_settings,
-                ),
-                owner_id=owner,
-                owner_epoch=epoch,
-                generation=generation,
-                capabilities=prepared.store_capabilities,
-                threads_dir=prepared.threads_dir,
-            )
         if store is None:
-            store = TemporalThreadStore(
-                start.store_id,
-                ThreadStoreTransport(
-                    task_queue=start.resource_queue,
-                    settings=self.store_settings,
-                ),
-                capabilities=prepared.store_capabilities,
-                threads_dir=prepared.threads_dir,
-            )
-            snapshot = await store.aread_snapshot(
-                start.system_id, start.thread_id, include_state=False
-            )
-            epoch = snapshot.owner_epoch
-            if snapshot.owner_id != owner:
-                receipt = await store.acommit_operation(
-                    start.system_id,
-                    start.thread_id,
-                    ThreadStoreOperation(
-                        self.new_id("claim"),
-                        "claim_owner",
-                        {"owner_id": owner},
-                        expected_revision=snapshot.revision,
-                        generation=snapshot.generation,
+            holder = _lease_owner()
+            store = self._thread_store(start, holder)
+            key = _thread_key(start)
+            if self.resumed_store is not None:
+                store.adopt(
+                    key,
+                    Lease(
+                        owner=holder,
+                        epoch=self.resumed_store,
+                        token=self.resumed_store_token,
                     ),
                 )
-                epoch = receipt.owner_epoch
-            store.owner_id, store.owner_epoch = owner, epoch
+            else:
+                # Тред сессии — за её цепочкой run, бессрочно; у владельца,
+                # чья цепочка уже не исполняется, воркер его отбирает.
+                await store.claim(key, LeaseRequest(owner=holder, ttl=None))
         self.store = store
         # Сообщения, прочитанные из треда, идут в activity модели ссылками.
         self.operations.thread_store = store
@@ -974,47 +951,50 @@ class UniversalAgentWorkflow:
             ]
         return result
 
+    def _thread_store(self, start, owner):
+        return TemporalThreadStore(
+            start.store_id,
+            ThreadStoreTransport(
+                task_queue=start.resource_queue,
+                settings=self.store_settings,
+            ),
+            owner=owner,
+        )
+
     async def _release_owner(self, start):
-        """Снять владение тредом, если эта цепочка run его держит.
+        """Снять аренду треда, если эта цепочка run её держит.
 
         Run после Continue-As-New, закрытый без хода, владеет тредом по
-        resume: прокси собирается из сохранённых epoch/generation.
+        resume: прокси собирается с сохранённой эпохой.
         """
         if self.owner_released:
             return
-        store = self.store
+        store, key = self.store, _thread_key(start)
         if store is None and self.resumed_store is not None:
-            epoch, generation = self.resumed_store
-            store = TemporalThreadStore(
-                start.store_id,
-                ThreadStoreTransport(
-                    task_queue=start.resource_queue,
-                    settings=self.store_settings,
+            holder = _lease_owner()
+            store = self._thread_store(start, holder)
+            store.adopt(
+                key,
+                Lease(
+                    owner=holder,
+                    epoch=self.resumed_store,
+                    token=self.resumed_store_token,
                 ),
-                owner_id=workflow.info().workflow_id,
-                owner_epoch=epoch,
-                generation=generation,
             )
-        if store is None or store.owner_epoch is None:
+        if store is None or store.lease is None:
             return
-        await store._mutate(
-            start.system_id, start.thread_id, "release_owner", {}
-        )
+        await store.release(key, store.lease)
         self.owner_released = True
 
     def _session_resume(self, store):
         """Состояние сессии для Continue-As-New (до ``_fit_resume``)."""
         # Run из CAN без хода владеет тредом по resume: передать его дальше,
         # иначе суточный CAN простаивающей сессии терял бы владение.
-        if store:
-            owner_epoch, generation = store.owner_epoch, store._generation
-        elif self.resumed_store:
-            owner_epoch, generation = (
-                self.resumed_store[0],
-                self.resumed_store[1],
-            )
-        else:
-            owner_epoch = generation = None
+        owner_epoch = self.resumed_store
+        owner_token = self.resumed_store_token
+        if store is not None and store.lease is not None:
+            owner_epoch = store.lease.epoch
+            owner_token = store.lease.token
         return SessionResume(
             human_replies=_recent(self.human_replies),
             reply_receipts=_recent(self.reply_receipts),
@@ -1031,7 +1011,7 @@ class UniversalAgentWorkflow:
             answer=self.answer,
             terminal_outcome=self.terminal_outcome,
             store_owner_epoch=owner_epoch,
-            store_generation=generation,
+            store_owner_token=owner_token,
         )
 
     async def _continue(self, start, store):
@@ -1063,3 +1043,13 @@ class UniversalAgentWorkflow:
                 else None
             ),
         )
+
+
+def _thread_key(start) -> ThreadKey:
+    return ThreadKey(system=start.system_id, thread=start.thread_id)
+
+
+def _lease_owner() -> str:
+    """Владелец аренды треда — цепочка run сессии (переживает CAN)."""
+    info = workflow.info()
+    return lease_owner(info.workflow_id, info.first_execution_run_id)

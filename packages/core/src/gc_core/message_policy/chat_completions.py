@@ -78,15 +78,18 @@ def repair_tool_call_pairing(
     messages: List[Dict],
     *,
     keep_latest_unanswered: bool = True,
+    keep_call_ids: frozenset[str] = frozenset(),
 ) -> List[Dict]:
     """
     Keep assistant.tool_calls only when each call has a matching tool reply
-    (role=tool, tool_call_id=...) later in the history.
+    (role=tool, tool_call_id=...) later in the history. ``keep_call_ids`` —
+    вызовы, чей ответ придёт позже (вопрос, на котором ход приостановлен):
+    их починка не трогает.
     """
     if not isinstance(messages, list) or not messages:
         return messages
 
-    future_tool_call_ids: set[str] = set()
+    future_tool_call_ids: set[str] = set(keep_call_ids)
     normalized_reversed: List[Dict] = []
 
     for message in reversed(messages):

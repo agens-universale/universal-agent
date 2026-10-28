@@ -4,7 +4,9 @@ from gc_core.agent_store import agent_store_of
 from gc_core.execution.resources import PromptResourceRequest
 
 
-def load_prompt_resource(request: PromptResourceRequest, *, ctx) -> str:
+async def aload_prompt_resource_here(
+    request: PromptResourceRequest, *, ctx
+) -> str:
     if request.schema_version != 1:
         raise ValueError("Unsupported prompt resource schema_version")
     readers = {
@@ -21,80 +23,58 @@ def load_prompt_resource(request: PromptResourceRequest, *, ctx) -> str:
         reader = readers[request.kind]
     except KeyError:
         raise ValueError("Unknown prompt resource kind") from None
-    return reader(request, ctx)
+    return await reader(request, ctx)
 
 
-def _summary(request, ctx):
-    from gc_core.summarize import prompt_loading
+async def _summary(_request, ctx):
+    from gc_core.summarize.prompt_loading import aload_summary_prompt
 
-    return prompt_loading.load_prompt_template(
-        str(request.path or prompt_loading.default_prompt_path()),
-        store=agent_store_of(ctx),
+    return await aload_summary_prompt(agent_store_of(ctx))
+
+
+async def _memory_patch(request, ctx):
+    from gc_core.summarize.prompt_loading import aload_memory_patch_prompt
+
+    return await aload_memory_patch_prompt(
+        agent_store_of(ctx), subagent=request.subagent
     )
 
 
-def _memory_patch(request, ctx):
-    from gc_core.summarize.memory_suggestions import (
-        _resolve_prompt_path,
-        default_memory_patch_path,
-    )
-    from gc_core.summarize.prompt_loading import (
-        load_memory_patch_replace_prompt,
-    )
-
-    path = _resolve_prompt_path(
-        ctx,
-        "chat_completions_memory_patch_replace_prompt_path",
-        default_memory_patch_path(),
-    )
-    return load_memory_patch_replace_prompt(
-        path, subagent=request.subagent, store=agent_store_of(ctx)
-    )
-
-
-def _limit(_request, ctx):
+async def _limit(_request, ctx):
     from gc_core.summarize.limit_trace_summary import (
-        _load_limit_summary_prompt,
+        aload_limit_summary_prompt,
     )
 
-    return _load_limit_summary_prompt(agent_store_of(ctx))
+    return await aload_limit_summary_prompt(agent_store_of(ctx))
 
 
-def _intent_tool(_request, ctx):
-    from gc_core.intent_scope.summarizer import _load_system_prompt
+async def _intent_tool(_request, ctx):
+    from gc_core.intent_scope.summarizer import aload_intent_prompt
 
-    return _load_system_prompt(ctx)
-
-
-def _intent_final(_request, ctx):
-    from gc_core.intent_scope.summarizer import (
-        _load_prompt_file,
-        _resolve_final_answer_prompt_path,
-    )
-
-    return _load_prompt_file(
-        _resolve_final_answer_prompt_path(ctx), store=agent_store_of(ctx)
-    )
+    return await aload_intent_prompt(agent_store_of(ctx), "intent_tool")
 
 
-def _project_memory(_request, ctx):
-    from gc_core.project_memory.compaction import _load_prompt
+async def _intent_final(_request, ctx):
+    from gc_core.intent_scope.summarizer import aload_intent_prompt
 
-    return _load_prompt(agent_store_of(ctx))
+    return await aload_intent_prompt(agent_store_of(ctx), "intent_final")
 
 
-def _finish_gate(request, ctx):
+async def _project_memory(_request, ctx):
+    from gc_core.project_memory.compaction import aload_compaction_prompt
+
+    return await aload_compaction_prompt(agent_store_of(ctx))
+
+
+async def _finish_gate(_request, ctx):
     from gc_core.intent_guard.final_report_consistency import (
-        _load_guard_prompt,
+        aload_guard_prompt,
     )
 
-    return _load_guard_prompt(request.path, store=agent_store_of(ctx))
+    return await aload_guard_prompt(agent_store_of(ctx))
 
 
-def _routing_pair_judge(request, ctx):
-    from gc_core.auto_routing.judge_runner import _load_judge_prompt
-    from gc_core.auto_routing.pair_judge import prompt_path
+async def _routing_pair_judge(_request, ctx):
+    from gc_core.auto_routing.judge_runner import aload_judge_prompt
 
-    return _load_judge_prompt(
-        request.path or prompt_path(ctx), store=agent_store_of(ctx)
-    )
+    return await aload_judge_prompt(agent_store_of(ctx))

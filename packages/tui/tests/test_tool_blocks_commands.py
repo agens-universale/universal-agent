@@ -12,7 +12,8 @@ import pytest
 pytest.importorskip("textual")
 
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
-from gc_core.thread_store import append_new_thread_messages, edits_journal_path
+from gc_core.thread_store import edits_journal_path
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.trace_grid import assert_trace_grid, trace_rows
 from gc_testkit.tui_support import tui_settings
 from rich.style import Style

@@ -25,6 +25,8 @@ from gc_core.config_modules.model_registry import (
     LEVEL_FALLBACK,
     LEVELS,
     ModelEntry,
+    configured_choice,
+    effective_choice,
 )
 from gc_core.settings import settings_of
 
@@ -592,3 +594,66 @@ class ModelRouter:
             tariff=None,
             source=source,
         )
+
+
+def consumer_has_transport(
+    settings: Any, consumer: str, router: ModelRouter | None = None
+) -> bool:
+    """Есть ли у потребителя адрес модели: легаси ``backend.completions_url``
+    или запись реестра ``models``, в которую он резолвится.
+
+    Конфиг только с реестром (``models``/``slots``) оставляет
+    ``backend.completions_url`` пустым — по одному этому полю потребитель
+    выглядел бы ненастроенным. Открытый предохранитель транспорт не отменяет:
+    алиас настроен, просто временно отказывает.
+    """
+    source = settings_of(settings)
+    if source.backend.completions_url:
+        return True
+    if router is None:
+        router = ModelRouter(
+            source,
+            choice_provider=lambda: effective_choice(
+                configured_choice(source), source
+            ),
+        )
+    try:
+        return bool(router.resolve(consumer, check_breaker=False).url)
+    except (ValueError, LookupError):
+        return False
+
+
+def main_model_identity(
+    settings: Any, router: ModelRouter | None
+) -> tuple[str, str]:
+    """Модель и адрес основного потребителя (``main``) — для лога старта и
+    отчёта расхода (тариф ищется по имени модели, валюта — по адресу).
+
+    С реестром ``models`` это запись, в которую резолвится ``main``: легаси
+    ``agent.model``/``backend.completions_url`` у такого конфига пусты или
+    чужие. Без реестра (и без ``router``) — легаси-пара, как раньше.
+    Витринный резолв: открытый предохранитель не мешает. Режим ``auto`` до
+    выбора пары — модель стартового уровня AUTO.
+    """
+    source = settings_of(settings)
+    resolved = None if router is None else _main_for_display(router)
+    if resolved is not None:
+        return resolved.model, resolved.url
+    return source.agent.model, source.backend.completions_url
+
+
+def _main_for_display(router: ModelRouter) -> ResolvedModel | None:
+    from gc_core.auto_routing.levels import AUTO
+    from gc_core.auto_routing.policy import START_LEVEL
+
+    try:
+        return router.resolve("main", check_breaker=False)
+    except (ValueError, LookupError):
+        if router.live_choice() != AUTO:
+            return None
+    try:
+        return router.resolve(
+            "main", check_breaker=False, target_override=START_LEVEL
+        )
+    except (ValueError, LookupError):
+        return None

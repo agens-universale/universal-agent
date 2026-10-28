@@ -6,15 +6,15 @@ import shutil
 from collections import Counter
 
 import pytest
-from live_support import temporal_cli
+from live_support import temporal_cli, thread_messages, thread_meta
 from gc_core.run_context import acreate_run_context
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio.activities import AgentActivities
 from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from gc_core_temporalio.public_config import public_config_snapshot
 from gc_testkit.settings import make_settings
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_stores.sqlite import SQLiteThreadStore
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -23,16 +23,11 @@ from live_support import (
 )
 
 
-@pytest.mark.parametrize(
-    ("batch_flags", "persist"),
-    [(False, "step"), (True, "step"), (True, "turn")],
-    ids=["legacy-flags", "batched-flags", "turn-persist"],
-)
+@pytest.mark.parametrize("persist", ["step", "turn"])
 async def test_native_executor_uses_real_file_session_and_replays(
     tmp_path,
     provider,  # noqa: F811
     monkeypatch,
-    batch_flags,
     persist,
 ):
     binary = temporal_cli()
@@ -66,21 +61,12 @@ async def test_native_executor_uses_real_file_session_and_replays(
         return contexts[call.owner_id]
 
     # История и мета агента — в переданном FileThreadStore.
-    files = DurableFileThreadStore(str(tmp_path / "threads"))
+    files = FileThreadStore(str(tmp_path / "threads"))
     activities = AgentActivities(
         context_provider=context_provider,
         stores={"files": files},
         public_config=public_config_snapshot,
     )
-    if not batch_flags:
-        prepare = activities._prepare
-
-        async def without_batch(call, ctx):
-            result = await prepare(call, ctx)
-            result.store_capabilities.remove("reset_run_flags")
-            return result
-
-        activities._prepare = without_batch
     thread = ThreadStoreActivities({"files": files})
     registered = [
         activities.prepare,
@@ -95,9 +81,7 @@ async def test_native_executor_uses_real_file_session_and_replays(
         activities.summary_trace,
         activities.close,
         activities.release,
-        thread.load,
-        thread.commit,
-        thread.read_trace,
+        *thread.registered,
     ]
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=binary
@@ -139,22 +123,22 @@ async def test_native_executor_uses_real_file_session_and_replays(
             for event in history.events
             if event.HasField("activity_task_failed_event_attributes")
         ]
-        assert not any(
-            "ThreadStoreConflict" in failure for failure in failures
-        )
-        # Before own metadata acknowledgements: 13 commits and 4 loads, one
-        # failed commit and its recovery load caused solely by our own flag.
-        # Optional startup batching removes one metadata read and one commit.
-        # persist: turn — шаги хода одним commit'ом в конце хода.
-        assert (
-            activity_counts["universal_agent.thread.commit"]
-            == ({"step": 11 if batch_flags else 12, "turn": 4}[persist])
-        )
-        assert activity_counts["universal_agent.thread.load"] == (
-            2 if batch_flags else 3
-        )
+        assert not any("ThreadConflict" in failure for failure in failures)
+        # persist: step — шаг одной записью (commit) без чтения перед ней;
+        # persist: turn — ход одной записью в конце. Тред читается один раз —
+        # при открытии сессии. Аренда — claim в начале, release в конце.
+        # Записей сбоку нет: отметку хода под Temporal не ставят, а сброс
+        # флагов хода без залипших флагов ничего не пишет.
+        expected = {
+            "step": {"commit": 8, "get": 1, "append_side": 0},
+            "turn": {"commit": 1, "get": 1, "append_side": 0},
+        }[persist]
+        for operation, count in expected.items():
+            name = f"universal_agent.thread.{operation}"
+            assert activity_counts[name] == count, (name, activity_counts)
+        assert activity_counts["universal_agent.thread.claim"] == 1
+        assert activity_counts["universal_agent.thread.release"] == 1
         measurement = {
-            "batch_flags": batch_flags,
             "persist": persist,
             "activities": dict(sorted(activity_counts.items())),
             "activity_total": sum(activity_counts.values()),
@@ -166,18 +150,16 @@ async def test_native_executor_uses_real_file_session_and_replays(
         (tmp_path / "activity-counts.json").write_text(
             json.dumps(measurement, indent=2)
         )
+
         assert "Recovered successfully" in str(result["answer"])
         assert len(requests) == 2
-        messages = files.load_messages("test", "native-thread")
+        messages = await thread_messages(files, "test", "native-thread")
         assert any(
             "file from native workflow" in str(message) for message in messages
         )
-        assert (
-            files.load_meta("test", "native-thread")["shared"][
-                "working_memory"
-            ]["knowledge"]
-            == "durable fact"
-        )
+        assert (await thread_meta(files, "test", "native-thread"))["shared"][
+            "working_memory"
+        ]["knowledge"] == "durable fact"
         await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(
             history
         )

@@ -15,10 +15,8 @@ import pytest
 pytest.importorskip("textual")
 
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
-from gc_core.thread_store import (
-    append_subagent_trace_record,
-    edits_journal_path,
-)
+from gc_core.thread_store import edits_journal_path
+from gc_testkit.thread_writes import subagent_record
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.services.diff_render import copyable_hunks
@@ -100,7 +98,7 @@ def _delegating_thread(tmp_path, tid: str, *, before: list[dict] = ()) -> None:
 
 
 def _sidecar_call(tmp_path, tid: str, call_id: str, path: str) -> None:
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         "cli",
         tid,
@@ -117,7 +115,7 @@ def _sidecar_call(tmp_path, tid: str, call_id: str, path: str) -> None:
 
 
 def _sidecar_result(tmp_path, tid: str, call_id: str) -> None:
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         "cli",
         tid,

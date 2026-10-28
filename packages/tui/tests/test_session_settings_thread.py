@@ -1,3 +1,4 @@
+from gc_testkit.develop_files import meta_of
 from gc_testkit.tui_support import tui_settings
 import pytest
 
@@ -94,7 +95,7 @@ async def test_init_auto_create_inherits_session_overrides(tmp_path):
         store = FileTaskStore(
             threads_dir=str(tmp_path / "threads"), system="cli"
         )
-        saved = (store.get_task_meta(tid).get("tui") or {}).get(
+        saved = (meta_of(store.get_record(tid)).get("tui") or {}).get(
             "session_settings"
         )
         assert saved == {"tui.finish_gate_mode": "off"}
@@ -135,7 +136,7 @@ async def test_freetext_auto_create_inherits_session_overrides(tmp_path):
         store = FileTaskStore(
             threads_dir=str(tmp_path / "threads"), system="cli"
         )
-        saved = (store.get_task_meta(tid).get("tui") or {}).get(
+        saved = (meta_of(store.get_record(tid)).get("tui") or {}).get(
             "session_settings"
         )
         assert saved == {"tui.finish_gate_mode": "off"}

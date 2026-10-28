@@ -2380,10 +2380,8 @@ async def test_undo_feedback_reaches_the_thread_as_technical_message(tmp_path):
     from gc_core.message_policy.user_message_policy import (
         is_technical_user_message_text,
     )
-    from gc_core.thread_store import (
-        append_new_thread_messages,
-        load_thread_messages,
-    )
+    from gc_testkit.develop_files import load_thread_messages
+    from gc_testkit.develop_files import append_new_thread_messages
     from gc_tui.app import TuiApp
 
     ws = _Workspace(tmp_path)

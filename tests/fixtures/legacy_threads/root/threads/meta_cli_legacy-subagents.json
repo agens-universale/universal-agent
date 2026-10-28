@@ -1,0 +1,57 @@
+{
+  "state_schema_version": "v2",
+  "thread_id": "legacy-subagents",
+  "system": "cli",
+  "schema_version": 2,
+  "updated_at": "2026-10-14T12:39:31.557840+00:00",
+  "created_at": "2026-10-14T12:39:31.518717+00:00",
+  "runtime": {
+    "live_history_chars": 394,
+    "live_msg_count": 5
+  },
+  "previous_response_id": null,
+  "backend_api_mode": "chat_completions",
+  "messages_count": 5,
+  "shared": {
+    "working_memory": {},
+    "notes_md": "",
+    "fetch_url_cache": {},
+    "confirm_rules": {},
+    "session_todo": []
+  },
+  "user_intent_log": [
+    {
+      "turn": 1,
+      "ts": "2026-10-14T12:39:31Z",
+      "action": "user_ask",
+      "tool_name": null,
+      "content": "Задача с субагентом"
+    }
+  ],
+  "current_user_intent": [],
+  "user_turn_seq": 1,
+  "dialog_steps_offset": 0,
+  "last_main_prompt_tokens": 10,
+  "last_main_prompt_message_count": 4,
+  "token_usage": {
+    "by_category": {
+      "main": {
+        "input": 20,
+        "output": 10,
+        "cached": 0,
+        "calls": 2,
+        "missing_usage_calls": 0,
+        "billed_calls": 0,
+        "billed_input": 0,
+        "billed_output": 0,
+        "billed_cached": 0,
+        "cost_by_currency": {}
+      }
+    }
+  },
+  "chat_completions_system_prompt_rendered": "SYSTEM PROMPT",
+  "project_memory_content_hash": null,
+  "tool_usage_notice_cnt": {},
+  "todo_reminder_cnt": 2,
+  "last_backend_response_id": "4428172b067a917272e4fcd9216bd29d"
+}

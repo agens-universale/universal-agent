@@ -21,7 +21,7 @@ from gc_core.agent_edits.tracking import (
 from gc_core.backends.local import LocalFsBackend
 from gc_core.config_modules import env_vars
 from gc_core.execution_workspace import build_execution_workspace
-from gc_core.thread_store import edits_journal_path, touched_journal_path
+from gc_core.thread_store import edits_journal_path
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
 from gc_testkit.helpers.tool_ctx import local_ctx
 from gc_testkit.settings import fake_ctx
@@ -96,7 +96,7 @@ async def test_tracking_backend_no_longer_writes_touched_journal(launch_root):
         )
     )
     assert res["ok"] is True
-    assert not Path(touched_journal_path(str(threads), "tui", "t1")).exists()
+    assert not (threads / "touched_tui_t1.json").exists()
     assert not (root / ".gc" / "diffs").exists()
     # Правка при этом записана — вторым каналом, из самого тула.
     assert [(r.path, r.call_id) for r in _records(threads)] == [

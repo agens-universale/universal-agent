@@ -1,113 +1,94 @@
+"""Где ищется config_server.yml, что попадает в лог, как правки агента ложатся
+поверх config.yml и где ищется роль агента поверхности."""
+
 import logging
 import os
 
 import pytest
-
+from gc_core.bundled_assets import bundled_root
 from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.model_router import ModelRouter
-from gc_server.rest_api import server_config
-from gc_server.rest_api.server_config import load_server_config
+from gc_server import config as server_config
+from gc_server.config import (
+    ServerConfig,
+    ServerConfigError,
+    load_server_config,
+    surface_settings,
+)
 from gc_testkit.settings import make_settings
 
 
 def test_server_config_path_from_env_vars(monkeypatch, tmp_path):
     custom = tmp_path / "my_server.yml"
-    custom.write_text(
-        "server:\n  host: 0.0.0.0\n  port: 9999\nagent:\n  server_agentmd_path: a.md\n",
-        encoding="utf-8",
-    )
+    custom.write_text("webhook:\n  port: 9999\n", encoding="utf-8")
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=custom))
     cfg = load_server_config()
-    assert cfg["server"].get("port") == 9999
+    assert cfg.address("webhook")[1] == 9999
+    assert cfg.config_path == str(custom)
 
 
-def test_server_config_path_none_falls_back_to_default(monkeypatch, tmp_path):
+def test_explicit_flag_wins_over_env(monkeypatch, tmp_path):
+    env_file = tmp_path / "env.yml"
+    env_file.write_text("webhook:\n  port: 1111\n", encoding="utf-8")
+    flag_file = tmp_path / "flag.yml"
+    flag_file.write_text("webhook:\n  port: 2222\n", encoding="utf-8")
+    monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=env_file))
+    assert load_server_config(str(flag_file)).address("webhook")[1] == 2222
+
+
+def test_nothing_found_falls_back_to_defaults(monkeypatch, tmp_path):
+    """Файла нет нигде — умолчания и пустой путь: «якорь неизвестен», а не
+    «якорь = ассеты»."""
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
-    monkeypatch.setattr(
-        "gc_server.rest_api.server_config.PROJECT_ROOT", str(tmp_path)
-    )
+    monkeypatch.setattr(server_config, "bundled_root", lambda: tmp_path / "a")
+    monkeypatch.setattr(server_config, "repo_root", lambda: None)
+    monkeypatch.chdir(tmp_path)
     cfg = load_server_config()
-    assert cfg["server"]["host"] == "0.0.0.0"
-    assert cfg["server"]["port"] == 8000
+    assert cfg.config_path == ""
+    assert cfg.address("webhook") == ("127.0.0.1", 8000)
 
 
 def test_load_server_config_logs_which_candidate_won(
     monkeypatch, tmp_path, caplog
 ):
-    """Какой именно config_server.yml прочитан — обязано быть в логе.
-
-    Список кандидатов начинается с CWD, и до этой строки узнать победителя было
-    неоткуда: молчаливый промах резолва однажды поднял сервер с auth_token=None.
-    """
+    """Какой именно config_server.yml прочитан — обязано быть в логе: список
+    кандидатов начинается с каталога запуска, и молчаливый промах резолва
+    однажды поднял сервер без токена."""
     (tmp_path / "config_server.yml").write_text(
-        "server:\n  port: 7777\n",
-        encoding="utf-8",
+        "webhook:\n  port: 7777\n", encoding="utf-8"
     )
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
     monkeypatch.chdir(tmp_path)
-
-    with caplog.at_level(
-        logging.INFO, logger="gc_server.rest_api.server_config"
-    ):
+    with caplog.at_level(logging.INFO, logger=server_config.__name__):
         cfg = load_server_config()
-
-    assert cfg["server"]["port"] == 7777
-    assert os.path.realpath(str(tmp_path / "config_server.yml")) in caplog.text
-
-
-def test_load_server_config_reports_the_file_it_read(monkeypatch, tmp_path):
-    """Прочитанный путь обязан уезжать вместе с конфигом.
-
-    Он единственный источник каталога, от которого резолвятся относительные
-    пути этого же файла (swarm.skills_dir и соседи). Пока его не было, swarm
-    резолвил их от корня bundled-ассетов — то есть внутрь чужого пакета.
-    """
-    custom = tmp_path / "my_server.yml"
-    custom.write_text("server:\n  port: 9999\n", encoding="utf-8")
-    monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=custom))
-
-    assert load_server_config()["config_path"] == str(custom)
+    assert cfg.address("webhook")[1] == 7777
+    assert os.path.realpath(str(tmp_path / "config_server.yml")) in (
+        os.path.realpath(cfg.config_path)
+    )
+    assert "config_server.yml" in caplog.text
 
 
-def test_load_server_config_reports_empty_path_when_nothing_found(
-    monkeypatch, tmp_path
-):
-    """Файла нет — ключ есть, но пустой: «якорь неизвестен», а не «якорь = ассеты»."""
-    monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
-    monkeypatch.setattr(server_config, "PROJECT_ROOT", str(tmp_path))
-    monkeypatch.setattr(server_config, "repo_root", lambda: None)
-    monkeypatch.chdir(tmp_path)
-
-    assert load_server_config()["config_path"] == ""
+# --- agent_overrides — тем же путём, что флаги CLI -------------------------
 
 
-# --- Task 10 (ревью): agent_overrides идут через apply_cli_overrides ------------
-#
-# Контракт (CLAUDE.md): agent_overrides перекрывают config.yml так же, как
-# CLI-аргументы -> agent_overrides.model/completions_url поверх непустого
-# merged-реестра моделей обязан включать легаси-форс, как --model.
-
-
-def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
-    monkeypatch.setattr(
-        server_config,
-        "load_settings",
-        lambda: make_settings(
-            {
-                "models": {"flash": {}},
-                "slots": {"default": "flash"},
-                "agent.model": "flash",
-                "backend.completions_url": "http://127.0.0.1:8014/v1/chat/completions",
-            }
-        ),
+def _with(cfg: dict, base: dict, name: str = "webhook"):
+    return surface_settings(
+        make_settings(base), ServerConfig.model_validate(cfg), name
     )
 
-    loaded = server_config.build_agent_settings_for_server(
-        {"agent_overrides": {"agent.model": "forced-model"}}
-    )
 
+def test_agent_overrides_model_with_registry_forces_legacy():
+    loaded = _with(
+        {"agent_overrides": {"agent.model": "forced-model"}},
+        {
+            "models": {"flash": {}},
+            "slots": {"default": "flash"},
+            "agent.model": "flash",
+            "backend.completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+        },
+    )
     # agent_overrides видны легаси-форсу как заданные из CLI.
     assert loaded.provenance.source("agent.model").layer == "cli"
     assert cli_forces_legacy_model(loaded) is True
@@ -120,69 +101,44 @@ def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
     assert resolved.source == "легаси-форс --model"
 
 
-def test_agent_overrides_without_model_is_not_forced(monkeypatch):
-    monkeypatch.setattr(
-        server_config,
-        "load_settings",
-        lambda: make_settings(
-            {"models": {"flash": {}}, "slots": {"default": "flash"}}
-        ),
+def test_agent_overrides_without_model_is_not_forced():
+    loaded = _with(
+        {"agent_overrides": {"agent.stop_tools": ["write_to_file"]}},
+        {"models": {"flash": {}}, "slots": {"default": "flash"}},
     )
-
-    loaded = server_config.build_agent_settings_for_server(
-        {"agent_overrides": {"agent.stop_tools": ["write_to_file"]}}
-    )
-
     assert cli_forces_legacy_model(loaded) is False
 
 
-def test_agent_overrides_other_keys_still_applied(monkeypatch):
-    """Регресс: прочие agent_overrides (например, stop_tools) применяются как раньше."""
-    monkeypatch.setattr(
-        server_config,
-        "load_settings",
-        lambda: make_settings({"agent.model": "m"}),
-    )
-
-    settings = server_config.build_agent_settings_for_server(
+def test_agent_overrides_other_keys_still_applied():
+    settings = _with(
         {
             "agent_overrides": {
                 "agent.stop_tools": ["write_to_file"],
                 "agent.max_steps": 7,
             }
-        }
+        },
+        {"agent.model": "m"},
     ).settings
-
     assert settings.agent.stop_tools == ["write_to_file"]
     assert settings.agent.max_steps == 7
 
 
-def test_agent_overrides_section_overrides_only_its_fields(monkeypatch):
-    """Вложенная секция перекрывает только заданные поля — как deep-merge у
-    swarm; прочие значения config.yml остаются."""
-    monkeypatch.setattr(
-        server_config,
-        "load_settings",
-        lambda: make_settings({"agent.model": "m", "agent.max_steps": 3}),
-    )
-
-    settings = server_config.build_agent_settings_for_server(
-        {"agent_overrides": {"agent": {"stop_tools": ["write_to_file"]}}}
+def test_agent_overrides_section_overrides_only_its_fields():
+    """Вложенная секция перекрывает только заданные поля; прочие значения
+    config.yml остаются."""
+    settings = _with(
+        {"agent_overrides": {"agent": {"stop_tools": ["write_to_file"]}}},
+        {"agent.model": "m", "agent.max_steps": 3},
     ).settings
-
     assert settings.agent.stop_tools == ["write_to_file"]
     assert settings.agent.max_steps == 3
     assert settings.agent.model == "m"
 
 
-def test_agent_overrides_flat_name_fails_with_path_hint(monkeypatch):
+def test_agent_overrides_flat_name_fails_with_path_hint():
     """Плоских имён нет: сервер не стартует, сообщение подсказывает путь."""
-    monkeypatch.setattr(server_config, "load_settings", make_settings)
-
-    with pytest.raises(ValueError) as exc:
-        server_config.build_agent_settings_for_server(
-            {"agent_overrides": {"max_steps": 7}}
-        )
+    with pytest.raises(ServerConfigError) as exc:
+        _with({"agent_overrides": {"max_steps": 7}}, {})
     message = str(exc.value)
     assert message.startswith(
         "agent_overrides: неизвестная настройка max_steps"
@@ -191,26 +147,21 @@ def test_agent_overrides_flat_name_fails_with_path_hint(monkeypatch):
     assert "--" not in message
 
 
-def _agent_md(server_agentmd_path, cfg_path):
-    """``paths.agent_md_path`` для заданной пары «значение поля, путь конфига»."""
-    return server_config.build_agent_settings_for_server(
-        {
-            "config_path": str(cfg_path),
-            "agent": {"server_agentmd_path": server_agentmd_path},
-        }
+# --- роль агента поверхности ------------------------------------------------
+
+
+def _agent_md(value: str, cfg_path):
+    cfg = ServerConfig.model_validate(
+        {"webhook": {"agent_md_path": value}}
+    ).model_copy(update={"config_path": str(cfg_path)})
+    return surface_settings(
+        make_settings({}), cfg, "webhook"
     ).settings.paths.agent_md_path
 
 
 def test_relative_agent_md_is_found_next_to_the_config(tmp_path):
-    """Пример из docs/server.md — файл рядом с config_server.yml — обязан находиться.
-
-    На develop `PROJECT_ROOT` был корнем репозитория, где лежит и сам
-    `config_server.yml`, поэтому `server_agentmd_path: "./server_agent.md"`
-    указывал на соседний файл. После переезда ассетов внутрь пакета тот же
-    якорь стал вести в `packages/core/assets`, и пример перестал работать —
-    молча: `build_instructions` возвращает пустой текст, а сервер продолжает
-    обслуживать запросы агентом БЕЗ системных инструкций.
-    """
+    """Файл рядом с config_server.yml обязан находиться: иначе агент молча
+    работал бы без системных инструкций."""
     own = tmp_path / "server_agent.md"
     own.write_text("# инструкции\n", encoding="utf-8")
     assert _agent_md(
@@ -219,19 +170,17 @@ def test_relative_agent_md_is_found_next_to_the_config(tmp_path):
 
 
 def test_relative_agent_md_falls_back_to_bundled_assets(tmp_path):
-    """Рядом с конфигом нет — берём bundled-промпт дистрибутива."""
     resolved = _agent_md(
         "prompts/server_agent.md", tmp_path / "config_server.yml"
     )
     assert os.path.isfile(resolved), resolved
-    assert resolved.startswith(server_config.PROJECT_ROOT)
+    assert resolved.startswith(str(bundled_root()))
 
 
 def test_missing_agent_md_is_loud(tmp_path, caplog):
-    """Ненайденный файл кричит: тихо работать без инструкций сервер не должен."""
     with caplog.at_level(logging.WARNING, logger=server_config.__name__):
         _agent_md("./nowhere.md", tmp_path / "config_server.yml")
-    assert "server_agentmd_path" in caplog.text
+    assert "webhook.agent_md_path" in caplog.text
     assert str(tmp_path) in caplog.text
 
 

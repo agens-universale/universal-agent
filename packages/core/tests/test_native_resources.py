@@ -149,14 +149,12 @@ async def test_project_memory_compaction_is_between_file_phases(monkeypatch):
         return compaction.CompactionResult(True, "compact", None, None)
 
     monkeypatch.setattr(compaction, "acompact_text", compact)
+    # Память читает и пишет порт (воркер), не хранилище в этом процессе.
     monkeypatch.setattr(
-        "gc_core.tools.project.project_memory.backup_path", forbidden
+        "gc_core.agent_store.file_store.FileAgentStore.read_memory", forbidden
     )
     monkeypatch.setattr(
-        "gc_core.tools.project.project_memory.storage.read", forbidden
-    )
-    monkeypatch.setattr(
-        "gc_core.tools.project.project_memory.storage.stat", forbidden
+        "gc_core.agent_store.file_store.FileAgentStore.write_memory", forbidden
     )
     ctx = fake_ctx(project_gc_dir="/worker/.gc", project_memory_io=io)
     result = await ProjectMemory(ctx=ctx, state=state).acall("append", "new")
@@ -181,12 +179,7 @@ async def test_durable_trace_write_failure_is_not_swallowed():
     from gc_core.agent_executor import _aappend_trace_id_to_meta
 
     failure = InfrastructureFailure("store unavailable")
-    session = SimpleNamespace(
-        store=object(),
-        system_id="test",
-        thread_id="thread",
-        port=SimpleNamespace(aload_meta=AsyncMock(side_effect=failure)),
-    )
+    session = SimpleNamespace(aadd_trace_id=AsyncMock(side_effect=failure))
     with pytest.raises(InfrastructureFailure) as caught:
         await _aappend_trace_id_to_meta(session, "trace")
     assert caught.value is failure

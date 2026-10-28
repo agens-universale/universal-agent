@@ -8,11 +8,17 @@ import sys
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio.client import AgentClient
 from gc_core_temporalio.contracts import ActivityCall, RunRequest
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from live_support import call, wait_marker, temporal_cli
+from live_support import (
+    call,
+    temporal_cli,
+    thread_messages,
+    thread_owner,
+    wait_marker,
+)
 from restart_interceptor import RestartInterceptor
 from temporalio.client import WorkflowFailureError
 from temporalio.converter import value_to_type
@@ -175,9 +181,9 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
             expected = effects(before) * (1 if resource == "mcp" else 2)
             assert effects(audit.read_text()) == expected
             del marker
-            messages = DurableFileThreadStore(
-                tmp_path / "threads"
-            ).load_messages("test", "lost")
+            messages = await thread_messages(
+                FileThreadStore(tmp_path / "threads"), "test", "lost"
+            )
             assert len({m["id"] for m in messages}) == len(messages)
             outputs = [
                 str(m.get("output") or m.get("content"))
@@ -286,9 +292,9 @@ async def test_native_cancellation_during_actual_mcp_teardown(
             assert len(requests) == 2
             assert not contexts._contexts and not host._owners
             assert (
-                contexts.stores["files"]
-                .read_snapshot("test", "controls")
-                .owner_id
+                await thread_owner(
+                    contexts.stores["files"], "test", "controls"
+                )
                 is None
             )
             history = await handle.fetch_history()

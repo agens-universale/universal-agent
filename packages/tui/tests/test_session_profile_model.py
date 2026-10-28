@@ -4,14 +4,14 @@
 docs/specs/2026-07-23-profiles-design.md §6.4, §8, §9, §3.2, §3.3, §3.5.
 """
 
-from gc_testkit.settings import make_settings
-from gc_testkit.tui_support import tui_settings
 import os
 import time
 from pathlib import Path
 
 import pytest
 import yaml
+from gc_testkit.settings import make_settings
+from gc_testkit.tui_support import tui_settings
 
 pytest.importorskip("textual")
 
@@ -22,10 +22,11 @@ from gc_core.runtime_notices import (
 )
 from gc_tui.app import TuiApp
 from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.stores.record_view import tui_section
 from gc_tui.session_settings import (
     SESSION_KEYS,
-    read_breaker_from_meta,
-    read_from_meta,
+    read_breaker_from_tui,
+    read_from_tui,
 )
 
 
@@ -84,10 +85,10 @@ def test_model_registered_in_session_keys():
 
 
 def test_old_meta_level_restored_as_model():
-    meta = {"tui": {"session_settings": {"level": "max", "profile": "w"}}}
-    assert read_from_meta(meta) == {"model": "max", "profile": "w"}
-    both = {"tui": {"session_settings": {"level": "max", "model": "giga"}}}
-    assert read_from_meta(both) == {"model": "giga"}
+    tui = {"session_settings": {"level": "max", "profile": "w"}}
+    assert read_from_tui(tui) == {"model": "max", "profile": "w"}
+    both = {"session_settings": {"level": "max", "model": "giga"}}
+    assert read_from_tui(both) == {"model": "giga"}
 
 
 @pytest.mark.asyncio
@@ -527,7 +528,9 @@ def test_circuit_breaker_persists_and_restores_across_windows(tmp_path):
     app.persist_circuit_breaker()
 
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_meta(store.get_task_meta("t-breaker"))
+    snapshot = read_breaker_from_tui(
+        tui_section(store.get_record("t-breaker"))
+    )
     assert snapshot.get("flash") == "недоступна"
 
     app2 = TuiApp(
@@ -568,7 +571,7 @@ def test_run_completion_persists_circuit_breaker(tmp_path):
     runner.wait(timeout=5)
 
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_meta(store.get_task_meta("t-run"))
+    snapshot = read_breaker_from_tui(tui_section(store.get_record("t-run")))
     assert snapshot.get("flash") == "недоступна"
 
 
@@ -602,7 +605,7 @@ def test_run_failure_persists_circuit_breaker(tmp_path):
     runner.wait(timeout=5)
 
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_meta(store.get_task_meta("t-fail"))
+    snapshot = read_breaker_from_tui(tui_section(store.get_record("t-fail")))
     assert snapshot.get("flash") == "5xx"
 
 
@@ -637,7 +640,7 @@ def test_run_persists_circuit_breaker_even_after_runner_replaced(tmp_path):
     runner.wait(timeout=5)
 
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_meta(store.get_task_meta("t-stop"))
+    snapshot = read_breaker_from_tui(tui_section(store.get_record("t-stop")))
     assert snapshot.get("flash") == "недоступна"
 
 
@@ -741,7 +744,7 @@ def test_load_circuit_breaker_restores_in_place_keeping_executor_wired(
     executor_router.breaker.trip("flash", "run trip")
     app.persist_circuit_breaker()
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_meta(store.get_task_meta("t-2"))
+    snapshot = read_breaker_from_tui(tui_section(store.get_record("t-2")))
     assert snapshot.get("flash") == "run trip"
     assert snapshot.get("deepseek-max") == "5xx"
 
@@ -1124,10 +1127,11 @@ def _write_unreadable_profile(
 
 
 def _meta_overrides(tmp_path: Path, task_id: str) -> dict:
-    from gc_tui.session_settings import read_from_meta
+    from gc_tui.services.stores.record_view import tui_section
+    from gc_tui.session_settings import read_from_tui
 
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    return read_from_meta(store.get_task_meta(task_id))
+    return read_from_tui(tui_section(store.get_record(task_id)))
 
 
 def test_switch_session_profile_refuses_a_profile_that_does_not_assemble(

@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from gc_core.threads.errors import OwnershipError
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -128,10 +129,6 @@ class SessionsScreen(Screen):
         self._page: int = 0
         self._branch_filter: str = "all"  # "all" | "current"
         self._current_branch: Optional[str] = None
-        # Исход строки по записи итога хода: хвост треда читается один раз
-        # за жизнь экрана. Ключ со статусом и временем меты — новый ход
-        # треда, пока экран открыт, читается заново.
-        self._row_status: dict[tuple, Optional[str]] = {}
 
     # ---- compose / mount ---------------------------------------------
 
@@ -177,10 +174,9 @@ class SessionsScreen(Screen):
 
     def _all_tasks(self) -> list:
         # Кап высокий (не 200) — чтобы счётчик «из N» показывал реальное число
-        # сессий, а не вводил в заблуждение. Список читает только мету
-        # (дёшево); хвост треда для статуса — лишь строки страницы
-        # (_settled_row_status). Фильтр-по-названию ограничен этим же
-        # капом. 10000 — как в mass-delete ниже.
+        # сессий, а не вводил в заблуждение. Дефолтный вид читает только мету (дёшево)
+        # + first-prompt лишь для 25 строк страницы; фильтр-по-названию ограничен этим
+        # же капом. 10000 — как в mass-delete ниже.
         return self._store.list_tasks(limit=10000)
 
     def _visible_tasks(self) -> list:
@@ -258,18 +254,10 @@ class SessionsScreen(Screen):
         # Правило «нет живого хода — прервано» — только для статуса TUI:
         # его ход держит процесс с замком сессии. Верхний статус — как есть.
         if (task.tui_meta or {}).get("status") != "running":
-            return self._settled_row_status(task)
+            return task.status
         return settled_status(
             task.status, live=self.app.session_run_is_live(task.thread_id)
         )
-
-    def _settled_row_status(self, task) -> Optional[str]:
-        key = (task.thread_id, task.status, task.updated_at)
-        if key not in self._row_status:
-            self._row_status[key] = self._store.turn_status(
-                task.thread_id, task.status
-            )
-        return self._row_status[key]
 
     def _title_line(self, task, *, selected: bool) -> Text:
         title = self._title_of(task)
@@ -504,8 +492,23 @@ class SessionsScreen(Screen):
         )
 
     def _delete_task(self, thread_id: str) -> None:
-        self._store.delete_task(thread_id)
+        self._delete_or_warn([thread_id])
         self._reload()
+
+    def _delete_or_warn(self, thread_ids: list[str]) -> None:
+        """Удалить сессии; тред, который ведёт durable-исполнитель, удаляет
+        только он сам — такие пропускаются с предупреждением."""
+        kept = 0
+        for thread_id in thread_ids:
+            try:
+                self._store.delete_task(thread_id)
+            except OwnershipError:
+                kept += 1
+        if kept:
+            self.app.notify(
+                f"Не удалено сессий: {kept} — их ведёт durable-исполнитель",
+                severity="warning",
+            )
 
     def _open_mass_delete(self) -> None:
         tasks = self._store.list_tasks(limit=10000)  # весь проект, не страница
@@ -534,8 +537,7 @@ class SessionsScreen(Screen):
         def _on_confirm(ok: bool) -> None:
             if not ok:
                 return
-            for tid in ids:
-                self._store.delete_task(tid)
+            self._delete_or_warn(list(ids))
             self._reload()
 
         self.app.push_screen(
@@ -582,7 +584,7 @@ class SessionsScreen(Screen):
         tid = task.thread_id
         segments = self._store.read_segments(tid)
         subagent_records = self._store.read_subagent_trace(tid)
-        runtime = self._store.get_task_meta(tid).get("runtime") or {}
+        record = self._store.get_record(tid)
         from gc_tui.screens.preview import PreviewScreen
 
         def _on_result(resume: bool) -> None:
@@ -595,7 +597,7 @@ class SessionsScreen(Screen):
                 thread_id=tid,
                 project_path=self._project_path(),
                 subagent_records=subagent_records,
-                mcp_snapshot=runtime.get("mcp_tools"),
+                mcp_snapshot=record.runtime.mcp_tools if record else None,
                 model_slots=self._model_slots(),
             ),
             _on_result,

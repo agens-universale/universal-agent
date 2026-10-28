@@ -646,8 +646,8 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
         as_coro(_fake_request_summary_text),
     )
     monkeypatch.setattr(
-        "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p, **_kw: "prompt",
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        as_coro(lambda _store: "prompt"),
     )
     monkeypatch.setattr(
         "gc_core.summarize.memory_suggestions.arequest_patch_replace",

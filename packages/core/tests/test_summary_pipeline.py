@@ -3,12 +3,10 @@ import types
 
 from gc_core.intent_log import append_user_ask
 from gc_core.summarize.compaction import arun_summary_compaction
-from gc_core.thread_store import (
-    ThreadSession,
-    append_new_thread_messages,
-    save_thread_meta,
-)
+from gc_core.thread_store import ThreadSession
+from gc_testkit.develop_files import save_thread_meta
 from gc_testkit import run_coro
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import (
     intent_user_ask_texts,
@@ -18,6 +16,11 @@ from gc_testkit.intent_fixtures import (
 from gc_testkit.settings import fake_ctx, make_settings
 
 TS = "2026-05-30T11:35:08Z"
+
+
+async def _fake_summary_prompt(_store):
+    """Промпт суммаризации без хранилища агента."""
+    return "prompt"
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -132,8 +135,8 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
         )
 
         monkeypatch.setattr(
-            "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p, **_kw: "prompt",
+            "gc_core.summarize.prompt_loading.aload_summary_prompt",
+            _fake_summary_prompt,
         )
 
         async def _fake_summary(**_kwargs):
@@ -218,16 +221,19 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
             system_id=system_id,
             thread_id=thread_id,
         )
-        session.meta["user_intent_log"] = meta_intent_log(
-            "first request", "second request"
-        )
-        session.meta["state_schema_version"] = "v2"
         await session.apersist_batch(
             [
                 {"role": "user", "content": "first request"},
                 {"role": "assistant", "content": "first reply"},
             ],
             previous_response_id=None,
+            session=session.state.model_copy(
+                update={
+                    "intent_log": meta_intent_log(
+                        "first request", "second request"
+                    )
+                }
+            ),
         )
 
         reloaded = await ThreadSession.afrom_config(
@@ -235,7 +241,7 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
             system_id=system_id,
             thread_id=thread_id,
         )
-        assert reloaded.meta.get("user_intent_log") == meta_intent_log(
+        assert reloaded.state.intent_log == meta_intent_log(
             "first request",
             "second request",
         )
@@ -243,8 +249,8 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
 
 def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
     monkeypatch.setattr(
-        "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p, **_kw: "prompt",
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
     )
 
     async def _fake_summary(**_kwargs):
@@ -296,8 +302,8 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "gc_core.summarize.prompt_loading.load_prompt_template",
-        lambda _p, **_kw: "prompt",
+        "gc_core.summarize.prompt_loading.aload_summary_prompt",
+        _fake_summary_prompt,
     )
 
     async def _fake_summary(**_kwargs):

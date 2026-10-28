@@ -5,7 +5,6 @@
 подготовка без закрытия такта.
 """
 
-import json
 import logging
 
 import pytest
@@ -16,12 +15,11 @@ from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.policy import Decision
 from gc_core.model_choice import ModelChoiceApplied
 from gc_core.model_router import ModelRouter
-from gc_core.persistence.model_choice_record import (
-    ModelChoiceRecord,
-    parse_model_choice,
-)
+from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.run_context import acreate_run_context
 from gc_core.states import State
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
 from gc_core.turn_boundary import begin_turn
 from gc_core.utils.logging_module import release_run_logger
 from parity_harness import (
@@ -433,13 +431,14 @@ async def test_subagent_calls_emit_nothing(prepared):
     assert state.applied_choice == "light"
 
 
-def _thread_rows(tmp_path):
-    path = tmp_path / "threads" / "data_cli_choice.jsonl"
-    return [json.loads(line) for line in path.read_text().splitlines()]
-
-
-def _choice_rows(rows):
-    return [row for row in rows if row["type"] == "model_choice"]
+async def _streams(tmp_path):
+    """История, итоги хода и смены модели треда прогона."""
+    store = FileThreadStore(str(tmp_path / "threads"))
+    key = ThreadKey(system="cli", thread="choice")
+    return [
+        [e.data for e in await store.read_stream(key, name)]
+        for name in ("messages", "turns", "model_choices")
+    ]
 
 
 async def test_change_during_run_is_written_where_it_applied(
@@ -455,38 +454,35 @@ async def test_change_during_run_is_written_where_it_applied(
         {1: "max"},
     )
 
-    rows = _thread_rows(tmp_path)
-    (record,) = _choice_rows(rows)
-    at = rows.index(record)
-    before = [row for row in rows[:at] if row["type"] == "message"]
-    assert parse_model_choice(record) == ModelChoiceRecord(
-        "max", "big", "fast"
+    messages, _turns, (choice,) = await _streams(tmp_path)
+    assert (
+        choice["model"] == ModelChoiceRecord("max", "big", "fast").to_payload()
     )
-    assert record["seq"] == before[-1]["seq"]
-    assert before[-1]["payload"].get("type") == "function_call_output"
-    assert rows[at + 1]["type"] == "message"
+    at = [m.get("id") for m in messages].index(choice["after"])
+    assert messages[at].get("type") == "function_call_output"
+    assert at + 1 < len(messages)
 
 
 async def test_change_at_run_end_is_written_after_turn_outcome(
     tmp_path, monkeypatch
 ):
+    """На завершении рана смена — за последним сообщением, как итог хода:
+    у одного сообщения читатели ставят итог хода раньше черты."""
     await _run(tmp_path, monkeypatch, "light", [_finish()], {1: "max"})
 
-    rows = _thread_rows(tmp_path)
-    assert [row["type"] for row in rows[-2:]] == [
-        "turn_outcome",
-        "model_choice",
-    ]
-    assert parse_model_choice(rows[-1]) == ModelChoiceRecord(
-        "max", "big", "fast"
+    messages, (turn,), (choice,) = await _streams(tmp_path)
+    assert (
+        choice["model"] == ModelChoiceRecord("max", "big", "fast").to_payload()
     )
-    assert rows[-1]["seq"] == rows[-2]["seq"]
+    assert choice["after"] == turn["after"] == messages[-1]["id"]
 
 
 async def test_run_without_change_writes_no_record(tmp_path, monkeypatch):
     await _run(tmp_path, monkeypatch, "max", [_work(), _finish()], {})
 
-    assert _choice_rows(_thread_rows(tmp_path)) == []
+    messages, turns, choices = await _streams(tmp_path)
+    assert messages and turns
+    assert choices == []
 
 
 async def test_applied_choice_reaches_recorder_with_previous_choice(prepared):

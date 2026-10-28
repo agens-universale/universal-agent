@@ -41,6 +41,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     "agent_store": BOUND
     + " (ExternalAgentStore: чтение ресурсов агента — только в activity)",
     "ask_human": FRONTEND + ": вопрос человеку — human_request",
+    "ask_human_suspends": DATA
+    + ": флаг приостановки на вопросе (A2A); под Temporal выключен",
     "attach_state": DATA
     + ": привязка State к RunContext в памяти, без ввода-вывода",
     "auth_connector": WORKER + ": токен модели — activity модели",
@@ -58,6 +60,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     "guard_probe": BOUND,
     "human_request": BOUND + " (updates/signals workflow)",
     "image_store": WORKER + ": байты картинок читает activity модели",
+    "on_thread_claimed": FRONTEND
+    + ": статус задачи вебхука после захвата треда; в Temporal ход ведёт workflow",
     "intent_scope": DATA,
     "is_cli_mode": DATA,
     "is_tui": DATA,
@@ -291,6 +295,22 @@ def test_custom_thread_store_must_declare_its_paths(tmp_path):
     with pytest.raises(ValueError, match="protected_paths"):
         store_paths(Undeclared())
     assert store_paths(Declared()) == [str(tmp_path / "s3-cache")]
+
+
+def test_every_bundled_thread_store_is_accepted_by_the_worker(tmp_path):
+    """Хранилища из коробки, которые документация называет для воркера, —
+    воркер их принимает (Postgres раньше не объявлял protected_paths и
+    валил старт). Подключение к базе не нужно."""
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core_temporalio.worker import store_paths
+    from gc_stores.postgres import PostgresThreadStore
+    from gc_stores.sqlite import SQLiteThreadStore
+
+    assert store_paths(FileThreadStore(tmp_path / "files"))
+    assert store_paths(SQLiteThreadStore(tmp_path / "t.db"))
+    assert (
+        store_paths(PostgresThreadStore("postgresql://u@db.invalid/x")) == []
+    )
 
 
 async def test_ask_refuses_to_answer_a_dropped_message(monkeypatch):

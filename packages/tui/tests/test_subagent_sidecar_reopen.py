@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store import append_subagent_trace_record
+from gc_testkit.thread_writes import subagent_record
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.subagent_sidecar_mapper import CHILD_SUMMARY_LABEL
 from gc_tui.widgets.tool_call_row import ToolCallRow
 from gc_tui.widgets.trace_row import TraceRow
@@ -64,7 +64,7 @@ def _write_parent_thread(tmp_path: Path, tid: str) -> None:
 
 def _write_sidecar(tmp_path: Path, tid: str) -> None:
     d = str(tmp_path)
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -78,7 +78,7 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
             "call_id": "call_child_9",
         },
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -91,7 +91,7 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
             "output": "ok",
         },
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -100,7 +100,7 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
         kind="child_summary",
         payload={"synthesis": "сжато"},
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -109,7 +109,7 @@ def _write_sidecar(tmp_path: Path, tid: str) -> None:
         kind="intermediate_reply",
         payload={"prose": "проверю дальше", "call_id": "ir1"},
     )
-    append_subagent_trace_record(
+    subagent_record(
         d,
         "cli",
         tid,
@@ -199,7 +199,7 @@ def _write_archived_subagent_thread(tmp_path: Path, tid: str) -> None:
         "\n".join(json.dumps(x, ensure_ascii=False) for x in live) + "\n",
         encoding="utf-8",
     )
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         "cli",
         tid,
@@ -213,7 +213,7 @@ def _write_archived_subagent_thread(tmp_path: Path, tid: str) -> None:
             "call_id": "child_arch_1",
         },
     )
-    append_subagent_trace_record(
+    subagent_record(
         str(tmp_path),
         "cli",
         tid,
@@ -324,7 +324,7 @@ async def test_reopen_shows_rejected_reply_and_stopped_call(tmp_path):
             },
         ),
     ):
-        append_subagent_trace_record(
+        subagent_record(
             d,
             "cli",
             tid,

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import pytest
 from gc_core.thread_store import sanitize_system_id
-from gc_server.rest_api.utils import ensure_task_id, normalize_system
+from gc_server.webhook.request import ensure_task_id, normalize_system
 
 
 @pytest.mark.parametrize(

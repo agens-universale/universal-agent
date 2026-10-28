@@ -10,8 +10,8 @@ MCP-процессами жили бы до рестарта воркера. Р�
 
 import asyncio
 import logging
+from datetime import timedelta
 
-from gc_core.thread_store_journal import prune_durable_receipts
 from temporalio.client import WorkflowExecutionStatus
 from temporalio.service import RPCError, RPCStatusCode
 
@@ -100,7 +100,7 @@ class WorkerMaintenance:
                 logger.info("Releasing abandoned context %s", owner)
                 await self.provider.forget_owner(owner)
         for store in self.stores.values():
-            await asyncio.to_thread(_prune_store_receipts, store)
+            await _prune_receipts(store)
 
     async def serve(self):
         while True:
@@ -111,11 +111,15 @@ class WorkerMaintenance:
                 logger.exception("Worker maintenance failed")
 
 
-def _prune_store_receipts(store):
-    prune = getattr(store, "prune_receipts", None)
-    if prune is not None:
-        prune(max_age_seconds=RECEIPT_MAX_AGE_SECONDS)
-    elif getattr(store, "threads_dir", None):
-        prune_durable_receipts(
-            store.threads_dir, max_age_seconds=RECEIPT_MAX_AGE_SECONDS
-        )
+async def _prune_receipts(store):
+    """Старые квитанции хранилища тредов. Файловое обходит все треды на
+    диске синхронно — в потоке, чтобы не держать event loop воркера (и
+    heartbeat соседних activities)."""
+    from gc_core.threads.facade import run_sync
+    from gc_core.threads.file_store import FileThreadStore
+
+    older = timedelta(seconds=RECEIPT_MAX_AGE_SECONDS)
+    if isinstance(store, FileThreadStore):
+        await asyncio.to_thread(run_sync, store.prune_receipts(older))
+    else:
+        await store.prune_receipts(older)

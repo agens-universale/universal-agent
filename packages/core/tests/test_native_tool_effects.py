@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.execution.tool_effects import execute_native_tool_effect
-from gc_core.security.guard_probe import evaluate_guard_probe
+from gc_core.security.guard_probe import aevaluate_guard_probes
 from gc_core.security.permission_store import PermissionStore
 from gc_core.tools import aapply_tool
 from gc_core.tools.exec.download_file import DownloadFile
@@ -29,7 +29,8 @@ def setup_ports(config, tool_class):
 
     async def probe(request):
         events.append(("probe", request.kind))
-        return evaluate_guard_probe(request, settings=worker)
+        (result,) = await aevaluate_guard_probes([request], settings=worker)
+        return result
 
     async def human(request):
         events.append(("human", request.decision_key))
@@ -327,6 +328,7 @@ async def test_view_image_worker_probes_the_model_of_the_actual_call(
     ctx, worker, _ = setup_ports(config, ViewImage)
     if level_field == "turn_level":
         from dataclasses import asdict
+
         from gc_core.execution.contracts import ToolVisionView
 
         async def legacy_effect(request):
@@ -414,7 +416,9 @@ async def test_view_image_snapshot_crosses_the_effect_boundary(
     snapshot = state.pending_tool_attachments[0]
     from gc_core.attachments.model import Attachment
 
-    stored = worker.image_store.read_for_send(Attachment.from_dict(snapshot))
+    stored = await worker.image_store.aread_for_send(
+        Attachment.from_dict(snapshot)
+    )
     assert stored, "файл снимка лежит в хранилище воркера"
 
 

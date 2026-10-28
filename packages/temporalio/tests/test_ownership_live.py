@@ -7,9 +7,10 @@ import pytest
 from live_support import temporal_cli, worker_kwargs
 import test_workflow_controls as controls
 from gc_core.execution.contracts import ExecutionFailure
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.thread_store_journal import durable_owner_id
 from gc_core_temporalio.contracts import UserMessage
+from gc_core_temporalio.thread_store_contracts import parse_lease_owner
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
@@ -23,7 +24,13 @@ scripted_http = controls.scripted_http
 
 
 def owner(tmp_path):
-    return durable_owner_id(str(tmp_path / "threads"), "test", "controls")
+    """Workflow, чья цепочка run держит тред (владелец — ``wf#run``)."""
+    held = durable_owner_id(str(tmp_path / "threads"), "test", "controls")
+    if held is None:
+        return None
+    workflow_id, chain = parse_lease_owner(held)
+    assert chain, f"владелец аренды — цепочка run, а не {held!r}"
+    return workflow_id
 
 
 async def test_keep_alive_close_after_continue_as_new_releases_owner(
@@ -57,16 +64,14 @@ async def test_failed_session_releases_owner(
 ):
     monkeypatch.chdir(tmp_path)
     url, _, _ = scripted_http
-    commit = DurableFileThreadStore.commit_operation
+    commit = FileThreadStore.commit
 
-    def failing_commit(self, system_id, thread_id, operation):
-        if operation.kind == "persist":
+    async def failing_commit(self, key, change):
+        if change.append_messages:
             raise ExecutionFailure("injected persist failure")
-        return commit(self, system_id, thread_id, operation)
+        return await commit(self, key, change)
 
-    monkeypatch.setattr(
-        DurableFileThreadStore, "commit_operation", failing_commit
-    )
+    monkeypatch.setattr(FileThreadStore, "commit", failing_commit)
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
             UniversalAgentWorkflow.run,
@@ -262,7 +267,8 @@ async def test_unlock_releases_only_a_dead_owner(
         assert await release_stale_owner(*args) is None
         assert owner(tmp_path) == "controls"
         await handle.terminate("operator")
-        assert await release_stale_owner(*args) == "controls"
+        released = await release_stale_owner(*args)
+        assert released and parse_lease_owner(released)[0] == "controls"
         assert owner(tmp_path) is None
 
 

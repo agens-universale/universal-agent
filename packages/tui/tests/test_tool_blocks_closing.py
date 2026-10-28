@@ -17,11 +17,9 @@ import pytest
 pytest.importorskip("textual")
 
 from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-)
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.paths import TUI_PKG
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings, wait_until
 from textual.containers import VerticalScroll
 from textual.widgets import Static
@@ -64,7 +62,7 @@ class _Thread:
             error=None,
             calls=kw.get("calls"),
         )
-        append_turn_outcome_record(self.dir, "cli", TID, outcome, seq=self.seq)
+        turn_outcome_record(self.dir, "cli", TID, outcome)
 
 
 def _read(i):
@@ -617,9 +615,7 @@ class _ReadsExecutor:
             duration_sec=12.0,
             error=None,
         )
-        append_turn_outcome_record(
-            self.dir, "cli", thread_id, outcome, seq=self.seq
-        )
+        turn_outcome_record(self.dir, "cli", thread_id, outcome)
 
     def stop_run(self):
         self.release.set()

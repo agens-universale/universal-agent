@@ -1,11 +1,12 @@
-"""Читатели треда TUI и запись смены модели (`type: "model_choice"`).
+"""Читатели треда TUI и запись смены модели (поток `model_choices`).
 
-Запись встаёт в `data_*.jsonl` за последним сообщением перед применением
-смены и повторяет его `seq`. Восстановление ленты и превью рисуют на её
-месте ту же черту, что живая смена (`ModelMark`), с теми же правилами
-склейки: черта сразу за чертой заменяет её, возврат к модели до первой из
-них — без черты. Живой хвост записи не рисует — черту дала живая смена.
-Сообщением запись не считается; экспорт — одна строка на смену.
+Запись привязана к последнему записанному сообщению перед применением
+смены (`after`). Восстановление ленты и превью рисуют на её месте ту же
+черту, что живая смена (`ModelMark`), с теми же правилами склейки: черта
+сразу за чертой заменяет её, возврат к модели до первой из них — без
+черты. Живой хвост записи не рисует — черту дала живая смена. Сообщение
+привязки удалено — запись сирота, черты нет. Сообщением запись не
+считается; экспорт — одна строка на смену.
 """
 
 from __future__ import annotations
@@ -20,13 +21,13 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
-    append_model_choice_record,
-    append_new_thread_messages,
-    append_turn_outcome_record,
-    archive_and_replace_thread_files,
-    load_thread_meta,
-    save_thread_meta,
+from gc_core.threads.facade import run_sync
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
+from gc_testkit.thread_writes import (
+    acompact,
+    model_choice_record,
+    turn_outcome_record,
 )
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.export import export_thread
@@ -57,41 +58,35 @@ def _assistant(mid: str) -> dict:
 
 
 class _Thread:
-    """Файлы треда: сообщения, записи смены и итога, сжатие."""
+    """Тред хранилища v2: сообщения, записи смены и итога, сжатие."""
 
     def __init__(self, root) -> None:
         self.dir = str(root)
         os.makedirs(self.dir, exist_ok=True)
-        self.seq = 0
-        save_thread_meta(self.dir, _SYS, _TID, {})
 
     def turn(self, n: int) -> _Thread:
-        msgs = [_user(f"u{n}"), _assistant(f"a{n}")]
-        append_new_thread_messages(
-            self.dir, _SYS, _TID, msgs, set(), start_seq=self.seq
-        )
-        self.seq += len(msgs)
+        self.store.append_messages(_TID, [_user(f"u{n}"), _assistant(f"a{n}")])
         return self
 
     def choice(self, record: ModelChoiceRecord) -> _Thread:
-        append_model_choice_record(self.dir, _SYS, _TID, record, seq=self.seq)
+        model_choice_record(self.dir, _SYS, _TID, record)
         return self
 
     def outcome(self) -> _Thread:
+        last = self.store.read_all_events(_TID)[0][-1]["payload"]["id"]
         outcome = TurnOutcome(
             status="done",
             reason=None,
-            opened_by=f"u{self.seq // 2}",
+            opened_by=f"u{last[1:]}",
             started_at="2026-10-25T11:32:00.000Z",
             ended_at="2026-10-25T11:32:12.000Z",
             duration_sec=12.0,
             error=None,
         )
-        append_turn_outcome_record(self.dir, _SYS, _TID, outcome, seq=self.seq)
+        turn_outcome_record(self.dir, _SYS, _TID, outcome)
         return self
 
     def compact(self) -> _Thread:
-        meta = load_thread_meta(self.dir, _SYS, _TID)
         summary = {
             "role": "user",
             "content": wrap_technical_user_content(
@@ -100,16 +95,12 @@ class _Thread:
             ),
             "id": "sum_S",
         }
-        archive_and_replace_thread_files(
-            self.dir, _SYS, _TID, [summary], archive_suffix="S"
-        )
-        save_thread_meta(
-            self.dir,
-            _SYS,
-            _TID,
-            {**meta, "last_summary_archive_suffix": "S"},
-        )
-        self.seq = 1
+        key = ThreadKey(system=_SYS, thread=_TID)
+        run_sync(acompact(FileThreadStore(self.dir), key, [summary]))
+        return self
+
+    def discard(self, message_id: str) -> _Thread:
+        self.store.discard_message_by_id(_TID, message_id)
         return self
 
     @property
@@ -218,6 +209,18 @@ async def test_restore_records_with_message_between_keep_both(tmp_path):
     assert labels == ["● giga-max", "● qwen"]
 
 
+@pytest.mark.asyncio
+async def test_restore_hides_record_whose_message_is_gone(tmp_path):
+    """Сообщение привязки откатили — запись сирота, черты нет; откат
+    реплики после неё черту не трогает."""
+    orphan = _Thread(tmp_path / "o").turn(1).choice(_TO_MAX).discard("a1")
+    kept = _Thread(tmp_path / "k").turn(1).choice(_TO_MAX).turn(2)
+    kept.discard("u2")
+
+    assert (await _restored(orphan))[1] == []
+    assert (await _restored(kept))[1] == ["● giga-max"]
+
+
 # ---- превью ---------------------------------------------------------------
 
 
@@ -288,7 +291,11 @@ def test_segment_counts_only_messages(tmp_path):
 
 def _export(thread: _Thread, fmt: str) -> str:
     return export_thread(
-        thread.segments(), fmt=fmt, meta={}, thread_id=_TID, system=_SYS
+        thread.segments(),
+        fmt=fmt,
+        api_mode="chat_completions",
+        thread_id=_TID,
+        system=_SYS,
     )
 
 

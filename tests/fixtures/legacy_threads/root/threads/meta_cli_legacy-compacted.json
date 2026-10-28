@@ -1,0 +1,77 @@
+{
+  "state_schema_version": "v2",
+  "thread_id": "legacy-compacted",
+  "system": "cli",
+  "schema_version": 2,
+  "updated_at": "2026-10-14T12:39:31.508802+00:00",
+  "created_at": "2026-10-14T12:39:31.457232+00:00",
+  "runtime": {
+    "live_history_chars": 1995,
+    "live_msg_count": 1
+  },
+  "previous_response_id": null,
+  "backend_api_mode": "chat_completions",
+  "messages_count": 1,
+  "shared": {
+    "working_memory": {
+      "goal": "Посчитать 3 * 450",
+      "constraints": "n/a",
+      "state": "готово",
+      "knowledge": "3 * 450 = 1350"
+    },
+    "notes_md": "",
+    "fetch_url_cache": {},
+    "confirm_rules": {},
+    "session_todo": []
+  },
+  "user_intent_log": [
+    {
+      "turn": 1,
+      "ts": "2026-10-14T12:39:31Z",
+      "action": "user_ask",
+      "tool_name": null,
+      "content": "Посчитай 3 * 450 для сжатия"
+    }
+  ],
+  "current_user_intent": [],
+  "user_turn_seq": 1,
+  "dialog_steps_offset": 5,
+  "last_main_prompt_tokens": null,
+  "last_main_prompt_message_count": null,
+  "token_usage": {
+    "by_category": {
+      "main": {
+        "input": 32,
+        "output": 12,
+        "cached": 0,
+        "calls": 3,
+        "missing_usage_calls": 0,
+        "billed_calls": 0,
+        "billed_input": 0,
+        "billed_output": 0,
+        "billed_cached": 0,
+        "cost_by_currency": {}
+      },
+      "summary": {
+        "input": 12,
+        "output": 2,
+        "cached": 0,
+        "calls": 1,
+        "missing_usage_calls": 0,
+        "billed_calls": 0,
+        "billed_input": 0,
+        "billed_output": 0,
+        "billed_cached": 0,
+        "cost_by_currency": {}
+      }
+    }
+  },
+  "chat_completions_system_prompt_rendered": "SYSTEM PROMPT",
+  "project_memory_content_hash": null,
+  "tool_usage_notice_cnt": {},
+  "todo_reminder_cnt": 2,
+  "last_backend_response_id": "4428172b067a917272e4fcd9216bd29d",
+  "last_summarized_at": "2026-10-14T12:39:31.498358+00:00",
+  "last_summary_archive_suffix": "20261014_123931",
+  "tui": {}
+}

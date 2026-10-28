@@ -1,4 +1,6 @@
-"""FileTaskStore.list_tasks + get_task_meta — поверх существующего thread_store."""
+"""FileTaskStore.list_tasks + get_record — поверх существующего thread_store."""
+
+from gc_testkit.develop_files import meta_of
 
 import json
 from pathlib import Path
@@ -88,12 +90,12 @@ def test_list_tasks_sorted_by_updated_desc(tmp_path):
     assert [t.thread_id for t in tasks] == ["newer", "older"]
 
 
-def test_get_task_meta_returns_full_dict(tmp_path):
+def test_get_record_keeps_every_meta_field(tmp_path):
     _write_thread(
         tmp_path, "cli", "t1", msgs=2, updated="2026-05-20T10:00:00+00:00"
     )
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
-    meta = store.get_task_meta("t1")
+    meta = meta_of(store.get_record("t1"))
     assert meta["thread_id"] == "t1"
     assert meta["messages_count"] == 2
 

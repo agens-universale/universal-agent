@@ -35,7 +35,7 @@ def _env_ts(rec: dict) -> str:
 
 
 def _build_header(
-    segments: list[dict], *, meta: dict, thread_id: str, system: str
+    segments: list[dict], *, api_mode: str, thread_id: str, system: str
 ) -> dict:
     # Экспорт — сообщения треда (строки с `payload`): записи итога хода и
     # смены модели в счёт не идут.
@@ -49,7 +49,7 @@ def _build_header(
     return {
         "thread_id": thread_id,
         "system": system,
-        "backend_api_mode": meta.get("backend_api_mode", ""),
+        "backend_api_mode": api_mode,
         "messages_count": len(all_recs),
         "ts_first": _env_ts(all_recs[0]) if all_recs else "",
         "ts_last": _env_ts(all_recs[-1]) if all_recs else "",
@@ -339,10 +339,15 @@ def _forget(answers: list[str], index: Optional[int]) -> None:
 
 
 def export_thread(
-    segments: list[dict], *, fmt: str, meta: dict, thread_id: str, system: str
+    segments: list[dict],
+    *,
+    fmt: str,
+    api_mode: str,
+    thread_id: str,
+    system: str,
 ) -> str:
     header = _build_header(
-        segments, meta=meta, thread_id=thread_id, system=system
+        segments, api_mode=api_mode, thread_id=thread_id, system=system
     )
     if fmt == "json":
         return _render_json(segments, header)

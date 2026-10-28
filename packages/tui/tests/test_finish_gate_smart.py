@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_testkit import run_coro
+from gc_testkit import as_coro
 
 
 def _async_noop(fn):
@@ -317,7 +318,7 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(
             [{"role": "user", "content": "сделай X", "id": "m0"}],
             state,
             ctx,
-            get_pending_messages=get_pending,
+            get_pending_messages=as_coro(get_pending),
         )
     )
 

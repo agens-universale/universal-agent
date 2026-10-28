@@ -38,6 +38,28 @@ REFERENCE = (
     Path(__file__).parent / "fixtures/local_runtime_reference_320ed0b19.json"
 )
 
+#: Ключи meta, которые добавляет хранилище v2 (спека
+#: docs/superpowers/specs/2026-10-14-agent-storage-v2-design.md, 5.7). Эталон
+#: develop их не знает, поэтому сравнение вырезает их — по списку, не по маске:
+#: любой другой новый ключ обязан уронить паритет.
+V2_ADDED_META_KEYS = (("workspace",), ("runtime", "turn"))
+
+
+def strip_v2_added_keys(meta):
+    out = deepcopy(meta)
+    for path in V2_ADDED_META_KEYS:
+        parent = out
+        for part in path[:-1]:
+            parent = parent.get(part)
+            if not isinstance(parent, dict):
+                break
+        else:
+            parent.pop(path[-1], None)
+    # Секцию, опустевшую после вырезания, develop не пишет вовсе.
+    if out.get("runtime") == {}:
+        out.pop("runtime")
+    return out
+
 
 def call(name, arguments, call_id="c1"):
     return assistant_tool_call(name, arguments, call_id)
@@ -512,7 +534,7 @@ async def run_scenario(
                 "answers": answers,
                 "requests": backend.calls,
                 "thread": records,
-                "meta": meta,
+                "meta": strip_v2_added_keys(meta),
                 "state": {
                     "messages": state.messages,
                     "steps": state.steps,
@@ -559,3 +581,27 @@ async def test_legacy_routing_runtime_matches_develop(
     reference = json.loads(REFERENCE.read_text())
     key = f"{name}:{'sse' if streaming else 'json'}"
     assert summary == reference["scenarios"][key]
+
+
+def test_strip_removes_only_listed_keys():
+    meta = {
+        "workspace": "/w",
+        "runtime": {"turn": "idle", "live_msg_count": 3},
+        "thread_id": "t",
+    }
+    assert strip_v2_added_keys(meta) == {
+        "runtime": {"live_msg_count": 3},
+        "thread_id": "t",
+    }
+    assert meta["workspace"] == "/w"  # вход не мутируется
+
+
+def test_strip_is_noop_without_new_keys():
+    meta = {"runtime": {"live_msg_count": 3}, "thread_id": "t"}
+    assert strip_v2_added_keys(meta) == meta
+
+
+def test_strip_drops_emptied_runtime():
+    # develop никогда не пишет пустую секцию runtime: снятие последнего
+    # флага убирает её целиком (контракт thread store).
+    assert strip_v2_added_keys({"runtime": {"turn": "idle"}}) == {}

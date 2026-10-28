@@ -36,13 +36,11 @@ def _patch_save_thread_meta(monkeypatch) -> None:
 
 def _thread_session_mock() -> MagicMock:
     thread = MagicMock()
-    thread.meta = {}
     thread.threads_dir = "/tmp/x"
     thread.system_id = "cli"
     thread.thread_id = "t1"
-    # Ядро ходит в хранилище через асинхронный порт: флаги, персист и архив
-    # ждутся нативно, поэтому двойники обязаны быть корутинными.
-    thread.port = AsyncMock()
+    # Флаги, персист и архив сессия ждёт нативно — двойники корутинные.
+    thread.aset_flag = AsyncMock()
     thread.apersist_batch = AsyncMock()
     thread.aarchive_and_compact_summary_payload = AsyncMock(return_value={})
     return thread
@@ -590,8 +588,10 @@ async def test_trace_failure_after_archive_keeps_task_in_real_thread(
     tmp_path, monkeypatch, ctx_stub, cancel
 ):
     import asyncio
-    from gc_core.thread_store import ThreadSession, make_message_key
-    from gc_core.thread_store_file import FileThreadStore
+    from gc_core.thread_store import ThreadSession
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import ThreadKey
 
     task = {
         "role": "user",
@@ -616,18 +616,10 @@ async def test_trace_failure_after_archive_keeps_task_in_real_thread(
     }
     history = [{"role": "user", "content": "old history", "id": "old"}, task]
     store = FileThreadStore(tmp_path / "threads")
-    store.append_messages("test", "thread", history)
-    thread = ThreadSession(
-        threads_dir=str(tmp_path / "threads"),
-        system_id="test",
-        store=store,
-        thread_id="thread",
-        history_messages=list(history),
-        known_message_keys={make_message_key(m) for m in history},
-        persisted_messages_count=2,
-        meta={},
-        previous_response_id=None,
-        backend_api_mode="chat_completions",
+    key = ThreadKey(system="test", thread="thread")
+    await Threads(store).append_messages(key, history)
+    thread = await ThreadSession.afrom_config(
+        settings=None, system_id="test", thread_id="thread", store=store
     )
     state = _minimal_state(messages=history)
     current = [task]
@@ -668,15 +660,11 @@ async def test_trace_failure_after_archive_keeps_task_in_real_thread(
         running.cancel()
     with pytest.raises(asyncio.CancelledError if cancel else RuntimeError):
         await running
-    persisted = store.load_messages("test", "thread")
+    persisted = [e.data for e in await store.read_stream(key, "messages")]
     assert persisted[-1] == task
     assert state.messages[-1] == task
     assert len(persisted) == 2
-    assert (
-        not store.load_meta("test", "thread")
-        .get("runtime", {})
-        .get("summarizing", False)
-    )
+    assert "summarizing" not in (await store.get_thread(key)).runtime.flags
 
 
 async def test_old_execution_patch_retains_failure_command_order(

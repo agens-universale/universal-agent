@@ -1,17 +1,18 @@
-"""Читатели треда TUI и запись итога хода (`type: "turn_outcome"`).
+"""Читатели треда TUI и поток итогов хода (``turns``).
 
-Запись встаёт в `data_*.jsonl` за последним сообщением хода и повторяет
-его `seq`. Читатели сообщений её как сообщение не видят: хвост ленты не
-сбрасывается, сжатие остаётся сжатием, счёт сообщений сегмента и экспорта
-— только сообщения, лента и превью — те же виджеты сообщений, что без
-записи, плюс строка хода (`TurnLine`) на месте записи.
+Итог хода — запись своего потока, привязанная к последнему сообщению
+хода (``after``). Хранилище отдаёт потоки пачками по потоку, поэтому
+читатель ставит запись по привязке, а не по месту в пачке: за её
+сообщением, а сообщения нет в пачке (прочитано раньше) — в начало пачки.
+Запись без сообщения своего хода в истории (откат, сброс) — сирота, её
+не видно. Конверт записи — ``type: "turn_outcome"``: счёт и объём
+сегмента сжатия, заголовок экспорта и ``_payload_ids`` её не считают;
+лента и превью — те же виджеты сообщений плюс строка хода.
 """
 
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
 import pytest
 from gc_core.message_policy.user_message_policy import (
@@ -19,28 +20,29 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.persistence.turn_outcome import TurnOutcome
-from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_turn_outcome_record,
-    archive_and_replace_thread_files,
-    load_thread_meta,
-    save_thread_meta,
-)
-from gc_testkit.tui_support import tui_settings
+from gc_core.threads.facade import Threads, run_sync
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
+from gc_testkit.thread_writes import turn_outcome_record
+from gc_testkit.tui_support import compact_thread, tui_settings
 from gc_tui.services.export import export_thread
 from gc_tui.services.stores.file_store import FileTaskStore, _payload_ids
 
 _SYS = "cli"
 _TID = "t1"
-_OUTCOME = TurnOutcome(
-    status="done",
-    reason=None,
-    opened_by="m1",
-    started_at="2026-10-22T11:32:00.000Z",
-    ended_at="2026-10-22T11:32:12.000Z",
-    duration_sec=12.0,
-    error=None,
-)
+_KEY = ThreadKey(system=_SYS, thread=_TID)
+
+
+def _outcome(opened_by: str = "m1") -> TurnOutcome:
+    return TurnOutcome(
+        status="done",
+        reason=None,
+        opened_by=opened_by,
+        started_at="2026-10-22T11:32:00.000Z",
+        ended_at="2026-10-22T11:32:12.000Z",
+        duration_sec=12.0,
+        error=None,
+    )
 
 
 def _user(mid: str, text: str = "вопрос") -> dict:
@@ -51,47 +53,34 @@ def _assistant(mid: str, text: str = "ответ") -> dict:
     return {"role": "assistant", "content": text, "id": mid}
 
 
+def _summary(suffix: str) -> dict:
+    return {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            "Summarized context from previous dialogue.\nкратко",
+            technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
+        ),
+        "id": f"sum_{suffix}",
+    }
+
+
 class _Thread:
     def __init__(self, tmp_path) -> None:
         self.dir = str(tmp_path)
-        self.seq = 0
-        save_thread_meta(self.dir, _SYS, _TID, {})
 
     def append(self, *msgs: dict) -> None:
-        append_new_thread_messages(
-            self.dir, _SYS, _TID, list(msgs), set(), start_seq=self.seq
-        )
-        self.seq += len(msgs)
+        threads = Threads(FileThreadStore(self.dir))
+        run_sync(threads.append_messages(_KEY, list(msgs)))
 
-    def outcome(self) -> None:
-        append_turn_outcome_record(
-            self.dir, _SYS, _TID, _OUTCOME, seq=self.seq
-        )
+    def outcome(self, opened_by: str = "m1") -> None:
+        turn_outcome_record(self.dir, _SYS, _TID, _outcome(opened_by))
+
+    def discard(self, mid: str) -> None:
+        threads = Threads(FileThreadStore(self.dir))
+        assert run_sync(threads.discard_message(_KEY, mid))
 
     def compact(self, suffix: str) -> None:
-        meta = load_thread_meta(self.dir, _SYS, _TID)
-        summary = {
-            "role": "user",
-            "content": wrap_technical_user_content(
-                "Summarized context from previous dialogue.\nкратко",
-                technical_type=TECHNICAL_TYPE_DIALOG_SUMMARY,
-            ),
-            "id": f"sum_{suffix}",
-        }
-        archive_and_replace_thread_files(
-            self.dir, _SYS, _TID, [summary], archive_suffix=suffix
-        )
-        save_thread_meta(
-            self.dir,
-            _SYS,
-            _TID,
-            {**meta, "last_summary_archive_suffix": suffix},
-        )
-        self.seq = 1
-
-    @property
-    def live(self) -> str:
-        return os.path.join(self.dir, f"data_{_SYS}_{_TID}.jsonl")
+        compact_thread(self.dir, _SYS, _TID, [_summary(suffix)])
 
 
 def _store(thread: _Thread) -> FileTaskStore:
@@ -105,41 +94,109 @@ def _ids(records: list[dict]) -> list:
 # ---- хвост ----------------------------------------------------------------
 
 
-def test_tail_record_with_equal_seq_is_continuation(tmp_path):
+def test_record_read_after_its_turn_leads_the_tail(tmp_path):
     thread = _Thread(tmp_path)
-    thread.append(*[_user(f"m{i}") for i in range(1, 6)])
+    thread.append(_user("m1"), _assistant("m2"))
     store = _store(thread)
     _, cur = store.read_all_events(_TID)
 
     thread.outcome()
+    thread.append(_user("m3"))
     tail = store.tail_events(_TID, cur)
 
     assert tail.stream_reset is False
-    assert _ids(tail.new_records) == ["turn_outcome"]
-    assert tail.new_records[0]["seq"] == 5
-    cur = tail.next_cursor
-    raw = Path(thread.live).read_bytes()
-    assert store._on_record_boundary(raw, cur) is True
+    assert _ids(tail.new_records) == ["turn_outcome", "m3"]
+    assert tail.new_records[0]["after"] == "m2"
+    tail = store.tail_events(_TID, tail.next_cursor)
+    assert tail.new_records == []
 
-    thread.append(_user("m6"))
+
+def test_record_in_one_batch_with_next_turn_follows_its_anchor(tmp_path):
+    thread = _Thread(tmp_path)
+    store = _store(thread)
+    _, cur = store.read_all_events(_TID)
+
+    thread.append(_user("m1"), _assistant("m2"))
+    thread.outcome()
+    thread.append(_user("m3"))
     tail = store.tail_events(_TID, cur)
-    assert tail.stream_reset is False
-    assert _ids(tail.new_records) == ["m6"]
+
+    assert _ids(tail.new_records) == ["m1", "m2", "turn_outcome", "m3"]
+
+
+def test_full_read_places_each_record_after_its_turn(tmp_path):
+    thread = _Thread(tmp_path)
+    thread.append(_user("m1"), _assistant("m2"))
+    thread.outcome("m1")
+    thread.append(_user("m3"), _assistant("m4"))
+    thread.outcome("m3")
+
+    records, _ = _store(thread).read_all_events(_TID)
+
+    assert _ids(records) == [
+        "m1",
+        "m2",
+        "turn_outcome",
+        "m3",
+        "m4",
+        "turn_outcome",
+    ]
+
+
+def test_full_read_drops_record_of_undone_reply(tmp_path):
+    thread = _Thread(tmp_path)
+    thread.append(_user("m1"), _assistant("m2"))
+    thread.outcome("m1")
+    thread.append(_user("m3"))
+    thread.outcome("m3")
+    thread.discard("m3")
+
+    records, _ = _store(thread).read_all_events(_TID)
+
+    assert _ids(records) == ["m1", "m2", "turn_outcome"]
+
+
+def test_sessions_list_after_undo_shows_previous_turn(tmp_path):
+    """Откат реплики остановленного хода: список сессий показывает итог
+    прошлого хода, как и лента (запись снятого хода — сирота)."""
+    thread = _Thread(tmp_path)
+    thread.append(_user("m1"), _assistant("a1"))
+    thread.outcome("m1")
+    thread.append(_user("m2"))
+    stopped = TurnOutcome(
+        status="stopped",
+        reason="user_stop",
+        opened_by="m2",
+        started_at="2026-10-22T11:33:00.000Z",
+        ended_at="2026-10-22T11:33:01.000Z",
+        duration_sec=1.0,
+        error=None,
+    )
+    turn_outcome_record(thread.dir, _SYS, _TID, stopped)
+    store = _store(thread)
+    assert [s.status for s in store.list_tasks()] == ["stopped"]
+
+    assert store.discard_message_by_id(_TID, "m2")
+    assert [s.status for s in store.list_tasks()] == ["completed"]
 
 
 def test_compaction_after_record_is_a_step_not_reset(tmp_path):
     thread = _Thread(tmp_path)
     thread.append(_user("m1"), _assistant("m2"))
-    thread.outcome()
     store = _store(thread)
     _, cur = store.read_all_events(_TID)
 
+    thread.outcome()
     thread.compact("S")
     tail = store.tail_events(_TID, cur)
 
     assert tail.stream_reset is False
     assert tail.compaction is not None
     assert tail.compaction.compacted_by["messages_in_segment"] == 2
+    # Запись хода дочитывается следующим тиком, один раз.
+    tail = store.tail_events(_TID, tail.next_cursor)
+    assert _ids(tail.new_records) == ["turn_outcome"]
+    assert store.tail_events(_TID, tail.next_cursor).new_records == []
 
 
 def test_segment_counts_only_messages(tmp_path):
@@ -153,6 +210,17 @@ def test_segment_counts_only_messages(tmp_path):
 
     assert segments[0]["compacted_by"]["messages_in_segment"] == 2
     assert _ids(segments[0]["messages"]) == ["m1", "m2", "turn_outcome"]
+    assert _ids(segments[1]["messages"]) == ["m3"]
+
+
+def test_segments_drop_orphan_record(tmp_path):
+    thread = _Thread(tmp_path)
+    thread.append(_user("m1"))
+    thread.outcome("m_gone")
+
+    (segment,) = _store(thread).read_segments(_TID)
+
+    assert _ids(segment["messages"]) == ["m1"]
 
 
 def test_payload_ids_ignore_record(tmp_path):
@@ -161,6 +229,7 @@ def test_payload_ids_ignore_record(tmp_path):
     thread.outcome()
     records, _ = _store(thread).read_all_events(_TID)
 
+    assert _ids(records) == ["m1", "turn_outcome"]
     assert _payload_ids(records) == frozenset({"m1"})
 
 
@@ -172,7 +241,7 @@ def _export(thread: _Thread, fmt: str) -> str:
     return export_thread(
         store.read_segments(_TID),
         fmt=fmt,
-        meta={},
+        api_mode="",
         thread_id=_TID,
         system=_SYS,
     )
@@ -262,6 +331,29 @@ async def test_live_feed_ignores_record(tmp_path):
     assert seen[0] == seen[1]
     assert seen[0]
     assert lines == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_live_feed_skips_record_of_unrendered_reply(tmp_path):
+    """Хвост: запись, чьей реплики нет в ленте (сирота), строки не даёт."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system=_SYS,
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        record = {
+            "type": "turn_outcome",
+            "after": "m1",
+            "outcome": _outcome("m_gone").to_payload(),
+        }
+        scr._render_records([record], live=True)
+        await pilot.pause()
+        assert _turn_lines(scr.query_one("#trace")) == 0
 
 
 def _preview_app(segments: list[dict]):

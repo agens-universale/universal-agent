@@ -11,10 +11,8 @@
 пробрасываем сразу — семантика ``os.replace`` сохраняется, атомарность не трогаем.
 """
 
-import contextlib
 import os
 import time
-import uuid
 
 _TRANSIENT_WINERRORS = (5, 32)
 
@@ -31,22 +29,3 @@ def atomic_replace(
             if not transient or attempt >= attempts:
                 raise
             time.sleep(base_delay * attempt)
-
-
-def write_text_atomic(path: str, text: str) -> None:
-    """Записать файл целиком через свой временный файл и ``os.replace``.
-
-    Временный файл уникален на каждую запись (рядом с целью, тот же диск):
-    параллельные писатели одного файла не делят его, читатель видит либо
-    старый, либо новый файл целиком. Права — обычные (umask), как у
-    ``open``, а не 0600 у ``mkstemp``.
-    """
-    tmp_path = f"{path}.{uuid.uuid4().hex}.tmp"
-    try:
-        with open(tmp_path, "x", encoding="utf-8") as f:
-            f.write(text)
-        atomic_replace(tmp_path, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.remove(tmp_path)
-        raise

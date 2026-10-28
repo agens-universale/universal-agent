@@ -54,6 +54,9 @@ REMOVED: Dict[str, str] = {
     # Классификатор уровня из черновой волны автороутинга: потребителя не было,
     # строка стояла в релизном demo_profile.yml.
     "assign.auto_judge": "судья auto_judge удалён — у него не было вызовов; строку можно удалить",
+    # Поверхности сервера настраиваются config_server.yml (gc-serve).
+    "chat_api": "секция переехала в config_server.yml: chat; запуск — gc-serve chat",
+    "a2a": "секция переехала в config_server.yml: a2a; запуск — gc-serve a2a",
 }
 
 _SYNC_HINT = "обновите config.yml: gc-cli --sync-config"

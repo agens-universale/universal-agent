@@ -10,33 +10,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from gc_testkit.module_snapshot import restore_gc_modules, save_gc_modules
 from gc_testkit.paths import module_dir
-
-# Имена `processing_responses`, которые файл подменяет на время прогона;
-# модули ядра teardown возвращает снимком тест-кита.
-_SAVED_MODULES: dict[str, types.ModuleType] = {}
-_SAVED_PR_NAMES: dict[str, object] = {}
-_PR_NAMES = ("aapply_tool", "WrongFunctionArgumentsException")
+from helpers.module_snapshot import ModuleSnapshot
 
 
 def teardown_module(_module) -> None:
-    restore_gc_modules(_SAVED_MODULES)
-    proc = _SAVED_MODULES.get("gc_core.processing_responses")
-    for attr, value in _SAVED_PR_NAMES.items():
-        setattr(proc, attr, value)
+    # Ровно прежние модули: свежая копия исполнителя в sys.modules развела
+    # бы код, загруженный до теста, и подмены по модулю у следующих тестов.
+    if _SNAPSHOT is not None:
+        _SNAPSHOT.restore()
 
 
+_SNAPSHOT: ModuleSnapshot | None = None
 agent_executor_module = None
 run_summary_coordinator_module = None
 
 
 def setup_module(_module) -> None:
-    global agent_executor_module, run_summary_coordinator_module
-    _SAVED_MODULES.update(save_gc_modules())
-    proc = _SAVED_MODULES.get("gc_core.processing_responses")
-    if proc is not None:
-        _SAVED_PR_NAMES.update((n, getattr(proc, n)) for n in _PR_NAMES)
+    global agent_executor_module, run_summary_coordinator_module, _SNAPSHOT
+    _SNAPSHOT = ModuleSnapshot()
     _stub_tools_modules()
     tools_pkg = sys.modules["gc_core.tools"]
     from gc_core import processing_responses as pr

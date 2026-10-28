@@ -30,21 +30,10 @@ class ModelChoiceApplied:
     at_run_end: bool = False
 
 
-def note_applied(
-    state: Any, ctx: Any, choice: str
-) -> ModelChoiceRecord | None:
-    """Сверить выбор подготовленного вызова с применённым; сменился —
-    запомнить, сообщить хуку и вернуть запись смены для треда (`None` —
-    смены нет).
-
-    Только главный трейс: подготовка вызова субагента событий не даёт.
-    Посреди рана модель — цель только что подготовленного вызова."""
-    return _note(state, ctx, lambda _router: choice, at_run_end=False)
-
-
 def note_applied_at_run_end(state: Any, ctx: Any) -> ModelChoiceRecord | None:
-    """`note_applied` на завершении рана: выбор, так и не дошедший до
-    вызова, — живой выбор Router'а, его читает сама сверка."""
+    """Сверка (`anote_applied`) на завершении рана: выбор, так и не
+    дошедший до вызова, — живой выбор Router'а, его читает сама сверка.
+    Запись смены возвращается — её пишет исполнитель после итога хода."""
     return _note(
         state, ctx, lambda router: router.live_choice(), at_run_end=True
     )
@@ -111,9 +100,13 @@ def model_of(router: Any, choice: str | None) -> str | None:
 
 
 async def anote_applied(state: Any, ctx: Any, choice: str) -> None:
-    """`note_applied` посреди рана и запись смены в тред тут же — за
-    последним записанным сообщением (`RunContext.record_model_choice`)."""
-    record = note_applied(state, ctx, choice)
+    """Сверить выбор подготовленного вызова с применённым; сменился —
+    запомнить, сообщить хуку и записать смену в тред тут же — за последним
+    записанным сообщением (`RunContext.record_model_choice`).
+
+    Только главный трейс: подготовка вызова субагента событий не даёт.
+    Посреди рана модель — цель только что подготовленного вызова."""
+    record = _note(state, ctx, lambda _router: choice, at_run_end=False)
     recorder = getattr(ctx, "record_model_choice", None)
     if record is not None and recorder is not None:
         await recorder(record)

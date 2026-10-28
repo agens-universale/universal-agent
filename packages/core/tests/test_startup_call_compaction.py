@@ -10,7 +10,9 @@ from gc_core.auto_routing import judge_runner
 from gc_core.config_modules.root import AppConfig
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads.facade import Threads
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
 from gc_core.utils.logging_module import release_run_logger
 
 
@@ -46,9 +48,8 @@ async def test_startup_compaction_uses_first_call_and_keeps_current_task(
         }
     )
     store = FileThreadStore(tmp_path / "threads")
-    store.append_messages(
-        "test",
-        "resume",
+    await Threads(store).append_messages(
+        ThreadKey(system="test", thread="resume"),
         [
             {"id": "old-user", "role": "user", "content": "old " * 2500},
             {"id": "old-answer", "role": "assistant", "content": "old result"},

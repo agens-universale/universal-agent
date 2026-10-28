@@ -145,7 +145,7 @@ async def test_a_message_queued_during_the_run_lifts_the_judge_pause(
         shared.judge_paused = True
         shared.judge_denials_in_a_row = 3
         ex.add_message({"role": "user", "content": "продолжай"})
-        poll()
+        await poll()
         seen["paused"] = shared.judge_paused
         seen["in_a_row"] = shared.judge_denials_in_a_row
 

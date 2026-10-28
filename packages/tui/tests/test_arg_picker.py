@@ -2,7 +2,7 @@
 Enter (выполняет export), Esc, mutex с командной палитрой."""
 
 import pytest
-from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.stores.file_store import FileTaskStore
 

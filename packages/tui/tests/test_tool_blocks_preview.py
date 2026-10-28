@@ -24,11 +24,10 @@ from gc_core.execution.progress import (
 )
 from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
 from gc_core.thread_store import (
-    append_new_thread_messages,
-    append_subagent_trace_record,
-    append_turn_outcome_record,
     edits_journal_path,
 )
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import subagent_record, turn_outcome_record
 from gc_testkit.trace_grid import (
     assert_trace_grid,
     record_frames,
@@ -222,7 +221,7 @@ def _sidecar(tmp_path) -> None:
         ("result", end),
         ("intermediate_reply", {"prose": "Клиент в порядке."}),
     ):
-        append_subagent_trace_record(
+        subagent_record(
             str(tmp_path),
             "cli",
             TID,
@@ -292,7 +291,7 @@ class _Thread:
             error=None,
             calls=_calls(),
         )
-        append_turn_outcome_record(self.dir, "cli", TID, outcome, seq=self.seq)
+        turn_outcome_record(self.dir, "cli", TID, outcome)
 
 
 def _write_done(tmp_path) -> None:
@@ -524,7 +523,7 @@ async def test_preview_enter_opens_thread_and_space_toggles(tmp_path):
     thread.add(_call(AGENT, "subagent_worker", {"task": "проверка"}))
     thread.add(_out(AGENT, "subagent_worker", "{}"))
     for i in range(5):
-        append_subagent_trace_record(
+        subagent_record(
             str(tmp_path),
             "cli",
             TID,
@@ -537,7 +536,7 @@ async def test_preview_enter_opens_thread_and_space_toggles(tmp_path):
                 "call_id": f"n{i}",
             },
         )
-        append_subagent_trace_record(
+        subagent_record(
             str(tmp_path),
             "cli",
             TID,
@@ -746,7 +745,7 @@ def _turn_record(thread, opened_by, calls):
         error=None,
         calls=calls,
     )
-    append_turn_outcome_record(thread.dir, "cli", TID, outcome, seq=thread.seq)
+    turn_outcome_record(thread.dir, "cli", TID, outcome)
 
 
 async def _ticks(pilot, n=3):
@@ -820,7 +819,7 @@ async def test_preview_stopped_orphan_call_equals_reopen(tmp_path):
         error=None,
         calls=None,
     )
-    append_turn_outcome_record(thread.dir, "cli", TID, outcome, seq=thread.seq)
+    turn_outcome_record(thread.dir, "cli", TID, outcome)
     async with _app(tmp_path).run_test(size=SIZE) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(TID, is_resume=True)

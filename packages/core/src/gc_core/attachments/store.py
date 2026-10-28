@@ -13,10 +13,11 @@
 объект хранилища на диске ничего не создаёт: каталоги появляются при первой
 записи (``stage`` / ``commit`` / ``snapshot``), временный корень — тоже.
 
-Хранилище тредов с файлами треда (``gc_core.thread_files``: SQLite, S3,
-память SDK, воркер Temporal) держит картинки у себя — ``StoreImageStore``:
-на диске процесса ничего, reset и delete треда удаляют их вместе с историей.
-Выбор — ``image_store_for``.
+Хранилище тредов без файлов (база, S3, память SDK, воркер Temporal) держит
+картинки у себя вложениями треда v2 — ``StoreImageStore``: на диске процесса
+ничего, reset и delete треда удаляют их вместе с историей. Выбор —
+``image_store_for``. Запись в тред и чтение для запроса — корутины
+(``acommit``, ``asnapshot``, ``aread_for_send``) у обоих хранилищ.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import contextlib
 import getpass
 import hashlib
 import logging
+import mimetypes
 import os
 import re
 import shutil
@@ -120,7 +122,7 @@ class ImageStore:
             image, att_id, path, origin=origin, label=label, source=source
         )
 
-    def commit(
+    async def acommit(
         self, att: Attachment, system_id: str, thread_id: str
     ) -> Attachment:
         """Копия из кармана в файл треда; вложение — с новым путём.
@@ -147,7 +149,7 @@ class ImageStore:
                 return att
         return replace(att, path=path)
 
-    def snapshot(
+    def _snapshot_file(
         self,
         image: NormalizedImage,
         system_id: str,
@@ -164,7 +166,7 @@ class ImageStore:
             image, att_id, path, origin=origin, label=label, source=source
         )
 
-    def read_for_send(self, att: Attachment) -> bytes | None:
+    async def aread_for_send(self, att: Attachment) -> bytes | None:
         """Байты для запроса; ``None`` — файла нет или хеш не совпал с ``att.id``."""
         try:
             with open(att.path, "rb") as handle:
@@ -172,6 +174,30 @@ class ImageStore:
         except OSError:
             return None
         return data if image_id(data) == att.id else None
+
+    # Ядро пишет в тред и читает для запроса корутинами: у хранилища тредов
+    # без файлов (StoreImageStore) это ввод-вывод хранилища. Копия и чтение —
+    # на loop, как у файловых тулов; снимок (запись сотен КБ) — в потоке.
+
+    async def asnapshot(
+        self,
+        image: NormalizedImage,
+        system_id: str,
+        thread_id: str,
+        *,
+        origin: str,
+        label: str,
+        source: str,
+    ) -> Attachment:
+        return await asyncio.to_thread(
+            self._snapshot_file,
+            image,
+            system_id,
+            thread_id,
+            origin=origin,
+            label=label,
+            source=source,
+        )
 
     def delete_thread_images(self, system_id: str, thread_id: str) -> None:
         """Удалить файлы треда; отказ по одному файлу не срывает сброс.
@@ -233,28 +259,23 @@ class ImageStore:
 
 
 class StoreImageStore:
-    """Картинки в хранилище тредов (файлы треда): на диске процесса ничего.
+    """Картинки во вложениях треда v2 (``put_blob``/``get_blob``): на диске
+    процесса ничего.
 
-    Тот же интерфейс, что у ``ImageStore``; путь вложения — ссылка
+    Интерфейс — как у ``ImageStore``; путь вложения — ссылка
     ``thread-file://…`` (``gc_core.thread_files``). Карман процесса — в
     памяти: картинка до отправки живёт, пока жив процесс. Карманом пользуется
     только прогон без треда (SDK без ``thread_id``) — в одном процессе; под
     Temporal у сессии тред есть всегда, и снимки сразу ложатся в хранилище
-    (``snapshot``), так что «stage на одном воркере, commit на другом» не
-    случается. Вложение приложения из ``ImageStore`` (файл на диске)
-    ``commit`` и ``read_for_send`` читают с диска.
+    (``asnapshot``). Вложение приложения из ``ImageStore`` (файл на диске)
+    ``acommit`` и ``aread_for_send`` читают с диска.
     """
 
     root = None
     staging_dir = None
 
     def __init__(self, thread_store: Any) -> None:
-        from gc_core.thread_files import thread_files_capability
-
-        files = thread_files_capability(thread_store)
-        if files is None:
-            raise TypeError("Хранилище тредов не умеет файлы треда")
-        self._files = files
+        self._store = thread_store
         self._staging: dict[str, bytes] = {}
 
     def stage(
@@ -271,21 +292,30 @@ class StoreImageStore:
             source=source,
         )
 
-    def commit(
+    async def _aput(
+        self, system_id: str, thread_id: str, data: bytes, mime: str
+    ) -> str:
+        from gc_core.threads.models import ThreadKey
+
+        ref = await self._store.put_blob(
+            ThreadKey(system=system_id, thread=thread_id), data, mime=mime
+        )
+        return ref.location
+
+    async def acommit(
         self, att: Attachment, system_id: str, thread_id: str
     ) -> Attachment:
-        """Из кармана в хранилище треда; не бросает (как ``ImageStore``)."""
-        name = _image_name(att.id, att.mime)
+        """Из кармана во вложение треда; не бросает (как ``ImageStore``)."""
         data = self._staging.get(att.id)
         if data is None:
-            data = self.read_for_send(att)
+            data = await self.aread_for_send(att)
         if data is None:
             logger.warning(
                 "image_commit_failed: картинки %s нет в кармане", att.id
             )
             return att
         try:
-            self._files.write(system_id, thread_id, name, data)
+            location = await self._aput(system_id, thread_id, data, att.mime)
         except Exception as exc:
             logger.warning(
                 "image_commit_failed: картинка %s не записана в тред: %s",
@@ -293,11 +323,9 @@ class StoreImageStore:
                 exc,
             )
             return att
-        from gc_core.thread_files import thread_file_uri
+        return replace(att, path=location)
 
-        return replace(att, path=thread_file_uri(system_id, thread_id, name))
-
-    def snapshot(
+    async def asnapshot(
         self,
         image: NormalizedImage,
         system_id: str,
@@ -307,54 +335,51 @@ class StoreImageStore:
         label: str,
         source: str,
     ) -> Attachment:
-        from gc_core.thread_files import thread_file_uri
-
-        att_id = image_id(image.data)
-        name = _image_name(att_id, image.mime)
-        self._files.write(system_id, thread_id, name, image.data)
+        location = await self._aput(
+            system_id, thread_id, image.data, image.mime
+        )
         return _attachment(
             image,
-            att_id,
-            thread_file_uri(system_id, thread_id, name),
+            image_id(image.data),
+            location,
             origin=origin,
             label=label,
             source=source,
         )
 
-    def read_uri(self, uri: str) -> bytes | None:
+    async def aread_uri(self, uri: str) -> bytes | None:
         """Байты файла треда по ссылке ``thread-file://`` (или ``None``)."""
-        from gc_core.thread_files import parse_thread_file_uri
+        from gc_core.thread_files import blob_ref_of
 
         if uri.startswith(_STAGING_URI):
             return self._staging.get(uri[len(_STAGING_URI) :].split(".")[0])
-        parsed = parse_thread_file_uri(uri)
-        if parsed is None:
+        ref = blob_ref_of(uri)
+        if ref is None:
             return None
         try:
-            return self._files.read(*parsed)
+            return await self._store.get_blob(ref)
+        except FileNotFoundError:
+            return None
         except Exception:
             logger.warning("thread_file_read_failed: %s", uri, exc_info=True)
             return None
 
-    def write_media(
+    async def awrite_media(
         self, system_id: str, thread_id: str, name: str, data: bytes
     ) -> str:
-        """Медиа инструмента (картинка или аудио из ответа MCP) — файлом
+        """Медиа инструмента (картинка или аудио из ответа MCP) — вложением
         треда; → ссылка ``thread-file://`` для модели."""
-        from gc_core.thread_files import safe_name, thread_file_uri
+        mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        return await self._aput(system_id, thread_id, data, mime)
 
-        path = f"{MEDIA_DIRNAME}/{safe_name(name)}"
-        self._files.write(system_id, thread_id, path, data)
-        return thread_file_uri(system_id, thread_id, path)
-
-    def read_for_send(self, att: Attachment) -> bytes | None:
+    async def aread_for_send(self, att: Attachment) -> bytes | None:
         """Байты ссылки ``thread-file://`` или файла на диске (вложение,
         сделанное приложением через ``ImageStore``, тред из локального режима);
         хеш сверяется с ``att.id``, как у ``ImageStore``."""
         from gc_core.thread_files import THREAD_FILE_SCHEME
 
         if str(att.path).startswith(THREAD_FILE_SCHEME):
-            data = self.read_uri(att.path)
+            data = await self.aread_uri(att.path)
         else:
             try:
                 with open(att.path, "rb") as handle:
@@ -364,7 +389,7 @@ class StoreImageStore:
         return data if data is not None and image_id(data) == att.id else None
 
     def delete_thread_images(self, system_id: str, thread_id: str) -> None:
-        """Файлы треда удаляет само хранилище (reset, delete)."""
+        """Вложения треда удаляет само хранилище (reset, delete)."""
 
     def clear_own_staging(self) -> None:
         self._staging.clear()
@@ -377,29 +402,26 @@ class StoreImageStore:
 _STAGING_URI = "thread-file://-/staging/"
 
 
-def _image_name(att_id: str, mime: str) -> str:
-    return f"{IMAGES_DIRNAME}/{att_id}.{_extension(mime)}"
-
-
 def image_store_for(settings: Any, thread_store: Any = None) -> Any:
     """Хранилище картинок прогона.
 
-    Хранилище тредов с файлами треда — картинки у него (``StoreImageStore``);
-    файловое хранилище — каталог ``images`` рядом с его тредами; без
-    хранилища — по конфигу, как раньше (``ImageStore.for_config``).
+    Файловое хранилище тредов — каталог ``images`` рядом с его тредами;
+    хранилище без файлов (база, S3, память SDK) — вложения треда
+    (``StoreImageStore``); без хранилища — по конфигу
+    (``ImageStore.for_config``).
     """
-    from gc_core.thread_files import thread_files_capability
-
     if thread_store is not None:
-        if thread_files_capability(thread_store) is not None:
-            return StoreImageStore(thread_store)
         threads_dir = getattr(thread_store, "threads_dir", None)
         if isinstance(threads_dir, str) and threads_dir:
             return ImageStore.for_threads_dir(threads_dir)
+        from gc_core.threads.store import ThreadStore
+
+        if isinstance(thread_store, ThreadStore):
+            return StoreImageStore(thread_store)
     return ImageStore.for_config(settings)
 
 
-def commit_to_run_thread(ctx: Any, att: Attachment) -> Attachment:
+async def acommit_to_run_thread(ctx: Any, att: Attachment) -> Attachment:
     """Копия вложения в тред прогона — единственный путь ядра «карман → тред».
 
     Хранилище — ``ctx.image_store``, адрес — ``thread_address(ctx)``. Зовут ход
@@ -413,12 +435,12 @@ def commit_to_run_thread(ctx: Any, att: Attachment) -> Attachment:
     address = thread_address(ctx)
     if store is None or address is None:
         return att
-    return store.commit(att, *address)
+    return await store.acommit(att, *address)
 
 
-def with_committed_attachments(message: dict, ctx: Any) -> dict:
+async def awith_committed_attachments(message: dict, ctx: Any) -> dict:
     """Сообщение очереди с вложениями, переложенными в тред прогона
-    (``commit_to_run_thread``); без вложений — как есть. Зовёт тот, кто принимает
+    (``acommit_to_run_thread``); без вложений — как есть. Зовёт тот, кто принимает
     сообщение из очереди в прогон: родитель и субагент (у ребёнка адрес треда —
     родителя).
 
@@ -430,7 +452,9 @@ def with_committed_attachments(message: dict, ctx: Any) -> dict:
         return message
     return {
         **message,
-        "attachments": [commit_to_run_thread(ctx, a).to_dict() for a in atts],
+        "attachments": [
+            (await acommit_to_run_thread(ctx, a)).to_dict() for a in atts
+        ],
     }
 
 

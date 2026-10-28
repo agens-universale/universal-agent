@@ -551,28 +551,33 @@ async def test_plan_panel_goes_above_turn_line_past_applied_mark(tmp_path):
         assert kids.index(panel) < kids.index(line) < kids.index(mark)
 
 
+def _write_messages(threads: Path, msgs: list[dict]) -> None:
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    FileTaskStore(str(threads), system="cli").append_messages(_TID, msgs)
+
+
 def _write_dialog(threads: Path) -> None:
     """Тред с одним ходом: две записи сообщений."""
-    from gc_core.thread_store import append_new_thread_messages
+    _write_messages(
+        threads,
+        [
+            {"id": "u1", "role": "user", "content": "вопрос"},
+            {"id": "a1", "role": "assistant", "content": "ответ"},
+        ],
+    )
 
-    msgs = [
-        {"id": "u1", "role": "user", "content": "вопрос"},
-        {"id": "a1", "role": "assistant", "content": "ответ"},
-    ]
-    append_new_thread_messages(str(threads), "cli", _TID, msgs, set())
 
+def _choice_rows(tmp_path: Path) -> list[dict]:
+    """Записи потока смен модели треда (``after``, ``model``)."""
+    from gc_testkit.thread_writes import model_choice_records
 
-def _thread_rows(tmp_path: Path) -> list[dict]:
-    path = tmp_path / "threads" / f"data_cli_{_TID}.jsonl"
-    return [json.loads(ln) for ln in path.read_text().splitlines()]
+    return model_choice_records(str(tmp_path / "threads"), "cli", _TID)
 
 
 @pytest.mark.asyncio
 async def test_idle_change_is_written_and_restored(tmp_path):
-    from gc_core.persistence.model_choice_record import (
-        ModelChoiceRecord,
-        parse_model_choice,
-    )
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
 
     app = _app(tmp_path)
     _write_dialog(tmp_path / "threads")
@@ -582,11 +587,13 @@ async def test_idle_change_is_written_and_restored(tmp_path):
         await pilot.pause()
         scr._cmd_model("max")
         await pilot.pause()
-        record = _thread_rows(tmp_path)[-1]
-        assert parse_model_choice(record) == ModelChoiceRecord(
-            "max", "giga-max", "glm-4.6"
-        )
-        assert record["seq"] == 2
+        (record,) = _choice_rows(tmp_path)
+        assert record == {
+            "after": "a1",
+            "model": ModelChoiceRecord(
+                "max", "giga-max", "glm-4.6"
+            ).to_payload(),
+        }
         assert len(_marks(scr)) == 1
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
@@ -604,7 +611,7 @@ async def test_running_change_is_not_written_by_tui(tmp_path):
         _busy(app, tmp_path)
         scr._cmd_model("max")
         await pilot.pause()
-        assert all(r["type"] == "message" for r in _thread_rows(tmp_path))
+        assert _choice_rows(tmp_path) == []
 
 
 @pytest.mark.asyncio
@@ -689,29 +696,28 @@ def _write_history_with_rule(threads: Path) -> None:
     """Ход, черта «glm-4.6» (смена в ходе, без сессионного выбора), ещё
     ход: последняя отметка ленты — glm-4.6, за ней сообщения."""
     from gc_core.persistence.model_choice_record import ModelChoiceRecord
-    from gc_core.thread_store import (
-        append_model_choice_record,
-        append_new_thread_messages,
-    )
+    from gc_testkit.thread_writes import model_choice_record
 
     record = ModelChoiceRecord("default", "glm-4.6", "glm-flash")
-    append_model_choice_record(str(threads), "cli", _TID, record, seq=2)
-    msgs = [
-        {"id": "u2", "role": "user", "content": "ещё вопрос"},
-        {"id": "a2", "role": "assistant", "content": "ещё ответ"},
-    ]
-    append_new_thread_messages(
-        str(threads), "cli", _TID, msgs, set(), start_seq=2
+    model_choice_record(str(threads), "cli", _TID, record)
+    _write_messages(
+        threads,
+        [
+            {"id": "u2", "role": "user", "content": "ещё вопрос"},
+            {"id": "a2", "role": "assistant", "content": "ещё ответ"},
+        ],
     )
 
 
 def _choice_records(tmp_path: Path) -> list:
-    from gc_core.persistence.model_choice_record import parse_model_choice
+    from gc_core.persistence.model_choice_record import (
+        MODEL_CHOICE_TYPE,
+        parse_model_choice,
+    )
 
     return [
-        parse_model_choice(r)
-        for r in _thread_rows(tmp_path)
-        if r["type"] == "model_choice"
+        parse_model_choice({"type": MODEL_CHOICE_TYPE, **r})
+        for r in _choice_rows(tmp_path)
     ]
 
 

@@ -15,6 +15,7 @@ from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.processing_responses import arun_agent
 from gc_core.security.permission_store import PermissionStore
 from gc_core.states import State
+from gc_core.threads.models import Lease, ThreadKey
 from gc_core.tools.subagents.active_scope import (
     activate_child_input,
     try_enqueue_user_message,
@@ -196,12 +197,20 @@ class UniversalSubagentWorkflow:
                         task_queue=request.start.resource_queue,
                         settings=operations.activity_settings["thread_store"],
                     ),
-                    owner_id=request.store_owner_id,
-                    owner_epoch=request.store_owner_epoch,
-                    generation=request.store_generation,
-                    capabilities=prepared.context.store_capabilities,
-                    threads_dir=prepared.context.threads_dir,
+                    owner=request.store_owner_id or request.parent_workflow_id,
                 )
+                if request.store_owner_epoch is not None:
+                    store.adopt(
+                        ThreadKey(
+                            system=request.start.system_id,
+                            thread=request.start.thread_id,
+                        ),
+                        Lease(
+                            owner=request.store_owner_id,
+                            epoch=request.store_owner_epoch,
+                            token=request.store_owner_token,
+                        ),
+                    )
                 operations.thread_store = store
                 parent_ctx = assemble_context(
                     request.parent_context,

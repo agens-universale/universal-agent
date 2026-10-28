@@ -34,6 +34,11 @@ def _ids(messages: list[dict]) -> list[str]:
     return [m["id"] for m in messages]
 
 
+def _admit_queue(ex: AgentExecutor) -> list[dict]:
+    """Агент впускает очередь — как в цикле хода."""
+    return asyncio.run(ex._atake_pending_messages())
+
+
 def test_companion_id_is_derived_from_message_id():
     assert companion_message_id("m1") == "m1_t"
 
@@ -44,7 +49,7 @@ def test_withdraw_from_pending_keeps_neighbours_in_order():
         ex.add_message(_msg(msg_id))
 
     assert ex.withdraw_message("b") is True
-    assert _ids(ex._take_pending_messages()) == ["a", "c"]
+    assert _ids(_admit_queue(ex)) == ["a", "c"]
 
 
 def test_withdraw_takes_own_companion_and_leaves_foreign_one():
@@ -55,7 +60,7 @@ def test_withdraw_takes_own_companion_and_leaves_foreign_one():
     ex.add_message(_msg(companion_message_id("b")))
 
     assert ex.withdraw_message("a") is True
-    assert _ids(ex._take_pending_messages()) == [
+    assert _ids(_admit_queue(ex)) == [
         "b",
         companion_message_id("b"),
     ]
@@ -64,7 +69,7 @@ def test_withdraw_takes_own_companion_and_leaves_foreign_one():
 def test_withdraw_after_admission_is_refused():
     ex = _executor()
     ex.add_message(_msg("a"))
-    ex._take_pending_messages()
+    _admit_queue(ex)
 
     assert ex.withdraw_message("a") is False
 
@@ -74,7 +79,7 @@ def test_withdraw_unknown_id_is_refused():
     ex.add_message(_msg("a"))
 
     assert ex.withdraw_message("zzz") is False
-    assert _ids(ex._take_pending_messages()) == ["a"]
+    assert _ids(_admit_queue(ex)) == ["a"]
 
 
 def test_withdraw_from_undelivered_tail():
@@ -103,7 +108,7 @@ def _race(ex: AgentExecutor, rounds: int) -> tuple[list[str], list[str]]:
         for i in range(rounds):
             ex.add_message(_msg(f"m{i}"))
             queued.wait()
-            admitted.extend(_ids(ex._take_pending_messages()))
+            admitted.extend(_ids(_admit_queue(ex)))
 
     def _withdraw() -> None:
         for i in range(rounds):
@@ -122,7 +127,7 @@ def _race(ex: AgentExecutor, rounds: int) -> tuple[list[str], list[str]]:
     for t in workers:
         t.join(timeout=30)
     assert not any(t.is_alive() for t in workers)
-    admitted.extend(_ids(ex._take_pending_messages()))
+    admitted.extend(_ids(_admit_queue(ex)))
     return admitted, withdrawn
 
 
@@ -206,7 +211,7 @@ def test_withdraw_and_admission_touch_queue_only_under_lock():
 
     assert ex.withdraw_message("c") is True
     assert ex.withdraw_message("a") is True
-    assert _ids(ex._take_pending_messages()) == ["b"]
+    assert _ids(_admit_queue(ex)) == ["b"]
 
     touches = ex._pending_messages.touches + ex._undelivered_messages.touches
     assert touches
