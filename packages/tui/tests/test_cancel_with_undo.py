@@ -1,9 +1,8 @@
 """TraceScreen счётчик _events_since_last_user_send + cancel-with-undo."""
 
-from gc_testkit.develop_files import meta_of
-
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.develop_files import meta_of
+from gc_testkit.tui_support import tui_settings
 
 
 async def _worker_session(tmp_path, tid):
@@ -253,9 +252,11 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
         scr._cmd_stop()  # 0 событий + пустой input → cancel-with-undo
         await pilot.pause()
 
-        # Тред ещё держит остановленный ход (аренда его сессии): сразу
-        # удалить нельзя — запись в чужой ход дала бы ThreadBusy. Заявка
-        # остаётся, реплика пока на месте.
+        # Тред ещё держит остановленный ход (аренда его сессии), а раннер
+        # уже не бежит: тик опроса удалить не может — запись в чужой ход
+        # дала бы ThreadBusy. Заявка остаётся, реплика пока на месте.
+        scr._run_orphan_cleanups()
+        assert scr._pending_orphan_cleanups
         msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
         assert any(m.get("id") == msg_id for m in msgs)
 
