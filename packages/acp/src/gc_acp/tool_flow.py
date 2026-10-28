@@ -205,7 +205,7 @@ def _call_report(
     if parsed is None:
         return report
     shown = _arguments_for_card(name, parsed)
-    report["title"] = _title(name, shown)
+    report["title"] = _title(name, shown, root)
     report["rawInput"] = _truncate_values(shown)
     locations = _locations(name, parsed)
     if locations is not None:
