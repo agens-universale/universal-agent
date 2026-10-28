@@ -616,6 +616,62 @@ async def test_esc_undo_never_draws_cancelled_line(
         assert _preview_openers(tmp_path) == ["u1"]
 
 
+@pytest.mark.asyncio
+async def test_esc_undo_store_error_keeps_claim_and_hides_line(
+    tmp_path, monkeypatch
+):
+    """Сбой хранилища при удалении снятой реплики: заявка остаётся, ни
+    реплики, ни строки «■ Отменено» в ленте; сбой прошёл — тик удаляет
+    реплику из треда и снимает заявку."""
+    from gc_testkit.develop_files import load_thread_messages
+    from gc_testkit.trace_grid import record_frames
+
+    _prepare_one_turn(tmp_path)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = await _open(pilot)
+        pilot.app.tui_state.active_task_id = TID
+        runner = _FakeRunner()
+        runner.produced_output = lambda: False
+        pilot.app.active_runner = runner
+        scr._prepare_for_new_run()
+        ts = await _worker_session(tmp_path)
+        await ts.apersist_batch(
+            [_reply("m_orphan", "отменяю")], previous_response_id=None
+        )
+        scr._last_user_message_id = "m_orphan"
+        scr._poll_tick()
+        await pilot.pause()
+        frames = record_frames(monkeypatch)
+        store = scr._store
+        real_discard = store.discard_message_by_id
+
+        def broken(*_args, **_kwargs):
+            raise OSError("диск недоступен")
+
+        store.discard_message_by_id = broken
+        scr._cmd_stop()
+        await pilot.pause()
+        await ts.aappend_turn_outcome(
+            _outcome(2, "m_orphan", status="stopped", reason="user_stop"),
+            discarded=True,
+        )
+        await ts.arelease_lease()
+        runner._running = False
+        await _poll_ticks(pilot, scr)
+
+        assert scr._pending_orphan_cleanups
+        drawn = [row for frame in frames for row in frame]
+        assert not [row for row in drawn if "Отменено" in row]
+        assert not [row for row in drawn if "отменяю" in row]
+
+        store.discard_message_by_id = real_discard
+        await _poll_ticks(pilot, scr)
+        assert not scr._pending_orphan_cleanups
+        msgs, _, _ = load_thread_messages(str(tmp_path), "cli", TID)
+        assert all(m.get("id") != "m_orphan" for m in msgs)
+        assert _fresh_line(scr).opened_by == "u1"
+
+
 async def _tailed_send_setup(pilot, tmp_path):
     """Как `_undo_setup`, но реплика `m_orphan` уже дочитана хвостом из
     треда: она в истории ленты, как вживую до Esc."""
