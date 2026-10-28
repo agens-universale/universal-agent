@@ -1,5 +1,7 @@
 """Итог хода — поток ``turns`` хранилища v2: привязка, runtime, сироты."""
 
+import json
+
 import pytest
 from gc_core.persistence.turn_outcome import TurnOutcome, turn_shown_in
 from gc_core.thread_store import ThreadSession
@@ -235,3 +237,27 @@ async def test_reset_history_orphans_old_records(tmp_path):
 
     (record,) = await _turns(store)
     assert not turn_shown_in(record, await _ids(store))
+
+
+async def test_old_in_file_record_is_skipped_without_migration(tmp_path):
+    """Старый тред: запись итога хода лежит строкой в ``data_*.jsonl``.
+    Переноса нет — история читает только сообщения, поток итогов пуст,
+    следующий ход дописывается как обычно."""
+    store = FileThreadStore(str(tmp_path))
+    session = await _session(store)
+    await session.apersist_batch([_user("u1")], previous_response_id=None)
+    await session.arelease_lease()
+    old = {
+        "type": "turn_outcome",
+        "seq": 1,
+        "outcome": _outcome().to_payload(),
+    }
+    with (tmp_path / "data_cli_t.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(old, ensure_ascii=False) + "\n")
+
+    fresh = await _session(store)
+    await fresh.apersist_batch([_answer("a1")], previous_response_id=None)
+
+    entries = await store.read_stream(KEY, "messages")
+    assert [(e.seq, e.data["id"]) for e in entries] == [(1, "u1"), (2, "a1")]
+    assert await _turns(store) == []
