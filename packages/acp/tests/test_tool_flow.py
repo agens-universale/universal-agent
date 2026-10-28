@@ -742,9 +742,7 @@ def test_write_file_card_omits_the_file_body():
         "path": "docs/note.md",
         "make_dirs": True,
     }
-    assert (
-        report["title"] == "fs_write_file(path='docs/note.md', make_dirs=True)"
-    )
+    assert report["title"] == "fs_write_file(docs/note.md)"
 
 
 def test_other_file_writes_omit_the_written_text():
