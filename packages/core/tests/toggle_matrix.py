@@ -45,6 +45,7 @@ from parity_harness import (
     judge_accept,
     parity_config,
     run_thread_dump,
+    strip_intended_meta_keys,
     strip_volatile,
     with_path_overrides,
 )
@@ -1324,6 +1325,9 @@ async def run_case(
         from gc_testkit.develop_files import load_thread_meta
 
         meta = load_thread_meta(resolve_threads_dir(base), SYS, TID) or {}
+        # Намеренно новые ключи (итог хода в runtime и т. п.) эталон develop
+        # не знает — правило одно с паритетом локального рантайма.
+        meta = strip_intended_meta_keys(meta)
         result["meta"] = strip_volatile(
             {
                 k: v

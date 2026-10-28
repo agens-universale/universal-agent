@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -450,6 +451,37 @@ def strip_volatile(obj: Any) -> Any:
     if isinstance(obj, list):
         return [strip_volatile(x) for x in obj]
     return obj
+
+
+#: Ключи meta, которых эталоны develop не знают НАМЕРЕННО — новые поля,
+#: а не сдвиг поведения:
+#: - ``workspace``, ``runtime.turn`` — хранилище v2 (спека
+#:   docs/superpowers/specs/2026-10-14-agent-storage-v2-design.md, 5.7);
+#: - ``runtime.last_turn`` — короткий итог хода из дизайна итогов хода
+#:   (решение владельца); его форму проверяют собственные тесты итога хода.
+#: Вырезаются по списку, не по маске: любой другой новый ключ обязан уронить
+#: паритет.
+INTENDED_NEW_META_KEYS = (
+    ("workspace",),
+    ("runtime", "turn"),
+    ("runtime", "last_turn"),
+)
+
+
+def strip_intended_meta_keys(meta: dict) -> dict:
+    out = deepcopy(meta)
+    for path in INTENDED_NEW_META_KEYS:
+        parent = out
+        for part in path[:-1]:
+            parent = parent.get(part)
+            if not isinstance(parent, dict):
+                break
+        else:
+            parent.pop(path[-1], None)
+    # Секцию, опустевшую после вырезания, develop не пишет вовсе.
+    if out.get("runtime") == {}:
+        out.pop("runtime")
+    return out
 
 
 def run_thread_dump(
