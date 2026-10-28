@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio.message_refs import (
     REF_KEY,
     SentMessages,
@@ -24,7 +24,14 @@ from gc_core_temporalio.contracts import RunRequest
 from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from live_support import call, temporal_cli, worker_kwargs
+from live_support import (
+    call,
+    seed_messages,
+    temporal_cli,
+    thread_messages,
+    thread_meta,
+    worker_kwargs,
+)
 from temporalio.api.enums.v1 import EventType
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -205,8 +212,9 @@ async def test_long_thread_and_long_turn_stay_below_temporal_limits(
     url, bodies, plan = growing_model
     plan["steps"] = 30
     (tmp_path / "big.txt").write_text("y" * 40_000)
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
-    store.append_messages(
+    store = FileThreadStore(str(tmp_path / "threads"))
+    await seed_messages(
+        store,
         "test",
         "refs",
         [
@@ -346,8 +354,8 @@ async def test_huge_mcp_output_is_capped_below_the_record_limit(
         await asyncio.wait_for(handle.result(), 120)
         largest, _, _ = await _payload_sizes(handle)
     assert largest < LIMIT
-    messages = DurableFileThreadStore(str(tmp_path / "threads")).load_messages(
-        "test", "refs"
+    messages = await thread_messages(
+        FileThreadStore(str(tmp_path / "threads")), "test", "refs"
     )
     outputs = [
         str(m.get("output") or m.get("content"))
@@ -399,8 +407,8 @@ async def test_long_turn_written_at_the_end_in_parts(
         largest, _, total = await _payload_sizes(handle)
         history = await handle.fetch_history()
     assert largest < LIMIT
-    messages = DurableFileThreadStore(str(tmp_path / "threads")).load_messages(
-        "test", "refs"
+    messages = await thread_messages(
+        FileThreadStore(str(tmp_path / "threads")), "test", "refs"
     )
     outputs = [
         m
@@ -475,8 +483,8 @@ async def test_fetch_url_cache_stays_on_the_worker(
     assert len(hits) == 1, hits
     assert [key for key, _ in cached] == [page]
     assert largest < 200_000, largest
-    meta = DurableFileThreadStore(str(tmp_path / "threads")).load_meta(
-        "test", "refs"
+    meta = await thread_meta(
+        FileThreadStore(str(tmp_path / "threads")), "test", "refs"
     )
     assert not (meta.get("shared") or {}).get("fetch_url_cache")
     await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
@@ -507,8 +515,9 @@ async def test_cache_miss_on_a_big_cyrillic_thread_does_not_inline_it(
     url, bodies, plan = growing_model
     plan["steps"] = 3
     (tmp_path / "big.txt").write_text("щ" * 2_000)
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
-    store.append_messages(
+    store = FileThreadStore(str(tmp_path / "threads"))
+    await seed_messages(
+        store,
         "test",
         "refs",
         [

@@ -1,13 +1,13 @@
 """Фактическая стоимость переживает сохранение и чтение meta треда."""
 
 import threading
-import types
 
 import gc_core.agent_executor as ae
 import gc_core.manual_compaction as mc
-from gc_core.thread_store import load_thread_meta
-from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_file import FileThreadStore
+from gc_testkit.develop_files import load_thread_meta
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey, Usage
+from gc_core.threads.session_writer import SessionWriter
 from gc_core.usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
@@ -85,27 +85,19 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
         CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$"
     )
 
-    _store = FileThreadStore(str(tmp_path))
-
-    async def _afrom_config(**kw):
-        return types.SimpleNamespace(
-            history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
-            meta={"token_usage": baseline.to_meta()},
-            thread_id="t1",
-            system_id="cli",
-            threads_dir=str(tmp_path),
-            # Ручная компакция пишет token_usage через хранилище сессии — и
-            # ходит туда через асинхронный порт: тред может лежать в базе.
-            store=_store,
-            port=athread_store(_store),
+    async def seed():
+        writer = SessionWriter(
+            FileThreadStore(str(tmp_path)),
+            ThreadKey(system="cli", thread="t1"),
+            owner="seed",
         )
+        await writer.acommit(
+            append_messages=[{"role": "user", "content": "hi", "id": "u1"}],
+            set_usage=Usage.model_validate(baseline.to_meta()),
+        )
+        await writer.arelease()
 
-    monkeypatch.setattr(
-        mc,
-        "ThreadSession",
-        types.SimpleNamespace(afrom_config=_afrom_config),
-    )
-    monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
+    run_coro(seed())
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
     monkeypatch.setattr(mc, "parse_summary_trigger_chars", lambda c: 5000)
     monkeypatch.setattr(mc, "State", _UsageState)
@@ -117,6 +109,7 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
             "agent.max_steps": 30,
             "agent.system_prompt_id": "x",
             "backend.api_mode": "chat_completions",
+            "paths.threads_data_path": str(tmp_path),
         },
         tools_spec=[],
         tools_description=[],

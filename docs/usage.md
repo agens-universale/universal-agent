@@ -25,14 +25,13 @@ uv tool install -e .                 # полный агент
 Профиль — отдельный дистрибутив со своим пакетом (`packages/<профиль>/src/gc_*`). Код чужих
 профилей физически не попадает на диск.
 
-| Команда | Ядро | TUI | server | acp | chat |
-|---|---|---|---|---|---|
-| `gc-ua` | да | да | да | да | да |
-| `gc-cli` | да | — | — | — | — |
-| `gc-tui` | да | да | — | — | — |
-| `gc-server` | да | — | да | — | — |
-| `gc-acp` | да | — | — | да | — |
-| `gc-chat` | да | — | — | — | да |
+| Команда | Ядро | TUI | server (webhook, chat, a2a, swarm) | acp |
+|---|---|---|---|---|
+| `gc-ua` | да | да | да | да |
+| `gc-cli` | да | — | — | — |
+| `gc-tui` | да | да | — | — |
+| `gc-server` | да | — | да | — |
+| `gc-acp` | да | — | — | да |
 
 ```bash
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
@@ -40,11 +39,25 @@ uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#su
 uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui" --with-executables-from gc-mcp
 uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 uv tool install "gc-acp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/acp"
-uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/chat"
 ```
 
-`gc-acp` — IDE по Agent Client Protocol: [acp.md](acp.md). `gc-chat` — HTTP-фасады
-Responses и Chat Completions: [chat.md](chat.md).
+`gc-acp` — IDE по Agent Client Protocol: [acp.md](acp.md). `gc-serve` — вебхук,
+HTTP-фасады Responses и Chat Completions, A2A и swarm: [server.md](server.md),
+[chat.md](chat.md), [a2a.md](a2a.md).
+
+Хранилище в базе (`storage` в config.yml) голый `gc-cli` не тянет. Пакет
+`gc-stores` с драйвером ставится в то же окружение; `--with-executables-from
+gc-stores` кладёт в `PATH` команду `gc-stores`. Уже стоящий `gc-cli` —
+переустановка с `--force`. Extra: `postgres`, `mysql`, `redis`, `s3`, `all`;
+SQLite — пакет `gc-stores` без скобок. Секция конфига и схема —
+[Хранилище](configuration.md#хранилище-storage).
+
+```bash
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" \
+  --with-executables-from gc-mcp \
+  --with "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores" \
+  --with-executables-from gc-stores
+```
 
 Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
 корневой `pyproject.toml`, а корень — это полный профиль. Устройство раскладки
@@ -63,8 +76,8 @@ exist`. Мета уже содержит всё, что даёт лист, та�
 переустанавливает тем же дистрибутивом.
 
 Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
-`gc-tui` → `gc-ua`/`gc-voice`, `gc-server` → `gc-serve`, `gc-acp` → `gc-acp`,
-`gc-chat` → `gc-chat`; полный `gc-ua` — все листовые. Менеджер MCP — отдельный
+`gc-tui` → `gc-ua`/`gc-voice`, `gc-server` → `gc-serve`, `gc-acp` → `gc-acp`;
+полный `gc-ua` — все листовые. Менеджер MCP — отдельный
 дистрибутив. `uv tool` не экспортирует команды зависимостей, поэтому у узкого
 профиля стоит штатный флаг:
 
@@ -207,7 +220,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 | `-s`, `--skill` *SKILL_NAME* | Решать задачу через указанный skill. Резолвится детерминированно **до старта агента**: точный canonical / `<pack-id>` → bootstrap пакета (напр. `supercoder` → `supercoder:using-supercoder`) / краткое имя / единственное близкое при опечатке. Неоднозначность / промах / сбой каталога → `warning:` в stderr и **мягкий фолбэк**: имя передаётся агенту как есть, агент стартует (`-s` — подсказка-намерение, не жёсткий контракт). Пустой `-s` — no-op. |
 | `--image` *PATH* | Приложить изображение к запросу `-q`; ключ повторяется (`--image a.png --image b.png`), не больше `images.max_per_message` (10). Файл проверяется и ужимается **до старта агента**: нет файла, не изображение, слишком большое или картинок больше лимита — сообщение в stderr и код 1. В начало текста запроса встают плашки `[Изображение #N]` — так их видит и консольная трасса. С `-t` номера продолжают нумерацию треда, а копия картинки хранится вместе с тредом; без `-t` картинка живёт до конца запуска. Флаг появился вместе с поддержкой изображений: `gc-cli` без неё принимает `--image PATH` за переопределение конфига и молча работает без картинки. |
 | `--config` *путь* | Путь к файлу `config.yml` вместо дефолтного. |
-| `-t`, `--thread-id` *id* | Продолжить диалог в существующем треде. |
+| `-t`, `--thread-id` *id* | Продолжить диалог в существующем треде. Тред, который сейчас ведёт другой процесс (окно `gc-ua`, другой `gc-cli`), — отказ «тред занят» и код 1. |
 | `-n`, `--new` | Начать тред с тем же `thread-id` заново (удалить старые `data_*`/`meta_*`). Разрешён **только вместе** с `-t` / `--thread-id`. |
 | `--write-guard true\|false` | Включить/выключить `write_guard`: ограничение файловых изменений `launch_root` и `write_guard.extra_paths`. Не сочетать с `--no-write-guard`. |
 | `--no-write-guard` | Явно отключить `write_guard` (эквивалент `--write-guard false`), приоритет над конфигом. |
@@ -217,6 +230,7 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 | `--command-moderation` | Режим для `execute_command` / `run_python_code`: `allow` — без judge, `ask` — подтверждение опасного, `deny` — блокировка опасного. В режиме разрешений `auto` команды вне списка безобидных всегда проверяет судья действий — `allow` его не отключает. |
 | `--permission-mode edit\|manual\|plan\|auto` | Режим разрешений сессии (выбор сохраняется в ней, флаг перебивает сохранённый): `edit` — агент редактирует файлы, опасные команды через подтверждение, `manual` — подтверждение каждой записи, команды и сетевого запроса, `plan` — агент ничего не меняет и предлагает план (в `gc-cli` с терминалом и `-t` план можно одобрить тут же), `auto` — без вопросов, спорные действия проверяет вспомогательная модель. Сессия без сохранённого режима открывается в `default_mode`. Без терминала вопрос становится отказом — см. [configuration.md](configuration.md#securitypermissions-режимы-разрешений). |
 | `--approve-plan edit\|manual\|auto` | Одобрить предложенный план треда и исполнить его в выбранном режиме; только вместе с `-t`. `-q` — необязательное уточнение к исполнению. Нет предложенного плана в треде — ошибка, код 1. Нельзя вместе с `-n`, `--permission-mode`, `--image`, `-s`, `-T`. См. «План в gc-cli» ниже. |
+| `--inbox` | Служебный, его передаёт обёртка swarm: ход из входящего потока треда `-t` без своего запроса — доставить сообщения, оставшиеся после выхода песочницы. Только вместе с `-t`; нельзя вместе с `-q`, `-n`, `--approve-plan`, `--image`, `-s`, `-T`. |
 | `--external-request` | Служебный, его передаёт обёртка swarm: запрос пришёл от внешней системы. Спросить некого, а слова запроса для судьи действий в режиме разрешений `auto` — описание задачи и запреты, не разрешение человека (как у webhook сервера). |
 | `--agentsmd-override` | Только TUI: оставить лишь корневой `AGENTS.md` (L3), отбросив shipped, глобальный `~/.gc/AGENTS.md` и `.gc/AGENTS.md`. Вне TUI слои не грузятся вовсе — агент говорит об этом на старте. |
 | `--profile` | Активировать профиль `<имя>` поверх указателя `profile:` из `config.yml` (`<проект>/.gc/profiles/` или `profiles/` рядом с базовым `config.yml` — Windows `~/.gc/profiles/`, Linux/macOS `~/.config/gc/profiles/`; при `--config` — каталог указанного файла). |

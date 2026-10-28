@@ -1,5 +1,7 @@
 """ThinkingIndicator — мгновенное гашение по submit_solution + sticky sentinel."""
 
+from gc_testkit.develop_files import record_from_meta
+
 from gc_testkit.tui_support import tui_settings
 import json
 import threading
@@ -497,8 +499,8 @@ async def test_runner_not_running_shows_terminal_state_after_finalized(
         # Заменяем store двойником, который возвращает status=completed,
         # чтобы idle-ветка гарантированно выдала state="done".
         class _CompletedStore:
-            def get_task_meta(self, tid):
-                return {"tui": {"status": "completed"}}
+            def get_record(self, tid):
+                return record_from_meta({"tui": {"status": "completed"}})
 
             def update_tui_meta(self, tid, patch):
                 pass

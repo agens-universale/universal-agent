@@ -52,3 +52,47 @@ _.aensure_ready
 # Абстрактный метод harbor.agents.base.BaseAgent.setup: зовёт Harbor перед запуском агента.
 # integrations/harbor/adapters/gc_cli_external.py.
 _.setup
+
+# Публичный API PostgresThreadStore (docs/sdk/thread-store.md, «Postgres»): таблицы
+# создаёт встраивающий при старте, ядро хранилище не создаёт и не зовёт.
+# packages/stores/src/gc_stores/postgres/store.py.
+_.ensure_schema
+
+# Публичный API gc_testkit для авторов хранилищ: засеять Seed конформанса через
+# запись ресурсов (ResourceWriter хранилищ gc-stores). Зовут тесты gc-stores.
+# packages/testkit/src/gc_testkit/agent_store_conformance.py.
+seed_store
+
+# Интерфейс записи ресурсов хранилищ агента gc-stores (ResourceWriter): его зовут
+# gc-stores sync и встраивающие, которые кладут промпты и скиллы в базу сами.
+# packages/stores/src/gc_stores/admin.py, sql/agent_store.py.
+ResourceWriter
+_.delete_resource
+_.list_resources
+
+# KV-движок gc-stores: MemoryKV — KV в памяти для проверки движка (тесты, свои
+# реализации встраивающих), sweep — уборка сирот прерванных записей: её
+# зовёт обслуживание вебхука по имени (getattr — у хранилищ, которые её
+# умеют) и оператор. packages/stores/src/gc_stores/kv/.
+MemoryKV
+_.sweep
+
+# Переопределение метода uvicorn.Server: его зовёт сам uvicorn (Server.serve).
+# Наш вариант не ставит обработчики сигналов — несколько серверов процесса
+# гасятся общим. packages/server/src/gc_server/app.py.
+_.capture_signals
+
+# Отмена хода с любого процесса — метод фасада Threads (SDK): его зовут
+# встраивающие, ручка отмены задачи сервера и отмена задачи A2A.
+# packages/core/src/gc_core/threads/facade.py.
+_.request_cancel
+
+# Хранилище настроек push A2A — реализация PushNotificationConfigStore
+# a2a-sdk: эти методы зовёт обработчик запросов и отправитель push SDK.
+# packages/server/src/gc_server/a2a/task_store.py.
+_.get_info
+_.get_info_for_dispatch
+_.delete_info
+
+# Публичный SDK: запись потока фронтенда через фасад Threads.
+_.append_frontend

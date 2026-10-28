@@ -142,7 +142,7 @@ def test_human_after_tool_batch_keeps_outputs_and_tail(monkeypatch):
             [_read_call("c1"), _read_call("c2")],
             state,
             _ctx(),
-            get_pending_messages=queue.drain,
+            get_pending_messages=as_coro(queue.drain),
             pre_backend_compaction_hook=lambda _msgs, mode: modes.append(mode),
         )
     )
@@ -190,7 +190,7 @@ def test_human_during_model_response_with_calls_waits_for_execution(
             [{"role": "user", "content": "прочитай a.py", "id": "m_start"}],
             state,
             _ctx(),
-            get_pending_messages=queue.drain,
+            get_pending_messages=as_coro(queue.drain),
         )
     )
 
@@ -236,7 +236,7 @@ def test_human_after_assistant_text_replaces_the_text(monkeypatch):
             [{"role": "user", "content": "прочитай a.py", "id": "m_start"}],
             state,
             _ctx(),
-            get_pending_messages=queue.drain,
+            get_pending_messages=as_coro(queue.drain),
         )
     )
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gc-server"
 version = "0.5.0"
-description = "GigaCode Universal Agent — FastAPI-режим и swarm (gc-serve)"
+description = "GigaCode Universal Agent — серверные поверхности: webhook, swarm, chat, a2a (gc-serve)"
 requires-python = ">=3.11"
 dependencies = [
 
@@ -13,14 +13,25 @@ dependencies = [
 
     "gc-cli==0.5.0",
     "gc-mcp==0.5.0",
+    "gc-stores==0.5.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.31.1",
     "psutil>=5.9,<7",
 ]
 
+[project.optional-dependencies]
+# Драйверы хранилищ из storage: config.yml (gc-stores без них — только код).
+postgres = ["gc-stores[postgres]==0.5.0"]
+mysql = ["gc-stores[mysql]==0.5.0"]
+redis = ["gc-stores[redis]==0.5.0"]
+s3 = ["gc-stores[s3]==0.5.0"]
+all = ["gc-stores[all]==0.5.0"]
+# Поверхность a2a (gc-serve a2a) — на официальном a2a-sdk.
+a2a = ["a2a-sdk[http-server]>=1.2,<2"]
+
 [project.scripts]
 
-gc-serve = "gc_server.server:serve"
+gc-serve = "gc_server.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_server"]

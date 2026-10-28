@@ -1,17 +1,15 @@
 """Обслуживание воркера освобождает брошенное и чистит служебные данные."""
 
-import os
 import time
 
 import test_workflow_controls as controls
-from gc_core.thread_store_journal import prune_durable_receipts
 from gc_core_temporalio import maintenance
 from gc_core_temporalio.maintenance import (
     WorkerMaintenance,
     owner_workflow,
 )
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_stores.sqlite import SQLiteThreadStore
 from live_support import call
 from test_workflow_controls import finish, request, runtime, wait_status
 
@@ -54,27 +52,30 @@ async def test_terminated_turn_context_is_released(
         assert provider.idle_owners(0) == []
 
 
-def test_old_store_receipts_are_pruned(tmp_path):
-    receipts = tmp_path / ".store" / "abc" / "receipts"
-    receipts.mkdir(parents=True)
-    old, fresh = receipts / "old.json", receipts / "fresh.json"
-    old.write_text("{}")
-    fresh.write_text("{}")
-    stale = time.time() - 30 * 24 * 3600
-    os.utime(old, (stale, stale))
-    assert prune_durable_receipts(tmp_path, max_age_seconds=3600) == 1
-    assert fresh.exists() and not old.exists()
+async def test_old_store_receipts_are_pruned(tmp_path):
+    """Квитанции хранилищ тредов старше недели чистятся: повтор activity —
+    минуты, а через дни квитанция только занимает место."""
+    from datetime import UTC, datetime, timedelta
 
-    store = SQLiteThreadStore(str(tmp_path / "threads.sqlite"))
-    store.ensure_ready()
-    with store.transaction() as db:
-        db.execute(
-            "INSERT INTO durable_receipts(system,thread,operation,digest,"
-            "receipt,created) VALUES ('s','t','old','d','{}',?),"
-            "('s','t','new','d','{}',?)",
-            (stale, time.time()),
-        )
-    assert store.prune_receipts(max_age_seconds=3600) == 1
+    from gc_core.threads.models import LeaseRequest, SideChange, ThreadKey
+
+    now = [datetime(2026, 1, 1, tzinfo=UTC)]
+    store = SQLiteThreadStore(
+        tmp_path / "threads.sqlite", clock=lambda: now[0]
+    )
+    key = ThreadKey(system="s", thread="t")
+    await store.claim(key, LeaseRequest(owner="w"))
+    await store.append_side(key, SideChange(op_id="old"))
+    now[0] += timedelta(days=30)
+    await store.append_side(key, SideChange(op_id="new"))
+
+    class Idle:
+        def idle_owners(self, _seconds):
+            return []
+
+    await WorkerMaintenance(None, Idle(), {"threads": store}).run_once()
+    now[0] += timedelta(seconds=1)
+    assert await store.prune_receipts(timedelta(0)) == 1, "свежая осталась"
 
 
 def test_owner_state_is_unknown_without_reliable_facts():

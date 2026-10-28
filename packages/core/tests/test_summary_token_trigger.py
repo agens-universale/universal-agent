@@ -6,7 +6,6 @@ import tempfile
 from types import SimpleNamespace
 
 from gc_core import run_summary_coordinator as rsc
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.processing_responses import remember_main_prompt_tokens
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.states import State
@@ -19,14 +18,18 @@ from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
     log_compaction_started,
 )
-from gc_core.thread_store import (
-    ThreadSession,
-    append_new_thread_messages,
+from gc_core.thread_store import ThreadSession
+from gc_testkit.develop_files import (
     load_thread_meta,
     save_thread_meta,
 )
 from gc_core.usage.account import UsageAccount
 from gc_testkit import run_coro
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.session_meta import (
+    merge_state_into_meta,
+    read_prompt_token_fields,
+)
 from gc_testkit.settings import fake_ctx, make_settings
 
 
@@ -261,24 +264,24 @@ def test_compaction_clears_prompt_fields_in_state_and_meta():
     )
     assert state.last_main_prompt_tokens is None
     assert state.last_main_prompt_message_count is None
-    meta = ThreadMetaMapper.merge_state_into_meta({}, state)
+    meta = merge_state_into_meta({}, state)
     assert "last_main_prompt_tokens" in meta
     assert meta["last_main_prompt_tokens"] is None
     assert meta["last_main_prompt_message_count"] is None
 
 
 def test_resume_reads_null_and_missing_as_none_and_keeps_zero():
-    assert ThreadMetaMapper.read_prompt_token_fields({}) == (None, None)
-    assert ThreadMetaMapper.read_prompt_token_fields(
+    assert read_prompt_token_fields({}) == (None, None)
+    assert read_prompt_token_fields(
         {
             "last_main_prompt_tokens": None,
             "last_main_prompt_message_count": None,
         }
     ) == (None, None)
-    assert ThreadMetaMapper.read_prompt_token_fields(
+    assert read_prompt_token_fields(
         {"last_main_prompt_tokens": 0, "last_main_prompt_message_count": 0}
     ) == (0, 0)
-    assert ThreadMetaMapper.read_prompt_token_fields(
+    assert read_prompt_token_fields(
         {"last_main_prompt_tokens": 9, "last_main_prompt_message_count": 2}
     ) == (9, 2)
 

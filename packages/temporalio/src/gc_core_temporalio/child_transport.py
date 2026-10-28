@@ -256,9 +256,7 @@ class ChildTransport:
             tool_name,
             arguments,
             parent_call_id,
-            self.store.owner_id,
-            self.store.owner_epoch,
-            self.store._generation,
+            *_lease_parts(self.store),
         )
         # Вход дочернего workflow — запись истории родителя: больше
         # лимита — сервер отверг бы команду, и задача родителя падала бы
@@ -346,3 +344,11 @@ def install_subagents(
     ctx.subagent_executor = transport.execute
     operations.stop_child = transport.stop_child
     return transport
+
+
+def _lease_parts(store) -> tuple[str | None, int | None, str | None]:
+    """Владелец, эпоха и токен аренды треда сессии (нет аренды — ``None``)."""
+    lease = getattr(store, "lease", None)
+    if lease is None:
+        return None, None, None
+    return lease.owner, lease.epoch, lease.token

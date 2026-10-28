@@ -1,19 +1,18 @@
 """Вызов тула в треде → короткая карточка между прозой.
 
-Живой ход дописывает jsonl, пока stream() молчит на исполнении тула.
-Хвост файла читается отдельно и не повторяет строки, которые уже были
-до этого prompt.
+Живой ход дописывает историю треда, пока stream() молчит на исполнении
+тула. Хвост истории читается отдельно (``Threads.tail``) и не повторяет
+записи, которые уже были до этого prompt.
 
-Вызовы внутри субагента лежат не в треде, а в sidecar
-``data_subagents_*``. Для клиента ACP это те же действия агента: та же
-карточка ``tool_call``, без отдельной вложенности.
+Вызовы внутри субагента лежат не в истории, а в потоке ``subagent_events``.
+Для клиента ACP это те же действия агента: та же карточка ``tool_call``, без
+отдельной вложенности.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from typing import Any
 
 from gc_core.constants.tool_names import (
@@ -31,10 +30,13 @@ from gc_core.execution.progress import (
     brief_args_summary,
     parse_tool_result_status,
 )
+from gc_core.threads.facade import Cursor, Threads
+from gc_core.threads.models import StreamEntry, ThreadKey
 
 _CALL = "function_call"
 _CALL_OUTPUT = "function_call_output"
-_ENVELOPE = "message"
+_HISTORY = "messages"
+_SUBAGENTS = "subagent_events"
 _SIDECAR_CALL = "call"
 _SIDECAR_DONE = frozenset({"result", "error"})
 _IN_PROGRESS = "in_progress"
@@ -87,80 +89,88 @@ def report_from_sidecar(
 
 
 class ToolFlow:
-    """Хвост jsonl с момента создания. Повторный poll дочитывает только новое.
+    """Хвост треда с момента :meth:`start`. Повторный poll дочитывает новое.
 
-    ``sidecar_path`` — файл вызовов субагента. Оба хвоста за один poll
-    сливаются по ``ts``, чтобы тул внутри субагента встал между стартом
-    субагента и его результатом, а не после.
+    История и вызовы субагента за один poll сливаются по ``ts``, чтобы тул
+    внутри субагента встал между стартом субагента и его результатом, а не
+    после. Сжатие истории посреди хода начинает её чтение заново; уже
+    показанные карточки не повторяются.
     """
 
-    def __init__(self, path: str, *, sidecar_path: str | None = None) -> None:
-        self._parent = _Tail(path)
-        self._sidecar = _Tail(sidecar_path or "")
+    def __init__(self, threads: Threads, key: ThreadKey) -> None:
+        self._threads = threads
+        self._key = key
+        self._cursor: Cursor | None = None
+        # Срез поиска текущего вызова — с создания хода.
+        self._origin: Cursor | None = None
         self._seen: set[str] = set()
         self._finished: set[str] = set()
 
-    def poll(self) -> list[dict]:
-        batch = _stamped(self._parent.read_lines(), "parent")
-        batch.extend(
-            _stamped(self._sidecar.read_lines(), "sidecar", len(batch))
+    @classmethod
+    async def start(cls, threads: Threads, key: ThreadKey) -> ToolFlow:
+        flow = cls(threads, key)
+        flow._cursor = (
+            await threads.tail(key, (_HISTORY, _SUBAGENTS), None)
+        ).cursor
+        flow._origin = flow._cursor
+        return flow
+
+    async def poll(self) -> list[dict]:
+        batch = await self._threads.tail(
+            self._key, (_HISTORY, _SUBAGENTS), self._cursor
         )
-        batch.sort()
+        self._cursor = batch.cursor
+        ordered = sorted(
+            (entry.ts, order, stream, entry)
+            for order, (stream, entry) in enumerate(batch.entries)
+        )
         updates: list[dict] = []
-        for _stamp, _order, kind, raw in batch:
-            update = _decode(kind, raw, self._seen, self._finished)
+        for _ts, _order, stream, entry in ordered:
+            update = _decode(stream, entry, self._seen, self._finished)
             if update is not None:
                 updates.append(update)
         return updates
 
-    def current_call_id(self) -> str | None:
+    async def current_call_id(self) -> str | None:
         """Вызов, который исполняется сейчас. Id тот же, что у карточки.
 
         Срез — с создания хода: незаконченный вызов прошлого prompt не
-        прилипает. Родительский батч уже лежит в jsonl и идёт с начала,
+        прилипает. Родительский батч уже лежит в истории и идёт с начала,
         поэтому текущий — первый без output. Вложенный тул дописывается
-        в sidecar в момент старта, поэтому текущий — последний открытый там.
-        Компакция обнуляет срез, и ноль сохраняется после дозаписи.
+        в поток субагента в момент старта, поэтому текущий — последний
+        открытый там. Сжатие истории читает её заново с начала: курсор
+        среза помнит версию истории на старте хода.
         """
-        nested = _open_call_ids(self._sidecar, "sidecar")
+        if self._origin is None:
+            return None
+        batch = await self._threads.tail(
+            self._key, (_HISTORY, _SUBAGENTS), self._origin
+        )
+        nested = _open_call_ids(batch.entries, _SUBAGENTS)
         if nested:
             return nested[-1]
-        parent = _open_call_ids(self._parent, "parent")
+        parent = _open_call_ids(batch.entries, _HISTORY)
         if parent:
             return parent[0]
         return None
 
 
-def _open_call_ids(tail: _Tail, kind: str) -> list[str]:
+def _open_call_ids(
+    entries: list[tuple[str, StreamEntry]], wanted: str
+) -> list[str]:
     seen: set[str] = set()
     finished: set[str] = set()
     order: list[str] = []
-    for raw in _read_from(tail):
-        update = _decode(kind, raw, seen, finished)
+    for stream, entry in entries:
+        if stream != wanted:
+            continue
+        update = _decode(stream, entry, seen, finished)
         if update is None or update.get("sessionUpdate") != "tool_call":
             continue
         call_id = update.get("toolCallId")
         if isinstance(call_id, str) and call_id != "":
             order.append(call_id)
     return [item for item in order if item not in finished]
-
-
-def _read_from(tail: _Tail) -> list[bytes]:
-    if tail.path == "":
-        return []
-    try:
-        size = os.path.getsize(tail.path)
-        # Срез запоминается на хвосте. Иначе после дозаписи файл снова
-        # длиннее старого смещения, и seek попадает в середину записи.
-        if size < tail.origin:
-            tail.origin = 0
-        with open(tail.path, "rb") as handle:
-            handle.seek(tail.origin)
-            blob = handle.read()
-    except OSError:
-        return []
-    lines, _rest = _complete_lines(blob)
-    return lines
 
 
 def _call_report(message: dict, seen: set[str]) -> dict | None:
@@ -371,120 +381,10 @@ def _call_id(message: dict) -> str | None:
     return None
 
 
-@dataclass
-class _Tail:
-    """Непрочитанный хвост одного jsonl. Файл может появиться позже.
-
-    ``origin`` — срез поиска текущего вызова. Компакция обнуляет его
-    вместе с курсором чтения, и ноль сохраняется после дозаписи.
-    """
-
-    path: str
-    offset: int = 0
-    origin: int = 0
-    pending: bytes = b""
-
-    def __post_init__(self) -> None:
-        size = _file_size(self.path)
-        self.offset = size
-        self.origin = size
-
-    def read_lines(self) -> list[bytes]:
-        if self.path == "":
-            return []
-        self.pending += _read_new(self)
-        lines, self.pending = _complete_lines(self.pending)
-        return lines
-
-
-def _file_size(path: str) -> int:
-    if path == "":
-        return 0
-    try:
-        return os.path.getsize(path)
-    except OSError:
-        return 0
-
-
-def _read_new(tail: _Tail) -> bytes:
-    try:
-        size = os.path.getsize(tail.path)
-        # Компакция переписывает jsonl короткой сводкой: старый offset за EOF,
-        # seek+read даёт пусто, и карточки хода больше не появляются.
-        # Тот же ноль — срез поиска вызова, иначе после дозаписи он смотрит
-        # в середину новой записи.
-        if size < tail.offset:
-            tail.offset = 0
-            tail.pending = b""
-            tail.origin = 0
-        with open(tail.path, "rb") as handle:
-            handle.seek(tail.offset)
-            chunk = handle.read()
-            tail.offset = handle.tell()
-    except OSError:
-        return b""
-    return chunk
-
-
-def _complete_lines(pending: bytes) -> tuple[list[bytes], bytes]:
-    lines: list[bytes] = []
-    blob = pending
-    while b"\n" in blob:
-        raw, blob = blob.split(b"\n", 1)
-        lines.append(raw)
-    return lines, blob
-
-
-def _stamped(
-    lines: list[bytes], kind: str, start: int = 0
-) -> list[tuple[str, int, str, bytes]]:
-    return [
-        (_stamp(raw), start + index, kind, raw)
-        for index, raw in enumerate(lines)
-    ]
-
-
-def _stamp(raw: bytes) -> str:
-    record = _json_object(raw)
-    if record is None:
-        return ""
-    ts = record.get("ts")
-    if isinstance(ts, str):
-        return ts
-    return ""
-
-
 def _decode(
-    kind: str, raw: bytes, seen: set[str], finished: set[str]
+    stream: str, entry: StreamEntry, seen: set[str], finished: set[str]
 ) -> dict | None:
-    record = _json_object(raw)
-    if record is None:
-        return None
-    if kind == "sidecar":
+    if stream == _SUBAGENTS:
+        record = {"ts": entry.ts, "seq": entry.seq, **entry.data}
         return report_from_sidecar(record, seen, finished)
-    message = _message(record)
-    if message is None:
-        return None
-    return report_from_record(message, seen, finished)
-
-
-def _json_object(raw: bytes) -> dict | None:
-    text = raw.decode("utf-8", errors="replace").strip()
-    if text == "":
-        return None
-    try:
-        record = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(record, dict):
-        return record
-    return None
-
-
-def _message(record: Any) -> dict | None:
-    if not isinstance(record, dict):
-        return None
-    payload = record.get("payload")
-    if record.get("type") == _ENVELOPE and isinstance(payload, dict):
-        return payload
-    return record
+    return report_from_record(entry.data, seen, finished)

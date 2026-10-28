@@ -4,14 +4,13 @@ import os
 
 from gc_core.persistence.plan_file import render_plan_file, write_plan_file
 from gc_core.plan_store import new_plan_block
-from gc_core.thread_store import (
-    delete_thread,
-    plan_file_path,
-    reset_thread_files,
-    save_thread_meta,
-)
-from gc_core.thread_store_file import FileThreadStore
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.thread_store import ThreadSession, plan_file_path
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import SideChange, ThreadKey
+from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+
+KEY = ThreadKey(system="cli", thread="t1")
+OTHER = ThreadKey(system="cli", thread="t2")
 
 
 def _plan(status="proposed", mode=None):
@@ -56,28 +55,39 @@ def test_write_happens_only_when_the_content_differs(tmp_path):
     assert write_plan_file(path, "") is False
 
 
-def test_plain_file_store_exports_and_the_journal_store_does_not(tmp_path):
+async def test_file_store_exports_and_a_store_without_files_does_not(
+    tmp_path,
+):
+    """Файл плана — возможность файлового хранилища тредов v2; у хранилищ
+    без каталога (память, базы) её нет — исполнитель молча пропускает."""
     store = FileThreadStore(str(tmp_path))
-    path = store.save_plan_file("cli", "t1", _plan())
+    path = await store.save_plan_file(KEY, _plan())
     assert path == plan_file_path(str(tmp_path), "cli", "t1")
     assert "предложен" in open(path, encoding="utf-8").read()
-    assert store.save_plan_file("cli", "t1", None) is None
-    assert DurableFileThreadStore.save_plan_file is None
+    assert await store.save_plan_file(KEY, None) is None
+    assert getattr(MemoryThreadStore(), "save_plan_file", None) is None
 
 
-def test_file_goes_away_with_the_session(tmp_path):
-    threads = str(tmp_path)
-    store = FileThreadStore(threads)
-    for remove in (delete_thread, reset_thread_files):
-        save_thread_meta(threads, "cli", "t1", {})
-        path = store.save_plan_file("cli", "t1", _plan())
-        other = store.save_plan_file("cli", "t2", _plan())
-        remove(threads, "cli", "t1")
-        assert not os.path.exists(path)
-        assert os.path.exists(other)  # чужая сессия цела
+async def test_file_goes_away_with_the_session(tmp_path):
+    store = FileThreadStore(str(tmp_path))
+    for key in (KEY, OTHER):
+        await store.append_side(key, SideChange(op_id=f"s-{key.thread}"))
+    path = await store.save_plan_file(KEY, _plan())
+    other = await store.save_plan_file(OTHER, _plan())
+    await store.delete(KEY, op_id="d")
+    assert not os.path.exists(path)
+    assert os.path.exists(other)  # чужая сессия цела
 
 
-def test_executor_exports_through_the_store_and_survives_a_failure(tmp_path):
+async def _session(store):
+    return await ThreadSession.afrom_config(
+        settings=None, system_id="cli", thread_id="t1", store=store
+    )
+
+
+async def test_executor_exports_through_the_session_and_survives_a_failure(
+    tmp_path,
+):
     import threading
     from types import SimpleNamespace
 
@@ -86,23 +96,46 @@ def test_executor_exports_through_the_store_and_survives_a_failure(tmp_path):
 
     ex = AgentExecutor.__new__(AgentExecutor)
     ex._lock = threading.Lock()
-    store = FileThreadStore(str(tmp_path))
-    ex._thread_session = SimpleNamespace(
-        store=store, system_id="cli", thread_id="t1"
-    )
+    ex._thread_session = await _session(FileThreadStore(str(tmp_path)))
     state = SimpleNamespace(shared=SharedStateData(plan=_plan()))
-    ex._export_plan_file(state, None)
+    await ex._aexport_plan_file(state, None)
     assert os.path.exists(plan_file_path(str(tmp_path), "cli", "t1"))
 
-    class _Broken:
-        def save_plan_file(self, *a):
+    class _Broken(MemoryThreadStore):
+        async def save_plan_file(self, *a):
             raise OSError("диск полон")
 
-    ex._thread_session = SimpleNamespace(
-        store=_Broken(), system_id="cli", thread_id="t1"
+    ex._thread_session = await _session(_Broken())
+    await ex._aexport_plan_file(state, None)  # не падает
+    ex._thread_session = await _session(MemoryThreadStore())
+    await ex._aexport_plan_file(state, None)  # хранилище не умеет — молча
+
+
+async def test_clearing_the_plan_drops_it_and_tells_the_model(tmp_path):
+    """``/plan clear`` (фасад ``Threads``): план убран из сессии, следующий
+    прогон один раз сообщит модели, файл плана удалён."""
+    from gc_core.execution.state import SharedStateData
+    from gc_core.persistence.session_state import (
+        session_with_shared,
+        shared_from_session,
     )
-    ex._export_plan_file(state, None)  # не падает
-    ex._thread_session = SimpleNamespace(
-        store=object(), system_id="cli", thread_id="t1"
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.models import SessionState
+    from gc_core.threads.session_writer import SessionWriter
+
+    store = FileThreadStore(str(tmp_path))
+    threads = Threads(store)
+    writer = SessionWriter(store, KEY, owner="w")
+    await writer.acommit(
+        set_state=session_with_shared(
+            SessionState(), SharedStateData(plan=_plan())
+        )
     )
-    ex._export_plan_file(state, None)  # хранилище не умеет — молча
+    await writer.arelease()
+    path = await store.save_plan_file(KEY, _plan())
+    assert await threads.clear_plan(KEY) is True
+    record = await threads.get(KEY)
+    shared = shared_from_session(record.state, record.extra)
+    assert shared.plan is None and shared.plan_removed_notice is True
+    assert not os.path.exists(path)
+    assert await threads.clear_plan(KEY) is False  # плана уже нет

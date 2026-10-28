@@ -1,15 +1,14 @@
 import asyncio
 import json
 import logging
-import os
 import threading
 from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from gc_core.agent_store import AgentResource, agent_store_of
-from gc_core.attachments.store import with_committed_attachments
+from gc_core.agent_store import Prompt, agent_store_of, aread_or_none
+from gc_core.attachments.store import awith_committed_attachments
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.levels import (
     auto_available,
@@ -17,7 +16,6 @@ from gc_core.auto_routing.levels import (
     resolve_routing_params,
 )
 from gc_core.auto_routing.policy import turn_params
-from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.agent import (
     merge_special_instructions_with_model_steering,
 )
@@ -127,6 +125,14 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
         if isinstance(content, str):
             return content
     return ""
+
+
+async def _adrain_with_attachments(scope: Any, child_ctx: Any) -> list:
+    """Реплики очереди субагента — как у родителя: картинки из кармана
+    процесса переезжают в тред."""
+    return [
+        await awith_committed_attachments(m, child_ctx) for m in scope.drain()
+    ]
 
 
 async def _drain_trace_writes(
@@ -857,8 +863,8 @@ class SubagentRunner:
                 message: Dict[str, Any], prose: str
             ) -> None:
                 payload: Dict[str, Any] = {"role": "user", "content": prose}
-                attachments = with_committed_attachments(
-                    message, child_ctx
+                attachments = (
+                    await awith_committed_attachments(message, child_ctx)
                 ).get("attachments")
                 if attachments:
                     payload["attachments"] = attachments
@@ -910,10 +916,9 @@ class SubagentRunner:
                     session_meta=child_meta,
                     # Приём реплик из очереди — как у родителя: картинки
                     # из кармана процесса переезжают в тред.
-                    get_pending_messages=lambda: [
-                        with_committed_attachments(m, child_ctx)
-                        for m in scope.drain()
-                    ],
+                    get_pending_messages=partial(
+                        _adrain_with_attachments, scope, child_ctx
+                    ),
                 )
             finally:
                 # Колбэк снимается ПЕРВЫМ делом: пока он вооружён, чужой поток
@@ -1276,13 +1281,12 @@ class SubagentRunner:
             # ключ кэша совпадает, попадание гарантировано.
             tools_cache=getattr(self._ctx, "tools_cache", None),
         )
-        child_system_prompt = self._resolve_subagent_system_prompt()
+        child_system_prompt = await self._aresolve_subagent_system_prompt()
 
         parent = self._orchestrator_state
         prepared = await prepare_state(
             workspace_config=child_config,
             workspace=getattr(parent, "workspace", None),
-            agent_md_path=parent.agent_md_path,
             verbose=parent.verbose,
             logger=parent.logger,
             agent_store=agent_store_of(self._ctx),
@@ -1344,58 +1348,22 @@ class SubagentRunner:
             self._parent_source()
         )
 
-    def _resolve_subagent_system_prompt(self) -> Optional[str]:
+    async def _aresolve_subagent_system_prompt(self) -> Optional[str]:
         """Вернуть системный промпт для субагента с fallback на промпт родителя.
 
         У кастомных (файловых) сабагентов промпт свой: он предупреждает модель,
         что роль написана оператором в локальном файле, прав не выдаёт и может
-        расходиться с фактическим набором инструментов.
+        расходиться с фактическим набором инструментов. Цепочку «свой путь из
+        конфига → пакетный» держит хранилище агента.
         """
-        # Путь из настроек есть только у кастомных; встроенные берут пакетный.
-        if self._is_custom_subagent():
-            paths = self._parent_settings().paths
-            prompt_path_raw = (
-                paths.chat_completions_custom_subagent_system_prompt_path
-            )
-            name = "custom_subagent"
-            default_name = "chat_completions_custom_subagent_system_prompt.md"
-        else:
-            prompt_path_raw = None
-            name = "subagent"
-            default_name = "chat_completions_subagent_system_prompt.md"
-
-        candidates: List[AgentResource] = []
-        if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
-            candidates.append(
-                AgentResource(
-                    "prompt", name, os.path.abspath(prompt_path_raw.strip())
-                )
-            )
-        # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-        candidates.append(
-            AgentResource(
-                "prompt", name, str(bundled_root() / "prompts" / default_name)
-            )
+        name = (
+            Prompt.CUSTOM_SUBAGENT
+            if self._is_custom_subagent()
+            else Prompt.SUBAGENT
         )
-
-        store = agent_store_of(self._ctx)
-        for resource in candidates:
-            try:
-                loaded = store.read_text(resource).strip()
-                if loaded:
-                    return loaded
-            except FileNotFoundError:
-                continue
-            # Первый кандидат — путь ИЗ КОНФИГА: файл человека, кодировка его.
-            # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`, и уходил
-            # мимо этого фолбэка, роняя запуск сабагента вместо отката на пакетный.
-            except (OSError, UnicodeDecodeError):
-                _log.warning(
-                    "Failed to read subagent system prompt from %s",
-                    resource.label,
-                    exc_info=True,
-                )
-
+        loaded = await aread_or_none(agent_store_of(self._ctx), "prompt", name)
+        if loaded is not None and loaded.strip():
+            return loaded.strip()
         return self._orchestrator_state.chat_completions_system_prompt
 
     def _build_initial_messages(
@@ -1643,6 +1611,11 @@ class SubagentRunner:
         # потоко-локальна: поток читал настоящую консоль, которую держит
         # Textual, и делил с ним нажатия — ход висел, клавиши пропадали.
         child_ctx.ask_human = getattr(self._ctx, "ask_human", None)
+        # Приостановка на вопросе — канал родителя: ребёнок её не делает
+        # (ход родителя посреди батча не приостановить), а отказывает.
+        child_ctx.ask_human_suspends = getattr(
+            self._ctx, "ask_human_suspends", False
+        )
         # Порт подтверждения — туда же. Без него write/command guard ребёнка
         # при tty читает `input()` процесса. Канал без человека (A2A, сервер)
         # объявлен в рантайме, ребёнок его наследует.

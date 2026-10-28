@@ -68,12 +68,15 @@ def _emit_project_memory_hints(
     settings: AppConfig,
     *,
     enabled: bool,
+    memory_hash: str | None,
 ) -> list[str]:
     """Добавить в ``out`` подсказки project_memory; вернуть их тексты."""
     emitted: list[str] = []
     if not enabled:
         return emitted
-    for hint_text in collect_project_memory_hints(state, meta, ctx, settings):
+    for hint_text in collect_project_memory_hints(
+        state, meta, ctx, settings, get_hash_fn=lambda _ctx: memory_hash
+    ):
         out.append(
             wrap_project_memory_hint_user_message(
                 hint_text, suffix="mem_project"
@@ -112,9 +115,12 @@ def apply_tool_usage_notice_before_llm(
     *,
     step_messages: list[dict[str, Any]],
     logger: Any | None = None,
+    project_memory_hash: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     После persist-batch, перед LLM: независимые контуры project_memory K-тик и tool_usage_notice.
+    ``project_memory_hash`` — версия памяти проекта, прочитанная заранее
+    (подсказки о памяти включены).
     Счётчики не сбрасывают друг друга; снимок — только в текстовый log.
     """
     settings = settings_of(ctx)
@@ -165,6 +171,7 @@ def apply_tool_usage_notice_before_llm(
         ctx,
         settings,
         enabled=project_hints_enabled,
+        memory_hash=project_memory_hash,
     )
     project_check_final = (
         get_project_memory_check_cnt(meta) if project_hints_enabled else None

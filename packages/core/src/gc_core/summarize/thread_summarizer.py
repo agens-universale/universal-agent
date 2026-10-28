@@ -572,14 +572,11 @@ async def asummarize_dialog_via_chat_completions(
     max_dialogue_chars = lim.max_dialogue_chars
     max_accumulated_summary_chars = lim.max_accumulated_summary_chars
     batch_chars_limit = lim.batch_chars_limit
-    prompt_path = summary.chat_completions_summary_prompt_path
+    prompt_path = summary.chat_completions_summary_prompt_path  # для лога
     system_prompt = await aload_prompt_resource(
         ctx,
-        PromptResourceRequest("summary", path=prompt_path),
-        local=lambda: prompt_loading.load_prompt_template(
-            str(prompt_path or prompt_loading.default_prompt_path()),
-            store=agent_store_of(ctx),
-        ),
+        PromptResourceRequest("summary"),
+        local=lambda: prompt_loading.aload_summary_prompt(agent_store_of(ctx)),
     )
 
     history_for_summary = dialog_history.trim_history_to_max_dialogue_chars(

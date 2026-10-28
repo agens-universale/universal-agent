@@ -1,6 +1,8 @@
 """Отправка сообщений с картинками: отказ «с командой», ветки хода, ответ на вопрос
 агента, pending, история и имя сессии, откат отправки, смена сессии (дизайн §12, §20.3)."""
 
+from gc_testkit.develop_files import meta_of
+
 import json
 from pathlib import Path
 
@@ -348,7 +350,7 @@ async def test_history_and_session_name_skip_image_chips(tmp_path):
             0,
             "почему кнопка «Войти» съехала вправо?",
         )
-        assert scr._store.get_task_meta(tid)["tui"]["last_actual"] == (
+        assert meta_of(scr._store.get_record(tid))["tui"]["last_actual"] == (
             "почему кнопка «Войти» съехала вправо?"
         )
 
@@ -368,7 +370,7 @@ async def test_image_only_message_leaves_history_and_session_name_alone(
         )
         assert scr._history.size == 0
         assert "last_actual" not in (
-            scr._store.get_task_meta(tid).get("tui") or {}
+            meta_of(scr._store.get_record(tid)).get("tui") or {}
         )
 
 

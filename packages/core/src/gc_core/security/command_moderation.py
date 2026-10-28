@@ -10,13 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
-    AgentResource,
-    AgentStore,
-    agent_store_of,
-)
-from gc_core.bundled_assets import bundled_root
+from gc_core.agent_store import AgentStore, agent_store_of, decode_text
 from gc_core.config_modules.security import validate_command_moderation_mode
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.execution.contracts import ExecutionFailure
@@ -995,10 +989,20 @@ def _join_reasons(reasons: list[str], *, default: str) -> str:
 
 def judge_transport_configured(ctx: Any) -> bool:
     """Есть ли у прогона канал вспомогательной модели для судьи. Это свойство
-    конфигурации, известное до запроса, — не временный сбой."""
+    конфигурации, известное до запроса, — не временный сбой.
+
+    Адрес судьи — легаси ``backend.completions_url`` или запись реестра
+    ``models``, в которую резолвится ``command_judge``: конфиг только с
+    реестром оставляет ``completions_url`` пустым."""
     configured = getattr(ctx, "model_transport_configured", None)
     if configured is None:
-        configured = bool(settings_of(ctx).backend.completions_url)
+        from gc_core.model_router import consumer_has_transport
+
+        configured = consumer_has_transport(
+            settings_of(ctx),
+            "command_judge",
+            getattr(ctx, "model_router", None),
+        )
     return bool(configured)
 
 
@@ -1034,12 +1038,12 @@ def _default_judge_client(
                 ),
             ).make_coro()
             prompts = facts.data
+        if prompts is None:
+            prompts = await aload_command_judge_prompts(agent_store_of(ctx))
         raw_text = await arequest_auxiliary_completion_text(
             ctx=ctx,
             state=state,
-            messages=_build_judge_messages(
-                judge_payload, prompts=prompts, store=agent_store_of(ctx)
-            ),
+            messages=_build_judge_messages(judge_payload, prompts=prompts),
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
             consumer="command_judge",
@@ -1058,20 +1062,10 @@ def _default_judge_client(
 def _build_judge_messages(
     judge_payload: dict[str, Any],
     *,
-    prompts: dict[str, str] | None = None,
-    store: AgentStore = DEFAULT_AGENT_STORE,
+    prompts: dict[str, str],
 ) -> list[dict[str, str]]:
-    system_prompt = (
-        prompts["system"]
-        if prompts is not None
-        else load_command_judge_prompt("system", store=store)
-    )
-    user_template = (
-        prompts["user"]
-        if prompts is not None
-        else load_command_judge_prompt("user", store=store)
-    )
-    user_prompt = user_template.format(
+    system_prompt = prompts["system"]
+    user_prompt = prompts["user"].format(
         judge_payload_json=json.dumps(
             judge_payload, ensure_ascii=False, indent=2
         )
@@ -1082,40 +1076,37 @@ def _build_judge_messages(
     ]
 
 
-def load_command_judge_prompt(
-    kind: str, *, store: AgentStore = DEFAULT_AGENT_STORE
-) -> str:
-    if kind == "system":
-        path = (
-            bundled_root() / "prompts" / "security" / "command_judge_system.md"
-        )
-    elif kind == "user":
-        path = (
-            bundled_root() / "prompts" / "security" / "command_judge_user.md"
-        )
-    else:
+async def aload_command_judge_prompts(store: AgentStore) -> dict[str, str]:
+    """Промпты судьи команд: ``system`` и шаблон ``user``."""
+    return {
+        kind: await aload_command_judge_prompt(kind, store=store)
+        for kind in ("system", "user")
+    }
+
+
+async def aload_command_judge_prompt(kind: str, *, store: AgentStore) -> str:
+    if kind not in ("system", "user"):
         raise ValueError("Unknown command judge prompt kind.")
-    return _load_prompt_file(path, store=store, name=f"command_judge_{kind}")
+    return await aload_judge_prompt(f"command_judge_{kind}", store=store)
 
 
-def _load_prompt_file(
-    path: Path,
-    *,
-    store: AgentStore = DEFAULT_AGENT_STORE,
-    name: str = "command_judge_system",
-) -> str:
+async def aload_judge_prompt(name: str, *, store: AgentStore) -> str:
+    """Промпт судьи из хранилища агента. Нет, пуст или не читается —
+    ``JudgeUnavailable``: судья отключается, а не роняет ход."""
+    label = store.label("prompt", name)
     # «Недоступен» — это и «не декодируется» (`UnicodeDecodeError` подкласс
-    # `ValueError`, а не `OSError`): судья отключается, а не роняет ход.
+    # `ValueError`, а не `OSError`).
     try:
-        text = store.read_text(
-            AgentResource("prompt", name, str(path))
-        ).strip()
+        data = await store.read("prompt", name)
+        if data is None:
+            raise FileNotFoundError(label)
+        text = decode_text(data).strip()
     except (OSError, UnicodeDecodeError) as exc:
         raise JudgeUnavailable(
-            f"Command judge prompt file is unavailable: {path}"
+            f"Judge prompt file is unavailable: {label}"
         ) from exc
     if not text:
-        raise JudgeUnavailable(f"Command judge prompt file is empty: {path}")
+        raise JudgeUnavailable(f"Judge prompt file is empty: {label}")
     return text
 
 

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core.agent_executor import AgentExecutor
+from gc_core.threads.models import SessionState
 from gc_core.usage.account import (
     CATEGORY_MAIN,
     CATEGORY_STRUCTURED_OUTPUT,
@@ -26,13 +27,20 @@ class _Logger:
 
 
 class _Session:
-    def __init__(self, meta):
-        self.meta = meta
+    """Сессия треда: шаг пишет сообщения, состояние и расход токенов."""
+
+    def __init__(self):
+        self.state = SessionState()
+        self.notice = {}
         self.backend_api_mode = "chat_completions"
         self.batches = []
+        self.usage = None
 
-    async def apersist_batch(self, messages, *, previous_response_id):
+    async def apersist_batch(
+        self, messages, *, previous_response_id, session=None, usage=None
+    ):
         self.batches.append((list(messages), previous_response_id))
+        self.usage = usage
 
 
 def _state(*, usage, start, last_run, stop=False):
@@ -80,7 +88,7 @@ async def test_close_includes_tokens_added_after_the_loop(capsys):
     stale = UsageAccount.from_meta(usage.to_meta())
     usage.add(CATEGORY_STRUCTURED_OUTPUT, 7, 4)
     state = _state(usage=usage, start=start, last_run=stale)
-    session = _Session(meta={"token_usage": stale.to_meta()})
+    session = _Session()
     ex, logger = _executor(state, session)
 
     await ex.aclose_run_accounting(console=False)
@@ -89,7 +97,7 @@ async def test_close_includes_tokens_added_after_the_loop(capsys):
     assert run.by_category[CATEGORY_MAIN]["input"] == 100
     assert run.by_category[CATEGORY_STRUCTURED_OUTPUT]["input"] == 7
     assert run.by_category[CATEGORY_STRUCTURED_OUTPUT]["output"] == 4
-    stored = session.meta["token_usage"]["by_category"]
+    stored = session.usage.by_category
     assert stored[CATEGORY_STRUCTURED_OUTPUT]["input"] == 7
     assert session.batches == [([], "resp-1")]
     events = [
@@ -107,7 +115,7 @@ async def test_second_close_does_not_write_again():
     usage = UsageAccount()
     usage.add(CATEGORY_MAIN, 10, 1)
     state = _state(usage=usage, start=UsageAccount(), last_run=None)
-    session = _Session(meta={})
+    session = _Session()
     ex, logger = _executor(state, session)
 
     await ex.aclose_run_accounting(console=False)
@@ -115,7 +123,7 @@ async def test_second_close_does_not_write_again():
     await ex.aclose_run_accounting(console=False)
 
     assert len(session.batches) == 1
-    stored = session.meta["token_usage"]["by_category"]
+    stored = session.usage.by_category
     assert CATEGORY_STRUCTURED_OUTPUT not in stored
     events = [
         extra for extra in logger.events if extra.get("event") == "run_usage"
@@ -133,7 +141,7 @@ async def test_close_skips_persist_when_stop_discarded_writes():
         last_run=UsageAccount(),
         stop=True,
     )
-    session = _Session(meta={})
+    session = _Session()
     ex, _logger = _executor(state, session)
 
     await ex.aclose_run_accounting(console=False)
@@ -141,7 +149,7 @@ async def test_close_skips_persist_when_stop_discarded_writes():
     structured = state.last_run_usage.by_category[CATEGORY_STRUCTURED_OUTPUT]
     assert structured["input"] == 3
     assert session.batches == []
-    assert "token_usage" not in session.meta
+    assert session.usage is None
 
 
 @pytest.mark.asyncio
@@ -150,7 +158,7 @@ async def test_persist_failure_reaches_the_caller():
     usage = UsageAccount()
     usage.add(CATEGORY_MAIN, 10, 1)
     state = _state(usage=usage, start=UsageAccount(), last_run=None)
-    session = _Session(meta={})
+    session = _Session()
 
     async def _boom(_messages, **_kwargs):
         raise OSError("disk full")
@@ -169,7 +177,7 @@ async def test_usage_report_failure_keeps_successful_persist(monkeypatch):
     usage = UsageAccount()
     usage.add(CATEGORY_MAIN, 10, 1)
     state = _state(usage=usage, start=UsageAccount(), last_run=None)
-    session = _Session(meta={})
+    session = _Session()
     ex, logger = _executor(state, session)
 
     def _boom(_meta):

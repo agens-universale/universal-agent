@@ -149,27 +149,28 @@ def test_reminder_counter_round_trips_through_meta():
     assert restored.todo_reminder_cnt == 7
 
 
-def test_reminder_counter_survives_meta_merge_to_base():
-    """Ключ попадает в base_meta перед сохранением треда (иначе потеряется на диске)."""
+def test_reminder_counter_survives_into_session_state():
+    """Счётчик попадает в состояние сессии при записи шага (иначе
+    потеряется в хранилище)."""
     from types import SimpleNamespace
 
-    from gc_core.message_policy.tool_usage_notice.state import (
-        merge_tool_usage_notice_meta_to_base,
-        persist_tool_usage_notice_state,
-    )
+    from gc_core.persistence.session_state import session_from_state
+    from gc_core.threads.models import SessionState
 
-    session_meta: dict = {}
-    persist_tool_usage_notice_state(
-        SimpleNamespace(
-            todo_reminder_cnt=4,
-            tool_usage_notice_cnt={},
-            project_memory_content_hash=None,
-        ),
-        session_meta,
+    state = SimpleNamespace(
+        todo_reminder_cnt=4,
+        tool_usage_notice_cnt={},
+        project_memory_content_hash=None,
     )
-    base: dict = {}
-    merge_tool_usage_notice_meta_to_base(base, session_meta)
-    assert base.get("todo_reminder_cnt") == 4
+    session = session_from_state(
+        SessionState(),
+        state,
+        notice={},
+        rendered_system_prompt=None,
+        backend_api_mode="chat_completions",
+        previous_response_id=None,
+    )
+    assert session.todo_reminder_count == 4
 
 
 # --- мягкая подсказка «заведи чек-лист» -------------------------------------

@@ -22,23 +22,27 @@ from types import SimpleNamespace
 import pytest
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.execution.state import SharedStateData
+from gc_core.agent_store import FileAgentStore
 from gc_core.message_policy.permission_denials import (
     OTHER_HOST_REDIRECT_TYPE,
     judge_failures_stop_text,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
-from gc_core.security.action_judge import load_action_judge_prompt
+from gc_testkit.session_meta import merge_shared_into_meta
+from gc_core.security.action_judge import aload_action_judge_prompt
 from gc_core.security.action_judge_step import FAILURES_BEFORE_STOP
 from gc_core.security.url_policy import url_host_key
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core_temporalio import AgentPlugin, AgentSession
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
-from live_support import call, temporal_cli
+from gc_stores.sqlite import SQLiteThreadStore
+from gc_testkit import run_coro
+from live_support import call, seed_meta, temporal_cli, thread_messages
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from test_workflow_controls import finish
 
-_JUDGE_SYSTEM = load_action_judge_prompt("system")
+_JUDGE_SYSTEM = run_coro(
+    aload_action_judge_prompt("system", store=FileAgentStore())
+)
 
 
 def _is_judge(body):
@@ -202,10 +206,11 @@ async def _session(tmp_path, settings, *, shared=None):
     общее состояние в мете треда до первого хода."""
     store = SQLiteThreadStore(str(tmp_path / "threads.sqlite"))
     if shared is not None:
-        store.save_meta(
+        await seed_meta(
+            store,
             "sdk",
             "t1",
-            ThreadMetaMapper.merge_shared_into_meta({}, shared),
+            merge_shared_into_meta({}, shared),
         )
     plugin = AgentPlugin(
         {"a": settings}, thread_store=store, workspace=tmp_path / "ws"
@@ -287,7 +292,7 @@ async def test_stop_during_the_judge_request_is_a_stop_body(
         await asyncio.wait_for(session.wait(message_id, timeout=60), 90)
         http.release.set()
         saved = json.dumps(
-            store.load_messages("sdk", "t1"), ensure_ascii=False
+            await thread_messages(store, "sdk", "t1"), ensure_ascii=False
         )
     assert not target.exists()
     assert len(http.judged) == 1  # стоп — не сбой: повтора нет

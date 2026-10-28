@@ -16,8 +16,6 @@ dependencies = [
     "gc-server==0.5.0",
     "gc-mcp==0.5.0",
     "gc-acp==0.5.0",
-    "gc-chat==0.5.0",
-    "gc-a2a==0.5.0",
 ]
 
 [project.optional-dependencies]
@@ -28,13 +26,11 @@ all = []
 [project.scripts]
 gc-cli = "gc_cli.cli:main"
 gc-ua = "gc_tui:main"
-gc-serve = "gc_server.server:serve"
+gc-serve = "gc_server.cli:main"
 gc-mcp = "recommended_mcp.runtime.cli:main"
 gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 gc-voice = "gc_tui.voice_runtime.cli:main"
 gc-acp = "gc_acp.main:main"
-gc-chat = "gc_chat.main:main"
-gc-a2a = "gc_a2a.main:main"
 
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
@@ -62,6 +58,8 @@ test = [
 
     "gc-testkit",
     "gc-core-temporalio==0.5.0",
+    "gc-stores[all]",
+    "gc-server[a2a]",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",
@@ -94,11 +92,10 @@ gc-tui = { workspace = true }
 gc-server = { workspace = true }
 gc-mcp = { workspace = true }
 gc-acp = { workspace = true }
-gc-chat = { workspace = true }
-gc-a2a = { workspace = true }
 
 gc-testkit = { workspace = true }
 gc-core-temporalio = { workspace = true }
+gc-stores = { workspace = true }
 office-mcp = { path = "packages/mcp/external/vendor/office-mcp", editable = true }
 
 [tool.pytest.ini_options]
@@ -113,8 +110,7 @@ testpaths = [
     "packages/tui/tests",
     "packages/temporalio/tests",
     "packages/acp/tests",
-    "packages/chat/tests",
-    "packages/a2a/tests",
+    "packages/stores/tests",
 ]
 asyncio_mode = "auto"
 
@@ -198,7 +194,7 @@ paths = [
     "packages/server/src",
     "packages/temporalio/src",
     "packages/acp/src",
-    "packages/chat/src",
+    "packages/stores/src",
     "packages/core/assets/skills",
     "scripts",
     "integrations",

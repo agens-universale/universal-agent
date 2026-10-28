@@ -11,9 +11,6 @@ from gc_core.auto_routing.state_ops import ROUTING_FIELDS, ensure_fields
 from gc_core.execution.output_store import ToolCallOutputsStore
 from gc_core.intent_log import deserialize_list, flush
 from gc_core.intent_log.serialize import serialize_for_meta
-from gc_core.message_policy.tool_usage_notice.state import (
-    hydrate_tool_usage_notice_state,
-)
 from gc_core.usage.account import UsageAccount
 
 
@@ -71,6 +68,7 @@ STATE_FIELDS = ROUTING_FIELDS + (
     "dialog_steps_offset",
     "model_breaker",
     "finish_gate_rejection_count",
+    "inbox_seq",
     "initial_project_data",
     "instruction_warnings",
     "internal_error_repeat_count",
@@ -141,6 +139,9 @@ TRANSIENT_STATE_DEFAULTS = {
     "vision_request_limit": lambda: None,
     "vision_routes": dict,
     "vision_probe_notices": set,
+    # Вопрос, на котором ход приостановлен (ask_human_suspends): его пишет
+    # тул в ядре и уносит запись сессии; ребёнку и в activity не нужен.
+    "pending_question": lambda: None,
 }
 
 
@@ -229,14 +230,6 @@ class ExecutionState:
             if isinstance(r.turn, int)
         ]
         self.user_turn_seq = max(turns) if turns else 1
-
-    def init_tool_usage_notice_from_meta(
-        self, meta: Optional[Dict[str, Any]]
-    ) -> None:
-        """Восстановить tool_usage_notice / project_memory поля из thread_session.meta или child_meta."""
-        hydrate_tool_usage_notice_state(
-            self, meta if isinstance(meta, dict) else None
-        )
 
     def init_subagent_tool_usage_notice(self) -> None:
         """Субагент: изолированный meta/state; wiki общая через shared (D34)."""

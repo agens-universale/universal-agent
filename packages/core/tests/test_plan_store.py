@@ -8,7 +8,6 @@ from gc_core.persistence.schema import (
     STATE_SCHEMA_VERSION,
     serialize_shared_block,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.plan_store import (
     PLAN_STATUS_LABELS,
     PLAN_STATUSES,
@@ -16,10 +15,11 @@ from gc_core.plan_store import (
     normalize_plan_block,
     now_stamp,
 )
+from gc_testkit.session_meta import shared_from_meta
 
 
 def _restore(block):
-    return ThreadMetaMapper.shared_from_meta(
+    return shared_from_meta(
         {"state_schema_version": STATE_SCHEMA_VERSION, "shared": block}
     )
 
@@ -86,56 +86,67 @@ def test_labels_and_accessors_for_frontends():
         assert plan_accepted_mode(missing) is None
 
 
-def test_clearing_the_plan_in_session_meta(tmp_path):
+async def _seed(store, shared):
+    from gc_core.persistence.session_state import session_with_shared
+    from gc_core.threads.models import SessionState, ThreadKey
+    from gc_core.threads.session_writer import SessionWriter
+
+    writer = SessionWriter(
+        store, ThreadKey(system="cli", thread="t1"), owner="seed"
+    )
+    await writer.aclaim()
+    await writer.acommit(set_state=session_with_shared(SessionState(), shared))
+    await writer.arelease()
+
+
+async def test_clearing_the_plan_in_session_meta(tmp_path):
     """`/plan clear`: план уходит из сессии, модели взводится одноразовое
     сообщение. Сессия без плана не трогается вовсе."""
-    from gc_core.thread_store import (
-        clear_plan_meta,
-        load_thread_meta,
-        save_thread_meta,
-    )
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import ThreadKey
+    from gc_testkit.develop_files import meta_of
 
-    threads = str(tmp_path)
-    shared = SharedStateData(
-        plan=new_plan_block("1. шаг"), permission_mode="plan"
+    store = FileThreadStore(str(tmp_path))
+    threads, key = Threads(store), ThreadKey(system="cli", thread="t1")
+    await _seed(
+        store,
+        SharedStateData(plan=new_plan_block("1. шаг"), permission_mode="plan"),
     )
-    save_thread_meta(
-        threads, "cli", "t1", {"shared": serialize_shared_block(shared)}
-    )
-    assert clear_plan_meta(threads, "cli", "t1") is True
-    saved = load_thread_meta(threads, "cli", "t1")["shared"]
+    assert await threads.clear_plan(key) is True
+    saved = meta_of(await threads.get(key))["shared"]
     assert "plan" not in saved
     assert saved["plan_removed_notice"] is True
     assert saved["permission_mode"] == "plan"  # остальное состояние цело
     restored = _restore(saved)
     assert restored.plan is None and restored.plan_removed_notice is True
 
-    assert clear_plan_meta(threads, "cli", "t1") is False  # плана уже нет
+    assert await threads.clear_plan(key) is False  # плана уже нет
 
 
-def test_clearing_the_plan_also_removes_its_file_for_the_human(tmp_path):
+async def test_clearing_the_plan_also_removes_its_file_for_the_human(
+    tmp_path,
+):
     """Файл плана для человека не должен пережить `/plan clear`: иначе снятый
     план выглядит действующим планом сессии."""
     import os
 
-    from gc_core.thread_store import (
-        clear_plan_meta,
-        plan_file_path,
-        save_thread_meta,
-    )
+    from gc_core.thread_store import plan_file_path
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import ThreadKey
 
-    threads = str(tmp_path)
-    shared = SharedStateData(plan=new_plan_block("1. шаг"))
-    save_thread_meta(
-        threads, "cli", "t1", {"shared": serialize_shared_block(shared)}
-    )
-    path = plan_file_path(threads, "cli", "t1")
+    store = FileThreadStore(str(tmp_path))
+    threads = Threads(store)
+    await _seed(store, SharedStateData(plan=new_plan_block("1. шаг")))
+    path = plan_file_path(str(tmp_path), "cli", "t1")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("1. шаг")
-    assert clear_plan_meta(threads, "cli", "t1") is True
+    assert await threads.clear_plan(ThreadKey(system="cli", thread="t1"))
     assert not os.path.exists(path)
-    assert clear_plan_meta(threads, "cli", "t-none") is False
+    none = ThreadKey(system="cli", thread="t-none")
+    assert await threads.clear_plan(none) is False
 
 
 def test_removed_notice_is_written_only_when_armed():

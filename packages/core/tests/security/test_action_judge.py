@@ -20,10 +20,29 @@ from gc_core.security.action_judge import (
     action_blocked,
     words_within_budget,
     build_action_judge_messages,
+    aload_action_judge_prompt,
+    aload_action_judge_prompts,
     build_action_judge_payload,
-    load_action_judge_prompt,
+    has_external_words,
     parse_action_verdict,
 )
+from gc_core.agent_store import FileAgentStore
+from gc_testkit import run_coro
+
+
+def load_action_judge_prompt(kind):
+    """Промпт судьи из пакета — через файловое хранилище агента."""
+    return run_coro(aload_action_judge_prompt(kind, store=FileAgentStore()))
+
+
+def _bundled_messages(payload):
+    """Сообщения судье с инструкцией пакета (как без durable)."""
+    prompts = run_coro(
+        aload_action_judge_prompts(
+            FileAgentStore(), external=has_external_words(payload)
+        )
+    )
+    return build_action_judge_messages(payload, prompts=prompts)
 
 
 def _request(**overrides):
@@ -141,9 +160,7 @@ def test_old_history_is_dropped_from_the_start_and_counted():
 
 
 def test_messages_carry_the_bundled_instruction_and_the_payload():
-    system, user = build_action_judge_messages(
-        build_action_judge_payload(_request())
-    )
+    system, user = _bundled_messages(build_action_judge_payload(_request()))
     assert (
         system["role"] == "system" and "crosses_boundary" in system["content"]
     )
@@ -430,7 +447,7 @@ def test_external_entries_bring_their_rule_into_the_instruction():
             )
         )
     )
-    system, user = build_action_judge_messages(payload)
+    system, user = _bundled_messages(payload)
     assert system["content"] == (
         load_action_judge_prompt("system")
         + "\n\n"
@@ -470,13 +487,15 @@ def test_instruction_parts_given_by_the_worker_follow_the_same_rule():
 
 def test_worker_probe_reads_the_external_rule_only_when_asked():
     from gc_core.execution.guard_contracts import GuardProbeRequest
-    from gc_core.security.guard_probe import evaluate_guard_probe
+    from gc_core.security.guard_probe import aevaluate_guard_probes
     from gc_testkit.settings import fake_ctx
 
     def parts(value):
-        facts = evaluate_guard_probe(
-            GuardProbeRequest("action_prompts", "exec_command", value, "/p"),
-            settings=fake_ctx(),
+        request = GuardProbeRequest(
+            "action_prompts", "exec_command", value, "/p"
+        )
+        (facts,) = run_coro(
+            aevaluate_guard_probes([request], settings=fake_ctx())
         )
         return sorted(facts.data)
 

@@ -13,6 +13,9 @@ class ProjectMemoryRequest:
     content: str = ""
     combined: str = ""
     compaction: CompactionResult | None = None
+    #: Версия памяти, по которой prepare собрал ``combined``: finish пишет
+    #: итог сжатия только поверх неё (иначе — конфликт).
+    base_version: str | None = None
     schema_version: int = 1
 
 
@@ -20,6 +23,7 @@ class ProjectMemoryRequest:
 class ProjectMemoryReply:
     output: str | None
     combined: str = ""
+    base_version: str | None = None
     baseline_updated: bool = False
     baseline_hash: str | None = None
     schema_version: int = 1
