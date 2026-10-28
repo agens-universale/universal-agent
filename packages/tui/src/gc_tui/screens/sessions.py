@@ -128,6 +128,10 @@ class SessionsScreen(Screen):
         self._page: int = 0
         self._branch_filter: str = "all"  # "all" | "current"
         self._current_branch: Optional[str] = None
+        # Исход строки по записи итога хода: хвост треда читается один раз
+        # за жизнь экрана. Ключ со статусом и временем меты — новый ход
+        # треда, пока экран открыт, читается заново.
+        self._row_status: dict[tuple, Optional[str]] = {}
 
     # ---- compose / mount ---------------------------------------------
 
@@ -173,9 +177,10 @@ class SessionsScreen(Screen):
 
     def _all_tasks(self) -> list:
         # Кап высокий (не 200) — чтобы счётчик «из N» показывал реальное число
-        # сессий, а не вводил в заблуждение. Дефолтный вид читает только мету (дёшево)
-        # + first-prompt лишь для 25 строк страницы; фильтр-по-названию ограничен этим
-        # же капом. 10000 — как в mass-delete ниже.
+        # сессий, а не вводил в заблуждение. Список читает только мету
+        # (дёшево); хвост треда для статуса — лишь строки страницы
+        # (_settled_row_status). Фильтр-по-названию ограничен этим же
+        # капом. 10000 — как в mass-delete ниже.
         return self._store.list_tasks(limit=10000)
 
     def _visible_tasks(self) -> list:
@@ -253,10 +258,18 @@ class SessionsScreen(Screen):
         # Правило «нет живого хода — прервано» — только для статуса TUI:
         # его ход держит процесс с замком сессии. Верхний статус — как есть.
         if (task.tui_meta or {}).get("status") != "running":
-            return task.status
+            return self._settled_row_status(task)
         return settled_status(
             task.status, live=self.app.session_run_is_live(task.thread_id)
         )
+
+    def _settled_row_status(self, task) -> Optional[str]:
+        key = (task.thread_id, task.status, task.updated_at)
+        if key not in self._row_status:
+            self._row_status[key] = self._store.turn_status(
+                task.thread_id, task.status
+            )
+        return self._row_status[key]
 
     def _title_line(self, task, *, selected: bool) -> Text:
         title = self._title_of(task)
