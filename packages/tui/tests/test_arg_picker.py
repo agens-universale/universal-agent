@@ -671,6 +671,30 @@ async def test_current_value_stays_revealed_when_hint_wraps(tmp_path):
         assert row.region.bottom <= footer.region.y
 
 
+@pytest.mark.asyncio
+async def test_current_value_stays_revealed_when_window_shrinks(tmp_path):
+    """Окно сжимается без смены содержимого пикера — подсвеченная строка
+    в хвосте длинного списка остаётся видна над подвалом."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    async with _mk_app(tmp_path).run_test(size=(80, 44)) as pilot:
+        pilot.app.screen._open_arg_picker(
+            options=[(f"model-{i:02d}", "описание") for i in range(40)],
+            prefix="",
+            initial_value="model-39",
+        )
+        await pilot.pause()
+        await pilot.resize_terminal(80, 22)
+        await pilot.pause()
+        await pilot.pause()
+        picker = pilot.app.query_one(ArgPicker)
+        row = picker.query_one(".palette-row.selected")
+        footer = picker.query_one(".palette-footer")
+        assert row.region.height == 1
+        assert row.region.bottom <= footer.region.y
+
+
 # --- Профиль не меняется во время хода ---------------------------------------
 
 _LOCKED_KEYS = (

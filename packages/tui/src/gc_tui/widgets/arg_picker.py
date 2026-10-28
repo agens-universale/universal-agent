@@ -300,10 +300,13 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
 
     def on_resize(self) -> None:
         """Ширина приходит с раскладкой (до неё хинт считается одной
-        строкой): резерв хинта и высота пикера — по фактической ширине."""
+        строкой): резерв хинта и высота пикера — по фактической ширине.
+        Сжатие окна размер содержимого не меняет (`watch_virtual_size`
+        молчит) — подсвеченную строку докручивает сама смена размера."""
         if self._hint_static is not None:
             self._hint_static.styles.height = self._hint_lines()
         self._apply_size()
+        self._reveal_selected()
 
     def watch_virtual_size(self) -> None:
         """Раскладка сменила размер содержимого — строки или подвал:
