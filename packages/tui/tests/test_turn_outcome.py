@@ -206,3 +206,29 @@ def test_meta_status_of_word(word, status):
     from gc_tui.services.turn_outcome import meta_status_of
 
     assert meta_status_of(word) == status
+
+
+@pytest.mark.parametrize("reason", ["user_stop", "cancelled"])
+def test_cancelled_turn_reads_as_user_stop(reason):
+    """Отмена без запроса стопа (`cancelled`) в ленте и списке — та же
+    «■ Отменено», что и стоп пользователя."""
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_tui.services.turn_outcome import (
+        kind_of,
+        meta_status_of,
+        turn_head,
+    )
+
+    outcome = TurnOutcome(
+        status="stopped",
+        reason=reason,
+        opened_by="u1",
+        started_at="2026-10-22T10:00:00Z",
+        ended_at="2026-10-22T10:01:00Z",
+        duration_sec=60.0,
+        error=None,
+    )
+    word, plan = kind_of(outcome)
+    head = turn_head(word, plan=plan, duration_sec=60.0, ended_at=None)
+    assert (word, head.plain) == ("cancelled", "■ Отменено")
+    assert meta_status_of(word) == "stopped"

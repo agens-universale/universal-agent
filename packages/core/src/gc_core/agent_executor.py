@@ -48,6 +48,7 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.persistence.turn_outcome import (
+    CANCELLED,
     USER_STOP,
     TurnOutcome,
     TurnStatus,
@@ -1692,11 +1693,16 @@ class AgentExecutor:
         self, reason: Optional[str], error: BaseException | None
     ) -> tuple[TurnStatus, Optional[str]]:
         """Исход хода: стоп сильнее всего (исключение после запроса стопа —
-        его следствие), затем отмена, ошибка, причина из цикла, лимит."""
-        if self._is_stop_requested() or isinstance(
-            error, (asyncio.CancelledError, KeyboardInterrupt)
-        ):
+        его следствие), затем отмена, ошибка, причина из цикла, лимит.
+
+        Стоп пользователя — запрошенный `stop_run` или Ctrl+C; отмена
+        задачи без запроса — `cancelled`. Не различается: aio-поток при
+        отмене (таймаут, отвалившийся клиент) сам зовёт `stop_run` перед
+        `task.cancel()`, и такой ход пишется стопом пользователя."""
+        if self._is_stop_requested() or isinstance(error, KeyboardInterrupt):
             return "stopped", USER_STOP
+        if isinstance(error, asyncio.CancelledError):
+            return "stopped", CANCELLED
         if error is not None:
             return "error", None
         if reason is not None:

@@ -17,6 +17,8 @@ TURN_OUTCOME_VERSION = 1
 
 TurnStatus = Literal["done", "stopped", "error"]
 USER_STOP = "user_stop"
+# Ход снят отменой задачи без запроса стопа (таймаут, остановка приложения).
+CANCELLED = "cancelled"
 
 _STATUSES = frozenset(get_args(TurnStatus))
 _OPTIONAL_TEXT = ("reason", "opened_by")
