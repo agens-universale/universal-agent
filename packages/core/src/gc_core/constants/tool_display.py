@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -50,6 +51,17 @@ from gc_core.constants.tool_names import (
 
 _SUBAGENT_PREFIX = "subagent_"
 _MCP_PREFIX = "mcp_"
+
+# Предел подписи MCP (сервер, название тула): в строке трейса на 80
+# колонках после глифа, категории, сервера и названия остаётся место цели
+# вызова. Обычные названия тулов — короче 30 символов.
+MCP_LABEL_MAX = 40
+# ESC-последовательности: CSI (цвета, курсор), OSC (заголовок окна) до BEL
+# или ST, прочие двухсимвольные.
+_ESC_SEQUENCE = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-_])"
+)
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
 class DisplayCategory(StrEnum):
@@ -148,20 +160,41 @@ LEGACY_TOOL_NAMES: Mapping[str, str] = {
 }
 
 
+def _mcp_label(text: str) -> str:
+    """Подпись из данных MCP-сервера — одной строкой и без управляющих
+    символов: перевод строки ломает строку трейса, ESC доезжает до
+    терминала, длинное название вытесняет цель вызова."""
+    text = _CONTROL.sub(" ", _ESC_SEQUENCE.sub("", text))
+    flat = " ".join(text.split())
+    if len(flat) <= MCP_LABEL_MAX:
+        return flat
+    return flat[: MCP_LABEL_MAX - 1].rstrip() + "…"
+
+
+def _mcp_parts(
+    wire_name: str,
+    mcp_tools: Mapping[str, McpToolInfo] | None,
+    mcp_servers: Iterable[str],
+) -> tuple[str, tuple[str, ...]]:
+    """Сервер и кандидаты в название тула по убыванию предпочтения."""
+    info = (mcp_tools or {}).get(wire_name)
+    if info is not None:
+        return info["server"], (info.get("title") or "", info["tool"])
+    rest = wire_name[len(_MCP_PREFIX) :]
+    for server in sorted(mcp_servers, key=len, reverse=True):
+        if rest.startswith(server + "_"):
+            return server, (rest[len(server) + 1 :],)
+    return "mcp", (rest,)
+
+
 def _mcp_display(
     wire_name: str,
     mcp_tools: Mapping[str, McpToolInfo] | None,
     mcp_servers: Iterable[str],
 ) -> ToolDisplay:
-    info = (mcp_tools or {}).get(wire_name)
-    if info is not None:
-        detail = info.get("title") or info["tool"]
-        return ToolDisplay(_C.MCP, info["server"], None, detail)
-    rest = wire_name[len(_MCP_PREFIX) :]
-    for server in sorted(mcp_servers, key=len, reverse=True):
-        if rest.startswith(server + "_"):
-            return ToolDisplay(_C.MCP, server, None, rest[len(server) + 1 :])
-    return ToolDisplay(_C.MCP, "mcp", None, rest)
+    server, names = _mcp_parts(wire_name, mcp_tools, mcp_servers)
+    detail = next((label for label in map(_mcp_label, names) if label), "")
+    return ToolDisplay(_C.MCP, _mcp_label(server), None, detail)
 
 
 def tool_display(
