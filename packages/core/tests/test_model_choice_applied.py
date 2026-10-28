@@ -6,6 +6,7 @@
 """
 
 import json
+import logging
 
 from gc_core import processing_responses as pr
 from gc_core.agent_executor import AgentExecutor
@@ -152,6 +153,22 @@ async def _prepared(tmp_path, monkeypatch, initial):
     return selected, ctx, state, events
 
 
+class _Records(logging.Handler):
+    """Сообщения записей логгера рана."""
+
+    def __init__(self, logger):
+        super().__init__()
+        self.messages = []
+        logger.addHandler(self)
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
+def _raise(_event):
+    raise RuntimeError("frontend is gone")
+
+
 async def _tick(state, ctx):
     """Один такт главного цикла: подготовка вызова и закрытие такта."""
     resolved = await pr.aprepare_main_call(state, ctx)
@@ -290,6 +307,25 @@ async def test_stop_with_pending_choice_emits_at_run_end(
     assert models == ["fast"]
 
 
+async def test_failing_choice_hook_mid_run_does_not_abort_the_call(
+    tmp_path, monkeypatch
+):
+    """Хук события посреди рана бросает — вызов готовится той моделью,
+    выбор считается применённым (им ран и работает), сбой — в лог."""
+    selected, ctx, state, _events = await _prepared(
+        tmp_path, monkeypatch, "light"
+    )
+    ctx.on_model_choice_applied = _raise
+    records = _Records(ctx.logger)
+    await _tick(state, ctx)
+    selected["model"] = "max"
+    resolved = await _tick(state, ctx)
+
+    assert resolved.alias == "big"
+    assert state.applied_choice == "max"
+    assert records.messages.count("model_choice_applied_failed") == 1
+
+
 async def test_failing_choice_hook_does_not_skip_run_teardown(
     tmp_path, monkeypatch
 ):
@@ -297,7 +333,10 @@ async def test_failing_choice_hook_does_not_skip_run_teardown(
     всё равно выполняются, ран завершается штатно."""
     calls = []
 
+    records = []
+
     def spy(executor):
+        records.append(_Records(executor._ctx.logger))
         record = executor._arecord_turn_outcome
         teardown = executor._ateardown_run
 
@@ -312,20 +351,18 @@ async def test_failing_choice_hook_does_not_skip_run_teardown(
         executor._arecord_turn_outcome = arecord
         executor._ateardown_run = ateardown
 
-    def hook(_event):
-        raise RuntimeError("frontend is gone")
-
     await _run(
         tmp_path,
         monkeypatch,
         "light",
         [_finish()],
         {1: "max"},
-        hook=hook,
+        hook=_raise,
         executor_spy=spy,
     )
 
     assert calls[-2:] == ["record", "teardown"]
+    assert "model_choice_applied_failed" in records[0].messages
 
 
 async def test_subagent_calls_emit_nothing(tmp_path, monkeypatch):

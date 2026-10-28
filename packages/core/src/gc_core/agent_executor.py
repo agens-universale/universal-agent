@@ -1117,20 +1117,14 @@ class AgentExecutor:
     ) -> Optional[ModelChoiceRecord]:
         """Выбор, так и не дошедший до вызова, применяется завершением рана.
         Возвращает запись смены — её пишут после итога хода, как её строку
-        показывает лента. Сбой резолва или хука фронтенда не срывает уборку
-        рана: в лог."""
+        показывает лента. Сбой резолва или хука фронтенда уборку рана не
+        срывает — его гасит `note_applied`."""
         router = self.get_model_router()
         if router is None:
             return None
-        try:
-            return note_applied(
-                state, self._ctx, router.live_choice(), at_run_end=True
-            )
-        except Exception:
-            logger = getattr(self._ctx, "logger", None)
-            if logger is not None:
-                logger.warning("model_choice_applied_failed", exc_info=True)
-            return None
+        return note_applied(
+            state, self._ctx, router.live_choice(), at_run_end=True
+        )
 
     async def _arecord_model_choice(
         self, record: Optional[ModelChoiceRecord]

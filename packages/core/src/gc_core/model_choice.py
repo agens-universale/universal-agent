@@ -36,7 +36,12 @@ def note_applied(
     вернуть запись смены для треда (`None` — смены нет).
 
     Только главный трейс: подготовка вызова субагента событий не даёт.
-    Посреди рана модель — цель только что подготовленного вызова."""
+    Посреди рана модель — цель только что подготовленного вызова.
+
+    Сбой резолва модели или хука фронтенда не срывает ни вызов посреди
+    рана, ни уборку на его завершении: в лог, записи смены нет. Выбор
+    остаётся применённым — ран им работает; событие этой смены теряется,
+    повтора на следующем такте нет."""
     router = getattr(ctx, "model_router", None)
     if router is None or router.is_subagent_child:
         return None
@@ -44,6 +49,24 @@ def note_applied(
     if before == choice:
         return None
     state.applied_choice = choice
+    try:
+        return _announce(state, ctx, router, before, choice, at_run_end)
+    except Exception:
+        logger = getattr(ctx, "logger", None)
+        if logger is not None:
+            logger.warning("model_choice_applied_failed", exc_info=True)
+        return None
+
+
+def _announce(
+    state: Any,
+    ctx: Any,
+    router: Any,
+    before: str | None,
+    choice: str,
+    at_run_end: bool,
+) -> ModelChoiceRecord:
+    """Сообщить хуку о применённой смене и собрать её запись для треда."""
     target = choice if at_run_end else state._call_level
     alias = None
     if target != AUTO:
