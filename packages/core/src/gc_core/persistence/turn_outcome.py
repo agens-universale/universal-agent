@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Container, Literal, Mapping, get_args
+from typing import Any, Container, Literal, Mapping, Sequence, get_args
 
 TURN_OUTCOME_TYPE = "turn_outcome"
 TURN_OUTCOME_VERSION = 1
@@ -74,16 +74,36 @@ def last_turn_of(outcome: TurnOutcome) -> dict[str, Any]:
     return {"status": outcome.status, "reason": outcome.reason}
 
 
-def turn_shown_in(record: Mapping[str, Any], ids: Container[str]) -> bool:
-    """Запись видна, пока сообщение её хода есть в истории ``ids``:
-    реплика, открывшая ход, а у хода без реплики — его последнее
-    сообщение. Сирота (откат, сброс истории) — не видна."""
+def turn_anchor(record: Mapping[str, Any]) -> Any:
+    """Сообщение хода записи: реплика, открывшая ход, а у хода без
+    реплики — его последнее сообщение."""
     payload = record.get("outcome")
     opened_by = (
         payload.get("opened_by") if isinstance(payload, Mapping) else None
     )
-    anchor = opened_by or record.get("after")
+    return opened_by or record.get("after")
+
+
+def turn_shown_in(record: Mapping[str, Any], ids: Container[str]) -> bool:
+    """Запись видна, пока сообщение её хода (``turn_anchor``) есть в
+    истории ``ids``. Сирота (откат, сброс истории) — не видна."""
+    anchor = turn_anchor(record)
     return isinstance(anchor, str) and anchor in ids
+
+
+def last_shown_turn(
+    records: Sequence[Mapping[str, Any]], ids: Container[str]
+) -> dict[str, Any] | None:
+    """Короткий итог (как ``last_turn_of``) последней видимой в истории
+    ``ids`` записи потока ``turns``; видимой нет — ``None``."""
+    for record in reversed(records):
+        payload = record.get("outcome")
+        if isinstance(payload, Mapping) and turn_shown_in(record, ids):
+            return {
+                "status": payload.get("status"),
+                "reason": payload.get("reason"),
+            }
+    return None
 
 
 def is_turn_outcome_record(record: Mapping[str, Any]) -> bool:

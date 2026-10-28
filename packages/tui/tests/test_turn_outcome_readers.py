@@ -156,6 +156,30 @@ def test_full_read_drops_record_of_undone_reply(tmp_path):
     assert _ids(records) == ["m1", "m2", "turn_outcome"]
 
 
+def test_sessions_list_after_undo_shows_previous_turn(tmp_path):
+    """Откат реплики остановленного хода: список сессий показывает итог
+    прошлого хода, как и лента (запись снятого хода — сирота)."""
+    thread = _Thread(tmp_path)
+    thread.append(_user("m1"), _assistant("a1"))
+    thread.outcome("m1")
+    thread.append(_user("m2"))
+    stopped = TurnOutcome(
+        status="stopped",
+        reason="user_stop",
+        opened_by="m2",
+        started_at="2026-10-22T11:33:00.000Z",
+        ended_at="2026-10-22T11:33:01.000Z",
+        duration_sec=1.0,
+        error=None,
+    )
+    turn_outcome_record(thread.dir, _SYS, _TID, stopped)
+    store = _store(thread)
+    assert [s.status for s in store.list_tasks()] == ["stopped"]
+
+    assert store.discard_message_by_id(_TID, "m2")
+    assert [s.status for s in store.list_tasks()] == ["completed"]
+
+
 def test_compaction_after_record_is_a_step_not_reset(tmp_path):
     thread = _Thread(tmp_path)
     thread.append(_user("m1"), _assistant("m2"))

@@ -16,12 +16,14 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
+from gc_core.persistence.turn_outcome import last_shown_turn, turn_anchor
 from gc_core.plan_store import normalize_plan_block
 from gc_core.threads.history import messages_and_keys
 from gc_core.threads.instance import session_owner
 from gc_core.threads.models import (
     CONTROL,
     INBOX,
+    TURNS,
     JsonObject,
     Receipt,
     SideChange,
@@ -350,7 +352,12 @@ class Threads:
     ) -> bool:
         """Удалить сообщение. ``recount(история) -> {"live_…": …}`` —
         пересчитать объём живой истории в ``runtime`` (остальное в нём —
-        как было)."""
+        как было).
+
+        Удалено сообщение хода последней записи ``turns`` (откат реплики)
+        — её запись стала сиротой, и ``runtime.last_turn`` пересчитывается
+        по последней видимой записи (``last_shown_turn``) или снимается:
+        список тредов видит тот же итог, что лента, не читая потоков."""
 
         async def work(writer: SessionWriter) -> bool:
             entries = await self.store.read_stream(key, _HISTORY)
@@ -361,13 +368,39 @@ class Threads:
 
         removed = await self._owned(key, work)
         record = await self.store.get_thread(key) if removed else None
-        if record is not None and recount is not None:
-            messages = [entry.data for entry in await self.history(key)]
-            runtime = record.runtime.model_copy(update=recount(messages))
+        if record is None:
+            return removed
+        update = await self._runtime_after_discard(key, message_id, recount)
+        if update:
+            runtime = record.runtime.model_copy(update=update)
             await self.store.append_side(
                 key, SideChange(op_id=_op_id("runtime"), set_runtime=runtime)
             )
         return removed
+
+    async def _runtime_after_discard(
+        self,
+        key: ThreadKey,
+        message_id: str,
+        recount: Callable[[list[JsonObject]], JsonObject] | None,
+    ) -> JsonObject:
+        """Поля ``runtime`` после удаления сообщения: объём живой истории
+        (``recount``) и ``last_turn``, если сиротой стала последняя запись
+        ``turns``. Видимость записи — по всей истории (архивы и живая), как
+        у ленты; архивы читаются только в этом случае."""
+        turns = [e.data for e in await self.store.read_stream(key, TURNS)]
+        orphaned = bool(turns) and turn_anchor(turns[-1]) == message_id
+        if orphaned:
+            parts = await self.parts(key)
+        else:
+            parts = [await self.history(key)] if recount is not None else []
+        update = {}
+        if recount is not None and parts:
+            update.update(recount([e.data for e in parts[-1]]))
+        if orphaned:
+            ids = {e.data.get("id") for part in parts for e in part}
+            update["last_turn"] = last_shown_turn(turns, ids)
+        return update
 
     async def clear_plan(self, key: ThreadKey) -> bool:
         """Убрать план сессии по решению человека (``/plan clear``); True —
