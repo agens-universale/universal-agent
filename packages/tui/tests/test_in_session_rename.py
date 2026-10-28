@@ -6,6 +6,8 @@ _on_user_text_submitted) + Шаг 3 (R5 — OSC = display_name(meta.tui)).
 _resumed_prompt. Чистая логика display_name/normalize — в test_session_title.py.
 """
 
+from gc_testkit.develop_files import record_from_meta
+
 import json
 
 import pytest
@@ -35,7 +37,7 @@ async def test_osc_uses_display_name_not_resumed_prompt(tmp_path, monkeypatch):
     ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        scr._store = None  # чтобы get_task_meta шёл через реальный стор ниже
+        scr._store = None  # чтобы get_record шёл через реальный стор ниже
         # _resumed_prompt намеренно другой — OSC должен игнорировать его при активной задаче
         scr._resumed_prompt = "сырой последний промпт"
         monkeypatch.setattr(scr, "_session_status_word", lambda: "completed")
@@ -370,12 +372,8 @@ class _FakeStore:
         self.base = meta
         self.patches: list[dict] = []
 
-    def get_task_meta(self, task_id, system=None):
-        return self.base
-
-    def meta_mtime(self, task_id, system=None):
-        """Как у FileTaskStore: момент правки meta (ключ кэша снимка MCP)."""
-        return None
+    def get_record(self, task_id, system=None):
+        return record_from_meta(self.base)
 
     def update_tui_meta(self, task_id, patch, system=None):
         self.patches.append(dict(patch))

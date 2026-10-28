@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
 from temporalio.worker import Replayer
-from live_support import call
+from live_support import call, thread_messages
 from test_workflow_controls import (  # noqa: F401
     finish,
     request,
@@ -84,8 +84,8 @@ async def test_mcp_two_calls_share_session_and_replay_does_not_reconnect(
             )
             result = await asyncio.wait_for(handle.result(), 45)
             assert "done" in str(result["answer"]) and len(requests) == 3
-            messages = contexts.stores["files"].load_messages(
-                "test", "controls"
+            messages = await thread_messages(
+                contexts.stores["files"], "test", "controls"
             )
             results = [
                 json.loads(m["output"])

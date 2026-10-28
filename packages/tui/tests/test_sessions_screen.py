@@ -1,12 +1,14 @@
 """SessionsScreen: карточки (2 строки), пагинация, фильтр веток, поиск, rename, preview."""
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import json
 from datetime import UTC
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_tui.services.stores.file_store import FileTaskStore
 
 
@@ -386,9 +388,11 @@ async def test_rename_saves_title(tmp_path):
         await pilot.pause()
         scr._apply_rename("ren00000", "Переименовано")  # прямой вызов колбэка
         await pilot.pause()
-        meta = FileTaskStore(
-            threads_dir=str(tmp_path), system="cli"
-        ).get_task_meta("ren00000")
+        meta = meta_of(
+            FileTaskStore(threads_dir=str(tmp_path), system="cli").get_record(
+                "ren00000"
+            )
+        )
         assert meta["tui"]["title"] == "Переименовано"
 
 

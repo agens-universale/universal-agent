@@ -289,11 +289,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
 def test_guard_prompt_contains_turn_handoff_rule():
     """Промпт судьи содержит правило turn-handoff (доставка ассета + резолв
     bundled_root для editable и wheel)."""
-    from gc_core.intent_guard.final_report_consistency import (
-        _load_guard_prompt,
-    )
-
-    prompt = _load_guard_prompt()
+    prompt = _bundled_guard_prompt()
     assert "## Interactive turn-handoff (Axis A clarification)" in prompt
     assert "hands the turn back to the user" in prompt
     assert "set `trace_ok=true`" in prompt
@@ -302,11 +298,7 @@ def test_guard_prompt_contains_turn_handoff_rule():
 
 def test_guard_prompt_accepts_confirmation_before_action():
     """Судья знает: запрос одобрения перед действием — легитимный hand-off, не stalling."""
-    from gc_core.intent_guard.final_report_consistency import (
-        _load_guard_prompt,
-    )
-
-    prompt = _load_guard_prompt()
+    prompt = _bundled_guard_prompt()
     assert (
         "explicit confirmation or approval **before** a consequential"
         in prompt
@@ -314,11 +306,7 @@ def test_guard_prompt_accepts_confirmation_before_action():
 
 
 def test_guard_prompt_evidence_before_verdict_no_think_invite():
-    from gc_core.intent_guard.final_report_consistency import (
-        _load_guard_prompt,
-    )
-
-    prompt = _load_guard_prompt()
+    prompt = _bundled_guard_prompt()
     assert "No reasoning in the reply" in prompt
     assert "Evidence before verdict" in prompt
     assert "<think>" not in prompt
@@ -327,3 +315,13 @@ def test_guard_prompt_evidence_before_verdict_no_think_invite():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _bundled_guard_prompt() -> str:
+    from gc_core.agent_store import FileAgentStore
+    from gc_core.intent_guard.final_report_consistency import (
+        aload_guard_prompt,
+    )
+    from gc_testkit import run_coro
+
+    return run_coro(aload_guard_prompt(FileAgentStore()))

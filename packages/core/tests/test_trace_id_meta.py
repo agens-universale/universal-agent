@@ -1,53 +1,39 @@
 from gc_core.agent_executor import _aappend_trace_id_to_meta
-from gc_core.thread_store import load_thread_meta, save_thread_meta
+from gc_core.thread_store import ThreadSession
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
+
+KEY = ThreadKey(system="cli", thread="t1")
 
 
-class _SessionStub:
-    """Похожа на настоящую ThreadSession — в том числе полем ``store``.
+async def _trace_ids(tmp_path):
+    record = await FileThreadStore(tmp_path).get_thread(KEY)
+    return record.runtime.trace_ids
 
-    Оно появилось здесь не для галочки: запись trace_id идёт через хранилище
-    сессии, а не через модульные функции, иначе у встраивающего с базой эти
-    записи молча уходили бы на диск мимо всего остального.
-    """
 
-    def __init__(self, threads_dir):
-        from gc_core.thread_store_file import FileThreadStore
-
-        self.threads_dir = str(threads_dir)
-        self.system_id = "cli"
-        self.thread_id = "t1"
-        self.store = FileThreadStore(self.threads_dir)
-        # Асинхронная форма ходит через ПОРТ, а не напрямую в store: у
-        # настоящей ThreadSession он тот же самый адаптер.
-        from gc_core.thread_store_async import athread_store
-
-        self.port = athread_store(self.store)
+async def _session(tmp_path):
+    """Настоящая сессия: trace_id пишется её хранилищем и её арендой — у
+    встраивающего с базой запись не уйдёт на диск мимо остального треда."""
+    return await ThreadSession.afrom_config(
+        settings=None,
+        system_id=KEY.system,
+        thread_id=KEY.thread,
+        store=FileThreadStore(tmp_path),
+    )
 
 
 async def test_appends_first_trace(tmp_path):
-    session = _SessionStub(tmp_path)
-    save_thread_meta(
-        session.threads_dir, session.system_id, session.thread_id, {}
-    )
+    session = await _session(tmp_path)
     await _aappend_trace_id_to_meta(session, "wf-1")
-    meta = load_thread_meta(
-        session.threads_dir, session.system_id, session.thread_id
-    )
-    assert meta["runtime"]["trace_ids"] == ["wf-1"]
+    assert await _trace_ids(tmp_path) == ["wf-1"]
 
 
 async def test_appends_in_order_and_dedups(tmp_path):
-    session = _SessionStub(tmp_path)
-    save_thread_meta(
-        session.threads_dir, session.system_id, session.thread_id, {}
-    )
+    session = await _session(tmp_path)
     await _aappend_trace_id_to_meta(session, "wf-1")
     await _aappend_trace_id_to_meta(session, "wf-2")
     await _aappend_trace_id_to_meta(session, "wf-1")
-    meta = load_thread_meta(
-        session.threads_dir, session.system_id, session.thread_id
-    )
-    assert meta["runtime"]["trace_ids"] == ["wf-1", "wf-2"]
+    assert await _trace_ids(tmp_path) == ["wf-1", "wf-2"]
 
 
 async def test_missing_identity_is_a_noop(tmp_path):

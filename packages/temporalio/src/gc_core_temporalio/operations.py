@@ -21,6 +21,7 @@ from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.project_memory.operations import ProjectMemoryReply
 from gc_core.run_preparation import PreparedPrompts
 from gc_core.state_preparation import PreparedState
+from gc_core.threads.errors import ThreadStoreError
 from temporalio import workflow
 from temporalio.exceptions import (
     ActivityError,
@@ -115,7 +116,8 @@ def session_failure(exc):
     """Доменный отказ сессии — ``ApplicationError``, run становится FAILED.
 
     Доменный — ``TurnFailure`` ядра (``ExecutionFailure``, ошибка провайдера,
-    переполнение контекста), ошибка, поднятая из исхода
+    переполнение контекста), отказ контракта хранилища тредов
+    (``ThreadStoreError``: конфликт, чужая аренда), ошибка, поднятая из исхода
     activity/child workflow (в цепочке ``__cause__`` есть ``FailureError``),
     или восстановленный исход модельной операции (``restored_model_failure``).
     Всё остальное — сбой кода workflow: недетерминизм после деплоя, запрет
@@ -126,9 +128,9 @@ def session_failure(exc):
         return exc
     current, seen = exc, set()
     while current is not None and id(current) not in seen:
-        if isinstance(current, (TurnFailure, FailureError)) or getattr(
-            current, "restored_model_failure", False
-        ):
+        if isinstance(
+            current, (TurnFailure, FailureError, ThreadStoreError)
+        ) or getattr(current, "restored_model_failure", False):
             return ApplicationError(
                 str(exc) or type(exc).__name__,
                 type=type(exc).__name__,

@@ -2,6 +2,7 @@
 текстовой запиской на своём месте; форма сообщения — по режиму API; ключ
 ``attachments`` на провод не уходит; удалённый файл — записка, а не падение хода."""
 
+from gc_testkit import run_coro
 import base64
 import copy
 import os
@@ -308,7 +309,7 @@ def test_deleted_image_file_goes_as_file_missing_note(tmp_path):
         audience=SEES,
         live_ids=frozenset({att.id}),
         api_mode=CHAT,
-        read_bytes=store.read_for_send,
+        read_bytes=lambda a: run_coro(store.aread_for_send(a)),
     )
     assert projected == {
         "role": "user",

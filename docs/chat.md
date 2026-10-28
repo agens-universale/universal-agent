@@ -1,10 +1,11 @@
 [Назад к README](../readme.md)
 
-# HTTP-фасады (`gc-chat`)
+# HTTP-фасады: `gc-serve chat`
 
-Отдельный процесс `gc-chat`. Внешнее приложение (или встроенная страница чата)
-открывает ход агента по HTTP и читает стрим. Петля тулов остаётся внутри ядра:
-клиент присылает текст и не исполняет тулы сам.
+Поверхность `chat` сервера `gc-serve` ([server.md](server.md)). Внешнее
+приложение (или встроенная страница чата) открывает ход агента по HTTP и читает
+стрим. Петля тулов остаётся внутри ядра: клиент присылает текст и не исполняет
+тулы сам.
 
 На одном порту два пути — клиент выбирает контракт:
 
@@ -13,69 +14,75 @@
 | `POST /v1/responses` | близок к OpenAI Responses API | продолжение через `previous_response_id`, тред `system="responses"` |
 | `POST /v1/chat/completions` | OpenAI-совместимый Chat Completions | клиент каждый раз шлёт `messages`; тред хода эфемерный; трейс внутри `<think>` |
 
-Это не `gc-serve`. У вебхука другой контракт: он отвечает `started` и просит
-опрашивать статус. Здесь соединение живёт, пока жив ход. Флага у `gc-cli` и
-маршрутов в `gc-serve` нет.
+У вебхука другой контракт: он отвечает `started` и просит опрашивать статус.
+Здесь соединение живёт, пока жив ход.
 
-Для IDE по Agent Client Protocol — [acp.md](acp.md) (`gc-acp`), не этот процесс.
+Для IDE по Agent Client Protocol — [acp.md](acp.md) (`gc-acp`), не эта поверхность.
 
 ## Установка и запуск
 
-Зависимости FastAPI и uvicorn живут в дистрибутиве `gc-chat`. Базовая установка
-CLI их не ставит. Полный `gc-ua` команду `gc-chat` тоже объявляет.
+Поверхность — часть пакета `gc-server` (FastAPI, uvicorn); полный `gc-ua` его
+включает.
 
 ```bash
-uv tool install -e packages/chat
+uv tool install -e packages/server
 # без клона:
-uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/chat"
+uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server"
 ```
 
 В корпоративной сети к `uv tool install` добавляйте `--system-certs`.
 
 ```bash
-gc-chat --config ./config.yml
-gc-chat --config ./config.yml --profile <имя>
+gc-serve chat --config ./config.yml
+gc-serve chat --config ./config.yml --profile <имя> --server-config ./config_server.yml
+gc-serve chat a2a webhook        # вместе с другими поверхностями, одним процессом
 ```
 
 Без `--config` поиск конфига тот же, что у остальных команд. Конфиг не читается —
 сообщение в stderr, код выхода 1, порт не открывается.
 
-`os_backend` обязан быть `local`. `harbor` и неизвестный бэкенд завершают процесс
-с кодом 1 до bind: рабочий каталог хода — путь на машине этого процесса.
+`os_backend` обязан быть `local`. `harbor` и неизвестный бэкенд — отказ старта
+до bind: рабочий каталог хода — путь на машине этого процесса.
 
-По умолчанию слушает `127.0.0.1:8090`. Логи — в stderr. Пустой `chat_api.auth_token`
-даёт на старте строку: сервер без авторизации. Там же процесс перечисляет ручки.
+По умолчанию слушает `127.0.0.1:8090`. Логи — в stderr. Пустой токен даёт на
+старте строку: поверхность без авторизации. Там же перечисляются ручки.
 
 Страница чата: `http://127.0.0.1:8090/` (`GET /`).
 
-## Конфиг `chat_api`
+## Секция `chat` в config_server.yml
 
-Секция — часть общей схемы `config.yml`. Аннотированный образец —
-[`demo_config_chat.yml`](../demo_config_chat.yml): скопируйте блок в свой конфиг
-агента. В шаблон CLI и в `demo_config.yml` секция не входит; без неё схема
-подставляет дефолты, и процесс стартует.
-
-Ключи читает только `gc-chat`. `gc-cli` и TUI их не применяют.
+Аннотированный образец — секция `chat` в
+[`demo_config_server.yml`](../demo_config_server.yml). Без секции — умолчания.
 
 | Ключ | Дефолт | Смысл |
 |---|---|---|
-| `chat_api.host` | `127.0.0.1` | Адрес bind |
-| `chat_api.port` | `8090` | Порт |
-| `chat_api.auth_token` | `""` | Пусто — без Bearer. Иначе каждый `/v1/` несёт `Authorization: Bearer <token>` |
-| `chat_api.cors_origins` | `[]` | Пусто — CORS выключен. Непусто — только эти origin. `"*"` из списка выбрасывается |
-| `chat_api.launch_root` | `null` | cwd нового хода, если в запросе нет абсолютного `metadata.cwd` |
-| `chat_api.text_answer_mode` | `allow` | `deny` / `judge` / `allow` |
-| `chat_api.finish_gate_mode` | `off` | `off` / `on` / `smart` (в YAML — в кавычках) |
-| `chat_api.todo_reminder_steps` | `0` | Напоминания `session_todo`; `0` — выкл |
+| `chat.host` | `server.host` (`127.0.0.1`) | Адрес bind |
+| `chat.port` | `8090` | Порт |
+| `chat.auth_token` | `server.auth_token` | Пусто — без Bearer. Иначе каждый `/v1/` несёт `Authorization: Bearer <token>` |
+| `chat.cors_origins` | `[]` | Пусто — CORS выключен. Непусто — только эти origin. `"*"` из списка выбрасывается |
+| `chat.launch_root` | `null` | Корень ходов: cwd нового хода без абсолютного `metadata.cwd`; `metadata.cwd` — только внутри, иначе 400; пусто — каталог процесса |
+| `chat.text_answer_mode` | `allow` | `deny` / `judge` / `allow` |
+| `chat.finish_gate_mode` | `off` | `off` / `on` / `smart` (в YAML — в кавычках) |
+| `chat.todo_reminder_steps` | `0` | Напоминания `session_todo`; `0` — выкл |
+| `chat.agent_md_path` | — | Роль агента этой поверхности (слой L0) |
+| `chat.agent_overrides` | `{}` | Правки настроек агента поверх общих `agent_overrides` |
 
-После загрузки фасад перекрывает `text_answer_mode` и судью `turn_finish` значениями
-из секции. `turn_ask_human` и `turn_intermediate_reply` снимаются из схемы: вопрос
-и прогресс — прозой ответа. У каждого HTTP-пути свой файл special instructions;
-свой `paths.chat_completions_special_instructions_path` на этом процессе не читается.
+Секция `chat_api` в config.yml больше не читается: `gc-cli` и TUI покажут
+уведомление, а `gc-serve chat` при ней не стартует — иначе её `auth_token`
+пропал бы молча. Перенесите ключи в секцию `chat` config_server.yml.
+
+После загрузки поверхность перекрывает `text_answer_mode` и судью `turn_finish`
+значениями из секции. `turn_ask_human` и `turn_intermediate_reply` снимаются из
+схемы: вопрос и прогресс — прозой ответа. У каждого HTTP-пути свой файл special
+instructions; свой `paths.chat_completions_special_instructions_path` на этой
+поверхности не читается.
 
 Защита от CSRF / DNS rebinding действует всегда (в т.ч. проверка `Host` на loopback).
 Токен её не заменяет. Полная таблица ключей, cwd и ошибок — в
 [responses.md](responses.md#конфиг).
+
+Треды Responses и Chat Completions лежат в хранилище из `storage` config.yml
+([server.md](server.md#хранилище-storage-в-configyml)).
 
 ## Responses API
 
@@ -87,6 +94,10 @@ curl -s http://127.0.0.1:8090/v1/responses \
   -d '{"model":"agent","input":"привет","stream":false}'
 ```
 
+Продолжение диалога, ход которого ещё идёт, — `409` (на этом инстансе —
+«turn already running», на другом — по аренде треда в общем хранилище:
+«turn already running on another instance»).
+
 `model` в ответ копируется как строка; в роутер моделей фасад её не передаёт —
 модель хода из конфига агента. `stream: true` — SSE до терминального события.
 
@@ -95,7 +106,7 @@ curl -s http://127.0.0.1:8090/v1/responses \
 
 ## Chat Completions API
 
-`POST /v1/chat/completions` — тот же порт и та же секция `chat_api` (host, port,
+`POST /v1/chat/completions` — тот же порт и та же секция `chat` (host, port,
 токен, CORS, режимы хода).
 
 Отличия от Responses:
@@ -119,12 +130,12 @@ curl -s http://127.0.0.1:8090/v1/responses \
 - список диалогов `/v1/dialogs` показывает только треды Responses.
 
 `GET /v1/models` отдаёт модель из конфига агента (и зарезервированные id для
-прямого прокси, если они настроены — см. код `gc_chat.model_route`).
+прямого прокси, если они настроены — см. код `gc_server.chat.model_route`).
 
 ## Режимы разрешений
 
-`gc-chat` канал о себе не объявляет: есть ли человек, определяет автопроверка ядра.
-`gc-chat` снимает `turn_ask_human`, поэтому автопроверка человека не находит, и
+Поверхность `chat` канал о себе не объявляет: есть ли человек, определяет
+автопроверка ядра. Она снимает `turn_ask_human`, поэтому автопроверка человека не находит, и
 любой вопрос режима разрешений или защиты заканчивается отказом «спросить некого» (`manual`, пауза судьи в `auto`, запись в
 каталог `.git`, скиллы и настройки инструментов). Слова пользователя для судьи
 действий в `auto` — свои, а не «запрос внешней системы»: клиент HTTP-фасада — сам
@@ -137,16 +148,17 @@ curl -s http://127.0.0.1:8090/v1/responses \
 | Чат в терминале | `gc-ua` |
 | Разовый запрос / скрипт | `gc-cli` |
 | IDE (VS Code ACP) | `gc-acp` — [acp.md](acp.md) |
-| HTTP-стрим хода для своего UI / интеграции | `gc-chat` (этот документ) |
-| Вебхук + опрос статуса / swarm | `gc-serve` — [server.md](server.md) |
+| HTTP-стрим хода для своего UI / интеграции | `gc-serve chat` (этот документ) |
+| Агент как пир A2A | `gc-serve a2a` — [a2a.md](a2a.md) |
+| Вебхук + опрос статуса / swarm | `gc-serve webhook` / `gc-serve swarm` — [server.md](server.md) |
 
 ## Пакет
 
 | | |
 |---|---|
-| Дистрибутив | `gc-chat` (`packages/chat`) |
-| Зависит от | `gc-core`, FastAPI, uvicorn |
-| Команда | `gc-chat` → `gc_chat.main:main` |
+| Дистрибутив | `gc-server` (`packages/server`), модуль `gc_server.chat` |
+| Зависит от | `gc-core`, `gc-stores`, FastAPI, uvicorn |
+| Команда | `gc-serve chat` → `gc_server.cli:main` |
 | В мета `gc-ua` | да |
 
 Раскладка дистрибутивов — [packaging.md](packaging.md).

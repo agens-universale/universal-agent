@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from gc_core.threads.errors import OwnershipError
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -491,8 +492,23 @@ class SessionsScreen(Screen):
         )
 
     def _delete_task(self, thread_id: str) -> None:
-        self._store.delete_task(thread_id)
+        self._delete_or_warn([thread_id])
         self._reload()
+
+    def _delete_or_warn(self, thread_ids: list[str]) -> None:
+        """Удалить сессии; тред, который ведёт durable-исполнитель, удаляет
+        только он сам — такие пропускаются с предупреждением."""
+        kept = 0
+        for thread_id in thread_ids:
+            try:
+                self._store.delete_task(thread_id)
+            except OwnershipError:
+                kept += 1
+        if kept:
+            self.app.notify(
+                f"Не удалено сессий: {kept} — их ведёт durable-исполнитель",
+                severity="warning",
+            )
 
     def _open_mass_delete(self) -> None:
         tasks = self._store.list_tasks(limit=10000)  # весь проект, не страница
@@ -521,8 +537,7 @@ class SessionsScreen(Screen):
         def _on_confirm(ok: bool) -> None:
             if not ok:
                 return
-            for tid in ids:
-                self._store.delete_task(tid)
+            self._delete_or_warn(list(ids))
             self._reload()
 
         self.app.push_screen(
@@ -562,7 +577,7 @@ class SessionsScreen(Screen):
         tid = task.thread_id
         segments = self._store.read_segments(tid)
         subagent_records = self._store.read_subagent_trace(tid)
-        runtime = self._store.get_task_meta(tid).get("runtime") or {}
+        record = self._store.get_record(tid)
         from gc_tui.screens.preview import PreviewScreen
 
         def _on_result(resume: bool) -> None:
@@ -575,7 +590,7 @@ class SessionsScreen(Screen):
                 thread_id=tid,
                 project_path=self._project_path(),
                 subagent_records=subagent_records,
-                mcp_snapshot=runtime.get("mcp_tools"),
+                mcp_snapshot=record.runtime.mcp_tools if record else None,
             ),
             _on_result,
         )

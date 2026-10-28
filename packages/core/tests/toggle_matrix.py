@@ -720,10 +720,24 @@ UNREPRESENTABLE = {
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # --- хранилище (storage) ---------------------------------------------------
+    #
+    # Ядро хранилище по конфигу не открывает: открывают фронтенды (gc-serve,
+    # gc-cli) через gc-stores и передают его прогону. Случай матрицы с базой
+    # сравнил бы файлы с файлами. Покрытие: test_storage_config.py (схема,
+    # отказ без открытого хранилища), stores/tests/test_open_configured.py,
+    # server/tests/test_server_storage_sqlite.py, cli/tests/test_cli_storage.py.
+    "storage.threads": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
+    "storage.agent": "выбирает хранилище фронтенд; покрытие в test_storage_config и наборах stores/server/cli",
+    "storage.ensure_schema": "накат схемы при открытии в gc-stores; покрытие в stores/tests/test_open_configured",
     # Локально допустимо только step (как develop); turn — только в durable-
     # исполнителе и отклоняется локальным прогоном. Покрыто
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
     "thread_store.persist": "local допускает только step; turn проверяется в test_thread_store_persist_turn и native live",
+    "thread_store.inbox_poll_seconds": "частота опроса входящего потока треда, не путь исполнения; покрытие в test_inbox",
+    "thread_store.retry.max_attempts": "политика повтора записи при недоступности хранилища, не путь исполнения; покрытие в threads/test_session_writer",
+    "thread_store.retry.initial_delay_sec": "пауза повтора записи в хранилище; покрытие в threads/test_session_writer",
+    "thread_store.retry.backoff_factor": "рост пауз повтора записи в хранилище; покрытие в threads/test_session_writer",
     "agent.model_steering": "текст подготовленных инструкций; текущий reader и local/port parity покрыты test_run_prompt_preparation",
     # --- режим разрешений ----------------------------------------------------
     #
@@ -758,6 +772,11 @@ NOT_IN_MATRIX = {
     "os_backend.sandbox.extra_ro": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.fetch_url_execute_on": "где качает exec_fetch_url; покрытие в tools/exec/test_remote_fetch.py и test_fetch_url.py",
     "os_backend.provision_skills": "копия скиллов в среду исполнения; покрытие в skills/test_remote_skills_provision.py",
+    # Имя проекта для хранилищ агента в базе: файловое хранилище им не
+    # пользуется (память — в .gc проекта), поведение рана не меняется.
+    "agent.project_id": "имя проекта для хранилищ в базе; покрытие в test_agent_store_project",
+    "agent.role": "роль запуска в хранилище агента в базе (ставит сервер); покрытие в test_agent_store_roles",
+    "agent.special_instructions_role": "вариант специнструкций роли (фасад Chat Completions); покрытие в test_agent_store_roles",
     # Токенный порог автосжатия. Эталон матрицы снят на develop и случаев
     # с этим рычагом не содержит: новый случай нельзя сверить, не пересняв
     # эталон на этой же ветке. Паритет async/sync того же координатора уже
@@ -892,24 +911,6 @@ NOT_IN_MATRIX = {
     "acp.todo_reminder_steps": "только ACP",
     "acp.confirm_timeout_sec": "только ACP: ожидание session/request_permission",
     "tui.finish_gate_mode": "только TUI",
-    "chat_api.host": "только процесс gc-chat",
-    "chat_api.port": "только процесс gc-chat",
-    "chat_api.auth_token": "только процесс gc-chat",
-    "chat_api.cors_origins": "только процесс gc-chat",
-    "chat_api.launch_root": "только процесс gc-chat",
-    "chat_api.text_answer_mode": "только процесс gc-chat",
-    "chat_api.finish_gate_mode": "только процесс gc-chat",
-    "chat_api.todo_reminder_steps": "только процесс gc-chat",
-    "a2a.host": "только процесс gc-a2a",
-    "a2a.port": "только процесс gc-a2a",
-    "a2a.public_url": "только процесс gc-a2a",
-    "a2a.auth_token": "только процесс gc-a2a",
-    "a2a.launch_root": "только процесс gc-a2a",
-    "a2a.name": "только процесс gc-a2a",
-    "a2a.description": "только процесс gc-a2a",
-    "a2a.text_answer_mode": "только процесс gc-a2a",
-    "a2a.finish_gate_mode": "только процесс gc-a2a",
-    "a2a.todo_reminder_steps": "только процесс gc-a2a",
     "todo.reminder_steps": (
         "напоминание чеклиста; матрица гоняет CLI и этот лист не "
         "переключает. Канал Responses пишет его в runtime"
@@ -1319,7 +1320,8 @@ async def run_case(
     result["backend_calls"] = len(getattr(backend, "calls", []))
 
     try:
-        from gc_core.thread_store import load_thread_meta, resolve_threads_dir
+        from gc_core.thread_store import resolve_threads_dir
+        from gc_testkit.develop_files import load_thread_meta
 
         meta = load_thread_meta(resolve_threads_dir(base), SYS, TID) or {}
         result["meta"] = strip_volatile(

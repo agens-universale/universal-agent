@@ -938,10 +938,12 @@ def test_pickup_pending_as_new_turn_clears_window(monkeypatch):
         loop_detector_window=["fp"],
         loop_detector_pending=[{"tool": "fs_read_file", "args": {}}],
     )
-    picked = pr._pickup_pending_as_new_turn(
-        lambda: [{"role": "user", "content": "следующий ход"}],
-        state,
-        SimpleNamespace(logger=None),
+    picked = run_coro(
+        pr._apickup_pending_as_new_turn(
+            as_coro(lambda: [{"role": "user", "content": "следующий ход"}]),
+            state,
+            SimpleNamespace(logger=None),
+        )
     )
     assert picked == [{"role": "user", "content": "следующий ход"}]
     assert state.loop_detector_window == []
@@ -957,8 +959,10 @@ def test_empty_pickup_does_not_clear_window(monkeypatch):
         loop_detector_pending=[{"tool": "fs_read_file", "args": {}}],
     )
     assert (
-        pr._pickup_pending_as_new_turn(
-            list, state, SimpleNamespace(logger=None)
+        run_coro(
+            pr._apickup_pending_as_new_turn(
+                as_coro(list), state, SimpleNamespace(logger=None)
+            )
         )
         is None
     )
@@ -1134,7 +1138,7 @@ def test_app_config_wires_loop_detector():
 
 
 def test_thread_meta_does_not_persist_loop_window():
-    from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+    from gc_testkit.session_meta import merge_state_into_meta, shared_from_meta
     from gc_core.states import State
 
     constructor = {
@@ -1150,12 +1154,10 @@ def test_thread_meta_does_not_persist_loop_window():
     state = State(**constructor)
     state.loop_detector_window = ["fp"]
     state.loop_detector_pending = [{"tool": "x", "args": {}}]
-    payload = ThreadMetaMapper.merge_state_into_meta({}, state)
+    payload = merge_state_into_meta({}, state)
     assert "loop_detector_window" not in payload
     assert "loop_detector_pending" not in payload
-    restored = State(
-        **constructor, shared=ThreadMetaMapper.shared_from_meta(payload)
-    )
+    restored = State(**constructor, shared=shared_from_meta(payload))
     assert restored.loop_detector_window == []
     assert restored.loop_detector_pending == []
 

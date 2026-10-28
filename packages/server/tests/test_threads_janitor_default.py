@@ -19,35 +19,30 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-import time
 
-import gc_server.server_cleanup_threads as janitor
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from gc_server.server_cleanup_threads import (
-    register_cleanup_threads_on_startup,
-)
-from gc_testkit.settings import make_settings
-
-
-@pytest.fixture(autouse=True)
-def _reset_started():
-    """Модульный флаг переживает тесты — иначе второй регистрирует пустышку."""
-    janitor._cleanup_thread_started = False
-    yield
-    janitor._cleanup_thread_started = False
+from server_harness import make_webhook
 
 
 def _store_with_old_thread(tmp_path) -> tuple[str, str]:
     threads = tmp_path / "threads"
     threads.mkdir()
     meta = threads / "meta_generic_old.json"
+    # Задача вебхука (статус вебхука в секции фронтенда): фоновая чистка
+    # трогает только такие треды.
     meta.write_text(
-        json.dumps({"updated_at": "2026-07-01T00:00:00+00:00"}),
+        json.dumps(
+            {
+                "system": "generic",
+                "thread_id": "old",
+                "updated_at": "2026-07-01T00:00:00+00:00",
+                "frontends": {"webhook": {"status": "completed"}},
+            }
+        ),
         encoding="utf-8",
     )
     (threads / "data_generic_old.jsonl").write_text("", encoding="utf-8")
@@ -55,21 +50,18 @@ def _store_with_old_thread(tmp_path) -> tuple[str, str]:
 
 
 def _run(server_config, threads_dir, caplog):
-    app = FastAPI()
-    register_cleanup_threads_on_startup(
-        app,
-        server_config=server_config,
-        base_agent_settings=make_settings(
-            {"paths.threads_data_path": threads_dir}
-        ),
-        logger=logging.getLogger("gc_server.server_cleanup_threads"),
+    surface = make_webhook(
+        config=server_config, **{"paths.threads_data_path": threads_dir}
     )
-    with caplog.at_level(
-        logging.INFO, logger="gc_server.server_cleanup_threads"
-    ):
-        with TestClient(app):
-            # Поток чистит ДО первого sleep; ждём, пока он отработает.
-            time.sleep(0.4)
+
+    async def scenario() -> None:
+        await surface.astart()
+        # Чистка проходит сразу при старте, затем спит интервал.
+        await asyncio.sleep(0.4)
+        await surface.astop()
+
+    with caplog.at_level(logging.INFO, logger="gc_server.webhook"):
+        asyncio.run(scenario())
     return caplog.text
 
 
@@ -78,6 +70,7 @@ def _run(server_config, threads_dir, caplog):
     [
         ({}, "конфига нет вовсе"),
         ({"server": {"host": "0.0.0.0"}}, "конфиг есть, секции нет"),
+        ({"webhook": {"port": 8000}}, "секция вебхука без чистки"),
     ],
 )
 def test_janitor_stays_off_without_explicit_enable(
@@ -104,15 +97,12 @@ def test_janitor_announces_directory_and_ttl(tmp_path, caplog):
     Громкость была устроена наоборот: «каталога нет» кричало предупреждением, а
     снос десятка тредов не печатал ничего.
 
-    Подмена: убрать любую из двух строк лога. Отдельно ловится перенос строки
-    «включена» на регистрацию хука — там она выполняется до `basicConfig` в
-    `serve()` и до глаз не доходит; в тесте это видно как отсутствие записи
-    внутри `with TestClient(app)`.
+    Подмена: убрать любую из двух строк лога.
     """
     threads_dir, meta = _store_with_old_thread(tmp_path)
 
     text = _run(
-        {"threads_cleanup": {"enabled": True, "ttl_days": 7}},
+        {"webhook": {"threads_cleanup": {"enabled": True, "ttl_days": 7}}},
         threads_dir,
         caplog,
     )

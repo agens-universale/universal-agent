@@ -5,6 +5,8 @@
 объект раннера в момент стампа нельзя (баг: давало «completed» вместо «stopped»).
 """
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import json
 
@@ -60,7 +62,7 @@ async def test_falling_edge_stamps_status(
         pilot.app.last_runner_error = last_error
         scr._poll_active()
         await pilot.pause()
-        meta = scr._store.get_task_meta(tid)
+        meta = meta_of(scr._store.get_record(tid))
         assert (meta.get("tui") or {}).get("status") == expected
 
 
@@ -90,7 +92,7 @@ async def test_finished_before_first_poll_stamps_status(
         app.active_runner = runner
         app.last_runner_error = error
         scr._poll_active()
-        assert scr._store.get_task_meta(tid)["tui"]["status"] == expected
+        assert meta_of(scr._store.get_record(tid))["tui"]["status"] == expected
 
 
 @pytest.mark.asyncio
@@ -121,7 +123,7 @@ async def test_compact_transition_does_not_stamp(tmp_path):
         pilot.app.last_runner_error = None
         scr._poll_active()
         await pilot.pause()
-        meta = scr._store.get_task_meta(tid)
+        meta = meta_of(scr._store.get_record(tid))
         assert (meta.get("tui") or {}).get(
             "status"
         ) == "stopped"  # НЕ completed
@@ -181,7 +183,7 @@ async def test_prepare_for_new_run_stamps_running_over_completed(tmp_path):
             },
         )
         scr._prepare_for_new_run()
-        meta = scr._store.get_task_meta(tid)
+        meta = meta_of(scr._store.get_record(tid))
         tui = meta.get("tui") or {}
         assert tui.get("status") == "running"
         assert tui.get("last_indicator") is None
@@ -214,7 +216,7 @@ async def test_rising_edge_stamps_running(tmp_path):
         pilot.app.active_runner = _Runner(running=True)
         scr._poll_active()
         await pilot.pause()
-        meta = scr._store.get_task_meta(tid)
+        meta = meta_of(scr._store.get_record(tid))
         tui = meta.get("tui") or {}
         assert tui.get("status") == "running"
         assert tui.get("last_indicator") is None

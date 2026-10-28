@@ -95,8 +95,10 @@ class CopyBufferScreen(Screen):
         if self._store is None or not self._active_task_id:
             return ""
         try:
-            meta = self._store.get_task_meta(self._active_task_id) or {}
-            return (meta.get("tui") or {}).get("copy_buffer") or ""
+            from gc_tui.services.stores.record_view import tui_section
+
+            record = self._store.get_record(self._active_task_id)
+            return tui_section(record).get("copy_buffer") or ""
         except Exception:
             return ""
 

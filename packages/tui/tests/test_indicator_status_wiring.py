@@ -1,3 +1,4 @@
+from gc_testkit.develop_files import record_from_meta
 import pytest
 
 
@@ -55,8 +56,8 @@ async def test_falling_edge_persists_last_indicator(tmp_path, monkeypatch):
             def update_tui_meta(self, tid, patch):
                 patches.append(patch)
 
-            def get_task_meta(self, tid):
-                return {}
+            def get_record(self, tid):
+                return record_from_meta({})
 
         scr._store = _Store()
         scr._thinking_started_at = 0.0

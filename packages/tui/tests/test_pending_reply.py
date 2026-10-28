@@ -1,5 +1,7 @@
 """Pending user-reply tracking + reconciliation."""
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import json
 import threading
@@ -517,7 +519,7 @@ async def test_mount_failed_skips_delivered_via_attach(tmp_path):
             f"должен быть state=normal, got {replies[0]._state}"
         )
         # meta очищена.
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert not pum, (
             f"pending_user_messages должен быть пуст после cross-check, got {pum}"
@@ -574,7 +576,7 @@ async def test_mount_failed_renders_truly_orphaned(tmp_path):
         assert len(replies) == 1
         assert replies[0]._state == "failed"
         # meta нормализована: pending → failed.
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert len(pum) == 1
         assert pum[0]["status"] == "failed"
@@ -675,7 +677,7 @@ async def test_mount_failed_skips_delivered_via_user_messages_log(tmp_path):
             f"delivered-old-msg должно быть отсечено через user_messages_log, got: {texts}"
         )
         # meta: pending очищен.
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert not pum, (
             f"pending должен быть очищен через user_messages_log, got: {pum}"
@@ -778,7 +780,7 @@ async def test_mount_failed_skips_delivered_via_user_intent_log(tmp_path):
         assert "delivered-old-msg" not in texts, (
             f"delivered-old-msg должно быть отсечено через user_intent_log, got: {texts}"
         )
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert not pum, (
             f"pending должен быть очищен через user_intent_log, got: {pum}"
@@ -866,7 +868,7 @@ async def test_mount_failed_drops_superseded_by_later_delivered(tmp_path):
         assert "опиши проект" not in texts, (
             f"устаревшее failed не должно висеть, got: {texts}"
         )
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert not pum, (
             f"устаревшее failed должно быть вычищено из meta, got: {pum}"
@@ -944,7 +946,7 @@ async def test_mount_failed_keeps_latest_failed_after_delivered(tmp_path):
         assert "последнее упало" in texts, (
             f"последнее failed должно остаться для retry, got: {texts}"
         )
-        meta = screen._store.get_task_meta(thread_id)
+        meta = meta_of(screen._store.get_record(thread_id))
         pum = (meta.get("tui") or {}).get("pending_user_messages", [])
         assert any(r.get("content") == "последнее упало" for r in pum), (
             f"последнее failed должно сохраниться в meta, got: {pum}"

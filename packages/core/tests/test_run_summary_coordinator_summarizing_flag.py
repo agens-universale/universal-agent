@@ -1,75 +1,45 @@
-"""tui summarizing → meta.runtime.summarizing; снимается (в т.ч. при ошибке)."""
+"""Флаг ``summarizing`` живого статуса: взведён в хранилище на время
+сжатия, снят после — в том числе при ошибке."""
 
 import pytest
 from gc_core import run_summary_coordinator as rsc
+from gc_core.thread_store import ThreadSession
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
+
+KEY = ThreadKey(system="cli", thread="t1")
 
 
-class _FakeTS:
-    """Похожа на ThreadSession — с полем ``store``.
-
-    Флаг ``summarizing`` пишется через хранилище сессии; файловое хранилище
-    здесь как раз и делегирует в модульные функции, которые тест подменяет.
-    """
-
-    def __init__(self, tmp_path):
-        from gc_core.thread_store_file import FileThreadStore
-
-        self.threads_dir = str(tmp_path)
-        self.system_id = "cli"
-        self.thread_id = "t1"
-        self.meta = {}
-        self.store = FileThreadStore(self.threads_dir)
-        self.flushed_states = []  # снимки наличия флага при каждом flush
-        self._port = None
-
-    @property
-    def port(self):
-        """Как у ``ThreadSession``: асинхронный порт над своим хранилищем."""
-        if self._port is None:
-            from gc_core.thread_store_async import athread_store
-
-            self._port = athread_store(self.store)
-        return self._port
+async def _session(tmp_path):
+    return await ThreadSession.afrom_config(
+        settings=None,
+        system_id=KEY.system,
+        thread_id=KEY.thread,
+        store=FileThreadStore(tmp_path),
+    )
 
 
-def _patch_flush(monkeypatch, ts):
-    original = ts.store.patch_runtime_flag
-
-    def record(*args, **kwargs):
-        result = original(*args, **kwargs)
-        disk = ts.store.load_meta(ts.system_id, ts.thread_id)
-        ts.flushed_states.append(
-            bool((disk.get("runtime") or {}).get("summarizing"))
-        )
-        return result
-
-    monkeypatch.setattr(ts.store, "patch_runtime_flag", record)
+async def _flag_on_disk(tmp_path) -> bool:
+    record = await FileThreadStore(tmp_path).get_thread(KEY)
+    return record is not None and "summarizing" in record.runtime.flags
 
 
-async def test_flag_set_during_and_cleared_after(monkeypatch, tmp_path):
-    ts = _FakeTS(tmp_path)
-    _patch_flush(monkeypatch, ts)
-    seen_during = {}
-
-    def fake_compaction():
-        rt = ts.meta.get("runtime") or {}
-        seen_during["flag"] = bool(rt.get("summarizing"))
-
+async def test_flag_set_during_and_cleared_after(tmp_path):
+    ts = await _session(tmp_path)
     async with rsc._asummarizing_flag(ts):
-        fake_compaction()
-    assert seen_during["flag"] is True
-    assert not (ts.meta.get("runtime") or {}).get("summarizing")
-    assert ts.flushed_states == [True, False]
+        assert await _flag_on_disk(tmp_path)
+        assert "summarizing" in ts.runtime.flags
+    assert not await _flag_on_disk(tmp_path)
+    assert "summarizing" not in ts.runtime.flags
 
 
-async def test_flag_cleared_on_exception(monkeypatch, tmp_path):
-    ts = _FakeTS(tmp_path)
-    _patch_flush(monkeypatch, ts)
+async def test_flag_cleared_on_exception(tmp_path):
+    ts = await _session(tmp_path)
     with pytest.raises(ValueError):
         async with rsc._asummarizing_flag(ts):
             raise ValueError("boom")
-    assert not (ts.meta.get("runtime") or {}).get("summarizing")
-    assert ts.flushed_states[-1] is False
+    assert not await _flag_on_disk(tmp_path)
+    assert "summarizing" not in ts.runtime.flags
 
 
 async def test_flag_noop_when_no_thread_session():

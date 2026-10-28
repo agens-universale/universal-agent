@@ -56,23 +56,30 @@ def build_project_memory_status_for_cwd(
     )
 
 
-def attach_status_to_prompt_vars(
+async def aattach_status_to_prompt_vars(
     prompt_vars: dict,
-    cwd: Optional[str] = None,
     *,
+    store: Any,
+    project: Any,
     settings: Any = None,
 ) -> None:
     """Add `longMemoryStatus` to the given prompt-variables dict.
 
     Не добавляет статус, если ``project_memory`` в ``stop_tools`` (D36).
     ``settings`` — то, что принимает ``settings_of``; ``None`` — умолчания.
+    Память читает хранилище агента ``store`` (проект ``project``).
     """
     settings = settings_of(settings)
     if PROJECT_MEMORY_TOOL_NAME in settings.agent.stop_tools:
         return
     try:
-        prompt_vars["longMemoryStatus"] = build_project_memory_status_for_cwd(
-            cwd, settings=settings
+        try:
+            memory = await store.read_memory(project)
+        except (OSError, UnicodeDecodeError):
+            memory = None  # не читается — как нет (как раньше)
+        prompt_vars["longMemoryStatus"] = status_of_text(
+            memory.text if memory is not None else "",
+            max_chars=settings.project_memory.max_chars,
         )
     except Exception:  # pragma: no cover — memory must never break metadata
         return
@@ -91,15 +98,27 @@ def build_project_memory_status(
       - populated → size hint only; read when conventions/decisions may matter (D16).
     """
     info = storage.stat(path)
-    if not info.exists or info.chars == 0:
-        return f"{_EMPTY_STATUS}\nLimit: {max_chars} chars (0% filled)."
-    text = storage.read(path)
+    text = storage.read(path) if info.exists else ""
+    return status_of_text(text, max_chars=max_chars)
+
+
+def status_of_text(
+    text: str, *, max_chars: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS
+) -> str:
+    """Статус по тексту памяти (пустой, из пробелов или нет — «памяти нет»)."""
     if not text.strip():
         return f"{_EMPTY_STATUS}\nLimit: {max_chars} chars (0% filled)."
-    usage_pct = fill_percent(info.chars, max_chars)
+    chars, lines = len(text), _count_lines(text)
+    usage_pct = fill_percent(chars, max_chars)
     return (
-        f"project has long memory — {info.chars}/{max_chars} chars "
-        f"({usage_pct}% filled), {info.lines} lines.\n"
+        f"project has long memory — {chars}/{max_chars} chars "
+        f"({usage_pct}% filled), {lines} lines.\n"
         "Use the appropriate memory tool with action=read when standing goals, rules, "
         "decisions, or durable facts may affect this task — not on every turn."
     )
+
+
+def _count_lines(text: str) -> int:
+    if not text:
+        return 0
+    return text.count("\n") + (0 if text.endswith("\n") else 1)

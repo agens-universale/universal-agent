@@ -1,17 +1,9 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, List
 
-from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
-    AgentResource,
-    AgentStore,
-    agent_store_of,
-    read_required_text,
-)
-from gc_core.bundled_assets import bundled_root
+from gc_core.agent_store import AgentStore, agent_store_of, aread_required
 from gc_core.config_modules.intent_scope import IntentScopeConfig
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resources import (
@@ -32,35 +24,21 @@ from gc_core.summarize.llm import arequest_summary_text
 _logger = logging.getLogger(__name__)
 
 
-def _resolve_final_answer_prompt_path(ctx: Any) -> str:
-    cfg = _scope_cfg(ctx)
-    raw = str(cfg.intent_scope_final_answer_summary_prompt_path or "").strip()
-    if not raw:
-        return str(
-            bundled_root()
-            / "prompts"
-            / "intent_scope_final_answer_summary_prompt.md"
-        )
-    if os.path.isabs(raw):
-        return raw
-    return os.path.abspath(os.path.join(str(bundled_root()), raw))
-
-
-def _load_prompt_file(
-    path: str,
-    *,
-    store: AgentStore = DEFAULT_AGENT_STORE,
-    name: str = "intent_final",
-) -> str:
+async def aload_intent_prompt(store: AgentStore, name: str) -> str:
+    """Промпт intent scope (``intent_tool`` или ``intent_final``)."""
     # Путь задаёт конфиг (`intent_scope_*_prompt_path`) — файл человека, его
     # кодировку никто не проверял. Отказ обязан назвать файл.
-    system = read_required_text(
-        store,
-        AgentResource("prompt", name, path),
-        missing=f"Intent scope prompt file not found: {path}",
+    label = store.label("prompt", name)
+    system = (
+        await aread_required(
+            store,
+            "prompt",
+            name,
+            missing=f"Intent scope prompt file not found: {label}",
+        )
     ).strip()
     if not system:
-        raise ValueError(f"Intent scope prompt file is empty: {path}")
+        raise ValueError(f"Intent scope prompt file is empty: {label}")
     return system
 
 
@@ -69,30 +47,6 @@ def _scope_cfg(ctx: Any) -> IntentScopeConfig:
     if isinstance(cfg, IntentScopeConfig):
         return cfg
     return IntentScopeConfig()
-
-
-def _resolve_prompt_path(ctx: Any) -> str:
-    cfg = _scope_cfg(ctx)
-    raw = str(cfg.intent_scope_tool_summary_prompt_path or "").strip()
-    if not raw:
-        return str(
-            bundled_root() / "prompts" / "intent_scope_tool_summary_prompt.md"
-        )
-    if os.path.isabs(raw):
-        return raw
-    return os.path.abspath(os.path.join(str(bundled_root()), raw))
-
-
-def _load_system_prompt(ctx: Any) -> str:
-    prompt_path = _resolve_prompt_path(ctx)
-    system = read_required_text(
-        agent_store_of(ctx),
-        AgentResource("prompt", "intent_tool", prompt_path),
-        missing=f"Intent scope prompt file not found: {prompt_path}",
-    ).strip()
-    if not system:
-        raise ValueError(f"Intent scope prompt file is empty: {prompt_path}")
-    return system
 
 
 def _format_prior_intent(current_user_intent: List[Any]) -> str:
@@ -152,11 +106,10 @@ async def asummarize_tool_intent_line(
             "role": "system",
             "content": await aload_prompt_resource(
                 ctx,
-                PromptResourceRequest(
-                    "intent_tool",
-                    path=scope_cfg.intent_scope_tool_summary_prompt_path,
+                PromptResourceRequest("intent_tool"),
+                local=lambda: aload_intent_prompt(
+                    agent_store_of(ctx), "intent_tool"
                 ),
-                local=lambda: _load_system_prompt(ctx),
             ),
         },
         {
@@ -255,13 +208,9 @@ async def asummarize_final_answer_line(
                 "role": "system",
                 "content": await aload_prompt_resource(
                     ctx,
-                    PromptResourceRequest(
-                        "intent_final",
-                        path=scope_cfg.intent_scope_final_answer_summary_prompt_path,
-                    ),
-                    local=lambda: _load_prompt_file(
-                        _resolve_final_answer_prompt_path(ctx),
-                        store=agent_store_of(ctx),
+                    PromptResourceRequest("intent_final"),
+                    local=lambda: aload_intent_prompt(
+                        agent_store_of(ctx), "intent_final"
                     ),
                 ),
             },

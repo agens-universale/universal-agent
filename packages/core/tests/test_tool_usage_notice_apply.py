@@ -79,16 +79,13 @@ def test_apply_long_changed_hint_on_k_tick(monkeypatch):
     )
 
     set_project_memory_check_cnt(meta, 2)
-    monkeypatch.setattr(
-        "gc_core.project_memory.get_hash", lambda _ctx: "new_hash"
-    )
-
     out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "x", "id": "u1"}],
         state,
         ctx,
         meta,
         step_messages=[],
+        project_memory_hash="new_hash",
     )
     assert any(
         "baseline" in m["content"].lower()
@@ -121,16 +118,13 @@ def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
     )
 
     set_project_memory_check_cnt(meta, 2)
-    monkeypatch.setattr(
-        "gc_core.project_memory.get_hash", lambda _ctx: "new_hash"
-    )
-
     out = apply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "x", "id": "u1"}],
         state,
         ctx,
         meta,
         step_messages=[{"role": "assistant", "content": "ok", "id": "a1"}],
+        project_memory_hash="new_hash",
     )
     assert any(
         "project memory" in m["content"].lower()

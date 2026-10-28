@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from gc_testkit.tui_support import compact_thread
 
 
 def _write_message(
@@ -76,32 +77,12 @@ async def test_polling_stream_reset_reloads_full(tmp_path):
         scr.attach_active_task("t2")
         await pilot.pause(0.05)
 
-        # Simulate compaction: rewrite file from scratch + new epoch
-        data = tmp_path / "data_cli_t2.jsonl"
-        data.write_text(
-            json.dumps(
-                {
-                    "type": "message",
-                    "seq": 1,
-                    "payload": {
-                        "id": "s1",
-                        "role": "assistant",
-                        "content": "после-сжатия",
-                    },
-                }
-            )
-            + "\n"
-        )
-        meta = tmp_path / "meta_cli_t2.json"
-        meta.write_text(
-            json.dumps(
-                {
-                    "thread_id": "t2",
-                    "updated_at": "2026-05-20T11:00:00+00:00",
-                    "messages_count": 1,
-                    "last_summary_archive_suffix": "2026-05-20T11-00",
-                }
-            )
+        # Компакция ядром: прежняя история — в архив, живая — с нуля.
+        compact_thread(
+            str(tmp_path),
+            "cli",
+            "t2",
+            [{"id": "s1", "role": "assistant", "content": "после-сжатия"}],
         )
         await pilot.pause(0.4)
 
@@ -124,32 +105,12 @@ async def test_polling_stream_reset_keeps_brand_header(tmp_path):
         scr.attach_active_task("t3")
         await pilot.pause(0.05)
 
-        # Simulate compaction: rewrite file from scratch + new epoch
-        data = tmp_path / "data_cli_t3.jsonl"
-        data.write_text(
-            json.dumps(
-                {
-                    "type": "message",
-                    "seq": 1,
-                    "payload": {
-                        "id": "s1",
-                        "role": "assistant",
-                        "content": "после-сжатия",
-                    },
-                }
-            )
-            + "\n"
-        )
-        meta = tmp_path / "meta_cli_t3.json"
-        meta.write_text(
-            json.dumps(
-                {
-                    "thread_id": "t3",
-                    "updated_at": "2026-06-10T11:00:00+00:00",
-                    "messages_count": 1,
-                    "last_summary_archive_suffix": "2026-06-10T11-00",
-                }
-            )
+        # Компакция ядром: прежняя история — в архив, живая — с нуля.
+        compact_thread(
+            str(tmp_path),
+            "cli",
+            "t3",
+            [{"id": "s1", "role": "assistant", "content": "после-сжатия"}],
         )
         await pilot.pause(0.4)  # > 250 ms polling interval
 

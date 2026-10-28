@@ -454,7 +454,7 @@ async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
     отпускания мыши — под заморозкой хвост не читается, курсор стоит."""
     import json
 
-    from gc_core.thread_store import append_new_thread_messages
+    from gc_testkit.develop_files import append_new_thread_messages
     from gc_tui.app import TuiApp
 
     def _append(seq: int, *msgs: dict) -> None:
@@ -505,19 +505,18 @@ async def test_tail_under_selection_drawn_after_release(tmp_path, monkeypatch):
         scr._poll_active()
         await pilot.pause(0.05)
         ids = [e.message_id for e in scr._task_events]
-        size = (tmp_path / "data_cli_t1.jsonl").stat().st_size
 
     assert True not in reads
     assert {"u2", "fc1", "fo1"} <= set(ids)
     assert ids.count("u2") == 1
-    assert scr._cursor.position_token == size
+    assert scr._cursor.ordering_key == 4
 
 
 @pytest.mark.asyncio
 async def test_stream_answer_under_selection_drawn_once(tmp_path, monkeypatch):
     """Ответ из стрима дописан в файл под выделением: после отпускания —
     одна строка ответа, стрим-блок снят."""
-    from gc_core.thread_store import append_new_thread_messages
+    from gc_testkit.develop_files import append_new_thread_messages
     from gc_tui.app import TuiApp
     from gc_tui.widgets.stream_block import StreamBlock
 

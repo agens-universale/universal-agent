@@ -1,28 +1,19 @@
 """Transport-only LLM calls for working_memory patch steps after summary."""
 
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from gc_core.agent_store import agent_store_of
-from gc_core.bundled_assets import bundled_root
 from gc_core.execution.resources import (
     PromptResourceRequest,
     aload_prompt_resource,
 )
-from gc_core.settings import settings_of
 from gc_core.summarize.llm import arequest_summary_text
-from gc_core.summarize.prompt_loading import load_memory_patch_replace_prompt
+from gc_core.summarize.prompt_loading import aload_memory_patch_prompt
 from gc_core.summarize.working_memory_gateway import (
     MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
     build_memory_deltas_format_repair_messages,
 )
-
-
-def default_memory_patch_path() -> str:
-    return str(
-        bundled_root() / "prompts" / "chat_completions_memory_patch_replace.md"
-    )
 
 
 @dataclass
@@ -35,16 +26,6 @@ class MemoryPatchLlmResult:
 
     request_messages: List[Dict[str, str]]
     raw_response: str
-
-
-def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
-    summary = settings_of(ctx).summary
-    prompt_path_raw = str(getattr(summary, config_key) or default_path).strip()
-    if not prompt_path_raw:
-        raise ValueError(f"summary_params.{config_key} is empty")
-    if os.path.isabs(prompt_path_raw):
-        return prompt_path_raw
-    return os.path.abspath(os.path.join(str(bundled_root()), prompt_path_raw))
 
 
 async def _arequest_patch(
@@ -96,24 +77,13 @@ async def arequest_patch_replace(
 
     Основная реализация шага; ``request_patch_replace`` — синхронный шим.
     """
-    summary = settings_of(ctx).summary
     subagent = _is_subagent_state(state)
     # Soft-only: subagent addendum lives in system prompt only (no user duplicate).
     system = await aload_prompt_resource(
         ctx,
-        PromptResourceRequest(
-            "memory_patch",
-            path=summary.chat_completions_memory_patch_replace_prompt_path,
-            subagent=subagent,
-        ),
-        local=lambda: load_memory_patch_replace_prompt(
-            _resolve_prompt_path(
-                ctx,
-                "chat_completions_memory_patch_replace_prompt_path",
-                default_memory_patch_path(),
-            ),
-            subagent=subagent,
-            store=agent_store_of(ctx),
+        PromptResourceRequest("memory_patch", subagent=subagent),
+        local=lambda: aload_memory_patch_prompt(
+            agent_store_of(ctx), subagent=subagent
         ),
     )
     user_prompt = (

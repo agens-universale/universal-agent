@@ -1,6 +1,8 @@
 """Гвозди приёмки /rigor (спека §8): резолвер-матрица, custom-правило, эфемерная
 позиция, smart-гейт, сессионность пары. Живые UI-гейты — в смоуке (см. план §смоук)."""
 
+from gc_testkit.develop_files import meta_of
+
 from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_testkit import run_coro
@@ -70,7 +72,8 @@ def test_session_pair_not_preset_survives(tmp_path):
     """Сессионность работает для ПАРЫ значений, не для пресета (пресет не хранится)."""
     pytest.importorskip("textual")
     from gc_tui.services.stores.file_store import FileTaskStore
-    from gc_tui.session_settings import read_from_meta
+    from gc_tui.services.stores.record_view import tui_section
+    from gc_tui.session_settings import read_from_tui
 
     a = _app(
         tmp_path,
@@ -80,7 +83,7 @@ def test_session_pair_not_preset_survives(tmp_path):
 
     apply_toggle(a, "rigor", "low")
     store = FileTaskStore(threads_dir=a._threads_dir, system=a._system)
-    saved = read_from_meta(store.get_task_meta("t1"))
+    saved = read_from_tui(tui_section(store.get_record("t1")))
     assert saved == {
         "tui.finish_gate_mode": "off",
         "tui.text_answer_mode": "allow",

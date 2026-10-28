@@ -7,17 +7,19 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import asyncio
-import functools
+import contextlib
 import gc
+import logging
 import threading
 from copy import copy as _shallow_copy_msg
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from gc_core.agent_edits.snapshots import purge_thread_snapshots
 from gc_core.attachments.model import Attachment, attachments_of
 from gc_core.attachments.store import (
-    commit_to_run_thread,
-    with_committed_attachments,
+    acommit_to_run_thread,
+    awith_committed_attachments,
 )
 from gc_core.auto_routing import state_ops
 from gc_core.config_modules.stored_outputs import (
@@ -38,14 +40,17 @@ from gc_core.message_policy.plan_messages import (
     accepted_plan_messages,
 )
 from gc_core.message_policy.stop_persist import is_persist_discarded
-from gc_core.message_policy.tool_usage_notice.state import (
-    persist_tool_usage_notice_state,
-)
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.model_router import main_model_identity
+from gc_core.persistence.session_state import (
+    hydrate_state,
+    session_from_state,
+    shared_from_session,
+    usage_from_state,
+)
 from gc_core.plan_store import (
     PLAN_STATUS_APPROVED,
     PLAN_STATUS_REWORKING,
@@ -73,7 +78,7 @@ from gc_core.security.permission_mode import (
 )
 from gc_core.security.permission_store import PermissionStore
 from gc_core.settings import settings_of
-from gc_core.states import SharedStateData, State
+from gc_core.states import State
 from gc_core.summarize.config import (
     resolve_summary_limits_at_level,
 )
@@ -82,6 +87,8 @@ from gc_core.thread_store import (
     make_message_key,
     resolve_threads_dir,
 )
+from gc_core.threads.errors import OwnershipError, ThreadBusy
+from gc_core.threads.session_writer import LEASE_TTL
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.stream_client import (
     _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
@@ -121,43 +128,19 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
 async def _aappend_trace_id_to_meta(
     thread_session: Any, trace_id: str, logger: Any | None = None
 ) -> None:
-    """Дописать trace_id в ``meta.runtime.trace_ids`` (append + дедуп).
-
-    Через ``update_runtime_meta`` (read-merge-write по диску), а НЕ через
-    ``thread_session.meta``: ``persist_batch`` пересобирает base_meta с диска и
-    переносит из ``self.meta`` только whitelist ключей, в который ``runtime`` не
-    входит — запись в память была бы потеряна.
+    """Дописать trace_id в ``runtime.trace_ids`` треда (без дубля).
 
     Отвечает на вопрос аудита «какие шаги оркестратора трогали этот тред».
-    Ошибки бухгалтерии меты не должны ронять ран, но раз это единственный путь
-    записи trace_id в мету — молчаливый swallow оставляем, а факт и причину
-    ошибки пишем в debug (``logger`` опционален, чтобы не менять контракт
-    вызывающих сторон).
+    Ошибки бухгалтерии не должны ронять ран: факт и причину пишем в debug.
     """
-    from gc_core.persistence.meta_ownership import runtime_section
-    from gc_core.thread_store import sanitize_system_id
-
-    # Хранилище берём у самой сессии: у неё оно уже своё — файловое по
-    # умолчанию или переданное встраивающим. Прямой вызов модульных функций
-    # уводил бы записи на диск даже тогда, когда история лежит в базе.
-    store = getattr(thread_session, "store", None)
-    port = getattr(thread_session, "port", None)
-    system_id = getattr(thread_session, "system_id", None)
-    thread_id = getattr(thread_session, "thread_id", None)
-    if store is None or port is None or not system_id or not thread_id:
+    add = getattr(thread_session, "aadd_trace_id", None)
+    if add is None:
         return
     try:
-        sys_norm = sanitize_system_id(system_id)
-        meta = await port.aload_meta(sys_norm, thread_id) or {}
-        existing = runtime_section(meta).get("trace_ids")
-        ids = [str(x) for x in existing] if isinstance(existing, list) else []
-        if trace_id in ids:
-            return
-        ids.append(trace_id)
-        await port.aupdate_runtime_meta(
-            sys_norm, thread_id, {"trace_ids": ids}
-        )
+        await add(trace_id)
     except ExecutionFailure:
+        raise
+    except ThreadBusy:
         raise
     except Exception as exc:
         if logger is not None:
@@ -167,7 +150,6 @@ async def _aappend_trace_id_to_meta(
                 )
             except Exception:
                 pass
-        return
 
 
 async def _aclose_mcp_and_release(owner_reset: Any) -> None:
@@ -230,15 +212,235 @@ def undelivered_as_arun_args(messages: list[dict]) -> tuple[list[str], dict]:
     }
 
 
-def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
-    """Вложения ``i``-го сообщения прогона — в ``msg["attachments"]`` словарями: каждое
-    проходит через ``commit`` (копия в тред прогона), ``commit=None`` — как есть, в
-    кармане. Нет вложений — ключа нет."""
+def _put_attachments(msg: dict, attachments, i: int) -> None:
+    """Вложения ``i``-го сообщения прогона — в ``msg["attachments"]`` словарями
+    (уже скопированные в тред прогона или в кармане). Нет вложений — ключа
+    нет."""
     atts = attachments[i] if attachments and i < len(attachments) else None
     if atts:
-        msg["attachments"] = [
-            (commit(a) if commit is not None else a).to_dict() for a in atts
-        ]
+        msg["attachments"] = [a.to_dict() for a in atts]
+
+
+async def _acommit_attachments(ctx: Any, attachments) -> Any:
+    """Вложения сообщений запуска — копиями в тред прогона
+    (``acommit_to_run_thread``), по сообщениям, как пришли."""
+    if not attachments:
+        return attachments
+    return [
+        [await acommit_to_run_thread(ctx, a) for a in atts] if atts else atts
+        for atts in attachments
+    ]
+
+
+#: Как часто продлевать аренду треда во время хода: треть срока — два
+#: сбоя продления подряд ещё не отдают тред другому инстансу.
+LEASE_RENEW_SECONDS = LEASE_TTL.total_seconds() / 3
+
+
+def _start_lease_keeper(
+    thread_session: Any, on_lost: Any = None
+) -> asyncio.Task | None:
+    """Фоновое продление аренды треда, пока идёт цикл. Аренда бессрочная
+    (workflow) или треда нет — ``None``. Аренду перехватили — ход
+    останавливается сразу (``on_lost``), не дожидаясь следующей записи."""
+    if thread_session is None or not getattr(
+        thread_session, "renews_lease", False
+    ):
+        return None
+
+    async def keep() -> None:
+        while True:
+            await asyncio.sleep(LEASE_RENEW_SECONDS)
+            try:
+                await thread_session.arenew_lease()
+            except ThreadBusy:
+                logging.getLogger(__name__).warning(
+                    "thread_lease_lost: тред ведёт другой процесс, ход "
+                    "останавливается",
+                    exc_info=True,
+                )
+                if on_lost is not None:
+                    on_lost()
+                return
+            except Exception:
+                # Временный сбой продления: следующая попытка — по таймеру.
+                logging.getLogger(__name__).warning(
+                    "thread lease renewal failed", exc_info=True
+                )
+
+    return asyncio.create_task(keep())
+
+
+async def _stop_lease_keeper(keeper: asyncio.Task | None) -> None:
+    if keeper is None:
+        return
+    keeper.cancel()
+    await asyncio.gather(keeper, return_exceptions=True)
+
+
+async def _arelease_lease(thread_session: Any, logger: Any) -> None:
+    """Отпустить аренду треда после хода; сбой — предупреждение (аренда
+    истечёт сама)."""
+    release = getattr(thread_session, "arelease_lease", None)
+    if release is None:
+        return
+    try:
+        await release()
+    except Exception:
+        if logger is not None:
+            logger.warning("thread lease release failed", exc_info=True)
+
+
+@contextlib.asynccontextmanager
+async def _aturn_released_on_failure(ctx: Any, thread_session: Any, logger):
+    """Сбой после захвата треда: отметка «ход окончен», затем аренда.
+
+    Порядок важен: отпущенный тред может сразу взять другой процесс, и
+    отметка, легшая после этого, затёрла бы его runtime. Снятая задача
+    (остановка сервера) оставляет отметку хода: его продолжит
+    восстановление после перезапуска.
+    """
+    try:
+        yield
+    except Exception:
+        # Отказ хода — не падение процесса: восстанавливать нечего.
+        await _amark_turn(ctx, thread_session, running=False, logger=logger)
+        await _arelease_lease(thread_session, logger)
+        raise
+    except BaseException:
+        await _arelease_lease(thread_session, logger)
+        raise
+
+
+#: Метка сообщения входящего потока в очереди хода: его ``seq`` в потоке.
+_INBOX_MARK = "_inbox_seq"
+
+
+class InboxDrained(ValueError):
+    """Ход без своих сообщений, а входящий поток пуст: играть нечего."""
+
+
+async def _arefuse_reset_of_a_busy_thread(store: Any, key: Any) -> None:
+    """Сброс треда (``-n``) при живой чужой аренде — ``ThreadBusy``:
+    удалить тред, который ведёт другой процесс, значило бы стереть его ход."""
+    from gc_core.execution.environment import utc_now
+    from gc_core.threads.rules import lease_expired
+
+    record = await store.get_thread(key)
+    lease = record.lease if record is not None else None
+    if lease is not None and not lease_expired(lease, utc_now()):
+        raise ThreadBusy(
+            f"тред {key.system}/{key.thread} занят: его ведёт {lease.owner}"
+            " — сброс невозможен",
+            owner=lease.owner,
+        )
+
+
+def _aimed_at(control: list, target: str | None) -> bool:
+    """Среди записей ``control`` есть отмена, нацеленная на ``target``."""
+    return target is not None and any(
+        entry.data.get("type") == "cancel"
+        and entry.data.get("target") == target
+        for entry in control
+    )
+
+
+def _cancel_boundary(control: list, *, first: int) -> int | None:
+    """Граница отмены, касающейся хода, который доставляет входящие с номера
+    ``first``: наибольший ``upto_inbox_seq`` отмен не раньше ``first``.
+    Отмена прошлого хода (граница меньше ``first``) и запись без границы
+    ход не касаются."""
+    bounds = [
+        entry.data.get("upto_inbox_seq")
+        for entry in control
+        if entry.data.get("type") == "cancel"
+    ]
+    applicable = [b for b in bounds if type(b) is int and b >= first]
+    return max(applicable) if applicable else None
+
+
+def _inbox_reader(ctx: Any, thread_session: Any) -> Any:
+    """Чтение входящего потока треда хода или ``None``: треда нет, хранилище
+    потоков не знает, или ход durable (Temporal: сообщения и отмена
+    приходят сигналами, а опрос через activity засорял бы историю
+    workflow). Тот же признак включает и управляющий поток."""
+    if thread_session is None or getattr(ctx, "durable_execution", False):
+        return None
+    return getattr(thread_session, "aread_inbox", None)
+
+
+def _inbox_message(entry: Any) -> dict:
+    """Запись входящего потока → сообщение пользователя для хода."""
+    message = {
+        key: value
+        for key, value in entry.data.items()
+        if key in ("role", "content", "id", "display_content")
+    }
+    message.setdefault("role", "user")
+    message.setdefault("id", f"m_inbox_{entry.seq}")
+    return message
+
+
+def _take_inbox_marks(messages: list[dict], state: Any) -> list[dict]:
+    """Снять метки входящего потока с забранных ходом сообщений и поднять
+    ``state.inbox_seq``: следующая запись шага унесёт отметку вместе с ними."""
+    out = []
+    for message in messages:
+        seq = message.get(_INBOX_MARK)
+        if seq is None:
+            out.append(message)
+            continue
+        message = {k: v for k, v in message.items() if k != _INBOX_MARK}
+        if state is not None:
+            state.inbox_seq = max(int(state.inbox_seq or 0), int(seq))
+        out.append(message)
+    return out
+
+
+async def _amark_turn(
+    ctx: Any, thread_session: Any, *, running: bool, logger: Any
+) -> None:
+    """Отметка хода в треде (для восстановления после падения процесса).
+    Под Temporal не ставится: там ход защищён историей workflow. Сбой —
+    предупреждение: ход от отметки не зависит."""
+    if thread_session is None or getattr(ctx, "durable_execution", False):
+        return
+    mark = getattr(thread_session, "amark_turn", None)
+    if mark is None:
+        return
+    try:
+        await mark(running=running)
+    except ThreadBusy:
+        raise
+    except Exception:
+        (logger or logging.getLogger(__name__)).warning(
+            "thread turn mark failed", exc_info=True
+        )
+
+
+async def _apersist_state(
+    thread_session: Any,
+    state: Any,
+    step_messages: list,
+    *,
+    rendered_system_prompt: str | None,
+) -> None:
+    """Шаг в тред: сообщения и состояние хода (части записи v2)."""
+    thread_session.backend_api_mode = state.backend_api_mode
+    session = session_from_state(
+        thread_session.state,
+        state,
+        notice=thread_session.notice,
+        rendered_system_prompt=rendered_system_prompt,
+        backend_api_mode=state.backend_api_mode,
+        previous_response_id=state.previous_response_id,
+    )
+    await thread_session.apersist_batch(
+        step_messages,
+        previous_response_id=state.previous_response_id,
+        session=session,
+        usage=usage_from_state(state),
+    )
 
 
 def _require_plan_execution_mode(mode: str) -> str:
@@ -283,6 +485,56 @@ def _extend_with_thread_history(
         )
 
 
+@dataclass(frozen=True)
+class _RunRequest:
+    """Аргументы хода ``arun`` для его части на взятом треде."""
+
+    messages: list[str]
+    thread_id: str | None
+    verbose: bool
+    skills_list: Any
+    backend_api_mode: str
+    logger: Any
+    discard_writes_after_stop: bool
+    message_ids: list[str] | None
+    display_contents: list[str | None] | None
+    skills_loaded: list[str | None] | None
+    attachments: list[list[Attachment] | None] | None
+    account_run: bool
+    #: Ответ на вопрос, на котором тред приостановлен (``ask_human_suspends``).
+    answer: str | None = None
+    #: Цель хода для отмены с другого процесса (``request_cancel(target=)``).
+    cancel_target: str | None = None
+
+
+def _pending_question(thread_session: Any) -> dict | None:
+    """Вопрос, на котором приостановлен тред (``SessionState``)."""
+    session = getattr(thread_session, "state", None)
+    pending = getattr(session, "pending_question", None)
+    return pending if isinstance(pending, dict) and pending else None
+
+
+def _question_output(thread_session: Any, answer: str | None) -> dict | None:
+    """Вывод вызова приостановившего вопроса для батча хода: ответ или
+    «закрыт без ответа» (ход начался без ответа). Вопроса нет — ``None``;
+    ответ без вопроса — ``ValueError``."""
+    pending = _pending_question(thread_session)
+    if pending is None:
+        if answer is not None:
+            raise ValueError("answer: в треде нет вопроса, ждущего ответа")
+        return None
+    from gc_core.tools.turn.ask_human import AskHuman
+
+    return {
+        "id": generate_message_id_func("fco"),
+        "type": "function_call_output",
+        "call_id": pending.get("call_id"),
+        "output": AskHuman.answer_output(
+            question=str(pending.get("question") or ""), answer=answer
+        ),
+    }
+
+
 class AgentExecutor:
     """
     Потокобезопасный запуск агента с возможностью добавлять сообщения во время run
@@ -299,6 +551,15 @@ class AgentExecutor:
         #: ответили «принято», и молча терять их нельзя. Забирает владелец —
         #: `take_undelivered_messages`, вместе с пришедшим после.
         self._undelivered_messages: list[dict] = []
+        #: Последний ``seq`` входящего потока, уже положенный в очередь хода.
+        self._inbox_seen = 0
+        #: Последний ``seq`` управляющего потока на старте хода: отмены до
+        #: него к этому ходу не относятся.
+        self._control_seen = 0
+        self._inbox_first: int | None = None
+        self.cancelled_inbox_upto: int | None = None
+        #: Цель хода для отмены с другого процесса (``request_cancel(target=)``).
+        self._cancel_target: Optional[str] = None
         self._state: State | None = None
         # Сессия последнего arun. Её мету пишет aclose_run_accounting, один раз.
         self._thread_session: Any = None
@@ -320,10 +581,24 @@ class AgentExecutor:
         # он реально отправит сообщение.
         self._plan_rework_thread: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
+        #: Ответ последнего законченного цикла и признак, что цикл дошёл до
+        #: конца. Отмена, легшая в уборку после цикла (остановка сервера),
+        #: выходит из ``arun`` исключением, хотя ход уже записан: вызывающий
+        #: берёт его итог отсюда.
+        self.last_response: Any = None
+        self.loop_finished = False
+        #: Вопрос, на котором приостановлен последний ход (``{call_id,
+        #: question}``), или ``None``.
+        self.last_pending_question: Optional[dict] = None
 
         from gc_core.user_stop import UserStop
 
-        self.user_stop = UserStop()
+        #: Снятие идущей работы по стопу. Под Temporal его нет: ход workflow
+        #: останавливает свой стоп (модель, субагенты; тул дорабатывает), а
+        #: примитивы потоков песочница workflow не пускает.
+        self.user_stop: Optional[UserStop] = (
+            None if getattr(ctx, "durable_execution", False) else UserStop()
+        )
 
         self.last_closing_reply: str = ""
 
@@ -348,18 +623,19 @@ class AgentExecutor:
             self._pending_messages = []
             return out
 
-    def _take_pending_messages(self) -> list[dict]:
+    async def _atake_pending_messages(self) -> list[dict]:
         with self._lock:
             out = self._pending_messages[:]
             self._pending_messages.clear()
             state = self._state
+        out = _take_inbox_marks(out, state)
         # Сообщение из очереди — такое же новое слово человека, как
         # стартовое: снимает паузу судьи и посреди прогона.
         if state is not None:
             self._lift_judge_pause(state, out)
-        # Вне замка: копия картинок в тред — файловая операция, а замок ждут
-        # поток TUI и обработчик сервера.
-        return self._commit_queued(out)
+        # Вне замка: копия картинок в тред — ввод-вывод хранилища, а замок
+        # ждут поток TUI и обработчик сервера.
+        return await self._acommit_queued(out)
 
     def _is_stop_requested(self) -> bool:
         with self._lock:
@@ -394,12 +670,26 @@ class AgentExecutor:
             # там — файловое, как раньше.
             _reset_store = getattr(self._ctx, "thread_store", None)
             if _reset_store is None:
-                from gc_core.thread_store_file import FileThreadStore
+                from gc_core.threads.file_store import FileThreadStore
 
                 _reset_store = FileThreadStore(resolve_threads_dir(self._ctx))
-            from gc_core.thread_store_async import athread_store
+            from gc_core.thread_paths import sanitize_system_id
+            from gc_core.threads.models import ThreadKey
+            from gc_core.utils.generate_message_id import (
+                generate_msg_id_sha256,
+            )
 
-            await athread_store(_reset_store).areset(system_id, thread_id)
+            reset_key = ThreadKey(
+                system=sanitize_system_id(system_id), thread=thread_id
+            )
+            await _arefuse_reset_of_a_busy_thread(_reset_store, reset_key)
+            try:
+                await _reset_store.delete(
+                    reset_key, op_id=generate_msg_id_sha256("reset")
+                )
+            except OwnershipError as exc:
+                # Тред ведёт durable-исполнитель — не сбрасывается.
+                raise ThreadBusy(str(exc)) from exc
             # Снимки баз — не забота хранилища: тем же ``reset`` ходит
             # запасной путь компакции, где сносить базы отката нельзя.
             # Пользовательский сброс знает, что чистит, и чистит здесь.
@@ -419,7 +709,28 @@ class AgentExecutor:
             # Хранилище встраивающего, если он его передал. None — файловое
             # по умолчанию, ровно прежнее поведение.
             store=getattr(self._ctx, "thread_store", None),
+            # Тред берётся до чтения истории: чужой живой ход — ThreadBusy
+            # до любой работы, а прочитанное не устареет под чужой записью.
+            claim=True,
         )
+        # Сбой между захватом и ходом (проверка состояния треда, хук) не
+        # оставляет аренду и отметку хода до срока: повтор увидел бы «тред
+        # занят» вместо ошибки, восстановление подняло бы упавшую задачу.
+        async with _aturn_released_on_failure(
+            self._ctx, thread_session, logger
+        ):
+            return await self._abind_claimed(
+                thread_session,
+                system_id=system_id,
+                backend_api_mode=backend_api_mode,
+                logger=logger,
+            )
+
+    async def _abind_claimed(
+        self, thread_session, *, system_id: str, backend_api_mode: str, logger
+    ) -> tuple:
+        """Взятый тред — в ход: отметка, история, состояние, личность."""
+        await self._aon_thread_claimed(thread_session, logger)
         if logger is not None:
             # Единственная связка «этот лог-файл ↔ этот тред»: на момент
             # создания логгера тред ещё не разрешён, поэтому в agent_start
@@ -442,14 +753,19 @@ class AgentExecutor:
             )
         previous_response_id = None
         if backend_api_mode == "chat_completions":
+            pending = _pending_question(thread_session)
             thread_session.history_messages = repair_tool_call_pairing(
                 thread_session.history_messages,
                 keep_latest_unanswered=False,
+                keep_call_ids=frozenset(
+                    [str(pending.get("call_id"))] if pending else []
+                ),
             )
         if backend_api_mode == "responses":
             previous_response_id = thread_session.previous_response_id
-        meta = getattr(thread_session, "meta", None) or {}
-        thread_shared = ThreadMetaMapper.shared_from_meta(meta)
+        thread_shared = shared_from_session(
+            thread_session.state, thread_session.extra
+        )
         # Sidecar nested-trace: identity для child ctx (независимо от TUI sink).
         bind_thread_identity(
             self._ctx,
@@ -458,6 +774,22 @@ class AgentExecutor:
             thread_id=thread_session.thread_id,
         )
         return thread_session, thread_shared, previous_response_id, system_id
+
+    async def _aon_thread_claimed(self, thread_session, logger) -> None:
+        """Тред взят: отметить ход и сказать фронтенду (статус задачи
+        вебхука пишет только взявший тред ход). Сбой хука — предупреждение."""
+        await _amark_turn(
+            self._ctx, thread_session, running=True, logger=logger
+        )
+        hook = getattr(self._ctx, "on_thread_claimed", None)
+        if hook is None:
+            return
+        try:
+            await hook(thread_session.system_id, thread_session.thread_id)
+        except Exception:
+            (logger or logging.getLogger(__name__)).warning(
+                "on_thread_claimed hook failed", exc_info=True
+            )
 
     async def _amcp_snapshot(
         self, thread_session, thread_id, system_id: str
@@ -471,11 +803,7 @@ class AgentExecutor:
             snap = build_mcp_tools_snapshot(
                 self._ctx, self._ctx.tools_data, self._ctx.mcp_status
             )
-            await thread_session.port.aupdate_runtime_meta(
-                system_id,
-                thread_id,
-                {"mcp_tools": snap},
-            )
+            await thread_session.aset_mcp_tools(snap)
         except Exception:
             pass
 
@@ -490,7 +818,7 @@ class AgentExecutor:
         from gc_core.agent_store import agent_store_of
         from gc_core.run_preparation import (
             PromptPreparationRequest,
-            load_run_prompts,
+            aload_run_prompts,
         )
 
         request = PromptPreparationRequest.from_config(
@@ -498,7 +826,7 @@ class AgentExecutor:
         )
         loader = port(self._ctx, "prompt_loader")
         if loader is None:
-            prepared = load_run_prompts(
+            prepared = await aload_run_prompts(
                 request, logger=logger, store=agent_store_of(self._ctx)
             )
         else:
@@ -551,7 +879,6 @@ class AgentExecutor:
 
             prepared = await preparer(
                 StatePreparationRequest(
-                    agent_md_path=state_data["agent_md_path"],
                     is_tui=state_data["is_tui"],
                     agentsmd_override=state_data["agentsmd_override"],
                     verbose=effective_verbose,
@@ -572,20 +899,12 @@ class AgentExecutor:
         )
         state.dialog_steps_offset = 0
         if thread_session is not None:
-            meta = getattr(thread_session, "meta", None) or {}
-            state.init_user_intent_log(meta.get("user_intent_log"))
-            state.init_current_user_intent(meta.get("current_user_intent"))
-            state.init_user_turn_seq(meta.get("user_turn_seq"))
-            state.infer_user_turn_seq_if_missing()
-            state.init_tool_usage_notice_from_meta(meta)
-            state.dialog_steps_offset = int(
-                meta.get("dialog_steps_offset", 0) or 0
+            hydrate_state(
+                state,
+                thread_session.state,
+                thread_session.usage,
+                thread_session.notice,
             )
-            (
-                state.last_main_prompt_tokens,
-                state.last_main_prompt_message_count,
-            ) = ThreadMetaMapper.read_prompt_token_fields(meta)
-            state.usage = UsageAccount.from_meta(meta.get("token_usage"))
         rendered_system_prompt: str | None = None
         if (
             backend_api_mode == "chat_completions"
@@ -770,19 +1089,18 @@ class AgentExecutor:
             plan["approved_mode"] = None
             plan["updated_at"] = now_stamp()
 
-    def _export_plan_file(self, state, logger) -> None:
-        """Файл плана для человека — раз в конце прогона, рядом с записью меты.
+    async def _aexport_plan_file(self, state, logger) -> None:
+        """Файл плана для человека — раз в конце прогона, после записи меты.
 
-        Пишет хранилище, если умеет (файловый стор); сбой экспорта прогон не
-        роняет: файл — удобство, канон плана уже сохранён в мете.
+        Пишет хранилище, если умеет (файловое); сбой экспорта прогон не
+        роняет: файл — удобство, канон плана уже сохранён в состоянии треда.
         """
         session = self._thread_session
-        save = getattr(getattr(session, "store", None), "save_plan_file", None)
         plan = getattr(state.shared, "plan", None)
-        if not callable(save) or not plan:
+        if session is None or not plan:
             return
         try:
-            save(session.system_id, session.thread_id, plan)
+            await session.asave_plan_file(plan)
         except Exception as exc:
             if logger is not None:
                 logger.warning("plan file export failed: %s", exc)
@@ -841,21 +1159,6 @@ class AgentExecutor:
         async def _persist_thread_batch(step_messages: list[dict]) -> None:
             if is_persist_discarded(state):
                 return
-            # Persist notes from in-memory state into thread meta.
-            # Tools mutate state, but ThreadSession writes self.meta to disk.
-            if (
-                backend_api_mode == "chat_completions"
-                and isinstance(rendered_system_prompt, str)
-                and rendered_system_prompt.strip()
-            ):
-                thread_session.meta[
-                    "chat_completions_system_prompt_rendered"
-                ] = rendered_system_prompt
-            _shared = getattr(state, "shared", None)
-            if isinstance(_shared, SharedStateData):
-                thread_session.meta = ThreadMetaMapper.merge_shared_into_meta(
-                    thread_session.meta, _shared
-                )
             known_before = set(thread_session.known_message_keys)
             step_messages_for_user_scope = [
                 m
@@ -867,24 +1170,15 @@ class AgentExecutor:
                 step_messages_for_user_scope,
                 user_turn_seq=state.user_turn_seq,
             )
-            thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
-                thread_session.meta, state
-            )
-            thread_session.meta["backend_api_mode"] = state.backend_api_mode
-            thread_session.backend_api_mode = state.backend_api_mode
-            persist_tool_usage_notice_state(state, thread_session.meta)
-            last_backend_response_id = getattr(
-                state, "last_backend_response_id", None
-            )
-            if (
-                isinstance(last_backend_response_id, str)
-                and last_backend_response_id
-            ):
-                thread_session.meta["last_backend_response_id"] = (
-                    last_backend_response_id
-                )
-            await thread_session.apersist_batch(
-                step_messages, previous_response_id=state.previous_response_id
+            await _apersist_state(
+                thread_session,
+                state,
+                step_messages,
+                rendered_system_prompt=(
+                    rendered_system_prompt
+                    if backend_api_mode == "chat_completions"
+                    else None
+                ),
             )
 
         return _persist_thread_batch
@@ -954,13 +1248,8 @@ class AgentExecutor:
             state.discard_writes_after_stop and state.stop_requested
         ):
             return
-        thread_session.meta = ThreadMetaMapper.merge_state_into_meta(
-            thread_session.meta, state
-        )
-        thread_session.meta["backend_api_mode"] = state.backend_api_mode
-        persist_tool_usage_notice_state(state, thread_session.meta)
-        await thread_session.apersist_batch(
-            [], previous_response_id=state.previous_response_id
+        await _apersist_state(
+            thread_session, state, [], rendered_system_prompt=None
         )
         # persist: turn — конец хода и есть точка сброса.
         flush = getattr(thread_session, "aflush_deferred", None)
@@ -981,14 +1270,19 @@ class AgentExecutor:
         # ``console=False`` — тот же отчёт только в лог, без таблицы в stdout.
         settings = settings_of(self._ctx)
         try:
+            # Тариф — по имени модели, валюта — по адресу: модель main из
+            # реестра models, а не легаси agent.model/backend.completions_url.
+            model_name, endpoint_url = main_model_identity(
+                settings, self.get_model_router()
+            )
             run_usage = state.usage.delta_from(run_start_usage)
             # Доступно in-memory: get_state().usage (кумулятив) и .last_run_usage (этот прогон).
             state.last_run_usage = run_usage
             usage_text = build_run_usage_report(
                 run_usage,
                 settings.pricing,
-                settings.agent.model,
-                settings.backend.completions_url,
+                model_name,
+                endpoint_url,
                 provider_currency=getattr(
                     self._ctx, "provider_currency", None
                 ),
@@ -1004,8 +1298,8 @@ class AgentExecutor:
                 usage_dict = build_run_usage_dict(
                     run_usage,
                     settings.pricing,
-                    settings.agent.model,
-                    settings.backend.completions_url,
+                    model_name,
+                    endpoint_url,
                     provider_currency=getattr(
                         self._ctx, "provider_currency", None
                     ),
@@ -1040,7 +1334,12 @@ class AgentExecutor:
         logger = getattr(self._ctx, "logger", None)
         await self._afinalize_thread(self._thread_session, state, logger)
         self._accounting_closed = True
-        self._export_plan_file(state, logger)
+        await self._aexport_plan_file(state, logger)
+        # Последняя запись хода — тред свободен для другого инстанса.
+        await _amark_turn(
+            self._ctx, self._thread_session, running=False, logger=logger
+        )
+        await _arelease_lease(self._thread_session, logger)
         try:
             baseline = UsageAccount.from_meta(
                 getattr(state, "run_start_usage_meta", None)
@@ -1073,7 +1372,11 @@ class AgentExecutor:
         # Keep the unconsumed queue before the await; messages arriving during
         # MCP cleanup remain pending and are returned by take_undelivered_messages.
         with self._lock:
-            self._undelivered_messages.extend(self._pending_messages)
+            # Сообщения входящего потока остаются в потоке: их доиграет
+            # рукопожатие или следующий ход, отметка доставки их не покрыла.
+            self._undelivered_messages.extend(
+                m for m in self._pending_messages if _INBOX_MARK not in m
+            )
             self._pending_messages = []
         try:
             cleanup = port(self._ctx, "mcp_cleanup")
@@ -1121,27 +1424,93 @@ class AgentExecutor:
         skills_loaded: list[str | None] | None = None,
         attachments: list[list[Attachment] | None] | None = None,
         account_run: bool = True,
+        answer: str | None = None,
+        cancel_target: str | None = None,
     ) -> Any:
         """Прогон агента, не блокирующий вызывающий loop.
 
         При каждом вызове state создаётся заново. messages — непустой список
-        текстов, каждый уходит отдельным user-сообщением.
+        текстов, каждый уходит отдельным user-сообщением. Пустой — ход из
+        входящего потока треда (``Threads.submit``); пуст и он —
+        ``InboxDrained`` (``ValueError``).
 
         attachments — вложения по сообщениям, параллельно messages (как
         display_contents): элемент — картинки своего сообщения из кармана
         процесса (``ImageStore.stage``) или None. В тред их копирует сам ход
-        (``commit_to_run_thread``); текст сообщения остаётся строкой с
+        (``acommit_to_run_thread``); текст сообщения остаётся строкой с
         плашками ``[Изображение #N]``.
 
         Форма ОДНА. Синхронного ``run`` нет: из синхронного кода агента
         ведут своим ``asyncio.run`` в рабочем потоке — так делают TUI и
         harbor-адаптер.
 
+        ``answer`` — ответ на вопрос, на котором тред приостановлен
+        (``ask_human_suspends``): ложится выводом того вызова, ход идёт
+        дальше. Тред ждёт ответа, а ход начат без него — вопрос закрывается
+        «без ответа». Ответ, когда вопроса нет, — ``ValueError``.
+
+        ``cancel_target`` — цель хода для отмены с другого процесса (ответ
+        chat, задача A2A): отмена с этой целью (``Threads.request_cancel``)
+        останавливает ход, когда бы ни легла — и пока он собирается.
+
         ``account_run=False`` — не закрывать учёт внутри. Вызывающий ещё
         добавит шаги после цикла и сам вызовет ``aclose_run_accounting``.
         Отмена закрытия MCP после уже завершённого цикла учёт всё равно
         записывает и затем пробрасывается: дополнительного шага уже не будет.
         """
+        _require_supported_persist_mode(settings_of(self._ctx), self._ctx)
+        response = await self._arun_turn(
+            messages,
+            thread_id=thread_id,
+            start_new_thread=start_new_thread,
+            system=system,
+            verbose=verbose,
+            discard_writes_after_stop=discard_writes_after_stop,
+            message_ids=message_ids,
+            display_contents=display_contents,
+            skills_loaded=skills_loaded,
+            attachments=attachments,
+            account_run=account_run,
+            answer=answer,
+            cancel_target=cancel_target,
+        )
+        # Рукопожатие: тред отпущен, а во входящий поток успело лечь
+        # сообщение после последнего забора — ещё ход тем же исполнителем.
+        # Не взяли тред — его уже ведёт другой, он и заберёт.
+        while account_run and await self.ainbox_left():
+            try:
+                response = await self._arun_turn(
+                    [],
+                    thread_id=thread_id,
+                    system=system,
+                    verbose=verbose,
+                    discard_writes_after_stop=discard_writes_after_stop,
+                )
+            except (ThreadBusy, InboxDrained):
+                break
+        return response
+
+    async def _arun_turn(
+        self,
+        messages: list[str],
+        *,
+        thread_id: str | None = None,
+        start_new_thread: bool = False,
+        system: str | None = None,
+        verbose: bool | None = None,
+        discard_writes_after_stop: bool = False,
+        message_ids: list[str] | None = None,
+        display_contents: list[str | None] | None = None,
+        skills_loaded: list[str | None] | None = None,
+        attachments: list[list[Attachment] | None] | None = None,
+        account_run: bool = True,
+        answer: str | None = None,
+        cancel_target: str | None = None,
+    ) -> Any:
+        """Один ход ``arun``: тред, подготовка, цикл, учёт."""
+        self._cancel_target = cancel_target
+        self._inbox_first = None
+        self.cancelled_inbox_upto = None
         with self._lock:
             # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
             # объекта, `stop_run` в сетапе этого хода (чтение треда, сборка
@@ -1158,31 +1527,58 @@ class AgentExecutor:
             self._state = None
             self._accounting_closed = False
         settings = settings_of(self._ctx)
-        # Раньше стопа: неверный persist не должен падать на отсутствии
-        # ``user_stop`` и не вооружает снятие хода, который не начнётся.
-        _require_supported_persist_mode(settings, self._ctx)
-        self.user_stop.prepare_run(
-            asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
-        )
+        # Неверный persist отбит ещё в ``arun`` — раньше стопа: ход, который
+        # не начнётся, снятие не вооружает.
+        if self.user_stop is not None:
+            self.user_stop.prepare_run(
+                asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
+            )
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else settings.agent.verbose
         )
         skills_list = await self._alist_skills()
         backend_api_mode = str(settings.backend.api_mode).strip().lower()
-        (
-            thread_session,
-            thread_shared,
-            previous_response_id,
-            system_id,
-        ) = await self._aopen_thread_session(
+        opened = await self._aopen_thread_session(
             thread_id,
             start_new_thread=start_new_thread,
             system=system,
             backend_api_mode=backend_api_mode,
             logger=logger,
         )
-        self._thread_session = thread_session
+        self._thread_session = opened[0]
+        request = _RunRequest(
+            messages=messages,
+            thread_id=thread_id,
+            verbose=effective_verbose,
+            skills_list=skills_list,
+            backend_api_mode=backend_api_mode,
+            logger=logger,
+            discard_writes_after_stop=discard_writes_after_stop,
+            message_ids=message_ids,
+            display_contents=display_contents,
+            skills_loaded=skills_loaded,
+            attachments=attachments,
+            account_run=account_run,
+            answer=answer,
+            cancel_target=cancel_target,
+        )
+        # Тред взят в начале хода; ход, не дошедший до учёта, не держит его
+        # до срока аренды (повторное отпускание безвредно).
+        async with _aturn_released_on_failure(self._ctx, opened[0], logger):
+            return await self._arun_on_thread(opened, request)
+
+    async def _arun_on_thread(
+        self, opened: tuple, request: _RunRequest
+    ) -> Any:
+        """Ход на взятом треде: подготовка состояния, цикл агента, учёт."""
+        thread_session, thread_shared, previous_response_id, system_id = opened
+        messages = request.messages
+        thread_id = request.thread_id
+        effective_verbose = request.verbose
+        skills_list = request.skills_list
+        backend_api_mode = request.backend_api_mode
+        logger = request.logger
         # Turn identity: свежий id на каждый run(), независимо от треда — без
         # него нечем будет пометить записи журнала правок текущего хода.
         bind_turn_identity(self._ctx, mint_turn_id())
@@ -1225,7 +1621,7 @@ class AgentExecutor:
             logger=logger,
         )
         self._bind_state(
-            state, discard_writes_after_stop=discard_writes_after_stop
+            state, discard_writes_after_stop=request.discard_writes_after_stop
         )
 
         # Permission memory: store оборачивает state.shared.confirm_rules ПО ССЫЛКЕ —
@@ -1271,26 +1667,33 @@ class AgentExecutor:
                 summary.apre_run_compact_if_needed, trigger_reason="pre_run"
             )
 
-        if not messages:
-            raise ValueError(
+        inbox_tail = await self._aread_inbox_tail(thread_session, state)
+        question_output = _question_output(thread_session, request.answer)
+        if (
+            not messages
+            and not inbox_tail
+            and question_output is None
+            and not state.stop_requested
+        ):
+            raise InboxDrained(
                 "Список пользовательских сообщений не должен быть пустым."
             )
         user_bodies = [str(x) for x in messages]
         # Копия вложений в тред — здесь и при приёме очереди, и только после
         # сброса треда и привязки его адреса к контексту выше: копия, сделанная
         # до сброса, пропала бы вместе с тредом.
-        commit_attachment = functools.partial(commit_to_run_thread, self._ctx)
+        committed = await _acommit_attachments(self._ctx, request.attachments)
         # id можно задать снаружи (TUI пробрасывает свой, чтобы потом точечно
         # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
         new_user_messages = self._build_user_messages(
             user_bodies,
-            message_ids=message_ids,
-            display_contents=display_contents,
-            skills_loaded=skills_loaded,
+            message_ids=request.message_ids,
+            display_contents=request.display_contents,
+            skills_loaded=request.skills_loaded,
             gen_id=generate_message_id_func,
-            attachments=attachments,
-            commit=commit_attachment,
+            attachments=committed,
         )
+        new_user_messages.extend(inbox_tail)
         self._seed_current_user_intent(state, new_user_messages)
         self._apply_plan_changes(state, new_user_messages)
         self._lift_judge_pause(state, new_user_messages)
@@ -1306,6 +1709,10 @@ class AgentExecutor:
                 },
             )
 
+        # Вывод вопроса, на котором тред приостановлен, — первым: он отвечает
+        # на последний вызов истории.
+        if question_output is not None:
+            new_user_messages.insert(0, question_output)
         messages, persist_messages_callback, get_full_history_messages = (
             self._persistence_for_run(
                 thread_session=thread_session,
@@ -1332,15 +1739,15 @@ class AgentExecutor:
         )
         loop_finished = False
         teardown_cancel: BaseException | None = None
+        keeper = _start_lease_keeper(thread_session, on_lost=self.stop_run)
+        poller = self._start_inbox_poller(thread_session)
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
-        queued_before_loop = self._take_pending_messages()
+        queued_before_loop = await self._atake_pending_messages()
         if queued_before_loop:
             messages = [*messages, *queued_before_loop]
-        from gc_core.user_stop import bind_user_stop
-
-        _stop_bound = bind_user_stop(self.user_stop)
+        _stop_bound = self._user_stop_scope()
         _stop_bound.__enter__()
         try:
             response = await arun_agent(
@@ -1357,10 +1764,12 @@ class AgentExecutor:
                 pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
                 force_compact_hook=summary.aforce_compact_once,
-                get_pending_messages=self._take_pending_messages,
+                get_pending_messages=self._atake_pending_messages,
                 check_stop=self._is_stop_requested,
                 session_meta=(
-                    thread_session.meta if thread_session is not None else None
+                    thread_session.notice
+                    if thread_session is not None
+                    else None
                 ),
                 mark_finalizing=(
                     lambda active: aset_tui_finalizing(thread_session, active)
@@ -1372,14 +1781,22 @@ class AgentExecutor:
                 ),
             )
             loop_finished = True
+            self.last_response, self.loop_finished = response, True
             self.last_terminal_outcome = getattr(
                 state, "terminal_outcome", None
+            )
+            self.last_pending_question = getattr(
+                state, "pending_question", None
             )
             self.last_closing_reply = getattr(state, "closing_reply", "")
         finally:
             _stop_bound.__exit__(None, None, None)
+            await _stop_lease_keeper(poller)
+            await _stop_lease_keeper(keeper)
             state_ops.leave(state)
             state.turn_level = None
+            # Упавший ход отпускает тред выше (``_arun_turn``) — после
+            # отметки «ход окончен», не до неё.
             teardown_cancel = await self._ateardown_run(_owner_reset)
 
         if teardown_cancel is not None:
@@ -1391,7 +1808,7 @@ class AgentExecutor:
 
         # Учёт — одна точка. Кто продолжит прогон после возврата, закроет её сам.
         # Отмена уборки сюда не доходит: завершённый цикл уже записан выше.
-        if account_run:
+        if request.account_run:
             await self.aclose_run_accounting()
 
         self._report_log_path(logger)
@@ -1434,6 +1851,119 @@ class AgentExecutor:
             if self._state is not None:
                 return getattr(self._state.shared, "permission_mode", None)
             return None
+
+    async def _aread_inbox_tail(self, thread_session, state) -> list[dict]:
+        """Недоставленный хвост входящего потока — в стартовые сообщения хода
+        (отметку доставки унесёт первая запись шага)."""
+        read = _inbox_reader(self._ctx, thread_session)
+        if read is None:
+            return []
+        delivered = int(state.inbox_seq or 0)
+        entries = await read(after=delivered)
+        control = await thread_session.aread_control(after=0)
+        self._control_seen = control[-1].seq if control else 0
+        if _aimed_at(control, self._cancel_target):
+            # Отменили именно этот ход (ответ chat, задача A2A), пока он
+            # собирался: до запроса к модели он не доходит.
+            state.stop_requested = True
+            self.stop_run()
+            return []
+        cut = _cancel_boundary(control, first=delivered + 1)
+        if cut is not None:
+            # Отмена пришла, пока ход собирался: сообщения до её границы
+            # сняты (в историю не идут); пришедшие после неё — новая работа
+            # этого хода. Без них ход останавливается до первого запроса к
+            # модели; отметку доставки унесёт запись остановки.
+            state.inbox_seq = cut
+            self._inbox_seen = cut
+            entries = [entry for entry in entries if entry.seq > cut]
+            if not entries:
+                self.cancelled_inbox_upto = cut
+                state.stop_requested = True
+                self.stop_run()
+                return []
+        if entries:
+            self._inbox_first = entries[0].seq
+            state.inbox_seq = entries[-1].seq
+        self._inbox_seen = int(state.inbox_seq or 0)
+        return [_inbox_message(entry) for entry in entries]
+
+    def _start_inbox_poller(self, thread_session) -> asyncio.Task | None:
+        """Фоновый опрос входящего потока, пока идёт цикл: новое — в очередь
+        хода с меткой ``seq``; цикл заберёт его на следующем шаге."""
+        read = _inbox_reader(self._ctx, thread_session)
+        if read is None:
+            return None
+        interval = settings_of(self._ctx).thread_store.inbox_poll_seconds
+        read_control = thread_session.aread_control
+
+        async def poll() -> None:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    entries = await read(after=self._inbox_seen)
+                    control = await read_control(after=self._control_seen)
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        "thread inbox poll failed", exc_info=True
+                    )
+                    continue
+                self._enqueue_inbox(entries)
+                self._apply_control(control)
+
+        return asyncio.create_task(poll())
+
+    def _apply_control(self, entries: list) -> None:
+        """Отмена из управляющего потока — остановка хода на следующем шаге."""
+        if not entries:
+            return
+        self._control_seen = entries[-1].seq
+        for entry in entries:
+            data = entry.data
+            if data.get("type") != "cancel":
+                continue
+            target = data.get("target")
+            upto = data.get("upto_inbox_seq")
+            if target is not None:
+                applies = target == self._cancel_target
+            else:
+                first = self._inbox_first
+                applies = (
+                    first is None or type(upto) is not int or upto >= first
+                )
+            if applies:
+                if type(upto) is int:
+                    self.cancelled_inbox_upto = max(
+                        self.cancelled_inbox_upto or 0, upto
+                    )
+                self.stop_run()
+
+    def _enqueue_inbox(self, entries: list) -> None:
+        """Записи потока — прямо в очередь хода (не субагенту: отметку
+        доставки ведёт ход)."""
+        with self._lock:
+            for entry in entries:
+                if entry.seq <= self._inbox_seen:
+                    continue
+                self._pending_messages.append(
+                    {**_inbox_message(entry), _INBOX_MARK: entry.seq}
+                )
+                self._inbox_seen = entry.seq
+
+    async def ainbox_left(self) -> bool:
+        """После хода: во входящем потоке треда есть недоставленное, а ход
+        кончился не остановкой — значит нужен ещё ход (рукопожатие ``arun``
+        и реестр сервера, закрывший прогон)."""
+        thread_session = self._thread_session
+        state = self.get_state()
+        if state is None or state.stop_requested:
+            return False
+        if _inbox_reader(self._ctx, thread_session) is None:
+            return False
+        entries = await thread_session.aread_inbox(
+            after=int(state.inbox_seq or 0), limit=1
+        )
+        return bool(entries)
 
     def add_message(self, message: dict) -> None:
         """Потокобезопасно добавляет сообщение в очередь активного скоупа.
@@ -1556,12 +2086,11 @@ class AgentExecutor:
         skills_loaded,
         gen_id,
         attachments=None,
-        commit=None,
     ):
         """Собрать user-сообщения с опциональными display_content/skill_loaded/attachments.
         display_content ставится только при отличии от content; skill_loaded — если задан;
-        attachments — если у сообщения есть вложения: каждое проходит через ``commit``
-        (копия в тред прогона), ``commit=None`` — вложения как есть, в кармане."""
+        attachments — если у сообщения есть вложения (уже скопированные в тред
+        прогона либо в кармане)."""
         out = []
         for i, body in enumerate(user_bodies):
             body = str(body)
@@ -1588,14 +2117,24 @@ class AgentExecutor:
             )
             if sk:
                 msg["skill_loaded"] = sk
-            _put_attachments(msg, attachments, i, commit)
+            _put_attachments(msg, attachments, i)
             out.append(msg)
         return out
 
-    def _commit_queued(self, messages: list[dict]) -> list[dict]:
+    async def _acommit_queued(self, messages: list[dict]) -> list[dict]:
         """Сообщения очереди с вложениями, переложенными в тред прогона: сообщение
         получает тред, когда его принимает агент, — здесь и копируем его картинки."""
-        return [with_committed_attachments(m, self._ctx) for m in messages]
+        return [
+            await awith_committed_attachments(m, self._ctx) for m in messages
+        ]
+
+    def _user_stop_scope(self) -> contextlib.AbstractContextManager:
+        """Снятие ``user_stop`` на время хода; под Temporal его нет."""
+        if self.user_stop is None:
+            return contextlib.nullcontext()
+        from gc_core.user_stop import bind_user_stop
+
+        return bind_user_stop(self.user_stop)
 
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.
@@ -1608,7 +2147,8 @@ class AgentExecutor:
             else:
                 self._stop_pending = True
             run_logger = getattr(self._ctx, "logger", None)
-        self.user_stop.request(run_logger)
+        if self.user_stop is not None:
+            self.user_stop.request(run_logger)
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

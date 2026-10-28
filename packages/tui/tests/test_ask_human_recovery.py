@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import compact_thread, tui_settings
 import json
 from pathlib import Path
 
@@ -467,41 +467,15 @@ async def test_stream_reset_compacted_answered_clears_stale_banner(tmp_path):
         await pilot.pause(0.05)
         assert scr._ask_human_banner is not None  # живой вопрос — баннер есть
 
-        # компакция: straddle-layout (call в архиве, summary+продолжение в live) + новый epoch
-        (
-            tmp_path / f"data_cli_{tid}__pre_summary__20260605_120000.jsonl"
-        ).write_text(
-            _ah_envelope_lines(
-                tid,
-                [
-                    {"id": "u1", "role": "user", "content": "запусти"},
-                    _ah_call_payload("Подтверждаете?", "call_ah_x"),
-                ],
-            ),
-            encoding="utf-8",
-        )
-        (tmp_path / f"data_cli_{tid}.jsonl").write_text(
-            _ah_envelope_lines(
-                tid,
-                [
-                    _ah_dialog_summary_payload(
-                        "вопрос подтверждён, продолжаем"
-                    ),
-                    {"id": "a1", "role": "assistant", "content": "Продолжаю."},
-                ],
-            ),
-            encoding="utf-8",
-        )
-        (tmp_path / f"meta_cli_{tid}.json").write_text(
-            json.dumps(
-                {
-                    "thread_id": tid,
-                    "updated_at": "t1",
-                    "messages_count": 2,
-                    "last_summary_archive_suffix": "20260605_120000",
-                }
-            ),
-            encoding="utf-8",
+        # компакция ядром: straddle-layout (call в архиве, summary+продолжение в live)
+        compact_thread(
+            str(tmp_path),
+            "cli",
+            tid,
+            [
+                _ah_dialog_summary_payload("вопрос подтверждён, продолжаем"),
+                {"id": "a1", "role": "assistant", "content": "Продолжаю."},
+            ],
         )
         await pilot.pause(0.4)  # poll → stream_reset → reconcile
 

@@ -69,6 +69,15 @@ class UnreadableDisk(MemoryDisk):
         raise OSError("denied")
 
 
+def _call_id(value):
+    """Текущий вызов для обёртки: ACP узнаёт его из хранилища, асинхронно."""
+
+    async def current():
+        return value
+
+    return current
+
+
 def _open(tmp_path, disk):
     agents = []
 
@@ -629,7 +638,7 @@ async def test_oversize_bodies_stay_out_of_the_log():
     new = "b" * (_LIMIT + 2)
     disk.files["/work/big.txt"] = old.encode()
     log = DiffLog()
-    backend = DiffBackend(disk, log, cwd="/work", call_id=lambda: "big")
+    backend = DiffBackend(disk, log, cwd="/work", call_id=_call_id("big"))
     await backend.write_bytes("/work/big.txt", new.encode())
     side = log._by_call["big"]["/work/big.txt"]
     assert side.old_text is None
@@ -656,7 +665,7 @@ async def test_kept_text_leaves_when_the_card_is_attached():
     disk = MemoryDisk()
     disk.files["note.txt"] = "было\n".encode()
     log = DiffLog()
-    backend = DiffBackend(disk, log, cwd="/work", call_id=lambda: "w1")
+    backend = DiffBackend(disk, log, cwd="/work", call_id=_call_id("w1"))
     await backend.write_bytes("note.txt", "стало\n".encode())
     shown = attach_diff(
         {
@@ -682,7 +691,7 @@ async def test_later_oversize_write_keeps_the_light_old_side():
     disk = MemoryDisk()
     disk.files["edit.txt"] = b"v0"
     log = DiffLog()
-    backend = DiffBackend(disk, log, cwd="/work", call_id=lambda: "batch")
+    backend = DiffBackend(disk, log, cwd="/work", call_id=_call_id("batch"))
     await backend.write_bytes("edit.txt", b"v1")
     side = log._by_call["batch"]["/work/edit.txt"]
     assert side.old_text == "v0"
@@ -710,7 +719,7 @@ async def test_small_text_returns_after_an_oversize_write():
     disk = MemoryDisk()
     disk.files["edit.txt"] = b"v0"
     log = DiffLog()
-    backend = DiffBackend(disk, log, cwd="/work", call_id=lambda: "batch")
+    backend = DiffBackend(disk, log, cwd="/work", call_id=_call_id("batch"))
     await backend.write_bytes("edit.txt", b"v1")
     await backend.write_bytes("edit.txt", ("v" * (_LIMIT + 1)).encode())
     await backend.write_bytes("edit.txt", b"v2")

@@ -1,4 +1,14 @@
-from gc_core.instructions.init_agents_md import build_init_prompt
+from gc_core.agent_store import FileAgentStore
+from gc_core.instructions.init_agents_md import abuild_init_prompt
+from gc_testkit import run_coro
+from gc_testkit.memory_agent_store import MemoryAgentStore
+
+
+def build_init_prompt(*, cwd: str, can_ask: bool) -> str:
+    """Шаблон — пакетный, через файловое хранилище по умолчанию."""
+    return run_coro(
+        abuild_init_prompt(store=FileAgentStore(), cwd=cwd, can_ask=can_ask)
+    )
 
 
 def test_no_file_branch_instructs_create(tmp_path):
@@ -40,3 +50,26 @@ def test_prompt_is_universal_and_agent_writes(tmp_path):
     assert (
         "Return the complete AGENTS.md markdown as your final answer" not in p
     )
+
+
+async def test_template_comes_from_the_agent_store(tmp_path):
+    """Шаблон /init — промпт хранилища агента (``init_agents_md``), а не
+    файл пакета напрямую."""
+    store = MemoryAgentStore(
+        prompts={"init_agents_md": "Шаблон {existing_block}"}, fallback=None
+    )
+    text = await abuild_init_prompt(
+        store=store, cwd=str(tmp_path), can_ask=True
+    )
+    assert text.startswith("Шаблон There is no AGENTS.md yet")
+
+
+async def test_missing_template_names_the_store_resource(tmp_path):
+    import pytest
+
+    with pytest.raises(FileNotFoundError, match="init_agents_md"):
+        await abuild_init_prompt(
+            store=MemoryAgentStore(fallback=None),
+            cwd=str(tmp_path),
+            can_ask=True,
+        )

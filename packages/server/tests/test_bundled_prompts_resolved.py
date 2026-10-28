@@ -51,126 +51,121 @@ def test_routing_pair_judge_prompt_under_bundled_root():
     assert Path(DEFAULT_PROMPT_PATH).is_file()
 
 
+def _store(ctx):
+    from gc_core.agent_store import agent_store_of
+
+    return agent_store_of(ctx)
+
+
+def _worker_read(kind: str, ctx) -> str:
+    from gc_core.execution.resources import PromptResourceRequest
+    from gc_core.resource_loading import aload_prompt_resource_here
+    from gc_testkit import run_coro
+
+    return run_coro(
+        aload_prompt_resource_here(PromptResourceRequest(kind), ctx=ctx)
+    )
+
+
 def test_command_judge_prompts_under_bundled_root(
     foreign_prompt_workspace, tmp_path
 ):
     from gc_core.execution.guard_contracts import GuardProbeRequest
-    from gc_core.security.command_moderation import load_command_judge_prompt
-    from gc_core.security.guard_probe import evaluate_guard_probe
+    from gc_core.security.command_moderation import aload_command_judge_prompt
+    from gc_core.security.guard_probe import aevaluate_guard_probes
+    from gc_testkit import run_coro
 
-    facts = evaluate_guard_probe(
-        GuardProbeRequest(
-            "command_prompts", "exec_command", "", cwd=str(tmp_path)
-        ),
-        settings=foreign_prompt_workspace,
+    (facts,) = run_coro(
+        aevaluate_guard_probes(
+            [
+                GuardProbeRequest(
+                    "command_prompts", "exec_command", "", cwd=str(tmp_path)
+                )
+            ],
+            settings=foreign_prompt_workspace,
+        )
     )
+    store = _store(foreign_prompt_workspace)
     for kind in ("system", "user"):
         path = _bp("prompts", "security", f"command_judge_{kind}.md")
         assert path.is_file()
+        assert Path(store.label("prompt", f"command_judge_{kind}")) == path
         expected = path.read_text(encoding="utf-8").strip()
-        assert load_command_judge_prompt(kind) == expected
+        assert (
+            run_coro(aload_command_judge_prompt(kind, store=store)) == expected
+        )
         assert facts.data[kind] == expected
 
 
 def test_intent_scope_prompt_under_bundled_root(foreign_prompt_workspace):
-    from gc_core.execution.resources import PromptResourceRequest
-    from gc_core.intent_scope.summarizer import (
-        _load_system_prompt,
-        _resolve_prompt_path,
-    )
-    from gc_core.resource_loading import load_prompt_resource
+    from gc_core.intent_scope.summarizer import aload_intent_prompt
+    from gc_testkit import run_coro
 
     path = _bp("prompts", "intent_scope_tool_summary_prompt.md")
     assert path.is_file()
-    assert Path(_resolve_prompt_path(foreign_prompt_workspace)) == path
+    store = _store(foreign_prompt_workspace)
+    assert Path(store.label("prompt", "intent_tool")) == path
     expected = path.read_text(encoding="utf-8").strip()
-    assert _load_system_prompt(foreign_prompt_workspace) == expected
-    assert (
-        load_prompt_resource(
-            PromptResourceRequest("intent_tool"), ctx=foreign_prompt_workspace
-        )
-        == expected
-    )
+    assert run_coro(aload_intent_prompt(store, "intent_tool")) == expected
+    assert _worker_read("intent_tool", foreign_prompt_workspace) == expected
 
 
 def test_memory_patch_prompts_under_bundled_root(foreign_prompt_workspace):
-    from gc_core.execution.resources import PromptResourceRequest
-    from gc_core.resource_loading import load_prompt_resource
-    from gc_core.summarize.memory_suggestions import (
-        _resolve_prompt_path,
-        default_memory_patch_path,
-    )
-    from gc_core.summarize.prompt_loading import (
-        load_memory_patch_replace_prompt,
-    )
+    from gc_core.summarize.prompt_loading import aload_memory_patch_prompt
+    from gc_testkit import run_coro
 
     path = _bp("prompts", "chat_completions_memory_patch_replace.md")
     assert path.is_file()
-    assert Path(default_memory_patch_path()) == path
-    resolved = _resolve_prompt_path(
-        foreign_prompt_workspace,
-        "chat_completions_memory_patch_replace_prompt_path",
-        default_memory_patch_path(),
-    )
-    assert Path(resolved) == path
+    store = _store(foreign_prompt_workspace)
+    assert Path(store.label("prompt", "memory_patch")) == path
     # The production reader expands memory tags and subagent placeholders.
-    expected = load_memory_patch_replace_prompt(str(path))
+    expected = run_coro(aload_memory_patch_prompt(store))
     assert expected
     assert "Foreign workspace prompt" not in expected
-    assert (
-        load_prompt_resource(
-            PromptResourceRequest("memory_patch"), ctx=foreign_prompt_workspace
-        )
-        == expected
-    )
+    assert _worker_read("memory_patch", foreign_prompt_workspace) == expected
 
 
 def test_summary_prompt_under_bundled_root():
-    from gc_core.summarize.prompt_loading import default_prompt_path
+    from gc_core.agent_store import FileAgentStore
 
-    assert Path(default_prompt_path()) == _bp(
-        "prompts", "chat_completions_summary_prompt.md"
-    )
-    assert Path(default_prompt_path()).is_file()
+    path = FileAgentStore().label("prompt", "summary")
+    assert Path(path) == _bp("prompts", "chat_completions_summary_prompt.md")
+    assert Path(path).is_file()
 
 
 def test_project_memory_compaction_prompt_under_bundled_root(
     foreign_prompt_workspace,
 ):
-    from gc_core.execution.resources import PromptResourceRequest
-    from gc_core.project_memory.compaction import _load_prompt
-    from gc_core.resource_loading import load_prompt_resource
+    from gc_core.project_memory.compaction import aload_compaction_prompt
+    from gc_testkit import run_coro
 
     path = _bp("prompts", "project_memory_compaction_prompt.md")
     assert path.is_file()
     expected = path.read_text(encoding="utf-8")
-    assert _load_prompt() == expected
-    assert (
-        load_prompt_resource(
-            PromptResourceRequest("project_memory"),
-            ctx=foreign_prompt_workspace,
-        )
-        == expected
-    )
+    store = _store(foreign_prompt_workspace)
+    assert run_coro(aload_compaction_prompt(store)) == expected
+    assert _worker_read("project_memory", foreign_prompt_workspace) == expected
 
 
 def test_subagent_system_prompt_asset_present():
-    # runner._resolve_subagent_system_prompt() резолвит дефолт через bundled_root();
+    # runner._aresolve_subagent_system_prompt() резолвит дефолт через bundled_root();
     # минимум — ассет на месте под bundled_root (иначе субагенты упадут в method-2).
     assert _bp(
         "prompts", "chat_completions_subagent_system_prompt.md"
     ).is_file()
 
 
-def test_server_agent_prompt_under_bundled_root():
-    # server_agentmd_path по умолчанию "./prompts/server_agent.md" резолвится
-    # относительно PROJECT_ROOT → должен указывать на bundled-промпт.
-    import os
+def test_server_agent_prompt_under_bundled_root(tmp_path):
+    """Роль вебхука по умолчанию — ``./prompts/server_agent.md``: рядом с
+    config_server.yml его нет, значит — bundled-промпт gc-core."""
+    from gc_server.config import ServerConfig, surface_settings
+    from gc_testkit.settings import make_settings
 
-    from gc_server.rest_api import server_config
-
-    resolved = os.path.join(
-        server_config.PROJECT_ROOT, "prompts", "server_agent.md"
+    cfg = ServerConfig().model_copy(
+        update={"config_path": str(tmp_path / "config_server.yml")}
     )
+    resolved = surface_settings(
+        make_settings({}), cfg, "webhook"
+    ).settings.paths.agent_md_path
     assert Path(resolved) == _bp("prompts", "server_agent.md")
     assert Path(resolved).is_file()

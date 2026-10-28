@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from gc_core.aio import AsyncAgent
 from gc_core.settings import LoadedSettings, RuntimeEnv
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio import (
     AgentClient,
     AgentPlugin,
@@ -22,7 +22,7 @@ from gc_core_temporalio import (
     WorkerConfig,
     run_worker,
 )
-from live_support import call, temporal_cli
+from live_support import call, temporal_cli, thread_messages
 from temporalio.api.enums.v1 import EventType
 from temporalio.common import RetryPolicy
 from temporalio.testing import WorkflowEnvironment
@@ -67,7 +67,7 @@ async def test_async_agent_runs_through_a_plugin_worker(
     url, requests, script = scripted_http
     script.extend([[finish("first")], [finish("second")]])
     settings = agent_settings(url, tmp_path)
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     plugin = AgentPlugin(
         {"shop": settings},
         thread_store=store,
@@ -122,7 +122,9 @@ async def test_async_agent_runs_through_a_plugin_worker(
     assert "first" in json.dumps(first, ensure_ascii=False)
     assert "second" in json.dumps(second, ensure_ascii=False)
     assert len(requests) == 2
-    contents = [m.get("content") for m in store.load_messages("sdk", "t1")]
+    contents = [
+        m.get("content") for m in await thread_messages(store, "sdk", "t1")
+    ]
     assert "first task" in contents and "second task" in contents
     assert ("universal_agent.model.request", "shop-model") in queues
     # Контекст хода отпускается на обеих очередях: activity модели собирает
@@ -160,7 +162,7 @@ async def test_separate_model_worker_releases_its_contexts(
     def plugin():
         return AgentPlugin(
             {"shop": settings},
-            thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+            thread_store=FileThreadStore(str(tmp_path / "threads")),
             model_activity=model_activity,
         )
 
@@ -223,7 +225,7 @@ async def test_session_ask_and_text_answer_mode_from_runtime(
     settings = agent_settings(url, tmp_path, text_answer_mode="allow")
     plugin = AgentPlugin(
         {"shop": settings},
-        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+        thread_store=FileThreadStore(str(tmp_path / "threads")),
     )
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=temporal_cli()
@@ -300,7 +302,7 @@ async def test_settings_mismatch_between_app_and_worker_fails_the_turn(
     app_settings = worker_settings.with_overrides({"agent.max_steps": 11})
     plugin = AgentPlugin(
         {"shop": worker_settings},
-        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+        thread_store=FileThreadStore(str(tmp_path / "threads")),
     )
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=temporal_cli()
@@ -336,7 +338,7 @@ async def test_send_with_other_settings_is_rejected_and_session_continues(
     settings = agent_settings(url, tmp_path)
     plugin = AgentPlugin(
         {"shop": settings},
-        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+        thread_store=FileThreadStore(str(tmp_path / "threads")),
     )
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=temporal_cli()
@@ -421,7 +423,7 @@ async def test_without_human_the_turn_never_waits_for_an_answer(
     )
     plugin = AgentPlugin(
         {"shop": agent_settings(url, tmp_path)},
-        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+        thread_store=FileThreadStore(str(tmp_path / "threads")),
     )
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=temporal_cli()
@@ -461,7 +463,7 @@ async def test_durable_send_and_stop_follow_local_semantics(
 
     script.extend([calc_and_send, [finish("first")]])
     settings = agent_settings(url, tmp_path)
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     plugin = AgentPlugin({"shop": settings}, thread_store=store)
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=temporal_cli()
@@ -494,7 +496,9 @@ async def test_durable_send_and_stop_follow_local_semantics(
             )
             await agent.aclose()
             await session.close()
-    contents = [m.get("content") for m in store.load_messages("sdk", "t6")]
+    contents = [
+        m.get("content") for m in await thread_messages(store, "sdk", "t6")
+    ]
     assert "дополнение" in contents
     assert contents.index("второй") < contents.index("между ходами")
     assert "second" in json.dumps(second, ensure_ascii=False)
@@ -519,7 +523,7 @@ async def test_durable_run_batches_messages_and_closes_threadless_sessions(
     settings = agent_settings(url, tmp_path)
     plugin = AgentPlugin(
         {"shop": settings},
-        thread_store=DurableFileThreadStore(str(tmp_path / "threads")),
+        thread_store=FileThreadStore(str(tmp_path / "threads")),
     )
     async with await WorkflowEnvironment.start_local(
         dev_server_existing_path=temporal_cli()
