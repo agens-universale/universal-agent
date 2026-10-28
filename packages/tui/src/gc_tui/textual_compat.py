@@ -275,3 +275,24 @@ def check_auto_scroll(
     keep_select_end_in(screen, container, mouse_coordinate)
     if was_running or abs(delta_y) >= 1:
         auto_scroll_below(screen, container, mouse_coordinate[1])
+
+
+def hook_auto_scroll(
+    screen: Screen, container: Callable[[], Widget | None]
+) -> bool:
+    """Поставить `check_auto_scroll` хуком `_check_auto_scroll` экрана;
+    `container` — лента на момент движения мыши.
+
+    Только для `PATCHED_TEXTUAL`: на иной версии хук не ставится, экран
+    остаётся с автопрокруткой Textual как есть — смена её сигнатуры или
+    пропажа метода выделение не ломает. `True` — хук поставлен."""
+    if not textual_is_patched_version():
+        return False
+
+    def check(select_widget, mouse_coordinate, delta_y) -> None:
+        check_auto_scroll(
+            screen, container(), select_widget, mouse_coordinate, delta_y
+        )
+
+    screen._check_auto_scroll = check
+    return True

@@ -10,8 +10,13 @@ _WAITS = "опишите задачу или /plan — вернуться к п�
 
 
 class _Runner:
-    def __init__(self, running=False) -> None:
+    """Двойник раннера: старт ставит прогон бегущим, решение по плану
+    ложится в мету треда — так, как его застаёт конец хода у настоящего
+    раннера (переход применяет продолжение, мета сливается на батче)."""
+
+    def __init__(self, running=False, threads_dir=None) -> None:
         self.running = running
+        self.threads_dir = threads_dir
         self.accepted, self.rework, self.cleared, self.started = [], [], [], []
 
     def is_running(self) -> bool:
@@ -22,6 +27,7 @@ class _Runner:
 
     def accept_plan(self, mode, thread_id):
         self.accepted.append((mode, thread_id))
+        _approve(self.threads_dir, thread_id, mode)
 
     def arm_plan_rework(self, thread_id):
         self.rework.append(thread_id)
@@ -31,7 +37,20 @@ class _Runner:
 
     def start(self, **kwargs):
         self.started.append(kwargs)
+        self.running = True
         return True
+
+
+def _approve(threads_dir, thread_id, mode):
+    """Статус «утверждён» в плане сессии, остальная мета — как была."""
+    from gc_core.plan_store import PLAN_STATUS_APPROVED
+    from gc_core.thread_store import load_thread_meta, save_thread_meta
+
+    meta = load_thread_meta(threads_dir, "cli", thread_id)
+    meta["shared"]["plan"].update(
+        status=PLAN_STATUS_APPROVED, approved_mode=mode
+    )
+    save_thread_meta(threads_dir, "cli", thread_id, meta)
 
 
 def _app(tmp_path):
@@ -66,7 +85,7 @@ def _save(tmp_path, *, plan="1. шаг", status="proposed", mode="plan"):
 
 
 async def _open(pilot, *, running=False):
-    runner = _Runner(running)
+    runner = _Runner(running, pilot.app._threads_dir)
     pilot.app.active_runner = runner
     pilot.app.screen.attach_active_task("t1")
     pilot.app.active_runner = runner

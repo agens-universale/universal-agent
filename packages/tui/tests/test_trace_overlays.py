@@ -154,9 +154,10 @@ class _Running:
 
     def __init__(self, tid):
         self._last_target = (tid, "cli")
+        self.running = True
 
     def is_running(self):
-        return True
+        return self.running
 
     def stop(self):
         pass

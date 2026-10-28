@@ -37,6 +37,10 @@ _OSC11_REPLY = re.compile(
     + rb"(?:\x07|\x1b\\)"
 )
 _READ_CHUNK = 1024
+# Потолок ожидания ответа: по медленному ssh или tmux ответ идёт дольше
+# 0,1 с. Отвечающий терминал его не ждёт — выход по ответу DA1; весь потолок
+# ждёт только молчащий.
+PROBE_TIMEOUT = 1.0
 
 
 def _os_name() -> str:
@@ -129,7 +133,7 @@ def _read_until_da1(fd: int, timeout: float) -> bytes:
 
 def query_background(
     *,
-    timeout: float = 0.1,
+    timeout: float = PROBE_TIMEOUT,
     stdin: IO[Any] | None = None,
     stdout: IO[Any] | None = None,
 ) -> tuple[int, int, int] | None:

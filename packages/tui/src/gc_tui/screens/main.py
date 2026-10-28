@@ -2155,6 +2155,12 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def on_mount(self) -> None:
         self.query_one(_SEL_CMDINPUT, CommandTextArea).focus()
+        # Автопрокрутка выделения Textual плюс протяжка ниже ленты (спека
+        # P3 §2.7): над накладками, полем ввода и футером лента едет вниз,
+        # конец выделения остаётся в ленте.
+        textual_compat.hook_auto_scroll(
+            self, lambda: self.query_one_optional(_SEL_TRACE)
+        )
         self._show_brand()
         self._render_startup_notices()
         # Per-project история input-реплик: project_dir известен со старта
@@ -5496,20 +5502,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._reasoning_clock.start("stream")
         else:
             self._reasoning_clock.stop("stream")
-
-    def _check_auto_scroll(
-        self, select_widget, mouse_coordinate, delta_y
-    ) -> None:
-        """Автопрокрутка выделения Textual плюс протяжка ниже ленты (спека
-        P3 §2.7): над накладками, полем ввода и футером лента едет вниз,
-        конец выделения остаётся в ленте (`textual_compat`)."""
-        textual_compat.check_auto_scroll(
-            self,
-            self.query_one_optional(_SEL_TRACE),
-            select_widget,
-            mouse_coordinate,
-            delta_y,
-        )
 
     def on_mouse_move(self, _event: events.MouseMove) -> None:
         """F5: движение мыши при выделении — активность, сторож ждёт."""

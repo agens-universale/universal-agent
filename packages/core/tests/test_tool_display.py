@@ -3,6 +3,7 @@ import sys
 
 import pytest
 from gc_core.constants.tool_display import (
+    MCP_LABEL_MAX,
     TOOL_DISPLAY,
     DisplayCategory,
     ToolDisplay,
@@ -59,11 +60,11 @@ def test_unknown_name_called():
     )
 
 
-def _snapshot(title):
+def _snapshot(title, *, server="office", tool="read_docx"):
     return {
         "mcp_office_read_docx": {
-            "server": "office",
-            "tool": "read_docx",
+            "server": server,
+            "tool": tool,
             "title": title,
         }
     }
@@ -170,3 +171,52 @@ def test_finish_summary_solution_type_only_nested():
     nested = tool_args_summary("turn_finish", args, nested=True)
     assert nested == "full_solution"
     assert tool_args_summary("turn_finish", args) == ""
+
+
+def _mcp_shown(title, *, server="office", tool="read_docx"):
+    return tool_display(
+        "mcp_office_read_docx",
+        mcp_tools=_snapshot(title, server=server, tool=tool),
+    )
+
+
+def test_mcp_title_newlines_become_one_space():
+    assert _mcp_shown("Read\n  Word\r\n\tdoc ").detail == "Read Word doc"
+
+
+def test_mcp_title_escape_sequences_removed():
+    assert _mcp_shown("\x1b[31mRed\x1b[0m title").detail == "Red title"
+    assert _mcp_shown("\x1b]0;pwned\x07Read").detail == "Read"
+
+
+def test_mcp_title_bel_and_c1_removed():
+    assert _mcp_shown("Read\x07Word\x9b").detail == "Read Word"
+
+
+def test_mcp_long_title_clipped_with_ellipsis():
+    detail = _mcp_shown("x" * 200).detail
+    assert detail == "x" * (MCP_LABEL_MAX - 1) + "…"
+
+
+def test_mcp_title_empty_after_cleaning_falls_back_to_tool():
+    assert _mcp_shown(" \n\x1b[0m\x07 ").detail == "read_docx"
+
+
+def test_mcp_tool_name_cleaned_too():
+    assert _mcp_shown(None, tool="read\x1b[2Jdocx\n").detail == "readdocx"
+
+
+def test_mcp_server_part_cleaned():
+    shown = _mcp_shown("Read", server="off\nice\x1b[1m" + "s" * 100)
+    assert shown.label == ("off ice" + "s" * 100)[: MCP_LABEL_MAX - 1] + "…"
+
+
+def test_mcp_wire_name_parts_cleaned():
+    shown = tool_display("mcp_office_read\ndocx", mcp_servers=["office"])
+    assert shown.detail == "read docx"
+
+
+def test_mcp_normal_title_unchanged():
+    assert _mcp_shown("Прочитать документ Word").detail == (
+        "Прочитать документ Word"
+    )
