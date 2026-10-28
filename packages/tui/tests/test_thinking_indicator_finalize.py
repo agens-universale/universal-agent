@@ -1,13 +1,12 @@
 """ThinkingIndicator — мгновенное гашение по submit_solution + sticky sentinel."""
 
-from gc_testkit.tui_support import tui_settings
 import json
 import threading
 import time
 from pathlib import Path
 
 import pytest
-from gc_testkit.tui_support import wait_until
+from gc_testkit.tui_support import tui_settings, wait_until
 
 
 def _screen(pilot):

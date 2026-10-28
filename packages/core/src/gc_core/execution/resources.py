@@ -19,7 +19,6 @@ class PromptResourceRequest:
         "finish_gate",
         "routing_pair_judge",
     ]
-    path: str | None = None
     subagent: bool = False
     schema_version: int = 1
 
@@ -31,9 +30,9 @@ async def aload_prompt_resource(
     ctx: Any,
     request: PromptResourceRequest,
     *,
-    local: Callable[[], str],
+    local: Callable[[], Awaitable[str]],
 ) -> str:
-    """Only the local branch may resolve paths or read prompt files.
+    """Only the local branch reads prompts (from the agent store).
 
     Transport errors must propagate; falling back to local I/O would break replay.
     The callable stays in the process and is never part of the request payload.
@@ -41,4 +40,4 @@ async def aload_prompt_resource(
     loader = port(ctx, "prompt_resource")
     if loader is not None:
         return await loader(request)
-    return local()
+    return await local()

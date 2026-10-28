@@ -5,17 +5,18 @@ import json
 from pathlib import Path
 
 import pytest
+from gc_testkit.develop_files import meta_of
 
 pytest.importorskip("textual")
 
 from gc_core.attachments.model import chip_text, user_label
+from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.models import TraceEvent
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.user_reply import UserReplyContainer
 from image_helpers import make_attachment_file
-from gc_testkit.tui_support import tui_settings
 
 
 class _StartRunner:
@@ -351,7 +352,7 @@ async def test_history_and_session_name_skip_image_chips(tmp_path):
             0,
             "почему кнопка «Войти» съехала вправо?",
         )
-        assert scr._store.get_task_meta(tid)["tui"]["last_actual"] == (
+        assert meta_of(scr._store.get_record(tid))["tui"]["last_actual"] == (
             "почему кнопка «Войти» съехала вправо?"
         )
 
@@ -371,7 +372,7 @@ async def test_image_only_message_leaves_history_and_session_name_alone(
         )
         assert scr._history.size == 0
         assert "last_actual" not in (
-            scr._store.get_task_meta(tid).get("tui") or {}
+            meta_of(scr._store.get_record(tid)).get("tui") or {}
         )
 
 

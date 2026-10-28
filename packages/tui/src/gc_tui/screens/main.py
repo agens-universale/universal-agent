@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from gc_tui.widgets.user_reply import UserReplyContainer
 
 from gc_core.attachments.model import Attachment, attachments_of
-from gc_core.attachments.numbering import read_image_seq
 from gc_core.config_modules.agent_edits import (
     DEFAULT_TURN_SUMMARY_IN_STATUS,
 )
@@ -43,6 +42,8 @@ from gc_core.persistence.turn_outcome import (
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
+from gc_core.threads.errors import OwnershipError, ThreadBusy
+from gc_core.threads.models import ThreadRecord
 from gc_core.tools.skills.skill_arg_resolver import (
     Failed,
     Resolved,
@@ -148,6 +149,7 @@ from gc_tui.services.session_title import (
 )
 from gc_tui.services.skill_view import skill_input_name
 from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.stores.record_view import tui_section
 from gc_tui.services.subagent_progress import (
     SubagentProgressConsumer,
     first_pending,
@@ -215,7 +217,7 @@ from gc_tui.services.usage_meter import (
     usage_segments,
 )
 from gc_tui.services.voice_pill import render_pill
-from gc_tui.session_settings import read_breaker_from_meta, read_from_meta
+from gc_tui.session_settings import read_breaker_from_tui, read_from_tui
 from gc_tui.toggles import (
     AUTO_LEVEL_VALUE,
     PROFILE_NONE_VALUE,
@@ -457,6 +459,12 @@ def _truncate_middle(name: str, max_cols: int) -> str:
     return f"{head}…{tail}"
 
 
+#: Техническая реплика не записана: тред ведёт другой процесс.
+THREAD_BUSY_REPLY = (
+    "Сообщение агенту не записано: сессию сейчас ведёт другой процесс."
+)
+
+
 class _TraceBlockHost:
     """Хост блоков верхнего уровня живой ленты (спека P4 §8.1): в конец —
     через `_trace_mount` (правило очереди), рядом с виджетом блока —
@@ -541,8 +549,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._cursor: Optional[TaskCursor] = None
         self._next_no: int = 1
         self._active_task_id: Optional[str] = None
-        # Снимок меты на тик опроса (см. _tick_meta); вне тика — None.
-        self._tick_meta_cache: tuple[str, dict] | None = None
+        # Снимок записи на тик опроса (см. _tick_record); вне тика — None.
+        self._tick_record_cache: tuple[str, Optional[ThreadRecord]] | None = (
+            None
+        )
         self._in_poll_tick = False
         self._session_lock_hb_mono: float = 0.0  # throttle heartbeat ≤ 1 Гц
         self._error_shown: bool = False
@@ -1399,29 +1409,36 @@ class TraceScreen(TraceFollowMixin, Screen):
             settings.backend.completions_url,
         )
 
-    def _tick_meta(self) -> dict:
-        """Мета активной задачи — ТОЛЬКО для показа; читатели не мутируют.
+    def _tick_record(self) -> Optional[ThreadRecord]:
+        """Запись активной задачи — ТОЛЬКО для показа.
 
-        Вне тика опроса — свежее чтение (`{}` без стора или задачи). Внутри
-        тика (`_poll_active`) — одно чтение на задачу, дальше тот же
-        словарь: показ за тик видит один снимок. Любая запись `tui`-меты
-        экрана идёт через `_write_tui_meta`, он сам сбрасывает снимок. Для
-        read-modify-write снимок не годится — читать хранилище напрямую.
-        `tui.pending_user_messages` через `_tick_meta` не читать.
+        Вне тика опроса — свежее чтение (``None`` без стора, задачи или
+        треда). Внутри тика (`_poll_active`) — одно чтение на задачу, дальше
+        тот же снимок: показ за тик видит одну запись. Любая запись
+        `tui`-секции экрана идёт через `_write_tui_meta`, он сам сбрасывает
+        снимок. Для read-modify-write снимок не годится — читать хранилище
+        напрямую. `tui.pending_user_messages` через `_tick_record` не читать.
         """
         if self._store is None or self._active_task_id is None:
-            return {}
+            return None
         if not self._in_poll_tick:
-            return self._store.get_task_meta(self._active_task_id)
+            return self._store.get_record(self._active_task_id)
         tid = self._active_task_id
-        if self._tick_meta_cache is None or self._tick_meta_cache[0] != tid:
-            self._tick_meta_cache = (tid, self._store.get_task_meta(tid))
-        return self._tick_meta_cache[1]
+        if (
+            self._tick_record_cache is None
+            or self._tick_record_cache[0] != tid
+        ):
+            self._tick_record_cache = (tid, self._store.get_record(tid))
+        return self._tick_record_cache[1]
+
+    def _task_tui(self, task_id: str) -> dict:
+        """Свежая секция TUI задачи — для read-modify-write."""
+        return tui_section(self._store.get_record(task_id))
 
     def _write_tui_meta(self, task_id: str, patch: dict) -> None:
         """Записать `tui`-мету задачи; снимок тика после записи устарел."""
         self._store.update_tui_meta(task_id, patch)
-        self._tick_meta_cache = None
+        self._tick_record_cache = None
 
     def _context_meter(self) -> Text | None:
         """Rich-Text индикатора контекста или None (скрыт)."""
@@ -1432,13 +1449,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         # mid-turn этой шкалы выключен: иначе проактивная уборка показывала бы 100%.
         if self._store is None or self._active_task_id is None:
             return None
-        meta = self._tick_meta()
+        record = self._tick_record()
         # Знаменатель — mid-turn активной шкалы модели, которая ведёт историю.
         # mid-turn 0 подменяется turn-end той же шкалы.
         limits = self._meter_summary_limits(cfg)
         token_mid = limits.tokens_during
         token_end = limits.tokens_after
-        saved_tokens = meta.get("last_main_prompt_tokens")
+        saved_tokens = record.state.last_prompt_tokens if record else None
         if (
             not isinstance(saved_tokens, bool)
             and isinstance(saved_tokens, int)
@@ -1453,13 +1470,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         threshold = limits.chars_during or limits.chars_after
         if threshold <= 0:
             return None
-        # Источник символьной шкалы — meta.runtime.live_history_chars (persist).
-        rt = meta.get("runtime") or {}
-        if "live_history_chars" not in rt:
-            return None
-        try:
-            chars = int(rt["live_history_chars"])
-        except (TypeError, ValueError):
+        # Источник символьной шкалы — runtime.live_history_chars (persist).
+        chars = record.runtime.live_history_chars if record else None
+        if chars is None:
             return None
         return render_context_meter(chars, threshold)
 
@@ -1505,19 +1518,20 @@ class TraceScreen(TraceFollowMixin, Screen):
             return "running"
         # Нет активного runner — статус из meta (tui-owned, затем legacy top-level).
         if self._store is not None and self._active_task_id is not None:
-            meta = self._tick_meta()
-            tui_status = (meta.get("tui") or {}).get("status")
+            record = self._tick_record()
+            tui_status = tui_section(record).get("status")
             # Ход TUI держит процесс с замком сессии: «running» без него —
             # прерванный ход. Верхний статус пишут другие writer'ы — как есть.
             if tui_status == "running":
                 return settled_status("running", live=self.open_run_is_live())
             if tui_status in ("completed", "stopped", "failed"):
                 return tui_status
-            if meta.get("status") == "running":
+            status = record.extra.get("status") if record else None
+            if status == "running":
                 return "running"
-            if meta.get("status") == "completed":
+            if status == "completed":
                 return "completed"
-            if meta.get("status") in ("failed", "unknown_failed"):
+            if status in ("failed", "unknown_failed"):
                 return "failed"
         return None  # исход неизвестен — не выдумываем «stopped»
 
@@ -2342,9 +2356,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         # Настройки режимов принадлежат треду (спека 2026-07-20-session-scoped-settings):
         # берём его значения; их нет (старый тред) — сессия возвращается к умолчанию.
-        task_meta = self._store.get_task_meta(task_id)
-        saved = read_from_meta(task_meta)
-        self._adopt_thread_breaker(task_meta)
+        task_record = self._store.get_record(task_id)
+        task_tui = tui_section(task_record)
+        saved = read_from_tui(task_tui)
+        self._adopt_thread_breaker(task_tui)
         # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
         # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
         # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
@@ -2356,7 +2371,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         self.app.sanitize_session_profile()
         # Режим разрешений — тоже выбор, сохранённый в сессии; у открытой
         # пикером сессии без режима — режим конфига. Флаг запуска сильнее.
-        self.app.adopt_thread_permission_mode(task_meta, resumed=is_resume)
+        self.app.adopt_thread_permission_mode(
+            task_record.state.permission_mode if task_record else None,
+            resumed=is_resume,
+        )
         # read_all_events — атомарный снимок live-файла + cursor (как раньше).
         # Была ли компакция, определяем по голове live-снимка (после turn_end
         # первая запись = сводка) — без доп. I/O. Тред без компакции рендерим
@@ -2456,15 +2474,15 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         from gc_tui.services.relative_time import parse_iso_utc
 
-        meta = self._store.get_task_meta(task_id)
-        records = (meta.get("tui") or {}).get("pending_user_messages", [])
+        record = self._store.get_record(task_id)
+        records = tui_section(record).get("pending_user_messages", [])
         if not records:
             return
         alive = self._run_in_progress()
         # Primary source: user_intent_log в meta (intent-модель master) — user_ask записи.
         delivered_wires = {
             rec.content.strip()
-            for rec in deserialize_list(meta.get("user_intent_log"))
+            for rec in deserialize_list(record.state.intent_log)
             if rec.action == ACTION_USER_ASK
             and isinstance(rec.content, str)
             and rec.content.strip()
@@ -2472,7 +2490,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Legacy fallback: старый формат meta.user_messages_log (плоские строки).
         delivered_wires.update(
             (s or "").strip()
-            for s in (meta.get("user_messages_log") or [])
+            for s in (record.extra.get("user_messages_log") or [])
             if isinstance(s, str)
         )
         # Safety net: live trace (на случай если оба log пусты —
@@ -2484,7 +2502,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         # реплику старше него пользователь уже оставил позади (есть доставленные
         # позже) → она устарела, показывать/хранить её не нужно.
         latest_delivered_ts = None
-        for rec in deserialize_list(meta.get("user_intent_log")):
+        for rec in deserialize_list(record.state.intent_log):
             if rec.action != ACTION_USER_ASK:
                 continue
             t = parse_iso_utc(getattr(rec, "ts", None))
@@ -2875,7 +2893,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return
-        tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
+        tui = self._task_tui(self._active_task_id)
         last = tui.get("last_indicator")
         edits = last.get("edits") if isinstance(last, dict) else None
         outcome = self._latest_turn_outcome()
@@ -3388,8 +3406,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not norm:
             return
         try:
-            meta = self._store.get_task_meta(self._active_task_id) or {}
-            tui_meta = meta.get("tui") or {}
+            tui_meta = self._task_tui(self._active_task_id)
             current = tui_meta.get("last_actual")
             if isinstance(current, str) and current.strip():
                 # уже задано — обновляем только содержательным промптом
@@ -3420,10 +3437,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not task:
             return
         try:
-            meta = self._store.get_task_meta(self._active_task_id) or {}
+            tui_meta = self._task_tui(self._active_task_id)
         except Exception:
             return
-        tui_meta = meta.get("tui") or {}
         if not should_update_task(tui_meta, self._live_turn_tool_calls):
             return
         if task_title(tui_meta) == task:
@@ -3460,7 +3476,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._store is None or self._active_task_id is None:
             return self._resumed_prompt or ""
         try:
-            return display_name(self._tick_meta().get("tui"))
+            return display_name(tui_section(self._tick_record()))
         except Exception:
             return self._resumed_prompt or ""
 
@@ -3506,17 +3522,19 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._store is None or self._active_task_id is None:
             return None
         try:
-            meta = self._store.get_task_meta(self._active_task_id)
+            record = self._store.get_record(self._active_task_id)
         except Exception:
             return None
-        for rec in reversed(deserialize_list(meta.get("user_intent_log"))):
+        if record is None:
+            return None
+        for rec in reversed(deserialize_list(record.state.intent_log)):
             if (
                 rec.action == ACTION_USER_ASK
                 and isinstance(rec.content, str)
                 and rec.content.strip()
             ):
                 return rec.content
-        for s in reversed(meta.get("user_messages_log") or []):
+        for s in reversed(record.extra.get("user_messages_log") or []):
             if isinstance(s, str) and s.strip():
                 return s
         return None
@@ -4672,8 +4690,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         батче). Модель в этом не участвует."""
         if self._store is None or self._active_task_id is None:
             return None
-        shared = self._store.get_task_meta(self._active_task_id).get("shared")
-        plan = (shared or {}).get("plan")
+        record = self._store.get_record(self._active_task_id)
+        plan = record.state.plan if record else None
         return plan if isinstance(plan, dict) and plan.get("text") else None
 
     def _plan_panels(self):
@@ -4840,7 +4858,15 @@ class TraceScreen(TraceFollowMixin, Screen):
         removed = False
         clear = getattr(self._store, "clear_plan", None)
         if callable(clear) and self._active_task_id is not None:
-            removed = bool(clear(self._active_task_id))
+            try:
+                removed = bool(clear(self._active_task_id))
+            except OwnershipError:
+                # Тред держит другой процесс (аренда хранилища): план — его.
+                self.app.notify(
+                    "сессию ведёт другой процесс — план не убран",
+                    severity="warning",
+                )
+                return
         if runner is not None and hasattr(runner, "clear_plan"):
             runner.clear_plan(self._active_task_id)
         self._plan_rework_pending = False
@@ -5180,9 +5206,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             record["attachments"] = [att.to_dict() for att in images]
         if queued:
             record.update(queued)
-        existing = (self._store.get_task_meta(tid).get("tui") or {}).get(
-            "pending_user_messages", []
-        )
+        existing = self._task_tui(tid).get("pending_user_messages", [])
         new_list = (existing + [record])[-self._PENDING_CAP :]
         self._write_tui_meta(tid, {"pending_user_messages": new_list})
         # In-memory кэш для reconciliation: meta может быть перетёрт executor'ом.
@@ -5200,9 +5224,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         tid = self.app.tui_state.active_task_id
         if tid is None or self._store is None:
             return
-        existing = (self._store.get_task_meta(tid).get("tui") or {}).get(
-            "pending_user_messages", []
-        )
+        existing = self._task_tui(tid).get("pending_user_messages", [])
         new_list = [r for r in existing if r.get("client_id") != client_id]
         if len(new_list) != len(existing):
             self._write_tui_meta(tid, {"pending_user_messages": new_list})
@@ -5217,9 +5239,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         for _cid, widget in self._pending_user_widgets.items():
             widget.set_state("failed")
         if tid is not None and self._store is not None:
-            records = (self._store.get_task_meta(tid).get("tui") or {}).get(
-                "pending_user_messages", []
-            )
+            records = self._task_tui(tid).get("pending_user_messages", [])
             failed_cids = set(self._pending_user_widgets.keys())
             new_list = [
                 {**r, "status": "failed"}
@@ -5373,7 +5393,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Снимок `tui` треда до «running» нового хода — его вернёт откат.
         Уже «running» — ход отмечен (отправкой; восходящий фронт — повтор):
         снимок до него не переписывается."""
-        tui = self._store.get_task_meta(tid).get("tui") or {}
+        tui = tui_section(self._store.get_record(tid))
         if tui.get("status") != "running":
             self._pre_run_tui_meta = (
                 tid,
@@ -5423,16 +5443,14 @@ class TraceScreen(TraceFollowMixin, Screen):
         snap = getattr(self.app, "_mcp_snapshot", None)
         if snap is not None:
             return snap
-        if self._store is not None and self._active_task_id is not None:
-            meta = self._store.get_task_meta(self._active_task_id)
-            return (meta.get("runtime") or {}).get("mcp_tools")
-        return None
+        record = self._tick_record()
+        return record.runtime.mcp_tools if record else None
 
     def _mcp_tool_info(self) -> tuple[dict, tuple]:
         """Подписи MCP из снимка рантайма: (wire→McpToolInfo, серверы).
 
-        Пересчёт — только при смене источника (`_mcp_snapshot_key`): строки
-        вызова одной перерисовки не перечитывают meta треда."""
+        Пересчёт — только при смене источника (`_mcp_snapshot_key`): серия
+        строк вызова читает запись треда один раз."""
         from gc_core.constants.tool_display import (
             mcp_servers_of,
             mcp_tools_from_snapshot,
@@ -5451,17 +5469,19 @@ class TraceScreen(TraceFollowMixin, Screen):
         return cache[1], cache[2]
 
     def _mcp_snapshot_key(self) -> tuple:
-        """Ключ источника снимка MCP — без чтения самого снимка.
+        """Ключ источника снимка MCP: при том же ключе снимок не разбирается.
 
         Boot-снимок — сам объект (в ключе он и жив, id не переиспользуется);
-        иначе — тред и метка изменения его meta."""
+        иначе — тред и курсор хвоста ленты, без ввода-вывода. Снимок пишется
+        в начале хода, до записей его вызовов, а строка вызова рисуется из
+        записей, прочитанных до неё: курсор сдвинут до отрисовки — снимок,
+        прочитанный при новом курсоре, не старше её хода."""
         snap = getattr(self.app, "_mcp_snapshot", None)
         if snap is not None:
             return ("app", id(snap), snap)
-        tid = self._active_task_id
-        if self._store is None or tid is None:
+        if self._store is None or self._active_task_id is None:
             return ("none",)
-        return ("meta", tid, self._store.meta_mtime(tid))
+        return ("tail", self._active_task_id, self._cursor)
 
     def _pending_wire_match(self, client_id: str, polled_content: str) -> bool:
         """Проверить, что pending-запись с этим client_id имеет wire_content,
@@ -5479,9 +5499,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             tid = self._active_task_id
             if tid is None or self._store is None:
                 return False
-            records = (self._store.get_task_meta(tid).get("tui") or {}).get(
-                "pending_user_messages", []
-            )
+            records = self._task_tui(tid).get("pending_user_messages", [])
             for rec in records:
                 if rec.get("client_id") == client_id:
                     cached = rec.get("wire_content") or ""
@@ -5544,7 +5562,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._poll_tick()
         finally:
             self._in_poll_tick = False
-            self._tick_meta_cache = None
+            self._tick_record_cache = None
 
     def _apply_human_wait(self, human_wait: bool) -> None:
         """Пауза running-строк на человеко-ожидании и тик их elapsed.
@@ -5622,7 +5640,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Тред прогона раннера: его цель, иначе активный."""
         return self.app.run_thread_id(runner) or self._active_task_id
 
-    def _adopt_thread_breaker(self, task_meta: dict) -> None:
+    def _adopt_thread_breaker(self, task_tui: dict) -> None:
         """Предохранитель моделей — владение треда (спека §8): restore
         ЦЕЛИКОМ заменяет breaker окна под открытый тред. Пока идёт ход,
         предохранитель принадлежит его треду — им пользуется исполнитель;
@@ -5630,7 +5648,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return
-        self.app.load_circuit_breaker(read_breaker_from_meta(task_meta))
+        self.app.load_circuit_breaker(read_breaker_from_tui(task_tui))
 
     def _on_run_finished(self, runner, kind: str) -> None:
         """Спадающий фронт прогона: исход — в мету треда прогона.
@@ -5670,7 +5688,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             # Ход чужого треда кончился: предохранитель — открытому.
             open_tid = self._active_task_id
             self._adopt_thread_breaker(
-                self._store.get_task_meta(open_tid) if open_tid else {}
+                self._task_tui(open_tid) if open_tid else {}
             )
             return
         # Ход закончился предложенным планом — баннер одобрения.
@@ -5826,36 +5844,34 @@ class TraceScreen(TraceFollowMixin, Screen):
         summarizing = False
         finalizing = False
         finish_gate_checking = False
-        _tmeta: dict = {}
+        live_count = None
         if self._store is not None and self._active_task_id is not None:
             try:
-                _tmeta = self._tick_meta()
-                _rt = _tmeta.get("runtime") or {}
-                summarizing = bool(_rt.get("summarizing"))
-                finalizing = bool(_rt.get("finalizing"))
-                finish_gate_checking = bool(_rt.get("finish_gate_checking"))
+                _record = self._tick_record()
+                _flags = _record.runtime.flags if _record else frozenset()
+                summarizing = "summarizing" in _flags
+                finalizing = "finalizing" in _flags
+                finish_gate_checking = "finish_gate_checking" in _flags
+                live_count = (
+                    _record.runtime.live_msg_count if _record else None
+                )
             except Exception:
                 summarizing = False
                 finalizing = False
                 finish_gate_checking = False
-                _tmeta = {}
         # Завершение сжатия (summarizing True→False) → baseline =
-        # снимок meta.runtime.live_msg_count (persist уже пересчитал live_* на compact).
+        # снимок runtime.live_msg_count (persist уже пересчитал live_* на compact).
         if (
             self._was_summarizing
             and not summarizing
             and self._store is not None
             and self._active_task_id is not None
+            and live_count is not None
         ):
-            live_count = (_tmeta.get("runtime") or {}).get("live_msg_count")
-            if live_count is not None:
-                try:
-                    self._write_tui_meta(
-                        self._active_task_id,
-                        {"last_compact_msg_count": int(live_count)},
-                    )
-                except (TypeError, ValueError):
-                    pass
+            self._write_tui_meta(
+                self._active_task_id,
+                {"last_compact_msg_count": live_count},
+            )
         self._was_summarizing = summarizing
 
         # Инвариант: нет активной задачи (пустое состояние) → индикатора нет.
@@ -6027,7 +6043,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         различает."""
         status = None
         if self._store is not None and self._active_task_id is not None:
-            status = (self._tick_meta().get("tui") or {}).get("status")
+            status = tui_section(self._tick_record()).get("status")
         word = word_of_status(status)
         if word == "completed" and getattr(runner, "_stop_requested", False):
             word = "cancelled"
@@ -6132,14 +6148,15 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Шаг сжатия — обычная порция записей плюс маркер (спека 3.2).
 
         Строки до сжатия, карты экрана, индикатор, баннер подтверждения и
-        прокрутка остаются. Сбой — откат полной перерисовкой."""
+        прокрутка остаются. Сбой — откат полной перерисовкой. Курсор — до
+        отрисовки, как у хвоста: по нему строки берут снимок MCP."""
+        self._cursor = next_cursor
         try:
             self._append_compaction_step(step)
         except Exception:
             _log.exception("шаг сжатия не применён, трейс перерисован")
             self._rebuild_from_store()
             return
-        self._cursor = next_cursor
         self._refresh_header()
 
     def _append_compaction_step(self, step: CompactionStep) -> None:
@@ -7829,14 +7846,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         `runtime.image_seq` из meta активного треда и после последнего номера, выданного в
         этом процессе (сообщение с картинкой могло ещё не дойти до meta)."""
         tid = self._active_task_id
-        meta = (
-            self._store.get_task_meta(tid)
+        record = (
+            self._store.get_record(tid)
             if tid and self._store is not None
             else None
         )
-        return (
-            max(read_image_seq(meta), self._image_seq_issued.get(tid, 0)) + 1
-        )
+        saved = (record.runtime.image_seq or 0) if record else 0
+        return max(saved, self._image_seq_issued.get(tid, 0)) + 1
 
     def _end_image_paste_hint(self) -> None:
         """Конец вставки: снять только свою подсказку («Вставка…», «дождитесь…», «Esc ещё
@@ -8072,34 +8088,16 @@ class TraceScreen(TraceFollowMixin, Screen):
         system = getattr(self.app, "_system", "cli")
         if not threads_dir:
             return
-        from gc_core.thread_store import (
-            append_new_thread_messages,
-            load_thread_messages,
-            load_thread_meta,
-            save_thread_meta,
-        )
-
-        tags, strip_think = self._projection_from_app_config()
-        _msgs, keys, max_seq = load_thread_messages(threads_dir, system, tid)
-        written = append_new_thread_messages(
-            threads_dir,
-            system,
-            tid,
-            [msg],
-            keys,
-            start_seq=max_seq,
-            tags=tags,
-            strip_think=strip_think,
-        )
-        if written and self._store is not None:
-            meta = load_thread_meta(threads_dir, system, tid) or {}
-            try:
-                meta["messages_count"] = (
-                    int(meta.get("messages_count", 0)) + written
-                )
-            except (TypeError, ValueError):
-                meta["messages_count"] = written
-            save_thread_meta(threads_dir, system, tid, meta)
+        # Счётчик сообщений ведёт хранилище; объём живой истории пересчитает
+        # следующий шаг сессии (как и при записи из ядра).
+        try:
+            FileTaskStore(
+                threads_dir=threads_dir, system=system
+            ).append_messages(tid, [msg])
+        except ThreadBusy:
+            # Тред ведёт другой процесс (gc-cli, сервер): дописать мимо его
+            # хода нельзя — реплика не записана, TUI живёт дальше.
+            self.notify(THREAD_BUSY_REPLY, severity="warning")
 
     def _cmd_new(self) -> None:
         self.request_thread_switch(None)
@@ -8901,9 +8899,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         ``None`` — скилл не загружен, писать нечего."""
         tid = self.app.tui_state.active_task_id
         if skill_id and tid is not None and self._store is not None:
-            current = (self._store.get_task_meta(tid).get("tui") or {}).get(
-                "skills", []
-            )
+            current = self._task_tui(tid).get("skills", [])
             if skill_id not in current:
                 self._write_tui_meta(tid, {"skills": current + [skill_id]})
 
@@ -9570,11 +9566,11 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
             return
         segments = self._store.read_segments(tid)
-        meta = self._store.get_task_meta(tid)
+        record = self._store.get_record(tid)
         text = export_thread(
             segments,
             fmt=fmt,
-            meta=meta,
+            api_mode=(record.info.api_mode if record else None) or "",
             thread_id=tid,
             system=self.app._system,
         )
@@ -9670,7 +9666,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         payload: dict = {}
 
         if tid is not None and self._store is not None:
-            payload["meta"] = self._store.get_task_meta(tid)
+            record = self._store.get_record(tid)
+            payload["meta"] = (
+                record.model_dump(mode="json") if record is not None else None
+            )
             title_id = tid[:8]
         else:
             payload["meta"] = None
@@ -9747,11 +9746,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         # Антиспам: runtime.live_msg_count vs tui.last_compact_msg_count.
         # baseline пишет _poll_active на завершении сжатия. Нет baseline → можно.
-        meta = self._store.get_task_meta(tid)
-        tui_meta = meta.get("tui") or {}
-        rt = meta.get("runtime") or {}
-        last_compact = tui_meta.get("last_compact_msg_count")
-        live_count = rt.get("live_msg_count")
+        record = self._store.get_record(tid)
+        last_compact = tui_section(record).get("last_compact_msg_count")
+        live_count = record.runtime.live_msg_count if record else None
         if (
             last_compact is not None
             and live_count is not None
@@ -9788,9 +9785,18 @@ class TraceScreen(TraceFollowMixin, Screen):
             )
             return
 
-        from gc_core.instructions.init_agents_md import build_init_prompt
+        from gc_core.agent_store import FileAgentStore
+        from gc_core.instructions.init_agents_md import abuild_init_prompt
+        from gc_core.threads.facade import run_sync
 
-        wire = build_init_prompt(cwd=os.getcwd(), can_ask=True)
+        # Хранилище агента TUI — файловое: шаблон читается за один шаг.
+        wire = run_sync(
+            abuild_init_prompt(
+                store=FileAgentStore(self.app.effective_settings()),
+                cwd=os.getcwd(),
+                can_ask=True,
+            )
+        )
         display = "/init"
         msg_id = "m_" + uuid.uuid4().hex
         self._last_user_message_id = msg_id

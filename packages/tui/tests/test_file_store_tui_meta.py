@@ -29,7 +29,7 @@ def test_update_tui_meta_creates_skills_list(tmp_path):
 
 def test_update_tui_meta_creates_meta_and_dir_when_missing(tmp_path):
     """Свежий проект: ни каталога threads, ни meta-файла нет — update_tui_meta
-    создаёт каталог и meta с thread_id/system_id + патч (первая запись TUI
+    создаёт каталог и meta с thread_id/system + патч (первая запись TUI
     может случиться раньше первой записи executor'а)."""
     threads_dir = tmp_path / "project" / "threads"
     assert not threads_dir.exists()
@@ -40,7 +40,7 @@ def test_update_tui_meta_creates_meta_and_dir_when_missing(tmp_path):
     assert meta_path.exists()
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert meta["thread_id"] == "t9"
-    assert meta["system_id"] == "cli"
+    assert meta["system"] == "cli"
     assert meta["tui"]["skill_id"] == "supercoder"
 
 

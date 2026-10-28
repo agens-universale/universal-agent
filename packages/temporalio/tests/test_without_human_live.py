@@ -14,7 +14,7 @@ import json
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core_temporalio import AgentPlugin, AgentSession
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_stores.sqlite import SQLiteThreadStore
 from live_support import call, temporal_cli
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker

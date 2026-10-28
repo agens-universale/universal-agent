@@ -1,12 +1,12 @@
 """SessionsScreen: карточки (2 строки), пагинация, фильтр веток, поиск, rename, preview."""
 
-from gc_testkit.tui_support import tui_settings
 import json
 from datetime import UTC
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages, meta_of
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.stores.file_store import FileTaskStore
 
 
@@ -386,9 +386,11 @@ async def test_rename_saves_title(tmp_path):
         await pilot.pause()
         scr._apply_rename("ren00000", "Переименовано")  # прямой вызов колбэка
         await pilot.pause()
-        meta = FileTaskStore(
-            threads_dir=str(tmp_path), system="cli"
-        ).get_task_meta("ren00000")
+        meta = meta_of(
+            FileTaskStore(threads_dir=str(tmp_path), system="cli").get_record(
+                "ren00000"
+            )
+        )
         assert meta["tui"]["title"] == "Переименовано"
 
 
@@ -854,58 +856,19 @@ async def test_search_matches_subtitle(tmp_path):
         assert "Починить парсер" not in text
 
 
-def _outcome_line(tid: str, status: str, reason=None) -> str:
-    from gc_core.persistence.turn_outcome import TurnOutcome
-
-    outcome = TurnOutcome(
-        status=status,
-        reason=reason,
-        opened_by=f"m_{tid}",
-        started_at="2026-10-22T10:00:00Z",
-        ended_at="2026-10-22T10:01:00Z",
-        duration_sec=60.0,
-        error=None,
-    )
-    rec = {"type": "turn_outcome", "seq": 2, "outcome": outcome.to_payload()}
-    return json.dumps(rec, ensure_ascii=False) + "\n"
-
-
-def _spy_tail_reads(monkeypatch) -> list:
-    from gc_tui.services.stores import file_store
-
-    reads: list = []
-    real = file_store._last_turn_outcome
-    monkeypatch.setattr(
-        file_store,
-        "_last_turn_outcome",
-        lambda path: reads.append(Path(path).name) or real(path),
-    )
-    return reads
-
-
 @pytest.mark.asyncio
-async def test_page_reads_tails_of_visible_rows_once(tmp_path, monkeypatch):
-    """Хвост треда читает только нарисованная строка, и один раз за жизнь
-    экрана: перерисовка фильтром и массовое удаление хвостов не читают.
-    Статус строки — из записи итога хода, не из меты."""
+async def test_preview_gets_the_mcp_snapshot_of_the_thread(tmp_path):
+    """Предпросмотр подписывает вызовы MCP снимком рантайма своего треда."""
     pytest.importorskip("textual")
-    for i in range(30):
-        tid = f"t{i:07d}"
-        _seed(
-            tmp_path,
-            tid,
-            f"промпт {i}",
-            updated_at=f"2026-06-{30 - i:02d}T00:00:00+00:00",
-        )
-        with (Path(tmp_path) / f"data_cli_{tid}.jsonl").open(
-            "a", encoding="utf-8"
-        ) as f:
-            f.write(_outcome_line(tid, "done"))
-    reads = _spy_tail_reads(monkeypatch)
+    _seed(tmp_path, "mcp00000", "задача с jira")
+    meta_file = Path(tmp_path) / "meta_cli_mcp00000.json"
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    snapshot = {"jira": {"tools": [{"name": "mcp_jira_create_issue"}]}}
+    meta["runtime"] = {"mcp_tools": snapshot}
+    meta_file.write_text(json.dumps(meta), encoding="utf-8")
     from gc_tui.app import TuiApp
-    from gc_tui.screens.mass_delete import MassDeleteScreen
+    from gc_tui.screens.preview import PreviewScreen
     from gc_tui.screens.sessions import SessionsScreen
-    from textual.widgets import Input
 
     async with TuiApp(
         threads_dir=str(tmp_path), system="cli"
@@ -913,14 +876,7 @@ async def test_page_reads_tails_of_visible_rows_once(tmp_path, monkeypatch):
         scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        page = {f"data_cli_{t.thread_id}.jsonl" for t in scr._page_items()}
-        assert len(page) == 25
-        assert sorted(reads) == sorted(page)
-        # мета «stopped», запись итога — done
-        assert "выполнено" in _rows_text(pilot)
-        scr.query_one("#sessions-filter", Input).value = "промпт"
+        scr._preview_selected()
         await pilot.pause()
-        await pilot.press("ctrl+d")
-        await pilot.pause()
-        assert isinstance(pilot.app.screen, MassDeleteScreen)
-        assert sorted(reads) == sorted(page)
+        assert isinstance(pilot.app.screen, PreviewScreen)
+        assert pilot.app.screen._mcp_snapshot == snapshot

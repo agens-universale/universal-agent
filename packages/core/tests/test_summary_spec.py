@@ -1,9 +1,7 @@
 import unittest
+from pathlib import Path
 
-from gc_core.summarize.prompt_loading import (
-    default_prompt_path,
-    load_prompt_template,
-)
+from gc_core.summarize.prompt_loading import render_summary_prompt
 from gc_core.summarize.summary_spec import (
     _SECTION_BODY_PATTERNS,
     SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
@@ -25,6 +23,17 @@ from gc_core.summarize.summary_validation import (
     validate_summary_text,
 )
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+
+
+def default_prompt_path() -> str:
+    from gc_testkit.paths import ASSETS
+
+    return str(ASSETS / "prompts" / "chat_completions_summary_prompt.md")
+
+
+def load_prompt_template(path: str) -> str:
+    raw = Path(path).read_text(encoding="utf-8")
+    return render_summary_prompt(raw, label=path)
 
 
 class SummarySpecTest(unittest.TestCase):

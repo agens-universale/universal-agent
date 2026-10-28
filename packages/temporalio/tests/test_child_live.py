@@ -7,7 +7,13 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-from live_support import temporal_cli, worker_kwargs
+from live_support import (
+    seed_messages,
+    temporal_cli,
+    thread_meta,
+    thread_trace,
+    worker_kwargs,
+)
 from gc_core.config_modules import AppConfig
 from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
 from gc_core_temporalio.contracts import RunRequest
@@ -255,9 +261,10 @@ async def test_native_child_model_tools_input_human_and_replay(
         profiles={"test": AgentProfile(workspace=str(tmp_path), core=core)},
     )
     if big:
-        from gc_core.thread_store_file_durable import DurableFileThreadStore
+        from gc_core.threads.file_store import FileThreadStore
 
-        DurableFileThreadStore(str(tmp_path / "threads")).append_messages(
+        await seed_messages(
+            FileThreadStore(str(tmp_path / "threads")),
             "test",
             "thread",
             [
@@ -358,7 +365,9 @@ async def test_native_child_model_tools_input_human_and_replay(
                     "fs_read_file",
                     "turn_ask_human",
                 }
-            meta = provider.stores["files"].load_meta("test", "thread")
+            meta = await thread_meta(
+                provider.stores["files"], "test", "thread"
+            )
             if stop:
                 assert final_status["phase"] == "stopped"
             else:
@@ -376,8 +385,8 @@ async def test_native_child_model_tools_input_human_and_replay(
             assert meta["token_usage"]["by_category"]["subagent"]["calls"] == (
                 1 if stop else 3
             )
-            trace = provider.stores["files"].read_subagent_trace(
-                "test", "thread"
+            trace = await thread_trace(
+                provider.stores["files"], "test", "thread"
             )
             assert any(record["kind"] == "finished" for record in trace)
             assert all(

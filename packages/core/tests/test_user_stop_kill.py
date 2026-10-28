@@ -408,9 +408,22 @@ async def test_readonly_tmp_is_not_spliced_into_commands():
     assert all("gc-user-stop" not in command for command in seen)
 
 
+def _host_watchdog() -> str:
+    """Сторож, который есть у ЭТОЙ машины: команду исполняет настоящий
+    шелл (``env``). На macOS нет GNU ``timeout`` — ответ пробы «timeout»
+    давал 127 вместо прерванной команды."""
+    import shutil
+
+    for tool in ("timeout", "gtimeout", "perl", "setsid"):
+        if shutil.which(tool):
+            return tool
+    pytest.skip("на машине нет ни одного сторожа удалённого шелла")
+
+
 async def test_readonly_tmp_stop_is_unkillable_and_stderr_stays_clean():
     from types import SimpleNamespace
 
+    watchdog = _host_watchdog()
     backend = RemoteShellBackend(
         ["env"],
         cwd=None,
@@ -422,7 +435,7 @@ async def test_readonly_tmp_stop_is_unkillable_and_stderr_stays_clean():
 
     async def _probe(*_args, **_kwargs):
         return SimpleNamespace(
-            stdout="nowrite\ntimeout\n",
+            stdout=f"nowrite\n{watchdog}\n",
             stderr="",
             return_code=0,
             timed_out=False,

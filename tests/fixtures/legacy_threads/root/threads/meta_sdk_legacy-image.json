@@ -1,0 +1,70 @@
+{
+  "state_schema_version": "v2",
+  "thread_id": "legacy-image",
+  "system": "sdk",
+  "schema_version": 2,
+  "updated_at": "2026-10-14T12:39:31.735039+00:00",
+  "created_at": "2026-10-14T12:39:31.717374+00:00",
+  "runtime": {
+    "live_history_chars": 4264,
+    "live_msg_count": 3,
+    "image_seq": 1
+  },
+  "previous_response_id": null,
+  "backend_api_mode": "chat_completions",
+  "messages_count": 3,
+  "shared": {
+    "working_memory": {},
+    "notes_md": "",
+    "fetch_url_cache": {},
+    "confirm_rules": {},
+    "session_todo": []
+  },
+  "user_intent_log": [
+    {
+      "turn": 1,
+      "ts": "2026-10-14T12:39:31Z",
+      "action": "user_ask",
+      "tool_name": null,
+      "content": "[Изображение #1] что на картинке?"
+    }
+  ],
+  "current_user_intent": [],
+  "user_turn_seq": 1,
+  "dialog_steps_offset": 0,
+  "last_main_prompt_tokens": 10,
+  "last_main_prompt_message_count": 2,
+  "token_usage": {
+    "by_category": {
+      "vision": {
+        "input": 12,
+        "output": 2,
+        "cached": 0,
+        "calls": 1,
+        "missing_usage_calls": 0,
+        "billed_calls": 0,
+        "billed_input": 0,
+        "billed_output": 0,
+        "billed_cached": 0,
+        "cost_by_currency": {}
+      },
+      "main": {
+        "input": 10,
+        "output": 5,
+        "cached": 0,
+        "calls": 1,
+        "missing_usage_calls": 0,
+        "billed_calls": 0,
+        "billed_input": 0,
+        "billed_output": 0,
+        "billed_cached": 0,
+        "cost_by_currency": {}
+      }
+    }
+  },
+  "chat_completions_system_prompt_rendered": "SYSTEM PROMPT",
+  "project_memory_content_hash": null,
+  "tool_usage_notice_cnt": {},
+  "todo_reminder_cnt": 1,
+  "last_backend_response_id": "scripted"
+}

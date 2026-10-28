@@ -37,8 +37,15 @@ def preparation(monkeypatch, tmp_path):
     import gc_core.run_preparation as prompts
     import gc_core.tools.subagents.registry as registry
 
+    async def no_prompts(*_a, **_k):
+        return PreparedPrompts()
+
+    async def no_definitions(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(prompts, "aload_run_prompts", no_prompts)
     monkeypatch.setattr(
-        prompts, "load_run_prompts", lambda *a, **k: PreparedPrompts()
+        registry, "aprepare_subagent_definitions", no_definitions
     )
     monkeypatch.setattr(
         registry, "resolve_subagent_definitions", lambda *a, **k: {}
@@ -448,7 +455,6 @@ async def test_child_reconstructs_recorded_parent_facts_with_separate_child_scop
         "parent-call",
         "owner",
         1,
-        0,
     )
     result = await child_module.UniversalSubagentWorkflow().run(request)
     assert result.output == "done"

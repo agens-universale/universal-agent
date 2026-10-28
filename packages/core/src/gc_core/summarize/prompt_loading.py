@@ -1,14 +1,7 @@
-"""Путь к файлу промпта суммаризации по умолчанию и чтение шаблона."""
+"""Промпты суммаризации и memory-patch: чтение из хранилища агента и
+подстановки."""
 
-import os
-
-from gc_core.agent_store import (
-    DEFAULT_AGENT_STORE,
-    AgentResource,
-    AgentStore,
-    read_resource_text,
-)
-from gc_core.bundled_assets import bundled_root
+from gc_core.agent_store import AgentStore, Prompt, aread_text
 from gc_core.summarize.summary_spec import (
     MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
     SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
@@ -22,43 +15,22 @@ from gc_core.summarize.working_memory_gateway import (
 )
 
 
-def default_prompt_path() -> str:
-    """Возвращает путь к файлу системного промпта суммаризации по умолчанию.
-
-    Назначение: единая точка, откуда оркестратор суммаризации берёт шаблон
-    инструкций для LLM, если в конфиге не задан свой путь.
-
-    Returns:
-        Абсолютный путь к `prompts/chat_completions_summary_prompt.md` в корне репозитория.
-    """
-    return os.path.join(
-        str(bundled_root()), "prompts", "chat_completions_summary_prompt.md"
-    )
+async def aload_summary_prompt(store: AgentStore) -> str:
+    """Системный промпт суммаризации из хранилища агента (у файлового —
+    ``summary.chat_completions_summary_prompt_path`` или пакетный)."""
+    # Путь задаёт КОНФИГ — файл может быть чей угодно и в любой кодировке.
+    # Отказ обязан назвать его: без пути человек читает голую жалобу кодека и
+    # не знает, какой из промптов чинить.
+    raw = await aread_text(store, "prompt", Prompt.SUMMARY)
+    return render_summary_prompt(raw, label=store.label("prompt", "summary"))
 
 
-def load_prompt_template(
-    path: str, *, store: AgentStore = DEFAULT_AGENT_STORE
-) -> str:
-    """Читает файл с системным промптом суммаризации и проверяет, что он не пустой.
-
-    Args:
-        path: Путь к markdown/текстовому файлу с промптом.
-
-    Returns:
-        Содержимое файла без ведущих/конечных пробельных строк.
-
-    Raises:
-        ValueError: Если после `strip()` текст пустой — иначе LLM получил бы
-            пустой system prompt.
-    """
-    # Путь задаёт КОНФИГ (`summary_prompt_path`) — файл может быть чей угодно и в
-    # любой кодировке. Отказ обязан назвать его: без пути человек читает голую
-    # жалобу кодека и не знает, какой из промптов чинить.
-    prompt = read_resource_text(
-        store, AgentResource("prompt", "summary", path)
-    ).strip()
+def render_summary_prompt(raw: str, *, label: str) -> str:
+    """Текст промпта суммаризации с подстановками; пустой — ``ValueError``
+    (иначе LLM получил бы пустой system prompt)."""
+    prompt = raw.strip()
     if not prompt:
-        raise ValueError(f"Summary prompt file is empty: {path}")
+        raise ValueError(f"Summary prompt file is empty: {label}")
     if SUMMARY_SECTIONS_PLACEHOLDER in prompt:
         prompt = prompt.replace(
             SUMMARY_SECTIONS_PLACEHOLDER,
@@ -98,17 +70,25 @@ This compaction is for a **subagent** child dialog. Session memory registers are
 """.strip()
 
 
-def _load_memory_patch_prompt(
-    path: str,
-    *,
-    subagent: bool = False,
-    store: AgentStore = DEFAULT_AGENT_STORE,
+async def aload_memory_patch_prompt(
+    store: AgentStore, *, subagent: bool = False
 ) -> str:
-    prompt = read_resource_text(
-        store, AgentResource("prompt", "memory_patch", path)
-    ).strip()
+    """Промпт memory-patch из хранилища агента (у файлового —
+    ``summary.chat_completions_memory_patch_replace_prompt_path`` или
+    пакетный)."""
+    raw = await aread_text(store, "prompt", Prompt.MEMORY_PATCH)
+    return render_memory_patch_prompt(
+        raw, label=store.label("prompt", "memory_patch"), subagent=subagent
+    )
+
+
+def render_memory_patch_prompt(
+    raw: str, *, label: str, subagent: bool = False
+) -> str:
+    """Текст промпта memory-patch с подстановками; пустой — ``ValueError``."""
+    prompt = raw.strip()
     if not prompt:
-        raise ValueError(f"Memory patch prompt file is empty: {path}")
+        raise ValueError(f"Memory patch prompt file is empty: {label}")
     if MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER in prompt:
         prompt = prompt.replace(
             MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
@@ -124,12 +104,3 @@ def _load_memory_patch_prompt(
     while "\n\n\n" in prompt:
         prompt = prompt.replace("\n\n\n", "\n\n")
     return prompt.strip()
-
-
-def load_memory_patch_replace_prompt(
-    path: str,
-    *,
-    subagent: bool = False,
-    store: AgentStore = DEFAULT_AGENT_STORE,
-) -> str:
-    return _load_memory_patch_prompt(path, subagent=subagent, store=store)

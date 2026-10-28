@@ -12,7 +12,6 @@ from gc_core.attachments.model import (
     user_label,
 )
 from gc_core.attachments.normalize import REASON_TOO_LARGE, NormalizeError
-from gc_core.attachments.numbering import read_image_seq
 from gc_core.attachments.store import ImageStore, amake_attachment
 from gc_core.config import (
     _bootstrap_user_config,
@@ -35,14 +34,19 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.run_context import RunContext, acreate_run_context
 from gc_core.settings import is_explicit
-from gc_core.thread_store import resolve_threads_dir
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.stores import Stores, run_store_kwargs
+from gc_core.threads.errors import ThreadBusy
+from gc_core.threads.facade import Threads
+from gc_core.threads.models import ThreadKey
 from gc_core.tools.turn.propose_plan import ProposePlan
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
 from gc_core.utils.json_text import format_json_for_display
-from gc_core.utils.logging_module import human_console_enabled
+from gc_core.utils.logging_module import (
+    RunLogDirUnavailable,
+    human_console_enabled,
+)
 from pydantic import ValidationError
 from recommended_mcp.runtime.daemon_autostart import (
     ensure_mcp_daemons,
@@ -53,8 +57,9 @@ from gc_cli import arg_parser
 from gc_cli.plan_approval import (
     NO_PROPOSED_PLAN,
     arun_plan_approval,
-    thread_has_proposed_plan,
+    athread_has_proposed_plan,
 )
+from gc_cli.stores import aopen_cli_stores, cli_threads
 from gc_cli.structured_output import (
     StructuredOutputError,
     aemit_structured_result,
@@ -168,23 +173,29 @@ class ImageArgError(ValueError):
     """Отказ `--image`: текст готов для stderr."""
 
 
-def _first_image_number(
-    threads_dir: str, thread_id: str | None, start_new_thread: bool
+def _run_system() -> str:
+    """Система треда запуска: `--system` (песочница swarm ведёт тред задачи),
+    по умолчанию `cli` — та же, что ставит исполнитель (`AgentExecutor.arun`)."""
+    return getattr(arg_parser.run_args, "system", None) or "cli"
+
+
+async def _afirst_image_number(
+    threads: Threads,
+    thread_id: str | None,
+    start_new_thread: bool,
+    *,
+    system: str = "cli",
 ) -> int:
     """Номер первой картинки запроса — сквозной по треду (спека §4).
 
-    С `-t` — следующий за `runtime.image_seq` треда; без `-t` и с `-n` — 1: тред
-    либо не пишется, либо начинается заново. Система `cli` — та же, что ставит
-    исполнитель по умолчанию (`AgentExecutor.arun`).
+    С `-t` — следующий за `runtime.image_seq` треда `(system, -t)`; без `-t`
+    и с `-n` — 1: тред либо не пишется, либо начинается заново.
     """
     if not thread_id or start_new_thread:
         return 1
-    return (
-        read_image_seq(
-            FileThreadStore(threads_dir).load_meta("cli", thread_id)
-        )
-        + 1
-    )
+    record = await threads.get(ThreadKey(system=system, thread=thread_id))
+    image_seq = record.runtime.image_seq if record is not None else None
+    return (image_seq or 0) + 1
 
 
 async def _astage_cli_images(
@@ -232,6 +243,7 @@ class _CliImages(NamedTuple):
 
 async def _aprepare_cli_images(
     settings: Any,
+    stores: Stores | None,
     image_paths: list[str],
     *,
     thread_id: str | None,
@@ -250,8 +262,11 @@ async def _aprepare_cli_images(
         pass
     if not image_paths:
         return _CliImages(store, [], 1)
-    first_n = _first_image_number(
-        resolve_threads_dir(settings), thread_id, start_new_thread
+    first_n = await _afirst_image_number(
+        cli_threads(settings, stores),
+        thread_id,
+        start_new_thread,
+        system=_run_system(),
     )
     try:
         images = await _astage_cli_images(
@@ -268,7 +283,7 @@ async def _aprepare_cli_images(
 
 
 def _cli_user_parts(
-    query: str,
+    query: str | None,
     images: list[Attachment],
     *,
     first_n: int,
@@ -280,7 +295,10 @@ def _cli_user_parts(
     Картинки — вложения к сообщению `-q`: его текст начинается с плашек
     `[Изображение #N]`. При `-T` обёртка ложится поверх плашек и текста — это всё
     ещё сообщение `-q`. Указание `-s` — отдельное техническое сообщение без вложений.
+    Без `-q` (`--inbox`) сообщений нет: ход из входящего потока треда.
     """
+    if query is None:
+        return [], None
     text = query
     if images:
         chips = " ".join(chip_text(first_n + i) for i in range(len(images)))
@@ -605,9 +623,6 @@ async def _run_init_agents_md() -> int:
     Корутина, потому что зовётся из-под ``asyncio.run(arun_cli())``, а
     синхронного входа у ядра нет вовсе.
     """
-    from gc_core.instructions.init_agents_md import build_init_prompt
-    from gc_core.security.confirm_port import confirm_available
-
     # Тот же режим запуска, что у основного входа: правило одно для всех
     # контекстов gc-cli (запись журнала правок — `agent_edits.record.cli`).
     loaded, settings_exit = _load_cli_settings(
@@ -617,6 +632,22 @@ async def _run_init_agents_md() -> int:
     if settings_exit is not None:
         return settings_exit
     loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)
+    stores, stores_exit = await aopen_cli_stores(loaded)
+    if stores_exit is not None:
+        return stores_exit
+    try:
+        return await _arun_init_with(loaded, stores)
+    finally:
+        if stores is not None:
+            await stores.aclose()
+
+
+async def _arun_init_with(loaded: Any, stores: Stores | None) -> int:
+    """``--init`` после загрузки настроек и открытия хранилищ."""
+    from gc_core.agent_store import agent_store_of
+    from gc_core.instructions.init_agents_md import abuild_init_prompt
+    from gc_core.security.confirm_port import confirm_available
+
     auth_connector = build_auth_connector(loaded)
     force_legacy = cli_forces_legacy_model(loaded)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
@@ -624,7 +655,10 @@ async def _run_init_agents_md() -> int:
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
     # против 0.01 с и 365 тиков у асинхронного двойника.
     ctx = await acreate_run_context(
-        loaded, auth_connector=auth_connector, force_legacy=force_legacy
+        loaded,
+        auth_connector=auth_connector,
+        force_legacy=force_legacy,
+        **run_store_kwargs(loaded, stores),
     )
     # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
     # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
@@ -637,7 +671,11 @@ async def _run_init_agents_md() -> int:
 
     from gc_core.utils.async_http import aclose_clients
 
-    prompt = build_init_prompt(cwd=os.getcwd(), can_ask=confirm_available(ctx))
+    prompt = await abuild_init_prompt(
+        store=agent_store_of(ctx),
+        cwd=os.getcwd(),
+        can_ask=confirm_available(ctx),
+    )
     try:
         await AgentExecutor(ctx).arun([prompt])  # агент пишет AGENTS.md сам
     finally:
@@ -828,23 +866,55 @@ def _load_cli_settings(config_arg, profile_arg):
     return loaded, None
 
 
-def _approve_plan_exit(
-    settings: Any, approve_mode: str | None, thread_id: str | None
+async def _acreate_cli_context(
+    loaded: Any,
+    *,
+    store_kwargs: dict[str, Any],
+    auth_connector: Any,
+    force_legacy: bool,
+    image_store: ImageStore,
+    auto_mcp: bool,
+) -> RunContext | None:
+    """RunContext прогона. Каталог логов недоступен на запись — строка в
+    stderr (каталог и что сделать) вместо трейсбека, уборка и ``None``."""
+    try:
+        return await acreate_run_context(
+            loaded,
+            auth_connector=auth_connector,
+            force_legacy=force_legacy,
+            **store_kwargs,
+        )
+    except RunLogDirUnavailable as exc:
+        print(f"[gc] {exc}", file=sys.stderr)
+        image_store.clear_own_staging()
+        if auto_mcp:
+            shutdown_mcp_daemons()
+        return None
+
+
+async def _aapprove_plan_exit(
+    settings: Any,
+    approve_mode: str | None,
+    thread_id: str | None,
+    stores: Stores | None = None,
+    *,
+    system: str = "cli",
 ) -> int | None:
     """`--approve-plan` без предложенного плана в сессии — ошибка, код 1."""
     if not approve_mode:
         return None
-    if thread_id and thread_has_proposed_plan(
-        resolve_threads_dir(settings), thread_id
+    if thread_id and await athread_has_proposed_plan(
+        cli_threads(settings, stores), thread_id, system=system
     ):
         return None
     print(NO_PROPOSED_PLAN.format(thread_id=thread_id), file=sys.stderr)
     return 1
 
 
-def _launch_exit(
+async def _alaunch_exit(
     config_arg: str | None,
     loaded: Any,
+    stores: Stores | None,
     *,
     just_created: bool,
     format_text: str | None,
@@ -861,7 +931,9 @@ def _launch_exit(
     )
     if setup_exit is not None:
         return setup_exit
-    return _approve_plan_exit(loaded, approve_mode, thread_id)
+    return await _aapprove_plan_exit(
+        loaded, approve_mode, thread_id, stores, system=_run_system()
+    )
 
 
 async def _arun_requested_turn(
@@ -879,6 +951,10 @@ async def _arun_requested_turn(
     """Ход, о котором просит запуск: одобрение предложенного плана флагом
     `--approve-plan` (та же последовательность ядра, что у консольного
     вопроса) либо обычный запрос `-q`."""
+    # Свой system треда — только у песочницы swarm (--system); обычный
+    # запуск зовёт исполнитель как раньше (system по умолчанию — cli).
+    system = _run_system()
+    thread_system = {} if system == "cli" else {"system": system}
     if approve_mode:
         return await executor.aexecute_accepted_plan(
             approve_mode,
@@ -886,6 +962,7 @@ async def _arun_requested_turn(
             extra_text=extra_text or "",
             verbose=verbose,
             account_run=account_run,
+            **thread_system,
         )
     return await executor.arun(
         user_parts,
@@ -894,6 +971,7 @@ async def _arun_requested_turn(
         verbose=verbose,
         attachments=attachments,
         account_run=account_run,
+        **thread_system,
     )
 
 
@@ -925,6 +1003,37 @@ async def arun_cli() -> int:
     loaded, settings_exit = _load_cli_settings(config_arg, profile_arg)
     if settings_exit is not None:
         return settings_exit
+    # Хранилище в базе (storage: config.yml) — одно на запуск: открыть до
+    # всего, что читает треды, закрыть после хода.
+    stores, stores_exit = await aopen_cli_stores(loaded)
+    if stores_exit is not None:
+        return stores_exit
+    try:
+        return await _arun_loaded(
+            loaded,
+            stores,
+            config_arg=config_arg,
+            just_created=just_created,
+            format_text=format_text,
+        )
+    except ThreadBusy as exc:
+        # Тред ведёт другой процесс (окно gc-ua, другой gc-cli, сервер).
+        print(f"[gc] {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if stores is not None:
+            await stores.aclose()
+
+
+async def _arun_loaded(
+    loaded: Any,
+    stores: Stores | None,
+    *,
+    config_arg: str | None,
+    just_created: bool,
+    format_text: str | None,
+) -> int:
+    """Запуск после загрузки настроек и открытия хранилищ ``storage:``."""
     # Режим запуска для ядра: от него зависит запись журнала правок
     # (`agent_edits.record.cli`, по умолчанию выключена — журнал здесь не смотрят).
     loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)
@@ -947,9 +1056,10 @@ async def arun_cli() -> int:
     thread_id = arg_parser.run_args.thread_id
     start_new_thread = arg_parser.run_args.new
     approve_mode = getattr(arg_parser.run_args, "approve_plan", None)
-    launch_exit = _launch_exit(
+    launch_exit = await _alaunch_exit(
         config_arg,
         loaded,
+        stores,
         just_created=just_created,
         format_text=format_text,
         approve_mode=approve_mode,
@@ -960,6 +1070,7 @@ async def arun_cli() -> int:
 
     cli_images = await _aprepare_cli_images(
         loaded,
+        stores,
         getattr(arg_parser.run_args, "images", None) or [],
         thread_id=thread_id,
         start_new_thread=start_new_thread,
@@ -987,9 +1098,16 @@ async def arun_cli() -> int:
     # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
     # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
-    ctx = await acreate_run_context(
-        loaded, auth_connector=auth_connector, force_legacy=force_legacy
+    ctx = await _acreate_cli_context(
+        loaded,
+        store_kwargs=run_store_kwargs(loaded, stores),
+        auth_connector=auth_connector,
+        force_legacy=force_legacy,
+        image_store=image_store,
+        auto_mcp=auto_mcp,
     )
+    if ctx is None:
+        return 1
     # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
     # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время
     # вопроса отменяет прогон целиком вместо штатного «отвечать не стали».
@@ -1044,6 +1162,7 @@ async def arun_cli() -> int:
             thread_id=thread_id,
             verbose=verbose,
             account_run=not close_accounting_after,
+            system=_run_system(),
         )
         structured_exit = await _emit_structured_if_requested(
             format_text=format_text,

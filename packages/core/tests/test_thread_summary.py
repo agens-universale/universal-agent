@@ -9,12 +9,12 @@ from gc_core.message_format.serialization import (
     calc_messages_chars_total,
     message_text_for_summary,
 )
-from gc_core.thread_store import (
-    ThreadSession,
-    append_new_thread_messages,
+from gc_core.thread_store import ThreadSession
+from gc_testkit.develop_files import (
     load_thread_meta,
     save_thread_meta,
 )
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_testkit.settings import make_settings
 
@@ -180,7 +180,6 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
                 system_id=system_id,
                 thread_id=thread_id,
             )
-            session.meta.pop("created_at", None)
 
             await session.aarchive_and_compact_summary_payload(
                 {
@@ -192,9 +191,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
 
             meta = load_thread_meta(tmp_dir, system_id, thread_id)
             self.assertEqual(meta.get("created_at"), original_created_at)
-            self.assertEqual(
-                session.meta.get("created_at"), original_created_at
-            )
+            self.assertEqual(session.info.created_at, original_created_at)
 
     async def test_archive_and_compact_preserves_original_user_messages_in_dump(
         self,

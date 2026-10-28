@@ -3,10 +3,7 @@
 from contextlib import nullcontext
 from copy import deepcopy
 
-# Load these deterministic core modules during sandbox initialization, rather
-# than on the first late-bound store/tool dispatch in a workflow task.
-from gc_core import thread_store_async as _thread_store_async  # noqa: F401
-from gc_core.agent_store import AgentResource, AgentStore
+from gc_core.agent_store import AgentStore
 from gc_core.config_modules.root import AppConfig
 from gc_core.context_preparation import (
     RunContextBindings,
@@ -19,6 +16,10 @@ from gc_core.intent_guard import (
 )
 from gc_core.model_router import ModelRouter
 from gc_core.run_context import assemble_run_context
+
+# Load these deterministic core modules during sandbox initialization, rather
+# than on the first late-bound store/tool dispatch in a workflow task.
+from gc_core.threads import session_writer as _session_writer  # noqa: F401
 from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
@@ -65,17 +66,28 @@ class ExternalResources:
 
 
 class ExternalAgentStore(AgentStore):
-    """Хранилище агента в коде workflow: промпты, инструкции, скиллы и
-    субагенты читаются на воркере (activity), здесь чтение — ошибка."""
+    """Хранилище агента в коде workflow: промпты, инструкции, скиллы,
+    субагенты и память читаются на воркере (activity), здесь — ошибка."""
 
-    def read_text(self, resource: AgentResource) -> str:
-        raise ExecutionFailure(
-            f"Agent resource {resource.kind}:{resource.name} "
-            "requires an external operation"
+    @staticmethod
+    def _external(what: str):
+        return ExecutionFailure(
+            f"Agent resource {what} requires an external operation"
         )
 
-    def list_dir(self, resource: AgentResource) -> list:
-        return self.read_text(resource)
+    async def read(self, kind, name, *, project=None):
+        del project
+        raise self._external(f"{kind}:{name}")
+
+    async def list(self, kind, prefix="", *, project=None):
+        del project
+        raise self._external(f"{kind}:{prefix}")
+
+    async def read_memory(self, project):
+        raise self._external(f"memory:{project.id}")
+
+    async def write_memory(self, project, text, *, expected_version):
+        raise self._external(f"memory:{project.id}")
 
 
 def assemble_context(

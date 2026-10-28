@@ -397,6 +397,33 @@ def test_tool_uses_custom_limits_from_config(tmp_path):
     assert "100" in res["error"]["message"]
 
 
+def test_tool_restores_deleted_memory_from_backup(tmp_path):
+    """Удалённую память из копии возвращает сам тул — как в develop."""
+    tool = _make_tool(tmp_path)
+    json.loads(tool(action="write", content="FACTS"))
+    (tmp_path / ".gc" / "project_memory.md").unlink()
+    res = json.loads(tool(action="read"))
+    assert res["content"] == "FACTS"
+    assert (tmp_path / ".gc" / "project_memory.md").is_file()
+
+
+def test_memory_read_outside_the_tool_does_not_restore(tmp_path):
+    """Статус и отпечаток памяти (каждый прогон, каждый шаг) читают её
+    через хранилище — удалённая пользователем память не возвращается."""
+    import asyncio
+
+    from gc_core.agent_store.reading import agent_store_of
+    from gc_core.project_memory import project_of
+
+    tool = _make_tool(tmp_path)
+    json.loads(tool(action="write", content="FACTS"))
+    (tmp_path / ".gc" / "project_memory.md").unlink()
+    ctx = tool._ctx
+    memory = asyncio.run(agent_store_of(ctx).read_memory(project_of(ctx)))
+    assert memory is None
+    assert not (tmp_path / ".gc" / "project_memory.md").exists()
+
+
 def _gated_call(tmp_path, mode, action, events=None):
     """Через настоящий диспетчер с гейтом режима: категорию записи тул
     получает из реестра, решение — из таблицы режимов."""

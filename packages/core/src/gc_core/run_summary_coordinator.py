@@ -62,30 +62,9 @@ _PRE_RUN_SUMMARY_MAX_ROUNDS = 20
 
 
 async def _aset_runtime_flag(thread_session, flag: str, active: bool) -> None:
-    """Прокси в хранилище сессии (I1: не clobber tui).
-
-    Через ``ts.port``, а не через модульную функцию: у сессии хранилище своё —
-    файловое по умолчанию или переданное встраивающим. Прямой вызов уводил бы
-    флаг на диск даже тогда, когда весь остальной тред лежит в базе.
-
-    ЕДИНСТВЕННАЯ форма: синхронного близнеца звал только синхронный
-    ``_summarizing_flag``, а того — только его собственный тест. В проде оба
-    были мертвы, и держать их значило держать вторую дорогу к тому же meta.
-
-    Через этот шов идут ТРИ индикатора TUI — ``summarizing``, ``finalizing`` и
-    ``finish_gate_checking``, — и возврат у него не используется вовсе. Для
-    асинхронного хранилища это самый тихий из отказов: корутина создаётся и
-    выбрасывается, исключения нет, в базу не уходит ничего. Индикаторы просто
-    никогда не загораются.
-    """
-    ts = thread_session
-    await ts.port.apatch_runtime_flag(
-        ts.system_id,
-        ts.thread_id,
-        flag,
-        active=active,
-        session_meta=ts.meta,
-    )
+    """Индикатор TUI в живом статусе треда — через сессию (её хранилище и
+    её аренда): ``summarizing``, ``finalizing``, ``finish_gate_checking``."""
+    await thread_session.aset_flag(flag, active=active)
 
 
 @contextlib.asynccontextmanager
@@ -108,38 +87,10 @@ async def _asummarizing_flag(thread_session):
 
 
 async def areset_run_flags(thread_session) -> None:
-    """Use an optional atomic store batch, retaining the custom-store path."""
+    """Снять флаги хода, залипшие после падения прошлого прогона."""
     if thread_session is None:
         return
-    reset = getattr(thread_session.port, "areset_run_flags", None)
-    if callable(reset):
-        await reset(
-            thread_session.system_id,
-            thread_session.thread_id,
-            session_meta=thread_session.meta,
-        )
-        return
-    await areset_stale_summarizing_flag(thread_session)
-    await aset_tui_finalizing(thread_session, False)
-    await aset_tui_finish_gate_checking(thread_session, False)
-
-
-async def areset_stale_summarizing_flag(thread_session) -> None:
-    """Снять залипший ``summarizing`` при старте: форма одна, синхронной нет."""
-    if thread_session is None:
-        return
-    ts = thread_session
-    disk = await ts.port.aload_meta(ts.system_id, ts.thread_id) or {}
-    rt = (
-        (ts.meta.get("runtime") or {})
-        if isinstance(ts.meta.get("runtime"), dict)
-        else {}
-    )
-    disk_rt = (
-        disk.get("runtime") if isinstance(disk.get("runtime"), dict) else {}
-    )
-    if rt.get("summarizing") or disk_rt.get("summarizing"):
-        await _aset_runtime_flag(ts, "summarizing", False)
+    await thread_session.areset_run_flags()
 
 
 async def aset_tui_finalizing(thread_session, active: bool) -> None:

@@ -135,7 +135,7 @@ volumes:
 `@playwright/mcp` всегда возвращает PNG base64 в tool_result рядом с путём в
 `--output-dir`. Это сотни тысяч токенов на вызов и пробивает context window.
 
-В `src/tools/connect_mcp/api.py` есть `_rewrite_media_blocks`: агент
+В `src/tools/connect_mcp/api.py` есть `_arewrite_media_blocks`: агент
 декодирует base64 → сохраняет файл в `./mcp_media/` (переопределяется env
 `MCP_MEDIA_SAVE_DIR`) → заменяет `data` на `path`. Это решает и проблему
 контекста, и ограничения sandbox'а Docker-варианта сервера.

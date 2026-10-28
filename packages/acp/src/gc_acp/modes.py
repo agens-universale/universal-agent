@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.security.permission_mode import (
     AVAILABLE_MODES,
     coerce_mode,
@@ -21,9 +20,9 @@ from gc_core.security.permission_mode import (
     mode_with_source,
 )
 from gc_core.settings import settings_of
-from gc_core.thread_store import load_thread_meta
+from gc_core.threads.facade import Threads
 
-from gc_acp.session_index import ACP_SYSTEM
+from gc_acp.session_index import thread_key
 
 MODE_CONFIG_ID = "mode"
 
@@ -74,31 +73,29 @@ def mode_updates(config_options: list[dict]) -> list[dict]:
     ]
 
 
-def current_mode(
-    agent: Any, settings: Any, *, threads_dir: str, session_id: str
+async def acurrent_mode(
+    agent: Any, settings: Any, *, threads: Threads, session_id: str
 ) -> str:
     """Действующий режим сессии — правило ядра ``mode_with_source``.
 
     Выбор знает исполнитель (смена из IDE, прошлый прогон этой сессии). До
     первого прогона после ``session/load`` его там ещё нет: режим сессии
-    лежит только в мете треда.
+    лежит только в состоянии треда.
     """
     executor = getattr(agent, "executor", None)
     getter = getattr(executor, "permission_mode", None)
     choice = getter() if callable(getter) else None
     if choice is None:
-        choice = _saved_mode(threads_dir, session_id)
+        choice = await _asaved_mode(threads, session_id)
     return mode_with_source(choice, settings_of(settings))[0].value
 
 
-def _saved_mode(threads_dir: str, session_id: str) -> str | None:
-    """Выбор режима из меты треда — через владельца формата меты
-    (``ThreadMetaMapper``), а не разбором ключей здесь. Незнакомое значение
-    отсеет ``mode_with_source``; негодная мета (``StateSchemaError`` —
-    ``ValueError``) — как нет выбора."""
+async def _asaved_mode(threads: Threads, session_id: str) -> str | None:
+    """Выбор режима из состояния треда. Незнакомое значение отсеет
+    ``mode_with_source``; негодный id сессии и сбой чтения — как нет
+    выбора."""
     try:
-        meta = load_thread_meta(threads_dir, ACP_SYSTEM, session_id)
-        shared = ThreadMetaMapper.shared_from_meta(meta)
+        record = await threads.get(thread_key(session_id))
     except (OSError, ValueError):
         return None
-    return None if shared is None else shared.permission_mode
+    return None if record is None else record.state.permission_mode

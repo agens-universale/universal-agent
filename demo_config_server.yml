@@ -1,71 +1,163 @@
+# Конфиг процесса gc-serve: какие поверхности он поднимает, где они слушают,
+# их токены и правки настроек агента поверх config.yml.
+#
+#   gc-serve                       # поверхности из server.apis
+#   gc-serve chat a2a              # перечисленные (поверхности — первыми)
+#   gc-serve --server-config ./config_server.yml --config ./config.yml
+#
+# Каждая поверхность слушает свой адрес — одинаковый при запуске одним
+# процессом и раздельно. Одинаковый адрес у нескольких поверхностей — одно
+# приложение в одном процессе (webhook и swarm на одном адресе — ошибка:
+# у них одинаковые ручки). Неизвестный ключ — отказ старта.
+
 server:
+  # host по умолчанию для всех поверхностей; у поверхности может быть свой.
   host: "0.0.0.0"
-  port: 8000
+  # Общий токен (Authorization: Bearer <token>); поверхность может задать свой.
+  # Пустой — без проверки, на старте строка в stderr.
+  auth_token: null
+  # Поверхности gc-serve без аргументов: webhook, chat, a2a, swarm.
+  apis: [webhook]
   log_level: "info"
-  # Сколько секунд вебхук ждёт, пока контекст его задачи строит другой запрос;
-  # по истечении — 503, повторите запрос. Сама сборка не прерывается.
-  context_build_wait_seconds: 120
+  # Правки logging.* агента.
+  logging:
+    # при console_trace: false агент не будет печатать пошаговые сообщения в stdout.
+    console_trace: false
+    save_logs: false
 
-defaults:
-  # Идентификатор системы по умолчанию, если во входном JSON нет поля system.
-  system: "generic"
-
-agent:
-  # Абсолютный путь — как есть; относительный ищется сначала рядом с ЭТИМ файлом,
-  # потом среди bundled-ассетов (в репозитории packages/core/assets, в колесе
-  # site-packages/gc_core/assets). Поэтому "./prompts/..." попадает в bundled-промпт,
-  # а "./server_agent.md" — в файл, лежащий рядом с конфигом, как и ожидает человек.
-  # Не нашёлся нигде — WARNING: молча работать без инструкций сервер не будет.
-  server_agentmd_path: "./prompts/demo_server_agent.md"
-
-logging:
-  # при console_trace: false агент не будет печатать пошаговые сообщения в stdout.
-  console_trace: false
-  save_logs: false
-
+# Правки настроек агента поверх config.yml — для ВСЕХ поверхностей. Ключи —
+# пути настроек через точку (agent.max_steps), как в config.yml и в
+# `gc-cli config explain`; можно и вложенной секцией (agent: {max_steps: 100}).
+# Плоские имена (max_steps) не принимаются — сервер не стартует с подсказкой.
 agent_overrides:
-  # Ключи — пути настроек через точку (agent.max_steps), как в config.yml и в
-  # `gc-cli config explain`; можно и вложенной секцией (agent: {max_steps: 100}).
-  # Плоские имена (max_steps) не принимаются — сервер не стартует с подсказкой пути.
-  # Builtin tools, запрещённые в серверном режиме (чтобы не портить файлы библиотеки).
-  agent.stop_tools:
-    # Отключаем тулы, которые могут повредить файлы библиотеки и работают с файловой системой веб приложения
-    - fs_write_file
-    - fs_apply_file_edits
-    - fs_append_file
-    - fs_read_file
-    - fs_list_files
-    - fs_find_files_by_name
-    - fs_find_in_files
-    - fs_search_and_replace
-    - fs_save_base64_file
-    - fs_view_image
-    - exec_command
-    - exec_python
-    - download_file
-    # - exec_fetch_url
-    - turn_ask_human
-    #- session_think
-    #- session_memory
-    # - exec_calculator
-    # Отключаем интерактив в консоли
   agent.verbose: false
   agent.use_server_subagents: true
   agent.max_steps: 100
 
-threads_cleanup:
-  # Периодическая чистка файлов истории тредов (meta_*.json / data_*.jsonl).
-  # Запускается в фоне внутри процесса REST-сервера.
-  #
-  # БЕЗ ЭТОЙ СЕКЦИИ ЧИСТКА ВЫКЛЮЧЕНА. Дефолт выключенный потому, что каталог
-  # тредов общий с gc-cli и TUI: сервер, поднятый в каталоге проекта, удалял бы
-  # историю интерактивной работы. Включая — соглашаетесь на это осознанно.
-  enabled: true
-  interval_seconds: 3600
-  ttl_days: 7
+webhook:
+  # Документация API (/docs, /redoc, /openapi.json) — только по ключу.
+  #docs: true
+  # Выключенные ручки: группы или пути (docs/server.md, «Документация API»).
+  #disabled_routes: []
+  port: 8000
+  # system по умолчанию, если во входном JSON его нет. Занятые другими
+  # поверхностями и интерактивными сессиями (a2a, responses, completions,
+  # acp, cli, tui) — 400.
+  default_system: "generic"
+  # Роль агента вебхука. Абсолютный путь — как есть; относительный ищется
+  # сначала рядом с ЭТИМ файлом, потом среди bundled-ассетов (в репозитории
+  # packages/core/assets, в колесе site-packages/gc_core/assets). Не нашёлся
+  # нигде — WARNING: молча работать без инструкций сервер не будет.
+  agent_md_path: "./prompts/demo_server_agent.md"
+  # Восстановление после падения: инстанс при старте и раз в interval_seconds
+  # продолжает задачи, чей ход прервался (процесс умер, аренды треда больше
+  # нет), и доставляет сообщения, которые никто не забрал. Повтор последнего
+  # вызова тула прерванного хода возможен.
+  recovery:
+    enabled: true
+    interval_seconds: 30
+    lookback_hours: 24
+  # Идемпотентность POST /v1/tasks (Idempotency-Key, webhook-id): сколько
+  # часов помнится квитанция записи.
+  idempotency_ttl_hours: 24
+  # Подпись тела по Standard Webhooks: задан секрет whsec_… (или список для
+  # смены) — неподписанный POST /v1/tasks получает 401. Общий с swarm.
+  #signing_secret: "${FILE:/run/secrets/webhook_signing_secret}"
+  signature_tolerance_seconds: 300
+  # Обратные вызовы о завершении задачи (task.completed | failed | cancelled
+  # | interrupted), подпись — Standard Webhooks.
+  callbacks:
+    url: null
+    #signing_secret: "${FILE:/run/secrets/callback_signing_secret}"
+    max_attempts: 5
+    # Где разрешён callback_url из тела запроса (схема и хост — точно, путь —
+    # началом). Пусто — callback_url не принимается.
+    allowed_urls: []
+  threads_cleanup:
+    # Периодическая чистка истории тредов в фоне процесса. Каталог тредов
+    # общий с gc-cli и TUI: сервер, поднятый в каталоге проекта, удалял бы
+    # историю интерактивной работы. Включая — соглашаетесь на это осознанно.
+    enabled: true
+    interval_seconds: 3600
+    ttl_days: 7
+  # Только вебхук, поверх общих agent_overrides.
+  agent_overrides:
+    # Builtin tools, запрещённые вебхуку (чтобы не портить файлы библиотеки и
+    # не работать с файловой системой веб-приложения).
+    agent.stop_tools:
+      - fs_write_file
+      - fs_apply_file_edits
+      - fs_append_file
+      - fs_read_file
+      - fs_list_files
+      - fs_find_files_by_name
+      - fs_find_in_files
+      - fs_search_and_replace
+      - fs_save_base64_file
+      - fs_view_image
+      - exec_command
+      - exec_python
+      - download_file
+      # - exec_fetch_url
+      - turn_ask_human
+      #- session_think
+      #- session_memory
+      # - exec_calculator
+
+chat:
+  # Документация API (/docs, /redoc, /openapi.json) — только по ключу.
+  #docs: true
+  # Выключенные ручки: группы или пути (docs/server.md, «Документация API»).
+  #disabled_routes: []
+  # Responses и Chat Completions на одном адресе; страница чата — на «/».
+  port: 8090
+  # Пустой список — CORS выключен. Непустой — только эти origin, методы GET,
+  # POST, OPTIONS, заголовок Authorization. Запись "*" из списка выбрасывается.
+  cors_origins: []
+  # Рабочий каталог нового хода, если в запросе нет абсолютного metadata.cwd.
+  # null — каталог процесса. Относительный путь не используется.
+  launch_root: null
+  # Проза без тула: deny | judge | allow. Дефолт канала — allow.
+  text_answer_mode: "allow"
+  # Судья на turn_finish: "off" | "on" | "smart" (кавычки обязательны: YAML
+  # читает off и on как boolean).
+  finish_gate_mode: "off"
+  # Напоминания про session_todo. 0 — не напоминать.
+  todo_reminder_steps: 0
+  # os_backend агента для chat обязан быть local: каталог хода — путь на
+  # машине этого процесса. turn_ask_human и turn_intermediate_reply канал
+  # снимает сам: вопрос и прогресс — проза ответа.
+
+a2a:
+  # Документация API (/docs, /redoc, /openapi.json) — только по ключу.
+  #docs: true
+  # Агент как пир A2A: карточка /.well-known/agent-card.json, JSON-RPC /rpc.
+  port: 8091
+  # Адрес не loopback без auth_token — отказ старта.
+  # URL в карточке; нужен, когда a2a слушает 0.0.0.0/:: — пир по адресу
+  # сокета не ходит.
+  public_url: null
+  name: "GigaCode"
+  description: "Универсальный агент GigaCode"
+  # Корень хода; metadata.cwd пира принимается только внутри него (без
+  # launch_root — внутри каталога процесса): это периметр записи агента.
+  launch_root: null
+  # Push-уведомления задач: адрес задаёт пир, а ходит по нему сервер.
+  # Пустой список — push выключен; иначе только эти хосты (и не во
+  # внутреннюю сеть).
+  push_allowed_hosts: []
+  text_answer_mode: "allow"
+  finish_gate_mode: "off"
+  todo_reminder_steps: 0
 
 swarm:
-  enabled: false
+  # Документация API (/docs, /redoc, /openapi.json) — только по ключу.
+  #docs: true
+  # Выключенные ручки: группы или пути (docs/server.md, «Документация API»).
+  #disabled_routes: []
+  # Задача исполняется gc-cli в песочнице bubblewrap (только Linux). Ручки —
+  # как у вебхука, на своём порту.
+  port: 8092
   # ВСЕ пути этой секции, кроме agentmd_path (он целится в файл ВНУТРИ пакета),
   # — пользовательские: абсолютный берётся как есть,
   # относительный резолвится от каталога ЭТОГО файла, пустой даёт дефолт под
@@ -82,6 +174,12 @@ swarm:
   # swarm_threads_dir/<swarm_id>/agent_logs/. Сохраняются даже при timeout/kill.
   #swarm_logs_dir: "/var/lib/gc-cli/swarm/agent_logs"
   max_concurrent: 10
+  # Тред задачи — в хранилище тредов сервера (storage.threads config.yml:
+  # файлы или база): /logs из хранилища, сообщения в идущую задачу — queued.
+  # Песочница ходит в свой тред через прокси одного треда (unix-сокет и токен
+  # задачи), учётных данных хранилища у неё нет. Без флага песочница хранит
+  # тред в своих файлах.
+  #thread_in_store: true
   ttl_seconds: 86400
   limits:
     memory_mb: 1024

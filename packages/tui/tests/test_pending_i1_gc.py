@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import compact_thread, tui_settings
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,19 +23,23 @@ def test_wire_match_falls_back_to_meta_wire_content():
     from gc_tui.screens.main import TraceScreen
 
     tid = "wire-meta-fallback"
+    from gc_testkit.develop_files import record_from_meta
+
     store = SimpleNamespace(
-        get_task_meta=lambda _tid: {
-            "tui": {
-                "pending_user_messages": [
-                    {
-                        "client_id": "c1",
-                        "content": "hello",
-                        "wire_content": "wire-hello\n",
-                        "status": "pending",
-                    }
-                ]
+        get_record=lambda _tid: record_from_meta(
+            {
+                "tui": {
+                    "pending_user_messages": [
+                        {
+                            "client_id": "c1",
+                            "content": "hello",
+                            "wire_content": "wire-hello\n",
+                            "status": "pending",
+                        }
+                    ]
+                }
             }
-        }
+        )
     )
     scr = TraceScreen()
     scr._active_task_id = tid
@@ -45,34 +49,28 @@ def test_wire_match_falls_back_to_meta_wire_content():
 
 
 async def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
-    """TUI снял pending с диска → set_tui_* их не возвращает (I1)."""
+    """TUI снял pending с диска → флаг хода их не возвращает (I1): сессия
+    пишет только живой статус, секцию TUI не трогает."""
     from gc_core.run_summary_coordinator import aset_tui_finalizing
-    from gc_core.thread_store import (
-        ThreadSession,
-        save_thread_meta,
-        update_tui_meta,
-    )
+    from gc_core.thread_store import ThreadSession
+    from gc_core.threads.facade import Threads
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import ThreadKey
 
     tid = "t1"
-    ts = ThreadSession(
-        threads_dir=str(tmp_path),
+    key = ThreadKey(system="cli", thread=tid)
+    threads = Threads(FileThreadStore(tmp_path))
+    stale = {"client_id": "stale", "content": "x", "status": "pending"}
+    await threads.update_frontend(
+        key, "tui", {"pending_user_messages": [stale]}
+    )
+    ts = await ThreadSession.afrom_config(
+        settings=None,
         system_id="cli",
         thread_id=tid,
-        history_messages=[],
-        known_message_keys=set(),
-        persisted_messages_count=0,
-        meta={
-            "tui": {
-                "pending_user_messages": [
-                    {"client_id": "stale", "content": "x", "status": "pending"}
-                ]
-            }
-        },
-        previous_response_id=None,
-        backend_api_mode="chat_completions",
+        store=FileThreadStore(tmp_path),
     )
-    save_thread_meta(str(tmp_path), "cli", tid, ts.meta)
-    update_tui_meta(str(tmp_path), "cli", tid, {"pending_user_messages": []})
+    await threads.update_frontend(key, "tui", {"pending_user_messages": []})
 
     await aset_tui_finalizing(ts, True)
 
@@ -81,39 +79,6 @@ async def test_set_tui_finalizing_does_not_resurrect_cleared_pending(tmp_path):
     )
     assert (meta.get("runtime") or {}).get("finalizing") is True
     assert (meta.get("tui") or {}).get("pending_user_messages") == []
-
-
-def test_patch_runtime_flag_preserves_disk_tui(tmp_path):
-    """Канон I1: runtime flag не воскрешает tui.pending."""
-    from gc_core.thread_store import (
-        patch_runtime_flag,
-        save_thread_meta,
-        update_tui_meta,
-    )
-
-    tid = "t2"
-    session_meta = {
-        "tui": {"pending_user_messages": [{"client_id": "stale"}]},
-    }
-    save_thread_meta(str(tmp_path), "cli", tid, session_meta)
-    update_tui_meta(str(tmp_path), "cli", tid, {"pending_user_messages": []})
-
-    patch_runtime_flag(
-        str(tmp_path),
-        "cli",
-        tid,
-        "summarizing",
-        active=True,
-        session_meta=session_meta,
-    )
-
-    meta = json.loads(
-        (tmp_path / f"meta_cli_{tid}.json").read_text(encoding="utf-8")
-    )
-    assert (meta.get("runtime") or {}).get("summarizing") is True
-    assert (meta.get("tui") or {}).get("pending_user_messages") == []
-    assert (session_meta.get("runtime") or {}).get("summarizing") is True
-    assert session_meta.get("tui", {}).get("pending_user_messages") == []
 
 
 @pytest.mark.asyncio
@@ -192,36 +157,12 @@ async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
         )
         assert len(_read_pending(tmp_path, tid)) == 1
 
-        # Компакция → stream_reset
-        (tmp_path / f"data_cli_{tid}.jsonl").write_text(
-            json.dumps(
-                {
-                    "type": "message",
-                    "thread_id": tid,
-                    "system": "cli",
-                    "seq": 1,
-                    "ts": "2026-06-11T11:00:00+00:00",
-                    "payload": {
-                        "id": "s1",
-                        "role": "assistant",
-                        "content": "после-сжатия",
-                    },
-                },
-                ensure_ascii=False,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        meta.update(
-            {
-                "updated_at": "2026-06-11T11:00:00+00:00",
-                "messages_count": 1,
-                "last_summary_archive_suffix": "2026-06-11T11-00-00",
-            }
-        )
-        meta_path.write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+        # Компакция ядром → stream_reset
+        compact_thread(
+            str(tmp_path),
+            "cli",
+            tid,
+            [{"id": "s1", "role": "assistant", "content": "после-сжатия"}],
         )
 
         def trace_text():

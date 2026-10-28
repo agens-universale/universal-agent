@@ -1,3 +1,4 @@
+from gc_testkit.develop_files import meta_of
 from gc_testkit.tui_support import tui_settings
 import pytest
 
@@ -142,7 +143,7 @@ def test_apply_toggle_writes_session_not_config_file(tmp_path):
     from gc_tui.services.stores.file_store import FileTaskStore
 
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    saved = (store.get_task_meta("t1").get("tui") or {}).get(
+    saved = (meta_of(store.get_record("t1")).get("tui") or {}).get(
         "session_settings"
     )
     assert saved == {"tui.finish_gate_mode": "off"}
@@ -228,7 +229,8 @@ def test_effective_gate_matrix_global_x_override(
 
 def test_apply_session_overrides_applies_pair(tmp_path):
     from gc_tui.services.stores.file_store import FileTaskStore
-    from gc_tui.session_settings import read_from_meta
+    from gc_tui.services.stores.record_view import tui_section
+    from gc_tui.session_settings import read_from_tui
 
     app = _app(tmp_path)
     app.tui_state.active_task_id = "t1"
@@ -242,7 +244,7 @@ def test_apply_session_overrides_applies_pair(tmp_path):
     assert eff.settings.tui.finish_gate_mode == "smart"
     assert eff.settings.tui.text_answer_mode == "judge"
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    saved = read_from_meta(store.get_task_meta("t1"))
+    saved = read_from_tui(tui_section(store.get_record("t1")))
     assert saved == {
         "tui.finish_gate_mode": "smart",
         "tui.text_answer_mode": "judge",

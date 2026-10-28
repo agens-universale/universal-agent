@@ -456,6 +456,11 @@ def test_bashrc_init_keeps_env_path_and_profile_additions(tmp_path):
     """
     if not _bash_runs("true"):
         pytest.skip("нет рабочего bash на хосте")
+    # bash 3.2 (системный на macOS) выходит по `set -e` из профиля,
+    # подключённого через `.`, даже под `|| true`. Init harbor исполняется в
+    # Linux-образе, где bash 4+; на хосте с bash 3.2 сверять нечего.
+    if not _bash_runs('[ "${BASH_VERSINFO[0]}" -ge 4 ]'):
+        pytest.skip("bash старше 4: set -e в профиле роняет шелл")
     from gc_core.backends.harbor import _BASHRC_EXEC_INIT
 
     profile = tmp_path / "profile"

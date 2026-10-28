@@ -1,0 +1,82 @@
+{
+  "revision": "1781889661d54620060487010fcfc37445f9ff29",
+  "threads": {
+    "cli_two_turns": {
+      "system": "cli",
+      "thread_id": "legacy-cli",
+      "messages": 10,
+      "archives": 0,
+      "images": 0,
+      "subagent_events": 0,
+      "edits": 0,
+      "title": null,
+      "first_user_text": "Посчитай 3 * 450"
+    },
+    "cli_compacted": {
+      "system": "cli",
+      "thread_id": "legacy-compacted",
+      "messages": 1,
+      "archives": 1,
+      "images": 0,
+      "subagent_events": 0,
+      "edits": 0,
+      "title": null,
+      "first_user_text": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>Посчитать 3 * 450.</task_and_context>\n  <open_tasks>mode: execution\n- none</open_tasks>\n  <do_not_redo>n/a</do_not_redo>\n  <last_verified_facts>- 3 * 450 = 1350</last_verified_facts>\n  <recent_artifacts>n/a</recent_artifacts>\n</summary>\n\n<session_memory>\n<goal>\nПосчитать 3 * 450\n</goal>\n<constraints>\nn/a\n</constraints>\n<state>\nготово\n</state>\n<knowledge>\n3 * 450 = 1350\n</knowledge>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<user_intent_log total_chars=\"125\" total_records=\"1\" offset=\"0\" limit=\"1\" truncated=\"false\">\n{\"turn\": 1, \"ts\": \"2026-10-14T12:39:31Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"Посчитай 3 * 450 для сжатия\"}\n</user_intent_log>\n\n<last_dialog_steps>\n<step 1>\n[user] Посчитай 3 * 450 для сжатия\n</step 1>\n\n<step 2>\n[function_call] exec_calculator\n{\"expression\": \"3 * 450\"}\n[function_call_output]\n{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"3 * 450\", \"value_type\": \"int\", \"error\": null, \"value\": 1350}\n</step 2>\n\n<step 3>\n[function_call] turn_finish\n{\"solution_type\": \"full_solution\", \"task\": \"Контрольная задача\", \"task_report\": \"1350\", \"handoff\": \"{}\"}\n[function_call_output]\n{\"tool\": \"turn_finish\", \"ok\": true, \"status\": \"submitted\", \"finish_gate\": {\"runtime_outcome\": \"skipped\"}}\n</step 3>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>"
+    },
+    "cli_subagents": {
+      "system": "cli",
+      "thread_id": "legacy-subagents",
+      "messages": 5,
+      "archives": 0,
+      "images": 0,
+      "subagent_events": 3,
+      "edits": 0,
+      "title": null,
+      "first_user_text": "Задача с субагентом"
+    },
+    "tui_session": {
+      "system": "tui",
+      "thread_id": "legacy-tui",
+      "messages": 10,
+      "archives": 0,
+      "images": 0,
+      "subagent_events": 0,
+      "edits": 1,
+      "title": "Старая сессия TUI",
+      "first_user_text": "Вопрос из TUI"
+    },
+    "acp_session": {
+      "system": "acp",
+      "thread_id": "0b1c2d3e-0000-4000-8000-000000000001",
+      "messages": 5,
+      "archives": 0,
+      "images": 0,
+      "subagent_events": 0,
+      "edits": 0,
+      "title": null,
+      "first_user_text": "Вопрос из IDE"
+    },
+    "chat_dialog": {
+      "system": "responses",
+      "thread_id": "legacy-chat",
+      "messages": 5,
+      "archives": 0,
+      "images": 0,
+      "subagent_events": 0,
+      "edits": 0,
+      "title": null,
+      "first_user_text": "Вопрос из chat"
+    },
+    "sdk_image": {
+      "system": "sdk",
+      "thread_id": "legacy-image",
+      "messages": 3,
+      "archives": 0,
+      "images": 1,
+      "subagent_events": 0,
+      "edits": 0,
+      "title": null,
+      "first_user_text": "[Изображение #1] что на картинке?"
+    }
+  }
+}

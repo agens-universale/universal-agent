@@ -201,19 +201,27 @@ def test_backend_responses_json_error_event(tmp_path, monkeypatch):
 
 def test_agent_md_read_failed_event(tmp_path, monkeypatch):
     """Event fires when verbose=True, logger is present, and L0 read fails."""
+    from gc_core.agent_store import FileAgentStore
     from gc_core.config_modules import env_vars
-    from gc_core.instructions.loader import build_instructions
+    from gc_core.instructions.loader import abuild_instructions
+    from gc_testkit import run_coro
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     logger, path = _make_logger(tmp_path)
 
     missing_path = tmp_path / "does_not_exist.md"
-    build_instructions(
-        agent_md_path=str(missing_path),
-        is_tui=False,
-        cwd=str(tmp_path / "proj"),
-        logger=logger,
-        verbose=True,
+    store = FileAgentStore(
+        make_settings({"paths.agent_md_path": str(missing_path)})
+    )
+    run_coro(
+        abuild_instructions(
+            is_tui=False,
+            store=store,
+            cwd=str(tmp_path / "proj"),
+            logger=logger,
+            verbose=True,
+        )
     )
     _flush(logger)
     recs = _records(path)
@@ -227,19 +235,27 @@ def test_agent_md_read_failed_event_not_emitted_when_not_verbose(
 ):
     """Same L0 read-failure + logger present, but verbose=False (the default)
     must suppress the event — matching the fork's ``if self.verbose:`` gate."""
+    from gc_core.agent_store import FileAgentStore
     from gc_core.config_modules import env_vars
-    from gc_core.instructions.loader import build_instructions
+    from gc_core.instructions.loader import abuild_instructions
+    from gc_testkit import run_coro
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
     logger, path = _make_logger(tmp_path)
 
     missing_path = tmp_path / "does_not_exist.md"
-    build_instructions(
-        agent_md_path=str(missing_path),
-        is_tui=False,
-        cwd=str(tmp_path / "proj"),
-        logger=logger,
-        verbose=False,
+    store = FileAgentStore(
+        make_settings({"paths.agent_md_path": str(missing_path)})
+    )
+    run_coro(
+        abuild_instructions(
+            is_tui=False,
+            store=store,
+            cwd=str(tmp_path / "proj"),
+            logger=logger,
+            verbose=False,
+        )
     )
     _flush(logger)
     recs = _records(path)

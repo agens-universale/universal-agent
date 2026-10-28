@@ -9,6 +9,7 @@ import json
 
 import pytest
 from gc_testkit.tui_support import tui_settings
+from gc_tui.services.stores.record_view import tui_section
 
 TID_A = "stal0000000000000000000000000000a"
 TID_B = "stal0000000000000000000000000000b"
@@ -52,7 +53,7 @@ def _app(tmp_path):
 
 def _status(scr_or_store, tid):
     store = getattr(scr_or_store, "_store", None) or scr_or_store
-    return (store.get_task_meta(tid).get("tui") or {}).get("status")
+    return tui_section(store.get_record(tid)).get("status")
 
 
 def _store(tmp_path):
@@ -292,7 +293,7 @@ async def test_elapsed_live_equals_reopen_from_turn_record(tmp_path):
         scr._poll_active()
         await pilot.pause()
         live = _outcome_text(scr)
-        meta = scr._store.get_task_meta(TID_A)["tui"]["last_indicator"]
+        meta = tui_section(scr._store.get_record(TID_A))["last_indicator"]
         assert live.startswith("✓ Выполнил за 5с")
         assert "elapsed" not in meta
         scr.attach_active_task(TID_B, is_resume=True)
