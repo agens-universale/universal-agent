@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 import os
 import select
@@ -158,6 +159,25 @@ def test_da1_only_is_none_without_waiting(pty_pair):
 
     assert rgb is None
     assert time.monotonic() - started < 1.0
+
+
+def test_probe_waits_up_to_one_second_by_default():
+    """По медленному ssh/tmux ответ идёт дольше 0,1 с — потолок 1 с."""
+    default = inspect.signature(query_background).parameters["timeout"]
+    assert terminal_caps.PROBE_TIMEOUT == 1.0
+    assert default.default == terminal_caps.PROBE_TIMEOUT
+
+
+def test_default_probe_exits_early_on_da1(pty_pair):
+    """Отвечающий терминал не ждёт потолка: выход по ответу DA1."""
+    master, slave = pty_pair
+    _emulate(master, ITERM2 + DA1_ITERM2)
+
+    started = time.monotonic()
+    rgb = query_background(stdin=_tty(slave), stdout=_tty(slave))
+
+    assert rgb == (0x16, 0x19, 0x1E)
+    assert time.monotonic() - started < terminal_caps.PROBE_TIMEOUT / 2
 
 
 def test_silent_terminal_is_none_by_timeout(pty_pair):
