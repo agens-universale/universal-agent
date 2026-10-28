@@ -646,6 +646,31 @@ async def test_long_list_opens_scrolled_to_the_current_value(tmp_path):
         assert row.region.bottom <= footer.region.y
 
 
+@pytest.mark.asyncio
+async def test_current_value_stays_revealed_when_hint_wraps(tmp_path):
+    """Длинный хинт переносится только при фактической ширине: подвал
+    растёт уже после первой раскладки и не накрывает текущее значение —
+    докрутка идёт за раскладкой пикера, а не за первым кадром."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    async with _mk_app(tmp_path).run_test(size=(60, 30)) as pilot:
+        pilot.app.screen._open_arg_picker(
+            options=[(f"model-{i:02d}", "описание") for i in range(40)],
+            prefix="",
+            hint_provider=lambda v: f"{v} " + "длинный хинт " * 12,
+            initial_value="model-35",
+        )
+        await pilot.pause()
+        await pilot.pause()
+        picker = pilot.app.query_one(ArgPicker)
+        row = picker.query_one(".palette-row.selected")
+        footer = picker.query_one(".palette-footer")
+        assert footer.region.height > 4
+        assert row.region.height == 1
+        assert row.region.bottom <= footer.region.y
+
+
 # --- Профиль не меняется во время хода ---------------------------------------
 
 _LOCKED_KEYS = (

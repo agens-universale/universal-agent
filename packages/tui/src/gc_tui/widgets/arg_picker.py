@@ -286,11 +286,6 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         declared `height: auto`."""
         self.styles.min_height = self.desired_height
 
-    def on_mount(self) -> None:
-        """Стартовая подсветка (`initial_value`) может стоять за краем
-        длинного списка — докрутить к ней после первой раскладки."""
-        self.call_after_refresh(self._reveal_selected)
-
     def _reveal_selected(self) -> None:
         rows = self.query(".palette-row.selected")
         if rows:
@@ -309,6 +304,15 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         if self._hint_static is not None:
             self._hint_static.styles.height = self._hint_lines()
         self._apply_size()
+
+    def watch_virtual_size(self) -> None:
+        """Раскладка сменила размер содержимого — строки или подвал:
+        докрутить подсвеченную строку по свежей геометрии. Так стартовая
+        подсветка (`initial_value` в хвосте длинного списка) видна сразу,
+        и подвал, выросший под переносы хинта уже после первой раскладки,
+        её не накрывает. Прокрутка колесом размер не меняет — с ней
+        докрутка не спорит."""
+        self._reveal_selected()
 
     def _footer_line_count(self, text: str) -> int:
         """Сколько СТРОК займёт строка подвала при текущей ширине.
