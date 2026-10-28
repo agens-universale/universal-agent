@@ -10,14 +10,18 @@ from gc_acp.plan import (
     entries_from_todos,
     plan_update,
     session_info_update,
-    todos_from_meta,
-    usage_account_from_meta,
+    thread_record,
+    todos_from_record,
+    usage_account_from_record,
     usage_update,
-    used_tokens_from_meta,
+    used_tokens_from_record,
 )
 from gc_acp.session_index import ACP_SYSTEM, prompt_title_line
 from gc_core.persistence.schema import normalize_session_todo
-from gc_core.thread_store import save_thread_meta
+from gc_testkit.develop_files import save_thread_meta
+from gc_core.threads.facade import Threads
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
 from gc_core.usage.account import MONEY_FIELD, UsageAccount
 from gc_testkit.settings import make_settings
 
@@ -287,11 +291,18 @@ def test_entries_from_todos_non_list_and_strips_content():
     ]
 
 
+def _record(tmp_path, session_id):
+    """Запись треда так, как её видит фасад: через хранилище тредов."""
+    threads = Threads(FileThreadStore(tmp_path))
+    key = ThreadKey(system=ACP_SYSTEM, thread=session_id)
+    return asyncio.run(thread_record(threads, key))
+
+
 def test_used_tokens_and_meta_helpers_reject_garbage(tmp_path):
     session_id = "meta-gap"
-    assert todos_from_meta(str(tmp_path), session_id) == []
-    assert used_tokens_from_meta(str(tmp_path), session_id) is None
-    assert usage_account_from_meta(str(tmp_path), session_id) is None
+    assert todos_from_record(_record(tmp_path, session_id)) == []
+    assert used_tokens_from_record(_record(tmp_path, session_id)) is None
+    assert usage_account_from_record(_record(tmp_path, session_id)) is None
 
     save_thread_meta(
         str(tmp_path),
@@ -303,12 +314,10 @@ def test_used_tokens_and_meta_helpers_reject_garbage(tmp_path):
             "token_usage": "broken",
         },
     )
-    assert todos_from_meta(str(tmp_path), session_id) == []
-    assert used_tokens_from_meta(str(tmp_path), session_id) is None
-    # from_meta на мусоре даёт пустой UsageAccount, не None
-    account = usage_account_from_meta(str(tmp_path), session_id)
-    assert account is not None
-    assert account.is_empty()
+    assert todos_from_record(_record(tmp_path, session_id)) == []
+    assert used_tokens_from_record(_record(tmp_path, session_id)) is None
+    # мусор вместо расхода — расхода нет
+    assert usage_account_from_record(_record(tmp_path, session_id)) is None
 
     save_thread_meta(
         str(tmp_path),
@@ -320,9 +329,9 @@ def test_used_tokens_and_meta_helpers_reject_garbage(tmp_path):
             "token_usage": _money_account().to_meta(),
         },
     )
-    assert used_tokens_from_meta(str(tmp_path), session_id) is None
-    assert todos_from_meta(str(tmp_path), session_id) == []
-    loaded = usage_account_from_meta(str(tmp_path), session_id)
+    assert used_tokens_from_record(_record(tmp_path, session_id)) is None
+    assert todos_from_record(_record(tmp_path, session_id)) == []
+    loaded = usage_account_from_record(_record(tmp_path, session_id))
     assert loaded is not None
     assert loaded.totals()[MONEY_FIELD] == {"USD": 0.045}
 

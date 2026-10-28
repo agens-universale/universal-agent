@@ -33,8 +33,8 @@ from gc_core.project_memory.operations import (
 from gc_core.run_preparation import PreparedPrompts, PromptPreparationRequest
 from gc_core.settings import settings_of
 from gc_core.state_preparation import PreparedState, StatePreparationRequest
-from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_durable import durable_store_capability
+from gc_core.threads.models import ThreadKey
+from gc_core.threads.store import ThreadStore
 from temporalio import activity
 from temporalio.converter import value_to_type
 from temporalio.exceptions import ApplicationError
@@ -250,15 +250,14 @@ class AgentActivities:
         #: — уходят в workflow с подготовкой хода.
         self.activity_settings = activity_settings or DEFAULT_ACTIVITY_SETTINGS
         self.context_provider = context_provider
-        self.stores = {
-            name: athread_store(store) for name, store in stores.items()
-        }
-        self.public_config = public_config
-        for store in self.stores.values():
-            if durable_store_capability(store) is None:
+        for name, store in stores.items():
+            if not isinstance(store, ThreadStore):
                 raise ValueError(
-                    "Temporal requires a durable ThreadStore capability"
+                    f"ThreadStore {name!r}: Temporal requires ThreadStore v2 "
+                    "(gc_core.threads.store)"
                 )
+        self.stores = dict(stores)
+        self.public_config = public_config
 
     @asynccontextmanager
     async def _operation_scope(self, call):
@@ -341,8 +340,9 @@ class AgentActivities:
         return await self._recorded(call, PreparedContext, self._prepare)
 
     async def _prepare(self, call, ctx):
-        from gc_core.run_preparation import load_run_prompts
+        from gc_core.run_preparation import aload_run_prompts
         from gc_core.tools.subagents.registry import (
+            aprepare_subagent_definitions,
             resolve_subagent_definitions,
         )
 
@@ -354,7 +354,6 @@ class AgentActivities:
         )
         if type(require_equivalence) is not bool:
             raise ExecutionFailure("Invalid root routing contract requirement")
-        store = self.stores[call.data["store_id"]]
         public = self.public_config(ctx)
         prepared_context = PreparedRunContext.from_context(
             ctx, settings=public.settings, runtime=public.runtime
@@ -362,12 +361,12 @@ class AgentActivities:
         prompts_request = PromptPreparationRequest.from_config(
             ctx, verbose=bool(settings_of(ctx).agent.verbose)
         )
-        prompts = await asyncio.to_thread(
-            load_run_prompts,
-            prompts_request,
-            logger=ctx.logger,
-            store=agent_store_of(ctx),
+        prompts = await aload_run_prompts(
+            prompts_request, logger=ctx.logger, store=agent_store_of(ctx)
         )
+        # Своё хранилище агента на воркере асинхронное: определения —
+        # заранее, синхронное чтение ниже берёт их готовыми.
+        await aprepare_subagent_definitions(ctx, logger=ctx.logger)
         return PreparedContext(
             human_input=getattr(self.context_provider, "human_input", True),
             context=prepared_context,
@@ -394,16 +393,6 @@ class AgentActivities:
                 }
                 for name, entry in ctx.tools_data.items()
             },
-            store_capabilities=[
-                name
-                for name in (
-                    "replace_messages",
-                    "archive_and_replace",
-                    "reset_run_flags",
-                )
-                if callable(getattr(store, "a" + name, None))
-            ],
-            threads_dir=str(getattr(store, "threads_dir", "")),
             resource_owner=(await self.context_provider.resource_owner(call))
             if callable(getattr(self.context_provider, "resource_owner", None))
             else None,
@@ -438,10 +427,9 @@ class AgentActivities:
         )
 
     async def _prepare_prompts(self, call, ctx):
-        from gc_core.run_preparation import load_run_prompts
+        from gc_core.run_preparation import aload_run_prompts
 
-        return await asyncio.to_thread(
-            load_run_prompts,
+        return await aload_run_prompts(
             value_to_type(PromptPreparationRequest, call.data),
             logger=ctx.logger,
             store=agent_store_of(ctx),
@@ -452,12 +440,10 @@ class AgentActivities:
         return await self._recorded(call, str, self._prompt)
 
     async def _prompt(self, call, ctx):
-        from gc_core.resource_loading import load_prompt_resource
+        from gc_core.resource_loading import aload_prompt_resource_here
 
-        return await asyncio.to_thread(
-            load_prompt_resource,
-            value_to_type(PromptResourceRequest, call.data),
-            ctx=ctx,
+        return await aload_prompt_resource_here(
+            value_to_type(PromptResourceRequest, call.data), ctx=ctx
         )
 
     @activity.defn(name="universal_agent.skills.list")
@@ -572,9 +558,8 @@ class AgentActivities:
         from gc_core.tools.project.project_memory import ProjectMemory
 
         state = SimpleNamespace(project_memory_content_hash=None)
-        return await asyncio.to_thread(
-            ProjectMemory(ctx=ctx, state=state).execute_io,
-            value_to_type(ProjectMemoryRequest, call.data),
+        return await ProjectMemory(ctx=ctx, state=state).aexecute_io(
+            value_to_type(ProjectMemoryRequest, call.data)
         )
 
     @activity.defn(name="universal_agent.guard.probe")
@@ -582,7 +567,7 @@ class AgentActivities:
         return await self._recorded(call, GuardProbes, self._guard)
 
     async def _guard(self, call, ctx):
-        from gc_core.security.guard_probe import evaluate_guard_probe
+        from gc_core.security.guard_probe import aevaluate_guard_probes
 
         requests = [
             value_to_type(GuardProbeRequest, value)
@@ -591,14 +576,9 @@ class AgentActivities:
                 *call.data.get("companions", []),
             )
         ]
-
-        def evaluate():
-            return [
-                evaluate_guard_probe(request, settings=ctx)
-                for request in requests
-            ]
-
-        primary, *companions = await asyncio.to_thread(evaluate)
+        primary, *companions = await aevaluate_guard_probes(
+            requests, settings=ctx
+        )
         return GuardProbes(primary, companions)
 
     @activity.defn(name="universal_agent.summary.trace")
@@ -707,13 +687,8 @@ class AgentActivities:
         store = self.stores.get(thread.get("store_id"))
         if store is None or not thread.get("thread_id"):
             return
-        capability = durable_store_capability(store)
-        if capability is None:
-            return
-        snapshot = await capability[0](
-            thread.get("system_id"), thread["thread_id"]
+        key = ThreadKey(
+            system=thread.get("system_id"), thread=thread["thread_id"]
         )
-        if snapshot is None or snapshot.state is None:
-            return
-        for message in snapshot.state.messages:
-            known.setdefault(message_hash(message), deepcopy(message))
+        for entry in await store.read_stream(key, "messages"):
+            known.setdefault(message_hash(entry.data), deepcopy(entry.data))

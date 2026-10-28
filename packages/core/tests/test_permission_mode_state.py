@@ -11,7 +11,7 @@ from gc_core.persistence.schema import (
     STATE_SCHEMA_VERSION,
     serialize_shared_block,
 )
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import shared_from_meta
 from gc_core.security.permission_mode import Mode, resolve_mode_with_source
 from gc_core.security.permission_store import PermissionStore
 from gc_testkit.settings import fake_ctx
@@ -27,7 +27,7 @@ def test_mode_survives_save_and_restore():
     shared = SharedStateData(permission_mode="manual")
     block = serialize_shared_block(shared)
     assert block["permission_mode"] == "manual"
-    restored = ThreadMetaMapper.shared_from_meta(
+    restored = shared_from_meta(
         {"state_schema_version": STATE_SCHEMA_VERSION, "shared": block}
     )
     assert restored.permission_mode == "manual"
@@ -37,7 +37,7 @@ def test_session_saved_before_the_feature_restores_without_a_mode():
     block = serialize_shared_block(SharedStateData())
     assert "permission_mode" not in block
     block["notes_md"] = "x"
-    restored = ThreadMetaMapper.shared_from_meta(
+    restored = shared_from_meta(
         {"state_schema_version": STATE_SCHEMA_VERSION, "shared": block}
     )
     assert restored.permission_mode is None

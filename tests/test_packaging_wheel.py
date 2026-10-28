@@ -48,8 +48,7 @@ MANIFESTS = {
     "gc_mcp": "packages/mcp",
     "gc_core_temporalio": "packages/temporalio",
     "gc_acp": "packages/acp",
-    "gc_chat": "packages/chat",
-    "gc_a2a": "packages/a2a",
+    "gc_stores": "packages/stores",
 }
 
 
@@ -245,11 +244,30 @@ def test_server_wheel_contents(wheels):
         :10
     ]
     for m in (
-        "gc_server/server.py",
-        "gc_server/rest_api/__init__.py",
+        "gc_server/cli.py",
+        "gc_server/app.py",
+        "gc_server/config.py",
+        "gc_server/webhook/surface.py",
+        "gc_server/chat/surface.py",
+        "gc_server/a2a/surface.py",
+        "gc_server/swarm/surface.py",
         "gc_server/swarm/runner.py",
     ):
         assert m in names, m
+
+
+def test_stores_wheel_ships_the_schema(wheels):
+    """Миграции схемы лежат файлами рядом с кодом: без них ``ensure_schema()``
+    установленного колеса падает на первом старте (а SQLite — при открытии)."""
+    names = wheels["gc_stores"]
+    assert {n.split("/")[0] for n in names} == {"gc_stores"}, sorted(names)
+    for base in ("postgres", "mysql", "sqlite"):
+        for m in (
+            f"gc_stores/{base}/store.py",
+            f"gc_stores/{base}/migrations/0001_threads.sql",
+            f"gc_stores/{base}/migrations/0002_agent.sql",
+        ):
+            assert m in names, m
 
 
 def test_vendored_ddgs_ships_without_build_junk(wheels):
@@ -339,8 +357,9 @@ OWN_COMMANDS = {
         "gc-temporal-worker",
     },
     "gc_acp": {"gc-acp"},
-    "gc_chat": {"gc-chat"},
-    "gc_a2a": {"gc-a2a"},
+    # Утилита обслуживания хранилищ (migrate, sync). gc-stores в мету gc-ua не
+    # входит и ставится отдельно, как Temporal: с командами меты не пересекается.
+    "gc_stores": {"gc-stores"},
 }
 
 
@@ -387,7 +406,7 @@ def test_each_distribution_declares_only_its_own_commands():
                 *(
                     commands
                     for leaf, commands in OWN_COMMANDS.items()
-                    if leaf != "gc_core_temporalio"
+                    if leaf not in ("gc_core_temporalio", "gc_stores")
                 )
             )
             assert got == expected, sub
@@ -431,8 +450,6 @@ def test_meta_pulls_every_profile():
         f"gc-server=={ver}",
         f"gc-mcp=={ver}",
         f"gc-acp=={ver}",
-        f"gc-chat=={ver}",
-        f"gc-a2a=={ver}",
     }
     assert root["project"]["optional-dependencies"]["temporal"] == [
         f"gc-core-temporalio=={ver}"
@@ -463,8 +480,7 @@ def test_versions_are_pinned_together():
         "packages/server",
         "packages/mcp",
         "packages/acp",
-        "packages/chat",
-        "packages/a2a",
+        "packages/stores",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -476,8 +492,7 @@ def test_versions_are_pinned_together():
         "packages/server",
         "packages/mcp",
         "packages/acp",
-        "packages/chat",
-        "packages/a2a",
+        "packages/stores",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -648,7 +663,7 @@ def test_docs_never_offer_bare_pip_for_our_distributions():
             if "pip install" not in stripped or "uv pip install" in stripped:
                 continue
             if re.search(
-                r"\bgc-(core|cli|tui|server|mcp|ua|testkit)\b", stripped
+                r"\bgc-(core|cli|tui|server|mcp|ua|testkit|stores)\b", stripped
             ):
                 offenders.append(f"{doc.relative_to(REPO)}:{num}: {stripped}")
 

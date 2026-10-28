@@ -9,8 +9,19 @@ import json
 import logging
 import time
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Tuple, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    NoReturn,
+    Optional,
+    Tuple,
+    Union,
+)
 
+from gc_core.attachments.model import attachments_of
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.judge_runner import arun_pair_judge
 from gc_core.auto_routing.levels import auto_active, effective_level
@@ -152,6 +163,7 @@ from gc_core.security.permission_mode import (
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
+from gc_core.threads.errors import ThreadStoreError
 from gc_core.tools import (
     WrongFunctionArgumentsException,
     aapply_tool,
@@ -247,6 +259,13 @@ async def _acall_blocking_hook(fn, *args: Any, **kwargs: Any):
     return await asyncio.to_thread(lambda: fn(*args, **kwargs))
 
 
+def _store_refused(exc: ThreadStoreError) -> ExecutionFailure:
+    """Отказ контракта хранилища при записи шага (тред ведёт другой
+    инстанс, аренда перехвачена) — отказ хода, а не сбой записи:
+    продолжить ход значило бы ответить пользователю, оставив в треде дыры."""
+    return ExecutionFailure(f"Тред недоступен для записи: {exc}")
+
+
 async def _maybe_persist(
     callback,
     messages: list,
@@ -275,6 +294,8 @@ async def _maybe_persist(
         await await_callback(callback(messages))
     except ExecutionFailure:
         raise
+    except ThreadStoreError as refused:
+        raise _store_refused(refused) from refused
     except Exception as persist_exc:
         _fallback_logger.warning(
             "Thread messages persist warning: %s",
@@ -856,29 +877,46 @@ def _request_audience(
     return audience
 
 
-def _image_bytes_reader(ctx: Any) -> Callable[[Any], Optional[bytes]]:
-    """Чем проекция читает байты вложений — хранилищем картинок контекста.
+async def _no_image_bytes(_attachment: Any) -> Optional[bytes]:
+    return None
+
+
+def _image_bytes_reader(
+    ctx: Any,
+) -> Callable[[Any], Awaitable[Optional[bytes]]]:
+    """Чем запрос читает байты вложений — хранилищем картинок контекста.
     Контекст, собранный в обход фабрики, хранилища не имеет: байт нет, живая
     картинка уходит запиской «файл недоступен» — как при удалённом файле."""
     store = getattr(ctx, "image_store", None)
     if store is None:
-        return lambda _attachment: None
-    return store.read_for_send
+        return _no_image_bytes
+    return store.aread_for_send
 
 
-def _read_once(
-    read_bytes: Callable[[Any], Optional[bytes]],
+def _no_pixels(_attachment: Any) -> Optional[bytes]:
+    """Проекция без пикселей (``responses``) байты не читает."""
+    return None
+
+
+async def _aread_live(
+    read_bytes: Callable[[Any], Awaitable[Optional[bytes]]],
+    live_ids: frozenset[str],
+    *message_lists: List[Dict],
 ) -> Callable[[Any], Optional[bytes]]:
-    """Байты картинок на один запрос: проекция идёт по двум спискам (state и батч),
-    картинки батча есть в обоих — читать и сверять файл второй раз незачем."""
-    cache: Dict[str, Optional[bytes]] = {}
-
-    def read(attachment: Any) -> Optional[bytes]:
-        if attachment.id not in cache:
-            cache[attachment.id] = read_bytes(attachment)
-        return cache[attachment.id]
-
-    return read
+    """Байты живых картинок запроса — заранее: хранилище тредов отдаёт их
+    корутиной, а проекция синхронна. Каждое вхождение (картинка и её путь)
+    читается один раз: проекция идёт по двум спискам (state и батч), картинки
+    батча есть в обоих."""
+    cache: Dict[Tuple[str, str], Optional[bytes]] = {}
+    for messages in message_lists:
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            for att in attachments_of(message):
+                place = (att.id, str(att.path))
+                if att.id in live_ids and place not in cache:
+                    cache[place] = await read_bytes(att)
+    return lambda att: cache.get((att.id, str(att.path)))
 
 
 _UNRESOLVED_MAIN = object()
@@ -1008,7 +1046,7 @@ async def _arequest_responses_once(
             audience=audience,
             live_ids=frozenset(),
             api_mode="responses",
-            read_bytes=_image_bytes_reader(ctx),
+            read_bytes=_no_pixels,
         ),
         state,
         tools=tools_for_mode(
@@ -1090,7 +1128,7 @@ async def _asend_chat_completions(
     *,
     sanitized_messages: List[Dict],
     sanitized_state_messages: List[Dict],
-    read_bytes: Callable[[Any], Optional[bytes]],
+    read_bytes: Callable[[Any], Awaitable[Optional[bytes]]],
     ctx: Any,
     settings: AppConfig,
     resolved: Any,
@@ -1103,7 +1141,9 @@ async def _asend_chat_completions(
     state.vision_live_ids = (
         live_ids if audience.native is not None else frozenset()
     )
-    read_bytes = _read_once(read_bytes)
+    read_bytes = await _aread_live(
+        read_bytes, live_ids, sanitized_state_messages, sanitized_messages
+    )
     chat_state = SimpleNamespace(
         messages=project_outbound(
             sanitized_state_messages,
@@ -1940,6 +1980,33 @@ def _after_judge_stop_skip_output(call_id: Any) -> Dict[str, Any]:
     }
 
 
+async def _aappend_call_output(
+    tools_outputs: List[Dict],
+    call: Dict,
+    tool_name: str,
+    tool_arguments: str,
+    tool_res_raw: Any,
+    state: State,
+    ctx: Any,
+) -> None:
+    """Вывод исполненного вызова — в батч; длинный ужимается в
+    stored-envelope. Вызов, приостановивший ход на вопросе, вывода не
+    получает, пока не придёт ответ (следующий ход)."""
+    if _suspends_on(state, call["call_id"]):
+        return
+    tools_outputs.append(
+        await _afinish_tool_call(
+            call, tool_name, tool_arguments, tool_res_raw, state, ctx
+        )
+    )
+
+
+def _suspends_on(state: Any, call_id: Any) -> bool:
+    """Вызов ``call_id`` приостановил ход на вопросе (``ask_human_suspends``)."""
+    pending = getattr(state, "pending_question", None)
+    return bool(pending) and pending.get("call_id") == call_id
+
+
 def _batch_ended_skip_output(
     state: Any, call_id: Any
 ) -> Dict[str, Any] | None:
@@ -2411,7 +2478,7 @@ async def aprocess_tool_calls(
     # посчитанные output'ы предыдущих тулов + skip'ы (I2), чтобы TUI не держал
     # их в running на время wait. Полный батч персистится ещё раз на выходе
     # process_tool_calls (run_agent → _maybe_persist); уже записанные id
-    # пропускаются в append_new_thread_messages по make_message_key.
+    # сессия пропускает по make_message_key.
     for i, m in enumerate(executed):
         # Между тулами / до старта — если stop, remaining не apply_tool → envelope B.
         if getattr(state, "stop_requested", False):
@@ -2452,12 +2519,14 @@ async def aprocess_tool_calls(
         unknown_in_batch += int(
             _track_repeat_errors(state, tool_name, tool_res_raw)
         )
-
-        # Длинный output ужимаем в stored-envelope; остальное оставляем как есть.
-        tools_outputs.append(
-            await _afinish_tool_call(
-                m, tool_name, tool_arguments, tool_res_raw, state, ctx
-            )
+        await _aappend_call_output(
+            tools_outputs,
+            m,
+            tool_name,
+            tool_arguments,
+            tool_res_raw,
+            state,
+            ctx,
         )
 
         # После apply: если стопнули mid-tool (envelope A от runner) — хвост batch → B.
@@ -2489,8 +2558,8 @@ async def aprocess_tool_outputs(messages, state: State, ctx: Any):
     return await _amain_call(messages, state, ctx)
 
 
-def _pickup_pending_as_new_turn(
-    get_pending_messages: Optional[Callable[[], List[Dict]]],
+async def _apickup_pending_as_new_turn(
+    get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]],
     state: State,
     ctx: Any,
 ) -> Optional[List[Dict]]:
@@ -2501,7 +2570,7 @@ def _pickup_pending_as_new_turn(
     пуста, ход завершается как обычно."""
     if get_pending_messages is None:
         return None
-    pending = get_pending_messages()
+    pending = await get_pending_messages()
     if not pending:
         return None
     # Новый пользовательский ход: окно прошлого хода не должно давать
@@ -2612,7 +2681,9 @@ class _AgentLoop:
             if self.check_stop is not None and self.check_stop():
                 clear_loop_detector(state)
                 return None
-            messages = self._poll_pending(messages, first_poll=first_poll)
+            messages = await self._apoll_pending(
+                messages, first_poll=first_poll
+            )
             first_poll = False
             # Если от backend'а или get_pending_messages пришёл пустой список сообщений,
             # не передаём его дальше в check_mode, чтобы не падать
@@ -2698,7 +2769,7 @@ class _AgentLoop:
         return True
 
     # ----------------------------------------------------------- iteration
-    def _poll_pending(self, messages, *, first_poll: bool):
+    async def _apoll_pending(self, messages, *, first_poll: bool):
         """Подхват сообщений из очереди (``get_pending_messages``) перед шагом цикла.
 
         `messages` здесь ещё не записан в state (запись — после опроса). Свежий
@@ -2717,7 +2788,7 @@ class _AgentLoop:
             return messages
         if not first_poll and _batch_has_pending_function_calls(messages):
             return messages
-        pending = self.get_pending_messages()
+        pending = await self.get_pending_messages()
         if not pending:
             return messages
         if first_poll or _is_tool_outputs_with_technical_tail(messages):
@@ -2996,6 +3067,7 @@ class _AgentLoop:
                 self.session_meta,
                 step_messages=messages,
                 logger=self.run_logger,
+                project_memory_hash=await _aproject_memory_hash(self.ctx),
             )
             notice_messages = messages[_messages_before_notice:]
             if notice_messages:
@@ -3025,6 +3097,8 @@ class _AgentLoop:
             )
         except ExecutionFailure:
             raise
+        except ThreadStoreError as refused:
+            raise _store_refused(refused) from refused
         except Exception as persist_exc:
             self.run_logger.warning(
                 "Thread notice messages persist warning: %s",
@@ -3116,6 +3190,8 @@ class _AgentLoop:
             run_agent_func=arun_agent,
             persist_messages_callback=self.persist_messages_callback,
         )
+        if getattr(state, "pending_question", None):
+            return await self._asuspend_on_question(messages)
         if getattr(state, "plan_proposed", False):
             return await self._aclose_plan_turn(messages)
         if getattr(state, "judge_stop_reason", None):
@@ -3242,6 +3318,33 @@ class _AgentLoop:
             state.terminal_outcome = "plan_proposed"
         return outcome
 
+    async def _asuspend_on_question(self, messages) -> _Outcome:
+        """Ход приостановлен на вопросе (``ask_human_suspends``).
+
+        Батч вливается в состояние и сохраняется без вывода вопроса: его
+        ответ придёт следующим ходом. Компакции конца хода и подхвата
+        очереди нет — история кончается вызовом без ответа, а ход журнала
+        намерений не закрыт: задача продолжится после ответа.
+        """
+        state = self.state
+        batch_new = filter_messages_not_in_state(
+            list(getattr(state, "messages", []) or []), messages
+        )
+        if batch_new:
+            state.messages += batch_new
+            await _maybe_persist(
+                self.persist_messages_callback, batch_new, state
+            )
+        state.steps += 1
+        clear_loop_detector(state)
+        state.terminal_outcome = "input_required"
+        return _Outcome(
+            result=json.dumps(
+                {"question": state.pending_question["question"]},
+                ensure_ascii=False,
+            )
+        )
+
     async def _astop_on_judge_unavailable(self, messages) -> _Outcome:
         """Проверка действий судьёй недоступна — прогон завершается.
 
@@ -3307,7 +3410,7 @@ class _AgentLoop:
             await _acall_blocking_hook(self.turn_end_compaction_hook)
         # Сообщение, пришедшее во время (блокирующей) компакции, не
         # теряем: продолжаем новым ходом на уже сжатом контексте.
-        new_turn_messages = _pickup_pending_as_new_turn(
+        new_turn_messages = await _apickup_pending_as_new_turn(
             self.get_pending_messages, self.state, self.ctx
         )
         if new_turn_messages is not None:
@@ -3464,7 +3567,7 @@ async def arun_agent(
     ] = None,
     turn_end_compaction_hook: Optional[Callable[[], None]] = None,
     force_compact_hook: Optional[Callable[[], None]] = None,
-    get_pending_messages: Optional[Callable[[], List[Dict]]] = None,
+    get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,
     mark_finalizing: Optional[Callable[[bool], None]] = None,
@@ -3485,3 +3588,21 @@ async def arun_agent(
         mark_finish_gate_checking=mark_finish_gate_checking,
     )
     return await loop.arun(messages)
+
+
+async def _aproject_memory_hash(ctx: Any) -> Optional[str]:
+    """Версия памяти проекта для подсказок — только когда они включены:
+    память читает хранилище агента, а цепочка подсказок синхронная."""
+    from gc_core.message_policy.project_memory_notice.policy import (
+        project_memory_hints_enabled,
+    )
+
+    try:
+        enabled = project_memory_hints_enabled(ctx)
+    except TypeError:  # контекст без настроек (заглушка) — подсказок нет
+        return None
+    if not enabled:
+        return None
+    from gc_core.project_memory import aget_hash
+
+    return await aget_hash(ctx)

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gc-stores"
+version = "0.5.0"
+description = "GigaCode Universal Agent — хранилища тредов и агента на базах (Postgres, MySQL, SQLite, Redis, S3)"
+requires-python = ">=3.11"
+dependencies = ["gc-core==0.5.0"]
+
+[project.scripts]
+gc-stores = "gc_stores.cli:main"
+
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.29"]
+mysql = ["asyncmy>=0.2.9"]
+redis = ["redis>=5.0"]
+s3 = ["aiobotocore>=2.13"]
+all = ["gc-stores[postgres,mysql,redis,s3]"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gc_stores"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

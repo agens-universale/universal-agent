@@ -13,8 +13,8 @@ from gc_core_temporalio.provider import WorkerConfig
 from gc_core_temporalio.worker import build_runtime
 from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
 from gc_core_temporalio.thread_store_contracts import (
-    ThreadStoreCall,
-    ThreadStoreReply,
+    ThreadCall,
+    ThreadReply,
 )
 from restart_interceptor import RestartInterceptor
 from temporalio import activity
@@ -33,8 +33,9 @@ async def gate(kind, value=None):
 
 class GatedThreadActivities(ThreadStoreActivities):
     @activity.defn(name="universal_agent.thread.commit")
-    async def commit(self, request: ThreadStoreCall) -> ThreadStoreReply:
-        selected = request.operation.kind == "persist"
+    async def commit(self, request: ThreadCall) -> ThreadReply:
+        # Запись шага — commit с сообщениями истории.
+        selected = bool(request.args["change"].get("append_messages"))
         if selected:
             await gate("before_store_commit", asdict(request))
         result = await super().commit(request)

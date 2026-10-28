@@ -1,58 +1,72 @@
-"""Хвост jsonl → карточка тула, без повтора уже записанного."""
+"""Хвост треда → карточка тула, без повтора уже записанного."""
 
 import json
 import os
 
 from gc_acp.tool_flow import ToolFlow, report_from_record
+from gc_core.thread_store import append_subagent_record
+from gc_core.threads.facade import Threads
+from gc_core.threads.models import ThreadKey
+from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+from gc_testkit.thread_writes import acompact
+
+KEY = ThreadKey(system="acp", thread="s")
 
 
-def _line(payload):
-    return json.dumps(
-        {"type": "message", "payload": payload}, ensure_ascii=False
+def _threads():
+    return Threads(MemoryThreadStore())
+
+
+def _call(name, call_id, arguments):
+    return {
+        "type": "function_call",
+        "name": name,
+        "call_id": call_id,
+        "arguments": json.dumps(arguments),
+    }
+
+
+def _output(call_id, output):
+    return {
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": output,
+    }
+
+
+async def _write(threads, *messages):
+    """Сообщения треда — каждое своей записью, как шаги хода."""
+    for message in messages:
+        await threads.append_messages(KEY, [message])
+
+
+async def _compact_history(threads, messages):
+    """Сжатие истории ходом агента: его сессия пишет и в конце хода отпускает
+    тред (иначе следующая запись получила бы ThreadBusy)."""
+    await acompact(threads.store, KEY, messages)
+
+
+async def _subagent(threads, kind, payload):
+    await append_subagent_record(
+        threads.store,
+        KEY,
+        parent_call_id="sub",
+        child_run_id="child",
+        kind=kind,
+        payload=payload,
     )
 
 
-def test_poll_skips_bytes_already_on_disk_and_hides_bookkeeping(tmp_path):
-    path = tmp_path / "data_acp_s.jsonl"
-    path.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "fs_read_file",
-                "call_id": "old",
-                "arguments": '{"path": "old.py"}',
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+async def test_poll_skips_entries_already_written_and_hides_bookkeeping():
+    threads = _threads()
+    await _write(threads, _call("fs_read_file", "old", {"path": "old.py"}))
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(
+        threads,
+        _call("exec_command", "c1", {"command": "pytest -q"}),
+        _call("turn_ask_human", "ask", {}),
     )
-    flow = ToolFlow(str(path))
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "c1",
-                    "arguments": '{"command": "pytest -q"}',
-                }
-            )
-            + "\n"
-        )
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "turn_ask_human",
-                    "call_id": "ask",
-                    "arguments": "{}",
-                }
-            )
-            + "\n"
-        )
-        handle.write("not-json\n")
-    updates = flow.poll()
-    assert updates == [
+    assert await flow.poll() == [
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "c1",
@@ -62,64 +76,28 @@ def test_poll_skips_bytes_already_on_disk_and_hides_bookkeeping(tmp_path):
             "rawInput": {"command": "pytest -q"},
         }
     ]
-    assert flow.poll() == []
+    assert await flow.poll() == []
 
 
-def test_poll_after_compaction_rewrites_shorter_file(tmp_path):
-    path = tmp_path / "data_acp_s.jsonl"
-    path.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "fs_read_file",
-                "call_id": "before",
-                "arguments": '{"path": "a.py"}',
-            }
-        )
-        + "\n"
-        + _line({"role": "assistant", "content": "длинный хвост " * 40})
-        + "\n",
-        encoding="utf-8",
+async def test_poll_after_compaction_reads_the_new_history():
+    threads = _threads()
+    await _write(
+        threads,
+        _call("fs_read_file", "before", {"path": "a.py"}),
+        {"role": "assistant", "content": "длинный хвост " * 40},
     )
-    flow = ToolFlow(str(path))
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "fs_read_file",
-                    "call_id": "mid",
-                    "arguments": '{"path": "b.py"}',
-                }
-            )
-            + "\n"
-        )
-    assert flow.poll()[0]["toolCallId"] == "mid"
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(threads, _call("fs_read_file", "mid", {"path": "b.py"}))
+    assert (await flow.poll())[0]["toolCallId"] == "mid"
 
-    path.write_text(
-        _line(
-            {
-                "role": "user",
-                "content": '<technical type="dialog_summary">сводка</technical>',
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "after",
-                    "arguments": '{"command": "ls"}',
-                }
-            )
-            + "\n"
-        )
-    updates = flow.poll()
-    assert updates == [
+    summary = {
+        "role": "user",
+        "content": '<technical type="dialog_summary">сводка</technical>',
+        "id": "summary",
+    }
+    await _compact_history(threads, [summary])
+    await _write(threads, _call("exec_command", "after", {"command": "ls"}))
+    assert await flow.poll() == [
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "after",
@@ -131,92 +109,17 @@ def test_poll_after_compaction_rewrites_shorter_file(tmp_path):
     ]
 
 
-def _sidecar(record):
-    return json.dumps(record, ensure_ascii=False)
-
-
-def _at(ts, payload):
-    return json.dumps(
-        {"ts": ts, "type": "message", "payload": payload},
-        ensure_ascii=False,
+async def test_poll_places_subagent_tools_between_call_and_result():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(threads, _call("subagent_explore", "sub", {"task": "найти"}))
+    await _subagent(
+        threads, "call", _call("fs_read_file", "c1", {"path": "a.py"})
     )
-
-
-def test_poll_places_subagent_tools_between_call_and_result(tmp_path):
-    thread = tmp_path / "data_acp_s.jsonl"
-    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
-    thread.write_text("", encoding="utf-8")
-    flow = ToolFlow(str(thread), sidecar_path=str(sidecar))
-    thread.write_text(
-        _at(
-            "2026-01-01T00:00:01+00:00",
-            {
-                "type": "function_call",
-                "name": "subagent_explore",
-                "call_id": "sub",
-                "arguments": '{"task": "найти"}',
-            },
-        )
-        + "\n"
-        + _at(
-            "2026-01-01T00:00:03+00:00",
-            {
-                "type": "function_call_output",
-                "call_id": "sub",
-                "output": '{"ok": true}',
-            },
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    sidecar.write_text(
-        _sidecar(
-            {
-                "ts": "2026-01-01T00:00:02+00:00",
-                "seq": 1,
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "fs_read_file",
-                    "call_id": "c1",
-                    "arguments": '{"path": "a.py"}',
-                },
-            }
-        )
-        + "\n"
-        + _sidecar(
-            {
-                "ts": "2026-01-01T00:00:02.500000+00:00",
-                "seq": 2,
-                "parent_call_id": "sub",
-                "kind": "result",
-                "payload": {
-                    "type": "function_call_output",
-                    "call_id": "c1",
-                    "output": '{"ok": true}',
-                },
-            }
-        )
-        + "\n"
-        + _sidecar(
-            {
-                "ts": "2026-01-01T00:00:02.600000+00:00",
-                "seq": 3,
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "turn_finish",
-                    "call_id": "fin",
-                    "arguments": "{}",
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    assert flow.poll() == [
+    await _subagent(threads, "result", _output("c1", '{"ok": true}'))
+    await _subagent(threads, "call", _call("turn_finish", "fin", {}))
+    await _write(threads, _output("sub", '{"ok": true}'))
+    assert await flow.poll() == [
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub",
@@ -247,45 +150,18 @@ def test_poll_places_subagent_tools_between_call_and_result(tmp_path):
             "content": [_preview('{"ok":true}')],
         },
     ]
-    assert flow.poll() == []
+    assert await flow.poll() == []
 
 
-def test_poll_reads_sidecar_created_after_start(tmp_path):
-    thread = tmp_path / "data_acp_s.jsonl"
-    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
-    flow = ToolFlow(str(thread), sidecar_path=str(sidecar))
-    assert flow.poll() == []
-    sidecar.write_text(
-        _sidecar(
-            {
-                "seq": 1,
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "c1",
-                    "arguments": '{"command": "ls"}',
-                },
-            }
-        )
-        + "\n"
-        + _sidecar(
-            {
-                "seq": 2,
-                "parent_call_id": "sub",
-                "kind": "error",
-                "payload": {
-                    "type": "function_call_output",
-                    "call_id": "c1",
-                    "output": "boom",
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+async def test_poll_reads_thread_created_after_start():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    assert await flow.poll() == []
+    await _subagent(
+        threads, "call", _call("exec_command", "c1", {"command": "ls"})
     )
-    assert flow.poll() == [
+    await _subagent(threads, "error", _output("c1", "boom"))
+    assert await flow.poll() == [
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub:c1",
@@ -303,274 +179,101 @@ def test_poll_reads_sidecar_created_after_start(tmp_path):
     ]
 
 
-def test_current_call_id_before_poll_matches_the_later_card(tmp_path):
-    path = tmp_path / "data_acp_s.jsonl"
-    flow = ToolFlow(str(path))
-    path.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "fs_read_file",
-                "call_id": "c1",
-                "arguments": '{"path": "a.py"}',
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+async def test_current_call_id_before_poll_matches_the_later_card():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(threads, _call("fs_read_file", "c1", {"path": "a.py"}))
+    assert await flow.current_call_id() == "c1"
+    assert (await flow.poll())[0]["toolCallId"] == "c1"
+
+
+async def test_current_call_id_is_the_first_unfinished_parent_call():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(
+        threads,
+        _call("fs_read_file", "first", {}),
+        _call("exec_command", "second", {}),
     )
-    assert flow.current_call_id() == "c1"
-    assert flow.poll()[0]["toolCallId"] == "c1"
+    assert await flow.current_call_id() == "first"
+    await _write(threads, _output("first", '{"ok": true}'))
+    assert await flow.current_call_id() == "second"
 
 
-def test_current_call_id_is_the_first_unfinished_parent_call(tmp_path):
-    path = tmp_path / "data_acp_s.jsonl"
-    flow = ToolFlow(str(path))
-    path.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "fs_read_file",
-                "call_id": "first",
-                "arguments": "{}",
-            }
-        )
-        + "\n"
-        + _line(
-            {
-                "type": "function_call",
-                "name": "exec_command",
-                "call_id": "second",
-                "arguments": "{}",
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    assert flow.current_call_id() == "first"
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line(
-                {
-                    "type": "function_call_output",
-                    "call_id": "first",
-                    "output": '{"ok": true}',
-                }
-            )
-            + "\n"
-        )
-    assert flow.current_call_id() == "second"
+async def test_current_call_id_is_the_latest_open_nested_call():
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY)
+    await _write(threads, _call("subagent_explore", "sub", {}))
+    await _subagent(threads, "call", _call("fs_read_file", "c1", {}))
+    await _subagent(threads, "result", _output("c1", '{"ok": true}'))
+    await _subagent(threads, "call", _call("exec_command", "c2", {}))
+    assert await flow.current_call_id() == "sub:c2"
 
 
-def test_current_call_id_is_the_latest_open_nested_call(tmp_path):
-    thread = tmp_path / "data_acp_s.jsonl"
-    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
-    flow = ToolFlow(str(thread), sidecar_path=str(sidecar))
-    thread.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "subagent_explore",
-                "call_id": "sub",
-                "arguments": "{}",
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    sidecar.write_text(
-        _sidecar(
-            {
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "fs_read_file",
-                    "call_id": "c1",
-                    "arguments": "{}",
-                },
-            }
-        )
-        + "\n"
-        + _sidecar(
-            {
-                "parent_call_id": "sub",
-                "kind": "result",
-                "payload": {
-                    "type": "function_call_output",
-                    "call_id": "c1",
-                    "output": '{"ok": true}',
-                },
-            }
-        )
-        + "\n"
-        + _sidecar(
-            {
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "c2",
-                    "arguments": "{}",
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    assert flow.current_call_id() == "sub:c2"
+async def test_current_call_id_ignores_the_previous_prompt():
+    threads = _threads()
+    await _write(threads, _call("fs_read_file", "old", {}))
+    flow = await ToolFlow.start(threads, KEY)
+    assert await flow.current_call_id() is None
+    await _write(threads, _call("fs_read_file", "new", {}))
+    assert await flow.current_call_id() == "new"
 
 
-def test_current_call_id_ignores_the_previous_prompt(tmp_path):
-    path = tmp_path / "data_acp_s.jsonl"
-    path.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "fs_read_file",
-                "call_id": "old",
-                "arguments": "{}",
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    flow = ToolFlow(str(path))
-    assert flow.current_call_id() is None
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line(
-                {
-                    "type": "function_call",
-                    "name": "fs_read_file",
-                    "call_id": "new",
-                    "arguments": "{}",
-                }
-            )
-            + "\n"
-        )
-    assert flow.current_call_id() == "new"
+async def _compact(threads):
+    """Сжатие истории посреди хода: история — одна сводка, версия растёт."""
+    summary = {
+        "role": "user",
+        "content": '<technical type="dialog_summary">сводка</technical>',
+        "id": "summary",
+    }
+    await _compact_history(threads, [summary])
 
 
-def _grow_past(path, old_size: int) -> None:
-    """Дописать журнал так, чтобы он стал длиннее среза до компакции."""
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            _line({"role": "assistant", "content": "y" * (old_size + 100)})
-            + "\n"
-        )
-    assert path.stat().st_size > old_size
+async def _grow(threads):
+    """Дописать историю после сжатия: длиннее, чем она была до него."""
+    await _write(threads, {"role": "assistant", "content": "y" * 5000})
 
 
-def test_current_call_id_keeps_poll_rewind_after_journal_grows(tmp_path):
-    path = tmp_path / "data_acp_s.jsonl"
-    path.write_text(
-        _line({"role": "assistant", "content": "x" * 4000}) + "\n",
-        encoding="utf-8",
-    )
-    flow = ToolFlow(str(path))
-    old_size = path.stat().st_size
-    path.write_text(
-        _line(
-            {
-                "role": "user",
-                "content": '<technical type="dialog_summary">сводка</technical>',
-            }
-        )
-        + "\n"
-        + _line(
-            {
-                "type": "function_call",
-                "name": "fs_write_file",
-                "call_id": "edit",
-                "arguments": '{"path": "a.py"}',
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    assert flow.poll()[0]["toolCallId"] == "edit"
-    _grow_past(path, old_size)
-    assert flow.current_call_id() == "edit"
+async def test_current_call_id_keeps_poll_rewind_after_journal_grows():
+    threads = _threads()
+    await _write(threads, {"role": "assistant", "content": "x" * 4000})
+    flow = await ToolFlow.start(threads, KEY)
+    await _compact(threads)
+    await _write(threads, _call("fs_write_file", "edit", {"path": "a.py"}))
+    assert (await flow.poll())[0]["toolCallId"] == "edit"
+    await _grow(threads)
+    assert await flow.current_call_id() == "edit"
 
 
-def test_current_call_id_remembers_its_own_rewind_after_journal_grows(
-    tmp_path,
-):
-    path = tmp_path / "data_acp_s.jsonl"
-    path.write_text(
-        _line({"role": "assistant", "content": "x" * 4000}) + "\n",
-        encoding="utf-8",
-    )
-    flow = ToolFlow(str(path))
-    old_size = path.stat().st_size
-    path.write_text(
-        _line(
-            {
-                "type": "function_call",
-                "name": "fs_write_file",
-                "call_id": "edit",
-                "arguments": '{"path": "a.py"}',
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    assert flow.current_call_id() == "edit"
-    _grow_past(path, old_size)
-    assert flow.current_call_id() == "edit"
+async def test_current_call_id_remembers_its_own_rewind_after_journal_grows():
+    threads = _threads()
+    await _write(threads, {"role": "assistant", "content": "x" * 4000})
+    flow = await ToolFlow.start(threads, KEY)
+    await _compact(threads)
+    await _write(threads, _call("fs_write_file", "edit", {"path": "a.py"}))
+    assert await flow.current_call_id() == "edit"
+    await _grow(threads)
+    assert await flow.current_call_id() == "edit"
 
 
-def test_nested_call_id_keeps_rewind_after_sidecar_grows(tmp_path):
-    thread = tmp_path / "data_acp_s.jsonl"
-    sidecar = tmp_path / "data_subagents_acp_s.jsonl"
-    thread.write_text("", encoding="utf-8")
-    sidecar.write_text(
-        _sidecar(
-            {
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "old",
-                    "arguments": "{}",
-                },
-            }
-        )
-        + "\n"
-        + _line({"role": "assistant", "content": "x" * 4000})
-        + "\n",
-        encoding="utf-8",
-    )
-    flow = ToolFlow(str(thread), sidecar_path=str(sidecar))
-    old_size = sidecar.stat().st_size
-    sidecar.write_text(
-        _sidecar(
-            {
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "exec_command",
-                    "call_id": "c2",
-                    "arguments": "{}",
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    assert flow.poll()[0]["toolCallId"] == "sub:c2"
-    _grow_past(sidecar, old_size)
-    assert flow.current_call_id() == "sub:c2"
+async def test_nested_call_id_survives_compaction_of_the_history():
+    """Сжатие переписывает историю, а не поток субагента: вызов прошлого
+    prompt там не всплывает, текущий не теряется."""
+    threads = _threads()
+    await _subagent(threads, "call", _call("exec_command", "old", {}))
+    flow = await ToolFlow.start(threads, KEY)
+    await _compact(threads)
+    await _subagent(threads, "call", _call("exec_command", "c2", {}))
+    assert (await flow.poll())[0]["toolCallId"] == "sub:c2"
+    await _grow(threads)
+    assert await flow.current_call_id() == "sub:c2"
 
 
 def _preview(text):
     return {"type": "content", "content": {"type": "text", "text": text}}
 
 
-def _call(name, call_id, arguments):
+def _raw_call(name, call_id, arguments):
     return {
         "type": "function_call",
         "name": name,
@@ -582,7 +285,7 @@ def _call(name, call_id, arguments):
 def test_call_card_is_the_signature_without_kind_or_content():
     seen: set[str] = set()
     report = report_from_record(
-        _call(
+        _raw_call(
             "fs_read_file",
             "c1",
             json.dumps({"path": "a.py", "offset": 10}),
@@ -605,7 +308,7 @@ def test_call_card_is_the_signature_without_kind_or_content():
 def test_unparsed_arguments_omit_raw_input_and_the_card_stays():
     seen: set[str] = set()
     report = report_from_record(
-        _call("exec_command", "c1", "not-json"),
+        _raw_call("exec_command", "c1", "not-json"),
         seen,
     )
     assert report["sessionUpdate"] == "tool_call"
@@ -618,7 +321,7 @@ def test_unparsed_arguments_omit_raw_input_and_the_card_stays():
 def test_non_object_arguments_omit_raw_input():
     seen: set[str] = set()
     report = report_from_record(
-        _call("exec_command", "c1", "[1, 2]"),
+        _raw_call("exec_command", "c1", "[1, 2]"),
         seen,
     )
     assert "rawInput" not in report
@@ -636,7 +339,7 @@ def test_long_argument_strings_are_cut_and_the_call_is_left_intact():
     }
     seen: set[str] = set()
     report = report_from_record(
-        _call("exec_command", "c1", arguments),
+        _raw_call("exec_command", "c1", arguments),
         seen,
     )
     raw = report["rawInput"]
@@ -655,7 +358,7 @@ def test_long_argument_strings_are_cut_and_the_call_is_left_intact():
 def test_read_file_location_is_absolute_from_the_process_cwd():
     seen: set[str] = set()
     report = report_from_record(
-        _call("fs_read_file", "c1", {"path": "dir/a.py", "offset": 1}),
+        _raw_call("fs_read_file", "c1", {"path": "dir/a.py", "offset": 1}),
         seen,
     )
     assert report["locations"] == [
@@ -666,7 +369,7 @@ def test_read_file_location_is_absolute_from_the_process_cwd():
 def test_path_without_a_read_offset_has_no_line():
     seen: set[str] = set()
     report = report_from_record(
-        _call("fs_write_file", "c1", {"path": "a.py", "offset": 4}),
+        _raw_call("fs_write_file", "c1", {"path": "a.py", "offset": 4}),
         seen,
     )
     assert report["locations"] == [{"path": os.path.abspath("a.py")}]
@@ -676,7 +379,7 @@ def test_path_without_a_read_offset_has_no_line():
 def test_missing_path_still_opens_a_card():
     seen: set[str] = set()
     report = report_from_record(
-        _call("exec_command", "c1", {"command": "pytest -q"}),
+        _raw_call("exec_command", "c1", {"command": "pytest -q"}),
         seen,
     )
     assert report["rawInput"] == {"command": "pytest -q"}
@@ -687,7 +390,7 @@ def test_missing_path_still_opens_a_card():
 def test_bool_offset_is_not_a_line():
     seen: set[str] = set()
     report = report_from_record(
-        _call("fs_read_file", "c1", {"path": "a.py", "offset": True}),
+        _raw_call("fs_read_file", "c1", {"path": "a.py", "offset": True}),
         seen,
     )
     assert report["locations"] == [{"path": os.path.abspath("a.py")}]
@@ -696,7 +399,7 @@ def test_bool_offset_is_not_a_line():
 def test_completion_sends_status_and_a_short_preview():
     seen: set[str] = set()
     report_from_record(
-        _call("fs_read_file", "c1", {"path": "a.py", "offset": 2}),
+        _raw_call("fs_read_file", "c1", {"path": "a.py", "offset": 2}),
         seen,
     )
     body = "a" * 6000
@@ -830,7 +533,7 @@ def test_read_file_card_omits_the_file_body():
 
 def test_empty_result_completes_without_content():
     seen: set[str] = set()
-    report_from_record(_call("fs_read_file", "c1", {"path": "a.py"}), seen)
+    report_from_record(_raw_call("fs_read_file", "c1", {"path": "a.py"}), seen)
     update = report_from_record(
         {"type": "function_call_output", "call_id": "c1", "output": ""},
         seen,
@@ -849,7 +552,7 @@ def test_stored_output_envelope_is_previewed_as_it_lies():
         "content": ("q" * 8000) + "TAIL-MARKER",
     }
     seen: set[str] = set()
-    report_from_record(_call("fs_read_file", "c1", {"path": "a.py"}), seen)
+    report_from_record(_raw_call("fs_read_file", "c1", {"path": "a.py"}), seen)
     update = report_from_record(
         {
             "type": "function_call_output",
@@ -874,7 +577,8 @@ def test_hidden_tools_do_not_open_or_close_a_card():
         "turn_propose_plan",
     ):
         assert (
-            report_from_record(_call(name, name, {"note": "x"}), seen) is None
+            report_from_record(_raw_call(name, name, {"note": "x"}), seen)
+            is None
         )
         assert (
             report_from_record(

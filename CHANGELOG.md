@@ -2,6 +2,82 @@
 
 ## Unreleased
 
+### Breaking — Temporal на контракте хранилища тредов v2
+
+- Под Temporal ядро пишет тред через контракт `ThreadStore` v2, как локально: хранилище воркера — любое v2 (`FileThreadStore` из `gc_core.threads.file_store`, `SQLiteThreadStore` из `gc_stores.sqlite`, `PostgresThreadStore`, своё — проверка `gc_testkit.thread_store_conformance_v2`). Activities треда — `universal_agent.thread.{get,read_stream,read_archive,resolve_alias,commit,append_side,claim,release,delete}` вместо `load`/`commit`/`read_trace`.
+- Удалены старый durable-контракт (`gc_core.thread_store_durable`: снимок, операция, квитанция), `DurableFileThreadStore`, `gc_core_temporalio.storage` (SQLite переехал в `gc-stores`, схема новая) и `gc_testkit.durable_thread_store_conformance`. Совместимость с историями и базами прежних воркеров не поддерживается (Temporal не в эксплуатации).
+- Владелец треда — аренда v2 `LeaseRequest(owner="<workflow id>#<first_execution_run_id>", ttl=None)` (цепочка run): переживает Continue-As-New, передаётся субагентам; новый запуск с тем же workflow ID — новая эпоха. Аренду со сроком (локальный TUI/CLI) сессия не отбирает. `gc-core-temporalio` зависит от `gc-stores`.
+- `SideChange.lease`: запись хода сбоку (статус, потоки, алиасы) в тред с бессрочной арендой проходит только по ней (`rules.check_side_writer`, все хранилища v2); состояние фронтенда — без аренды.
+- `persist: turn` включается настройкой (под Temporal), а не способностью хранилища; компакция под Temporal — две записи (`replace_history`, затем состояние), как локально.
+- Квитанция `commit` во всех хранилищах v2 несёт аренду после записи (`reset_history` её снимает): пишущий не берёт аренду заново перед каждой записью.
+
+### Добавлено — `PostgresThreadStore` (дистрибутив `gc-stores`)
+
+- Новый дистрибутив `gc-stores` (библиотека, в `gc-ua` не входит): хранилища тредов на базах. `gc_stores.postgres.PostgresThreadStore` — контракт `ThreadStore` v2 на Postgres для нескольких инстансов на одной базе; драйвер — extra `gc-stores[postgres]` (asyncpg). Схему (миграции) применяет `await store.ensure_schema()` или `gc-stores migrate`; подключение — `AsyncAgent.create(settings, thread_store=store)`. Подходит и воркеру Temporal (`AgentPlugin(thread_store=…)`): объявляет `protected_paths() == []` — данных на диске воркера нет.
+- Конформанс-наборы хранилищ тредов (`thread_store_conformance_v2.assert_conforms`, `thread_store_conformance.assert_conforms_async`) закрывают хранилище после каждой проверки (`await store.close()`, если метод есть) — для хранилищ с пулом соединений. Новые проверки: явно заданные поля моделей (`model_fields_set`) переживают хранилище — по ним строится meta; `NaN`/`Infinity` в данных пишутся и читаются, как у файлового хранилища.
+
+### Добавлено — хранилища на базах: MySQL, SQLite, Redis, S3 и хранилище агента (`gc-stores`)
+
+- Каждое хранилище `gc-stores` реализует оба контракта — треды (`ThreadStore`) и агента (`AgentStore`): `PostgresThreadStore`/`PostgresAgentStore`, `MySQLThreadStore`/`MySQLAgentStore` (MySQL ≥ 8.0.19, extra `[mysql]` — asyncmy), `SQLiteThreadStore`/`SQLiteAgentStore`, `RedisThreadStore`/`RedisAgentStore` (extra `[redis]`), `S3ThreadStore`/`S3AgentStore` (extra `[s3]` — aiobotocore); `[all]` — все драйверы. Выбор, сочетания и ограничения — `docs/sdk/stores.md`.
+- Сочетания любые: связка `gc_core.stores.Stores(threads=…, agent=…)` — `AsyncAgent.create(settings, stores=…)` и `AgentPlugin(…, stores=…)`; `open_stores(…, agent_id=…)` каждой базы — оба хранилища на одном подключении.
+- Два общих движка: SQL (Postgres, MySQL, SQLite — транзакция с блокировкой строки треда) и KV (Redis, S3 — точка фиксации записи в тред — условная запись его заголовка; прерванная запись следов не оставляет, `sweep()` убирает сирот).
+- Redis — «быстрое хранилище для простых задач»: атомарность записи гарантирована, долговечность — как настроен Redis; Cluster не поддерживается. S3 — только с условной записью (`If-Match`/`If-None-Match`): проверяется при первом обращении, без неё — `ConditionalWritesUnsupported`.
+- Схема SQL-баз — пронумерованные миграции и таблица `gc_schema_version` (у Postgres вместо `schema.sql`): `ensure_schema()` применяет недостающие под блокировкой, перед первой операцией хранилище сверяет версию и называет, что сделать.
+- Утилита `gc-stores`: `migrate [--check]` — схема базы (формат ключей у Redis/S3); `sync <каталог> --agent-id … [--project …] [--with-defaults] [--prune] [--dry-run]` — промпты, AGENTS.md, субагенты и скиллы в хранилище агента (умолчания пакета — с меткой `bundled@<версия>`; после обновления gc-ua хранилище предупреждает о старых). Адрес базы — флагом или `GC_STORES_*`.
+- Конформанс `ThreadStore` проверяет конкурентную запись (два писателя одновременно), конформанс `AgentStore` — ресурсы проекта, изоляцию проектов и память по проекту; `gc_testkit.agent_store_conformance.seed_store` — засеять хранилище с записью ресурсов.
+- Режимы разрешений, план и судья действий — на хранилищах v2. Состояние сессии (`SessionState`) несёт режим, план режима plan и предохранитель судьи (`permission_mode`, `plan`, `mode_announced`, `plan_removed_notice`, `judge_denials_in_a_row`, `judge_denials_total`, `judge_paused`) — базы хранят их, как файл; ключ `shared` в meta, которого модель не знает, при записи больше не теряется. Промпты судьи действий — ресурсы хранилища агента (`action_judge_system`, `action_judge_user`, `action_judge_external`; в базу — `gc-stores sync --with-defaults`). Файл плана для человека — возможность файлового хранилища тредов (`FileThreadStore.save_plan_file`), `/plan clear` — `Threads.clear_plan` (под арендой треда).
+
+### Breaking v2 — ресурсы проекта в `AgentStore`
+
+- `AgentStore.read`, `list` и `label` получают `project=ProjectKey(…)`: `L2` (`.gc/AGENTS.md`), `L3` (`AGENTS.md` проекта) и слой скиллов `project` — ресурсы проекта и читаются только с ним (без — `ValueError`, `require_project`; `needs_project` их называет). `skills_registry` и `aprovision_skills` получают `project`. Ядро берёт эти слои у хранилища агента, а не файлом из workspace: у `FileAgentStore` это те же файлы.
+- Настройка `agent.project_id` — имя проекта для хранилищ в базе (без неё — slug пути, как раньше); только `[A-Za-z0-9._-]`, не с точки.
+- Шаблон `/init` (`init_agents_md`) читается через хранилище агента: `abuild_init_prompt(store=…, cwd=…, can_ask=…)` вместо `build_init_prompt`.
+
+### Исправлено — промпты судьи команд под Temporal со своим хранилищем агента
+
+- Проба воркера `command_prompts` и перепроверка фактов перед эффектом читали промпты судьи команд синхронно (`run_sync`): со своим сетевым хранилищем агента (база) модерация команд под Temporal падала. Теперь — `aevaluate_guard_probes` на loop.
+
+### Breaking — хранилище агента v2 (`AgentStore`)
+
+- Контракт `gc_core.agent_store.AgentStore` асинхронный и по логическим именам: `read(kind, name) -> bytes | None`, `list(kind, prefix)`, `read_memory(project)`, `write_memory(project, text, expected_version=…)`. Виды: `prompt` (имена — `Prompt`), `instructions` (`L0`, `L1`), `subagent`, `skill`. Ядро больше не передаёт хранилищу путь: `FileAgentStore(settings)` вычисляет его сам по настройкам (с runtime-слоем фронтенда), как раньше ядро. Прежние `read_text`/`list_dir`/`AgentResource`/`DEFAULT_AGENT_STORE` удалены; `MemoryAgentStore` (testkit) и конформанс-набор `gc_testkit.agent_store_conformance` — под новый контракт.
+- Память проекта — через хранилище агента: версия (sha256 текста) и запись с проверкой версии. Параллельная правка (второй инстанс, второе окно) больше не теряется: тул `project_memory` перечитывает память и применяет `append` к свежему тексту, повторный конфликт — ошибка тула `conflict`.
+- Скрипты скиллов из своего хранилища агента запускаются: файлы скилла выкладываются через `os_backend` в `<launch_root>/.gc/skills_runtime/<слой>/<скилл>/<версия>` и сверяются с хранилищем перед каждым запуском (раньше — отказ).
+- `L2` (`.gc/AGENTS.md`) и `L3` (`AGENTS.md` проекта) читаются из workspace, не из хранилища агента.
+- `PromptPreparationRequest` и `StatePreparationRequest` (порты `prompt_loader`/`state_preparer`) больше не несут путей промптов и роли запуска: их знает хранилище исполнителя.
+
+### Хранилища v2 — фронтенды читают и пишут треды через хранилище тредов
+
+- TUI, CLI, сервер, gc-chat и gc-acp работают с тредами через фасад `Threads` поверх `ThreadStore`; формат файлов тредов прежний, новое только добавляется.
+- gc-chat: ответ Responses — запись потока `chat.responses` треда, `response_id` — алиас треда. Файлы `responses-index/*.json` старые читаются, а новые пишутся вместе с потоком — откат на develop видит ответы ветки; двойная запись уйдёт в следующем релизе.
+- gc-chat: `metadata.cwd` хода — только внутри `chat.launch_root` (не задан — каталога процесса), как у A2A; иначе 400, ход не стартует. Проверяется раскрытый путь (симлинки, `..`). Каталог хода — периметр записи агента, а с хранилищем агента в базе и ключ проекта: клиент с любым путём получал бы память и скиллы чужого проекта.
+- gc-acp: cwd и заголовок сессии — в треде (`frontend["acp"]`). Файлы `acp-sessions/*.json` читаются, пока у треда нет этого состояния, и пишутся вместе с ним (создание, ход, удаление) — для отката на develop; двойная запись уйдёт в следующем релизе. Сессия develop без единого хода снова загружается (`session/load`); одна нечитаемая сессия не роняет `session/list`.
+- `/export log-json` собирает строки треда из хранилища (тот же конверт строки истории); строки, которые не читаются как запись истории, в выгрузку не попадают.
+- `gc-cli -n` удаляет тред целиком — с архивами сжатия (`__pre_summary__`), потоками фронтендов и алиасами; develop архивы оставлял, и `/export log-json` нового треда тянул части старого.
+- gc-acp: `session/load` проигрывает историю без повторов по ключу сообщения, как develop.
+- Тред, который ведёт durable-исполнитель (Temporal), удаляет только он сам: уборщик сервера и `/sessions` в TUI его пропускают (TUI — с предупреждением).
+- После удаления треда в `.store/` остаётся служебная запись с его поколением и эпохой аренды: по ней читатели замечают, что тред с тем же id создан заново. В списке тредов её нет, через сутки её убирает удаление следующего треда или уборщик сервера (`FileThreadStore.sweep_tombstones`).
+- Список тредов файлового хранилища: список одной системы (диалоги chat, сессии ACP, задачи A2A, сессии TUI) не читает треды других систем, а обход всех тредов (уборщик сервера) — один проход по каталогу, а не проход на каждую тысячу тредов. На 4000 тредах: обход — 1,6 с вместо 6,5, список одной системы — 0,5 с вместо 1,6 (раньше — на цикле событий сервера при каждом открытии страницы chat).
+- Квитанции записи (`.store/<h>/receipts/`) тред чистит сам при записи, раз в сутки — старше недели; без сервера `.store/` больше не растёт без предела.
+- Аренда треда держится только на время хода (продлевается в фоне, снимается после): второй инстанс на другом хосте ведёт тред сразу. Отказ хранилища в записи шага (тред ведёт другой инстанс) завершает ход ошибкой, а не теряет шаги.
+- Файловое хранилище терпит испорченные данные, как develop: meta с `updated_at` не по ISO — тред в конце списка (а не отказ всех списков); пустой `control.json` и недописанный `pending.json` (отключение питания без fsync) тред не закрывают — журнал уходит в `pending.json.corrupt-<pid>`; чужая по форме строка потока пропускается.
+- Тред, удалённый кодом develop после отката, не оживает по оставшимся потокам фронтендов и алиасам; удаление треда сносит потоки по точным именам, не задевая тред с похожим id.
+
+### Исправлено — подтверждение команды в ACP не прячет её конец
+
+- `session/request_permission`: команда длиннее 200 символов в заголовке — начало и конец с пометкой `⚠ … [обрезано, N симв.]`, а не только начало (приписанное за безобидным началом `; curl … | sh` в quick pick VS Code было не видно); allow always для такой команды не предлагается. Управляющие и невидимые символы (U+202E, нулевой ширины) в заголовке и тексте — escape-записью.
+
+### Исправлено — недоступный каталог логов объясняется одной строкой
+
+- `logging.save_logs: true`, а каталог логов недоступен на запись (корень контейнера только на чтение, чужие права): агент по-прежнему не стартует, но вместо трейсбека `OSError` — `RunLogDirUnavailable` (наследник `OSError`) с каталогом и подсказкой «выключите `logging.save_logs` или укажите `paths.logs_dump_dir`»; `gc-cli` печатает это одной строкой `[gc] …` и выходит с кодом 1.
+
+### Исправлено — лог старта и отчёт расхода называют модель из реестра
+
+- Событие `agent_start` («agent started: model=… url=…») и отчёт расхода прогона (`Run usage    model: …`, тариф, валюта) брали легаси `agent.model`/`backend.completions_url`, даже когда ходы шли в модель реестра `models`: в логе стояла не та модель, стоимость считалась по чужому тарифу, валюта — по чужому адресу (₽ при ходах в OpenRouter). Теперь — модель и адрес, в которые резолвится `main` (`gc_core.model_router.main_model_identity`); в режиме `auto` до выбора пары — модель стартового уровня AUTO; без реестра — как раньше.
+
+### Исправлено — судья команд при моделях только в реестре
+
+- Судья модерации команд считался ненастроенным, если модели заданы только реестром `models`/`slots`, а `backend.completions_url` пуст: fail-closed политика блокировала модерируемые команды (`exec_python`, `exec_command`), под Temporal — и в субагентах. Доступность судьи теперь — адрес модели, в которую резолвится `command_judge` (`gc_core.model_router.consumer_has_transport`), локально и в снимке настроек воркера Temporal.
+
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
 
 - When the main agent or a subagent hits a limit (`step_limit` / `tool_call_limit` / `token_limit`), the trace is now summarized by a single auxiliary LLM call and returned as a JSON envelope `{ok:false, status, message, raw_trace_summary}` instead of a flat string.

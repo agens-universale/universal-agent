@@ -6,6 +6,7 @@ SPEC 2026-07-25 §3.1 B6/B7/B8: экран буфера сессии; Esc сох
 """
 
 from __future__ import annotations
+from gc_testkit.develop_files import record_from_meta
 
 from gc_testkit.tui_support import tui_settings
 import pytest
@@ -18,8 +19,8 @@ class _MockStore:
         self._existing = existing_buffer
         self.writes: list = []
 
-    def get_task_meta(self, task_id, system=None):
-        return {"tui": {"copy_buffer": self._existing}}
+    def get_record(self, task_id, system=None):
+        return record_from_meta({"tui": {"copy_buffer": self._existing}})
 
     def update_tui_meta(self, task_id, patch, system=None):
         self.writes.append((task_id, dict(patch)))

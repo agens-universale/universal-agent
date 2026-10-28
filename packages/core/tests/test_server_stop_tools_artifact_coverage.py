@@ -1,8 +1,8 @@
 """Серверная поставка не выдаёт модели ни одного встроенного артефактного тула.
 
 Тулы записи файлов и запуска команд описывает один набор имён на весь репозиторий
-(`ARTIFACT_TOOL_NAMES`). Серверный демо-конфиг запрещает встроенные из них через
-`agent_overrides` → `agent.stop_tools`; страж смотрит на фактическую сборку встроенного
+(`ARTIFACT_TOOL_NAMES`). Серверный демо-конфиг запрещает вебхуку встроенные из них через
+`webhook.agent_overrides` → `agent.stop_tools`; страж смотрит на фактическую сборку встроенного
 реестра с этими запретами и падает, если набор расширится, а список запретов
 — нет. Граница стража названа явно: тул скиллов `skills_run_script` во встроенный
 реестр не входит и `stop_tools` не снимается, MCP-тулы по имени не
@@ -30,7 +30,7 @@ def _server_stop_tools() -> list:
         )
         or {}
     )
-    return raw["agent_overrides"]["agent.stop_tools"]
+    return raw["webhook"]["agent_overrides"]["agent.stop_tools"]
 
 
 def test_server_demo_stop_tools_hide_every_artifact_tool():

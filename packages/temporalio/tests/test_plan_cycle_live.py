@@ -20,7 +20,7 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core_temporalio.child_workflow import UniversalSubagentWorkflow
 from gc_core_temporalio.contracts import UserMessage
 from gc_core_temporalio.workflow import UniversalAgentWorkflow
-from live_support import call
+from live_support import call, thread_meta
 from plan_approval_workflow_fixture import (
     APPROVED_MODE,
     PlanApprovingWorkflow,
@@ -100,7 +100,7 @@ async def test_plan_is_proposed_approved_and_executed(
         )
         await handle.signal(UniversalAgentWorkflow.close_session)
         result = await asyncio.wait_for(handle.result(), 30)
-        meta = contexts.stores["files"].load_meta("test", "controls")
+        meta = await thread_meta(contexts.stores["files"], "test", "controls")
         histories = [
             await env.client.get_workflow_handle(
                 "plan-cycle", run_id=run_id

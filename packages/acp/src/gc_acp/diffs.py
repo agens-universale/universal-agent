@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from gc_core.utils.file_text import decode_text_bytes
 
@@ -94,7 +95,7 @@ class DiffBackend:
         log: DiffLog,
         *,
         cwd: str,
-        call_id: Callable[[], str | None],
+        call_id: Callable[[], Awaitable[str | None]],
     ) -> None:
         object.__setattr__(self, "_inner", inner)
         object.__setattr__(self, "_log", log)
@@ -115,7 +116,7 @@ class DiffBackend:
         old = await self._old_text(path)
         new = _text_of(payload)
         await self._inner.write_bytes(path, payload)
-        call_id = self._call_id()
+        call_id = await self._call_id()
         if not isinstance(call_id, str) or call_id == "":
             return
         self._log.add(call_id, _absolute(path, self._cwd), old, new)

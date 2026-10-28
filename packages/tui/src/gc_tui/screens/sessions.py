@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from gc_core.threads.errors import OwnershipError
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -473,8 +474,23 @@ class SessionsScreen(Screen):
         )
 
     def _delete_task(self, thread_id: str) -> None:
-        self._store.delete_task(thread_id)
+        self._delete_or_warn([thread_id])
         self._reload()
+
+    def _delete_or_warn(self, thread_ids: list[str]) -> None:
+        """Удалить сессии; тред, который ведёт durable-исполнитель, удаляет
+        только он сам — такие пропускаются с предупреждением."""
+        kept = 0
+        for thread_id in thread_ids:
+            try:
+                self._store.delete_task(thread_id)
+            except OwnershipError:
+                kept += 1
+        if kept:
+            self.app.notify(
+                f"Не удалено сессий: {kept} — их ведёт durable-исполнитель",
+                severity="warning",
+            )
 
     def _open_mass_delete(self) -> None:
         tasks = self._store.list_tasks(limit=10000)  # весь проект, не страница
@@ -503,8 +519,7 @@ class SessionsScreen(Screen):
         def _on_confirm(ok: bool) -> None:
             if not ok:
                 return
-            for tid in ids:
-                self._store.delete_task(tid)
+            self._delete_or_warn(list(ids))
             self._reload()
 
         self.app.push_screen(

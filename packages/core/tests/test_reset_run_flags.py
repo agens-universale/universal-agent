@@ -1,121 +1,114 @@
-"""Startup batching reads fresh metadata and retains custom-store behavior."""
+"""Сброс флагов хода на старте прогона — запись сбоку из снимка сессии.
 
-from copy import deepcopy
-from types import SimpleNamespace
+Флаги ``summarizing`` / ``finalizing`` / ``finish_gate_checking``,
+залипшие после падения прошлого прогона, снимаются; прочие поля живого
+статуса и секции фронтендов (их пишут сами фронтенды) остаются."""
 
 import pytest
 from gc_core.run_summary_coordinator import (
     areset_run_flags,
-    areset_stale_summarizing_flag,
     aset_tui_finalizing,
     aset_tui_finish_gate_checking,
 )
 from gc_core.thread_store import ThreadSession
-from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_durable import ThreadStoreOperation
-from gc_core.thread_store_file import FileThreadStore
-from gc_core.thread_store_file_durable import DurableFileThreadStore
-from gc_testkit.memory_thread_store import MemoryThreadStore
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import RuntimeStatus, SideChange, ThreadKey
+from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
+
+KEY = ThreadKey(system="s", thread="t")
 
 
-@pytest.mark.parametrize("disk_flag", [None, False, True])
-@pytest.mark.parametrize("cached_flag", [None, False, True])
-async def test_batch_matches_original_flags_and_tui(
-    tmp_path, disk_flag, cached_flag
+def _store(kind, tmp_path):
+    if kind == "file":
+        return FileThreadStore(tmp_path / "threads")
+    return MemoryThreadStore()
+
+
+async def _seed(store, flags, **extra):
+    await store.append_side(
+        KEY,
+        SideChange(
+            op_id="seed",
+            set_runtime=RuntimeStatus(flags=frozenset(flags), **extra),
+            set_frontend=("tui", {"pin": 1}),
+        ),
+    )
+
+
+async def _open(store):
+    return await ThreadSession.afrom_config(
+        settings=None, system_id=KEY.system, thread_id=KEY.thread, store=store
+    )
+
+
+@pytest.mark.parametrize("kind", ["file", "memory"])
+@pytest.mark.parametrize("summarizing", [False, True])
+async def test_reset_clears_run_flags_and_keeps_the_rest(
+    tmp_path, kind, summarizing
 ):
-    stores = [
-        DurableFileThreadStore(str(tmp_path / "batch")),
-        FileThreadStore(str(tmp_path / "legacy")),
-    ]
-    meta = {
-        "runtime": {
-            "finalizing": True,
-            "finish_gate_checking": True,
-            "external": 9,
-        },
-        "tui": {"title": "current"},
-    }
-    if disk_flag is not None:
-        meta["runtime"]["summarizing"] = disk_flag
-    sessions = []
-    for store in stores:
-        store.save_meta("s", "t", deepcopy(meta))
-        cached = {"runtime": {}, "tui": {"title": "stale"}, "pending": "keep"}
-        if cached_flag is not None:
-            cached["runtime"]["summarizing"] = cached_flag
-        sessions.append(
-            SimpleNamespace(
-                port=athread_store(store),
-                meta=cached,
-                system_id="s",
-                thread_id="t",
-            )
-        )
-    await areset_run_flags(sessions[0])
-    await areset_stale_summarizing_flag(sessions[1])
-    await aset_tui_finalizing(sessions[1], False)
-    await aset_tui_finish_gate_checking(sessions[1], False)
-    assert sessions[0].meta == sessions[1].meta
-    actual, expected = [store.load_meta("s", "t") for store in stores]
-    for key in ("runtime", "tui"):
-        assert actual.get(key) == expected.get(key)
-    assert actual["runtime"]["external"] == 9
-
-
-async def test_external_write_between_open_and_batch_is_preserved(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
-    session = await ThreadSession.afrom_config(
-        settings=None, system_id="s", thread_id="t", store=store
-    )
-    store.save_meta(
-        "s",
-        "t",
-        {
-            "runtime": {"summarizing": True, "new_external": 7},
-            "tui": {"title": "new", "pinned": True},
-        },
-    )
-    before = store.read_snapshot("s", "t", include_state=False)
+    store = _store(kind, tmp_path)
+    flags = {"finalizing", "finish_gate_checking"}
+    if summarizing:
+        flags.add("summarizing")
+    await _seed(store, flags, external=9)
+    session = await _open(store)
     await areset_run_flags(session)
-    after = store.read_snapshot("s", "t", include_state=False)
-    assert after.revision == before.revision + 1
-    assert after.meta["runtime"] == {"new_external": 7}
-    assert after.meta["tui"] == {"title": "new", "pinned": True}
-    assert session.meta["runtime"] == after.meta["runtime"]
-    assert session.meta["tui"] == after.meta["tui"]
+    record = await store.get_thread(KEY)
+    assert record.runtime.flags == frozenset()
+    assert record.runtime.model_extra == {"external": 9}
+    assert record.frontend["tui"] == {"pin": 1}
+    assert session.runtime == record.runtime
 
 
-def test_reset_batch_retry_returns_original_receipt(tmp_path):
-    store = DurableFileThreadStore(str(tmp_path))
-    store.save_meta("s", "t", {"runtime": {"summarizing": True}})
-    operation = ThreadStoreOperation("reset-flags", "reset_run_flags", {})
-    original = store.commit_operation("s", "t", operation)
-    store.patch_runtime_flag("s", "t", "summarizing", active=True)
-    assert store.commit_operation("s", "t", operation) == original
-    assert store.load_meta("s", "t")["runtime"]["summarizing"] is True
-
-
-async def test_custom_store_without_batch_keeps_original_calls():
-    class RecordingStore(MemoryThreadStore):
-        def __init__(self):
-            super().__init__()
-            self.recorded = []
-
-        def load_meta(self, *args):
-            self.recorded.append("load")
-            return super().load_meta(*args)
-
-        def patch_runtime_flag(self, *args, **kwargs):
-            self.recorded.append(args[2])
-            return super().patch_runtime_flag(*args, **kwargs)
-
-    store = RecordingStore()
-    port = athread_store(store)
-    assert port.areset_run_flags is None
-    session = SimpleNamespace(port=port, meta={}, system_id="s", thread_id="t")
-    await areset_run_flags(session)
-    assert store.recorded[0] == "load"
-    assert [name for name in store.recorded if name != "load"] == [
-        "finalizing",
-        "finish_gate_checking",
+async def test_reset_matches_flag_by_flag_clearing(tmp_path):
+    """Сброс разом даёт то же, что снятие каждого флага по отдельности."""
+    flags = {"summarizing", "finalizing", "finish_gate_checking"}
+    batch, single = MemoryThreadStore(), MemoryThreadStore()
+    for store in (batch, single):
+        await _seed(store, flags, external=9)
+    await areset_run_flags(await _open(batch))
+    session = await _open(single)
+    await session.aset_flag("summarizing", active=False)
+    await aset_tui_finalizing(session, False)
+    await aset_tui_finish_gate_checking(session, False)
+    first, second = [
+        (await s.get_thread(KEY)).runtime for s in (batch, single)
     ]
+    assert first == second
+
+
+async def test_frontend_written_after_open_survives_reset(tmp_path):
+    store = FileThreadStore(tmp_path)
+    await _seed(store, {"summarizing"})
+    session = await _open(store)
+    # Фронтенд пишет свою секцию после открытия сессии — своей записью.
+    await store.append_side(
+        KEY,
+        SideChange(
+            op_id="tui", set_frontend=("tui", {"pin": 2, "draft": "new"})
+        ),
+    )
+    await areset_run_flags(session)
+    record = await store.get_thread(KEY)
+    assert record.frontend["tui"] == {"pin": 2, "draft": "new"}
+    assert not record.runtime.flags
+
+
+async def test_reset_without_run_flags_writes_nothing(tmp_path):
+    store = MemoryThreadStore()
+    await _seed(store, set(), external=9)
+    session = await _open(store)
+    writes: list = []
+    real = store.append_side
+
+    async def counted(key, change):
+        writes.append(change)
+        return await real(key, change)
+
+    store.append_side = counted
+    await areset_run_flags(session)
+    assert writes == []
+
+
+async def test_reset_none_session_is_noop():
+    await areset_run_flags(None)

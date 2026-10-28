@@ -6,9 +6,29 @@ after state construction. These tests pin that contract and the resulting
 rendered prompt.
 """
 
-from gc_core.project_memory import attach_status_to_prompt_vars
+from gc_core.project_memory import aattach_status_to_prompt_vars
+from gc_testkit import run_coro
 from gc_testkit.paths import ASSETS
 from gc_testkit.settings import make_settings
+
+
+def attach_status_to_prompt_vars(prompt_vars, cwd=None, *, settings=None):
+    """Статус памяти проекта ``cwd`` (по умолчанию — текущего каталога) из
+    файлового хранилища агента."""
+    import os
+
+    from gc_core.agent_store import FileAgentStore, ProjectKey
+    from gc_core.config_modules.env_vars import project_slug
+
+    root = cwd or os.getcwd()
+    run_coro(
+        aattach_status_to_prompt_vars(
+            prompt_vars,
+            store=FileAgentStore(settings),
+            project=ProjectKey(id=project_slug(root), root=root),
+            settings=settings,
+        )
+    )
 
 
 def test_attach_status_with_no_memory_file(tmp_path, monkeypatch):

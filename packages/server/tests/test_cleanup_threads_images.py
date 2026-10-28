@@ -8,12 +8,12 @@ import io
 import json
 import os
 
-from PIL import Image
-
 from gc_core.attachments.model import ORIGIN_USER, user_label
 from gc_core.attachments.normalize import normalize_image
 from gc_core.attachments.store import ImageStore
 from gc_server.cleanup_threads import cleanup_threads
+from gc_testkit import run_coro
+from PIL import Image
 
 OLD = "2020-01-01T00:00:00+00:00"
 
@@ -35,13 +35,15 @@ def _thread(threads, tid: str, updated_at: str) -> None:
 
 
 def _snap(threads, tid: str, color: str):
-    return ImageStore.for_threads_dir(str(threads)).snapshot(
-        normalize_image(_png(color)),
-        "srv",
-        tid,
-        origin=ORIGIN_USER,
-        label=user_label(1),
-        source="shot.png",
+    return run_coro(
+        ImageStore.for_threads_dir(str(threads)).asnapshot(
+            normalize_image(_png(color)),
+            "srv",
+            tid,
+            origin=ORIGIN_USER,
+            label=user_label(1),
+            source="shot.png",
+        )
     )
 
 
@@ -162,7 +164,11 @@ def test_old_thread_with_meta_archive_counts_no_errors(tmp_path):
 
     stats = cleanup_threads(str(threads), ttl_days=7)
 
-    assert sorted(p.name for p in threads.iterdir()) == []
+    # `.store` — служебный каталог хранилища v2: там остаётся надгробие
+    # удалённого треда (его поколение), чтобы курсор читателя заметил
+    # пересоздание треда с тем же id. Файлов треда не остаётся.
+    assert sorted(p.name for p in threads.iterdir()) == [".store"]
+    assert not list((threads / ".store").rglob("data_*"))
     assert stats["errors"] == 0
 
 

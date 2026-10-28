@@ -1,0 +1,64 @@
+{
+  "state_schema_version": "v2",
+  "thread_id": "legacy-cli",
+  "system": "cli",
+  "schema_version": 2,
+  "updated_at": "2026-10-14T12:39:31.446635+00:00",
+  "created_at": "2026-10-14T12:39:31.352250+00:00",
+  "runtime": {
+    "live_history_chars": 1117,
+    "live_msg_count": 10
+  },
+  "previous_response_id": null,
+  "backend_api_mode": "chat_completions",
+  "messages_count": 10,
+  "shared": {
+    "working_memory": {},
+    "notes_md": "",
+    "fetch_url_cache": {},
+    "confirm_rules": {},
+    "session_todo": []
+  },
+  "user_intent_log": [
+    {
+      "turn": 1,
+      "ts": "2026-10-14T12:39:31Z",
+      "action": "user_ask",
+      "tool_name": null,
+      "content": "Посчитай 3 * 450"
+    },
+    {
+      "turn": 2,
+      "ts": "2026-10-14T12:39:31Z",
+      "action": "user_ask",
+      "tool_name": null,
+      "content": "Запиши итог в result.txt"
+    }
+  ],
+  "current_user_intent": [],
+  "user_turn_seq": 2,
+  "dialog_steps_offset": 0,
+  "last_main_prompt_tokens": 10,
+  "last_main_prompt_message_count": 9,
+  "token_usage": {
+    "by_category": {
+      "main": {
+        "input": 40,
+        "output": 20,
+        "cached": 0,
+        "calls": 4,
+        "missing_usage_calls": 0,
+        "billed_calls": 0,
+        "billed_input": 0,
+        "billed_output": 0,
+        "billed_cached": 0,
+        "cost_by_currency": {}
+      }
+    }
+  },
+  "chat_completions_system_prompt_rendered": "SYSTEM PROMPT",
+  "project_memory_content_hash": null,
+  "tool_usage_notice_cnt": {},
+  "todo_reminder_cnt": 4,
+  "last_backend_response_id": "c0eebca9da720e680b7d9a0619a8e14a"
+}

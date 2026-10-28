@@ -63,9 +63,10 @@ class SessionResume:
     completed: dict[str, int] = field(default_factory=dict)
     #: Итоги последних ходов по номеру (``message_state``: ответ своего хода).
     turn_outcomes: dict[str, dict[str, Any]] = field(default_factory=dict)
-    #: Владение тредом уже подтверждено прошлым run: перечитывать не нужно.
+    #: Эпоха аренды треда, взятой прошлым run: новый run пишет по ней без
+    #: нового захвата.
     store_owner_epoch: int | None = None
-    store_generation: int | None = None
+    store_owner_token: str | None = None
     #: Отпечаток настроек, принятый из сообщений (``settings_fingerprint``).
     message_fingerprint: dict[str, str] | None = None
     #: ``answer``/``formatted_answer``/``post_error`` — те же, что в итоге
@@ -112,8 +113,6 @@ class ActivityCall:
 class PreparedContext:
     context: PreparedRunContext
     tool_metadata: dict[str, dict[str, Any]]
-    store_capabilities: list[str]
-    threads_dir: str
     resource_owner: ResourceOwnerRef | None = None
     model_transport_configured: bool = False
     provider_currency: str = "$"

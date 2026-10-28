@@ -1,0 +1,585 @@
+"""Второй ход того же треда, пока первый не зафиксирован, — 409 без send."""
+
+import asyncio
+import json
+
+import pytest
+from gc_server.chat.errors import ApiError
+from gc_server.chat.responses.facade import ResponsesFacade
+from gc_server.chat.responses.index_store import ResponseIndex
+from gc_server.chat.responses.turn import TurnRun
+from gc_server.config import ChatConfig
+from gc_testkit.settings import make_settings
+
+
+async def _finished(turn) -> dict:
+    """Дождаться конца хода и взять сохранённый ответ."""
+    await turn.done.wait()
+    return await turn.result()
+
+
+class FakeAgent:
+    def __init__(self, release: asyncio.Event) -> None:
+        self.release = release
+        self.calls: list[dict] = []
+        self.sent: list[dict] = []
+        self.stopped = 0
+        self.started = asyncio.Event()
+        self._hold = True
+        self._answer = "готово"
+        self.chunks: list[tuple[str, str]] | None = None
+        self.executor = type("E", (), {})()
+        self.executor.last_terminal_outcome = None
+        self.executor._ctx = type("C", (), {})()
+
+    async def stream(
+        self, prompt, thread_id=None, system=None, cancel_target=None
+    ):
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "thread_id": thread_id,
+                "system": system,
+                "cancel_target": cancel_target,
+            }
+        )
+        self.started.set()
+        chunks = [("answer", "кусок")] if self.chunks is None else self.chunks
+        for kind, text in chunks:
+            yield (kind, text)
+        if self._hold:
+            self._hold = False
+            await self.release.wait()
+
+    @property
+    def last_answer(self):
+        return self._answer
+
+    def stop(self) -> None:
+        self.stopped += 1
+        self.release.set()
+
+    def send(self, message: dict) -> None:
+        self.sent.append(message)
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _facade(
+    tmp_path, agent: FakeAgent, launch_root: str | None = None
+) -> ResponsesFacade:
+    threads = tmp_path / "threads"
+    threads.mkdir()
+
+    async def factory(settings, **kwargs):
+        del settings, kwargs
+        return agent
+
+    return ResponsesFacade(
+        settings=make_settings(**{"agent.model": "from-config"}),
+        section=ChatConfig(host="127.0.0.1", launch_root=launch_root),
+        agent_factory=factory,
+        index=ResponseIndex.for_threads_dir(str(threads)),
+    )
+
+
+async def test_second_post_is_409_and_does_not_send(tmp_path):
+    release = asyncio.Event()
+    agent = FakeAgent(release)
+    facade = _facade(tmp_path, agent)
+    first = await facade.open({"model": "ui", "input": "первый"})
+    await agent.started.wait()
+    with pytest.raises(ApiError) as caught:
+        await facade.open(
+            {
+                "model": "ui",
+                "input": "второй",
+                "previous_response_id": first.response_id,
+            }
+        )
+    assert caught.value.status == 409
+    assert caught.value.code == "conflict"
+    assert agent.sent == []
+    assert len(agent.calls) == 1
+    assert agent.calls[0]["system"] == "responses"
+    release.set()
+    done = await _finished(first)
+    assert done["status"] == "completed"
+    assert agent.sent == []
+    nxt = await facade.open(
+        {
+            "model": "ui",
+            "input": "третий",
+            "previous_response_id": first.response_id,
+        }
+    )
+    continued = await _finished(nxt)
+    assert continued["status"] == "completed"
+    assert len(agent.calls) == 2
+    assert agent.calls[1]["thread_id"] == agent.calls[0]["thread_id"]
+    assert agent.calls[1]["system"] == "responses"
+    assert agent.calls[1]["prompt"] == "третий"
+    assert agent.sent == []
+
+
+async def test_history_array_starts_only_the_last_user_text(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open(
+        {
+            "model": "ui-model",
+            "input": [
+                {"role": "user", "content": "старое"},
+                {
+                    "type": "function_call_output",
+                    "call_id": "c",
+                    "output": "тело",
+                },
+                {"type": "input_image", "image_url": "http://img"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_image", "image_url": "http://img"},
+                        {"type": "input_text", "text": "только это"},
+                    ],
+                },
+            ],
+            "store": False,
+        }
+    )
+    body = await _finished(handle)
+    assert agent.calls[0]["prompt"] == "только это"
+    assert agent.calls[0]["system"] == "responses"
+    assert body["model"] == "ui-model"
+    assert body["status"] == "completed"
+    assert (await facade.get(handle.response_id))["id"] == handle.response_id
+
+
+async def test_empty_last_element_does_not_start(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    facade = _facade(tmp_path, agent)
+    with pytest.raises(ApiError) as caught:
+        await facade.open(
+            {
+                "model": "m",
+                "input": [
+                    {"role": "user", "content": "было"},
+                    {"type": "function_call_output", "output": "x"},
+                ],
+            }
+        )
+    assert caught.value.status == 400
+    assert agent.calls == []
+    assert agent.sent == []
+
+
+async def test_cancel_then_second_cancel_does_not_stop_again(tmp_path):
+    release = asyncio.Event()
+    agent = FakeAgent(release)
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "стоп"})
+    await agent.started.wait()
+    cancelled = await facade.cancel(handle.response_id)
+    assert cancelled["status"] == "cancelled"
+    assert agent.stopped == 1
+    again = await facade.cancel(handle.response_id)
+    assert again["status"] == "cancelled"
+    assert agent.stopped == 1
+    with pytest.raises(ApiError) as missing:
+        await facade.cancel("resp_00000000-0000-0000-0000-000000000000")
+    assert missing.value.status == 404
+
+
+async def test_get_survives_a_new_facade(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "сохрани"})
+    saved = await _finished(handle)
+    threads = tmp_path / "threads"
+    restarted = ResponsesFacade(
+        settings=make_settings(**{"agent.model": "m"}),
+        agent_factory=facade._agent_factory,
+        index=ResponseIndex.for_threads_dir(str(threads)),
+    )
+    assert await restarted.get(handle.response_id) == saved
+
+
+async def test_cwd_mismatch_does_not_start(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    facade = _facade(tmp_path, agent, launch_root=str(tmp_path))
+    work = tmp_path / "work"
+    work.mkdir()
+    handle = await facade.open(
+        {"model": "m", "input": "тут", "metadata": {"cwd": str(work)}}
+    )
+    await _finished(handle)
+    with pytest.raises(ApiError) as caught:
+        await facade.open(
+            {
+                "model": "m",
+                "input": "там",
+                "previous_response_id": handle.response_id,
+                "metadata": {"cwd": "/tmp/other-root"},
+            }
+        )
+    assert caught.value.status == 400
+    assert len(agent.calls) == 1
+
+
+def _finish_arguments(**extra) -> dict:
+    payload = {
+        "solution_type": "direct_answer",
+        "task": "прочитать README",
+        "task_report": "В README одна фраза.",
+        "handoff": '{"artifacts":["README.md"]}',
+    }
+    payload.update(extra)
+    return payload
+
+
+def _output_text(body: dict) -> str:
+    parts: list[str] = []
+    for item in body["output"]:
+        if item.get("type") != "message":
+            continue
+        for block in item.get("content") or []:
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "".join(parts)
+
+
+async def test_finish_arguments_become_report_not_raw_json(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = []
+    agent._answer = json.dumps(
+        _finish_arguments(
+            comment="файл короткий",
+            message="Finish gate: accept.",
+            finish_gate={"action": "accept"},
+        ),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await _finished(handle)
+    text = _output_text(body)
+    assert text == "В README одна фраза.\n\n* **заметка:**\n\n  файл короткий"
+    assert "solution_type" not in text
+    assert "Finish gate" not in text
+
+
+async def test_shown_report_is_not_repeated_with_a_note(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "В README одна фраза.")]
+    agent.executor.last_closing_reply = "В README одна фраза."
+    agent._answer = json.dumps(
+        _finish_arguments(comment="файл короткий"),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await _finished(handle)
+    assert (
+        _output_text(body)
+        == "В README одна фраза.\n\n* **заметка:**\n\n  файл короткий"
+    )
+
+
+async def test_reply_then_record_in_same_message_item(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "Пока!")]
+    agent.executor.last_closing_reply = "Пока!"
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Прочитал README."),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await _finished(handle)
+    messages = [i for i in body["output"] if i["type"] == "message"]
+    assert len(messages) == 1
+    assert messages[0]["content"][0]["text"] == (
+        "Пока!\n\n* **итог:**\n\n  Прочитал README."
+    )
+
+
+async def test_no_stream_reply_and_record(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = []
+    agent.executor.last_closing_reply = "Пока!"
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Прочитал README."),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await _finished(handle)
+    assert _output_text(body) == "Пока!\n\n* **итог:**\n\n  Прочитал README."
+
+
+async def test_prose_streamed_before_bounce_does_not_glue_to_record(
+    tmp_path,
+):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "Пока!")]
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Прочитал README."),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await _finished(handle)
+    assert _output_text(body) == "Пока!\n\nПрочитал README."
+
+
+async def test_report_equal_to_bounced_prose_is_shown_once(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "Сделал.")]
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Сделал.", comment=""),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "сделай"})
+    body = await _finished(handle)
+    assert _output_text(body) == "Сделал."
+
+
+async def test_bounced_prose_with_comment_keeps_only_the_note(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "Сделал.")]
+    agent._answer = json.dumps(
+        _finish_arguments(task_report="Сделал.", comment="проверил"),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "сделай"})
+    body = await _finished(handle)
+    assert _output_text(body) == "Сделал.\n\n* **заметка:**\n\n  проверил"
+
+
+async def test_cancel_before_second_turn_skips_the_model(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    facade = _facade(tmp_path, agent)
+    first = await facade.open({"model": "m", "input": "первый"})
+    await _finished(first)
+    assert len(agent.calls) == 1
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = TurnRun._forward
+
+    async def hold(self):
+        entered.set()
+        await release.wait()
+        await original(self)
+
+    TurnRun._forward = hold
+    try:
+        second = await facade.open(
+            {
+                "model": "m",
+                "input": "второй",
+                "previous_response_id": first.response_id,
+            }
+        )
+        await entered.wait()
+        cancel_task = asyncio.create_task(facade.cancel(second.response_id))
+        while not second.cancel_requested:
+            await asyncio.sleep(0)
+        release.set()
+        body = await cancel_task
+    finally:
+        TurnRun._forward = original
+
+    assert body["status"] == "cancelled"
+    assert len(agent.calls) == 1
+
+
+async def test_dialog_run_by_another_instance_is_409(tmp_path):
+    """Тред диалога ведёт другой инстанс (его аренда жива): продолжение —
+    409, ход не начинается."""
+    from gc_core.threads.models import ThreadKey
+    from gc_core.threads.session_writer import SessionWriter
+
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    facade = _facade(tmp_path, agent)
+    first = await facade.open({"model": "m", "input": "первый"})
+    await _finished(first)
+    thread_id = agent.calls[0]["thread_id"]
+    other = SessionWriter(
+        facade._index.threads.store,
+        ThreadKey(system="responses", thread=thread_id),
+        owner="other/1/abcd1234",
+    )
+    await other.aclaim()
+    with pytest.raises(ApiError) as caught:
+        await facade.open(
+            {
+                "model": "m",
+                "input": "второй",
+                "previous_response_id": first.response_id,
+            }
+        )
+    assert caught.value.status == 409
+    assert len(agent.calls) == 1
+    await other.arelease()
+
+
+async def test_cancel_of_a_turn_run_by_another_instance(tmp_path):
+    """Ход ведёт другой инстанс (у этого живого хода нет): отмена — запись
+    в поток ``control`` треда диалога, тот ход увидит её опросом."""
+    from gc_server.chat.responses.index_store import thread_key
+
+    agent = FakeAgent(asyncio.Event())
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "долго"})
+    await agent.started.wait()
+    other = ResponsesFacade(
+        settings=make_settings(**{"agent.model": "m"}),
+        agent_factory=facade._agent_factory,
+        index=ResponseIndex.for_threads_dir(str(tmp_path / "threads")),
+    )
+    answer = await other.cancel(handle.response_id)
+    assert answer["status"] == "in_progress"
+    thread_id = agent.calls[0]["thread_id"]
+    control = await other._index.threads.store.read_stream(
+        thread_key(thread_id), "control"
+    )
+    assert [e.data["type"] for e in control] == ["cancel"]
+    # Отмена называет ответ, а ход знает свою цель: отмена, легшая пока ход
+    # собирался, его тоже остановит.
+    assert control[0].data["target"] == handle.response_id
+    assert agent.calls[0]["cancel_target"] == handle.response_id
+    agent.release.set()
+    await _finished(handle)
+
+
+async def test_slow_dialog_lookup_does_not_hold_other_dialogs(tmp_path):
+    """Ревью, раунд 4: открытие хода держало общий замок процесса, пока
+    читало индекс ответов и аренду треда — на базе все диалоги вставали в
+    очередь за сетевым чтением одного."""
+    release = asyncio.Event()
+    agent = FakeAgent(release)
+    facade = _facade(tmp_path, agent)
+    first = await facade.open({"model": "ui", "input": "первый"})
+    release.set()
+    await _finished(first)
+    reading, gate = asyncio.Event(), asyncio.Event()
+    real_load = facade._index.load
+
+    async def slow_load(response_id):
+        reading.set()
+        await gate.wait()
+        return await real_load(response_id)
+
+    facade._index.load = slow_load
+    continuing = asyncio.create_task(
+        facade.open(
+            {
+                "model": "ui",
+                "input": "дальше",
+                "previous_response_id": first.response_id,
+            }
+        )
+    )
+    await reading.wait()
+    try:
+        fresh = await asyncio.wait_for(
+            facade.open({"model": "ui", "input": "новый диалог"}), 2
+        )
+    finally:
+        gate.set()
+    assert (await _finished(fresh))["status"] == "completed"
+    assert (await _finished(await continuing))["status"] == "completed"
+
+
+async def test_two_instances_reserve_before_building_agents(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    first = _facade(tmp_path, agent)
+    initial = await first.open({"model": "m", "input": "initial"})
+    await _finished(initial)
+    second = ResponsesFacade(
+        settings=first._settings,
+        agent_factory=first._agent_factory,
+        index=ResponseIndex.for_threads_dir(str(tmp_path / "threads")),
+    )
+    entered, resume = asyncio.Event(), asyncio.Event()
+    original = first._agent_for
+
+    async def building(thread_id, cwd):
+        entered.set()
+        await resume.wait()
+        return await original(thread_id, cwd)
+
+    first._agent_for = building
+    body = {
+        "model": "m",
+        "input": "next",
+        "previous_response_id": initial.response_id,
+    }
+    opening = asyncio.create_task(first.open(body))
+    await asyncio.wait_for(entered.wait(), 2)
+    try:
+        with pytest.raises(ApiError) as caught:
+            await second.open(body)
+        assert caught.value.status == 409
+        assert second._agents == {}
+    finally:
+        resume.set()
+    assert (await _finished(await opening))["status"] == "completed"
+    await first.shutdown()
+    await second.shutdown()
+
+
+async def test_late_finalizer_cannot_replace_new_admission_summary(tmp_path):
+    from dataclasses import replace
+    from gc_core.threads.models import SideChange
+    from gc_server.chat.responses.index_store import ResponseRecord, thread_key
+
+    index = ResponseIndex.for_threads_dir(str(tmp_path / "threads"))
+    key = thread_key("dialog")
+    await index.threads.store.append_side(
+        key,
+        SideChange(
+            op_id="new-owner",
+            patch_frontend=("chat", {"admission": {"token": "new"}}),
+        ),
+    )
+    winner = ResponseRecord(
+        "resp_00000000-0000-0000-0000-000000000001",
+        "dialog",
+        "/",
+        None,
+        1,
+        "in_progress",
+        {},
+        reservation="new",
+    )
+    await index.save(winner)
+    await index.save(
+        replace(
+            winner,
+            response_id="resp_00000000-0000-0000-0000-000000000002",
+            status="failed",
+            reservation="old",
+        )
+    )
+    summary = index.summary(await index.threads.get(key))
+    assert summary["latest_response_id"] == winner.response_id
+    assert summary["status"] == "in_progress"

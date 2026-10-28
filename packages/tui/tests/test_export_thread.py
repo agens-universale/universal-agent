@@ -64,14 +64,10 @@ def _sample_records():
 
 
 def test_json_wrapper_shape():
-    meta = {
-        "backend_api_mode": "chat_completions",
-        "last_summary_archive_suffix": None,
-    }
     out = export_thread(
         _segs(_sample_records()),
         fmt="json",
-        meta=meta,
+        api_mode="chat_completions",
         thread_id="tid1",
         system="cli",
     )
@@ -101,7 +97,7 @@ def test_json_segments_model():
         _seg([{"role": "user", "content": "вопрос-1"}], index=1),
     ]
     out = export_thread(
-        segments, fmt="json", meta={}, thread_id="t1", system="cli"
+        segments, fmt="json", api_mode="", thread_id="t1", system="cli"
     )
     data = json.loads(out)
     assert data["thread"]["summarizations"] == 1
@@ -114,27 +110,25 @@ def test_json_segments_model():
 
 def test_json_empty_records():
     out = export_thread(
-        [], fmt="json", meta={}, thread_id="tid1", system="cli"
+        [], fmt="json", api_mode="", thread_id="tid1", system="cli"
     )
     doc = json.loads(out)
     assert doc["segments"] == []
     assert doc["thread"]["messages_count"] == 0
 
 
-def _txt(records, meta=None):
+def _txt(records, api_mode=""):
     return export_thread(
         _segs(records),
         fmt="txt",
-        meta=meta or {},
+        api_mode=api_mode,
         thread_id="tid1",
         system="cli",
     )
 
 
 def test_txt_header_and_numbering():
-    out = _txt(
-        _sample_records(), meta={"backend_api_mode": "chat_completions"}
-    )
+    out = _txt(_sample_records(), api_mode="chat_completions")
     assert out.startswith("===== Thread tid1")
     assert "2 messages" in out
     assert "chat_completions" in out
@@ -156,7 +150,7 @@ def test_txt_has_inline_summary_block():
     out = export_thread(
         segments,
         fmt="txt",
-        meta={"last_summary_archive_suffix": "x"},
+        api_mode="",
         thread_id="t1",
         system="cli",
     )

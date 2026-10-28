@@ -123,9 +123,6 @@ class TestToolUsageNoticeGate:
 
 class TestProjectMemoryGate:
     def test_hint_suppressed_when_tool_absent(self, monkeypatch):
-        from gc_core import project_memory
-
-        monkeypatch.setattr(project_memory, "get_hash", lambda _ctx: "hash-1")
         cfg = {
             "project_memory.enable_project_memory_notice": True,
             "project_memory": {"check_interval_messages": 1},
@@ -139,10 +136,20 @@ class TestProjectMemoryGate:
         base = [{"role": "user", "content": "hi", "id": "u1"}]
 
         out_absent = apply_tool_usage_notice_before_llm(
-            base, _state(), absent, {}, step_messages=[]
+            base,
+            _state(),
+            absent,
+            {},
+            step_messages=[],
+            project_memory_hash="hash-1",
         )
         out_present = apply_tool_usage_notice_before_llm(
-            base, _state(), present, {}, step_messages=[]
+            base,
+            _state(),
+            present,
+            {},
+            step_messages=[],
+            project_memory_hash="hash-1",
         )
         assert len(out_absent) == 1
         assert len(out_present) == 2

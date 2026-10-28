@@ -3,11 +3,15 @@
 import asyncio
 import importlib.metadata
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from gc_acp.facade import AcpFacade
 from gc_core.message_policy.plan_messages import accepted_plan_messages
-from gc_core.thread_store import append_new_thread_messages
+from gc_core.thread_store import append_subagent_record
+from gc_core.threads.facade import Threads, run_sync
+from gc_core.threads.file_store import FileThreadStore
+from gc_core.threads.models import ThreadKey
 from gc_testkit.settings import make_settings
 
 
@@ -169,43 +173,54 @@ def _by_id(writer, request_id):
     return found[-1]
 
 
-def _append_call(path, name, call_id, arguments):
-    _append_record(
-        path,
-        {
-            "type": "function_call",
-            "name": name,
-            "call_id": call_id,
-            "arguments": json.dumps(arguments),
-        },
-    )
+class Thread:
+    """Тред сессии глазами ядра: пишет историю и трассу субагентов тем же
+    путём, что исполнитель (синхронно — из колбэков подставного агента)."""
 
+    def __init__(self, tmp_path, session_id, *, system="acp"):
+        self.threads = Threads(FileThreadStore(tmp_path))
+        self.key = ThreadKey(system=system, thread=session_id)
 
-def _append_output(path, call_id, output):
-    _append_record(
-        path,
-        {
-            "type": "function_call_output",
-            "call_id": call_id,
-            "output": json.dumps(output),
-        },
-    )
+    def append(self, *messages):
+        for message in messages:
+            run_sync(self.threads.append_messages(self.key, [message]))
 
+    def call(self, name, call_id, arguments):
+        self.append(
+            {
+                "type": "function_call",
+                "name": name,
+                "call_id": call_id,
+                "arguments": json.dumps(arguments),
+            }
+        )
 
-def _append_record(path, payload, ts=None):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    envelope = {"type": "message", "payload": payload}
-    if ts is not None:
-        envelope["ts"] = ts
-    line = json.dumps(envelope, ensure_ascii=False)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
+    def output(self, call_id, output):
+        self.append(
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": json.dumps(output),
+            }
+        )
 
+    def subagent(self, kind, payload):
+        run_sync(
+            append_subagent_record(
+                self.threads.store,
+                self.key,
+                parent_call_id="sub",
+                child_run_id="child",
+                kind=kind,
+                payload=payload,
+            )
+        )
 
-def _append_sidecar(path, record):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    def exists(self):
+        return run_sync(self.threads.get(self.key)) is not None
+
+    def messages(self):
+        return len(run_sync(self.threads.history(self.key)))
 
 
 async def _wait_for_tool(writer, call_id):
@@ -626,8 +641,8 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
     await _init(facade)
     await _new(facade, "/work/app")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
-    path = tmp_path / f"data_acp_{session_id}.jsonl"
-    _append_call(path, "fs_read_file", "old", {"path": "old.py"})
+    thread = Thread(tmp_path, session_id)
+    thread.call("fs_read_file", "old", {"path": "old.py"})
     agent = agents[0]
     agent.lead = [("answer", "смотрю")]
     agent.hold = True
@@ -635,9 +650,9 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
     agent.answer = "готово"
 
     def write_call():
-        _append_call(path, "fs_read_file", "call-1", {"path": "src/a.py"})
-        _append_call(path, "turn_finish", "fin", {})
-        _append_output(path, "call-1", {"ok": True, "total_lines": 3})
+        thread.call("fs_read_file", "call-1", {"path": "src/a.py"})
+        thread.call("turn_finish", "fin", {})
+        thread.output("call-1", {"ok": True, "total_lines": 3})
 
     agent.on_pause = write_call
     await facade.handle_line(
@@ -681,8 +696,7 @@ async def test_prompt_reports_tools_inside_a_subagent(tmp_path):
     await _init(facade)
     await _new(facade, "/work/app")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
-    path = tmp_path / f"data_acp_{session_id}.jsonl"
-    sidecar = tmp_path / f"data_subagents_acp_{session_id}.jsonl"
+    thread = Thread(tmp_path, session_id)
     agent = agents[0]
     agent.lead = [("answer", "смотрю")]
     agent.hold = True
@@ -690,54 +704,25 @@ async def test_prompt_reports_tools_inside_a_subagent(tmp_path):
     agent.answer = "готово"
 
     def write_call():
-        _append_record(
-            path,
+        thread.call("subagent_explore", "sub", {"task": "найти"})
+        thread.subagent(
+            "call",
             {
                 "type": "function_call",
-                "name": "subagent_explore",
-                "call_id": "sub",
-                "arguments": json.dumps({"task": "найти"}),
-            },
-            ts="2026-01-01T00:00:01+00:00",
-        )
-        _append_sidecar(
-            sidecar,
-            {
-                "ts": "2026-01-01T00:00:02+00:00",
-                "seq": 1,
-                "parent_call_id": "sub",
-                "kind": "call",
-                "payload": {
-                    "type": "function_call",
-                    "name": "fs_read_file",
-                    "call_id": "c1",
-                    "arguments": json.dumps({"path": "a.py"}),
-                },
+                "name": "fs_read_file",
+                "call_id": "c1",
+                "arguments": json.dumps({"path": "a.py"}),
             },
         )
-        _append_sidecar(
-            sidecar,
-            {
-                "ts": "2026-01-01T00:00:02.500000+00:00",
-                "seq": 2,
-                "parent_call_id": "sub",
-                "kind": "result",
-                "payload": {
-                    "type": "function_call_output",
-                    "call_id": "c1",
-                    "output": json.dumps({"ok": True}),
-                },
-            },
-        )
-        _append_record(
-            path,
+        thread.subagent(
+            "result",
             {
                 "type": "function_call_output",
-                "call_id": "sub",
+                "call_id": "c1",
                 "output": json.dumps({"ok": True}),
             },
-            ts="2026-01-01T00:00:03+00:00",
         )
+        thread.output("sub", {"ok": True})
 
     agent.on_pause = write_call
     await facade.handle_line(
@@ -1102,15 +1087,9 @@ async def test_list_resume_load_after_restart(tmp_path):
     await _init(facade)
     await _new(facade, "/work/app")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
-    append_new_thread_messages(
-        str(tmp_path),
-        "acp",
-        session_id,
-        [
-            {"role": "user", "content": "привет"},
-            {"role": "assistant", "content": "здравствуйте"},
-        ],
-        set(),
+    Thread(tmp_path, session_id).append(
+        {"role": "user", "content": "привет"},
+        {"role": "assistant", "content": "здравствуйте"},
     )
     await facade.shutdown()
 
@@ -1194,20 +1173,51 @@ async def test_list_resume_load_after_restart(tmp_path):
     await restored.shutdown()
 
 
+async def test_load_replays_a_message_written_twice_once(tmp_path):
+    """Тред develop с повтором строки (повтор шага): ``session/load``
+    проигрывает сообщение один раз — как develop."""
+    from gc_core.threads import file_layout as layout
+
+    facade, writer, _agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    Thread(tmp_path, session_id).append(
+        {"id": "u1", "role": "user", "content": "привет"}
+    )
+    data = Path(layout.history_file(str(tmp_path), "acp", session_id))
+    lines = data.read_text(encoding="utf-8").splitlines(keepends=True)
+    data.write_text("".join([*lines, lines[-1]]), encoding="utf-8")
+    await facade.shutdown()
+
+    restored, writer2, _agents2 = _open(tmp_path)
+    await _init(restored)
+    await restored.handle_line(
+        _line(
+            "session/load",
+            {"sessionId": session_id, "cwd": "/work/app", "mcpServers": []},
+            3,
+        )
+    )
+    # После проигрыша load шлёт снимок сессии (plan, title) — не реплики.
+    replayed = [
+        item["sessionUpdate"]
+        for item in _updates(writer2)
+        if item["sessionUpdate"].endswith("_chunk")
+    ]
+    assert replayed == ["user_message_chunk"]
+    await restored.shutdown()
+
+
 async def test_delete_removes_acp_thread_and_repeat_is_not_found(tmp_path):
     facade, writer, agents = _open(tmp_path)
     await _init(facade)
     await _new(facade, "/work")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
-    append_new_thread_messages(
-        str(tmp_path),
-        "acp",
-        session_id,
-        [{"role": "user", "content": "hi"}],
-        set(),
-    )
-    cli_thread = tmp_path / "data_cli_foreign.jsonl"
-    cli_thread.write_text("{}\n", encoding="utf-8")
+    thread = Thread(tmp_path, session_id)
+    thread.append({"role": "user", "content": "hi"})
+    cli_thread = Thread(tmp_path, "foreign", system="cli")
+    cli_thread.append({"role": "user", "content": "чужой"})
     agents[0].hold = True
     await facade.handle_line(
         _line(
@@ -1234,8 +1244,8 @@ async def test_delete_removes_acp_thread_and_repeat_is_not_found(tmp_path):
     )
     assert delete_at < prompt_at
     assert agents[0].closed is True
-    assert not (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
-    assert not (tmp_path / f"data_acp_{session_id}.jsonl").exists()
+    assert await facade._index.load(session_id) is None
+    assert not thread.exists()
     await facade.handle_line(
         _line("session/delete", {"sessionId": session_id}, 5)
     )
@@ -1258,7 +1268,7 @@ async def test_close_drops_the_agent_and_keeps_files(tmp_path):
     )
     assert _by_id(writer, 3)["result"] == {}
     assert agents[0].closed is True
-    assert (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
+    assert await facade._index.load(session_id) is not None
     await facade.handle_line(
         _line("session/close", {"sessionId": session_id}, 4)
     )
@@ -1313,7 +1323,7 @@ async def test_close_during_a_hung_turn_answers_and_serves_the_next_line(
     await _drain(facade)
     assert agents[0].closed is True
     assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
-    assert (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
+    assert await facade._index.load(session_id) is not None
     await facade.shutdown()
 
 
@@ -1324,13 +1334,8 @@ async def test_delete_during_a_hung_turn_answers_and_serves_the_next_line(
     await _init(facade)
     await _new(facade, "/work")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
-    append_new_thread_messages(
-        str(tmp_path),
-        "acp",
-        session_id,
-        [{"role": "user", "content": "hi"}],
-        set(),
-    )
+    thread = Thread(tmp_path, session_id)
+    thread.append({"role": "user", "content": "hi"})
     agents[0].hold = True
     agents[0].release_on_stop = False
     await facade.handle_line(
@@ -1350,8 +1355,8 @@ async def test_delete_during_a_hung_turn_answers_and_serves_the_next_line(
     assert _by_id(writer, 4)["result"] == {}
     assert not any(item.get("id") == 3 for item in writer.sent)
     assert agents[0].closed is False
-    assert not (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
-    assert (tmp_path / f"data_acp_{session_id}.jsonl").exists()
+    assert await facade._index.load(session_id) is None
+    assert thread.messages() == 1
     await facade.handle_line(
         _line("session/delete", {"sessionId": session_id}, 5)
     )
@@ -1359,7 +1364,7 @@ async def test_delete_during_a_hung_turn_answers_and_serves_the_next_line(
     agents[0].release.set()
     await _drain(facade)
     assert agents[0].closed is True
-    assert not (tmp_path / f"data_acp_{session_id}.jsonl").exists()
+    assert not thread.exists()
     assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
     delete_at = next(
         index for index, item in enumerate(writer.sent) if item.get("id") == 4

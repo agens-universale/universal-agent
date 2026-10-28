@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from collections import OrderedDict
 
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_testkit.session_meta import merge_shared_into_meta, shared_from_meta
 from gc_core.states import SharedStateData
 from gc_core.tools.exec.fetch_url import FetchUrl
 from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
@@ -141,11 +141,11 @@ def test_cache_order_survives_serialize_roundtrip():
             "content": f"p{i}"
         }
     # merge_shared_into_meta ставит state_schema_version, иначе shared_from_meta упадёт.
-    meta = ThreadMetaMapper.merge_shared_into_meta({}, shared)
+    meta = merge_shared_into_meta({}, shared)
     raw_json = json.dumps(meta, ensure_ascii=False)
     restored_meta = json.loads(raw_json)
 
-    restored_shared = ThreadMetaMapper.shared_from_meta(restored_meta)
+    restored_shared = shared_from_meta(restored_meta)
     assert restored_shared is not None
     # Содержимое и порядок сохранены.
     assert list(restored_shared.fetch_url_cache.keys()) == [

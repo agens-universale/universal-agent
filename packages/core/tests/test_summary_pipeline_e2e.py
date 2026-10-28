@@ -5,14 +5,17 @@ import types
 
 from gc_core.intent_log import deserialize_list
 from gc_core.summarize.compaction import arun_summary_compaction
-from gc_core.thread_store import (
-    ThreadSession,
-    append_new_thread_messages,
-    load_thread_meta,
-)
+from gc_core.thread_store import ThreadSession
+from gc_testkit.develop_files import load_thread_meta
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import intent_user_ask_texts
 from gc_testkit.settings import fake_ctx, make_settings
+
+
+async def _fake_summary_prompt(_store):
+    """Промпт суммаризации без хранилища агента."""
+    return "prompt"
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -95,7 +98,6 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             system_id=system_id,
             thread_id=thread_id,
         )
-        session.meta["backend_api_mode"] = "chat_completions"
         session.backend_api_mode = "chat_completions"
         state = _state()
         state.thread_id = thread_id
@@ -106,8 +108,8 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
         state.user_turn_seq = 1
 
         monkeypatch.setattr(
-            "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p, **_kw: "prompt",
+            "gc_core.summarize.prompt_loading.aload_summary_prompt",
+            _fake_summary_prompt,
         )
 
         async def _fake_summary(**_kwargs):
@@ -242,7 +244,6 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             system_id=system_id,
             thread_id=thread_id,
         )
-        session.meta["backend_api_mode"] = "chat_completions"
         session.backend_api_mode = "chat_completions"
         state = _state()
         state.thread_id = thread_id
@@ -256,8 +257,8 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
         state.user_turn_seq = 1
 
         monkeypatch.setattr(
-            "gc_core.summarize.prompt_loading.load_prompt_template",
-            lambda _p, **_kw: "prompt",
+            "gc_core.summarize.prompt_loading.aload_summary_prompt",
+            _fake_summary_prompt,
         )
 
         async def _fake_summary(**_kwargs):

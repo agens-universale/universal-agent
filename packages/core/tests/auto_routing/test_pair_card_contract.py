@@ -14,7 +14,7 @@ from gc_core.intent_log import append_final_answer, append_user_ask, flush
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core.summarize.compaction import apply_summary_state_patch
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
 
 
@@ -145,10 +145,10 @@ async def test_finish_outcome_survives_compaction_and_meta_reload(
             summarized_messages_count=len(state.messages),
             can_propose_plan=True,
         )
-        from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+        from gc_testkit.session_meta import merge_state_into_meta
         from gc_core.intent_log import deserialize_list
 
-        meta = ThreadMetaMapper.merge_state_into_meta({}, state)
+        meta = merge_state_into_meta({}, state)
         restored = SimpleNamespace(
             user_intent_log=deserialize_list(meta["user_intent_log"]),
             user_turn_seq=meta["user_turn_seq"],

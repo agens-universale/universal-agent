@@ -9,13 +9,13 @@ from gc_core.config_modules import AppConfig
 from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.settings import override_settings
-from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_core.threads.file_store import FileThreadStore
 from gc_core_temporalio.contracts import ActivityCall
 from gc_core_temporalio.provider import (
     AgentProfile,
     ContextProvider,
 )
-from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_stores.sqlite import SQLiteThreadStore
 
 
 def profile(tmp_path, **overrides):
@@ -29,7 +29,7 @@ def profile(tmp_path, **overrides):
 
 
 def make_provider(tmp_path, profiles=None, store=None):
-    store = store or DurableFileThreadStore(str(tmp_path / "threads"))
+    store = store or FileThreadStore(str(tmp_path / "threads"))
     return ContextProvider(
         profiles=profiles or {"test": profile(tmp_path)},
         stores={"files": store},
@@ -50,7 +50,7 @@ async def test_actual_context_store_and_stateless_restart(
 ):
     monkeypatch.chdir(tmp_path)
     store = (
-        DurableFileThreadStore(str(tmp_path / "threads"))
+        FileThreadStore(str(tmp_path / "threads"))
         if backend == "file"
         else SQLiteThreadStore(str(tmp_path / "threads.sqlite"))
     )
@@ -387,7 +387,7 @@ async def test_worker_state_inside_workspace_is_protected(
     inside = str(workspace / "threads")
     provider = ContextProvider(
         profiles={"test": profile(workspace)},
-        stores={"files": DurableFileThreadStore(inside)},
+        stores={"files": FileThreadStore(inside)},
         resource_host=WorkerResourceHost("test"),
         state_paths=[inside],
     )
@@ -444,7 +444,7 @@ async def test_worker_logs_go_to_process_logging_unless_profile_says_files(
         def emit(self, record):
             records.append(record)
 
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     provider = ContextProvider(
         profiles={"test": default, "files": explicit},
         stores={"files": store},
@@ -474,26 +474,16 @@ async def test_worker_logs_go_to_process_logging_unless_profile_says_files(
         await provider.aclose()
 
 
-async def test_store_without_thread_files_disables_view_image(
-    tmp_path, monkeypatch
-):
-    """Хранилище без файлов треда и без каталога тредов: снимки
-    ``fs_view_image`` легли бы на диск воркера — инструмент выключен."""
-    from gc_testkit.memory_thread_store import MemoryThreadStore
-
-    class _NoFiles(MemoryThreadStore):
-        write_thread_file = None
-        read_thread_file = None
+async def test_every_thread_store_keeps_view_image(tmp_path, monkeypatch):
+    """Снимки ``fs_view_image`` ложатся вложениями треда (``put_blob``) у
+    любого хранилища тредов — инструмент воркера не выключается."""
+    from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 
     monkeypatch.chdir(tmp_path)
-    for store, disabled in (
-        (_NoFiles(), True),
-        (MemoryThreadStore(), False),
-        (DurableFileThreadStore(str(tmp_path / "threads")), False),
-    ):
+    for store in (MemoryThreadStore(), FileThreadStore(str(tmp_path / "t"))):
         provider, _ = make_provider(tmp_path, store=store)
         stop = provider._profiles["test"][1].settings.agent.stop_tools
-        assert ("fs_view_image" in stop) is disabled, type(store)
+        assert "fs_view_image" not in stop, type(store)
         await provider.aclose()
 
 
@@ -512,7 +502,7 @@ async def test_worker_without_human_has_no_ask_tool_and_no_ask_modes(
         }
     )
     pinned = AgentProfile(workspace=str(tmp_path), core=core)
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     for human_input, expected in ((False, "deny"), (True, "ask")):
         provider = ContextProvider(
             profiles={"test": pinned},
@@ -536,7 +526,7 @@ async def test_project_memory_is_off_under_temporal(tmp_path, monkeypatch):
     """Project memory — файл в рабочей папке, возможность TUI и CLI: под
     Temporal её нет при любом профиле, с человеком или без."""
     monkeypatch.chdir(tmp_path)
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     for human_input in (False, True):
         provider = ContextProvider(
             profiles={"test": profile(tmp_path)},
@@ -555,7 +545,7 @@ async def test_agent_store_reaches_the_worker_context(tmp_path, monkeypatch):
     from gc_testkit.memory_agent_store import MemoryAgentStore
 
     monkeypatch.chdir(tmp_path)
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     agent_store = MemoryAgentStore()
     for value in (agent_store, {"test": agent_store}):
         provider = ContextProvider(
@@ -591,7 +581,7 @@ async def test_worker_without_human_declares_the_channel(
     подтверждения — «спросить некого», а не «не ответил вовремя». С
     человеком — объявления нет, автопроверка видит порт вопроса."""
     monkeypatch.chdir(tmp_path)
-    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store = FileThreadStore(str(tmp_path / "threads"))
     for human_input, declared in ((False, False), (True, None)):
         provider = ContextProvider(
             profiles={"test": profile(tmp_path)},
