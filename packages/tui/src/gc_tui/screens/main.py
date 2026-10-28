@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
 import logging
@@ -8381,7 +8382,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Заявка _pending_orphan_cleanups (см. выше) — backstop на микро-гонку
         # «persist ровно в момент удаления».
         if tid is not None and msg_id:
-            self._discard_orphan_and_resync(tid, msg_id)
+            # Тред ещё держит остановленный ход — удалит заявка.
+            with contextlib.suppress(OwnershipError):
+                self._discard_orphan_and_resync(tid, msg_id)
         # НЕ монтируем [stopped] — это и есть "undo".
         self._close_undone_run(old_runner, msg_id)
 
@@ -8433,7 +8436,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         меняет (версия истории та же), тик ничего не перерисовывает (виджет
         уже снят точечно) и дочитывает то, что легло после курсора, — ответ
         и итог нового хода не теряются. Запись итога снятого хода остаётся
-        в потоке сиротой: её строку лента не показывает."""
+        в потоке сиротой: её строку лента не показывает.
+        Тред держит другой ход (его аренда) — `OwnershipError` вызывающему:
+        удалять позже."""
         if self._store is None:
             return False
         try:
@@ -8441,6 +8446,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             removed = self._store.discard_message_by_id(
                 tid, msg_id, tags=tags, strip_think=strip_think
             )
+        except OwnershipError:
+            raise
         except Exception:
             return False
         if removed and tid == self._active_task_id:
@@ -8467,7 +8474,12 @@ class TraceScreen(TraceFollowMixin, Screen):
             if old_busy or thread_busy:
                 still_pending.append((old_runner, tid, msg_id))
                 continue
-            self._discard_orphan_and_resync(tid, msg_id)
+            try:
+                self._discard_orphan_and_resync(tid, msg_id)
+            except OwnershipError:
+                # Раннер уже не бежит, а аренду его хода ещё не сняли (или
+                # тред держит другой процесс): заявка ждёт следующего тика.
+                still_pending.append((old_runner, tid, msg_id))
         self._pending_orphan_cleanups = still_pending
 
     def _reset_history_navigation(self) -> None:
