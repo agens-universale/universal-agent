@@ -55,6 +55,8 @@ class ResponseRecord:
     status: str
     response: dict
     reservation: str | None = None
+    request_text: str | None = None
+    recovery_attempts: int = 0
 
 
 def thread_key(thread_id: str) -> ThreadKey:
@@ -79,7 +81,9 @@ class ResponseIndex:
             legacy_dir=os.path.join(parent, _LEGACY_DIR),
         )
 
-    async def save(self, record: ResponseRecord) -> None:
+    async def save(
+        self, record: ResponseRecord, *, update_summary: bool = True
+    ) -> None:
         key = thread_key(record.thread_id)
         summary = {
             "latest_response_id": record.response_id,
@@ -96,8 +100,10 @@ class ResponseIndex:
                 record.reservation is None
                 or admission.get("token") == record.reservation
             )
-            if not own and record.status == "in_progress":
-                raise ThreadConflict("бронь диалога потеряна до запуска")
+            if not own:
+                raise ThreadConflict(
+                    "бронь диалога потеряна до сохранения ответа"
+                )
             try:
                 await self.threads.store.append_side(
                     key,
@@ -116,7 +122,9 @@ class ResponseIndex:
                             )
                         ],
                         add_aliases=[record.response_id],
-                        patch_frontend=(_FRONTEND, summary) if own else None,
+                        patch_frontend=(_FRONTEND, summary)
+                        if update_summary
+                        else None,
                     ),
                 )
                 break
@@ -258,6 +266,21 @@ def _payload(record: ResponseRecord) -> dict:
         "created_at": record.created_at,
         "status": record.status,
         "response": record.response,
+        **(
+            {"reservation": record.reservation}
+            if record.reservation is not None
+            else {}
+        ),
+        **(
+            {"request_text": record.request_text}
+            if record.request_text is not None
+            else {}
+        ),
+        **(
+            {"recovery_attempts": record.recovery_attempts}
+            if record.recovery_attempts
+            else {}
+        ),
     }
 
 
@@ -297,4 +320,7 @@ def _record(raw: Any, response_id: str) -> ResponseRecord | None:
         created,
         status,
         response,
+        reservation=raw.get("reservation"),
+        request_text=raw.get("request_text"),
+        recovery_attempts=raw.get("recovery_attempts", 0),
     )

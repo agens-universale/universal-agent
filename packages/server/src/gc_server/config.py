@@ -94,7 +94,18 @@ class ServerConfigError(ValueError):
 DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
 
 
-class SurfaceConfig(BaseModel):
+class _AuthTokenConfig(BaseModel):
+    @field_validator("auth_token", check_fields=False)
+    @classmethod
+    def _auth_token(cls, value: str | None) -> str | None:
+        if value and any(not 33 <= ord(char) <= 126 for char in value):
+            raise ValueError(
+                "auth_token должен содержать печатные ASCII-символы без пробелов"
+            )
+        return value
+
+
+class SurfaceConfig(_AuthTokenConfig):
     """Общие ключи поверхности; ``host``, ``auth_token`` и
     ``max_body_bytes`` — по умолчанию из секции ``server``."""
 
@@ -269,9 +280,16 @@ class _ChannelModes(SurfaceConfig):
         return value.strip() or None
 
 
+class ChatRecoveryConfig(RecoveryConfig):
+    """Восстановление сохранённых Responses; повтор тула возможен."""
+
+    max_attempts: int = Field(default=3, ge=1, le=20)
+
+
 class ChatConfig(_ApiDocs, _ChannelModes):
     _surface: ClassVar[str] = "chat"
     port: int = Field(default=8090, ge=1, le=65535)
+    recovery: ChatRecoveryConfig = Field(default_factory=ChatRecoveryConfig)
     #: Явный список origin; ``*`` отбрасывается — чужой сайт в браузере.
     cors_origins: list[str] = Field(default_factory=list)
 
@@ -341,7 +359,7 @@ class SwarmConfig(_ApiDocs, SurfaceConfig):
     thread_in_store: bool = False
 
 
-class ServerSection(BaseModel):
+class ServerSection(_AuthTokenConfig):
     model_config = _STRICT
 
     host: str = "127.0.0.1"

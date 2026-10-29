@@ -129,7 +129,7 @@ class ChatSurface:
         return app
 
     async def astart(self) -> None:
-        return None
+        self.responses.recovery.start()
 
     async def astop(self) -> None:
         await self.responses.shutdown()

@@ -24,6 +24,7 @@ from gc_server.chat.http_common import (
     unauthorized,
 )
 from gc_server.chat.http_guard import install_http_guard
+from gc_server.chat.model_errors import error_http_status, model_api_error
 from gc_server.chat.model_route import completions_route, models_body
 
 _POLL_S = 0.05
@@ -93,8 +94,8 @@ async def _open_turn(
     except ApiError as exc:
         return json_response(error_payload(exc), exc.status)
     except Exception as exc:
-        err = ApiError(500, "server_error", str(exc) or "server error")
-        return json_response(error_payload(err), 500)
+        err = model_api_error(exc)
+        return json_response(error_payload(err), err.status)
 
 
 async def _stream_response(run: TurnRun, request: Request) -> Response:
@@ -103,7 +104,7 @@ async def _stream_response(run: TurnRun, request: Request) -> Response:
         return Response(status_code=204)
     kind, payload = first
     if kind == "error":
-        return json_response(payload, 500)
+        return json_response(payload, error_http_status(payload))
     if kind == "cancelled":
         return Response(status_code=204)
     return StreamingResponse(
@@ -124,7 +125,7 @@ async def _finished_body(run: TurnRun, request: Request) -> Response:
             parts.append(payload)
             continue
         if kind == "error":
-            return json_response(payload, 500)
+            return json_response(payload, error_http_status(payload))
         if kind == "cancelled":
             return Response(status_code=204)
         body = completion_object(

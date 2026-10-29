@@ -28,3 +28,22 @@ def prepare_agent_settings(
     return base.with_overrides(updates, layer="runtime").with_runtime(
         launch_root=cwd
     )
+
+
+def agent_io(settings, cwd, backend, cache):
+    """Локальный I/O и его кэш принадлежат агенту, а не всем диалогам."""
+    from gc_core.backends.factory import parse_os_backend_kind
+    from gc_core.backends.local import LocalFsBackend
+    from gc_core.tools.connect_mcp.registry import ToolsCache
+
+    if type(backend) is LocalFsBackend or (
+        backend is None and parse_os_backend_kind(settings) == "local"
+    ):
+        cap = (
+            backend.exec_output_capture_max_chars
+            if backend is not None
+            else settings_of(settings).agent.exec_output_capture_max_chars
+        )
+        scoped = LocalFsBackend(cwd=cwd, exec_output_capture_max_chars=cap)
+        return scoped, ToolsCache(os_backend=scoped)
+    return backend, cache

@@ -25,13 +25,6 @@ def outcome_of(agent: Any) -> str | None:
     return None
 
 
-def error_message(exc: BaseException) -> str:
-    text = str(exc).strip()
-    if text:
-        return text
-    return exc.__class__.__name__
-
-
 async def astop_agent(agent: Any) -> None:
     """Стоп агента и ожидание, пока текущая работа снята.
 

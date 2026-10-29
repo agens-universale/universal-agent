@@ -14,6 +14,7 @@ from gc_server.chat.http_common import (
     unauthorized,
 )
 from gc_server.chat.http_guard import install_http_guard
+from gc_server.chat.model_errors import error_http_status, model_api_error
 from gc_server.chat.model_route import AGENT_ID, models_body
 from gc_server.chat.responses.facade import ResponsesFacade
 from gc_server.chat.responses.turn import TurnRun
@@ -107,8 +108,8 @@ async def _open_turn(facade: ResponsesFacade, body: Any) -> TurnRun | Response:
     except ApiError as exc:
         return json_response(error_payload(exc), exc.status)
     except Exception as exc:
-        err = ApiError(500, "server_error", str(exc) or "server error")
-        return json_response(error_payload(err), 500)
+        err = model_api_error(exc)
+        return json_response(error_payload(err), err.status)
 
 
 async def _finished_body(run: TurnRun, request: Request) -> Response:
@@ -117,5 +118,9 @@ async def _finished_body(run: TurnRun, request: Request) -> Response:
     except Exception:
         await run.request_stop()
         raise
-    code = 500 if payload.get("status") == "failed" else 200
+    code = (
+        error_http_status(payload)
+        if payload.get("status") == "failed"
+        else 200
+    )
     return json_response(payload, code)

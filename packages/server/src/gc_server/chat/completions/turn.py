@@ -12,12 +12,12 @@ from gc_core.tools.turn.turn_close import close_view, closing_reply_of
 from gc_server.chat.completions.content import ContentMap
 from gc_server.chat.completions.history import SYSTEM, forget_thread
 from gc_server.chat.completions.status import finish_reason
-from gc_server.chat.errors import ApiError, error_payload
+from gc_server.chat.errors import error_payload
+from gc_server.chat.model_errors import model_api_error
 from gc_server.chat.tool_flow import ToolFlow
 from gc_server.chat.turn_common import (
     TurnLifecycle,
     astop_agent,
-    error_message,
     log_forgotten_stop,
     outcome_of,
 )
@@ -144,7 +144,7 @@ def _terminal(
     if cancelled:
         return ("cancelled", None)
     if failed is not None:
-        exc = ApiError(500, "server_error", error_message(failed))
+        exc = model_api_error(failed)
         return ("error", error_payload(exc))
     return ("finish", finish_reason(outcome_of(agent)))
 

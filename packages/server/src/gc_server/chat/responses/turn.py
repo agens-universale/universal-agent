@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import Any
 
 from gc_core.tools.turn.turn_close import (
@@ -13,6 +14,7 @@ from gc_core.tools.turn.turn_close import (
 )
 
 from gc_server.chat.http_common import disconnected
+from gc_server.chat.model_errors import model_api_error
 from gc_server.chat.responses.index_store import ResponseIndex, ResponseRecord
 from gc_server.chat.responses.sse import encode_sse, is_terminal
 from gc_server.chat.responses.status import incomplete_details, turn_status
@@ -21,7 +23,6 @@ from gc_server.chat.tool_flow import ToolFlow
 from gc_server.chat.turn_common import (
     TurnLifecycle,
     astop_agent,
-    error_message,
     log_forgotten_stop,
     outcome_of,
 )
@@ -165,20 +166,15 @@ class TurnRun(TurnLifecycle):
             )
             _put(self._queue, events)
             body = events[-1]["response"]
-            self._record = ResponseRecord(
-                self.response_id,
-                self._record.thread_id,
-                self._record.cwd,
-                self._record.previous_response_id,
-                self._record.created_at,
-                status,
-                body,
-                reservation=self._record.reservation,
-            )
-            await self._index.save(self._record)
-            self.sealed = True
-            await self._release_busy(self.thread_id, self.response_id)
-            self.done.set()
+            self._record = replace(self._record, status=status, response=body)
+            try:
+                await self._index.save(self._record)
+            finally:
+                self.sealed = True
+                try:
+                    await self._release_busy(self.thread_id, self.response_id)
+                finally:
+                    self.done.set()
 
     async def _tool_events(self) -> list[dict]:
         events: list[dict] = []
@@ -195,7 +191,8 @@ def _decision(
     )
     error = None
     if status == "failed" and failed is not None:
-        error = {"message": error_message(failed), "code": "server_error"}
+        exc = model_api_error(failed)
+        error = {"message": exc.message, "code": exc.code}
     return status, error, incomplete_details(status, outcome)
 
 

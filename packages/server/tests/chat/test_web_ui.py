@@ -6,6 +6,7 @@ import uuid
 from datetime import timedelta
 from urllib.parse import quote
 
+import pytest
 from fastapi.testclient import TestClient
 from gc_server.chat.app import create_app
 from gc_server.chat.completions.facade import CompletionsFacade
@@ -478,6 +479,53 @@ def test_dialog_feed_is_chain_order_with_text_and_output(tmp_path):
     assert missing.json()["error"]["code"] == "not_found"
     invalid = client.get("/v1/dialogs/bad id")
     assert invalid.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "method,suffix",
+    [("GET", ""), ("GET", "/download"), ("POST", ""), ("DELETE", "")],
+)
+@pytest.mark.parametrize(
+    "case,expected",
+    [
+        ("unknown-dialog", "dialog not found"),
+        ("missing-path", "path not found"),
+        ("missing-root", "path not found"),
+        ("outside-path", "path not found"),
+    ],
+)
+def test_artifact_errors_distinguish_dialog_and_path(
+    tmp_path, method, suffix, case, expected
+):
+    app, index, _threads = _joint(tmp_path)
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
+    if case == "missing-root":
+        cwd.rmdir()
+    thread_id = "unknown" if case == "unknown-dialog" else "files"
+    path = "../outside" if case == "outside-path" else "missing"
+    if case == "missing-root":
+        path = ""
+    kwargs = (
+        {"json": {"path": path, "name": "new"}}
+        if method == "POST"
+        else {"params": {"path": path}}
+    )
+    with TestClient(app, base_url=LOOPBACK) as client:
+        response = client.request(
+            method, f"/v1/dialogs/{thread_id}/artifacts{suffix}", **kwargs
+        )
+    assert response.status_code == 404
+    assert response.json()["error"] == {
+        "code": "not_found",
+        "message": expected,
+        "type": "invalid_request_error",
+    }
+    assert outside.is_dir()
+    assert not (outside / "new").exists()
 
 
 def test_folder_lists_one_level_without_tool_calls(tmp_path):
