@@ -3332,7 +3332,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Единственная точка закрытия групп верхнего уровня (решение
         плана 10): событие ленты не из группы закрывает открытую группу.
         Не закрывают: виджеты модели блоков, живой стрим, реплика в
-        очереди и тихая отметка модели."""
+        очереди и тихая отметка модели (ставши чертой — закрывает)."""
         view = self._block_views.get("")
         if view is None or view.issued(widget) or pins_to_bottom(widget):
             return
@@ -5307,11 +5307,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         self, mark: ModelMark, choice: str, alias: str | None
     ) -> None:
         """Отметка ожидания — чертой, над прижатым хвостом без неё: реплики
-        очереди над ней остаются внизу, у ↑."""
+        очереди над ней остаются внизу, у ↑. Черта — событие ленты:
+        закрывает открытую группу, как и восстановленная."""
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
         tail = [w for w in self._pinned_tail(trace) if w is not mark]
         mark.set_choice(choice, alias)
         mark.apply()
+        self._note_top_event(mark)
         if tail:
             trace.move_child(mark, before=tail[0])
         drop_mark_before(mark)

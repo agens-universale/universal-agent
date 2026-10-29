@@ -352,6 +352,29 @@ async def test_applied_event_turns_pending_into_mark_in_place(tmp_path):
         assert isinstance(kids[-1], ToolCallRow)
 
 
+@pytest.mark.asyncio
+async def test_applied_mark_closes_group_above_it(tmp_path):
+    """Ожидание группу не рвёт, черта — рвёт, как после восстановления:
+    чтение после применённой смены открывает свою группу."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = app.screen
+        _busy(app, tmp_path)
+        _call(scr, "c1", 1)
+        scr._cmd_model("max")
+        await pilot.pause()
+        _call(scr, "c2", 2)
+        await pilot.pause()
+        model = scr._top_blocks().model
+        assert model.block_of("c2") == model.block_of("c1")
+        _push(app, ModelChoiceApplied("max", "giga-max"))
+        scr._drain_trace_notes()
+        await pilot.pause()
+        _call(scr, "c3", 3)
+        await pilot.pause()
+        assert model.block_of("c3") != model.block_of("c2")
+
+
 async def _apply(pilot, scr, app, choice: str, alias: str) -> None:
     _push(app, ModelChoiceApplied(choice, alias))
     scr._drain_trace_notes()
