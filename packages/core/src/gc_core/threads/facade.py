@@ -101,17 +101,25 @@ class Threads:
         updated_before: str | None = None,
         updated_after: str | None = None,
     ) -> AsyncIterator[ThreadRecord]:
-        """Все треды по фильтру, ``updated_at`` по убыванию, постранично."""
+        """Все треды по фильтру, ``updated_at`` по убыванию, постранично.
+        Файловое хранилище — одним проходом: его страница и так читает весь
+        каталог."""
+        from gc_core.threads.file_store import FileThreadStore
+
+        query = ThreadQuery(
+            system=system,
+            updated_before=updated_before,
+            updated_after=updated_after,
+            limit=_PAGE,
+        )
+        if isinstance(self.store, FileThreadStore):
+            for record in await self.store.list_all_threads(query):
+                yield record
+            return
         cursor = None
         while True:
             page = await self.store.list_threads(
-                ThreadQuery(
-                    system=system,
-                    updated_before=updated_before,
-                    updated_after=updated_after,
-                    cursor=cursor,
-                    limit=_PAGE,
-                )
+                query.model_copy(update={"cursor": cursor})
             )
             for record in page.items:
                 yield record
@@ -210,12 +218,22 @@ class Threads:
     # --- запись -----------------------------------------------------------
 
     async def update_frontend(
-        self, key: ThreadKey, name: str, patch: JsonObject
+        self,
+        key: ThreadKey,
+        name: str,
+        patch: JsonObject,
+        *,
+        op_id: str | None = None,
     ) -> Receipt:
-        """Слить ключи в состояние фронтенда (атомарно в хранилище)."""
+        """Слить ключи в состояние фронтенда (атомарно в хранилище).
+
+        ``op_id`` — своя операция: тот же ``op_id`` с другим патчем —
+        ``OperationMismatch`` (так из нескольких процессов выбирают одного)."""
         return await self.store.append_side(
             key,
-            SideChange(op_id=_op_id(name), patch_frontend=(name, patch)),
+            SideChange(
+                op_id=op_id or _op_id(name), patch_frontend=(name, patch)
+            ),
         )
 
     async def append_frontend(
@@ -272,6 +290,7 @@ class Threads:
         *,
         target: str | None = None,
         op_id: str | None = None,
+        upto_inbox_seq: int | None = None,
     ) -> Receipt:
         """Отменить ход треда с любого процесса: запись в поток ``control``
         с границей — последним номером входящего потока на момент отмены.
@@ -285,7 +304,9 @@ class Threads:
         from gc_core.execution.environment import utc_now
 
         record = await self.store.get_thread(key)
-        upto = record.max_seq.get(INBOX, 0) if record is not None else 0
+        upto = upto_inbox_seq
+        if upto is None:
+            upto = record.max_seq.get(INBOX, 0) if record is not None else 0
         entry = {
             "type": "cancel",
             "at": utc_now().isoformat(),

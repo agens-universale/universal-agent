@@ -43,6 +43,7 @@ from gc_core.threads.models import (
 )
 from gc_core.threads.rules import (
     check_deletable,
+    check_frontend,
     check_side_writer,
     check_writer,
     granted_lease,
@@ -78,7 +79,12 @@ T = TypeVar("T")
 SIDE_COLUMNS = ("runtime", "frontend", "max_seq", "updated_at")
 #: Сколько живёт надгробие удалённого треда.
 TOMBSTONE_TTL = timedelta(days=1)
-LEASE_COLUMNS = ("lease_owner", "lease_epoch", "lease_expires_at")
+LEASE_COLUMNS = (
+    "lease_owner",
+    "lease_epoch",
+    "lease_expires_at",
+    "lease_token",
+)
 _TIME_COLUMNS = ("created_at", "updated_at", "lease_expires_at")
 
 
@@ -494,6 +500,7 @@ class SqlThreadStore(ThreadStore):
             if replayed is not None:
                 return replayed
             check_side_writer(row.lease, change)
+            check_frontend(row.frontend, change)
             now = await self._now(conn)
             await self._add_aliases(conn, key, change.add_aliases)
             apply_side(row, change, now)
@@ -527,6 +534,7 @@ class SqlThreadStore(ThreadStore):
                 key.thread,
                 lease.owner,
                 lease.epoch,
+                lease.token,
             )
 
         await self._write(work)

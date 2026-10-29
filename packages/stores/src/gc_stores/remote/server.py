@@ -49,6 +49,10 @@ MAX_LEASE_TTL = timedelta(minutes=15)
 READ_TIMEOUT_SECONDS = 30.0
 #: Секции фронтенда, которые пишет ход (сессия ядра); остальные — сервера.
 _SANDBOX_FRONTENDS = frozenset({"tui"})
+#: Потоки ядра, которые пишет ход сбоку: трасса субагентов и журнал правок.
+#: Входящие и отмены (``inbox``, ``control``) пишет сервер: дописав себе
+#: сообщение, песочница продолжала бы себя мимо потолка задачи.
+_SANDBOX_STREAMS = frozenset({"subagent_events", "edits"})
 #: Короткий корень каталога сокета: путь unix-сокета ограничен ~104 байтами.
 _SHORT_ROOT = "/tmp"
 
@@ -157,14 +161,19 @@ def _forbidden(message: str) -> dict[str, Any]:
 
 def _own_sections_only(change: SideChange) -> None:
     """Песочница пишет только то, что пишет ход: свою секцию фронтенда и
-    потоки ядра. Секции и потоки сервера (метка задачи swarm, статус
-    вебхука, задачи A2A) — его: снятая метка отдала бы тред восстановлению
-    вебхука, и ход пошёл бы на хосте мимо песочницы."""
+    потоки хода. Секции и потоки сервера (метка задачи swarm, статус
+    вебхука, задачи A2A, входящие и отмены) — его: снятая метка отдала бы
+    тред восстановлению вебхука, и ход пошёл бы на хосте мимо песочницы."""
     for section in (change.set_frontend, change.patch_frontend):
         if section is not None and section[0] not in _SANDBOX_FRONTENDS:
             raise PermissionError(f"секция фронтенда {section[0]!r} — сервера")
     for stream, _entries in change.append:
-        if "." in stream and stream.split(".", 1)[0] not in _SANDBOX_FRONTENDS:
+        own = (
+            stream.split(".", 1)[0] in _SANDBOX_FRONTENDS
+            if "." in stream
+            else stream in _SANDBOX_STREAMS
+        )
+        if not own:
             raise PermissionError(f"поток {stream!r} — сервера")
 
 

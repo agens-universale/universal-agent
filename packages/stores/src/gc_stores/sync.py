@@ -86,9 +86,16 @@ async def _put(
         report.unchanged.append(label)
         return
     if not dry_run:
-        await writer.put_resource(
-            kind, name, data, project=project, source=source
+        written = await writer.put_resource(
+            kind,
+            name,
+            data,
+            project=project,
+            source=source,
+            preserve_manual=source is not None,
         )
+        if written is False:
+            return
     report.written.append(label)
 
 

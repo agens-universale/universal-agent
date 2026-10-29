@@ -1127,7 +1127,10 @@ async def _arun_loaded(
 
     verbose = arg_parser.run_args.verbose
 
+    from gc_cli.run_stop import install_run_sigint, restore_run_sigint
+
     executor = AgentExecutor(ctx)
+    _sigint_previous = install_run_sigint(executor)
     # Флаг запуска — выбор режима на эту сессию: он сильнее сохранённого в
     # треде, поэтому идёт исполнителю, а не слоем конфига.
     permission_mode = getattr(arg_parser.run_args, "permission_mode", None)
@@ -1169,6 +1172,7 @@ async def _arun_loaded(
             executor=executor,
         )
     finally:
+        restore_run_sigint(_sigint_previous)
         # Запись меты может бросить исключение. Если она стоит первой
         # строкой finally, клиенты и демоны `-a` этого запуска не гасятся.
         # Учёт — в своём try, уборка — во внутреннем finally.

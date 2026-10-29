@@ -16,6 +16,7 @@ from gc_core.thread_store import validate_thread_id
 from gc_server.chat.agent_config import prepare_agent_settings
 from gc_server.chat.cwd import cwd_for_new
 from gc_server.chat.errors import ApiError
+from gc_server.chat.responses.admission import Admission
 from gc_server.chat.responses.ask_human import bind_ask_human
 from gc_server.chat.responses.index_store import (
     SYSTEM,
@@ -78,16 +79,16 @@ class ResponsesFacade:
         self._agents: OrderedDict[str, Any] = OrderedDict()
         self._busy: set[str] = set()
         self._live: dict[str, TurnRun] = {}
-        self._gate = asyncio.Lock()
         self._create_lock = asyncio.Lock()
+        self._admissions: dict[str, Admission] = {}
 
     async def open(self, body: Any) -> TurnRun:
         incoming = parse_turn(body)
         thread_id, cwd = await self._reserve(incoming)
         try:
             agent = await self._agent_for(thread_id, cwd)
-        except Exception:
-            self._busy.discard(thread_id)
+        except BaseException:
+            await self._release(thread_id, "")
             logger.exception("responses agent")
             raise
         return await self._begin(incoming, thread_id, cwd, agent)
@@ -115,7 +116,12 @@ class ResponsesFacade:
                     thread_key(record.thread_id), target=response_id
                 )
             return record.response if record is not None else {}
-        await live.request_stop()
+        try:
+            await live.request_stop()
+        except TimeoutError as exc:
+            raise ApiError(
+                500, "server_error", str(exc) or "user stop did not settle"
+            ) from exc
         await live.done.wait()
         return await live.result()
 
@@ -131,24 +137,48 @@ class ResponsesFacade:
         for agent in list(self._agents.values()):
             await _safe_aclose(agent)
         self._agents.clear()
+        for thread_id in list(self._admissions):
+            await self._release(thread_id, "")
 
     async def _reserve(self, incoming: IncomingTurn) -> tuple[str, str]:
-        async with self._gate:
-            if incoming.previous_response_id is None:
-                thread_id = validate_thread_id(str(uuid.uuid4()))
-                cwd = self.new_dialog_cwd(incoming.cwd_sent)
-            else:
-                record = await self._index.load(incoming.previous_response_id)
-                if record is None:
-                    raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
-                thread_id = record.thread_id
-                cwd = cwd_for_continue(incoming.cwd_sent, record.cwd)
-            if thread_id in self._busy:
-                raise ApiError(409, _CONFLICT, "turn already running")
-            if incoming.previous_response_id is not None:
+        # Чтения хранилища — вне замков: на базе они сетевые, и общий замок
+        # ставил бы в очередь открытие ходов во всех диалогах. Проверка и
+        # бронь — один шаг без ``await`` между ними.
+        if incoming.previous_response_id is None:
+            thread_id = validate_thread_id(str(uuid.uuid4()))
+            cwd = self.new_dialog_cwd(incoming.cwd_sent)
+        else:
+            record = await self._index.load(incoming.previous_response_id)
+            if record is None:
+                raise ApiError(404, _NOT_FOUND, _RESPONSE_NOT_FOUND)
+            thread_id = record.thread_id
+            cwd = cwd_for_continue(incoming.cwd_sent, record.cwd)
+        if thread_id in self._busy:
+            raise ApiError(409, _CONFLICT, "turn already running")
+        self._busy.add(thread_id)
+        if incoming.previous_response_id is not None:
+            try:
                 await self._refuse_foreign_turn(thread_id)
-            self._busy.add(thread_id)
-            return thread_id, cwd
+            except BaseException:
+                self._busy.discard(thread_id)
+                raise
+        admission = Admission(
+            self._index.threads,
+            thread_key(thread_id),
+            lambda: self._lost_admission(thread_id),
+        )
+        try:
+            await admission.acquire()
+        except BaseException:
+            self._busy.discard(thread_id)
+            raise
+        self._admissions[thread_id] = admission
+        return thread_id, cwd
+
+    async def _lost_admission(self, thread_id: str) -> None:
+        for run in list(self._live.values()):
+            if run.thread_id == thread_id:
+                await run.request_stop()
 
     async def _refuse_foreign_turn(self, thread_id: str) -> None:
         """Тред диалога ведёт другой инстанс (его аренда жива) — 409:
@@ -216,14 +246,16 @@ class ResponsesFacade:
             created_at,
             _IN_PROGRESS,
             mapper.snapshot(),
+            reservation=self._admissions[thread_id].token,
         )
         try:
+            await self._admissions[thread_id].validate()
             await self._index.save(record)
             flow = await ToolFlow.start(
                 self._index.threads, thread_key(thread_id)
             )
-        except Exception:
-            self._busy.discard(thread_id)
+        except BaseException:
+            await self._release(thread_id, "")
             raise
         run = TurnRun(
             agent=agent,
@@ -239,9 +271,18 @@ class ResponsesFacade:
         run.start()
         return run
 
-    def _release(self, thread_id: str, response_id: str) -> None:
-        self._busy.discard(thread_id)
-        self._live.pop(response_id, None)
+    async def _release(self, thread_id: str, response_id: str) -> None:
+        admission = self._admissions.pop(thread_id, None)
+        try:
+            if admission is not None:
+                await admission.release()
+        except Exception:
+            logger.warning(
+                "chat: бронь не снята, истечёт по сроку", exc_info=True
+            )
+        finally:
+            self._busy.discard(thread_id)
+            self._live.pop(response_id, None)
 
 
 def _cors_origins(raw: list[str]) -> list[str]:

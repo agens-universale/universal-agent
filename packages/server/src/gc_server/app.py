@@ -15,6 +15,7 @@ import logging
 import signal
 import socket
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any, Callable
 
 import uvicorn
@@ -33,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 #: Сколько uvicorn ждёт открытые соединения после сигнала остановки.
 GRACEFUL_SHUTDOWN_SECONDS = 5
+#: Как часто процесс обслуживает хранилище тредов в базе.
+MAINTENANCE_SECONDS = 3600
 
 
 class AddressConflict(ServerConfigError):
@@ -77,6 +80,31 @@ class ServerRuntime:
             return Threads(store)
         settings = self.surface_settings(surface) if surface else self.base
         return Threads.from_settings(settings)
+
+    async def amaintain_once(self) -> None:
+        """Обслуживание хранилища тредов в базе — при любом наборе
+        поверхностей: квитанции старше окна идемпотентности, надгробия
+        старше суток и — у хранилища, которое умеет (Redis, S3), — сироты
+        прерванных записей (``sweep``). Файловое чистит себя само при
+        записи."""
+        store = self.store_kwargs().get("thread_store")
+        if store is None:
+            return
+        window = timedelta(hours=self.config.webhook.idempotency_ttl_hours)
+        await store.prune_receipts(window)
+        sweep = getattr(store, "sweep", None)
+        if callable(sweep):
+            await sweep()
+
+    async def amaintain_forever(self) -> None:
+        while True:
+            try:
+                await self.amaintain_once()
+            except Exception:
+                logger.warning(
+                    "обслуживание хранилища тредов не удалось", exc_info=True
+                )
+            await asyncio.sleep(MAINTENANCE_SECONDS)
 
     def response_index(self) -> Any:
         """Индекс ответов chat в хранилище процесса; ``None`` — файловый по
@@ -260,11 +288,13 @@ async def aserve(
     by_name = {s.name: s for s in surfaces}
     groups = group_surfaces(runtime.config, list(by_name))
     sockets: dict[tuple[str, int], socket.socket] = {}
+    maintenance: asyncio.Task | None = None
     try:
         for (host, port), names in groups.items():
             sockets[(host, port)] = bind_socket(host, port, names)
         stop = stop or asyncio.Event()
         _install_stop(stop)
+        maintenance = asyncio.create_task(runtime.amaintain_forever())
         for surface in surfaces:
             await surface.astart()
         servers = []
@@ -283,6 +313,9 @@ async def aserve(
             servers.append((server, sockets[(host, port)]))
         await _run_servers(servers, surfaces, stop)
     finally:
+        if maintenance is not None:
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
         for surface in reversed(surfaces):
             await _safe_stop(surface)
         for sock in sockets.values():

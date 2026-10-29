@@ -23,9 +23,18 @@ from gc_core.threads.models import Receipt, ThreadKey, ThreadRecord
 FRONTEND = "webhook"
 
 
-async def aset_status(threads: Threads, key: ThreadKey, **fields: Any) -> None:
-    """Слить поля в статус задачи (атомарно в хранилище)."""
-    await threads.update_frontend(key, FRONTEND, jsonable_encoder(fields))
+async def aset_status(
+    threads: Threads,
+    key: ThreadKey,
+    *,
+    op_id: str | None = None,
+    **fields: Any,
+) -> None:
+    """Слить поля в статус задачи (атомарно в хранилище); ``op_id`` — см.
+    ``Threads.update_frontend``."""
+    await threads.update_frontend(
+        key, FRONTEND, jsonable_encoder(fields), op_id=op_id
+    )
 
 
 async def asubmit(

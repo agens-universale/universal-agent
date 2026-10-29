@@ -43,6 +43,7 @@ from gc_server.surface import (
     http_error,
     install_bearer,
 )
+from gc_server.thread_ownership import claim_surface
 from gc_server.webhook import status as task_status
 from gc_server.webhook.callbacks import (
     CallbackSender,
@@ -66,7 +67,6 @@ _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
 #: Прогон восстановления: адрес обратного вызова задачи остаётся прежним.
 KEEP_CALLBACK = object()
 #: Как часто забывать квитанции старше окна идемпотентности.
-_RECEIPTS_PRUNE_SECONDS = 3600
 
 
 def webhook_settings(runtime: ServerRuntime, name: str = "webhook"):
@@ -154,13 +154,11 @@ class WebhookSurface:
         self.registry = AgentRunRegistry()
         self._pruner: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
-        self._receipts: asyncio.Task | None = None
         self.callbacks = CallbackSender(self.config.callbacks)
 
     # --- жизненный цикл ----------------------------------------------------
 
     async def astart(self) -> None:
-        self._receipts = asyncio.create_task(self._areceipts_loop())
         if self.config.recovery.enabled:
             from gc_server.webhook.recovery import arecover_forever
 
@@ -186,10 +184,8 @@ class WebhookSurface:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await self.callbacks.aclose()
-        background = [
-            t for t in (self._pruner, self.recovery_task, self._receipts) if t
-        ]
-        self._pruner = self.recovery_task = self._receipts = None
+        background = [t for t in (self._pruner, self.recovery_task) if t]
+        self._pruner = self.recovery_task = None
         for task in background:
             task.cancel()
         await asyncio.gather(*background, return_exceptions=True)
@@ -310,7 +306,17 @@ class WebhookSurface:
                 **pending,
             }
         if status is None:
-            return None
+            if not pending["pending_messages"]:
+                return None
+            # Принята, а прогона ещё нет (строит другой инстанс, сборка
+            # упала или инстанс умер до захвата): задача есть на любом.
+            return {
+                "status": "queued",
+                **base,
+                "thread_id": key.thread,
+                "started_at": None,
+                **pending,
+            }
         return {**task_status.status_body(status, record, base), **pending}
 
     async def asubmit(
@@ -326,13 +332,7 @@ class WebhookSurface:
         иначе этот запрос строит прогон (``started``)."""
         if callback_url is not None:
             await self._check_callback(key, callback_url)
-        if _foreign(await self.threads().get(key)):
-            raise http_error(
-                409,
-                "thread belongs to another surface or application",
-                system=key.system,
-                task_id=key.thread,
-            )
+        await claim_surface(self.threads(), key, "webhook")
         receipt = await task_status.asubmit(
             self.threads(), key, message, op_id=op_id
         )
@@ -388,29 +388,11 @@ class WebhookSurface:
             and (record.state.inbox_seq >= seq)
         )
 
-    async def aprune_receipts(self, *, older_than: timedelta) -> int:
-        """Забыть квитанции старше окна идемпотентности."""
-        return await self.threads().prune(older_than)
-
     async def amaintain_once(self) -> None:
-        """Обслуживание хранилища тредов: квитанции старше окна
-        идемпотентности (и надгробия) и — у хранилища, которое умеет
-        (Redis, S3), — сироты прерванных записей (``sweep``)."""
-        window = timedelta(hours=self.config.idempotency_ttl_hours)
-        await self.aprune_receipts(older_than=window)
-        sweep = getattr(self.threads().store, "sweep", None)
-        if callable(sweep):
-            await sweep()
-
-    async def _areceipts_loop(self) -> None:
-        while True:
-            try:
-                await self.amaintain_once()
-            except Exception:
-                logger.warning(
-                    "обслуживание хранилища тредов не удалось", exc_info=True
-                )
-            await asyncio.sleep(_RECEIPTS_PRUNE_SECONDS)
+        """Обслуживание хранилища тредов — его ведёт процесс
+        (``ServerRuntime.amaintain_forever``), при любом наборе
+        поверхностей."""
+        await self.runtime.amaintain_once()
 
     async def acancel(self, key: ThreadKey) -> Dict[str, Any] | None:
         """Отменить ход задачи с любого инстанса: поток ``control`` треда
@@ -418,12 +400,26 @@ class WebhookSurface:
         from gc_server.webhook.api_v1 import FINAL
 
         status = await self.astatus(key)
-        settled = status is None or status["status"] in FINAL
+        settled = status is None or status["status"] in FINAL | {"queued"}
         if settled and not await self._aundelivered(key):
             return None if status is None else {"status": status["status"]}
-        self.registry.stop(system=key.system, task_id=key.thread)
         threads = self.threads()
-        await threads.request_cancel(key)
+        record = await threads.get(key)
+        cutoff = record.max_seq.get("inbox", 0) if record else 0
+        # Финализатор может выполниться внутри stop: граница уже должна
+        # быть в хранилище, а не вычисляться по хвосту после ожидания.
+        await threads.request_cancel(key, upto_inbox_seq=cutoff)
+        run = self.registry.run_of(system=key.system, task_id=key.thread)
+        if run is not None:
+            run.notes["cancel_upto"] = cutoff
+        try:
+            await self.registry.stop(system=key.system, task_id=key.thread)
+        except TimeoutError:
+            # Флаг стопа ход уже получил, работа снимается дольше потолка:
+            # ответ — «отменяется», не успех.
+            logger.warning(
+                "снятие своего прогона %s не уложилось в потолок", key
+            )
         if settled:
             # Ход по недоставленному ещё строится — на этом или другом
             # инстансе, статуса его прогона в хранилище нет: отмену он
@@ -442,6 +438,7 @@ class WebhookSurface:
                     record,
                     status="cancelled",
                     op="cancel-abandoned",
+                    inbox_upto=cutoff,
                     finished_at=time.time(),
                     recovery_attempts=0,
                 )
@@ -600,11 +597,16 @@ class WebhookSurface:
         }
         if callback_url is not KEEP_CALLBACK:
             fields["callback_url"] = callback_url
-        await task_status.aset_status(
-            self.threads(),
-            ThreadKey(system=system, thread=thread_id),
-            **fields,
-        )
+        key = ThreadKey(system=system, thread=thread_id)
+        threads = self.threads()
+        record = await threads.get(key)
+        if not _pending(record):
+            # Всё уже доставлено — задачу довёл другой прогон, этот сейчас
+            # сдаст тред (InboxDrained). Статус ведёт тот, кто её довёл.
+            return
+        fields["inbox_started_upto"] = record.max_seq.get("inbox", 0)
+        fields["inbox_first"] = record.state.inbox_seq + 1
+        await task_status.aset_status(threads, key, **fields)
 
     async def _amark_finished(self, run: ActiveRun) -> None:
         """Итог прогона — в статус задачи, если статус всё ещё его: тред
@@ -618,17 +620,25 @@ class WebhookSurface:
         if current is None or current.get("run_id") != run.notes["run_id"]:
             return
         if run.ending == "interrupted":
-            # Остановка сервера: задачу продолжит восстановление, а эта
-            # попытка — не сбой хода (деплои не исчерпают попытки).
-            await task_status.aset_status(threads, key, stopped_by="shutdown")
-            return
+            if not _turn_done(run, record):
+                # Остановка сервера: задачу продолжит восстановление, а эта
+                # попытка — не сбой хода (деплои не исчерпают попытки).
+                await task_status.aset_status(
+                    threads, key, stopped_by="shutdown"
+                )
+                return
+            # Остановка легла в уборку законченного хода: ход в треде
+            # закрыт, продолжать восстановлению нечего — итог есть.
+            run.ending, run.result = "completed", run.executor.last_response
         final = _final_fields(run)
         final["recovery_attempts"] = 0
         if final["status"] in ("failed", "cancelled") and record is not None:
             # Задача сдалась или отменена: входящие до этой границы
             # восстановление не поднимает (иначе упавший ход повторялся бы
             # по кругу, а отменённый собирался бы ради снятого сообщения).
-            final["inbox_upto"] = record.max_seq.get("inbox", 0)
+            final["inbox_upto"] = await _finished_inbox_upto(
+                threads, record, run, current
+            )
         await task_status.aset_status(threads, key, **final)
         self.notify(key, {**current, **final})
 
@@ -647,6 +657,16 @@ class WebhookSurface:
             self.callbacks.send(
                 url, make_event(status["status"], key, jsonable(status))
             )
+
+
+def _turn_done(run: ActiveRun, record: ThreadRecord | None) -> bool:
+    """Цикл прогона дошёл до конца, и ход в треде закрыт: остановка сервера
+    сняла только уборку после хода."""
+    return (
+        getattr(run.executor, "loop_finished", False)
+        and record is not None
+        and record.runtime.turn != "running"
+    )
 
 
 def _final_fields(run: ActiveRun) -> Dict[str, Any]:
@@ -701,3 +721,36 @@ def _pending(record: ThreadRecord | None) -> int:
 
 async def healthcheck():
     return {"status": "ok"}
+
+
+async def _finished_inbox_upto(threads, record, run, current) -> int:
+    """Граница именно этого прогона; новые входящие остаются новой работой."""
+    executor = getattr(run, "executor", None)
+    state_fn = getattr(executor, "get_state", None)
+    state = state_fn() if state_fn is not None else None
+    delivered = int(getattr(state, "inbox_seq", 0) or 0)
+    if run.ending == "cancelled":
+        cutoff = run.notes.get("cancel_upto")
+        if cutoff is None:
+            cutoff = getattr(executor, "cancelled_inbox_upto", None)
+        if type(cutoff) is int:
+            return cutoff
+        cutoff = await _cancel_boundary(threads, record, current)
+        if cutoff is not None:
+            return cutoff
+    return max(
+        delivered,
+        int(current.get("inbox_started_upto") or record.state.inbox_seq),
+    )
+
+
+async def _cancel_boundary(threads, record, current) -> int | None:
+    first = current.get("inbox_first", record.state.inbox_seq + 1)
+    controls = await threads.store.read_stream(record.key, "control")
+    bounds = [
+        e.data.get("upto_inbox_seq")
+        for e in controls
+        if e.data.get("type") == "cancel" and e.data.get("target") is None
+    ]
+    applicable = [b for b in bounds if type(b) is int and b >= first]
+    return max(applicable) if applicable else None

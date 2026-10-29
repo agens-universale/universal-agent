@@ -32,10 +32,24 @@ def error_message(exc: BaseException) -> str:
     return exc.__class__.__name__
 
 
-def stop_agent(agent: Any) -> None:
-    stop = getattr(agent, "stop", None)
-    if stop is not None:
-        stop()
+async def astop_agent(agent: Any) -> None:
+    """Стоп агента и ожидание, пока текущая работа снята.
+
+    Потолок ожидания — ``TimeoutError``, не успешный стоп.
+    """
+    from gc_core.user_stop import await_agent_stop
+
+    await await_agent_stop(agent)
+
+
+def log_forgotten_stop(task: asyncio.Task) -> None:
+    """Забрать ошибку стопа, который никто не ждёт."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    logger.exception("user stop did not settle", exc_info=exc)
 
 
 class TurnLifecycle:

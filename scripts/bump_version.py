@@ -39,10 +39,11 @@ MANIFESTS = [
     ROOT / "packages" / "acp" / _MANIFEST_NAME,
     ROOT / "packages" / "stores" / _MANIFEST_NAME,
     ROOT / "packages" / "testkit" / _MANIFEST_NAME,
+    ROOT / "packages" / "temporalio" / _MANIFEST_NAME,
 ]
 
-# Цифры в имени дистрибутива допустимы: `[a-z]+` пин вроде gc-a2a не видел.
-PIN_RE = re.compile(r'"(gc-[a-z0-9]+)==\d+\.\d+\.\d+"')
+# Цифра — для gc-a2a, дефис — для gc-core-temporalio.
+PIN_RE = re.compile(r'"(gc-[a-z0-9-]+)==\d+\.\d+\.\d+"')
 VERSION_RE = re.compile(
     r'^(\s*version\s*=\s*")(\d+\.\d+\.\d+)("\s*)$', re.MULTILINE
 )

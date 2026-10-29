@@ -34,6 +34,12 @@ from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.selection import subagents_enabled
+from gc_core.user_stop import (
+    UserStopInterrupt,
+    await_cancelled,
+    bind_tool_call,
+    current_user_stop,
+)
 
 _fallback_logger = logging.getLogger(__name__)
 from gc_core.execution.ports import is_sandbox_violation, port
@@ -614,6 +620,50 @@ def _tool_result_to_text(res: Any) -> str:
     return str(res)
 
 
+async def _acall_under_stop(tool_name: str, call_id: str, fn, args):
+    """Корутина тула, которая не процесс: стоп её отменяет.
+
+    Вложенный exec/MCP регистрирует своё снятие поверх и забирает жест себе.
+    Уже идущий системный вызов без await дочитывается: отмена приходит на
+    следующей точке ожидания.
+    """
+    import asyncio
+
+    stop = current_user_stop()
+
+    async def _body():
+        if args is None:
+            return await fn()
+        return await fn(**args)
+
+    if stop is None:
+        return await _body()
+    if stop.requested:
+        raise UserStopInterrupt(kind="tool", started=False)
+    task = asyncio.create_task(_body())
+
+    async def _release() -> None:
+        if not task.done():
+            task.cancel()
+
+    try:
+        async with stop.arm(
+            kind="tool",
+            tool=tool_name,
+            call_id=call_id,
+            release=_release,
+        ):
+            return await task
+    except UserStopInterrupt as exc:
+        if not exc.started:
+            await await_cancelled(task)
+        raise
+    except asyncio.CancelledError:
+        if stop.requested:
+            raise UserStopInterrupt(kind="tool", started=True)
+        raise
+
+
 async def _aapply_tool_text(
     tool_name: str,
     arguments: str | Dict[str, Any],
@@ -663,26 +713,40 @@ async def _aapply_tool_text(
         from gc_core.security.permission_gate import permission_gate_flow
 
         async def _invoke() -> Any:
+            call_id = str(kwargs.get("call_id") or "")
             if callable(port(ctx, "tool_effect")) and uses_leaf_effect(tool):
-                return await invoke_native_tool(
-                    tool,
-                    tool_name,
-                    args,
-                    ctx=ctx,
-                    state=kwargs.get("state"),
-                    call_id=kwargs.get("call_id"),
-                    operation_id=kwargs.get("tool_operation_id")
-                    or str(kwargs.get("call_id") or "tool"),
-                )
+                with bind_tool_call(tool_name, call_id):
+                    return await _acall_under_stop(
+                        tool_name,
+                        call_id,
+                        lambda: invoke_native_tool(
+                            tool,
+                            tool_name,
+                            args,
+                            ctx=ctx,
+                            state=kwargs.get("state"),
+                            call_id=kwargs.get("call_id"),
+                            operation_id=kwargs.get("tool_operation_id")
+                            or str(kwargs.get("call_id") or "tool"),
+                        ),
+                        None,
+                    )
             from gc_core.tools.connect_mcp.api import media_sink_scope
 
             with media_sink_scope(ctx):
-                return await acall(**args)
+                with bind_tool_call(tool_name, call_id):
+                    return await _acall_under_stop(
+                        tool_name,
+                        call_id,
+                        acall,
+                        args,
+                    )
 
         # Гейт режима разрешений — только для ИЗВЕСТНЫХ имён (неизвестное уже
         # ушло выше со списком доступных тулов: отказ режима на выдуманном
         # имени был бы тупиком) и после веток субагентов. Категории со своей
         # защитой гейт пропускает — их решает защита самого тула.
+        # Снятие хода — внутри вызова: гейт сначала решает, можно ли звать тул.
         entries = tools_data_ if tools_data_ is not None else ctx.tools_data
         res = await arun_guard_flow(
             permission_gate_flow(
@@ -696,6 +760,18 @@ async def _aapply_tool_text(
         )
     except ExecutionFailure:
         raise
+    except UserStopInterrupt as exc:
+        from gc_core.message_policy.user_stop import (
+            cancelled_by_user_output,
+            not_started_due_to_user_stop_output,
+        )
+
+        text = (
+            not_started_due_to_user_stop_output(tool_name)
+            if not exc.started
+            else cancelled_by_user_output(tool_name)
+        )
+        return annotate_output_with_dropped_arguments(text, dropped)
     except Exception as e:
         if is_sandbox_violation(e):
             raise

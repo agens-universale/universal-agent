@@ -51,7 +51,7 @@ def test_round_trip_keeps_fields_set_and_non_finite_numbers():
 def test_fresh_after_tombstone_continues_generation_and_epoch():
     head = Head.fresh(KEY, NOW)
     head.row.generation, head.row.lease_epoch = 4, 7
-    tomb = Head.loads(head.tombstone().dumps())
+    tomb = Head.loads(head.tombstone(NOW).dumps())
     assert tomb.deleted and tomb.row.generation == 5
     again = Head.fresh(KEY, NOW, tomb)
     assert (again.row.generation, again.row.lease_epoch) == (5, 7)

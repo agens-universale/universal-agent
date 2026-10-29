@@ -1,4 +1,3 @@
-import importlib
 import json
 import logging
 import os
@@ -12,35 +11,24 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_testkit.paths import module_dir
+from helpers.module_snapshot import ModuleSnapshot
 
 
 def teardown_module(_module) -> None:
-    # Полные имена: после переезда ключи в sys.modules — "gc_core.agent_executor"
-    # и "gc_core.run_summary_coordinator". Кодмод сплита правит узлы import и
-    # одиночные строковые литералы, а строки ВНУТРИ кортежа не тронул — сетка
-    # module_literals их тоже не ловила (оговорено в её докстринге), и pop стал
-    # no-op: модули, загруженные под подменённым gc_core.tools, доживали до конца
-    # сессии и доставались следующим тестам.
-    for mod in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
-        sys.modules.pop(mod, None)
-    for name in list(sys.modules):
-        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
-            sys.modules.pop(name, None)
-    real_tools = importlib.import_module("gc_core.tools")
-    proc = sys.modules.get("gc_core.processing_responses")
-    if proc is not None:
-        proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+    # Ровно прежние модули: свежая копия исполнителя в sys.modules развела
+    # бы код, загруженный до теста, и подмены по модулю у следующих тестов.
+    if _SNAPSHOT is not None:
+        _SNAPSHOT.restore()
 
 
+_SNAPSHOT: ModuleSnapshot | None = None
 agent_executor_module = None
 run_summary_coordinator_module = None
 
 
 def setup_module(_module) -> None:
-    global agent_executor_module, run_summary_coordinator_module
+    global agent_executor_module, run_summary_coordinator_module, _SNAPSHOT
+    _SNAPSHOT = ModuleSnapshot()
     _stub_tools_modules()
     tools_pkg = sys.modules["gc_core.tools"]
     from gc_core import processing_responses as pr

@@ -86,6 +86,8 @@ class _Queries:
             f"({c('path')} = {p()} OR substr({c('path')}, 1, {p()}) = {p()})"
         )
         self.put = d.upsert(res, _RESOURCE_COLUMNS, _RESOURCE_KEY)
+        self.reserve_resource = d.insert_ignore(res, _RESOURCE_COLUMNS)
+        self.lock_resource = self.read + d.lock_suffix
         p = d.params()
         self.delete = (
             f"DELETE FROM {res} WHERE {c('agent_id')} = {p()} "
@@ -334,15 +336,15 @@ class SqlAgentStore(AgentStore):
         *,
         project: str | None = None,
         source: str | None = None,
-    ) -> None:
+        preserve_manual: bool = False,
+    ) -> bool:
         path = name.strip("/")
         project_id = project or ""
         self._d.check_resource(project_id=project_id, path=path)
         digest = hashlib.sha256(data).hexdigest()
 
-        async def work(conn: Conn) -> None:
-            await conn.execute(
-                self._q.put,
+        async def work(conn: Conn) -> bool:
+            values = (
                 self.agent_id,
                 project_id,
                 kind,
@@ -352,8 +354,19 @@ class SqlAgentStore(AgentStore):
                 source,
                 await self._now(conn),
             )
+            if preserve_manual:
+                # Резервируем отсутствующий ключ, чтобы ручная первая
+                # запись не могла вклиниться между SELECT и UPSERT.
+                await conn.execute(self._q.reserve_resource, *values)
+                current = await conn.fetchrow(
+                    self._q.lock_resource, *values[:4]
+                )
+                if current["source"] is None:
+                    return False
+            await conn.execute(self._q.put, *values)
+            return True
 
-        await self._write(work)
+        return await self._write(work)
 
     async def delete_resource(
         self, kind: ResourceKind, name: str, *, project: str | None = None

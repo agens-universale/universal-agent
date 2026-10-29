@@ -45,6 +45,20 @@ uv tool install "gc-acp @ git+https://gitverse.ru/gigacode-ai/universal-agent#su
 HTTP-фасады Responses и Chat Completions, A2A и swarm: [server.md](server.md),
 [chat.md](chat.md), [a2a.md](a2a.md).
 
+Хранилище в базе (`storage` в config.yml) голый `gc-cli` не тянет. Пакет
+`gc-stores` с драйвером ставится в то же окружение; `--with-executables-from
+gc-stores` кладёт в `PATH` команду `gc-stores`. Уже стоящий `gc-cli` —
+переустановка с `--force`. Extra: `postgres`, `mysql`, `redis`, `s3`, `all`;
+SQLite — пакет `gc-stores` без скобок. Секция конфига и схема —
+[Хранилище](configuration.md#хранилище-storage).
+
+```bash
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" \
+  --with-executables-from gc-mcp \
+  --with "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores" \
+  --with-executables-from gc-stores
+```
+
 Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
 корневой `pyproject.toml`, а корень — это полный профиль. Устройство раскладки
 описано в [docs/packaging.md](packaging.md).

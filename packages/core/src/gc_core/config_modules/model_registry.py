@@ -247,7 +247,6 @@ def connection_parts(
     url: Any,
     token: Any,
     completions_url: Any,
-    proxy: Any,
     authorization: Any,
 ) -> tuple[bool, bool]:
     """§2, ЕДИНОЕ определение «адрес задан» / «токен задан» для всех точек проверки.
@@ -262,11 +261,14 @@ def connection_parts(
     наследуется», и правило обязано читать его так же, иначе отвергает законную форму,
     а `{url: "", token: ...}` пропускает как целую пару.
 
+    `backend.proxy` в пару не входит: это строка транспорта эндпоинта. Она
+    применяется сама по себе и не требует своего токена или адреса.
+
     Токен — по «значение задано» (`is not None`), потому что так его читает
     `ModelEntry.authorization_header`: `None` — наследовать, `""` — ЗАДАННЫЙ токен
     «сервер не требует авторизации»."""
     return (
-        bool(url or completions_url or proxy),
+        bool(url or completions_url),
         token is not None or authorization is not None,
     )
 
@@ -331,7 +333,6 @@ def _unresolved_pair_refs(entry) -> list[str]:
         entry.get("url"),
         entry.get("token"),
         backend.get("completions_url"),
-        backend.get("proxy"),
         headers.get("Authorization"),
     ):
         for name in missing_env_refs(value):
@@ -385,7 +386,6 @@ def validate_registry_pairs(
                 url=entry.get("url"),
                 token=entry.get("token"),
                 completions_url=backend.get("completions_url"),
-                proxy=backend.get("proxy"),
                 authorization=headers.get("Authorization"),
             ),
         )
@@ -506,7 +506,6 @@ class ModelEntry(BaseModel):
             completions_url=backend.completions_url
             if backend is not None
             else None,
-            proxy=backend.proxy if backend is not None else None,
             authorization=(
                 backend.chat_completion_headers.get("Authorization")
                 if backend is not None
@@ -520,8 +519,8 @@ class ModelEntry(BaseModel):
         провайдеру: половина пары либо уносит общий ключ на чужой хост (свой адрес без
         токена), либо уезжает вслед за сменой общего адреса (свой токен без адреса).
 
-        Прокси считается адресом: он определяет, куда физически уходит запрос
-        (`connect_backend.resolve_network_params`). `use_ssl`/сертификаты — не адрес, у них
+        `backend.proxy` адрес не задаёт: строка применяется к запросу этого
+        эндпоинта и без своего токена. `use_ssl`/сертификаты — тоже не адрес, у них
         своё предупреждение (спека §7). Что считать заданным — `connection_parts`, общее
         с проверкой слоя."""
         problem = _pair_violation("models.<alias>", *self._connection_parts())

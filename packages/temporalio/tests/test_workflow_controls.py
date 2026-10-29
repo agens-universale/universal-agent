@@ -18,6 +18,8 @@ from live_support import (
     thread_meta,
     worker_kwargs,
 )
+from gc_testkit.helpers.crossplatform import python_command
+from temporalio.api.enums.v1 import EventType
 from temporalio.client import WorkflowUpdateFailedError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -556,6 +558,60 @@ async def test_stop_cancels_model_request_retried_without_limit(
             "phase"
         ] == "stopped"
         history = await handle.fetch_history()
+    await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
+
+
+async def test_stop_while_a_tool_runs_does_not_break_the_workflow(
+    tmp_path, monkeypatch, scripted_http
+):
+    """Слияние develop: снятие ``UserStop`` ядра к ходу workflow не
+    привязано. Привязанное, оно на стопе во время тула звало
+    ``call_soon_threadsafe``, которого у цикла workflow нет: задача
+    workflow падала на каждом повторе. Стоп Temporal — свой (модель,
+    субагенты): тул дорабатывает, ход останавливается на границе шага."""
+    monkeypatch.chdir(tmp_path)
+    url, requests, script = scripted_http
+    command = python_command(tmp_path, "import time\ntime.sleep(3)\n")
+    script.append(
+        [call("slow", "exec_command", {"command": command, "cwd": "."})]
+    )
+    no_judge = {"security": {"command_moderation": {"enabled": False}}}
+    async with runtime(tmp_path, url, core_extra=no_judge) as (env, _, _):
+        handle = await env.client.start_workflow(
+            UniversalAgentWorkflow.run,
+            request(),
+            id="controls",
+            task_queue="native-controls",
+        )
+        status = await wait_status(handle, lambda s: s["phase"] == "running")
+        async with asyncio.timeout(30):
+            while True:
+                described = await handle.describe()
+                if any(
+                    activity.activity_type.name
+                    == "universal_agent.tool.execute"
+                    for activity in described.raw_description.pending_activities
+                ):
+                    break
+                await asyncio.sleep(0.05)
+        await asyncio.wait_for(
+            handle.execute_update(
+                UniversalAgentWorkflow.stop_turn, status["turn_id"]
+            ),
+            30,
+        )
+        await asyncio.wait_for(handle.result(), 30)
+        assert (await handle.query(UniversalAgentWorkflow.status))[
+            "phase"
+        ] == "stopped"
+        history = await handle.fetch_history()
+    failed = [
+        event
+        for event in history.events
+        if event.event_type == EventType.EVENT_TYPE_WORKFLOW_TASK_FAILED
+    ]
+    assert failed == []
+    assert len(requests) == 1  # после стопа модель не спрашивали
     await Replayer(workflows=[UniversalAgentWorkflow]).replay_workflow(history)
 
 

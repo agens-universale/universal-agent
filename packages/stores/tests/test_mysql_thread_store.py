@@ -14,9 +14,9 @@ from gc_core.threads.models import (
 )
 from gc_stores import migrations
 from gc_stores.mysql import MySQLThreadStore
-from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
 from gc_testkit.session_checks import CHECKS as SESSION_CHECKS
 from gc_testkit.session_checks import aassert_session_works
+from gc_testkit.thread_store_conformance_v2 import CHECKS, assert_conforms
 
 LATEST = migrations.latest(migrations.load("gc_stores.mysql"))
 
@@ -70,6 +70,19 @@ async def test_two_instances_migrate_once(mysql_databases):
         assert await first.schema_version() == LATEST
     finally:
         await asyncio.gather(first.close(), second.close())
+
+
+async def test_migration_resumes_after_ddl_without_version(mysql_databases):
+    dsn = await mysql_databases.acreate(migrate=False)
+    async with MySQLThreadStore(dsn) as store:
+        found = migrations.load("gc_stores.mysql")
+        await migrations.ensure(store._db, store._d, found[:2])
+        async with store._db.connection() as conn:
+            await conn.execute(
+                "ALTER TABLE gc_tombstones ADD COLUMN `deleted_at` DATETIME(6) NULL"
+            )
+        await store.ensure_schema()
+        assert await store.schema_version() == LATEST
 
 
 async def test_store_without_schema_names_the_fix(mysql_databases):

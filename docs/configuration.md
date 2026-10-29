@@ -957,9 +957,10 @@ assign:                                  # привязки отдельных �
   без адреса уехал бы вслед за сменой общего адреса. Правило действует и внутри одного файла,
   и по слоям — слой (проектный `config.yml`, профиль), перекрывший у записи только адрес,
   отвергается с путём своего файла;
-- «свой адрес» — это `url`, `backend.completions_url` **или** `backend.proxy`: прокси решает,
-  куда физически уходит запрос вместе с токеном, поэтому тоже требует своего токена. «Свой
-  токен» — `token` или `backend.chat_completion_headers.Authorization`;
+- «свой адрес» — это `url` или `backend.completions_url`. «Свой
+  токен» — `token` или `backend.chat_completion_headers.Authorization`.
+  `backend.proxy` в пару не входит: это строка транспорта эндпоинта, она
+  применяется и без своего адреса или токена;
 - `backend.use_ssl` / `backend.cert_path` / `backend.key_path` в пару **не входят** — адрес
   они не меняют, и своего токена не требуют. Но у записи, работающей через общее подключение,
   они ослабляют защиту запроса, который уходит с **общим токеном**, — про это при старте
@@ -1729,13 +1730,59 @@ storage:
 | `s3` | `bucket`, `prefix`, `endpoint_url`, `region` (ключи — переменные AWS) | `gc-stores[s3]` |
 | `пакет.модуль:функция` | любые — функция получает их словарём (часть `agent` — и `agent_id`) | своё |
 
+Строка подключения — значение обязательного параметра. `${FILE:…}` и
+`${ENV:…}` подставляют её из файла или окружения и сами адресом не являются.
+
+| `type` | Куда писать | Пример |
+|---|---|---|
+| `postgres` | `dsn` | `postgresql://user:password@host:5432/database` |
+| `mysql` | `dsn` | `mysql://user:password@host:3306/database` |
+| `sqlite` | `path` | `/var/lib/gc/agents.db` |
+| `redis` | `url` | `redis://:password@host:6379/0` |
+| `s3` | `bucket` | `agents` |
+
+У Postgres схема таблиц — ключ `schema`, не часть `dsn` (по умолчанию
+`public`). У MySQL тот же адрес пишется и как `mysql+asyncmy://…`; хост и
+порт по умолчанию — `127.0.0.1` и `3306`. У SQLite это путь к файлу, не URL. У Redis
+`prefix` по умолчанию `gc:`; номер базы — последний сегмент URL (`/0`).
+У S3 одной строки подключения нет: бакет обязателен, остальное по желанию,
+ключи — переменные AWS, не параметры секции.
+
+```yaml
+threads:
+  type: s3
+  bucket: agents
+  prefix: gc/
+  endpoint_url: http://minio:9000   # AWS — ключ не задавать
+  region: us-east-1
+```
+
 - **Кто открывает.** Ядро знает только схему секции; открывают хранилище
   `gc-serve` (один раз на процесс, до открытия портов) и `gc-cli` (на запуск).
-  Нужен пакет `gc-stores` (в `gc-server` он есть; к голому `gc-cli` — поставить
-  с драйвером), без него — код 1 и подсказка. TUI и `gc-acp` хранят только в
-  файлах: нефайловая часть — отказ при старте. SDK —
-  `gc_stores.configured.aopen_configured(settings)` и
-  `AsyncAgent.create(settings, stores=…)` ([sdk/stores.md](sdk/stores.md)).
+  Пакет `gc-stores` у `gc-server` уже есть, драйвер — extra
+  (`gc-server[postgres]` и соседние, [server.md](server.md#установка));
+  SQLite — без extra. Голый `gc-cli` от `gc-stores` не зависит: без пакета в
+  том же окружении нефайловый `storage` — код 1 и подсказка, какой extra
+  поставить. Из рабочей копии драйверы уже в dev-группе, отдельно ничего не
+  ставится: `uv run gc-cli --config ./config.yml`. Как инструмент — в то же
+  окружение, что и `gc-cli`; уже стоящий инструмент переустанавливается с
+  `--force`:
+
+```bash
+uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" \
+  --with-executables-from gc-mcp \
+  --with "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores" \
+  --with-executables-from gc-stores
+```
+
+Вместо `postgres` — `mysql`, `redis`, `s3` или `all`. Для SQLite extra нет:
+`--with "gc-stores @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/stores"`.
+`--with-executables-from gc-stores` выносит в `PATH` команду `gc-stores`
+(`migrate`, `sync`). Дальше обычный запуск: `gc-cli --config ./config.yml`.
+TUI и `gc-acp` хранят только в файлах: нефайловая часть — отказ при старте.
+SDK — `gc_stores.configured.aopen_configured(settings)` и
+`AsyncAgent.create(settings, stores=…)` ([sdk/stores.md](sdk/stores.md)).
+
 - **Одна база на обе части** (тот же `type` и те же параметры) — одно
   подключение.
 - **Схема** сверяется при открытии: не накатана или старая — отказ с подсказкой

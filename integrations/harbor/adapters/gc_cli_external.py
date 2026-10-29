@@ -41,6 +41,11 @@ from harbor.utils.trajectory_utils import format_trajectory_json
 from adapters.gc_cli_config import build_gc_cli_settings, profile_value
 from adapters.step_timings import StepTimings
 
+try:
+    from harbor.agents.capabilities import AgentCapabilities
+except ImportError:  # harbor < 0.24 has no capability gate
+    AgentCapabilities = None
+
 if TYPE_CHECKING:
     from gc_core.settings import LoadedSettings
 
@@ -263,7 +268,12 @@ def _skill_source(
 
 
 class GcCliExternal(BaseAgent):
-    SUPPORTS_ATIF: bool = False
+    # harbor >= 0.24 refuses tasks with MCP servers / skills unless the agent
+    # declares them. Both are real: `run` wires `self.mcp_servers` into the gc-cli
+    # MCP config and points `paths.skills_data_path` at `self.skills_dir`.
+    # MCP HTTP headers are not forwarded, so `mcp_http_headers` stays off.
+    if AgentCapabilities is not None:
+        capabilities = AgentCapabilities(mcp_servers=True, skills=True)
 
     def __init__(
         self,

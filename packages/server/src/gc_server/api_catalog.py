@@ -132,7 +132,8 @@ _TASK_PATH = (
 _STATUS = _object(
     status=_described(
         _STR,
-        "`running` | `completed` | `failed` | `cancelled` | `interrupted`",
+        "`queued` | `running` | `completed` | `failed` | `cancelled` | "
+        "`interrupted`",
     ),
     system=_STR,
     task_id=_STR,
@@ -321,6 +322,7 @@ def _task_routes(*, callbacks: bool, runner: str) -> dict:
             summary="Статус задачи",
             description=(
                 "Из хранилища, одинаковый на любом инстансе. "
+                "`queued` — сообщение принято, прогон ещё не взял задачу. "
                 "`interrupted` — ход прерван падением инстанса и подхвачен "
                 "восстановлением (сразу сменится на `running`)."
             ),
@@ -551,8 +553,8 @@ _CWD_META = _described(
     _object(
         cwd=_described(
             _STR,
-            "Абсолютный каталог хода; нет — `chat.launch_root`, иначе "
-            "каталог процесса",
+            "Абсолютный каталог хода внутри `chat.launch_root` (пусто — "
+            "каталога процесса), иначе 400; нет — сам корень",
         )
     ),
     "Метаданные запроса",

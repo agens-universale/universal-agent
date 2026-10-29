@@ -668,7 +668,7 @@ class TuiApp(App):
             )
         )
 
-    def set_config_path(self, path: Optional[str]) -> None:
+    def set_config_path(self, path: Optional[str | Path]) -> None:
         """Единая точка присвоения `_config_path`: путь + снимок мтайм-набора (спека
         §3.3) одним движением. Вызывать ровно тогда, когда база окна уже фактически
         соответствует файлу по этому пути (main() — конфиг только что загружен
@@ -677,8 +677,11 @@ class TuiApp(App):
         Без немедленного снимка первая же проверка reload_config_if_changed()
         в новом окне видит файл как «изменившийся» (снимка ещё нет) и зря
         перечитывает конфиг и инвалидирует раннер — хотя окно только что само
-        прочитало этот же файл."""
-        self._config_path = path
+        прочитало этот же файл.
+
+        Хранится строка: онбординг отдаёт `Path`, обычный запуск — `str`, а
+        экраны (/config) читают путь как строку."""
+        self._config_path = str(path) if path else None
         self._config_mtime_set = self._compute_mtime_set()
         self._profile_source = self._current_profile_source()
 

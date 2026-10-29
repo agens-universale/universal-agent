@@ -197,3 +197,68 @@ def file_layout_store_dir(root, key):
 
     stem = f"{key.system}_{key.thread}"
     return root / ".store" / hashlib.sha256(stem.encode()).hexdigest()
+
+
+def _spy_listed(monkeypatch) -> list:
+    """Ключи тредов, прочитанных списком целиком (блокировка, сборка
+    записи)."""
+    listed: list = []
+    real = FileThreadStore._listed
+
+    def spy(self, key):
+        listed.append(key)
+        return real(self, key)
+
+    monkeypatch.setattr(FileThreadStore, "_listed", spy)
+    return listed
+
+
+def _fill(store, counts: dict) -> None:
+    from gc_core.threads.facade import Threads
+
+    threads = Threads(store)
+    for system, count in counts.items():
+        for n in range(count):
+            key = ThreadKey(system=system, thread=f"{system}{n}")
+            run(threads.update_frontend(key, "x", {"n": n}))
+
+
+def test_list_of_one_system_reads_only_its_threads(tmp_path, monkeypatch):
+    """Список одной системы (диалоги chat, сессии ACP, задачи A2A) не
+    читает треды других: при тысячах тредов вебхука страница диалогов
+    стоила секунды на цикле событий."""
+    from gc_core.threads.models import ThreadQuery
+
+    store = FileThreadStore(tmp_path)
+    _fill(store, {"a2a": 3, "load": 20})
+    listed = _spy_listed(monkeypatch)
+    page = run(store.list_threads(ThreadQuery(system="a2a")))
+    assert sorted(r.key.thread for r in page.items) == ["a2a0", "a2a1", "a2a2"]
+    assert {key.system for key in listed} == {"a2a"}
+
+
+def test_iterating_a_file_store_reads_each_thread_once(tmp_path, monkeypatch):
+    """Каждая страница списка файлового хранилища читает весь каталог:
+    постраничный обход — N/страница полных проходов. Фасад обходит его
+    одним проходом, порядок тот же."""
+    from gc_core.threads import facade as facade_module
+    from gc_core.threads.facade import Threads
+
+    monkeypatch.setattr(facade_module, "_PAGE", 5)
+    store = FileThreadStore(tmp_path)
+    _fill(store, {"a2a": 4, "load": 8})
+    threads = Threads(store)
+
+    async def collect(**query):
+        return [record async for record in threads.iter_threads(**query)]
+
+    listed = _spy_listed(monkeypatch)
+    found = run(collect())
+    assert len(found) == 12
+    assert len(listed) == 12
+    stamps = [record.info.updated_at for record in found]
+    assert stamps == sorted(stamps, reverse=True)
+    listed.clear()
+    only = run(collect(system="a2a"))
+    assert sorted(r.key.thread for r in only) == [f"a2a{n}" for n in range(4)]
+    assert len(listed) == 4

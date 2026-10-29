@@ -94,8 +94,10 @@ class SqlQueries:
         p = d.params()
         self.release = (
             f"UPDATE {self.threads} SET {c('lease_owner')} = NULL, "
-            f"{c('lease_expires_at')} = NULL WHERE {self.by_thread(p)} "
-            f"AND {c('lease_owner')} = {p()} AND {c('lease_epoch')} = {p()}"
+            f"{c('lease_expires_at')} = NULL, {c('lease_token')} = NULL "
+            f"WHERE {self.by_thread(p)} "
+            f"AND {c('lease_owner')} = {p()} AND {c('lease_epoch')} = {p()} "
+            f"AND COALESCE({c('lease_token')}, '') = COALESCE({p()}, '')"
         )
 
     def update_columns(self, columns: tuple[str, ...] = THREAD_COLUMNS) -> str:

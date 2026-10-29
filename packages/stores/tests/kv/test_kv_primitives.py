@@ -66,3 +66,16 @@ async def test_fault_stops_before_the_operation():
     with pytest.raises(KvFault):
         await kv.put_any("k", b"x")
     assert await kv.get("k") is None
+
+
+async def test_conditional_delete():
+    """Удаление по версии: ключ, переписанный после чтения, остаётся."""
+    kv = MemoryKV()
+    assert kv.conditional_delete
+    v1 = await kv.put("k", b"1", if_version=None)
+    v2 = await kv.put("k", b"2", if_version=v1)
+    assert await kv.delete_if("k", v1) is False
+    assert (await kv.get("k")).data == b"2"
+    assert await kv.delete_if("k", v2) is True
+    assert await kv.get("k") is None
+    assert await kv.delete_if("k", v2) is False

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-core"
-version = "0.4.0"
+version = "0.5.0"
 description = "GigaCode Universal Agent — ядро агента (SDK): цикл, тулы, конфиг, безопасность, память, MCP-клиент"
 requires-python = ">=3.11"
 dependencies = [

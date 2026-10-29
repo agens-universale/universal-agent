@@ -66,7 +66,9 @@ class FakeAgent:
         return None
 
 
-def _facade(tmp_path, agent: FakeAgent) -> ResponsesFacade:
+def _facade(
+    tmp_path, agent: FakeAgent, launch_root: str | None = None
+) -> ResponsesFacade:
     threads = tmp_path / "threads"
     threads.mkdir()
 
@@ -76,7 +78,7 @@ def _facade(tmp_path, agent: FakeAgent) -> ResponsesFacade:
 
     return ResponsesFacade(
         settings=make_settings(**{"agent.model": "from-config"}),
-        section=ChatConfig(host="127.0.0.1", launch_root=None),
+        section=ChatConfig(host="127.0.0.1", launch_root=launch_root),
         agent_factory=factory,
         index=ResponseIndex.for_threads_dir(str(threads)),
     )
@@ -208,7 +210,7 @@ async def test_get_survives_a_new_facade(tmp_path):
 async def test_cwd_mismatch_does_not_start(tmp_path):
     agent = FakeAgent(asyncio.Event())
     agent._hold = False
-    facade = _facade(tmp_path, agent)
+    facade = _facade(tmp_path, agent, launch_root=str(tmp_path))
     work = tmp_path / "work"
     work.mkdir()
     handle = await facade.open(
@@ -465,3 +467,119 @@ async def test_cancel_of_a_turn_run_by_another_instance(tmp_path):
     assert agent.calls[0]["cancel_target"] == handle.response_id
     agent.release.set()
     await _finished(handle)
+
+
+async def test_slow_dialog_lookup_does_not_hold_other_dialogs(tmp_path):
+    """Ревью, раунд 4: открытие хода держало общий замок процесса, пока
+    читало индекс ответов и аренду треда — на базе все диалоги вставали в
+    очередь за сетевым чтением одного."""
+    release = asyncio.Event()
+    agent = FakeAgent(release)
+    facade = _facade(tmp_path, agent)
+    first = await facade.open({"model": "ui", "input": "первый"})
+    release.set()
+    await _finished(first)
+    reading, gate = asyncio.Event(), asyncio.Event()
+    real_load = facade._index.load
+
+    async def slow_load(response_id):
+        reading.set()
+        await gate.wait()
+        return await real_load(response_id)
+
+    facade._index.load = slow_load
+    continuing = asyncio.create_task(
+        facade.open(
+            {
+                "model": "ui",
+                "input": "дальше",
+                "previous_response_id": first.response_id,
+            }
+        )
+    )
+    await reading.wait()
+    try:
+        fresh = await asyncio.wait_for(
+            facade.open({"model": "ui", "input": "новый диалог"}), 2
+        )
+    finally:
+        gate.set()
+    assert (await _finished(fresh))["status"] == "completed"
+    assert (await _finished(await continuing))["status"] == "completed"
+
+
+async def test_two_instances_reserve_before_building_agents(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    first = _facade(tmp_path, agent)
+    initial = await first.open({"model": "m", "input": "initial"})
+    await _finished(initial)
+    second = ResponsesFacade(
+        settings=first._settings,
+        agent_factory=first._agent_factory,
+        index=ResponseIndex.for_threads_dir(str(tmp_path / "threads")),
+    )
+    entered, resume = asyncio.Event(), asyncio.Event()
+    original = first._agent_for
+
+    async def building(thread_id, cwd):
+        entered.set()
+        await resume.wait()
+        return await original(thread_id, cwd)
+
+    first._agent_for = building
+    body = {
+        "model": "m",
+        "input": "next",
+        "previous_response_id": initial.response_id,
+    }
+    opening = asyncio.create_task(first.open(body))
+    await asyncio.wait_for(entered.wait(), 2)
+    try:
+        with pytest.raises(ApiError) as caught:
+            await second.open(body)
+        assert caught.value.status == 409
+        assert second._agents == {}
+    finally:
+        resume.set()
+    assert (await _finished(await opening))["status"] == "completed"
+    await first.shutdown()
+    await second.shutdown()
+
+
+async def test_late_finalizer_cannot_replace_new_admission_summary(tmp_path):
+    from dataclasses import replace
+    from gc_core.threads.models import SideChange
+    from gc_server.chat.responses.index_store import ResponseRecord, thread_key
+
+    index = ResponseIndex.for_threads_dir(str(tmp_path / "threads"))
+    key = thread_key("dialog")
+    await index.threads.store.append_side(
+        key,
+        SideChange(
+            op_id="new-owner",
+            patch_frontend=("chat", {"admission": {"token": "new"}}),
+        ),
+    )
+    winner = ResponseRecord(
+        "resp_00000000-0000-0000-0000-000000000001",
+        "dialog",
+        "/",
+        None,
+        1,
+        "in_progress",
+        {},
+        reservation="new",
+    )
+    await index.save(winner)
+    await index.save(
+        replace(
+            winner,
+            response_id="resp_00000000-0000-0000-0000-000000000002",
+            status="failed",
+            reservation="old",
+        )
+    )
+    summary = index.summary(await index.threads.get(key))
+    assert summary["latest_response_id"] == winner.response_id
+    assert summary["status"] == "in_progress"

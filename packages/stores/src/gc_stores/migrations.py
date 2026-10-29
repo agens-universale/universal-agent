@@ -137,7 +137,7 @@ async def _apply(
     )
     for migration in found[current:]:
         for statement in migration.statements():
-            await conn.execute(statement)
+            await dialect.execute_migration(conn, statement)
         await conn.execute(f"DELETE FROM {table}")
         p = dialect.params()
         await conn.execute(

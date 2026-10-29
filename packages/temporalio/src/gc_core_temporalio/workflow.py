@@ -228,6 +228,7 @@ class UniversalAgentWorkflow:
         self.post_error = None
         self.terminal_outcome = None
         self.resumed_store = None
+        self.resumed_store_token = None
         #: Прокси треда с подтверждённым владением (после claim или resume).
         self.store = None
         self.owner_released = False
@@ -581,6 +582,7 @@ class UniversalAgentWorkflow:
             # Эпоха аренды треда: run после Continue-As-New пишет по ней
             # без нового захвата.
             self.resumed_store = resume.store_owner_epoch
+            self.resumed_store_token = resume.store_owner_token
         self.human_replies = dict(resume.human_replies)
         self.reply_receipts = dict(resume.reply_receipts)
         self.undelivered = list(resume.undelivered)
@@ -656,7 +658,14 @@ class UniversalAgentWorkflow:
             store = self._thread_store(start, holder)
             key = _thread_key(start)
             if self.resumed_store is not None:
-                store.adopt(key, Lease(owner=holder, epoch=self.resumed_store))
+                store.adopt(
+                    key,
+                    Lease(
+                        owner=holder,
+                        epoch=self.resumed_store,
+                        token=self.resumed_store_token,
+                    ),
+                )
             else:
                 # Тред сессии — за её цепочкой run, бессрочно; у владельца,
                 # чья цепочка уже не исполняется, воркер его отбирает.
@@ -964,7 +973,14 @@ class UniversalAgentWorkflow:
         if store is None and self.resumed_store is not None:
             holder = _lease_owner()
             store = self._thread_store(start, holder)
-            store.adopt(key, Lease(owner=holder, epoch=self.resumed_store))
+            store.adopt(
+                key,
+                Lease(
+                    owner=holder,
+                    epoch=self.resumed_store,
+                    token=self.resumed_store_token,
+                ),
+            )
         if store is None or store.lease is None:
             return
         await store.release(key, store.lease)
@@ -975,8 +991,10 @@ class UniversalAgentWorkflow:
         # Run из CAN без хода владеет тредом по resume: передать его дальше,
         # иначе суточный CAN простаивающей сессии терял бы владение.
         owner_epoch = self.resumed_store
+        owner_token = self.resumed_store_token
         if store is not None and store.lease is not None:
             owner_epoch = store.lease.epoch
+            owner_token = store.lease.token
         return SessionResume(
             human_replies=_recent(self.human_replies),
             reply_receipts=_recent(self.reply_receipts),
@@ -993,6 +1011,7 @@ class UniversalAgentWorkflow:
             answer=self.answer,
             terminal_outcome=self.terminal_outcome,
             store_owner_epoch=owner_epoch,
+            store_owner_token=owner_token,
         )
 
     async def _continue(self, start, store):

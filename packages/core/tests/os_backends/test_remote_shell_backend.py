@@ -358,6 +358,34 @@ def test_env_names_must_be_identifiers():
     assert env == {"GOOD_NAME": "v"} and err is None
 
 
+def test_kill_script_fails_when_the_pid_file_is_missing(tmp_path):
+    import subprocess
+
+    from gc_core.backends.remote_shell import remote_kill_command
+
+    script = remote_kill_command(str(tmp_path / "absent"))
+    completed = subprocess.run(
+        ["sh", "-c", script], capture_output=True, text=True
+    )
+    assert completed.returncode != 0
+
+
+def test_kill_script_with_a_pid_keeps_the_grace_and_exits_zero(tmp_path):
+    import subprocess
+
+    from gc_core.backends.remote_shell import remote_kill_command
+
+    path = tmp_path / "pid"
+    path.write_text("99999999\n")
+    script = remote_kill_command(str(path))
+    assert "sleep 0.5" in script
+    assert "kill -TERM" in script and "kill -KILL" in script
+    completed = subprocess.run(
+        ["sh", "-c", script], capture_output=True, text=True
+    )
+    assert completed.returncode == 0
+
+
 def test_watchdog_wrap_variants():
     import shlex
 
@@ -408,6 +436,32 @@ async def test_timed_out_command_does_not_outlive_the_timeout():
         os.kill(pid, 0)
 
 
+async def test_watchdog_probe_keeps_the_tool_when_the_tmp_line_follows():
+    from types import SimpleNamespace
+
+    from gc_core.backends.remote_shell import RemoteShellBackend
+
+    be = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+
+    async def _probe(*_args, **_kwargs):
+        return SimpleNamespace(
+            stdout="timeout\nnowrite\n",
+            stderr="",
+            return_code=0,
+            timed_out=False,
+        )
+
+    be._afs_exec = _probe
+    assert await be._awatchdog() == "timeout"
+
+
 async def test_watchdog_probe_is_cached_and_reported():
     from gc_core.backends.remote_shell import RemoteShellBackend
 
@@ -421,7 +475,9 @@ async def test_watchdog_probe_is_cached_and_reported():
     )
     first = await be._awatchdog()
     assert first in ("timeout", "gtimeout", "setsid", "perl", None)
-    be._afs_exec = None  # вторая проба не должна исполняться
+    if first is None:
+        return
+    be._afs_exec = None  # найденный сторож второй раз не спрашивается
     assert await be._awatchdog() == first
 
 
@@ -455,6 +511,62 @@ async def test_dead_runtime_is_not_cached_as_no_watchdog():
 
     be._afs_exec = live
     assert await be._awatchdog() == "timeout"
+
+
+async def test_missing_watchdog_is_probed_again():
+    """«Сторожа нет» не запоминается: стоп и честный none спрашиваются снова."""
+    from types import SimpleNamespace
+
+    from gc_core.backends.remote_shell import RemoteShellBackend
+
+    def _backend():
+        return RemoteShellBackend(
+            ["env"],
+            cwd=None,
+            env={},
+            exec_init=None,
+            exec_output_capture_max_chars=1000,
+            walk_output_max_chars=1000,
+        )
+
+    def _result(stdout: str, return_code: int, **extra):
+        return SimpleNamespace(
+            stdout=stdout,
+            stderr="",
+            return_code=return_code,
+            timed_out=False,
+            **extra,
+        )
+
+    stopped = _backend()
+    calls = {"n": 0}
+
+    async def stopped_then_timeout(*_args, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _result("", -15, stopped_by_user=True)
+        return _result("timeout\n", 0)
+
+    stopped._afs_exec = stopped_then_timeout
+    assert await stopped._awatchdog() is None
+    assert "_watchdog_tool" not in stopped.__dict__
+    assert await stopped._awatchdog() == "timeout"
+    assert calls["n"] == 2
+    stopped._afs_exec = None
+    assert await stopped._awatchdog() == "timeout"
+
+    absent = _backend()
+    asked = {"n": 0}
+
+    async def always_none(*_args, **_kwargs):
+        asked["n"] += 1
+        return _result("none\n", 0)
+
+    absent._afs_exec = always_none
+    assert await absent._awatchdog() is None
+    assert await absent._awatchdog() is None
+    assert asked["n"] == 2
+    assert "_watchdog_tool" not in absent.__dict__
 
 
 async def test_download_rejects_non_base64_noise():

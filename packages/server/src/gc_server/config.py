@@ -41,7 +41,17 @@ SurfaceName = Literal["webhook", "chat", "a2a", "swarm"]
 #: вебхука к тому же — только тред с его статусом (``webhook.status``): у
 #: SDK system свой у каждого приложения.
 RESERVED_SYSTEMS = frozenset(
-    {"a2a", "responses", "completions", "acp", "cli", "tui", "sdk"}
+    {
+        "a2a",
+        "responses",
+        "completions",
+        "acp",
+        "cli",
+        "tui",
+        "sdk",
+        # Служебные треды реестра владельцев (gc_server.owners).
+        "gc_owners",
+    }
 )
 #: Адрес по умолчанию у фасадов, собранных без конфига (тесты, встраивание).
 LOOPBACK = "127.0.0.1"

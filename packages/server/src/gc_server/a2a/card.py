@@ -6,7 +6,7 @@ from a2a.types import a2a_pb2 as pb
 
 from gc_server.surface import http_origin
 
-CARD_VERSION = "0.4.0"
+CARD_VERSION = "0.5.0"
 RPC_PATH = "/rpc"
 CARD_PATH = "/.well-known/agent-card.json"
 

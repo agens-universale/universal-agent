@@ -129,6 +129,12 @@ class S3KV(KV):
         s3 = await self._s3()
         await s3.delete_object(Bucket=self.bucket, Key=self._key(key))
 
+    #: Удаления по версии нет: ``If-Match`` у ``DeleteObject`` S3-совместимые
+    #: серверы соблюдают не все (MinIO удаляет и при чужом ETag), а молча
+    #: безусловное удаление стёрло бы пересозданный тред. Надгробия тредов
+    #: на S3 поэтому не убираются (docs/sdk/stores.md).
+    conditional_delete = False
+
     async def scan(
         self, prefix: str, *, start_after: str = "", limit: int = 1000
     ) -> list[str]:

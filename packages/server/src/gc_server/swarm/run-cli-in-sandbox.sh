@@ -151,6 +151,7 @@ if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
 
   BWRAP_CMD=(
     bwrap
+    --die-with-parent
     --unshare-all
     --share-net
     --dev /dev
@@ -262,26 +263,51 @@ if command -v timeout >/dev/null 2>&1; then
   # SIGTERM (15) c grace-period 30s, потом SIGKILL (9).
   # Grace нужен чтобы CLI успел сделать summary compaction если она в процессе
   # (см. swarm_spec.md §6, «Суммаризация в swarm-режиме»).
-  TIMEOUT_PREFIX=(timeout --kill-after=30 --signal=TERM "${SWARM_LIMIT_TIMEOUT_SECONDS}")
+  TIMEOUT_PREFIX=(timeout --foreground --kill-after=30 --signal=TERM "${SWARM_LIMIT_TIMEOUT_SECONDS}")
 else
   TIMEOUT_PREFIX=()
 fi
 
 # --- Запуск CLI и захват exit code ---
 
+# Сервер снимает песочницу сигналом группе обёртки (os.killpg: отмена,
+# дедлайн, лимиты, остановка). --foreground сохраняет timeout и CLI в
+# группе обёртки: SIGKILL сервера достигает их за тот же grace-период.
+# bwrap также завершает свою PID namespace при смерти родителя.
+# Прямой TERM обёртке пересылается дочернему процессу; сигнал всей группе
+# уже получает каждый её участник.
+CHILD_PID=""
+forward_signal() {
+  [[ -n "${CHILD_PID}" ]] || return 0
+  kill -TERM "${CHILD_PID}" 2>/dev/null
+}
+
+run_forwarding_signals() {
+  # stdin фонового запуска — как у обёртки, а не /dev/null.
+  exec 3<&0
+  "$@" <&3 3<&- >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}" &
+  CHILD_PID=$!
+  exec 3<&-
+  trap forward_signal TERM INT
+  wait "${CHILD_PID}"
+  EXIT_CODE=$?
+  # wait прерван пересланным сигналом — дождаться настоящего выхода.
+  while kill -0 "${CHILD_PID}" 2>/dev/null; do
+    wait "${CHILD_PID}"
+    EXIT_CODE=$?
+  done
+  trap - TERM INT
+}
+
 # Защита под set -u: пустой массив через ${arr[@]+"${arr[@]}"} (bash 3.2-safe).
 # set +e локально, чтобы поймать exit code даже при ошибке.
 set +e
 if [[ "${SWARM_SANDBOX_TOOL}" == "bubblewrap" ]]; then
-  ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
-    "${BWRAP_CMD[@]}" -- "${CLI_CMD[@]}" \
-    >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}"
-  EXIT_CODE=$?
+  run_forwarding_signals ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
+    "${BWRAP_CMD[@]}" -- "${CLI_CMD[@]}"
 else
-  ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
-    "${CLI_CMD[@]}" \
-    >>"${STDOUT_LOG}" 2>>"${STDERR_LOG}"
-  EXIT_CODE=$?
+  run_forwarding_signals ${TIMEOUT_PREFIX[@]+"${TIMEOUT_PREFIX[@]}"} \
+    "${CLI_CMD[@]}"
 fi
 set -e
 

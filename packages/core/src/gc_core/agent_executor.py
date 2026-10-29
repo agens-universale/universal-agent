@@ -7,6 +7,7 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import asyncio
+import contextlib
 import gc
 import logging
 import threading
@@ -289,6 +290,27 @@ async def _arelease_lease(thread_session: Any, logger: Any) -> None:
             logger.warning("thread lease release failed", exc_info=True)
 
 
+@contextlib.asynccontextmanager
+async def _aturn_released_on_failure(ctx: Any, thread_session: Any, logger):
+    """Сбой после захвата треда: отметка «ход окончен», затем аренда.
+
+    Порядок важен: отпущенный тред может сразу взять другой процесс, и
+    отметка, легшая после этого, затёрла бы его runtime. Снятая задача
+    (остановка сервера) оставляет отметку хода: его продолжит
+    восстановление после перезапуска.
+    """
+    try:
+        yield
+    except Exception:
+        # Отказ хода — не падение процесса: восстанавливать нечего.
+        await _amark_turn(ctx, thread_session, running=False, logger=logger)
+        await _arelease_lease(thread_session, logger)
+        raise
+    except BaseException:
+        await _arelease_lease(thread_session, logger)
+        raise
+
+
 #: Метка сообщения входящего потока в очереди хода: его ``seq`` в потоке.
 _INBOX_MARK = "_inbox_seq"
 
@@ -537,6 +559,8 @@ class AgentExecutor:
         #: Последний ``seq`` управляющего потока на старте хода: отмены до
         #: него к этому ходу не относятся.
         self._control_seen = 0
+        self._inbox_first: int | None = None
+        self.cancelled_inbox_upto: int | None = None
         #: Цель хода для отмены с другого процесса (``request_cancel(target=)``).
         self._cancel_target: Optional[str] = None
         self._state: State | None = None
@@ -560,9 +584,25 @@ class AgentExecutor:
         # он реально отправит сообщение.
         self._plan_rework_thread: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
+        #: Ответ последнего законченного цикла и признак, что цикл дошёл до
+        #: конца. Отмена, легшая в уборку после цикла (остановка сервера),
+        #: выходит из ``arun`` исключением, хотя ход уже записан: вызывающий
+        #: берёт его итог отсюда.
+        self.last_response: Any = None
+        self.loop_finished = False
         #: Вопрос, на котором приостановлен последний ход (``{call_id,
         #: question}``), или ``None``.
         self.last_pending_question: Optional[dict] = None
+
+        from gc_core.user_stop import UserStop
+
+        #: Снятие идущей работы по стопу. Под Temporal его нет: ход workflow
+        #: останавливает свой стоп (модель, субагенты; тул дорабатывает), а
+        #: примитивы потоков песочница workflow не пускает.
+        self.user_stop: Optional[UserStop] = (
+            None if getattr(ctx, "durable_execution", False) else UserStop()
+        )
+
         self.last_closing_reply: str = ""
 
     def take_undelivered_messages(self) -> list[dict]:
@@ -676,6 +716,23 @@ class AgentExecutor:
             # до любой работы, а прочитанное не устареет под чужой записью.
             claim=True,
         )
+        # Сбой между захватом и ходом (проверка состояния треда, хук) не
+        # оставляет аренду и отметку хода до срока: повтор увидел бы «тред
+        # занят» вместо ошибки, восстановление подняло бы упавшую задачу.
+        async with _aturn_released_on_failure(
+            self._ctx, thread_session, logger
+        ):
+            return await self._abind_claimed(
+                thread_session,
+                system_id=system_id,
+                backend_api_mode=backend_api_mode,
+                logger=logger,
+            )
+
+    async def _abind_claimed(
+        self, thread_session, *, system_id: str, backend_api_mode: str, logger
+    ) -> tuple:
+        """Взятый тред — в ход: отметка, история, состояние, личность."""
         await self._aon_thread_claimed(thread_session, logger)
         if logger is not None:
             # Единственная связка «этот лог-файл ↔ этот тред»: на момент
@@ -1455,6 +1512,8 @@ class AgentExecutor:
     ) -> Any:
         """Один ход ``arun``: тред, подготовка, цикл, учёт."""
         self._cancel_target = cancel_target
+        self._inbox_first = None
+        self.cancelled_inbox_upto = None
         with self._lock:
             # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
             # объекта, `stop_run` в сетапе этого хода (чтение треда, сборка
@@ -1471,6 +1530,12 @@ class AgentExecutor:
             self._state = None
             self._accounting_closed = False
         settings = settings_of(self._ctx)
+        # Неверный persist отбит ещё в ``arun`` — раньше стопа: ход, который
+        # не начнётся, снятие не вооружает.
+        if self.user_stop is not None:
+            self.user_stop.prepare_run(
+                asyncio.get_running_loop(), getattr(self._ctx, "logger", None)
+            )
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose if verbose is not None else settings.agent.verbose
@@ -1501,22 +1566,10 @@ class AgentExecutor:
             answer=answer,
             cancel_target=cancel_target,
         )
-        try:
+        # Тред взят в начале хода; ход, не дошедший до учёта, не держит его
+        # до срока аренды (повторное отпускание безвредно).
+        async with _aturn_released_on_failure(self._ctx, opened[0], logger):
             return await self._arun_on_thread(opened, request)
-        except Exception:
-            # Отказ хода — не падение процесса: восстанавливать нечего.
-            await _amark_turn(
-                self._ctx, opened[0], running=False, logger=logger
-            )
-            await _arelease_lease(opened[0], logger)
-            raise
-        except BaseException:
-            # Тред взят в начале хода; ход, не дошедший до учёта, не держит
-            # его до срока аренды (повторное отпускание безвредно). Снятая
-            # задача (остановка сервера) оставляет отметку хода: его
-            # продолжит восстановление после перезапуска.
-            await _arelease_lease(opened[0], logger)
-            raise
 
     async def _arun_on_thread(
         self, opened: tuple, request: _RunRequest
@@ -1697,6 +1750,8 @@ class AgentExecutor:
         queued_before_loop = await self._atake_pending_messages()
         if queued_before_loop:
             messages = [*messages, *queued_before_loop]
+        _stop_bound = self._user_stop_scope()
+        _stop_bound.__enter__()
         try:
             response = await arun_agent(
                 messages,
@@ -1729,6 +1784,7 @@ class AgentExecutor:
                 ),
             )
             loop_finished = True
+            self.last_response, self.loop_finished = response, True
             self.last_terminal_outcome = getattr(
                 state, "terminal_outcome", None
             )
@@ -1737,14 +1793,14 @@ class AgentExecutor:
             )
             self.last_closing_reply = getattr(state, "closing_reply", "")
         finally:
+            _stop_bound.__exit__(None, None, None)
             await _stop_lease_keeper(poller)
             await _stop_lease_keeper(keeper)
             state_ops.leave(state)
             state.turn_level = None
+            # Упавший ход отпускает тред выше (``_arun_turn``) — после
+            # отметки «ход окончен», не до неё.
             teardown_cancel = await self._ateardown_run(_owner_reset)
-            if not loop_finished:
-                # Ход упал — учёт не закроется, аренду не держать до срока.
-                await _arelease_lease(thread_session, logger)
 
         if teardown_cancel is not None:
             # Незавершённый цикл сюда не попадает: его исключение выходит из
@@ -1825,10 +1881,12 @@ class AgentExecutor:
             self._inbox_seen = cut
             entries = [entry for entry in entries if entry.seq > cut]
             if not entries:
+                self.cancelled_inbox_upto = cut
                 state.stop_requested = True
                 self.stop_run()
                 return []
         if entries:
+            self._inbox_first = entries[0].seq
             state.inbox_seq = entries[-1].seq
         self._inbox_seen = int(state.inbox_seq or 0)
         return [_inbox_message(entry) for entry in entries]
@@ -1863,12 +1921,25 @@ class AgentExecutor:
         if not entries:
             return
         self._control_seen = entries[-1].seq
-        if any(
-            entry.data.get("type") == "cancel"
-            and entry.data.get("target") in (None, self._cancel_target)
-            for entry in entries
-        ):
-            self.stop_run()
+        for entry in entries:
+            data = entry.data
+            if data.get("type") != "cancel":
+                continue
+            target = data.get("target")
+            upto = data.get("upto_inbox_seq")
+            if target is not None:
+                applies = target == self._cancel_target
+            else:
+                first = self._inbox_first
+                applies = (
+                    first is None or type(upto) is not int or upto >= first
+                )
+            if applies:
+                if type(upto) is int:
+                    self.cancelled_inbox_upto = max(
+                        self.cancelled_inbox_upto or 0, upto
+                    )
+                self.stop_run()
 
     def _enqueue_inbox(self, entries: list) -> None:
         """Записи потока — прямо в очередь хода (не субагенту: отметку
@@ -2051,6 +2122,14 @@ class AgentExecutor:
             await awith_committed_attachments(m, self._ctx) for m in messages
         ]
 
+    def _user_stop_scope(self) -> contextlib.AbstractContextManager:
+        """Снятие ``user_stop`` на время хода; под Temporal его нет."""
+        if self.user_stop is None:
+            return contextlib.nullcontext()
+        from gc_core.user_stop import bind_user_stop
+
+        return bind_user_stop(self.user_stop)
+
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.
 
@@ -2061,6 +2140,9 @@ class AgentExecutor:
                 self._state.stop_requested = True
             else:
                 self._stop_pending = True
+            run_logger = getattr(self._ctx, "logger", None)
+        if self.user_stop is not None:
+            self.user_stop.request(run_logger)
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

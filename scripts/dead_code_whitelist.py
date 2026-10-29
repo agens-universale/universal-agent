@@ -93,3 +93,6 @@ _.request_cancel
 _.get_info
 _.get_info_for_dispatch
 _.delete_info
+
+# Публичный SDK: запись потока фронтенда через фасад Threads.
+_.append_frontend

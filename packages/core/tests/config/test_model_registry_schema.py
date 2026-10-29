@@ -105,16 +105,15 @@ def test_second_spelling_of_token_needs_an_address():
         )
 
 
-def test_own_proxy_counts_as_own_address():
-    """Решение владельца §2: прокси определяет, КУДА физически уходит запрос с токеном."""
+def test_proxy_does_not_require_a_token():
+    """`backend.proxy` — строка транспорта эндпоинта, не половина пары адрес+токен."""
     from gc_core.config_modules.model_registry import ModelEntry
 
-    with pytest.raises(
-        ValueError, match="задан свой адрес, но не задан токен"
-    ):
-        ModelEntry.model_validate(
-            {"backend": {"proxy": "http://attacker:8080"}}
-        )
+    entry = ModelEntry.model_validate(
+        {"backend": {"proxy": "http://proxy:8080"}}
+    )
+    assert entry.backend.proxy == "http://proxy:8080"
+    assert entry.authorization_header is None
 
 
 def test_empty_url_is_not_an_own_address():

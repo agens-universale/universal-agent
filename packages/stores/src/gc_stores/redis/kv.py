@@ -111,6 +111,26 @@ class RedisKV(KV):
             pipe.zrem(self._names, key)
             await pipe.execute()
 
+    conditional_delete = True
+
+    async def delete_if(self, key: str, version: str) -> bool:
+        client = await self._redis()
+        name = self._hash(key)
+        async with client.pipeline(transaction=True) as pipe:
+            await pipe.watch(name)
+            current = await pipe.hget(name, "v")
+            if current is None or current.decode("ascii") != version:
+                await pipe.unwatch()
+                return False
+            pipe.multi()
+            pipe.delete(name)
+            pipe.zrem(self._names, key)
+            try:
+                await pipe.execute()
+            except driver_watch_error():
+                return False
+        return True
+
     async def scan(
         self, prefix: str, *, start_after: str = "", limit: int = 1000
     ) -> list[str]:

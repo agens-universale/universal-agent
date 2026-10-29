@@ -111,6 +111,15 @@ class SessionWriter:
         self._clock = clock
         #: Аренду потеряли: дальше — только ``ThreadBusy``, без перезахвата.
         self._lost = False
+        #: Свою аренду со сроком отпустили; следующая запись хода возьмёт
+        #: тред заново.
+        self._released = False
+
+    @property
+    def gave_up_lease(self) -> bool:
+        """Тред этой сессией отпущен или потерян: его может вести другой
+        ход, и runtime треда теперь его."""
+        return self._lost or self._released
 
     @property
     def renews(self) -> bool:
@@ -191,6 +200,7 @@ class SessionWriter:
             )
         self.lease = record.lease
         self.revision = record.revision
+        self._released = False
         return record
 
     def _lapsed_under_foreign_turn(
@@ -201,8 +211,16 @@ class SessionWriter:
         return (
             held is not None
             and record.lease is not None
-            and record.lease.epoch != held.epoch
-            and record.revision != self.revision
+            and (
+                (
+                    record.lease.token != held.token
+                    and record.lease.epoch <= held.epoch
+                )
+                or (
+                    record.lease.epoch != held.epoch
+                    and record.revision != self.revision
+                )
+            )
         )
 
     async def _arelease_quietly(self, lease: Lease | None) -> None:
@@ -239,6 +257,7 @@ class SessionWriter:
         if lease is None or lease.expires_at is None:
             return
         self.lease = None
+        self._released = True
         await self.retried(
             lambda: self.store.release(self.key, lease), "thread release"
         )

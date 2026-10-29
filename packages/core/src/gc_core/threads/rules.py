@@ -7,10 +7,15 @@
 from __future__ import annotations
 
 import copy
+import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
-from gc_core.threads.errors import InvalidCursor, OwnershipError
+from gc_core.threads.errors import (
+    InvalidCursor,
+    OwnershipError,
+    ThreadConflict,
+)
 from gc_core.threads.models import (
     INBOX,
     JsonObject,
@@ -97,16 +102,20 @@ def granted_lease(
         if current.owner != request.owner:
             raise OwnershipError(f"тред ведёт {current.owner!r}")
         epoch = current.epoch
+        token = current.token
     else:
         epoch = last_epoch + 1
-    return Lease(owner=request.owner, epoch=epoch, expires_at=expires)
+        token = uuid.uuid4().hex
+    return Lease(
+        owner=request.owner, epoch=epoch, expires_at=expires, token=token
+    )
 
 
 def check_writer(current: Lease | None, lease: Lease, now: datetime) -> None:
     """Пишущий ``commit`` держит текущую живую аренду — иначе отказ."""
     if current is None:
         raise OwnershipError("запись без claim")
-    if (current.owner, current.epoch) != (lease.owner, lease.epoch):
+    if not same_lease(current, lease):
         raise OwnershipError("аренда сменилась: запись по чужой эпохе")
     if lease_expired(current, now):
         raise OwnershipError("аренда истекла")
@@ -135,10 +144,26 @@ def check_side_writer(current: Lease | None, change: SideChange) -> None:
         )
 
 
+def check_frontend(
+    frontend: dict[str, JsonObject], change: SideChange
+) -> None:
+    """Проверка снимка под тем же замком/CAS, что и запись сбоку."""
+    if (
+        change.expected_frontend is not None
+        and frontend != change.expected_frontend
+    ):
+        raise ThreadConflict("состояние frontend изменилось")
+
+
 def same_lease(current: Lease | None, lease: Lease) -> bool:
-    return current is not None and (current.owner, current.epoch) == (
+    return current is not None and (
+        current.owner,
+        current.epoch,
+        current.token,
+    ) == (
         lease.owner,
         lease.epoch,
+        lease.token,
     )
 
 
@@ -190,14 +215,23 @@ def _after_cursor(
     return (record.key.system, record.key.thread) > (system, thread)
 
 
+def in_list_order(
+    records: Iterable[ThreadRecord], query: ThreadQuery
+) -> list[ThreadRecord]:
+    """Треды по фильтру ``query`` в порядке списка (updated_at ↓, system,
+    thread); курсор и ``limit`` не смотрятся."""
+    chosen = [r for r in records if _matches(r, query)]
+    chosen.sort(key=lambda r: (r.key.system, r.key.thread))
+    chosen.sort(key=_updated, reverse=True)
+    return chosen
+
+
 def page_of(
     records: Iterable[ThreadRecord], query: ThreadQuery
 ) -> Page[ThreadRecord]:
     """Страница списка тредов: фильтр, порядок (updated_at ↓, system,
     thread), курсор — непрозрачная строка последней записи страницы."""
-    chosen = [r for r in records if _matches(r, query)]
-    chosen.sort(key=lambda r: (r.key.system, r.key.thread))
-    chosen.sort(key=_updated, reverse=True)
+    chosen = in_list_order(records, query)
     if query.cursor:
         position = parse_list_cursor(query.cursor)
         chosen = [r for r in chosen if _after_cursor(r, position)]

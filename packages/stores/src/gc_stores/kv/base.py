@@ -46,6 +46,16 @@ class KV(ABC):
     async def delete(self, key: str) -> None:
         """Удалить; нет ключа — ничего."""
 
+    #: Умеет удаление по версии (``delete_if``). Без него заголовки-
+    #: надгробия удалённых тредов не убираются: пересозданный тред было бы
+    #: не отличить от надгробия в момент удаления.
+    conditional_delete: bool = False
+
+    async def delete_if(self, key: str, version: str) -> bool:
+        """Удалить, только если версия та; ``False`` — ключ переписан или
+        его нет."""
+        raise NotImplementedError("удаление по версии не поддерживается")
+
     @abstractmethod
     async def scan(
         self, prefix: str, *, start_after: str = "", limit: int = 1000
@@ -99,6 +109,13 @@ class GuardedKV(KV):
 
     async def delete(self, key: str) -> None:
         await self._call(self.inner.delete(key))
+
+    @property
+    def conditional_delete(self) -> bool:  # type: ignore[override]
+        return self.inner.conditional_delete
+
+    async def delete_if(self, key: str, version: str) -> bool:
+        return await self._call(self.inner.delete_if(key, version))
 
     async def scan(
         self, prefix: str, *, start_after: str = "", limit: int = 1000

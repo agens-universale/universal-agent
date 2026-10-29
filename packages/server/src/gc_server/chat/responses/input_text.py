@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Any
 
-from gc_server.chat.cwd import metadata_cwd
+from gc_server.chat.cwd import metadata_cwd, same_cwd
 from gc_server.chat.errors import ApiError
 
 _INVALID = "invalid_request"
@@ -69,9 +68,7 @@ def response_metadata(value: Any) -> dict:
 
 
 def cwd_for_continue(sent: str | None, recorded: str) -> str:
-    if sent is not None and os.path.normpath(sent) != os.path.normpath(
-        recorded
-    ):
+    if sent is not None and not same_cwd(sent, recorded):
         raise ApiError(400, _INVALID, "cwd mismatch")
     return recorded
 

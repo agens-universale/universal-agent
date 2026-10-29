@@ -10,6 +10,7 @@ from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
     install,
+    install_many,
     judge_accept,
     parity_config,
 )
@@ -106,10 +107,24 @@ async def test_facade_does_not_block_the_loop(tmp_path, monkeypatch):
 
 
 async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
-    """Два агента на одном loop — без потока на каждого."""
-    cfg_a = parity_config(tmp_path / "a", monkeypatch)
-    cfg_b = parity_config(tmp_path / "b", monkeypatch)
-    install(monkeypatch, ScriptedBackend(_scenario("раз") + _scenario("два")))
+    """Два агента на одном loop — без потока на каждого.
+
+    По сценарию на агента: общий раздаёт ходы в порядке вызовов, и с тех
+    пор как запрос к модели идёт своей задачей (стоп develop снимает его),
+    второй агент забирал судью первого — пятый запрос вместо четырёх."""
+    cfg_a = parity_config(
+        tmp_path / "a", monkeypatch, **{"agent.model": "агент-а"}
+    )
+    cfg_b = parity_config(
+        tmp_path / "b", monkeypatch, **{"agent.model": "агент-б"}
+    )
+    scripts = install_many(
+        monkeypatch,
+        {
+            "агент-а": ScriptedBackend(_scenario("раз")),
+            "агент-б": ScriptedBackend(_scenario("два")),
+        },
+    )
 
     before = threading.active_count()
     a = await AsyncAgent.create(cfg_a)
@@ -121,6 +136,8 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
         )
 
     assert r1 and r2
+    for script in scripts.values():
+        script.assert_clean()
     # Прогон агента больше не держит по потоку на себя; допуск на служебные
     # потоки httpx/логгера, но не на «поток на каждый прогон».
     assert threading.active_count() <= before + 2

@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-cli"
-version = "0.4.0"
+version = "0.5.0"
 description = "GigaCode Universal Agent — CLI-фронтенд (gc-cli)"
 requires-python = ">=3.11"
 dependencies = [
 
-    "gc-core==0.4.0",
-    "gc-mcp==0.4.0",
+    "gc-core==0.5.0",
+    "gc-mcp==0.5.0",
 
 ]
 

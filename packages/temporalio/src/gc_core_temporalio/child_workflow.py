@@ -208,6 +208,7 @@ class UniversalSubagentWorkflow:
                         Lease(
                             owner=request.store_owner_id,
                             epoch=request.store_owner_epoch,
+                            token=request.store_owner_token,
                         ),
                     )
                 operations.thread_store = store
