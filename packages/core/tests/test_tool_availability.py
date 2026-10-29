@@ -8,7 +8,7 @@
 
 from types import SimpleNamespace
 
-from gc_core.message_policy.todo_reminder import apply_todo_reminder
+from gc_core.message_policy.todo_reminder import todo_reminder_text
 from gc_core.message_policy.tool_availability import (
     available_tool_names,
     tool_is_available,
@@ -160,8 +160,7 @@ class TestTodoReminderGate:
     def _apply(self, available):
         state = _state()
         state.todo_reminder_cnt = 9
-        return apply_todo_reminder(
-            [],
+        return todo_reminder_text(
             state,
             make_settings(
                 {"todo": {"reminder_steps": 10}, "agent.stop_tools": []}
@@ -171,10 +170,10 @@ class TestTodoReminderGate:
         )
 
     def test_suppressed_when_tool_absent(self):
-        assert self._apply({"fs_read_file"}) == []
+        assert self._apply({"fs_read_file"}) is None
 
     def test_sent_when_tool_present(self):
-        assert len(self._apply({"session_todo"})) == 1
+        assert self._apply({"session_todo"}) is not None
 
     def test_unknown_set_keeps_old_behaviour(self):
-        assert len(self._apply(None)) == 1
+        assert self._apply(None) is not None

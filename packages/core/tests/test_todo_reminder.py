@@ -1,6 +1,6 @@
 from gc_core.message_policy.todo_reminder import (
-    apply_todo_reminder,
     build_todo_reminder_text,
+    todo_reminder_text,
 )
 from gc_core.settings import LoadedSettings
 from gc_core.states import SharedStateData, State
@@ -32,8 +32,7 @@ CFG = make_settings({"todo": {"reminder_steps": 3}})
 
 
 def _tick(state, cfg=CFG, step_messages=None):
-    return apply_todo_reminder(
-        [],
+    return todo_reminder_text(
         state,
         cfg,
         step_messages=step_messages or [{"role": "assistant", "id": "a1"}],
@@ -42,12 +41,11 @@ def _tick(state, cfg=CFG, step_messages=None):
 
 def test_fires_after_n_steps_with_open_items():
     state = _state(OPEN_ITEMS)
-    assert _tick(state) == []  # 1
-    assert _tick(state) == []  # 2
+    assert _tick(state) is None  # 1
+    assert _tick(state) is None  # 2
     out = _tick(state)  # 3 — порог
-    assert len(out) == 1
-    assert out[0]["role"] == "user"
-    assert "Шаг 2" in out[0]["content"]
+    assert out is not None
+    assert "Шаг 2" in out
     assert state.todo_reminder_cnt == 0  # сброс после инжекта
 
 
@@ -55,8 +53,8 @@ def test_cycle_repeats_after_fire():
     state = _state(OPEN_ITEMS)
     for _ in range(3):
         last = _tick(state)
-    assert len(last) == 1
-    assert _tick(state) == []  # цикл пошёл заново
+    assert last is not None
+    assert _tick(state) is None  # цикл пошёл заново
     assert state.todo_reminder_cnt == 1
 
 
@@ -67,9 +65,9 @@ def test_empty_or_closed_list_gets_soft_nudge_once():
     через «есть ли живой план», а не через «есть ли список»."""
     for items in ([], CLOSED_ITEMS):
         state = _state(items)
-        fired = [msg for _ in range(5) for msg in _tick(state)]
+        fired = [msg for _ in range(5) if (msg := _tick(state))]
         assert len(fired) == 1
-        assert "without an active task checklist" in fired[0]["content"]
+        assert "without an active task checklist" in fired[0]
 
 
 def test_counter_resets_when_tool_used_in_batch():
@@ -77,15 +75,14 @@ def test_counter_resets_when_tool_used_in_batch():
     _tick(state)
     _tick(state)
     assert state.todo_reminder_cnt == 2
-    out = apply_todo_reminder(
-        [],
+    out = todo_reminder_text(
         state,
         CFG,
         step_messages=[
             {"type": "function_call", "name": "session_todo", "id": "c1"}
         ],
     )
-    assert out == []
+    assert out is None
     assert state.todo_reminder_cnt == 0
 
 
@@ -93,7 +90,7 @@ def test_zero_steps_disables():
     state = _state(OPEN_ITEMS)
     cfg = make_settings({"todo": {"reminder_steps": 0}})
     for _ in range(20):
-        assert _tick(state, cfg=cfg) == []
+        assert _tick(state, cfg=cfg) is None
     assert state.todo_reminder_cnt == 0
 
 
@@ -105,7 +102,7 @@ def test_stop_tools_disables():
             "agent.stop_tools": ["session_todo"],
         }
     )
-    assert _tick(state, cfg=cfg) == []
+    assert _tick(state, cfg=cfg) is None
 
 
 def test_reminder_text_contains_snapshot_and_instruction():
@@ -180,7 +177,7 @@ def _cfg(steps: int = 1) -> LoadedSettings:
     return make_settings({"todo": {"reminder_steps": steps}})
 
 
-def _state(todos=None, cnt: int = 0):
+def _soft_state(todos=None, cnt: int = 0):
     from gc_core.states import SharedStateData, State
 
     st = State(
@@ -201,37 +198,36 @@ def _state(todos=None, cnt: int = 0):
 
 def test_soft_nudge_when_no_checklist_at_all():
     """Живого плана нет → мягкая подсказка «если задача того стоит — заведи»."""
-    out = apply_todo_reminder([], _state([]), _cfg(), step_messages=[])
-    assert len(out) == 1
-    text = out[0]["content"]
-    assert "without an active task checklist" in text
-    assert "consider writing the checklist" in text
-    assert "Skip this if the task is simple" in text
+    out = todo_reminder_text(_soft_state([]), _cfg(), step_messages=[])
+    assert out is not None
+    assert "without an active task checklist" in out
+    assert "consider writing the checklist" in out
+    assert "Skip this if the task is simple" in out
 
 
 def test_soft_nudge_when_all_items_completed():
     """Список весь закрыт = живого плана нет → та же мягкая подсказка."""
     done = [{"content": "Сделано", "status": "completed"}]
-    out = apply_todo_reminder([], _state(done), _cfg(), step_messages=[])
-    assert len(out) == 1
-    assert "without an active task checklist" in out[0]["content"]
+    out = todo_reminder_text(_soft_state(done), _cfg(), step_messages=[])
+    assert out is not None
+    assert "without an active task checklist" in out
 
 
 def test_soft_nudge_sent_once_per_run():
     """Отклонённую мягкую подсказку не повторяем — это было бы спором с решением."""
-    state = _state([])
-    first = apply_todo_reminder([], state, _cfg(), step_messages=[])
-    assert len(first) == 1
-    second = apply_todo_reminder([], state, _cfg(), step_messages=[])
-    assert second == []
+    state = _soft_state([])
+    first = todo_reminder_text(state, _cfg(), step_messages=[])
+    assert first is not None
+    second = todo_reminder_text(state, _cfg(), step_messages=[])
+    assert second is None
 
 
 def test_open_items_still_get_directive_reminder():
     """Незакрытые пункты → прежнее директивное напоминание, не мягкое."""
     items = [{"content": "Шаг", "status": "in_progress"}]
-    out = apply_todo_reminder([], _state(items), _cfg(), step_messages=[])
-    assert len(out) == 1
-    assert "has not been updated for a while" in out[0]["content"]
+    out = todo_reminder_text(_soft_state(items), _cfg(), step_messages=[])
+    assert out is not None
+    assert "has not been updated for a while" in out
 
 
 def test_counter_resets_even_when_nudge_suppressed():
@@ -241,10 +237,10 @@ def test_counter_resets_even_when_nudge_suppressed():
     per-run — и на следующем ходу напоминание стреляет на первом же шаге вместо
     N-го. Сброс обязателен во всех ветках, не только в двух отправляющих.
     """
-    state = _state([])
-    assert len(apply_todo_reminder([], state, _cfg(), step_messages=[])) == 1
+    state = _soft_state([])
+    assert todo_reminder_text(state, _cfg(), step_messages=[]) is not None
     for _ in range(5):
-        assert apply_todo_reminder([], state, _cfg(), step_messages=[]) == []
+        assert todo_reminder_text(state, _cfg(), step_messages=[]) is None
         assert state.todo_reminder_cnt < 1, (
             f"счётчик разбух до {state.todo_reminder_cnt} — следующий ход получит напоминание немедленно"
         )

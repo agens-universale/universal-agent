@@ -14,10 +14,7 @@ from typing import Any
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.message_policy.todo_context import format_todo_snapshot
 from gc_core.message_policy.tool_availability import tool_is_available
-from gc_core.message_policy.tool_usage_notice.policy import (
-    batch_used_tool,
-    wrap_thread_memory_technical_user_message,
-)
+from gc_core.message_policy.tool_usage_notice.policy import batch_used_tool
 from gc_core.settings import AppConfig, settings_of
 
 _OPEN_STATUSES = ("pending", "in_progress")
@@ -69,42 +66,31 @@ def _stopped(settings: AppConfig) -> bool:
     }
 
 
-def apply_todo_reminder(
-    messages: list[dict[str, Any]],
+def todo_reminder_text(
     state: Any,
     settings: Any,
     *,
     step_messages: list[dict[str, Any]],
     available_tools: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    """+1 за persist-batch без вызова session_todo при незакрытых пунктах;
-    на пороге — один reminder со снапшотом списка и сброс счётчика.
-
-    ``available_tools`` — набор тулов рана (``None`` = неизвестен, гейт не
-    применяется). Звать модель к туду, которого в ране нет, нельзя: ``_stopped``
-    видит только глобальный ``stop_tools``, а набор сужается ещё и файлом
-    сабагента / harbor / неподнявшимся MCP.
-
-    ``settings`` — то, что принимает ``settings_of`` (ctx, ``LoadedSettings``,
-    ``AppConfig``).
-    """
+) -> str | None:
+    """Текст напоминания либо None. Счётчик тикает здесь, сообщение не собирает."""
     settings = settings_of(settings)
     steps_limit = max(0, int(settings.todo.reminder_steps))
     if steps_limit <= 0 or _stopped(settings):
-        return messages
+        return None
     if not tool_is_available(available_tools, SESSION_TODO_TOOL_NAME):
-        return messages
+        return None
 
     items = _todo_items(state)
     if batch_used_tool(step_messages, SESSION_TODO_TOOL_NAME):
         state.todo_reminder_cnt = 0
-        return messages
+        return None
 
     state.todo_reminder_cnt = (
         int(getattr(state, "todo_reminder_cnt", 0) or 0) + 1
     )
     if state.todo_reminder_cnt < steps_limit:
-        return messages
+        return None
 
     # Порог достигнут — отсчёт начинается заново НЕЗАВИСИМО от того, отправим ли
     # мы сообщение. Иначе в подавленной ветке (подсказка уже была) счётчик растёт
@@ -116,17 +102,7 @@ def apply_todo_reminder(
     # один раз за прогон: отклонённое решение модели не оспариваем повтором.
     if not has_open_todos(items):
         if getattr(state, "todo_create_nudge_sent", False):
-            return messages
+            return None
         state.todo_create_nudge_sent = True
-        text = build_todo_create_nudge_text()
-    else:
-        text = build_todo_reminder_text(items)
-
-    out = list(messages)
-    out.append(
-        wrap_thread_memory_technical_user_message(
-            text,
-            message_id_suffix="todo_reminder",
-        )
-    )
-    return out
+        return build_todo_create_nudge_text()
+    return build_todo_reminder_text(items)

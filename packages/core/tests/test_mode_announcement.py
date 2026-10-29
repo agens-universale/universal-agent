@@ -162,7 +162,8 @@ def test_mode_switched_during_a_batch_is_told_on_the_next_request(
     _switch_mode_during_the_tool(monkeypatch, shared, "plan")
     sent = _first_request(monkeypatch, [dict(_READ)], state, _ctx(shared))
     assert sent[0]["type"] == "function_call_output"
-    assert sent[-1]["content"] == wrap_technical_user_content(told)
+    body = json.loads(sent[-1]["output"])
+    assert told in body["technical_system_messages"]
     assert state.mode_announced == "plan"
 
 

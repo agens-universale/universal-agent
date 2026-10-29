@@ -191,11 +191,12 @@ def test_images_ride_after_the_loop_notice_at_the_very_end(monkeypatch):
         )
     )
 
-    assert len(outs) == 5
+    assert len(outs) == 4
     assert [o["call_id"] for o in outs[:3]] == ["c1", "c2", "c3"]
-    assert "Loop detector:" in outs[3]["content"]
-    assert outs[4]["id"] == "m_x"
-    assert outs[4]["attachments"] == [TOOL_ATT.to_dict()]
+    assert outs[3]["id"] == "m_x"
+    assert outs[3]["attachments"] == [TOOL_ATT.to_dict()]
+    assert not any("Loop detector:" in str(o.get("content", "")) for o in outs)
+    assert state.loop_detector_pending
     assert state.pending_tool_attachments == []
 
 
