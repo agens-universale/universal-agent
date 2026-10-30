@@ -97,11 +97,11 @@ def _canon_content_text(content, *, persist_reasoning: bool):
 
 
 def _nonempty_content(content):
-    """Строковый content после strip; пробельный → None. Не-строки as-is."""
+    """Preserve nonempty content verbatim, including whitespace-only strings."""
     if content is None:
         return None
     if isinstance(content, str):
-        return content.strip() or None
+        return content or None
     return content
 
 
@@ -151,7 +151,7 @@ def get_output_list(
                 f"code={err_code!r} message={err_message!r} metadata={err_metadata!r}"
             )
         msg_obj = dct_choice.get("message") or {}
-        # Пробельный content/reasoning схлопываем до пустоты; дальше — те же ветки.
+        # Keep nonempty provider strings verbatim, including whitespace-only text.
         content = _nonempty_content(msg_obj.get("content"))
         reasoning_text = nonempty_reasoning_text(msg_obj)
         has_tools = bool(msg_obj.get("tool_calls"))

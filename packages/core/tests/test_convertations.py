@@ -140,29 +140,62 @@ def test_get_output_list_null_message_with_known_finish_is_empty_batch():
     assert get_output_list({"choices": [{"finish_reason": "stop"}]}) == []
 
 
-def test_get_output_list_whitespace_content_alone_is_empty_batch():
-    # Пробельный content схлопывается: пустой батч → bounce, без мусора в истории.
-    assert get_output_list(_dct("stop", content="\n")) == []
-    assert get_output_list(_dct("stop", content="\n\n")) == []
-    assert get_output_list(_dct(None, content="\n")) == []
+def test_get_output_list_preserves_whitespace_only_content():
+    for finish_reason, content in (
+        ("stop", "\n"),
+        ("stop", "\n\n"),
+        (None, "\n"),
+    ):
+        out = get_output_list(_dct(finish_reason, content=content))
+        assert out[0]["content"][0]["text"] == content
 
 
-def test_get_output_list_whitespace_content_with_reasoning_salvages():
-    # Qwen3/vLLM при length: content="\n\n" + reasoning → salvage, не два \\n в истории.
+def test_get_output_list_preserves_whitespace_content_with_reasoning():
     payload = _dct("length", content="\n\n")
     payload["choices"][0]["message"]["reasoning_content"] = (
         "search the leaderboard"
     )
-    out = get_output_list(payload)
+    out = get_output_list(payload, persist_reasoning_content=True)
     msg, text = _message_text(out)
-    assert text == "<think>search the leaderboard</think>"
-    assert "reasoning_content" not in msg
+    assert text == "\n\n"
+    assert msg["reasoning_content"] == "search the leaderboard"
 
 
-def test_get_output_list_whitespace_reasoning_alone_is_empty():
+def test_get_output_list_preserves_whitespace_only_reasoning():
     payload = _dct("stop", content=None)
     payload["choices"][0]["message"]["reasoning_content"] = "  \n"
-    assert get_output_list(payload) == []
+    out = get_output_list(payload, persist_reasoning_content=True)
+    msg, text = _message_text(out)
+    assert text == ""
+    assert msg["reasoning_content"] == "  \n"
+
+
+def test_get_output_list_preserves_whitespace_reasoning_alias_priority():
+    payload = _dct("stop", content="answer")
+    payload["choices"][0]["message"].update(
+        {"reasoning_content": "\n\n", "reasoning": "fallback"}
+    )
+    out = get_output_list(payload, persist_reasoning_content=True)
+    assert out[0]["reasoning_content"] == "\n\n"
+
+
+def test_get_output_list_preserves_generated_newlines_with_tool_calls():
+    calls = [
+        _tool_call("first", arguments='{"value":0}'),
+        _tool_call("second", arguments='{"value":0.0}'),
+    ]
+    payload = _dct("tool_calls", content="text\n\n", tool_calls=calls)
+    payload["choices"][0]["message"]["reasoning_content"] = "  reason\n"
+
+    out = get_output_list(payload, persist_reasoning_content=True)
+
+    assert out[0]["content"][0]["text"] == "text\n\n"
+    assert out[0]["reasoning_content"] == "  reason\n"
+    assert [item["call_id"] for item in out[1:]] == ["first", "second"]
+    assert [item["arguments"] for item in out[1:]] == [
+        '{"value":0}',
+        '{"value":0.0}',
+    ]
 
 
 def test_get_output_list_empty_unknown_finish_logs_error():
