@@ -101,6 +101,11 @@ ALLOWED: dict[str, str] = {
     _MCP + "install.py": _MCP_RUNTIME,
     _MCP + "process_supervisor.py": _MCP_RUNTIME,
     _MCP + "runtime/wiring.py": _MCP_RUNTIME,
+    # Плагины.
+    _CORE + "plugins/installed.py": (
+        "хранилище установленных плагинов: копия плагина и список on/off"
+    ),
+    _CORE + "plugins/sources.py": "кеш клонов git-источников плагинов",
     # Апдейтер.
     _CORE + "updater/runner.py": _UPDATER,
     _CORE + "upgrade_gate.py": _UPDATER,
@@ -129,6 +134,7 @@ ALLOWED: dict[str, str] = {
     _TESTKIT + "develop_files.py": _TESTKIT_REASON,
     _TESTKIT + "helpers/crossplatform.py": _TESTKIT_REASON,
     _TESTKIT + "legacy_threads.py": _TESTKIT_REASON,
+    _TESTKIT + "plugin_store.py": _TESTKIT_REASON,
     _TESTKIT + "tui_fixtures/stub_executor.py": _TESTKIT_REASON,
 }
 
