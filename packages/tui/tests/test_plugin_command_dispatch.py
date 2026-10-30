@@ -4,6 +4,7 @@
 import threading
 
 import pytest
+from gc_core.plugins.catalog import plugin_fingerprint
 from gc_core.plugins.manifest import PluginCommand
 from gc_core.plugins.snapshot import PluginSnapshot
 from gc_testkit.tui_support import tui_settings
@@ -39,9 +40,12 @@ class _Fake:
 def _app(tmp_path, captured, command="review"):
     from gc_tui.app import TuiApp
 
-    settings = tui_settings({"agent.model": "M"}).with_runtime(
-        plugins=PluginSnapshot(commands=(("plug", _cmd(command)),))
+    settings = tui_settings({"agent.model": "M"})
+    snap = PluginSnapshot(
+        commands=(("plug", _cmd(command)),),
+        fingerprint=plugin_fingerprint(settings),
     )
+    settings = settings.with_runtime(plugins=snap)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", settings=settings)
     app._executor_factory = lambda: _Fake(captured)
     return app

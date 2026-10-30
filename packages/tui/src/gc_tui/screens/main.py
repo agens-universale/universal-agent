@@ -4518,8 +4518,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         Сводка правок — тихий правый сегмент строки итога; compact ходом не
         считается, правок в нём нет. Сводка — по журналу треда прогона
         `task_id`; строке — только если этот тред на экране."""
-        self._skills_cache = None
-        self._warm_skills_cache()
+        self.drop_skills_cache()
         self._edits_baseline_taken = False
         if kind == "compact":
             return None
@@ -9918,15 +9917,21 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         inp.refresh_command_highlight()
 
+    def drop_skills_cache(self) -> None:
+        """Забыть скиллы и прогреть заново: агент создал скилл или окно
+        сменило набор плагинов (`TuiApp.get_runner`)."""
+        self._skills_cache = None
+        self._warm_skills_cache()
+
     def _warm_skills_cache(self) -> None:
         """Тихий фоновый прогрев `_skills_cache` (спека P5 §3.1): палитре
         скиллы нужны с первой буквы, без I/O на нажатие. Ошибка — только в
         лог: кэш остаётся холодным, явный /skill загрузит и покажет её сам.
         `exclusive` отменяет прежний прогрев: его устаревший снимок в кэш не
-        попадёт; воркер экрана отменяется и при его снятии."""
-        self.run_worker(
-            self._warm_skills(), group="skills-warm", exclusive=True
-        )
+        попадёт; воркер экрана отменяется и при его снятии. Воркеру
+        отдаётся функция, а не корутина: прогрев, отменённый до старта
+        (сброс кеша сразу за прогревом), не оставляет неожиданной корутины."""
+        self.run_worker(self._warm_skills, group="skills-warm", exclusive=True)
 
     async def _warm_skills(self) -> None:
         try:

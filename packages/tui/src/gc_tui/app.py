@@ -342,6 +342,11 @@ class TuiApp(App):
         # Поколение состояния: растёт на каждой перечитке. Читатель, собравший
         # кэш по снимку ДО неё, не затирает им уже применённый новый.
         self._config_generation = 0
+        # Диагностика снимков плагинов, уже показанная в этом процессе: после
+        # смены набора посреди сессии новое уведомление — раз за процесс (§7.1).
+        self._plugin_notices_seen: set[str] = set(
+            settings.runtime.plugins.notices
+        )
         # Кеш имён встроенных тулов для уведомлений: (settings, names) по
         # identity объекта настроек — сборка реестра дорогая, а бейдж
         # опрашивается каждый тик.
@@ -1851,6 +1856,7 @@ class TuiApp(App):
         сборка заморозила бы event-loop Textual. Передаём фабрику; AgentRunner
         построит executor в своём worker-потоке при первом start().
         """
+        self._apply_plugin_set_change()
         if (
             self.active_runner is not None
             and self._runner_stale
@@ -1907,6 +1913,63 @@ class TuiApp(App):
         if self._permission_mode is not None:
             self.active_runner.set_permission_mode(self._permission_mode)
         return self.active_runner
+
+    def _apply_plugin_set_change(self) -> None:
+        """Граница хода (§8.3): набор плагинов на диске сменился — новый
+        снимок в базу окна и в пере-мерж сессионного профиля, раннер
+        пересобирается, палитра забывает скиллы. Живой ход не трогаем:
+        в рамках раннера набор не меняется частично."""
+        from gc_tui.services.plugin_set import plugin_set_changed
+
+        runner = self.active_runner
+        if runner is not None and runner.is_running():
+            return
+        snap = self._config_snapshot()
+        cached = snap.profile_cache
+        targets = (snap.settings,) + ((cached[1],) if cached else ())
+        if not any(plugin_set_changed(t) for t in targets):
+            return
+        self._push_plugin_notices(self._commit_plugin_refresh(snap))
+        self.invalidate_runner()
+        main = self._main_screen()
+        if main is not None:
+            main.drop_skills_cache()
+
+    def _commit_plugin_refresh(self, snap: _ConfigSnapshot) -> tuple:
+        """Новый снимок в базу и в кеш сессионного профиля одним
+        присваиванием под замком; возвращает обновлённые настройки."""
+        from gc_tui.services.plugin_set import refresh_plugins
+
+        base = refresh_plugins(snap.settings)
+        cache = snap.profile_cache
+        if cache is not None:
+            loaded = cache[1]
+            loaded = (
+                base if loaded is snap.settings else refresh_plugins(loaded)
+            )
+            cache = (cache[0], loaded)
+        with self._config_lock:
+            self._config_generation += 1
+            self._settings = base
+            self._session_profile_cache = cache
+            self._effective_cache = None
+        return (base,) + ((cache[1],) if cache else ())
+
+    def _push_plugin_notices(self, refreshed: tuple) -> None:
+        """Диагностика нового снимка, которой нет среди стартовых и которую
+        ещё не показывали, — уведомлением рантайма, раз за процесс."""
+        for loaded in refreshed:
+            runtime = loaded.runtime
+            for message in runtime.plugins.notices:
+                if (
+                    message in runtime.notices
+                    or message in self._plugin_notices_seen
+                ):
+                    continue
+                self._plugin_notices_seen.add(message)
+                push_runtime_notice(
+                    Notice("warning", "plugin_snapshot", message)
+                )
 
     def _build_real_executor(self):
         """Build the real AgentExecutor from config. Called when no factory injected."""
