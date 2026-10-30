@@ -2940,6 +2940,9 @@ class _AgentLoop:
         pending = await self.get_pending_messages()
         if not pending:
             return messages
+        # Реплика из очереди — новый запрос, не повтор после переполнения:
+        # хуки запроса и команда плагина для неё запускаются.
+        self._repeat_request = False
         if first_poll or _is_tool_outputs_with_technical_tail(messages):
             return [*messages, *pending]
         return pending
