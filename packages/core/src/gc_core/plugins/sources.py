@@ -1,8 +1,8 @@
 """Плагины из git: клонирование в кэш агента по ``plugins.sources``.
 
 Каждый источник (url + ref) живёт в своём каталоге
-``<gc_cache>/plugins/<имя>-<хеш>``. Клон делается один раз, при загрузке
-сборке снимка набора (``plugins/catalog.py``); в цикле агента сеть не
+``<gc_cache>/plugins/<имя>-<хеш>``. Клон делается один раз, при сборке
+снимка набора (``plugins/catalog.py``); в цикле агента сеть не
 используется. Ref закрепляет версию: тег или хеш коммита не меняются сами.
 Для ветки (или без ref) обновление явное (``update_cached``) или удаление
 каталога кэша. Сбой клона не останавливает агента: плагин пропускается,
@@ -69,18 +69,19 @@ def _clone(url: str, ref: str | None, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(target.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
+    # Адрес из конфига — после «--»: значение с «-» не станет опцией git.
     try:
         if ref and _SHA.match(ref):
             tmp.mkdir()
             _git(["init", "-q"], tmp)
-            _git(["remote", "add", "origin", url], tmp)
+            _git(["remote", "add", "origin", "--", url], tmp)
             _git(["fetch", "-q", "--depth", "1", "origin", ref], tmp)
             _git(["checkout", "-q", "FETCH_HEAD"], tmp)
         else:
             args = ["clone", "-q", "--depth", "1"]
             if ref:
                 args += ["--branch", ref]
-            _git([*args, url, str(tmp)])
+            _git([*args, "--", url, str(tmp)])
         shutil.rmtree(target, ignore_errors=True)
         tmp.rename(target)
     finally:
@@ -92,8 +93,8 @@ def _warn_not_cloned(key: tuple[str, str, str], url: str) -> None:
         return
     _warned.add(key)
     logger.warning(
-        "plugin source %s is not cloned yet; it is loaded after "
-        "settings load (load_settings) or gc-plugin install",
+        "plugin source %s is not cloned yet; it is cloned when the "
+        "agent starts (plugin snapshot build)",
         url,
     )
 

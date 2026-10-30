@@ -161,3 +161,22 @@ def test_clone_is_memoised_per_process(tmp_path, monkeypatch):
     catalog.build_plugin_snapshot(loaded, clone=True)
 
     assert calls == []
+
+
+def test_clone_url_never_read_as_git_option(tmp_path, monkeypatch):
+    """Адрес из конфига идёт после ``--``: ``-…`` не станет опцией git."""
+    calls = []
+
+    def _git(args, _cwd=None):
+        calls.append(args)
+        if args[0] == "clone":
+            os.makedirs(args[-1])
+
+    monkeypatch.setattr(sources, "_git", _git)
+    url = "--upload-pack=touch x"
+    sources._clone(url, None, tmp_path / "a")
+    sources._clone(url, "abc1234", tmp_path / "b")
+
+    clone, remote = calls[0], calls[2]
+    assert clone[-3:] == ["--", url, str(tmp_path / "a.tmp")]
+    assert remote == ["remote", "add", "origin", "--", url]
