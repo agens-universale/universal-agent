@@ -9,6 +9,7 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.services.stores.record_view import tui_section
 import pytest
 from rich.style import Style
+from rich.text import Span
 
 from gc_tui.palette import ERR, SKILL
 
@@ -103,7 +104,9 @@ async def test_slash_skill_name_is_one_reply_with_skill_name(
         assert [_line(r) for r in replies] == [
             "› /supercoder:brainstorming придумай"
         ]
-        assert replies[0]._reply_lines(80)[0].body.spans == []
+        assert replies[0]._reply_lines(80)[0].body.spans == [
+            Span(0, len("/supercoder:brainstorming"), Style(color=SKILL))
+        ]
         assert replies[0].plain_text == "/supercoder:brainstorming придумай"
         assert replies[0]._consequences == []
         assert "загружен" not in _trace_texts(scr)
