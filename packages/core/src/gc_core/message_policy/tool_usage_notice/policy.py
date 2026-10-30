@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from gc_core.config_modules.message_notice import ToolUsageNoticeRule
@@ -13,6 +14,45 @@ from gc_core.utils.generate_message_id import (
 )
 
 
+def _output_payload(message: dict[str, Any]) -> dict[str, Any] | None:
+    """JSON ответа тула. Flush перед моделью видит function_call_output, не call."""
+    if message.get("type") not in {"function_call_output", "tool_call_output"}:
+        return None
+    raw = message.get("output")
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str) or raw[:1] != "{":
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _invoked_tool_name(message: dict[str, Any]) -> str:
+    """Имя тула, который вызвали в этом сообщении.
+
+    У call это ``name``. У output — поле ``tool`` тела. У свёрнутого
+    stored-envelope ``tool`` нет, имя в ``source_tool``. Страница чтения
+    ставит ``tool`` на reader, а ``source_tool`` — на исходный тул: считать
+    нужно вызов, а не то, чью страницу читают.
+    """
+    name = message.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    payload = _output_payload(message)
+    if payload is None:
+        return ""
+    tool = payload.get("tool")
+    if isinstance(tool, str) and tool.strip():
+        return tool.strip()
+    source = payload.get("source_tool")
+    if isinstance(source, str) and source.strip():
+        return source.strip()
+    return ""
+
+
 def batch_used_tool(
     step_messages: list[dict[str, Any]], tool_name: str
 ) -> bool:
@@ -20,12 +60,7 @@ def batch_used_tool(
     if not target:
         return False
     for message in step_messages or []:
-        if not isinstance(message, dict):
-            continue
-        name = message.get("name")
-        if name == target:
-            return True
-        if message.get("type") == "function_call" and name == target:
+        if isinstance(message, dict) and _invoked_tool_name(message) == target:
             return True
     return False
 

@@ -1,3 +1,5 @@
+import json
+
 from gc_core.message_policy.todo_reminder import (
     build_todo_reminder_text,
     todo_reminder_text,
@@ -80,6 +82,46 @@ def test_counter_resets_when_tool_used_in_batch():
         CFG,
         step_messages=[
             {"type": "function_call", "name": "session_todo", "id": "c1"}
+        ],
+    )
+    assert out is None
+    assert state.todo_reminder_cnt == 0
+
+
+def test_counter_resets_on_function_call_output():
+    """Flush перед моделью передаёт output батча, не function_call.
+
+    У function_call_output нет поля name: имя тула лежит в JSON output.
+    Иначе session_todo не сбрасывает счётчик, и следующее напоминание
+    говорит «давно не обновлял» про список, записанный шагом раньше.
+    """
+    state = _state(OPEN_ITEMS)
+    _tick(state)
+    _tick(state)
+    assert state.todo_reminder_cnt == 2
+    out = todo_reminder_text(
+        state,
+        CFG,
+        step_messages=[
+            {
+                "id": "fco_other",
+                "type": "function_call_output",
+                "call_id": "call_other",
+                "output": json.dumps({"tool": "exec_command", "ok": True}),
+            },
+            {
+                "id": "fco_todo",
+                "type": "function_call_output",
+                "call_id": "call_todo",
+                "output": json.dumps(
+                    {
+                        "tool": "session_todo",
+                        "ok": True,
+                        "message": "Checklist replaced",
+                        "technical_system_messages": ["unrelated"],
+                    }
+                ),
+            },
         ],
     )
     assert out is None
