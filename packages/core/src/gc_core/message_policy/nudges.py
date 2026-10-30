@@ -286,6 +286,7 @@ class NudgeHold:
         "compacted",
         "followers",
         "notices_sent",
+        "skip_fill",
         "trace",
     )
 
@@ -299,11 +300,14 @@ class NudgeHold:
         # переполнения окна не собирает их заново. Снимается, когда
         # запрос к модели завершился и следующий шаг — новый.
         self.notices_sent = False
+        # Ближайший запрос после сводки не собирает подсказки заново.
+        self.skip_fill = False
 
     def clear(self, state: Any) -> None:
         """Accept / stop / compact: буфер и loop без доставки модели."""
         self.buffer.clear()
         self.notices_sent = False
+        self.skip_fill = False
         clear_loop_detector(state)
 
     def reset_after_summary(

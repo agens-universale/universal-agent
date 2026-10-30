@@ -47,3 +47,17 @@ def test_force_noop_in_responses_mode(monkeypatch):
     coord = _coord(monkeypatch, calls, backend="responses")
     run_coro(coord.aforce_compact_once())
     assert calls == []
+
+
+def test_force_compact_leaves_nudge_counters_to_the_caller(monkeypatch):
+    """Сводка не знает про подсказки: счётчики остаются вызывающему."""
+    calls = []
+    coord = _coord(monkeypatch, calls)
+    coord._state.tool_usage_notice_cnt = {"session_memory": 4}
+    coord._state.todo_reminder_cnt = 3
+
+    applied = run_coro(coord.aforce_compact_once())
+
+    assert applied is True
+    assert coord._state.tool_usage_notice_cnt == {"session_memory": 4}
+    assert coord._state.todo_reminder_cnt == 3

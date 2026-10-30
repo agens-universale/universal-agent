@@ -2867,7 +2867,8 @@ class _AgentLoop:
                     with_nudges=False,
                 )
                 return None
-            await self._apre_backend_compaction(messages, mode)
+            if await self._apre_backend_compaction(messages, mode):
+                self._discard_nudges_after_summary(skip_fill=True)
             if self._stopped_before_call():
                 await self._nudges.apublish(
                     messages,
@@ -2895,6 +2896,18 @@ class _AgentLoop:
         они уже в ``messages``, а запасной путь без носителя тикнул бы
         счётчики ещё раз.
         """
+        if self._nudges.skip_fill:
+            # Сводка только что заменила трейс. Буфер уже пуст, счётчики
+            # обнулены; этот запрос уходит без подсказок.
+            self._nudges.skip_fill = False
+            await self._nudges.apublish(
+                messages,
+                state=self.state,
+                apersist=self._anudge_persist,
+                with_nudges=False,
+            )
+            self._nudges.notices_sent = True
+            return messages
         if self._nudges.notices_sent:
             return messages
         messages, done = await self._nudges.aflush_before_model(
@@ -3020,7 +3033,8 @@ class _AgentLoop:
             _MAX_CONTEXT_OVERFLOW_RETRIES,
             backend_exc,
         )
-        await _acall_blocking_hook(self.force_compact_hook)
+        if await _acall_blocking_hook(self.force_compact_hook):
+            self._discard_nudges_after_summary(skip_fill=True)
         return True
 
     def _count_step(
@@ -3189,12 +3203,30 @@ class _AgentLoop:
         mode = check_mode(messages, self.run_logger)
         return messages, mode, _NO_RETURN
 
-    async def _apre_backend_compaction(self, messages, mode) -> None:
+    def _discard_nudges_after_summary(self, *, skip_fill: bool) -> None:
+        """Сводка заменила трейс: подсказки старого диалога выбрасываем.
+
+        Счётчики те же, что после тула ``session_compact``. Объявление режима
+        и baseline hash памяти не трогаем. ``skip_fill`` — ближайший запрос
+        к модели не собирает подсказки заново.
+        """
+        self._nudges.reset_after_summary(
+            self.state,
+            session_meta=self.session_meta
+            if isinstance(self.session_meta, dict)
+            else None,
+        )
+        if skip_fill:
+            self._nudges.skip_fill = True
+
+    async def _apre_backend_compaction(self, messages, mode) -> bool:
         if self.pre_backend_compaction_hook is None:
-            return
+            return False
         try:
-            await _acall_blocking_hook(
-                self.pre_backend_compaction_hook, messages, mode
+            return bool(
+                await _acall_blocking_hook(
+                    self.pre_backend_compaction_hook, messages, mode
+                )
             )
         except ExecutionFailure:
             raise
@@ -3204,6 +3236,7 @@ class _AgentLoop:
                 pre_backend_exc,
                 exc_info=True,
             )
+            return False
 
     async def _aannounce_mode(self, messages) -> List[Dict]:
         """Сказать агенту о режиме, если он сменился с прошлого объявления.
@@ -3598,8 +3631,11 @@ class _AgentLoop:
 
     async def _aclose_turn(self, result) -> _Outcome:
         """Конец хода: компакция turn-end и подхват pending-сообщения новым ходом."""
-        if self.turn_end_compaction_hook is not None:
+        if self.turn_end_compaction_hook is not None and (
             await _acall_blocking_hook(self.turn_end_compaction_hook)
+        ):
+            # Ход уже закрыт: счётчики обнуляем, следующий запрос считает заново.
+            self._discard_nudges_after_summary(skip_fill=False)
         # Сообщение, пришедшее во время (блокирующей) компакции, не
         # теряем: продолжаем новым ходом на уже сжатом контексте.
         new_turn_messages = await _apickup_pending_as_new_turn(
