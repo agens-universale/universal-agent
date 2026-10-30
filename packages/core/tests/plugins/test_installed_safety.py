@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from gc_core.plugins.installed import (
@@ -90,3 +91,25 @@ def test_no_leftovers_after_install_and_update(tmp_path):
 def test_safe_name_never_yields_staging_dir():
     assert _safe_name(".staging") != ".staging"
     assert not _safe_name("..staging").startswith(".")
+
+
+def test_failed_swap_restores_old_install(tmp_path, monkeypatch):
+    store = tmp_path / "installed"
+    install(str(make_plugin(tmp_path / "src" / "p", "p")), root=store)
+    real_rename = Path.rename
+
+    def broken(self, target):
+        if self.name == "new":
+            raise OSError("rename failed")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", broken)
+    with pytest.raises(OSError):
+        install(
+            str(make_plugin(tmp_path / "s2" / "p", "p")),
+            root=store,
+            force=True,
+        )
+    monkeypatch.undo()
+    assert (store / "p" / ".claude-plugin" / "plugin.json").is_file()
+    assert list((store / ".staging").iterdir()) == []

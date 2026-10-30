@@ -249,9 +249,16 @@ def _replace_dir(src: Path, dest: Path) -> None:
         tmp = Path(tmp_name)
         staged = tmp / "new"
         shutil.copytree(src, staged, ignore=shutil.ignore_patterns(".git"))
-        if dest.exists():
-            dest.rename(tmp / "old")
-        staged.rename(dest)
+        old = tmp / "old"
+        had_old = dest.exists()
+        if had_old:
+            dest.rename(old)
+        try:
+            staged.rename(dest)
+        except BaseException:
+            if had_old:
+                old.rename(dest)
+            raise
 
 
 def _tree_digest(root: Path) -> str:
