@@ -275,19 +275,6 @@ def _technical(text: str, suffix: str) -> dict[str, Any]:
     )
 
 
-def _user_text(message: dict[str, Any]) -> str:
-    content = message.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            str(part.get("text", ""))
-            for part in content
-            if isinstance(part, dict) and part.get("text")
-        )
-    return ""
-
-
 async def auser_prompt_messages(
     state: Any, ctx: Any, messages: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -299,15 +286,12 @@ async def auser_prompt_messages(
     """
     if _is_subagent(state) or not messages or not active_plugins(ctx):
         return []
-    last = messages[-1]
-    if not isinstance(last, dict) or last.get("role") != "user":
-        return []
     from gc_core.message_policy.user_message_policy import (
-        is_technical_user_message_text,
+        last_real_user_text,
     )
 
-    prompt = _user_text(last)
-    if not prompt or is_technical_user_message_text(prompt):
+    prompt = last_real_user_text(messages)
+    if not prompt:
         return []
     payload = {
         **_base_payload(ctx, state, EVENT_USER_PROMPT_SUBMIT),

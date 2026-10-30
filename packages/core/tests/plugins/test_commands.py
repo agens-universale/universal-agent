@@ -204,3 +204,77 @@ async def test_intent_log_gets_expanded_command(tmp_path, monkeypatch):
     ]
     assert asks == ["SAY-HI there"]
     assert "SAY-HI there" in json.dumps(backend.calls[0], ensure_ascii=False)
+
+
+def test_dropped_command_uses_skill_id_from_frontmatter(tmp_path):
+    root = _plugin(
+        tmp_path, commands=[("review", "C"), ("audit", "A"), ("noid", "N")]
+    )
+    skill = root / "skills" / "folder"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nid: review\n---\nb\n")
+    empty = root / "skills" / "noid"
+    empty.mkdir()
+    (empty / "SKILL.md").write_text('---\nid: ""\n---\nb\n')
+    loaded = LoadedSettings(
+        settings=AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    )
+
+    snap = build_plugin_snapshot(loaded, clone=False)
+
+    assert [c.name for _, c in snap.commands] == ["audit"]
+
+
+def test_missing_skills_folder_does_not_break_snapshot(tmp_path, monkeypatch):
+    root = _plugin(tmp_path, commands=[("hi", "H")], skills=["s"])
+    real = catalog.skill_roots
+
+    def gone(plugins):
+        return tuple(
+            r.__class__(r.plugin, str(tmp_path / "gone"), r.contain)
+            for r in real(plugins)
+        )
+
+    monkeypatch.setattr(catalog, "skill_roots", gone)
+    loaded = LoadedSettings(
+        settings=AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
+    )
+
+    snap = build_plugin_snapshot(loaded, clone=False)
+
+    assert [c.name for _, c in snap.commands] == ["hi"]
+
+
+@pytest.mark.usefixtures("_stub_turn_finish")
+async def test_command_with_technical_tail_is_expanded(tmp_path, monkeypatch):
+    """Строка TUI с ``@файлом`` — пара «запрос + технический хвост»."""
+    from gc_core import run_context as rc
+    from gc_core.message_policy.user_message_policy import (
+        wrap_technical_user_content,
+    )
+
+    root = _plugin(tmp_path, commands=[("hi", "SAY-HI $ARGUMENTS\n")])
+    cfg = parity_config(
+        tmp_path,
+        monkeypatch,
+        **{"plugins.paths": [str(root)], "plugins.use_installed": False},
+    )
+    finish = assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": "ok",
+            "handoff": "{}",
+        },
+        call_id="c1",
+    )
+    backend = install(monkeypatch, ScriptedBackend([finish, judge_accept()]))
+    ctx = await rc.acreate_run_context(with_plugin_snapshot(cfg, clone=False))
+
+    await AgentExecutor(ctx).arun(
+        ["/plug:hi @main.py", wrap_technical_user_content("file main.py")],
+        thread_id="t1",
+    )
+
+    request = json.dumps(backend.calls[0], ensure_ascii=False)
+    assert "SAY-HI @main.py" in request

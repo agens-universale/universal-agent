@@ -7727,6 +7727,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         skill_ids = listed_skill_ids(self._skills_cache or [])
         return resolve_slash_name(name, commands, skill_ids)
 
+    def _has_plugin_command(self, slash: Resolution) -> bool:
+        """Среди вариантов есть команда плагина; неоднозначность только
+        скиллов решает разбор скиллов (у него есть bootstrap пакетов)."""
+        commands = runtime_of(self.app.base_settings()).plugins.commands
+        ids = {f"{plugin}:{cmd.name}" for plugin, cmd in commands}
+        return not ids.isdisjoint(slash.candidates)
+
     def _is_plugin_command(self, name: str) -> bool:
         """`/имя` — команда плагина (не перекрыта командой TUI): строка
         уходит ядру обычным запросом, подстановку делает ядро."""
@@ -9024,7 +9031,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         Холодный кэш — «неизвестная команда» (без ожидания прогрева).
         Короткое имя у команды плагина и скилла — неоднозначно."""
         slash = self._slash_resolution(name)
-        if slash.kind == "ambiguous":
+        if slash.kind == "ambiguous" and self._has_plugin_command(slash):
             self._render_skill_ambiguous(name, list(slash.candidates))
             return
         res = self._resolve_cached_skill(name)

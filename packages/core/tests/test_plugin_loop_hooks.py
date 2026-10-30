@@ -110,6 +110,34 @@ async def test_user_prompt_hook_and_command_run_on_first_turn(
     assert "SAY-HI there" in first_request
 
 
+async def test_user_prompt_hook_sees_request_before_technical_tail(
+    tmp_path, monkeypatch
+):
+    from gc_core import run_context as rc
+    from gc_core.message_policy.user_message_policy import (
+        wrap_technical_user_content,
+    )
+    from gc_core.plugins import catalog
+
+    catalog.reset_plugin_cache()
+    root, log = _plugin(tmp_path)
+    cfg = parity_config(
+        tmp_path,
+        monkeypatch,
+        **{"plugins.paths": [str(root)], "plugins.use_installed": False},
+    )
+    install(monkeypatch, ScriptedBackend(_finish_turn()))
+    ctx = await rc.acreate_run_context(
+        catalog.with_plugin_snapshot(cfg, clone=False)
+    )
+    await AgentExecutor(ctx).arun(
+        ["привет @a.py", wrap_technical_user_content("file a.py")],
+        thread_id="t1",
+    )
+
+    assert log.read_text().splitlines() == ["привет @a.py"]
+
+
 @pytest.mark.parametrize("backend_mode", ["chat_completions", "responses"])
 async def test_session_hooks_run_in_every_backend_mode(
     tmp_path, monkeypatch, backend_mode

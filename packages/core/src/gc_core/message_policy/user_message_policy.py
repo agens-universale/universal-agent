@@ -148,6 +148,18 @@ def extract_real_user_message_text(message: Any) -> str:
     return content
 
 
+def last_real_user_text(messages: list[Any]) -> str:
+    """Реплика человека в хвостовом блоке user-сообщений: технический хвост
+    (сноски ``@файлов``, картинки) пропускается; до не-user сообщения."""
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            return ""
+        text = extract_real_user_message_text(message)
+        if text:
+            return text
+    return ""
+
+
 def resolve_technical_user_content_type(content: str) -> str:
     normalized = str(content or "").strip().lower()
     if (

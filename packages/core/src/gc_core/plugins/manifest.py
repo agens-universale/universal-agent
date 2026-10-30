@@ -468,7 +468,7 @@ def skill_id_segment(skill_dir: Path) -> str:
     ``id`` из шапки ``SKILL.md``, иначе имя каталога."""
     text = _read_text(skill_dir / "SKILL.md") or ""
     meta_id = _split_markdown(text)[0].get("id")
-    return meta_id if isinstance(meta_id, str) else skill_dir.name
+    return (meta_id if isinstance(meta_id, str) else "") or skill_dir.name
 
 
 def _names(value: Any) -> tuple[str, ...] | None:

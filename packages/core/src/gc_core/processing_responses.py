@@ -155,6 +155,7 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     build_invalid_tool_call_feedback_message,
     extract_real_user_message_text,
+    last_real_user_text,
     wrap_technical_user_content,
 )
 from gc_core.message_policy.user_stop import (
@@ -3268,16 +3269,14 @@ class _AgentLoop:
 
     async def _aapply_plugin_command(self, messages, request) -> List[Dict]:
         """Команда плагина: раскрытый текст к запросу ``/плагин:команда``
-        (последнее сообщение ``request``)."""
+        (реплика человека в хвосте ``request``)."""
 
         async def _pending() -> List[Dict]:
             skills = getattr(self.state, "skills_list", None) or []
             return command_messages(
                 runtime_of(self.ctx).plugins,
                 listed_skill_ids(skills),
-                extract_real_user_message_text(
-                    request[-1] if request else None
-                ),
+                last_real_user_text(request),
             )
 
         return await self._aadd_plugin_messages(messages, _pending())

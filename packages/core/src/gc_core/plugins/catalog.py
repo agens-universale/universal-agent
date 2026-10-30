@@ -131,7 +131,11 @@ def _skill_ids(roots: tuple[SkillRoot, ...]) -> frozenset[str]:
     """Id skills плагинов (``<плагин>:<имя>``), как их заведёт реестр."""
     ids: set[str] = set()
     for root in roots:
-        for entry in Path(root.path).iterdir():
+        try:
+            entries = list(Path(root.path).iterdir())
+        except OSError:  # каталог пропал или не читается — skills в нём нет
+            continue
+        for entry in entries:
             if not (entry / "SKILL.md").is_file():
                 continue
             if root.contain and not entry.resolve().is_relative_to(

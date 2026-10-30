@@ -36,11 +36,11 @@ class _Fake:
         pass
 
 
-def _app(tmp_path, captured):
+def _app(tmp_path, captured, command="review"):
     from gc_tui.app import TuiApp
 
     settings = tui_settings({"agent.model": "M"}).with_runtime(
-        plugins=PluginSnapshot(commands=(("plug", _cmd("review")),))
+        plugins=PluginSnapshot(commands=(("plug", _cmd(command)),))
     )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", settings=settings)
     app._executor_factory = lambda: _Fake(captured)
@@ -77,3 +77,36 @@ async def test_tui_short_name_ambiguous_with_skill(tmp_path):
         )
         assert "/plug:review" in text and "/b:review" in text
         assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_tui_pack_bootstrap_beats_skill_only_ambiguity(
+    tmp_path, monkeypatch
+):
+    """Пакет ``review`` с bootstrap и скиллы ``x:review``/``y:review``:
+    `/review` — bootstrap пакета, как до команд плагинов (команда плагина
+    с другим именем)."""
+    pytest.importorskip("textual")
+    from gc_core.tools.skills import skill_delivery as sd
+
+    async def _available(_skill_id, _reg):
+        return True
+
+    monkeypatch.setattr(sd, "skill_is_available", _available)
+    captured = []
+    app = _app(tmp_path, captured, command="other")
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [
+            {
+                "id": "review:start",
+                "pack_id": "review",
+                "is_pack_bootstrap": True,
+            },
+            {"id": "x:review"},
+            {"id": "y:review"},
+        ]
+        await scr._handle_command("review main.py")
+        await pilot.pause(0.3)
+        assert len(captured) == 1
+        assert "review:start" in captured[0][0]
