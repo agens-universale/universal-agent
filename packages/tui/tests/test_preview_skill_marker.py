@@ -6,6 +6,10 @@
 """
 
 import pytest
+from rich.style import Style
+from rich.text import Span
+
+from gc_tui.palette import SKILL
 
 
 def _rec(payload, ts="2026-06-01T12:00:00Z"):
@@ -66,7 +70,9 @@ async def test_skill_plus_prompt_is_one_reply_with_skill_name():
     )
     assert len(replies) == 1
     assert _first_line(replies[0]) == "› /pack:qa-x давай"
-    assert replies[0]._reply_lines(80)[0].body.spans == []
+    assert replies[0]._reply_lines(80)[0].body.spans == [
+        Span(0, len("/pack:qa-x"), Style(color=SKILL))
+    ]
     assert not any("[skill]" in r or "загружен" in r for r in rows)
 
 
