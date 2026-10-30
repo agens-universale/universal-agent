@@ -57,6 +57,22 @@ async def test_json_without_context_adds_nothing(tmp_path):
     assert res.additional_context == ""
 
 
+@pytest.mark.parametrize(
+    "code",
+    [
+        "import sys; sys.stderr.write('r' * {n}); sys.exit(2)",
+        "import json; print(json.dumps("
+        "{{'decision': 'block', 'reason': 'r' * {n}}}))",
+    ],
+)
+async def test_long_block_reason_is_truncated(tmp_path, code):
+    res = await _run(tmp_path, _cmd(code.format(n=MAX_CONTEXT_CHARS * 2)))
+    assert res.blocked
+    assert res.reason.startswith("r" * MAX_CONTEXT_CHARS)
+    assert "r" * (MAX_CONTEXT_CHARS + 1) not in res.reason
+    assert len(res.reason) < MAX_CONTEXT_CHARS + 200
+
+
 async def test_long_context_is_truncated_with_mark(tmp_path):
     res = await _run(tmp_path, _cmd(f"print('x' * {MAX_CONTEXT_CHARS * 2})"))
     assert res.additional_context.startswith("x" * MAX_CONTEXT_CHARS)

@@ -261,7 +261,7 @@ async def test_session_start_reruns_after_mid_turn_compaction(
 
     assert compacted == [True]
     assert _lines(log) == ["SessionStart:startup", "SessionStart:compact"]
-    assert "BOOT" in _requests(backend)[1]
+    assert _requests(backend)[1].count("BOOT") == 1
 
 
 async def test_session_start_without_output_runs_once_per_turn(
@@ -302,6 +302,32 @@ async def test_plugin_added_mid_thread_gets_own_session_start(
     requests = _requests(backend)
     assert "CTX-OF-B" not in requests[0]
     assert "CTX-OF-A" in requests[2] and "CTX-OF-B" in requests[2]
+
+
+@pytest.mark.parametrize(
+    "names", [("my.plugin", "my_plugin"), ("плагин", "модуль")]
+)
+async def test_session_start_markers_do_not_collide(
+    tmp_path, monkeypatch, names
+):
+    first, second = names
+    root_a = _plugin(
+        tmp_path, first, {"SessionStart": _py("print('CTX-ONE')")}
+    )
+    root_b = _plugin(
+        tmp_path, second, {"SessionStart": _py("print('CTX-TWO')")}
+    )
+    backend = install(
+        monkeypatch, ScriptedBackend(_finish_turn() + _finish_turn("c2"))
+    )
+    ctx = await _ctx(tmp_path, monkeypatch, [root_a])
+    await AgentExecutor(ctx).arun(["один"], thread_id="t1")
+    ctx = await _ctx(tmp_path, monkeypatch, [root_a, root_b])
+    await AgentExecutor(ctx).arun(["два"], thread_id="t1")
+
+    second_turn = _requests(backend)[2]
+    assert second_turn.count("CTX-ONE") == 1
+    assert second_turn.count("CTX-TWO") == 1
 
 
 async def test_tool_and_stop_hooks_never_run(tmp_path, monkeypatch):

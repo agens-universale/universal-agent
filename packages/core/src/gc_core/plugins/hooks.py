@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -46,7 +47,8 @@ from gc_core.startup_notices import Notice
 
 logger = logging.getLogger(__name__)
 
-# Суффикс id сообщения ``SessionStart``: ``m_plugin_session_start_<плагин>_…``.
+# Суффикс id сообщения ``SessionStart``:
+# ``m_plugin_session_start_<плагин>_<хеш имени>_…``.
 _SESSION_START_SUFFIX = "plugin_session_start"
 _SOURCE_STARTUP = "startup"
 _SOURCE_COMPACT = "compact"
@@ -159,8 +161,12 @@ def _safe(name: str) -> str:
 
 
 def _marker(plugin: str) -> str:
-    """Суффикс id сообщения ``SessionStart`` плагина (маркер в истории)."""
-    return f"{_SESSION_START_SUFFIX}_{_safe(plugin)}"
+    """Суффикс id сообщения ``SessionStart`` плагина (маркер в истории).
+
+    Читаемая часть теряет заменённые знаки (``my.plugin`` и ``my_plugin``,
+    кириллица целиком), поэтому за ней — короткий хеш точного имени."""
+    digest = hashlib.sha256(plugin.encode("utf-8")).hexdigest()[:8]
+    return f"{_SESSION_START_SUFFIX}_{_safe(plugin)}_{digest}"
 
 
 def _has_marker(history: list[dict], plugin: str) -> bool:

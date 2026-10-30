@@ -13,8 +13,8 @@
   не-JSON — весь текст идёт в контекст. Код 2 означает отказ, причина
   берётся из stderr. Любой другой код и таймаут — сбой хука, агент не
   останавливается (fail-open), в лог уходит предупреждение.
-* Контекст хука ограничен ``MAX_CONTEXT_CHARS``, длиннее — обрезается с
-  пометкой.
+* Контекст и причина отказа ограничены ``MAX_CONTEXT_CHARS``, длиннее —
+  обрезаются с пометкой.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from gc_core.plugins.manifest import HookCommand, Plugin
 logger = logging.getLogger(__name__)
 
 MAX_CONTEXT_CHARS = 10_000
-_TRUNCATED_MARK = "\n[контекст хука обрезан до 10 000 символов]"
+_TRUNCATED_MARK = "\n[вывод хука обрезан до 10 000 символов]"
 _bash_warned = False
 
 
@@ -70,7 +70,7 @@ def _parse_stdout(plugin: str, stdout: str) -> HookResult:
     return HookResult(
         plugin=plugin,
         blocked=str(data.get("decision", "")).lower() == "block",
-        reason=str(data.get("reason", "")),
+        reason=_bounded(str(data.get("reason", ""))),
         additional_context=(
             _bounded(context) if isinstance(context, str) else ""
         ),
@@ -166,7 +166,9 @@ async def run_hook(
         return HookResult(plugin=plugin.name, failed=True)
 
     if proc.returncode == 2:
-        reason = stderr.decode("utf-8", "replace").strip() or "blocked"
+        reason = _bounded(
+            stderr.decode("utf-8", "replace").strip() or "blocked"
+        )
         return HookResult(plugin=plugin.name, blocked=True, reason=reason)
     if proc.returncode != 0:
         logger.warning(
