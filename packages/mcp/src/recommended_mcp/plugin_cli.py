@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from gc_core.plugins import installed
+from gc_core.plugins import installed, sources
 
 
 def _build() -> argparse.ArgumentParser:
@@ -41,6 +41,12 @@ def _build() -> argparse.ArgumentParser:
                 help="не спрашивать подтверждение",
             )
     sub.add_parser("list", help="список установленных")
+    src = sub.add_parser("sources", help="git-источники plugins.sources")
+    src_sub = src.add_subparsers(dest="sources_cmd", required=True)
+    src_sub.add_parser(
+        "update",
+        help="обновить кеш источников на ветке (теги и коммиты — нет)",
+    )
     return parser
 
 
@@ -51,11 +57,33 @@ def _row(p: installed.InstalledPlugin) -> str:
     return f"{state} {p.name} {p.version}  {p.source}{ref} {pin}".rstrip()
 
 
+def _role_settings(prepared: installed.PreparedInstall) -> object | None:
+    """Настройки для прав ролей в сводке; без ролей не загружаются."""
+    if not prepared.plugin.agents:
+        return None
+    from gc_core.config import load_settings
+    from gc_core.settings import default_settings
+
+    try:
+        return load_settings()
+    except Exception:  # битый конфиг не мешает установке: берём умолчания
+        return default_settings()
+
+
+def _update_sources() -> int:
+    done = sources.update_cached()
+    for name, ok in done:
+        print(f"{'обновлён' if ok else 'не обновлён'}: {name}")
+    if not done:
+        print("нечего обновлять")
+    return 0 if all(ok for _, ok in done) else 1
+
+
 def _confirm(prepared: installed.PreparedInstall, yes: bool) -> bool:
     """Показать, что плагин запускает, и спросить; без TTY нужен ``--yes``."""
     plugin = prepared.plugin
     print(f"плагин {plugin.name} {plugin.version} запускает:")
-    for line in prepared.summary():
+    for line in prepared.summary(_role_settings(prepared)):
         print(f"  {line}")
     if yes:
         return True
@@ -87,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
                     return 1
                 info = prepared.commit(args.force)
             print(f"установлен: {_row(info)}")
+        elif args.cmd == "sources":
+            return _update_sources()
         elif args.cmd == "list":
             rows = installed.list_installed()
             print("\n".join(_row(p) for p in rows) or "плагинов нет")

