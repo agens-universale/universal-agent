@@ -2783,6 +2783,9 @@ class _AgentLoop:
 
         self.tool_error_cnt = 0
         self.context_overflow_retries = 0
+        # Повтор запроса после переполнения: хуки запроса и команда плагина
+        # уже в messages, второй раз не запускаются.
+        self._repeat_request = False
         self.run_logger = getattr(ctx, "logger", None) or _fallback_logger
         agent_cfg = settings_of(ctx).agent
         self.proj_tags = projection_tags_from_config(ctx)
@@ -2840,9 +2843,11 @@ class _AgentLoop:
             return _Outcome(result=early)
         # Вызовы backend не ловим здесь: после исчерпания transport/adaptive
         # ретраев исключение уходит наверх как есть.
+        repeat, self._repeat_request = self._repeat_request, False
+        prepared = None
         try:
             prepared = await self._aprepare_main_request(
-                messages, mode, backend_mode
+                messages, mode, backend_mode, repeat=repeat
             )
             if prepared is None:
                 return _Outcome(result=None)
@@ -2863,15 +2868,17 @@ class _AgentLoop:
             if not await self._atry_recover_context_overflow(backend_exc):
                 raise
             outcome = _Outcome(messages, restart=True)
+            self._repeat_request = repeat or prepared is not None
         outcome.mode = mode
         return outcome
 
     async def _aprepare_main_request(
-        self, messages, mode, backend_mode: str
+        self, messages, mode, backend_mode: str, *, repeat: bool = False
     ) -> Optional[List[Dict]]:
         """Всё, что идёт перед основным запросом: судья пары, сжатие,
         подсказка об инструментах, объявление режима. None — стоп до
-        запроса."""
+        запроса. ``repeat`` — повтор того же запроса после переполнения
+        контекста: хуки запроса и команда плагина уже в ``messages``."""
         if not _mode_requires_backend_call(mode):
             return messages
         chat = backend_mode == "chat_completions"
@@ -2886,7 +2893,7 @@ class _AgentLoop:
         # подстановка команды плагина (с хуками не связана). SessionStart —
         # перед каждым запросом: после сжатия посреди хода он срабатывает
         # снова.
-        if mode == "user_ask":
+        if mode == "user_ask" and not repeat:
             request = messages
             messages = await self._aapply_context_hooks(
                 messages, user_prompt=True

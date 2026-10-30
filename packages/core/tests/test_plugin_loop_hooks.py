@@ -560,3 +560,44 @@ async def test_context_hooks_run_in_every_backend_mode(
         [{"role": "user", "content": "hi"}], "user_ask", backend_mode
     )
     assert called == ["prompt", "start", "announce"]
+
+
+async def test_overflow_retry_runs_prompt_hook_and_command_once(
+    tmp_path, monkeypatch
+):
+    """Повтор запроса после переполнения контекста — тот же запрос:
+    UserPromptSubmit не запускается снова, команда не раскрывается дважды."""
+    from gc_core import processing_responses as pr
+    from gc_core import run_summary_coordinator as rsc
+
+    log = tmp_path / "hooks.log"
+    root = _plugin(
+        tmp_path, "plug", {"UserPromptSubmit": _logging(log, "CTX")}
+    )
+    (root / "commands").mkdir()
+    (root / "commands" / "hi.md").write_text("SAY-HI $ARGUMENTS\n")
+    backend = install(monkeypatch, ScriptedBackend(_finish_turn()))
+    real = pr.aprocess_user_ask
+    overflowed = []
+
+    async def _overflow_once(messages, state, ctx):
+        if not overflowed:
+            overflowed.append(True)
+            raise ValueError(
+                "Requested token count exceeds the model's maximum context "
+                "length of 131072 tokens. Please reduce the number of tokens"
+            )
+        return await real(messages, state, ctx)
+
+    async def _compact(**_kw):
+        return None
+
+    monkeypatch.setattr(pr, "aprocess_user_ask", _overflow_once)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _compact)
+    ctx = await _ctx(tmp_path, monkeypatch, [root])
+    await AgentExecutor(ctx).arun(["/plug:hi there"], thread_id="t1")
+
+    assert overflowed == [True]
+    first = _requests(backend)[0]
+    assert (first.count("SAY-HI there"), first.count("CTX")) == (1, 1)
+    assert _lines(log) == ["UserPromptSubmit:"]
