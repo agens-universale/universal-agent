@@ -9,6 +9,7 @@ from gc_core.plugins.catalog import with_plugin_snapshot
 from gc_core.runtime_notices import clear_runtime_notices
 from gc_core.settings import runtime_of
 from gc_core.tools.connect_mcp.effective import effective_mcp_servers
+from gc_testkit.settings import make_settings
 from gc_testkit.tui_support import tui_settings
 
 pytest.importorskip("textual")
@@ -165,8 +166,11 @@ def test_missing_source_at_rebuild_notice_without_clone(monkeypatch, pushed):
     clones = []
     monkeypatch.setattr(sources, "_clone", lambda *a: clones.append(a))
     source = {"git": "https://e.x/repo.git"}
-    loaded = tui_settings({"plugins.sources": [source]})
-    app = _app(loaded)  # снимка ещё нет: отпечаток не совпадает
+    # Снимка ещё нет: отпечаток не совпадает.
+    loaded = make_settings(
+        {"plugins.sources": [source], "logging.save_logs": False}
+    )
+    app = _app(loaded)
 
     app.get_runner()
 
