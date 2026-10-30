@@ -1196,11 +1196,16 @@ class TuiApp(App):
         """Флаги запуска поверх свежей загрузки: слой CLI и путь `--model`,
         решённый на старте (без повторного решения по новому реестру)."""
         from gc_core.config import apply_cli_overrides
+        from gc_core.plugins.catalog import with_plugin_snapshot
 
         loaded = apply_cli_overrides(loaded)
         if self._model_flag:
             loaded = loaded.with_overrides(self._model_flag, layer="cli")
-        return self._with_tui_runtime(loaded)
+        # Цикл Textual уже идёт: без клонов, недостающий источник — в
+        # диагностику до перезапуска (§8.3).
+        return with_plugin_snapshot(
+            self._with_tui_runtime(loaded), clone=False
+        )
 
     def _maybe_notice_profile_activation(self, name: str, meta, cfg) -> None:
         """Спека §3.5: первая активация ПРОЕКТНОГО профиля в сессии — notice с

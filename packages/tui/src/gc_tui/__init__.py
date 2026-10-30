@@ -329,6 +329,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(storage_rejection, file=sys.stderr)
         return 1
 
+    # Снимок набора плагинов — после всех оверрайдов и до цикла Textual:
+    # клон git-источников — синхронный git (§8.3).
+    from gc_core.plugins.catalog import with_plugin_snapshot
+
+    settings = with_plugin_snapshot(settings)
+
     _select_theme(settings)
     # importlib.import_module goes through sys.modules, not the package
     # attribute cache, so evicting tui.app in tests forces a real re-import.
