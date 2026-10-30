@@ -24,7 +24,7 @@ def _cli_settings(monkeypatch, argv, base=None):
         "extra_config_overrides",
         arg_parser._parse_unknown_args(argv),
     )
-    loaded, code = asyncio.run(cli._aload_cli_settings(None, None))
+    loaded, code = asyncio.run(cli._aload_settings_with_plugins(None, None))
     assert code is None
     return loaded
 

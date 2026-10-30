@@ -628,7 +628,7 @@ async def _run_init_agents_md() -> int:
     """
     # Тот же режим запуска, что у основного входа: правило одно для всех
     # контекстов gc-cli (запись журнала правок — `agent_edits.record.cli`).
-    loaded, settings_exit = await _aload_cli_settings(
+    loaded, settings_exit = await _aload_settings_with_plugins(
         arg_parser.run_args.config,
         getattr(arg_parser.run_args, "profile", None),
     )
@@ -793,7 +793,7 @@ def _unconfigured_setup_exit(
     return 0
 
 
-async def _aload_cli_settings(config_arg, profile_arg):
+async def _aload_settings_with_plugins(config_arg, profile_arg):
     """Настройки запуска со снимком набора плагинов в рантайме (§8.3).
 
     Снимок — после всех CLI-override: иначе ``--plugins.use_installed
@@ -1016,7 +1016,9 @@ async def arun_cli() -> int:
     config_arg = arg_parser.run_args.config
     profile_arg = getattr(arg_parser.run_args, "profile", None)
     just_created = _bootstrap_user_config() if config_arg is None else False
-    loaded, settings_exit = await _aload_cli_settings(config_arg, profile_arg)
+    loaded, settings_exit = await _aload_settings_with_plugins(
+        config_arg, profile_arg
+    )
     if settings_exit is not None:
         return settings_exit
     # Хранилище в базе (storage: config.yml) — одно на запуск: открыть до
