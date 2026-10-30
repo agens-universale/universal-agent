@@ -221,3 +221,114 @@ def test_new_notice_pushed_once_per_process(tmp_path, pushed):
 
     assert [n.message[: len(UNTRUSTED)] for n in pushed] == [UNTRUSTED]
     assert _notice_count(app.base_settings(), UNTRUSTED) == 0
+
+
+def _with_command(root, name="go"):
+    (root / "commands").mkdir()
+    (root / "commands" / f"{name}.md").write_text(
+        "---\ndescription: d\n---\nBODY $ARGUMENTS\n", encoding="utf-8"
+    )
+    return root
+
+
+class _Fake:
+    def __init__(self, captured):
+        self._captured = captured
+
+    async def arun(self, messages, **kw):
+        self._captured.append(list(messages))
+
+    def stop_run(self):
+        pass
+
+    def add_message(self, m):
+        pass
+
+
+def _live_app(tmp_path, captured):
+    app = app_mod.TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=_started({"agent.model": "M"}),
+    )
+    app._executor_factory = lambda: _Fake(captured)
+    return app
+
+
+async def _submit(pilot, text):
+    inp = pilot.app.query_one("#cmdinput")
+    inp.text = text
+    await pilot.press("enter")
+    await pilot.pause(0.3)
+
+
+def test_refresh_plugin_set_skips_live_run(tmp_path):
+    app = _app(_started())
+    runner = app.get_runner()
+    runner.is_running = lambda: True
+    installed.install(str(_plugin(tmp_path / "src", "pl")))
+
+    app.refresh_plugin_set()
+    assert _skill_plugins(app.base_settings()) == set()
+
+    runner.is_running = lambda: False
+    app.refresh_plugin_set()
+    assert _skill_plugins(app.base_settings()) == {"pl"}
+
+
+@pytest.mark.asyncio
+async def test_installed_command_accepted_on_first_submit(tmp_path):
+    captured = []
+    app = _live_app(tmp_path, captured)
+    async with app.run_test() as pilot:
+        installed.install(str(_with_command(_plugin(tmp_path / "src", "pl"))))
+        await _submit(pilot, "/pl:go main.py")
+        assert captured == [["/pl:go main.py"]]
+
+
+@pytest.mark.asyncio
+async def test_disabled_command_not_sent_to_model(tmp_path):
+    captured = []
+    installed.install(str(_with_command(_plugin(tmp_path / "src", "pl"))))
+    app = _live_app(tmp_path, captured)
+    async with app.run_test() as pilot:
+        installed.disable("pl")
+        await _submit(pilot, "/pl:go main.py")
+        assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_palette_open_refreshes_plugin_set(tmp_path):
+    app = _live_app(tmp_path, [])
+    async with app.run_test() as pilot:
+        installed.install(str(_with_command(_plugin(tmp_path / "src", "pl"))))
+        pilot.app.screen._open_palette(prefix="")
+        commands = runtime_of(app.base_settings()).plugins.commands
+        assert [(p, c.name) for p, c in commands] == [("pl", "go")]
+
+
+@pytest.mark.asyncio
+async def test_plugins_screen_after_external_uninstall(tmp_path):
+    installed.install(str(_plugin(tmp_path / "src", "pl")))
+    app = _live_app(tmp_path, [])
+    async with app.run_test() as pilot:
+        installed.uninstall("pl")
+        pilot.app.screen._cmd_plugins()
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.is_running
+        assert _skill_plugins(app.screen._settings) == set()
+        assert app.screen.cards == []
+
+
+@pytest.mark.asyncio
+async def test_installed_skill_runs_on_first_submit(tmp_path):
+    captured = []
+    app = _live_app(tmp_path, captured)
+    async with app.run_test() as pilot:
+        pilot.app.screen._skills_cache = []
+        installed.install(str(_plugin(tmp_path / "src", "pl")))
+        await _submit(pilot, "/pl:s main.py")
+        assert len(captured) == 1
+        assert "pl:s" in captured[0][0]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -21,6 +23,9 @@ from gc_tui.services.skills_scan import run_off_loop
 _FOOTER = "[Enter] раскрыть  [↑↓] плагины  [Esc] back"
 _HINT = "Управление: gc-plugin install | enable | disable | uninstall"
 _EMPTY = "Плагинов нет. Установка: gc-plugin install <owner/repo>"
+_LOAD_ERROR = "Не удалось прочитать плагины"
+
+_log = logging.getLogger(__name__)
 
 
 def _warning_count(info: dict) -> int:
@@ -96,14 +101,20 @@ class PluginsScreen(Screen):
         self.cards: list[PluginCard] = []
 
     def on_mount(self) -> None:
-        self.run_worker(self._load, exclusive=True)
+        self.run_worker(self._load, exclusive=True, exit_on_error=False)
 
     async def _load(self) -> None:
         settings = self._settings
-        cards, notices = await run_off_loop(
-            lambda: (plugin_cards(settings), general_notices(settings)),
-            "plugin-cards",
-        )
+        try:
+            cards, notices = await run_off_loop(
+                lambda: (plugin_cards(settings), general_notices(settings)),
+                "plugin-cards",
+            )
+        except Exception as exc:
+            _log.warning("экран /plugins: чтение не удалось", exc_info=True)
+            line = Text(f"{_LOAD_ERROR}: {exc}", style=_ERR)
+            await self._mount([Static(line, classes="mcp-summary")])
+            return
         await self._show(cards, notices)
 
     async def _show(self, cards: list[dict], notices: list[str]) -> None:
@@ -112,7 +123,12 @@ class PluginsScreen(Screen):
             Static(Text(f"⚠ {n}", style=_WARN), classes="mcp-summary")
             for n in notices
         ]
-        widgets += self.cards or [Static(Text(_EMPTY, style=_DIM))]
+        # Общая причина (плагины выключены и т.п.) уже объяснила пустоту.
+        if not self.cards and not notices:
+            widgets.append(Static(Text(_EMPTY, style=_DIM)))
+        await self._mount([*widgets, *self.cards])
+
+    async def _mount(self, widgets: list[Static]) -> None:
         trace = self.query_one("#trace", VerticalScroll)
         await trace.mount_all(widgets, before=0)
         if self.cards:

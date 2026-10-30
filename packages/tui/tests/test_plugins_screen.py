@@ -122,17 +122,13 @@ async def test_plugins_screen_info_alone_is_not_a_warning_badge(
 
 
 @pytest.mark.asyncio
-async def test_plugins_screen_empty_state_and_general_notices(
-    tmp_path, monkeypatch
-):
-    note = "Плагины выключены: задан paths.skills_data_path."
-    app, scr = await _open(tmp_path, monkeypatch, [], [note])
+async def test_plugins_screen_empty_state(tmp_path, monkeypatch):
+    app, scr = await _open(tmp_path, monkeypatch, [])
     async with app.run_test() as pilot:
         await _push(app, pilot, scr)
         assert scr.cards == []
         shown = " ".join(str(w.render()) for w in scr.query(Static))
         assert "gc-plugin install <owner/repo>" in shown
-        assert f"⚠ {note}" in shown
 
 
 def _snapshot_settings(plugins, notices=(), roles=()):
@@ -362,3 +358,52 @@ def test_plugin_card_real_availability_when_subagents_off(monkeypatch):
     (card,) = mod.plugin_cards(settings)
     assert card["roles"][0]["ok"] is False
     assert "субагенты выключены" in card["roles"][0]["status"]
+
+
+def test_plugin_cards_survive_removed_skills_dir(tmp_path, monkeypatch):
+    """Каталог плагина убрали снаружи (uninstall/update), снимок старый:
+    карточка строится без скиллов, без исключения."""
+    from gc_core.plugins.manifest import Plugin
+    from gc_tui.services import plugin_cards as mod
+
+    _no_entries(monkeypatch, mod)
+    monkeypatch.setattr(mod, "list_installed", list)
+    gone = tmp_path / "gone"
+    plugin = Plugin("p", "1", gone, (gone / "skills",))
+
+    (card,) = mod.plugin_cards(_snapshot_settings((plugin,)))
+
+    assert card["skills"] == []
+
+
+@pytest.mark.asyncio
+async def test_plugins_screen_load_failure_shows_error_line(
+    tmp_path, monkeypatch
+):
+    def _boom(_settings):
+        raise RuntimeError("disk gone")
+
+    app, scr = await _open(tmp_path, monkeypatch, [])
+    from gc_tui.screens import plugins as mod
+
+    monkeypatch.setattr(mod, "plugin_cards", _boom)
+    async with app.run_test() as pilot:
+        await _push(app, pilot, scr)
+        assert app.is_running
+        assert app.screen is scr
+        shown = " ".join(str(w.render()) for w in scr.query(Static))
+        assert "Не удалось прочитать плагины" in shown
+        assert "disk gone" in shown
+
+
+@pytest.mark.asyncio
+async def test_plugins_screen_off_notice_hides_empty_install_hint(
+    tmp_path, monkeypatch
+):
+    note = "Плагины выключены: задан paths.skills_data_path."
+    app, scr = await _open(tmp_path, monkeypatch, [], [note])
+    async with app.run_test() as pilot:
+        await _push(app, pilot, scr)
+        shown = " ".join(str(w.render()) for w in scr.query(Static))
+        assert f"⚠ {note}" in shown
+        assert "Плагинов нет" not in shown

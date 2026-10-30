@@ -7393,6 +7393,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
             return
+        self.app.refresh_plugin_set()
         self.spend_help_hint()
         palette = CommandPalette(
             self._registry,
@@ -7759,6 +7760,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._voice is not None and self._voice.state == "recording":
             self._voice.stop_and_transcribe()
             return
+        # Команды плагинов и скиллы — по набору на диске, до разбора ввода;
+        # сменился набор — скиллы нужны сейчас, не после фонового прогрева.
+        if self.app.refresh_plugin_set():
+            self._skills_cache = await self._load_skills_safe()
 
         # Идёт вставка изображения: Enter не отправляет — сообщение ушло бы без
         # картинки; текст остаётся в поле (контракт §2).
@@ -8384,6 +8389,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _cmd_plugins(self) -> None:
         from gc_tui.screens.plugins import PluginsScreen
 
+        self.app.refresh_plugin_set()
         self.app.push_screen(PluginsScreen(settings=self.app.base_settings()))
 
     def _cmd_diff(self, *, source: Optional[str] = None) -> None:
@@ -9935,7 +9941,7 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def drop_skills_cache(self) -> None:
         """Забыть скиллы и прогреть заново: агент создал скилл или окно
-        сменило набор плагинов (`TuiApp.get_runner`)."""
+        сменило набор плагинов (`TuiApp.refresh_plugin_set`)."""
         self._skills_cache = None
         self._warm_skills_cache()
 

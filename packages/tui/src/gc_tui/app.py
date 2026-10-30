@@ -1856,7 +1856,7 @@ class TuiApp(App):
         сборка заморозила бы event-loop Textual. Передаём фабрику; AgentRunner
         построит executor в своём worker-потоке при первом start().
         """
-        self._apply_plugin_set_change()
+        self.refresh_plugin_set()
         if (
             self.active_runner is not None
             and self._runner_stale
@@ -1914,26 +1914,29 @@ class TuiApp(App):
             self.active_runner.set_permission_mode(self._permission_mode)
         return self.active_runner
 
-    def _apply_plugin_set_change(self) -> None:
-        """Граница хода (§8.3): набор плагинов на диске сменился — новый
+    def refresh_plugin_set(self) -> bool:
+        """Сверка набора плагинов с диском (§8.3): граница хода, отправка
+        ввода, открытие палитры и ``/plugins``. Набор сменился — новый
         снимок в базу окна и в пере-мерж сессионного профиля, раннер
         пересобирается, палитра забывает скиллы. Живой ход не трогаем:
-        в рамках раннера набор не меняется частично."""
+        в рамках раннера набор не меняется частично. Без смены — только
+        отпечаток. True — набор сменился."""
         from gc_tui.services.plugin_set import plugin_set_changed
 
         runner = self.active_runner
         if runner is not None and runner.is_running():
-            return
+            return False
         snap = self._config_snapshot()
         cached = snap.profile_cache
         targets = (snap.settings,) + ((cached[1],) if cached else ())
         if not any(plugin_set_changed(t) for t in targets):
-            return
+            return False
         self._push_plugin_notices(self._commit_plugin_refresh(snap))
         self.invalidate_runner()
         main = self._main_screen()
         if main is not None:
             main.drop_skills_cache()
+        return True
 
     def _commit_plugin_refresh(self, snap: _ConfigSnapshot) -> tuple:
         """Новый снимок в базу и в кеш сессионного профиля одним

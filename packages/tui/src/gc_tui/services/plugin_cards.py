@@ -49,11 +49,19 @@ def general_notices(settings: Any) -> list[str]:
     ]
 
 
+def _entries(root: Path) -> list[Path]:
+    """Содержимое каталога; пропавший снаружи каталог — пусто."""
+    try:
+        return sorted(root.iterdir())
+    except OSError:
+        return []
+
+
 def _skill_ids(plugin: Plugin) -> list[str]:
     return [
         f"{plugin.name}:{d.name}"
         for root in plugin.skills_dirs
-        for d in sorted(root.iterdir())
+        for d in _entries(root)
         if (d / "SKILL.md").is_file()
     ]
 
