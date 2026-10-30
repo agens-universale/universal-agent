@@ -110,11 +110,16 @@ def is_context_overflow_error(exc: BaseException) -> bool:
 
 
 def nonempty_reasoning_text(msg) -> str | None:
-    """Return the first nonempty reasoning alias without changing its text."""
+    """Prefer meaningful reasoning aliases and preserve the selected string."""
     if not isinstance(msg, dict):
         return None
+    whitespace_fallback = None
     for key in ("reasoning_content", "reasoning"):
         value = msg.get(key)
-        if isinstance(value, str) and value:
+        if not isinstance(value, str) or not value:
+            continue
+        if value.strip():
             return value
-    return None
+        if whitespace_fallback is None:
+            whitespace_fallback = value
+    return whitespace_fallback

@@ -170,13 +170,13 @@ def test_get_output_list_preserves_whitespace_only_reasoning():
     assert msg["reasoning_content"] == "  \n"
 
 
-def test_get_output_list_preserves_whitespace_reasoning_alias_priority():
+def test_get_output_list_prefers_meaningful_reasoning_alias_verbatim():
     payload = _dct("stop", content="answer")
     payload["choices"][0]["message"].update(
-        {"reasoning_content": "\n\n", "reasoning": "fallback"}
+        {"reasoning_content": "\n\n", "reasoning": "  fallback\n"}
     )
     out = get_output_list(payload, persist_reasoning_content=True)
-    assert out[0]["reasoning_content"] == "\n\n"
+    assert out[0]["reasoning_content"] == "  fallback\n"
 
 
 def test_get_output_list_preserves_generated_newlines_with_tool_calls():
