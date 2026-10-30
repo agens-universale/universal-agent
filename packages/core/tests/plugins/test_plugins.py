@@ -1241,61 +1241,6 @@ async def test_discovery_without_tools_key_means_all_tools(
     assert d.description.startswith("Субагент плагина demo")
 
 
-async def test_commands_are_skills_of_the_plugin_pack(tmp_path):
-    root = _plugin_with_md(tmp_path)
-    plugin = load_plugin(root)
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    reg = SkillsRegistry(
-        system_root=str(empty),
-        user_root=str(empty),
-        project_root=str(empty),
-        plugin_commands=[("demo", c) for c in plugin.commands],
-    )
-    skills = await reg.list_skills()
-    ids = {s["id"] if isinstance(s, dict) else s.id for s in skills}
-    assert "demo:review" in ids
-    loaded = await reg.load_skill_detail("demo:review")
-    assert "$ARGUMENTS" in loaded["instructions"]
-    assert "<файл>" in loaded["instructions"]
-
-
-def test_command_prompt_text_substitutes_arguments(tmp_path):
-    plugin = load_plugin(_plugin_with_md(tmp_path))
-    plugins = (plugin,)
-    text = runtime.command_prompt_text(plugins, "/demo:review a.py b.py")
-    assert "Проверь a.py и ещё b.py." in text
-    assert "Всё: a.py b.py." in text and "Пропуск: []." in text
-    assert "demo:review" in text
-    # короткое имя, если оно одно
-    assert runtime.command_prompt_text(plugins, "/review x") is not None
-    # чужое и не команда
-    assert runtime.command_prompt_text(plugins, "/other:review x") is None
-    assert runtime.command_prompt_text(plugins, "/nope") is None
-    assert runtime.command_prompt_text(plugins, "просто текст") is None
-
-
-def test_ambiguous_short_command_name_is_not_expanded(tmp_path):
-    a = load_plugin(_plugin_with_md(tmp_path, name="a"))
-    b = load_plugin(_plugin_with_md(tmp_path, name="b"))
-    assert runtime.command_prompt_text((a, b), "/review x") is None
-    assert runtime.command_prompt_text((a, b), "/b:review x") is not None
-
-
-async def test_user_prompt_expands_plugin_command(tmp_path, monkeypatch):
-    root = _plugin_with_md(tmp_path)
-    _config(monkeypatch, [str(root)])
-    ctx, state = SimpleNamespace(), SimpleNamespace(state_id="s1")
-    out = await runtime.auser_prompt_messages(
-        state, ctx, [{"role": "user", "content": "/demo:review main.py"}]
-    )
-    assert len(out) == 1 and "Проверь main.py" in out[0]["content"]
-    plain = await runtime.auser_prompt_messages(
-        state, ctx, [{"role": "user", "content": "привет"}]
-    )
-    assert plain == []
-
-
 def test_use_installed_false_keeps_explicit_paths(monkeypatch):
     monkeypatch.setattr(installed, "enabled_paths", lambda: ["/inst/a"])
     off = PluginsConfig(paths=["/p"], use_installed=False)

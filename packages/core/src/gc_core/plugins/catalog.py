@@ -11,12 +11,19 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.config_modules.plugins import PluginsConfig
 from gc_core.config_modules.storage import FILES
 from gc_core.plugins import installed, sources
-from gc_core.plugins.manifest import PLUGIN_FORMAT_AP, Plugin, load_plugin
+from gc_core.plugins.manifest import (
+    PLUGIN_FORMAT_AP,
+    Plugin,
+    PluginCommand,
+    load_plugin,
+    skill_id_segment,
+)
 from gc_core.plugins.mcp_servers import plugin_mcp_part
 from gc_core.plugins.snapshot import PluginSnapshot, SkillRoot
 from gc_core.settings import LoadedSettings
@@ -120,6 +127,42 @@ def skill_roots(plugins: tuple[Plugin, ...]) -> tuple[SkillRoot, ...]:
     )
 
 
+def _skill_ids(roots: tuple[SkillRoot, ...]) -> frozenset[str]:
+    """Id skills плагинов (``<плагин>:<имя>``), как их заведёт реестр."""
+    ids: set[str] = set()
+    for root in roots:
+        for entry in Path(root.path).iterdir():
+            if not (entry / "SKILL.md").is_file():
+                continue
+            if root.contain and not entry.resolve().is_relative_to(
+                Path(root.contain).resolve()
+            ):
+                continue
+            ids.add(f"{root.plugin}:{skill_id_segment(entry)}")
+    return frozenset(ids)
+
+
+def _plugin_commands(
+    plugins: tuple[Plugin, ...], roots: tuple[SkillRoot, ...]
+) -> tuple[tuple[tuple[str, PluginCommand], ...], tuple[str, ...]]:
+    """Команды ``(плагин, команда)`` и диагностика: команда с id skill
+    отбрасывается — skill главнее (§4.2)."""
+    skill_ids = _skill_ids(roots)
+    kept: list[tuple[str, PluginCommand]] = []
+    notices: list[str] = []
+    for plugin in plugins:
+        for command in plugin.commands:
+            full_id = f"{plugin.name}:{command.name}"
+            if full_id in skill_ids:
+                notices.append(
+                    f"Команда плагина {full_id} не подключена: есть skill "
+                    "с тем же именем."
+                )
+            else:
+                kept.append((plugin.name, command))
+    return tuple(kept), tuple(notices)
+
+
 def _disabled_reason(loaded: LoadedSettings) -> str | None:
     settings = loaded.settings
     if settings.paths.skills_data_path:
@@ -176,6 +219,8 @@ def build_plugin_snapshot(
     servers, keys, mcp_notices = plugin_mcp_part(
         plugins, loaded.settings.mcp.servers
     )
+    roots = skill_roots(plugins)
+    commands, command_notices = _plugin_commands(plugins, roots)
     return PluginSnapshot(
         plugins=plugins,
         trusted=frozenset(
@@ -183,11 +228,11 @@ def build_plugin_snapshot(
             for path, plugin in loaded_entries
             if path in entries.installed or path not in untrusted
         ),
-        skill_roots=skill_roots(plugins),
-        commands=tuple((p.name, c) for p in plugins for c in p.commands),
+        skill_roots=roots,
+        commands=commands,
         mcp_servers=servers,
         mcp_keys=keys,
-        notices=entries.notices + mcp_notices,
+        notices=entries.notices + mcp_notices + command_notices,
         fingerprint=fingerprint,
     )
 

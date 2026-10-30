@@ -4,6 +4,7 @@ import json
 import sys
 
 import pytest
+from gc_core.agent_executor import AgentExecutor
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
@@ -12,14 +13,11 @@ from parity_harness import (
     parity_config,
 )
 
-from gc_core.agent_executor import AgentExecutor
-
 
 @pytest.fixture(autouse=True)
 def _stub_turn_finish(monkeypatch):
-    from helpers.turn_finish_apply import stub_turn_finish_apply
-
     from gc_core import processing_responses as pr
+    from helpers.turn_finish_apply import stub_turn_finish_apply
 
     real = pr.aapply_tool
 
@@ -101,7 +99,9 @@ async def test_user_prompt_hook_and_command_run_on_first_turn(
         **{"plugins.paths": [str(root)], "plugins.use_installed": False},
     )
     backend = install(monkeypatch, ScriptedBackend(_finish_turn()))
-    ctx = await rc.acreate_run_context(cfg)
+    ctx = await rc.acreate_run_context(
+        catalog.with_plugin_snapshot(cfg, clone=False)
+    )
     await AgentExecutor(ctx).arun(["/plug:hi there"], thread_id="t1")
 
     assert log.read_text().splitlines() == ["/plug:hi there"]

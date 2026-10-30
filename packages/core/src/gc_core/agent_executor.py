@@ -66,6 +66,7 @@ from gc_core.plan_store import (
     normalize_plan_block,
     now_stamp,
 )
+from gc_core.plugins.commands import expanded_prompt, listed_skill_ids
 from gc_core.processing_responses import (
     _acall_blocking_hook,
     arun_agent,
@@ -86,7 +87,7 @@ from gc_core.security.permission_mode import (
     resolve_mode,
 )
 from gc_core.security.permission_store import PermissionStore
-from gc_core.settings import settings_of
+from gc_core.settings import runtime_of, settings_of
 from gc_core.states import State
 from gc_core.summarize.config import (
     resolve_summary_limits_at_level,
@@ -1178,20 +1179,27 @@ class AgentExecutor:
         shared.plan_removed_notice = False
         return [PLAN_REMOVED_MESSAGE]
 
-    @staticmethod
-    def _seed_current_user_intent(state, new_user_messages) -> None:
+    def _seed_current_user_intent(self, state, new_user_messages) -> None:
         # На старте user turn дописываем текущий CLI-запрос в current_user_intent
         # (только реальные user-сообщения, не technical). user_intent_log — только
         # user_intent_log — только после flush при accept turn_finish.
         for new_user_message in new_user_messages:
             state.finish_gate_rejection_count = 0
-            text = extract_real_user_message_text(new_user_message)
+            text = self._user_intent_text(state, new_user_message)
             if text:
                 state.current_user_intent = append_user_ask_deduped(
                     state.current_user_intent,
                     text,
                     user_turn_seq=state.user_turn_seq,
                 )
+
+    def _user_intent_text(self, state, message) -> str:
+        """Текст реплики для лога намерений; запрос-команда плагина —
+        раскрытым текстом (§4.2)."""
+        text = extract_real_user_message_text(message)
+        snapshot = runtime_of(self._ctx).plugins
+        skill_ids = listed_skill_ids(state.skills_list or [])
+        return expanded_prompt(snapshot, skill_ids, text) or text
 
     def _thread_persist_callback(
         self,
@@ -1214,6 +1222,7 @@ class AgentExecutor:
                 state.current_user_intent,
                 step_messages_for_user_scope,
                 user_turn_seq=state.user_turn_seq,
+                text_of=lambda m: self._user_intent_text(state, m),
             )
             await _apersist_state(
                 thread_session,
@@ -1283,6 +1292,7 @@ class AgentExecutor:
                     state.current_user_intent,
                     step_messages,
                     user_turn_seq=state.user_turn_seq,
+                    text_of=lambda m: self._user_intent_text(state, m),
                 )
 
             return messages, _persist_runtime_batch, None

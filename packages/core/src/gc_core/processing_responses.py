@@ -162,6 +162,7 @@ from gc_core.message_policy.user_stop import (
 )
 from gc_core.model_choice import anote_applied
 from gc_core.model_router import AliasCircuitOpenError
+from gc_core.plugins.commands import command_messages, listed_skill_ids
 from gc_core.plugins.runtime import (
     apost_tool_call as aplugin_post_tool_call,
 )
@@ -193,7 +194,7 @@ from gc_core.security.permission_mode import (
     resolve_mode,
     tools_for_mode,
 )
-from gc_core.settings import AppConfig, settings_of
+from gc_core.settings import AppConfig, runtime_of, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.threads.errors import ThreadStoreError
@@ -2902,9 +2903,12 @@ class _AgentLoop:
             await self._apre_backend_compaction(messages, mode)
         # Хуки плагинов — в любом api_mode, как хуки инструментов и Stop.
         # UserPromptSubmit — до служебных добавок (подсказка, SessionStart):
-        # хук смотрит на последнее сообщение, это должен быть запрос.
+        # хук смотрит на последнее сообщение, это должен быть запрос. В той
+        # же точке — подстановка команды плагина (с хуками не связана).
         if mode == "user_ask":
+            request = messages
             messages = await self._aapply_plugin_user_prompt(messages)
+            messages = await self._aapply_plugin_command(messages, request)
         if chat:
             messages = await self._aapply_tool_usage_notice(messages)
         messages = await self._aapply_plugin_session_start(messages)
@@ -3261,6 +3265,22 @@ class _AgentLoop:
             messages,
             aplugin_user_prompt_messages(self.state, self.ctx, messages),
         )
+
+    async def _aapply_plugin_command(self, messages, request) -> List[Dict]:
+        """Команда плагина: раскрытый текст к запросу ``/плагин:команда``
+        (последнее сообщение ``request``)."""
+
+        async def _pending() -> List[Dict]:
+            skills = getattr(self.state, "skills_list", None) or []
+            return command_messages(
+                runtime_of(self.ctx).plugins,
+                listed_skill_ids(skills),
+                extract_real_user_message_text(
+                    request[-1] if request else None
+                ),
+            )
+
+        return await self._aadd_plugin_messages(messages, _pending())
 
     async def _aadd_plugin_messages(self, messages, pending) -> List[Dict]:
         state = self.state

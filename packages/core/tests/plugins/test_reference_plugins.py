@@ -50,7 +50,6 @@ async def _skill_ids(settings, tmp_path):
         user_root=str(empty),
         project_root=str(empty),
         plugin_roots=snapshot.skill_roots,
-        plugin_commands=list(snapshot.commands),
     )
     return {
         s["id"] if isinstance(s, dict) else s.id
@@ -161,7 +160,7 @@ def test_playwright_mcp_is_stdio_npx(tmp_path):
     assert server.args == ["@playwright/mcp@latest"]
 
 
-async def test_backend_development_agent_command_skill(tmp_path):
+async def test_backend_development_agent_and_command(tmp_path):
     root = tmp_path / "backend-development"
     _manifest(root, {"name": "backend-development", "version": "1.0.0"})
     _write(
@@ -181,8 +180,12 @@ async def test_backend_development_agent_command_skill(tmp_path):
 
     settings = _settings(root)
     ids = await _skill_ids(settings, tmp_path)
-    assert "backend-development:feature-development" in ids
+    assert "backend-development:feature-development" not in ids
     assert "backend-development:api-design-principles" in ids
+    snapshot = catalog.build_plugin_snapshot(settings, clone=False)
+    assert [(p, c.name) for p, c in snapshot.commands] == [
+        ("backend-development", "feature-development")
+    ]
 
     definitions = await adiscover_subagent_definitions(
         make_settings(

@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-import shlex
 from dataclasses import dataclass
 from typing import Any
 
@@ -76,61 +74,6 @@ def active_plugins(ctx: Any) -> tuple[Plugin, ...]:
     cfg = _plugins_config(ctx)
     paths = configured_paths(cfg)
     return load_plugins(paths) if paths else ()
-
-
-_COMMAND_RE = re.compile(r"^/([\w.-]+(?::[\w.-]+)?)(?:\s+(.*))?$", re.DOTALL)
-
-
-def find_command(
-    plugins: tuple[Plugin, ...], token: str
-) -> tuple[Plugin, Any] | None:
-    """Команда по ``плагин:команда`` либо по короткому имени, если оно одно."""
-    owner, sep, name = token.partition(":")
-    if not sep:
-        owner, name = "", token
-    found = [
-        (plugin, command)
-        for plugin in plugins
-        if not owner or plugin.name == owner
-        for command in plugin.commands
-        if command.name == name
-    ]
-    return found[0] if len(found) == 1 else None
-
-
-def expand_command(command: Any, arguments: str) -> str:
-    """Текст команды с ``$ARGUMENTS`` и ``$1``..``$9`` вместо аргументов."""
-    try:
-        words = shlex.split(arguments)
-    except ValueError:
-        words = arguments.split()
-    body = command.body.replace("$ARGUMENTS", arguments)
-    return re.sub(
-        r"\$([1-9])",
-        lambda m: (
-            words[int(m.group(1)) - 1] if int(m.group(1)) <= len(words) else ""
-        ),
-        body,
-    )
-
-
-def command_prompt_text(
-    plugins: tuple[Plugin, ...], prompt: str
-) -> str | None:
-    """Если запрос ``/плагин:команда аргументы``, текст команды для модели."""
-    match = _COMMAND_RE.match(prompt.strip())
-    if not match:
-        return None
-    found = find_command(plugins, match.group(1))
-    if found is None:
-        return None
-    plugin, command = found
-    arguments = (match.group(2) or "").strip()
-    return (
-        f"[команда плагина {plugin.name}:{command.name}] Пользователь вызвал "
-        "команду. Выполни её инструкции для его запроса.\n\n"
-        + expand_command(command, arguments)
-    )
 
 
 def _cwd(ctx: Any) -> str:
@@ -371,9 +314,6 @@ async def auser_prompt_messages(
         "prompt": prompt,
     }
     texts: list[str] = []
-    command_text = command_prompt_text(active_plugins(ctx), prompt)
-    if command_text:
-        texts.append(command_text)
     for result in await _run_event(
         ctx, EVENT_USER_PROMPT_SUBMIT, None, payload
     ):

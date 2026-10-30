@@ -48,8 +48,14 @@ from gc_core.persistence.turn_outcome import (
     turn_shown_in,
 )
 from gc_core.plan_store import plan_awaits_decision, plan_is_accepted
+from gc_core.plugins.commands import (
+    Resolution,
+    listed_skill_ids,
+    resolve_slash_name,
+)
 from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
+from gc_core.settings import runtime_of
 from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.models import ThreadRecord
 from gc_core.tools.skills.skill_arg_resolver import (
@@ -7709,8 +7715,25 @@ class TraceScreen(TraceFollowMixin, Screen):
         asking = self.app.tui_state.ask_human_state is not None
         if text.startswith("/"):
             name = (text[1:].split(None, 1) or [""])[0]
+            if self._is_plugin_command(name):
+                return False
             return not asking or self._is_known_command(name)
         return text.startswith("!") and not asking
+
+    def _slash_resolution(self, name: str) -> Resolution:
+        """`/имя` по командам плагинов снимка и прогретому кэшу скиллов —
+        функцией ядра, той же, что в цикле агента (§4.2)."""
+        commands = runtime_of(self.app.base_settings()).plugins.commands
+        skill_ids = listed_skill_ids(self._skills_cache or [])
+        return resolve_slash_name(name, commands, skill_ids)
+
+    def _is_plugin_command(self, name: str) -> bool:
+        """`/имя` — команда плагина (не перекрыта командой TUI): строка
+        уходит ядру обычным запросом, подстановку делает ядро."""
+        return (
+            self._registry.lookup(name) is None
+            and self._slash_resolution(name).kind == "command"
+        )
 
     def _is_known_command(self, name: str) -> bool:
         """`/имя` запустит команду (или алиас) или скилл — точный разбор
@@ -8998,7 +9021,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         """`/имя текст` без такой команды ≡ `/skill имя текст` — только при
         точном совпадении по прогретому кэшу. Опечатка скилл не запускает:
         «неизвестная команда» с кандидатами — команда, затем скиллы.
-        Холодный кэш — «неизвестная команда» (без ожидания прогрева)."""
+        Холодный кэш — «неизвестная команда» (без ожидания прогрева).
+        Короткое имя у команды плагина и скилла — неоднозначно."""
+        slash = self._slash_resolution(name)
+        if slash.kind == "ambiguous":
+            self._render_skill_ambiguous(name, list(slash.candidates))
+            return
         res = self._resolve_cached_skill(name)
         if isinstance(res, Resolved):
             await self._cmd_use_skill(res.canonical_id, prompt=arg)

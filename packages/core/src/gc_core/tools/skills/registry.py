@@ -12,7 +12,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Tuple,
 )
 
 import yaml
@@ -274,36 +273,6 @@ def _inside(path: Path, root: Path) -> bool:
     return path.resolve().is_relative_to(root.resolve())
 
 
-def _command_skill(plugin_name: str, command: Any) -> Skill:
-    """Команда плагина как skill ``<плагин>:<команда>``.
-
-    ``/skill <плагин>:<команда> <запрос>`` в TUI подкладывает такой skill вместе
-    с запросом пользователя, поэтому ``$ARGUMENTS`` в тексте объясняется строкой
-    сверху.
-    """
-    hint = (
-        f" Подсказка по аргументам: {command.argument_hint}."
-        if (command.argument_hint)
-        else ""
-    )
-    instructions = (
-        "Это команда плагина. Её аргументы (``$ARGUMENTS``) это текст запроса "
-        f"пользователя после имени команды.{hint}\n\n{command.body}"
-    )
-    return Skill(
-        id=f"{plugin_name}:{command.name}",
-        name=f"{plugin_name}:{command.name}",
-        description=command.description
-        or f"Команда плагина {plugin_name}: {command.name}",
-        version=None,
-        root_path=os.path.dirname(command.source),
-        instructions=instructions,
-        has_scripts=False,
-        source="system",
-        pack_id=plugin_name,
-    )
-
-
 class PluginSkillRoot(Protocol):
     """Каталог skills плагина (``SkillRoot`` из снимка), читается по полям."""
 
@@ -326,17 +295,12 @@ class SkillsRegistry:
         user_root: Optional[str] = None,
         project_root: Optional[str] = None,
         plugin_roots: Sequence[PluginSkillRoot] = (),
-        plugin_commands: Optional[List[Tuple[str, Any]]] = None,
         disable_skills: Optional[List[str]] = None,
     ) -> None:
         self._backend = backend or LocalFsBackend()
         # Каталоги skills/ включённых плагинов: слой между system и user.
         # Skills плагина получают id ``<плагин>:<skill>``, как в Claude Code.
         self._plugin_roots: List[PluginSkillRoot] = list(plugin_roots)
-        # (имя плагина, PluginCommand): команды плагинов видны как skills пакета.
-        self._plugin_commands: List[Tuple[str, Any]] = list(
-            plugin_commands or []
-        )
         # Legacy: если передан skills_root и никаких новых — режим single-source.
         # В этом режиме все скиллы помечаются как source="user".
         if (
@@ -433,9 +397,7 @@ class SkillsRegistry:
                 # else: пусто, скип  # noqa: ERA001  # описание формата, не выключенный код
 
     def _plugin_names(self) -> List[str]:
-        names = list(dict.fromkeys(r.plugin for r in self._plugin_roots))
-        names += [n for n, _ in self._plugin_commands if n not in names]
-        return names
+        return list(dict.fromkeys(r.plugin for r in self._plugin_roots))
 
     def _register_plugin_pack(self, plugin_name: str) -> None:
         self._packs_by_id[plugin_name] = {
@@ -473,23 +435,8 @@ class SkillsRegistry:
             if skill is not None and skill.id not in self._disabled:
                 self._skills_by_id[skill.id] = skill
 
-    def _add_plugin_command_skills(self, plugin_name: str) -> None:
-        for owner, command in self._plugin_commands:
-            if owner != plugin_name:
-                continue
-            skill = _command_skill(plugin_name, command)
-            if (
-                skill.id not in self._skills_by_id
-                and skill.id not in self._disabled
-            ):
-                self._skills_by_id[skill.id] = skill
-
     async def _load_plugin_skills(self) -> None:
-        """Skills плагинов как пакет ``<плагин>``: все видны в списке.
-
-        Команды плагина (``commands/*.md``) добавляются в тот же пакет как
-        skills ``<плагин>:<команда>``; skill с таким же именем главнее.
-        """
+        """Skills плагинов как пакет ``<плагин>``: все видны в списке."""
         roots: dict[str, list[tuple[str, Optional[str]]]] = {}
         for item in self._plugin_roots:
             roots.setdefault(item.plugin, []).append((item.path, item.contain))
@@ -499,7 +446,6 @@ class SkillsRegistry:
             self._register_plugin_pack(plugin_name)
             for root, contain in roots.get(plugin_name, ()):
                 await self._load_plugin_skill_dirs(plugin_name, root, contain)
-            self._add_plugin_command_skills(plugin_name)
 
     async def _load_skill_dir(
         self,
@@ -976,13 +922,11 @@ def get_skills_registry(
             disable_skills=disable_skills,
             backend=backend,
         )
-    plugins = runtime_of(settings).plugins
     return SkillsRegistry(
         disable_skills=disable_skills,
         backend=backend,
         project_root=project_root,
-        plugin_roots=plugins.skill_roots,
-        plugin_commands=list(plugins.commands),
+        plugin_roots=runtime_of(settings).plugins.skill_roots,
     )
 
 
