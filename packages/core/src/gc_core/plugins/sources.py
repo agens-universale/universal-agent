@@ -2,11 +2,11 @@
 
 Каждый источник (url + ref) живёт в своём каталоге
 ``<gc_cache>/plugins/<имя>-<хеш>``. Клон делается один раз, при загрузке
-настроек или командой ``gc-plugin``; в цикле агента сеть не используется,
-берётся только готовый кэш. Ref закрепляет версию: тег или хеш коммита не меняются сами.
-Для ветки (или без ref) обновление явное: ``python -m gc_core.plugins.sources
-update`` или удаление каталога кэша. Сбой клона не останавливает агента
-(в лог идёт предупреждение, плагин пропускается).
+сборке снимка набора (``plugins/catalog.py``); в цикле агента сеть не
+используется. Ref закрепляет версию: тег или хеш коммита не меняются сами.
+Для ветки (или без ref) обновление явное (``update_cached``) или удаление
+каталога кэша. Сбой клона не останавливает агента: плагин пропускается,
+причина попадает в диагностику снимка.
 """
 
 from __future__ import annotations
@@ -130,12 +130,36 @@ def resolve_source(
     return result
 
 
+def is_cloned(source: Any) -> bool:
+    """Есть ли на диске клон репозитория источника (без сети)."""
+    target = cache_dir(normalize_url(source.git), source.ref)
+    return (target / ".git").is_dir()
+
+
+def is_pinned(clone_dir: Path) -> bool:
+    """Клон на detached HEAD (тег или коммит): сам не обновляется."""
+    done = subprocess.run(
+        ["git", "symbolic-ref", "-q", "HEAD"],
+        cwd=clone_dir,
+        capture_output=True,
+        text=True,
+        timeout=_GIT_TIMEOUT_SEC,
+    )
+    return not done.stdout.strip()
+
+
 def update_cached() -> list[tuple[str, bool]]:
-    """Подтянуть свежий коммит во все закэшированные клоны (для веток)."""
+    """Подтянуть свежий коммит в закэшированные клоны на ветке;
+    закреплённые (тег, коммит) не трогаются и в результат не входят."""
     done: list[tuple[str, bool]] = []
     root = cache_root()
     for target in sorted(root.glob("*")) if root.is_dir() else []:
         if not (target / ".git").is_dir():
+            continue
+        try:
+            if is_pinned(target):
+                continue
+        except (OSError, subprocess.SubprocessError):
             continue
         try:
             _git(["fetch", "-q", "--depth", "1", "origin"], target)
@@ -145,20 +169,3 @@ def update_cached() -> list[tuple[str, bool]]:
             logger.warning("plugin cache %s not updated: %s", target, exc)
             done.append((target.name, False))
     return done
-
-
-def main(argv: list[str] | None = None) -> int:
-    """``update``: обновить все закэшированные плагины из git."""
-    import sys
-
-    args = list(sys.argv[1:] if argv is None else argv)
-    if args[:1] != ["update"]:
-        print("usage: python -m gc_core.plugins.sources update")
-        return 2
-    for name, ok in update_cached():
-        print(f"{name}: {'ok' if ok else 'FAILED'}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

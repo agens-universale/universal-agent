@@ -94,3 +94,15 @@ def test_surface_without_prewarm_does_not_clone(tmp_path, monkeypatch):
     assert clones == []
     assert _names(loaded) == ()
     assert any("не подключён" in n for n in runtime_of(loaded).notices)
+
+
+def test_prewarm_reports_clone_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sources, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(sources, "_resolved", {})
+    base = {"plugins.sources": [{"git": str(tmp_path / "nope")}]}
+    runtime = _runtime(base)
+
+    prewarm_plugin_sources(runtime.base, runtime.config, ["chat"])
+
+    out = capsys.readouterr()
+    assert "не подключён" in out.out + out.err

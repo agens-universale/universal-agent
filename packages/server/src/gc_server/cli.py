@@ -105,7 +105,8 @@ def prewarm_plugin_sources(loaded, cfg: ServerConfig, names) -> None:
             settings = surface_settings(loaded, cfg, name)
         except ServerConfigError:
             continue  # отказ объяснит сборка самой поверхности
-        build_plugin_snapshot(settings, clone=True)
+        for notice in build_plugin_snapshot(settings, clone=True).notices:
+            say(f"{name}: {notice}")
 
 
 async def _amain(loaded, cfg: ServerConfig, names, log_level: str) -> int:

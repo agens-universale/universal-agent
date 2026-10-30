@@ -47,6 +47,13 @@ def _installed_paths(cfg: PluginsConfig) -> list[str]:
         return []
 
 
+def _source_notice(source) -> str:
+    head = f"Плагин из источника {source.git} не подключён: "
+    if sources.is_cloned(source) and source.subdir:
+        return head + f"в репозитории нет подкаталога {source.subdir}."
+    return head + "репозиторий не получен."
+
+
 def plugin_entries(cfg: PluginsConfig, *, clone: bool) -> PluginEntries:
     """Каталоги плагинов набора. Git запускается только при ``clone=True``;
     источник без клона (или с неудачным клоном) — в ``notices``."""
@@ -55,10 +62,7 @@ def plugin_entries(cfg: PluginsConfig, *, clone: bool) -> PluginEntries:
     for source in cfg.sources:
         path = sources.resolve_source(source, fetch=clone)
         if path is None:
-            notices.append(
-                f"Плагин из источника {source.git} не подключён: "
-                "репозиторий не получен."
-            )
+            notices.append(_source_notice(source))
         else:
             paths.append(str(path))
     found = _installed_paths(cfg)
