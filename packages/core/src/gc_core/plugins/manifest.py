@@ -119,8 +119,8 @@ class PluginAgent:
 
     ``tools`` это имена инструментов из шапки как есть (в именах Claude Code
     либо агента); ``None`` только если шапка разобрана и ключа в ней нет.
-    Ключ есть, но пуст, ``null``, неверного типа или шапка не разобралась:
-    ``()``, причина в ``problem``; битую шапку отличает ``header_broken``
+    Ключ есть, но пуст, ``null``, неверного типа (в том числе список с
+    не-строками) или шапка не разобралась: ``()``, причина в ``problem``; битую шапку отличает ``header_broken``
     (такая роль не подключается). ``model`` из шапки как есть. Перевод в
     имена агента делает ``plugins.agents``.
     """
@@ -487,16 +487,23 @@ def _agent_tools(
     meta: dict[str, Any], header_problem: str
 ) -> tuple[tuple[str, ...] | None, str]:
     """Инструменты роли и причина. Закрыто на отказ: ключ есть (пусто,
-    ``null``, не тот тип) или шапка битая, значит ``()``, а не «все»."""
+    ``null``, не тот тип, в списке не строки) или шапка битая, значит
+    ``()``, а не «все»."""
     if header_problem:
         return (), header_problem
     if "tools" not in meta:
         return None, ""
-    names = _names(meta["tools"])
+    value = meta["tools"]
+    names = _names(value)
     if names is None:
-        value = meta["tools"]
         kind = "null" if value is None else type(value).__name__
         return (), f"tools: ожидались строка или список, получено {kind}"
+    alien = isinstance(value, list) and [
+        v for v in value if not isinstance(v, str)
+    ]
+    if alien:
+        shown = ", ".join(map(repr, alien))
+        return (), f"tools: в списке не строки ({shown})"
     return names, ""
 
 

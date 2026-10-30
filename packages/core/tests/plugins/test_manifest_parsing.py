@@ -56,6 +56,18 @@ def test_wrong_type_and_null_report_problem(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "header", ["tools: [5]", "tools: [1, null]", "tools: [Read, 5]"]
+)
+def test_list_with_non_string_items_is_service_only_with_problem(
+    tmp_path, header
+):
+    agent = load_agent(tmp_path, header)
+    assert agent.tools == ()
+    assert agent.header_broken is False
+    assert "tools:" in agent.problem
+
+
+@pytest.mark.parametrize(
     "text",
     [
         "---\ntools: [Read\n---\nbody",
@@ -65,8 +77,9 @@ def test_wrong_type_and_null_report_problem(tmp_path):
 )
 def test_broken_header_role_never_gets_all_tools(tmp_path, text):
     agent = load_agent_raw(tmp_path, text)
-    assert agent is None or agent.tools == ()
-    assert agent is None or agent.problem
+    assert agent.tools == ()
+    assert agent.header_broken is True
+    assert agent.problem != ""
 
 
 def test_agent_without_header_keeps_all_tools(tmp_path):
