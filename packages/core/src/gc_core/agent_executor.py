@@ -98,6 +98,7 @@ from gc_core.thread_store import (
 )
 from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.session_writer import LEASE_TTL
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
 from gc_core.tools.connect_mcp.stream_client import (
     _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
@@ -829,7 +830,7 @@ class AgentExecutor:
         self, thread_session, thread_id, system_id: str
     ) -> None:
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
-        if thread_id is None or not settings_of(self._ctx).mcp.servers:
+        if thread_id is None or not effective_mcp_servers(self._ctx):
             return
         try:
             from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot

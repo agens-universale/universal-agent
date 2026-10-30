@@ -17,9 +17,9 @@ from gc_core.config_modules.plugins import PluginsConfig
 from gc_core.config_modules.storage import FILES
 from gc_core.plugins import installed, sources
 from gc_core.plugins.manifest import PLUGIN_FORMAT_AP, Plugin, load_plugin
+from gc_core.plugins.mcp_servers import plugin_mcp_part
 from gc_core.plugins.snapshot import PluginSnapshot, SkillRoot
 from gc_core.settings import LoadedSettings
-from gc_core.tools import _REMOTE_OS_BACKENDS
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,9 @@ def _disabled_reason(loaded: LoadedSettings) -> str | None:
         )
     if settings.storage.part("agent")[0] != FILES:
         return "Плагины выключены: storage.agent — не файловое хранилище."
+    # Пакет тулов тяжёлый (~1.4 с): только когда до проверки бэкенда дошло.
+    from gc_core.tools import _REMOTE_OS_BACKENDS
+
     kind = parse_os_backend_kind(loaded)
     if kind in _REMOTE_OS_BACKENDS:
         return f"Плагины выключены: OS-бэкенд {kind} не локальный."
@@ -166,6 +169,9 @@ def build_plugin_snapshot(
     loaded_entries = _load_entries(entries.paths)
     untrusted = loaded.runtime.untrusted_plugin_entries
     plugins = tuple(plugin for _, plugin in loaded_entries)
+    servers, keys, mcp_notices = plugin_mcp_part(
+        plugins, loaded.settings.mcp.servers
+    )
     return PluginSnapshot(
         plugins=plugins,
         trusted=frozenset(
@@ -174,7 +180,9 @@ def build_plugin_snapshot(
             if path in entries.installed or path not in untrusted
         ),
         skill_roots=skill_roots(plugins),
-        notices=entries.notices,
+        mcp_servers=servers,
+        mcp_keys=keys,
+        notices=entries.notices + mcp_notices,
         fingerprint=fingerprint,
     )
 

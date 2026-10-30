@@ -9,6 +9,7 @@ import pytest
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.config_modules.plugins import PluginsConfig
 from gc_core.plugins import catalog, installed, runtime
+from gc_core.settings import LoadedSettings
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.tools.subagents.custom.file_definitions import (
     adiscover_subagent_definitions,
@@ -151,7 +152,9 @@ def test_playwright_mcp_is_stdio_npx(tmp_path):
         ),
     )
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
-    server = resolve_paths(cfg, str(tmp_path)).mcp.servers["playwright"]
+    loaded = LoadedSettings(settings=resolve_paths(cfg, str(tmp_path)))
+    snap = catalog.build_plugin_snapshot(loaded, clone=False)
+    server = snap.mcp_servers["playwright"]
     assert server.transport == "stdio"
     assert server.command == "npx"
     assert server.args == ["@playwright/mcp@latest"]

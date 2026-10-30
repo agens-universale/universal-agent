@@ -32,7 +32,6 @@ from gc_core.plugins.manifest import (
     EVENT_SESSION_START,
     EVENT_STOP,
     EVENT_USER_PROMPT_SUBMIT,
-    PLUGIN_FORMAT_AP,
     Plugin,
 )
 
@@ -466,49 +465,3 @@ async def astop_decision(
         logger.warning("plugin Stop hooks exceeded %s continuations", used)
         return [], 0
     return [_technical("\n\n".join(reasons), "plugin_stop")], used + 1
-
-
-def plugin_mcp_servers(paths: list[str]) -> dict[str, dict[str, Any]]:
-    """Серверы ``.mcp.json`` включённых плагинов под именами ``<плагин>_<имя>``."""
-    import re
-
-    def safe(text: str) -> str:
-        return re.sub(r"[^0-9A-Za-z_-]+", "_", text).strip("_") or "x"
-
-    out: dict[str, dict[str, Any]] = {}
-    for plugin in load_plugins(list(paths)):
-        for name, spec in plugin.mcp_servers.items():
-            if _data_dir_ready(plugin, name, spec):
-                out[_mcp_key(safe(plugin.name), safe(name))] = spec
-    return out
-
-
-def _mcp_key(plugin: str, server: str) -> str:
-    """``<плагин>_<сервер>``; сервер с именем плагина — просто ``<плагин>``.
-
-    Имя MCP-инструмента ``mcp_<ключ>_<тул>`` у OpenAI-совместимых бэкендов
-    ограничено 64 символами, удвоенный префикс (``context7_context7``) его съедает.
-    """
-    return plugin if server == plugin else f"{plugin}_{server}"
-
-
-def _data_dir_ready(plugin: Plugin, name: str, spec: dict[str, Any]) -> bool:
-    """Создать ``${PLUGIN_DATA}`` для stdio-сервера Agent Plugins.
-
-    Создаётся здесь, при загрузке настроек, а не при чтении плагина. Каталог
-    недоступен (только для чтения и т. п.) — сервер пропускается.
-    """
-    if plugin.format != PLUGIN_FORMAT_AP or spec["transport"] != "stdio":
-        return True
-    from gc_core.plugins.installed import plugin_data_dir
-
-    try:
-        plugin_data_dir(plugin.name)
-    except OSError as exc:
-        logger.warning(
-            "plugin mcp server %r skipped: data dir unavailable (%s)",
-            name,
-            exc.strerror or type(exc).__name__,
-        )
-        return False
-    return True

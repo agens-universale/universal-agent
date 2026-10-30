@@ -21,11 +21,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from typing import Any, Iterable
 
+from gc_core.constants.tool_names import shorten_tool_name
 from gc_core.plugins.manifest import Plugin, PluginAgent
 
 _log = logging.getLogger(__name__)
@@ -45,7 +45,6 @@ TOOL_ALIASES: dict[str, str] = {
 }
 
 _SNAKE = re.compile(r"^[a-z][a-z0-9_]*$")
-_MAX_NAME_LEN = 64
 _MAX_DESCRIPTION_LEN = 1024
 
 
@@ -55,11 +54,7 @@ def _safe(text: str) -> str:
 
 def subagent_name(plugin: str, agent: str) -> str:
     """Имя инструмента субагента: ``subagent_<плагин>_<агент>``, до 64 знаков."""
-    name = f"subagent_{_safe(plugin)}_{_safe(agent)}"
-    if len(name) <= _MAX_NAME_LEN:
-        return name
-    digest = hashlib.sha256(name.encode()).hexdigest()[:6]
-    return f"{name[: _MAX_NAME_LEN - 7]}_{digest}"
+    return shorten_tool_name(f"subagent_{_safe(plugin)}_{_safe(agent)}")
 
 
 def map_tools(names: Iterable[str]) -> tuple[tuple[str, ...], list[str]]:

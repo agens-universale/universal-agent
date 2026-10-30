@@ -1916,7 +1916,7 @@ class TuiApp(App):
         )
         from gc_core.config_modules.auth import build_auth_connector
         from gc_core.run_context import acreate_run_context
-        from gc_core.settings import settings_of
+        from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 
         from gc_tui.services.mcp_progress import McpProgress
         from gc_tui.toggles import tui_agent_settings
@@ -1927,7 +1927,7 @@ class TuiApp(App):
         choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
         progress = McpProgress()
-        progress.begin(list(settings_of(loaded).mcp.servers))
+        progress.begin(list(effective_mcp_servers(loaded)))
         self._mcp_progress = progress
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 

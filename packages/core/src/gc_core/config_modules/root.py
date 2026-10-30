@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    ValidationError,
     field_validator,
 )
 
@@ -426,36 +424,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> AppConfig:
     cfg.plugins.paths = [
         plugin_entry_path(config_dir, path) for path in cfg.plugins.paths
     ]
-    _merge_plugin_mcp_servers(cfg)
     return cfg.result()
-
-
-def _merge_plugin_mcp_servers(cfg: Any) -> None:
-    """Серверы из ``.mcp.json`` плагинов; свои серверы пользователя важнее."""
-    from gc_core.plugins.runtime import configured_paths, plugin_mcp_servers
-
-    paths = configured_paths(cfg.plugins, fetch=True)
-    if not paths:
-        return
-    from gc_core.config_modules.mcp import McpServerConfig
-
-    for name, spec in plugin_mcp_servers(paths).items():
-        if name not in cfg.mcp.servers:
-            try:
-                cfg.mcp.servers[name] = McpServerConfig(**spec)
-            except ValidationError as exc:
-                # Битый сервер плагина не должен ронять весь конфиг; значения полей
-                # в лог не пишем (там могут быть токены).
-                logging.getLogger(__name__).warning(
-                    "plugin mcp server %r skipped: %s",
-                    name,
-                    "; ".join(
-                        f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
-                        for e in exc.errors(
-                            include_input=False, include_url=False
-                        )
-                    ),
-                )
 
 
 def _clamp_summary_trigger(value: int) -> int:

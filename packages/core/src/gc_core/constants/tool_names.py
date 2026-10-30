@@ -1,5 +1,7 @@
 """Canonical agent-visible builtin tool names (TOOL_NAMESPACES_SPEC v1.1)."""
 
+import hashlib
+
 # Turn
 FINISH_TOOL_NAME = "turn_finish"
 ASK_HUMAN_TOOL_NAME = "turn_ask_human"
@@ -102,3 +104,18 @@ IMPORTANT_TOOL_NAMES = FILE_WRITE_TOOL_NAMES | frozenset(
         PROPOSE_PLAN_TOOL_NAME,
     }
 )
+
+
+# OpenAI-совместимые бэкенды ограничивают имя функции 64 символами: один тул
+# длиннее отклоняет весь запрос к модели.
+MAX_TOOL_NAME_LEN = 64
+
+
+def shorten_tool_name(name: str, limit: int = MAX_TOOL_NAME_LEN) -> str:
+    """Имя тула не длиннее ``limit``: длинное — укорочено с хешем полного
+    имени (разные длинные имена не сливаются). Один помощник на весь агент:
+    MCP-тулы и роли плагинов."""
+    if len(name) <= limit:
+        return name
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    return f"{name[: limit - 9]}_{digest}"

@@ -1,11 +1,11 @@
 import asyncio
-import hashlib
 import json
 import logging
 import time
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+from gc_core.constants.tool_names import shorten_tool_name
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 
 
@@ -42,19 +42,10 @@ def _tool_title(tool: Dict[str, Any]) -> str | None:
     return next((c for c in candidates if isinstance(c, str) and c), None)
 
 
-# OpenAI-совместимые бэкенды ограничивают имя функции 64 символами: один тул
-# длиннее отклоняет весь запрос к модели.
-MAX_TOOL_NAME_LEN = 64
-
-
 def mcp_tool_full_name(server_name: str, base_name: str) -> str:
     """Имя тула для модели ``mcp_<сервер>_<тул>``; длиннее предела — укорочено
     с хешем полного имени. Вызов идёт по метаданным записи, а не по имени."""
-    name = f"mcp_{server_name}_{base_name}"
-    if len(name) <= MAX_TOOL_NAME_LEN:
-        return name
-    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
-    return f"{name[: MAX_TOOL_NAME_LEN - 9]}_{digest}"
+    return shorten_tool_name(f"mcp_{server_name}_{base_name}")
 
 
 def _normalize_tool(

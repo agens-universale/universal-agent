@@ -675,8 +675,8 @@ def _ap_stdio_entry(
 ) -> tuple[dict[str, Any] | None, str | None]:
     from gc_core.plugins.installed import plugin_data_path
 
-    # Каталог данных создаёт ``runtime.plugin_mcp_servers`` при загрузке
-    # настроек, не здесь: чтение плагина (prepare, /plugins) ничего не пишет.
+    # Каталог данных создаёт ``mcp_servers.plugin_mcp_part`` при сборке
+    # снимка, не здесь: чтение плагина (prepare, /plugins) ничего не пишет.
     data = plugin_data_path(plugin_name)
     args, env = spec.get("args", []), spec.get("env", {})
     if not _ap_str_list(args) or not _ap_str_map(env):

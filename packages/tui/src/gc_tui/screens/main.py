@@ -6656,9 +6656,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         return self._collect_notices()
 
     def _has_mcp_servers(self) -> bool:
-        """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
-        MCP-settle — карточку досбираем тогда; без них — сразу на boot."""
-        return bool(self.app.base_settings().settings.mcp.servers)
+        """Есть ли действующие MCP-серверы (конфига и плагинов). При них
+        mcp_status осядет только на MCP-settle — карточку досбираем тогда; без
+        них — сразу на boot."""
+        from gc_core.tools.connect_mcp.effective import effective_mcp_servers
+
+        return bool(effective_mcp_servers(self.app.base_settings()))
 
     def _compose_card_lines(self, mcp_line: Optional[str]) -> Text:
         """Итог-содержимое правой колонки карточки: до четырёх строк через пустую строку.

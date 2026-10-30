@@ -71,6 +71,15 @@ def _config(monkeypatch, paths, timeout=10):
     )
 
 
+def _servers(cfg, tmp_path):
+    """Серверы плагинов из снимка набора (в ``mcp.servers`` их нет)."""
+    from gc_core.config_modules.root import resolve_paths
+    from gc_core.settings import LoadedSettings
+
+    loaded = LoadedSettings(settings=resolve_paths(cfg, str(tmp_path)))
+    return catalog.build_plugin_snapshot(loaded, clone=False).mcp_servers
+
+
 def test_load_plugin_reads_manifest_hooks_and_skills(tmp_path):
     root = _make_plugin(
         tmp_path,
@@ -691,8 +700,8 @@ async def test_post_tool_failure_uses_failure_event(tmp_path, monkeypatch):
     assert log.read_text().split() == ["PostToolUse", "PostToolUseFailure"]
 
 
-def test_plugin_mcp_json_is_loaded_and_merged_into_config(tmp_path):
-    from gc_core.config_modules.root import AppConfig, resolve_paths
+def test_plugin_mcp_json_is_loaded_into_snapshot(tmp_path):
+    from gc_core.config_modules.root import AppConfig
 
     root = _make_plugin(tmp_path, name="my plugin")
     (root / ".mcp.json").write_text(
@@ -711,8 +720,8 @@ def test_plugin_mcp_json_is_loaded_and_merged_into_config(tmp_path):
     )
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
-    out = resolve_paths(cfg, str(tmp_path))
-    servers = out.mcp.servers
+    out = _servers(cfg, tmp_path)
+    servers = out
     assert set(servers) == {"my_plugin_local", "my_plugin_remote"}
     assert servers["my_plugin_local"].command == f"{root}/bin/srv"
     assert servers["my_plugin_local"].transport == "stdio"
@@ -720,7 +729,7 @@ def test_plugin_mcp_json_is_loaded_and_merged_into_config(tmp_path):
 
 
 def test_plugin_mcp_env_vars_are_expanded(tmp_path, monkeypatch):
-    from gc_core.config_modules.root import AppConfig, resolve_paths
+    from gc_core.config_modules.root import AppConfig
 
     monkeypatch.setenv("GC_T_TOKEN", "abc")
     monkeypatch.delenv("GC_T_PATH", raising=False)
@@ -739,8 +748,8 @@ def test_plugin_mcp_env_vars_are_expanded(tmp_path, monkeypatch):
     )
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
-    out = resolve_paths(cfg, str(tmp_path))
-    server = out.mcp.servers["p_gh"]
+    out = _servers(cfg, tmp_path)
+    server = out["p_gh"]
     assert server.headers == {"Authorization": "Bearer abc"}
     assert server.url == "https://x/mcp"
 
@@ -748,7 +757,7 @@ def test_plugin_mcp_env_vars_are_expanded(tmp_path, monkeypatch):
 def test_plugin_mcp_missing_env_var_skips_server(
     tmp_path, monkeypatch, caplog
 ):
-    from gc_core.config_modules.root import AppConfig, resolve_paths
+    from gc_core.config_modules.root import AppConfig
 
     monkeypatch.delenv("GC_T_MISSING", raising=False)
     root = _make_plugin(tmp_path, name="p")
@@ -768,14 +777,14 @@ def test_plugin_mcp_missing_env_var_skips_server(
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     with caplog.at_level("WARNING"):
-        out = resolve_paths(cfg, str(tmp_path))
-    assert set(out.mcp.servers) == {"p_ok"}
+        out = _servers(cfg, tmp_path)
+    assert set(out) == {"p_ok"}
     assert "GC_T_MISSING" in caplog.text
     assert "'bad'" in caplog.text
 
 
 def test_bad_plugin_mcp_server_is_skipped(tmp_path):
-    from gc_core.config_modules.root import AppConfig, resolve_paths
+    from gc_core.config_modules.root import AppConfig
 
     root = _make_plugin(tmp_path, name="p")
     (root / ".mcp.json").write_text(
@@ -789,12 +798,12 @@ def test_bad_plugin_mcp_server_is_skipped(tmp_path):
     )
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
-    out = resolve_paths(cfg, str(tmp_path))
-    assert set(out.mcp.servers) == {"p_good"}
+    out = _servers(cfg, tmp_path)
+    assert set(out) == {"p_good"}
 
 
 def test_bad_plugin_mcp_server_warning_has_no_secret_values(tmp_path, caplog):
-    from gc_core.config_modules.root import AppConfig, resolve_paths
+    from gc_core.config_modules.root import AppConfig
 
     root = _make_plugin(tmp_path, name="p")
     (root / ".mcp.json").write_text(
@@ -804,7 +813,7 @@ def test_bad_plugin_mcp_server_warning_has_no_secret_values(tmp_path, caplog):
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     with caplog.at_level("WARNING"):
-        resolve_paths(cfg, str(tmp_path))
+        _servers(cfg, tmp_path)
     assert "p_bad" in caplog.text
     assert "SECRET123" not in caplog.text
 
@@ -1389,7 +1398,7 @@ def _ap_plugin(tmp_path, servers, name="apmcp", schema=AP_MCP_SCHEMA):
 
 
 def test_ap_mcp_streamable_http(tmp_path):
-    from gc_core.config_modules.root import AppConfig, resolve_paths
+    from gc_core.config_modules.root import AppConfig
 
     root = _ap_plugin(
         tmp_path,
@@ -1397,7 +1406,7 @@ def test_ap_mcp_streamable_http(tmp_path):
     )
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
-    servers = resolve_paths(cfg, str(tmp_path)).mcp.servers
+    servers = _servers(cfg, tmp_path)
     assert servers["apmcp_api"].transport == "stream_http"
 
 
@@ -1637,7 +1646,7 @@ def test_plugin_data_dir_not_created_at_load_and_mkdir_failure_fail_open(
 ):
     from pathlib import Path
 
-    from gc_core.config_modules.root import AppConfig, resolve_paths
+    from gc_core.config_modules.root import AppConfig
 
     root = _ap_plugin(
         tmp_path, {"s": {"type": "stdio", "command": "node"}}, name="dataro"
@@ -1655,12 +1664,12 @@ def test_plugin_data_dir_not_created_at_load_and_mkdir_failure_fail_open(
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     monkeypatch.setattr(Path, "mkdir", boom)
-    servers = resolve_paths(cfg, str(tmp_path)).mcp.servers
+    servers = _servers(cfg, tmp_path)
     monkeypatch.undo()
     assert "dataro_s" not in servers
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
-    assert "dataro_s" in resolve_paths(cfg, str(tmp_path)).mcp.servers
+    assert "dataro_s" in _servers(cfg, tmp_path)
     assert data.is_dir()
 
 
@@ -1830,7 +1839,7 @@ def test_install_with_mcp_env_var_unset_succeeds_and_says_so(
 
 def test_mcp_server_named_like_plugin_gets_short_key(tmp_path):
     """``context7`` вместо ``context7_context7``: короче имена инструментов."""
-    from gc_core.config_modules.root import AppConfig, resolve_paths
+    from gc_core.config_modules.root import AppConfig
 
     root = _make_plugin(tmp_path, name="ctx")
     (root / ".mcp.json").write_text(
@@ -1844,9 +1853,9 @@ def test_mcp_server_named_like_plugin_gets_short_key(tmp_path):
     )
     catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
-    out = resolve_paths(cfg, str(tmp_path))
-    assert {"ctx", "ctx_other"} <= set(out.mcp.servers)
-    assert "ctx_ctx" not in out.mcp.servers
+    out = _servers(cfg, tmp_path)
+    assert {"ctx", "ctx_other"} <= set(out)
+    assert "ctx_ctx" not in out
 
 
 def test_update_asks_when_hook_script_content_changes(tmp_path, monkeypatch):
