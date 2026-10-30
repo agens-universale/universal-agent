@@ -243,6 +243,7 @@ def build_default_registry() -> CommandRegistry:
         Command("status", (), "", "Состояние текущей сессии"),
         Command("stop", (), "", "Остановить активную задачу", hotkey="Ctrl+C"),
         Command("mcp", (), "", "MCP-серверы и их тулы"),
+        Command("plugins", (), "", "Установленные плагины"),
         Command(
             "buffer",
             (),

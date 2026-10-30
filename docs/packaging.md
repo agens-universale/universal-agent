@@ -15,7 +15,7 @@
 | `gc-cli` | `gc_cli` | `gc-cli` |
 | `gc-tui` | `gc_tui` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc_server` | `gc-serve` — поверхности webhook, chat, a2a, swarm |
-| `gc-mcp` | `recommended_mcp` | `gc-mcp`, `gc-mcp-install` |
+| `gc-mcp` | `recommended_mcp` | `gc-mcp`, `gc-mcp-install`, `gc-plugin` |
 | `gc-acp` | `gc_acp` | `gc-acp` |
 | `gc-stores` | `gc_stores` | **нет** — библиотека: хранилища тредов на базах, драйвер — extra (`gc-stores[postgres]`) |
 | `gc-ua` | — (только метаданные) | все листовые команды выше |
@@ -231,7 +231,7 @@ provided by dependencies of tool packages are not installed»). Поэтому �
 | `gc-cli` | `gc-cli` |
 | `gc-tui` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc-serve` |
-| `gc-mcp` | `gc-mcp`, `gc-mcp-install` |
+| `gc-mcp` | `gc-mcp`, `gc-mcp-install`, `gc-plugin` |
 | `gc-acp` | `gc-acp` |
 | `gc-ua` (мета) | все листовые команды, включая `gc-acp` и `gc-serve` |
 | `gc-core` | ничего, это библиотека |

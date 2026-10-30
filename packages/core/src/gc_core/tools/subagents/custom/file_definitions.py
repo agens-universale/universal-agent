@@ -288,6 +288,23 @@ async def adiscover_subagent_definitions(
             continue
         taken[definition.name] = definition
 
+    # Агенты включённых плагинов идут после папки: её определения побеждают.
+    from gc_core.plugins.agents import plugin_subagent_definitions
+
+    for definition in plugin_subagent_definitions(
+        settings, logger=logger, diagnostics=diagnostics
+    ):
+        if _name_collides(
+            definition,
+            definition.source_path,
+            builtin,
+            taken,
+            logger,
+            diagnostics,
+        ):
+            continue
+        taken[definition.name] = definition
+
     return list(taken.values())
 
 
