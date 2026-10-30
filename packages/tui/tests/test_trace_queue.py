@@ -184,10 +184,15 @@ def test_queued_reply_shows_full_skill_id_in_reply_colour():
     assert _skill_color(reply) == {RichColor.parse(palette.QUIET_REPLY_INK)}
 
 
-def test_normal_reply_skill_has_no_colour_of_its_own():
+def test_normal_reply_skill_name_in_skill_colour():
     for state in ("normal", "pending", "failed"):
         reply = UserReplyContainer("текст", state=state, skill="p:coder")
-        assert _skill_color(reply) == set()
+        assert _skill_color(reply) == {RichColor.parse(palette.SKILL)}
+
+
+def test_missing_skill_name_in_reply_colour():
+    reply = UserReplyContainer("текст", skill="coder", skill_error=True)
+    assert _skill_color(reply) == set()
 
 
 def test_skill_without_pack_shows_name():

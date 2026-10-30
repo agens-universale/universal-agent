@@ -20,6 +20,7 @@ from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.palette import QUIET_REPLY_INK as _QUIET_INK
 from gc_tui.palette import QUIET_REPLY_MARK as _QUIET_MARK
+from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
 from gc_tui.services.path_display import fit_path
 from gc_tui.services.trace_render import (
@@ -304,8 +305,9 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
 
     ``skill`` — полный id скилла с пакетом (`supercoder:brainstorming`;
     без пакета — просто имя): первым словом после маркера, `/id` цветом
-    текста реплики (решение 19); ``skill_error`` — скилл не найден: имя
-    как набрано и следствие `└ ✕ скилл … не найден …` (спека P3 §2.3).
+    `SKILL` (в тихой реплике и у ненайденного — цветом текста);
+    ``skill_error`` — скилл не найден: имя как набрано и следствие
+    `└ ✕ скилл … не найден …` (спека P3 §2.3).
     """
 
     DEFAULT_CSS = """
@@ -428,17 +430,21 @@ class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
         if quiet:
             body = self._quiet_body(first.body)
         elif self._skill is not None:
-            body = self._skill_head().append_text(first.body)
+            body = self._skill_head(styled=True).append_text(first.body)
         else:
             return lines
         return [first._replace(body=body), *lines[1:]]
 
-    def _skill_head(self) -> Text:
+    def _skill_head(self, *, styled: bool = False) -> Text:
         """`/id ` перед текстом первой строки; без текста — только id.
-        Цвет — цвет текста реплики (стиля нет). Без скилла — пусто."""
+        ``styled`` — имя цветом `SKILL`, как в строке вызова `Skill`: скилл
+        применён; ненайденный — цветом текста. Без ``styled`` (тихая
+        реплика) — цвет текста строки. Без скилла — пусто."""
         if self._skill is None:
             return Text()
-        head = Text("/" + self._skill)
+        style = Style(color=_SKILL) if styled and not self._skill_error else ""
+        head = Text()
+        head.append("/" + self._skill, style=style)
         if self._text:
             head.append(" ")
         return head
