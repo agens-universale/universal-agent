@@ -332,7 +332,7 @@ def test_git_source_is_cloned_once_into_cache_and_loaded(
 def test_runtime_does_not_clone(tmp_path, monkeypatch, caplog):
     from gc_core.plugins import sources
 
-    def boom(*a, **k):
+    def boom(*_a, **_k):
         raise AssertionError("clone on hot path")
 
     monkeypatch.setattr(sources, "cache_root", lambda: tmp_path / "cache")
@@ -357,7 +357,7 @@ def test_runtime_uses_cached_source_without_fetch(tmp_path, monkeypatch):
     assert _paths(cfg, clone=True) != []
     sources._resolved.clear()
 
-    def boom(*a, **k):
+    def boom(*_a, **_k):
         raise AssertionError("clone on hot path")
 
     monkeypatch.setattr(sources, "_clone", boom)
@@ -383,7 +383,7 @@ def test_short_github_form_is_normalized():
     assert normalize_url("https://x.y/z.git") == "https://x.y/z.git"
 
 
-def test_install_list_disable_enable_update_uninstall(tmp_path, monkeypatch):
+def test_install_list_disable_enable_update_uninstall(tmp_path):
     from gc_core.plugins import installed
 
     catalog.reset_plugin_cache()
@@ -427,7 +427,7 @@ def test_install_rejects_non_plugin_dir(tmp_path):
         installed.install(str(empty))
 
 
-def test_install_from_git_pins_commit(tmp_path, monkeypatch):
+def test_install_from_git_pins_commit(tmp_path):
     from gc_core.plugins import installed
 
     repo = _git_repo(tmp_path)
@@ -924,7 +924,7 @@ def test_plugin_data_dir_not_created_at_load_and_mkdir_failure_fail_open(
         pass
     assert not data.exists()
 
-    def boom(self, *a, **kw):
+    def boom(_self, *_a, **_kw):
         raise OSError(30, "Read-only file system")
 
     catalog.reset_plugin_cache()

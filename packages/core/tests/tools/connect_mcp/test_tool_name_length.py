@@ -22,7 +22,7 @@ def _normalized(server: str, name: str) -> dict:
 
 
 async def test_long_tool_name_is_shortened_and_still_routes(monkeypatch):
-    async def fake_discover(items, **_kw):
+    async def fake_discover(_items, **_kw):
         return {
             SERVER: (
                 [_normalized(SERVER, LONG), _normalized(SERVER, "ping")],

@@ -5,6 +5,7 @@ import subprocess
 
 import pytest
 from gc_core.plugins import installed
+
 from recommended_mcp import plugin_cli as cli
 
 
@@ -100,7 +101,7 @@ def test_gc_plugin_cli_roundtrip(tmp_path, capsys):
     assert cli.main(["uninstall", "cli-demo"]) == 0
 
 
-def test_cli_accepts_source_as_name(tmp_path, capsys):
+def test_cli_accepts_source_as_name(tmp_path):
     src = _make_plugin(tmp_path, with_skill=True, name="by-src")
     assert cli.main(["install", "--yes", str(src)]) == 0
     assert installed.resolve_name(str(src)) == "by-src"
@@ -195,7 +196,7 @@ def test_install_prompt_eof_means_no(tmp_path, monkeypatch, capsys):
     src = _mcp_plugin(tmp_path)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
 
-    def eof(prompt=""):
+    def eof(_prompt=""):
         raise EOFError
 
     monkeypatch.setattr("builtins.input", eof)
