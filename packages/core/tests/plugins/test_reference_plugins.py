@@ -44,12 +44,13 @@ def _skill(root, name):
 async def _skill_ids(settings, tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir(exist_ok=True)
+    snapshot = catalog.build_plugin_snapshot(settings, clone=False)
     reg = SkillsRegistry(
         system_root=str(empty),
         user_root=str(empty),
         project_root=str(empty),
-        plugin_roots=runtime.plugin_skill_roots(settings),
-        plugin_commands=runtime.plugin_command_defs(settings),
+        plugin_roots=snapshot.skill_roots,
+        plugin_commands=list(snapshot.commands),
     )
     return {
         s["id"] if isinstance(s, dict) else s.id

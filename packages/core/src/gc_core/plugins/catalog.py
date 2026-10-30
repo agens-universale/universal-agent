@@ -184,6 +184,7 @@ def build_plugin_snapshot(
             if path in entries.installed or path not in untrusted
         ),
         skill_roots=skill_roots(plugins),
+        commands=tuple((p.name, c) for p in plugins for c in p.commands),
         mcp_servers=servers,
         mcp_keys=keys,
         notices=entries.notices + mcp_notices,

@@ -4,14 +4,23 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+)
 
 import yaml
 
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 from gc_core.bundled_assets import bundled_root
-from gc_core.settings import settings_of
+from gc_core.settings import runtime_of, settings_of
 
 SKILL_MD = "SKILL.md"
 
@@ -295,6 +304,14 @@ def _command_skill(plugin_name: str, command: Any) -> Skill:
     )
 
 
+class PluginSkillRoot(Protocol):
+    """Каталог skills плагина (``SkillRoot`` из снимка), читается по полям."""
+
+    plugin: str
+    path: str
+    contain: Optional[str]
+
+
 class SkillsRegistry:
     """
     Простой реестр скиллов, основанный только на файловой структуре skills_data/.
@@ -308,16 +325,14 @@ class SkillsRegistry:
         system_root: Optional[str] = None,
         user_root: Optional[str] = None,
         project_root: Optional[str] = None,
-        plugin_roots: Optional[List[Tuple[str, str, Optional[str]]]] = None,
+        plugin_roots: Sequence[PluginSkillRoot] = (),
         plugin_commands: Optional[List[Tuple[str, Any]]] = None,
         disable_skills: Optional[List[str]] = None,
     ) -> None:
         self._backend = backend or LocalFsBackend()
-        # (имя плагина, каталог skills/) включённых плагинов: слой между system и
-        # user. Skills плагина получают id ``<плагин>:<skill>``, как в Claude Code.
-        self._plugin_roots: List[Tuple[str, str, Optional[str]]] = list(
-            plugin_roots or []
-        )
+        # Каталоги skills/ включённых плагинов: слой между system и user.
+        # Skills плагина получают id ``<плагин>:<skill>``, как в Claude Code.
+        self._plugin_roots: List[PluginSkillRoot] = list(plugin_roots)
         # (имя плагина, PluginCommand): команды плагинов видны как skills пакета.
         self._plugin_commands: List[Tuple[str, Any]] = list(
             plugin_commands or []
@@ -418,7 +433,7 @@ class SkillsRegistry:
                 # else: пусто, скип  # noqa: ERA001  # описание формата, не выключенный код
 
     def _plugin_names(self) -> List[str]:
-        names = [name for name, _, _ in self._plugin_roots]
+        names = list(dict.fromkeys(r.plugin for r in self._plugin_roots))
         names += [n for n, _ in self._plugin_commands if n not in names]
         return names
 
@@ -476,8 +491,8 @@ class SkillsRegistry:
         skills ``<плагин>:<команда>``; skill с таким же именем главнее.
         """
         roots: dict[str, list[tuple[str, Optional[str]]]] = {}
-        for n, r, c in self._plugin_roots:
-            roots.setdefault(n, []).append((r, c))
+        for item in self._plugin_roots:
+            roots.setdefault(item.plugin, []).append((item.path, item.contain))
         for plugin_name in self._plugin_names():
             if plugin_name in self._disabled:
                 continue
@@ -961,17 +976,13 @@ def get_skills_registry(
             disable_skills=disable_skills,
             backend=backend,
         )
-    from gc_core.plugins.runtime import (
-        plugin_command_defs,
-        plugin_skill_roots,
-    )
-
+    plugins = runtime_of(settings).plugins
     return SkillsRegistry(
         disable_skills=disable_skills,
         backend=backend,
         project_root=project_root,
-        plugin_roots=plugin_skill_roots(settings),
-        plugin_commands=plugin_command_defs(settings),
+        plugin_roots=plugins.skill_roots,
+        plugin_commands=list(plugins.commands),
     )
 
 

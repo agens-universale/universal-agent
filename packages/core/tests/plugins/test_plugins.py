@@ -7,11 +7,10 @@ import os
 import shutil
 import sys
 import time
-
-import pytest
 from types import SimpleNamespace
 
-from gc_core.config_modules.plugins import PluginSource, PluginsConfig
+import pytest
+from gc_core.config_modules.plugins import PluginsConfig, PluginSource
 from gc_core.plugins import catalog, installed, runtime
 from gc_core.plugins.hook_runner import run_hook
 from gc_core.plugins.manifest import (
@@ -19,6 +18,7 @@ from gc_core.plugins.manifest import (
     load_plugin,
     validate_ap_manifest,
 )
+from gc_core.plugins.snapshot import SkillRoot
 from gc_core.tools.skills.registry import SkillsRegistry
 
 PY = sys.executable
@@ -579,7 +579,6 @@ async def test_no_plugins_configured_is_a_noop(monkeypatch):
     decision = await runtime.apre_tool_call(ctx, state, "t", "{}")
     assert decision.arguments == "{}" and decision.blocked_output is None
     assert await runtime.asession_start_messages(state, ctx) == ([], True)
-    assert runtime.plugin_skill_roots(None) == []
 
 
 async def test_plugin_skills_are_visible_between_system_and_user(tmp_path):
@@ -590,7 +589,7 @@ async def test_plugin_skills_are_visible_between_system_and_user(tmp_path):
         system_root=str(empty),
         user_root=str(empty),
         project_root=str(empty),
-        plugin_roots=[("demo", str(root / "skills"), None)],
+        plugin_roots=[SkillRoot("demo", str(root / "skills"), None)],
     )
     skills = await reg.list_skills()
     assert "demo:demo-skill" in {
@@ -1358,7 +1357,7 @@ async def test_ap_skill_symlink_outside_root_skipped(tmp_path):
         system_root=str(empty),
         user_root=str(empty),
         project_root=str(empty),
-        plugin_roots=[("x", str(root / "skills"), str(root))],
+        plugin_roots=[SkillRoot("x", str(root / "skills"), str(root))],
     )
     ids = {
         s["id"] if isinstance(s, dict) else s.id

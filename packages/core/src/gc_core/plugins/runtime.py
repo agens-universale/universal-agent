@@ -23,7 +23,7 @@ import shlex
 from dataclasses import dataclass
 from typing import Any
 
-from gc_core.plugins.catalog import load_plugins, plugin_entries, skill_roots
+from gc_core.plugins.catalog import load_plugins, plugin_entries
 from gc_core.plugins.hook_runner import HookResult, run_hook
 from gc_core.plugins.manifest import (
     EVENT_POST_TOOL_USE,
@@ -76,53 +76,6 @@ def active_plugins(ctx: Any) -> tuple[Plugin, ...]:
     cfg = _plugins_config(ctx)
     paths = configured_paths(cfg)
     return load_plugins(paths) if paths else ()
-
-
-def plugin_skill_roots(
-    settings: Any,
-) -> list[tuple[str, str, str | None]]:
-    """``(имя, каталог skills, корень для проверки вложенности)`` для реестра.
-
-    У плагина несколько каталогов: по записи на каждый.
-
-    Корень задан только у плагинов Agent Plugins: их skills за пределами
-    плагина (ссылкой) пропускаются.
-    """
-    if settings is None:
-        return []
-    try:
-        from gc_core.settings import settings_of
-
-        cfg = settings_of(settings).plugins
-    except Exception:
-        return []
-    paths = configured_paths(cfg)
-    if not paths:
-        return []
-    return [
-        (root.plugin, root.path, root.contain)
-        for root in skill_roots(load_plugins(paths))
-    ]
-
-
-def plugin_command_defs(settings: Any) -> list[tuple[str, Any]]:
-    """``(имя плагина, PluginCommand)`` команд включённых плагинов."""
-    if settings is None:
-        return []
-    try:
-        from gc_core.settings import settings_of
-
-        cfg = settings_of(settings).plugins
-    except Exception:
-        return []
-    paths = configured_paths(cfg)
-    if not paths:
-        return []
-    return [
-        (plugin.name, command)
-        for plugin in load_plugins(paths)
-        for command in plugin.commands
-    ]
 
 
 _COMMAND_RE = re.compile(r"^/([\w.-]+(?::[\w.-]+)?)(?:\s+(.*))?$", re.DOTALL)
