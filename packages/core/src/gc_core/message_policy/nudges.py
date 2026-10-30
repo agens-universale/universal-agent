@@ -388,32 +388,30 @@ class NudgeHold:
     def arm_prepare(
         self, messages: list[dict[str, Any]], state: Any
     ) -> list[dict[str, Any]]:
-        """Выбрать носителя и соседей; вырезать hold из state. → to_commit."""
+        """Последний ответ и соседи за ним — на диск после решения про сводку.
+
+        В историю они попадают сразу. ``state`` не режется: вынимать нечего.
+        → что записать на диск этим шагом, без носителя и соседей.
+        """
+        del state
         carrier = self.find_carrier(messages)
         self.carrier = carrier
         self.followers = []
-        held_ids: set[int] = set()
-        if carrier is not None:
-            try:
-                carrier_at = messages.index(carrier)
-            except ValueError:
-                carrier_at = len(messages)
-            self.followers = [
-                message
-                for message in messages[carrier_at + 1 :]
-                if isinstance(message, dict)
-            ]
-            held_ids = {
-                id(carrier),
-                *(id(message) for message in self.followers),
-            }
-            state.messages = [
-                message
-                for message in state.messages
-                if id(message) not in held_ids
-            ]
-        if not held_ids:
+        if carrier is None:
             return messages
+        try:
+            carrier_at = messages.index(carrier)
+        except ValueError:
+            return messages
+        self.followers = [
+            message
+            for message in messages[carrier_at + 1 :]
+            if isinstance(message, dict)
+        ]
+        held_ids = {
+            id(carrier),
+            *(id(message) for message in self.followers),
+        }
         return [message for message in messages if id(message) not in held_ids]
 
     async def _apersist_one(

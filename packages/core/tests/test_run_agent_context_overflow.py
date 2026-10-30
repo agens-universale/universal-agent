@@ -1,6 +1,8 @@
 """run_agent при переполнении контекста: force-компакция + повтор, не краш."""
 
 from gc_core import processing_responses as pr
+from gc_core import run_summary_coordinator as rsc
+from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
 
@@ -187,6 +189,120 @@ def test_summary_hook_drops_nudges_for_this_request(monkeypatch):
     assert state.todo_reminder_cnt == 0
     assert notice["project_memory_check_cnt"] == 0
     assert state.mode_announced == "default"
+
+
+def test_overflow_retry_does_not_glue_old_batch_onto_summary(monkeypatch):
+    """После аварийной сводки повтор не дописывает исходный батч поверх неё."""
+    seen = []
+    state = _state()
+
+    async def _fake_process_user_ask(messages, st, _ctx):
+        seen.append(
+            {
+                "batch": [m.get("id") for m in messages],
+                "state": [m.get("id") for m in st.messages],
+            }
+        )
+        if len(seen) == 1:
+            raise ValueError(
+                "Requested token count exceeds the model's maximum context "
+                "length of 131072 tokens. Please reduce the number of tokens"
+            )
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp_2"
+
+    def _compact():
+        state.messages = [{"role": "user", "content": "SUMMARY", "id": "sum"}]
+        return True
+
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
+
+    result = run_coro(
+        pr.arun_agent(
+            [{"role": "user", "content": "сделай", "id": "u1"}],
+            state,
+            _run_ctx(),
+            force_compact_hook=_compact,
+        )
+    )
+
+    assert result == "готово"
+    assert seen[1]["batch"] == ["sum"]
+    assert seen[1]["state"] == ["sum"]
+
+
+def test_tool_output_step_compacts_while_output_is_held(monkeypatch):
+    """Ответ инструмента уже в истории — сводка перед моделью его забирает."""
+    output = {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": "x" * 400,
+        "id": "fco",
+    }
+    compacted = {"yes": False}
+
+    async def _fake_tools(
+        _messages, _state, _ctx, batch_trace=None, **_kwargs
+    ):
+        if isinstance(batch_trace, dict):
+            batch_trace.setdefault("executed", []).append("c1")
+        return [output]
+
+    async def _fake_outputs(messages, _state, _ctx):
+        compacted["sent"] = [m.get("id") for m in messages]
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp"
+
+    async def _compact(**kwargs):
+        compacted["yes"] = True
+        compacted["source"] = [m.get("id") for m in kwargs["state"].messages]
+        kept = [m.get("id") for m in kwargs["kept_messages"]]
+        compacted["kept"] = kept
+        kwargs["state"].messages = [
+            {"role": "user", "content": "SUMMARY", "id": "sum"}
+        ]
+
+    monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_tools)
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", _fake_outputs)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _compact)
+
+    state = _state()
+    state.backend_api_mode = "chat_completions"
+    ctx = _run_ctx()
+    coord = RunSummaryCoordinator(
+        ctx=ctx,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=50,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+
+    result = run_coro(
+        pr.arun_agent(
+            [
+                {
+                    "type": "function_call",
+                    "call_id": "c1",
+                    "name": "fs_read",
+                    "arguments": "{}",
+                    "id": "fc",
+                }
+            ],
+            state,
+            ctx,
+            pre_backend_compaction_hook=coord.apre_backend_compaction_hook,
+        )
+    )
+
+    assert result == "готово"
+    assert compacted["yes"] is True
+    assert "fco" in compacted["source"]
+    assert "fco" not in compacted["kept"]
+    assert "fc" not in compacted["kept"]
+    assert "fco" not in compacted["sent"]
 
 
 def test_non_overflow_error_still_propagates(monkeypatch):

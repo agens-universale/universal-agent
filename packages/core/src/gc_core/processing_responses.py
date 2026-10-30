@@ -146,7 +146,9 @@ from gc_core.model_router import AliasCircuitOpenError
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
-from gc_core.run_summary_coordinator import filter_messages_not_in_state
+from gc_core.run_summary_coordinator import (
+    filter_messages_not_in_state,
+)
 from gc_core.runtime_notices import (
     maybe_push_level_reroute_notice,
     maybe_push_llm_failure_notice,
@@ -2843,12 +2845,27 @@ class _AgentLoop:
         except Exception as backend_exc:
             if not await self._atry_recover_context_overflow(backend_exc):
                 raise
-            outcome = _Outcome(messages, restart=True)
-            outcome.mode = mode
             # Тот же шаг: подсказки уже в messages, notices_sent не снимаем.
-            return outcome
+            return self._overflow_resume(messages, mode)
         outcome.mode = mode
         self._nudges.notices_sent = False
+        return outcome
+
+    def _overflow_resume(self, messages, mode) -> _Outcome:
+        """Повтор шага после сводки. Старый батч поверх неё не кладём."""
+        resume = messages
+        if self._nudges.skip_fill:
+            fresh = [
+                message
+                for message in (self.state.messages or [])
+                if isinstance(message, dict)
+            ]
+            if fresh:
+                self._nudges.carrier = None
+                self._nudges.followers = []
+                resume = fresh
+        outcome = _Outcome(resume, restart=True)
+        outcome.mode = mode
         return outcome
 
     async def _aprepare_main_request(
@@ -2869,6 +2886,10 @@ class _AgentLoop:
                 return None
             if await self._apre_backend_compaction(messages, mode):
                 self._discard_nudges_after_summary(skip_fill=True)
+                # Ответ уже вошёл в сводку. Запись на диск вернула бы его
+                # в трейс сырым, без подсказок он туда и не нужен.
+                self._nudges.carrier = None
+                self._nudges.followers = []
             if self._stopped_before_call():
                 await self._nudges.apublish(
                     messages,
@@ -3165,12 +3186,12 @@ class _AgentLoop:
         state = self.state
         self._log_incoming(messages)
         messages = self._sanitize_batch(messages)
-        # Соседи после носителя (реплика, картинка) пишутся вместе с ним,
-        # иначе тред увидит их раньше ответа инструмента.
+        # Весь батч сразу в истории. Последний ответ и соседи за ним
+        # (реплика, картинка) на диск — после сводки: без неё уже с подсказками.
         to_commit = self._nudges.arm_prepare(messages, state)
         new_state_messages = filter_messages_not_in_state(
             list(getattr(state, "messages", []) or []),
-            list(to_commit),
+            list(messages),
         )
         if new_state_messages:
             state.mark_turn_start()

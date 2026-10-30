@@ -411,16 +411,24 @@ class RunSummaryCoordinator:
     async def _acompact_backend_batch(
         self, current_messages: list[dict], mode: str, trigger_reason: str
     ) -> bool:
-        """Сжать полный контекст, сохранив текущий батч для отправки модели."""
+        """Сжать историю, если она вышла за порог.
+
+        Вызов и ответ уже в ``state``: они входят в сводку и после неё
+        не остаются. Свежие реплики и картинки возвращаются следом.
+        """
         state = self._state
+        state_tail = getattr(state, "messages", None)
+        if not isinstance(state_tail, list):
+            return False
+        if not current_messages or not _messages_tail_matches(
+            state_tail, list(current_messages)
+        ):
+            return False
+
         hits = self._backend_batch_trigger_hits()
         if not hits:
             return False
         exceeded_chars, exceeded_tokens = _hit_pair(hits)
-
-        state_tail = getattr(state, "messages", None)
-        if not isinstance(state_tail, list):
-            return False
 
         preserved_batch = build_preserved_batch(
             current_messages=list(current_messages),
@@ -428,9 +436,6 @@ class RunSummaryCoordinator:
             state_messages=list(state_tail),
             message_keys_already_persisted=self._keys_persisted_before_last_batch(),
         )
-        suffix_exact = list(current_messages)
-        if not _messages_tail_matches(state_tail, suffix_exact):
-            return False
 
         # State заменяется до callback: текущий батч должен вернуться даже
         # при сбое трассы, снятия флага или отмене после применения сводки.
@@ -469,7 +474,8 @@ class RunSummaryCoordinator:
 
     def _backend_batch_trigger_hits(self) -> Any:
         """Сработавшие триггеры сжатия перед вызовом бэкенда; пусто — сжимать
-        не нужно (не `chat_completions` или триггеры выключены)."""
+        не нужно (не `chat_completions` или триггеры выключены).
+        """
         if self._state.backend_api_mode != "chat_completions":
             return None
         self._refresh_limits()

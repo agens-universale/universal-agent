@@ -333,7 +333,9 @@ def exceeded_summary_triggers(
     tokens_hit = False
     if summary_trigger_tokens > 0:
         estimate = _prompt_token_estimate(
-            state, tags=tags, strip_think=strip_think
+            state,
+            tags=tags,
+            strip_think=strip_think,
         )
         tokens_hit = estimate is not None and estimate > summary_trigger_tokens
     return SummaryTriggerHits(chars=chars_hit, tokens=tokens_hit)
