@@ -2792,6 +2792,8 @@ class _AgentLoop:
             outcome = await self._adispatch(mode, messages, backend_mode)
         except WrongFunctionArgumentsException as e:
             # Аргументы отвалились на exec — ход модели всё равно «закрыт».
+            # Следующий запрос к модели — новый шаг, подсказки собираются снова.
+            self._nudges.notices_sent = False
             outcome = _Outcome(
                 self._bounce_wrong_arguments(e), completed_step=True
             )
@@ -2806,8 +2808,10 @@ class _AgentLoop:
                 raise
             outcome = _Outcome(messages, restart=True)
             outcome.mode = mode
+            # Тот же шаг: подсказки уже в messages, notices_sent не снимаем.
             return outcome
         outcome.mode = mode
+        self._nudges.notices_sent = False
         return outcome
 
     async def _aprepare_main_request(
@@ -2848,7 +2852,14 @@ class _AgentLoop:
     async def _aflush_nudges(
         self, messages: List[Dict], backend_mode: str
     ) -> List[Dict]:
-        """Flush hold перед моделью; без носителя — редкий user + notices."""
+        """Flush hold перед моделью; без носителя — редкий user + notices.
+
+        Повтор того же шага после переполнения окна подсказки не собирает:
+        они уже в ``messages``, а запасной путь без носителя тикнул бы
+        счётчики ещё раз.
+        """
+        if self._nudges.notices_sent:
+            return messages
         messages, done = await self._nudges.aflush_before_model(
             messages,
             state=self.state,
@@ -2861,12 +2872,16 @@ class _AgentLoop:
             apersist=self._anudge_persist,
         )
         if done:
+            self._nudges.notices_sent = True
             return messages
         if backend_mode == "chat_completions":
             messages = await self._aapply_tool_usage_notice(messages)
             if self._stopped_before_call():
+                self._nudges.notices_sent = True
                 return messages
-        return await self._aannounce_mode(messages)
+        messages = await self._aannounce_mode(messages)
+        self._nudges.notices_sent = True
+        return messages
 
     # ----------------------------------------------------------- iteration
     async def _apoll_pending(self, messages, *, first_poll: bool):

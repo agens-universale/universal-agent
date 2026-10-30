@@ -280,7 +280,14 @@ def _insert_carrier(
 class NudgeHold:
     """Hold носителя батча + буфер: publish до/после flush, clear на stop."""
 
-    __slots__ = ("buffer", "carrier", "compacted", "followers", "trace")
+    __slots__ = (
+        "buffer",
+        "carrier",
+        "compacted",
+        "followers",
+        "notices_sent",
+        "trace",
+    )
 
     def __init__(self) -> None:
         self.buffer = NudgeBuffer()
@@ -288,10 +295,15 @@ class NudgeHold:
         self.compacted = False
         self.carrier: dict[str, Any] | None = None
         self.followers: list[dict[str, Any]] = []
+        # Подсказки этого шага уже ушли в сообщения. Повтор после
+        # переполнения окна не собирает их заново. Снимается, когда
+        # запрос к модели завершился и следующий шаг — новый.
+        self.notices_sent = False
 
     def clear(self, state: Any) -> None:
         """Accept / stop / compact: буфер и loop без доставки модели."""
         self.buffer.clear()
+        self.notices_sent = False
         clear_loop_detector(state)
 
     def reset_after_summary(

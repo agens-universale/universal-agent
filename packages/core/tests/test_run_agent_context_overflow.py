@@ -18,7 +18,7 @@ def _state():
     return s
 
 
-def _run_ctx():
+def _run_ctx(overrides=None):
     cd = {
         "backend.api_mode": "chat_completions",
         "logging.console_trace": False,
@@ -26,6 +26,8 @@ def _run_ctx():
         "agent.strict_turn_finish_validation": True,
         "text_answer_mode": "allow",
     }
+    if overrides:
+        cd.update(overrides)
     return fake_ctx(cd, logger=None)
 
 
@@ -59,6 +61,85 @@ def test_context_overflow_triggers_compaction_and_retries(monkeypatch):
     assert result == "готово"  # прогон восстановился, не краш
     assert calls["backend"] == 2  # 1-й overflow, 2-й успех
     assert calls["compact"] == 1  # force-компакция вызвана один раз
+
+
+def test_overflow_retry_collects_notices_once(monkeypatch):
+    """Повтор после сжатия — тот же шаг: подсказка уже в сообщениях."""
+    calls = {"backend": 0, "notices": 0, "seen": []}
+
+    def _notice(messages, *_args, **_kwargs):
+        calls["notices"] += 1
+        return [
+            *messages,
+            {"role": "user", "content": "NOTICE", "id": "notice-1"},
+        ]
+
+    async def _fake_process_user_ask(messages, state, ctx):
+        calls["backend"] += 1
+        calls["seen"].append(list(messages))
+        if calls["backend"] == 1:
+            raise ValueError(
+                "Requested token count exceeds the model's maximum context "
+                "length of 131072 tokens. Please reduce the number of tokens"
+            )
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp_2"
+
+    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _notice)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
+
+    result = run_coro(
+        pr.arun_agent(
+            [{"role": "user", "content": "сделай", "id": "u1"}],
+            _state(),
+            _run_ctx(),
+            force_compact_hook=lambda: None,
+            session_meta={},
+        )
+    )
+
+    assert result == "готово"
+    assert calls["notices"] == 1
+    assert [m.get("content") for m in calls["seen"][1]].count("NOTICE") == 1
+
+
+def test_next_step_collects_notices_again(monkeypatch):
+    """Следующий запрос к модели после успешного шага снова собирает подсказки."""
+    calls = {"backend": 0, "notices": 0}
+
+    def _notice(messages, *_args, **_kwargs):
+        calls["notices"] += 1
+        return messages
+
+    async def _fake_process_user_ask(messages, state, ctx):
+        calls["backend"] += 1
+        return [
+            {"role": "assistant", "type": "message", "content": "не тул"}
+        ], "resp"
+
+    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _notice)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
+    state = _state()
+    state.tick_signals = set()
+
+    result = run_coro(
+        pr.arun_agent(
+            [{"role": "user", "content": "сделай", "id": "u1"}],
+            state,
+            _run_ctx(
+                {
+                    "text_answer_mode": "deny",
+                    "agent.no_tool_call_max_count": 1,
+                }
+            ),
+            session_meta={},
+        )
+    )
+
+    assert result == "Agent tools call errors."
+    assert calls["backend"] == 2
+    assert calls["notices"] == 2
 
 
 def test_non_overflow_error_still_propagates(monkeypatch):
