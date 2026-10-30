@@ -173,20 +173,21 @@ class WorkingMemory(AbstractSimpleTool):
                         "type": "string",
                         "description": (
                             "Optional brief justification for why this update is useful "
-                            "and why it belongs in this register. Recommended but optional; "
-                            "content is required for append/write."
+                            "and why it belongs in this register. Recommended but optional."
                         ),
                     },
                     "content": {
                         "type": "string",
                         "description": (
-                            "Markdown text for append/write. "
-                            "For append: ONLY the new delta. "
-                            "For write: the FULL updated register content (full overwrite)."
+                            "Required on every call. "
+                            "For append: ONLY the new delta (must be non-empty). "
+                            "For write: the FULL updated register content "
+                            "(must be non-empty; full overwrite). "
+                            "For list and read: pass an empty string; any value is ignored."
                         ),
                     },
                 },
-                "required": ["action", "register"],
+                "required": ["action", "register", "content"],
                 "additionalProperties": False,
             },
             "strict": True,
@@ -236,9 +237,10 @@ Do NOT store chain-of-thought, verbose reasoning, raw logs, large blobs, full fi
 Keep memory compact, structured, and durable.
 
 `register` is required for every action (ignored for list).
-`reason` is optional; `content` is required for append/write.
+`reason` is optional.
+`content` is required for every action. For list and read pass "" — any value is ignored. For append and write it must be non-empty.
 
-Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["list","read","append","write"]},"register":{"type":"string","enum":["goal","constraints","state","knowledge"]},"reason":{"type":"string"},"content":{"type":"string"}},"required":["action","register"],"additionalProperties":false}
+Input schema: {"type":"object","properties":{"action":{"type":"string","enum":["list","read","append","write"]},"register":{"type":"string","enum":["goal","constraints","state","knowledge"]},"reason":{"type":"string"},"content":{"type":"string"}},"required":["action","register","content"],"additionalProperties":false}
 """
 
     def _get_registers(self) -> Dict[str, str]:
