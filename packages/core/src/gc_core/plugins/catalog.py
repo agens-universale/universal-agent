@@ -225,19 +225,38 @@ def build_plugin_snapshot(
     )
     roots = skill_roots(plugins)
     commands, command_notices = _plugin_commands(plugins, roots)
+    trusted = frozenset(
+        plugin.name
+        for path, plugin in loaded_entries
+        if path in entries.installed or path not in untrusted
+    )
     return PluginSnapshot(
         plugins=plugins,
-        trusted=frozenset(
-            plugin.name
-            for path, plugin in loaded_entries
-            if path in entries.installed or path not in untrusted
-        ),
+        trusted=trusted,
         skill_roots=roots,
         commands=commands,
         mcp_servers=servers,
         mcp_keys=keys,
-        notices=entries.notices + mcp_notices + command_notices,
+        notices=entries.notices
+        + mcp_notices
+        + command_notices
+        + _untrusted_hook_notices(plugins, trusted),
         fingerprint=fingerprint,
+    )
+
+
+def _untrusted_hook_notices(
+    plugins: tuple[Plugin, ...], trusted: frozenset[str]
+) -> tuple[str, ...]:
+    """Хуки плагинов из конфига проекта не запускаются (§7.1)."""
+    names = dict.fromkeys(
+        p.name for p in plugins if p.hooks and p.name not in trusted
+    )
+    return tuple(
+        f"Хуки плагина {name} из конфига проекта не запускаются. Чтобы "
+        "включить, установите плагин командой `gc-plugin install` или "
+        "добавьте его в личный конфиг"
+        for name in names
     )
 
 

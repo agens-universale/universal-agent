@@ -164,21 +164,7 @@ from gc_core.message_policy.user_stop import (
 from gc_core.model_choice import anote_applied
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.plugins.commands import command_messages, listed_skill_ids
-from gc_core.plugins.runtime import (
-    apost_tool_call as aplugin_post_tool_call,
-)
-from gc_core.plugins.runtime import (
-    apre_tool_call as aplugin_pre_tool_call,
-)
-from gc_core.plugins.runtime import (
-    asession_start_messages as aplugin_session_start_messages,
-)
-from gc_core.plugins.runtime import (
-    astop_decision as aplugin_stop_decision,
-)
-from gc_core.plugins.runtime import (
-    auser_prompt_messages as aplugin_user_prompt_messages,
-)
+from gc_core.plugins.hooks import acontext_hook_messages
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
@@ -2321,11 +2307,6 @@ async def _ainvoke_tool(
     tool_call_id,
 ):
     operations = port(ctx, "operations")
-    # Плагины: PreToolUse может запретить вызов или поменять аргументы.
-    pre = await aplugin_pre_tool_call(ctx, state, tool_name, tool_arguments)
-    if pre.blocked_output is not None:
-        return pre.blocked_output, False
-    tool_arguments = pre.arguments
     output = await aapply_tool(
         tool_name=tool_name,
         arguments=tool_arguments,
@@ -2339,7 +2320,6 @@ async def _ainvoke_tool(
             else {}
         ),
     )
-    await aplugin_post_tool_call(ctx, state, tool_name, tool_arguments, output)
     return output, False
 
 
@@ -2789,8 +2769,6 @@ class _AgentLoop:
         attach = getattr(ctx, "attach_state", None)
         if callable(attach):
             attach(state)
-        self._plugin_stop_continuations = 0
-        self._plugin_session_started = False
         self.get_full_history_messages = get_full_history_messages
         self.persist_messages_callback = persist_messages_callback
         self.pre_backend_compaction_hook = pre_backend_compaction_hook
@@ -2902,17 +2880,23 @@ class _AgentLoop:
             if self._stopped_before_call():
                 return None
             await self._apre_backend_compaction(messages, mode)
-        # Хуки плагинов — в любом api_mode, как хуки инструментов и Stop.
-        # UserPromptSubmit — до служебных добавок (подсказка, SessionStart):
-        # хук смотрит на последнее сообщение, это должен быть запрос. В той
-        # же точке — подстановка команды плагина (с хуками не связана).
+        # Контекстные хуки плагинов — в любом api_mode. UserPromptSubmit —
+        # до служебных добавок (подсказка, SessionStart): хук смотрит на
+        # последнее сообщение, это должен быть запрос. В той же точке —
+        # подстановка команды плагина (с хуками не связана). SessionStart —
+        # перед каждым запросом: после сжатия посреди хода он срабатывает
+        # снова.
         if mode == "user_ask":
             request = messages
-            messages = await self._aapply_plugin_user_prompt(messages)
+            messages = await self._aapply_context_hooks(
+                messages, user_prompt=True
+            )
             messages = await self._aapply_plugin_command(messages, request)
         if chat:
             messages = await self._aapply_tool_usage_notice(messages)
-        messages = await self._aapply_plugin_session_start(messages)
+        messages = await self._aapply_context_hooks(
+            messages, user_prompt=False
+        )
         if chat and self._stopped_before_call():
             return None
         return await self._aannounce_mode(messages)
@@ -3246,25 +3230,16 @@ class _AgentLoop:
             )
         return messages
 
-    async def _aapply_plugin_session_start(self, messages) -> List[Dict]:
-        """Плагины: контекст SessionStart один раз на старте сессии."""
-
-        async def _pending() -> List[Dict]:
-            (
-                pending,
-                self._plugin_session_started,
-            ) = await aplugin_session_start_messages(
-                self.state, self.ctx, self._plugin_session_started
-            )
-            return pending
-
-        return await self._aadd_plugin_messages(messages, _pending())
-
-    async def _aapply_plugin_user_prompt(self, messages) -> List[Dict]:
-        """Плагины: контекст UserPromptSubmit к сообщению пользователя."""
+    async def _aapply_context_hooks(
+        self, messages, *, user_prompt: bool
+    ) -> List[Dict]:
+        """Контекстные хуки плагинов: UserPromptSubmit на запросе
+        (``user_prompt``) или SessionStart перед запросом к модели."""
         return await self._aadd_plugin_messages(
             messages,
-            aplugin_user_prompt_messages(self.state, self.ctx, messages),
+            acontext_hook_messages(
+                self.state, self.ctx, messages, user_prompt=user_prompt
+            ),
         )
 
     async def _aapply_plugin_command(self, messages, request) -> List[Dict]:
@@ -3299,7 +3274,7 @@ class _AgentLoop:
             raise
         except Exception as plugin_exc:
             self.run_logger.warning(
-                "Plugin session start warning: %s",
+                "Plugin messages warning: %s",
                 plugin_exc,
                 exc_info=True,
             )
@@ -3625,21 +3600,13 @@ class _AgentLoop:
     async def _aclose_turn(
         self, result, *, reason: Optional[str] = None
     ) -> _Outcome:
-        """Конец хода: хуки Stop, итог хода, компакция turn-end и подхват
+        """Конец хода: итог хода, компакция turn-end и подхват
         pending-сообщения новым ходом.
 
-        Хуки Stop плагинов — первыми: продолжение от них ход не закрывает.
-        На плане (``reason="plan_proposed"``) их нет: план ждёт одобрения
-        человека, и хук не продолжает ход за него.
-
-        Итог — до компакции: запись встаёт за последним сообщением хода и
-        уходит в архив вместе с ним при компакции конца хода; подхват очереди
+        Итог — первым: запись встаёт за последним сообщением хода и уходит
+        в архив вместе с ним при компакции конца хода; подхват очереди
         затем привязывает часы нового хода. ``reason`` — причина закрытия
         из цикла (``plan_proposed``), обычный финал — ``None``."""
-        if reason is None:
-            stop_messages = await self._aplugin_stop(result)
-            if stop_messages:
-                return _Outcome(stop_messages, completed_step=True)
         if self.turn_closed_hook is not None:
             await self.turn_closed_hook(reason)
         if self.turn_end_compaction_hook is not None:
@@ -3652,26 +3619,6 @@ class _AgentLoop:
         if new_turn_messages is not None:
             return _Outcome(new_turn_messages, restart=True)
         return _Outcome(result=result)
-
-    async def _aplugin_stop(self, result) -> List[Dict]:
-        try:
-            (
-                messages,
-                self._plugin_stop_continuations,
-            ) = await aplugin_stop_decision(
-                self.state,
-                self.ctx,
-                result if isinstance(result, str) else None,
-                self._plugin_stop_continuations,
-            )
-            return messages
-        except ExecutionFailure:
-            raise
-        except Exception as plugin_exc:
-            self.run_logger.warning(
-                "Plugin stop hook warning: %s", plugin_exc, exc_info=True
-            )
-            return []
 
     def _after_tool_batch(self, messages) -> _Outcome:
         state = self.state

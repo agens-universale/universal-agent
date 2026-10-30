@@ -3,15 +3,18 @@
 Контракт (один, без угадывания агента по окружению):
 
 * В окружении всегда заданы ``GC_PLUGIN_ROOT`` и ``CLAUDE_PLUGIN_ROOT`` (путь
-  к каталогу плагина) и ``GC_PROJECT_DIR`` (рабочий каталог). В самой команде
-  ``${CLAUDE_PLUGIN_ROOT}`` подставляет оболочка.
-* На stdin приходит JSON события (``hook_event_name``, ``cwd``, для инструментов
-  ``tool_name`` и ``tool_input``).
-* Ответ: код 0 и необязательный JSON на stdout; код 2 означает отказ, причина
-  берётся из stderr. Любой другой код и таймаут считаются сбоем хука и не
-  останавливают агента (fail-open), в лог уходит предупреждение.
-* Понимаются оба формата контекста: ``additionalContext`` верхнего уровня и
-  ``hookSpecificOutput.additionalContext``.
+  к каталогу плагина) и ``GC_PROJECT_DIR`` (рабочий каталог). Команда хука в
+  формате — строка оболочки, её исполняет ``bash -c``; ``${CLAUDE_PLUGIN_ROOT}``
+  в ней подставляет оболочка.
+* На stdin приходит JSON события (``hook_event_name``, ``cwd`` и поля
+  события).
+* Ответ: код 0 и stdout. JSON-объект даёт ``additionalContext`` (верхнего
+  уровня или в ``hookSpecificOutput``) и ``decision: block`` с ``reason``;
+  не-JSON — весь текст идёт в контекст. Код 2 означает отказ, причина
+  берётся из stderr. Любой другой код и таймаут — сбой хука, агент не
+  останавливается (fail-open), в лог уходит предупреждение.
+* Контекст хука ограничен ``MAX_CONTEXT_CHARS``, длиннее — обрезается с
+  пометкой.
 """
 
 from __future__ import annotations
@@ -31,7 +34,8 @@ from gc_core.plugins.manifest import HookCommand, Plugin
 
 logger = logging.getLogger(__name__)
 
-_DENY_WORDS = frozenset({"deny", "block"})
+MAX_CONTEXT_CHARS = 10_000
+_TRUNCATED_MARK = "\n[контекст хука обрезан до 10 000 символов]"
 _bash_warned = False
 
 
@@ -41,8 +45,13 @@ class HookResult:
     blocked: bool = False
     reason: str = ""
     additional_context: str = ""
-    updated_input: dict[str, Any] | None = None
     failed: bool = False
+
+
+def _bounded(text: str) -> str:
+    if len(text) <= MAX_CONTEXT_CHARS:
+        return text
+    return text[:MAX_CONTEXT_CHARS] + _TRUNCATED_MARK
 
 
 def _parse_stdout(plugin: str, stdout: str) -> HookResult:
@@ -52,25 +61,19 @@ def _parse_stdout(plugin: str, stdout: str) -> HookResult:
     try:
         data = json.loads(text)
     except ValueError:
-        return HookResult(plugin=plugin)
+        data = None
     if not isinstance(data, dict):
-        return HookResult(plugin=plugin)
+        return HookResult(plugin=plugin, additional_context=_bounded(text))
     specific = data.get("hookSpecificOutput")
     specific = specific if isinstance(specific, dict) else {}
     context = specific.get("additionalContext", data.get("additionalContext"))
-    decision = str(
-        specific.get("permissionDecision", data.get("decision", ""))
-    ).lower()
-    reason = str(
-        specific.get("permissionDecisionReason", data.get("reason", ""))
-    )
-    updated = specific.get("updatedInput", data.get("updatedInput"))
     return HookResult(
         plugin=plugin,
-        blocked=decision in _DENY_WORDS,
-        reason=reason,
-        additional_context=context if isinstance(context, str) else "",
-        updated_input=updated if isinstance(updated, dict) else None,
+        blocked=str(data.get("decision", "")).lower() == "block",
+        reason=str(data.get("reason", "")),
+        additional_context=(
+            _bounded(context) if isinstance(context, str) else ""
+        ),
     )
 
 

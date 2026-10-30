@@ -41,7 +41,8 @@ def begin_turn(state: State, ctx: Any) -> None:
     честно отказывает на первом вызове. В ручном режиме открытый алиас, как и
     раньше, поднимает `AliasCircuitOpenError` здесь, на старте хода.
 
-    Здесь же снимается граница сообщений хода:
+    Здесь же сбрасывается признак SessionStart плагинов без вывода
+    (``plugin_hooks_ran_turn``) и снимается граница сообщений хода:
     свои сообщения ход в историю ещё не положил, а поставит её
     `State.mark_turn_start` на первом же батче."""
     attach = getattr(ctx, "attach_state", None)
@@ -50,6 +51,7 @@ def begin_turn(state: State, ctx: Any) -> None:
     state_ops.reset(state)
     state.turn_level = None
     state.turn_messages_start = None
+    state.plugin_hooks_ran_turn = set()
     if not getattr(state, "parent_state_id", None):
         # Ключ хода для проб зрения. В durable-исполнении id выдаёт среда
         # (``supplied_id``): ``uuid4`` в workflow недетерминирован.

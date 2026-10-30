@@ -1,27 +1,19 @@
-"""Песочница плагинов: манифест, запуск хуков, фасад для цикла и skills."""
+"""Песочница плагинов: манифест, установка, MCP, команды, роли, skills."""
 
-import asyncio
 import json
 import logging
-import os
 import shutil
-import sys
-import time
-from types import SimpleNamespace
 
 import pytest
 from gc_core.config_modules.plugins import PluginsConfig, PluginSource
 from gc_core.plugins import catalog, installed, runtime
-from gc_core.plugins.hook_runner import run_hook
 from gc_core.plugins.manifest import (
-    HookCommand,
     load_plugin,
     validate_ap_manifest,
 )
 from gc_core.plugins.snapshot import SkillRoot
 from gc_core.tools.skills.registry import SkillsRegistry
 
-PY = sys.executable
 AP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 AP_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 
@@ -54,23 +46,6 @@ def _make_plugin(tmp_path, hooks=None, with_skill=False, name="demo"):
     return root
 
 
-def _cmd(code: str) -> str:
-    return f"{PY} -c {json.dumps(code)}"
-
-
-def _config(monkeypatch, paths, timeout=10):
-    catalog.reset_plugin_cache()
-    # установленные у пользователя плагины в тесты не попадают
-    monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
-    monkeypatch.setattr(
-        runtime,
-        "_plugins_config",
-        lambda ctx: PluginsConfig(
-            paths=[str(p) for p in paths], hook_timeout_sec=timeout
-        ),
-    )
-
-
 def _servers(cfg, tmp_path):
     """Серверы плагинов из снимка набора (в ``mcp.servers`` их нет)."""
     from gc_core.config_modules.root import resolve_paths
@@ -84,9 +59,9 @@ def test_load_plugin_reads_manifest_hooks_and_skills(tmp_path):
     root = _make_plugin(
         tmp_path,
         hooks={
-            "PreToolUse": [
+            "SessionStart": [
                 {
-                    "matcher": "exec_command",
+                    "matcher": "startup",
                     "hooks": [{"type": "command", "command": "true"}],
                 }
             ],
@@ -98,13 +73,25 @@ def test_load_plugin_reads_manifest_hooks_and_skills(tmp_path):
     assert plugin is not None
     assert (plugin.name, plugin.version) == ("demo", "1.2.3")
     assert plugin.skills_dirs == (root / "skills",)
-    assert set(plugin.hooks) == {"PreToolUse"}
-    assert plugin.hooks_for("PreToolUse", "exec_command")
-    assert not plugin.hooks_for("PreToolUse", "fs_read_file")
+    assert set(plugin.hooks) == {"SessionStart"}
+    assert plugin.hooks_for("SessionStart", "startup")
+    assert not plugin.hooks_for("SessionStart", "compact")
 
 
 def test_load_plugin_missing_dir_is_none(tmp_path):
     assert load_plugin(tmp_path / "nope") is None
+
+
+@pytest.mark.parametrize(
+    "event", ["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]
+)
+def test_tool_and_stop_hooks_are_skipped_with_diagnostic(tmp_path, event):
+    hook = {"hooks": [{"type": "command", "command": "true"}]}
+    plugin = load_plugin(_make_plugin(tmp_path, hooks={event: [hook]}))
+    assert plugin.hooks == {}
+    assert plugin.hook_problems == (
+        f"хуки {event} будут поддержаны после middleware",
+    )
 
 
 def test_matcher_wildcard_and_alternatives(tmp_path):
@@ -117,7 +104,7 @@ def test_matcher_wildcard_and_alternatives(tmp_path):
                     "hooks": [{"type": "command", "command": "true"}],
                 }
             ],
-            "PostToolUse": [
+            "UserPromptSubmit": [
                 {
                     "matcher": "*",
                     "hooks": [{"type": "command", "command": "true"}],
@@ -128,369 +115,7 @@ def test_matcher_wildcard_and_alternatives(tmp_path):
     plugin = load_plugin(root)
     assert plugin.hooks_for("SessionStart", "startup")
     assert not plugin.hooks_for("SessionStart", "resume")
-    assert plugin.hooks_for("PostToolUse", "any_tool")
-
-
-async def test_hook_exit_code_2_blocks_with_stderr_reason(tmp_path):
-    plugin = load_plugin(_make_plugin(tmp_path))
-    hook = HookCommand(
-        command=_cmd("import sys; sys.stderr.write('nope'); sys.exit(2)")
-    )
-    res = await run_hook(
-        plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
-    )
-    assert res.blocked and res.reason == "nope"
-
-
-async def test_hook_json_deny_and_both_context_formats(tmp_path):
-    plugin = load_plugin(_make_plugin(tmp_path))
-    deny = HookCommand(
-        command=_cmd('print(\'{"decision": "deny", "reason": "r"}\')')
-    )
-    res = await run_hook(
-        plugin, deny, {}, cwd=str(tmp_path), default_timeout_sec=10
-    )
-    assert res.blocked and res.reason == "r"
-
-    nested = HookCommand(
-        command=_cmd(
-            'print(\'{"hookSpecificOutput": {"additionalContext": "A"}}\')'
-        )
-    )
-    flat = HookCommand(command=_cmd('print(\'{"additionalContext": "B"}\')'))
-    for hook, expected in ((nested, "A"), (flat, "B")):
-        res = await run_hook(
-            plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
-        )
-        assert res.additional_context == expected
-
-
-async def test_hook_gets_env_and_stdin(tmp_path):
-    plugin = load_plugin(_make_plugin(tmp_path))
-    hook = HookCommand(
-        command=_cmd(
-            "import json, os, sys; e = json.load(sys.stdin);"
-            "print(json.dumps({'additionalContext':"
-            " os.environ['CLAUDE_PLUGIN_ROOT'] + '|' + e['hook_event_name']}))"
-        )
-    )
-    res = await run_hook(
-        plugin,
-        hook,
-        {"hook_event_name": "PreToolUse"},
-        cwd=str(tmp_path),
-        default_timeout_sec=10,
-    )
-    assert res.additional_context == f"{plugin.root}|PreToolUse"
-
-
-async def test_hook_failure_and_timeout_fail_open(tmp_path):
-    plugin = load_plugin(_make_plugin(tmp_path))
-    crash = HookCommand(command=_cmd("import sys; sys.exit(1)"))
-    res = await run_hook(
-        plugin, crash, {}, cwd=str(tmp_path), default_timeout_sec=10
-    )
-    assert res.failed and not res.blocked
-
-    slow = HookCommand(
-        command=_cmd("import time; time.sleep(5)"), timeout_sec=1
-    )
-    res = await run_hook(
-        plugin, slow, {}, cwd=str(tmp_path), default_timeout_sec=10
-    )
-    assert res.failed and not res.blocked
-
-
-_posix_only = pytest.mark.skipif(
-    sys.platform == "win32", reason="группы процессов только в POSIX"
-)
-
-
-def _pid_command(pid_file) -> str:
-    return f"sleep 600 & echo $! > {pid_file}; sleep 600"
-
-
-async def _wait_dead(pid: int, limit: float = 2.0) -> bool:
-    deadline = time.monotonic() + limit
-    while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return True
-        await asyncio.sleep(0.05)
-    return False
-
-
-async def _read_pid(pid_file, limit: float = 5.0) -> int:
-    deadline = time.monotonic() + limit
-    while time.monotonic() < deadline:
-        text = pid_file.read_text().strip() if pid_file.exists() else ""
-        if text:
-            return int(text)
-        await asyncio.sleep(0.05)
-    raise AssertionError("pid file was not written")
-
-
-@_posix_only
-async def test_timeout_kills_process_group(tmp_path):
-    plugin = load_plugin(_make_plugin(tmp_path))
-    pid_file = tmp_path / "pid"
-    hook = HookCommand(command=_pid_command(pid_file), timeout_sec=1)
-    res = await run_hook(
-        plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
-    )
-    assert res.failed
-    assert await _wait_dead(await _read_pid(pid_file))
-
-
-@_posix_only
-async def test_cancel_kills_hook(tmp_path):
-    plugin = load_plugin(_make_plugin(tmp_path))
-    pid_file = tmp_path / "pid"
-    hook = HookCommand(command=_pid_command(pid_file))
-    task = asyncio.create_task(
-        run_hook(plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30)
-    )
-    pid = await _read_pid(pid_file)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert await _wait_dead(pid)
-
-
-@_posix_only
-async def test_timeout_kills_child_after_bash_exit(tmp_path):
-    plugin = load_plugin(_make_plugin(tmp_path))
-    pid_file = tmp_path / "pid"
-    hook = HookCommand(
-        command=f"sleep 600 & echo $! > {pid_file}; echo x", timeout_sec=1
-    )
-    res = await run_hook(
-        plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
-    )
-    assert res.failed
-    assert await _wait_dead(await _read_pid(pid_file))
-
-
-@_posix_only
-async def test_killpg_permission_error_keeps_contract(tmp_path, monkeypatch):
-    real_killpg = os.killpg
-
-    def killpg_eperm(pid, sig):
-        real_killpg(pid, sig)
-        raise PermissionError
-
-    monkeypatch.setattr(os, "killpg", killpg_eperm)
-    plugin = load_plugin(_make_plugin(tmp_path))
-    pid_file = tmp_path / "pid"
-    slow = HookCommand(command=_pid_command(pid_file), timeout_sec=1)
-    res = await run_hook(
-        plugin, slow, {}, cwd=str(tmp_path), default_timeout_sec=10
-    )
-    assert res.failed
-    pid_file.unlink()
-    task = asyncio.create_task(
-        run_hook(
-            plugin,
-            HookCommand(command=_pid_command(pid_file)),
-            {},
-            cwd=str(tmp_path),
-            default_timeout_sec=30,
-        )
-    )
-    await _read_pid(pid_file)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-
-async def test_no_bash_fails_open(tmp_path, monkeypatch, caplog):
-    from gc_core.plugins import hook_runner
-
-    monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(shutil, "which", lambda name: None)
-    monkeypatch.setattr(hook_runner, "_bash_warned", False)
-    plugin = load_plugin(_make_plugin(tmp_path))
-    hook = HookCommand(command="true")
-    with caplog.at_level(logging.WARNING):
-        for _ in range(2):
-            res = await run_hook(
-                plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=10
-            )
-            assert res.failed
-    assert caplog.text.count("plugin hooks need bash in PATH") == 1
-
-
-async def test_pre_tool_call_blocks_and_rewrites(tmp_path, monkeypatch):
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "PreToolUse": [
-                {
-                    "matcher": "exec_command",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": _cmd(
-                                "import json, sys; e = json.load(sys.stdin);"
-                                "c = e['tool_input']['command'];"
-                                "print(json.dumps({'decision': 'deny', 'reason': 'x'}) "
-                                "if 'sudo' in c else json.dumps("
-                                "{'updatedInput': {'command': c + ' --safe'}}))"
-                            ),
-                        }
-                    ],
-                }
-            ]
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    ctx, state = SimpleNamespace(), SimpleNamespace(state_id="s1")
-
-    blocked = await runtime.apre_tool_call(
-        ctx, state, "exec_command", json.dumps({"command": "sudo ls"})
-    )
-    out = json.loads(blocked.blocked_output)
-    assert out["ok"] is False and out["error"] == runtime.BLOCKED_ERROR
-
-    rewritten = await runtime.apre_tool_call(
-        ctx, state, "exec_command", json.dumps({"command": "ls"})
-    )
-    assert rewritten.blocked_output is None
-    assert json.loads(rewritten.arguments) == {"command": "ls --safe"}
-
-    other = await runtime.apre_tool_call(
-        ctx, state, "fs_read_file", json.dumps({"path": "a"})
-    )
-    assert json.loads(other.arguments) == {"path": "a"}
-
-
-@pytest.mark.parametrize("matcher", ["Bash", "exec_command"])
-async def test_tool_hook_matches_claude_name(tmp_path, monkeypatch, matcher):
-    stdin_log = tmp_path / "stdin.json"
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "PreToolUse": [
-                {
-                    "matcher": matcher,
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": _cmd(
-                                "import sys;"
-                                f"open({str(stdin_log)!r}, 'w').write(sys.stdin.read());"
-                                "sys.stderr.write('no'); sys.exit(2)"
-                            ),
-                        }
-                    ],
-                }
-            ]
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    ctx, state = SimpleNamespace(), SimpleNamespace(state_id="s1")
-    decision = await runtime.apre_tool_call(
-        ctx, state, "exec_command", json.dumps({"command": "ls"})
-    )
-    assert decision.blocked_output is not None
-    assert json.loads(stdin_log.read_text())["tool_name"] == "Bash"
-
-
-async def test_pre_tool_matcher_uses_every_claude_alias(tmp_path, monkeypatch):
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "PreToolUse": [
-                {
-                    "matcher": "MultiEdit",
-                    "hooks": [{"type": "command", "command": "exit 2"}],
-                }
-            ]
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    decision = await runtime.apre_tool_call(
-        SimpleNamespace(),
-        SimpleNamespace(state_id="s1"),
-        "fs_apply_file_edits",
-        "{}",
-    )
-    assert decision.blocked_output is not None
-
-
-async def test_post_tool_hook_matches_claude_name(tmp_path, monkeypatch):
-    log = tmp_path / "post.log"
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "PostToolUse": [
-                {
-                    "matcher": "Bash",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": _cmd(
-                                "import json,sys;d=json.load(sys.stdin);"
-                                f"open({str(log)!r},'w').write(d['tool_name'])"
-                            ),
-                        }
-                    ],
-                }
-            ]
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    await runtime.apost_tool_call(
-        SimpleNamespace(),
-        SimpleNamespace(state_id="s1"),
-        "exec_command",
-        "{}",
-        '{"ok": true}',
-    )
-    assert log.read_text() == "Bash"
-
-
-async def test_session_start_without_output_runs_once_per_loop(
-    tmp_path, monkeypatch
-):
-    counter = tmp_path / "count.txt"
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "SessionStart": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": _cmd(
-                                f"open({str(counter)!r}, 'a').write('x\\n')"
-                            ),
-                        }
-                    ]
-                }
-            ]
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    ctx = SimpleNamespace()
-    state = SimpleNamespace(state_id="s1", messages=[])
-    started = False
-    for _ in range(3):
-        messages, started = await runtime.asession_start_messages(
-            state, ctx, started
-        )
-        assert messages == []
-    assert counter.read_text().split() == ["x"]
-
-
-async def test_session_start_ignores_non_dict_messages(tmp_path, monkeypatch):
-    _config(monkeypatch, [str(_make_plugin(tmp_path, hooks={}))])
-    state = SimpleNamespace(state_id="s1", messages=["raw", None])
-    assert await runtime.asession_start_messages(state, SimpleNamespace()) == (
-        [],
-        True,
-    )
+    assert plugin.hooks_for("UserPromptSubmit", None)
 
 
 def test_reset_plugin_cache_clears_source_warnings():
@@ -499,86 +124,6 @@ def test_reset_plugin_cache_clears_source_warnings():
     sources._warned.add(("a", "b", "c"))
     catalog.reset_plugin_cache()
     assert not sources._warned
-
-
-async def test_session_start_not_repeated_for_loaded_history(
-    tmp_path, monkeypatch
-):
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "SessionStart": [
-                {
-                    "matcher": "startup",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": _cmd(
-                                'print(\'{"additionalContext": "HELLO"}\')'
-                            ),
-                        }
-                    ],
-                }
-            ]
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    ctx = SimpleNamespace()
-    state = SimpleNamespace(state_id="s1", messages=[])
-    keys = set(vars(state))
-
-    first, _ = await runtime.asession_start_messages(state, ctx)
-    assert len(first) == 1 and "HELLO" in first[0]["content"]
-    assert first[0]["id"].startswith(runtime.SESSION_START_ID_PREFIX)
-
-    # Новый State следующего хода: история подгружена из треда.
-    next_state = SimpleNamespace(state_id="s2", messages=first)
-    assert await runtime.asession_start_messages(next_state, ctx) == ([], True)
-    assert set(vars(state)) == keys
-    assert set(vars(next_state)) == {"state_id", "messages"}
-
-    durable_ctx = SimpleNamespace(durable_execution=True)
-    assert await runtime.asession_start_messages(
-        SimpleNamespace(state_id="s3", messages=[]), durable_ctx
-    ) == ([], True)
-
-
-async def test_session_start_and_stop_skipped_in_subagent(
-    tmp_path, monkeypatch
-):
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "SessionStart": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": _cmd(
-                                'print(\'{"additionalContext": "HELLO"}\')'
-                            ),
-                        }
-                    ]
-                }
-            ],
-            "Stop": [{"hooks": [{"type": "command", "command": "exit 2"}]}],
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    state = SimpleNamespace(state_id="s1", messages=[], parent_state_id="p")
-    assert await runtime.asession_start_messages(state, SimpleNamespace()) == (
-        [],
-        True,
-    )
-    assert await runtime.astop_decision(state, object(), "done", 0) == ([], 0)
-
-
-async def test_no_plugins_configured_is_a_noop(monkeypatch):
-    _config(monkeypatch, [])
-    ctx, state = SimpleNamespace(), SimpleNamespace(state_id="s1")
-    decision = await runtime.apre_tool_call(ctx, state, "t", "{}")
-    assert decision.arguments == "{}" and decision.blocked_output is None
-    assert await runtime.asession_start_messages(state, ctx) == ([], True)
 
 
 async def test_plugin_skills_are_visible_between_system_and_user(tmp_path):
@@ -595,108 +140,6 @@ async def test_plugin_skills_are_visible_between_system_and_user(tmp_path):
     assert "demo:demo-skill" in {
         s["id"] if isinstance(s, dict) else s.id for s in skills
     }
-
-
-async def test_user_prompt_submit_adds_context_and_skips_technical(
-    tmp_path, monkeypatch
-):
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "UserPromptSubmit": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": _cmd(
-                                "import json,sys;d=json.load(sys.stdin);"
-                                "print(json.dumps({'additionalContext':"
-                                "'saw: '+d['prompt']}))"
-                            ),
-                        }
-                    ]
-                }
-            ]
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    state = SimpleNamespace(state_id="s1")
-    out = await runtime.auser_prompt_messages(
-        state, object(), [{"role": "user", "content": "hello"}]
-    )
-    assert len(out) == 1 and "saw: hello" in json.dumps(out[0])
-    assert (
-        await runtime.auser_prompt_messages(
-            state, object(), [{"role": "assistant", "content": "x"}]
-        )
-        == []
-    )
-
-
-async def test_stop_hook_continues_with_cap(tmp_path, monkeypatch):
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "Stop": [
-                {
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": "echo not done >&2; exit 2",
-                        }
-                    ]
-                }
-            ]
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    state = SimpleNamespace(state_id="s1")
-    used = 0
-    for _ in range(runtime.MAX_STOP_CONTINUATIONS):
-        out, new_used = await runtime.astop_decision(
-            state, object(), "done", used
-        )
-        assert len(out) == 1 and "not done" in json.dumps(out[0])
-        assert new_used == used + 1
-        used = new_used
-    assert await runtime.astop_decision(state, object(), "done", used) == (
-        [],
-        0,
-    )
-
-
-async def test_post_tool_failure_uses_failure_event(tmp_path, monkeypatch):
-    log = tmp_path / "events.log"
-    cmd = _cmd(
-        "import json,sys;d=json.load(sys.stdin);"
-        f"open({str(log)!r},'a').write(d['hook_event_name']+'\\n')"
-    )
-    root = _make_plugin(
-        tmp_path,
-        hooks={
-            "PostToolUse": [{"hooks": [{"type": "command", "command": cmd}]}],
-            "PostToolUseFailure": [
-                {"hooks": [{"type": "command", "command": cmd}]}
-            ],
-        },
-    )
-    _config(monkeypatch, [str(root)])
-    state = SimpleNamespace(state_id="s1")
-    await runtime.apost_tool_call(
-        state=state,
-        ctx=object(),
-        tool_name="t",
-        arguments="{}",
-        output='{"ok": true}',
-    )
-    await runtime.apost_tool_call(
-        state=state,
-        ctx=object(),
-        tool_name="t",
-        arguments="{}",
-        output='{"ok": false}',
-    )
-    assert log.read_text().split() == ["PostToolUse", "PostToolUseFailure"]
 
 
 def test_plugin_mcp_json_is_loaded_into_snapshot(tmp_path):
@@ -1082,7 +525,7 @@ def test_update_asks_only_when_hooks_or_mcp_change(tmp_path, monkeypatch):
     assert cli.main(["update", "trust"]) == 0
     assert asked == []
     hooks = json.loads((src / "hooks" / "hooks.json").read_text())
-    hooks["hooks"]["Stop"] = [
+    hooks["hooks"]["UserPromptSubmit"] = [
         {"hooks": [{"type": "command", "command": "echo new-hook"}]}
     ]
     (src / "hooks" / "hooks.json").write_text(json.dumps(hooks))
@@ -1849,17 +1292,19 @@ def test_loaded_plugin_cache_sees_update_without_restart(tmp_path):
 
     catalog.reset_plugin_cache()
     hook = {"hooks": [{"type": "command", "command": "echo v1"}]}
-    src = _make_plugin(tmp_path, hooks={"Stop": [hook]}, name="upd")
+    src = _make_plugin(tmp_path, hooks={"SessionStart": [hook]}, name="upd")
     installed.install(str(src))
     paths = installed.enabled_paths()
-    assert catalog.load_plugins(paths)[0].hooks_for("Stop", None)[
+    assert catalog.load_plugins(paths)[0].hooks_for("SessionStart", None)[
         0
     ].command == ("echo v1")
 
     hook["hooks"][0]["command"] = "echo v2"
     (src / "hooks" / "hooks.json").write_text(
-        json.dumps({"hooks": {"Stop": [hook]}}), encoding="utf-8"
+        json.dumps({"hooks": {"SessionStart": [hook]}}), encoding="utf-8"
     )
     installed.install(str(src), force=True)
     reloaded = catalog.load_plugins(installed.enabled_paths())
-    assert reloaded[0].hooks_for("Stop", None)[0].command == "echo v2"
+    assert reloaded[0].hooks_for("SessionStart", None)[0].command == (
+        "echo v2"
+    )

@@ -17,20 +17,12 @@ import yaml
 logger = logging.getLogger(__name__)
 
 EVENT_SESSION_START = "SessionStart"
-EVENT_PRE_TOOL_USE = "PreToolUse"
-EVENT_POST_TOOL_USE = "PostToolUse"
-EVENT_POST_TOOL_USE_FAILURE = "PostToolUseFailure"
 EVENT_USER_PROMPT_SUBMIT = "UserPromptSubmit"
-EVENT_STOP = "Stop"
-SUPPORTED_EVENTS = frozenset(
-    {
-        EVENT_SESSION_START,
-        EVENT_PRE_TOOL_USE,
-        EVENT_POST_TOOL_USE,
-        EVENT_POST_TOOL_USE_FAILURE,
-        EVENT_USER_PROMPT_SUBMIT,
-        EVENT_STOP,
-    }
+SUPPORTED_EVENTS = frozenset({EVENT_SESSION_START, EVENT_USER_PROMPT_SUBMIT})
+# Хуки на инструменты и Stop переедут на middleware (спека §7.3); до тех пор
+# они пропускаются с диагностикой в ``Plugin.hook_problems``.
+DEFERRED_EVENTS = frozenset(
+    {"PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"}
 )
 
 PLUGIN_FORMAT_CLAUDE = "claude-code"
@@ -87,7 +79,7 @@ class HookMatcher:
 
     ``*`` или пустая строка подходят всегда. Иначе это регулярное выражение,
     которое должно совпасть со значением целиком: для ``SessionStart`` это
-    источник старта (``startup``), для событий инструментов имя инструмента.
+    источник старта (``startup`` или ``compact``).
     """
 
     matcher: str
@@ -153,6 +145,8 @@ class Plugin:
     mcp_servers_raw: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Пропущенные серверы и битый mcp.json: имя и причина, без значений.
     mcp_problems: tuple[str, ...] = ()
+    # Пропущенные хуки (события, которые цикл пока не запускает).
+    hook_problems: tuple[str, ...] = ()
     commands: tuple[PluginCommand, ...] = ()
     agents: tuple[PluginAgent, ...] = ()
     format: str = PLUGIN_FORMAT_CLAUDE
@@ -271,23 +265,26 @@ def _event_matchers(groups: Any) -> tuple[HookMatcher, ...]:
     return tuple(m for m in found if m is not None)
 
 
-def _parse_hooks(raw: Any) -> dict[str, tuple[HookMatcher, ...]]:
-    if not isinstance(raw, dict):
-        return {}
-    section = raw.get("hooks", raw)
+HookParse = tuple[dict[str, tuple[HookMatcher, ...]], tuple[str, ...]]
+
+
+def _parse_hooks(raw: Any) -> HookParse:
+    """Хуки поддержанных событий и диагностика пропущенных."""
+    section = raw.get("hooks", raw) if isinstance(raw, dict) else None
     if not isinstance(section, dict):
-        return {}
+        return {}, ()
     parsed: dict[str, tuple[HookMatcher, ...]] = {}
+    problems: list[str] = []
     for event, groups in section.items():
-        if event not in SUPPORTED_EVENTS:
+        if event in DEFERRED_EVENTS:
+            problems.append(f"хуки {event} будут поддержаны после middleware")
+        elif event not in SUPPORTED_EVENTS:
             logger.info(
                 "plugin hook event %r is not supported, skipped", event
             )
-            continue
-        matchers = _event_matchers(groups)
-        if matchers:
+        elif matchers := _event_matchers(groups):
             parsed[event] = matchers
-    return parsed
+    return parsed, tuple(problems)
 
 
 def _with_plugin_root(value: Any, root: Path) -> Any:
@@ -856,11 +853,7 @@ _AP_IGNORED = (_HOOKS_FILE, "commands", "agents")
 
 def _cc_components(
     root: Path, fmt: str, manifest: dict[str, Any]
-) -> tuple[
-    dict[str, tuple[HookMatcher, ...]],
-    tuple[PluginCommand, ...],
-    tuple[PluginAgent, ...],
-]:
+) -> tuple[HookParse, tuple[PluginCommand, ...], tuple[PluginAgent, ...]]:
     """Хуки, команды и агенты; у Agent Plugins их нет (только skills и MCP)."""
     if fmt == PLUGIN_FORMAT_AP:
         ignored = [rel for rel in _AP_IGNORED if (root / rel).exists()]
@@ -870,10 +863,12 @@ def _cc_components(
                 root,
                 ", ".join(ignored),
             )
-        return {}, (), ()
+        return ({}, ()), (), ()
     hooks_path = root / _HOOKS_FILE
     hooks = (
-        _parse_hooks(_read_json(hooks_path)) if hooks_path.is_file() else {}
+        _parse_hooks(_read_json(hooks_path))
+        if hooks_path.is_file()
+        else ({}, ())
     )
     return (
         hooks,
@@ -917,7 +912,9 @@ def load_plugin(path: str | Path) -> Plugin | None:
             )
     elif (root / _CLAUDE_MANIFEST).is_file():
         manifest = _read_json(root / _CLAUDE_MANIFEST) or {}
-    hooks, commands, agents = _cc_components(root, fmt, manifest)
+    (hooks, hook_problems), commands, agents = _cc_components(
+        root, fmt, manifest
+    )
     name = str(manifest.get("name") or root.name)
     version = str(manifest.get("version") or "0")
     mcp_servers, mcp_shown, mcp_problems = _load_mcp_servers(
@@ -929,6 +926,7 @@ def load_plugin(path: str | Path) -> Plugin | None:
         root=root,
         skills_dirs=_skills_dirs(root, fmt, manifest),
         hooks=hooks,
+        hook_problems=hook_problems,
         mcp_servers=mcp_servers,
         mcp_servers_raw=mcp_shown,
         mcp_problems=tuple(mcp_problems),

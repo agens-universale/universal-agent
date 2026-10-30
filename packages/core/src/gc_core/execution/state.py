@@ -146,6 +146,9 @@ TRANSIENT_STATE_DEFAULTS = {
     # Вопрос, на котором ход приостановлен (ask_human_suspends): его пишет
     # тул в ядре и уносит запись сессии; ребёнку и в activity не нужен.
     "pending_question": lambda: None,
+    # SessionStart плагина без вывода в этом ходе (``plugins.hooks``);
+    # сбрасывает ``turn_boundary.begin_turn``.
+    "plugin_hooks_ran_turn": set,
 }
 
 

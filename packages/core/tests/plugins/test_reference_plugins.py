@@ -5,10 +5,9 @@ import os
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.config_modules.root import AppConfig, resolve_paths
-from gc_core.config_modules.plugins import PluginsConfig
-from gc_core.plugins import catalog, installed, runtime
+from gc_core.plugins import catalog, installed
+from gc_core.plugins.hooks import acontext_hook_messages
 from gc_core.settings import LoadedSettings
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.tools.subagents.custom.file_definitions import (
@@ -63,9 +62,7 @@ def _settings(root):
     )
 
 
-async def test_superpowers_skills_and_session_start_once(
-    tmp_path, monkeypatch
-):
+async def test_superpowers_skills_and_session_start_once(tmp_path):
     root = tmp_path / "superpowers"
     _manifest(root, {"name": "superpowers", "version": "7.0.1"})
     _skill(root, "brainstorming")
@@ -99,19 +96,22 @@ async def test_superpowers_skills_and_session_start_once(
         "superpowers:using-superpowers",
     } <= await _skill_ids(settings, tmp_path)
 
-    monkeypatch.setattr(
-        runtime,
-        "_plugins_config",
-        lambda ctx: PluginsConfig(paths=[str(root)], hook_timeout_sec=10),
+    loaded = catalog.with_plugin_snapshot(settings, clone=False)
+    state = SimpleNamespace(
+        state_id="s1",
+        parent_state_id=None,
+        messages=[],
+        plugin_hooks_ran_turn=set(),
     )
-    ctx = SimpleNamespace()
-    state = SimpleNamespace(state_id="s1", messages=[])
-    first, started = await runtime.asession_start_messages(state, ctx)
-    assert started and len(first) == 1
+    first = await acontext_hook_messages(state, loaded, [], user_prompt=False)
+    assert len(first) == 1
     assert "You have superpowers." in first[0]["content"]
     # история треда уже содержит контекст: повторно хук не идёт
-    again = SimpleNamespace(state_id="s2", messages=first)
-    assert await runtime.asession_start_messages(again, ctx) == ([], True)
+    state.messages = first
+    assert (
+        await acontext_hook_messages(state, loaded, [], user_prompt=False)
+        == []
+    )
 
 
 async def test_agent_plugins_example_format_and_skill(tmp_path):

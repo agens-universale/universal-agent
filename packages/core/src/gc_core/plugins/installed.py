@@ -187,6 +187,7 @@ class PreparedInstall:
             )
             lines.append(f"mcp {name}: {target}{reads}")
         lines.extend(plugin.mcp_problems)
+        lines.extend(plugin.hook_problems)
         skills = sum(
             1
             for skills_dir in plugin.skills_dirs
@@ -326,6 +327,7 @@ def prepare(
         if not (
             plugin.skills_dirs
             or plugin.hooks
+            or plugin.hook_problems
             or plugin.mcp_servers
             or plugin.mcp_servers_raw
             or plugin.commands
