@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from gc_core.config_modules.root import AppConfig, resolve_paths
-from gc_core.plugins import installed, runtime
+from gc_core.config_modules.plugins import PluginsConfig
+from gc_core.plugins import catalog, installed, runtime
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.tools.subagents.custom.file_definitions import (
     adiscover_subagent_definitions,
@@ -22,7 +23,7 @@ SKILL = "---\nname: {name}\ndescription: d\n---\nbody\n"
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(installed, "installed_dir", lambda: tmp_path / "inst")
     monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
 
 
 def _write(path, text):
@@ -100,7 +101,7 @@ async def test_superpowers_skills_and_session_start_once(
     monkeypatch.setattr(
         runtime,
         "_plugins_config",
-        lambda ctx: SimpleNamespace(paths=[str(root)], hook_timeout_sec=10),
+        lambda ctx: PluginsConfig(paths=[str(root)], hook_timeout_sec=10),
     )
     ctx = SimpleNamespace()
     state = SimpleNamespace(state_id="s1", messages=[])
@@ -128,7 +129,7 @@ async def test_agent_plugins_example_format_and_skill(tmp_path):
     )
     _skill(root, "migrate-agent-plugin")
     settings = _settings(root)
-    (plugin,) = runtime.load_plugins([str(root)])
+    (plugin,) = catalog.load_plugins([str(root)])
     assert plugin.format == "agent-plugins"
     assert "agent-plugins-example:migrate-agent-plugin" in await _skill_ids(
         settings, tmp_path

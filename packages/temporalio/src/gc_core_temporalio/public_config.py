@@ -117,7 +117,15 @@ _RUNTIME_PUBLIC = frozenset(
     }
 )
 _RUNTIME_WORKER_ONLY = frozenset(
-    {"config_path", "config_dir", "notices", "voice_overridden_by_managed"}
+    {
+        "config_path",
+        "config_dir",
+        "notices",
+        "voice_overridden_by_managed",
+        # Плагины под воркером не поддерживаются: снимок пуст по построению.
+        "plugins",
+        "untrusted_plugin_entries",
+    }
 )
 
 

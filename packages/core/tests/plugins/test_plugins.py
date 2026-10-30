@@ -11,7 +11,8 @@ import time
 import pytest
 from types import SimpleNamespace
 
-from gc_core.plugins import installed, runtime
+from gc_core.config_modules.plugins import PluginSource, PluginsConfig
+from gc_core.plugins import catalog, installed, runtime
 from gc_core.plugins.hook_runner import run_hook
 from gc_core.plugins.manifest import (
     HookCommand,
@@ -58,13 +59,15 @@ def _cmd(code: str) -> str:
 
 
 def _config(monkeypatch, paths, timeout=10):
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     # установленные у пользователя плагины в тесты не попадают
     monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
     monkeypatch.setattr(
         runtime,
         "_plugins_config",
-        lambda ctx: SimpleNamespace(paths=paths, hook_timeout_sec=timeout),
+        lambda ctx: PluginsConfig(
+            paths=[str(p) for p in paths], hook_timeout_sec=timeout
+        ),
     )
 
 
@@ -485,7 +488,7 @@ def test_reset_plugin_cache_clears_source_warnings():
     from gc_core.plugins import sources
 
     sources._warned.add(("a", "b", "c"))
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     assert not sources._warned
 
 
@@ -706,7 +709,7 @@ def test_plugin_mcp_json_is_loaded_and_merged_into_config(tmp_path):
         ),
         encoding="utf-8",
     )
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     out = resolve_paths(cfg, str(tmp_path))
     servers = out.mcp.servers
@@ -734,7 +737,7 @@ def test_plugin_mcp_env_vars_are_expanded(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     out = resolve_paths(cfg, str(tmp_path))
     server = out.mcp.servers["p_gh"]
@@ -762,7 +765,7 @@ def test_plugin_mcp_missing_env_var_skips_server(
         ),
         encoding="utf-8",
     )
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     with caplog.at_level("WARNING"):
         out = resolve_paths(cfg, str(tmp_path))
@@ -784,7 +787,7 @@ def test_bad_plugin_mcp_server_is_skipped(tmp_path):
         ),
         encoding="utf-8",
     )
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     out = resolve_paths(cfg, str(tmp_path))
     assert set(out.mcp.servers) == {"p_good"}
@@ -798,7 +801,7 @@ def test_bad_plugin_mcp_server_warning_has_no_secret_values(tmp_path, caplog):
         json.dumps({"bad": {"command": "echo", "args": "SECRET123"}}),
         encoding="utf-8",
     )
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     with caplog.at_level("WARNING"):
         resolve_paths(cfg, str(tmp_path))
@@ -850,14 +853,12 @@ def _git_repo(tmp_path):
 def test_git_source_is_cloned_once_into_cache_and_loaded(
     tmp_path, monkeypatch
 ):
-    from types import SimpleNamespace as NS
-
     from gc_core.plugins import sources
 
     repo = _git_repo(tmp_path)
     monkeypatch.setattr(sources, "cache_root", lambda: tmp_path / "cache")
     sources._resolved.clear()
-    src = NS(git=str(repo), ref="v1", subdir=None)
+    src = PluginSource(git=str(repo), ref="v1")
     path = sources.resolve_source(src)
     assert path is not None and (path / "skills").is_dir()
     # второй раз сеть/клон не нужны: каталог берётся из кэша
@@ -867,14 +868,12 @@ def test_git_source_is_cloned_once_into_cache_and_loaded(
     sources._resolved.clear()
     assert sources.resolve_source(src) == path
 
-    runtime.reset_plugin_cache()
-    cfg = NS(paths=[], sources=[src], hook_timeout_sec=10)
+    catalog.reset_plugin_cache()
+    cfg = PluginsConfig(sources=[src])
     assert runtime.configured_paths(cfg) == [str(path)]
 
 
 def test_runtime_does_not_clone(tmp_path, monkeypatch, caplog):
-    from types import SimpleNamespace as NS
-
     from gc_core.plugins import sources
 
     def boom(*a, **k):
@@ -883,23 +882,21 @@ def test_runtime_does_not_clone(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(sources, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(sources, "_clone", boom)
     sources._resolved.clear()
-    src = NS(git=str(tmp_path / "repo"), ref=None, subdir=None)
-    cfg = NS(paths=[], sources=[src], hook_timeout_sec=10, use_installed=False)
+    src = PluginSource(git=str(tmp_path / "repo"))
+    cfg = PluginsConfig(sources=[src], use_installed=False)
     assert runtime.configured_paths(cfg) == []
     assert sources._resolved == {}
     assert str(tmp_path / "repo") in caplog.text
 
 
 def test_runtime_uses_cached_source_without_fetch(tmp_path, monkeypatch):
-    from types import SimpleNamespace as NS
-
     from gc_core.plugins import sources
 
     repo = _git_repo(tmp_path)
     monkeypatch.setattr(sources, "cache_root", lambda: tmp_path / "cache")
     sources._resolved.clear()
-    src = NS(git=str(repo), ref="v1", subdir=None)
-    cfg = NS(paths=[], sources=[src], hook_timeout_sec=10, use_installed=False)
+    src = PluginSource(git=str(repo), ref="v1")
+    cfg = PluginsConfig(sources=[src], use_installed=False)
     assert runtime.configured_paths(cfg) == []
     assert runtime.configured_paths(cfg, fetch=True) != []
     sources._resolved.clear()
@@ -912,15 +909,12 @@ def test_runtime_uses_cached_source_without_fetch(tmp_path, monkeypatch):
 
 
 def test_git_source_failure_is_fail_open(tmp_path, monkeypatch):
-    from types import SimpleNamespace as NS
-
     from gc_core.plugins import sources
 
     monkeypatch.setattr(sources, "cache_root", lambda: tmp_path / "cache")
     sources._resolved.clear()
-    bad = NS(git=str(tmp_path / "nope"), ref=None, subdir=None)
+    bad = PluginSource(git=str(tmp_path / "nope"))
     assert sources.resolve_source(bad) is None
-    assert sources.resolve_sources([bad]) == []
 
 
 def test_short_github_form_is_normalized():
@@ -936,13 +930,13 @@ def test_short_github_form_is_normalized():
 def test_install_list_disable_enable_update_uninstall(tmp_path, monkeypatch):
     from gc_core.plugins import installed
 
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     src = _make_plugin(tmp_path, with_skill=True, name="inst-demo")
     info = installed.install(str(src))
     assert info.name == "inst-demo" and info.enabled
     assert [p.name for p in installed.list_installed()] == ["inst-demo"]
     # установленный включён без правки конфига
-    cfg = SimpleNamespace(paths=[], sources=[], hook_timeout_sec=10)
+    cfg = PluginsConfig()
     assert len(runtime.configured_paths(cfg)) == 1
 
     with pytest.raises(ValueError):
@@ -1186,7 +1180,7 @@ async def test_discovery_includes_plugin_agents(tmp_path, monkeypatch):
     from gc_testkit.settings import make_settings
 
     root = _plugin_with_md(tmp_path)
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
     settings = make_settings({"plugins.paths": [str(root)]})
     definitions = await adiscover_subagent_definitions(
@@ -1212,7 +1206,7 @@ async def test_discovery_skips_agent_without_known_tools(
         "agents/web.md",
         "---\nname: web\ndescription: d\ntools: WebSearch, Task\n---\nРоль.",
     )
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
     settings = make_settings({"plugins.paths": [str(root)]})
     assert (
@@ -1231,7 +1225,7 @@ async def test_discovery_without_tools_key_means_all_tools(
 
     root = _make_plugin(tmp_path)
     _add_md(root, "agents/any.md", "---\nname: any\n---\nРоль.")
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
     settings = make_settings({"plugins.paths": [str(root)]})
     (d,) = await adiscover_subagent_definitions(settings, builtin_names=set())
@@ -1296,8 +1290,8 @@ async def test_user_prompt_expands_plugin_command(tmp_path, monkeypatch):
 
 def test_use_installed_false_keeps_explicit_paths(monkeypatch):
     monkeypatch.setattr(installed, "enabled_paths", lambda: ["/inst/a"])
-    off = SimpleNamespace(paths=["/p"], sources=[], use_installed=False)
-    on = SimpleNamespace(paths=["/p"], sources=[], use_installed=True)
+    off = PluginsConfig(paths=["/p"], use_installed=False)
+    on = PluginsConfig(paths=["/p"], use_installed=True)
     assert runtime.configured_paths(off) == ["/p"]
     assert runtime.configured_paths(on) == ["/p", "/inst/a"]
 
@@ -1401,7 +1395,7 @@ def test_ap_mcp_streamable_http(tmp_path):
         tmp_path,
         {"api": {"type": "streamable-http", "url": "https://e.x/mcp"}},
     )
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     servers = resolve_paths(cfg, str(tmp_path)).mcp.servers
     assert servers["apmcp_api"].transport == "stream_http"
@@ -1658,13 +1652,13 @@ def test_plugin_data_dir_not_created_at_load_and_mkdir_failure_fail_open(
     def boom(self, *a, **kw):
         raise OSError(30, "Read-only file system")
 
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     monkeypatch.setattr(Path, "mkdir", boom)
     servers = resolve_paths(cfg, str(tmp_path)).mcp.servers
     monkeypatch.undo()
     assert "dataro_s" not in servers
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     assert "dataro_s" in resolve_paths(cfg, str(tmp_path)).mcp.servers
     assert data.is_dir()
@@ -1848,7 +1842,7 @@ def test_mcp_server_named_like_plugin_gets_short_key(tmp_path):
         ),
         encoding="utf-8",
     )
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     cfg = AppConfig.model_validate({"plugins": {"paths": [str(root)]}})
     out = resolve_paths(cfg, str(tmp_path))
     assert {"ctx", "ctx_other"} <= set(out.mcp.servers)
@@ -1900,12 +1894,12 @@ def test_loaded_plugin_cache_sees_update_without_restart(tmp_path):
     новые хуки, а не закэшированные старые."""
     from gc_core.plugins import installed
 
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     hook = {"hooks": [{"type": "command", "command": "echo v1"}]}
     src = _make_plugin(tmp_path, hooks={"Stop": [hook]}, name="upd")
     installed.install(str(src))
     paths = installed.enabled_paths()
-    assert runtime.load_plugins(paths)[0].hooks_for("Stop", None)[
+    assert catalog.load_plugins(paths)[0].hooks_for("Stop", None)[
         0
     ].command == ("echo v1")
 
@@ -1914,5 +1908,5 @@ def test_loaded_plugin_cache_sees_update_without_restart(tmp_path):
         json.dumps({"hooks": {"Stop": [hook]}}), encoding="utf-8"
     )
     installed.install(str(src), force=True)
-    reloaded = runtime.load_plugins(installed.enabled_paths())
+    reloaded = catalog.load_plugins(installed.enabled_paths())
     assert reloaded[0].hooks_for("Stop", None)[0].command == "echo v2"

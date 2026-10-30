@@ -72,6 +72,11 @@ def _meta_path(root: Path) -> Path:
     return root / _META
 
 
+def metadata_path(root: Path | None = None) -> Path:
+    """Файл ``.installed.json`` хранилища (для отпечатка набора)."""
+    return _meta_path(root or installed_dir())
+
+
 def _read_meta(root: Path) -> dict[str, dict]:
     try:
         data = json.loads(_meta_path(root).read_text(encoding="utf-8"))

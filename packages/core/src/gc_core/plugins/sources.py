@@ -48,6 +48,12 @@ def cache_dir(url: str, ref: str | None) -> Path:
     return cache_root() / f"{stem}-{digest}"
 
 
+def source_dir(source: Any) -> Path:
+    """Где лежит плагин источника после клона (без обращения к сети)."""
+    target = cache_dir(normalize_url(source.git), source.ref)
+    return target / source.subdir if source.subdir else target
+
+
 def _git(args: list[str], cwd: Path | None = None) -> None:
     subprocess.run(
         ["git", *args],
@@ -104,6 +110,7 @@ def resolve_source(
     if not update and key in _resolved:
         return _resolved[key]
     target = cache_dir(url, source.ref)
+    root = source_dir(source)
     if not fetch and not update and not (target / ".git").is_dir():
         _warn_not_cloned(key, url)
         return None
@@ -116,21 +123,11 @@ def resolve_source(
         if not (target / ".git").is_dir():
             _resolved[key] = None
             return None
-    root = target / source.subdir if source.subdir else target
     result = root if root.is_dir() else None
     if result is None:
         logger.warning("plugin source %s: no directory %s", url, source.subdir)
     _resolved[key] = result
     return result
-
-
-def resolve_sources(sources: list[Any], *, fetch: bool = True) -> list[str]:
-    out: list[str] = []
-    for source in sources:
-        path = resolve_source(source, fetch=fetch)
-        if path is not None:
-            out.append(str(path))
-    return out
 
 
 def update_cached() -> list[tuple[str, bool]]:

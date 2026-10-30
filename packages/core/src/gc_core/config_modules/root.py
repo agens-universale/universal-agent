@@ -268,6 +268,14 @@ def _to_abs(config_dir: str, path_value: str | None) -> str | None:
     return os.path.abspath(os.path.join(config_dir, path_value))
 
 
+def plugin_entry_path(config_dir: str, value: str) -> str:
+    """Запись ``plugins.paths`` как её видит загрузчик: ``~`` раскрыт,
+    относительный путь — от каталога базового конфига. Одно правило для
+    резолва и для сравнения записей при классификации доверия."""
+    expanded = os.path.expanduser(str(value).strip())
+    return _to_abs(config_dir, expanded) or expanded
+
+
 def _normalize_summary_limits(cfg: AppConfig) -> AppConfig:
     """Нули/отрицательные лимиты summary → дефолты; производные триггеры — от основного."""
     cfg = editable(cfg)
@@ -414,6 +422,9 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> AppConfig:
     write_guard = cfg.security.write_guard
     write_guard.extra_paths = [
         to_abs(path) or path for path in write_guard.extra_paths
+    ]
+    cfg.plugins.paths = [
+        plugin_entry_path(config_dir, path) for path in cfg.plugins.paths
     ]
     _merge_plugin_mcp_servers(cfg)
     return cfg.result()

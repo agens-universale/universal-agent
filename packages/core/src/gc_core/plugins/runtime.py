@@ -18,12 +18,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shlex
 from dataclasses import dataclass
 from typing import Any
 
+from gc_core.plugins.catalog import load_plugins, plugin_entries, skill_roots
 from gc_core.plugins.hook_runner import HookResult, run_hook
 from gc_core.plugins.manifest import (
     EVENT_POST_TOOL_USE,
@@ -34,7 +34,6 @@ from gc_core.plugins.manifest import (
     EVENT_USER_PROMPT_SUBMIT,
     PLUGIN_FORMAT_AP,
     Plugin,
-    load_plugin,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,8 +44,6 @@ SESSION_START_ID_PREFIX = "m_plugin_session_start"
 MAX_STOP_CONTINUATIONS = 3
 _SESSION_SOURCE = "startup"
 BLOCKED_ERROR = "blocked_by_plugin"
-
-_cache: dict[tuple[tuple[str, tuple[int, int]], ...], tuple[Plugin, ...]] = {}
 
 
 @dataclass(frozen=True)
@@ -67,56 +64,11 @@ def _plugins_config(ctx: Any) -> Any | None:
 
 
 def configured_paths(cfg: Any, *, fetch: bool = False) -> list[str]:
-    """Каталоги плагинов: ``paths`` и ``sources`` из конфига плюс установленные
-    командой ``gc-plugin install`` (включённые). Git-источники клонируются
-    только при ``fetch=True`` (загрузка настроек), иначе берётся кэш."""
-    paths = list(cfg.paths) if cfg is not None else []
-    sources = list(getattr(cfg, "sources", ()) or ())
-    if sources:
-        from gc_core.plugins.sources import resolve_sources
-
-        paths += resolve_sources(sources, fetch=fetch)
-    if getattr(cfg, "use_installed", True):
-        try:
-            from gc_core.plugins.installed import enabled_paths
-
-            paths += [p for p in enabled_paths() if p not in paths]
-        except Exception:  # хранилище не должно ронять агента
-            logger.warning("installed plugins unavailable", exc_info=True)
-    return paths
-
-
-def _dir_stamp(path: str) -> tuple[int, int]:
-    """Отпечаток каталога плагина: ``update`` подменяет каталог целиком (новый
-    inode; время изменения ``copytree`` копирует из источника, его мало)."""
-    try:
-        st = os.stat(path)
-    except OSError:
-        return (-1, -1)
-    return (st.st_ino, st.st_mtime_ns)
-
-
-def load_plugins(paths: list[str]) -> tuple[Plugin, ...]:
-    # В ключе и время изменения каталогов: долгоживущий процесс (TUI, сервер)
-    # после ``gc-plugin update`` читает плагин заново, а не держит старые хуки.
-    key = tuple((p, _dir_stamp(p)) for p in paths)
-    if key not in _cache:
-        unique: dict[str, Plugin] = {}
-        for path in paths:
-            plugin = load_plugin(path)
-            # одноимённый плагин берётся один раз (первый из списка)
-            if plugin is not None and plugin.name not in unique:
-                unique[plugin.name] = plugin
-        _cache[key] = tuple(unique.values())
-    return _cache[key]
-
-
-def reset_plugin_cache() -> None:
-    """Сбросить кэш прочитанных плагинов (для тестов и перезагрузки)."""
-    from gc_core.plugins import sources
-
-    _cache.clear()
-    sources._warned.clear()
+    """Каталоги плагинов набора (``catalog.plugin_entries``); git-источники
+    клонируются только при ``fetch=True``, иначе берётся кеш."""
+    if cfg is None:
+        return []
+    return list(plugin_entries(cfg, clone=fetch).paths)
 
 
 def active_plugins(ctx: Any) -> tuple[Plugin, ...]:
@@ -149,13 +101,8 @@ def plugin_skill_roots(
     if not paths:
         return []
     return [
-        (
-            p.name,
-            str(d),
-            str(p.root) if p.format == PLUGIN_FORMAT_AP else None,
-        )
-        for p in load_plugins(paths)
-        for d in p.skills_dirs
+        (root.plugin, root.path, root.contain)
+        for root in skill_roots(load_plugins(paths))
     ]
 
 

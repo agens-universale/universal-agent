@@ -91,9 +91,9 @@ async def test_user_prompt_hook_and_command_run_on_first_turn(
     tmp_path, monkeypatch
 ):
     from gc_core import run_context as rc
-    from gc_core.plugins import runtime
+    from gc_core.plugins import catalog
 
-    runtime.reset_plugin_cache()
+    catalog.reset_plugin_cache()
     root, log = _plugin(tmp_path)
     cfg = parity_config(
         tmp_path,

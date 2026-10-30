@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from gc_core.config_modules.field_meta import _nested_model
 from gc_core.config_modules.provenance import Provenance
 from gc_core.config_modules.root import AppConfig, resolve_paths
+from gc_core.plugins.snapshot import PluginSnapshot
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,12 @@ class RuntimeEnv:
     #: сервера, пир A2A), а не воля человека: судья действий видит их
     #: отдельным видом записи. Субагент наследует признак с рантаймом.
     external_user_words: bool = False
+    #: Снимок набора плагинов (``plugins.catalog``); собирает фронтенд после
+    #: всех оверрайдов.
+    plugins: PluginSnapshot = field(default_factory=PluginSnapshot)
+    #: Записи ``plugins.paths`` / ``sources`` из конфига и профилей проекта,
+    #: нормализованные как в ``resolve_paths``: хуки таких плагинов не идут.
+    untrusted_plugin_entries: frozenset[str] = frozenset()
 
     def with_values(self, **values: Any) -> RuntimeEnv:
         return replace(self, **values)
