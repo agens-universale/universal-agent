@@ -1,4 +1,5 @@
-"""Манифест плагина: каталог с skills и хуками (раскладка как у Claude Code)."""
+"""Манифест плагина: каталог с skills и хуками (форматы Claude Code и
+Agent Plugins)."""
 
 from __future__ import annotations
 
@@ -101,7 +102,7 @@ class PluginCommand:
     """Команда плагина: ``commands/<имя>.md`` (текст запроса под коротким именем).
 
     ``$ARGUMENTS`` в тексте заменяется аргументами, ``$1``..``$9`` словами
-    аргументов (как у Claude Code).
+    аргументов.
     """
 
     name: str
@@ -406,7 +407,7 @@ def _skip(problems: list[str], name: Any, reason: str) -> None:
 
 
 def _parse_mcp_servers(raw: Any, root: Path) -> McpParse:
-    """``.mcp.json`` как у Claude Code: ``{"mcpServers": {имя: {...}}}`` или
+    """``.mcp.json`` формата Claude Code: ``{"mcpServers": {имя: {...}}}`` или
     сразу ``{имя: {...}}``. ``${CLAUDE_PLUGIN_ROOT}`` подставляется путём
     плагина, ``${VAR}`` / ``${VAR:-def}`` берутся из окружения (сервер с
     незаданной ``${VAR}`` пропускается). Имя сервера становится

@@ -8,6 +8,7 @@ import pytest
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.plugins import catalog, installed
 from gc_core.plugins.hooks import acontext_hook_messages
+from gc_core.plugins.manifest import load_plugin
 from gc_core.settings import LoadedSettings
 from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.tools.subagents.custom.file_definitions import (
@@ -130,7 +131,7 @@ async def test_agent_plugins_example_format_and_skill(tmp_path):
     )
     _skill(root, "migrate-agent-plugin")
     settings = _settings(root)
-    (plugin,) = catalog.load_plugins([str(root)])
+    plugin = load_plugin(str(root))
     assert plugin.format == "agent-plugins"
     assert "agent-plugins-example:migrate-agent-plugin" in await _skill_ids(
         settings, tmp_path

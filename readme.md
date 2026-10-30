@@ -12,7 +12,7 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - Два режима бэкенда: `chat_completions` и `v1/responses` (deprecated).
 - MCP: 6 транспортов, готовые рецепты в дистрибутиве `gc-mcp` (`packages/mcp/src/recommended_mcp/`).
 - Скиллы и пакеты скиллов (встроенные паки `supercoder` / `codebase` / `articles`).
-- Плагины (экспериментально): каталоги в формате Claude Code со skills, командами, субагентами, хуками и MCP; установка `gc-plugin install` — [docs/plugins.md](docs/plugins.md).
+- Плагины: готовые наборы в формате Claude Code или Agent Plugins — skills, команды, роли субагентов, MCP-серверы и хуки; установка `gc-plugin install` (дистрибутив `gc-mcp`) — [docs/plugins.md](docs/plugins.md).
 - Слои инструкций `AGENTS.md` (L0 shipped → L1 `~/.gc/AGENTS.md` → L2 `.gc/AGENTS.md` → L3 `AGENTS.md` в корне проекта) — задать агенту проектный/глобальный контекст; `--init` генерирует `AGENTS.md` по структуре репо.
 - Профили и выбор модели (`auto` или модель реестра; в `auto` модель выбирается по ходу работы из уровней `light`/`default`/`max`, см. [docs/auto-routing.md](docs/auto-routing.md)): реестр `models`/`slots`/`assign` в конфиге, переключаемые YAML-профили, CLI `--profile`/`--model`, палитра `/model`/`/profiles`.
 - Защита файловой системы: `write_guard` ограничивает запись в `launch_root`, `security.protected_paths` включена по умолчанию.

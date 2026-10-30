@@ -236,6 +236,12 @@ provided by dependencies of tool packages are not installed»). Поэтому �
 | `gc-ua` (мета) | все листовые команды, включая `gc-acp` и `gc-serve` |
 | `gc-core` | ничего, это библиотека |
 
+`gc-plugin` (установка плагинов, [plugins.md](plugins.md)) живёт в
+`recommended_mcp.plugin_cli`, рядом с `gc-mcp`, а не в `gc-cli`: профиль
+`gc-tui` от `gc-cli` не зависит, и команды в нём не было бы. С
+`--with-executables-from gc-mcp` она приезжает в профили `gc-cli`, `gc-tui`
+и `gc-server`.
+
 Гайды: [acp.md](acp.md), [server.md](server.md), [chat.md](chat.md), [a2a.md](a2a.md).
 
 ### Почему имена не должны пересекаться

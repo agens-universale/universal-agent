@@ -194,3 +194,14 @@ def test_no_file_anywhere_gives_defaults(tmp_path, monkeypatch):
     cfg = load_server_config(None)
     assert cfg.config_path == ""
     assert cfg.server.apis == ["webhook"]
+
+
+@pytest.mark.parametrize("surface", ["webhook", "chat", "a2a"])
+def test_server_demo_config_does_not_load_installed_plugins(surface):
+    """Образец серверного конфига не подхватывает плагины, установленные
+    на хосте командой ``gc-plugin install``."""
+    from gc_testkit.paths import REPO
+
+    cfg = load_server_config(str(REPO / "demo_config_server.yml"))
+    loaded = surface_settings(make_settings({}), cfg, surface)
+    assert loaded.settings.plugins.use_installed is False

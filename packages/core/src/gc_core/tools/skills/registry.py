@@ -299,7 +299,7 @@ class SkillsRegistry:
     ) -> None:
         self._backend = backend or LocalFsBackend()
         # Каталоги skills/ включённых плагинов: слой между system и user.
-        # Skills плагина получают id ``<плагин>:<skill>``, как в Claude Code.
+        # Skills плагина получают id ``<плагин>:<skill>``.
         self._plugin_roots: List[PluginSkillRoot] = list(plugin_roots)
         # Legacy: если передан skills_root и никаких новых — режим single-source.
         # В этом режиме все скиллы помечаются как source="user".

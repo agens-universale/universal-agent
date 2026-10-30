@@ -6,7 +6,7 @@ import shutil
 
 import pytest
 from gc_core.config_modules.plugins import PluginsConfig, PluginSource
-from gc_core.plugins import catalog, installed, runtime
+from gc_core.plugins import catalog, installed
 from gc_core.plugins.catalog import with_plugin_snapshot
 from gc_core.plugins.manifest import (
     load_plugin,
@@ -24,6 +24,10 @@ def _isolated_installed_dir(tmp_path, monkeypatch):
     from gc_core.plugins import installed
 
     monkeypatch.setattr(installed, "installed_dir", lambda: tmp_path / "inst")
+
+
+def _paths(cfg, *, clone=False):
+    return list(catalog.plugin_entries(cfg, clone=clone).paths)
 
 
 def _make_plugin(tmp_path, hooks=None, with_skill=False, name="demo"):
@@ -322,7 +326,7 @@ def test_git_source_is_cloned_once_into_cache_and_loaded(
 
     catalog.reset_plugin_cache()
     cfg = PluginsConfig(sources=[src])
-    assert runtime.configured_paths(cfg) == [str(path)]
+    assert _paths(cfg) == [str(path)]
 
 
 def test_runtime_does_not_clone(tmp_path, monkeypatch, caplog):
@@ -336,7 +340,7 @@ def test_runtime_does_not_clone(tmp_path, monkeypatch, caplog):
     sources._resolved.clear()
     src = PluginSource(git=str(tmp_path / "repo"))
     cfg = PluginsConfig(sources=[src], use_installed=False)
-    assert runtime.configured_paths(cfg) == []
+    assert _paths(cfg) == []
     assert sources._resolved == {}
     assert str(tmp_path / "repo") in caplog.text
 
@@ -349,15 +353,15 @@ def test_runtime_uses_cached_source_without_fetch(tmp_path, monkeypatch):
     sources._resolved.clear()
     src = PluginSource(git=str(repo), ref="v1")
     cfg = PluginsConfig(sources=[src], use_installed=False)
-    assert runtime.configured_paths(cfg) == []
-    assert runtime.configured_paths(cfg, fetch=True) != []
+    assert _paths(cfg) == []
+    assert _paths(cfg, clone=True) != []
     sources._resolved.clear()
 
     def boom(*a, **k):
         raise AssertionError("clone on hot path")
 
     monkeypatch.setattr(sources, "_clone", boom)
-    assert len(runtime.configured_paths(cfg)) == 1
+    assert len(_paths(cfg)) == 1
 
 
 def test_git_source_failure_is_fail_open(tmp_path, monkeypatch):
@@ -389,17 +393,17 @@ def test_install_list_disable_enable_update_uninstall(tmp_path, monkeypatch):
     assert [p.name for p in installed.list_installed()] == ["inst-demo"]
     # установленный включён без правки конфига
     cfg = PluginsConfig()
-    assert len(runtime.configured_paths(cfg)) == 1
+    assert len(_paths(cfg)) == 1
 
     with pytest.raises(ValueError):
         installed.install(str(src))  # уже установлен
     installed.install(str(src), force=True)
 
     assert installed.disable("inst-demo")
-    assert runtime.configured_paths(cfg) == []
+    assert _paths(cfg) == []
     assert not installed.list_installed()[0].enabled
     assert installed.enable("inst-demo")
-    assert len(runtime.configured_paths(cfg)) == 1
+    assert len(_paths(cfg)) == 1
 
     (src / "skills" / "demo-skill" / "SKILL.md").write_text(
         "---\nname: demo-skill\ndescription: d\n---\nnew body\n",
@@ -619,8 +623,8 @@ def test_use_installed_false_keeps_explicit_paths(monkeypatch):
     monkeypatch.setattr(installed, "enabled_paths", lambda: ["/inst/a"])
     off = PluginsConfig(paths=["/p"], use_installed=False)
     on = PluginsConfig(paths=["/p"], use_installed=True)
-    assert runtime.configured_paths(off) == ["/p"]
-    assert runtime.configured_paths(on) == ["/p", "/inst/a"]
+    assert _paths(off) == ["/p"]
+    assert _paths(on) == ["/p", "/inst/a"]
 
 
 def _ap_root(tmp_path, manifest, name="ap"):
@@ -1118,6 +1122,12 @@ def test_install_summary_lists_env_vars_plugin_reads(tmp_path, monkeypatch):
     assert "sk-secret" not in summary and "gt-secret" not in summary
 
 
+def _installed_snapshot():
+    from gc_testkit.settings import make_settings
+
+    return catalog.build_plugin_snapshot(make_settings({}), clone=False)
+
+
 def test_loaded_plugin_cache_sees_update_without_restart(tmp_path):
     """Долгоживущий процесс (TUI, сервер) после ``gc-plugin update`` видит
     новые хуки, а не закэшированные старые."""
@@ -1127,17 +1137,13 @@ def test_loaded_plugin_cache_sees_update_without_restart(tmp_path):
     hook = {"hooks": [{"type": "command", "command": "echo v1"}]}
     src = _make_plugin(tmp_path, hooks={"SessionStart": [hook]}, name="upd")
     installed.install(str(src))
-    paths = installed.enabled_paths()
-    assert catalog.load_plugins(paths)[0].hooks_for("SessionStart", None)[
-        0
-    ].command == ("echo v1")
+    (plugin,) = _installed_snapshot().plugins
+    assert plugin.hooks_for("SessionStart", None)[0].command == "echo v1"
 
     hook["hooks"][0]["command"] = "echo v2"
     (src / "hooks" / "hooks.json").write_text(
         json.dumps({"hooks": {"SessionStart": [hook]}}), encoding="utf-8"
     )
     installed.install(str(src), force=True)
-    reloaded = catalog.load_plugins(installed.enabled_paths())
-    assert reloaded[0].hooks_for("SessionStart", None)[0].command == (
-        "echo v2"
-    )
+    (reloaded,) = _installed_snapshot().plugins
+    assert reloaded.hooks_for("SessionStart", None)[0].command == "echo v2"

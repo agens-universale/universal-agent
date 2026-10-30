@@ -104,10 +104,6 @@ def _load_entries(paths: tuple[str, ...]) -> _Loaded:
     return _cache[key]
 
 
-def load_plugins(paths: list[str]) -> tuple[Plugin, ...]:
-    return tuple(plugin for _, plugin in _load_entries(tuple(paths)))
-
-
 def reset_plugin_cache() -> None:
     """Сбросить кеш прочитанных плагинов (для тестов и перезагрузки)."""
     _cache.clear()
