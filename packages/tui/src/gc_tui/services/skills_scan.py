@@ -51,7 +51,7 @@ def _deliver(fut: asyncio.Future, result: Any, exc: Any) -> None:
 
 async def list_skills_off_loop(settings: Any) -> list[dict]:
     """Все скиллы реестра; обход диска — вне текущего цикла."""
-    return await _off_loop(lambda: _scan(settings), "skills-scan")
+    return await run_off_loop(lambda: _scan(settings), "skills-scan")
 
 
 async def skill_delivery_off_loop(
@@ -59,12 +59,14 @@ async def skill_delivery_off_loop(
 ) -> tuple[str, bool]:
     """Текст доставки скилла и загружен ли он (`build_skill_delivery`,
     `skill_is_available`); чтение диска — вне текущего цикла."""
-    return await _off_loop(
+    return await run_off_loop(
         lambda: _delivery(settings, skill_id), "skill-delivery"
     )
 
 
-async def _off_loop(work: Callable[[], Any], name: str) -> Any:
+async def run_off_loop(work: Callable[[], Any], name: str) -> Any:
+    """Результат ``work()`` из потока-демона (см. описание модуля); им же
+    пользуются и другие экраны с чтением диска."""
     loop = asyncio.get_running_loop()
     fut: asyncio.Future = loop.create_future()
 

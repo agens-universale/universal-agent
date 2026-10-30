@@ -2,12 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from gc_core.plugins import installed as _store
-from gc_core.plugins.installed import list_installed
-from gc_core.plugins.manifest import load_plugin
-from gc_core.plugins.runtime import configured_paths, load_plugins
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -19,119 +13,33 @@ from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import OK as _OK
+from gc_tui.palette import WARN as _WARN
 from gc_tui.screens.mcp import ServerCard
+from gc_tui.services.plugin_cards import general_notices, plugin_cards
+from gc_tui.services.skills_scan import run_off_loop
 
 _FOOTER = "[Enter] раскрыть  [↑↓] плагины  [Esc] back"
 _HINT = "Управление: gc-plugin install | enable | disable | uninstall"
 _EMPTY = "Плагинов нет. Установка: gc-plugin install <owner/repo>"
-_AGENTS_NOTE = "агенты плагина выключены: agent.use_local_subagents"
-_LOAD_FAILED = "не загружен (см. лог)"
 
 
-def _skill_ids(plugin) -> list[str]:
-    return [
-        f"{plugin.name}:{d.name}"
-        for root in plugin.skills_dirs
-        for d in sorted(root.iterdir())
-        if (d / "SKILL.md").is_file()
-    ]
+def _warning_count(info: dict) -> int:
+    """Сколько строк карточки — неполадки (сведения не считаются)."""
+    return (
+        len(info["warnings"])
+        + sum(len(r["notes"]) for r in info["roles"])
+        + sum(not r["ok"] for r in info["roles"])
+    )
 
 
-def _is_installed_path(root) -> bool:
-    try:
-        root.resolve().relative_to(_store.installed_dir().resolve())
-    except ValueError:
-        return False
-    return True
-
-
-def _source(item) -> str:
-    return f"{item.source}@{item.commit[:8]}" if item.commit else item.source
-
-
-def _version(version: str) -> str:
-    return "—" if version in ("", "0") else version
-
-
-def _bare_card(name, version, source, *, enabled, error="") -> dict:
-    """Карточка без состава: выключенный или не загрузившийся плагин."""
-    return {
-        "name": name,
-        "version": _version(version),
-        "format": "",
-        "source": source,
-        "enabled": enabled,
-        "skills": [],
-        "commands": [],
-        "agents": [],
-        "hooks": [],
-        "mcp_servers": [],
-        "agents_off": False,
-        "error": error,
-    }
-
-
-def _failed_cards(paths, plugins, installed) -> list[dict]:
-    """Включённые каталоги, которые ``load_plugin`` не прочитал."""
-    loaded = {p.root for p in plugins}
-    cards: list[dict] = []
-    for path in paths:
-        root = Path(path).expanduser().resolve()
-        if root in loaded or load_plugin(root) is not None:
-            continue
-        item = installed.get(root.name) if _is_installed_path(root) else None
-        cards.append(
-            _bare_card(
-                root.name,
-                item.version if item else "",
-                _source(item) if item else "config",
-                enabled=True,
-                error=_LOAD_FAILED,
-            )
+def _append_roles(t: Text, roles: list[dict]) -> None:
+    for role in roles:
+        t.append(
+            f"\n    роль {role['name']}: {role['status']}",
+            style=_DEEP_DIM if role["ok"] else _WARN,
         )
-    return cards
-
-
-def plugin_cards(settings) -> list[dict]:
-    """Данные карточек: загруженные, не загрузившиеся и выключенные плагины."""
-    installed = {p.name: p for p in list_installed()}
-    subagents = bool(settings.settings.agent.use_local_subagents)
-    paths = configured_paths(settings.settings.plugins)
-    plugins = load_plugins(paths)
-    cards: list[dict] = []
-    for plugin in plugins:
-        item = installed.get(plugin.name)
-        from_store = item is not None and _is_installed_path(plugin.root)
-        cards.append(
-            {
-                "name": plugin.name,
-                "version": _version(plugin.version),
-                "format": plugin.format,
-                "source": _source(item) if from_store else "config",
-                "enabled": True,
-                "skills": _skill_ids(plugin),
-                "commands": [c.name for c in plugin.commands],
-                "agents": [a.name for a in plugin.agents],
-                "hooks": [
-                    f"{event} {group.matcher or '*'}"
-                    for event, groups in plugin.hooks.items()
-                    for group in groups
-                ],
-                "mcp_servers": list(plugin.mcp_servers),
-                "agents_off": bool(plugin.agents) and not subagents,
-                "error": "",
-            }
-        )
-    cards += _failed_cards(paths, plugins, installed)
-    loaded = {c["name"] for c in cards}
-    for item in installed.values():
-        if item.name not in loaded and not item.enabled:
-            cards.append(
-                _bare_card(
-                    item.name, item.version, _source(item), enabled=False
-                )
-            )
-    return cards
+        for note in role["notes"]:
+            t.append(f"\n      {note}", style=_WARN)
 
 
 class PluginCard(ServerCard):
@@ -151,32 +59,62 @@ class PluginCard(ServerCard):
         t.append("    " + " · ".join(m for m in meta if m), style=_DIM)
         if info["error"]:
             t.append(f"    {info['error']}", style=_ERR)
+        warnings = _warning_count(info)
+        if warnings and not self._expanded:
+            t.append(f"    ⚠ {warnings}", style=_WARN)
         if self._expanded:
-            for label, key in (
-                ("skills", "skills"),
-                ("commands", "commands"),
-                ("agents", "agents"),
-                ("hooks", "hooks"),
-                ("mcp", "mcp_servers"),
-            ):
-                if info[key]:
-                    t.append(
-                        f"\n    {label}: {', '.join(info[key])}",
-                        style=_DEEP_DIM,
-                    )
-            if info["agents_off"]:
-                t.append(f"\n    {_AGENTS_NOTE}", style=_DIM)
+            self._append_details(t)
         return t
+
+    def _append_details(self, t: Text) -> None:
+        info = self._info
+        for label, key in (
+            ("skills", "skills"),
+            ("commands", "commands"),
+            ("hooks", "hooks"),
+            ("mcp", "mcp_servers"),
+        ):
+            if info[key]:
+                t.append(
+                    f"\n    {label}: {', '.join(info[key])}",
+                    style=_DEEP_DIM,
+                )
+        _append_roles(t, info["roles"])
+        for line in info["warnings"]:
+            t.append(f"\n    ⚠ {line}", style=_WARN)
+        for line in info["info"]:
+            t.append(f"\n    · {line}", style=_DIM)
 
 
 class PluginsScreen(Screen):
+    """Карточки строятся после показа экрана: чтение диска и обход ролей
+    (доступность, права) — вне цикла интерфейса, один раз на открытие."""
+
     def __init__(self, *, settings=None) -> None:
         super().__init__()
-        self.cards: list[PluginCard] = [
-            PluginCard(info) for info in plugin_cards(settings)
-        ]
+        self._settings = settings
+        self.cards: list[PluginCard] = []
 
     def on_mount(self) -> None:
+        self.run_worker(self._load, exclusive=True)
+
+    async def _load(self) -> None:
+        settings = self._settings
+        cards, notices = await run_off_loop(
+            lambda: (plugin_cards(settings), general_notices(settings)),
+            "plugin-cards",
+        )
+        await self._show(cards, notices)
+
+    async def _show(self, cards: list[dict], notices: list[str]) -> None:
+        self.cards = [PluginCard(info) for info in cards]
+        widgets: list[Static] = [
+            Static(Text(f"⚠ {n}", style=_WARN), classes="mcp-summary")
+            for n in notices
+        ]
+        widgets += self.cards or [Static(Text(_EMPTY, style=_DIM))]
+        trace = self.query_one("#trace", VerticalScroll)
+        await trace.mount_all(widgets, before=0)
         if self.cards:
             self.cards[0].focus()
 
@@ -188,9 +126,6 @@ class PluginsScreen(Screen):
             event.stop()
             self.focus_previous()
 
-    def _empty_renderable(self) -> Text | None:
-        return None if self.cards else Text(_EMPTY, style=_DIM)
-
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
@@ -200,11 +135,6 @@ class PluginsScreen(Screen):
             trace = VerticalScroll(id="trace")
             trace.can_focus = False
             with trace:
-                empty = self._empty_renderable()
-                if empty is not None:
-                    yield Static(empty)
-                else:
-                    yield from self.cards
                 yield Static(
                     Text(_HINT, style=_DEEP_DIM), classes="mcp-summary"
                 )

@@ -3,13 +3,17 @@
 
 Владелец ответственности «как показать скилл» — этот модуль; SkillsScreen
 использует его (source_label / truncate_path_left / build_skill_viewer),
-палитра и реплика — skill_input_name, не дублируя форматирование.
+палитра и реплика — skill_input_name, не дублируя форматирование. Команды
+плагинов палитра показывает строкой скилла (`plugin_command_rows`): имена
+команд и скиллов — одно пространство (§4.2).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
+from gc_core.plugins.commands import resolve_slash_name
+from gc_core.plugins.manifest import PluginCommand
 from gc_core.tools.skills.skill_arg_resolver import (
     Resolved,
     SkillCatalog,
@@ -65,13 +69,17 @@ def skill_input_name(
     catalog: SkillCatalog | None = None,
     *,
     is_command: Callable[[str], bool] | None = None,
+    commands: Sequence[tuple[str, PluginCommand]] = (),
 ) -> str:
     """Запускаемый вид скилла (без `/`) — как его вставляют Enter/Tab
     палитры и как он показан в реплике: короткое имя, если оно ведёт ровно
-    к этому скиллу и не занято командой или алиасом, иначе полный id.
-    Каталога нет (холодный кэш, превью) — короткое имя."""
+    к этому скиллу и не занято командой, алиасом или командой плагина
+    (`commands` снимка), иначе полный id. Каталога нет (холодный кэш,
+    превью) — короткое имя."""
     short = skill_id.rpartition(":")[2]
     if is_command is not None and is_command(short):
+        return skill_id
+    if any(cmd.name == short for _, cmd in commands):
         return skill_id
     if catalog is None:
         return short
@@ -79,3 +87,28 @@ def skill_input_name(
     if isinstance(res, Resolved) and res.canonical_id == skill_id:
         return short
     return skill_id
+
+
+def plugin_command_rows(
+    commands: Sequence[tuple[str, PluginCommand]],
+    skill_ids: Sequence[str],
+    *,
+    is_command: Callable[[str], bool],
+) -> list[dict]:
+    """Строки палитры для команд плагинов — записи вида скилла с пометкой
+    `plugin`. Имя короткое, если не занято командой или алиасом и функция
+    ядра ведёт по нему ровно к этой команде, иначе `<плагин>:<команда>`."""
+    rows: list[dict] = []
+    for plugin, cmd in commands:
+        full = f"{plugin}:{cmd.name}"
+        found = resolve_slash_name(cmd.name, commands, skill_ids)
+        short = not is_command(cmd.name) and found.canonical == full
+        rows.append(
+            {
+                "id": full,
+                "description": cmd.description,
+                "input_name": cmd.name if short else full,
+                "plugin": plugin,
+            }
+        )
+    return rows

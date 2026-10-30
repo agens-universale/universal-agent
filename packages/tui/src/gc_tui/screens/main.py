@@ -168,7 +168,10 @@ from gc_tui.services.session_title import (
     should_update_task,
     task_title,
 )
-from gc_tui.services.skill_view import skill_input_name
+from gc_tui.services.skill_view import (
+    plugin_command_rows,
+    skill_input_name,
+)
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.stores.record_view import tui_section
 from gc_tui.services.subagent_progress import (
@@ -8986,16 +8989,24 @@ class TraceScreen(TraceFollowMixin, Screen):
         return True
 
     def _palette_skills(self) -> list[dict]:
-        """Скиллы для палитры: запись + запускаемое имя (`input_name`) —
-        то же, что вставит Enter."""
-        return [
+        """Скиллы и команды плагинов для палитры: запись + запускаемое имя
+        (`input_name`) — то же, что вставит Enter."""
+        skills = [
             {**s, "input_name": self._skill_input_name(s)}
             for s in self._skills_cache or []
         ]
+        return skills + plugin_command_rows(
+            runtime_of(self.app.base_settings()).plugins.commands,
+            listed_skill_ids(self._skills_cache or []),
+            is_command=self._is_tui_command,
+        )
+
+    def _is_tui_command(self, name: str) -> bool:
+        return self._registry.lookup(name) is not None
 
     def _skill_input_name(self, skill: dict) -> str:
-        """Запускаемый вид скилла (`skill_input_name`) по прогретому кэшу
-        и реестру команд."""
+        """Запускаемый вид скилла (`skill_input_name`) по прогретому кэшу,
+        реестру команд и командам плагинов снимка."""
         catalog = (
             None
             if self._skills_cache is None
@@ -9004,7 +9015,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         return skill_input_name(
             str(skill.get("id", "")),
             catalog,
-            is_command=lambda name: self._registry.lookup(name) is not None,
+            is_command=self._is_tui_command,
+            commands=runtime_of(self.app.base_settings()).plugins.commands,
         )
 
     async def _cmd_skill(self, arg: str) -> None:
@@ -9031,7 +9043,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         Короткое имя у команды плагина и скилла — неоднозначно."""
         slash = self._slash_resolution(name)
         if slash.kind == "ambiguous" and self._has_plugin_command(slash):
-            self._render_skill_ambiguous(name, list(slash.candidates))
+            self._render_command_error(
+                name,
+                list(slash.candidates),
+                title="несколько команд и скиллов с именем",
+            )
             return
         res = self._resolve_cached_skill(name)
         if isinstance(res, Resolved):
