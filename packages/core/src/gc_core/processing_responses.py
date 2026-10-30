@@ -146,10 +146,7 @@ from gc_core.model_router import AliasCircuitOpenError
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
-from gc_core.run_summary_coordinator import (
-    build_preserved_batch,
-    filter_messages_not_in_state,
-)
+from gc_core.run_summary_coordinator import filter_messages_not_in_state
 from gc_core.runtime_notices import (
     maybe_push_level_reroute_notice,
     maybe_push_llm_failure_notice,
@@ -353,25 +350,63 @@ def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _without_tool_call_pairs(
-    messages: List[Dict], tool_name: str
-) -> List[Dict]:
-    """Убрать пары function_call + function_call_output для ``tool_name`` из preserved batch."""
-    out: List[Dict] = []
-    i = 0
-    while i < len(messages):
-        msg = messages[i]
-        if (
-            i + 1 < len(messages)
-            and isinstance(msg, dict)
-            and msg.get("type") == "function_call"
-            and str(msg.get("name") or "") == tool_name
-        ):
-            i += 2
+_TOOL_CALL_TYPES = frozenset({"function_call", "tool_call"})
+_TOOL_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
+
+
+def _completed_output_id(message: Any) -> Any:
+    if not isinstance(message, dict):
+        return None
+    if message.get("type") not in _TOOL_OUTPUT_TYPES:
+        return None
+    return message.get("call_id") or None
+
+
+def _closed_output_ids(messages: List[Dict]) -> set:
+    return {
+        call_id
+        for message in messages
+        if (call_id := _completed_output_id(message))
+    }
+
+
+def _outputs_missing_from(outputs: List[Dict], closed_ids: set) -> List[Dict]:
+    """Выходы этого батча, которых ещё нет в истории. Дописывает их id в ``closed_ids``."""
+    extra: List[Dict] = []
+    for output in outputs:
+        call_id = _completed_output_id(output)
+        if call_id is None or call_id in closed_ids:
             continue
-        out.append(msg)
-        i += 1
-    return out
+        closed_ids.add(call_id)
+        extra.append(output)
+    return extra
+
+
+def _is_open_tool_call(message: Any, closed_ids: set) -> bool:
+    return (
+        isinstance(message, dict)
+        and message.get("type") in _TOOL_CALL_TYPES
+        and message.get("call_id") not in closed_ids
+    )
+
+
+def _history_closed_before_session_compact(
+    messages: List[Dict],
+    completed_outputs: List[Dict],
+) -> List[Dict]:
+    """История для сводки: только вызовы, у которых уже есть выход.
+
+    Выходы тулов этого батча, исполненных до ``session_compact``, дописываются
+    к истории. Вызов без выхода (сам ``session_compact`` и всё, что за ним
+    в батче) в сводку не попадает.
+    """
+    closed_ids = _closed_output_ids(messages)
+    extra_outputs = _outputs_missing_from(completed_outputs, closed_ids)
+    return [
+        message
+        for message in [*messages, *extra_outputs]
+        if not _is_open_tool_call(message, closed_ids)
+    ]
 
 
 def _make_technical_feedback_user_message(
@@ -1550,8 +1585,8 @@ def _is_tool_outputs_with_technical_tail(messages: List[Dict]) -> bool:
     Ни вызовов, ни ответа модели.
 
     Такой батч продолжает ответы тулов, а не открывает запрос человека. Реплика в
-    батче (в т.ч. пара «текст + @-сноска» из очереди TUI) или вызов в нём (хвост
-    ``session_compact`` несёт пары call/output) оставляют ``user_ask``.
+    батче (в т.ч. пара «текст + @-сноска» из очереди TUI) или вызов в нём
+    оставляют ``user_ask``.
     """
     has_output = False
     for message in messages:
@@ -2269,39 +2304,25 @@ def _track_repeat_errors(
     return is_unknown
 
 
-def _apply_session_compact_to_batch(
-    state: State,
-    batch_snapshot: List[Dict],
-    tools_outputs: List[Dict],
-) -> List[Dict]:
-    # Если внутри batch сработал session_compact — вместо сырых output'ов
-    # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
-    # чтобы не оставить висячий function_call и не тащить старое окно дальше.
+def _apply_session_compact_to_batch(state: State) -> List[Dict]:
+    """После сводки живой трейс продолжает одно техническое «продолжай».
+
+    Закрытые пары уже внутри сводки. Неисполненные вызовы этого батча
+    не исполняются и в трейс не возвращаются.
+    """
     state.session_compact_applied = False
-    snapshot = (
-        getattr(state, "_session_compact_batch_snapshot", None)
-        or batch_snapshot
-    )
-    if hasattr(state, "_session_compact_batch_snapshot"):
-        delattr(state, "_session_compact_batch_snapshot")
-    preserved = build_preserved_batch(
-        current_messages=[*snapshot, *tools_outputs],
-        mode="function_call_output",
-        state_messages=list(getattr(state, "messages", []) or []),
-    )
-    preserved = _without_tool_call_pairs(preserved, SESSION_COMPACT_TOOL_NAME)
-    resume = _make_technical_feedback_user_message(
-        _SESSION_COMPACT_RESUME_USER_TEXT,
-        technical_type=TECHNICAL_TYPE_TECHNICAL,
-    )
-    return [*preserved, resume]
+    return [
+        _make_technical_feedback_user_message(
+            _SESSION_COMPACT_RESUME_USER_TEXT,
+            technical_type=TECHNICAL_TYPE_TECHNICAL,
+        )
+    ]
 
 
 async def _afinalize_tool_batch(
     state: State,
     ctx: Any,
     tools_outputs: List[Dict],
-    batch_snapshot: List[Dict],
     *,
     aborted_by_user_stop: bool,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]],
@@ -2321,9 +2342,9 @@ async def _afinalize_tool_batch(
 
     compacted = bool(getattr(state, "session_compact_applied", False))
     if compacted:
-        tools_outputs = _apply_session_compact_to_batch(
-            state, batch_snapshot, tools_outputs
-        )
+        tools_outputs = _apply_session_compact_to_batch(state)
+        # Картинки батча жили в старом трейсе. После сводки их нет.
+        state.pending_tool_attachments = []
 
     # После саммари resume-user уже продолжает ход — harness не нужен.
     # Иначе loop допишет `_aflush_nudges` перед запросом к модели.
@@ -2434,9 +2455,27 @@ async def _aexecute_one_batch_call(
     if batch_trace is not None:
         batch_trace["executed"].append(call.get("call_id"))
     tool_arguments = str(call.get("arguments", ""))
-    tool_res_raw, was_invalid, ok = await _aexecute_tool_call(
-        call, tool_name, tool_arguments, state, ctx, run_agent_func
-    )
+    history_snapshot = None
+    prepared_history = None
+    if tool_name == SESSION_COMPACT_TOOL_NAME:
+        history_snapshot = list(getattr(state, "messages", []) or [])
+        prepared_history = _history_closed_before_session_compact(
+            history_snapshot, tools_outputs
+        )
+        state.messages = prepared_history
+    try:
+        tool_res_raw, was_invalid, ok = await _aexecute_tool_call(
+            call, tool_name, tool_arguments, state, ctx, run_agent_func
+        )
+    finally:
+        # Сводка уже подменила историю своим списком — его не откатываем.
+        # Откат только если вызов не дошёл до подмены.
+        if (
+            history_snapshot is not None
+            and state.messages is prepared_history
+            and not getattr(state, "session_compact_applied", False)
+        ):
+            state.messages = history_snapshot
     unknown_hit = int(_track_repeat_errors(state, tool_name, tool_res_raw))
     await _aappend_call_output(
         tools_outputs,
@@ -2506,6 +2545,9 @@ async def _arun_executed_tool_batch(
         )
         invalid_in_batch += int(was_invalid)
         unknown_in_batch += unknown_hit
+        if getattr(state, "session_compact_applied", False):
+            # Сводка заменила трейс. Хвост батча не стартует и выходов не получает.
+            break
         if ask_ok:
             successful_ask_human = True
 
@@ -2561,10 +2603,6 @@ async def aprocess_tool_calls(
     if len(grouped_messages["tool_outputs"]) > 0:
         raise ValueError("Messages has tool_outputs")
 
-    # Снимок batch до исполнения: если сработает session_compact, из него
-    # соберём «что оставить» вместо сырого списка output'ов.
-    batch_snapshot = list(messages)
-    state._session_compact_batch_snapshot = batch_snapshot
     state.session_compact_applied = False
     # Картинки батча (fs_view_image, ответ на turn_ask_human) копятся здесь и
     # уходят одним техническим сообщением в конце. Остаток прерванного батча
@@ -2608,7 +2646,6 @@ async def aprocess_tool_calls(
         state,
         ctx,
         tools_outputs,
-        batch_snapshot,
         aborted_by_user_stop=aborted_by_user_stop,
         persist_messages_callback=persist_messages_callback,
     )

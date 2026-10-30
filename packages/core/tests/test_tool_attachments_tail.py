@@ -1,9 +1,9 @@
 """Картинки батча — одним техническим сообщением в самом конце (спека §4, §7.1).
 
 Тул-сообщение chat/completions картинку не несёт, поэтому картинки из тулов и из
-ответа на turn_ask_human едут отдельным user-сообщением после батча: после
-пересборки session_compact и после напоминания loop detector. После стопа
-пользователя его нет, после принятого turn_finish оно уходит вместе с хвостом.
+ответа на turn_ask_human едут отдельным user-сообщением после батча, в том числе
+после напоминания loop detector. После session_compact и после стопа пользователя
+его нет, после принятого turn_finish оно уходит вместе с хвостом.
 """
 
 from __future__ import annotations
@@ -294,7 +294,7 @@ def _agent_state(*, max_steps: int = 5) -> State:
     )
 
 
-def test_images_follow_the_session_compact_resume(monkeypatch):
+def test_images_do_not_follow_the_session_compact_resume(monkeypatch):
     sys_m = {"role": "system", "content": "s", "id": "sys"}
     state = _agent_state(max_steps=2)
     state.backend_api_mode = "chat_completions"
@@ -327,9 +327,11 @@ def test_images_follow_the_session_compact_resume(monkeypatch):
         )
     )
 
-    assert [m.get("call_id") for m in outs[:-2]] == ["c_view", "c_view"]
-    assert "session_compact finished" in outs[-2]["content"]
-    assert outs[-1]["attachments"] == [TOOL_ATT.to_dict()]
+    assert len(outs) == 1
+    assert outs[0]["role"] == "user"
+    assert "session_compact finished" in outs[0]["content"]
+    assert "attachments" not in outs[0]
+    assert state.pending_tool_attachments == []
 
 
 # --- граница хода: принятый turn_finish -------------------------------------

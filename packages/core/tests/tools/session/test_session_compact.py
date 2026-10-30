@@ -184,10 +184,19 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
     assert state.session_compact_applied is False
 
 
-def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
+def test_after_compact_only_resume_and_summary_sees_closed_tail(monkeypatch):
+    """Сводка видит только закрытые пары. Хвост батча не исполняется.
+    Дальше уходит одно user-сообщение «продолжай»."""
     from gc_core.processing_responses import aprocess_tool_calls
 
     sys_m = {"role": "system", "content": "s", "id": "sys"}
+    done_call = {
+        "type": "function_call",
+        "call_id": "c_done",
+        "name": "session_think",
+        "arguments": '{"thoughts": "done"}',
+        "id": "fc_done",
+    }
     compact_call = {
         "type": "function_call",
         "call_id": "c_compact",
@@ -195,14 +204,13 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
         "arguments": '{"reason": "done"}',
         "id": "fc_compact",
     }
-    other_call = {
+    pending_call = {
         "type": "function_call",
-        "call_id": "c_other",
+        "call_id": "c_pending",
         "name": "session_think",
-        "arguments": '{"thoughts": "x"}',
-        "id": "fc_other",
+        "arguments": '{"thoughts": "later"}',
+        "id": "fc_pending",
     }
-    batch = [compact_call, other_call]
     state = State(
         verbose=False,
         model="CodeChat",
@@ -217,11 +225,23 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
     state.messages = [
         sys_m,
         {"role": "user", "content": "history", "id": "u0"},
+        done_call,
+        compact_call,
+        pending_call,
     ]
     state.session_compact_applied = False
+    called = []
+    seen_ids = []
 
     async def fake_apply_tool(**kwargs):
+        called.append(kwargs["tool_name"])
         if kwargs["tool_name"] == "session_compact":
+            seen_ids.extend(
+                m.get("call_id")
+                for m in state.messages
+                if isinstance(m, dict)
+                and m.get("type") in ("function_call", "function_call_output")
+            )
             state.messages = [
                 sys_m,
                 {"role": "user", "content": "summary", "id": "sum"},
@@ -240,18 +260,87 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
 
     out = run_coro(
         aprocess_tool_calls(
-            batch,
+            [done_call, compact_call, pending_call],
             state,
             ctx=fake_ctx(),
             run_agent_func=lambda *_a, **_k: None,
         )
     )
 
-    call_ids = [
-        m.get("call_id")
-        for m in out
-        if m.get("type") in ("function_call", "function_call_output")
-    ]
-    assert call_ids == ["c_other", "c_other"]
-    assert out[-1]["role"] == "user"
-    assert "session_compact finished" in str(out[-1].get("content") or "")
+    assert called == ["session_think", "session_compact"]
+    assert seen_ids.count("c_done") == 2
+    assert "c_pending" not in seen_ids
+    assert "c_compact" not in seen_ids
+    assert len(out) == 1
+    assert out[0]["role"] == "user"
+    assert "session_compact finished" in str(out[0].get("content") or "")
+    assert not any(
+        m.get("type") in ("function_call", "function_call_output") for m in out
+    )
+
+
+def test_failed_compact_keeps_the_rest_of_the_batch(monkeypatch):
+    from gc_core.processing_responses import aprocess_tool_calls
+
+    sys_m = {"role": "system", "content": "s", "id": "sys"}
+    compact_call = {
+        "type": "function_call",
+        "call_id": "c_compact",
+        "name": "session_compact",
+        "arguments": '{"reason": "done"}',
+        "id": "fc_compact",
+    }
+    later_call = {
+        "type": "function_call",
+        "call_id": "c_later",
+        "name": "session_think",
+        "arguments": '{"thoughts": "x"}',
+        "id": "fc_later",
+    }
+    state = State(
+        verbose=False,
+        model="CodeChat",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=2,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
+    state.backend_api_mode = "chat_completions"
+    state.messages = [sys_m, compact_call, later_call]
+    state.session_compact_applied = False
+    called = []
+
+    async def fake_apply_tool(**kwargs):
+        called.append(kwargs["tool_name"])
+        if kwargs["tool_name"] == "session_compact":
+            return json.dumps(
+                {
+                    "tool": "session_compact",
+                    "ok": False,
+                    "error": {"type": "compaction_failed"},
+                }
+            )
+        return json.dumps({"tool": "session_think", "ok": True})
+
+    monkeypatch.setattr(
+        "gc_core.processing_responses.aapply_tool", fake_apply_tool
+    )
+    monkeypatch.setattr(
+        "gc_core.processing_responses.maybe_store_and_wrap_tool_output",
+        lambda tool_res, **_kw: tool_res,
+    )
+
+    out = run_coro(
+        aprocess_tool_calls(
+            [compact_call, later_call],
+            state,
+            ctx=fake_ctx(),
+            run_agent_func=lambda *_a, **_k: None,
+        )
+    )
+
+    assert called == ["session_compact", "session_think"]
+    assert [m.get("call_id") for m in out] == ["c_compact", "c_later"]
+    assert state.messages == [sys_m, compact_call, later_call]
