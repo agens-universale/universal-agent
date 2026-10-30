@@ -130,7 +130,9 @@ def active_plugins(ctx: Any) -> tuple[Plugin, ...]:
 def plugin_skill_roots(
     settings: Any,
 ) -> list[tuple[str, str, str | None]]:
-    """``(имя, каталог skills/, корень для проверки вложенности)`` для реестра.
+    """``(имя, каталог skills, корень для проверки вложенности)`` для реестра.
+
+    У плагина несколько каталогов: по записи на каждый.
 
     Корень задан только у плагинов Agent Plugins: их skills за пределами
     плагина (ссылкой) пропускаются.
@@ -149,11 +151,11 @@ def plugin_skill_roots(
     return [
         (
             p.name,
-            str(p.skills_dir),
+            str(d),
             str(p.root) if p.format == PLUGIN_FORMAT_AP else None,
         )
         for p in load_plugins(paths)
-        if p.skills_dir is not None
+        for d in p.skills_dirs
     ]
 
 

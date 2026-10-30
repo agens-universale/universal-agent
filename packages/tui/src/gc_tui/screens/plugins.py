@@ -29,11 +29,9 @@ _LOAD_FAILED = "не загружен (см. лог)"
 
 
 def _skill_ids(plugin) -> list[str]:
-    root = plugin.skills_dir
-    if root is None or not root.is_dir():
-        return []
     return [
         f"{plugin.name}:{d.name}"
+        for root in plugin.skills_dirs
         for d in sorted(root.iterdir())
         if (d / "SKILL.md").is_file()
     ]

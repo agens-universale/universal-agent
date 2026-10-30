@@ -125,7 +125,9 @@ class PluginAgent:
     """Субагент плагина: ``agents/<имя>.md`` (шапка YAML и текст роли).
 
     ``tools`` это имена инструментов из шапки как есть (в именах Claude Code
-    либо агента); ``None``, если ключа нет. Перевод в имена агента делает
+    либо агента); ``None`` только если шапка разобрана и ключа в ней нет.
+    Ключ есть, но пуст, ``null``, неверного типа или шапка не разобралась:
+    ``()``, причина в ``problem``. Перевод в имена агента делает
     ``plugins.agents``.
     """
 
@@ -134,6 +136,7 @@ class PluginAgent:
     tools: tuple[str, ...] | None
     body: str
     source: str
+    problem: str = ""
 
 
 @dataclass(frozen=True)
@@ -141,7 +144,7 @@ class Plugin:
     name: str
     version: str
     root: Path
-    skills_dir: Path | None
+    skills_dirs: tuple[Path, ...]
     hooks: dict[str, tuple[HookMatcher, ...]] = field(default_factory=dict)
     # Серверы из ``.mcp.json`` плагина: имя -> поля McpServerConfig.
     mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -435,41 +438,70 @@ def _parse_mcp_servers(raw: Any, root: Path) -> McpParse:
     return out, shown, problems
 
 
-def _split_markdown(text: str) -> tuple[dict[str, Any], str]:
-    """YAML-шапка и тело ``.md``; без шапки (или с битой) шапка пустая."""
+def _split_markdown(text: str) -> tuple[dict[str, Any], str, str]:
+    """YAML-шапка, тело ``.md`` и причина, если шапка не разобралась.
+
+    Нет шапки вовсе (первая строка не ``---``) это не ошибка. Шапка без
+    закрытия, с битым YAML или не словарём: шапка пустая, причина непуста.
+    """
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
-        return {}, text.strip()
+        return {}, text.strip(), ""
     end = next(
         (i for i in range(1, len(lines)) if lines[i].strip() == "---"), None
     )
     if end is None:
-        return {}, text.strip()
+        return {}, text.strip(), "шапка не закрыта строкой ---"
+    problem = ""
     try:
         meta = yaml.safe_load("".join(lines[1:end]))
     except yaml.YAMLError:
-        meta = None
+        meta, problem = None, "шапка не разобрана как YAML"
+    if meta is not None and not isinstance(meta, dict):
+        meta, problem = None, "шапка не словарь"
     body = "".join(lines[end + 1 :]).strip()
-    return (meta if isinstance(meta, dict) else {}), body
+    return (meta or {}), body, problem
 
 
 def _names(value: Any) -> tuple[str, ...] | None:
-    """Список имён из строки через запятую или из списка; ``None``, если пусто."""
+    """Имена из строки через запятую или списка; ``None``, если тип другой."""
     if isinstance(value, str):
         items = value.split(",")
     elif isinstance(value, list):
         items = [v for v in value if isinstance(v, str)]
     else:
         return None
-    out = tuple(dict.fromkeys(i.strip() for i in items if i.strip()))
-    return out or None
+    return tuple(dict.fromkeys(i.strip() for i in items if i.strip()))
 
 
-def _markdown_files(directory: Path) -> list[Path]:
-    """Файлы ``*.md`` каталога (без вложенных), по имени."""
-    if not directory.is_dir():
-        return []
-    return sorted(p for p in directory.glob("*.md") if p.is_file())
+def _agent_tools(
+    meta: dict[str, Any], header_problem: str
+) -> tuple[tuple[str, ...] | None, str]:
+    """Инструменты роли и причина. Закрыто на отказ: ключ есть (пусто,
+    ``null``, не тот тип) или шапка битая, значит ``()``, а не «все»."""
+    if header_problem:
+        return (), header_problem
+    if "tools" not in meta:
+        return None, ""
+    names = _names(meta["tools"])
+    if names is None:
+        value = meta["tools"]
+        kind = "null" if value is None else type(value).__name__
+        return (), f"tools: ожидались строка или список, получено {kind}"
+    return names, ""
+
+
+def _markdown_files(sources: tuple[Path, ...]) -> list[Path]:
+    """Файлы ``*.md``: из каталогов (без вложенных, по имени) и сами файлы;
+    один файл по одному разрешённому пути один раз."""
+    found: dict[Path, None] = {}
+    for src in sources:
+        if src.is_dir():
+            files = sorted(p.resolve() for p in src.glob("*.md"))
+            found.update(dict.fromkeys(files))
+        elif src.suffix == ".md":
+            found[src.resolve()] = None
+    return [p for p in found if p.is_file()]
 
 
 def _read_text(path: Path) -> str | None:
@@ -480,13 +512,15 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
-def _load_commands(root: Path) -> tuple[PluginCommand, ...]:
+def _load_commands(sources: tuple[Path, ...]) -> tuple[PluginCommand, ...]:
     out: list[PluginCommand] = []
-    for path in _markdown_files(root / "commands"):
+    for path in _markdown_files(sources):
         text = _read_text(path)
         if text is None:
             continue
-        meta, body = _split_markdown(text)
+        meta, body, problem = _split_markdown(text)
+        if problem:
+            logger.warning("plugin command %s: %s", path, problem)
         if not body:
             logger.warning("plugin command %s is empty, skipped", path)
             continue
@@ -503,23 +537,27 @@ def _load_commands(root: Path) -> tuple[PluginCommand, ...]:
     return tuple(out)
 
 
-def _load_agents(root: Path) -> tuple[PluginAgent, ...]:
+def _load_agents(sources: tuple[Path, ...]) -> tuple[PluginAgent, ...]:
     out: list[PluginAgent] = []
-    for path in _markdown_files(root / "agents"):
+    for path in _markdown_files(sources):
         text = _read_text(path)
         if text is None:
             continue
-        meta, body = _split_markdown(text)
+        meta, body, header_problem = _split_markdown(text)
         if not body:
             logger.warning("plugin agent %s has no role text, skipped", path)
             continue
+        tools, problem = _agent_tools(meta, header_problem)
+        if problem:
+            logger.warning("plugin agent %s: %s", path, problem)
         out.append(
             PluginAgent(
                 name=str(meta.get("name") or path.stem).strip(),
                 description=str(meta.get("description") or "").strip(),
-                tools=_names(meta.get("tools")),
+                tools=tools,
                 body=body,
                 source=str(path),
+                problem=problem,
             )
         )
     return tuple(out)
@@ -726,25 +764,90 @@ def _parse_ap_mcp_servers(raw: Any, root: Path, plugin_name: str) -> McpParse:
     return out, shown, problems
 
 
-def _load_mcp_servers(root: Path, fmt: str, name: str) -> McpParse:
-    """Серверы MCP плагина: ``mcp.json`` для Agent Plugins, ``.mcp.json`` /
-    ``mcp.json`` для Claude Code."""
+def _declared_paths(
+    manifest: dict[str, Any], key: str, root: Path
+) -> tuple[Path, ...]:
+    """Пути компонента из манифеста Claude Code (строка или список).
+
+    Каждый разрешается с раскрытием ссылок и обязан остаться внутри плагина;
+    остальные отбрасываются с предупреждением. Повторы убираются.
+    """
+    raw = manifest.get(key)
+    items = [raw] if isinstance(raw, str) else raw
+    found: dict[Path, None] = {}
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        path = (root / item).resolve()
+        if path.is_relative_to(root):
+            found[path] = None
+        else:
+            logger.warning(
+                "plugin %s: %s path %r is outside the plugin, ignored",
+                root,
+                key,
+                item,
+            )
+    return tuple(found)
+
+
+def _component_sources(
+    manifest: dict[str, Any], key: str, root: Path
+) -> tuple[Path, ...]:
+    """Стандартный каталог ``<key>/`` и пути из манифеста, без повторов."""
+    standard = (root / key).resolve()
+    declared = _declared_paths(manifest, key, root)
+    return tuple(dict.fromkeys((standard, *declared)))
+
+
+def _mcp_documents(manifest: dict[str, Any], root: Path) -> list[Any]:
+    """Документы MCP Claude Code: стандартный файл, затем объявленные
+    (``mcpServers`` в манифесте: путь, список путей или сам объект)."""
+    standard = next(
+        (root / rel for rel in _MCP_CANDIDATES if (root / rel).is_file()),
+        None,
+    )
+    docs: list[Any] = []
+    if standard is not None:
+        docs.append(_read_json(standard))
+    declared = manifest.get("mcpServers")
+    if isinstance(declared, dict):
+        docs.append(declared)
+    taken = standard.resolve() if standard is not None else None
+    for path in _declared_paths(manifest, "mcpServers", root):
+        if path.is_file() and path != taken:
+            docs.append(_read_json(path))
+    return docs
+
+
+def _load_mcp_servers(
+    root: Path, fmt: str, name: str, manifest: dict[str, Any]
+) -> McpParse:
+    """Серверы MCP плагина: ``mcp.json`` для Agent Plugins; для Claude Code
+    ``.mcp.json`` / ``mcp.json`` и серверы, объявленные в манифесте."""
     if fmt == PLUGIN_FORMAT_AP:
         path = root / _AP_MCP_FILE
         if not path.is_file():
             return {}, {}, []
         return _parse_ap_mcp_servers(_read_json(path), root, name)
-    path = next(
-        (root / rel for rel in _MCP_CANDIDATES if (root / rel).is_file()), None
-    )
-    return _parse_mcp_servers(_read_json(path), root) if path else ({}, {}, [])
+    out: dict[str, dict[str, Any]] = {}
+    shown: dict[str, dict[str, Any]] = {}
+    problems: list[str] = []
+    for raw in _mcp_documents(manifest, root):
+        got, got_shown, got_problems = _parse_mcp_servers(raw, root)
+        for key, entry in got.items():
+            out.setdefault(key, entry)
+        for key, entry in got_shown.items():
+            shown.setdefault(key, entry)
+        problems.extend(got_problems)
+    return out, shown, problems
 
 
 _AP_IGNORED = (_HOOKS_FILE, "commands", "agents")
 
 
 def _cc_components(
-    root: Path, fmt: str
+    root: Path, fmt: str, manifest: dict[str, Any]
 ) -> tuple[
     dict[str, tuple[HookMatcher, ...]],
     tuple[PluginCommand, ...],
@@ -764,7 +867,21 @@ def _cc_components(
     hooks = (
         _parse_hooks(_read_json(hooks_path)) if hooks_path.is_file() else {}
     )
-    return hooks, _load_commands(root), _load_agents(root)
+    return (
+        hooks,
+        _load_commands(_component_sources(manifest, "commands", root)),
+        _load_agents(_component_sources(manifest, "agents", root)),
+    )
+
+
+def _skills_dirs(
+    root: Path, fmt: str, manifest: dict[str, Any]
+) -> tuple[Path, ...]:
+    if fmt == PLUGIN_FORMAT_AP:
+        sources = (root / "skills",)
+    else:
+        sources = _component_sources(manifest, "skills", root)
+    return tuple(d for d in sources if d.is_dir())
 
 
 def load_plugin(path: str | Path) -> Plugin | None:
@@ -792,16 +909,17 @@ def load_plugin(path: str | Path) -> Plugin | None:
             )
     elif (root / _CLAUDE_MANIFEST).is_file():
         manifest = _read_json(root / _CLAUDE_MANIFEST) or {}
-    skills_dir = root / "skills"
-    hooks, commands, agents = _cc_components(root, fmt)
+    hooks, commands, agents = _cc_components(root, fmt, manifest)
     name = str(manifest.get("name") or root.name)
     version = str(manifest.get("version") or "0")
-    mcp_servers, mcp_shown, mcp_problems = _load_mcp_servers(root, fmt, name)
+    mcp_servers, mcp_shown, mcp_problems = _load_mcp_servers(
+        root, fmt, name, manifest
+    )
     return Plugin(
         name=name,
         version=version,
         root=root,
-        skills_dir=skills_dir if skills_dir.is_dir() else None,
+        skills_dirs=_skills_dirs(root, fmt, manifest),
         hooks=hooks,
         mcp_servers=mcp_servers,
         mcp_servers_raw=mcp_shown,

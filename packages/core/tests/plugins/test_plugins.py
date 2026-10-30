@@ -85,7 +85,7 @@ def test_load_plugin_reads_manifest_hooks_and_skills(tmp_path):
     plugin = load_plugin(root)
     assert plugin is not None
     assert (plugin.name, plugin.version) == ("demo", "1.2.3")
-    assert plugin.skills_dir == root / "skills"
+    assert plugin.skills_dirs == (root / "skills",)
     assert set(plugin.hooks) == {"PreToolUse"}
     assert plugin.hooks_for("PreToolUse", "exec_command")
     assert not plugin.hooks_for("PreToolUse", "fs_read_file")
@@ -1377,7 +1377,7 @@ def test_both_manifests_prefer_claude_code(tmp_path):
     )
     plugin = load_plugin(root)
     assert (plugin.format, plugin.name) == ("claude-code", "cc")
-    assert plugin.skills_dir is not None
+    assert plugin.skills_dirs
 
 
 def _ap_plugin(tmp_path, servers, name="apmcp", schema=AP_MCP_SCHEMA):

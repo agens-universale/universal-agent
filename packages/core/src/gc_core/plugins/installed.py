@@ -182,13 +182,12 @@ class PreparedInstall:
             )
             lines.append(f"mcp {name}: {target}{reads}")
         lines.extend(plugin.mcp_problems)
-        skills = 0
-        if plugin.skills_dir:
-            skills = sum(
-                1
-                for d in Path(plugin.skills_dir).iterdir()
-                if (d / "SKILL.md").is_file()
-            )
+        skills = sum(
+            1
+            for skills_dir in plugin.skills_dirs
+            for d in skills_dir.iterdir()
+            if (d / "SKILL.md").is_file()
+        )
         lines.append(
             f"skills: {skills}, commands: {len(plugin.commands)}, "
             f"agents: {len(plugin.agents)}"
@@ -320,7 +319,7 @@ def prepare(
         if plugin is None:
             raise ValueError(f"{source}: каталог плагина не найден")
         if not (
-            plugin.skills_dir
+            plugin.skills_dirs
             or plugin.hooks
             or plugin.mcp_servers
             or plugin.mcp_servers_raw

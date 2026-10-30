@@ -475,13 +475,15 @@ class SkillsRegistry:
         Команды плагина (``commands/*.md``) добавляются в тот же пакет как
         skills ``<плагин>:<команда>``; skill с таким же именем главнее.
         """
-        roots = {n: (r, c) for n, r, c in self._plugin_roots}
+        roots: dict[str, list[tuple[str, Optional[str]]]] = {}
+        for n, r, c in self._plugin_roots:
+            roots.setdefault(n, []).append((r, c))
         for plugin_name in self._plugin_names():
             if plugin_name in self._disabled:
                 continue
             self._register_plugin_pack(plugin_name)
-            root, contain = roots.get(plugin_name, (None, None))
-            await self._load_plugin_skill_dirs(plugin_name, root, contain)
+            for root, contain in roots.get(plugin_name, ()):
+                await self._load_plugin_skill_dirs(plugin_name, root, contain)
             self._add_plugin_command_skills(plugin_name)
 
     async def _load_skill_dir(

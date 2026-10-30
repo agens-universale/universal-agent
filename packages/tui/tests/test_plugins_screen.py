@@ -111,10 +111,10 @@ def test_plugin_cards_merges_loaded_and_disabled(tmp_path, monkeypatch):
             "a",
             "0",
             inst / "a",
-            inst / "a" / "skills",
+            (inst / "a" / "skills",),
             hooks={"Stop": (hook,)},
         ),
-        Plugin("cfg", "2.0", Path("/elsewhere/cfg"), None),
+        Plugin("cfg", "2.0", Path("/elsewhere/cfg"), ()),
     )
     monkeypatch.setattr(mod, "configured_paths", lambda cfg: ["x"])
     monkeypatch.setattr(mod, "load_plugins", lambda paths: loaded)
