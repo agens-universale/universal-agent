@@ -18,7 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import yaml
 
 from gc_core.agent_store import agent_store_of, aread_text
-from gc_core.settings import settings_of
+from gc_core.settings import runtime_of, settings_of
 
 # Имя сабагента = имя тула. Префикс обязателен: по нему `is_subagent_tool`
 # отличает вызов сабагента, а `_normalize_agent_kind` отрезает его, получая kind
@@ -71,6 +71,9 @@ class SubagentDefinition:
     tools: Optional[Tuple[str, ...]]
     stop_tools: Tuple[str, ...]
     source_path: str
+    #: Разрешения MCP роли плагина: «(ключ сервера, инструмент или None =
+    #: все)»; сверяются с полями записи инструмента, не с его именем.
+    mcp_allow: Tuple[Tuple[str, Optional[str]], ...] = ()
 
 
 def _normalize_names(values: Iterable[Any]) -> Tuple[str, ...]:
@@ -288,12 +291,9 @@ async def adiscover_subagent_definitions(
             continue
         taken[definition.name] = definition
 
-    # Агенты включённых плагинов идут после папки: её определения побеждают.
-    from gc_core.plugins.agents import plugin_subagent_definitions
-
-    for definition in plugin_subagent_definitions(
-        settings, logger=logger, diagnostics=diagnostics
-    ):
+    # Роли плагинов из снимка набора идут после папки: её определения
+    # побеждают. Без настроек (``None``) снимок пуст — ролей нет.
+    for definition in runtime_of(settings).plugins.roles:
         if _name_collides(
             definition,
             definition.source_path,

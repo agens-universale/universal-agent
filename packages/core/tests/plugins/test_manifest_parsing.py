@@ -132,3 +132,21 @@ def test_manifest_mcp_servers_path_extends_standard(tmp_path):
         encoding="utf-8",
     )
     assert list(load_plugin(root).mcp_servers) == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    "text,broken",
+    [
+        ("---\ntools: [Read\n---\nbody", True),
+        ("---\n- a\n- b\n---\nbody", True),
+        ("---\ntools: 5\n---\nbody", False),
+        ("---\ntools: []\n---\nbody", False),
+    ],
+)
+def test_broken_header_is_told_apart_from_bad_tools(tmp_path, text, broken):
+    assert load_agent_raw(tmp_path, text).header_broken is broken
+
+
+def test_agent_model_field_is_read(tmp_path):
+    assert load_agent(tmp_path, "model: sonnet").model == "sonnet"
+    assert load_agent(tmp_path / "b", "tools: Read").model == ""

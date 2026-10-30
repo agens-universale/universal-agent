@@ -127,6 +127,15 @@ def _warn_unknown_filter_names(
         )
 
 
+def _mcp_allowed(entry: Dict[str, Any], pairs: set) -> bool:
+    """Запись MCP разрешена парой «(ключ сервера, инструмент или None)» —
+    по полям записи, не по префиксу имени: ключ ``p`` не берёт ``p_x``."""
+    server = entry.get("mcp_server")
+    if server is None:
+        return False
+    return (server, None) in pairs or (server, entry.get("mcp_tool")) in pairs
+
+
 def apply_subagent_tools_filter(
     tools_data: Dict[str, Dict[str, Any]],
     settings: Any,
@@ -154,6 +163,7 @@ def apply_subagent_tools_filter(
     stop_raw = runtime.subagent_tools_stop
     allow = set(allow_raw) if allow_raw is not None else None
     stop = set(stop_raw or ())
+    mcp_allow = {tuple(pair) for pair in runtime.subagent_mcp_allow}
     if allow is None and not stop:
         return tools_data
 
@@ -166,7 +176,8 @@ def apply_subagent_tools_filter(
     filtered = {
         name: entry
         for name, entry in tools_data.items()
-        if (allow is None or name in allow) and name not in stop
+        if (allow is None or name in allow or _mcp_allowed(entry, mcp_allow))
+        and name not in stop
     }
     # Служебное ядро возвращается безусловно: перечислять его в `tools` не нужно,
     # и `stop_tools` его не отбирает (попытка запрета логируется в реестре). Если

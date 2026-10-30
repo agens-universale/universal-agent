@@ -23,8 +23,8 @@ from gc_core_temporalio.public_config import (
     PublicConfigError,
     is_private_path,
     public_config_snapshot,
-    settings_fingerprint,
     settings_exclude_spec,
+    settings_fingerprint,
 )
 
 #: Каждое закрытое поле задано значением с меткой SECRET — метка не должна
@@ -189,6 +189,7 @@ def test_snapshot_contains_no_worker_only_or_secret_field():
         "finish_gate_smart",
         "subagent_tools_allow",
         "subagent_tools_stop",
+        "subagent_mcp_allow",
         "os_backend",
         "run_mode",
         "human_channel",

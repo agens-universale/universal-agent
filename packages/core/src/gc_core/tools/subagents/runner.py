@@ -1134,10 +1134,9 @@ class SubagentRunner:
             runtime=self._build_child_runtime(),
         )
 
-    def _child_tool_scope(
-        self,
-    ) -> Optional[tuple[Optional[tuple[str, ...]], tuple[str, ...]]]:
-        """Область инструментов из файла сабагента: ``(allow, stop)``.
+    def _child_tool_scope(self) -> Optional[dict[str, Any]]:
+        """Область инструментов из файла сабагента — поля рантайма ребёнка
+        (белый список, запреты, MCP-разрешения роли плагина).
 
         ``None`` — сабагент встроенный, область наследуется от родителя.
         Читается рантаймом ребёнка (``_build_child_runtime``).
@@ -1150,18 +1149,20 @@ class SubagentRunner:
         allow = (
             tuple(definition.tools) if definition.tools is not None else None
         )
-        return allow, tuple(definition.stop_tools)
+        return {
+            "subagent_tools_allow": allow,
+            "subagent_tools_stop": tuple(definition.stop_tools),
+            "subagent_mcp_allow": tuple(definition.mcp_allow),
+        }
 
     def _build_child_runtime(self) -> RuntimeEnv:
-        """Рантайм ребёнка: рантайм родителя + область инструментов из его файла."""
+        """Рантайм ребёнка: рантайм родителя (со снимком плагинов) + область
+        инструментов из его файла."""
         parent = self._parent_runtime()
         scope = self._child_tool_scope()
         if scope is None:
             return parent
-        allow, stop = scope
-        return parent.with_values(
-            subagent_tools_allow=allow, subagent_tools_stop=stop
-        )
+        return parent.with_values(**scope)
 
     def _build_child_settings(self) -> AppConfig:
         """Настройки ребёнка: настройки родителя без локальных субагентов —

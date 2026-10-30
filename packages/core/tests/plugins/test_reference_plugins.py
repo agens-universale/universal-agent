@@ -188,12 +188,15 @@ async def test_backend_development_agent_and_command(tmp_path):
     ]
 
     definitions = await adiscover_subagent_definitions(
-        make_settings(
-            {
-                "plugins.paths": [str(root)],
-                "plugins.use_installed": False,
-                "agent.use_local_subagents": True,
-            }
+        catalog.with_plugin_snapshot(
+            make_settings(
+                {
+                    "plugins.paths": [str(root)],
+                    "plugins.use_installed": False,
+                    "agent.use_local_subagents": True,
+                }
+            ),
+            clone=False,
         ),
         builtin_names=set(),
     )

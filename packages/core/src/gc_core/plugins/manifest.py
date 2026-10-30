@@ -119,8 +119,9 @@ class PluginAgent:
     ``tools`` это имена инструментов из шапки как есть (в именах Claude Code
     либо агента); ``None`` только если шапка разобрана и ключа в ней нет.
     Ключ есть, но пуст, ``null``, неверного типа или шапка не разобралась:
-    ``()``, причина в ``problem``. Перевод в имена агента делает
-    ``plugins.agents``.
+    ``()``, причина в ``problem``; битую шапку отличает ``header_broken``
+    (такая роль не подключается). ``model`` из шапки как есть. Перевод в
+    имена агента делает ``plugins.agents``.
     """
 
     name: str
@@ -129,6 +130,8 @@ class PluginAgent:
     body: str
     source: str
     problem: str = ""
+    header_broken: bool = False
+    model: str = ""
 
 
 @dataclass(frozen=True)
@@ -563,6 +566,8 @@ def _load_agents(sources: tuple[Path, ...]) -> tuple[PluginAgent, ...]:
                 body=body,
                 source=str(path),
                 problem=problem,
+                header_broken=bool(header_problem),
+                model=str(meta.get("model") or "").strip(),
             )
         )
     return tuple(out)

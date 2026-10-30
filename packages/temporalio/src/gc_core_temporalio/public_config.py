@@ -110,6 +110,7 @@ _RUNTIME_PUBLIC = frozenset(
         "finish_gate_smart",
         "subagent_tools_allow",
         "subagent_tools_stop",
+        "subagent_mcp_allow",
         "os_backend",
         "run_mode",
         "human_channel",
@@ -282,6 +283,13 @@ def public_settings(settings: AppConfig) -> dict[str, Any]:
     return _json_value(document, "settings")
 
 
+def _listed(value: Any) -> Any:
+    """Кортеж рантайма (и пары внутри него) — списками JSON."""
+    if not isinstance(value, tuple):
+        return value
+    return [list(v) if isinstance(v, tuple) else v for v in value]
+
+
 def public_runtime(runtime: RuntimeEnv) -> dict[str, Any]:
     """Публичная часть рантайма; новое поле ``RuntimeEnv`` требует классификации."""
     output = {}
@@ -291,9 +299,7 @@ def public_runtime(runtime: RuntimeEnv) -> dict[str, Any]:
             continue
         if name not in _RUNTIME_PUBLIC:
             raise PublicConfigError(f"Unclassified runtime field: {name}")
-        value = getattr(runtime, name)
-        if isinstance(value, tuple):
-            value = list(value)
+        value = _listed(getattr(runtime, name))
         output[name] = _json_value(value, f"runtime.{name}")
     # Вид бэкенда — имя из схемы (секретов в нём нет); всё остальное о
     # бэкенде (адреса, ``env``) остаётся на воркере.

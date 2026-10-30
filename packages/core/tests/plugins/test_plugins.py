@@ -7,6 +7,7 @@ import shutil
 import pytest
 from gc_core.config_modules.plugins import PluginsConfig, PluginSource
 from gc_core.plugins import catalog, installed, runtime
+from gc_core.plugins.catalog import with_plugin_snapshot
 from gc_core.plugins.manifest import (
     load_plugin,
     validate_ap_manifest,
@@ -423,7 +424,7 @@ def test_install_rejects_non_plugin_dir(tmp_path):
 
 
 def test_install_from_git_pins_commit(tmp_path, monkeypatch):
-    from gc_core.plugins import installed, sources
+    from gc_core.plugins import installed
 
     repo = _git_repo(tmp_path)
     info = installed.install(str(repo), ref=None)
@@ -600,28 +601,28 @@ def test_subagent_name_is_valid_and_bounded():
     assert long_name == subagent_name("p" * 40, "a" * 40)
 
 
-def test_map_tools_translates_drops_and_keeps_native_names():
-    from gc_core.plugins.agents import map_tools
+def test_translate_role_uses_alias_table_and_builtin_names(tmp_path):
+    from gc_core.plugins.agents import translate_role
 
-    mapped, dropped = map_tools(
-        [
-            "Read",
-            "Grep",
-            "Bash",
-            "WebSearch",
-            "fs_list_files",
-            "Edit",
-            "MultiEdit",
-        ]
+    root = _make_plugin(tmp_path)
+    _add_md(
+        root,
+        "agents/r.md",
+        "---\nname: r\ntools: Read, Grep, Bash, WebSearch, fs_list_files, "
+        "Edit, MultiEdit\n---\nРоль.",
     )
-    assert mapped == (
+    plugin = load_plugin(root)
+    d, notices = translate_role(
+        plugin, plugin.agents[0], builtin={"fs_list_files"}, mcp_keys={}
+    )
+    assert d.tools == (
         "fs_read_file",
         "fs_find_in_files",
         "exec_command",
         "fs_list_files",
         "fs_apply_file_edits",
     )
-    assert dropped == ["WebSearch"]
+    assert len(notices) == 1 and "WebSearch" in notices[0]
 
 
 async def test_discovery_includes_plugin_agents(tmp_path, monkeypatch):
@@ -633,7 +634,9 @@ async def test_discovery_includes_plugin_agents(tmp_path, monkeypatch):
     root = _plugin_with_md(tmp_path)
     catalog.reset_plugin_cache()
     monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
-    settings = make_settings({"plugins.paths": [str(root)]})
+    settings = with_plugin_snapshot(
+        make_settings({"plugins.paths": [str(root)]}), clone=False
+    )
     definitions = await adiscover_subagent_definitions(
         settings, builtin_names={"subagent_worker"}
     )
@@ -659,7 +662,9 @@ async def test_discovery_skips_agent_without_known_tools(
     )
     catalog.reset_plugin_cache()
     monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
-    settings = make_settings({"plugins.paths": [str(root)]})
+    settings = with_plugin_snapshot(
+        make_settings({"plugins.paths": [str(root)]}), clone=False
+    )
     assert (
         await adiscover_subagent_definitions(settings, builtin_names=set())
         == []
@@ -678,7 +683,9 @@ async def test_discovery_without_tools_key_means_all_tools(
     _add_md(root, "agents/any.md", "---\nname: any\n---\nРоль.")
     catalog.reset_plugin_cache()
     monkeypatch.setattr(installed, "enabled_paths", lambda root=None: [])
-    settings = make_settings({"plugins.paths": [str(root)]})
+    settings = with_plugin_snapshot(
+        make_settings({"plugins.paths": [str(root)]}), clone=False
+    )
     (d,) = await adiscover_subagent_definitions(settings, builtin_names=set())
     assert d.tools is None and "демо" not in d.description.lower()
     assert d.description.startswith("Субагент плагина demo")

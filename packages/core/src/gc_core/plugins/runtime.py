@@ -9,18 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 from gc_core.plugins.catalog import load_plugins, plugin_entries
-from gc_core.plugins.manifest import Plugin
 
-
-def _plugins_config(ctx: Any) -> Any | None:
-    if ctx is None:
-        return None
-    try:
-        from gc_core.settings import settings_of
-
-        return settings_of(ctx).plugins
-    except Exception:  # плагины не должны ронять агента
-        return None
+# ``load_plugins`` экран ``/plugins`` в TUI берёт отсюда до перевода на снимок.
+__all__ = ["configured_paths", "load_plugins"]
 
 
 def configured_paths(cfg: Any, *, fetch: bool = False) -> list[str]:
@@ -29,11 +20,3 @@ def configured_paths(cfg: Any, *, fetch: bool = False) -> list[str]:
     if cfg is None:
         return []
     return list(plugin_entries(cfg, clone=fetch).paths)
-
-
-def active_plugins(ctx: Any) -> tuple[Plugin, ...]:
-    if getattr(ctx, "durable_execution", False):
-        return ()
-    cfg = _plugins_config(ctx)
-    paths = configured_paths(cfg)
-    return load_plugins(paths) if paths else ()

@@ -12,6 +12,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Mapping
 
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.config_modules.plugins import PluginsConfig
@@ -167,6 +168,33 @@ def _plugin_commands(
     return tuple(kept), tuple(notices)
 
 
+def _plugin_roles(
+    loaded: LoadedSettings,
+    plugins: tuple[Plugin, ...],
+    mcp_keys: Mapping[tuple[str, str], str],
+) -> tuple[tuple[Any, ...], tuple[str, ...]]:
+    """Роли плагинов, переведённые в определения субагентов (§6), и их
+    диагностика."""
+    if not any(p.agents for p in plugins):
+        return (), ()
+    # Перевод тянет пакет тулов (~1.4 с) — только когда роли есть.
+    from gc_core.plugins.agents import translate_role
+    from gc_core.tools.registry import all_builtin_tool_names
+
+    builtin = all_builtin_tool_names(loaded)
+    roles: list[Any] = []
+    notices: list[str] = []
+    for plugin in plugins:
+        for agent in plugin.agents:
+            role, role_notices = translate_role(
+                plugin, agent, builtin=builtin, mcp_keys=mcp_keys
+            )
+            notices += role_notices
+            if role is not None:
+                roles.append(role)
+    return tuple(roles), tuple(notices)
+
+
 def _disabled_reason(loaded: LoadedSettings) -> str | None:
     settings = loaded.settings
     if settings.paths.skills_data_path:
@@ -225,6 +253,7 @@ def build_plugin_snapshot(
     )
     roots = skill_roots(plugins)
     commands, command_notices = _plugin_commands(plugins, roots)
+    roles, role_notices = _plugin_roles(loaded, plugins, keys)
     trusted = frozenset(
         plugin.name
         for path, plugin in loaded_entries
@@ -237,9 +266,11 @@ def build_plugin_snapshot(
         commands=commands,
         mcp_servers=servers,
         mcp_keys=keys,
+        roles=roles,
         notices=entries.notices
         + mcp_notices
         + command_notices
+        + role_notices
         + _untrusted_hook_notices(plugins, trusted),
         fingerprint=fingerprint,
     )
