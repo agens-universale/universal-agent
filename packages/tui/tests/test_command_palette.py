@@ -1110,3 +1110,168 @@ def test_skill_match_case_insensitive_on_both_sides(filter_):
     skill = {"id": "P:Bz-a"}
     palette = _skill_palette(filter_, [skill])
     assert palette._visible_skill_rows() == [skill]
+
+
+# --- Алиасы и раскладка в фильтре --------------------------------------------
+
+
+def _filtered_palette(typed: str, skills=None):
+    pytest.importorskip("textual")
+    from gc_tui.commands import build_default_registry
+    from gc_tui.widgets.command_palette import CommandPalette
+
+    return CommandPalette(
+        build_default_registry(), initial_filter=typed, skills=skills
+    )
+
+
+def _cmd_row_text(palette, name: str) -> str:
+    cmd = next(c for c in palette._visible_rows() if c.name == name)
+    return str(palette._format_row(cmd))
+
+
+def test_alias_match_shows_alias_in_brackets():
+    palette = _filtered_palette("cle")
+    assert [c.name for c in palette._visible_rows()] == ["new"]
+    assert "/new (clear)" in _cmd_row_text(palette, "new")
+
+
+def test_name_match_shows_no_alias():
+    palette = _filtered_palette("ne")
+    assert [c.name for c in palette._visible_rows()] == ["new"]
+    assert "(" not in _cmd_row_text(palette, "new").split("Новая")[0]
+
+
+def test_name_matches_listed_before_alias_matches():
+    palette = _filtered_palette("c")
+    assert [c.name for c in palette._visible_rows()] == [
+        "config",
+        "copy",
+        "compact",
+        "sessions",
+        "new",
+        "stop",
+    ]
+
+
+def test_other_layout_name_match_is_a_plain_name_match():
+    palette = _filtered_palette("ьщв")
+    assert [c.name for c in palette._visible_rows()] == ["model"]
+    assert "(" not in _cmd_row_text(palette, "model").split("Модель")[0]
+
+
+def test_other_layout_alias_match_shows_real_alias():
+    palette = _filtered_palette("c;f")
+    assert [c.name for c in palette._visible_rows()] == ["compact"]
+    assert "/compact (сжать)" in _cmd_row_text(palette, "compact")
+
+
+def test_alias_label_widens_name_column():
+    from gc_tui.widgets.palette_layout import name_col_w
+
+    palette = _filtered_palette("cont")
+    assert palette._name_col_w() == name_col_w(["/sessions (continue)"])
+
+
+def test_toggle_alias_match_shows_alias():
+    palette = _filtered_palette("гейт")
+    rows = palette._visible_toggle_rows()
+    gate = next(c for c in rows if c.name == "gate")
+    assert "/gate (гейт)" in palette._row_head(gate)
+
+
+def test_other_layout_only_when_typed_finds_nothing():
+    palette = _filtered_palette("c")
+    assert "help" not in [c.name for c in palette._visible_rows()]
+
+
+def test_skill_matches_in_other_layout():
+    skills = [{"id": "pack:brainstorming"}]
+    palette = _filtered_palette("икфшт", skills=lambda: skills)
+    assert palette._visible_skill_rows() == skills
+
+
+def test_skill_more_hint_uses_filter_in_right_layout():
+    skills = [{"id": "pack:brainstorming"}]
+    palette = _filtered_palette("икфшт", skills=lambda: skills)
+    assert palette._skill_more_text().endswith("/skill brain")
+
+
+def test_filter_layout_checked_once_per_typed_text():
+    calls = []
+
+    def skills():
+        calls.append(1)
+        return [{"id": "pack:brainstorming"}]
+
+    palette = _filtered_palette("zzz", skills=skills)
+    before = len(calls)
+    for cmd in palette._registry.list_commands():
+        palette._label(cmd)
+    assert len(calls) - before <= 1
+
+
+@pytest.mark.parametrize(
+    "typed, word",
+    [
+        ("ne", "new"),
+        ("cle", "clear"),
+        ("очи", "new"),
+        ("ту", "new"),
+        ("сду", "clear"),
+    ],
+)
+def test_completion_is_the_typed_word(typed, word):
+    """Tab дописывает набираемое слово латиницей: имя, совпавший
+    английский синоним или то же слово в правильной раскладке; русское
+    слово — командой, к которой оно привязано."""
+    palette = _filtered_palette(typed)
+    new = next(c for c in palette._visible_rows() if c.name == "new")
+    assert palette.completion(new) == word
+
+
+@pytest.mark.asyncio
+async def test_tab_completes_alias_as_typed(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        for ch in "/cle":
+            await pilot.press(ch)
+        await pilot.pause()
+        await pilot.press("tab")
+        await pilot.pause()
+        assert inp.text == "/clear "
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "typed, inserted", [("/models", "/models "), ("/модел", "/model ")]
+)
+async def test_enter_inserts_command_word_like_tab(tmp_path, typed, inserted):
+    """Enter, подставляющий команду с аргументом, пишет слово по тому же
+    правилу, что Tab: английский синоним — как набран, русское слово —
+    командой."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        inp.insert(typed)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert inp.text == inserted

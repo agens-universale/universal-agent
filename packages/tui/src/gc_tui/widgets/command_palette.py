@@ -25,7 +25,8 @@ from textual.css.scalar import Unit
 from textual.widgets import Rule, Static
 
 from gc_tui import palette as _pal
-from gc_tui.commands import Command, CommandRegistry
+from gc_tui.commands import Command, CommandRegistry, field_word
+from gc_tui.services.keyboard_layout import swap_layout
 from gc_tui.toggles import _HINT_KEYS_TOGGLE, TOGGLES, _fit_hint, padded_track
 from gc_tui.widgets.palette_layout import (
     fit_name,
@@ -61,15 +62,19 @@ def _hint_for(cmd: Command | None) -> str:
     return _HINT_NO_ARGS
 
 
-def _matches(cmd: Command, prefix: str) -> bool:
-    """Фильтр строки палитры: имя ИЛИ любой алиас начинается с набранного
-    (тихий алиас `models`→`/model`: набравший «/models» находит
-    `/model` уже на этапе фильтрации, не только по прямому вводу полного
-    алиаса). Generic по `Command.aliases` — тот же механизм, что у `/сжать`
-    (`/compact`), просто применённый и к живому фильтру, не только к `lookup`."""
+def _match(cmd: Command, prefix: str) -> Optional[str]:
+    """Как строка команды подошла под фильтр: `""` — по имени, алиас —
+    только по нему (строка покажет `/имя (алиас)`), None — никак."""
     if cmd.name.startswith(prefix):
-        return True
-    return any(alias.startswith(prefix) for alias in cmd.aliases)
+        return ""
+    return next((a for a in cmd.aliases if a.startswith(prefix)), None)
+
+
+def _by_match(cmds: list[Command], prefix: str) -> list[Command]:
+    """Подошедшие под фильтр: сначала по имени, потом по алиасу; внутри
+    — порядок реестра."""
+    hits = [(c, _match(c, prefix)) for c in cmds]
+    return [c for c, h in hits if h == ""] + [c for c, h in hits if h]
 
 
 def _skill_label(skill: dict) -> str:
@@ -145,6 +150,9 @@ class CommandPalette(VerticalScroll):
         # Значения на одну перерисовку: ширина правой колонки и строки
         # спрашивают их много раз, провайдер (роутер витрины) — один.
         self._value_memo: dict[str, Optional[Text]] = {}
+        # Фильтр поиска для набранного текста (`_prefix`): пара
+        # (набранное, фильтр); сбрасывается с каждой перерисовкой.
+        self._prefix_memo: Optional[tuple[str, str]] = None
         # Состав значений тогглов на время ОДНОГО рендера подвала (`_build_footer`):
         # раскладка и строки спрашивают его много раз, провайдер должен
         # отработать один. None — вне рендера, кэша нет.
@@ -372,8 +380,8 @@ class CommandPalette(VerticalScroll):
         2026-07-18 §4): самое длинное видимое имя (`/имя`; у скилла — его
         запускаемый вид), не шире `SKILL_NAME_MAX`, + 3 пробела. Описания
         всех строк начинаются в одной колонке."""
-        labels = [f"/{c.name}" for c in self._visible_rows()]
-        labels += [f"/{c.name}" for c in self._visible_toggle_rows()]
+        labels = [self._label(c) for c in self._visible_rows()]
+        labels += [self._label(c) for c in self._visible_toggle_rows()]
         labels += [_skill_label(s) for s in self._visible_skill_rows()]
         return name_col_w(labels)
 
@@ -385,7 +393,43 @@ class CommandPalette(VerticalScroll):
         (DIM), не позицией."""
         if name_w is None:
             name_w = self._name_col_w()
-        return f" {f'/{cmd.name}'.ljust(name_w)}{cmd.description}"
+        return f" {self._label(cmd).ljust(name_w)}{cmd.description}"
+
+    def _label(self, cmd: Command) -> str:
+        """Имя строки: `/имя`, при совпадении только по алиасу —
+        `/имя (алиас)`, чтобы было видно, почему строка нашлась."""
+        alias = self._alias_hit(cmd)
+        return f"/{cmd.name} ({alias})" if alias else f"/{cmd.name}"
+
+    def completion(self, cmd: Command) -> str:
+        """Слово, которое Tab (и Enter, подставляющий команду) дописывает в
+        поле: набираемое — совпавший алиас, иначе имя, по правилу поля
+        (`field_word`: русский алиас — именем команды); набранное в чужой
+        раскладке — уже в правильной."""
+        return field_word(cmd, self._alias_hit(cmd) or cmd.name)
+
+    def _alias_hit(self, cmd: Command) -> Optional[str]:
+        return _match(cmd, self._prefix()) or None
+
+    def _prefix(self) -> str:
+        """Фильтр, по которому ищет палитра: набранное, а если по нему не
+        нашлось ни команды, ни скилла — оно же в другой раскладке
+        (`ьщв` — `/model`, `c;f` — `/compact (сжать)`). Запасной вариант,
+        а не второй поиск: короткое `/c` не тянет русские алиасы на «с»."""
+        memo = self._prefix_memo
+        if memo is None or memo[0] != self._filter:
+            typed = self._filter.lower()
+            if typed and not self._finds(typed):
+                typed = swap_layout(self._filter).lower()
+            self._prefix_memo = memo = (self._filter, typed)
+        return memo[1]
+
+    def _finds(self, prefix: str) -> bool:
+        commands = self._registry.list_commands()
+        if any(_match(c, prefix) is not None for c in commands):
+            return True
+        skills = self._skills() if self._skills is not None else []
+        return any(_skill_shown_name(s, prefix, False) for s in skills)
 
     def _value(self, cmd: Command) -> Optional[Text]:
         """Текущее значение команды (один вызов провайдера на перерисовку)."""
@@ -441,7 +485,7 @@ class CommandPalette(VerticalScroll):
     def _format_row(self, cmd: Command) -> str | Text:
         """Строка команды; со значением (`/model`) — `Text`, значение в
         правой колонке со своими цветами (знак модели)."""
-        head = f" {fit_name(f'/{cmd.name}').ljust(self._name_col_w())}"
+        head = f" {fit_name(self._label(cmd)).ljust(self._name_col_w())}"
         tail = self._hotkey_tail()
         desc = self._fit_desc(cmd.description, tail)
         right = self._right_text(cmd)
@@ -656,7 +700,7 @@ class CommandPalette(VerticalScroll):
         имя, которое показывает строка и вставляет Enter. Сначала совпавшие
         по имени (`skill_name_key`, как в пикере /skill), ниже совпавшие
         только по пакету — по пакетам, внутри пакета по короткому имени."""
-        f = self._filter.lower()
+        f = self._prefix()
         if not f or self._skills is None:
             return []
         by_name: list[dict] = []
@@ -706,17 +750,15 @@ class CommandPalette(VerticalScroll):
 
     def _skill_more_text(self) -> str:
         n = self._skill_more_count()
-        return f"… ещё {n} — /skill {self._filter}"
+        return f"… ещё {n} — /skill {self._prefix()}"
 
     def _filtered(self, *, toggle: bool) -> list[Command]:
-        f = self._filter.lower()
+        f = self._prefix()
         cmds = [
             c for c in self._registry.list_commands() if c.is_toggle == toggle
         ]
         if not toggle:
-            # Обычные команды — фильтр как был: startswith по имени ИЛИ алиасу
-            # (тихий алиас `models`→`/model` — тот же приём здесь).
-            return [c for c in cmds if _matches(c, f)] if f else cmds
+            return _by_match(cmds, f) if f else cmds
         # Toggle-подвал (ревизия 7, спека §2, §4.1): база — пустой фильтр =
         # `palette_default`-тогглы, непустой = startswith (то же правило, что
         # и раньше). Для КАЖДОГО preset-родителя из базы сразу после него
@@ -739,7 +781,7 @@ class CommandPalette(VerticalScroll):
         # родителем. Ребёнок, чей родитель фильтром НЕ пойман (отсутствует в
         # базе), в `owned` не попадает — остаётся обычной строкой на своём месте.
         base = (
-            [c for c in cmds if _matches(c, f)]
+            _by_match(cmds, f)
             if f
             else [c for c in cmds if TOGGLES[c.name].palette_default]
         )
@@ -814,6 +856,7 @@ class CommandPalette(VerticalScroll):
         if not self.is_mounted:
             return
         self._value_memo = {}
+        self._prefix_memo = None
         rows = self._visible_rows()
         new_widgets: list[Static] = []
         selected_widget: Optional[Static] = None
