@@ -27,6 +27,7 @@ from gc_core.plugins.sources import _clone, normalize_url
 logger = logging.getLogger(__name__)
 
 _META = ".installed.json"
+_STAGING = ".staging"  # служебный каталог; не имя плагина (_safe_name)
 
 
 @dataclass
@@ -88,6 +89,12 @@ def _write_meta(root: Path, meta: dict[str, dict]) -> None:
 
 def _safe_name(name: str) -> str:
     return re.sub(r"[^0-9A-Za-z_.-]+", "_", name).strip("._") or "plugin"
+
+
+def _staging_dir(root: Path) -> Path:
+    path = root / _STAGING
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _commit_of(path: Path) -> str | None:
@@ -231,23 +238,20 @@ class PreparedInstall:
 
 
 def _replace_dir(src: Path, dest: Path) -> None:
-    """Заменить ``dest`` копией ``src``: копия рядом, затем переименование.
+    """Заменить ``dest`` копией ``src``: копия в ``.staging``, затем
+    переименование.
 
     Сбой копирования оставляет прежнюю установку нетронутой.
     """
-    staged = dest.with_name(dest.name + ".new")
-    old = dest.with_name(dest.name + ".old")
-    shutil.rmtree(staged, ignore_errors=True)
-    try:
+    with tempfile.TemporaryDirectory(
+        dir=_staging_dir(dest.parent)
+    ) as tmp_name:
+        tmp = Path(tmp_name)
+        staged = tmp / "new"
         shutil.copytree(src, staged, ignore=shutil.ignore_patterns(".git"))
-    except BaseException:
-        shutil.rmtree(staged, ignore_errors=True)
-        raise
-    shutil.rmtree(old, ignore_errors=True)
-    if dest.exists():
-        dest.rename(old)
-    staged.rename(dest)
-    shutil.rmtree(old, ignore_errors=True)
+        if dest.exists():
+            dest.rename(tmp / "old")
+        staged.rename(dest)
 
 
 def _tree_digest(root: Path) -> str:
@@ -299,7 +303,7 @@ def prepare(
     """Скачать и проверить плагин; ``ValueError``, если источник не плагин."""
     root = root or installed_dir()
     root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=root) as tmp_name:
+    with tempfile.TemporaryDirectory(dir=_staging_dir(root)) as tmp_name:
         fetched, sha, norm = _fetch(source, ref, Path(tmp_name))
         plugin_dir = fetched / subdir if subdir else fetched
         errors = ap_manifest_errors(plugin_dir)
@@ -401,13 +405,21 @@ def disable(name: str, root: Path | None = None) -> bool:
 
 
 def uninstall(name: str, root: Path | None = None) -> bool:
+    """Удалить зарегистрированный плагин; ``False`` для чужого имени.
+
+    ``ValueError``, если путь записи выходит за пределы хранилища.
+    """
     root, meta = _load_meta(root)
-    existed = name in meta or (root / name).is_dir()
-    meta.pop(name, None)
-    shutil.rmtree(root / name, ignore_errors=True)
-    if existed:
-        _write_meta(root, meta)
-    return existed
+    if name not in meta:
+        return False
+    target = (root / name).resolve()
+    base = root.resolve()
+    if target == base or not target.is_relative_to(base):
+        raise ValueError(f"путь плагина вне хранилища: {name}")
+    shutil.rmtree(target, ignore_errors=True)
+    del meta[name]
+    _write_meta(root, meta)
+    return True
 
 
 def update(

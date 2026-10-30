@@ -1789,7 +1789,7 @@ def test_force_reinstall_copy_failure_keeps_old_install(tmp_path, monkeypatch):
     real_copytree = shutil.copytree
 
     def broken(source, target, *args, **kwargs):
-        if str(target).startswith(str(dest)):
+        if str(target).startswith(str(dest.parent / ".staging")):
             raise OSError("disk full")
         return real_copytree(source, target, *args, **kwargs)
 
@@ -1798,7 +1798,7 @@ def test_force_reinstall_copy_failure_keeps_old_install(tmp_path, monkeypatch):
         installed.install(str(src), force=True)
 
     assert (dest / "skills" / "demo-skill" / "SKILL.md").is_file()
-    assert not (dest.parent / "keep-demo.new").exists()
+    assert list((dest.parent / ".staging").iterdir()) == []
     assert [p.name for p in installed.list_installed()] == ["keep-demo"]
 
 
