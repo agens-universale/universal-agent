@@ -22,11 +22,16 @@ Screen {
    экрана ровно там, где выход нужнее всего. Обрубок врёт о клавишах так же, как
    обрубок счётчиков в шапке, поэтому решение общее для всех read-only экранов. */
 #footer { height: auto; min-height: 2; background: $bg; color: $dim;
-          padding: 0 1; }
+          padding: 0 1; border-top: solid $deep-dim; }
+/* Полоса над подвалом отделяет его от прокручиваемого тела (как у превью
+   сессии). Где тело и так в рамке — правки, их откат, «Обновление» — полоса
+   лишняя: рамка уже отделяет. */
+DiffScreen #footer, DiffFileViewer #footer, RevertConfirmScreen #footer,
+PostUpdateScreen #footer { border-top: none; }
 /* Исключение — главный экран: его подвал верстается кодом (усечение cwd,
    адаптивный стек usage) и стоит НАД полем ввода, где рост полосы двигал бы
    ввод под рукой. */
-TraceScreen #footer { height: 2; }
+TraceScreen #footer { height: 2; border-top: none; }
 /* padding-right: 2 — ФИЗИЧЕСКИЙ зазор между колонками футера. Правая колонка
    width:auto забирает своё по содержимому, левая (1fr) получает остаток — и без этих
    двух столбцов её текст упирался в имя модели вплотную (живая приёмка). Арифметика
@@ -437,6 +442,9 @@ TurnLine.-held, CompactionRule.-held { display: none; }
 
 /* Тело ViewerScreen — read-only payload/файл */
 .viewer-body   { color: $ink; padding: 0 1; }
+/* Markdown-тело — контейнер строк ленты: высота по содержимому, иначе
+   Vertical берёт 1fr окна, обрезает хвост и прокрутка пропадает. */
+.viewer-markdown { height: auto; }
 /* FileViewerScreen: TextArea(read_only) — скролл, syntax, мышиное выделение */
 FileViewerScreen #root { height: 1fr; }
 #file-view-body {

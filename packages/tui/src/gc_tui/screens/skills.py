@@ -193,4 +193,6 @@ class SkillsScreen(Screen):
         from gc_tui.services.skill_view import build_skill_viewer
 
         title, body = build_skill_viewer(detail)
-        self.app.push_screen(ViewerScreen(title=title, content=body))
+        self.app.push_screen(
+            ViewerScreen(title=title, content=body, markdown=True)
+        )

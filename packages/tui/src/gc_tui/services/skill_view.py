@@ -42,7 +42,8 @@ def build_skill_viewer(detail: dict) -> tuple[str, str]:
     """(title, body) для ViewerScreen скилла.
 
     title: `skill · <id> · <тип> · <root_path>`.
-    body: markdown — заголовок, описание, разделитель, инструкции.
+    body: markdown — заголовок, описание, инструкции (без `---`: движок
+    ленты линию не рисует, а сырой знак в просмотре — мусор).
     """
     sid = detail.get("id") or "?"
     title = f"skill · {sid} · {source_label(detail.get('source', ''))} · {detail.get('root_path', '')}"
@@ -51,8 +52,6 @@ def build_skill_viewer(detail: dict) -> tuple[str, str]:
             f"# {detail.get('name') or sid} ({sid})",
             "",
             detail.get("description", "") or "(без описания)",
-            "",
-            "---",
             "",
             detail.get("instructions", "") or "(нет инструкций)",
         ]
