@@ -217,6 +217,28 @@ def _mcp_display(
     return ToolDisplay(_C.MCP, _mcp_label(server), None, detail)
 
 
+#: Поля `session_think` в порядке показа; все необязательные.
+THINK_FIELDS = ("thoughts", "critics", "doubts", "reflection")
+#: Имена, которыми модели пишут поле мимо схемы: без переноса строгая схема
+#: выбросила бы мысль (живой случай 2026-11-01 — `thought`).
+THINK_FIELD_ALIASES = {"thought": "thoughts"}
+
+
+def think_parts(args: Mapping[str, object]) -> list[str]:
+    """Непустые поля вызова Think по порядку `THINK_FIELDS`; синоним — на
+    месте своего поля, если оно пустое. Один разбор на тул (перенос перед
+    схемой), сводку строки и раскрытие ленты."""
+    data = dict(args)
+    for alias, field in THINK_FIELD_ALIASES.items():
+        if not _filled(data.get(field)) and _filled(data.get(alias)):
+            data[field] = data[alias]
+    return [str(data[f]).strip() for f in THINK_FIELDS if _filled(data.get(f))]
+
+
+def _filled(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def tool_display(
     wire_name: str,
     *,

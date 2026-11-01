@@ -104,3 +104,21 @@ async def test_apply_tool_session_think_empty_after_strip_still_fails():
     data = json.loads(raw)
     assert data["ok"] is False
     assert data["error"]["type"] == "invalid_argument"
+
+
+def test_misnamed_thought_field_becomes_thoughts():
+    """Модель назвала поле `thought` — мысль не выбрасывается строгой
+    схемой, а встаёт в `thoughts` (как `reason`)."""
+    from gc_core.tools.session.think import Think
+
+    got = Think.prepare_args_before_strip(
+        {"thought": "мысль", "reflection": "вывод"}
+    )
+    assert got == {"thoughts": "мысль", "reflection": "вывод"}
+
+
+def test_thought_does_not_override_filled_thoughts():
+    from gc_core.tools.session.think import Think
+
+    args = {"thought": "лишнее", "thoughts": "своё"}
+    assert Think.prepare_args_before_strip(args)["thoughts"] == "своё"

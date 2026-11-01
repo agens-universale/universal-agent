@@ -107,7 +107,9 @@ async def test_click_on_cut_object_expands_full_text():
 
 
 @pytest.mark.asyncio
-async def test_short_think_only_selects():
+async def test_short_think_neither_expands_nor_selects():
+    """Влезающий текст не раскрывается; обычный клик строку не выделяет
+    (канон клик-модели)."""
     from gc_tui.widgets.expandable_text import ExpandableTextBody
 
     row = _row("коротко", "коротко")
@@ -116,7 +118,7 @@ async def test_short_think_only_selects():
         assert not _content(row).has_class("trace-expandable")
         await _click_object(pilot, row)
         assert row.query_one(ExpandableTextBody).display is False
-        assert row.has_focus
+        assert not row.has_focus
 
 
 @pytest.mark.asyncio
@@ -225,3 +227,10 @@ async def test_first_line_pieces_are_flush_with_right_gutter(width, kind):
         assert tail.right <= width - 1
         if long:
             assert tail.right == width - 1
+
+
+def test_think_text_takes_the_misnamed_thought_field():
+    from gc_tui.services.think_text import think_text
+
+    args = {"thought": "главное", "reflection": "вывод"}
+    assert think_text("session_think", args) == "главное\n\nвывод"

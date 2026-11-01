@@ -1,13 +1,16 @@
 import json
 from typing import Any, Dict
 
+from gc_core.constants.tool_display import THINK_FIELD_ALIASES, THINK_FIELDS
 from gc_core.loop_detector.constants import (
     GENERIC_PROFILE,
     loop_warn_on_repeat,
 )
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
-_THINK_FIELDS = ("thoughts", "critics", "doubts", "reflection")
+
+def _filled(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 @loop_warn_on_repeat(**GENERIC_PROFILE)
@@ -35,19 +38,22 @@ class Think(AbstractSimpleTool):
 
     @classmethod
     def prepare_args_before_strip(cls, args: Dict[str, Any]) -> Dict[str, Any]:
-        """If only injected ``reason`` is filled, treat it as ``thoughts`` before strip."""
+        """Before strip: a misnamed field (``thought``) goes to its schema
+        field when that one is empty; if only injected ``reason`` is filled,
+        it becomes ``thoughts``."""
         if not isinstance(args, dict):
             return args
-        reason = args.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            return args
-        if any(
-            isinstance(args.get(name), str) and args.get(name, "").strip()
-            for name in _THINK_FIELDS
-        ):
-            return args
         remapped = dict(args)
-        remapped["thoughts"] = reason
+        for alias, field in THINK_FIELD_ALIASES.items():
+            if _filled(remapped.get(alias)) and not _filled(
+                remapped.get(field)
+            ):
+                remapped[field] = remapped.pop(alias)
+        reason = remapped.get("reason")
+        if _filled(reason) and not any(
+            _filled(remapped.get(name)) for name in THINK_FIELDS
+        ):
+            remapped["thoughts"] = reason
         return remapped
 
     @classmethod
@@ -115,7 +121,7 @@ Return format (JSON string):
         **kwargs,
     ) -> str:
         vals = [thoughts, critics, doubts, reflection]
-        for name, val in zip(_THINK_FIELDS, vals):
+        for name, val in zip(THINK_FIELDS, vals):
             if val is not None and not isinstance(val, str):
                 return self._result(
                     ok=False,
