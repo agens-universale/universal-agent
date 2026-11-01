@@ -205,7 +205,7 @@ class HelpScreen(Screen):
             trace = VerticalScroll(id="trace")
             trace.can_focus = False
             yield trace
-            yield Static("[Esc] назад", id="footer", markup=False)
+            yield Static("Esc — назад", id="footer", markup=False)
 
     def on_mount(self) -> None:
         reg = build_default_registry()

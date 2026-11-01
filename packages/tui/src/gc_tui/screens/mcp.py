@@ -16,7 +16,9 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.column_row import ColumnRow, ColumnRows
 
-_FOOTER = "[Enter] раскрыть  [↑↓] серверы  [PgUp PgDn] прокрутка  [Esc] back"
+_FOOTER = (
+    "↑/↓ — серверы · Enter — раскрыть · PgUp/PgDn — прокрутка · Esc — назад"
+)
 
 # Цвета — из tui.palette (единый источник). Принцип: цвет — редкий сигнал
 # (глиф + статус), тело монохромно/приглушённо.

@@ -20,7 +20,7 @@ from gc_tui.services.yaml_view import (
     yaml_syntax_widget,
 )
 
-_FOOTER = "[Esc] back  [↑↓ / PgUp PgDn] прокрутка"
+_FOOTER = "↑/↓ / PgUp/PgDn — прокрутка · Esc — назад"
 _SNAPSHOT_HINT = (
     "снимок на момент запуска · правки применятся после перезапуска"
 )

@@ -52,9 +52,10 @@ TraceScreen #footer { height: 2; border-top: none; }
  * preview/viewer/help/config/mcp/tool_call_detail переиспользуют id="trace"). */
 #trace { height: 1fr; padding: 0 1; background: $bg; }
 /* Скроллбар — ЕДИНЫЙ стиль для всех скроллируемых контейнеров (трейс, /sessions,
- * /skills, read-only экраны): узкий и тихий, фирменный teal только при наведении/
- * перетаскивании (акцент — редкий сигнал). Тип-селектор → одинаково везде. */
-VerticalScroll {
+ * /skills, read-only экраны, область текста /view и буфера копий): узкий и тихий,
+ * фирменный teal только при наведении/перетаскивании (акцент — редкий сигнал).
+ * Тип-селектор → одинаково везде. */
+VerticalScroll, TextArea {
     scrollbar-size: 1 1;
     scrollbar-background: $bg;
     scrollbar-background-hover: $bg;
@@ -456,6 +457,11 @@ FileViewerScreen #root { height: 1fr; }
     color: $ink;
 }
 #file-view-body:focus { border: none; }
+/* Строка области текста и полосы позиции. Окнами (большой файл) встроенный
+   скроллбар знает лишь окно и врёт о файле — его место занимает
+   FilePositionBar, посчитанная по всему файлу. */
+#file-view-row { height: 1fr; }
+#file-view-body.paged { scrollbar-size-vertical: 0; }
 
 /* CopyBufferScreen: TextArea на весь экран — шапка+футер как у ViewerScreen,
  * рамка — тихая палитровая (не дефолт Textual), акцент при фокусе. */

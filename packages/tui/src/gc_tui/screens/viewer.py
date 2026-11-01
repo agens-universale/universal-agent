@@ -43,7 +43,7 @@ class ViewerScreen(Screen):
                 body.add_class("viewer-body")
                 yield body
             yield Static(
-                "[Esc] back  [↑↓ / PgUp PgDn] прокрутка",
+                "↑/↓ / PgUp/PgDn — прокрутка · Esc — назад",
                 id="footer",
                 markup=False,
             )

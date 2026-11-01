@@ -14,7 +14,9 @@ from textual.widgets import Input, Static
 from gc_tui.palette import DIM, MUTED, SKILL, SUB_INK
 from gc_tui.services.skill_view import source_label, truncate_path_left
 
-_FOOTER = "[↑↓] выбрать  [Enter] открыть  [Esc] назад  /skill <id>"
+_FOOTER = (
+    "↑/↓ — выбор · Enter — открыть · /skill <id> — запустить · Esc — назад"
+)
 _PATH_MIN = 16  # минимально видимая длина пути (хвост-папка)
 _DEFAULT_WIDTH = 80  # пока ширина списка неизвестна (до первой раскладки)
 _TYPE_RESERVE = 16  # длиннейший RU-ярлык типа ("пользовательский")

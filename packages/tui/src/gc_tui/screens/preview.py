@@ -24,8 +24,8 @@ from gc_tui.services.trace_retention import subagent_parent_ids_in_window
 
 _PATH_MAXLEN = 48
 _FOOTER_HINTS = (
-    "[Esc] назад  ·  [Enter] продолжить сессию  ·  "
-    "[↑↓ / PgUp PgDn] прокрутка  ·  [End] в конец"
+    "Enter — продолжить сессию · ↑/↓ / PgUp/PgDn — прокрутка · "
+    "End — в конец · Esc — назад"
 )
 
 
