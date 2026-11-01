@@ -58,6 +58,9 @@ class TuiConfig(BaseModel):
     # smart — судья только если за ход был >=1 вызов инструмента (спека §3).
     # Только TUI; CLI/server рулит agent.strict_turn_finish_validation.
     finish_gate_mode: Literal["on", "off", "smart"] = "smart"
+    # Мысли модели (reasoning) строками Thought в ленте и в треде; только
+    # chat_completions. Строки, как finish_gate_mode: тоггл пишет без конвертера.
+    show_reasoning: Literal["off", "on"] = "off"
     # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global
     # (~/.config/gc) и .gc/AGENTS.md. Игнорируется, если задан
     # paths.agent_md_path (путь главнее флага).

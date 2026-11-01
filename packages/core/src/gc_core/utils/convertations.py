@@ -72,7 +72,17 @@ def get_md5_hash(obj):
 
 # Только закрытая пара, нежадно. Незакрытый ``<think>`` в прозе не трогаем
 # (иначе «Use the <think> tag carefully.» → «Use the»).
-_THINK_CLOSED_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_THINK_CLOSED_RE = re.compile(
+    r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE
+)
+
+
+def closed_think_texts(text: str) -> list[str]:
+    """Тексты закрытых ``<think>…</think>`` по порядку, без пустых."""
+    if not isinstance(text, str):
+        return []
+    pieces = (p.strip() for p in _THINK_CLOSED_RE.findall(text))
+    return [p for p in pieces if p]
 
 
 def _visible_prose_without_think(text: str) -> str:

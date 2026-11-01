@@ -126,6 +126,42 @@ def model_choice_record(
     run_sync(_achoice())
 
 
+def reasoning_record(
+    threads_dir: str,
+    system: str,
+    thread: str,
+    record: Any,
+    *,
+    after: str | None = None,
+) -> None:
+    """Мысль модели в файловый тред так, как её пишет сессия ядра: запись
+    потока ``reasoning`` за сообщением ``after`` (по умолчанию —
+    последним в истории). Синхронно (тесты TUI на ``run_test``)."""
+    from gc_core.persistence.reasoning_record import reasoning_entry
+    from gc_core.threads.facade import run_sync
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import REASONING, SideChange
+
+    store = FileThreadStore(threads_dir)
+    key = ThreadKey(system=system, thread=thread)
+
+    async def _athought() -> None:
+        anchor = after
+        if anchor is None:
+            history = await store.read_stream(key, "messages")
+            anchor = history[-1].data.get("id") if history else None
+        entry = reasoning_entry(record, after=anchor)
+        await store.append_side(
+            key,
+            SideChange(
+                op_id=f"thought_{uuid.uuid4().hex}",
+                append=[(REASONING, [entry])],
+            ),
+        )
+
+    run_sync(_athought())
+
+
 def runtime_flag(
     threads_dir: str, system: str, thread: str, flag: str, *, active: bool
 ) -> None:

@@ -84,6 +84,11 @@
     с текстовым ответом агента без вызова инструмента:
     `deny` — всегда bounce (как CLI), `judge` — intent_guard решает, `allow` — принять текст.
     Только TUI копирует это в рабочий ключ `text_answer_mode`.
+  - `tui.show_reasoning` (`off | on`, по умолчанию `off`; в YAML — в кавычках) —
+    рассуждения модели строками `Thought` в ленте; при `on` они сохраняются в
+    треде. Только
+    `backend_api_mode: chat_completions`. Только TUI копирует это в рабочий ключ
+    `record_reasoning`. Переключается командой `/reasoning`.
   - `acp.text_answer_mode` (`deny | judge | allow`, по умолчанию `allow`) — то же для
     канала `gc-acp` (IDE). По умолчанию проза разрешена без судьи.
   - `acp.finish_gate_mode` (`on | off | smart`, по умолчанию `off`) — судья на

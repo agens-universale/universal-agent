@@ -100,6 +100,11 @@ from gc_core.execution.progress import (
     todo_items_from_arguments,
     tool_args_summary,
 )
+from gc_core.execution.reasoning_episode import (
+    ReasoningEpisode,
+    bind_episode,
+    current_episode,
+)
 from gc_core.execution.turn_clock import (
     TurnClock,
     begin_call_time,
@@ -178,7 +183,7 @@ from gc_core.security.permission_mode import (
     resolve_mode,
     tools_for_mode,
 )
-from gc_core.settings import AppConfig, settings_of
+from gc_core.settings import AppConfig, runtime_of, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.threads.errors import ThreadStoreError
@@ -351,7 +356,17 @@ def _main_call_on_delta(
             state.produced_output = True
         on_delta(kind, text)
 
-    return without_answer_deltas(marking) if mute_answer else marking
+    forward = without_answer_deltas(marking) if mute_answer else marking
+    episode = current_episode(ctx)
+    if episode is None:
+        return forward
+
+    def observed(kind: str, text: str) -> None:
+        # Отметки фазы мысли — до глушения `answer`: конец фазы виден и
+        # у заглушённой прозы.
+        forward(kind, episode.observe(kind, text))
+
+    return observed
 
 
 def _function_call_output_message(call_id: Any, output: str) -> Dict:
@@ -1576,6 +1591,7 @@ async def _arequest_backend_canonical_once(
     choices = res.get("choices")
     if isinstance(choices, list) and len(choices) > 0:
         first_choice_payload["choices"] = [choices[0]]
+        _capture_episode(ctx, choices[0])
     persist_reasoning = persist_reasoning_content_for_model(resolved, settings)
     canonical = output_chat_completion_to_response(
         first_choice_payload,
@@ -1838,14 +1854,57 @@ async def _amaybe_reroute_for_floors(
     return result
 
 
+def _capture_episode(ctx: Any, choice: Any) -> None:
+    """Мысль полученного ответа — в эпизод главного вызова, если он идёт."""
+    episode = current_episode(ctx)
+    message = choice.get("message") if isinstance(choice, dict) else None
+    if episode is not None and isinstance(message, dict):
+        episode.capture(message)
+
+
+def _start_episode(ctx: Any) -> Optional[ReasoningEpisode]:
+    """Эпизод мысли на время главного вызова: только при включённой записи
+    мыслей (``RuntimeEnv.record_reasoning``) и заданном хуке записи."""
+    if getattr(ctx, "record_reasoning", None) is None:
+        return None
+    if not runtime_of(ctx).record_reasoning:
+        return None
+    mono, _ = turn_clock_sources(ctx)
+    episode = ReasoningEpisode(
+        mono=mono, new_token=lambda: generate_message_id_func("att")
+    )
+    bind_episode(ctx, episode)
+    return episode
+
+
 async def _amain_call(messages, state: State, ctx: Any):
     """Главный вызов такта — одно тело для `aprocess_user_ask` и
     `aprocess_tool_outputs`: решение и комплект вызова, запрос, пол, закрытие такта.
     Снимок usage нужен только переигрышу пола (расход отброшенного вызова) —
     берётся, только когда этот вызов решал auto (`state.current_level`). Вызов,
     чью прозу заведомо переиграют, идёт с приглушённым каналом `answer` потока
-    (`_answer_stream_muted`); переигранный — с полным."""
+    (`_answer_stream_muted`); переигранный — с полным. Мысль пишется только
+    у принятого ответа — он известен лишь после переигрыша пола."""
     resolved = await aprepare_main_call(state, ctx)
+    episode = _start_episode(ctx)
+    try:
+        resp_messages, response_id = await _amain_call_accepted(
+            messages, state, ctx, resolved
+        )
+    finally:
+        if episode is not None:
+            bind_episode(ctx, None)
+    record = episode.take() if episode is not None else None
+    if record is not None:
+        await ctx.record_reasoning(record)
+    return resp_messages, response_id
+
+
+async def _amain_call_accepted(
+    messages, state: State, ctx: Any, resolved: Any
+):
+    """Запрос такта с заменой недоступной модели, переигрыш пола и закрытие
+    такта → принятый ответ."""
     usage_before = (
         _usage_snapshot(state)
         if getattr(state, "current_level", None) is not None

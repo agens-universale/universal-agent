@@ -187,6 +187,7 @@ def test_snapshot_contains_no_worker_only_or_secret_field():
         "is_tui",
         "text_answer_mode",
         "finish_gate_smart",
+        "record_reasoning",
         "subagent_tools_allow",
         "subagent_tools_stop",
         "os_backend",
