@@ -87,7 +87,7 @@ from gc_tui.widgets.block_panel import (
     _copy_request,
     copy_glyph,
 )
-from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.click_model import ClickModelMixin, opens_event
 from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.ran_output import OutputTexts, RanParts, RanPhrase
@@ -881,7 +881,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._toggle_parts(widget.toggle_key)
             return
         if (
-            not event.ctrl
+            not opens_event(event)
             and widget is not None
             and widget.has_class("block-copy")
         ):

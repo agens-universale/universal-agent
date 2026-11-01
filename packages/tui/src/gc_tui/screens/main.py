@@ -3379,6 +3379,35 @@ class TraceScreen(TraceFollowMixin, Screen):
             if not isinstance(w, ModelMark)
         ]
 
+    def _selected_event(self) -> Optional[Widget]:
+        """Выделенное событие ленты — сфокусированный прямой ребёнок
+        `#trace`; фокус в поле или в самой ленте — None."""
+        focused = self.focused
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        if focused is None or focused.parent is not trace:
+            return None
+        return focused
+
+    def _event_nav_key(self, key: str) -> bool:
+        """Режим событий: пока выделено событие (Tab, клик с модификатором),
+        ↑/↓ ходят по событиям — Shift+Tab занят режимами разрешений, — а Esc
+        возвращает в поле. Фокус в поле — клавиши его, здесь False."""
+        if key not in ("up", "down", "escape"):
+            return False
+        current = self._selected_event()
+        if current is None:
+            return False
+        if key == "escape":
+            self.query_one(_SEL_CMDINPUT, CommandTextArea).focus()
+            return True
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        events_ = [w for w in trace.children if w.can_focus and w.display]
+        step = -1 if key == "up" else 1
+        at = events_.index(current) + step if current in events_ else -1
+        if 0 <= at < len(events_):
+            events_[at].focus()
+        return True
+
     def _withdraw_last_queued(self) -> bool:
         """↑ забирает последнюю реплику очереди в поле (спека P3 §2.4, §10
         ответ 2): поле в фокусе и пустое, палитра и пикеры закрыты, история
@@ -6906,6 +6935,11 @@ class TraceScreen(TraceFollowMixin, Screen):
             event.stop()
             event.prevent_default()
             self._voice_toggle()
+            return
+
+        if self._event_nav_key(event.key):
+            event.stop()
+            event.prevent_default()
             return
 
         # Input history: ↑/↓ для навигации (smart line-position check).

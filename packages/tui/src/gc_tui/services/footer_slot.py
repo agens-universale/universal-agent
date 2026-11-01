@@ -22,7 +22,7 @@ PASTE_HINT_TEXT = "вставьте ещё раз, чтобы развернут
 # Вставка изображения: «Вставка…» держится до результата.
 IMAGE_PASTE_BUSY_HINT = "Вставка…"
 IMAGE_PASTE_WAIT_HINT = "дождитесь окончания вставки"
-IMAGE_OPEN_TIP = "Ctrl+клик по плашке — открыть изображение"
+IMAGE_OPEN_TIP = "Ctrl/Cmd+клик по плашке — открыть изображение"
 IMAGE_REFUSAL_EMPTY_CLIPBOARD = "✗ в буфере обмена нет изображения"
 IMAGES_WITH_COMMAND_REFUSAL = (
     "✗ изображения нельзя отправить вместе с командой"
