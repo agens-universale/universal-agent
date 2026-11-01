@@ -67,3 +67,37 @@ def test_nonempty_stream_returns_normally(monkeypatch):
         )
     )
     assert res["choices"][0]["message"]["content"] == "hi!"
+
+
+def test_whitespace_reasoning_without_finish_raises_empty_stream(monkeypatch):
+    install_transport(
+        monkeypatch,
+        stream_response(
+            sse_body(
+                {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "reasoning_content": "  \n",
+                            },
+                            "finish_reason": None,
+                        }
+                    ]
+                },
+                done=False,
+            )
+        ),
+    )
+    with pytest.raises(BackendStreamError) as error:
+        run_coro(
+            cb.arequest_backend_chat_completions(
+                {"model": "m", "messages": []},
+                {},
+                url="http://x",
+                on_delta=lambda kind, text: None,
+            )
+        )
+    assert error.value.status_code is None
+    assert "empty" in str(error.value).lower()
