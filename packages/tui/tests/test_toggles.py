@@ -127,11 +127,11 @@ def test_toggle_values_carry_hint_and_color():
     assert off.color == pal.INK  # gate off — белый (спека §3)
     on = gate.values[2]
     assert on.value == "on"
-    assert on.color == pal.ACCENT
+    assert on.color == pal.RUN_COLOR
     assert "самопроверка" in on.hint
     ans = TOGGLES["answers"]
     assert ans.names == ("allow", "judge", "deny")
-    assert ans.values[1].color == pal.RUN_COLOR  # judge — амбер
+    assert ans.values[1].color == pal.ACCENT  # judge — бирюзовый
     assert ans.values[0].color == pal.INK  # allow — белый
     assert "вызовом инструмента" in ans.values[2].hint
 
@@ -186,7 +186,7 @@ def test_gate_gains_smart_value():
         "on",
     )  # off·smart·on (мягкое→строгое, §3)
     smart = gate.values[1]
-    assert smart.value == "smart" and smart.color == pal.RUN_COLOR
+    assert smart.value == "smart" and smart.color == pal.ACCENT
     assert "работал инструментами" in smart.hint
 
 
@@ -199,12 +199,26 @@ def test_rigor_toggle_spec_shape():
     assert rigor.state is resolve_rigor_state
     assert rigor.palette_default is True
     assert rigor.dotted == ""
-    # low INK, medium RUN_COLOR, high ACCENT (спека §4.1)
+    # шкала значений: low INK, medium ACCENT, high RUN_COLOR
     from gc_tui import palette as pal
 
     assert rigor.values[0].color == pal.INK
-    assert rigor.values[1].color == pal.RUN_COLOR
-    assert rigor.values[2].color == pal.ACCENT
+    assert rigor.values[1].color == pal.ACCENT
+    assert rigor.values[2].color == pal.RUN_COLOR
+
+
+def test_value_scales_go_white_teal_amber():
+    """Шкала значений (дизайн-код): от слабого к сильному — INK, ACCENT,
+    RUN_COLOR. Ручки самопроверки и уровни модели — одна шкала."""
+    from gc_core.config_modules.model_registry import LEVELS
+    from gc_tui import palette as pal
+    from gc_tui.services.model_sign import LEVEL_COLORS
+    from gc_tui.toggles import TOGGLES
+
+    scale = (pal.INK, pal.ACCENT, pal.RUN_COLOR)
+    for name in ("rigor", "gate", "answers"):
+        assert tuple(v.color for v in TOGGLES[name].values) == scale
+    assert tuple(LEVEL_COLORS[level] for level in LEVELS) == scale
 
 
 def test_rigor_is_first_and_details_hidden_by_default():
@@ -357,9 +371,9 @@ def test_next_toggle_value_displayed_custom_falls_back_to_idx_zero():
 
 def test_answers_track_synchronized_with_gate_axis():
     """Инвариант всех треков (спека §3, ревизия 8): слева-направо от мягкого/
-    дешёвого (INK) к строгому/тщательному (ACCENT). answers исторически лежал
+    дешёвого (INK) к строгому/тщательному (RUN_COLOR). answers исторически лежал
     задом наперёд (deny·judge·allow) и расходился с gate/rigor в пресетах —
-    разворачивается в allow·judge·deny с цветами INK·RUN_COLOR·ACCENT. Синхрон:
+    разворачивается в allow·judge·deny с цветами INK·ACCENT·RUN_COLOR. Синхрон:
     для каждого пресета позиция answers-значения в его треке == позиции
     gate-значения в его треке (оба идут low/off слева -> high/on справа)."""
     from gc_tui import palette as pal
@@ -368,8 +382,8 @@ def test_answers_track_synchronized_with_gate_axis():
     answers = TOGGLES["answers"]
     assert answers.names == ("allow", "judge", "deny")
     assert answers.values[0].color == pal.INK
-    assert answers.values[1].color == pal.RUN_COLOR
-    assert answers.values[2].color == pal.ACCENT
+    assert answers.values[1].color == pal.ACCENT
+    assert answers.values[2].color == pal.RUN_COLOR
 
     gate = TOGGLES["gate"]
     for pair in PRESETS.values():

@@ -31,6 +31,24 @@ def test_profile_header_shows_registry_model_not_flat_key():
     assert "модель: ● flash" in text
 
 
+def test_profile_header_dot_carries_the_level_colour():
+    """Точка знака в шапке — цвет уровня по шкале значений, тот же, что в
+    футере и пикере `/model`: модель слота default — ACCENT."""
+    from gc_core import onboarding
+    from gc_tui.palette import ACCENT
+    from gc_tui.screens.config import _profile_header_text
+
+    cfg = {
+        "agent.model": onboarding.MODEL_SENTINEL,
+        "model": "default",
+        "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+        "slots": {"default": "flash"},
+    }
+    text = _profile_header_text(as_settings(cfg), profile_source=None)
+    dot = text.plain.index("●")
+    assert [str(s.style) for s in text.spans if s.start == dot] == [ACCENT]
+
+
 def test_profile_header_prefers_resolved_model_over_stale_flat_key():
     """Худший случай плоского чтения: `agent.model` заполнен руками и устарел —
     шапка называла бы моделью то, чем работа не идёт."""

@@ -107,8 +107,8 @@ async def test_manual_footer_shows_model_sign(tmp_path):
     async with app.run_test(size=(120, 24)):
         head = app.screen._compose_footer_right()
         assert head.plain.startswith("●● giga-max")
-        assert _style_at(head, "●") == RUN_COLOR
-        assert _style_at(head, "●", 1) == ACCENT
+        assert _style_at(head, "●") == ACCENT
+        assert _style_at(head, "●", 1) == RUN_COLOR
         assert _style_at(head, "giga-max") == INK
     app = _app(tmp_path, "qwen-coder")
     async with app.run_test(size=(120, 24)):
@@ -139,7 +139,7 @@ async def test_running_auto_footer_keeps_arrow_and_decision_dot(tmp_path):
         assert head.plain.startswith("● → ● giga-max")
         assert "✧" not in head.plain
         assert _style_at(head, "●") == AUTO_COLOR
-        assert _style_at(head, "●", 1) == ACCENT
+        assert _style_at(head, "●", 1) == RUN_COLOR
 
 
 def _rows(scr) -> list[str]:
@@ -171,7 +171,7 @@ async def test_pending_choice_goes_to_second_row_under_name(tmp_path):
         _assert_aligned(row1, row2, "glm-4.6", "giga-max")
         second = head.plain.index("giga-max")
         assert _style_at(head, "giga-max", second) == DIM
-        assert _style_at(head, "●", second - 2) == ACCENT
+        assert _style_at(head, "●", second - 2) == RUN_COLOR
         # manual → auto: слово `auto` в колонке имени.
         app.apply_model_choice("auto")
         row1, row2 = _rows(scr)

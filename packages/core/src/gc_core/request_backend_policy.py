@@ -93,6 +93,7 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
     logger: logging.Logger | None = None,
     on_delta=None,
     request_label: Optional[str] = None,
+    notice_who: Optional[str] = None,
     runtime_notices_enabled: bool = False,
     notice_url: Optional[str] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
@@ -148,6 +149,7 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
                 first_exc,
                 request_label=request_label,
                 url=notice_url,
+                who=notice_who,
                 enabled=runtime_notices_enabled,
             )
             raise
@@ -188,6 +190,7 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
             first_exc,
             request_label=request_label,
             url=notice_url,
+            who=notice_who,
             enabled=runtime_notices_enabled,
         )
         raise first_exc

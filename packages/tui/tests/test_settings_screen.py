@@ -4214,6 +4214,33 @@ async def test_session_line_label_is_dim_italic_and_value_has_its_track_colour(
         assert plan_colour.lower() in style_at(text.plain.rindex("plan"))
 
 
+async def test_modes_rows_paint_values_on_the_value_scale(tmp_path):
+    """Шкала значений в «Режимах работы»: ● трека горит цветом своей позиции
+    (`smart` — ACCENT), значение сессии второй строкой — тоже (`on` —
+    RUN_COLOR)."""
+    from gc_tui.palette import ACCENT, RUN_COLOR
+
+    app, _ = _app_with_config(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
+    )
+    app.tui_state.active_task_id = "t1"
+    app._threads_dir = str(tmp_path / "threads")
+    app.apply_session_overrides({"tui.finish_gate_mode": "on"})
+    async with app.run_test(size=(200, 24)) as pilot:
+        scr = await _open_modes_section(pilot)
+        text = scr._mode_row_text("gate", selected=False)
+
+        def style_at(idx):
+            return " ".join(
+                str(s.style) for s in text.spans if s.start <= idx < s.end
+            ).lower()
+
+        assert ACCENT.lower() in style_at(text.plain.index("●"))
+        assert _session_line(text.plain) == "  в текущей сессии: on"
+        assert RUN_COLOR.lower() in style_at(text.plain.rindex("on"))
+
+
 async def test_connection_section_mounts_connection_editor(tmp_path):
     from gc_tui import app as app_mod
     from gc_tui.editors.connection import ConnectionEditor

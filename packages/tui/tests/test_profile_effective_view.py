@@ -22,7 +22,7 @@ from gc_core.config_modules.model_registry import LEVELS
 from gc_testkit.tui_support import wait_until
 from gc_tui.editors import models_section as m
 from gc_tui.editors.models_section import value_style
-from gc_tui.palette import DEEP_DIM, DIM, INK
+from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, RUN_COLOR
 from test_profile_editor import _fill_entry
 from test_profiles_crud import (
     _flash,
@@ -789,6 +789,45 @@ async def test_slot_value_shows_three_states(tmp_path, monkeypatch):
             row = _slot_row(ed, level)
             if ed._effective_slot_value(level):
                 assert "не задан" not in row.plain, (level, row.plain)
+
+
+async def test_slot_heads_carry_the_value_scale(tmp_path, monkeypatch):
+    """Под-вид профиля — тот же редактор, что «Модели»: имя уровня в голове
+    строки слота — цветом шкалы значений (light INK, default ACCENT,
+    max RUN_COLOR), тем же, что в секции «Модели» и в знаке модели."""
+    colours = {"light": INK, "default": ACCENT, "max": RUN_COLOR}
+    async with _profile_view(tmp_path, monkeypatch) as (_p, _s, ed):
+        ed._row_width = lambda: 100  # грамматика строки, а не геометрия окна
+        for level in LEVELS:
+            head = _slot_row(ed, level)
+            assert _value_color(head, level) == _rgb(colours[level])
+
+
+async def test_the_selected_assign_row_shows_its_config_key(
+    tmp_path, monkeypatch
+):
+    """Под-вид профиля — тот же редактор: ключ конфига второй строкой только у
+    выбранной строки назначений. Путь тот же, что в основном конфиге, — файл
+    профиля устроен так же."""
+    async with _profile_view(tmp_path, monkeypatch, assign=True) as (
+        pilot,
+        _s,
+        ed,
+    ):
+        rows = ed._rows()
+        ed._idx = next(
+            i
+            for i, row in enumerate(rows)
+            if row.get("consumer") == "subagents.subagent_critic"
+        )
+        ed._refresh_rows()
+        await pilot.pause()
+        texts = [str(w.render()) for w in ed.query(".models-row")]
+        assert texts[ed._idx].split("\n")[1] == (
+            "  ключ: assign.subagents.subagent_critic"
+        )
+        others = texts[: ed._idx] + texts[ed._idx + 1 :]
+        assert [t for t in others if "\n" in t] == []
 
 
 async def test_assign_three_states_and_picker_first_row(tmp_path, monkeypatch):

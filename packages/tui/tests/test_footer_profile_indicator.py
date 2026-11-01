@@ -173,7 +173,7 @@ async def test_footer_dot_color_is_the_level_of_the_model(
     tmp_path, monkeypatch
 ):
     """Цвет точки — уровень модели по `model_sign.LEVEL_COLORS`, не хардкод
-    (light=INK, max=ACCENT); модель без уровня — серая точка."""
+    (light=INK, max=RUN_COLOR); модель без уровня — серая точка."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui import palette as p
@@ -199,7 +199,7 @@ async def test_footer_dot_color_is_the_level_of_the_model(
         app.set_session_override("model", "max")
         text2 = scr._compose_footer_right()
         assert text2.plain.startswith("● big")
-        assert str(text2.spans[0].style) == p.ACCENT
+        assert str(text2.spans[0].style) == p.RUN_COLOR
 
 
 @pytest.mark.asyncio

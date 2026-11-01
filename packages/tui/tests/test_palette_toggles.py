@@ -999,8 +999,8 @@ def test_slider_colors_semantic(monkeypatch):
     text = pal._format_toggle_row(reg.lookup("answers"))
     knob_styles = [str(s.style) for s in text.spans]
     assert any(
-        p.RUN_COLOR.lower() in st.lower() for st in knob_styles
-    )  # judge амбер
+        p.ACCENT.lower() in st.lower() for st in knob_styles
+    )  # judge бирюзовый
 
     text2 = pal._format_toggle_row(reg.lookup("gate"))
     knob_styles2 = [
@@ -1013,8 +1013,8 @@ def test_slider_colors_semantic(monkeypatch):
     pal_on = _mk_palette(reg, {"gate": "on", "answers": "judge"})
     text3 = pal_on._format_toggle_row(reg.lookup("gate"))
     assert any(
-        p.ACCENT.lower() in str(s.style).lower() for s in text3.spans
-    )  # on — teal индикатор
+        p.RUN_COLOR.lower() in str(s.style).lower() for s in text3.spans
+    )  # on — янтарный индикатор
 
 
 @pytest.mark.asyncio

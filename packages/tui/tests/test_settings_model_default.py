@@ -91,7 +91,7 @@ async def _pick(pilot, scr, value):
 async def test_model_row_label_and_value_sign(tmp_path, monkeypatch):
     """Голова — `model · модель по умолчанию`, значение — знак записанного
     выбора: слово уровня показывает модель своего слота с её точками."""
-    from gc_tui.palette import RUN_COLOR
+    from gc_tui.palette import ACCENT
 
     monkeypatch.chdir(tmp_path)
     app, _ = _app_with_config(tmp_path, 'model: "default"\n' + _REGISTRY)
@@ -104,7 +104,7 @@ async def test_model_row_label_and_value_sign(tmp_path, monkeypatch):
         assert text.plain.rstrip().endswith("● flash")
         dot = text.plain.rindex("●")
         assert any(
-            span.start <= dot < span.end and span.style == RUN_COLOR
+            span.start <= dot < span.end and span.style == ACCENT
             for span in text.spans
         )
 

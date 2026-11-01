@@ -17,7 +17,7 @@ from gc_core.model_choice import ModelChoiceApplied
 from gc_testkit.settings import make_settings
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
-from gc_tui.palette import ACCENT, DEEP_DIM, DIM, MUTED, TRACK
+from gc_tui.palette import DEEP_DIM, DIM, MUTED, RUN_COLOR, TRACK
 from gc_tui.services.model_sign import FREE_COLOR
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.trace_mapper import map_message
@@ -182,7 +182,7 @@ async def test_idle_change_mounts_rule_mark(tmp_path):
         assert list(_trace(scr).children)[-1] is mark
         assert not mark.pending
         await _assert_rule(pilot, mark, "● giga-max")
-        assert _style_of(mark._content, "●") == ACCENT
+        assert _style_of(mark._content, "●") == RUN_COLOR
 
 
 @pytest.mark.asyncio
@@ -273,7 +273,7 @@ async def test_running_change_mounts_pending_at_bottom_below_new_events(
         (mark,) = _marks(scr)
         assert mark.pending
         assert mark._prefix.plain == "● "
-        assert _style_of(mark._prefix, "●") == ACCENT
+        assert _style_of(mark._prefix, "●") == RUN_COLOR
         assert mark._content.plain == "giga-max"
         assert _style_of(mark._content, "giga-max") == DIM
         assert _notes(mark) == [_PENDING_NOTE]

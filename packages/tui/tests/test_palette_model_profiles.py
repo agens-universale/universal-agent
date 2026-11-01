@@ -85,7 +85,7 @@ async def test_model_and_profiles_are_plain_commands_with_values_right(
     assert len(model_row.plain) == len(str(help_row))
     dot = model_row.plain.rindex("●")
     styles = [str(s.style) for s in model_row.spans if s.start <= dot < s.end]
-    assert p.RUN_COLOR in styles
+    assert p.ACCENT in styles
 
 
 def test_knob_group_is_only_rigor_family():

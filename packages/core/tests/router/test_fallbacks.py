@@ -212,9 +212,27 @@ def test_service_consumer_degrades_and_pushes_fallback_notice(monkeypatch):
     notices = collect_runtime_notices()
     assert len(notices) == 1
     message = notices[0].message
-    assert "finish_gate" in message
+    assert message.startswith("самопроверка выполнения задачи: ")
     assert "flash" in message
     assert "glm-local" in message
+
+
+def test_consumer_labels_are_human_names():
+    """Уведомление о замене недоступной модели называет потребителя
+    по-человечески — теми же словами, что экран назначений (он берёт их
+    отсюда же)."""
+    from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
+
+    assert CONSUMER_RU_LABEL == {
+        "finish_gate": "самопроверка выполнения задачи",
+        "text_answer_judge": "формат ответа",
+        "command_judge": "судья команд",
+        "summary": "суммаризация",
+        "intent_scope": "журнал намерений",
+        "memory_compaction": "компакция памяти",
+        "vision": "модель для зрения",
+        "routing_judge": "судья автовыбора",
+    }
 
 
 def test_double_failure_service_consumer_propagates_for_per_consumer_fail_semantics(
@@ -942,6 +960,37 @@ async def test_subagent_non_first_call_failure_degrades_without_restart(
     assert parent_router.breaker.is_open("deepseek-max") is True
 
 
+async def test_subagent_fallback_notice_names_the_role(tmp_path):
+    """Уведомление о замене модели субагента называет его ролью из таблицы
+    ролей ядра, а не именем тула."""
+    from gc_core.tools.subagents.runner import SubagentRunner
+
+    raw = {
+        "models": {"flash": {}, "deepseek-max": {}},
+        "slots": {"default": "flash"},
+        "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
+    }
+    cfg = _subagent_cfg(tmp_path, raw)
+    parent_router = _router(raw, level="default")
+    parent_ctx = _subagent_ctx(cfg, parent_router)
+    parent_ctx.is_tui = True
+    runner = SubagentRunner(parent_ctx, _subagent_orchestrator_state(), cfg)
+    calls = {"n": 0}
+
+    async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(500)
+        return "ok"
+
+    await runner.arun(
+        "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
+    )
+
+    (notice,) = collect_runtime_notices()
+    assert notice.message.startswith("субагент Planner (рестарт): ")
+
+
 async def test_subagent_repeated_failure_after_fallback_returns_honest_tool_error(
     tmp_path,
 ):
@@ -1095,12 +1144,15 @@ def test_subagent_pin_already_open_redirects_to_active_at_ctx_build_time(
     parent_router = _router(raw, level="default")
     parent_router.breaker.trip("deepseek-max", "5xx после ретраев")
     parent_ctx = _subagent_ctx(cfg, parent_router)
+    parent_ctx.is_tui = True
     orch = _subagent_orchestrator_state()
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
     child_ctx = run_coro(runner._build_child_ctx(tool_name="subagent_planner"))
 
     assert child_ctx.model_router.resolve("main").alias == "flash"
+    (notice,) = collect_runtime_notices()
+    assert notice.message.startswith("субагент Planner: ")
 
 
 # ---------------------------------------------------------------------------

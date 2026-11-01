@@ -89,7 +89,8 @@ def resolve_rigor_state(settings: Any) -> str:
 @dataclass(frozen=True)
 class ToggleValue:
     """Одно значение тоггла: каноническое имя + подсказка (§5 спеки) + цвет ползунка
-    (§3 спеки; токен-константа tui/palette.py)."""
+    (§3 спеки; токен-константа tui/palette.py). У ручки-шкалы цвета идут от
+    слабого к сильному: INK, ACCENT, RUN_COLOR (дизайн-код, «Шкала значений»)."""
 
     value: str
     hint: str
@@ -648,12 +649,12 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue(
                 "medium",
                 "самопроверка после работы с инструментами, текст — по решению самопроверки · универсальный режим",
-                _pal.RUN_COLOR,
+                _pal.ACCENT,
             ),
             ToggleValue(
                 "high",
                 "самопроверка всегда, завершать только вызовом инструмента · сложные задачи, где важна полнота",
-                _pal.ACCENT,
+                _pal.RUN_COLOR,
             ),
         ),
         state=resolve_rigor_state,
@@ -673,12 +674,12 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue(
                 "smart",
                 "самопроверка только если агент работал инструментами · разговор без действий не проверяется",
-                _pal.RUN_COLOR,
+                _pal.ACCENT,
             ),
             ToggleValue(
                 "on",
                 "самопроверка не даст закончить, пока запрос не закрыт · для сложных задач, где важна полнота",
-                _pal.ACCENT,
+                _pal.RUN_COLOR,
             ),
         ),
         state=finish_gate_mode_of,
@@ -697,12 +698,12 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue(
                 "judge",
                 "текстовый ответ принимается, если проходит самопроверку · универсальный режим",
-                _pal.RUN_COLOR,
+                _pal.ACCENT,
             ),
             ToggleValue(
                 "deny",
                 "текст не завершает ход: агент обязан закончить вызовом инструмента · для строгой автономии",
-                _pal.ACCENT,
+                _pal.RUN_COLOR,
             ),
         ),
         state=text_answer_mode_of,
