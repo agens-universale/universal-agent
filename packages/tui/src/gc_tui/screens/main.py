@@ -9813,7 +9813,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 from gc_tui.screens.viewer import ViewerScreen
 
                 # ViewerScreen сам делает render_payload — pretty-print JSON
-                # с solarized-dark подсветкой для dict/list или plain Static
+                # с подсветкой темой кода ленты для dict/list или plain Static
                 # для остального. Передаём raw payload без предварительного dumps.
                 # summary: в segments-пути full_payload пуст ({}); показываем
                 # синтез сводки (summary_content заполнен в обоих путях).

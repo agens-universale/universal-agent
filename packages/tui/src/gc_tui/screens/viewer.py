@@ -19,7 +19,7 @@ class ViewerScreen(Screen):
     """Простой просмотрщик: заголовок + тело.
 
     content может быть:
-    - dict/list → pretty-print JSON с solarized-dark подсветкой (через render_payload).
+    - dict/list → pretty-print JSON с подсветкой темой кода ленты (через render_payload).
     - str: try json.loads → если ok, тоже подсветка; иначе plain Static.
     - str при ``markdown=True`` — Markdown тем же движком, что ответ в ленте:
       проза строками, код и таблицы панелями (тело скилла).
