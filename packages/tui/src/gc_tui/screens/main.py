@@ -196,6 +196,7 @@ from gc_tui.services.tool_blocks import (
     ToolBlocks,
     block_kind,
 )
+from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.trace_mapper import (
     PROPOSE_PLAN_ID,
     RenderContext,
@@ -901,7 +902,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             yield trace
             yield Vertical(id="indicator-bar")
             with Horizontal(id="input-row"):
-                yield Static("› ", id="input-prompt", markup=False)
+                yield Static(PROMPT, id="input-prompt", markup=False)
                 inp = CommandTextArea(
                     placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )

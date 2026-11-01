@@ -32,6 +32,7 @@ from gc_core.utils.path_truncate import truncate_path
 from gc_tui.models import AgentHead, ResultOutcome, TraceEvent
 from gc_tui.palette import INK
 from gc_tui.services.duration_format import format_round_int
+from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
     filter_sidecar_to_parents,
@@ -81,7 +82,7 @@ def level_prefix(level: int) -> str:
 # Глифы колонки `●`: реплика агента (итоговая — белым, промежуточная —
 # серым по классу `line-intermediate`) и реплика пользователя.
 PROSE_BULLET = "● "
-USER_PREFIX = "› "
+USER_PREFIX = PROMPT
 NESTED_PROSE_PREFIX = level_prefix(1) + PROSE_BULLET
 NESTED_USER_PREFIX = level_prefix(1) + USER_PREFIX
 LINE_INTERMEDIATE_CLASS = "line-intermediate"

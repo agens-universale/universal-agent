@@ -33,6 +33,7 @@ from gc_tui.services.session_lock import BUSY_MESSAGE, is_held_by_other
 from gc_tui.services.session_title import display_name, task_subtitle
 from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.turn_outcome import outcome_of, settled_status
 from gc_tui.services.usage_meter import format_nonzero_cost
 
@@ -139,7 +140,7 @@ class SessionsScreen(Screen):
                 yield Static("", id="sessions-header-right", markup=False)
             yield VerticalScroll(id="sessions-list")
             with Horizontal(id="sessions-filter-row"):
-                yield Static("> ", id="sessions-filter-prompt", markup=False)
+                yield Static(PROMPT, id="sessions-filter-prompt", markup=False)
                 yield Input(
                     placeholder="поиск (id или текст)", id="sessions-filter"
                 )

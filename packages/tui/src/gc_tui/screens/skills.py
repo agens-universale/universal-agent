@@ -13,6 +13,7 @@ from textual.widgets import Input, Static
 
 from gc_tui.palette import DIM, MUTED, SKILL, SUB_INK
 from gc_tui.services.skill_view import source_label, truncate_path_left
+from gc_tui.services.trace_glyphs import PROMPT
 
 _FOOTER = (
     "↑/↓ — выбор · Enter — открыть · /skill <id> — запустить · Esc — назад"
@@ -47,7 +48,7 @@ class SkillsScreen(Screen):
                 yield Static("", id="header-left", markup=False)
             yield VerticalScroll(id="skills-list")
             with Horizontal(id="skills-filter-row"):
-                yield Static("> ", id="skills-filter-prompt", markup=False)
+                yield Static(PROMPT, id="skills-filter-prompt", markup=False)
                 yield Input(placeholder="фильтр…", id="skills-filter")
             yield Static(_FOOTER, id="footer", markup=False)
 

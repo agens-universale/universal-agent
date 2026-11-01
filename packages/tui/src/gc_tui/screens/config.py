@@ -14,6 +14,7 @@ from textual.widgets import Input, Static
 from gc_tui.palette import DIM, MUTED
 from gc_tui.services.column_row import ColumnRow, ColumnRows
 from gc_tui.services.redact import redact_settings
+from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.yaml_view import (
     safe_yaml_dump,
     yaml_syntax_renderable,
@@ -274,7 +275,7 @@ class ConfigScreen(Screen):
                 self._yaml_w.border_subtitle = "секреты скрыты"
                 yield self._yaml_w
             with Horizontal(id="config-filter-row"):
-                yield Static("> ", id="config-filter-prompt", markup=False)
+                yield Static(PROMPT, id="config-filter-prompt", markup=False)
                 yield Input(placeholder="фильтр ключей…", id="config-filter")
             yield Static(_FOOTER, id="footer", markup=False)
 
