@@ -28,6 +28,7 @@ from gc_tui.session_settings import (
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _TUI_FINISH_GATE_MODE = "tui.finish_gate_mode"
 _TUI_TEXT_ANSWER_MODE = "tui.text_answer_mode"
+_TUI_SHOW_REASONING = "tui.show_reasoning"
 
 
 def tui_agent_settings(loaded):
@@ -53,6 +54,7 @@ def tui_agent_settings(loaded):
     ).with_runtime(
         text_answer_mode=text_answer_mode_of(loaded.settings),
         finish_gate_smart=mode == "smart",
+        record_reasoning=loaded.settings.tui.show_reasoning == "on",
     )
 
 
@@ -542,7 +544,12 @@ def group_toggle_names(group: str) -> list:
 # Порядок блоков сверху вниз — решение владельца: «чем работаем» (модель по
 # умолчанию), «что агенту можно» (режим разрешений по умолчанию), «как строго
 # закрывать ход» (строгость, самопроверка, формат ответа).
-MODES_SECTION_GROUPS: Tuple[str, ...] = ("model", "permissions", "rigor")
+MODES_SECTION_GROUPS: Tuple[str, ...] = (
+    "model",
+    "permissions",
+    "rigor",
+    "trace",
+)
 
 
 def modes_section_names() -> list:
@@ -709,6 +716,27 @@ TOGGLES: Dict[str, ToggleSpec] = {
         state=text_answer_mode_of,
         label="формат ответа",
         summary="допустим ли текст как финал хода",
+        palette_default=False,
+    ),
+    "reasoning": ToggleSpec(
+        dotted=_TUI_SHOW_REASONING,
+        values=(
+            ToggleValue(
+                "off",
+                "рассуждения модели в ленте не показываются и в тред не пишутся",
+                _pal.INK,
+            ),
+            ToggleValue(
+                "on",
+                "рассуждения модели строками Thought в ленте, сохраняются в треде"
+                " · только в chat_completions",
+                _pal.RUN_COLOR,
+            ),
+        ),
+        state=lambda s: settings_of(s).tui.show_reasoning,
+        label="рассуждения модели в ленте (reasoning)",
+        summary="",
+        group="trace",
         palette_default=False,
     ),
 }

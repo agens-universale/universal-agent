@@ -17,6 +17,10 @@ def test_session_keys_cover_toggle_keys():
     assert all(name == key.dotted for name, key in SESSION_KEYS.items())
 
 
+def test_show_reasoning_is_session_key():
+    assert "tui.show_reasoning" in SESSION_KEYS
+
+
 def test_session_layer_sets_value_and_makes_it_explicit():
     """Переопределение ложится сессионным слоем и делает поле явным — иначе
     правило коллизии сочло бы значение неявным и могло вернуть не его."""

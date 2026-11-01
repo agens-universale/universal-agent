@@ -1275,3 +1275,15 @@ async def test_enter_inserts_command_word_like_tab(tmp_path, typed, inserted):
         await pilot.press("enter")
         await pilot.pause()
         assert inp.text == inserted
+
+
+@pytest.mark.parametrize("typed", ["reas", "рассужд"])
+def test_reasoning_toggle_found_by_name_and_alias(typed):
+    palette = _filtered_palette(typed)
+    assert [c.name for c in palette._visible_toggle_rows()] == ["reasoning"]
+
+
+def test_reasoning_toggle_absent_in_empty_palette():
+    palette = _filtered_palette("")
+    names = [c.name for c in palette._visible_toggle_rows()]
+    assert "reasoning" not in names

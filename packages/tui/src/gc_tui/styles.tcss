@@ -158,7 +158,7 @@ TraceScreen #trace { width: 100%; margin: 0 0 1 0; }
 /* Фокус строки события — сдвиг-безопасная подсветка фона (заменила [N]-префикс:
    background не рефлоунит контент, в отличие от prefix/border). */
 ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus,
-BlockPanel:focus, TodoBlock:focus {
+BlockPanel:focus, TodoBlock:focus, ThoughtRow:focus {
     background: $highlight-bg;
 }
 /* DiffBlock здесь НЕТ: он не фокусируется вовсе (can_focus=False) — событие
@@ -227,6 +227,18 @@ BlockPanel:focus, TodoBlock:focus {
 .block-copy  { color: $dim; }
 /* Наведение на действие ленты (❐, «… ещё N строк») — одно правило. */
 .trace-action:hover { color: $accent; }
+/* Наведение на текст, раскрываемый кликом по нему самому (строка мысли),
+   — белым; одно правило. */
+.trace-expandable:hover { color: $ink; }
+/* Объект вызова Think — отдельный Static без своего цвета в тексте:
+   законченный `$sub-ink`, идущий `$ink` (вид строки вызова, §10). */
+.think-target { color: $sub-ink; }
+/* Три Static первой строки Think идут вплотную: ширина по тексту; селектор
+   с типом строки — приоритет над `.trace-content { width: 1fr }`. */
+ToolCallRow .think-label,
+ToolCallRow .think-target,
+ToolCallRow .think-tail { width: auto; height: 1; }
+.think-target.-active { color: $ink; }
 
 /* Накладки над лентой «не внизу» (спека P3 §2.6): поверх экрана, высоты
    ленты не занимают; место и ширину ставит код по #trace. Ховер плашки —
@@ -274,6 +286,10 @@ ScrollEndPill:hover { background: $highlight-bg; }
 .line-tool      { color: $dim; }       /* |- механика тула */
 /* Пустая строка перед каждым вызовом — верхним и вложенным (спека P3 §2.1). */
 ToolCallRow { margin-top: 1; }
+/* Строка мысли модели — событие уровня 0, тоже с пустой строкой сверху;
+   серая целиком, хвост и раскрытый текст — тоже (ховер хвоста —
+   .trace-expandable:hover). */
+ThoughtRow { margin-top: 1; color: $dim; }
 /* Блоки P4: члены и строки внутри блока субагента — без пустой строки
    сверху; между видимыми файлами блока правок — есть (спека P4 §3.1). */
 ToolCallRow.-member, ToolCallRow.-in-agent { margin-top: 0; }

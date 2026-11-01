@@ -11,6 +11,7 @@ from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
 from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
 from gc_core.execution.progress import tool_args_summary
 from gc_core.message_policy.chat_completions import is_bridge_echo
+from gc_core.persistence.reasoning_record import parse_reasoning
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -29,6 +30,7 @@ from gc_tui.services.command_output import (
 from gc_tui.services.duration_format import format_size
 from gc_tui.services.image_chips import images_mentioned
 from gc_tui.services.plural import plural_form
+from gc_tui.services.think_text import think_text
 from gc_tui.services.tool_identity import tool_id
 from gc_tui.services.tool_refusal import refusal_text
 
@@ -651,6 +653,24 @@ def map_message(
     return None
 
 
+def map_thought(rec: Mapping[str, Any], *, no: int) -> Optional[TraceEvent]:
+    """Запись мысли модели (поток ``reasoning``) → событие ленты
+    ``thought``: полный текст — сводка и payload (экран события), запись —
+    строке ленты; кривая запись — ``None``."""
+    thought = parse_reasoning(rec)
+    if thought is None:
+        return None
+    return TraceEvent(
+        no=no,
+        event_ts_utc_iso=str(rec.get("ts") or ""),
+        kind="thought",
+        title="thought",
+        summary=thought.text,
+        full_payload=thought.text,
+        thought=thought,
+    )
+
+
 def coerce_args(arguments: Any) -> dict:
     if isinstance(arguments, dict):
         return arguments
@@ -958,6 +978,7 @@ def _map_function_event(
                 wire_name, msg.get("arguments"), root=root
             ),
             agent=agent_head(wire_name, msg.get("arguments")),
+            think_text=think_text(wire_name, msg.get("arguments")),
         )
 
     if typ == "function_call_output":

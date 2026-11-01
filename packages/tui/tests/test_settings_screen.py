@@ -4165,7 +4165,7 @@ async def test_modes_session_line_survives_a_narrow_window(tmp_path):
     app, cfg_file = _app_with_config(
         tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
     )
-    async with app.run_test(size=(73, 24)) as pilot:
+    async with app.run_test(size=(80, 24)) as pilot:
         scr = await _open_modes_section(pilot)
         app.set_session_override("tui.finish_gate_mode", "off")
         scr._render_view()
@@ -4176,6 +4176,8 @@ async def test_modes_session_line_survives_a_narrow_window(tmp_path):
         gate_row = str(gate.render())
         assert _session_line(gate_row) == "  в текущей сессии: off"
         assert gate_row.split("\n")[0].rstrip().endswith("on")
+        lines = gate_row.split("\n")
+        assert len(lines) == 2  # значение + сессия (строка не выбрана)
         assert gate.region.height == 2  # две строки, без переноса
 
 
@@ -5404,6 +5406,7 @@ def test_modes_section_goes_model_then_permissions_then_rigor():
         "rigor",
         "gate",
         "answers",
+        "reasoning",
     ]
 
 
@@ -5419,9 +5422,9 @@ async def test_model_row_stands_behind_a_separator(tmp_path):
 
         seps = list(scr.query(".set-group-sep"))
         rows = list(scr.query(".set-row"))
-        # Три блока: model | mode | rigor с детьми — две черты.
-        assert len(seps) == 2
-        assert len(rows) == 5
+        # Четыре блока: model | mode | rigor с детьми | trace — три черты.
+        assert len(seps) == 3
+        assert len(rows) == 6
         assert rows[0].region.y < seps[0].region.y < rows[1].region.y
         assert rows[1].region.y < seps[1].region.y < rows[2].region.y
 
@@ -5926,7 +5929,7 @@ async def test_modes_key_line_sits_in_hint_not_in_rows(tmp_path):
     app, _ = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test(size=(200, 30)) as pilot:
         scr = await _open_modes_section(pilot)
-        for name in ("rigor", "gate", "model"):
+        for name in ("reasoning", "rigor", "gate", "model"):
             assert "ключ:" not in scr._mode_row_text(name, True).plain
 
         def key_line(name: str) -> str:
@@ -5939,9 +5942,23 @@ async def test_modes_key_line_sits_in_hint_not_in_rows(tmp_path):
                 assert block[block.spans[-1].start :].plain == lines[1][6:]
             return lines[1]
 
+        assert key_line("reasoning") == "ключ: tui.show_reasoning"
         assert key_line("gate") == "ключ: tui.finish_gate_mode"
         assert key_line("model") == "ключ: model"
         assert key_line("rigor") == ""
+
+
+async def test_modes_session_line_is_last_row_line(tmp_path):
+    """Сессионный `on` при файловом `off`: «в текущей сессии: on» — второй
+    и последней строкой строки (ключ — в подсказке)."""
+    app, _ = _app_with_config(tmp_path, 'tui:\n  show_reasoning: "off"\n')
+    app.tui_state.active_task_id = "t1"
+    app._threads_dir = str(tmp_path / "threads")
+    app.apply_session_overrides({"tui.show_reasoning": "on"})
+    async with app.run_test(size=(200, 30)) as pilot:
+        scr = await _open_modes_section(pilot)
+        lines = scr._mode_row_text("reasoning", True).plain.split("\n")
+        assert lines[1:] == ["  в текущей сессии: on"]
 
 
 @pytest.mark.parametrize("width", [70, 100, 160])

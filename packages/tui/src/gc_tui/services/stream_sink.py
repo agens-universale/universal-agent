@@ -27,6 +27,7 @@ class StreamSink:
         self._chars = 0
         self._reasoning_started_at = None  # float | None
         self._reasoning_ended_at = None  # float | None
+        self._attempt = None  # str | None
 
     def push(self, kind: str, text: str) -> None:
         with self._lock:
@@ -36,6 +37,7 @@ class StreamSink:
                 self._chars = 0
                 self._reasoning_started_at = None
                 self._reasoning_ended_at = None
+                self._attempt = text or None
                 return
             if kind == "think":
                 self._think += text
@@ -69,6 +71,11 @@ class StreamSink:
         with self._lock:
             return self._think, self._answer
 
+    def attempt(self) -> str | None:
+        """Метка попытки из текста последнего `reset` (None — не пришла)."""
+        with self._lock:
+            return self._attempt
+
     def has_content(self) -> bool:
         with self._lock:
             return bool(self._think or self._answer)
@@ -91,6 +98,22 @@ class StreamSink:
                 self._reasoning_ended_at - self._reasoning_started_at,
             )
 
+    def clear_answer(self) -> None:
+        """Снять только канал ответа: он стал строкой ленты. Мысль, метка
+        попытки и фаза мысли остаются — их сбрасывает `reset` ядра."""
+        with self._lock:
+            self._answer = ""
+
+    def reasoning_seconds(self) -> float | None:
+        """Время фазы мысли: идёт, пока мысль идёт, после — её длительность;
+        мысли не было — None."""
+        with self._lock:
+            started = self._reasoning_started_at
+            if started is None:
+                return None
+            ended = self._reasoning_ended_at
+            return (self._clock() if ended is None else ended) - started
+
     def reset(self) -> None:
         with self._lock:
             self._think = ""
@@ -98,6 +121,7 @@ class StreamSink:
             self._chars = 0
             self._reasoning_started_at = None
             self._reasoning_ended_at = None
+            self._attempt = None
 
 
 def format_stream_block(*, answer: str) -> str:
@@ -109,7 +133,7 @@ def format_stream_block(*, answer: str) -> str:
     return "" if is_bridge_echo(text) else text
 
 
-def _reasoning_tail(think: str, maxlen: int) -> str:
+def reasoning_tail(think: str, maxlen: int) -> str:
     """Reasoning as a single line: collapse whitespace; if longer than `maxlen`,
     keep the last `maxlen` chars trimmed to a word boundary (no mid-word cut),
     '…'-prefixed."""
@@ -128,19 +152,24 @@ def _reasoning_tail(think: str, maxlen: int) -> str:
 def format_reasoning_line(*, think: str, tail_len: int = 64) -> str:
     """Compact one-line reasoning glimpse for the StreamBlock during the
     thinking phase: `⠇ <tail>` (empty string if no reasoning)."""
-    tail = _reasoning_tail(think, tail_len)
+    tail = reasoning_tail(think, tail_len)
     return f"⠇ {tail}" if tail else ""
 
 
 def select_stream_render(
-    mode: str, clean_answer: str, reasoning_line: str
+    mode: str,
+    clean_answer: str,
+    reasoning_line: str,
+    *,
+    show_reasoning: bool = False,
 ) -> tuple[str, bool]:
     """Что показать в StreamBlock по режиму tui_stream_display.
-    Возвращает (kind, thinking): kind ∈ {"answer", "reasoning", "none"}."""
+    Возвращает (kind, thinking): kind ∈ {"answer", "reasoning", "none"}.
+    При show_reasoning мысли идут в ленту, глазок скрыт."""
     if mode == "minimal":
         return ("none", False)
     if clean_answer.strip():
         return ("answer", False)
-    if mode == "answer_reasoning" and reasoning_line:
+    if mode == "answer_reasoning" and reasoning_line and not show_reasoning:
         return ("reasoning", True)
     return ("none", False)

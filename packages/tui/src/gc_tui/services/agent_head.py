@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Optional
 
 from gc_core.constants.tool_display import (
@@ -15,15 +14,7 @@ from gc_core.constants.tool_display import (
 )
 
 from gc_tui.models import AgentHead
-
-
-def _arguments(arguments: Any) -> dict:
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments) if arguments.strip() else {}
-        except json.JSONDecodeError:
-            return {}
-    return arguments if isinstance(arguments, dict) else {}
+from gc_tui.services.call_arguments import call_arguments
 
 
 def _text(data: dict, key: str) -> str:
@@ -40,5 +31,5 @@ def agent_head(
         return None
     if tool_display(wire_name).category is not DisplayCategory.AGENT:
         return None
-    data = _arguments(arguments)
+    data = call_arguments(arguments)
     return AgentHead(subagent_role(wire_name, data), _text(data, "task"))

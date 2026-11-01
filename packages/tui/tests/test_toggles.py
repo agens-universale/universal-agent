@@ -6,6 +6,7 @@ agent.strict_turn_finish_validation=false даёт off; иначе smart (деф
 сравнение с умолчанием)."""
 
 from gc_testkit.settings import make_settings
+from gc_testkit.tui_support import tui_settings
 from gc_tui.session_settings import finish_gate_mode_of
 
 
@@ -392,3 +393,47 @@ def test_answers_track_synchronized_with_gate_axis():
         assert gate.names.index(gate_value) == answers.names.index(
             answers_value
         )
+
+
+def test_tui_agent_settings_projects_show_reasoning():
+    from gc_core.settings import runtime_of
+    from gc_tui.toggles import tui_agent_settings
+
+    on = tui_agent_settings(make_settings(**{"tui.show_reasoning": "on"}))
+    off = tui_agent_settings(make_settings(**{"tui.show_reasoning": "off"}))
+    assert runtime_of(on).record_reasoning is True
+    assert runtime_of(off).record_reasoning is False
+
+
+def test_two_value_toggles_go_white_amber():
+    from gc_tui import palette as pal
+    from gc_tui.toggles import TOGGLES
+
+    two = [s for s in TOGGLES.values() if len(s.values) == 2]
+    assert two
+    assert all(
+        tuple(v.color for v in s.values) == (pal.INK, pal.RUN_COLOR)
+        for s in two
+    )
+
+
+def test_reasoning_toggle_spec():
+    from gc_tui.toggles import TOGGLES, modes_section_names
+
+    s = TOGGLES["reasoning"]
+    assert (s.dotted, s.palette_default, s.group) == (
+        "tui.show_reasoning",
+        False,
+        "trace",
+    )
+    assert s.names == ("off", "on")
+    assert s.values[1].hint.endswith("· только в chat_completions")
+    assert modes_section_names()[-1] == "reasoning"
+
+
+def test_reasoning_state_reads_effective_flag():
+    from gc_tui.toggles import TOGGLES
+
+    on = tui_settings(**{"tui.show_reasoning": "on"})
+    assert TOGGLES["reasoning"].state(on) == "on"
+    assert TOGGLES["reasoning"].state(tui_settings()) == "off"

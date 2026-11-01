@@ -12,12 +12,13 @@ TUI работает с локальным файловым хранилищем
   storage_epoch   → «поколение:версия истории»
   archives        → число архивов сжатия треда
 
-Итог хода (поток ``turns``) и смена модели (поток ``model_choices``) —
-записи сбоку: хранилище отдаёт потоки пачками по потоку, поэтому запись
-встаёт по привязке (``after`` — последнее сообщение хода или последнее
-записанное на момент смены), а не по месту в пачке: за своим сообщением,
-а его нет в пачке (прочитано раньше) — в начало пачки; у одного сообщения
-итог хода идёт раньше смены. Полное чтение (снимок, сегменты) снимает
+Итог хода (поток ``turns``), смена модели (поток ``model_choices``) и
+мысль модели (поток ``reasoning``) — записи сбоку: хранилище отдаёт потоки
+пачками по потоку, поэтому запись встаёт по привязке (``after`` —
+последнее сообщение хода или последнее записанное на момент записи), а не
+по месту в пачке: за своим сообщением, а его нет в пачке (прочитано
+раньше) — в начало пачки; у одного сообщения итог хода идёт раньше смены,
+мысль — последней. Полное чтение (снимок, сегменты) снимает
 записи-сироты: сообщения их хода в истории нет (откат, сброс).
 
 Сжатие (новая версия истории того же поколения и ровно один новый архив)
@@ -44,6 +45,7 @@ from gc_core.persistence.model_choice_record import (
     MODEL_CHOICE_TYPE,
     ModelChoiceRecord,
 )
+from gc_core.persistence.reasoning_record import THOUGHT_TYPE
 from gc_core.persistence.turn_outcome import (
     TURN_OUTCOME_TYPE,
     turn_shown_in,
@@ -53,6 +55,7 @@ from gc_core.threads.facade import Cursor, TailBatch, Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import (
     MODEL_CHOICES,
+    REASONING,
     TURNS,
     StreamEntry,
     ThreadKey,
@@ -70,7 +73,11 @@ _HISTORY = "messages"
 _TUI = "tui"
 #: Записи сбоку, которые лента ставит за сообщением привязки: поток →
 #: тип конверта. Порядок — порядок у одного сообщения.
-_SIDE = {TURNS: TURN_OUTCOME_TYPE, MODEL_CHOICES: MODEL_CHOICE_TYPE}
+_SIDE = {
+    TURNS: TURN_OUTCOME_TYPE,
+    MODEL_CHOICES: MODEL_CHOICE_TYPE,
+    REASONING: THOUGHT_TYPE,
+}
 _SIDE_TYPES = frozenset(_SIDE.values())
 #: Потоки ленты: история и записи сбоку.
 _FEED = (_HISTORY, *_SIDE)
@@ -505,9 +512,11 @@ async def _aparts_and_side(
         return parts, []
     turns = await threads.turns(key)
     choices = await threads.model_choices(key)
+    thoughts = await threads.reasoning(key)
     return parts, [
         *(_side_envelope(key, TURNS, e) for e in turns),
         *(_side_envelope(key, MODEL_CHOICES, e) for e in choices),
+        *(_side_envelope(key, REASONING, e) for e in thoughts),
     ]
 
 

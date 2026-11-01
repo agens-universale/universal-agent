@@ -56,7 +56,6 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
-from gc_tui import textual_compat
 from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
@@ -82,6 +81,7 @@ from gc_tui.services.trace_render import (
     fit_lines,
     level_prefix,
 )
+from gc_tui.widgets.blink_pulse import BlinkPulseMixin
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
     _copy_request,
@@ -89,6 +89,10 @@ from gc_tui.widgets.block_panel import (
 )
 from gc_tui.widgets.click_model import ClickModelMixin, opens_event
 from gc_tui.widgets.consequence_line import ConsequenceSlot
+from gc_tui.widgets.expandable_text import (
+    ExpandableTextBody,
+    ExpandableToggle,
+)
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.ran_output import OutputTexts, RanParts, RanPhrase
 from gc_tui.widgets.static_content import update_if_changed
@@ -167,7 +171,7 @@ class _CopyButton(NoSelectStatic):
     FOCUS_ON_CLICK = False
 
 
-class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
+class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
     """Строка одного tool-вызова: waiting / running / ok / error / interrupted.
 
     DOM:
@@ -214,6 +218,8 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         height: auto;
     }
     ToolCallRow.has-consequence .trace-consequence { display: block; }
+    ToolCallRow > ExpandableTextBody { padding: 0 0 0 2; display: none; }
+    ToolCallRow.-expanded > ExpandableTextBody { display: block; }
     """
     can_focus = True
 
@@ -230,6 +236,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         path_target: bool = False,
         skill_target: bool = False,
         task: str = "",
+        think_text: str = "",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -247,6 +254,16 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         # Последнее сокращение объекта: (ширина, текст) — без пересчёта на
         # тиках таймера, пока ширина под объект та же.
         self._fitted: tuple[int, str] = (-1, target)
+        # Явный `Think`: полный текст под строкой (раскрытие кликом по
+        # обрезанному объекту); строка из трёх Static: подпись, объект
+        # (без своего цвета — база и ховер из CSS), хвост.
+        self._think_body: Optional[ExpandableTextBody] = (
+            ExpandableTextBody(think_text) if think_text else None
+        )
+        self._think_cut = False
+        self._think_chars: tuple[int, int] = (0, 0)
+        self._think_target: Optional[Static] = None
+        self._think_tail: Optional[Static] = None
         self.wire_name = wire_name
         self._event_no = event_no
         self._result: Optional[str] = None
@@ -325,11 +342,23 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
                 markup=False,
             )
             yield self._content_static
+            if self._think_body is not None:
+                self._content_static.add_class("think-label")
+                self._think_target = Static(
+                    "", classes="think-target", markup=False
+                )
+                self._think_tail = Static(
+                    "", classes="think-tail line-tool", markup=False
+                )
+                yield self._think_target
+                yield self._think_tail
             yield _CopyButton(
                 copy_glyph(), classes="block-copy trace-action", markup=False
             )
         if self._ran is not None:
             yield self._ran
+        if self._think_body is not None:
+            yield self._think_body
         yield self._consequence_slot
 
     def on_mount(self) -> None:
@@ -497,30 +526,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         self._edit_tail = tail
         self._update()
 
-    def _sync_pulse(self) -> None:
-        """Таймер мигания ● есть только у запущенной running-строки.
-
-        Waiting, результат, прерывание, пауза на человеко-ожидании или
-        виджет ещё не запущен (рендер истории) — без таймера. Идемпотентно.
-        """
-        if self._blinking and self.is_running:
-            if self._pulse_timer is None:
-                self._pulse_timer = self.set_interval(0.1, self._pulse_tick)
-        elif self._pulse_timer is not None:
-            self._pulse_timer.stop()
-            self._pulse_timer = None
-
-    def _pulse_tick(self) -> None:
-        """Кадр мигания ●. Waiting / done / interrupted — не тикаем."""
-        # F4: freeze UI на время app-select — не тикаем анимацию (Screen._selecting).
-        try:
-            if textual_compat.is_selecting(self.screen):
-                return
-        except Exception:
-            pass
-        if not self._blinking:
-            return
-        self._pulse_frame += 1
+    def _redraw_pulse(self) -> None:
         if self._prefix_static is not None:
             # Меняется только цвет ● (ширина глифа постоянна) — без layout.
             self._prefix_static.update(self._render_prefix(), layout=False)
@@ -529,10 +535,25 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         if self._prefix_static is not None:
             update_if_changed(self._prefix_static, self._render_prefix())
         if self._content_static is not None:
-            update_if_changed(self._content_static, self._render_content())
+            self._update_content()
         bodies = self._consequence_bodies()
         self.set_class(bool(bodies), "has-consequence")
         self._consequence_slot.set_bodies(bodies)
+
+    def _update_content(self) -> None:
+        """Первая строка: одним Static, а у `Think` — тремя (подпись,
+        объект, хвост), чтобы ховер и клик относились только к объекту."""
+        text = self._render_content()
+        target, tail = self._think_target, self._think_tail
+        if target is None or tail is None:
+            update_if_changed(self._content_static, text)
+            return
+        start, end = self._think_chars
+        update_if_changed(self._content_static, text[:start])
+        update_if_changed(target, Text(text.plain[start:end]))
+        update_if_changed(tail, text[end:])
+        target.set_class(self._think_cut, "trace-expandable")
+        target.set_class(self._is_live or self._waiting, "-active")
 
     def set_active(self) -> None:
         """Снять waiting → running (● + elapsed). После result/interrupt — no-op."""
@@ -677,14 +698,24 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         target = self._fit_target(
             text.cell_len + tail.cell_len + len(sep) + _RIGHT_GUTTER
         )
+        self._think_chars = (len(text.plain), len(text.plain))
+        self._think_cut = False
         if target:
             start = len(text.plain) + len(sep)
+            self._think_chars = (start, start + len(target))
+            self._think_cut = self._target_is_cut(target)
             text.append(f"{sep}{target}", style=target_style)
             if self._skill_target:
                 text.stylize(_SKILL, start, start + len(target))
         text.append_text(tail)
         self._append_command_rest(text, target_style)
         return text
+
+    def _target_is_cut(self, target: str) -> bool:
+        """Объект `Think` показан с `…` — под ширину или сводкой ядра."""
+        return self._think_body is not None and (
+            target != self._target or target.endswith("…")
+        )
 
     def _append_command_rest(self, text: Text, style: str) -> None:
         """Продолжение команды под строкой: в свёрнутом виде — сколько
@@ -734,7 +765,11 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         """Ширина content-колонки; ещё не раскладывалась — та, что даст
         раскладка (`_row_width` без префикса и ❐)."""
         static = self._content_static
-        if static is not None and static.size.width > 0:
+        if (
+            self._think_body is None
+            and static is not None
+            and (static.size.width > 0)
+        ):
             return static.size.width
         width = self._row_width() - self._render_prefix().cell_len
         if width > 0 and self.has_class("edited"):
@@ -876,6 +911,10 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
         явный super(): иначе Textual по MRO вызвал бы миксин вторым."""
         event.prevent_default()
         widget = getattr(event, "widget", None)
+        if self._click_on_think_object(event):
+            event.stop()
+            self.toggle_think()
+            return
         if isinstance(widget, RanPhrase):
             event.stop()
             self._toggle_parts(widget.toggle_key)
@@ -890,6 +929,35 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._flash_copied()
             return
         super().on_click(event)
+
+    def _click_on_think_object(self, event: events.Click) -> bool:
+        """Простой клик по обрезанному объекту `Think` (не Ctrl+клик)."""
+        return (
+            not event.ctrl
+            and self._think_cut
+            and getattr(event, "widget", None) is self._think_target
+        )
+
+    @property
+    def think_expanded(self) -> bool:
+        return self.has_class("-expanded")
+
+    def toggle_think(self) -> None:
+        """Раскрыть / свернуть полный текст `Think` под строкой."""
+        self.toggle_class("-expanded")
+
+    def on_expandable_toggle(self, message: ExpandableToggle) -> None:
+        message.stop()
+        self.toggle_think()
+
+    def on_key(self, event: events.Key) -> None:
+        """Пробел на `Think` — раскрыть / свернуть текст; остальное — как у
+        любой строки вызова: Textual зовёт `on_key` клик-модели следом по MRO,
+        если не `prevent_default`."""
+        if event.key == "space" and (self._think_cut or self.think_expanded):
+            event.stop()
+            event.prevent_default()
+            self.toggle_think()
 
     def _toggle_parts(self, key: Optional[str]) -> None:
         """Клик по фразе частей `Ran` — тогл её ключа в модели."""

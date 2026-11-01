@@ -10,6 +10,7 @@ import logging
 import re
 import textwrap
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Optional
 
@@ -22,6 +23,11 @@ from gc_core.persistence.model_choice_record import (
     is_model_choice_record,
     parse_model_choice,
 )
+from gc_core.persistence.reasoning_record import (
+    ReasoningRecord,
+    is_reasoning_record,
+    parse_reasoning,
+)
 from gc_core.persistence.turn_outcome import (
     TurnOutcome,
     is_turn_outcome_record,
@@ -31,7 +37,7 @@ from gc_core.utils.path_truncate import truncate_path
 
 from gc_tui.models import AgentHead, ResultOutcome, TraceEvent
 from gc_tui.palette import INK
-from gc_tui.services.duration_format import format_round_int
+from gc_tui.services.duration_format import format_round_int, format_timer
 from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
@@ -49,6 +55,7 @@ if TYPE_CHECKING:
 
     from gc_tui.services.trace_mapper import RenderContext
     from gc_tui.widgets.consequence_line import ConsequenceLine
+    from gc_tui.widgets.thought_row import ThoughtRow
     from gc_tui.widgets.tool_blocks_view import (
         PreviewBlocks,
         ToolBlocksView,
@@ -589,6 +596,105 @@ def fit_call_target(target: str, cols: int, *, path: bool) -> str:
     return target[: cols - 1].rstrip() + "…"
 
 
+#: Слово строки мысли модели: идёт / после (спека мыслей §2).
+THOUGHT_LIVE_WORD = "Thinking"
+THOUGHT_DONE_WORD = "Thought"
+#: Глиф строки мысли (с пробелом до слова) и разделитель слова и хвоста.
+THOUGHT_GLYPH = "● "
+_THOUGHT_SEP = "  "
+
+
+@dataclass(frozen=True)
+class ThoughtLine:
+    """Части строки мысли под ширину: слово, хвост текста, таймер
+    (` · 4с` или пусто); ``cut`` — хвост обрезан, текст раскрываем."""
+
+    word: str
+    tail: str
+    timer: str
+    cut: bool
+
+    @property
+    def lead(self) -> str:
+        """Слово с разделителем перед хвостом (без хвоста — слово)."""
+        return self.word + (_THOUGHT_SEP if self.tail else "")
+
+
+#: Граница предложения в мысли: после `.`/`!`/`?`/`…` и пробела.
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?…])\s+")
+
+
+def _last_sentence_head(flat: str, room: int) -> str:
+    """Последнее предложение с начала в ``room`` знаков: до него был
+    текст — `…` в начале; не влезло — обрезка по границе слова, `…` в
+    конце."""
+    pieces = _SENTENCE_BREAK.split(flat)
+    lead = "…" if len(pieces) > 1 else ""
+    sentence = lead + pieces[-1]
+    if len(sentence) <= room:
+        return sentence
+    head = sentence[: room - 1]
+    if " " in head:
+        head = head.rsplit(" ", 1)[0]
+    return head.rstrip() + "…"
+
+
+def thought_line(
+    *,
+    live: bool,
+    text: str,
+    seconds: float | None,
+    width: int,
+    expanded: bool = False,
+) -> ThoughtLine:
+    """Строка мысли в ``width`` клеток: глиф, слово и таймер не режутся.
+    Не влезло — у идущей хвост с `…` в начале (видны новейшие слова), у
+    законченной последнее предложение с начала (`…` в начале, если до
+    него был текст, и в конце, если не влезло). Раскрытая
+    (``expanded``) — без текста: он весь под строкой. Ширины нет
+    (``<= 0``) — текст целиком."""
+    from rich.cells import cell_len
+
+    from gc_tui.services.stream_sink import reasoning_tail
+
+    word = THOUGHT_LIVE_WORD if live else THOUGHT_DONE_WORD
+    timer = format_timer(seconds) if seconds is not None else None
+    timer = f" · {timer}" if timer else ""
+    flat = " ".join(text.split())
+    room = width - cell_len(THOUGHT_GLYPH + word + _THOUGHT_SEP + timer)
+    if width <= 0 or cell_len(flat) <= room:
+        return ThoughtLine(word, "" if expanded else flat, timer, cut=False)
+    if expanded:
+        tail = ""
+    elif room <= 1:
+        tail = "…"
+    elif live:
+        # `reasoning_tail` держит `maxlen` знаков после `…`.
+        tail = reasoning_tail(flat, room - 1)
+    else:
+        tail = _last_sentence_head(flat, room)
+    return ThoughtLine(word, tail, timer, cut=True)
+
+
+def build_thought_row(
+    record: ReasoningRecord, *, event_no: int | None
+) -> ThoughtRow:
+    """Записанная строка мысли — один билдер для живой ленты и превью
+    (временную строку строит стрим, `ThoughtRow.persist` делает её
+    записанной)."""
+    from gc_tui.widgets.thought_row import ThoughtRow
+
+    row = ThoughtRow(
+        text=record.text,
+        live=False,
+        attempt=record.attempt,
+        seconds=record.duration_sec,
+        event_no=event_no,
+    )
+    row.persist(record)
+    return row
+
+
 #: Строк задачи субагента под заголовком `Agent`; дальше — `…`.
 AGENT_TASK_LINES = 2
 
@@ -619,6 +725,7 @@ def build_call_row(
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
     agent: AgentHead | None = None,
+    think_text: str = "",
 ) -> ToolCallRow:
     """Строка вызова — один билдер для живой ленты, превью и вложенных.
 
@@ -645,6 +752,7 @@ def build_call_row(
         waiting=waiting,
         level=level,
         task=agent.task if agent is not None else "",
+        think_text=think_text,
     )
 
 
@@ -906,6 +1014,7 @@ def _dispatch_readonly(
             mcp_tools=mcp_tools,
             mcp_servers=mcp_servers,
             agent=ev.agent,
+            think_text=ev.think_text,
         )
         calls[row.call_id] = row
         category, _ = tool_caption(wire_name, mcp_tools, mcp_servers)
@@ -1017,6 +1126,7 @@ def _render_record_readonly(
     mcp_servers: Iterable[str] = (),
     questions: dict | None = None,
     model_slots: Mapping[str, str | None] | None = None,
+    show_thoughts: bool = False,
 ) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
@@ -1026,6 +1136,15 @@ def _render_record_readonly(
 
     if is_model_choice_record(rec):
         _mount_model_mark(mount_target, rec, model_slots or {})
+        return no
+    if is_reasoning_record(rec):
+        thought = parse_reasoning(rec) if show_thoughts else None
+        if thought is not None:
+            # Превью только смотрят: Enter отдан резюму треда, экрана
+            # события нет — строка без фокуса и номера, раскрытие кликом.
+            row = build_thought_row(thought, event_no=None)
+            row.can_focus = False
+            mount_target.mount(row)
         return no
     if is_turn_outcome_record(rec):
         # Итог хода — строка на месте записи, не событие ленты; в превью
@@ -1067,11 +1186,13 @@ def render_segments_readonly(
     root: str | None = None,
     blocks: PreviewBlocks | None = None,
     model_slots: Mapping[str, str | None] | None = None,
+    show_thoughts: bool = False,
 ) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
     трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там),
-    черты смены модели — по слотам ``model_slots`` (точки знака).
+    черты смены модели — по слотам ``model_slots`` (точки знака), мысли
+    модели — только при ``show_thoughts`` (действующий `tui.show_reasoning`).
     Возвращает `calls` (`{call_id: ToolCallRow}`) — нужен вызывающему для
     домонтирования вложенного трейса субагентов (см. `merge_nested_readonly`).
 
@@ -1132,6 +1253,7 @@ def render_segments_readonly(
                 mcp_servers=mcp_servers,
                 questions=questions,
                 model_slots=model_slots,
+                show_thoughts=show_thoughts,
             )
         comp = seg.get("compacted_by")
         if comp:
