@@ -37,6 +37,7 @@ from gc_tui.form_frame import (
     scroll_body,
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
+from gc_tui.services.column_row import ColumnRow
 from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.services.profile_lock import profile_switch_refusal
@@ -440,26 +441,6 @@ def fit_mode_pairs(pairs: list[str], width: int) -> str:
 # Отступ хвоста строки профиля (слоты и секции-оверлеи) от колонки источника
 # и колонки «активен» от описания.
 _PROFILE_TAIL_GAP = 3
-
-
-def fit_overlay_suffix(names: list[str], width: int) -> str:
-    """Суффикс секций-оверлеев профиля («+security+summary»), усечённый ЦЕЛЫМИ
-    именами под `width` (тот же приём, что и `fit_mode_pairs`, но без разделителя
-    между именами). `width <= 0` — строка ещё не смонтирована — без усечения."""
-    if not names:
-        return ""
-    full = "".join(f"+{n}" for n in names)
-    if width <= 0 or len(full) <= width:
-        return full
-    tail = "+…"
-    out: list[str] = []
-    for n in names:
-        candidate = "".join(f"+{x}" for x in out + [n]) + tail
-        if len(candidate) <= width:
-            out.append(n)
-        else:
-            break
-    return ("".join(f"+{x}" for x in out) + tail) if out else "+…"
 
 
 def _shown_path(path) -> str:
@@ -1548,7 +1529,6 @@ class SettingsScreen(Screen):
                 self.call_after_refresh(self._refresh_profile_overlay)
             elif self._view == _PROFILES:
                 self.call_after_refresh(self._refresh_profiles_hint)
-                self.call_after_refresh(self._refresh_profiles_rows)
         if self._report_text is not None:
             self._mount_report(
                 self._report_text
@@ -5675,63 +5655,46 @@ class SettingsScreen(Screen):
         else:
             t.append(" " * width)
 
-    def _profiles_row_width(self) -> int:
-        """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же
-        рода, что `_refresh_menu_rows`: региона нет до layout-прохода при монтировании."""
-        widgets = list(self.query(".set-profiles-row"))
-        if not widgets:
-            return 0
-        return max(0, widgets[-1].region.width - 2)
-
     def _profile_row_text(
         self, row: dict, rows: list[dict], selected: bool
-    ) -> Text:
+    ) -> ColumnRow:
+        """Голова — маркер, имя, «активен», источник; хвост (слоты, секции,
+        пометки выбора) переносится в своей колонке (дизайн-код §10)."""
         name, ref = row["name"], row["ref"]
         config_active = self._config_profile()
         name_w = self._profiles_name_width(rows)
-        t = Text()
-        t.append("▸ " if selected else "  ", style=ACCENT)
-        t.append(f"{name:<{name_w}}", style=INK)
-        self._append_active_marker(t, name == config_active)
+        head = Text()
+        head.append("▸ " if selected else "  ", style=ACCENT)
+        head.append(f"{name:<{name_w}}", style=INK)
+        self._append_active_marker(head, name == config_active)
         source = "проектный" if ref.root_kind == "project" else "глобальный"
-        t.append(f"{source:<11}", style=DIM)
+        head.append(f"{source:<11}", style=DIM)
+        atoms: list[Text] = []
         if (
             name == config_active
             and self._project_sets_profile_pointer()
             and ref.root_kind != "project"
         ):
-            t.append(" · выбран проектом", style=DEEP_DIM)
+            atoms.append(Text(" · выбран проектом", style=DEEP_DIM))
         summary = self._profile_summary(ref.path)
-        tail = ""
-        if summary.slots:
-            tail += " · ".join(
-                f"{lvl} {alias}" for lvl, alias in summary.slots.items()
-            )
-        if summary.overlay_sections:
-            width = self._profiles_row_width()
-            # Отступ от колонки маркера ставится ОДИН раз ниже, а не вместе со слотами:
-            # привязанный к ним, он пропадал у профиля, который несёт только секции —
-            # и суффикс слипался с маркером в «активен+voice» (живой смок 2026-08-26).
-            budget = (
-                max(0, width - len(t.plain) - len(tail) - _PROFILE_TAIL_GAP)
-                if width > 0
-                else 0
-            )
-            if budget <= 0 and width > 0:
-                budget = 0
-            suffix = (
-                "".join(f"+{n}" for n in summary.overlay_sections)
-                if width <= 0
-                else fit_overlay_suffix(summary.overlay_sections, budget)
-            )
-            tail += (" " if tail else "") + suffix
-        if tail:
-            t.append(" " * _PROFILE_TAIL_GAP + tail, style=DIM)
+        slots = [f"{lvl} {alias}" for lvl, alias in summary.slots.items()]
+        parts = [(" ", f"{s} ·") for s in slots[:-1]]
+        parts += [(" ", s) for s in slots[-1:]]
+        parts += [
+            (" " if i == 0 else "", f"+{n}")
+            for i, n in enumerate(summary.overlay_sections)
+        ]
+        # Отступ от колонки источника ставится ОДИН раз — перед первым куском
+        # хвоста: привязанный к слотам, он пропадал у профиля с одними секциями,
+        # и суффикс слипался в «глобальный+voice» (живой смок 2026-08-26).
+        for i, (sep, part) in enumerate(parts):
+            lead = " " * _PROFILE_TAIL_GAP if i == 0 else sep
+            atoms.append(Text(lead + part, style=DIM))
         session_overrides = getattr(self.app, "_session_overrides", None) or {}
         session_name = session_overrides.get("profile")
         if session_name == name and session_name != config_active:
-            t.append("   · выбран в текущей сессии", style=DEEP_DIM)
-        return t
+            atoms.append(Text("   · выбран в текущей сессии", style=DEEP_DIM))
+        return ColumnRow(head, atoms)
 
     def _add_profile_row_text(self, selected: bool) -> Text:
         """Строка-действие «+ добавить профиль…» — перенос паттерна «Моделей»:
@@ -5929,25 +5892,6 @@ class SettingsScreen(Screen):
                     )
                 )
         inp.focus()
-
-    def _refresh_profiles_rows(self) -> None:
-        """Carry-fix (тот же приём, что `_refresh_menu_rows`): досчитать усечение
-        суффикса секций-оверлеев ПОСЛЕ layout-прохода, когда регион уже известен."""
-        if self._view != _PROFILES:
-            return
-        rows = self._profiles_rows()
-        widgets = list(self.query(".set-profiles-row"))
-        if not widgets:
-            return
-        fresh = widgets[-len(rows) :]
-        for i, row in enumerate(rows):
-            selected = i == self._profiles_idx
-            if row["kind"] == "none":
-                fresh[i].update(self._none_row_text(rows, selected))
-            elif row["kind"] == "add":
-                fresh[i].update(self._add_profile_row_text(selected))
-            else:
-                fresh[i].update(self._profile_row_text(row, rows, selected))
 
     def _refresh_profiles_hint(self) -> None:
         if self._view != _PROFILES:
@@ -6325,8 +6269,7 @@ class SettingsScreen(Screen):
 
     def _profile_overlay_width(self) -> int:
         """Ширина строки превью внутри рамки (padding 0 1 — минус 2); до layout-прохода
-        региона нет — 0, что трактуется как «без усечения» (carry-fix, как у
-        `_profiles_row_width`)."""
+        региона нет — 0, что трактуется как «без усечения» (carry-fix)."""
         widgets = list(self.query(".set-profiles-overlay"))
         if not widgets:
             return 0
@@ -6366,7 +6309,7 @@ class SettingsScreen(Screen):
 
     def _refresh_profile_overlay(self) -> None:
         """Пересчитать превью оверлеев: и усечение — ПОСЛЕ layout-прохода, когда регион
-        строки уже известен (тот же carry-fix, что `_refresh_profiles_rows`), — и сам
+        строки уже известен (carry-fix, как у `_refresh_menu_rows`), — и сам
         СОСТАВ. Состав меняет не только ширина: запись в профиль поднимает формы
         `slots`/`assign` (реестр стал непуст) или убирает их, а превью говорит ровно
         про то, чего формы НЕ показывают, — не пересчитанное, оно дублирует видимое

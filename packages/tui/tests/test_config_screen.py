@@ -179,21 +179,19 @@ async def test_config_screen_has_header_and_footer(tmp_path):
 
 def test_paths_block_is_rich_text_without_pseudo_comment():
     from gc_tui.screens.config import _paths_block
-    from rich.text import Text
 
     t = _paths_block(
         as_settings({"paths.agent_md_path": "/p/agent.md"}),
         "/p/config.yml",
         None,
     )
-    assert isinstance(t, Text)
     plain = t.plain
     assert "# Пути" not in plain  # псевдокомментарий ушёл в border_title
     assert "config.yml:" in plain and "/p/config.yml" in plain
     assert "agent.md:" in plain and "/p/agent.md" in plain
     assert "project_memory.md:" in plain
     assert "(не задано)" in plain  # threads/logs не заданы
-    assert len(t.spans) > 0  # метки подкрашены (dim)
+    assert all(row.head.style for row in t.rows)  # метки подкрашены (dim)
 
 
 def test_paths_block_project_local_line():

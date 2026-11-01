@@ -11,6 +11,7 @@ from rich.text import Text
 
 from gc_tui.editors.field_list import LIST_CLOSED_HINT, FieldListController
 from gc_tui.palette import ACCENT, DEEP_DIM
+from gc_tui.services.column_row import ColumnRow
 
 # Канон-хинт пресет-листа адреса (спека §2.1, дословно).
 PRESET_HINT = "провайдеры · печать — фильтр/свой адрес · Enter — подставить · Esc — свернуть"
@@ -74,12 +75,12 @@ def preset_list_controller(
     # url, когда имя длиннее: «раздел «Подключение»» и т.п.).
     name_w = max((len(p.name) for p in presets), default=0) + 3
 
-    def render(preset, *, selected: bool) -> Text:
+    def render(preset, *, selected: bool) -> ColumnRow:
+        # Длинный адрес переносится в своей колонке (дизайн-код §10).
         t = Text()
         t.append("▸ " if selected else "  ", style=ACCENT)
         t.append(preset.name.ljust(name_w))
-        t.append(preset.url, style=DEEP_DIM)
-        return t
+        return ColumnRow(t, [Text(preset.url, style=DEEP_DIM)])
 
     def can_open(value: str) -> bool:
         return bool(presets) and not value

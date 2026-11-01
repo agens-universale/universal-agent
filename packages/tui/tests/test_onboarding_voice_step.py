@@ -1013,7 +1013,7 @@ async def test_alt_down_reopens_the_list_only_from_the_model_field():
 
 def _url_rows(screen):
     return [
-        str(w.render())
+        str(w.content)
         for w in screen.query(".voice-url-preset-row")
         if w.display
     ]

@@ -53,7 +53,7 @@ async def test_post_update_lists_checkboxes(monkeypatch):
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "Агент обновлён: 0.3.0 → 0.4.0" in body
         assert "[●] Обновить подключённые MCP" in body
         assert "office" in body and "ddg" in body
@@ -81,7 +81,7 @@ async def test_post_update_hides_mcp_when_nothing_to_update(monkeypatch):
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "Обновить подключённые MCP" not in body
         assert "[●] Обновить config.yml" in body
 
@@ -106,7 +106,7 @@ async def test_post_update_mcp_row_lists_only_outdated(monkeypatch):
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "office" in body and "ddg" not in body
         assert scr._mcp_outdated == ["office"]
 
@@ -126,7 +126,7 @@ async def test_post_update_hides_config_when_nothing_to_sync(monkeypatch):
         )
         app.push_screen(scr)
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert (
             "Обновить config.yml" not in body
         )  # нечего синхронизировать → скрыт
@@ -169,7 +169,7 @@ async def test_post_update_offers_voice_engine_when_behind(monkeypatch):
         )
         app.push_screen(scr)
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "[●] Обновить голосовой движок" in body  # отмечен по умолчанию
         assert "v0.8.3 → v0.9.0" in body
 
@@ -191,7 +191,7 @@ async def test_post_update_hides_voice_when_at_pin_or_absent(monkeypatch):
         app.push_screen(scr)
         await pilot.pause()
         assert "голосовой движок" not in " ".join(
-            str(w.render()) for w in scr.query(Static)
+            str(w.content) for w in scr.query(Static)
         )
         _voice(monkeypatch, installed=None)  # не установлен вовсе
         scr2 = PostUpdateScreen(
@@ -261,7 +261,7 @@ async def test_post_update_space_unmarks_then_enter_skips_it(monkeypatch):
         assert "mcp" in scr._marked
         await pilot.press("space")  # снять отметку с единственного пункта
         assert "mcp" not in scr._marked
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "[ ] Обновить подключённые MCP" in body
         await pilot.press("enter")  # выполнить (пункт снят — install не зовём)
         await pilot.pause()
@@ -365,7 +365,7 @@ async def test_post_update_nothing_to_do_shows_only_title(monkeypatch):
         app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "Агент обновлён: 0.3.0 → 0.4.0" in body
         assert "Осталось обновить" not in body
         assert "всё уже актуально" not in body
@@ -389,7 +389,7 @@ async def test_post_update_hint_and_footer_when_there_is_work(monkeypatch):
         )
         app.push_screen(scr)
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "Осталось обновить:" in body
         assert "Довести машину" not in body
         assert "Space — отметить" in body
@@ -415,7 +415,7 @@ async def test_post_update_equal_version_title_is_plain(monkeypatch):
         )
         app.push_screen(scr)
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "✓ Агент обновлён" in body
         assert "до актуальной версии" not in body
 
@@ -440,7 +440,7 @@ async def test_post_update_title_always_carries_version(monkeypatch):
         )
         app.push_screen(scr)
         await pilot.pause()
-        body = " ".join(str(w.render()) for w in scr.query(Static))
+        body = " ".join(str(w.content) for w in scr.query(Static))
         assert "✓ Агент обновлён · v0.0.1" in body
         assert "0.0.1 → 0.0.1" not in body
 

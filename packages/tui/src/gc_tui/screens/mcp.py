@@ -14,6 +14,7 @@ from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
+from gc_tui.services.column_row import ColumnRow, ColumnRows
 
 _FOOTER = "[Enter] раскрыть  [↑↓] серверы  [PgUp PgDn] прокрутка  [Esc] back"
 
@@ -76,7 +77,7 @@ class ServerCard(Static):
 
     # ---- рендер ------------------------------------------------------
 
-    def _renderable(self) -> Text:
+    def _renderable(self) -> ColumnRows:
         info = self._info
         status = info.get("status", "unknown")
         connected = status == "connected"
@@ -97,11 +98,14 @@ class ServerCard(Static):
         desc = _truncate(info.get("description") or "")
         if desc:
             t.append(f"\n    · {desc}", style=_DEEP_DIM)
-        if self._expanded:
-            self._append_body(t, connected, tools)
-        return t
+        body = self._body_rows(connected, tools) if self._expanded else []
+        return ColumnRows([t, *body])
 
-    def _append_body(self, t: Text, connected: bool, tools: list) -> None:
+    def _body_rows(
+        self, connected: bool, tools: list
+    ) -> list[ColumnRow | Text]:
+        """Строки раскрытой карточки: описание тула переносится в своей
+        колонке, под собой, а не под именем (дизайн-код §10)."""
         if connected and tools:
             prefix = f"mcp_{self._name}_"
             shorts = [
@@ -114,16 +118,24 @@ class ServerCard(Static):
                 for tt in tools
             ]
             width = max(len(n) for n, _ in shorts)
-            for n, d in shorts:
-                t.append(f"\n    {n.ljust(width)}", style=_TOOL_NAME)
-                if d:
-                    t.append(
-                        f"  {_truncate(d, _TOOL_DESC_LIMIT)}", style=_DEEP_DIM
-                    )
-        elif not connected and self._info.get("reason"):
+            return [
+                ColumnRow(
+                    Text(f"    {n.ljust(width)}", style=_TOOL_NAME),
+                    [
+                        Text(
+                            f"  {_truncate(d, _TOOL_DESC_LIMIT)}",
+                            style=_DEEP_DIM,
+                        )
+                    ]
+                    if d
+                    else [],
+                )
+                for n, d in shorts
+            ]
+        if not connected and self._info.get("reason"):
             full = str(self._info["reason"])
-            for ln in full.splitlines():
-                t.append(f"\n    {ln}", style=_DIM)
+            return [Text(f"    {ln}", style=_DIM) for ln in full.splitlines()]
+        return []
 
 
 class McpScreen(Screen):

@@ -475,7 +475,7 @@ async def test_a_profile_that_only_repoints_slots_is_not_called_empty(
     app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
-        row = " ".join(str(w.render()) for w in scr.query(".set-profiles-row"))
+        row = " ".join(str(w.content) for w in scr.query(".set-profiles-row"))
         assert "default flash" in row  # список говорит: переопределяет
         ed = await _open_profile(pilot, scr, "work")
         assert ed._rows() == []  # реестра действительно нет
@@ -533,9 +533,9 @@ async def test_level_inside_a_profile_shows_in_the_preview_but_not_in_the_list_r
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         row = next(
-            str(w.render())
+            str(w.content)
             for w in scr.query(".set-profiles-row")
-            if "work" in str(w.render())
+            if "work" in str(w.content)
         )
         assert "model" not in row
         await _open_profile(pilot, scr, "work")

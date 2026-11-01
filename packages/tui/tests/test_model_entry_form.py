@@ -3629,7 +3629,7 @@ async def test_the_cursor_does_not_call_a_typed_address_inherited():
         assert form.reload_presets() is True  # Alt+↓ поверх своего адреса
         await pilot.pause()
         rows = [
-            str(w.render()) for w in form.query(".mef-preset-row") if w.display
+            str(w.content) for w in form.query(".mef-preset-row") if w.display
         ]
         selected = [r for r in rows if r.startswith("▸")]
         assert selected and "OpenRouter" in selected[0], rows

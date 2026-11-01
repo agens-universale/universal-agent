@@ -175,7 +175,6 @@ def test_mcp_card_reason_on_failed_line():
 
 def test_mcp_renderable_is_rich_text_with_styles():
     from gc_tui.screens.mcp import McpScreen
-    from rich.text import Text
 
     snap = {
         "office": {
@@ -186,8 +185,7 @@ def test_mcp_renderable_is_rich_text_with_styles():
         }
     }
     rend = McpScreen(tools_snapshot=snap).cards[0]._renderable()
-    assert isinstance(rend, Text)
-    assert len(rend.spans) > 0  # есть цветовые сегменты
+    assert len(rend.rows[0].spans) > 0  # есть цветовые сегменты
 
 
 # ---- ServerCard: свёрнутый/раскрытый рендер (spec 2026-06-10) ----

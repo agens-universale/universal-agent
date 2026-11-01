@@ -1514,9 +1514,7 @@ def _form_text(form, widget_id: str) -> str:
 def _inherit_row(form) -> str:
     """Первая строка раскрытого пресет-листа адреса — пункт «наследовать»: над
     пустым полем список раскрыт с входа в форму (курсор стоит на адресе)."""
-    rows = [
-        str(w.render()) for w in form.query(".mef-preset-row") if w.display
-    ]
+    rows = [str(w.content) for w in form.query(".mef-preset-row") if w.display]
     assert rows, "пресет-лист над пустым адресом не раскрыт"
     return rows[0]
 

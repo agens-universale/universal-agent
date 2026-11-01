@@ -973,7 +973,7 @@ async def test_connection_section_esc_collapses_presets_enter_substitutes(
         await pilot.pause()
         await pilot.pause()  # дать call_after_refresh дорисовать строки
         assert scr.query_one("#conn-url", Input).value == ""
-        rows = [str(w.render()) for w in scr.query(".conn-preset-row")]
+        rows = [str(w.content) for w in scr.query(".conn-preset-row")]
         assert any("OpenRouter" in r for r in rows)
         assert any("Cloud.ru" in r for r in rows)
         assert any("RouterAI" in r for r in rows)
@@ -1077,7 +1077,7 @@ async def test_alt_down_over_own_address_opens_without_a_highlight(tmp_path):
         await pilot.press("alt+down")
         await pilot.pause()
         assert ed.presets_open is True
-        rows = [str(w.render()) for w in scr.query(".conn-preset-row")]
+        rows = [str(w.content) for w in scr.query(".conn-preset-row")]
         assert rows and not any(
             r.startswith("▸") for r in rows
         )  # видны все, подсвеченной нет

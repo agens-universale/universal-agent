@@ -3233,7 +3233,7 @@ def _url_widgets(scr):
 
 
 def _url_rows(scr):
-    return [str(w.render()) for w in _url_widgets(scr) if w.display]
+    return [str(w.content) for w in _url_widgets(scr) if w.display]
 
 
 def _url_selected(scr):
