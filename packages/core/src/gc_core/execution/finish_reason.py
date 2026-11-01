@@ -110,18 +110,16 @@ def is_context_overflow_error(exc: BaseException) -> bool:
 
 
 def nonempty_reasoning_text(msg) -> str | None:
-    """Канон ``reasoning_content`` или алиас OpenRouter ``reasoning``.
-
-    Берём ОДНО из двух, не сумму — как стрим-ассемблер. Иначе нестрим
-    (бенч/CLI/server) теряет reasoning-only ответ, который TUI спасает.
-    Пробельный CoT → None; иначе возвращаем уже strip'нутый текст.
-    """
+    """Prefer meaningful reasoning aliases and preserve the selected string."""
     if not isinstance(msg, dict):
         return None
+    whitespace_fallback = None
     for key in ("reasoning_content", "reasoning"):
         value = msg.get(key)
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped:
-                return stripped
-    return None
+        if not isinstance(value, str) or not value:
+            continue
+        if value.strip():
+            return value
+        if whitespace_fallback is None:
+            whitespace_fallback = value
+    return whitespace_fallback
