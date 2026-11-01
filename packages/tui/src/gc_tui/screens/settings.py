@@ -443,6 +443,28 @@ def fit_mode_pairs(pairs: list[str], width: int) -> str:
 _PROFILE_TAIL_GAP = 3
 
 
+# Подпись режима короче — уже не читается: дальше строка переносится как есть.
+_MODE_HEAD_MIN = 8
+
+
+def fit_row_head(row: Text, head_end: int, tail_w: int, width: int) -> Text:
+    """Первая строка ``row`` — курсор (2 клетки), голова до ``head_end`` и
+    хвост (трек, значение). Не влезает в ``width`` — режется голова с «…»,
+    хвост цел: строка режима не переносится (узкое окно). Вторая строка
+    («в текущей сессии») не трогается; ``width`` 0 — ширины ещё нет."""
+    room = width - 2 - tail_w
+    if width <= 0 or room >= head_end - 2 or room < _MODE_HEAD_MIN:
+        return row
+    lines = row.split("\n", allow_blank=True)
+    line = lines[0]
+    head = line[2:head_end]
+    head.rstrip()
+    head.truncate(room - 1, overflow="ellipsis")
+    head.pad_right(room - head.cell_len)
+    fitted = Text.assemble(line[:2], head, line[head_end:])
+    return Text("\n").join([fitted, *lines[1:]])
+
+
 def _shown_path(path) -> str:
     """Путь файла в репликах экрана: домашний каталог — через `~`."""
     return home_path(str(path), os.path.expanduser("~"))
@@ -754,6 +776,7 @@ class SettingsScreen(Screen):
         # Влезет ли содержимое, видно только ПОСЛЕ раскладки — от этого зависит,
         # называть ли клавишу прокрутки.
         self.call_after_refresh(self._refresh_footer)
+        self.call_after_refresh(self._refresh_modes_rows)
 
     def _profile_footer(self, ed) -> str:
         """Футер под-вида профиля: строку даёт редактор (она позиционная), а
@@ -3867,7 +3890,14 @@ class SettingsScreen(Screen):
         value_w = max(len(v) for v in value_names)
         return label_w, base_w, extra_w, value_w
 
-    def _mode_row_text(self, name: str, selected: bool) -> Text:
+    def _modes_tail_w(self) -> int:
+        """Ширина хвоста строки режима: трек, зазор, подпись значения."""
+        _label_w, base_w, extra_w, value_w = self._modes_columns()
+        return base_w + extra_w + 2 + value_w
+
+    def _mode_row_text(
+        self, name: str, selected: bool, width: int = 0
+    ) -> Text:
         from gc_tui.toggles import (
             PRESET_CUSTOM,
             TOGGLES,
@@ -3879,7 +3909,7 @@ class SettingsScreen(Screen):
 
         spec = TOGGLES[name]
         if spec.value_text is not None:
-            return self._value_row_text(name, selected)
+            return self._value_row_text(name, selected, width)
         current = toggle_state_base(
             self.app, name
         )  # секция правит глобал → трек = глобал
@@ -3933,9 +3963,11 @@ class SettingsScreen(Screen):
             t.append("в текущей сессии: ", style=f"italic {DEEP_DIM}")
             colours = {v.value: v.color for v in values}
             t.append(effective, style=colours.get(effective, DIM))
-        return t
+        return fit_row_head(t, label_w, self._modes_tail_w(), width)
 
-    def _value_row_text(self, name: str, selected: bool) -> Text:
+    def _value_row_text(
+        self, name: str, selected: bool, width: int = 0
+    ) -> Text:
         """Строка без трека (`value_text`): голова и знак значения в колонке
         треков; выбор сессии, если он другой, — второй строкой, как у
         соседей (§6.2)."""
@@ -3953,7 +3985,7 @@ class SettingsScreen(Screen):
             t.append("\n  ")
             t.append("в текущей сессии: ", style=f"italic {DEEP_DIM}")
             t.append_text(effective)
-        return t
+        return fit_row_head(t, label_w, self._modes_tail_w(), width)
 
     def _modes_row_opens_picker(self) -> bool:
         """Строка под курсором выбирается списком (`opens_picker`)."""
@@ -3970,6 +4002,23 @@ class SettingsScreen(Screen):
         if spec.value_words is not None:
             return spec.value_words(self.app, self.app.base_settings())
         return toggle_state_base(self.app, name)
+
+    def _refresh_modes_rows(self) -> None:
+        """Строки режимов под фактическую ширину: не влезает — подпись с «…»,
+        строка не переносится (`fit_row_head`). Последние len(names) строк —
+        старые ещё могут не отсоединиться (приём `_voice_row_widgets`)."""
+        if self._view != _MODES:
+            return
+        from gc_tui.toggles import modes_section_names
+
+        names = modes_section_names()
+        rows = list(self.query(".set-modes-row"))[-len(names) :]
+        if len(rows) != len(names):
+            return
+        for i, (name, row) in enumerate(zip(names, rows)):
+            row.update(
+                self._mode_row_text(name, i == self._modes_idx, row.size.width)
+            )
 
     def _mount_modes_section(self, frame: Vertical) -> None:
         from gc_tui.toggles import TOGGLES, modes_section_names
@@ -3995,10 +4044,15 @@ class SettingsScreen(Screen):
                 frame.mount(Rule(classes="set-group-sep"))
             # Без set-spaced: плотность B — тогглы группы впритык (общий пульт),
             # воздух даёт разделитель групп (margin-top .set-group-sep).
-            cls = "set-row set-dyn" + (_CLS_SELECTED if selected else "")
+            cls = "set-row set-dyn set-modes-row" + (
+                _CLS_SELECTED if selected else ""
+            )
             frame.mount(
                 Static(self._mode_row_text(name, selected), classes=cls)
             )
+        # Ширина строки известна только после раскладки: подпись под неё
+        # подрезается вторым проходом (тот же приём, что `_refresh_menu_rows`).
+        self.call_after_refresh(self._refresh_modes_rows)
         # Подсказка выделенного тоггла — ВНУТРИ рамки (конвенция «Обновления»:
         # пояснительная строка в карточке под строками-опциями, класс set-hint);
         # высота — под самый длинный вариант секции (дизайн-код §9).

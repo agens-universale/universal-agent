@@ -5976,3 +5976,33 @@ async def test_modes_hint_height_stays_on_cursor_and_value(tmp_path, width):
         heights.add(hint().size.height)
         assert len(heights) == 1
         assert not any(t.endswith("…") for t in texts)
+
+
+@pytest.mark.parametrize("width", [64, 73, 80, 160])
+async def test_modes_rows_never_wrap_and_keep_the_value(tmp_path, width):
+    """Строка режима — одна строка на любой ширине: не влезает — режется
+    подпись с «…», трек и значение справа целы (переносилась на 73 и уже)."""
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
+    async with app.run_test(size=(width, 60)) as pilot:
+        scr = await _open_modes_section(pilot)
+        await pilot.pause(0.1)
+        rows = [r for r in scr.query(".set-modes-row") if r.display]
+        assert rows
+        for row in rows:
+            assert row.region.height == 1, str(row.content)
+        gate = next(r for r in rows if "gate" in str(r.content))
+        assert str(gate.content).rstrip().endswith("smart")
+
+
+def test_fit_row_head_cuts_the_label_not_the_tail():
+    from gc_tui.screens.settings import fit_row_head
+    from rich.text import Text
+
+    row = Text("  gate · самопроверка выполнения задачи     ○ ● ○  smart")
+    head_end = len("  gate · самопроверка выполнения задачи     ")
+    tail_w = len("○ ● ○  smart")
+    fitted = fit_row_head(row, head_end, tail_w, 40)
+    assert fitted.cell_len <= 40
+    assert fitted.plain.endswith("○ ● ○  smart")
+    assert "…" in fitted.plain
+    assert fit_row_head(row, head_end, tail_w, 200).plain == row.plain
