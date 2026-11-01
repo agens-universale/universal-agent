@@ -724,8 +724,9 @@ def _fit_hint(value: str, hint: str, keys: str, width: int) -> str:
     ' · ' уходит первым; 2) клавиши теряют «Enter — готово» (ЦЕЛЫМ куском,
     не обрывком); 3) клавиши сжимаются до `←/→`; 4) остаток смысла —
     многоточие.
-    Механика (клавиши в той или иной форме) видима всегда. Settings эту
-    функцию не вызывает (использует `_fit_value_hint`).
+    Механика (клавиши в той или иной форме) видима всегда. Settings
+    подсказку не режет: показывает целиком с резервом высоты (дизайн-код
+    §9).
 
     Владелец канонического представления тоггла (рядом с render_track) —
     переиспользуется палитрой (command_palette.py)."""
@@ -749,30 +750,6 @@ def _fit_hint(value: str, hint: str, keys: str, width: int) -> str:
     return build(
         core[: room - 1] + "…", _HINT_KEYS_TOGGLE_SHORT
     )  # 4) многоточие
-
-
-def _fit_value_hint(value: str, hint: str, width: int) -> str:
-    """Усечение строки «<значение> — <подсказка>» БЕЗ клавишной части (канон §6,
-    п.1/п.3 — п.2 «короткие клавиши» неприменим, клавиш тут нет): 1) хвост
-    подсказки после последнего ' · ' уходит первым; 2) остаток — многоточие.
-
-    Для строки внутри рамки подэкрана Settings («Режимы работы») — клавиши там
-    показывает статичный футер вне рамки (см. `_fit_hint` — та же механика,
-    но с клавишами внутри самой строки, там, где своего футера-подсказки нет)."""
-
-    def build(h: str) -> str:
-        return f"{value} — {h}"
-
-    full = build(hint)
-    if width <= 0 or len(full) <= width:
-        return full
-    core = hint.rsplit(" · ", 1)[0]
-    trimmed = build(core)
-    if len(trimmed) <= width:
-        return trimmed
-    fixed = len(build(""))
-    room = max(1, width - fixed)
-    return build(core[: room - 1] + "…")
 
 
 def render_track(

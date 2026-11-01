@@ -5888,3 +5888,64 @@ async def test_mode_row_shows_the_mode_chosen_in_this_session(tmp_path):
 
         assert row.split("\n")[0].rstrip().endswith("edit")
         assert _session_line(row) == "  в текущей сессии: plan"
+
+
+async def test_modes_key_line_sits_in_hint_not_in_rows(tmp_path):
+    """Ключ выбранной строки — второй строкой подсказки внизу рамки
+    (`ключ: <dotted>`, имя — `SUB_INK`), не под самой строкой. У строки без
+    `dotted` (rigor) место ключа пустое."""
+    from gc_tui.palette import SUB_INK
+
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
+    async with app.run_test(size=(200, 30)) as pilot:
+        scr = await _open_modes_section(pilot)
+        for name in ("rigor", "gate", "model"):
+            assert "ключ:" not in scr._mode_row_text(name, True).plain
+
+        def key_line(name: str) -> str:
+            scr._modes_idx = modes_row_index(name)
+            block = scr._modes_hint_block()
+            lines = block.plain.split("\n")
+            assert len(lines) == 2
+            if lines[1]:
+                assert block.spans[-1].style == SUB_INK
+                assert block[block.spans[-1].start :].plain == lines[1][6:]
+            return lines[1]
+
+        assert key_line("gate") == "ключ: tui.finish_gate_mode"
+        assert key_line("model") == "ключ: model"
+        assert key_line("rigor") == ""
+
+
+@pytest.mark.parametrize("width", [70, 100, 160])
+async def test_modes_hint_height_stays_on_cursor_and_value(tmp_path, width):
+    """Подсказка целиком, без обрезки; высота — под самый длинный вариант
+    секции: ни ↑/↓, ни ←/→ не двигают низ рамки."""
+    from gc_tui.services.hint_height import wrapped_lines
+
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
+    async with app.run_test(size=(width, 60)) as pilot:
+        scr = await _open_modes_section(pilot)
+
+        def hint():
+            return list(scr.query(".set-modes-hint"))[-1]
+
+        def fits() -> bool:
+            h = hint()
+            block = scr._modes_hint_block().plain
+            return h.size.height >= wrapped_lines(
+                block, h.content_region.width
+            )
+
+        heights, texts = set(), []
+        for _ in range(8):
+            await pilot.press("down")
+            await pilot.pause(0.1)
+            heights.add(hint().size.height)
+            texts.append(scr._modes_hint_text())
+            assert fits()
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        heights.add(hint().size.height)
+        assert len(heights) == 1
+        assert not any(t.endswith("…") for t in texts)

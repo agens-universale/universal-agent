@@ -42,6 +42,7 @@ from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.toggles import PROFILE_ACTIVE_STATUS, PROFILE_NONE_VALUE
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
+from gc_tui.widgets.reserved_hint import ReservedHint
 
 # Клавиша сохранения настроек.
 _SAVE_KEY = "ctrl+s"
@@ -1543,9 +1544,7 @@ class SettingsScreen(Screen):
         else:
             self._mount_section_body(frame, self._view)
             self._update_dirty()
-            if self._view == _MODES:
-                self.call_after_refresh(self._refresh_modes_hint)
-            elif self._view == _PROFILES and self._profiles_open is not None:
+            if self._view == _PROFILES and self._profiles_open is not None:
                 self.call_after_refresh(self._refresh_profile_overlay)
             elif self._view == _PROFILES:
                 self.call_after_refresh(self._refresh_profiles_hint)
@@ -2612,9 +2611,11 @@ class SettingsScreen(Screen):
                 )
             )
         else:
+            # Высота — под длинное из двух описаний режима (дизайн-код §9).
             frame.mount(
-                Static(
+                ReservedHint(
                     self._voice_hint_text(s),
+                    variants=self._voice_hint_variants,
                     classes="set-hint set-dyn set-voicehint",
                 )
             )
@@ -2909,6 +2910,14 @@ class SettingsScreen(Screen):
         from gc_tui.voice_runtime.state import current_model_short
 
         return _VOICE_MODE_HINTS["local"].format(model=current_model_short())
+
+    @staticmethod
+    def _voice_hint_variants() -> list[str]:
+        """Описания обоих режимов — резерв высоты подсказки голоса."""
+        from gc_tui.voice_runtime.state import current_model_short
+
+        local = _VOICE_MODE_HINTS["local"].format(model=current_model_short())
+        return [local, _VOICE_MODE_HINTS["cloud"]]
 
     def _voice_row_widgets(self) -> list:
         """Строки режима текущего рендера: последние len(_VOICE_ROWS) матчей — старые
@@ -4011,78 +4020,98 @@ class SettingsScreen(Screen):
                 Static(self._mode_row_text(name, selected), classes=cls)
             )
         # Подсказка выделенного тоггла — ВНУТРИ рамки (конвенция «Обновления»:
-        # пояснительная строка в карточке под строками-опциями, класс set-hint).
+        # пояснительная строка в карточке под строками-опциями, класс set-hint);
+        # высота — под самый длинный вариант секции (дизайн-код §9).
         frame.mount(
-            Static(
-                self._modes_hint_text(),
+            ReservedHint(
+                self._modes_hint_block(),
+                variants=self._modes_hint_variants,
                 classes="set-hint set-dyn set-modes-hint",
             )
         )
 
-    def _modes_hint_width(self) -> int:
-        """Ширина hint-строки внутри рамки (padding 0 1 — минус 2). Строка монтируется
-        заново на КАЖДЫЙ рендер (frame полностью перебирается) — региона нет до
-        layout-прохода этого же кадра; carry-fix `_refresh_modes_hint` (тот же приём,
-        что и `_refresh_menu_rows`) досчитывает усечение постфактум. Последний матч
-        по классу — свежесмонтированный (транзиентный старый ещё не отсоединён)."""
-        widgets = list(self.query(_SEL_MODES_HINT))
-        if not widgets:
-            return 0
-        return max(0, widgets[-1].region.width - 2)
-
     def _modes_hint_text(self) -> str:
-        """Подсказка выделенного тоггла внутри рамки (канон §6, без клавиш): значение
-        + подсказка ГЛОБАЛЬНОГО состояния. Для строки-пресета в состоянии custom —
-        динамический custom-хинт (спека §5)."""
-        from gc_tui.toggles import (
-            PRESET_CUSTOM,
-            TOGGLES,
-            _fit_value_hint,
-            dynamic_toggle_hint,
-            modes_section_names,
-            preset_custom_hint,
-            toggle_state_base,
-        )
+        """Подсказка выделенной строки целиком (без клавиш — их держит
+        футер): значение + подсказка ГЛОБАЛЬНОГО состояния."""
+        from gc_tui.toggles import modes_section_names, toggle_state_base
 
         names = modes_section_names()
         if not names:
             return ""
         name = names[self._modes_idx]
+        return self._modes_value_hint(name, toggle_state_base(self.app, name))
+
+    def _modes_value_hint(self, name: str, value: str) -> str:
+        """Подсказка строки ``name`` при значении ``value``. Строка-пресет в
+        custom — динамический custom-хинт (спека §5); строка со списком —
+        подсказка модели."""
+        from gc_tui.toggles import (
+            PRESET_CUSTOM,
+            TOGGLES,
+            dynamic_toggle_hint,
+            preset_custom_hint,
+        )
+
         spec = TOGGLES[name]
         if spec.opens_picker:
             return self._model_row_hint()
-        current = toggle_state_base(self.app, name)
         # Динамический хинт вперёд статического — тот же порядок, что у палитры
         # (`CommandPalette(toggle_dynamic_hint=...)`): у `level` статических
         # подсказок нет вовсе, их роль играет модель, резолвнутая для уровня.
         if spec.hint_provider is not None:
-            return _fit_value_hint(
-                current,
-                dynamic_toggle_hint(self.app, name, current),
-                self._modes_hint_width(),
-            )
-        if current in spec.names:
-            val = spec.values[spec.names.index(current)]
-            return _fit_value_hint(
-                val.value, val.hint, self._modes_hint_width()
-            )
-        if spec.preset_keys and current == PRESET_CUSTOM:
-            return _fit_value_hint(
-                current,
-                preset_custom_hint(self.app, name, scope="global"),
-                self._modes_hint_width(),
-            )
-        val = spec.values[0]
-        return _fit_value_hint(val.value, val.hint, self._modes_hint_width())
+            hint = dynamic_toggle_hint(self.app, name, value)
+        elif value in spec.names:
+            hint = spec.values[spec.names.index(value)].hint
+        elif spec.preset_keys and value == PRESET_CUSTOM:
+            hint = preset_custom_hint(self.app, name, scope="global")
+        else:
+            value, hint = spec.values[0].value, spec.values[0].hint
+        return f"{value} — {hint}"
 
-    def _refresh_modes_hint(self) -> None:
-        """Carry-fix (тот же приём, что и `_refresh_menu_rows`): досчитать усечение
-        hint-строки ПОСЛЕ layout-прохода, когда регион уже известен."""
-        if self._view != _MODES:
-            return
-        widgets = list(self.query(_SEL_MODES_HINT))
-        if widgets:
-            widgets[-1].update(self._modes_hint_text())
+    @staticmethod
+    def _modes_key_text(name: str) -> str:
+        """Строка ключа конфига строки ``name`` (пусто — ключа нет)."""
+        from gc_tui.toggles import TOGGLES
+
+        dotted = TOGGLES[name].dotted
+        return f"ключ: {dotted}" if dotted else ""
+
+    def _modes_hint_block(self) -> Text:
+        """Подсказка внизу рамки: значение выделенной строки, второй строкой
+        — её ключ конфига (`ключ: <dotted>`, имя заметно ярче — `SUB_INK`).
+        Место ключа есть всегда (у строки без ключа — пустое)."""
+        from gc_tui.toggles import modes_section_names
+
+        t = Text(self._modes_hint_text() + "\n")
+        names = modes_section_names()
+        key = self._modes_key_text(names[self._modes_idx]) if names else ""
+        if key:
+            label, _, dotted = key.partition(" ")
+            t.append(label + " ").append(dotted, style=SUB_INK)
+        return t
+
+    def _modes_hint_variants(self) -> list[str]:
+        """Все подсказки секции — каждая строка при каждом своём значении,
+        с её строкой ключа: резерв высоты. Подсказки, что собираются на
+        ходу (модель, custom пресета), — по текущему значению."""
+        from gc_tui.toggles import (
+            TOGGLES,
+            modes_section_names,
+            toggle_state_base,
+        )
+
+        out = []
+        for name in modes_section_names():
+            spec = TOGGLES[name]
+            values = list(spec.names)
+            current = toggle_state_base(self.app, name)
+            if current not in values:
+                values.append(current)
+            key = self._modes_key_text(name)
+            out.extend(
+                f"{self._modes_value_hint(name, v)}\n{key}" for v in values
+            )
+        return out
 
     def _file_snapshot(self, target):
         """Текст файла до записи — или None, если его ещё нет либо он не читается
@@ -4517,9 +4546,10 @@ class SettingsScreen(Screen):
         t.append(" ▸", style=SUB_INK)
         frame.mount(Static(t, classes="set-row set-dyn" + _CLS_SELECTED))
         frame.mount(
-            Static(
+            ReservedHint(
                 _THEME_HINTS[self._theme_value()],
-                classes="set-hint set-dyn",
+                variants=_THEME_HINTS.values,
+                classes="set-hint set-dyn set-theme-hint",
             )
         )
 
@@ -5647,7 +5677,7 @@ class SettingsScreen(Screen):
 
     def _profiles_row_width(self) -> int:
         """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же
-        рода, что `_modes_hint_width`: региона нет до layout-прохода при монтировании."""
+        рода, что `_refresh_menu_rows`: региона нет до layout-прохода при монтировании."""
         widgets = list(self.query(".set-profiles-row"))
         if not widgets:
             return 0
@@ -5737,7 +5767,10 @@ class SettingsScreen(Screen):
         return rows[self._profiles_idx]
 
     def _profiles_hint_text(self, rows: list[dict]) -> str:
-        row = self._profiles_row_under_cursor(rows)
+        return self._profiles_row_hint(self._profiles_row_under_cursor(rows))
+
+    def _profiles_row_hint(self, row: dict) -> str:
+        """Подсказка строки ``row`` секции «Профили»."""
         if row["kind"] == "add":
             # Полный путь — то же правило, что у «запись:» секции «Модели»: одно
             # имя не говорит, куда именно ляжет файл.
@@ -5831,9 +5864,13 @@ class SettingsScreen(Screen):
             # там печатается. Обещание недоступного плюс лишние строки между полем
             # и ответом на него: отказ уезжал в конец секции, за чужой текст. Роль
             # клавиш в этом состоянии называет позиционный футер.
+            # Высота — под самую длинную подсказку строк (дизайн-код §9).
             frame.mount(
-                Static(
+                ReservedHint(
                     self._profiles_hint_text(rows),
+                    variants=lambda: [
+                        self._profiles_row_hint(r) for r in rows
+                    ],
                     classes="set-hint set-dyn set-profiles-hint",
                 )
             )
@@ -5894,7 +5931,7 @@ class SettingsScreen(Screen):
         inp.focus()
 
     def _refresh_profiles_rows(self) -> None:
-        """Carry-fix (тот же приём, что `_refresh_modes_hint`): досчитать усечение
+        """Carry-fix (тот же приём, что `_refresh_menu_rows`): досчитать усечение
         суффикса секций-оверлеев ПОСЛЕ layout-прохода, когда регион уже известен."""
         if self._view != _PROFILES:
             return
@@ -6449,12 +6486,16 @@ class SettingsScreen(Screen):
                 )
             )
         else:
+            # Высота — под самую длинную подсказку действий (дизайн-код §9).
             frame.mount(
-                Static(
+                ReservedHint(
                     self._update_hint_text(
                         actions[self._update_idx], resolved
                     ),
-                    classes=_CLS_SET_HINT_SET_DYN,
+                    variants=lambda: [
+                        self._update_hint_text(a, resolved) for a in actions
+                    ],
+                    classes="set-hint set-dyn set-update-hint",
                 )
             )
 

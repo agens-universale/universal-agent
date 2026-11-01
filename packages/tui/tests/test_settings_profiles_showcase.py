@@ -1946,3 +1946,36 @@ async def test_profile_delete_and_rename_are_refused_while_a_run_is_going(
         assert home.exists()
         assert base_cfg.read_text(encoding="utf-8") == before
         app.active_runner = None
+
+
+async def test_profiles_hint_height_stays_on_cursor(tmp_path, monkeypatch):
+    """Подсказка строк «Профилей» — с резервом под самую длинную (у профиля
+    — путь, активация, секции; у «нет» — одна фраза): ↑/↓ не двигают низ
+    рамки (дизайн-код §9)."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
+    async with app.run_test(size=(90, 50)) as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+
+        def height() -> int:
+            return list(scr.query(".set-profiles-hint"))[-1].size.height
+
+        heights = {height()}
+        for _ in range(len(scr._profiles_rows())):
+            await pilot.press("down")
+            await pilot.pause(0.1)
+            heights.add(height())
+        assert len(heights) == 1
+        assert heights.pop() >= 3

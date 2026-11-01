@@ -170,3 +170,21 @@ async def test_footer_offers_only_working_keys(tmp_path):
         footer = str(scr.query_one("#set-footer", Static).render())
         assert "←/→ — изменить" in footer
         assert "↑/↓" not in footer
+
+
+async def test_theme_hint_height_stays_on_value_change(tmp_path):
+    """Описание темы — с резервом под самое длинное: ←/→ меняет текст,
+    высота подсказки (и низ рамки) на месте."""
+    app, _ = _app_with_config(tmp_path, 'tui:\n  theme: "gigacode"\n')
+    async with app.run_test(size=(70, 40)) as pilot:
+        scr = await _open_look(pilot)
+
+        def hint():
+            return list(scr.query(".set-theme-hint"))[-1]
+
+        heights = {hint().size.height}
+        for _ in range(3):
+            await pilot.press("right")
+            await pilot.pause(0.1)
+            heights.add(hint().size.height)
+        assert heights == {2}
