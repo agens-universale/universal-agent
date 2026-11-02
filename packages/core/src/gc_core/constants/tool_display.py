@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -219,24 +220,25 @@ def _mcp_display(
 
 #: Поля `session_think` в порядке показа; все необязательные.
 THINK_FIELDS = ("thoughts", "critics", "doubts", "reflection")
-#: Имена, которыми модели пишут поле мимо схемы: без переноса строгая схема
-#: выбросила бы мысль (живой случай 2026-11-01 — `thought`).
-THINK_FIELD_ALIASES = {"thought": "thoughts"}
 
 
 def think_parts(args: Mapping[str, object]) -> list[str]:
-    """Непустые поля вызова Think по порядку `THINK_FIELDS`; синоним — на
-    месте своего поля, если оно пустое. Один разбор на тул (перенос перед
-    схемой), сводку строки и раскрытие ленты."""
-    data = dict(args)
-    for alias, field in THINK_FIELD_ALIASES.items():
-        if not _filled(data.get(field)) and _filled(data.get(alias)):
-            data[field] = data[alias]
-    return [str(data[f]).strip() for f in THINK_FIELDS if _filled(data.get(f))]
+    """Непустые части вызова Think: сначала `THINK_FIELDS` по порядку,
+    затем любые другие ключи как пришли; значение не-строка — JSON-текстом.
+    Всё, что модель передала, — мысль (живой случай 2026-11-01 — `thought`
+    мимо схемы). Один разбор на тул (перед схемой), сводку строки и
+    раскрытие ленты."""
+    keys = [*THINK_FIELDS, *(key for key in args if key not in THINK_FIELDS)]
+    texts = (_think_value_text(args.get(key)) for key in keys)
+    return [text for text in texts if text]
 
 
-def _filled(value: object) -> bool:
-    return isinstance(value, str) and bool(value.strip())
+def _think_value_text(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if value in (None, [], {}):
+        return ""
+    return json.dumps(value, ensure_ascii=False)
 
 
 def tool_display(

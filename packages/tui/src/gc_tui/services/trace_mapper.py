@@ -8,7 +8,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
-from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
+from gc_core.constants.tool_names import (
+    PROPOSE_PLAN_TOOL_NAME,
+    SESSION_THINK_TOOL_NAME,
+)
 from gc_core.execution.progress import tool_args_summary
 from gc_core.message_policy.chat_completions import is_bridge_echo
 from gc_core.vision.errors import (
@@ -29,7 +32,7 @@ from gc_tui.services.command_output import (
 from gc_tui.services.duration_format import format_size
 from gc_tui.services.image_chips import images_mentioned
 from gc_tui.services.plural import plural_form
-from gc_tui.services.think_text import think_text
+from gc_tui.services.think_text import think_rejected, think_text
 from gc_tui.services.tool_identity import tool_id
 from gc_tui.services.tool_refusal import refusal_text
 
@@ -940,6 +943,9 @@ def _map_function_event(
     )
 
     if typ == "function_call":
+        thought = think_text(wire_name, msg.get("arguments"))
+        if wire_name == SESSION_THINK_TOOL_NAME and not thought:
+            return None  # пустой Think: ошибка — только модели
         args_summary = tool_args_summary(
             wire_name, msg.get("arguments"), root=root
         )
@@ -959,11 +965,13 @@ def _map_function_event(
                 wire_name, msg.get("arguments"), root=root
             ),
             agent=agent_head(wire_name, msg.get("arguments")),
-            think_text=think_text(wire_name, msg.get("arguments")),
+            think_text=thought,
         )
 
     if typ == "function_call_output":
         output = msg.get("output")
+        if think_rejected(output):
+            return None  # пара пустого Think (строки вызова нет)
         is_err = _looks_like_error(output)
         kind = "error" if is_err else "result"
         stop = result_stop(output) if is_err else None

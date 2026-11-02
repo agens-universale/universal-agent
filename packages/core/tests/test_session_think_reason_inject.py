@@ -106,19 +106,18 @@ async def test_apply_tool_session_think_empty_after_strip_still_fails():
     assert data["error"]["type"] == "invalid_argument"
 
 
-def test_misnamed_thought_field_becomes_thoughts():
-    """Модель назвала поле `thought` — мысль не выбрасывается строгой
-    схемой, а встаёт в `thoughts` (как `reason`)."""
-    from gc_core.tools.session.think import Think
-
-    got = Think.prepare_args_before_strip(
-        {"thought": "мысль", "reflection": "вывод"}
+async def test_apply_tool_session_think_any_key_ok_without_dropped_note():
+    """Ключ мимо схемы — тоже мысль: вызов проходит, заметки о снятых
+    полях нет."""
+    tools_data, _, _, _ = await abuild_tools_data(
+        make_settings(_inject_config())
     )
-    assert got == {"thoughts": "мысль", "reflection": "вывод"}
-
-
-def test_thought_does_not_override_filled_thoughts():
-    from gc_core.tools.session.think import Think
-
-    args = {"thought": "лишнее", "thoughts": "своё"}
-    assert Think.prepare_args_before_strip(args)["thoughts"] == "своё"
+    ctx = fake_ctx(_inject_config(), tools_data=tools_data, logger=None)
+    raw = await aapply_tool(
+        tool_name="session_think",
+        arguments=json.dumps({"reason": "why", "analysis": ["шаг 1"]}),
+        ctx=ctx,
+    )
+    data = json.loads(raw)
+    assert data["ok"] is True
+    assert "dropped_arguments" not in data

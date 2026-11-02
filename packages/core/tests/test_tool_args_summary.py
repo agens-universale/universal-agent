@@ -135,10 +135,12 @@ def test_think_without_thoughts_shows_the_first_filled_field():
     assert tool_args_summary("session_think", {}) == ""
 
 
-def test_think_summary_takes_the_misnamed_thought_field():
-    """`thought` вместо `thoughts` (живой случай 2026-11-01) — то же поле."""
+def test_think_summary_takes_any_key_after_the_known_fields():
+    """Ключ мимо схемы (`thought`, живой случай 2026-11-01) — тоже мысль,
+    после четырёх полей Think."""
     args = {"thought": "главное", "reflection": "вывод"}
-    assert tool_args_summary("session_think", args) == "главное"
+    assert tool_args_summary("session_think", args) == "вывод"
+    assert tool_args_summary("session_think", {"thought": "x"}) == "x"
 
 
 def test_mcp_without_scalar_falls_back_to_pairs():

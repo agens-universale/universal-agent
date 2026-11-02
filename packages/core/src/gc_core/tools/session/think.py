@@ -1,16 +1,13 @@
 import json
+from collections.abc import Collection
 from typing import Any, Dict
 
-from gc_core.constants.tool_display import THINK_FIELD_ALIASES, THINK_FIELDS
+from gc_core.constants.tool_display import THINK_FIELDS, think_parts
 from gc_core.loop_detector.constants import (
     GENERIC_PROFILE,
     loop_warn_on_repeat,
 )
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-
-
-def _filled(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip())
 
 
 @loop_warn_on_repeat(**GENERIC_PROFILE)
@@ -37,24 +34,25 @@ class Think(AbstractSimpleTool):
         )
 
     @classmethod
-    def prepare_args_before_strip(cls, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Before strip: a misnamed field (``thought``) goes to its schema
-        field when that one is empty; if only injected ``reason`` is filled,
-        it becomes ``thoughts``."""
+    def prepare_args_before_strip(
+        cls,
+        args: Dict[str, Any],
+        *,
+        injected_fields: Collection[str] = (),
+    ) -> Dict[str, Any]:
+        """Before strip: everything the model passed is the thought — the
+        schema fields first, then any other keys, values of any type as
+        text — folded into ``thoughts``, so no key is dropped. Injected
+        service fields stay as they are and give the text only when
+        nothing else is filled."""
         if not isinstance(args, dict):
             return args
-        remapped = dict(args)
-        for alias, field in THINK_FIELD_ALIASES.items():
-            if _filled(remapped.get(alias)) and not _filled(
-                remapped.get(field)
-            ):
-                remapped[field] = remapped.pop(alias)
-        reason = remapped.get("reason")
-        if _filled(reason) and not any(
-            _filled(remapped.get(name)) for name in THINK_FIELDS
-        ):
-            remapped["thoughts"] = reason
-        return remapped
+        service = {k: v for k, v in args.items() if k in injected_fields}
+        own = {k: v for k, v in args.items() if k not in injected_fields}
+        parts = think_parts(own) or think_parts(service)
+        if parts:
+            service["thoughts"] = "\n\n".join(parts)
+        return service
 
     @classmethod
     def tool_description(cls, settings: Any = None):

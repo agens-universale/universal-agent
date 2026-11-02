@@ -253,8 +253,8 @@ def test_prepare_branches_with_a_fabric_hook_and_an_empty_schema():
 
     class Fabric:
         @staticmethod
-        def prepare_args_before_strip(args):
-            calls.append(dict(args))
+        def prepare_args_before_strip(args, *, injected_fields):
+            calls.append((dict(args), injected_fields))
             return args.get("replace", {**args, "added": 1})
 
     entry = {
@@ -271,9 +271,11 @@ def test_prepare_branches_with_a_fabric_hook_and_an_empty_schema():
     assert prepare_tool_arguments('{"replace": [1]}', entry) == (None, {})
     assert prepare_tool_arguments("null", entry) == (None, {})
     assert len(calls) == 2
+    assert calls[0][1] == frozenset({"audit_tag"})
     assert prepare_tool_arguments(None, entry) == ({}, {})
     assert prepare_tool_arguments("  ", entry) == ({}, {})
     assert len(calls) == 2
+    assert calls[0][1] == frozenset({"audit_tag"})
     entry["spec"]["parameters"]["properties"]["path"] = {}
     assert prepare_tool_arguments("  ", entry) == (None, {})
     assert prepare_tool_arguments(

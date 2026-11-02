@@ -229,8 +229,36 @@ async def test_first_line_pieces_are_flush_with_right_gutter(width, kind):
             assert tail.right == width - 1
 
 
-def test_think_text_takes_the_misnamed_thought_field():
+def test_think_text_shows_any_keys_after_the_known_fields():
+    """Всё, что модель передала, — мысль: ключи мимо схемы и значения
+    любого типа идут текстом после четырёх полей Think."""
     from gc_tui.services.think_text import think_text
 
-    args = {"thought": "главное", "reflection": "вывод"}
-    assert think_text("session_think", args) == "главное\n\nвывод"
+    args = {"thought": "главное", "reflection": "вывод", "steps": [1, 2]}
+    assert think_text("session_think", args) == "вывод\n\nглавное\n\n[1, 2]"
+
+
+def _think_event(msg: dict):
+    from gc_tui.services.trace_mapper import _map_function_event
+
+    return _map_function_event(msg, no=1, ts="", mid=None)
+
+
+def test_empty_think_call_and_its_rejection_are_not_shown():
+    """Пустой Think: ошибка — только модели, в ленте нет ни строки
+    вызова, ни строки ошибки."""
+    from gc_core.tools.session.think import Think
+    from gc_testkit.helpers.tool_ctx import CallableTool
+
+    call = {
+        "type": "function_call",
+        "name": "session_think",
+        "call_id": "t1",
+        "arguments": json.dumps({"thoughts": " ", "reason": ""}),
+    }
+    rejected = CallableTool(Think())(thoughts="")
+    output = {"type": "function_call_output", "call_id": "t1"}
+    assert _think_event(call) is None
+    assert _think_event({**output, "output": rejected}) is None
+    accepted = CallableTool(Think())(thoughts="мысль")
+    assert _think_event({**output, "output": accepted}).kind == "result"
