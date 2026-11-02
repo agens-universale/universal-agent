@@ -997,6 +997,7 @@ NOT_IN_MATRIX = {
     "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
     "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
     "tui.theme": "только палитра TUI, не ход агента; покрытие — tui/test_theme_startup",
+    "tui.show_reasoning": "не ход агента: включает только запись рассуждений боковым потоком треда, в историю модели она не идёт; покрытие — core/test_processing_responses_reasoning, test_thread_store_reasoning",
 }
 
 
