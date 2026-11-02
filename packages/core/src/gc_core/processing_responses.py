@@ -435,15 +435,23 @@ def _make_technical_feedback_user_message(
     return msg
 
 
-def _mode_notices(state: State, ctx: Any) -> List[Dict]:
-    """Служебные сообщения о границе режима для ЭТОГО агента; сдвигает его
-    отметку (``State.mode_announced``). Пусто — режим уже объявлен. Текст
-    plan — по набору тулов агента (``offers_plan_tool``)."""
-    texts, state.mode_announced = mode_boundary_messages(
+def _mode_notices(
+    state: State, ctx: Any, *, update_silent_mark: bool = True
+) -> List[Dict]:
+    """Служебные сообщения о границе режима для ЭТОГО агента.
+
+    Сдвигает отметку (``State.mode_announced``). Пустой список — сказать
+    нечего. ``update_silent_mark=False`` не трогает отметку, если текста
+    нет: после сводки пустой пересчёт не должен её затирать.
+    Текст plan — по набору тулов агента (``offers_plan_tool``).
+    """
+    texts, announced = mode_boundary_messages(
         current=resolve_mode(ctx).value,
         announced=state.mode_announced,
         can_propose_plan=offers_plan_tool(ctx, state),
     )
+    if texts or update_silent_mark:
+        state.mode_announced = announced
     return [_make_technical_feedback_user_message(text) for text in texts]
 
 
@@ -2990,7 +2998,8 @@ class _AgentLoop:
         """
         if self._nudges.skip_fill:
             # Сводка только что заменила трейс. Буфер уже пуст, счётчики
-            # обнулены; этот запрос уходит без подсказок.
+            # обнулены; этот запрос уходит без подсказок. Смена режима —
+            # отдельный технический user сразу после сводки, до генерации.
             clear_executed_tool_names(self._nudges.trace)
             self._nudges.skip_fill = False
             await self._nudges.apublish(
@@ -2998,6 +3007,9 @@ class _AgentLoop:
                 state=self.state,
                 apersist=self._anudge_persist,
                 with_nudges=False,
+            )
+            messages = await self._aannounce_mode(
+                messages, update_silent_mark=False
             )
             self._nudges.notices_sent = True
             return messages
@@ -3015,6 +3027,12 @@ class _AgentLoop:
             apersist=self._anudge_persist,
         )
         if done:
+            # Окно после session_compact: наджи в output не клеим, но смену
+            # режима говорим сразу за «продолжай», до генерации.
+            if self._nudges.compacted:
+                messages = await self._aannounce_mode(
+                    messages, update_silent_mark=False
+                )
             self._nudges.notices_sent = True
             return messages
         if backend_mode == "chat_completions":
@@ -3331,17 +3349,23 @@ class _AgentLoop:
             )
             return False
 
-    async def _aannounce_mode(self, messages) -> List[Dict]:
+    async def _aannounce_mode(
+        self, messages, *, update_silent_mark: bool = True
+    ) -> List[Dict]:
         """Сказать агенту о режиме, если он сменился с прошлого объявления.
 
         Перед каждым запросом к модели: на старте агента и после каждого
         батча — смена режима посреди хода доходит до модели на ближайшем
-        шаге. Одно правило для корня и любого субагента: отметка своя у
+        шаге. На шаге сводки тоже: технический user сразу после сводки
+        или «продолжай», до генерации, без остальных наджей.
+        Одно правило для корня и любого субагента: отметка своя у
         каждого, режим — общий живой. Не в хвосте батча: после принятого
         ``turn_finish`` хвост отбрасывается, а отметка уже была бы сдвинута.
         """
         state = self.state
-        notices = _mode_notices(state, self.ctx)
+        notices = _mode_notices(
+            state, self.ctx, update_silent_mark=update_silent_mark
+        )
         if not notices:
             return messages
         state.messages += notices

@@ -214,6 +214,95 @@ def test_a_stop_before_the_request_leaves_no_announcement(monkeypatch):
     assert shared.mode_announced is None
 
 
+def test_mode_changed_at_summary_is_told_before_the_model(monkeypatch):
+    """Автосводка на этом запросе: смена режима — технический user после
+    сводки, до генерации. Остальные наджи этого запроса не собираются."""
+    shared = SharedStateData(permission_mode="plan")
+    state = _state(shared)
+    state.mode_announced = "edit"
+    summary = {"role": "user", "content": "сводка диалога", "id": "sum"}
+    notices = {"calls": 0}
+
+    def _notice(messages, *_args, **_kwargs):
+        notices["calls"] += 1
+        return messages
+
+    async def compaction(messages, _mode):
+        state.messages[:] = [summary]
+        messages[:] = [summary]
+        return True
+
+    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _notice)
+    sent = _request_with_hook(
+        monkeypatch,
+        [_user("задача", "u1")],
+        state,
+        _ctx(shared),
+        pre_backend_compaction_hook=compaction,
+    )
+    assert [m.get("id") for m in sent[:1]] == ["sum"]
+    assert sent[-1]["content"] == wrap_technical_user_content(
+        PLAN_ENTER_MESSAGE
+    )
+    assert sent[-1] in state.messages
+    assert state.mode_announced == "plan"
+    assert notices["calls"] == 0
+
+
+def test_mode_changed_at_session_compact_follows_the_resume(monkeypatch):
+    """После session_compact смена режима стоит сразу за «продолжай»,
+    до запроса к модели."""
+    from gc_core.execution.constants import _SESSION_COMPACT_RESUME_USER_TEXT
+
+    shared = SharedStateData(permission_mode="edit")
+    state = _state(shared)
+    state.mode_announced = "edit"
+    summary = {"role": "user", "content": "сводка диалога", "id": "sum"}
+    resume = {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            _SESSION_COMPACT_RESUME_USER_TEXT
+        ),
+        "id": "resume",
+    }
+
+    async def fake_tools(
+        messages,
+        state,
+        ctx,
+        run_agent_func,
+        persist_messages_callback=None,
+        batch_trace=None,
+    ):
+        del messages, ctx, run_agent_func, persist_messages_callback
+        shared.permission_mode = "plan"
+        batch_trace["compacted"] = True
+        state.messages = [summary, resume]
+        return [resume]
+
+    monkeypatch.setattr(pr, "aprocess_tool_calls", fake_tools)
+    sent = _first_request(monkeypatch, [dict(_READ)], state, _ctx(shared))
+    assert [m.get("id") for m in sent[:1]] == ["resume"]
+    assert sent[-1]["content"] == wrap_technical_user_content(
+        PLAN_ENTER_MESSAGE
+    )
+    assert [m.get("content") for m in state.messages[-2:]] == [
+        resume["content"],
+        sent[-1]["content"],
+    ]
+    assert state.mode_announced == "plan"
+
+
+def _request_with_hook(monkeypatch, messages, state, ctx, **hooks):
+    async def _request(sent, _state, _ctx):
+        raise _Requested(list(sent))
+
+    monkeypatch.setattr(pr, "aprocess_user_ask", _request)
+    with pytest.raises(_Requested) as caught:
+        run_coro(arun_agent(messages, state, ctx, **hooks))
+    return caught.value.messages
+
+
 def test_the_announcement_is_the_last_message_before_the_request(
     monkeypatch,
 ):
