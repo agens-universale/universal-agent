@@ -189,6 +189,7 @@ from gc_tui.services.terminal_title import (
     format_terminal_title,
     set_terminal_title,
 )
+from gc_tui.services.think_text import think_rejected
 from gc_tui.services.thought_text import thought_display_text
 from gc_tui.services.tool_blocks import (
     BlockEdit,
@@ -438,14 +439,6 @@ _FooterHeadSnapshot = namedtuple(
 _FooterFrame = namedtuple(
     "_FooterFrame", ("badge", "snapshot", "meter", "usage")
 )
-
-
-def _records_context(records: list[dict], root: str) -> RenderContext:
-    """Контекст рендера порции записей треда (по их payload)."""
-    return collect_render_context(
-        (rec.get("payload") for rec in records if isinstance(rec, dict)),
-        root=root,
-    )
 
 
 def _profile_source_label(ref) -> str | None:
@@ -1869,6 +1862,16 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Рабочая папка сессии — фиксирована = папка запуска процесса."""
         return str(Path.cwd())
 
+    def _render_context(self, payloads) -> RenderContext:
+        """Контекст рендера порции payload'ов треда: корень сессии и
+        служебные поля схем тулов (в мысль Think не входят)."""
+        agent = self.app.effective_settings().settings.agent
+        return collect_render_context(
+            payloads,
+            root=self._current_cwd(),
+            injected_fields=agent.inject_tool_fields,
+        )
+
     def _show_footer_refusal(
         self, text: str, tone: Optional[str] = "warn"
     ) -> None:
@@ -2674,7 +2677,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         лежит в следующем файле с тем же id, рисуется первое вхождение.
         Payload остаётся full, пока этот id есть в окне segments[-2:]."""
         records = [rec for seg in segments for rec in seg["messages"]]
-        context = _records_context(records, self._current_cwd())
+        context = self._render_context(
+            rec.get("payload") for rec in records if isinstance(rec, dict)
+        )
         # Ответ модели, начатый в конце ленты, нужен вызову следующего тика.
         self._response_tail = response_tail(
             [rec.get("payload") for rec in records if isinstance(rec, dict)]
@@ -2719,9 +2724,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             payloads = [*self._response_tail, *payloads]
         self._response_tail = response_tail(payloads)
         if context is None:
-            context = collect_render_context(
-                payloads, root=self._current_cwd()
-            )
+            context = self._render_context(payloads)
         elif live:
             # Общий контекст шага сжатия не видит текста ответа из прошлой
             # пачки опроса.
@@ -2853,18 +2856,20 @@ class TraceScreen(TraceFollowMixin, Screen):
         from gc_tui.widgets.thought_row import ThoughtRow
 
         attempt = sink.attempt()
+        current = None
+        for row in self._streamed_thoughts:
+            if row.attempt == attempt:
+                current = row
+            else:
+                # Новая попытка — прежние законченные, даже если новая
+                # (пока) без мысли.
+                row.settle()
         think = thought_display_text(sink.snapshot()[0])
         if attempt is None or not think or not self._thoughts_on():
             return
         state, _duration = sink.reasoning_state()
         seconds = sink.reasoning_seconds() or 0.0
         live = state == "thinking"
-        current = None
-        for row in self._streamed_thoughts:
-            if row.attempt == attempt:
-                current = row
-            else:
-                row.settle()
         if current is not None:
             current.update_live(think, seconds, live)
             return
@@ -2873,6 +2878,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._streamed_thoughts.append(row)
         self._trace_mount(row, scroll=True)
+        # Превью ответа этой попытки могло встать тем же тактом раньше —
+        # мысль над ним.
+        for preview in (self._stream_block, self._stream_answer_row):
+            if preview is not None and preview.parent is row.parent:
+                row.parent.move_child(preview, after=row)
 
     def _settle_thoughts(self) -> None:
         """Конец хода (ответ, стоп, ошибка, отмена): строки мыслей остаются
@@ -3996,6 +4006,8 @@ class TraceScreen(TraceFollowMixin, Screen):
                 self._reconcile_active_tool_phases()
                 return
             # Fallback (call_id unknown or no matching row) — append separate line
+            if think_rejected((ev.full_payload or {}).get("output")):
+                return  # отказ пустого Think: строки вызова нет
             if ev.kind == "error":
                 from gc_tui.services.trace_render import (
                     build_orphan_result_row,
@@ -6378,6 +6390,10 @@ class TraceScreen(TraceFollowMixin, Screen):
                 and (self._last_event_kind != "_finalized")
             )
             sink = getattr(self.app, "_stream_sink", None)
+            if _thinking_phase and sink is not None and not _frozen:
+                # Строки мыслей сверяются и с пустым стримом: новая попытка
+                # без мысли закрывает строки прежних.
+                thought_sink = sink
             # F3: при freeze не монтируем/не красим стрим-виджеты (mount/switch/
             # set_content дрожали бы экран под выделением). Контент догонит после MouseUp.
             if (
@@ -6394,7 +6410,6 @@ class TraceScreen(TraceFollowMixin, Screen):
                 )
                 from gc_tui.widgets.stream_block import StreamBlock
 
-                thought_sink = sink
                 think, answer = sink.snapshot()
                 mode = self.app.base_settings().settings.tui.stream_display
                 show_reasoning = (
@@ -6637,8 +6652,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Хвост архива, маркер, новый живой файл — живым путём, одним
         контекстом рендера (вызов в хвосте сводится с выводом в живом)."""
         start = len(self._task_events)
-        context = _records_context(
-            [*step.archive_tail, *step.live_records], self._current_cwd()
+        context = self._render_context(
+            rec.get("payload")
+            for rec in [*step.archive_tail, *step.live_records]
+            if isinstance(rec, dict)
         )
         self._render_records(step.archive_tail, live=True, context=context)
         self._mount_compaction_marker(step)

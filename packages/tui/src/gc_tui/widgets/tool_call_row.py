@@ -260,6 +260,9 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         self._think_body: Optional[ExpandableTextBody] = (
             ExpandableTextBody(think_text) if think_text else None
         )
+        # Мысль целиком одной строкой: сводка ядра — только первое поле,
+        # объект обрезан, пока он короче всей мысли.
+        self._think_flat = " ".join(think_text.split())
         self._think_cut = False
         self._think_chars: tuple[int, int] = (0, 0)
         self._think_target: Optional[Static] = None
@@ -712,9 +715,10 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         return text
 
     def _target_is_cut(self, target: str) -> bool:
-        """Объект `Think` показан с `…` — под ширину или сводкой ядра."""
+        """Объект `Think` показывает не всю мысль: `…` под ширину или
+        сводкой ядра, либо сводка — одно поле из нескольких."""
         return self._think_body is not None and (
-            target != self._target or target.endswith("…")
+            target != self._think_flat or target.endswith("…")
         )
 
     def _append_command_rest(self, text: Text, style: str) -> None:
@@ -931,9 +935,10 @@ class ToolCallRow(BlinkPulseMixin, CopyFeedbackMixin, ClickModelMixin, Widget):
         super().on_click(event)
 
     def _click_on_think_object(self, event: events.Click) -> bool:
-        """Простой клик по обрезанному объекту `Think` (не Ctrl+клик)."""
+        """Простой клик по обрезанному объекту `Think` (не клик открытия:
+        Ctrl, на Маке Cmd)."""
         return (
-            not event.ctrl
+            not opens_event(event)
             and self._think_cut
             and getattr(event, "widget", None) is self._think_target
         )

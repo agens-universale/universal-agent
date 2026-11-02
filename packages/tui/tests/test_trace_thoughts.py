@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -368,3 +369,117 @@ async def test_reasoning_tag_lines_not_shown(tmp_path):
             lambda: _line(_thoughts(scr)[0]) == "● Thinking  план",
             "строка без тегов",
         )
+
+
+@pytest.mark.asyncio
+async def test_new_attempt_without_thought_settles_previous(tmp_path):
+    """Повтор запроса без рассуждения: строка прежней попытки законченная,
+    не мигает до конца хода."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr, sink, _runner = await _live(pilot, "первая попытка")
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
+        sink.push("reset", "")
+        await wait_until(
+            pilot, lambda: _thoughts(scr)[0].settled, "прежняя законченная"
+        )
+        assert len(_thoughts(scr)) == 1
+
+
+@pytest.mark.asyncio
+async def test_thought_and_answer_in_one_tick_keep_thought_above(tmp_path):
+    """Мысль и первые токены ответа пришли за один такт: строка мысли
+    встаёт над превью ответа."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    app = _app(tmp_path, **{"tui.stream_display": "answer"})
+    async with app.run_test(size=(100, 40)) as pilot:
+        scr, sink, _runner = await _live(pilot, "короткая мысль")
+        sink.push("answer", "ответ")
+        await wait_until(
+            pilot,
+            lambda: _thoughts(scr) and scr._stream_answer_row is not None,
+            "мысль и превью ответа",
+        )
+        children = list(scr.query_one("#trace").children)
+        assert children.index(_thoughts(scr)[0]) < children.index(
+            scr._stream_answer_row
+        )
+
+
+# --- Think в ленте -----------------------------------------------------------
+
+
+def _think_call(arguments: dict, call_id="k1"):
+    return {
+        "id": f"fc_{call_id}",
+        "type": "function_call",
+        "call_id": call_id,
+        "name": "session_think",
+        "arguments": json.dumps(arguments),
+    }
+
+
+async def _think_output(call_id="k1"):
+    """Отказ Think на пустой вызов — вывод самого тула (в потоке:
+    `CallableTool` гонит свой цикл событий)."""
+    from gc_core.tools.session.think import Think
+    from gc_testkit.helpers.tool_ctx import CallableTool
+
+    output = await asyncio.to_thread(CallableTool(Think()), thoughts="")
+    return {
+        "id": f"fco_{call_id}",
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": output,
+    }
+
+
+@pytest.mark.asyncio
+async def test_empty_think_and_its_rejection_not_shown_live(tmp_path):
+    """Пустой Think вживую: ни строки вызова, ни строки ошибки; следующий
+    вызов рисуется как обычно."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID)
+        pilot.app.active_runner = _Runner()
+        _messages(
+            tmp_path,
+            _think_call({"thoughts": " "}),
+            await _think_output(),
+            _call(),
+            _output(),
+            start_seq=1,
+        )
+        await wait_until(
+            pilot, lambda: _top_index(scr, ToolCallRow) >= 0, "вызов шага"
+        )
+        await pilot.pause(0.3)
+        body = "\n".join(str(w.render()) for w in scr.query("#trace *"))
+        assert "At least one" not in body
+        calls = [r for r in scr.query(ToolCallRow) if r.mode != "header"]
+        assert [r.wire_name for r in calls] == ["read_file"]
+
+
+@pytest.mark.asyncio
+async def test_old_rejected_think_with_text_keeps_its_error(tmp_path):
+    """Старый тред: Think с текстом получил отказ (до приёма любых ключей)
+    — строка вызова видна и закрыта ошибкой, а не висит незавершённой."""
+    _write_thread(tmp_path)
+    _messages(
+        tmp_path,
+        _reply(),
+        _think_call({"thought": "мысль мимо схемы"}),
+        await _think_output(),
+    )
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(TID, is_resume=True)
+        await wait_until(
+            pilot, lambda: _top_index(scr, ToolCallRow) >= 0, "строка Think"
+        )
+        (row,) = scr.query(ToolCallRow)
+        assert row._outcome == "error"

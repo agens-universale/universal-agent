@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TypedDict
@@ -222,12 +222,21 @@ def _mcp_display(
 THINK_FIELDS = ("thoughts", "critics", "doubts", "reflection")
 
 
-def think_parts(args: Mapping[str, object]) -> list[str]:
+def think_parts(
+    args: Mapping[str, object], injected: Collection[str] = ()
+) -> list[str]:
     """Непустые части вызова Think: сначала `THINK_FIELDS` по порядку,
     затем любые другие ключи как пришли; значение не-строка — JSON-текстом.
     Всё, что модель передала, — мысль (живой случай 2026-11-01 — `thought`
-    мимо схемы). Один разбор на тул (перед схемой), сводку строки и
+    мимо схемы). Служебные поля схемы (``injected``) дают текст, только
+    когда своего нет. Один разбор на тул (перед схемой), сводку строки и
     раскрытие ленты."""
+    own = {k: v for k, v in args.items() if k not in injected}
+    service = {k: v for k, v in args.items() if k in injected}
+    return _think_texts(own) or _think_texts(service)
+
+
+def _think_texts(args: Mapping[str, object]) -> list[str]:
     keys = [*THINK_FIELDS, *(key for key in args if key not in THINK_FIELDS)]
     texts = (_think_value_text(args.get(key)) for key in keys)
     return [text for text in texts if text]

@@ -142,10 +142,11 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         self._update()
 
     def _set(self, text: str, seconds: float | None, live: bool) -> None:
+        if text != self._text:
+            self._body.set_text(text.strip())
         self._text = text
         self._seconds = seconds
         self._live = live
-        self._body.set_text(text.strip())
         self._sync_pulse()
         self._update()
 

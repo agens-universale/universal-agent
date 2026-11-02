@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -119,6 +120,36 @@ async def test_short_think_neither_expands_nor_selects():
         await _click_object(pilot, row)
         assert row.query_one(ExpandableTextBody).display is False
         assert not row.has_focus
+
+
+@pytest.mark.asyncio
+async def test_short_summary_expands_when_other_fields_hold_more():
+    """Сводка — первое поле, а в остальных есть ещё текст: строка
+    раскрывается, иначе остальные поля не увидеть."""
+    from gc_tui.widgets.expandable_text import ExpandableTextBody
+
+    row = _row(f"коротко\n\n{_THOUGHTS}", "коротко")
+    async with _app(row).run_test(size=(60, 30)) as pilot:
+        await pilot.pause()
+        assert _content(row).has_class("trace-expandable")
+        await _click_object(pilot, row)
+        assert row.query_one(ExpandableTextBody).display is True
+
+
+@pytest.mark.asyncio
+async def test_cmd_click_on_cut_object_opens_detail_not_expands():
+    """Cmd+клик на Маке приходит `meta`: открывает событие, как в любой
+    строке ленты, а не раскрывает текст."""
+    from gc_tui.widgets.expandable_text import ExpandableTextBody
+
+    row = _row(_THOUGHTS, " ".join(_THOUGHTS.split()))
+    opened: list[str] = []
+    async with _app(row, opened).run_test(size=(50, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click(_content(row), offset=(3, 0), meta=True)
+        await pilot.pause()
+        assert row.query_one(ExpandableTextBody).display is False
+        assert opened == ["t1"]
 
 
 @pytest.mark.asyncio
@@ -244,21 +275,115 @@ def _think_event(msg: dict):
     return _map_function_event(msg, no=1, ts="", mid=None)
 
 
-def test_empty_think_call_and_its_rejection_are_not_shown():
-    """Пустой Think: ошибка — только модели, в ленте нет ни строки
-    вызова, ни строки ошибки."""
-    from gc_core.tools.session.think import Think
-    from gc_testkit.helpers.tool_ctx import CallableTool
-
+def test_empty_think_call_is_not_shown():
+    """Пустой Think: строки вызова в ленте нет (ошибка — только модели)."""
     call = {
         "type": "function_call",
         "name": "session_think",
         "call_id": "t1",
         "arguments": json.dumps({"thoughts": " ", "reason": ""}),
     }
-    rejected = CallableTool(Think())(thoughts="")
-    output = {"type": "function_call_output", "call_id": "t1"}
     assert _think_event(call) is None
-    assert _think_event({**output, "output": rejected}) is None
-    accepted = CallableTool(Think())(thoughts="мысль")
-    assert _think_event({**output, "output": accepted}).kind == "result"
+
+
+def test_think_text_drops_injected_fields_unless_nothing_else():
+    """Служебные поля схемы (`agent.inject_tool_fields`) ядро выбрасывает
+    — лента тоже; текстом они становятся, только когда своего нет (как у
+    тула)."""
+    from gc_tui.services.think_text import think_text
+
+    both = {"thoughts": "мысль", "reason": "зачем"}
+    assert think_text("session_think", both, {"reason"}) == "мысль"
+    only = {"reason": "зачем"}
+    assert think_text("session_think", only, {"reason"}) == "зачем"
+
+
+def test_mapper_drops_injected_fields_from_think_text():
+    from gc_tui.services.trace_mapper import RenderContext, map_message
+
+    call = {
+        "type": "function_call",
+        "name": "session_think",
+        "call_id": "t1",
+        "arguments": json.dumps({"thoughts": "мысль", "reason": "зачем"}),
+    }
+    context = RenderContext(injected_fields=frozenset({"reason"}))
+    event = map_message(call, no=1, ts="", context=context)
+    assert event.think_text == "мысль"
+
+
+def test_think_rejection_is_recognised_by_output():
+    from gc_core.tools.session.think import Think
+    from gc_testkit.helpers.tool_ctx import CallableTool
+    from gc_tui.services.think_text import think_rejected
+
+    assert think_rejected(CallableTool(Think())(thoughts=""))
+    assert not think_rejected(CallableTool(Think())(thoughts="мысль"))
+    assert not think_rejected('{"ok": false, "error": {"tool": "x"}}')
+    assert not think_rejected("не json")
+
+
+def _readonly_app(records):
+    from textual.app import App
+    from textual.containers import VerticalScroll
+    from trace_readonly import render_thread_readonly
+
+    class _A(App):
+        def compose(self):
+            yield VerticalScroll(id="t")
+
+        def on_mount(self):
+            render_thread_readonly(self.query_one("#t"), records)
+
+    return _A()
+
+
+def _env(payload):
+    return {"type": "message", "seq": 1, "ts": "", "payload": payload}
+
+
+@pytest.mark.asyncio
+async def test_readonly_hides_empty_think_keeps_old_rejection_with_text():
+    """Превью: пустой Think и его отказ не видны; Think с текстом, получивший
+    отказ в старом треде, закрыт ошибкой."""
+    from gc_core.tools.session.think import Think
+    from gc_testkit.helpers.tool_ctx import CallableTool
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    rejected = await asyncio.to_thread(CallableTool(Think()), thoughts="")
+
+    def pair(call_id, args):
+        return [
+            _env(
+                {
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": "session_think",
+                    "arguments": json.dumps(args),
+                }
+            ),
+            _env(
+                {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": rejected,
+                }
+            ),
+        ]
+
+    records = [*pair("e1", {}), *pair("o1", {"thought": "мысль"})]
+    async with _readonly_app(records).run_test(size=(80, 20)) as pilot:
+        await pilot.pause()
+        rows = list(pilot.app.query(ToolCallRow))
+        assert len(rows) == 1 and rows[0]._outcome == "error"
+        body = "\n".join(str(w.render()) for w in pilot.app.query("#t > *"))
+        assert body.count("At least one") <= 1
+
+
+def test_nested_empty_think_is_not_a_row():
+    """Вложенный вызов субагента: пустой Think строкой не бывает."""
+    from gc_tui.services.subagent_sidecar_mapper import nested_call_row
+
+    assert not nested_call_row("session_think", "")
+    assert nested_call_row("session_think", "мысль")
+    assert nested_call_row("fs_read_file", "")

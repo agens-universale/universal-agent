@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from typing import Any, Optional
 
 from gc_core.constants.tool_display import think_parts
@@ -17,17 +18,25 @@ from gc_core.constants.tool_names import SESSION_THINK_TOOL_NAME
 from gc_tui.services.call_arguments import call_arguments
 
 
-def think_text(wire_name: Optional[str], arguments: Any) -> str:
-    """Тело раскрытия вызова `session_think`; другой тул — пусто."""
+def think_text(
+    wire_name: Optional[str],
+    arguments: Any,
+    injected: Collection[str] = (),
+) -> str:
+    """Тело раскрытия вызова `session_think`; другой тул — пусто.
+    ``injected`` — служебные поля схемы (`agent.inject_tool_fields`): как
+    и у тула, текстом они становятся, только когда своего нет."""
     if wire_name != SESSION_THINK_TOOL_NAME:
         return ""
-    return "\n\n".join(think_parts(call_arguments(arguments)))
+    return "\n\n".join(think_parts(call_arguments(arguments), injected))
 
 
 def think_rejected(output: Any) -> bool:
     """Вывод — отказ самого Think (пустой вызов: мысли нет). Конверт
-    битых аргументов — не отказ Think, он показывается как обычно."""
-    if not isinstance(output, str):
+    битых аргументов — не отказ Think, он показывается как обычно.
+    Скрывается такой вывод, только когда у него нет строки вызова: Think
+    с текстом, получивший отказ в старом треде, закрывается ошибкой."""
+    if not isinstance(output, str) or SESSION_THINK_TOOL_NAME not in output:
         return False
     try:
         data = json.loads(output)

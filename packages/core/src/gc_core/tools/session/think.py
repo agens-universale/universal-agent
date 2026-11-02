@@ -48,8 +48,7 @@ class Think(AbstractSimpleTool):
         if not isinstance(args, dict):
             return args
         service = {k: v for k, v in args.items() if k in injected_fields}
-        own = {k: v for k, v in args.items() if k not in injected_fields}
-        parts = think_parts(own) or think_parts(service)
+        parts = think_parts(args, injected_fields)
         if parts:
             service["thoughts"] = "\n\n".join(parts)
         return service

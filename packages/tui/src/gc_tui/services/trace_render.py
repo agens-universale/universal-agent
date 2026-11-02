@@ -33,6 +33,7 @@ from gc_core.utils.path_truncate import truncate_path
 from gc_tui.models import AgentHead, ResultOutcome, TraceEvent
 from gc_tui.palette import INK
 from gc_tui.services.duration_format import format_round_int, format_timer
+from gc_tui.services.think_text import think_rejected
 from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
@@ -1000,6 +1001,8 @@ def _dispatch_readonly(
         row = calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
             _readonly_result(blocks, blocks.views[""], row, ev)
+        elif think_rejected((ev.full_payload or {}).get("output")):
+            pass  # отказ пустого Think: строки вызова нет
         elif ev.kind == "error":
             mount_target.mount(
                 build_orphan_result_row(
@@ -1151,6 +1154,7 @@ def render_segments_readonly(
     root: str | None = None,
     blocks: PreviewBlocks | None = None,
     model_slots: Mapping[str, str | None] | None = None,
+    injected_fields: Iterable[str] = (),
 ) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
@@ -1161,7 +1165,8 @@ def render_segments_readonly(
 
     ``blocks`` — блоки превью (исполнители уровней, таймеры, журнал правок
     треда): тот же объект вызывающий отдаёт `merge_nested_readonly`; без
-    него — свои, без журнала."""
+    него — свои, без журнала. ``injected_fields`` — служебные поля схем
+    тулов: в мысль Think не входят, пока есть своё."""
     from gc_tui.services.tool_blocks import ToolBlocks
     from gc_tui.services.trace_mapper import collect_render_context
     from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
@@ -1185,6 +1190,7 @@ def render_segments_readonly(
             if isinstance(rec, dict)
         ),
         root=root,
+        injected_fields=injected_fields,
     )
     # Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
     # файле с тем же id. Рисуем первое вхождение. Payload full, пока id есть
