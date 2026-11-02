@@ -84,6 +84,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     "project_gc_dir": DATA,
     "record_model_choice": FRONTEND
     + ": запись смены модели в тред; durable её не пишет, как итог хода",
+    "record_reasoning": FRONTEND
+    + ": запись рассуждений в тред; durable её не пишет, как смену модели",
     "project_memory_io": BOUND,
     "prompt_loader": BOUND,
     "prompt_resource": BOUND,
