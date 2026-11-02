@@ -72,6 +72,7 @@ def todo_reminder_text(
     *,
     step_messages: list[dict[str, Any]],
     available_tools: set[str] | None = None,
+    invoked_tool_names: set[str] | None = None,
 ) -> str | None:
     """Текст напоминания либо None. Счётчик тикает здесь, сообщение не собирает."""
     settings = settings_of(settings)
@@ -82,7 +83,10 @@ def todo_reminder_text(
         return None
 
     items = _todo_items(state)
-    if batch_used_tool(step_messages, SESSION_TODO_TOOL_NAME):
+    invoked = invoked_tool_names or set()
+    if SESSION_TODO_TOOL_NAME in invoked or batch_used_tool(
+        step_messages, SESSION_TODO_TOOL_NAME
+    ):
         state.todo_reminder_cnt = 0
         return None
 

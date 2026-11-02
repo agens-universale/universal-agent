@@ -1,3 +1,10 @@
+import json
+
+from gc_core.message_policy.nudges import (
+    clear_executed_tool_names,
+    executed_tool_names,
+    record_executed_call,
+)
 from gc_core.message_policy.tool_usage_notice.apply import (
     apply_tool_usage_notice_before_llm,
 )
@@ -92,6 +99,50 @@ def test_apply_long_changed_hint_on_k_tick(monkeypatch):
         for m in out
         if m.get("role") == "user"
     )
+
+
+def test_trace_remembers_executed_tool_name():
+    trace: dict = {"executed": [], "tool_names": set()}
+    record_executed_call(trace, {"call_id": "c1", "name": "fs_view_image"})
+    assert trace["executed"] == ["c1"]
+    assert executed_tool_names(trace) == {"fs_view_image"}
+    clear_executed_tool_names(trace)
+    assert executed_tool_names(trace) == set()
+    assert trace["executed"] == ["c1"]
+
+
+def test_apply_resets_from_invoked_names_when_output_has_no_tool():
+    """Имя вызова живёт в трейсе батча, не в JSON ответа."""
+    state = _state()
+    state.tool_usage_notice_cnt = {"fs_view_image": 4}
+    ctx = fake_ctx(
+        {
+            "tool_usage_notice": [
+                {
+                    "tool_name": "fs_view_image",
+                    "step_messages_count": 16,
+                    "notice_message": "You have not used fs_view_image.",
+                }
+            ],
+            "agent.stop_tools": [],
+        }
+    )
+    out = apply_tool_usage_notice_before_llm(
+        [{"role": "user", "content": "hi", "id": "u1"}],
+        state,
+        ctx,
+        {},
+        step_messages=[
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": json.dumps({"ok": True, "path": "/a.png"}),
+            }
+        ],
+        reset_tool_names={"fs_view_image"},
+    )
+    assert out == [{"role": "user", "content": "hi", "id": "u1"}]
+    assert state.tool_usage_notice_cnt["fs_view_image"] == 0
 
 
 def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):

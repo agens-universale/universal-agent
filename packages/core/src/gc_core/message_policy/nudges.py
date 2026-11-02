@@ -193,6 +193,7 @@ async def afill_nudge_buffer(
     step_messages: list[dict[str, Any]],
     backend_mode: str,
     logger: Any | None = None,
+    reset_tool_names: set[str] | None = None,
 ) -> None:
     """Эмиттеры → буфер. Счётчики тикают здесь один раз за fill."""
     notice = flush_loop_detector(state)
@@ -209,6 +210,7 @@ async def afill_nudge_buffer(
                     step_messages=step_messages,
                     logger=logger,
                     project_memory_hash=await aproject_memory_hash(ctx),
+                    reset_tool_names=reset_tool_names,
                 )
             )
         except ExecutionFailure:
@@ -246,6 +248,40 @@ def clear_nudge_counters_after_summary(
     if isinstance(session_meta, dict):
         set_project_memory_check_cnt(session_meta, 0)
         persist_tool_usage_notice_state(state, session_meta)
+
+
+def record_executed_call(
+    trace: dict[str, Any] | None, call: dict[str, Any]
+) -> None:
+    """Запомнить исполненный вызов: ``call_id`` и имя тула.
+
+    Имя нужно счётчикам «давно не вызывал». В тексте ответа его может не быть.
+    """
+    if not isinstance(trace, dict) or not isinstance(call, dict):
+        return
+    trace.setdefault("executed", []).append(call.get("call_id"))
+    name = call.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return
+    names = trace.setdefault("tool_names", set())
+    if isinstance(names, set):
+        names.add(name.strip())
+
+
+def executed_tool_names(trace: dict[str, Any] | None) -> set[str]:
+    """Имена тулов, исполненных в текущем батче."""
+    if not isinstance(trace, dict):
+        return set()
+    raw = trace.get("tool_names")
+    if not isinstance(raw, set):
+        return set()
+    return {name for name in raw if isinstance(name, str) and name.strip()}
+
+
+def clear_executed_tool_names(trace: dict[str, Any] | None) -> None:
+    """Снять имена после тика, чтобы следующий запрос их не пересчитал."""
+    if isinstance(trace, dict):
+        trace["tool_names"] = set()
 
 
 def _technical_user_note(text: str) -> dict[str, Any]:
@@ -348,6 +384,7 @@ class NudgeHold:
     def begin_tool_batch(self) -> dict[str, Any]:
         self.trace = {
             "executed": [],
+            "tool_names": set(),
             "persisted": set(),
             "outputs": [],
         }
@@ -521,6 +558,7 @@ class NudgeHold:
         ``False`` — нужен редкий user-хвост / notices на границе хода.
         """
         if self.compacted:
+            clear_executed_tool_names(self.trace)
             await self.apublish(
                 messages, state=state, apersist=apersist, with_nudges=False
             )
@@ -531,6 +569,7 @@ class NudgeHold:
             message is carrier for message in messages
         )
         if has_carrier:
+            invoked = executed_tool_names(self.trace)
             await afill_nudge_buffer(
                 self.buffer,
                 state,
@@ -539,7 +578,9 @@ class NudgeHold:
                 step_messages=messages,
                 backend_mode=backend_mode,
                 logger=logger,
+                reset_tool_names=invoked,
             )
+            clear_executed_tool_names(self.trace)
             self.buffer.flush_into(carrier)
             await self.apublish(
                 messages, state=state, apersist=apersist, with_nudges=False

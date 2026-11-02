@@ -124,7 +124,13 @@ from gc_core.message_policy.no_tool_call_bounce import (
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
-from gc_core.message_policy.nudges import NudgeHold, aproject_memory_hash
+from gc_core.message_policy.nudges import (
+    NudgeHold,
+    aproject_memory_hash,
+    clear_executed_tool_names,
+    executed_tool_names,
+    record_executed_call,
+)
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.tool_attachments import (
     build_tool_attachments_message,
@@ -2459,8 +2465,7 @@ async def _aexecute_one_batch_call(
         prior=list(tools_outputs) + skip_outputs,
         persist_messages_callback=persist_messages_callback,
     )
-    if batch_trace is not None:
-        batch_trace["executed"].append(call.get("call_id"))
+    record_executed_call(batch_trace, call)
     tool_arguments = str(call.get("arguments", ""))
     history_snapshot = None
     prepared_history = None
@@ -2965,6 +2970,7 @@ class _AgentLoop:
         if self._nudges.skip_fill:
             # Сводка только что заменила трейс. Буфер уже пуст, счётчики
             # обнулены; этот запрос уходит без подсказок.
+            clear_executed_tool_names(self._nudges.trace)
             self._nudges.skip_fill = False
             await self._nudges.apublish(
                 messages,
@@ -3327,6 +3333,7 @@ class _AgentLoop:
         state = self.state
         try:
             _messages_before_notice = len(messages)
+            invoked = executed_tool_names(self._nudges.trace)
             messages = apply_tool_usage_notice_before_llm(
                 messages,
                 state,
@@ -3335,7 +3342,9 @@ class _AgentLoop:
                 step_messages=messages,
                 logger=self.run_logger,
                 project_memory_hash=await aproject_memory_hash(self.ctx),
+                reset_tool_names=invoked,
             )
+            clear_executed_tool_names(self._nudges.trace)
             notice_messages = messages[_messages_before_notice:]
             if notice_messages:
                 to_append = filter_messages_not_in_state(

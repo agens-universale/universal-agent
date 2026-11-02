@@ -88,6 +88,27 @@ def test_counter_resets_when_tool_used_in_batch():
     assert state.todo_reminder_cnt == 0
 
 
+def test_counter_resets_from_invoked_name_when_output_has_no_tool():
+    state = _state(OPEN_ITEMS)
+    _tick(state)
+    _tick(state)
+    assert state.todo_reminder_cnt == 2
+    out = todo_reminder_text(
+        state,
+        CFG,
+        step_messages=[
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": json.dumps({"ok": True, "items": []}),
+            }
+        ],
+        invoked_tool_names={"session_todo"},
+    )
+    assert out is None
+    assert state.todo_reminder_cnt == 0
+
+
 def test_counter_resets_on_function_call_output():
     """Flush перед моделью передаёт output батча, не function_call.
 
