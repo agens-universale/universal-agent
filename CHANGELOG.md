@@ -2,15 +2,6 @@
 
 ## Unreleased
 
-### Добавлено — trace_id шага под Temporal
-
-- `agent_step(..., trace_id=…)` и `RunRequest.trace_id`: внешний трейс шага уходит заголовком в запросы к модели и MCP шага и его субагентов (по настройкам `agent.trace_header_enabled`, `agent.trace_id_header_name` и `trace_header_enabled` сервера). Кривое значение — `ApplicationError` типа `InvalidTraceId` до запуска шага.
-
-### Изменено — зависимости `gc-core` и `gc-core-temporalio`
-
-- `gc-core`: `mcp>=1.28.1,<2` вместо `mcp==1.26.0`. MCP-клиент ядра проверен на `mcp` 1.30.0; с 2.x ядро не импортируется (`McpError` переименован в `MCPError`).
-- `gc-core-temporalio`: `temporalio>=1.32.0,<1.34` вместо `temporalio==1.33.0` — тесты пакета, включая живые, проходят и на 1.32.0.
-
 ### Breaking — Temporal на контракте хранилища тредов v2
 
 - Под Temporal ядро пишет тред через контракт `ThreadStore` v2, как локально: хранилище воркера — любое v2 (`FileThreadStore` из `gc_core.threads.file_store`, `SQLiteThreadStore` из `gc_stores.sqlite`, `PostgresThreadStore`, своё — проверка `gc_testkit.thread_store_conformance_v2`). Activities треда — `universal_agent.thread.{get,read_stream,read_archive,resolve_alias,commit,append_side,claim,release,delete}` вместо `load`/`commit`/`read_trace`.
