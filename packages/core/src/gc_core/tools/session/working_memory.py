@@ -183,7 +183,7 @@ class WorkingMemory(AbstractSimpleTool):
                             "For append: ONLY the new delta (must be non-empty). "
                             "For write: the FULL updated register content "
                             "(must be non-empty; full overwrite). "
-                            "For list and read: pass an empty string; any value is ignored."
+                            "For list and read: pass an empty string."
                         ),
                     },
                 },
