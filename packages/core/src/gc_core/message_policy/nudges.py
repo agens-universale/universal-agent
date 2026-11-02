@@ -24,6 +24,7 @@ from gc_core.message_policy.tool_usage_notice.state import (
     set_project_memory_check_cnt,
 )
 from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
     TECHNICAL_TYPE_ERROR_MESSAGE,
     wrap_technical_user_content,
 )
@@ -56,30 +57,57 @@ def _free_harness_key(payload: dict[str, Any]) -> str:
     return f"{HARNESS_KEY}_{index}"
 
 
+def _visible_harness_texts(texts: list[str]) -> list[str]:
+    """Те же теги, что у служебного user: ``current_context``."""
+    visible: list[str] = []
+    for text in texts:
+        if not isinstance(text, str) or text.strip() == "":
+            continue
+        visible.append(
+            wrap_technical_user_content(
+                text.strip(),
+                technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
+            )
+        )
+    return visible
+
+
+def _payload_with_harness_first(
+    payload: dict[str, Any], key: str, messages: list[str]
+) -> dict[str, Any]:
+    ordered = {key: messages}
+    for existing_key, value in payload.items():
+        if existing_key == key:
+            continue
+        ordered[existing_key] = value
+    return ordered
+
+
 def attach_technical_system_messages(output: str, texts: list[str]) -> str:
     """Дописать непустые строки harness в JSON output.
 
-    Объект: список в первый свободный ключ ``technical_system_messages``,
-    затем ``_1``, ``_2``. Остальные ключи не меняются, ``ok`` / ``tool`` /
-    ``error`` не добавляются. Не-объект при непустом списке оборачивается
-    в ``{"result": <исходная строка>, "technical_system_messages": [...]}``.
+    Список пишется первым ключом объекта, чтобы модель видела его до
+    ``stdout``. Строки оборачиваются в ``<technical type="current_context">``,
+    как служебный user. Объект: первый свободный ключ
+    ``technical_system_messages``, затем ``_1``, ``_2``. Остальные ключи не
+    меняются, ``ok`` / ``tool`` / ``error`` не добавляются. Не-объект при
+    непустом списке оборачивается в объект с этим ключом и ``result``.
     Пустой список оставляет строку как была.
     """
-    messages = [
-        text.strip()
-        for text in texts
-        if isinstance(text, str) and text.strip() != ""
-    ]
+    messages = _visible_harness_texts(texts)
     if not messages:
         return output
     payload = _object_payload(output)
     if payload is None:
         return json.dumps(
-            {"result": output, HARNESS_KEY: messages},
+            {HARNESS_KEY: messages, "result": output},
             ensure_ascii=False,
         )
-    payload[_free_harness_key(payload)] = messages
-    return json.dumps(payload, ensure_ascii=False)
+    key = _free_harness_key(payload)
+    return json.dumps(
+        _payload_with_harness_first(payload, key, messages),
+        ensure_ascii=False,
+    )
 
 
 def output_for_card(output: str) -> str:

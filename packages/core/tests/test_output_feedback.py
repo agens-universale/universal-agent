@@ -9,6 +9,10 @@ from gc_core.message_policy.nudges import (
 )
 
 
+def _tagged(text: str) -> str:
+    return f'<technical type="current_context">{text}</technical>'
+
+
 def test_json_object_gains_the_list_and_keeps_other_keys():
     raw = json.dumps(
         {"ok": False, "message": "denied", "tool": "fs_read"},
@@ -17,10 +21,13 @@ def test_json_object_gains_the_list_and_keeps_other_keys():
     parsed = json.loads(
         attach_technical_system_messages(raw, ["Loop detector: stop"])
     )
+    assert next(iter(parsed)) == "technical_system_messages"
     assert parsed["ok"] is False
     assert parsed["message"] == "denied"
     assert parsed["tool"] == "fs_read"
-    assert parsed["technical_system_messages"] == ["Loop detector: stop"]
+    assert parsed["technical_system_messages"] == [
+        _tagged("Loop detector: stop")
+    ]
     assert set(parsed) == {
         "ok",
         "message",
@@ -39,9 +46,10 @@ def test_non_object_is_wrapped_without_adding_ok():
     wrapped = json.loads(
         attach_technical_system_messages("plain text", ["hint"])
     )
+    assert next(iter(wrapped)) == "technical_system_messages"
     assert wrapped == {
+        "technical_system_messages": [_tagged("hint")],
         "result": "plain text",
-        "technical_system_messages": ["hint"],
     }
     assert "ok" not in wrapped
 
@@ -73,9 +81,10 @@ def test_occupied_key_uses_the_next_free_suffix():
         }
     )
     parsed = json.loads(attach_technical_system_messages(raw, ["ours"]))
+    assert next(iter(parsed)) == "technical_system_messages_2"
     assert parsed["technical_system_messages"] == ["foreign"]
     assert parsed["technical_system_messages_1"] == ["also"]
-    assert parsed["technical_system_messages_2"] == ["ours"]
+    assert parsed["technical_system_messages_2"] == [_tagged("ours")]
     assert parsed["ok"] is True
     assert "error" not in parsed
 
@@ -98,7 +107,11 @@ def test_stored_envelope_keeps_the_list_beside_content():
     assert parsed["output_ref"] == "out_1"
     assert parsed["offset"] == 0
     assert parsed["next_offset"] == 8
-    assert parsed["technical_system_messages"] == ["loop", "mode"]
+    assert next(iter(parsed)) == "technical_system_messages"
+    assert parsed["technical_system_messages"] == [
+        _tagged("loop"),
+        _tagged("mode"),
+    ]
     assert "technical_system_messages" not in parsed["content"]
 
 
@@ -137,7 +150,12 @@ def test_nudge_buffer_flush_and_clear():
     buf.flush_into(carrier)
     body = json.loads(carrier["output"])
     assert body["ok"] is True
-    assert body["technical_system_messages"] == ["loop", "mode", "loop"]
+    assert next(iter(body)) == "technical_system_messages"
+    assert body["technical_system_messages"] == [
+        _tagged("loop"),
+        _tagged("mode"),
+        _tagged("loop"),
+    ]
     assert not buf
     buf.emit("x")
     buf.clear()
