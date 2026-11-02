@@ -11,16 +11,12 @@
 мысль под строкой (`ExpandableTextBody`, внизу `− свернуть`), сама
 строка остаётся без текста — `● Thought · 4с`.
 Влезающий текст не раскрывается. Обычный клик строку не выделяет (канон
-клик-модели); Tab выделяет, Enter или клик с Ctrl/Alt открывают экран
-события — у записанной строки (`event_no`); у временной (`event_no=None`)
-открывать нечего.
+клик-модели); Tab выделяет. Экрана события у мысли нет: она живёт только в
+живой ленте и нигде не хранится.
 """
 
 from __future__ import annotations
 
-from typing import Optional
-
-from gc_core.persistence.reasoning_record import ReasoningRecord
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -28,7 +24,6 @@ from textual.containers import Horizontal
 from textual.widget import Widget
 from textual.widgets import Static
 
-from gc_tui.messages import OpenEventRequest
 from gc_tui.palette import DIM
 from gc_tui.services.trace_glyphs import blink_on
 from gc_tui.services.trace_render import THOUGHT_GLYPH, thought_line
@@ -58,9 +53,8 @@ class _ThoughtText(Static):
 
 
 class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
-    """Строка мысли: идущая (`Thinking`, мигает) или законченная
-    (`Thought`); временная — из стрима, записанная — из записи треда
-    (`persist`)."""
+    """Строка мысли из стрима: идущая (`Thinking`, мигает) или
+    законченная (`Thought`)."""
 
     DEFAULT_CSS = """
     ThoughtRow {
@@ -81,7 +75,6 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         live: bool,
         attempt: str | None,
         seconds: float | None,
-        event_no: int | None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -89,9 +82,7 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         self._live = live
         self._attempt = attempt
         self._seconds = seconds
-        #: Номер события записанной строки (Enter); временная — None.
-        self.event_no = event_no
-        self._persisted = False
+        self._settled = False
         self._cut = False
         self._pulse_frame = 0
         self._pulse_timer = None
@@ -123,8 +114,8 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
         return self._attempt
 
     @property
-    def persisted(self) -> bool:
-        return self._persisted
+    def settled(self) -> bool:
+        return self._settled
 
     @property
     def expanded(self) -> bool:
@@ -132,13 +123,18 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
 
     def update_live(self, text: str, seconds: float, live: bool) -> None:
         """Мысль из стрима: текст дорастает, таймер идёт; ``live=False``
-        — размышление кончилось (`Thought`, мигание стоп)."""
-        self._set(text, seconds, live)
+        — размышление кончилось (`Thought`, мигание стоп). Законченную
+        строку стрим не трогает."""
+        if not self._settled:
+            self._set(text, seconds, live)
 
-    def persist(self, record: ReasoningRecord) -> None:
-        """Строка становится записанной: текст и время — из записи."""
-        self._persisted = True
-        self._set(record.text, record.duration_sec, False)
+    def settle(self) -> None:
+        """Попытка кончилась (новая попытка, конец хода): строка
+        становится законченной `Thought` с прежними текстом и временем."""
+        if self._settled:
+            return
+        self._settled = True
+        self._set(self._text, self._seconds, False)
 
     def toggle(self) -> None:
         """Раскрыть / свернуть мысль целиком под строкой."""
@@ -155,10 +151,9 @@ class ThoughtRow(BlinkPulseMixin, ClickModelMixin, Widget):
 
     # --- клик-модель -------------------------------------------------------
 
-    def _open_request(self) -> Optional[OpenEventRequest]:
-        if self.event_no is None:
-            return None
-        return OpenEventRequest(self.event_no)
+    def _open_request(self) -> None:
+        """Экрана события у мысли нет."""
+        return None
 
     def on_key(self, event: events.Key) -> None:
         """Пробел — раскрыть / свернуть; остальное (Enter) — клик-модели:

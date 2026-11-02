@@ -23,11 +23,6 @@ from gc_core.persistence.model_choice_record import (
     is_model_choice_record,
     parse_model_choice,
 )
-from gc_core.persistence.reasoning_record import (
-    ReasoningRecord,
-    is_reasoning_record,
-    parse_reasoning,
-)
 from gc_core.persistence.turn_outcome import (
     TurnOutcome,
     is_turn_outcome_record,
@@ -55,7 +50,6 @@ if TYPE_CHECKING:
 
     from gc_tui.services.trace_mapper import RenderContext
     from gc_tui.widgets.consequence_line import ConsequenceLine
-    from gc_tui.widgets.thought_row import ThoughtRow
     from gc_tui.widgets.tool_blocks_view import (
         PreviewBlocks,
         ToolBlocksView,
@@ -676,25 +670,6 @@ def thought_line(
     return ThoughtLine(word, tail, timer, cut=True)
 
 
-def build_thought_row(
-    record: ReasoningRecord, *, event_no: int | None
-) -> ThoughtRow:
-    """Записанная строка мысли — один билдер для живой ленты и превью
-    (временную строку строит стрим, `ThoughtRow.persist` делает её
-    записанной)."""
-    from gc_tui.widgets.thought_row import ThoughtRow
-
-    row = ThoughtRow(
-        text=record.text,
-        live=False,
-        attempt=record.attempt,
-        seconds=record.duration_sec,
-        event_no=event_no,
-    )
-    row.persist(record)
-    return row
-
-
 #: Строк задачи субагента под заголовком `Agent`; дальше — `…`.
 AGENT_TASK_LINES = 2
 
@@ -1126,7 +1101,6 @@ def _render_record_readonly(
     mcp_servers: Iterable[str] = (),
     questions: dict | None = None,
     model_slots: Mapping[str, str | None] | None = None,
-    show_thoughts: bool = False,
 ) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
@@ -1136,15 +1110,6 @@ def _render_record_readonly(
 
     if is_model_choice_record(rec):
         _mount_model_mark(mount_target, rec, model_slots or {})
-        return no
-    if is_reasoning_record(rec):
-        thought = parse_reasoning(rec) if show_thoughts else None
-        if thought is not None:
-            # Превью только смотрят: Enter отдан резюму треда, экрана
-            # события нет — строка без фокуса и номера, раскрытие кликом.
-            row = build_thought_row(thought, event_no=None)
-            row.can_focus = False
-            mount_target.mount(row)
         return no
     if is_turn_outcome_record(rec):
         # Итог хода — строка на месте записи, не событие ленты; в превью
@@ -1186,13 +1151,11 @@ def render_segments_readonly(
     root: str | None = None,
     blocks: PreviewBlocks | None = None,
     model_slots: Mapping[str, str | None] | None = None,
-    show_thoughts: bool = False,
 ) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
     трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там),
-    черты смены модели — по слотам ``model_slots`` (точки знака), мысли
-    модели — только при ``show_thoughts`` (действующий `tui.show_reasoning`).
+    черты смены модели — по слотам ``model_slots`` (точки знака).
     Возвращает `calls` (`{call_id: ToolCallRow}`) — нужен вызывающему для
     домонтирования вложенного трейса субагентов (см. `merge_nested_readonly`).
 
@@ -1253,7 +1216,6 @@ def render_segments_readonly(
                 mcp_servers=mcp_servers,
                 questions=questions,
                 model_slots=model_slots,
-                show_thoughts=show_thoughts,
             )
         comp = seg.get("compacted_by")
         if comp:

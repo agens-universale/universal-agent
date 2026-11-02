@@ -28,6 +28,7 @@ class StreamSink:
         self._reasoning_started_at = None  # float | None
         self._reasoning_ended_at = None  # float | None
         self._attempt = None  # str | None
+        self._resets = 0
 
     def push(self, kind: str, text: str) -> None:
         with self._lock:
@@ -37,7 +38,8 @@ class StreamSink:
                 self._chars = 0
                 self._reasoning_started_at = None
                 self._reasoning_ended_at = None
-                self._attempt = text or None
+                self._resets += 1
+                self._attempt = f"a{self._resets}"
                 return
             if kind == "think":
                 self._think += text
@@ -72,7 +74,8 @@ class StreamSink:
             return self._think, self._answer
 
     def attempt(self) -> str | None:
-        """Метка попытки из текста последнего `reset` (None — не пришла)."""
+        """Метка попытки стрима: новая на каждом `reset` ядра (новый
+        запрос к модели); None — `reset` ещё не было."""
         with self._lock:
             return self._attempt
 

@@ -127,11 +127,16 @@ def test_reasoning_line_empty():
     assert format_reasoning_line(think="   ") == ""
 
 
-def test_sink_keeps_attempt_from_reset():
+def test_sink_numbers_attempts_by_reset():
+    """Метку попытки ставит сам sink: новая на каждом `reset` ядра."""
     s = StreamSink()
-    s.push("reset", "att_2")
+    assert s.attempt() is None
+    s.push("reset", "")
     s.push("think", "x")
-    assert s.attempt() == "att_2"
+    first = s.attempt()
+    s.push("reset", "")
+    assert first is not None
+    assert s.attempt() not in (None, first)
     s.reset()
     assert s.attempt() is None
 
@@ -166,11 +171,12 @@ def test_clear_answer_keeps_thought_and_attempt():
     ответа — мысль, метка попытки и фаза мысли остаются."""
     clk = {"t": 1.0}
     s = StreamSink(clock=lambda: clk["t"])
-    s.push("reset", "att_1")
+    s.push("reset", "")
+    attempt = s.attempt()
     s.push("think", "план")
     clk["t"] = 3.0
     s.push("answer", "ответ")
     s.clear_answer()
     assert s.snapshot() == ("план", "")
-    assert s.attempt() == "att_1"
+    assert s.attempt() == attempt
     assert s.reasoning_seconds() == 2.0

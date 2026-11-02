@@ -54,7 +54,6 @@ def tui_agent_settings(loaded):
     ).with_runtime(
         text_answer_mode=text_answer_mode_of(loaded.settings),
         finish_gate_smart=mode == "smart",
-        record_reasoning=loaded.settings.tui.show_reasoning == "on",
     )
 
 
@@ -723,13 +722,13 @@ TOGGLES: Dict[str, ToggleSpec] = {
         values=(
             ToggleValue(
                 "off",
-                "рассуждения модели в ленте не показываются и в тред не пишутся",
+                "рассуждения модели в ленте не показываются",
                 _pal.INK,
             ),
             ToggleValue(
                 "on",
-                "рассуждения модели строками Thought в ленте, сохраняются в треде"
-                " · только в chat_completions",
+                "рассуждения модели строками Thought в живой ленте, не хранятся"
+                " · только в chat_completions с потоком",
                 _pal.RUN_COLOR,
             ),
         ),

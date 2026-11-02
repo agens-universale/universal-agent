@@ -37,7 +37,6 @@ CoreStream = Literal[
     "control",
     "turns",
     "model_choices",
-    "reasoning",
 ]
 CORE_STREAMS: frozenset[str] = frozenset(get_args(CoreStream))
 #: Поток итогов хода: одна запись на закрытый ход, привязанная к его
@@ -46,9 +45,6 @@ TURNS = "turns"
 #: Поток смен модели: запись за последним записанным сообщением на момент
 #: смены (``gc_core.persistence.model_choice_record``).
 MODEL_CHOICES = "model_choices"
-#: Поток мыслей модели: запись за последним записанным сообщением на
-#: момент записи (``gc_core.persistence.reasoning_record``).
-REASONING = "reasoning"
 #: Входящий поток треда: сообщения в идущий или следующий ход с любого
 #: процесса (``Threads.submit``).
 INBOX = "inbox"

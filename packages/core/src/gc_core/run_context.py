@@ -78,7 +78,6 @@ from gc_core.utils.prod_auth import AuthConnector
 if TYPE_CHECKING:
     from gc_core.model_choice import ModelChoiceApplied
     from gc_core.persistence.model_choice_record import ModelChoiceRecord
-    from gc_core.persistence.reasoning_record import ReasoningRecord
     from gc_core.vision.notes import TraceNote
 
 
@@ -157,13 +156,6 @@ class RunContext:
     # передаётся.
     record_model_choice: Optional[
         Callable[[ModelChoiceRecord], Awaitable[None]]
-    ] = None
-    # Запись мысли принятого ответа главного вызова в тред: ставит
-    # исполнитель на время рана; ядро зовёт его, только когда запись мыслей
-    # включена (`RuntimeEnv.record_reasoning`). Дочернему контексту не
-    # передаётся.
-    record_reasoning: Optional[
-        Callable[[ReasoningRecord], Awaitable[None]]
     ] = None
     # Порт «спросить человека»: обычная функция или корутинная. Не задан —
     # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению

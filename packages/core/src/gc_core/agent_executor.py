@@ -48,7 +48,6 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.model_choice import note_applied_at_run_end
 from gc_core.model_router import main_model_identity
 from gc_core.persistence.model_choice_record import ModelChoiceRecord
-from gc_core.persistence.reasoning_record import ReasoningRecord
 from gc_core.persistence.session_state import (
     hydrate_state,
     session_from_state,
@@ -1434,23 +1433,6 @@ class AgentExecutor:
             if logger is not None:
                 logger.warning("model_choice_write_failed", exc_info=True)
 
-    async def _arecord_reasoning(self, record: ReasoningRecord) -> None:
-        """Записать мысль принятого ответа в тред за последним записанным
-        сообщением (через `RunContext.record_reasoning`). Сбой записи —
-        предупреждение в журнал прогона, ран он не роняет."""
-        session = self._thread_session
-        state = self.get_state()
-        if session is None or state is None:
-            return
-        try:
-            await session.aappend_reasoning(
-                record, discarded=is_persist_discarded(state)
-            )
-        except Exception:
-            logger = getattr(self._ctx, "logger", None)
-            if logger is not None:
-                logger.warning("reasoning_write_failed", exc_info=True)
-
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
         # Keep the unconsumed queue before the await; messages arriving during
         # MCP cleanup remain pending and are returned by take_undelivered_messages.
@@ -1742,7 +1724,6 @@ class AgentExecutor:
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
         self._ctx.record_model_choice = self._arecord_model_choice
-        self._ctx.record_reasoning = self._arecord_reasoning
         self._ctx.is_cli_mode = is_cli_mode
 
         # Старые истории сохраняют порядок команд. Новые исполнения проверяют

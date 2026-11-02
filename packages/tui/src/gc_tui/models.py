@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
 from gc_core.attachments.model import Attachment
-from gc_core.persistence.reasoning_record import ReasoningRecord
 
 Kind = Literal[
     "user",
@@ -19,7 +18,6 @@ Kind = Literal[
     "ask_human",
     "summary",
     "todo",
-    "thought",
 ]
 Status = Literal["running", "stopped", "completed", "failed"]
 #: Итог вызова в ленте: успех `●` зелёным, сбой `●` красным, стоп или лимит `○`
@@ -158,9 +156,6 @@ class TraceEvent:
     # Заголовок вызова субагента (kind="call"): роль и задача из сырых
     # аргументов — до облегчения retention (решение владельца 2026-10-23).
     agent: Optional[AgentHead] = None
-    # Мысль модели (kind="thought"): запись потока `reasoning` — строке
-    # ленты попытка и время; полный текст — `summary` и `full_payload`.
-    thought: Optional[ReasoningRecord] = None
     # Полный текст явного вызова `Think` (kind="call"): раскрытие строки;
     # считается при маппинге, до облегчения retention.
     think_text: str = ""

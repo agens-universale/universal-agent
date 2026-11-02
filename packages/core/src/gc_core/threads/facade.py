@@ -28,7 +28,6 @@ from gc_core.threads.models import (
     CONTROL,
     INBOX,
     MODEL_CHOICES,
-    REASONING,
     TURNS,
     JsonObject,
     Receipt,
@@ -157,10 +156,6 @@ class Threads:
     async def model_choices(self, key: ThreadKey) -> list[StreamEntry]:
         """Поток смен модели ``model_choices`` целиком."""
         return await self.store.read_stream(key, MODEL_CHOICES)
-
-    async def reasoning(self, key: ThreadKey) -> list[StreamEntry]:
-        """Поток мыслей модели ``reasoning`` целиком."""
-        return await self.store.read_stream(key, REASONING)
 
     async def subagent_events(self, key: ThreadKey) -> list[StreamEntry]:
         return await self.store.read_stream(key, "subagent_events")

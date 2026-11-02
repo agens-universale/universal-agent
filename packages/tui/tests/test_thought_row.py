@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import pytest
-from gc_core.persistence.reasoning_record import ReasoningRecord
 from gc_tui.messages import OpenEventRequest
 from gc_tui.palette import DIM
 from gc_tui.services.trace_render import THOUGHT_GLYPH, thought_line
@@ -152,9 +151,7 @@ def _line(row) -> str:
 async def test_row_fits_width_and_marks_expandable():
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text=_LONG, live=False, attempt=None, seconds=7, event_no=None
-    )
+    row = ThoughtRow(text=_LONG, live=False, attempt=None, seconds=7)
     async with _app(row).run_test(size=(50, 20)) as pilot:
         await pilot.pause()
         line = _line(row)
@@ -168,9 +165,7 @@ async def test_row_fits_width_and_marks_expandable():
 async def test_short_text_is_not_expandable():
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text="коротко", live=False, attempt=None, seconds=2, event_no=None
-    )
+    row = ThoughtRow(text="коротко", live=False, attempt=None, seconds=2)
     async with _app(row).run_test(size=(60, 20)) as pilot:
         await pilot.pause()
         assert _line(row) == "● Thought  коротко · 2с"
@@ -186,9 +181,7 @@ async def test_click_on_text_expands_without_selecting_the_row():
     обычный клик в ленте не выделяет (канон клик-модели)."""
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text=_LONG, live=False, attempt=None, seconds=7, event_no=None
-    )
+    row = ThoughtRow(text=_LONG, live=False, attempt=None, seconds=7)
     async with _app(row).run_test(size=(50, 20)) as pilot:
         await pilot.pause()
         await pilot.click(_text_static(row))
@@ -202,9 +195,7 @@ async def test_click_on_text_expands_and_collapse_at_bottom():
     from gc_tui.widgets.expandable_text import ExpandableTextBody
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text=_LONG, live=False, attempt=None, seconds=7, event_no=None
-    )
+    row = ThoughtRow(text=_LONG, live=False, attempt=None, seconds=7)
     async with _app(row).run_test(size=(50, 30)) as pilot:
         await pilot.pause()
         body = row.query_one(ExpandableTextBody)
@@ -225,12 +216,12 @@ async def test_click_on_text_expands_and_collapse_at_bottom():
 
 
 @pytest.mark.asyncio
-async def test_space_toggles_and_enter_opens_event():
+async def test_space_toggles_and_enter_opens_nothing():
+    """Пробел раскрывает и сворачивает; экрана события у мысли нет —
+    Enter ничего не открывает."""
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text=_LONG, live=False, attempt=None, seconds=7, event_no=5
-    )
+    row = ThoughtRow(text=_LONG, live=False, attempt=None, seconds=7)
     opened: list[int] = []
     async with _app(row, opened).run_test(size=(50, 30)) as pilot:
         await pilot.pause()
@@ -243,16 +234,7 @@ async def test_space_toggles_and_enter_opens_event():
         assert not row.expanded
         await pilot.press("enter")
         await pilot.pause()
-    assert opened == [5]
-
-
-def test_provisional_row_opens_nothing():
-    from gc_tui.widgets.thought_row import ThoughtRow
-
-    row = ThoughtRow(
-        text="x", live=True, attempt="1", seconds=None, event_no=None
-    )
-    assert row._open_request() is None
+    assert opened == []
 
 
 @pytest.mark.asyncio
@@ -260,9 +242,7 @@ async def test_live_update_grows_open_body():
     from gc_tui.widgets.expandable_text import ExpandableTextBody
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text=_LONG, live=True, attempt=None, seconds=1, event_no=None
-    )
+    row = ThoughtRow(text=_LONG, live=True, attempt=None, seconds=1)
     async with _app(row).run_test(size=(50, 30)) as pilot:
         await pilot.pause()
         assert _line(row).startswith("● Thinking  …")
@@ -276,25 +256,22 @@ async def test_live_update_grows_open_body():
 
 
 @pytest.mark.asyncio
-async def test_persist_takes_record_and_stops_blink():
+async def test_settle_stops_blink_and_freezes_text():
+    """Попытка кончилась: строка законченная, мигание стоп, стрим её
+    больше не трогает."""
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text="черновик", live=True, attempt="2", seconds=1, event_no=None
-    )
+    row = ThoughtRow(text="мысль", live=True, attempt="a2", seconds=4.2)
     async with _app(row).run_test(size=(60, 20)) as pilot:
         await pilot.pause()
         assert row._pulse_timer is not None
-        assert not row.persisted
-        row.persist(
-            ReasoningRecord(
-                text="итоговая мысль", duration_sec=4.2, attempt="2"
-            )
-        )
+        assert not row.settled
+        row.settle()
+        row.update_live("чужой текст", 9, True)
         await pilot.pause()
-        assert row.persisted and row.attempt == "2"
+        assert row.settled and row.attempt == "a2"
         assert row._pulse_timer is None
-        assert _line(row) == "● Thought  итоговая мысль · 4с"
+        assert _line(row) == "● Thought  мысль · 4с"
 
 
 def test_glyph_blinks_dim_with_running_rhythm():
@@ -302,9 +279,7 @@ def test_glyph_blinks_dim_with_running_rhythm():
     from gc_tui.services.trace_glyphs import blink_on
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text="x", live=True, attempt=None, seconds=None, event_no=None
-    )
+    row = ThoughtRow(text="x", live=True, attempt=None, seconds=None)
     seen = []
     for frame in range(24):
         row._pulse_frame = frame
@@ -331,9 +306,7 @@ async def test_thought_colors_are_dim(text, cut):
     и ховер — CSS), класс `trace-expandable` — только у обрезанного."""
     from gc_tui.widgets.thought_row import ThoughtRow
 
-    row = ThoughtRow(
-        text=text, live=False, attempt=None, seconds=3, event_no=None
-    )
+    row = ThoughtRow(text=text, live=False, attempt=None, seconds=3)
     async with _app(row).run_test(size=(50, 20)) as pilot:
         await pilot.pause()
         for selector in (".trace-prefix", ".thought-word", ".thought-timer"):

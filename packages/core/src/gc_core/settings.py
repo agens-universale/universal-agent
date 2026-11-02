@@ -41,9 +41,6 @@ class RuntimeEnv:
     #: CLI/server их не ставят — строгий контракт.
     text_answer_mode: Optional[str] = None
     finish_gate_smart: bool = False
-    #: Запись мыслей модели в тред (``tui.show_reasoning``); только TUI,
-    #: CLI/server не ставят — мысли в тред не пишутся.
-    record_reasoning: bool = False
     #: Область инструментов субагента из его файла: белый список (None — без
     #: ограничения) и дополнительные запреты поверх глобального ``stop_tools``.
     subagent_tools_allow: Optional[tuple[str, ...]] = None

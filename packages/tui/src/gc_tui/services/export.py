@@ -14,7 +14,6 @@ from gc_core.message_policy.user_message_policy import (
     user_content_to_text,
 )
 from gc_core.persistence.model_choice_record import parse_model_choice
-from gc_core.persistence.reasoning_record import parse_reasoning
 
 from gc_tui.services.answer_flow import AnswerFlow
 from gc_tui.services.trace_mapper import collect_render_context, map_message
@@ -230,14 +229,6 @@ def _model_choice_lines(rec: dict) -> list[str]:
     return [f"────────── модель: {name or record.choice} ──────────", ""]
 
 
-def _thought_lines(n: int, rec: dict) -> list[str]:
-    """Записанная мысль модели — блок `THOUGHT` с отступом, как `THINK`."""
-    record = parse_reasoning(rec)
-    if record is None:
-        return []
-    return [f"[{n}] THOUGHT", *_indent(record.text), ""]
-
-
 def _render_txt(segments: list[dict], header: dict) -> str:
     out: list[str] = [_header_line(header), ""]
     all_recs = [r for seg in segments for r in seg["messages"]]
@@ -247,10 +238,7 @@ def _render_txt(segments: list[dict], header: dict) -> str:
         for r in seg["messages"]:
             payload = r.get("payload")
             if not isinstance(payload, dict):
-                lines = _thought_lines(n + 1, r)
-                if lines:
-                    n += 1
-                out += lines or _model_choice_lines(r)
+                out += _model_choice_lines(r)
                 continue
             n += 1
             out += _render_record(n, payload, name_by_call)

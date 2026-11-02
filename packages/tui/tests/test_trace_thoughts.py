@@ -1,12 +1,11 @@
-"""Мысли модели в ленте (спека мыслей §2, §3, §7): запись потока
-``reasoning`` — истина, живая строка из стрима временная.
+"""Мысли модели в ленте (спека мыслей §2, §3, §7): только из стрима,
+нигде не хранятся.
 
-Под флагом `tui.show_reasoning: on` мысль идущей попытки — временная
-строка `Thinking` в конце ленты; пришла запись её попытки — та же строка
-становится записанной `Thought` (перед вызовами своего шага), строки
-прежних попыток уходят; без записи к концу хода строки снимаются.
-Повторное открытие и превью `/sessions` рисуют записи той же строкой.
-Флаг выключен — записи не рисуются; смена флага перерисовывает ленту.
+Под флагом `tui.show_reasoning: on` мысль идущей попытки — строка
+`Thinking` в конце ленты; новая попытка оставляет прежнюю строку на месте
+законченной `Thought`; к концу хода строки остаются. После перерисовки
+ленты из треда (переоткрытие) мыслей нет. Смена флага скрывает и
+возвращает строки сессии, ленту не перерисовывает.
 """
 
 from __future__ import annotations
@@ -14,9 +13,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from gc_core.persistence.reasoning_record import ReasoningRecord
 from gc_testkit.develop_files import append_new_thread_messages
-from gc_testkit.thread_writes import reasoning_record
 from gc_testkit.tui_support import tui_settings, wait_until
 from gc_tui.widgets.tool_call_row import ToolCallRow
 
@@ -59,16 +56,6 @@ def _output(mid="fco1", call_id="c1"):
         "call_id": call_id,
         "output": json.dumps({"tool": "read_file", "ok": True}),
     }
-
-
-def _thought(tmp_path, text, *, attempt=None, seconds=3.0, after="u1"):
-    reasoning_record(
-        str(tmp_path),
-        "cli",
-        TID,
-        ReasoningRecord(text=text, duration_sec=seconds, attempt=attempt),
-        after=after,
-    )
 
 
 def _app(tmp_path, reasoning="on", **config):
@@ -160,127 +147,100 @@ async def _reopen(pilot, tmp_path):
     return scr
 
 
-# --- живая строка и запись --------------------------------------------------
+# --- живая строка ------------------------------------------------------------
+
+
+async def _live(pilot, text="думаю"):
+    """Открытый тред с идущим прогоном и мыслью новой попытки в стриме."""
+    scr = pilot.app.screen
+    scr.attach_active_task(TID)
+    runner = _Runner()
+    pilot.app.active_runner = runner
+    sink = pilot.app._stream_sink
+    sink.push("reset", "")
+    sink.push("think", text)
+    return scr, sink, runner
 
 
 @pytest.mark.asyncio
-async def test_two_attempts_and_one_record_give_one_thought(tmp_path):
-    """Две попытки в стриме, запись второй — одна строка `Thought` с
-    текстом записи перед строкой вызова; Enter открывает мысль целиком."""
-    from gc_tui.screens.viewer import ViewerScreen
-    from gc_tui.widgets.thought_row import ThoughtRow
-    from gc_tui.widgets.tool_call_row import ToolCallRow
-
+async def test_new_attempt_keeps_previous_thought(tmp_path):
+    """Две попытки в стриме — две строки: прежняя законченная `Thought` на
+    своём месте, новая `Thinking` за ней."""
     _write_thread(tmp_path)
     _messages(tmp_path, _reply())
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        pilot.app.active_runner = _Runner()
-        sink = pilot.app._stream_sink
-        sink.push("reset", "att_1")
-        sink.push("think", "первая попытка")
+        scr, sink, _runner = await _live(pilot, "первая попытка")
         await wait_until(
             pilot,
-            lambda: [r.attempt for r in _thoughts(scr)] == ["att_1"],
-            "временная строка первой попытки",
+            lambda: (
+                len(_thoughts(scr)) == 1
+                and _line(_thoughts(scr)[0]) == "● Thinking  первая попытка"
+            ),
+            "строка первой попытки",
         )
-        await wait_until(
-            pilot,
-            lambda: _line(_thoughts(scr)[0]) == "● Thinking  первая попытка",
-            "строка Thinking",
-        )
-        sink.push("reset", "att_2")
+        sink.push("reset", "")
         sink.push("think", "вторая попытка")
         await wait_until(
-            pilot,
-            lambda: [r.attempt for r in _thoughts(scr)] == ["att_1", "att_2"],
-            "временная строка второй попытки",
+            pilot, lambda: len(_thoughts(scr)) == 2, "строка второй попытки"
         )
-        live = _thoughts(scr)[1]
-        sink.push("tool", "{}")
-        _thought(tmp_path, "мысль из записи", attempt="att_2", seconds=4.0)
-        _messages(tmp_path, _call(), _output(), start_seq=1)
+        first, second = _thoughts(scr)
+        assert first.settled and not second.settled
+        assert _line(first).startswith("● Thought  первая попытка")
         await wait_until(
             pilot,
-            lambda: (
-                _top_index(scr, ToolCallRow) >= 0 and _thoughts(scr) == [live]
-            ),
-            "строка вызова, одна мысль",
+            lambda: _line(second).startswith("● Thinking  вторая попытка"),
+            "строка Thinking второй попытки",
         )
-        assert live.persisted and live.event_no is not None
-        assert _line(live) == "● Thought  мысль из записи · 4с"
-        assert _top_index(scr, ThoughtRow) < _top_index(scr, ToolCallRow)
-        live.focus()
-        await pilot.press("enter")
-        await pilot.pause()
-        assert isinstance(pilot.app.screen, ViewerScreen)
-        assert "мысль из записи" in pilot.app.screen._content
 
 
 @pytest.mark.asyncio
-async def test_live_row_survives_feed_row_of_previous_step(tmp_path):
-    """Вызов и вывод тула шага 1 дочитаны одним тиком, когда стрим шага 2
-    уже начался (метка пришла до первого токена): строка шага 2 есть и
-    дорастает."""
+async def test_thought_stays_above_its_step_rows(tmp_path):
+    """Мысль встала, потом пришли вызов и вывод её шага — мысль над ними
+    и не переставляется."""
+    from gc_tui.widgets.thought_row import ThoughtRow
+
     _write_thread(tmp_path)
     _messages(tmp_path, _reply())
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        pilot.app.active_runner = _Runner()
-        sink = pilot.app._stream_sink
-        sink.push("reset", "att_2")
-        sink.push("think", "шаг два")
+        scr, sink, _runner = await _live(pilot, "план")
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
+        sink.push("tool", "{}")
         _messages(tmp_path, _call(), _output(), start_seq=1)
         await wait_until(
             pilot,
-            lambda: (
-                [r.attempt for r in _thoughts(scr)] == ["att_2"]
-                and _top_index(scr, ToolCallRow) >= 0
-            ),
-            "строка вызова и временная строка второго шага",
+            lambda: _top_index(scr, ToolCallRow) >= 0,
+            "строка вызова шага",
         )
-        from gc_tui.widgets.thought_row import ThoughtRow
+        await pilot.pause(0.3)
+        assert len(_thoughts(scr)) == 1
+        assert _top_index(scr, ThoughtRow) < _top_index(scr, ToolCallRow)
 
+
+@pytest.mark.asyncio
+async def test_previous_step_rows_read_with_new_thought_stand_above(tmp_path):
+    """Вызов и вывод шага 1 дочитаны тем же тиком, в котором пришла мысль
+    шага 2: строки шага 1 выше мысли, мысль дорастает."""
+    from gc_tui.widgets.thought_row import ThoughtRow
+
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        _messages(tmp_path, _call(), _output(), start_seq=1)
+        scr, sink, _runner = await _live(pilot, "шаг два")
+        await wait_until(
+            pilot,
+            lambda: (
+                len(_thoughts(scr)) == 1 and _top_index(scr, ToolCallRow) >= 0
+            ),
+            "строка вызова и мысль второго шага",
+        )
         assert _top_index(scr, ThoughtRow) > _top_index(scr, ToolCallRow)
-        await pilot.pause(0.6)
         sink.push("think", " дальше")
         await wait_until(
             pilot,
             lambda: "дальше" in _line(_thoughts(scr)[0]),
             "строка дорастает",
         )
-
-
-@pytest.mark.asyncio
-async def test_live_row_moves_below_rows_read_in_later_tick(tmp_path):
-    """Строка идущей попытки встала, строки прошлого шага дочитаны позже:
-    та же строка уходит под них — идущая попытка после всего записанного."""
-    from gc_tui.widgets.thought_row import ThoughtRow
-
-    _write_thread(tmp_path)
-    _messages(tmp_path, _reply())
-    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        pilot.app.active_runner = _Runner()
-        sink = pilot.app._stream_sink
-        sink.push("reset", "att_2")
-        sink.push("think", "шаг два")
-        await wait_until(
-            pilot, lambda: len(_thoughts(scr)) == 1, "временная строка"
-        )
-        live = _thoughts(scr)[0]
-        _messages(tmp_path, _call(), _output(), start_seq=1)
-        await wait_until(
-            pilot,
-            lambda: _top_index(scr, ToolCallRow) >= 0,
-            "строка вызова прошлого шага",
-        )
-        await pilot.pause()
-        assert _thoughts(scr) == [live] and not live.persisted
-        assert _top_index(scr, ThoughtRow) > _top_index(scr, ToolCallRow)
 
 
 @pytest.mark.asyncio
@@ -293,12 +253,7 @@ async def test_feed_row_keeps_next_answer_preview(tmp_path):
     _messages(tmp_path, _reply())
     app = _app(tmp_path, **{"tui.stream_display": "answer"})
     async with app.run_test(size=(100, 40)) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        pilot.app.active_runner = _Runner()
-        sink = pilot.app._stream_sink
-        sink.push("reset", "att_2")
-        sink.push("think", "шаг два")
+        scr, sink, _runner = await _live(pilot, "шаг два")
         _messages(tmp_path, _call(), _output(), start_seq=1)
         await wait_until(
             pilot,
@@ -321,118 +276,52 @@ async def test_feed_row_keeps_next_answer_preview(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_persisted_row_not_duplicated_by_kept_thought(tmp_path):
-    """Запись попытки пришла, а мысль этой попытки ещё в стриме: строка
-    одна."""
+async def test_stop_while_thinking_keeps_finished_thought(tmp_path):
+    """Стоп во время размышления — строка остаётся законченной `Thought`;
+    в треде мысль не записана."""
     _write_thread(tmp_path)
     _messages(tmp_path, _reply())
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        pilot.app.active_runner = _Runner()
-        sink = pilot.app._stream_sink
-        sink.push("reset", "att_1")
-        sink.push("think", "мысль")
-        _thought(tmp_path, "мысль", attempt="att_1")
-        _messages(tmp_path, _call(), _output(), start_seq=1)
-        await wait_until(
-            pilot,
-            lambda: _top_index(scr, ToolCallRow) >= 0,
-            "строки шага",
-        )
-        await pilot.pause(0.6)
-        rows = _thoughts(scr)
-        assert len(rows) == 1 and rows[0].persisted
-
-
-@pytest.mark.asyncio
-async def test_old_record_keeps_current_live_row(tmp_path):
-    """Запись прежней попытки без своей строки, а уже идёт новая: живая
-    строка остаётся, записанная встаёт над ней."""
-    _write_thread(tmp_path)
-    _messages(tmp_path, _reply())
-    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        pilot.app.active_runner = _Runner()
-        sink = pilot.app._stream_sink
-        sink.push("reset", "att_2")
-        sink.push("think", "новая мысль")
-        await wait_until(
-            pilot, lambda: len(_thoughts(scr)) == 1, "временная строка"
-        )
-        live = _thoughts(scr)[0]
-        _thought(tmp_path, "старая мысль", attempt="att_1")
-        await wait_until(
-            pilot, lambda: len(_thoughts(scr)) == 2, "записанная мысль"
-        )
-        old, current = _thoughts(scr)
-        assert current is live and not live.persisted
-        assert old.persisted and old.attempt == "att_1"
-
-
-@pytest.mark.asyncio
-async def test_stop_while_thinking_leaves_no_thought(tmp_path):
-    """Стоп во время размышления, записи нет — после ухода в idle строк
-    мыслей нет."""
-    _write_thread(tmp_path)
-    _messages(tmp_path, _reply())
-    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        runner = _Runner()
-        pilot.app.active_runner = runner
-        sink = pilot.app._stream_sink
-        sink.push("reset", "att_1")
-        sink.push("think", "думаю")
-        await wait_until(
-            pilot, lambda: len(_thoughts(scr)) == 1, "временная строка"
-        )
+        scr, _sink, runner = await _live(pilot)
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
         runner.running = False
         await wait_until(
-            pilot, lambda: not _thoughts(scr), "строки мыслей сняты"
+            pilot, lambda: _thoughts(scr)[0].settled, "строка законченная"
         )
+        assert _line(_thoughts(scr)[0]).startswith("● Thought  думаю")
+    assert not list(tmp_path.glob("stream_reasoning_*"))
 
 
 @pytest.mark.asyncio
-async def test_reopen_places_thought_before_its_step(tmp_path):
-    """Тред с записью мысли открыт заново — `Thought` на месте записи,
-    перед вызовом своего шага, тем же виджетом."""
-    from gc_tui.widgets.thought_row import ThoughtRow
-    from gc_tui.widgets.tool_call_row import ToolCallRow
-
+async def test_reopen_has_no_thoughts(tmp_path):
+    """Мысли нигде не хранятся: тред открыт заново — строк мыслей нет."""
     _write_thread(tmp_path)
     _messages(tmp_path, _reply())
-    _thought(tmp_path, "план", attempt="att_1", seconds=2.0)
-    _messages(tmp_path, _call(), _output(), start_seq=1)
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
-        scr = await _reopen(pilot, tmp_path)
-        rows = _thoughts(scr)
-        assert len(rows) == 1 and rows[0].persisted
-        assert _line(rows[0]) == "● Thought  план · 2с"
-        assert 0 <= _top_index(scr, ThoughtRow) < _top_index(scr, ToolCallRow)
-
-
-@pytest.mark.asyncio
-async def test_flag_off_hides_records_and_toggle_shows(tmp_path):
-    """Флаг выключен — записи не рисуются; включили в сессии — видны;
-    выключили — снова скрыты."""
-    _write_thread(tmp_path)
-    _messages(tmp_path, _reply())
-    _thought(tmp_path, "скрытая мысль", attempt="att_1")
-    _messages(tmp_path, _call(), _output(), start_seq=1)
-    async with _app(tmp_path, reasoning="off").run_test(
-        size=(100, 40)
-    ) as pilot:
+        scr, _sink, runner = await _live(pilot)
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
+        runner.running = False
+        pilot.app.active_runner = None
         scr = await _reopen(pilot, tmp_path)
         await pilot.pause(0.3)
         assert not _thoughts(scr)
-        pilot.app.set_session_override("tui.show_reasoning", "on")
-        await wait_until(
-            pilot, lambda: len(_thoughts(scr)) == 1, "мысль видна"
-        )
+
+
+@pytest.mark.asyncio
+async def test_flag_toggle_hides_and_returns_rows(tmp_path):
+    """Флаг выключили в сессии — строки мыслей скрыты, включили — те же
+    строки видны снова; лента не перерисовывается."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr, _sink, _runner = await _live(pilot)
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
+        row = _thoughts(scr)[0]
         pilot.app.set_session_override("tui.show_reasoning", "off")
-        await wait_until(pilot, lambda: not _thoughts(scr), "мысль скрыта")
+        await wait_until(pilot, lambda: row.display is False, "мысль скрыта")
+        pilot.app.set_session_override("tui.show_reasoning", "on")
+        await wait_until(pilot, lambda: row.display is True, "мысль видна")
+        assert _thoughts(scr) == [row]
 
 
 @pytest.mark.asyncio
@@ -442,41 +331,9 @@ async def test_flag_off_creates_no_live_row(tmp_path):
     async with _app(tmp_path, reasoning="off").run_test(
         size=(100, 40)
     ) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        pilot.app.active_runner = _Runner()
-        pilot.app._stream_sink.push("reset", "att_1")
-        pilot.app._stream_sink.push("think", "думаю")
+        scr, _sink, _runner = await _live(pilot)
         await pilot.pause(0.6)
         assert not _thoughts(scr)
-
-
-@pytest.mark.asyncio
-async def test_no_stream_record_gives_thought_without_timer(tmp_path):
-    """Стриминг выключен — временной строки нет, запись без длительности
-    даёт `Thought` без таймера."""
-    _write_thread(tmp_path)
-    _messages(tmp_path, _reply())
-    async with _app(tmp_path, **{"backend.stream": False}).run_test(
-        size=(100, 40)
-    ) as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(TID)
-        pilot.app.active_runner = _Runner()
-        await pilot.pause(0.3)
-        assert not _thoughts(scr)
-        _thought(tmp_path, "без стрима", attempt="att_1", seconds=None)
-        _messages(tmp_path, _call(), _output(), start_seq=1)
-        await wait_until(
-            pilot, lambda: len(_thoughts(scr)) == 1, "мысль из записи"
-        )
-        row = _thoughts(scr)[0]
-        assert row.persisted
-        await wait_until(
-            pilot,
-            lambda: _line(row) == "● Thought  без стрима",
-            "строка Thought без таймера",
-        )
 
 
 @pytest.mark.asyncio
@@ -487,79 +344,8 @@ async def test_thought_text_is_dim_from_styles(tmp_path):
 
     _write_thread(tmp_path)
     _messages(tmp_path, _reply())
-    _thought(tmp_path, "серая мысль", attempt="att_1")
     async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
-        scr = await _reopen(pilot, tmp_path)
+        scr, _sink, _runner = await _live(pilot, "серая мысль")
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
         tail = _thoughts(scr)[0].query_one(".thought-text")
         assert tail.rich_style.color == Color.parse(DIM).rich_color
-
-
-# --- хранилище и превью -----------------------------------------------------
-
-
-def test_store_places_thought_after_anchor(tmp_path):
-    """Сегменты и полное чтение ставят запись мысли за сообщением
-    привязки, перед сообщениями шага."""
-    from gc_tui.services.stores.file_store import FileTaskStore
-
-    _write_thread(tmp_path)
-    _messages(tmp_path, _reply())
-    _thought(tmp_path, "план", attempt="att_1")
-    _messages(tmp_path, _call(), _output(), start_seq=1)
-    store = FileTaskStore(str(tmp_path))
-    records, _cursor = store.read_all_events(TID)
-    seg = store.read_segments(TID)[0]["messages"]
-    for recs in (records, seg):
-        kinds = [r.get("type") for r in recs]
-        assert kinds == ["message", "thought", "message", "message"]
-        assert recs[1]["thought"]["text"] == "план"
-
-
-def _segments(tmp_path):
-    from gc_tui.services.stores.file_store import FileTaskStore
-
-    _write_thread(tmp_path)
-    _messages(tmp_path, _reply())
-    _thought(tmp_path, "мысль в превью", attempt="att_1", seconds=5.0)
-    _messages(tmp_path, _call(), _output(), start_seq=1)
-    return FileTaskStore(str(tmp_path)).read_segments(TID)
-
-
-def _preview_app(segments, *, show):
-    from gc_tui.services.trace_render import render_segments_readonly
-    from textual.app import App
-    from textual.containers import VerticalScroll
-
-    class _A(App):
-        def compose(self):
-            yield VerticalScroll(id="t")
-
-        def on_mount(self):
-            render_segments_readonly(
-                self.query_one("#t"), segments, show_thoughts=show
-            )
-
-    return _A()
-
-
-@pytest.mark.asyncio
-async def test_preview_shows_thought(tmp_path):
-    from gc_tui.widgets.thought_row import ThoughtRow
-
-    app = _preview_app(_segments(tmp_path), show=True)
-    async with app.run_test(size=(100, 30)) as pilot:
-        await pilot.pause()
-        rows = list(app.query(ThoughtRow))
-        assert len(rows) == 1 and rows[0].persisted
-        assert not rows[0].can_focus
-        assert _line(rows[0]) == "● Thought  мысль в превью · 5с"
-
-
-@pytest.mark.asyncio
-async def test_preview_hides_thought_when_flag_off(tmp_path):
-    from gc_tui.widgets.thought_row import ThoughtRow
-
-    app = _preview_app(_segments(tmp_path), show=False)
-    async with app.run_test(size=(100, 30)) as pilot:
-        await pilot.pause()
-        assert not list(app.query(ThoughtRow))

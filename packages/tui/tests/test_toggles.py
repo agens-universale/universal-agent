@@ -395,16 +395,6 @@ def test_answers_track_synchronized_with_gate_axis():
         )
 
 
-def test_tui_agent_settings_projects_show_reasoning():
-    from gc_core.settings import runtime_of
-    from gc_tui.toggles import tui_agent_settings
-
-    on = tui_agent_settings(make_settings(**{"tui.show_reasoning": "on"}))
-    off = tui_agent_settings(make_settings(**{"tui.show_reasoning": "off"}))
-    assert runtime_of(on).record_reasoning is True
-    assert runtime_of(off).record_reasoning is False
-
-
 def test_two_value_toggles_go_white_amber():
     from gc_tui import palette as pal
     from gc_tui.toggles import TOGGLES
@@ -427,7 +417,7 @@ def test_reasoning_toggle_spec():
         "trace",
     )
     assert s.names == ("off", "on")
-    assert s.values[1].hint.endswith("· только в chat_completions")
+    assert s.values[1].hint.endswith("· только в chat_completions с потоком")
     assert modes_section_names()[-1] == "reasoning"
 
 

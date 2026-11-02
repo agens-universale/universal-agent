@@ -252,34 +252,3 @@ def test_txt_technical_user_message_labeled():
 def test_txt_empty_records():
     out = _txt([])
     assert "(пусто)" in out
-
-
-def _thought_env(text, after):
-    from gc_core.persistence.reasoning_record import (
-        THOUGHT_TYPE,
-        ReasoningRecord,
-        reasoning_entry,
-    )
-
-    entry = reasoning_entry(ReasoningRecord(text, 1.5, None), after=after)
-    return {"type": THOUGHT_TYPE, "seq": 1, "ts": "t", **entry}
-
-
-def test_txt_exports_thought_after_its_message():
-    records = [
-        _env(1, "t", {"role": "user", "content": "вопрос", "id": "msg_1"}),
-        _thought_env("сперва взвешу\nварианты", "msg_1"),
-        _env(2, "t", {"role": "assistant", "content": "ответ", "id": "m2"}),
-    ]
-    out = export_thread(
-        _segs(records),
-        fmt="txt",
-        api_mode="chat_completions",
-        thread_id="tid1",
-        system="cli",
-    )
-    assert (
-        "[1] USER\n    вопрос\n\n"
-        "[2] THOUGHT\n    сперва взвешу\n    варианты\n\n"
-        "[3] ASSISTANT\n    ответ\n"
-    ) in out

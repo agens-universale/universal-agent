@@ -14,10 +14,6 @@ from gc_core.persistence.model_choice_record import (
     ModelChoiceRecord,
     model_choice_entry,
 )
-from gc_core.persistence.reasoning_record import (
-    ReasoningRecord,
-    reasoning_entry,
-)
 from gc_core.persistence.session_state import (
     extra_for_write,
     notice_state,
@@ -42,7 +38,6 @@ from gc_core.threads.models import (
     CONTROL,
     INBOX,
     MODEL_CHOICES,
-    REASONING,
     TURNS,
     Compaction,
     RuntimeStatus,
@@ -624,23 +619,6 @@ class ThreadSession:
         after = await self._alast_message_id()
         entry = model_choice_entry(record, after=after)
         await self.writer.aside(append=[(MODEL_CHOICES, [entry])])
-        return True
-
-    async def aappend_reasoning(
-        self, record: ReasoningRecord, *, discarded: bool
-    ) -> bool:
-        """Мысль модели — запись потока ``reasoning`` за последним
-        записанным сообщением, сбоку по аренде хода. Правила те же, что у
-        ``aappend_model_choice``, но мысль шага, отброшенного стопом, не
-        пишется: её шага в треде нет. Возвращает, записано ли."""
-        if discarded:
-            return False
-        await self.aflush_deferred()
-        if not self.history_messages or self.writer.gave_up_lease:
-            return False
-        after = await self._alast_message_id()
-        entry = reasoning_entry(record, after=after)
-        await self.writer.aside(append=[(REASONING, [entry])])
         return True
 
     async def _alast_message_id(self) -> Optional[str]:

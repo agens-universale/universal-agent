@@ -2,7 +2,6 @@ import unittest
 from unittest.mock import MagicMock
 
 from gc_core.utils.convertations import (
-    closed_think_texts,
     get_output_list,
     output_chat_completion_to_response,
 )
@@ -519,9 +518,3 @@ async def test_salvaged_think_is_not_text_answer_even_in_allow():
 
 if __name__ == "__main__":
     unittest.main()
-
-
-def test_closed_think_texts_only_closed_pairs_without_blanks():
-    text = "<think> a </think>x<THINK>b</THINK><think> </think>y <think>c"
-    assert closed_think_texts(text) == ["a", "b"]
-    assert closed_think_texts(None) == []

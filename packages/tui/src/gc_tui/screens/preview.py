@@ -103,11 +103,7 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
             "blocks": self._blocks,
         }
         calls = render_segments_readonly(
-            trace,
-            segments,
-            model_slots=self._model_slots,
-            show_thoughts=self._show_thoughts(),
-            **opts,
+            trace, segments, model_slots=self._model_slots, **opts
         )
         if records:
             merge_nested_readonly(
@@ -127,14 +123,6 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
 
     def on_resize(self, _event) -> None:
         self.call_after_refresh(self._refresh_trace_overlays)
-
-    def _show_thoughts(self) -> bool:
-        """Мысли модели — по действующему `tui.show_reasoning` окна; хост
-        без настроек — выключено, как по умолчанию."""
-        settings = getattr(self.app, "effective_settings", None)
-        if settings is None:
-            return False
-        return settings().settings.tui.show_reasoning == "on"
 
     def _preview_blocks(self):
         """Блоки превью с журналом правок треда (только чтение) и правилом
