@@ -189,6 +189,7 @@ from gc_tui.services.terminal_title import (
     format_terminal_title,
     set_terminal_title,
 )
+from gc_tui.services.thought_text import thought_display_text
 from gc_tui.services.tool_blocks import (
     BlockEdit,
     BlockKind,
@@ -2852,8 +2853,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         from gc_tui.widgets.thought_row import ThoughtRow
 
         attempt = sink.attempt()
-        think, _answer = sink.snapshot()
-        if attempt is None or not think.strip() or not self._thoughts_on():
+        think = thought_display_text(sink.snapshot()[0])
+        if attempt is None or not think or not self._thoughts_on():
             return
         state, _duration = sink.reasoning_state()
         seconds = sink.reasoning_seconds() or 0.0

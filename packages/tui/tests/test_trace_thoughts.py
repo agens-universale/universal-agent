@@ -349,3 +349,22 @@ async def test_thought_text_is_dim_from_styles(tmp_path):
         await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
         tail = _thoughts(scr)[0].query_one(".thought-text")
         assert tail.rich_style.color == Color.parse(DIM).rich_color
+
+
+@pytest.mark.asyncio
+async def test_reasoning_tag_lines_not_shown(tmp_path):
+    """Строки из одного тега рассуждения (`</thinking>` от модели) в
+    строке мысли не видны; стрим из одних тегов строки не даёт."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr, sink, _runner = await _live(pilot, "</thinking>\n")
+        await pilot.pause(0.6)
+        assert not _thoughts(scr)
+        sink.push("think", "план\n</thinking>")
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
+        await wait_until(
+            pilot,
+            lambda: _line(_thoughts(scr)[0]) == "● Thinking  план",
+            "строка без тегов",
+        )
