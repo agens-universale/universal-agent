@@ -232,6 +232,7 @@ def test_after_compact_only_resume_and_summary_sees_closed_tail(monkeypatch):
     state.session_compact_applied = False
     called = []
     seen_ids = []
+    logger = MagicMock()
 
     async def fake_apply_tool(**kwargs):
         called.append(kwargs["tool_name"])
@@ -262,7 +263,7 @@ def test_after_compact_only_resume_and_summary_sees_closed_tail(monkeypatch):
         aprocess_tool_calls(
             [done_call, compact_call, pending_call],
             state,
-            ctx=fake_ctx(),
+            ctx=fake_ctx(logger=logger),
             run_agent_func=lambda *_a, **_k: None,
         )
     )
@@ -274,9 +275,14 @@ def test_after_compact_only_resume_and_summary_sees_closed_tail(monkeypatch):
     assert len(out) == 1
     assert out[0]["role"] == "user"
     assert "session_compact finished" in str(out[0].get("content") or "")
+    assert "c_pending" not in str(out[0].get("content") or "")
     assert not any(
         m.get("type") in ("function_call", "function_call_output") for m in out
     )
+    logger.warning.assert_called_once()
+    logged = " ".join(str(part) for part in logger.warning.call_args.args)
+    assert "c_pending" in logged
+    assert "session_think" in logged
 
 
 def test_failed_compact_keeps_the_rest_of_the_batch(monkeypatch):

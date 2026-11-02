@@ -2312,6 +2312,26 @@ def _track_repeat_errors(
     return is_unknown
 
 
+def _log_unstarted_after_session_compact(ctx: Any, calls: List[Dict]) -> None:
+    """Хвост батча после сводки не стартует и в трейс не пишется. Только лог."""
+    parts: List[str] = []
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        name = str(call.get("name") or "").strip()
+        call_id = str(call.get("call_id") or "").strip()
+        if not name and not call_id:
+            continue
+        parts.append(f"{name or '?'} call_id={call_id or '?'}")
+    if not parts:
+        return
+    logger = getattr(ctx, "logger", None) or _fallback_logger
+    logger.warning(
+        "session_compact: не исполнены вызовы батча после сводки: %s",
+        ", ".join(parts),
+    )
+
+
 def _apply_session_compact_to_batch(state: State) -> List[Dict]:
     """После сводки живой трейс продолжает одно техническое «продолжай».
 
@@ -2559,6 +2579,7 @@ async def _arun_executed_tool_batch(
         unknown_in_batch += unknown_hit
         if getattr(state, "session_compact_applied", False):
             # Сводка заменила трейс. Хвост батча не стартует и выходов не получает.
+            _log_unstarted_after_session_compact(ctx, executed[i + 1 :])
             break
         if ask_ok:
             successful_ask_human = True
