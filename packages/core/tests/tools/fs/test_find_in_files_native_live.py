@@ -341,8 +341,7 @@ def test_native_context_clips_long_lines_to_budget(tmp_path):
 
 
 @requires_native_search
-def test_native_clips_long_line_to_the_head_budget(tmp_path):
-    """Without match offsets grep clips the first N chars (Python keeps the hit)."""
+def test_native_long_line_keeps_match_visible(tmp_path):
     (tmp_path / "one.txt").write_text(
         "a" * 3000 + "NEEDLE" + "b" * 3000, encoding="utf-8"
     )
@@ -354,6 +353,105 @@ def test_native_clips_long_line_to_the_head_budget(tmp_path):
     line = data["matches"][0]["line_content"]
     assert len(line) <= FindInFiles.max_line_content_chars + 80
     assert "line_truncated" in line
+    assert "NEEDLE" in line
+
+
+@requires_native_search
+@pytest.mark.parametrize(
+    ("prefix", "pattern", "query_mode", "case_insensitive", "expected"),
+    [
+        ("", "NEEDLE", "text", False, "NEEDLE"),
+        ("a" * 600, "NEEDLE", "text", False, "NEEDLE"),
+        ("a" * 700, "NEEDLE", "text", False, "NEEDLE"),
+        ("é" * 600, "NEEDLE", "text", False, "NEEDLE"),
+        ("a" * 600, "needle", "text", True, "NEEDLE"),
+        ("a" * 600, "NEEDLE|OTHER", "python-re", False, "NEEDLE"),
+    ],
+)
+def test_native_match_window_modes(
+    tmp_path, prefix, pattern, query_mode, case_insensitive, expected
+):
+    (tmp_path / "one.txt").write_text(
+        prefix + "NEEDLE" + "b" * 600, encoding="utf-8"
+    )
+
+    data = _call_tool(
+        tmp_path,
+        pattern=pattern,
+        query_mode=query_mode,
+        case_insensitive=case_insensitive,
+    )
+
+    assert data["search_backend"] == "grep"
+    assert expected in data["matches"][0]["line_content"]
+
+
+@requires_native_search
+def test_native_multiple_hits_on_one_long_line_show_a_real_hit(tmp_path):
+    (tmp_path / "one.txt").write_text(
+        "a" * 600 + "NEEDLE" + "b" * 600 + "NEEDLE", encoding="utf-8"
+    )
+
+    data = _call_tool(tmp_path, pattern="NEEDLE", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 1
+    assert "NEEDLE" in data["matches"][0]["line_content"]
+
+
+@requires_native_search
+def test_native_match_at_end_of_long_line_is_visible(tmp_path):
+    (tmp_path / "one.txt").write_text("a" * 700 + "NEEDLE", encoding="utf-8")
+
+    data = _call_tool(tmp_path, pattern="NEEDLE", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    assert data["matches"][0]["line_content"].endswith(
+        "NEEDLE[line_truncated: total 706 chars]"
+    )
+
+
+@requires_native_search
+def test_native_oversized_match_shows_marked_fragment(tmp_path):
+    (tmp_path / "one.txt").write_text(
+        "a" * 600 + "N" * 600 + "b" * 600, encoding="utf-8"
+    )
+
+    data = _call_tool(tmp_path, pattern="N" * 600, query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    line = data["matches"][0]["line_content"]
+    assert "N" * FindInFiles.max_line_content_chars in line
+    assert "line_truncated" in line
+
+
+@requires_native_search
+def test_native_ascii_ignore_case_skips_unicode_case_equivalent(tmp_path):
+    (tmp_path / "one.txt").write_text(
+        "K" + "a" * 700 + "k" + "b" * 700, encoding="utf-8"
+    )
+
+    data = _call_tool(
+        tmp_path, pattern="K", query_mode="text", case_insensitive=True
+    )
+
+    assert data["search_backend"] == "grep"
+    assert "k" in data["matches"][0]["line_content"]
+    assert "K" not in data["matches"][0]["line_content"]
+
+
+@requires_native_search
+def test_non_ascii_ignore_case_uses_python_offsets(tmp_path):
+    (tmp_path / "one.txt").write_text(
+        "a" * 700 + "École" + "b" * 700, encoding="utf-8"
+    )
+
+    data = _call_tool(
+        tmp_path, pattern="école", query_mode="text", case_insensitive=True
+    )
+
+    assert data["search_backend"] == "python"
+    assert "École" in data["matches"][0]["line_content"]
 
 
 # ------------------------------------------------------------------

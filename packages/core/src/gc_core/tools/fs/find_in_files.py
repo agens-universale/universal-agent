@@ -71,6 +71,9 @@ _PREFILTER_FALLBACK_REASONS = frozenset(
 _REFUSE_STOP_REASONS = frozenset(
     {"too_many_candidate_files", "unfiltered_host_reads", "output_capped"}
 )
+_ASCII_LOWER = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"
+)
 
 # affix_or re-open budget is the only per-mode open cap (spec §5 / §6.3).
 _MODE_CANDIDATE_LIMIT_ATTR = {
@@ -137,6 +140,7 @@ class FindInFiles(AbstractSimpleTool):
     # file re-emits the whole line, and the payload grows as
     # matches × line_length — measured 600 MB from a 2 MB file.
     max_context_chars = 5000
+    max_regex_matches_examined = 4096
 
     QUERY_MODE_TEXT = "text"
     QUERY_MODE_RE = "python-re"
@@ -654,10 +658,11 @@ class FindInFiles(AbstractSimpleTool):
         match_start: int,
         match_end: int,
     ) -> str:
+        """Clip a match against lines whose CR/LF endings were removed once."""
         idx = start_line - 1
         if idx < 0 or idx >= len(lines):
             return ""
-        line_text = lines[idx].rstrip("\r\n")
+        line_text = lines[idx]
         line_abs = line_starts[idx] if idx < len(line_starts) else 0
         # Intersection of [match_start, match_end) with this line's content
         # (excluding line endings). Multiline → from match start to EOL.
@@ -861,15 +866,19 @@ class FindInFiles(AbstractSimpleTool):
         text: str,
         file_path: str,
         limit_eff: int,
-    ) -> List[Dict[str, Any]]:
-        """Run compiled regex on decoded text; return up to limit_eff match dicts."""
+    ) -> Tuple[List[Dict[str, Any]], bool]:
+        """Return visible rows and whether the per-file match scan was capped."""
         lines = text.splitlines(keepends=True)
+        line_bodies = [line.rstrip("\r\n") for line in lines]
         line_starts = self._line_start_offsets(lines)
         text_len = len(text)
         results: List[Dict[str, Any]] = []
+        seen: set[Tuple[int, int, str]] = set()
         report_path = tool_report_abspath(file_path, workspace=self._workspace)
 
-        for match in compiled.finditer(text):
+        for examined, match in enumerate(compiled.finditer(text), 1):
+            if examined > self.max_regex_matches_examined:
+                return results, True
             start = match.start()
             end = match.end()
             start_line = self._offset_to_line(line_starts, start, text_len)
@@ -878,18 +887,20 @@ class FindInFiles(AbstractSimpleTool):
                 if end <= start
                 else self._offset_to_line(line_starts, end - 1, text_len)
             )
+            line_content = self._start_line_content(
+                line_bodies, line_starts, start_line, start, end
+            )
+            # Context depends only on the line interval; file is fixed here.
+            key = (start_line, end_line, line_content)
+            if key in seen:
+                continue
+            seen.add(key)
             results.append(
                 {
                     "file": report_path,
                     "line": start_line,
                     "end_line": end_line,
-                    "line_content": self._start_line_content(
-                        lines,
-                        line_starts,
-                        start_line,
-                        start,
-                        end,
-                    ),
+                    "line_content": line_content,
                     "context": self._build_match_context(
                         lines, start_line, end_line
                     ),
@@ -897,7 +908,7 @@ class FindInFiles(AbstractSimpleTool):
             )
             if len(results) >= limit_eff:
                 break
-        return results
+        return results, False
 
     @staticmethod
     def _cap_stop_info(
@@ -1051,6 +1062,13 @@ class FindInFiles(AbstractSimpleTool):
             )
         return f"Results truncated (showing up to {limit_eff} matches). Increase limit if you need more."
 
+    @staticmethod
+    def _regex_match_budget_guidance() -> str:
+        return (
+            "Partial scan: too many regex occurrences were examined in one file. "
+            "Narrow the pattern or path; more distinct lines may exist."
+        )
+
     # ------------------------------------------------------------------
     # per-file funnel (§6.2)
     # ------------------------------------------------------------------
@@ -1105,16 +1123,16 @@ class FindInFiles(AbstractSimpleTool):
         needles: Needles,
         pattern_mode: PatternMode,
         limit_remaining: int,
-    ) -> Tuple[List[Dict[str, Any]], bool]:
-        """Literal gate + match. Returns (matches, ran_full_re)."""
+    ) -> Tuple[List[Dict[str, Any]], bool, bool]:
+        """Literal gate + match. Return rows, ran_re, match_budget_hit."""
         if limit_remaining <= 0:
-            return [], False
+            return [], False, False
 
         # §6.2 step 4: required_literal gate (like / affix_or)
         if needles.required_literal is not None and not self._literal_in(
             text, needles.required_literal, needles.effective_ci
         ):
-            return [], False
+            return [], False, False
 
         # Optional or_group any-branch (or_simple / affix_or with pure inner)
         if needles.or_group is not None and needles.required_literal is None:
@@ -1123,7 +1141,7 @@ class FindInFiles(AbstractSimpleTool):
                 self._literal_in(text, b, needles.effective_ci)
                 for b in needles.or_group
             ):
-                return [], False
+                return [], False, False
         elif (
             needles.or_group is not None
             and needles.required_literal is not None
@@ -1134,8 +1152,10 @@ class FindInFiles(AbstractSimpleTool):
 
         ran_re = True
         # like / text: still use compiled escaped pattern (same as finditer)
-        matches = self._run_regex(compiled, text, abs_path, limit_remaining)
-        return matches, ran_re
+        matches, budget_hit = self._run_regex(
+            compiled, text, abs_path, limit_remaining
+        )
+        return matches, ran_re, budget_hit
 
     # ------------------------------------------------------------------
     # single file (§7)
@@ -1239,7 +1259,7 @@ class FindInFiles(AbstractSimpleTool):
                 effective_ci=effective_ci,
             )
 
-        matches, _ran_re = self._match_decoded_text(
+        matches, _ran_re, budget_hit = self._match_decoded_text(
             text=text,
             abs_path=path,
             compiled=compiled,
@@ -1260,6 +1280,11 @@ class FindInFiles(AbstractSimpleTool):
                 limit_capped=limit_capped,
                 limit_requested=limit_requested,
             )
+        elif budget_hit:
+            stop_reason = "regex_match_budget"
+            scan_complete = False
+            more_matches_may_exist = True
+            guidance = self._regex_match_budget_guidance()
         elif limit_capped:
             stop_reason, guidance = self._cap_stop_info(
                 True, limit_requested, limit_eff, count=count
@@ -1662,11 +1687,47 @@ class FindInFiles(AbstractSimpleTool):
                 rel = os.path.basename(abs_n)
             yield WalkEntry(rel or ".", False)
 
+    @staticmethod
+    def _native_match_span(
+        line: str, plan: Any, compiled: re.Pattern
+    ) -> Optional[Tuple[int, int]]:
+        """Locate a grep hit in character offsets on its full returned line."""
+        if plan.fixed:
+            if plan.case_insensitive:
+                start = line.translate(_ASCII_LOWER).find(plan.pattern.lower())
+            else:
+                start = line.find(plan.pattern)
+            return None if start < 0 else (start, start + len(plan.pattern))
+        match = compiled.search(line)
+        return None if match is None else match.span()
+
+    def _clip_native_matches(
+        self, shown: List[Dict[str, Any]], plan: Any, compiled: re.Pattern
+    ) -> bool:
+        """Keep a real hit visible in each grep row; False means fall back."""
+        for row in shown:
+            line = row["line_content"]
+            span = self._native_match_span(line, plan, compiled)
+            if span is None:
+                return False
+            row["line_content"] = self._clip_line_content(
+                line, match_start=span[0], match_end=span[1]
+            )
+            row.pop("context", None)
+        return True
+
+    def _has_native_grep(self) -> bool:
+        try:
+            return bool(getattr(self._backend, "has_grep", False))
+        except Exception:
+            return False
+
     async def _try_native_grep_directory(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         self,
         *,
         path: str,
         pattern: str,
+        compiled: re.Pattern,
         query_mode: str,
         pattern_mode: PatternMode,
         needles: Needles,
@@ -1697,11 +1758,7 @@ class FindInFiles(AbstractSimpleTool):
 
         # No grep at all: native is impossible whatever the pattern — say that,
         # not "pattern_not_native" (which invites the agent to simplify the pattern).
-        try:
-            has_grep = bool(getattr(self._backend, "has_grep", False))
-        except Exception:
-            has_grep = False
-        if not has_grep:
+        if not self._has_native_grep():
             return None, "no_grep"
 
         # Affix/complex open budgets and multi-hit regex semantics stay on Python.
@@ -1794,9 +1851,8 @@ class FindInFiles(AbstractSimpleTool):
             else len(ranked)
         )
         shown = ranked[:limit_eff]
-        for m in shown:
-            m["line_content"] = self._clip_line_content(m["line_content"])
-            m.pop("context", None)
+        if not self._clip_native_matches(shown, plan, compiled):
+            return None, "native_match_offset_unavailable"
         await self._attach_native_match_contexts(shown, max_bytes)
         for m in shown:
             m["file"] = tool_report_abspath(
@@ -1928,6 +1984,7 @@ class FindInFiles(AbstractSimpleTool):
         native_resp, fallback_reason = await self._try_native_grep_directory(
             path=path,
             pattern=pattern,
+            compiled=compiled,
             query_mode=query_mode,
             pattern_mode=pattern_mode,
             needles=needles,
@@ -2460,7 +2517,7 @@ class FindInFiles(AbstractSimpleTool):
                 return
             remaining = params.limit_eff - len(shared.matches)
             shared.shortlist_len += 1
-        file_matches, ran_re = self._match_decoded_text(
+        file_matches, ran_re, budget_hit = self._match_decoded_text(
             text=text,
             abs_path=abs_path,
             compiled=params.compiled,
@@ -2472,6 +2529,9 @@ class FindInFiles(AbstractSimpleTool):
             self._absorb_file_matches(
                 shared, file_matches, ran_re, params.limit_eff
             )
+            if budget_hit and not shared.stop:
+                shared.stop = True
+                shared.stop_reason = "regex_match_budget"
 
     async def _ascan_cooperatively(
         self,
@@ -2573,6 +2633,11 @@ class FindInFiles(AbstractSimpleTool):
                 f"Narrow path (e.g. path={report_path}) or simplify pattern; "
                 "shell rg is a fallback."
             )
+        elif shared.stop_reason == "regex_match_budget":
+            stop_reason = "regex_match_budget"
+            more_matches_may_exist = True
+            scan_complete = False
+            guidance = self._regex_match_budget_guidance()
         elif limit_capped:
             stop_reason, guidance = self._cap_stop_info(
                 True, limit_requested, limit_eff, count=count
