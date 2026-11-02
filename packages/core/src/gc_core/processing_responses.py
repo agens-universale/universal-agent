@@ -2807,7 +2807,46 @@ class _AgentLoop:
             self._count_step(step.completed_step, step.mode)
 
     async def _astep(self, messages, backend_mode: str) -> _Outcome:
-        """Одна итерация цикла: подготовка батча и обработка режима."""
+        """Одна итерация цикла: подготовка батча и обработка режима.
+
+        Если шаг кончился раньше ``apublish``, отложенный ответ инструмента
+        всё ещё только в ``state``. Дописываем его здесь, пока ссылку не
+        затёр следующий ``arm_prepare``.
+        """
+        raised = False
+        try:
+            return await self._astep_once(messages, backend_mode)
+        except BaseException:
+            raised = True
+            raise
+        finally:
+            await self._apersist_held_output(swallow_errors=raised)
+
+    async def _apersist_held_output(self, *, swallow_errors: bool) -> None:
+        """Записать отложенный ответ без подсказок, если flush его не забрал.
+
+        Сводка и обычный ``apublish`` обнуляют ссылку сами. Ошибка этой
+        записи не подменяет исключение, из-за которого шаг уже падает.
+        """
+        if self._nudges.carrier is None:
+            return
+        try:
+            await self._nudges.apublish(
+                list(getattr(self.state, "messages", None) or []),
+                state=self.state,
+                apersist=self._anudge_persist,
+                with_nudges=False,
+            )
+        except Exception:
+            if not swallow_errors:
+                raise
+            self.run_logger.warning(
+                "Held tool output persist failed",
+                exc_info=True,
+            )
+
+    async def _astep_once(self, messages, backend_mode: str) -> _Outcome:
+        """Подготовка батча и обработка режима, без страховки записи."""
         try:
             messages, mode, early = await self._aprepare_batch(
                 messages, backend_mode

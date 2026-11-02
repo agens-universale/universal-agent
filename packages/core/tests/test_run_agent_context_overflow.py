@@ -1,7 +1,11 @@
 """run_agent при переполнении контекста: force-компакция + повтор, не краш."""
 
+import pytest
+
 from gc_core import processing_responses as pr
 from gc_core import run_summary_coordinator as rsc
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.message_policy import nudges as nudge_mod
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
@@ -305,9 +309,105 @@ def test_tool_output_step_compacts_while_output_is_held(monkeypatch):
     assert "fco" not in compacted["sent"]
 
 
-def test_non_overflow_error_still_propagates(monkeypatch):
-    import pytest
+def _held_output():
+    return {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": "тело ответа",
+        "id": "fco",
+    }
 
+
+def _tool_call_batch():
+    return [
+        {
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "fs_read",
+            "arguments": "{}",
+            "id": "fc",
+        }
+    ]
+
+
+def test_fill_failure_persists_held_tool_output(monkeypatch):
+    """Отказ сбора подсказок не оставляет ответ инструмента только в памяти."""
+    output = _held_output()
+    persisted: list[dict] = []
+
+    async def _fake_tools(
+        _messages, _state, _ctx, batch_trace=None, **_kwargs
+    ):
+        if isinstance(batch_trace, dict):
+            batch_trace.setdefault("executed", []).append("c1")
+        return [output]
+
+    def _memory_down(*_args, **_kwargs):
+        raise ExecutionFailure("memory store down")
+
+    monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_tools)
+    monkeypatch.setattr(nudge_mod, "notice_texts_before_llm", _memory_down)
+
+    with pytest.raises(ExecutionFailure, match="memory store down"):
+        run_coro(
+            pr.arun_agent(
+                _tool_call_batch(),
+                _state(),
+                _run_ctx(),
+                persist_messages_callback=persisted.extend,
+                session_meta={},
+            )
+        )
+
+    assert [message.get("id") for message in persisted].count("fco") == 1
+
+
+def test_check_mode_bounce_persists_held_tool_output(monkeypatch):
+    """Отскок из-за неразобранного батча всё равно пишет отложенный ответ."""
+    output = _held_output()
+    persisted: list[dict] = []
+
+    async def _fake_tools(
+        _messages, _state, _ctx, batch_trace=None, **_kwargs
+    ):
+        if isinstance(batch_trace, dict):
+            batch_trace.setdefault("executed", []).append("c1")
+        return [output]
+
+    async def _done(messages, state, ctx):
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp"
+
+    real_check = pr.check_mode
+
+    def _check(messages, logger):
+        if any(
+            isinstance(message, dict) and message.get("id") == "fco"
+            for message in messages
+        ):
+            raise ValueError("Undefined mode")
+        return real_check(messages, logger)
+
+    monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_tools)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _done)
+    monkeypatch.setattr(pr, "check_mode", _check)
+
+    result = run_coro(
+        pr.arun_agent(
+            _tool_call_batch(),
+            _state(),
+            _run_ctx(),
+            persist_messages_callback=persisted.extend,
+            session_meta={},
+        )
+    )
+
+    assert result == "готово"
+    assert [message.get("id") for message in persisted].count("fco") == 1
+
+
+def test_non_overflow_error_still_propagates(monkeypatch):
     async def _boom(messages, state, ctx):
         raise ValueError("some other backend failure")
 
