@@ -14,7 +14,7 @@ from gc_core.message_policy.tool_availability import (
     tool_is_available,
 )
 from gc_core.message_policy.tool_usage_notice.apply import (
-    apply_tool_usage_notice_before_llm,
+    notice_texts_before_llm,
 )
 from gc_core.states import SharedStateData, State
 from gc_testkit.settings import fake_ctx, make_settings
@@ -92,8 +92,7 @@ class TestToolUsageNoticeGate:
     def _apply(self, ctx):
         state = _state()
         state.tool_usage_notice_cnt = {"session_memory": 10}
-        return apply_tool_usage_notice_before_llm(
-            [{"role": "user", "content": "hi", "id": "u1"}],
+        return notice_texts_before_llm(
             state,
             ctx,
             {},
@@ -105,20 +104,20 @@ class TestToolUsageNoticeGate:
             _notice_cfg(),
             tools_data={"fs_read_file": {}, "turn_finish": {}},
         )
-        assert len(self._apply(ctx)) == 1
+        assert self._apply(ctx) == []
 
     def test_notice_kept_when_tool_present(self):
         ctx = fake_ctx(
             _notice_cfg(),
             tools_data={"fs_read_file": {}, "session_memory": {}},
         )
-        out = self._apply(ctx)
-        assert len(out) == 2
-        assert "not used session_memory" in out[1]["content"]
+        texts = self._apply(ctx)
+        assert len(texts) == 1
+        assert "not used session_memory" in texts[0]
 
     def test_unknown_tool_set_keeps_old_behaviour(self):
         # ctx без тулов (синтетический/тестовый) — гейт не применяется.
-        assert len(self._apply(fake_ctx(_notice_cfg()))) == 2
+        assert len(self._apply(fake_ctx(_notice_cfg()))) == 1
 
 
 class TestProjectMemoryGate:
@@ -133,27 +132,23 @@ class TestProjectMemoryGate:
             cfg,
             tools_data={"fs_read_file": {}, "project_memory": {}},
         )
-        base = [{"role": "user", "content": "hi", "id": "u1"}]
-
-        out_absent = apply_tool_usage_notice_before_llm(
-            base,
+        absent_texts = notice_texts_before_llm(
             _state(),
             absent,
             {},
             step_messages=[],
             project_memory_hash="hash-1",
         )
-        out_present = apply_tool_usage_notice_before_llm(
-            base,
+        present_texts = notice_texts_before_llm(
             _state(),
             present,
             {},
             step_messages=[],
             project_memory_hash="hash-1",
         )
-        assert len(out_absent) == 1
-        assert len(out_present) == 2
-        assert "project memory" in out_present[1]["content"].lower()
+        assert absent_texts == []
+        assert len(present_texts) == 1
+        assert "project memory" in present_texts[0].lower()
 
 
 class TestTodoReminderGate:

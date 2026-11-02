@@ -235,9 +235,3 @@ def wrap_thread_memory_technical_user_message(
         ),
         "id": generate_message_id(f"m_{message_id_suffix}"),
     }
-
-
-def wrap_tool_usage_notice_user_message(text: str) -> dict[str, Any]:
-    return wrap_thread_memory_technical_user_message(
-        text, message_id_suffix="tool_usage_notice"
-    )

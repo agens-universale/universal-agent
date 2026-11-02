@@ -73,12 +73,9 @@ def test_overflow_retry_collects_notices_once(monkeypatch):
     """Повтор после сжатия — тот же шаг: подсказка уже в сообщениях."""
     calls = {"backend": 0, "notices": 0, "seen": []}
 
-    def _notice(messages, *_args, **_kwargs):
+    def _notice(*_args, **_kwargs):
         calls["notices"] += 1
-        return [
-            *messages,
-            {"role": "user", "content": "NOTICE", "id": "notice-1"},
-        ]
+        return ["NOTICE"]
 
     async def _fake_process_user_ask(messages, state, ctx):
         calls["backend"] += 1
@@ -92,7 +89,9 @@ def test_overflow_retry_collects_notices_once(monkeypatch):
             {"role": "assistant", "type": "message", "content": "готово"}
         ], "resp_2"
 
-    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _notice)
+    monkeypatch.setattr(
+        "gc_core.message_policy.nudges.notice_texts_before_llm", _notice
+    )
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
 
     result = run_coro(
@@ -107,16 +106,23 @@ def test_overflow_retry_collects_notices_once(monkeypatch):
 
     assert result == "готово"
     assert calls["notices"] == 1
-    assert [m.get("content") for m in calls["seen"][1]].count("NOTICE") == 1
+    assert (
+        sum(
+            1
+            for message in calls["seen"][1]
+            if "NOTICE" in str(message.get("content"))
+        )
+        == 1
+    )
 
 
 def test_next_step_collects_notices_again(monkeypatch):
     """Следующий запрос к модели после успешного шага снова собирает подсказки."""
     calls = {"backend": 0, "notices": 0}
 
-    def _notice(messages, *_args, **_kwargs):
+    def _notice(*_args, **_kwargs):
         calls["notices"] += 1
-        return messages
+        return []
 
     async def _fake_process_user_ask(messages, state, ctx):
         calls["backend"] += 1
@@ -124,7 +130,9 @@ def test_next_step_collects_notices_again(monkeypatch):
             {"role": "assistant", "type": "message", "content": "не тул"}
         ], "resp"
 
-    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _notice)
+    monkeypatch.setattr(
+        "gc_core.message_policy.nudges.notice_texts_before_llm", _notice
+    )
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
     state = _state()
     state.tick_signals = set()
@@ -152,12 +160,9 @@ def test_summary_hook_drops_nudges_for_this_request(monkeypatch):
     """Хук сводки вернул истину — цикл выбрасывает подсказки этого запроса."""
     calls = {"notices": 0, "seen": []}
 
-    def _notice(messages, *_args, **_kwargs):
+    def _notice(*_args, **_kwargs):
         calls["notices"] += 1
-        return [
-            *messages,
-            {"role": "user", "content": "NOTICE", "id": "notice-1"},
-        ]
+        return ["NOTICE"]
 
     async def _summary_applied(_messages, _mode):
         return True
@@ -172,7 +177,9 @@ def test_summary_hook_drops_nudges_for_this_request(monkeypatch):
     state.tool_usage_notice_cnt = {"session_memory": 4}
     state.todo_reminder_cnt = 3
     state.mode_announced = "default"
-    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _notice)
+    monkeypatch.setattr(
+        "gc_core.message_policy.nudges.notice_texts_before_llm", _notice
+    )
     monkeypatch.setattr(pr, "aprocess_user_ask", _fake_process_user_ask)
     notice = {"project_memory_check_cnt": 4}
 
@@ -188,7 +195,9 @@ def test_summary_hook_drops_nudges_for_this_request(monkeypatch):
 
     assert result == "готово"
     assert calls["notices"] == 0
-    assert [m.get("content") for m in calls["seen"][0]].count("NOTICE") == 0
+    assert not any(
+        "NOTICE" in str(message.get("content")) for message in calls["seen"][0]
+    )
     assert state.tool_usage_notice_cnt == {}
     assert state.todo_reminder_cnt == 0
     assert notice["project_memory_check_cnt"] == 0

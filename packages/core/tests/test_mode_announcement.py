@@ -16,7 +16,9 @@ from gc_core.message_policy.plan_messages import (
     PLAN_ENTER_MESSAGE,
     PLAN_RESEARCH_ENTER_MESSAGE,
 )
+from gc_core.loop_detector.detector import brief_args
 from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
     wrap_technical_user_content,
 )
 from gc_core.processing_responses import arun_agent
@@ -104,7 +106,7 @@ def test_root_is_told_the_mode_at_start(monkeypatch):
     )
     assert sent[0]["content"] == "задача"
     assert sent[-1]["content"] == wrap_technical_user_content(
-        PLAN_ENTER_MESSAGE
+        PLAN_ENTER_MESSAGE, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
     )
     assert sent[-1] in state.messages  # ушло и в историю
     assert shared.mode_announced == "plan"
@@ -120,7 +122,8 @@ def test_child_is_told_the_mode_at_start_and_keeps_the_root_mark(
     )
     # У ребёнка нет тула плана: «исследуй и верни находки текстом».
     assert sent[-1]["content"] == wrap_technical_user_content(
-        PLAN_RESEARCH_ENTER_MESSAGE
+        PLAN_RESEARCH_ENTER_MESSAGE,
+        technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
     )
     assert child.mode_announced == "plan"
     assert shared.mode_announced == "auto"  # отметку корня ребёнок не тронул
@@ -180,7 +183,8 @@ def test_the_text_follows_the_tool_set_not_the_role(monkeypatch):
     }
     sent = _first_request(monkeypatch, [_user("задача", "u1")], state, ctx)
     assert sent[-1]["content"] == wrap_technical_user_content(
-        PLAN_RESEARCH_ENTER_MESSAGE
+        PLAN_RESEARCH_ENTER_MESSAGE,
+        technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
     )
 
 
@@ -223,16 +227,18 @@ def test_mode_changed_at_summary_is_told_before_the_model(monkeypatch):
     summary = {"role": "user", "content": "сводка диалога", "id": "sum"}
     notices = {"calls": 0}
 
-    def _notice(messages, *_args, **_kwargs):
+    def _notice(*_args, **_kwargs):
         notices["calls"] += 1
-        return messages
+        return ["подсказка"]
 
     async def compaction(messages, _mode):
         state.messages[:] = [summary]
         messages[:] = [summary]
         return True
 
-    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _notice)
+    monkeypatch.setattr(
+        "gc_core.message_policy.nudges.notice_texts_before_llm", _notice
+    )
     sent = _request_with_hook(
         monkeypatch,
         [_user("задача", "u1")],
@@ -303,22 +309,58 @@ def _request_with_hook(monkeypatch, messages, state, ctx, **hooks):
     return caught.value.messages
 
 
-def test_the_announcement_is_the_last_message_before_the_request(
-    monkeypatch,
-):
-    """Объявление режима — последним, после подсказки об инструментах: так
-    его не опередит ни одна вставка подготовки запроса."""
+def test_without_tools_nudges_share_one_user(monkeypatch):
+    """Нет ответа инструмента: петля и смена режима — один user,
+    теги current_context подряд. В pending ничего не остаётся."""
     shared = SharedStateData(permission_mode="plan")
     state = _state(shared)
-    hint = {"role": "user", "content": "подсказка об инструментах"}
+    state.loop_detector_pending = [
+        {"tool": "fs_read_file", "args": {"path": "a.py"}}
+    ]
+    sent = _first_request(
+        monkeypatch, [_user("задача", "u1")], state, _ctx(shared)
+    )
+    notes = [message for message in sent if message.get("id") != "u1"]
+    assert len(notes) == 1
+    loop = (
+        "Loop detector: you called fs_read_file with the same arguments "
+        f"again ({brief_args({'path': 'a.py'})}).\n"
+        "The tool still ran; this probably does not produce new information. "
+        "Use the previous\n"
+        "result, change arguments, or try a different tactic."
+    )
+    assert notes[0]["role"] == "user"
+    assert notes[0]["content"] == "\n".join(
+        [
+            wrap_technical_user_content(
+                loop, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
+            ),
+            wrap_technical_user_content(
+                PLAN_ENTER_MESSAGE,
+                technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
+            ),
+        ]
+    )
+    assert notes[0] in state.messages
+    assert state.loop_detector_pending == []
+    assert shared.mode_announced == "plan"
 
-    def _with_hint(messages, *_args, **_kwargs):
-        return [*messages, hint]
+
+def test_tool_hint_and_mode_share_one_user_and_mode_is_last(monkeypatch):
+    """Подсказка об инструментах и режим — один user; тег режима последний."""
+    shared = SharedStateData(permission_mode="plan")
+    state = _state(shared)
+    hint = "подсказка об инструментах"
+
+    def _hint(*_args, **_kwargs):
+        return [hint]
 
     async def _request(sent, _state, _ctx):
         raise _Requested(list(sent))
 
-    monkeypatch.setattr(pr, "apply_tool_usage_notice_before_llm", _with_hint)
+    monkeypatch.setattr(
+        "gc_core.message_policy.nudges.notice_texts_before_llm", _hint
+    )
     monkeypatch.setattr(pr, "aprocess_user_ask", _request)
     with pytest.raises(_Requested) as caught:
         run_coro(
@@ -327,7 +369,16 @@ def test_the_announcement_is_the_last_message_before_the_request(
             )
         )
     sent = caught.value.messages
-    assert sent[-2] == hint
-    assert sent[-1]["content"] == wrap_technical_user_content(
-        PLAN_ENTER_MESSAGE
+    assert [message.get("id") for message in sent[:1]] == ["u1"]
+    assert len(sent) == 2
+    assert sent[-1]["content"] == "\n".join(
+        [
+            wrap_technical_user_content(
+                hint, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
+            ),
+            wrap_technical_user_content(
+                PLAN_ENTER_MESSAGE,
+                technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
+            ),
+        ]
     )

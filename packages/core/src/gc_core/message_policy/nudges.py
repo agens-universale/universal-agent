@@ -25,7 +25,6 @@ from gc_core.message_policy.tool_usage_notice.state import (
 )
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
-    TECHNICAL_TYPE_ERROR_MESSAGE,
     wrap_technical_user_content,
 )
 from gc_core.run_summary_coordinator import filter_messages_not_in_state
@@ -284,12 +283,14 @@ def clear_executed_tool_names(trace: dict[str, Any] | None) -> None:
         trace["tool_names"] = set()
 
 
-def _technical_user_note(text: str) -> dict[str, Any]:
+def _nudge_user_message(texts: list[str]) -> dict[str, Any] | None:
+    """Один служебный user: те же теги ``current_context``, что в output."""
+    visible = _visible_harness_texts(texts)
+    if not visible:
+        return None
     return {
         "role": "user",
-        "content": wrap_technical_user_content(
-            text, technical_type=TECHNICAL_TYPE_ERROR_MESSAGE
-        ),
+        "content": "\n".join(visible),
         "id": generate_msg_id_sha256("m"),
     }
 
@@ -490,15 +491,6 @@ class NudgeHold:
         ):
             self.trace.setdefault("persisted", set()).add(message_id)
 
-    def _flush_or_clear_buffer(
-        self, carrier: dict[str, Any], *, with_nudges: bool
-    ) -> None:
-        if with_nudges and self.buffer:
-            self.buffer.flush_into(carrier)
-            return
-        if not with_nudges:
-            self.buffer.clear()
-
     def _place_followers(self, state: Any, carrier: dict[str, Any]) -> None:
         followers = [
             message
@@ -524,15 +516,12 @@ class NudgeHold:
         *,
         state: Any,
         apersist: Callable[[list[dict[str, Any]]], Awaitable[None]],
-        with_nudges: bool,
     ) -> None:
-        """Записать отложенный носитель (и соседей). with_nudges=False — clear."""
+        """Записать отложенный носитель и соседей. Буфер очищается."""
         carrier = self.carrier
+        self.buffer.clear()
         if carrier is None:
-            if not with_nudges:
-                self.buffer.clear()
             return
-        self._flush_or_clear_buffer(carrier, with_nudges=with_nudges)
         _insert_carrier(messages, state, carrier)
         self._place_followers(state, carrier)
         await self._apersist_one(carrier, state=state, apersist=apersist)
@@ -551,18 +540,16 @@ class NudgeHold:
         backend_mode: str,
         logger: Any | None,
         apersist: Callable[[list[dict[str, Any]]], Awaitable[None]],
-    ) -> tuple[list[dict[str, Any]], bool]:
+    ) -> list[dict[str, Any]]:
         """Один flush перед моделью.
 
-        → ``(messages, done)``. ``done=True`` — носитель/compact закрыли путь;
-        ``False`` — нужен редкий user-хвост / notices на границе хода.
+        Носитель получает наджи в output. Без носителя они уходят одним user.
+        После сводки буфер только очищается.
         """
         if self.compacted:
             clear_executed_tool_names(self.trace)
-            await self.apublish(
-                messages, state=state, apersist=apersist, with_nudges=False
-            )
-            return messages, True
+            await self.apublish(messages, state=state, apersist=apersist)
+            return messages
 
         carrier = self.carrier
         has_carrier = carrier is not None and any(
@@ -582,21 +569,31 @@ class NudgeHold:
             )
             clear_executed_tool_names(self.trace)
             self.buffer.flush_into(carrier)
-            await self.apublish(
-                messages, state=state, apersist=apersist, with_nudges=False
-            )
-            return messages, True
+            await self.apublish(messages, state=state, apersist=apersist)
+            return messages
 
-        await self.apublish(
-            messages, state=state, apersist=apersist, with_nudges=False
+        await self.apublish(messages, state=state, apersist=apersist)
+        # Носителя нет: те же наджи, что ушли бы в output, одним user.
+        # apublish выше уже очистил буфер, сюда попадает только свежий сбор.
+        invoked = executed_tool_names(self.trace)
+        await afill_nudge_buffer(
+            self.buffer,
+            state,
+            ctx,
+            session_meta=session_meta,
+            step_messages=messages,
+            backend_mode=backend_mode,
+            logger=logger,
+            reset_tool_names=invoked,
         )
-        if self.buffer:
-            notes = [_technical_user_note(text) for text in self.buffer.take()]
-            messages = [*notes, *messages]
+        clear_executed_tool_names(self.trace)
+        note = _nudge_user_message(self.buffer.take())
+        if note is not None:
+            messages = [*messages, note]
             to_append = filter_messages_not_in_state(
-                list(getattr(state, "messages", []) or []), notes
+                list(getattr(state, "messages", []) or []), [note]
             )
             if to_append:
                 state.messages += to_append
                 await apersist(to_append)
-        return messages, False
+        return messages

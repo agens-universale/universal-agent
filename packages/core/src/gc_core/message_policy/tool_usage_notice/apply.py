@@ -8,7 +8,6 @@ from gc_core.message_policy.project_memory_notice.policy import (
     collect_project_memory_hints,
     on_persist_steps,
     project_memory_hints_enabled,
-    wrap_project_memory_hint_user_message,
 )
 from gc_core.message_policy.todo_reminder import todo_reminder_text
 from gc_core.message_policy.tool_availability import (
@@ -21,8 +20,6 @@ from gc_core.message_policy.tool_usage_notice.policy import (
     collect_tool_usage_notices,
     get_thread_memory_registers_from_shared,
     update_tool_usage_notice_after_persist,
-    wrap_thread_memory_technical_user_message,
-    wrap_tool_usage_notice_user_message,
 )
 from gc_core.message_policy.tool_usage_notice.state import (
     get_project_memory_check_cnt,
@@ -113,8 +110,7 @@ def notice_texts_before_llm(
 ) -> list[str]:
     """Тексты подсказок в порядке: project memory, tool usage, todo.
 
-    Тикает те же счётчики, что и ``apply_tool_usage_notice_before_llm``.
-    Сообщение ``user`` не собирает.
+    Сообщение ``user`` не собирает: его клеит цикл, в output или одним user.
     ``reset_tool_names`` — тулы, исполненные в батче; имя берётся из вызова.
     """
     return [
@@ -129,49 +125,6 @@ def notice_texts_before_llm(
             reset_tool_names=reset_tool_names,
         )
     ]
-
-
-def apply_tool_usage_notice_before_llm(
-    messages: list[dict[str, Any]],
-    state: Any,
-    ctx: Any,
-    meta: dict[str, Any],
-    *,
-    step_messages: list[dict[str, Any]],
-    logger: Any | None = None,
-    project_memory_hash: str | None = None,
-    reset_tool_names: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    """
-    После persist-batch, перед LLM: независимые контуры project_memory K-тик и tool_usage_notice.
-    ``project_memory_hash`` — версия памяти проекта, прочитанная заранее
-    (подсказки о памяти включены).
-    Счётчики не сбрасывают друг друга; снимок — только в текстовый log.
-    """
-    out = list(messages)
-    for kind, text in _notice_pairs_before_llm(
-        state,
-        ctx,
-        meta,
-        step_messages=step_messages,
-        logger=logger,
-        project_memory_hash=project_memory_hash,
-        reset_tool_names=reset_tool_names,
-    ):
-        out.append(_wrap_notice(kind, text))
-    return out
-
-
-def _wrap_notice(kind: str, text: str) -> dict[str, Any]:
-    if kind == "memory":
-        return wrap_project_memory_hint_user_message(
-            text, suffix="mem_project"
-        )
-    if kind == "todo":
-        return wrap_thread_memory_technical_user_message(
-            text, message_id_suffix="todo_reminder"
-        )
-    return wrap_tool_usage_notice_user_message(text)
 
 
 def _notice_pairs_before_llm(

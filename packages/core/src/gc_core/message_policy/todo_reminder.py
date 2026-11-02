@@ -4,7 +4,7 @@
 ``state.todo_reminder_cnt`` (переживает границу хода через thread meta).
 Две ветки: есть незакрытые пункты — директивное «обнови»; живого плана нет
 (пусто ИЛИ всё закрыто) — мягкое «если задача того стоит, заведи», один раз.
-Вызывается из ``apply_tool_usage_notice_before_llm`` (chat_completions-only).
+Вызывается из ``notice_texts_before_llm`` (chat_completions-only).
 """
 
 from __future__ import annotations

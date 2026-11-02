@@ -126,17 +126,12 @@ from gc_core.message_policy.no_tool_call_bounce import (
 )
 from gc_core.message_policy.nudges import (
     NudgeHold,
-    aproject_memory_hash,
     clear_executed_tool_names,
-    executed_tool_names,
     record_executed_call,
 )
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.tool_attachments import (
     build_tool_attachments_message,
-)
-from gc_core.message_policy.tool_usage_notice.apply import (
-    apply_tool_usage_notice_before_llm,
 )
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_ERROR_MESSAGE,
@@ -2875,7 +2870,6 @@ class _AgentLoop:
                 list(getattr(self.state, "messages", None) or []),
                 state=self.state,
                 apersist=self._anudge_persist,
-                with_nudges=False,
             )
         except Exception:
             if not swallow_errors:
@@ -2960,7 +2954,6 @@ class _AgentLoop:
                     messages,
                     state=self.state,
                     apersist=self._anudge_persist,
-                    with_nudges=False,
                 )
                 return None
             if await self._apre_backend_compaction(messages, mode):
@@ -2974,7 +2967,6 @@ class _AgentLoop:
                     messages,
                     state=self.state,
                     apersist=self._anudge_persist,
-                    with_nudges=False,
                 )
                 return None
         return await self._aflush_nudges(messages, backend_mode)
@@ -2990,11 +2982,11 @@ class _AgentLoop:
     async def _aflush_nudges(
         self, messages: List[Dict], backend_mode: str
     ) -> List[Dict]:
-        """Flush hold перед моделью; без носителя — редкий user + notices.
+        """Flush hold перед моделью.
 
-        Повтор того же шага после переполнения окна подсказки не собирает:
-        они уже в ``messages``, а запасной путь без носителя тикнул бы
-        счётчики ещё раз.
+        С ответом инструмента наджи в его output. Без ответа — один
+        служебный user со всеми тегами. Повтор того же шага после
+        переполнения окна подсказки не собирает: они уже в ``messages``.
         """
         if self._nudges.skip_fill:
             # Сводка только что заменила трейс. Буфер уже пуст, счётчики
@@ -3006,7 +2998,6 @@ class _AgentLoop:
                 messages,
                 state=self.state,
                 apersist=self._anudge_persist,
-                with_nudges=False,
             )
             messages = await self._aannounce_mode(
                 messages, update_silent_mark=False
@@ -3015,7 +3006,7 @@ class _AgentLoop:
             return messages
         if self._nudges.notices_sent:
             return messages
-        messages, done = await self._nudges.aflush_before_model(
+        messages = await self._nudges.aflush_before_model(
             messages,
             state=self.state,
             ctx=self.ctx,
@@ -3026,21 +3017,12 @@ class _AgentLoop:
             logger=self.run_logger,
             apersist=self._anudge_persist,
         )
-        if done:
-            # Окно после session_compact: наджи в output не клеим, но смену
-            # режима говорим сразу за «продолжай», до генерации.
-            if self._nudges.compacted:
-                messages = await self._aannounce_mode(
-                    messages, update_silent_mark=False
-                )
-            self._nudges.notices_sent = True
-            return messages
-        if backend_mode == "chat_completions":
-            messages = await self._aapply_tool_usage_notice(messages)
-            if self._stopped_before_call():
-                self._nudges.notices_sent = True
-                return messages
-        messages = await self._aannounce_mode(messages)
+        # Окно после session_compact: наджи в output не клеим, но смену
+        # режима говорим сразу за «продолжай», до генерации.
+        if self._nudges.compacted:
+            messages = await self._aannounce_mode(
+                messages, update_silent_mark=False
+            )
         self._nudges.notices_sent = True
         return messages
 
@@ -3298,7 +3280,6 @@ class _AgentLoop:
                 messages,
                 state=state,
                 apersist=self._anudge_persist,
-                with_nudges=False,
             )
             return messages, None, envelope
         if self.tool_error_cnt > self.max_tool_errors:
@@ -3307,7 +3288,6 @@ class _AgentLoop:
                 messages,
                 state=state,
                 apersist=self._anudge_persist,
-                with_nudges=False,
             )
             return messages, None, "Agent tools call errors."
 
@@ -3371,61 +3351,6 @@ class _AgentLoop:
         state.messages += notices
         await _maybe_persist(self.persist_messages_callback, notices, state)
         return [*messages, *notices]
-
-    async def _aapply_tool_usage_notice(self, messages) -> List[Dict]:
-        if not isinstance(self.session_meta, dict):
-            return messages
-        state = self.state
-        try:
-            _messages_before_notice = len(messages)
-            invoked = executed_tool_names(self._nudges.trace)
-            messages = apply_tool_usage_notice_before_llm(
-                messages,
-                state,
-                self.ctx,
-                self.session_meta,
-                step_messages=messages,
-                logger=self.run_logger,
-                project_memory_hash=await aproject_memory_hash(self.ctx),
-                reset_tool_names=invoked,
-            )
-            clear_executed_tool_names(self._nudges.trace)
-            notice_messages = messages[_messages_before_notice:]
-            if notice_messages:
-                to_append = filter_messages_not_in_state(
-                    list(getattr(state, "messages", []) or []),
-                    list(notice_messages),
-                )
-                if to_append:
-                    state.messages += to_append
-                await self._apersist_notice_messages(notice_messages)
-        except ExecutionFailure:
-            raise
-        except Exception as mem_exc:
-            self.run_logger.warning(
-                "Memory messages hook warning: %s",
-                mem_exc,
-                exc_info=True,
-            )
-        return messages
-
-    async def _apersist_notice_messages(self, notice_messages) -> None:
-        if self.persist_messages_callback is None:
-            return
-        try:
-            await await_callback(
-                self.persist_messages_callback(notice_messages)
-            )
-        except ExecutionFailure:
-            raise
-        except ThreadStoreError as refused:
-            raise _store_refused(refused) from refused
-        except Exception as persist_exc:
-            self.run_logger.warning(
-                "Thread notice messages persist warning: %s",
-                persist_exc,
-                exc_info=True,
-            )
 
     # ------------------------------------------------------------ dispatch
     async def _adispatch(self, mode, messages, backend_mode: str) -> _Outcome:

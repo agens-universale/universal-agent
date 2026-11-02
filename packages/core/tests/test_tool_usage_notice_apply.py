@@ -6,7 +6,7 @@ from gc_core.message_policy.nudges import (
     record_executed_call,
 )
 from gc_core.message_policy.tool_usage_notice.apply import (
-    apply_tool_usage_notice_before_llm,
+    notice_texts_before_llm,
 )
 from gc_core.states import SharedStateData, State
 from gc_testkit.settings import fake_ctx
@@ -42,15 +42,14 @@ def test_apply_appends_notice_when_threshold_reached():
             "agent.stop_tools": [],
         }
     )
-    out = apply_tool_usage_notice_before_llm(
-        [{"role": "user", "content": "hi", "id": "u1"}],
+    texts = notice_texts_before_llm(
         state,
         ctx,
         meta,
         step_messages=[{"role": "assistant", "content": "ok", "id": "a1"}],
     )
-    assert len(out) == 2
-    assert "not used session_memory" in out[1]["content"]
+    assert len(texts) == 1
+    assert "not used session_memory" in texts[0]
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 0
 
 
@@ -59,14 +58,13 @@ def test_apply_no_notice_when_rules_empty():
     state.tool_usage_notice_cnt = {"session_memory": 100}
     meta: dict = {}
     ctx = fake_ctx({"agent.stop_tools": []})
-    out = apply_tool_usage_notice_before_llm(
-        [{"role": "user", "content": "hi", "id": "u1"}],
+    texts = notice_texts_before_llm(
         state,
         ctx,
         meta,
         step_messages=[],
     )
-    assert len(out) == 1
+    assert texts == []
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 100
 
 
@@ -86,19 +84,14 @@ def test_apply_long_changed_hint_on_k_tick(monkeypatch):
     )
 
     set_project_memory_check_cnt(meta, 2)
-    out = apply_tool_usage_notice_before_llm(
-        [{"role": "user", "content": "x", "id": "u1"}],
+    texts = notice_texts_before_llm(
         state,
         ctx,
         meta,
         step_messages=[],
         project_memory_hash="new_hash",
     )
-    assert any(
-        "baseline" in m["content"].lower()
-        for m in out
-        if m.get("role") == "user"
-    )
+    assert any("baseline" in text.lower() for text in texts)
 
 
 def test_trace_remembers_executed_tool_name():
@@ -127,8 +120,7 @@ def test_apply_resets_from_invoked_names_when_output_has_no_tool():
             "agent.stop_tools": [],
         }
     )
-    out = apply_tool_usage_notice_before_llm(
-        [{"role": "user", "content": "hi", "id": "u1"}],
+    texts = notice_texts_before_llm(
         state,
         ctx,
         {},
@@ -141,7 +133,7 @@ def test_apply_resets_from_invoked_names_when_output_has_no_tool():
         ],
         reset_tool_names={"fs_view_image"},
     )
-    assert out == [{"role": "user", "content": "hi", "id": "u1"}]
+    assert texts == []
     assert state.tool_usage_notice_cnt["fs_view_image"] == 0
 
 
@@ -169,17 +161,12 @@ def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
     )
 
     set_project_memory_check_cnt(meta, 2)
-    out = apply_tool_usage_notice_before_llm(
-        [{"role": "user", "content": "x", "id": "u1"}],
+    texts = notice_texts_before_llm(
         state,
         ctx,
         meta,
         step_messages=[{"role": "assistant", "content": "ok", "id": "a1"}],
         project_memory_hash="new_hash",
     )
-    assert any(
-        "project memory" in m["content"].lower()
-        for m in out
-        if m.get("role") == "user"
-    )
+    assert any("project memory" in text.lower() for text in texts)
     assert state.tool_usage_notice_cnt.get("session_memory", 0) == 7
