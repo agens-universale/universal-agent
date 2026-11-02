@@ -62,7 +62,6 @@ def _tool_reset_reasons(
 
 
 def _emit_project_memory_hints(
-    out: list,
     state: Any,
     meta: dict,
     ctx: Any,
@@ -71,20 +70,12 @@ def _emit_project_memory_hints(
     enabled: bool,
     memory_hash: str | None,
 ) -> list[str]:
-    """Добавить в ``out`` подсказки project_memory; вернуть их тексты."""
-    emitted: list[str] = []
+    """Тексты подсказок project_memory. Сообщение собирает вызывающий."""
     if not enabled:
-        return emitted
-    for hint_text in collect_project_memory_hints(
+        return []
+    return collect_project_memory_hints(
         state, meta, ctx, settings, get_hash_fn=lambda _ctx: memory_hash
-    ):
-        out.append(
-            wrap_project_memory_hint_user_message(
-                hint_text, suffix="mem_project"
-            )
-        )
-        emitted.append(hint_text)
-    return emitted
+    )
 
 
 def _project_counter_reset(
@@ -226,10 +217,8 @@ def _notice_pairs_before_llm(
         getattr(state, "tool_usage_notice_cnt", None) or {}
     )
     pairs: list[tuple[str, str]] = []
-    emitted_holder: list[str] = []
 
     emitted_project_hints = _emit_project_memory_hints(
-        emitted_holder,
         state,
         meta,
         ctx,
