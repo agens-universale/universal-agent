@@ -140,8 +140,8 @@ def test_schema_requires_action_register_and_content():
     )
     content_desc = WorkingMemory.tool_description()["parameters"][
         "properties"
-    ]["content"]["description"]
-    assert "ignored" in content_desc.lower()
+    ]["content"]["description"].lower()
+    assert "for list and read: pass an empty string." in content_desc
 
 
 def test_list_and_read_ignore_content():
