@@ -97,11 +97,11 @@ def _canon_content_text(content, *, persist_reasoning: bool):
 
 
 def _nonempty_content(content):
-    """Строковый content после strip; пробельный → None. Не-строки as-is."""
+    """Preserve nonempty content verbatim, including whitespace-only strings."""
     if content is None:
         return None
     if isinstance(content, str):
-        return content.strip() or None
+        return content or None
     return content
 
 
@@ -151,7 +151,7 @@ def get_output_list(
                 f"code={err_code!r} message={err_message!r} metadata={err_metadata!r}"
             )
         msg_obj = dct_choice.get("message") or {}
-        # Пробельный content/reasoning схлопываем до пустоты; дальше — те же ветки.
+        # Keep nonempty provider strings verbatim, including whitespace-only text.
         content = _nonempty_content(msg_obj.get("content"))
         reasoning_text = nonempty_reasoning_text(msg_obj)
         has_tools = bool(msg_obj.get("tool_calls"))
@@ -257,7 +257,12 @@ def _message_text_and_reasoning(
             persist_reasoning_content=persist_reasoning_content,
         )
         return text_out, item_reasoning
-    if content:
+    if content and (
+        persist_reasoning_content
+        or not isinstance(content, str)
+        or content.strip()
+        or reasoning_text is None
+    ):
         # Think + проза при strip — только проза; think-only content — as-is.
         text_out = _canon_content_text(
             content, persist_reasoning=persist_reasoning_content
@@ -270,7 +275,9 @@ def _message_text_and_reasoning(
     # Литеральный </think> внутри мысли иначе закрывает обёртку
     # раньше времени: нежадный strip оставляет хвост как прозу.
     body = re.sub(r"</think>", "", reasoning_text, flags=re.IGNORECASE)
-    return f"<think>{body}</think>", None
+    # In strip mode salvage reasoning before the original whitespace content.
+    suffix = content if isinstance(content, str) else ""
+    return f"<think>{body}</think>{suffix}", None
 
 
 def _message_text_with_tools(
@@ -285,6 +292,8 @@ def _message_text_with_tools(
     if content is None:
         return None
     if not isinstance(content, str):
+        return content
+    if content and not content.strip():
         return content
     if not _visible_prose_without_think(content):
         return None
