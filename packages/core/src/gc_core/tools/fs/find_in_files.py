@@ -141,6 +141,7 @@ class FindInFiles(AbstractSimpleTool):
     # matches × line_length — measured 600 MB from a 2 MB file.
     max_context_chars = 5000
     max_regex_matches_examined = 4096
+    max_native_match_locators = 8
 
     QUERY_MODE_TEXT = "text"
     QUERY_MODE_RE = "python-re"
@@ -1688,33 +1689,54 @@ class FindInFiles(AbstractSimpleTool):
             yield WalkEntry(rel or ".", False)
 
     @staticmethod
-    def _native_match_span(
-        line: str, plan: Any, compiled: re.Pattern
+    def _native_literal_match_span(
+        line: str, plan: Any
     ) -> Optional[Tuple[int, int]]:
-        """Locate a grep hit in character offsets on its full returned line."""
-        if plan.fixed:
-            if plan.case_insensitive:
-                start = line.translate(_ASCII_LOWER).find(plan.pattern.lower())
-            else:
-                start = line.find(plan.pattern)
-            return None if start < 0 else (start, start + len(plan.pattern))
-        match = compiled.search(line)
-        return None if match is None else match.span()
+        """Use character offsets only where literal grep semantics are exact."""
+        if not plan.fixed:
+            return None
+        if plan.case_insensitive:
+            if not plan.pattern.isascii():
+                return None
+            start = line.translate(_ASCII_LOWER).find(plan.pattern.lower())
+        else:
+            start = line.find(plan.pattern)
+        return None if start < 0 else (start, start + len(plan.pattern))
 
-    def _clip_native_matches(
-        self, shown: List[Dict[str, Any]], plan: Any, compiled: re.Pattern
+    async def _clip_native_matches(
+        self, shown: List[Dict[str, Any]], plan: Any
     ) -> bool:
-        """Keep a real hit visible in each grep row; False means fall back."""
+        """Bound each row without discarding native hits when a span is unknown."""
+        from gc_core.utils.native_fs_search import alocate_native_grep_match
+
+        complete = True
+        probes = 0
         for row in shown:
             line = row["line_content"]
-            span = self._native_match_span(line, plan, compiled)
-            if span is None:
-                return False
-            row["line_content"] = self._clip_line_content(
-                line, match_start=span[0], match_end=span[1]
-            )
             row.pop("context", None)
-        return True
+            if len(line) <= self.max_line_content_chars:
+                continue
+            span = self._native_literal_match_span(line, plan)
+            if (
+                span is None
+                and not row.get("line_content_truncated")
+                and probes < self.max_native_match_locators
+            ):
+                probes += 1
+                span = await alocate_native_grep_match(
+                    self._backend, line, plan
+                )
+            if span is None:
+                complete = False
+                row["line_content"] = (
+                    line[: self.max_line_content_chars]
+                    + "...[line_truncated: match location unavailable]"
+                )
+            else:
+                row["line_content"] = self._clip_line_content(
+                    line, match_start=span[0], match_end=span[1]
+                )
+        return complete
 
     def _has_native_grep(self) -> bool:
         try:
@@ -1727,7 +1749,6 @@ class FindInFiles(AbstractSimpleTool):
         *,
         path: str,
         pattern: str,
-        compiled: re.Pattern,
         query_mode: str,
         pattern_mode: PatternMode,
         needles: Needles,
@@ -1851,8 +1872,7 @@ class FindInFiles(AbstractSimpleTool):
             else len(ranked)
         )
         shown = ranked[:limit_eff]
-        if not self._clip_native_matches(shown, plan, compiled):
-            return None, "native_match_offset_unavailable"
+        windows_complete = await self._clip_native_matches(shown, plan)
         await self._attach_native_match_contexts(shown, max_bytes)
         for m in shown:
             m["file"] = tool_report_abspath(
@@ -1885,14 +1905,15 @@ class FindInFiles(AbstractSimpleTool):
             limit_capped=limit_capped,
             limit_requested=limit_requested,
             count=count,
+            windows_complete=windows_complete,
         )
         return self._build_response(
             matches=shown,
             count=count,
             stop_reason=stop_reason,
             guidance=guidance,
-            scan_complete=not hit_limit,
-            more_matches_may_exist=hit_limit,
+            scan_complete=not hit_limit and windows_complete,
+            more_matches_may_exist=hit_limit or not windows_complete,
             **common,
         ), None
 
@@ -1926,7 +1947,14 @@ class FindInFiles(AbstractSimpleTool):
         limit_capped: bool,
         limit_requested: int,
         count: int,
+        windows_complete: bool,
     ) -> Tuple[Optional[str], Optional[str]]:
+        if not windows_complete:
+            return "native_match_offset_unavailable", (
+                "Native matches are retained, but a displayed line fragment may "
+                "omit its match. Use shell grep on the reported file/line to "
+                "locate it; increasing limit will not restore the fragment."
+            )
         if hit_limit:
             return "match_limit", self._match_limit_guidance(
                 limit_eff,
@@ -1984,7 +2012,6 @@ class FindInFiles(AbstractSimpleTool):
         native_resp, fallback_reason = await self._try_native_grep_directory(
             path=path,
             pattern=pattern,
-            compiled=compiled,
             query_mode=query_mode,
             pattern_mode=pattern_mode,
             needles=needles,

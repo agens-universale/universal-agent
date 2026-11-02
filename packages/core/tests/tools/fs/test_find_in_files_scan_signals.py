@@ -425,6 +425,94 @@ def test_capture_cap_with_native_failure_does_not_fall_to_python(
     assert "fallback_reason" not in data
 
 
+def test_capture_capped_tail_preserves_native_hits(tmp_path, monkeypatch):
+    from gc_core.utils import native_fs_search
+    from gc_core.utils.native_fs_search import NativeGrepResult
+
+    path = tmp_path / "big.log"
+    path.write_text("KEY\n" + "x" * 1000 + "KEY\n", encoding="utf-8")
+    rows = [
+        {"file": str(path), "line": 1, "end_line": 1, "line_content": "KEY"},
+        {
+            "file": str(path),
+            "line": 2,
+            "end_line": 2,
+            "line_content": "x" * 600,
+            "line_content_truncated": True,
+        },
+    ]
+    monkeypatch.setattr(
+        native_fs_search,
+        "arun_native_grep",
+        as_coro(lambda *a, **k: NativeGrepResult(rows, True, True)),
+    )
+    tool = _tool(tmp_path, {"max_file_bytes": 50})
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 2
+    assert data["matches"][0]["line_content"] == "KEY"
+    assert data["matches"][1]["line_content_truncated"] is True
+    assert data["stop_reason"] == "output_capped"
+    assert data["scan_complete"] is False
+    assert "fallback_reason" not in data
+
+
+def test_failed_offset_probes_are_bounded_and_preserve_hits(
+    tmp_path, monkeypatch
+):
+    from gc_core.utils import native_fs_search
+    from gc_core.utils.native_fs_search import NativeGrepResult
+
+    line = "x" * 700 + "key"
+    path = tmp_path / "big.log"
+    path.write_text((line + "\n") * 10, encoding="utf-8")
+    rows = [
+        {
+            "file": str(path),
+            "line": i + 1,
+            "end_line": i + 1,
+            "line_content": line,
+        }
+        for i in range(10)
+    ]
+    monkeypatch.setattr(
+        native_fs_search,
+        "arun_native_grep",
+        as_coro(lambda *a, **k: NativeGrepResult(rows, False, False)),
+    )
+    probes = []
+
+    async def unavailable(*args):
+        probes.append(args)
+        return None
+
+    monkeypatch.setattr(
+        native_fs_search, "alocate_native_grep_match", unavailable
+    )
+    monkeypatch.setattr(FindInFiles, "max_native_match_locators", 2)
+    tool = _tool(tmp_path, {"max_file_bytes": 50})
+    _native_ready(tool, monkeypatch)
+
+    data = _call(
+        tool,
+        tmp_path,
+        pattern="KEY|OTHER",
+        query_mode="python-re",
+        case_insensitive=True,
+    )
+
+    assert len(probes) == 2
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 10
+    assert data["stop_reason"] == "native_match_offset_unavailable"
+    assert data["scan_complete"] is False
+    assert data["more_matches_may_exist"] is True
+    assert "fallback_reason" not in data
+
+
 # --- call-time exclude_dirs stay on the native path ----------------------------
 
 

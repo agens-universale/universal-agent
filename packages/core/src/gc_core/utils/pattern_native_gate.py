@@ -91,9 +91,6 @@ def is_grep_native_safe(
     # control chars are unsafe for grep argv in every mode → fail closed
     if _has_control_chars(pattern):
         return None
-    # Locale-dependent grep -i cannot supply offsets equivalent to Python re.
-    if case_insensitive and not pattern.isascii():
-        return None
 
     # text mode → fixed string
     if query_mode == "text":

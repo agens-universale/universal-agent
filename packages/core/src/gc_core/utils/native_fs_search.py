@@ -29,6 +29,8 @@ from typing import (
 
 from gc_core.backends.async_protocol import aexec_port, arun_backend_exec_raw
 from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
+from gc_core.backends.runtime_probe import RuntimeUnavailable
+from gc_core.user_stop import UserStopInterrupt
 from gc_core.utils.find_in_files_scan_mode import Needles
 from gc_core.utils.fs_search_walk import effective_exclude_dir_names
 from gc_core.utils.pattern_native_gate import (
@@ -86,6 +88,59 @@ def _grep_env(plan: NativeGrepPlan) -> Dict[str, str]:
     if plan.fixed and plan.pattern.isascii():
         env["LC_ALL"] = "C"
     return env
+
+
+async def alocate_native_grep_match(
+    backend: Any, line: str, plan: NativeGrepPlan
+) -> Optional[Tuple[int, int]]:
+    """Locate the first hit with grep's locale/case rules on a returned line.
+
+    Offsets from ``-b -o`` count UTF-8 bytes of stdin, not Python characters.
+    Only a complete first record is usable; capped/failed probes lose no hits.
+    """
+    argv = ["grep", "-b", "-o", "-m", "1", "--color=never"]
+    if plan.case_insensitive:
+        argv.append("-i")
+    argv.extend(["-F" if plan.fixed else "-E", "--", plan.pattern])
+    try:
+        result = await aexec_port(backend).aexec_argv(
+            argv,
+            stdin=line,
+            timeout=2,
+            env=_grep_env(plan),
+            capture_max_chars=4096,
+        )
+    except (UserStopInterrupt, RuntimeUnavailable):
+        raise
+    except Exception:
+        return None
+    if getattr(result, "stopped_by_user", False):
+        raise UserStopInterrupt(kind="exec")
+    if (
+        result.timed_out
+        or result.return_code != 0
+        or result.stdout_hit_capture_cap
+    ):
+        return None
+    record, newline, _rest = result.stdout.partition("\n")
+    offset, sep, matched = record.partition(":")
+    if (
+        not newline
+        or not sep
+        or not offset.isascii()
+        or not offset.isdecimal()
+    ):
+        return None
+    raw = line.encode("utf-8")
+    start = int(offset)
+    needle = matched.encode("utf-8")
+    if not needle or raw[start : start + len(needle)] != needle:
+        return None
+    try:
+        char_start = len(raw[:start].decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
+    return char_start, char_start + len(matched)
 
 
 class _ParseFailure(Exception):

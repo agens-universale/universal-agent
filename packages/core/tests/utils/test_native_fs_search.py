@@ -1,12 +1,55 @@
 """Нативный grep-рецепт: имена файлов в выводе, старт-симлинк, фильтр до обрезки."""
 
+import pytest
+
+from gc_core.backends.runtime_probe import RuntimeUnavailable
+from gc_core.user_stop import UserStopInterrupt
 from gc_core.utils.native_fs_search import (
     _build_find_prune_argv,
+    alocate_native_grep_match,
     arun_native_grep,
 )
 from gc_core.utils.pattern_native_gate import NativeGrepPlan
 
 PLAN = NativeGrepPlan(fixed=True, pattern="KEY", case_insensitive=False)
+
+
+async def test_native_match_locator_converts_utf8_byte_offsets():
+    backend = _Backend(stdout="6:KEY\n")
+
+    span = await alocate_native_grep_match(backend, "éééKEY", PLAN)
+
+    assert span == (3, 6)
+
+
+async def test_native_match_locator_rejects_spliced_capture():
+    backend = _Backend(stdout="0:" + "N" * 600 + "\n")
+    backend._res.stdout_hit_capture_cap = True
+
+    span = await alocate_native_grep_match(
+        backend,
+        "N" * 1000,
+        NativeGrepPlan(fixed=True, pattern="N" * 1000, case_insensitive=False),
+    )
+
+    assert span is None
+
+
+@pytest.mark.parametrize(
+    "error", [UserStopInterrupt(kind="exec"), RuntimeUnavailable()]
+)
+async def test_native_match_locator_propagates_control_failures(
+    monkeypatch, error
+):
+    backend = _Backend()
+
+    def stopped(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(backend, "exec_argv", stopped)
+
+    with pytest.raises(type(error)):
+        await alocate_native_grep_match(backend, "KEY", PLAN)
 
 
 class _Res:

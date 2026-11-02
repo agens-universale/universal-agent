@@ -441,7 +441,41 @@ def test_native_ascii_ignore_case_skips_unicode_case_equivalent(tmp_path):
 
 
 @requires_native_search
-def test_non_ascii_ignore_case_uses_python_offsets(tmp_path):
+def test_native_or_ignore_case_uses_grep_match_offsets(tmp_path, monkeypatch):
+    monkeypatch.setenv("LC_ALL", "C")
+    (tmp_path / "one.txt").write_text(
+        "K" + "a" * 700 + "k" + "b" * 700, encoding="utf-8"
+    )
+
+    data = _call_tool(
+        tmp_path,
+        pattern="k|OTHER",
+        query_mode="python-re",
+        case_insensitive=True,
+    )
+
+    assert data["search_backend"] == "grep"
+    assert "k" in data["matches"][0]["line_content"]
+    assert "K" not in data["matches"][0]["line_content"]
+
+
+@requires_native_search
+def test_native_or_keeps_the_longest_matching_branch(tmp_path):
+    long_branch = "A" + "B" * 300
+    (tmp_path / "one.txt").write_text(
+        "x" * 600 + long_branch + "y" * 600, encoding="utf-8"
+    )
+
+    data = _call_tool(
+        tmp_path, pattern="A|" + long_branch, query_mode="python-re"
+    )
+
+    assert data["search_backend"] == "grep"
+    assert long_branch in data["matches"][0]["line_content"]
+
+
+@requires_native_search
+def test_non_ascii_ignore_case_uses_native_offsets(tmp_path):
     (tmp_path / "one.txt").write_text(
         "a" * 700 + "École" + "b" * 700, encoding="utf-8"
     )
@@ -450,8 +484,28 @@ def test_non_ascii_ignore_case_uses_python_offsets(tmp_path):
         tmp_path, pattern="école", query_mode="text", case_insensitive=True
     )
 
-    assert data["search_backend"] == "python"
+    assert data["search_backend"] == "grep"
     assert "École" in data["matches"][0]["line_content"]
+
+
+@requires_native_search
+def test_non_ascii_ignore_case_preserves_hits_in_oversized_files(tmp_path):
+    (tmp_path / "big.txt").write_text("École\n" * 20, encoding="utf-8")
+
+    data = _call_tool(
+        tmp_path,
+        extra={"max_file_bytes": 50},
+        pattern="École",
+        query_mode="text",
+        case_insensitive=True,
+    )
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 20
+    assert all("École" in row["line_content"] for row in data["matches"])
+    assert all(
+        row["context_omitted"] == "file_too_large" for row in data["matches"]
+    )
 
 
 # ------------------------------------------------------------------
