@@ -28,7 +28,8 @@ uv pip install "gc-stores[postgres] @ git+https://gitverse.ru/gigacode-ai/univer
 
 Из конфига — секция `storage` в config.yml
 ([configuration.md](../configuration.md#хранилище-storage)); её открывают
-`gc-serve` и `gc-cli`, а в своём коде — `aopen_configured`:
+`gc-serve` и `gc-cli`, а в своём коде — `aopen_configured`. Примеры строк
+подключения и установка голого `gc-cli` с драйвером — там же.
 
 ```python
 from gc_stores.configured import aopen_configured
