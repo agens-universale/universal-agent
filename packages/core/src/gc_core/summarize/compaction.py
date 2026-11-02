@@ -50,6 +50,10 @@ from gc_core.summarize.summary_spec import (
     agent_summary_slice_mode,
     slice_summary,
 )
+from gc_core.summarize.summary_validation import (
+    FALLBACK_SUMMARY,
+    has_nonempty_summary_body,
+)
 from gc_core.summarize.thread_summarizer import (
     asummarize_dialog_via_chat_completions,
 )
@@ -499,6 +503,11 @@ async def arun_summary_compaction(
             raw_summary_chars=len(raw_summary),
         )
         agent_summary_text = raw_summary
+    # Reject unusable projected content before changing state or persistence.
+    if raw_summary == FALLBACK_SUMMARY or not has_nonempty_summary_body(
+        agent_summary_text
+    ):
+        raise ValueError("compaction produced no usable summary")
     memory_append_deltas = coerce_working_memory_deltas(
         summary_result.get("memory_append_deltas")
     )

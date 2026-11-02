@@ -2,12 +2,12 @@
 
 from typing import Any
 
-from gc_core.message_format import dialog_history as dialog_history
 from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.summary_spec import (
     render_output_shape_for_prompt,
     render_tag_roles_for_prompt,
 )
+from gc_core.summarize.summary_validation import has_nonempty_summary_body
 
 
 async def acompress_summary_text(
@@ -48,10 +48,12 @@ async def acompress_summary_text(
         consumer="summary",
         max_tokens=max_tokens,
     )
-    if not text:
-        return summary_text[:max_chars]
+    if not has_nonempty_summary_body(text):
+        raise ValueError("summary compression produced no usable summary")
     if len(text) > max_chars:
-        return dialog_history.truncate_text(text, max_chars)
+        raise ValueError(
+            "summary compression produced no usable summary within character limit"
+        )
     return text
 
 

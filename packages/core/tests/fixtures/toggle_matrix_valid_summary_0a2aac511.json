@@ -1,0 +1,973 @@
+[
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:50Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"5149\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.&lt;/task_and_context&gt;\n  &lt;open_tasks&gt;- test content for validation padding.&lt;/open_tasks&gt;\n  &lt;do_not_redo&gt;- test content for validation padding.&lt;/do_not_redo&gt;\n  &lt;last_verified_facts&gt;- test content for validation padding.&lt;/last_verified_facts&gt;\n  &lt;recent_artifacts&gt;- test content for validation padding.&lt;/recent_artifacts&gt;\n&lt;/summary&gt;\n\n&lt;session_memory&gt;\n&lt;/session_memory&gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&lt;current_user_intent&gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:50Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&lt;/current_user_intent&gt;\n\n&lt;last_dialog_steps&gt;\n&lt;step 6&gt;\n&lt;cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"2946\"&gt;[user] &amp;lt;technical type=\"dialog_summary\"&amp;gt;Summarized context from previous dialogue.\n&amp;lt;summary&amp;gt;\n  &amp;lt;task_and_context&amp;gt;- previous dialogue\n- test content for validation padding.&amp;lt;/task_and_context&amp;gt;\n  &amp;lt;open_tasks&amp;gt;- test content for validation padding.&amp;lt;/open_tasks&amp;gt;\n  &amp;lt;do_not_redo&amp;gt;- test content for validation padding.&amp;lt;/do_not_redo&amp;gt;\n  &amp;lt;last_verified_facts&amp;gt;- test content for validation padding.&amp;lt;/last_verified_facts&amp;gt;\n </cutted_envelope>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n[assistant] <summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n</step 11>\n\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "summary/trigger_tiny",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 4809,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": "порог заведомо перешагивается — компакция обязана сработать"
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:50Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"5149\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.&lt;/task_and_context&gt;\n  &lt;open_tasks&gt;- test content for validation padding.&lt;/open_tasks&gt;\n  &lt;do_not_redo&gt;- test content for validation padding.&lt;/do_not_redo&gt;\n  &lt;last_verified_facts&gt;- test content for validation padding.&lt;/last_verified_facts&gt;\n  &lt;recent_artifacts&gt;- test content for validation padding.&lt;/recent_artifacts&gt;\n&lt;/summary&gt;\n\n&lt;session_memory&gt;\n&lt;/session_memory&gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&lt;current_user_intent&gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:50Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&lt;/current_user_intent&gt;\n\n&lt;last_dialog_steps&gt;\n&lt;step 6&gt;\n&lt;cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"2946\"&gt;[user] &amp;lt;technical type=\"dialog_summary\"&amp;gt;Summarized context from previous dialogue.\n&amp;lt;summary&amp;gt;\n  &amp;lt;task_and_context&amp;gt;- previous dialogue\n- test content for validation padding.&amp;lt;/task_and_context&amp;gt;\n  &amp;lt;open_tasks&amp;gt;- test content for validation padding.&amp;lt;/open_tasks&amp;gt;\n  &amp;lt;do_not_redo&amp;gt;- test content for validation padding.&amp;lt;/do_not_redo&amp;gt;\n  &amp;lt;last_verified_facts&amp;gt;- test content for validation padding.&amp;lt;/last_verified_facts&amp;gt;\n </cutted_envelope>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n[assistant] <summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n</step 11>\n\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "summary/turn_end_off",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 4809,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": ""
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:50Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"5240\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.&lt;/task_and_context&gt;\n  &lt;open_tasks&gt;- test content for validation padding.&lt;/open_tasks&gt;\n  &lt;do_not_redo&gt;- test content for validation padding.&lt;/do_not_redo&gt;\n  &lt;last_verified_facts&gt;- test content for validation padding.&lt;/last_verified_facts&gt;\n  &lt;active_constraints&gt;- test content for validation padding.&lt;/active_constraints&gt;\n  &lt;recent_artifacts&gt;- test content for validation padding.&lt;/recent_artifacts&gt;\n&lt;/summary&gt;\n\n&lt;session_memory&gt;\n&lt;/session_memory&gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&lt;current_user_intent&gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:50Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&lt;/current_user_intent&gt;\n\n&lt;last_dialog_steps&gt;\n&lt;step 6&gt;\n&lt;cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"3028\"&gt;[user] &amp;lt;technical type=\"dialog_summary\"&amp;gt;Summarized context from previous dialogue.\n&amp;lt;summary&amp;gt;\n  &amp;lt;task_and_context&amp;gt;- previous dialogue\n- test content for validation padding.&amp;lt;/task_and_context&amp;gt;\n  &amp;lt;open_tasks&amp;gt;- test content for validation padding.&amp;lt;/open_tasks&amp;gt;\n  &amp;lt;do_not_redo&amp;gt;- test content for validation padding.&amp;lt;/do_not_redo&amp;gt;\n  &amp;lt;last_veri</cutted_envelope>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n[assistant] <summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n</step 11>\n\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "summary/batch_chars_tiny",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 4891,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": "многобатчевая сводка: memory-patch пропускается"
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 19,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_c ... [TEXT CUTTED]</task_and_context>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:51Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"4847\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.&lt;/task_and_c ... [TEXT CUTTED]&lt;/task_and_context&gt;\n&lt;/summary&gt;\n\n&lt;session_memory&gt;\n&lt;/session_memory&gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&lt;current_user_intent&gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:51Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&lt;/current_user_intent&gt;\n\n&lt;last_dialog_steps&gt;\n&lt;step 6&gt;\n&lt;cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"2680\"&gt;[user] &amp;lt;technical type=\"dialog_summary\"&amp;gt;Summarized context from previous dialogue.\n&amp;lt;summary&amp;gt;\n  &amp;lt;task_and_context&amp;gt;- previous dialogue\n- test content for validation padding.&amp;lt;/task_and_c ... [TEXT CUTTED]&amp;lt;/task_and_context&amp;gt;\n&amp;lt;/summary&amp;gt;\n\n&amp;lt;session_memory&amp;gt;\n&amp;lt;/session_memory&amp;gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&amp;lt;current_user_intent&amp;gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:51Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&amp;lt;/current_user_intent&amp;gt;\n\n&amp;lt;last_dialog_ste</cutted_envelope>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n[assistant] <summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n</step 11>\n\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "summary/max_accumulated_tiny",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 4498,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": ""
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:51Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"100\" original_chars=\"2468\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task</cutted_envelope>\n<cutted_envelope truncated=\"true\" shown_chars=\"100\" original_chars=\"149\">[user] &lt;technical type=\"technical\"&gt;There is no tool call in your response. Choose a tool call that b</cutted_envelope>\n<cutted_envelope truncated=\"true\" shown_chars=\"100\" original_chars=\"508\">[assistant] &lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.</cutted_envelope>\n</step 11>\n\n<step 12>\n<cutted_envelope truncated=\"true\" shown_chars=\"100\" original_chars=\"149\">[user] &lt;technical type=\"technical\"&gt;There is no tool call in your response. Choose a tool call that b</cutted_envelope>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "summary/max_message_tiny",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 3014,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": ""
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:51Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 11>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "summary/max_dialogue_tiny",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 2334,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": ""
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:51Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "summary/last_steps_1",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 2334,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": ""
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:46:51Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"80\" original_chars=\"2354\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogu</cutted_envelope>\n<cutted_envelope truncated=\"true\" shown_chars=\"80\" original_chars=\"149\">[user] &lt;technical type=\"technical\"&gt;There is no tool call in your response. Choos</cutted_envelope>\n<cutted_envelope truncated=\"true\" shown_chars=\"80\" original_chars=\"508\">[assistant] &lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for</cutted_envelope>\n</step 11>\n\n<step 12>\n<cutted_envelope truncated=\"true\" shown_chars=\"80\" original_chars=\"149\">[user] &lt;technical type=\"technical\"&gt;There is no tool call in your response. Choos</cutted_envelope>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "summary/last_step_msg_chars",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 2921,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": ""
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "prompts",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:01Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"5149\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.&lt;/task_and_context&gt;\n  &lt;open_tasks&gt;- test content for validation padding.&lt;/open_tasks&gt;\n  &lt;do_not_redo&gt;- test content for validation padding.&lt;/do_not_redo&gt;\n  &lt;last_verified_facts&gt;- test content for validation padding.&lt;/last_verified_facts&gt;\n  &lt;recent_artifacts&gt;- test content for validation padding.&lt;/recent_artifacts&gt;\n&lt;/summary&gt;\n\n&lt;session_memory&gt;\n&lt;/session_memory&gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&lt;current_user_intent&gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:01Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&lt;/current_user_intent&gt;\n\n&lt;last_dialog_steps&gt;\n&lt;step 6&gt;\n&lt;cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"2946\"&gt;[user] &amp;lt;technical type=\"dialog_summary\"&amp;gt;Summarized context from previous dialogue.\n&amp;lt;summary&amp;gt;\n  &amp;lt;task_and_context&amp;gt;- previous dialogue\n- test content for validation padding.&amp;lt;/task_and_context&amp;gt;\n  &amp;lt;open_tasks&amp;gt;- test content for validation padding.&amp;lt;/open_tasks&amp;gt;\n  &amp;lt;do_not_redo&amp;gt;- test content for validation padding.&amp;lt;/do_not_redo&amp;gt;\n  &amp;lt;last_verified_facts&amp;gt;- test content for validation padding.&amp;lt;/last_verified_facts&amp;gt;\n </cutted_envelope>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n[assistant] <summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n</step 11>\n\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "prompts/summary_prompt",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 4809,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": "промпт сводки заменён и компакция реально идёт"
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "prompts",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:01Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"5149\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.&lt;/task_and_context&gt;\n  &lt;open_tasks&gt;- test content for validation padding.&lt;/open_tasks&gt;\n  &lt;do_not_redo&gt;- test content for validation padding.&lt;/do_not_redo&gt;\n  &lt;last_verified_facts&gt;- test content for validation padding.&lt;/last_verified_facts&gt;\n  &lt;recent_artifacts&gt;- test content for validation padding.&lt;/recent_artifacts&gt;\n&lt;/summary&gt;\n\n&lt;session_memory&gt;\n&lt;/session_memory&gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&lt;current_user_intent&gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:01Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&lt;/current_user_intent&gt;\n\n&lt;last_dialog_steps&gt;\n&lt;step 6&gt;\n&lt;cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"2946\"&gt;[user] &amp;lt;technical type=\"dialog_summary\"&amp;gt;Summarized context from previous dialogue.\n&amp;lt;summary&amp;gt;\n  &amp;lt;task_and_context&amp;gt;- previous dialogue\n- test content for validation padding.&amp;lt;/task_and_context&amp;gt;\n  &amp;lt;open_tasks&amp;gt;- test content for validation padding.&amp;lt;/open_tasks&amp;gt;\n  &amp;lt;do_not_redo&amp;gt;- test content for validation padding.&amp;lt;/do_not_redo&amp;gt;\n  &amp;lt;last_verified_facts&amp;gt;- test content for validation padding.&amp;lt;/last_verified_facts&amp;gt;\n </cutted_envelope>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n[assistant] <summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n</step 11>\n\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "prompts/memory_patch_prompt",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 4809,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": ""
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:01Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"5149\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.&lt;/task_and_context&gt;\n  &lt;open_tasks&gt;- test content for validation padding.&lt;/open_tasks&gt;\n  &lt;do_not_redo&gt;- test content for validation padding.&lt;/do_not_redo&gt;\n  &lt;last_verified_facts&gt;- test content for validation padding.&lt;/last_verified_facts&gt;\n  &lt;recent_artifacts&gt;- test content for validation padding.&lt;/recent_artifacts&gt;\n&lt;/summary&gt;\n\n&lt;session_memory&gt;\n&lt;/session_memory&gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&lt;current_user_intent&gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:01Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&lt;/current_user_intent&gt;\n\n&lt;last_dialog_steps&gt;\n&lt;step 6&gt;\n&lt;cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"2946\"&gt;[user] &amp;lt;technical type=\"dialog_summary\"&amp;gt;Summarized context from previous dialogue.\n&amp;lt;summary&amp;gt;\n  &amp;lt;task_and_context&amp;gt;- previous dialogue\n- test content for validation padding.&amp;lt;/task_and_context&amp;gt;\n  &amp;lt;open_tasks&amp;gt;- test content for validation padding.&amp;lt;/open_tasks&amp;gt;\n  &amp;lt;do_not_redo&amp;gt;- test content for validation padding.&amp;lt;/do_not_redo&amp;gt;\n  &amp;lt;last_verified_facts&amp;gt;- test content for validation padding.&amp;lt;/last_verified_facts&amp;gt;\n </cutted_envelope>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n[assistant] <summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n</step 11>\n\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "pair/trigger_x_turn_end",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 4809,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": "run_summary_coordinator: pre_run/pre_backend против turn_end"
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (2/2).\", \"raw_trace_summary\": \"{\\\"action\\\": \\\"accept\\\", \\\"trace_ok\\\": true, \\\"report_ok\\\": true, \\\"is_question\\\": false}\"}",
+    "area": "summary",
+    "backend_calls": 3,
+    "dump": [
+      {
+        "payload": {
+          "content": "сделай что-нибудь",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "arguments": "{\"expression\": \"2+2\"}",
+          "name": "exec_calculator",
+          "status": "completed",
+          "type": "function_call"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "output": "{\"tool\": \"exec_calculator\", \"ok\": true, \"expression\": \"2+2\", \"value_type\": \"int\", \"error\": null, \"value\": 4}",
+          "type": "function_call_output"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "arguments": "{\"solution_type\": \"direct_answer\", \"task_report\": \"готово\", \"handoff\": \"{}\"}",
+          "name": "turn_finish",
+          "status": "completed",
+          "type": "function_call"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "output": "{\"ok\": false, \"error\": {\"type\": \"invalid_arguments\", \"tool\": \"turn_finish\", \"message\": \"Arguments for tool 'turn_finish' do not match its schema. Details:\\npath='<root>': 'task' is a required property\"}, \"message\": \"❌ Wrong arguments for `turn_finish`: Arguments for tool 'turn_finish' do not match its schema. Details:\\npath='<root>': 'task' is a required property\\n\\nCorrect call format:\\n```json\\n{\\n  // REQUIRED\\n  \\\"solution_type\\\": <string>  // Turn outcome: full_solution (objective done), partial_solution (meaningful progress, not done), direct_answer (direct answer/explanation completed this turn), couldnt_solve, need_additional_info (blocked), abandoned,\\n  \\\"task\\\": <string>  // What the user asked this turn, in 1–2 phrases, in the user's terms,\\n  \\\"task_report\\\": <string>  // Final human-facing summary for this turn: what was done, result, assumptions, evidence,\\n  \\\"handoff\\\": <string>  // Must decode to a JSON object (dictionary), not an array, scalar, or null,\\n  // OPTIONAL\\n  \\\"comment\\\": <string>  // Caveats, risks, unresolved items, or suggested next steps for the user\\n}\\n```\\n\\nFix the arguments and retry the tool call.\"}",
+          "type": "function_call_output"
+        },
+        "seq": 5,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "pair/trigger_x_max_steps",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 0,
+      "messages_count": 5,
+      "runtime": {
+        "live_history_chars": 1405,
+        "live_msg_count": 5
+      },
+      "user_turn_seq": 0
+    },
+    "note": "компакция внутри лимита шагов"
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 25,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation  ... [TEXT CUTTED]</task_and_context>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:02Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"4830\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation  ... [TEXT CUTTED]&lt;/task_and_context&gt;\n&lt;/summary&gt;\n\n&lt;session_memory&gt;\n&lt;/session_memory&gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&lt;current_user_intent&gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:02Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&lt;/current_user_intent&gt;\n\n&lt;last_dialog_steps&gt;\n&lt;step 6&gt;\n&lt;cutted_envelope truncated=\"true\" shown_chars=\"1500\" original_chars=\"2660\"&gt;[user] &amp;lt;technical type=\"dialog_summary\"&amp;gt;Summarized context from previous dialogue.\n&amp;lt;summary&amp;gt;\n  &amp;lt;task_and_context&amp;gt;- previous dialogue\n- test content for validation  ... [TEXT CUTTED]&amp;lt;/task_and_context&amp;gt;\n&amp;lt;/summary&amp;gt;\n\n&amp;lt;session_memory&amp;gt;\n&amp;lt;/session_memory&amp;gt;\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n&amp;lt;current_user_intent&amp;gt;\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:02Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n&amp;lt;/current_user_intent&amp;gt;\n\n&amp;lt;last_dialog_steps&amp;gt;\n&amp;lt;step 1&amp;gt;\n[user] сделай что-ниб</cutted_envelope>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n[assistant] <summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n</step 11>\n\n<step 12>\n[user] <technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "pair/batch_x_accumulated",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 4483,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": "сжатие сводки внутри многобатча"
+  },
+  {
+    "answer": "{\"ok\": false, \"status\": \"step_limit\", \"message\": \"Agent stopped: step limit (5/5).\", \"raw_trace_summary\": \"<summary>\\n  <task_and_context>- previous dialogue\\n- test content for validation padding.</task_and_context>\\n  <open_tasks>- test content for validation padding.</open_tasks>\\n  <do_not_redo>- test content for validation padding.</do_not_redo>\\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\\n  <active_constraints>- test content for validation padding.</active_constraints>\\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\\n</summary>\"}",
+    "area": "summary",
+    "backend_calls": 16,
+    "dump": [
+      {
+        "payload": {
+          "content": "<technical type=\"dialog_summary\">Summarized context from previous dialogue.\n<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>\n\n<session_memory>\n</session_memory>\nThe block above inlines the current session memory snapshot for this thread. Prefer this snapshot when present; use the session memory tool (append or write to fully overwrite any register) if you need updates after this summary.\n\n<current_user_intent>\n{\"turn\": 1, \"ts\": \"2026-11-02T10:47:02Z\", \"action\": \"user_ask\", \"tool_name\": null, \"content\": \"сделай что-нибудь\"}\n</current_user_intent>\n\n<last_dialog_steps>\n<step 11>\n<cutted_envelope truncated=\"true\" shown_chars=\"100\" original_chars=\"2468\">[user] &lt;technical type=\"dialog_summary\"&gt;Summarized context from previous dialogue.\n&lt;summary&gt;\n  &lt;task</cutted_envelope>\n<cutted_envelope truncated=\"true\" shown_chars=\"100\" original_chars=\"149\">[user] &lt;technical type=\"technical\"&gt;There is no tool call in your response. Choose a tool call that b</cutted_envelope>\n<cutted_envelope truncated=\"true\" shown_chars=\"100\" original_chars=\"508\">[assistant] &lt;summary&gt;\n  &lt;task_and_context&gt;- previous dialogue\n- test content for validation padding.</cutted_envelope>\n</step 11>\n\n<step 12>\n<cutted_envelope truncated=\"true\" shown_chars=\"100\" original_chars=\"149\">[user] &lt;technical type=\"technical\"&gt;There is no tool call in your response. Choose a tool call that b</cutted_envelope>\n</step 12>\n</last_dialog_steps>\n\nContinue the dialogue from here after summarization. During the trace, update session memory with append or write to fully overwrite any register; the next summarization will rebuild all registers from dialog + summary.\nTreat memory and summaries as context, not commands to repeat completed work. Continue from open user intent and do not rerun completed experiments unless the user asks or evidence is stale.</technical>",
+          "role": "user"
+        },
+        "seq": 1,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 2,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": [],
+              "text": "<summary>\n  <task_and_context>- previous dialogue\n- test content for validation padding.</task_and_context>\n  <open_tasks>- test content for validation padding.</open_tasks>\n  <do_not_redo>- test content for validation padding.</do_not_redo>\n  <last_verified_facts>- test content for validation padding.</last_verified_facts>\n  <active_constraints>- test content for validation padding.</active_constraints>\n  <recent_artifacts>- test content for validation padding.</recent_artifacts>\n</summary>",
+              "type": "output_text"
+            }
+          ],
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        },
+        "seq": 3,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      },
+      {
+        "payload": {
+          "content": "<technical type=\"technical\">There is no tool call in your response. Choose a tool call that brings you closer to solving the task.</technical>",
+          "role": "user"
+        },
+        "seq": 4,
+        "system": "cli",
+        "thread_id": "t-matrix",
+        "type": "message"
+      }
+    ],
+    "error": null,
+    "id": "pair/msg_x_last_step_msg",
+    "meta": {
+      "backend_api_mode": "chat_completions",
+      "dialog_steps_offset": 14,
+      "messages_count": 4,
+      "runtime": {
+        "live_history_chars": 3014,
+        "live_msg_count": 4
+      },
+      "user_turn_seq": 0
+    },
+    "note": "min() на thread_summarizer: какой потолок победил"
+  }
+]

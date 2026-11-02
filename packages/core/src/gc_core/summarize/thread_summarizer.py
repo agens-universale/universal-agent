@@ -324,10 +324,7 @@ class _BatchRun:
             final_text, repair_resolution = repaired, "repaired_valid"
         else:
             final_text, repair_resolution = resolve_after_repair_failure(
-                invalid_text=text,
                 merged_text=merged,
-                repaired_text=repaired,
-                accumulated_summary=accumulated_summary,
             )
         trace_batch["repair"] = {
             "reason": reason,
@@ -512,7 +509,7 @@ async def asummarize_dialog_via_chat_completions(
         - Для каждого батча вызывает LLM: первый батч — «с нуля», следующие —
           обновление `previous_summary`; валидирует ответ, при провале —
           `summary_llm_steps.arepair_summary_text` (без intent-блоков; multi-batch repair с `<previous_summary>`),
-          иначе partial merge / предыдущий батч / `FALLBACK_SUMMARY`.
+          Useful partial repair is accepted; a failed batch aborts compaction.
         - По необходимости сжимает накопленную сводку через `summary_llm_steps.acompress_summary_text`.
         - Шаг `memory_suggestions.arequest_patch_replace` (полная перезапись всех регистров WM)
           выполняется только если весь диалог уложился в один батч (мультибатч:

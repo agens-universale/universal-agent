@@ -16,13 +16,15 @@ _FALLBACK_MSG = (
 )
 
 
-def has_extracted_summary_content(text: str) -> bool:
-    return bool(extract_summary_bodies(text))
-
-
 def has_nonempty_summary_body(text: str) -> bool:
-    """Хотя бы один известный тег с непустым телом (``- n/a`` допустим)."""
-    return any(extract_summary_bodies(text).values())
+    """Return whether a known section has content beyond template ellipses."""
+    return any(
+        body.strip()
+        and any(
+            line.strip() not in {"", "...", "…"} for line in body.splitlines()
+        )
+        for body in extract_summary_bodies(text).values()
+    )
 
 
 def fallback_summary_xml() -> str:
@@ -68,18 +70,9 @@ def merge_repaired_summary(*, invalid_text: str, repaired_text: str) -> str:
 
 def resolve_after_repair_failure(
     *,
-    invalid_text: str,
     merged_text: str,
-    repaired_text: str,
-    accumulated_summary: str,
 ) -> tuple[str, str]:
-    """partial_merged | accumulated | fallback — если strict validate не прошёл."""
-    if (
-        has_extracted_summary_content(merged_text)
-        or has_extracted_summary_content(repaired_text)
-        or has_extracted_summary_content(invalid_text)
-    ):
+    """Keep a useful partial repair; otherwise leave source history intact."""
+    if has_nonempty_summary_body(merged_text):
         return merged_text, "partial_merged"
-    if (accumulated_summary or "").strip():
-        return accumulated_summary, "accumulated"
-    return fallback_summary_xml(), "fallback"
+    raise ValueError("summary repair produced no usable summary")

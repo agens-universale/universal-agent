@@ -83,9 +83,18 @@ REFERENCE = (
     / "fixtures"
     / "toggle_matrix_reference_e66a1e90.json"
 )
+VALID_SUMMARY_REFERENCE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "toggle_matrix_valid_summary_0a2aac511.json"
+)
 
 #: Поля, по которым идёт сверка.
 COMPARED = ("answer", "dump", "meta", "backend_calls", "error")
+COMPRESSION_REFUSAL_CASES = {
+    "summary/max_accumulated_tiny",
+    "pair/batch_x_accumulated",
+}
 
 #: Метка времени ВНУТРИ строки. ``strip_volatile`` снимает только ключи словаря,
 #: а в теле сообщения-сводки таймстемпы лежат внутри вложенного JSON
@@ -107,7 +116,14 @@ def _normalize(obj):
 @pytest.fixture(scope="module")
 def reference() -> dict:
     data = json.loads(REFERENCE.read_text(encoding="utf-8"))
-    return {row["id"]: row for row in data}
+    rows = {row["id"]: row for row in data}
+    # Captured on develop 0a2aac511 with the same valid summary stimulus.
+    # Invalid-summary preservation is covered by test_summary_content_preservation.
+    valid_summary_rows = json.loads(
+        VALID_SUMMARY_REFERENCE.read_text(encoding="utf-8")
+    )
+    rows.update({row["id"]: row for row in valid_summary_rows})
+    return rows
 
 
 def test_reference_covers_every_case(reference):
@@ -128,6 +144,18 @@ async def test_toggle_matches_pre_async(
         pytest.skip(f"схема не выражает: {UNREPRESENTABLE[case.id]}")
     expected = reference[case.id]
     actual = await run_case(case, tmp_path, monkeypatch)
+
+    if case.id in COMPRESSION_REFUSAL_CASES:
+        # These limits cannot hold the scripted XML. D01 must preserve the
+        # original messages instead of applying a truncated synthetic summary.
+        assert actual["error"] is None
+        assert _normalize(actual["dump"][:5]) == _normalize(
+            reference["baseline/default"]["dump"][:5]
+        )
+        assert "dialog_summary" not in json.dumps(actual["dump"])
+        assert actual["meta"]["dialog_steps_offset"] == 0
+        assert actual["meta"]["messages_count"] == len(actual["dump"])
+        return
 
     for field in COMPARED:
         assert _normalize(actual.get(field)) == _normalize(
@@ -168,7 +196,11 @@ def test_summary_cases_actually_compact(reference):
     def _has_summary(row) -> bool:
         return "dialog_summary" in json.dumps(row["dump"], ensure_ascii=False)
 
-    compacted = [cid for cid, row in reference.items() if _has_summary(row)]
+    compacted = [
+        cid
+        for cid, row in reference.items()
+        if cid not in COMPRESSION_REFUSAL_CASES and _has_summary(row)
+    ]
     assert compacted, "ни один случай не довёл дело до компакции"
     assert "summary/trigger_tiny" in compacted
 
