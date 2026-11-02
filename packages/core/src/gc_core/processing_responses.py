@@ -2328,6 +2328,7 @@ async def _afinalize_tool_batch(
     *,
     aborted_by_user_stop: bool,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]],
+    batch_trace: Optional[Dict] = None,
 ) -> List[Dict]:
     """Хвост батча: user-stop пары, session_compact, notice loop-детектора, gc."""
     if aborted_by_user_stop:
@@ -2343,6 +2344,10 @@ async def _afinalize_tool_batch(
         state.pending_tool_attachments = []
 
     compacted = bool(getattr(state, "session_compact_applied", False))
+    if compacted and isinstance(batch_trace, dict):
+        # Защёлка на state гасится вместе с хвостом. Окно наджей живёт
+        # дольше — его ставит контроллер цикла по этой отметке трейса.
+        batch_trace["compacted"] = True
     if compacted:
         tools_outputs = _apply_session_compact_to_batch(state)
         # Картинки батча жили в старом трейсе. После сводки их нет.
@@ -2650,6 +2655,7 @@ async def aprocess_tool_calls(
         tools_outputs,
         aborted_by_user_stop=aborted_by_user_stop,
         persist_messages_callback=persist_messages_callback,
+        batch_trace=batch_trace,
     )
 
 
@@ -3455,9 +3461,8 @@ class _AgentLoop:
             ),
             batch_trace=batch_trace,
         )
-        if self._nudges.mark_compacted_if_resume(
-            messages, _SESSION_COMPACT_RESUME_USER_TEXT
-        ):
+        if batch_trace.get("compacted"):
+            self._nudges.mark_compacted()
             self._nudges.reset_after_summary(
                 state,
                 session_meta=self.session_meta

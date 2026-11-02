@@ -328,15 +328,9 @@ class NudgeHold:
         self.followers = []
         return self.trace
 
-    def mark_compacted_if_resume(
-        self, messages: list[dict[str, Any]], resume_marker: str
-    ) -> bool:
-        self.compacted = any(
-            isinstance(message, dict)
-            and resume_marker in str(message.get("content") or "")
-            for message in messages
-        )
-        return self.compacted
+    def mark_compacted(self) -> None:
+        """Окно после session_compact: до следующего батча тулов наджи не шлём."""
+        self.compacted = True
 
     def note_persisted(self, messages: list[dict[str, Any]] | None) -> None:
         trace = self.trace
