@@ -10,7 +10,7 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.session_settings import finish_gate_mode_of
 
 
-def _cfg(mode="on", explicit=False, strict_false=False):
+def _cfg(mode="always", explicit=False, strict_false=False):
     """Настройки с явностью полей как у файла: `explicit` — tui.finish_gate_mode
     задан, `strict_false` — agent.strict_turn_finish_validation: false задан."""
     dotted = {}
@@ -32,8 +32,10 @@ def test_explicit_global_off_wins_over_default_tui():
 
 def test_explicit_tui_beats_explicit_global_off():
     assert (
-        finish_gate_mode_of(_cfg(mode="on", explicit=True, strict_false=True))
-        == "on"
+        finish_gate_mode_of(
+            _cfg(mode="always", explicit=True, strict_false=True)
+        )
+        == "always"
     )
 
 
@@ -58,7 +60,7 @@ def test_template_yaml_default_is_string_not_bool(tmp_path):
         data = yaml.safe_load(tpl.read_text(encoding="utf-8"))
         v = data["tui"]["finish_gate_mode"]
         assert v == "smart" and isinstance(v, str), f"{tpl}: {v!r}"
-    assert TuiConfig(finish_gate_mode="on").finish_gate_mode == "on"
+    assert TuiConfig(finish_gate_mode="always").finish_gate_mode == "always"
 
 
 def test_tui_wiring_projects_off_into_strict_flag():
@@ -75,7 +77,7 @@ def test_tui_wiring_on_keeps_strict_true():
     from gc_tui.toggles import tui_agent_settings
 
     loaded = tui_agent_settings(
-        _cfg(mode="on", explicit=True, strict_false=True)
+        _cfg(mode="always", explicit=True, strict_false=True)
     )  # явный tui on поверх глобального off
     assert loaded.settings.agent.strict_turn_finish_validation is True
 
@@ -109,12 +111,12 @@ def test_explicit_global_off_without_tui_key_is_off_e2e(tmp_path):
 
 
 def test_explicit_tui_key_beats_explicit_global_off_e2e(tmp_path):
-    """Тот же явный global off + явный tui.finish_gate_mode: on → tui-ключ побеждает."""
+    """Тот же явный global off + явный tui.finish_gate_mode: always → tui-ключ побеждает."""
     cfg = _load(
         tmp_path,
-        'agent:\n  strict_turn_finish_validation: false\ntui:\n  finish_gate_mode: "on"\n',
+        'agent:\n  strict_turn_finish_validation: false\ntui:\n  finish_gate_mode: "always"\n',
     )
-    assert finish_gate_mode_of(cfg) == "on"
+    assert finish_gate_mode_of(cfg) == "always"
 
 
 def test_toggle_values_carry_hint_and_color():
@@ -122,14 +124,14 @@ def test_toggle_values_carry_hint_and_color():
     from gc_tui.toggles import TOGGLES
 
     gate = TOGGLES["gate"]
-    assert gate.names == ("off", "smart", "on")
+    assert gate.names == ("off", "smart", "always")
     off = gate.values[0]
     assert off.value == "off"
     assert off.color == pal.INK  # gate off — белый (спека §3)
-    on = gate.values[2]
-    assert on.value == "on"
-    assert on.color == pal.RUN_COLOR
-    assert "самопроверка" in on.hint
+    always = gate.values[2]
+    assert always.value == "always"
+    assert always.color == pal.RUN_COLOR
+    assert "самопроверка" in always.hint
     ans = TOGGLES["answers"]
     assert ans.names == ("allow", "judge", "deny")
     assert ans.values[1].color == pal.ACCENT  # judge — бирюзовый
@@ -172,7 +174,7 @@ def test_render_track_canonical():
 
     t = render_track(TOGGLES["answers"], "judge")
     assert t.plain == "○ ● ○"
-    t2 = render_track(TOGGLES["gate"], "on")
+    t2 = render_track(TOGGLES["gate"], "always")
     assert t2.plain == "○ ○ ●"
 
 
@@ -184,8 +186,8 @@ def test_gate_gains_smart_value():
     assert gate.names == (
         "off",
         "smart",
-        "on",
-    )  # off·smart·on (мягкое→строгое, §3)
+        "always",
+    )  # off·smart·always (мягкое→строгое, §3)
     smart = gate.values[1]
     assert smart.value == "smart" and smart.color == pal.ACCENT
     assert "работал инструментами" in smart.hint
@@ -209,17 +211,27 @@ def test_rigor_toggle_spec_shape():
 
 
 def test_value_scales_go_white_teal_amber():
-    """Шкала значений (дизайн-код): от слабого к сильному — INK, ACCENT,
-    RUN_COLOR. Ручки самопроверки и уровни модели — одна шкала."""
+    """Дизайн-код, п. 2a: шкала из трёх — INK, ACCENT, RUN_COLOR;
+    переключатель из двух — INK, ACCENT. Режимы разрешений — не шкала;
+    уровни модели — та же шкала из трёх."""
     from gc_core.config_modules.model_registry import LEVELS
     from gc_tui import palette as pal
     from gc_tui.services.model_sign import LEVEL_COLORS
     from gc_tui.toggles import TOGGLES
 
-    scale = (pal.INK, pal.ACCENT, pal.RUN_COLOR)
-    for name in ("rigor", "gate", "answers"):
-        assert tuple(v.color for v in TOGGLES[name].values) == scale
-    assert tuple(LEVEL_COLORS[level] for level in LEVELS) == scale
+    by_count = {
+        2: (pal.INK, pal.ACCENT),
+        3: (pal.INK, pal.ACCENT, pal.RUN_COLOR),
+    }
+    checked = {}
+    for name, spec in TOGGLES.items():
+        if name == "permissions" or not spec.values:
+            continue
+        colors = tuple(v.color for v in spec.values)
+        checked[name] = colors
+        assert colors == by_count[len(colors)], name
+    assert {"rigor", "gate", "answers"} <= checked.keys()
+    assert tuple(LEVEL_COLORS[level] for level in LEVELS) == by_count[3]
 
 
 def test_rigor_is_first_and_details_hidden_by_default():
@@ -288,11 +300,11 @@ def test_padded_track_no_padding_needed_matches_render_track():
     from gc_tui.toggles import TOGGLES, padded_track, render_track
 
     t = padded_track(
-        TOGGLES["gate"], "on", extra_lit=None, base_w=5, extra_w=0
+        TOGGLES["gate"], "always", extra_lit=None, base_w=5, extra_w=0
     )
     assert (
         t.plain
-        == render_track(TOGGLES["gate"], "on", extra_lit=None).plain
+        == render_track(TOGGLES["gate"], "always", extra_lit=None).plain
         == "○ ○ ●"
     )
 
@@ -325,7 +337,7 @@ def test_padded_track_reserves_blank_extra_zone_for_row_without_own_extra():
     from gc_tui.toggles import TOGGLES, padded_track
 
     t = padded_track(
-        TOGGLES["gate"], "on", extra_lit=None, base_w=5, extra_w=3
+        TOGGLES["gate"], "always", extra_lit=None, base_w=5, extra_w=3
     )
     assert t.plain == "○ ○ ●" + "   "
     assert "●" not in t.plain[5:] and "○" not in t.plain[5:]
@@ -360,7 +372,10 @@ def test_next_toggle_value_displayed_custom_falls_back_to_idx_zero():
         def effective_settings(self):
             # пара нестандартна -> эффективное "custom"
             return make_settings(
-                {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+                {
+                    "tui.finish_gate_mode": "always",
+                    "tui.text_answer_mode": "allow",
+                }
             )
 
     assert next_toggle_value(_App(), "rigor", 1) == "medium"  # idx0 +1
@@ -376,7 +391,7 @@ def test_answers_track_synchronized_with_gate_axis():
     задом наперёд (deny·judge·allow) и расходился с gate/rigor в пресетах —
     разворачивается в allow·judge·deny с цветами INK·ACCENT·RUN_COLOR. Синхрон:
     для каждого пресета позиция answers-значения в его треке == позиции
-    gate-значения в его треке (оба идут low/off слева -> high/on справа)."""
+    gate-значения в его треке (оба идут low/off слева -> high/always справа)."""
     from gc_tui import palette as pal
     from gc_tui.toggles import PRESETS, TOGGLES
 
@@ -393,18 +408,6 @@ def test_answers_track_synchronized_with_gate_axis():
         assert gate.names.index(gate_value) == answers.names.index(
             answers_value
         )
-
-
-def test_two_value_toggles_go_white_amber():
-    from gc_tui import palette as pal
-    from gc_tui.toggles import TOGGLES
-
-    two = [s for s in TOGGLES.values() if len(s.values) == 2]
-    assert two
-    assert all(
-        tuple(v.color for v in s.values) == (pal.INK, pal.RUN_COLOR)
-        for s in two
-    )
 
 
 def test_reasoning_toggle_spec():

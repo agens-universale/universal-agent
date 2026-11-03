@@ -26,7 +26,7 @@ def test_apply_rigor_preset_writes_pair_to_session(tmp_path):
 
     app, cfg_file = _app(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "deny"\n',
     )
     got = apply_toggle(app, "rigor", "low")
     assert got == "low"
@@ -37,7 +37,7 @@ def test_apply_rigor_preset_writes_pair_to_session(tmp_path):
     )
     assert toggle_state(app, "rigor") == "low"
     # config.yml не тронут (сессия)
-    assert 'finish_gate_mode: "on"' in cfg_file.read_text(encoding="utf-8")
+    assert 'finish_gate_mode: "always"' in cfg_file.read_text(encoding="utf-8")
 
 
 def test_apply_toggle_rejects_custom(tmp_path):
@@ -49,7 +49,7 @@ def test_apply_toggle_rejects_custom(tmp_path):
 
     app, cfg_file = _app(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "allow"\n',
     )
     original = cfg_file.read_text(encoding="utf-8")
 
@@ -79,7 +79,7 @@ def test_nonstandard_pair_shows_custom_step_onto_preset_replaces_it(tmp_path):
         'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
     )
     app.apply_session_overrides(
-        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+        {"tui.finish_gate_mode": "always", "tui.text_answer_mode": "allow"}
     )
     assert toggle_state(app, "rigor") == "custom"
     assert (
@@ -111,7 +111,9 @@ async def test_rigor_palette_cycles_three_values(tmp_path):
         await pilot.pause(0.1)
         await pilot.press("right")  # medium -> high
         await pilot.pause(0.05)
-        assert app.effective_settings().settings.tui.finish_gate_mode == "on"
+        assert (
+            app.effective_settings().settings.tui.finish_gate_mode == "always"
+        )
         assert cfg_file.read_text(encoding="utf-8") == original
         assert pilot.app.query(".palette")
         await pilot.press("left")  # high -> medium
@@ -194,7 +196,9 @@ async def test_child_spin_shows_custom_without_moving_rows_then_preset_step_clea
         await pilot.pause(0.05)
 
         # (a) сессионная пара изменилась ТОЛЬКО по этому ключу.
-        assert app.effective_settings().settings.tui.finish_gate_mode == "on"
+        assert (
+            app.effective_settings().settings.tui.finish_gate_mode == "always"
+        )
         assert (
             app.effective_settings().settings.tui.text_answer_mode == "judge"
         )  # answers не тронут
@@ -266,7 +270,7 @@ def test_filtered_gate_row_is_dimmed_child_flat():
     reg = build_default_registry()
     state = {
         "rigor": "high",
-        "gate": "on",
+        "gate": "always",
         "answers": "deny",
     }
     pal = CommandPalette(
@@ -343,10 +347,10 @@ def test_preset_custom_hint_two_states(tmp_path):
     # 1) пара нестандартна ИЗ-ЗА самого глобала (оверрайдов пары нет).
     app1, _ = _app(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "allow"\n',
     )
     assert preset_custom_hint(app1, "rigor") == (
-        "ваш дефолт: самопроверка on, формат allow · менять в /settings"
+        "ваш дефолт: самопроверка always, формат allow · менять в /settings"
     )
 
     # 2) пара нестандартна ИЗ-ЗА сессионных оверрайдов (хотя бы один ключ пары
@@ -356,8 +360,8 @@ def test_preset_custom_hint_two_states(tmp_path):
         'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
     )
     app2.apply_session_overrides(
-        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+        {"tui.finish_gate_mode": "always", "tui.text_answer_mode": "allow"}
     )
     assert preset_custom_hint(app2, "rigor") == (
-        "своя пара этой сессии: самопроверка on, формат allow · шаг на пресет заменит пару · закрепить — в /settings"
+        "своя пара этой сессии: самопроверка always, формат allow · шаг на пресет заменит пару · закрепить — в /settings"
     )

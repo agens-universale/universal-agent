@@ -66,7 +66,7 @@ PRESET_CUSTOM = "custom"
 PRESETS: Dict[str, Dict[str, str]] = {
     "low": {_TUI_FINISH_GATE_MODE: "off", _TUI_TEXT_ANSWER_MODE: "allow"},
     "medium": {_TUI_FINISH_GATE_MODE: "smart", _TUI_TEXT_ANSWER_MODE: "judge"},
-    "high": {_TUI_FINISH_GATE_MODE: "on", _TUI_TEXT_ANSWER_MODE: "deny"},
+    "high": {_TUI_FINISH_GATE_MODE: "always", _TUI_TEXT_ANSWER_MODE: "deny"},
 }
 
 
@@ -90,8 +90,9 @@ def resolve_rigor_state(settings: Any) -> str:
 @dataclass(frozen=True)
 class ToggleValue:
     """Одно значение тоггла: каноническое имя + подсказка (§5 спеки) + цвет ползунка
-    (§3 спеки; токен-константа tui/palette.py). У ручки-шкалы цвета идут от
-    слабого к сильному: INK, ACCENT, RUN_COLOR (дизайн-код, «Шкала значений»)."""
+    (§3 спеки; токен-константа tui/palette.py). У шкалы из трёх цвета идут от
+    слабого к сильному: INK, ACCENT, RUN_COLOR; у переключателя из двух —
+    INK, ACCENT (дизайн-код, п. 2a)."""
 
     value: str
     hint: str
@@ -683,7 +684,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
                 _pal.ACCENT,
             ),
             ToggleValue(
-                "on",
+                "always",
                 "самопроверка не даст закончить, пока запрос не закрыт · для сложных задач, где важна полнота",
                 _pal.RUN_COLOR,
             ),
@@ -729,7 +730,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
                 "on",
                 "рассуждения модели строками Thought в живой ленте, не хранятся"
                 " · только в chat_completions с потоком",
-                _pal.RUN_COLOR,
+                _pal.ACCENT,
             ),
         ),
         state=lambda s: settings_of(s).tui.show_reasoning,

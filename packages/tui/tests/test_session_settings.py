@@ -26,7 +26,7 @@ def test_session_layer_sets_value_and_makes_it_explicit():
     правило коллизии сочло бы значение неявным и могло вернуть не его."""
     from gc_core.settings import is_explicit
 
-    base = make_settings({"tui.finish_gate_mode": "on"})
+    base = make_settings({"tui.finish_gate_mode": "always"})
     loaded = base.with_overrides(
         {"tui.finish_gate_mode": "off"}, layer="session"
     )

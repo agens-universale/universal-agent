@@ -3,6 +3,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from gc_core.config_modules.field_meta import gc_meta
+from gc_core.config_modules.finish_gate_mode import FinishGateMode
 
 
 class BangShellConfig(BaseModel):
@@ -54,10 +55,10 @@ class TuiConfig(BaseModel):
     # deny — всегда bounce (как CLI); judge — судья intent_guard решает;
     # allow — всегда принять текст (ни bounce, ни судьи).
     text_answer_mode: Literal["deny", "judge", "allow"] = "judge"
-    # /gate в палитре: on — судья на turn_finish всегда; off — не зовётся;
+    # /gate в палитре: always — судья на turn_finish всегда; off — не зовётся;
     # smart — судья только если за ход был >=1 вызов инструмента (спека §3).
     # Только TUI; CLI/server рулит agent.strict_turn_finish_validation.
-    finish_gate_mode: Literal["on", "off", "smart"] = "smart"
+    finish_gate_mode: FinishGateMode = "smart"
     # Мысли модели (reasoning) строками Thought в живой ленте, без хранения;
     # только chat_completions с потоком. Строки, как finish_gate_mode: тоггл
     # пишет без конвертера.
