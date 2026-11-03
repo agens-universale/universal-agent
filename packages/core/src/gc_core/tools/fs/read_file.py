@@ -226,7 +226,7 @@ class ReadFile(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_read_file
-Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256. Optional add_line_numbers prefixes each line as N|.
+Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256. add_line_numbers is required: true prefixes each line as N|, false returns the raw text.
 Input schema: {
   "type": "object",
   "properties": {
