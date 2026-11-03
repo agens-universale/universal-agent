@@ -711,6 +711,28 @@ async def test_failed_run_returns_queue_to_input_in_order(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_failed_run_waits_for_runner_to_exit(tmp_path):
+    """Ошибка видна раньше, чем поток вышел: выброшенные раннером реплики
+    (`dropped_message_ids`) известны только после его выхода."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path, admitted=True)
+        _fail(pilot, runner)
+        runner.running = True
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == ""
+        assert _texts(pilot) == ["первое", "второе"]
+        assert runner.withdrawn == []
+        runner.dropped_message_ids = frozenset(m["id"] for m in runner.added)
+        runner.running = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == "первое\n\nвторое"
+        assert _trace_texts(pilot) == []
+
+
+@pytest.mark.asyncio
 async def test_failed_compact_returns_queued_reply_once(tmp_path):
     """Сбой `/compact`: слива очереди у сжатия нет, реплика осталась у
     исполнителя — снять её, иначе ушла бы со следующим прогоном."""

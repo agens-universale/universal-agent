@@ -6113,8 +6113,16 @@ class TraceScreen(TraceFollowMixin, Screen):
         err = self._active_run_error()
         # Пока выделение заморожено, хвост треда не дочитан: впущенная, но
         # не сверенная реплика ушла бы в поле и продублировалась. Пометка
-        # сбоя — на первом тике после разморозки.
-        if err and not self._error_shown and not _frozen:
+        # сбоя — на первом тике после разморозки. Ошибка видна раньше выхода
+        # потока, а выброшенные реплики (`dropped_message_ids`) раннер
+        # отдаёт на выходе — пометка ждёт его.
+        observed = self._observed_runner()
+        if (
+            err
+            and not self._error_shown
+            and not _frozen
+            and not (observed is not None and observed.is_running())
+        ):
             # Причина — строкой `└` под «✕ Ошибка» свежей строки итога в
             # ленте. Без треда строки итога нет — тогда строкой без
             # владельца.
@@ -6126,7 +6134,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             # отправлено» сняла бы её с ожидания, и запись смонтировалась
             # бы второй репликой.
             self._poll_trace_tail()
-            self._mark_pending_failed(self._observed_runner())
+            self._mark_pending_failed(observed)
         # Инвариант: running tool-строки живут, только пока задача жива (live
         # runner / ask_human). Любой НЕ-live статус — стоп, обрыв runner'а, resume
         # брошенного треда или неизвестный исход (бейдж None) → осиротевшие вызовы
