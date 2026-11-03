@@ -207,3 +207,14 @@ def test_take_probe_is_atomic_across_threads():
     for t in threads:
         t.join()
     assert wins.count(True) == 1
+
+
+def test_open_reason_reads_only_open_aliases():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.trip("p", "2")
+    b.allow_probe()
+    b.trip("a", "3")
+    assert b.open_reason("a") == "3"
+    assert b.open_reason("p") is None
+    assert b.open_reason("x") is None

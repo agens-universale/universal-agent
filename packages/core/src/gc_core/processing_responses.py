@@ -671,6 +671,11 @@ UNAVAILABLE_REROUTE_PATCH = "main-unavailable-reroute-v1"
 #: основному запросу, ни к замене модели. Без маркера — прежнее поведение.
 STOP_AFTER_ROUTING_PATCH = "stop-after-routing-v1"
 
+#: Маркер durable-истории: начало хода главного даёт открытым алиасам право
+#: на одну пробу (спека model-breaker §2.2) — ход, который падал до запроса к
+#: модели, теперь его делает. Без маркера — прежняя честная ошибка на старте.
+MODEL_BREAKER_PROBE_PATCH = "model-breaker-probe-v1"
+
 
 def _stop_honored(stopped: bool, ctx: Any) -> bool:
     """Стоп пользователя прерывает такт перед основным запросом или после
@@ -905,15 +910,17 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     """Начало хода ГЛАВНОГО трейса (спека §6.4/§8): ставит стартовый
     `default_model` хода (`turn_boundary.begin_turn`) — каждый вызов внутри хода
     резолвит модель перед отправкой (`resolve_main_for_call`); ручной выбор и
-    AUTO закрепляются только на такт —
-    и, если активный алиас уже в предохранителе (trip прошлого хода /
-    персистированный breaker при attach), поднимает честную ошибку класса 2 ДО
-    похода в транспорт — с той же моделью/endpoint/причиной и подсказкой /model
-    /profile, что и `_arequest_backend_canonical`.
+    AUTO закрепляются только на такт.
 
-    В ручном режиме `begin_turn` резолвит `main` с проверкой предохранителя,
-    поэтому открытый алиас прилетает сюда сырым `AliasCircuitOpenError`;
-    переводим его в тот же честный класс 2 через
+    До `begin_turn` открытые алиасы получают право на одну пробу (спека
+    model-breaker §2.2): резолв их пропускает, первый основной запрос к
+    алиасу идёт к модели одним HTTP-запросом и при провале снова открывает
+    его до следующего хода главного. Право выдаётся только главному трейсу и
+    только если durable-история знает `MODEL_BREAKER_PROBE_PATCH`.
+
+    Без маркера (и у ребёнка, который права не получает) открытый алиас в
+    ручном режиме прилетает из `begin_turn` сырым `AliasCircuitOpenError`;
+    переводим его в честную ошибку класса 2 через
     `_maybe_trip_and_raise_main_unavailable` (единый текст, без дублирования).
     При активном auto стартовый резолв предохранитель не проверяет — живость за
     точкой решения (`aroute_before_call`), и отказ, если мертвы все три уровня,
@@ -927,11 +934,22 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     if not getattr(state, "parent_state_id", None):
         mono, wall = turn_clock_sources(ctx)
         bind_turn_clock(ctx, TurnClock.start(mono=mono, wall=wall))
+        _allow_breaker_probe(ctx)
     try:
         begin_turn(state, ctx)
     except AliasCircuitOpenError as exc:
         _maybe_trip_and_raise_main_unavailable(ctx, exc, resolved=exc.resolved)
         raise
+
+
+def _allow_breaker_probe(ctx: Any) -> None:
+    """Право на пробу открытым алиасам — если durable-история знает маркер."""
+    router = getattr(ctx, "model_router", None)
+    if router is None:
+        return
+    execution_patch = port(ctx, "execution_patch")
+    if execution_patch is None or execution_patch(MODEL_BREAKER_PROBE_PATCH):
+        router.breaker.allow_probe()
 
 
 def _request_audience(
@@ -1469,6 +1487,12 @@ async def _arequest_backend_canonical_once(
         config_proxy,
         retry_embedded_choice_errors,
     ) = resolve_network_params(settings, resolved_for_network)
+    # Проба алиаса из предохранителя — один HTTP-запрос: без ретраев
+    # транспорта и без адаптивных повторов (спека model-breaker §2.2).
+    router = getattr(ctx, "model_router", None)
+    probe = router is not None and router.take_probe(resolved)
+    if probe:
+        use_retry = False
 
     if backend_mode == "responses":
         return await _arequest_responses_once(
@@ -1538,6 +1562,7 @@ async def _arequest_backend_canonical_once(
             "verify": verify,
             "cert": cert,
             "use_retry": use_retry,
+            "adaptive_retry": not probe,
             "retry_embedded_choice_errors": retry_embedded_choice_errors,
             "salvage_reasoning": True,
             "logger": getattr(ctx, "logger", None),
@@ -2705,7 +2730,9 @@ async def _apickup_pending_as_new_turn(
     except Exception as exc:
         # Очередь УЖЕ слита (`get_pending_messages` — drain, не peek): уронив ход
         # здесь, мы потеряли бы набранное пользователем сообщение бесследно —
-        # вернуть его в очередь некуда. Поэтому ход продолжаем на модели прошлого
+        # вернуть его в очередь некуда. С пробой главный сюда не попадает:
+        # открытый алиас получил право и ход идёт к модели. Остаются ребёнок
+        # и история без маркера пробы — ход продолжаем на модели прошлого
         # хода: тот же честный отказ придёт из резолва модели следующего вызова
         # (`resolve_main_for_call` → `_raise_honest_main_unavailable`, единая
         # точка текста), но сообщение к тому моменту уже в трейсе и в логе.

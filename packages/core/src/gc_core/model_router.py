@@ -175,6 +175,11 @@ class CircuitBreaker:
         with self._lock:
             return alias in self._tripped
 
+    def open_reason(self, alias: str) -> str | None:
+        """Причина, если алиас открыт, иначе None — одно чтение под замком."""
+        with self._lock:
+            return self._tripped.get(alias)
+
     def trip(self, alias: str, reason: str) -> None:
         with self._lock:
             self._probe.pop(alias, None)
@@ -629,10 +634,10 @@ class ModelRouter:
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).
         # ``check_breaker=False`` — витринный резолв (футер/`/status`): показать
         # модель честно, не роняя резолв (§12.2).
-        if check_breaker and self.breaker.is_open(alias):
-            raise AliasCircuitOpenError(
-                resolved, self.breaker.snapshot().get(alias, "")
-            )
+        if check_breaker:
+            reason = self.breaker.open_reason(alias)
+            if reason is not None:
+                raise AliasCircuitOpenError(resolved, reason)
         return resolved
 
     def take_probe(self, resolved: ResolvedModel | None) -> bool:

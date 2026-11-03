@@ -574,7 +574,8 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
     """Important-2: старт хода (`begin_turn`) при открытом активном алиасе кидает
     AliasCircuitOpenError ДО choke-point транспорта — витрина рана должна получить
     честную ошибку класса 2 (модель/endpoint/причина + подсказка /level //profiles),
-    а не сырое исключение предохранителя."""
+    а не сырое исключение предохранителя. Так — в durable-истории без
+    маркера пробы (`MODEL_BREAKER_PROBE_PATCH`)."""
     from gc_core import processing_responses as pr
     from gc_core.model_router import AliasCircuitOpenError
 
@@ -589,6 +590,7 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
         auth_connector=None,
         logger=None,
         is_tui=False,
+        execution_patch=lambda _patch: False,
     )
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -601,34 +603,47 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
     assert "glm-local" in message
 
 
-def test_turns_against_open_alias_keep_original_breaker_reason():
-    """Каждый ход против открытого алиаса — честная ошибка с исходной
-    причиной: текст ошибки называет предохранитель один раз, а причина в
-    предохранителе не обрастает префиксами «алиас … в предохранителе»."""
+def test_reopened_alias_keeps_original_reason_across_turns(monkeypatch):
+    """Каждый ход пробует открытый алиас, проба падает: причина в
+    предохранителе — исходный текст отказа, без префиксов «алиас … в
+    предохранителе»; текст честной ошибки называет предохранитель не больше
+    одного раза."""
     from gc_core import processing_responses as pr
+    from gc_core.execution.contracts import MainModelUnavailable
+    from gc_core.model_router import breaker_reason
 
     router = _router(
         {"models": {"glm-local": {}}, "slots": {"default": "glm-local"}},
         level="default",
     )
     router.breaker.trip("glm-local", "ReadError")
-    ctx = fake_ctx(
-        {},
-        model_router=router,
-        auth_connector=None,
-        logger=None,
-        is_tui=False,
+    ctx = _service_ctx(router)
+    state = _subagent_orchestrator_state()
+    calls = []
+
+    def _fake_policy(**kwargs):
+        calls.append(kwargs)
+        raise _http_error(503)
+
+    monkeypatch.setattr(
+        pr, "arequest_chat_completions_with_policy", as_coro(_fake_policy)
     )
 
     messages = []
     for _ in range(3):
-        with pytest.raises(RuntimeError) as excinfo:
-            pr.begin_turn_main_trace(_service_state(), ctx)
-        messages.append(str(excinfo.value))
+        pr.begin_turn_main_trace(state, ctx)
+        for _ in range(2):  # проба, затем второй запрос того же хода
+            with pytest.raises(MainModelUnavailable) as excinfo:
+                run_coro(pr._arequest_backend_canonical([], state, ctx))
+            messages.append(str(excinfo.value))
+        assert router.breaker.snapshot() == {
+            "glm-local": breaker_reason(_http_error(503))
+        }
+        assert "в предохранителе" not in router.breaker.snapshot()["glm-local"]
 
-    assert router.breaker.snapshot() == {"glm-local": "ReadError"}
-    assert messages[0] == messages[2]
-    assert messages[2].count("в предохранителе") == 1
+    assert len(calls) == 3
+    assert all(m.count("в предохранителе") <= 1 for m in messages)
+    assert messages[1] == messages[5]
 
 
 def test_begin_turn_main_trace_legacy_is_plain_passthrough():

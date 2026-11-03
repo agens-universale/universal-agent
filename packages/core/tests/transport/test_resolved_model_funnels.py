@@ -40,8 +40,10 @@ def _canonical_once(processing_module, *args, **kwargs):
 def _serve_main_trace(router) -> None:
     """Main-трейс берёт модель через `ModelRouter.resolve_main_at` (уровень
     вызова). У фейка без уровней это тот же `resolve("main")` — счёт вызовов
-    `resolve` в проверках остаётся прежним."""
+    `resolve` в проверках остаётся прежним. Предохранителя у фейка нет —
+    права на пробу тоже."""
     router.resolve_main_at = lambda level, **_kw: router.resolve("main")
+    router.take_probe = lambda _resolved: False
 
 
 def _resolved(**overrides) -> ResolvedModel:
