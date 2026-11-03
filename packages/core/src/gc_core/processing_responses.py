@@ -134,6 +134,7 @@ from gc_core.message_policy.tool_attachments import (
     build_tool_attachments_message,
 )
 from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
     TECHNICAL_TYPE_ERROR_MESSAGE,
     TECHNICAL_TYPE_TECHNICAL,
     build_invalid_tool_call_feedback_message,
@@ -447,7 +448,12 @@ def _mode_notices(
     )
     if texts or update_silent_mark:
         state.mode_announced = announced
-    return [_make_technical_feedback_user_message(text) for text in texts]
+    return [
+        _make_technical_feedback_user_message(
+            text, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
+        )
+        for text in texts
+    ]
 
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
@@ -2990,8 +2996,9 @@ class _AgentLoop:
         """
         if self._nudges.skip_fill:
             # Сводка только что заменила трейс. Буфер уже пуст, счётчики
-            # обнулены; этот запрос уходит без подсказок. Смена режима —
-            # отдельный технический user сразу после сводки, до генерации.
+            # обнулены; этот запрос уходит без подсказок. Правила действующего
+            # режима уже в теле сводки. Технический user ниже — страховка,
+            # если сводка собралась со старой отметкой.
             clear_executed_tool_names(self._nudges.trace)
             self._nudges.skip_fill = False
             await self._nudges.apublish(
@@ -3017,8 +3024,8 @@ class _AgentLoop:
             logger=self.run_logger,
             apersist=self._anudge_persist,
         )
-        # Окно после session_compact: наджи в output не клеим, но смену
-        # режима говорим сразу за «продолжай», до генерации.
+        # Окно после session_compact: наджи в output не клеим. Смена режима
+        # уже в сводке; user следом — только если отметка всё ещё старая.
         if self._nudges.compacted:
             messages = await self._aannounce_mode(
                 messages, update_silent_mark=False
@@ -3336,8 +3343,9 @@ class _AgentLoop:
 
         Перед каждым запросом к модели: на старте агента и после каждого
         батча — смена режима посреди хода доходит до модели на ближайшем
-        шаге. На шаге сводки тоже: технический user сразу после сводки
-        или «продолжай», до генерации, без остальных наджей.
+        шаге. После сводки правила уже в её блоке режима. Технический user
+        здесь появляется, только если отметка всё ещё не совпала с режимом.
+        Тег тот же, что у наджей в output: ``current_context``.
         Одно правило для корня и любого субагента: отметка своя у
         каждого, режим — общий живой. Не в хвосте батча: после принятого
         ``turn_finish`` хвост отбрасывается, а отметка уже была бы сдвинута.

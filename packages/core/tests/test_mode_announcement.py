@@ -213,14 +213,17 @@ def test_a_stop_before_the_request_leaves_no_announcement(monkeypatch):
         )
     )
     assert result is None
-    notice = wrap_technical_user_content(PLAN_ENTER_MESSAGE)
+    notice = wrap_technical_user_content(
+        PLAN_ENTER_MESSAGE, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
+    )
     assert all(m.get("content") != notice for m in state.messages)
     assert shared.mode_announced is None
 
 
 def test_mode_changed_at_summary_is_told_before_the_model(monkeypatch):
-    """Автосводка на этом запросе: смена режима — технический user после
-    сводки, до генерации. Остальные наджи этого запроса не собираются."""
+    """Хук сводки не сдвинул отметку: смена режима — user с current_context
+    после сводки, до генерации. Остальные наджи этого запроса не собираются.
+    Живое сжатие кладёт правила в тело сводки и этот user не добавляет."""
     shared = SharedStateData(permission_mode="plan")
     state = _state(shared)
     state.mode_announced = "edit"
@@ -248,7 +251,7 @@ def test_mode_changed_at_summary_is_told_before_the_model(monkeypatch):
     )
     assert [m.get("id") for m in sent[:1]] == ["sum"]
     assert sent[-1]["content"] == wrap_technical_user_content(
-        PLAN_ENTER_MESSAGE
+        PLAN_ENTER_MESSAGE, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
     )
     assert sent[-1] in state.messages
     assert state.mode_announced == "plan"
@@ -256,8 +259,8 @@ def test_mode_changed_at_summary_is_told_before_the_model(monkeypatch):
 
 
 def test_mode_changed_at_session_compact_follows_the_resume(monkeypatch):
-    """После session_compact смена режима стоит сразу за «продолжай»,
-    до запроса к модели."""
+    """session_compact не сдвинул отметку: смена режима с current_context
+    стоит сразу за «продолжай». Живое сжатие кладёт правила в сводку."""
     from gc_core.execution.constants import _SESSION_COMPACT_RESUME_USER_TEXT
 
     shared = SharedStateData(permission_mode="edit")
@@ -290,7 +293,7 @@ def test_mode_changed_at_session_compact_follows_the_resume(monkeypatch):
     sent = _first_request(monkeypatch, [dict(_READ)], state, _ctx(shared))
     assert [m.get("id") for m in sent[:1]] == ["resume"]
     assert sent[-1]["content"] == wrap_technical_user_content(
-        PLAN_ENTER_MESSAGE
+        PLAN_ENTER_MESSAGE, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
     )
     assert [m.get("content") for m in state.messages[-2:]] == [
         resume["content"],

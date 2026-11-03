@@ -20,7 +20,10 @@ from gc_core.message_format.serialization import (
     calc_history_chars_for_trigger,
     calc_messages_chars_total,
 )
-from gc_core.message_policy.mode_messages import render_mode_block
+from gc_core.message_policy.mode_messages import (
+    mode_boundary_messages,
+    render_mode_block,
+)
 from gc_core.message_policy.todo_context import (
     render_todo_for_persistent_state,
 )
@@ -28,7 +31,7 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
-from gc_core.security.permission_mode import offers_plan_tool
+from gc_core.security.permission_mode import offers_plan_tool, resolve_mode
 from gc_core.settings import settings_of
 from gc_core.summarize.config import resolve_summary_limits_at_level
 from gc_core.summarize.summary_logging import (
@@ -512,6 +515,16 @@ async def arun_summary_compaction(
     preview_chars = _intent_log_preview_chars_from_ctx(ctx)
     log_summary_raw_text(logger, log_ctx, raw_summary)
 
+    # Сводка — baseline. Блок режима в ней про режим, который действует
+    # сейчас, а не про отметку до сжатия. Фразы выхода не дописываем: старый
+    # текст входа из истории вырезан, и пустой блок — это и есть выход.
+    # Служебный user после сводки остаётся, если сжатие прошло мимо этого сдвига.
+    can_propose_plan = offers_plan_tool(ctx, state)
+    _, state.mode_announced = mode_boundary_messages(
+        current=resolve_mode(ctx).value,
+        announced=getattr(state, "mode_announced", None),
+        can_propose_plan=can_propose_plan,
+    )
     summary_message_content = apply_summary_state_patch(
         state=state,
         raw_summary=agent_summary_text,
@@ -523,7 +536,7 @@ async def arun_summary_compaction(
         summarized_messages_count=len(full_messages),
         intent_log_preview_chars=preview_chars,
         kept_messages=kept_messages,
-        can_propose_plan=offers_plan_tool(ctx, state),
+        can_propose_plan=can_propose_plan,
     )
     if isinstance(trace, dict):
         _fill_trace_final_output(
