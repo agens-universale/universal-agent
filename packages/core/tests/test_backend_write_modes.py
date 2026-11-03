@@ -38,9 +38,10 @@ async def test_local_overwrite_preserves_executable_mode(tmp_path):
 
 
 class _LocalHarborEnvironment:
-    """Run Harbor shell commands locally while upload replaces the destination inode."""
+    """Run Harbor shell commands locally while upload replaces its target inode."""
 
     def __init__(self):
+        self.fail_write = False
         self.fail_replace = False
         self.fail_stat = False
         self.malformed_stat = False
@@ -56,16 +57,20 @@ class _LocalHarborEnvironment:
             )
         if self.malformed_stat and command.startswith("stat -c "):
             return ExecResult(stdout="", stderr="", return_code=0)
-        if self.fail_replace and command.startswith("chown "):
-            return ExecResult(stdout="", stderr="chown failed", return_code=1)
+        if self.fail_write and "cat -- " in command:
+            return ExecResult(stdout="", stderr="write failed", return_code=1)
+        if self.fail_replace and command.startswith("mv -f -- "):
+            return ExecResult(
+                stdout="", stderr="replace failed", return_code=1
+            )
         if sys.platform == "darwin":
             command = command.replace("stat -c '%F|%a'", "stat -f '%HT|%Lp'")
         if command.startswith("chown --reference="):
-            ownership, command = command.split(" && ", 1)
-            _, source_arg, target_arg = shlex.split(ownership)
-            reference = Path(source_arg.removeprefix("--reference="))
-            current = reference.stat()
-            os.chown(target_arg, current.st_uid, current.st_gid)
+            _, reference_arg, candidate = shlex.split(command)
+            reference = Path(reference_arg.removeprefix("--reference="))
+            owner = reference.stat()
+            os.chown(candidate, owner.st_uid, owner.st_gid)
+            return ExecResult(stdout="", stderr="", return_code=0)
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True
         )
@@ -214,7 +219,27 @@ async def test_overwrite_replaces_symlink_without_changing_target(
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are required")
 @pytest.mark.asyncio
-async def test_harbor_failed_mode_copy_leaves_existing_file_unchanged(
+async def test_harbor_failed_write_leaves_existing_file_unchanged(
+    tmp_path, harbor_loop
+):
+    path = tmp_path / "script.sh"
+    path.write_bytes(b"old")
+    path.chmod(0o755)
+    environment = _LocalHarborEnvironment()
+    environment.fail_write = True
+    backend = HarborBackend(environment, harbor_loop)
+
+    with pytest.raises(OSError, match="write failed"):
+        await backend.write_bytes(str(path), b"new")
+
+    assert path.read_bytes() == b"old"
+    assert _mode(path) == 0o755
+    assert not list(tmp_path.glob("script.sh.gc-write-tmp.*"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are required")
+@pytest.mark.asyncio
+async def test_harbor_failed_replace_leaves_existing_file_unchanged(
     tmp_path, harbor_loop
 ):
     path = tmp_path / "script.sh"
@@ -224,7 +249,7 @@ async def test_harbor_failed_mode_copy_leaves_existing_file_unchanged(
     environment.fail_replace = True
     backend = HarborBackend(environment, harbor_loop)
 
-    with pytest.raises(OSError, match="chown failed"):
+    with pytest.raises(OSError, match="replace failed"):
         await backend.write_bytes(str(path), b"new")
 
     assert path.read_bytes() == b"old"

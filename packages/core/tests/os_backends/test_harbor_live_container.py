@@ -66,8 +66,9 @@ class _ContainerEnv:
     образа — ровно так же, как это делает окружение Harbor.
     """
 
-    def __init__(self, cid: str):
+    def __init__(self, cid: str, user: str | None = None):
         self._cid = cid
+        self._user = user
 
     async def _run(
         self, args: list[str], timeout_sec: int | None = None
@@ -85,8 +86,10 @@ class _ContainerEnv:
     async def exec(
         self, command: str, timeout_sec: int | None = None, **_: object
     ) -> _Result:
+        user_args = ["--user", self._user] if self._user else []
         return await self._run(
-            ["docker", "exec", self._cid, "bash", "-c", command], timeout_sec
+            ["docker", "exec", *user_args, self._cid, "bash", "-c", command],
+            timeout_sec,
         )
 
     async def upload_file(self, source: Path, target: str) -> None:
@@ -197,6 +200,90 @@ async def test_overwrite_keeps_executable_mode_in_container(backend):
     )
     assert result.return_code == 0
     assert result.stdout.splitlines() == ["755", "new"]
+
+
+async def test_non_root_overwrite_keeps_mode_and_owner(container):
+    root_env = _ContainerEnv(container)
+    setup = await root_env.exec(
+        "mkdir -p /app/user && chown 1000:1000 /app/user "
+        "&& printf '#!/bin/sh\\necho old\\n' > /app/user/script.sh "
+        "&& chown 1000:1000 /app/user/script.sh "
+        "&& chmod 755 /app/user/script.sh"
+    )
+    assert setup.return_code == 0
+    backend = HarborBackend(
+        _ContainerEnv(container, user="1000:1000"), asyncio.get_running_loop()
+    )
+
+    await backend.write_bytes("/app/user/script.sh", b"#!/bin/sh\necho new\n")
+
+    result = await root_env.exec(
+        "stat -c '%u:%g|%a' /app/user/script.sh && /app/user/script.sh"
+    )
+    assert result.return_code == 0
+    assert result.stdout.splitlines() == ["1000:1000|755", "new"]
+
+
+async def test_non_root_new_file_is_writable_by_task_user(container):
+    root_env = _ContainerEnv(container)
+    setup = await root_env.exec(
+        "mkdir -p /app/user && chown 1000:1000 /app/user"
+    )
+    assert setup.return_code == 0
+    backend = HarborBackend(
+        _ContainerEnv(container, user="1000:1000"), asyncio.get_running_loop()
+    )
+
+    await backend.write_bytes("/app/user/new.txt", b"new")
+
+    metadata = await root_env.exec("stat -c '%u:%g|%a' /app/user/new.txt")
+    access = await backend.aexec_raw("test -w /app/user/new.txt")
+    assert metadata.stdout.strip() == "1000:1000|644"
+    assert access.return_code == 0
+
+
+async def test_non_root_write_cleans_staging_in_sticky_directory(container):
+    root_env = _ContainerEnv(container)
+    setup = await root_env.exec(
+        "printf 'old' > /tmp/task-file && chown 1000:1000 /tmp/task-file "
+        "&& chmod 755 /tmp/task-file"
+    )
+    assert setup.return_code == 0
+    backend = HarborBackend(
+        _ContainerEnv(container, user="1000:1000"), asyncio.get_running_loop()
+    )
+
+    await backend.write_bytes("/tmp/task-file", b"new")
+
+    leftovers = await root_env.exec(
+        "find /tmp -maxdepth 1 -name 'task-file.gc-write-tmp.*' -print"
+    )
+    assert leftovers.stdout.strip() == ""
+
+
+async def test_non_root_can_write_file_without_parent_directory_access(
+    container,
+):
+    root_env = _ContainerEnv(container)
+    setup = await root_env.exec(
+        "mkdir -p /app/locked && chmod 755 /app/locked "
+        "&& printf 'old' > /app/locked/shared.txt "
+        "&& chmod 666 /app/locked/shared.txt"
+    )
+    assert setup.return_code == 0
+    backend = HarborBackend(
+        _ContainerEnv(container, user="1000:1000"), asyncio.get_running_loop()
+    )
+
+    await backend.write_bytes("/app/locked/shared.txt", b"new")
+
+    result = await root_env.exec(
+        "stat -c '%u:%g|%a' /app/locked/shared.txt "
+        "&& cat /app/locked/shared.txt "
+        "&& find /app/locked -maxdepth 1 -name '*.gc-write-tmp.*' -print"
+    )
+    assert result.return_code == 0
+    assert result.stdout.splitlines() == ["0:0|666", "new"]
 
 
 async def _state(backend, pid: int) -> str:

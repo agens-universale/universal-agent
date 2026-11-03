@@ -126,7 +126,11 @@ async def test_write_uses_upload(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     await backend.write("/work/new.txt", "hello")
-    assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
+    assert env.uploaded and env.uploaded[0][1].startswith("/tmp/.gc-write-")
+    assert any(
+        c.startswith("mv -f -- ") and c.endswith(" /work/new.txt")
+        for c in env.calls
+    )
 
 
 async def test_is_file_reads_shell_answer_and_raises_when_backend_is_down(
@@ -301,8 +305,11 @@ async def test_append_creates_file_if_missing(loop_in_thread):
 
     env.exec = fake_exec
     await backend.append("/work/new.txt", "hello")
-    assert env.uploaded and ".gc-append-tmp." in env.uploaded[0][1]
-    assert env.uploaded[0][1].startswith("/work/new.txt.gc-append-tmp.")
+    assert env.uploaded and env.uploaded[0][1].startswith("/tmp/.gc-write-")
+    assert any(
+        c.startswith("mv -f -- ") and "/work/new.txt.gc-append-tmp." in c
+        for c in env.calls
+    )
     assert any(">>" in c and "/work/new.txt" in c for c in env.calls)
 
 
@@ -333,8 +340,11 @@ async def test_append_concatenates_existing_content(loop_in_thread):
     await backend.append("/work/f.txt", "more")
     assert len(uploaded_payloads) == 1
     remote_tmp, payload = uploaded_payloads[0]
-    assert remote_tmp.startswith("/work/f.txt.gc-append-tmp.")
-    assert ".gc-append-tmp." in remote_tmp
+    assert remote_tmp.startswith("/tmp/.gc-write-")
+    assert any(
+        c.startswith("mv -f -- ") and "/work/f.txt.gc-append-tmp." in c
+        for c in env.calls
+    )
     assert payload == b"more"
     assert any(
         "cat " in c and ">>" in c and "/work/f.txt" in c for c in env.calls
@@ -605,8 +615,12 @@ async def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
     backend = HarborBackend(env, loop_in_thread)
     await backend.write("/work/a.txt", "data", encoding="utf-8")
     await backend.append("/work/a.txt", "more", encoding="utf-8")
-    assert any(dst == "/work/a.txt" for _, dst in env.uploaded)
-    assert any(".gc-append-tmp." in dst for _, dst in env.uploaded)
+    assert all(dst.startswith("/tmp/.gc-write-") for _, dst in env.uploaded)
+    assert any(
+        c.startswith("mv -f -- ") and c.endswith(" /work/a.txt")
+        for c in env.calls
+    )
+    assert any(".gc-append-tmp." in c for c in env.calls)
 
 
 async def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):

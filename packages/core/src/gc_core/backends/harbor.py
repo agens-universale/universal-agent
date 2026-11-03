@@ -10,6 +10,8 @@ read/list use shell through exec (``PosixShellFsMixin``); здесь тольк�
 
 import asyncio
 import contextlib
+import os
+import posixpath
 import re
 import shlex
 import tempfile
@@ -365,38 +367,86 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             raise failure
         return ""
 
+    async def _arequire_fs_command(
+        self, command: str, path: str, *, what: str
+    ) -> None:
+        result = await self._afs_exec(command)
+        if result.return_code != 0:
+            raise self._fs_failure(path, result, what=what)
+
+    async def _apublish_staged_bytes(
+        self, staged: str, path: str, previous_mode: str, suffix: str
+    ) -> None:
+        candidate = f"{path}.gc-write-tmp.{suffix}"
+        quoted_candidate = shlex.quote(candidate)
+        quoted_path = shlex.quote(path)
+        if previous_mode and not await self.writable(posixpath.dirname(path)):
+            # Without directory write access, replacing the inode is impossible
+            # for the task user. Updating the writable inode keeps its owner/mode.
+            await self._arequire_fs_command(
+                f"cat -- {shlex.quote(staged)} > {quoted_path}",
+                path,
+                what="write",
+            )
+            return
+        try:
+            await self._arequire_fs_command(
+                f": > {quoted_candidate} && cat -- {shlex.quote(staged)} > {quoted_candidate}",
+                path,
+                what="stage",
+            )
+            if previous_mode:
+                await self._arequire_fs_command(
+                    f"chown --reference={quoted_path} {quoted_candidate}",
+                    path,
+                    what="owner",
+                )
+                await self._arequire_fs_command(
+                    f"chmod {shlex.quote(previous_mode)} {quoted_candidate}",
+                    path,
+                    what="mode",
+                )
+            await self._arequire_fs_command(
+                f"mv -f -- {quoted_candidate} {quoted_path}",
+                path,
+                what="replace",
+            )
+        finally:
+            try:
+                await self._afs_exec(f"rm -f -- {quoted_candidate}")
+            except Exception:
+                pass
+
     async def _aupload_bytes(self, data: bytes, path: str) -> None:
         # mkdir и upload_file идут мимо ``_aexec_impl``.
         await self._runtime_probe.ensure(self._aprobe)
         quoted_path = shlex.quote(path)
         previous_mode = await self._aexisting_regular_mode(path)
-        remote_path = (
-            f"{path}.gc-write-tmp.{uuid.uuid4().hex}"
-            if previous_mode
-            else path
-        )
-        with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
-            tmp.write(data)
-            tmp_path = Path(tmp.name)
-        try:
+        suffix = uuid.uuid4().hex
+        remote_dir = f"/tmp/.gc-write-{suffix}"
+        staged = f"{remote_dir}/payload"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / "payload"
+            tmp_path.write_bytes(data)
+            os.chmod(tmp_path, 0o644)
             await self._aawait(
                 self._env.exec(f"mkdir -p $(dirname {quoted_path})")
             )
-            await self._aawait(self._env.upload_file(tmp_path, remote_path))
-            if previous_mode:
-                quoted_remote = shlex.quote(remote_path)
-                result = await self._afs_exec(
-                    f"chown --reference={quoted_path} {quoted_remote} "
-                    f"&& chmod {shlex.quote(previous_mode)} {quoted_remote} "
-                    f"&& mv -f {quoted_remote} {quoted_path}"
+            await self._arequire_fs_command(
+                f"mkdir -m 700 -- {shlex.quote(remote_dir)}",
+                path,
+                what="stage directory",
+            )
+            try:
+                await self._aawait(self._env.upload_file(tmp_path, staged))
+                await self._apublish_staged_bytes(
+                    staged, path, previous_mode, suffix
                 )
-                if result.return_code != 0:
-                    raise self._fs_failure(path, result, what="replace")
-        finally:
-            tmp_path.unlink(missing_ok=True)
-            if previous_mode:
+            finally:
                 try:
-                    await self._afs_exec(f"rm -f {shlex.quote(remote_path)}")
+                    await self._afs_exec(
+                        f"rm -f -- {shlex.quote(staged)}; rmdir -- {shlex.quote(remote_dir)}"
+                    )
                 except Exception:
                     pass
 
