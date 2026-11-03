@@ -165,6 +165,10 @@ class AgentRunner:
         #: смене видит конец хода, даже если следующий прогон (хвост из
         #: очереди) стартовал между тиками опроса.
         self.run_seq = 0
+        #: Id реплик, выброшенных прогоном мимо закрытия
+        #: (`_close_or_take_tail`): экран при сбое возвращает их в поле
+        #: ввода. Новый прогон начинает с пустого.
+        self.dropped_message_ids: frozenset[str] = frozenset()
         self._stop_requested = False
         # TUI _stop_and_replace_runner: runner снят с active_runner, но поток ещё
         # может досидеть HTTP/ретраи. Его on_error не должен залипать ✗ Ошибка
@@ -585,6 +589,7 @@ class AgentRunner:
         self._accepting = True
         self._last_target = (thread_id, system)
         self.run_seq += 1
+        self.dropped_message_ids = frozenset()
         t = threading.Thread(
             target=self._run_worker,
             args=(batch, thread_id, start_new_thread, system),
@@ -680,8 +685,8 @@ class AgentRunner:
             finally:
                 if not closed:
                     # Мимо закрытия — ошибка, отмена или стоп до старта прогона.
-                    # Хвост не доигрываем: реплики упавшего хода UI уже пометил
-                    # неотправленными (`_mark_pending_failed`).
+                    # Хвост не доигрываем: его id — в `dropped_message_ids`,
+                    # экран вернёт эти реплики в поле (`_mark_pending_failed`).
                     self._close_or_take_tail(
                         executor, ending=ending, lost=in_flight
                     )
@@ -716,7 +721,8 @@ class AgentRunner:
                 return tail
             self._accepting = False
             target = self._last_target
-        dropped = [*lost, *tail]
+            dropped = [*lost, *tail]
+            self.dropped_message_ids = frozenset(m.get("id") for m in dropped)
         if dropped:
             # Потеря — часть исхода прогона, но не молчаливая: то же событие,
             # что у сервера.

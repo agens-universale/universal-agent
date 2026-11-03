@@ -31,6 +31,7 @@ class _BusyRunner:
         self.events: list[str] = []
         self._admitted = admitted
         self.admitted_ids: set[str] = set()
+        self.dropped_message_ids: frozenset[str] = frozenset()
         self.running = True
 
     def is_running(self) -> bool:
@@ -524,10 +525,8 @@ async def test_stop_with_reply_held_by_core_does_not_undo(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "reset", ["_reset_render_state", "_mark_pending_failed"]
-)
-async def test_held_ids_cleared_with_pending_widgets(tmp_path, reset):
+@pytest.mark.parametrize("failed", [False, True])
+async def test_held_ids_cleared_with_pending_widgets(tmp_path, failed):
     """Удержанные ядром реплики забываются вместе с `_pending_user_widgets`
     (смена треда, `/new`, пересборка, ошибка хода)."""
     async with _app(tmp_path / "threads").run_test() as pilot:
@@ -537,7 +536,10 @@ async def test_held_ids_cleared_with_pending_widgets(tmp_path, reset):
         scr._poll_active()
         await pilot.pause()
         assert len(scr._held_client_ids) == 2
-        getattr(scr, reset)()
+        if failed:
+            scr._mark_pending_failed(runner)
+        else:
+            scr._reset_render_state()
         assert scr._held_client_ids == set()
 
 
@@ -678,3 +680,103 @@ async def test_up_after_withdraw_skips_same_text_in_history(tmp_path):
         await pilot.press("down")
         await pilot.pause()
         assert _inp(pilot).text == "второе"
+
+
+# --- сбой хода: очередь — в поле ввода (спека §2.5) --------------------------
+
+
+def _fail(pilot, runner: _BusyRunner) -> None:
+    """Ход упал: ошибка раннера видна экрану, поток вышел."""
+    pilot.app.last_runner_error = "MainModelUnavailable: 404"
+    pilot.app.last_runner_error_run = (runner, None)
+    runner.running = False
+
+
+def _trace_texts(pilot) -> list[str]:
+    trace = pilot.app.screen.query_one("#trace")
+    return [r._text for r in trace.query(UserReplyContainer)]
+
+
+@pytest.mark.asyncio
+async def test_failed_run_returns_queue_to_input_in_order(tmp_path):
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path)
+        _fail(pilot, runner)
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == "первое\n\nвторое"
+        assert _trace_texts(pilot) == []
+        assert _pending_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_failed_compact_returns_queued_reply_once(tmp_path):
+    """Сбой `/compact`: слива очереди у сжатия нет, реплика осталась у
+    исполнителя — снять её, иначе ушла бы со следующим прогоном."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = _busy(pilot, tmp_path)
+        runner._thread_kind = "compact"
+        await _send(pilot, "первое")
+        msg_id = runner.added[0]["id"]
+        _fail(pilot, runner)
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == "первое"
+        assert msg_id in runner.withdrawn
+        assert _trace_texts(pilot) == []
+
+
+@pytest.mark.asyncio
+async def test_failed_run_returns_dropped_reply(tmp_path):
+    """Реплику выбросил раннер при сбое (`run_tail_dropped`) — в поле."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = _busy(pilot, tmp_path, admitted=True)
+        await _send(pilot, "первое")
+        runner.dropped_message_ids = frozenset({runner.added[0]["id"]})
+        _fail(pilot, runner)
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == "первое"
+        assert _trace_texts(pilot) == []
+        assert _pending_records(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_failed_run_admitted_reply_stays_red(tmp_path):
+    """Впущенная в ход реплика без записи в треде — красный `›`."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = _busy(pilot, tmp_path, admitted=True)
+        await _send(pilot, "первое")
+        _fail(pilot, runner)
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == ""
+        trace = scr.query_one("#trace")
+        (reply,) = trace.query(UserReplyContainer)
+        assert (reply._text, reply.state) == ("первое", "failed")
+
+
+@pytest.mark.asyncio
+async def test_frozen_tick_defers_failure_marking(tmp_path):
+    """Пока выделение заморожено, хвост треда не дочитан — пометка сбоя
+    ждёт разморозки."""
+    async with _app(tmp_path / "threads").run_test() as pilot:
+        scr = pilot.app.screen
+        runner = await _two_queued(pilot, tmp_path)
+        frozen = [True]
+        scr._ui_frozen_for_select = lambda: frozen[0]
+        _fail(pilot, runner)
+        scr._poll_active()
+        await pilot.pause()
+        assert _texts(pilot) == ["первое", "второе"]
+        assert scr._error_shown is False
+        frozen[0] = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _inp(pilot).text == "первое\n\nвторое"
+        assert _trace_texts(pilot) == []
+        assert _pending_records(tmp_path) == []

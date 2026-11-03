@@ -5552,10 +5552,23 @@ class TraceScreen(TraceFollowMixin, Screen):
         if len(new_list) != len(existing):
             self._write_tui_meta(tid, {"pending_user_messages": new_list})
 
-    def _mark_pending_failed(self) -> None:
-        """При фейле run'а: все текущие pending-виджеты → state=failed,
-        записи в meta.tui.pending_user_messages → status=failed.
+    def _take_back_failed_queue(self, runner) -> list:
+        """Реплики очереди упавшего хода, которые ход не впустил: снятые
+        у исполнителя (сбой `/compact`, хвост ещё не слит) и выброшенные
+        раннером (`dropped_message_ids`). Делим по факту, не по виду."""
+        return [
+            reply
+            for reply in self._queued_replies()
+            if runner.withdraw_message(reply.message_id)
+            or reply.message_id in runner.dropped_message_ids
+        ]
+
+    def _mark_pending_failed(self, runner) -> None:
+        """При фейле run'а: невпущенные реплики очереди — в поле ввода, как
+        при стопе; остальные pending-виджеты → state=failed, записи в
+        meta.tui.pending_user_messages → status=failed.
         Очищает self._pending_user_widgets (виджеты остаются на экране как failed)."""
+        self._return_queue_to_input(self._take_back_failed_queue(runner))
         if not self._pending_user_widgets:
             return
         tid = self.app.tui_state.active_task_id
@@ -5941,10 +5954,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         прошлого прогона того же раннера не рисуются."""
         if not self._runner_is_for_active_thread():
             return None
-        runner = self._watched_runner or getattr(
-            self.app, "active_runner", None
-        )
-        return self._run_error_of(runner)
+        return self._run_error_of(self._observed_runner())
+
+    def _observed_runner(self):
+        """Раннер наблюдаемого прогона: застанный тиком, иначе активный."""
+        return self._watched_runner or getattr(self.app, "active_runner", None)
 
     def _run_error_of(self, runner) -> str | None:
         """Ошибка прогона раннера: пара «раннер и `run_seq`» прогона —
@@ -6097,7 +6111,10 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._arg_picker.sync_lock()
         self._pump_reasoning_stream_source()
         err = self._active_run_error()
-        if err and not self._error_shown:
+        # Пока выделение заморожено, хвост треда не дочитан: впущенная, но
+        # не сверенная реплика ушла бы в поле и продублировалась. Пометка
+        # сбоя — на первом тике после разморозки.
+        if err and not self._error_shown and not _frozen:
             # Причина — строкой `└` под «✕ Ошибка» свежей строки итога в
             # ленте. Без треда строки итога нет — тогда строкой без
             # владельца.
@@ -6108,9 +6125,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             # до ошибки и сверится со своей отправкой; иначе пометка «не
             # отправлено» сняла бы её с ожидания, и запись смонтировалась
             # бы второй репликой.
-            if not _frozen:
-                self._poll_trace_tail()
-            self._mark_pending_failed()
+            self._poll_trace_tail()
+            self._mark_pending_failed(self._observed_runner())
         # Инвариант: running tool-строки живут, только пока задача жива (live
         # runner / ask_human). Любой НЕ-live статус — стоп, обрыв runner'а, resume
         # брошенного треда или неизвестный исход (бейдж None) → осиротевшие вызовы
