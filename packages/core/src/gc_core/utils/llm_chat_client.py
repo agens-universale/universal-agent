@@ -735,8 +735,10 @@ def _resolve_for_call(router: Any, consumer: str, *, isolated: bool):
     """Резолв привязки. Изолированный вызов право пробы не берёт, поэтому
     алиас, ждущий пробы, для него открыт: право остаётся основному ходу."""
     resolved = router.resolve(consumer)
+    if not isolated:
+        return resolved
     reason = router.breaker.known_unavailable(resolved.alias)
-    if isolated and reason is not None:
+    if reason is not None:
         raise AliasCircuitOpenError(resolved, reason)
     return resolved
 

@@ -122,6 +122,7 @@ def _transport(monkeypatch, dead=(), reply=None, on_dead=None):
         resolved,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         sent.append(resolved.alias)
         if resolved.alias in dead:
@@ -347,6 +348,7 @@ def test_a_failed_attempt_leaves_no_trace_in_the_history(monkeypatch):
         resolved,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         attempts.append(resolved.alias)
         ctx.on_stream_delta("reset", "")

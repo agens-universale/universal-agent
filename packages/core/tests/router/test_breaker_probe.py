@@ -117,6 +117,56 @@ def test_probe_call_is_single_request_without_retries(monkeypatch):
     assert sent[1][1]["adaptive_retry"] is True
 
 
+class _Auth:
+    def __init__(self):
+        self.force_calls = 0
+
+    def get_token(self, force=False):
+        self.force_calls += int(force)
+        return "tok"
+
+
+def test_probe_survives_auth_retry(monkeypatch):
+    ctx = _ctx()
+    ctx.auth_connector = _Auth()
+    s = _state(ctx)
+    ctx.model_router.breaker.trip("mid", "ReadError")
+    sent = _transport(monkeypatch)
+    pr.begin_turn_main_trace(s, ctx)
+    first = pr.arequest_chat_completions_with_policy
+
+    async def once_401(**kwargs):
+        if not sent:
+            sent.append(("401", kwargs))
+            raise _http_error(401)
+        return await first(**kwargs)
+
+    monkeypatch.setattr(pr, "arequest_chat_completions_with_policy", once_401)
+    run_coro(pr._arequest_backend_canonical(USER, s, ctx))
+    assert ctx.auth_connector.force_calls == 1
+    assert [model for model, _ in sent] == ["401", "mid"]
+    assert sent[0][1]["use_retry"] is False
+    assert sent[1][1]["use_retry"] is False
+    assert sent[1][1]["adaptive_retry"] is False
+
+
+def test_probe_right_kept_when_preparation_fails(monkeypatch):
+    ctx = _ctx()
+    s = _state(ctx)
+    ctx.model_router.breaker.trip("mid", "ReadError")
+    sent = _transport(monkeypatch)
+    pr.begin_turn_main_trace(s, ctx)
+
+    async def broken_prep(*_args, **_kwargs):
+        raise ValueError("prep")
+
+    monkeypatch.setattr(pr, "_aprepare_native_vision", broken_prep)
+    with pytest.raises(ValueError):
+        run_coro(pr._arequest_backend_canonical(USER, s, ctx))
+    assert sent == []
+    assert ctx.model_router.breaker.take_probe("mid") is True
+
+
 def test_failed_probe_reopens_and_blocks_rest_of_turn(monkeypatch):
     ctx = _ctx()
     s = _state(ctx)

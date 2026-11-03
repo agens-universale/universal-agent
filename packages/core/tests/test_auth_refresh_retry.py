@@ -43,6 +43,7 @@ def test_retry_once_on_401_refreshes_and_succeeds(monkeypatch):
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         calls["n"] += 1
         if calls["n"] == 1:
@@ -126,6 +127,7 @@ def test_mute_answer_survives_the_401_retry(monkeypatch):
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         muted.append(mute_answer)
         if len(muted) == 1:

@@ -546,6 +546,7 @@ def test_main_trace_trips_breaker_and_raises_honest_error_with_hint(
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         raise _http_error(500)
 
@@ -742,6 +743,7 @@ def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         calls["n"] += 1
         return (["msg"], "rid", {})
@@ -776,6 +778,7 @@ def test_main_trace_legacy_breaker_not_tracked_error_unchanged(monkeypatch):
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         raise _http_error(500)
 
@@ -819,6 +822,7 @@ def test_main_trace_context_overflow_not_treated_as_unavailable(monkeypatch):
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         raise ValueError("maximum context length exceeded")
 
@@ -1147,6 +1151,7 @@ async def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         once_calls["n"] += 1
         return (["msg"], "rid", {})

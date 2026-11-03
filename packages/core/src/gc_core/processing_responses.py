@@ -1074,12 +1074,20 @@ async def _arequest_backend_canonical_local(
     (см. `_raise_honest_main_unavailable`).
 
     `mute_answer` — вызов идёт без дельт `answer` в потоке; решает вызывающий
-    (`_answer_stream_muted`), в повтор после 401 значение едет то же."""
+    (`_answer_stream_muted`), в повтор после 401 значение едет то же.
+
+    Право пробы (спека model-breaker §2.2) берётся один раз на запрос: первая
+    попытка забирает его перед отправкой, повтор после 401 видит тот же ответ.
+    Сбой подготовки до отправки право не тратит."""
     if resolved is _UNRESOLVED_MAIN:
         resolved = resolve_main_for_call(
             state, ctx, target_override=getattr(state, "_call_level", None)
         )
     auth_connector = getattr(ctx, "auth_connector", None)
+    router = getattr(ctx, "model_router", None)
+    take_probe = functools.cache(
+        lambda: router is not None and router.take_probe(resolved)
+    )
     try:
         return await _arequest_backend_canonical_once(
             messages,
@@ -1088,6 +1096,7 @@ async def _arequest_backend_canonical_local(
             resolved=resolved,
             set_previous_response_id=set_previous_response_id,
             mute_answer=mute_answer,
+            take_probe=take_probe,
         )
     except Exception as exc:
         if auth_connector is not None and is_auth_error(exc):
@@ -1107,6 +1116,7 @@ async def _arequest_backend_canonical_local(
                     resolved=resolved,
                     set_previous_response_id=set_previous_response_id,
                     mute_answer=mute_answer,
+                    take_probe=take_probe,
                 )
             except Exception as retry_exc:
                 _maybe_trip_and_raise_main_unavailable(
@@ -1127,6 +1137,7 @@ async def _arequest_responses_once(
     settings: AppConfig,
     set_previous_response_id: bool,
     network: tuple,
+    take_probe: Callable[[], bool],
 ) -> Tuple[List[Dict], str, Dict]:
     # Адрес — backend.completions_url в обоих режимах API. Прежний плоский
     # `agent_url` в схеме не существует (строгая валидация его не пропустит).
@@ -1160,6 +1171,8 @@ async def _arequest_responses_once(
         resolved=resolved,
         settings=settings,
     )
+    if take_probe():
+        use_retry = False
     with usage_scope(
         getattr(state, "usage", None), USAGE_CATEGORY_MAIN, "responses"
     ):
@@ -1452,6 +1465,10 @@ async def _aprepare_native_vision(
     return key
 
 
+def _no_probe_right() -> bool:
+    return False
+
+
 async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
@@ -1460,9 +1477,14 @@ async def _arequest_backend_canonical_once(
     resolved: Any = _UNRESOLVED_MAIN,
     set_previous_response_id: bool = True,
     mute_answer: bool = False,
+    take_probe: Callable[[], bool] = _no_probe_right,
 ) -> Tuple[List[Dict], str, Dict]:
     """
     Унифицированный вызов backend для двух режимов API (одна попытка).
+
+    `take_probe` забирает право пробы алиаса из предохранителя (см.
+    `_arequest_backend_canonical_local`) — его зовут прямо перед отправкой:
+    проба — один HTTP-запрос, без ретраев транспорта и адаптивных повторов.
 
     Возвращает:
     - канонические сообщения (responses-like),
@@ -1487,12 +1509,6 @@ async def _arequest_backend_canonical_once(
         config_proxy,
         retry_embedded_choice_errors,
     ) = resolve_network_params(settings, resolved_for_network)
-    # Проба алиаса из предохранителя — один HTTP-запрос: без ретраев
-    # транспорта и без адаптивных повторов (спека model-breaker §2.2).
-    router = getattr(ctx, "model_router", None)
-    probe = router is not None and router.take_probe(resolved)
-    if probe:
-        use_retry = False
 
     if backend_mode == "responses":
         return await _arequest_responses_once(
@@ -1510,11 +1526,15 @@ async def _arequest_backend_canonical_once(
                 request_timeout_sec,
                 config_proxy,
             ),
+            take_probe=take_probe,
         )
 
     route_key = await _aprepare_native_vision(
         state, ctx, resolved, call_headers, messages, settings
     )
+    probe = take_probe()
+    if probe:
+        use_retry = False
 
     url = (
         resolved.url
