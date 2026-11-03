@@ -8,7 +8,8 @@
 * свежая (`-latest`, `freshen`) — строка последнего хода: справа сводка
   правок хода (кликабельна, ведёт на экран изменений в источнике «Ход»),
   под «✕ Ошибка» — причина `└` до трёх строк;
-* осевшая (`settle`) — только голова; данные сводки и причины строка
+* осевшая (`settle`) — только голова (у ошибки причина — подсказкой
+  при наведении); данные сводки и причины строка
   хранит, чтобы освежиться снова;
 * за баром (`-held`, `hold` / `reveal`) — скрыта, пока стоит бар
   индикатора.
@@ -107,6 +108,7 @@ class TurnLine(Static):
             return
         self._summary = summary
         self._error = error
+        self.tooltip = None
         self.add_class(TURN_LINE_LATEST)
         self.refresh(layout=True)
 
@@ -115,6 +117,10 @@ class TurnLine(Static):
         self.remove_class(TURN_LINE_LATEST)
         self._pressed_in_summary = False
         self._summary_hover = False
+        # Причина осевшей ошибки — подсказкой; `Text`, не строка: строка
+        # разбирается как разметка и теряет квадратные скобки.
+        failed = self._word == _FAILED_WORD and self._error
+        self.tooltip = Text(self._error) if failed else None
         self.refresh(layout=True)
 
     def hold(self) -> None:

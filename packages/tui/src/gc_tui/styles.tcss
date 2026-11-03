@@ -889,3 +889,6 @@ ModelEntryForm TextArea.mef-yaml {
 ModelEntryForm TextArea.mef-yaml:focus {
     border: round $run-color; background: $band-bg; color: $ink;
 }
+
+/* Подсказка с причиной у осевшей строки ошибки хода (turn_line.py). */
+Tooltip { background: $overlay-bg; color: $ink; max-width: 72; }

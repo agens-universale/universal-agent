@@ -112,3 +112,54 @@ async def test_narrow_line_hides_the_whole_segment():
         await pilot.pause()
         assert line.render().plain == "✓ Выполнил"
         assert "изменено" not in line.render().plain
+
+
+@pytest.mark.asyncio
+async def test_settled_error_line_has_reason_tooltip():
+    line = _failed_line()
+    async with LineApp(line).run_test(size=(80, 10)) as pilot:
+        line.freshen(None, "ReadError: boom")
+        line.settle()
+        await pilot.pause()
+        assert str(line.tooltip) == "ReadError: boom"
+
+        line.freshen(None, "ReadError: boom")
+        assert line.tooltip is None
+
+
+@pytest.mark.asyncio
+async def test_settled_ok_line_has_no_tooltip():
+    line = build_turn_line(word="completed")
+    async with LineApp(line).run_test(size=(80, 10)) as pilot:
+        line.freshen((1, 2, 3), None)
+        line.settle()
+        await pilot.pause()
+        assert line.tooltip is None
+
+
+@pytest.mark.asyncio
+async def test_tooltip_keeps_square_brackets():
+    reason = "ошибка [bold]x[/] a [/] b"
+    line = _failed_line()
+    async with LineApp(line).run_test(size=(80, 10)) as pilot:
+        line.freshen(None, reason)
+        line.settle()
+        await pilot.pause()
+        assert line.tooltip.plain == reason
+
+
+@pytest.mark.asyncio
+async def test_hover_shows_tooltip():
+    from textual.widgets._tooltip import Tooltip
+
+    line = _failed_line()
+    app = LineApp(line)
+    async with app.run_test(size=(80, 10), tooltips=True) as pilot:
+        line.freshen(None, "ReadError: boom")
+        line.settle()
+        await pilot.pause()
+        await pilot.hover(line)
+        await pilot.pause(0.7)
+        tip = app.screen.query_one(Tooltip)
+        assert tip.display
+        assert "ReadError: boom" in str(tip.render())
