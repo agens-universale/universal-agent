@@ -58,7 +58,7 @@ from gc_tui.services.diff_render import (
 )
 from gc_tui.services.plural import lines_word
 from gc_tui.widgets.block_panel import CopyFeedbackMixin, _copy_request
-from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.click_model import ClickModelMixin, opens_event
 from gc_tui.widgets.no_select import NoSelectStatic
 
 COLLAPSE_LABEL = "свернуть"
@@ -323,7 +323,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         event.prevent_default()
         widget = getattr(event, "widget", None)
         if (
-            not event.ctrl
+            not opens_event(event)
             and widget is not None
             and widget.has_class("diff-more")
         ):
@@ -345,8 +345,8 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
                 body.first(Static).text_select_all()
             self._copy_block()
             return
-        if event.ctrl:
-            # Ctrl+клик — жест «открыть событие», он и выделяет: после выхода с
+        if opens_event(event):
+            # Клик с модификатором — жест «открыть событие», он и выделяет: после выхода с
             # открытого экрана фокус должен остаться здесь, а не на прошлой строке.
             super().on_click(event)
             return

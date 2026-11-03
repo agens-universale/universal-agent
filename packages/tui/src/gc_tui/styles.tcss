@@ -22,11 +22,16 @@ Screen {
    экрана ровно там, где выход нужнее всего. Обрубок врёт о клавишах так же, как
    обрубок счётчиков в шапке, поэтому решение общее для всех read-only экранов. */
 #footer { height: auto; min-height: 2; background: $bg; color: $dim;
-          padding: 0 1; }
+          padding: 0 1; border-top: solid $deep-dim; }
+/* Полоса над подвалом отделяет его от прокручиваемого тела (как у превью
+   сессии). Где тело и так в рамке — правки, их откат, «Обновление» — полоса
+   лишняя: рамка уже отделяет. */
+DiffScreen #footer, DiffFileViewer #footer, RevertConfirmScreen #footer,
+PostUpdateScreen #footer { border-top: none; }
 /* Исключение — главный экран: его подвал верстается кодом (усечение cwd,
    адаптивный стек usage) и стоит НАД полем ввода, где рост полосы двигал бы
    ввод под рукой. */
-TraceScreen #footer { height: 2; }
+TraceScreen #footer { height: 2; border-top: none; }
 /* padding-right: 2 — ФИЗИЧЕСКИЙ зазор между колонками футера. Правая колонка
    width:auto забирает своё по содержимому, левая (1fr) получает остаток — и без этих
    двух столбцов её текст упирался в имя модели вплотную (живая приёмка). Арифметика
@@ -47,9 +52,10 @@ TraceScreen #footer { height: 2; }
  * preview/viewer/help/config/mcp/tool_call_detail переиспользуют id="trace"). */
 #trace { height: 1fr; padding: 0 1; background: $bg; }
 /* Скроллбар — ЕДИНЫЙ стиль для всех скроллируемых контейнеров (трейс, /sessions,
- * /skills, read-only экраны): узкий и тихий, фирменный teal только при наведении/
- * перетаскивании (акцент — редкий сигнал). Тип-селектор → одинаково везде. */
-VerticalScroll {
+ * /skills, read-only экраны, область текста /view и буфера копий): узкий и тихий,
+ * фирменный teal только при наведении/перетаскивании (акцент — редкий сигнал).
+ * Тип-селектор → одинаково везде. */
+VerticalScroll, TextArea {
     scrollbar-size: 1 1;
     scrollbar-background: $bg;
     scrollbar-background-hover: $bg;
@@ -129,6 +135,11 @@ TraceScreen #trace { width: 100%; margin: 0 0 1 0; }
 #sessions-filter-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left middle; padding: 0; }
 #sessions-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
 #sessions-filter:focus { border: none; }
+/* Поле фильтра — как главный ввод: Textual подкрашивает фон Input в фокусе,
+   и строка фильтра выделялась светлой полосой, которой у главного поля нет. */
+#sessions-filter:focus, #skills-filter:focus, #config-filter:focus {
+    background-tint: 0%;
+}
 
 /* FOCUS-2px — на НЕ-ввод (список/футер), когда Tab уведёт фокус туда.
    #trace здесь НЕТ, и это общее решение, а не правка одного экрана: `outline`
@@ -147,7 +158,7 @@ TraceScreen #trace { width: 100%; margin: 0 0 1 0; }
 /* Фокус строки события — сдвиг-безопасная подсветка фона (заменила [N]-префикс:
    background не рефлоунит контент, в отличие от prefix/border). */
 ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus,
-BlockPanel:focus, TodoBlock:focus {
+BlockPanel:focus, TodoBlock:focus, ThoughtRow:focus {
     background: $highlight-bg;
 }
 /* DiffBlock здесь НЕТ: он не фокусируется вовсе (can_focus=False) — событие
@@ -216,6 +227,18 @@ BlockPanel:focus, TodoBlock:focus {
 .block-copy  { color: $dim; }
 /* Наведение на действие ленты (❐, «… ещё N строк») — одно правило. */
 .trace-action:hover { color: $accent; }
+/* Наведение на текст, раскрываемый кликом по нему самому (строка мысли),
+   — белым; одно правило. */
+.trace-expandable:hover { color: $ink; }
+/* Объект вызова Think — отдельный Static без своего цвета в тексте:
+   законченный `$sub-ink`, идущий `$ink` (вид строки вызова, §10). */
+.think-target { color: $sub-ink; }
+/* Три Static первой строки Think идут вплотную: ширина по тексту; селектор
+   с типом строки — приоритет над `.trace-content { width: 1fr }`. */
+ToolCallRow .think-label,
+ToolCallRow .think-target,
+ToolCallRow .think-tail { width: auto; height: 1; }
+.think-target.-active { color: $ink; }
 
 /* Накладки над лентой «не внизу» (спека P3 §2.6): поверх экрана, высоты
    ленты не занимают; место и ширину ставит код по #trace. Ховер плашки —
@@ -263,6 +286,10 @@ ScrollEndPill:hover { background: $highlight-bg; }
 .line-tool      { color: $dim; }       /* |- механика тула */
 /* Пустая строка перед каждым вызовом — верхним и вложенным (спека P3 §2.1). */
 ToolCallRow { margin-top: 1; }
+/* Строка мысли модели — событие уровня 0, тоже с пустой строкой сверху;
+   серая целиком, хвост и раскрытый текст — тоже (ховер хвоста —
+   .trace-expandable:hover). */
+ThoughtRow { margin-top: 1; color: $dim; }
 /* Блоки P4: члены и строки внутри блока субагента — без пустой строки
    сверху; между видимыми файлами блока правок — есть (спека P4 §3.1). */
 ToolCallRow.-member, ToolCallRow.-in-agent { margin-top: 0; }
@@ -437,6 +464,9 @@ TurnLine.-held, CompactionRule.-held { display: none; }
 
 /* Тело ViewerScreen — read-only payload/файл */
 .viewer-body   { color: $ink; padding: 0 1; }
+/* Markdown-тело — контейнер строк ленты: высота по содержимому, иначе
+   Vertical берёт 1fr окна, обрезает хвост и прокрутка пропадает. */
+.viewer-markdown { height: auto; }
 /* FileViewerScreen: TextArea(read_only) — скролл, syntax, мышиное выделение */
 FileViewerScreen #root { height: 1fr; }
 #file-view-body {
@@ -448,6 +478,11 @@ FileViewerScreen #root { height: 1fr; }
     color: $ink;
 }
 #file-view-body:focus { border: none; }
+/* Строка области текста и полосы позиции. Окнами (большой файл) встроенный
+   скроллбар знает лишь окно и врёт о файле — его место занимает
+   FilePositionBar, посчитанная по всему файлу. */
+#file-view-row { height: 1fr; }
+#file-view-body.paged { scrollbar-size-vertical: 0; }
 
 /* CopyBufferScreen: TextArea на весь экран — шапка+футер как у ViewerScreen,
  * рамка — тихая палитровая (не дефолт Textual), акцент при фокусе. */
@@ -663,6 +698,9 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #config-filter-row { height: 3; width: 1fr; padding: 0; background: $bg; border-top: solid $deep-dim; border-bottom: solid $deep-dim; }
 #config-filter-prompt { width: 2; color: $accent; height: 1; background: $bg; content-align: left middle; padding: 0; }
 #config-filter { height: 1; width: 1fr; border: none; padding: 0; background: $bg; color: $ink; }
+/* Под фильтром `/skills` и `/config` сразу подвал — его полоса и есть нижняя
+   линия поля; своя давала две линии подряд. */
+#skills-filter-row, #config-filter-row { height: 2; border-bottom: none; }
 
 /* ── Онбординг ─────────────────────────────────────────── */
 /* Хедер (титул) сверху + футер (подсказки, слева) снизу — как на основном экране;

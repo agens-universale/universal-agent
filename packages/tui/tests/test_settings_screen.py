@@ -973,7 +973,7 @@ async def test_connection_section_esc_collapses_presets_enter_substitutes(
         await pilot.pause()
         await pilot.pause()  # дать call_after_refresh дорисовать строки
         assert scr.query_one("#conn-url", Input).value == ""
-        rows = [str(w.render()) for w in scr.query(".conn-preset-row")]
+        rows = [str(w.content) for w in scr.query(".conn-preset-row")]
         assert any("OpenRouter" in r for r in rows)
         assert any("Cloud.ru" in r for r in rows)
         assert any("RouterAI" in r for r in rows)
@@ -1077,7 +1077,7 @@ async def test_alt_down_over_own_address_opens_without_a_highlight(tmp_path):
         await pilot.press("alt+down")
         await pilot.pause()
         assert ed.presets_open is True
-        rows = [str(w.render()) for w in scr.query(".conn-preset-row")]
+        rows = [str(w.content) for w in scr.query(".conn-preset-row")]
         assert rows and not any(
             r.startswith("▸") for r in rows
         )  # видны все, подсвеченной нет
@@ -3507,7 +3507,7 @@ async def test_modes_preview_truncated_on_first_frame_of_narrow_menu(tmp_path):
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "judge"\n',
         encoding="utf-8",
     )
     app = app_mod.TuiApp(settings=tui_settings({}))
@@ -3533,13 +3533,13 @@ async def test_modes_subscreen_writes_global(tmp_path):
     один ключ (глобал)."""
     app, cfg_file = _app_with_config(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "deny"\n',
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
         assert not scr.query(".set-modes-save")
 
-        # курсор на пресете rigor (high: on+deny). → пишет ПАРУ следующего пресета.
+        # курсор на пресете rigor (high: always+deny). → пишет ПАРУ следующего пресета.
         scr._modes_idx = modes_row_index("rigor")
         rows = [str(w.render()) for w in scr.query(".set-row")]
         assert any("rigor · строгость завершения хода" in r for r in rows)
@@ -3579,7 +3579,7 @@ async def test_modes_apply_error_flash_keeps_screen(tmp_path, monkeypatch):
     """Писатель падает (OSError) → флеш «✗ не сохранено: …», подэкран не
     закрывается, config.yml не меняется."""
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
     original = cfg_file.read_text(encoding="utf-8")
 
@@ -3604,7 +3604,7 @@ async def test_modes_footer_shows_value_hint(tmp_path):
     Курсор на /rigor; спускаемся на детальные gate/answers."""
     app, cfg_file = _app_with_config(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "deny"\n',
     )  # high -> пресет-строка
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
@@ -3628,10 +3628,10 @@ async def test_modes_footer_shows_value_hint(tmp_path):
         assert hint0.startswith("high —")  # строка пресета, значение high
         assert "Enter" not in hint0
 
-        await pilot.press("down")  # -> gate (самопроверка), значение on
+        await pilot.press("down")  # -> gate (самопроверка), значение always
         await pilot.pause(0.1)
         hint1 = str(scr.query_one(".set-modes-hint", Static).render())
-        assert hint1.startswith("on —")
+        assert hint1.startswith("always —")
         assert hint1 != hint0
 
         await pilot.press("down")  # -> answers (формат), значение deny
@@ -3646,7 +3646,7 @@ async def test_modes_preset_row_shows_custom_when_global_nonstandard(tmp_path):
     отращивает 4-ю позицию (спека §2, §4.2)."""
     app, cfg_file = _app_with_config(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "allow"\n',
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
@@ -3669,7 +3669,7 @@ async def test_modes_preset_row_shows_session_override_tail(tmp_path):
     app.tui_state.active_task_id = "t1"
     app._threads_dir = str(tmp_path / "threads")
     app.apply_session_overrides(
-        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"}
+        {"tui.finish_gate_mode": "always", "tui.text_answer_mode": "deny"}
     )
     async with app.run_test(size=(200, 24)) as pilot:
         scr = await _open_modes_section(pilot)
@@ -3695,7 +3695,7 @@ async def test_modes_preset_track_width_reserved_regardless_of_global(
     )
     app_custom, _ = _app_with_config(
         custom_dir,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "allow"\n',
     )
     async with app_std.run_test() as pilot_std:
         scr_std = await _open_modes_section(pilot_std)
@@ -3726,7 +3726,7 @@ async def test_modes_rows_track_base_left_aligned(tmp_path):
     )
     app_custom, _ = _app_with_config(
         custom_dir,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "allow"\n',
     )
 
     async with app_std.run_test() as pilot_std:
@@ -3764,7 +3764,7 @@ async def test_modes_rows_track_base_left_aligned(tmp_path):
     assert first_glyph_col(gate_custom) == first_glyph_col(gate_std)
     assert first_glyph_col(answers_custom) == first_glyph_col(answers_std)
     assert rigor_std.index("medium") == rigor_custom.index("custom")
-    assert gate_std.rindex("smart") == gate_custom.rindex("on")
+    assert gate_std.rindex("smart") == gate_custom.rindex("always")
     assert answers_std.rindex("judge") == answers_custom.rindex("allow")
 
 
@@ -3781,7 +3781,7 @@ async def test_modes_session_line_stands_under_the_key_name(tmp_path):
     # глобал (off, judge) — не пресет -> rigor резолвится в custom (6 симв.);
     # сессия (on, deny) — ровно пара "high" (4 симв.), отличная от custom.
     app.apply_session_overrides(
-        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"}
+        {"tui.finish_gate_mode": "always", "tui.text_answer_mode": "deny"}
     )
     async with app.run_test(size=(200, 24)) as pilot:
         scr = await _open_modes_section(pilot)
@@ -3791,7 +3791,7 @@ async def test_modes_session_line_stands_under_the_key_name(tmp_path):
         answers_row = next(r for r in rows if "формат ответа" in r)
 
         assert _session_line(rigor_row) == "  в текущей сессии: high"
-        assert _session_line(gate_row) == "  в текущей сессии: on"
+        assert _session_line(gate_row) == "  в текущей сессии: always"
         assert _session_line(answers_row) == "  в текущей сессии: deny"
         for row in (rigor_row, gate_row, answers_row):
             assert "в текущей сессии" not in row.split("\n")[0]
@@ -3806,7 +3806,7 @@ async def test_modes_hint_global_framing_even_with_session_override(tmp_path):
     (on+allow), сессия расходится с ним (off+deny)."""
     app, cfg_file = _app_with_config(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "allow"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "allow"\n',
     )
     app.tui_state.active_task_id = "t1"
     app._threads_dir = str(tmp_path / "threads")
@@ -3819,7 +3819,7 @@ async def test_modes_hint_global_framing_even_with_session_override(tmp_path):
         scr._render_view()
         await pilot.pause(0.1)
         hint = str(scr.query_one(".set-modes-hint", Static).render())
-        assert "ваш дефолт: самопроверка on, формат allow" in hint
+        assert "ваш дефолт: самопроверка always, формат allow" in hint
         assert "своя пара этой сессии" not in hint
 
 
@@ -3868,7 +3868,7 @@ async def test_modes_generic_toggle_appears_and_cycles_without_code_changes(
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "judge"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "judge"\n',
         encoding="utf-8",
     )
     app = app_mod.TuiApp(settings=tui_settings({}))
@@ -3990,7 +3990,7 @@ async def test_modes_apply_blocked_when_not_writable(tmp_path, monkeypatch):
     from gc_core import config as config_mod
 
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
     original = cfg_file.read_text(encoding="utf-8")
     monkeypatch.setattr(
@@ -4014,7 +4014,7 @@ async def test_modes_enter_on_toggle_row_does_nothing(tmp_path):
     """Enter на строке ручки в «Режимах работы» значение не меняет и
     ничего не пишет; меняют ←/→."""
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
     original = cfg_file.read_text(encoding="utf-8")
     async with app.run_test() as pilot:
@@ -4035,14 +4035,14 @@ async def test_modes_apply_preserves_unrelated_keys(tmp_path):
     Курсор на /rigor (пресет) — спускаемся на детальную gate."""
     app, cfg_file = _app_with_config(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\nagent:\n  model: "custom-model-xyz"\n',
+        'tui:\n  finish_gate_mode: "always"\nagent:\n  model: "custom-model-xyz"\n',
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
         scr._modes_idx = modes_row_index("rigor")
         await pilot.press("down")  # /rigor -> gate
         await pilot.pause(0.1)
-        await pilot.press("right")  # gate on -> off глобально
+        await pilot.press("right")  # gate always -> off глобально
         await pilot.pause(0.1)
 
         text = cfg_file.read_text(encoding="utf-8")
@@ -4053,9 +4053,9 @@ async def test_modes_apply_preserves_unrelated_keys(tmp_path):
 async def test_modes_apply_does_not_reset_live_session_override(tmp_path):
     """Центральная гарантия модели «место = scope» (Settings пишет глобал,
     сессию не трогает) — прямым тестом, не композицией существующих. Оверрайд
-    "on" совпадает с исходным глобалом ДО переключения — это осознанный выбор:
+    "always" совпадает с исходным глобалом ДО переключения — это осознанный выбор:
     после единственного нажатия глобал уходит в "off" (цикл идёт от глобала),
-    и только тогда пара расходится ("on" оверрайда против "off" нового
+    и только тогда пара расходится ("always" оверрайда против "off" нового
     глобала) — иначе ассерты не различили бы, откуда взялось эффективное
     значение. Если `_modes_apply` начнёт сбрасывать/перезаписывать сессионные
     переопределения при записи глобала — первым упадёт п.3 (эффективное
@@ -4065,11 +4065,11 @@ async def test_modes_apply_does_not_reset_live_session_override(tmp_path):
     from gc_tui.toggles import toggle_state
 
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
     async with app.run_test(size=(200, 24)) as pilot:
         scr = await _open_modes_section(pilot)
-        app.set_session_override("tui.finish_gate_mode", "on")
+        app.set_session_override("tui.finish_gate_mode", "always")
 
         scr._modes_idx = modes_row_index("rigor")
         await pilot.press("down")  # /rigor -> gate
@@ -4081,17 +4081,17 @@ async def test_modes_apply_does_not_reset_live_session_override(tmp_path):
         assert 'finish_gate_mode: "off"' in text  # (1) новый глобал в файле
 
         assert app._session_overrides == {
-            "tui.finish_gate_mode": "on"
+            "tui.finish_gate_mode": "always"
         }  # (2) оверрайд выжил
 
         assert (
-            toggle_state(app, "gate") == "on"
+            toggle_state(app, "gate") == "always"
         )  # (3) эффективное = оверрайд, не новый глобал
 
         rows = [str(w.render()) for w in scr.query(".set-row")]
         gate_row = next(r for r in rows if "самопроверка" in r)
         assert (
-            _session_line(gate_row) == "  в текущей сессии: on"
+            _session_line(gate_row) == "  в текущей сессии: always"
         )  # (4) пометка отражает пару слоёв
 
 
@@ -4106,7 +4106,7 @@ async def test_modes_row_shows_session_override_note(tmp_path):
     from gc_tui.toggles import modes_section_names
 
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
     async with app.run_test(size=(200, 24)) as pilot:
         scr = await _open_modes_section(pilot)
@@ -4132,7 +4132,7 @@ async def test_modes_row_shows_session_override_note(tmp_path):
             "в текущей сессии" not in answers_row
         )  # неразошедшийся — без пометки
         # значение в строке — глобал, не сессия
-        assert gate_row.split("\n")[0].rstrip().endswith("on")
+        assert gate_row.split("\n")[0].rstrip().endswith("always")
 
 
 async def test_modes_no_override_note_from_legacy_key_alone(tmp_path):
@@ -4163,9 +4163,9 @@ async def test_modes_session_line_survives_a_narrow_window(tmp_path):
     """Строка «в текущей сессии: …» короткая и стоит отдельно: на узком окне
     она остаётся целиком, а строка тоггла не переносится."""
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
-    async with app.run_test(size=(73, 24)) as pilot:
+    async with app.run_test(size=(80, 24)) as pilot:
         scr = await _open_modes_section(pilot)
         app.set_session_override("tui.finish_gate_mode", "off")
         scr._render_view()
@@ -4175,7 +4175,9 @@ async def test_modes_session_line_survives_a_narrow_window(tmp_path):
         gate = next(w for w in rows if "самопроверка" in str(w.render()))
         gate_row = str(gate.render())
         assert _session_line(gate_row) == "  в текущей сессии: off"
-        assert gate_row.split("\n")[0].rstrip().endswith("on")
+        assert gate_row.split("\n")[0].rstrip().endswith("always")
+        lines = gate_row.split("\n")
+        assert len(lines) == 2  # значение + сессия (строка не выбрана)
         assert gate.region.height == 2  # две строки, без переноса
 
 
@@ -4212,6 +4214,33 @@ async def test_session_line_label_is_dim_italic_and_value_has_its_track_colour(
         )
         assert text.plain.split("\n")[1].endswith("plan")
         assert plan_colour.lower() in style_at(text.plain.rindex("plan"))
+
+
+async def test_modes_rows_paint_values_on_the_value_scale(tmp_path):
+    """Шкала значений в «Режимах работы»: ● трека горит цветом своей позиции
+    (`smart` — ACCENT), значение сессии второй строкой — тоже (`on` —
+    RUN_COLOR)."""
+    from gc_tui.palette import ACCENT, RUN_COLOR
+
+    app, _ = _app_with_config(
+        tmp_path,
+        'tui:\n  finish_gate_mode: "smart"\n  text_answer_mode: "judge"\n',
+    )
+    app.tui_state.active_task_id = "t1"
+    app._threads_dir = str(tmp_path / "threads")
+    app.apply_session_overrides({"tui.finish_gate_mode": "always"})
+    async with app.run_test(size=(200, 24)) as pilot:
+        scr = await _open_modes_section(pilot)
+        text = scr._mode_row_text("gate", selected=False)
+
+        def style_at(idx):
+            return " ".join(
+                str(s.style) for s in text.spans if s.start <= idx < s.end
+            ).lower()
+
+        assert ACCENT.lower() in style_at(text.plain.index("●"))
+        assert _session_line(text.plain) == "  в текущей сессии: always"
+        assert RUN_COLOR.lower() in style_at(text.plain.rindex("always"))
 
 
 async def test_connection_section_mounts_connection_editor(tmp_path):
@@ -5377,6 +5406,7 @@ def test_modes_section_goes_model_then_permissions_then_rigor():
         "rigor",
         "gate",
         "answers",
+        "reasoning",
     ]
 
 
@@ -5392,9 +5422,9 @@ async def test_model_row_stands_behind_a_separator(tmp_path):
 
         seps = list(scr.query(".set-group-sep"))
         rows = list(scr.query(".set-row"))
-        # Три блока: model | mode | rigor с детьми — две черты.
-        assert len(seps) == 2
-        assert len(rows) == 5
+        # Четыре блока: model | mode | rigor с детьми | trace — три черты.
+        assert len(seps) == 3
+        assert len(rows) == 6
         assert rows[0].region.y < seps[0].region.y < rows[1].region.y
         assert rows[1].region.y < seps[1].region.y < rows[2].region.y
 
@@ -5456,7 +5486,7 @@ async def test_modes_write_goes_to_the_project_config_that_already_sets_the_key(
     project_config.mkdir()
     project_config = project_config / "config.yml"
     project_config.write_text(
-        'tui:\n  finish_gate_mode: "on"\n', encoding="utf-8"
+        'tui:\n  finish_gate_mode: "always"\n', encoding="utf-8"
     )
 
     app, base_cfg = _app_with_config(
@@ -5473,7 +5503,7 @@ async def test_modes_write_goes_to_the_project_config_that_already_sets_the_key(
             yaml.safe_load(project_config.read_text(encoding="utf-8"))["tui"][
                 "finish_gate_mode"
             ]
-            != "on"
+            != "always"
         )
         assert (
             yaml.safe_load(base_cfg.read_text(encoding="utf-8"))["tui"][
@@ -5535,11 +5565,11 @@ async def test_modes_write_says_what_actually_acts_when_a_layer_wins(
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    # Профиль держит "on", а цикл от "off" даёт "smart" — значения РАЗВЕДЕНЫ:
+    # Профиль держит "always", а цикл от "off" даёт "smart" — значения РАЗВЕДЕНЫ:
     # совпади они, тест зеленел бы и без всякой сверки.
     (tmp_path / "profiles").mkdir()
     (tmp_path / "profiles" / "work.yml").write_text(
-        'tui:\n  finish_gate_mode: "on"\n', encoding="utf-8"
+        'tui:\n  finish_gate_mode: "always"\n', encoding="utf-8"
     )
 
     app, _ = _app_with_config(
@@ -5558,7 +5588,7 @@ async def test_modes_write_says_what_actually_acts_when_a_layer_wins(
         # или профиль» врало бы в первой половине — проектный, задающий ключ,
         # перехватывает саму запись (правило выбора файла) и перекрыть её не может.
         assert any(
-            "действует" in n and "on" in n and "профилем work" in n
+            "действует" in n and "always" in n and "профилем work" in n
             for n in notices
         ), notices
 
@@ -5742,7 +5772,7 @@ async def test_overriding_layer_names_the_key_that_actually_diverged(
     gc_dir = project_dir / ".gc"
     gc_dir.mkdir()
     (gc_dir / "config.yml").write_text(
-        'tui:\n  finish_gate_mode: "on"\n', encoding="utf-8"
+        'tui:\n  finish_gate_mode: "always"\n', encoding="utf-8"
     )
     (tmp_path / "profiles").mkdir()
     (tmp_path / "profiles" / "work.yml").write_text(
@@ -5757,7 +5787,7 @@ async def test_overriding_layer_names_the_key_that_actually_diverged(
         scr = await _open_modes_section(pilot)
 
         name = scr._overriding_layer_name(
-            {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+            {"tui.finish_gate_mode": "always", "tui.text_answer_mode": "allow"}
         )
 
         assert "профилем work" in name, name
@@ -5888,3 +5918,108 @@ async def test_mode_row_shows_the_mode_chosen_in_this_session(tmp_path):
 
         assert row.split("\n")[0].rstrip().endswith("edit")
         assert _session_line(row) == "  в текущей сессии: plan"
+
+
+async def test_modes_key_line_sits_in_hint_not_in_rows(tmp_path):
+    """Ключ выбранной строки — второй строкой подсказки внизу рамки
+    (`ключ: <dotted>`, имя — `SUB_INK`), не под самой строкой. У строки без
+    `dotted` (rigor) место ключа пустое."""
+    from gc_tui.palette import SUB_INK
+
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
+    async with app.run_test(size=(200, 30)) as pilot:
+        scr = await _open_modes_section(pilot)
+        for name in ("reasoning", "rigor", "gate", "model"):
+            assert "ключ:" not in scr._mode_row_text(name, True).plain
+
+        def key_line(name: str) -> str:
+            scr._modes_idx = modes_row_index(name)
+            block = scr._modes_hint_block()
+            lines = block.plain.split("\n")
+            assert len(lines) == 2
+            if lines[1]:
+                assert block.spans[-1].style == SUB_INK
+                assert block[block.spans[-1].start :].plain == lines[1][6:]
+            return lines[1]
+
+        assert key_line("reasoning") == "ключ: tui.show_reasoning"
+        assert key_line("gate") == "ключ: tui.finish_gate_mode"
+        assert key_line("model") == "ключ: model"
+        assert key_line("rigor") == ""
+
+
+async def test_modes_session_line_is_last_row_line(tmp_path):
+    """Сессионный `on` при файловом `off`: «в текущей сессии: on» — второй
+    и последней строкой строки (ключ — в подсказке)."""
+    app, _ = _app_with_config(tmp_path, 'tui:\n  show_reasoning: "off"\n')
+    app.tui_state.active_task_id = "t1"
+    app._threads_dir = str(tmp_path / "threads")
+    app.apply_session_overrides({"tui.show_reasoning": "on"})
+    async with app.run_test(size=(200, 30)) as pilot:
+        scr = await _open_modes_section(pilot)
+        lines = scr._mode_row_text("reasoning", True).plain.split("\n")
+        assert lines[1:] == ["  в текущей сессии: on"]
+
+
+@pytest.mark.parametrize("width", [70, 100, 160])
+async def test_modes_hint_height_stays_on_cursor_and_value(tmp_path, width):
+    """Подсказка целиком, без обрезки; высота — под самый длинный вариант
+    секции: ни ↑/↓, ни ←/→ не двигают низ рамки."""
+    from gc_tui.services.hint_height import wrapped_lines
+
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
+    async with app.run_test(size=(width, 60)) as pilot:
+        scr = await _open_modes_section(pilot)
+
+        def hint():
+            return list(scr.query(".set-modes-hint"))[-1]
+
+        def fits() -> bool:
+            h = hint()
+            block = scr._modes_hint_block().plain
+            return h.size.height >= wrapped_lines(
+                block, h.content_region.width
+            )
+
+        heights, texts = set(), []
+        for _ in range(8):
+            await pilot.press("down")
+            await pilot.pause(0.1)
+            heights.add(hint().size.height)
+            texts.append(scr._modes_hint_text())
+            assert fits()
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        heights.add(hint().size.height)
+        assert len(heights) == 1
+        assert not any(t.endswith("…") for t in texts)
+
+
+@pytest.mark.parametrize("width", [64, 73, 80, 160])
+async def test_modes_rows_never_wrap_and_keep_the_value(tmp_path, width):
+    """Строка режима — одна строка на любой ширине: не влезает — режется
+    подпись с «…», трек и значение справа целы (переносилась на 73 и уже)."""
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
+    async with app.run_test(size=(width, 60)) as pilot:
+        scr = await _open_modes_section(pilot)
+        await pilot.pause(0.1)
+        rows = [r for r in scr.query(".set-modes-row") if r.display]
+        assert rows
+        for row in rows:
+            assert row.region.height == 1, str(row.content)
+        gate = next(r for r in rows if "gate" in str(r.content))
+        assert str(gate.content).rstrip().endswith("smart")
+
+
+def test_fit_row_head_cuts_the_label_not_the_tail():
+    from gc_tui.screens.settings import fit_row_head
+    from rich.text import Text
+
+    row = Text("  gate · самопроверка выполнения задачи     ○ ● ○  smart")
+    head_end = len("  gate · самопроверка выполнения задачи     ")
+    tail_w = len("○ ● ○  smart")
+    fitted = fit_row_head(row, head_end, tail_w, 40)
+    assert fitted.cell_len <= 40
+    assert fitted.plain.endswith("○ ● ○  smart")
+    assert "…" in fitted.plain
+    assert fit_row_head(row, head_end, tail_w, 200).plain == row.plain

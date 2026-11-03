@@ -8,7 +8,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
-from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
+from gc_core.constants.tool_names import (
+    PROPOSE_PLAN_TOOL_NAME,
+    SESSION_THINK_TOOL_NAME,
+)
 from gc_core.execution.progress import tool_args_summary
 from gc_core.message_policy.chat_completions import is_bridge_echo
 from gc_core.vision.errors import (
@@ -29,6 +32,7 @@ from gc_tui.services.command_output import (
 from gc_tui.services.duration_format import format_size
 from gc_tui.services.image_chips import images_mentioned
 from gc_tui.services.plural import plural_form
+from gc_tui.services.think_text import think_text
 from gc_tui.services.tool_identity import tool_id
 from gc_tui.services.tool_refusal import refusal_text
 
@@ -187,16 +191,22 @@ class RenderContext:
     collect_image_index): ответ на turn_ask_human берёт из него свои картинки.
     ``closing_replies`` — call_id закрывающего вызова → текст модели того же
     ответа (turn_close.closing_replies): по нему отчёт становится итогом.
-    ``root`` — корень проекта сессии: пути в подписях вызовов от него."""
+    ``root`` — корень проекта сессии: пути в подписях вызовов от него.
+    ``injected_fields`` — служебные поля схем тулов
+    (`agent.inject_tool_fields`): в мысль Think не входят, пока есть своё."""
 
     skipped_call_ids: frozenset = frozenset()
     image_index: Mapping[str, Attachment] = field(default_factory=dict)
     closing_replies: Mapping[str, str] = field(default_factory=dict)
     root: Optional[str] = None
+    injected_fields: frozenset = frozenset()
 
 
 def collect_render_context(
-    messages: Iterable, *, root: Optional[str] = None
+    messages: Iterable,
+    *,
+    root: Optional[str] = None,
+    injected_fields: Iterable[str] = (),
 ) -> RenderContext:
     """Pre-pass по payload'ам батча — один на всех вызывающих (лента, превью, сегменты
     сжатого треда)."""
@@ -209,6 +219,7 @@ def collect_render_context(
         image_index=collect_image_index(payloads),
         closing_replies=closing_replies(payloads),
         root=root,
+        injected_fields=frozenset(injected_fields),
     )
 
 
@@ -645,7 +656,12 @@ def map_message(
     # function_call / function_call_output — Task 2.6
     if typ in ("function_call", "function_call_output"):
         return _map_function_event(
-            msg, no=no, ts=ts, mid=mid, root=context.root
+            msg,
+            no=no,
+            ts=ts,
+            mid=mid,
+            root=context.root,
+            injected=context.injected_fields,
         )
 
     return None
@@ -930,6 +946,7 @@ def _map_function_event(
     ts: str,
     mid: Optional[str],
     root: Optional[str] = None,
+    injected: frozenset = frozenset(),
 ) -> Optional[TraceEvent]:
     typ = msg.get("type")
     wire_name = msg.get("name") if isinstance(msg.get("name"), str) else None
@@ -939,6 +956,9 @@ def _map_function_event(
     )
 
     if typ == "function_call":
+        thought = think_text(wire_name, msg.get("arguments"), injected)
+        if wire_name == SESSION_THINK_TOOL_NAME and not thought:
+            return None  # пустой Think: ошибка — только модели
         args_summary = tool_args_summary(
             wire_name, msg.get("arguments"), root=root
         )
@@ -958,6 +978,7 @@ def _map_function_event(
                 wire_name, msg.get("arguments"), root=root
             ),
             agent=agent_head(wire_name, msg.get("arguments")),
+            think_text=thought,
         )
 
     if typ == "function_call_output":

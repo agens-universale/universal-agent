@@ -6,6 +6,14 @@ from textual.widgets import Static, TextArea
 from textual.widgets.text_area import Selection
 
 
+@pytest.fixture
+def paged(monkeypatch):
+    """Режим окон (большой файл) на маленьком: порог «целиком» — ноль."""
+    from gc_tui.services import file_view
+
+    monkeypatch.setattr(file_view, "WHOLE_FILE_MAX_BYTES", 0)
+
+
 @pytest.mark.asyncio
 async def test_view_command_opens_file(tmp_path):
     pytest.importorskip("textual")
@@ -38,6 +46,7 @@ async def test_view_python_uses_syntax_highlight(tmp_path):
 
     from gc_tui.app import TuiApp
     from gc_tui.screens.file_view import FileViewerScreen
+    from gc_tui.services.file_view_theme import FILE_VIEW_THEME
 
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
@@ -54,6 +63,8 @@ async def test_view_python_uses_syntax_highlight(tmp_path):
         }
         assert "keyword" in styles or "keyword.function" in styles
         assert any(styles)  # не пустая карта
+        # Тема подсветки — из палитры, а не встроенная vscode_dark.
+        assert body.theme == FILE_VIEW_THEME
 
 
 @pytest.mark.asyncio
@@ -87,7 +98,7 @@ async def test_view_usage_without_path(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_view_remembers_page_across_reopen(tmp_path):
+async def test_view_remembers_page_across_reopen(tmp_path, paged):
     pytest.importorskip("textual")
     f = tmp_path / "long.txt"
     f.write_text(
@@ -123,7 +134,7 @@ async def test_view_remembers_page_across_reopen(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_view_arrow_hold_coalesces_moves(tmp_path):
+async def test_view_arrow_hold_coalesces_moves(tmp_path, paged):
     """Зажатая ↓ не должна делать read на каждый key-repeat — throttle ~10 Hz."""
     pytest.importorskip("textual")
     import asyncio
@@ -160,7 +171,7 @@ async def test_view_arrow_hold_coalesces_moves(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_view_pagedown_changes_window(tmp_path):
+async def test_view_pagedown_changes_window(tmp_path, paged):
     pytest.importorskip("textual")
     f = tmp_path / "p.txt"
     f.write_text(
@@ -266,7 +277,7 @@ async def test_view_get_selected_text_empty_when_no_window(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_view_get_selected_text_after_pagedown(tmp_path):
+async def test_view_get_selected_text_after_pagedown(tmp_path, paged):
     """После PgDown get_selected_text возвращает текст новой страницы."""
     pytest.importorskip("textual")
     f = tmp_path / "pages.txt"
@@ -316,3 +327,111 @@ async def test_view_soft_wrap_enabled(tmp_path):
         assert isinstance(viewer, FileViewerScreen)
         body = viewer.query_one("#file-view-body", TextArea)
         assert body.soft_wrap is True
+
+
+@pytest.mark.asyncio
+async def test_small_file_opens_whole_and_scrolls_natively(tmp_path):
+    """Файл до порога — целиком: весь текст в области, полосы позиции нет,
+    PgDn прокручивает, шапка — видимые строки."""
+    f = tmp_path / "long.txt"
+    f.write_text("\n".join(f"W{i}" for i in range(1, 301)) + "\n")
+
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.file_position_bar import FilePositionBar
+
+    app = TuiApp(threads_dir=str(tmp_path))
+    async with app.run_test(size=(80, 30)) as pilot:
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.pause()
+        viewer = pilot.app.screen
+        body = viewer.query_one("#file-view-body", TextArea)
+        assert body.text.splitlines()[-1] == "W300"
+        assert not viewer.query_one(FilePositionBar).display
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert body.scroll_y > 0
+        right = str(viewer.query_one("#header-right", Static).render())
+        assert not right.startswith("1–") and right.endswith("/ 300")
+
+
+@pytest.mark.asyncio
+async def test_whole_file_reopens_at_the_same_line(tmp_path):
+    f = tmp_path / "long.txt"
+    f.write_text("\n".join(f"W{i}" for i in range(1, 301)) + "\n")
+
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(threads_dir=str(tmp_path))
+    async with app.run_test(size=(80, 30)) as pilot:
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.pause()
+        await pilot.press("pagedown", "pagedown")
+        await pilot.pause()
+        top = pilot.app.screen._start_line
+        assert top > 1
+        await pilot.press("escape")
+        await pilot.pause()
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.pause()
+        await pilot.pause()
+        assert pilot.app.screen._start_line == top
+
+
+@pytest.mark.asyncio
+async def test_paged_wheel_and_click_move_the_window(tmp_path, paged):
+    """Окнами: колесо листает файл, клик по полосе — прыжок в это место."""
+    f = tmp_path / "big.txt"
+    f.write_text("\n".join(f"B{i}" for i in range(1, 1001)) + "\n")
+
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.file_position_bar import FilePositionBar
+
+    app = TuiApp(threads_dir=str(tmp_path))
+    async with app.run_test(size=(80, 30)) as pilot:
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.pause()
+        viewer = pilot.app.screen
+        bar = viewer.query_one(FilePositionBar)
+        assert bar.display
+        from textual import events
+
+        body = viewer.query_one("#file-view-body", TextArea)
+        body.post_message(
+            events.MouseScrollDown(body, 1, 1, 0, 1, 0, False, False, False)
+        )
+        await pilot.pause()
+        assert viewer._start_line == 4
+        await pilot.pause(0.15)
+        await pilot.click(FilePositionBar, offset=(0, bar.size.height - 1))
+        await pilot.pause(0.15)
+        assert viewer._start_line > 900
+
+
+@pytest.mark.asyncio
+async def test_paged_counts_unknown_length_in_background(
+    tmp_path, paged, monkeypatch
+):
+    """Длина большого файла неизвестна при открытии — досчитывается в фоне,
+    шапка и полоса узнают её."""
+    from gc_tui.screens import file_view as screen_mod
+
+    real = screen_mod.open_for_view
+    monkeypatch.setattr(
+        screen_mod,
+        "open_for_view",
+        lambda *a, **kw: real(*a, **{**kw, "count_eager_bytes": 0}),
+    )
+    f = tmp_path / "big.txt"
+    f.write_text("\n".join(f"B{i}" for i in range(1, 501)) + "\n")
+
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(threads_dir=str(tmp_path))
+    async with app.run_test(size=(80, 30)) as pilot:
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.app.workers.wait_for_complete()
+        await pilot.pause()
+        viewer = pilot.app.screen
+        assert viewer._total_lines == 500
+        right = str(viewer.query_one("#header-right", Static).render())
+        assert right.endswith("/ 500")

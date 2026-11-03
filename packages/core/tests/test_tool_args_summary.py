@@ -124,8 +124,23 @@ def test_think_shows_start_of_thought():
     assert tool_args_summary("session_think", {"thoughts": "x"}) == "x"
 
 
-def test_think_without_thoughts_has_empty_summary():
-    assert tool_args_summary("session_think", {"doubts": "x"}) == ""
+def test_think_without_thoughts_shows_the_first_filled_field():
+    """Поля Think необязательные: модель может заполнить одно `reflection`
+    — строка не должна оставаться голой «Think»."""
+    assert tool_args_summary("session_think", {"doubts": "x"}) == "x"
+    assert (
+        tool_args_summary("session_think", {"critics": " ", "reflection": "y"})
+        == "y"
+    )
+    assert tool_args_summary("session_think", {}) == ""
+
+
+def test_think_summary_takes_any_key_after_the_known_fields():
+    """Ключ мимо схемы (`thought`, живой случай 2026-11-01) — тоже мысль,
+    после четырёх полей Think."""
+    args = {"thought": "главное", "reflection": "вывод"}
+    assert tool_args_summary("session_think", args) == "вывод"
+    assert tool_args_summary("session_think", {"thought": "x"}) == "x"
 
 
 def test_mcp_without_scalar_falls_back_to_pairs():

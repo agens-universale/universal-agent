@@ -26,6 +26,7 @@ from gc_core.config_modules.intent_scope import intent_scope_from_config_dict
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
+from gc_core.constants.tool_display import subagent_role
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.progress import emit_progress
@@ -1001,7 +1002,7 @@ class SubagentRunner:
             return None
 
         kind = "рестарт" if child_state.steps == 0 else "деградация"
-        who = f"субагент {tool_name}"
+        who = f"субагент {subagent_role(tool_name, {})}"
         logger = getattr(self._ctx, "logger", None)
         message = f"{who} ({kind}): {failed_resolved.alias} недоступна — выполнено активной {active_resolved.model}"
         if logger is not None:
@@ -1250,7 +1251,7 @@ class SubagentRunner:
                     f"{active_exc.resolved.model} (алиас {active_exc.alias}) недоступны "
                     f"(предохранитель). Выберите другую модель /model или профиль /profile."
                 ) from active_exc
-            who = f"субагент {tool_name}"
+            who = f"субагент {subagent_role(tool_name, {})}"
             logger = getattr(self._ctx, "logger", None)
             message = f"{who}: {exc.alias} недоступна — выполнено активной {resolved.model}"
             if logger is not None:

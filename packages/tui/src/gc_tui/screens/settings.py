@@ -37,11 +37,13 @@ from gc_tui.form_frame import (
     scroll_body,
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
+from gc_tui.services.column_row import ColumnRow
 from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.toggles import PROFILE_ACTIVE_STATUS, PROFILE_NONE_VALUE
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
+from gc_tui.widgets.reserved_hint import ReservedHint
 
 # Клавиша сохранения настроек.
 _SAVE_KEY = "ctrl+s"
@@ -441,24 +443,26 @@ def fit_mode_pairs(pairs: list[str], width: int) -> str:
 _PROFILE_TAIL_GAP = 3
 
 
-def fit_overlay_suffix(names: list[str], width: int) -> str:
-    """Суффикс секций-оверлеев профиля («+security+summary»), усечённый ЦЕЛЫМИ
-    именами под `width` (тот же приём, что и `fit_mode_pairs`, но без разделителя
-    между именами). `width <= 0` — строка ещё не смонтирована — без усечения."""
-    if not names:
-        return ""
-    full = "".join(f"+{n}" for n in names)
-    if width <= 0 or len(full) <= width:
-        return full
-    tail = "+…"
-    out: list[str] = []
-    for n in names:
-        candidate = "".join(f"+{x}" for x in out + [n]) + tail
-        if len(candidate) <= width:
-            out.append(n)
-        else:
-            break
-    return ("".join(f"+{x}" for x in out) + tail) if out else "+…"
+# Подпись режима короче — уже не читается: дальше строка переносится как есть.
+_MODE_HEAD_MIN = 8
+
+
+def fit_row_head(row: Text, head_end: int, tail_w: int, width: int) -> Text:
+    """Первая строка ``row`` — курсор (2 клетки), голова до ``head_end`` и
+    хвост (трек, значение). Не влезает в ``width`` — режется голова с «…»,
+    хвост цел: строка режима не переносится (узкое окно). Вторая строка
+    («в текущей сессии») не трогается; ``width`` 0 — ширины ещё нет."""
+    room = width - 2 - tail_w
+    if width <= 0 or room >= head_end - 2 or room < _MODE_HEAD_MIN:
+        return row
+    lines = row.split("\n", allow_blank=True)
+    line = lines[0]
+    head = line[2:head_end]
+    head.rstrip()
+    head.truncate(room - 1, overflow="ellipsis")
+    head.pad_right(room - head.cell_len)
+    fitted = Text.assemble(line[:2], head, line[head_end:])
+    return Text("\n").join([fitted, *lines[1:]])
 
 
 def _shown_path(path) -> str:
@@ -772,6 +776,7 @@ class SettingsScreen(Screen):
         # Влезет ли содержимое, видно только ПОСЛЕ раскладки — от этого зависит,
         # называть ли клавишу прокрутки.
         self.call_after_refresh(self._refresh_footer)
+        self.call_after_refresh(self._refresh_modes_rows)
 
     def _profile_footer(self, ed) -> str:
         """Футер под-вида профиля: строку даёт редактор (она позиционная), а
@@ -1543,13 +1548,10 @@ class SettingsScreen(Screen):
         else:
             self._mount_section_body(frame, self._view)
             self._update_dirty()
-            if self._view == _MODES:
-                self.call_after_refresh(self._refresh_modes_hint)
-            elif self._view == _PROFILES and self._profiles_open is not None:
+            if self._view == _PROFILES and self._profiles_open is not None:
                 self.call_after_refresh(self._refresh_profile_overlay)
             elif self._view == _PROFILES:
                 self.call_after_refresh(self._refresh_profiles_hint)
-                self.call_after_refresh(self._refresh_profiles_rows)
         if self._report_text is not None:
             self._mount_report(
                 self._report_text
@@ -2612,9 +2614,11 @@ class SettingsScreen(Screen):
                 )
             )
         else:
+            # Высота — под длинное из двух описаний режима (дизайн-код §9).
             frame.mount(
-                Static(
+                ReservedHint(
                     self._voice_hint_text(s),
+                    variants=self._voice_hint_variants,
                     classes="set-hint set-dyn set-voicehint",
                 )
             )
@@ -2909,6 +2913,14 @@ class SettingsScreen(Screen):
         from gc_tui.voice_runtime.state import current_model_short
 
         return _VOICE_MODE_HINTS["local"].format(model=current_model_short())
+
+    @staticmethod
+    def _voice_hint_variants() -> list[str]:
+        """Описания обоих режимов — резерв высоты подсказки голоса."""
+        from gc_tui.voice_runtime.state import current_model_short
+
+        local = _VOICE_MODE_HINTS["local"].format(model=current_model_short())
+        return [local, _VOICE_MODE_HINTS["cloud"]]
 
     def _voice_row_widgets(self) -> list:
         """Строки режима текущего рендера: последние len(_VOICE_ROWS) матчей — старые
@@ -3878,7 +3890,14 @@ class SettingsScreen(Screen):
         value_w = max(len(v) for v in value_names)
         return label_w, base_w, extra_w, value_w
 
-    def _mode_row_text(self, name: str, selected: bool) -> Text:
+    def _modes_tail_w(self) -> int:
+        """Ширина хвоста строки режима: трек, зазор, подпись значения."""
+        _label_w, base_w, extra_w, value_w = self._modes_columns()
+        return base_w + extra_w + 2 + value_w
+
+    def _mode_row_text(
+        self, name: str, selected: bool, width: int = 0
+    ) -> Text:
         from gc_tui.toggles import (
             PRESET_CUSTOM,
             TOGGLES,
@@ -3890,7 +3909,7 @@ class SettingsScreen(Screen):
 
         spec = TOGGLES[name]
         if spec.value_text is not None:
-            return self._value_row_text(name, selected)
+            return self._value_row_text(name, selected, width)
         current = toggle_state_base(
             self.app, name
         )  # секция правит глобал → трек = глобал
@@ -3944,9 +3963,11 @@ class SettingsScreen(Screen):
             t.append("в текущей сессии: ", style=f"italic {DEEP_DIM}")
             colours = {v.value: v.color for v in values}
             t.append(effective, style=colours.get(effective, DIM))
-        return t
+        return fit_row_head(t, label_w, self._modes_tail_w(), width)
 
-    def _value_row_text(self, name: str, selected: bool) -> Text:
+    def _value_row_text(
+        self, name: str, selected: bool, width: int = 0
+    ) -> Text:
         """Строка без трека (`value_text`): голова и знак значения в колонке
         треков; выбор сессии, если он другой, — второй строкой, как у
         соседей (§6.2)."""
@@ -3964,7 +3985,7 @@ class SettingsScreen(Screen):
             t.append("\n  ")
             t.append("в текущей сессии: ", style=f"italic {DEEP_DIM}")
             t.append_text(effective)
-        return t
+        return fit_row_head(t, label_w, self._modes_tail_w(), width)
 
     def _modes_row_opens_picker(self) -> bool:
         """Строка под курсором выбирается списком (`opens_picker`)."""
@@ -3981,6 +4002,23 @@ class SettingsScreen(Screen):
         if spec.value_words is not None:
             return spec.value_words(self.app, self.app.base_settings())
         return toggle_state_base(self.app, name)
+
+    def _refresh_modes_rows(self) -> None:
+        """Строки режимов под фактическую ширину: не влезает — подпись с «…»,
+        строка не переносится (`fit_row_head`). Последние len(names) строк —
+        старые ещё могут не отсоединиться (приём `_voice_row_widgets`)."""
+        if self._view != _MODES:
+            return
+        from gc_tui.toggles import modes_section_names
+
+        names = modes_section_names()
+        rows = list(self.query(".set-modes-row"))[-len(names) :]
+        if len(rows) != len(names):
+            return
+        for i, (name, row) in enumerate(zip(names, rows)):
+            row.update(
+                self._mode_row_text(name, i == self._modes_idx, row.size.width)
+            )
 
     def _mount_modes_section(self, frame: Vertical) -> None:
         from gc_tui.toggles import TOGGLES, modes_section_names
@@ -4006,83 +4044,108 @@ class SettingsScreen(Screen):
                 frame.mount(Rule(classes="set-group-sep"))
             # Без set-spaced: плотность B — тогглы группы впритык (общий пульт),
             # воздух даёт разделитель групп (margin-top .set-group-sep).
-            cls = "set-row set-dyn" + (_CLS_SELECTED if selected else "")
+            cls = "set-row set-dyn set-modes-row" + (
+                _CLS_SELECTED if selected else ""
+            )
             frame.mount(
                 Static(self._mode_row_text(name, selected), classes=cls)
             )
+        # Ширина строки известна только после раскладки: подпись под неё
+        # подрезается вторым проходом (тот же приём, что `_refresh_menu_rows`).
+        self.call_after_refresh(self._refresh_modes_rows)
         # Подсказка выделенного тоггла — ВНУТРИ рамки (конвенция «Обновления»:
-        # пояснительная строка в карточке под строками-опциями, класс set-hint).
+        # пояснительная строка в карточке под строками-опциями, класс set-hint);
+        # высота — под самый длинный вариант секции (дизайн-код §9).
         frame.mount(
-            Static(
-                self._modes_hint_text(),
+            ReservedHint(
+                self._modes_hint_block(),
+                variants=self._modes_hint_variants,
                 classes="set-hint set-dyn set-modes-hint",
             )
         )
 
-    def _modes_hint_width(self) -> int:
-        """Ширина hint-строки внутри рамки (padding 0 1 — минус 2). Строка монтируется
-        заново на КАЖДЫЙ рендер (frame полностью перебирается) — региона нет до
-        layout-прохода этого же кадра; carry-fix `_refresh_modes_hint` (тот же приём,
-        что и `_refresh_menu_rows`) досчитывает усечение постфактум. Последний матч
-        по классу — свежесмонтированный (транзиентный старый ещё не отсоединён)."""
-        widgets = list(self.query(_SEL_MODES_HINT))
-        if not widgets:
-            return 0
-        return max(0, widgets[-1].region.width - 2)
-
     def _modes_hint_text(self) -> str:
-        """Подсказка выделенного тоггла внутри рамки (канон §6, без клавиш): значение
-        + подсказка ГЛОБАЛЬНОГО состояния. Для строки-пресета в состоянии custom —
-        динамический custom-хинт (спека §5)."""
-        from gc_tui.toggles import (
-            PRESET_CUSTOM,
-            TOGGLES,
-            _fit_value_hint,
-            dynamic_toggle_hint,
-            modes_section_names,
-            preset_custom_hint,
-            toggle_state_base,
-        )
+        """Подсказка выделенной строки целиком (без клавиш — их держит
+        футер): значение + подсказка ГЛОБАЛЬНОГО состояния."""
+        from gc_tui.toggles import modes_section_names, toggle_state_base
 
         names = modes_section_names()
         if not names:
             return ""
         name = names[self._modes_idx]
+        return self._modes_value_hint(name, toggle_state_base(self.app, name))
+
+    def _modes_value_hint(self, name: str, value: str) -> str:
+        """Подсказка строки ``name`` при значении ``value``. Строка-пресет в
+        custom — динамический custom-хинт (спека §5); строка со списком —
+        подсказка модели."""
+        from gc_tui.toggles import (
+            PRESET_CUSTOM,
+            TOGGLES,
+            dynamic_toggle_hint,
+            preset_custom_hint,
+        )
+
         spec = TOGGLES[name]
         if spec.opens_picker:
             return self._model_row_hint()
-        current = toggle_state_base(self.app, name)
         # Динамический хинт вперёд статического — тот же порядок, что у палитры
         # (`CommandPalette(toggle_dynamic_hint=...)`): у `level` статических
         # подсказок нет вовсе, их роль играет модель, резолвнутая для уровня.
         if spec.hint_provider is not None:
-            return _fit_value_hint(
-                current,
-                dynamic_toggle_hint(self.app, name, current),
-                self._modes_hint_width(),
-            )
-        if current in spec.names:
-            val = spec.values[spec.names.index(current)]
-            return _fit_value_hint(
-                val.value, val.hint, self._modes_hint_width()
-            )
-        if spec.preset_keys and current == PRESET_CUSTOM:
-            return _fit_value_hint(
-                current,
-                preset_custom_hint(self.app, name, scope="global"),
-                self._modes_hint_width(),
-            )
-        val = spec.values[0]
-        return _fit_value_hint(val.value, val.hint, self._modes_hint_width())
+            hint = dynamic_toggle_hint(self.app, name, value)
+        elif value in spec.names:
+            hint = spec.values[spec.names.index(value)].hint
+        elif spec.preset_keys and value == PRESET_CUSTOM:
+            hint = preset_custom_hint(self.app, name, scope="global")
+        else:
+            value, hint = spec.values[0].value, spec.values[0].hint
+        return f"{value} — {hint}"
 
-    def _refresh_modes_hint(self) -> None:
-        """Carry-fix (тот же приём, что и `_refresh_menu_rows`): досчитать усечение
-        hint-строки ПОСЛЕ layout-прохода, когда регион уже известен."""
-        if self._view != _MODES:
-            return
-        widgets = list(self.query(_SEL_MODES_HINT))
-        if widgets:
-            widgets[-1].update(self._modes_hint_text())
+    @staticmethod
+    def _modes_key_text(name: str) -> str:
+        """Строка ключа конфига строки ``name`` (пусто — ключа нет)."""
+        from gc_tui.toggles import TOGGLES
+
+        dotted = TOGGLES[name].dotted
+        return f"ключ: {dotted}" if dotted else ""
+
+    def _modes_hint_block(self) -> Text:
+        """Подсказка внизу рамки: значение выделенной строки, второй строкой
+        — её ключ конфига (`ключ: <dotted>`, имя заметно ярче — `SUB_INK`).
+        Место ключа есть всегда (у строки без ключа — пустое)."""
+        from gc_tui.toggles import modes_section_names
+
+        t = Text(self._modes_hint_text() + "\n")
+        names = modes_section_names()
+        key = self._modes_key_text(names[self._modes_idx]) if names else ""
+        if key:
+            label, _, dotted = key.partition(" ")
+            t.append(label + " ").append(dotted, style=SUB_INK)
+        return t
+
+    def _modes_hint_variants(self) -> list[str]:
+        """Все подсказки секции — каждая строка при каждом своём значении,
+        с её строкой ключа: резерв высоты. Подсказки, что собираются на
+        ходу (модель, custom пресета), — по текущему значению."""
+        from gc_tui.toggles import (
+            TOGGLES,
+            modes_section_names,
+            toggle_state_base,
+        )
+
+        out = []
+        for name in modes_section_names():
+            spec = TOGGLES[name]
+            values = list(spec.names)
+            current = toggle_state_base(self.app, name)
+            if current not in values:
+                values.append(current)
+            key = self._modes_key_text(name)
+            out.extend(
+                f"{self._modes_value_hint(name, v)}\n{key}" for v in values
+            )
+        return out
 
     def _file_snapshot(self, target):
         """Текст файла до записи — или None, если его ещё нет либо он не читается
@@ -4517,9 +4580,10 @@ class SettingsScreen(Screen):
         t.append(" ▸", style=SUB_INK)
         frame.mount(Static(t, classes="set-row set-dyn" + _CLS_SELECTED))
         frame.mount(
-            Static(
+            ReservedHint(
                 _THEME_HINTS[self._theme_value()],
-                classes="set-hint set-dyn",
+                variants=_THEME_HINTS.values,
+                classes="set-hint set-dyn set-theme-hint",
             )
         )
 
@@ -5645,63 +5709,46 @@ class SettingsScreen(Screen):
         else:
             t.append(" " * width)
 
-    def _profiles_row_width(self) -> int:
-        """Ширина строки внутри рамки (padding 0 1 — минус 2) — carry-fix того же
-        рода, что `_modes_hint_width`: региона нет до layout-прохода при монтировании."""
-        widgets = list(self.query(".set-profiles-row"))
-        if not widgets:
-            return 0
-        return max(0, widgets[-1].region.width - 2)
-
     def _profile_row_text(
         self, row: dict, rows: list[dict], selected: bool
-    ) -> Text:
+    ) -> ColumnRow:
+        """Голова — маркер, имя, «активен», источник; хвост (слоты, секции,
+        пометки выбора) переносится в своей колонке (дизайн-код §10)."""
         name, ref = row["name"], row["ref"]
         config_active = self._config_profile()
         name_w = self._profiles_name_width(rows)
-        t = Text()
-        t.append("▸ " if selected else "  ", style=ACCENT)
-        t.append(f"{name:<{name_w}}", style=INK)
-        self._append_active_marker(t, name == config_active)
+        head = Text()
+        head.append("▸ " if selected else "  ", style=ACCENT)
+        head.append(f"{name:<{name_w}}", style=INK)
+        self._append_active_marker(head, name == config_active)
         source = "проектный" if ref.root_kind == "project" else "глобальный"
-        t.append(f"{source:<11}", style=DIM)
+        head.append(f"{source:<11}", style=DIM)
+        atoms: list[Text] = []
         if (
             name == config_active
             and self._project_sets_profile_pointer()
             and ref.root_kind != "project"
         ):
-            t.append(" · выбран проектом", style=DEEP_DIM)
+            atoms.append(Text(" · выбран проектом", style=DEEP_DIM))
         summary = self._profile_summary(ref.path)
-        tail = ""
-        if summary.slots:
-            tail += " · ".join(
-                f"{lvl} {alias}" for lvl, alias in summary.slots.items()
-            )
-        if summary.overlay_sections:
-            width = self._profiles_row_width()
-            # Отступ от колонки маркера ставится ОДИН раз ниже, а не вместе со слотами:
-            # привязанный к ним, он пропадал у профиля, который несёт только секции —
-            # и суффикс слипался с маркером в «активен+voice» (живой смок 2026-08-26).
-            budget = (
-                max(0, width - len(t.plain) - len(tail) - _PROFILE_TAIL_GAP)
-                if width > 0
-                else 0
-            )
-            if budget <= 0 and width > 0:
-                budget = 0
-            suffix = (
-                "".join(f"+{n}" for n in summary.overlay_sections)
-                if width <= 0
-                else fit_overlay_suffix(summary.overlay_sections, budget)
-            )
-            tail += (" " if tail else "") + suffix
-        if tail:
-            t.append(" " * _PROFILE_TAIL_GAP + tail, style=DIM)
+        slots = [f"{lvl} {alias}" for lvl, alias in summary.slots.items()]
+        parts = [(" ", f"{s} ·") for s in slots[:-1]]
+        parts += [(" ", s) for s in slots[-1:]]
+        parts += [
+            (" " if i == 0 else "", f"+{n}")
+            for i, n in enumerate(summary.overlay_sections)
+        ]
+        # Отступ от колонки источника ставится ОДИН раз — перед первым куском
+        # хвоста: привязанный к слотам, он пропадал у профиля с одними секциями,
+        # и суффикс слипался в «глобальный+voice» (живой смок 2026-08-26).
+        for i, (sep, part) in enumerate(parts):
+            lead = " " * _PROFILE_TAIL_GAP if i == 0 else sep
+            atoms.append(Text(lead + part, style=DIM))
         session_overrides = getattr(self.app, "_session_overrides", None) or {}
         session_name = session_overrides.get("profile")
         if session_name == name and session_name != config_active:
-            t.append("   · выбран в текущей сессии", style=DEEP_DIM)
-        return t
+            atoms.append(Text("   · выбран в текущей сессии", style=DEEP_DIM))
+        return ColumnRow(head, atoms)
 
     def _add_profile_row_text(self, selected: bool) -> Text:
         """Строка-действие «+ добавить профиль…» — перенос паттерна «Моделей»:
@@ -5737,7 +5784,10 @@ class SettingsScreen(Screen):
         return rows[self._profiles_idx]
 
     def _profiles_hint_text(self, rows: list[dict]) -> str:
-        row = self._profiles_row_under_cursor(rows)
+        return self._profiles_row_hint(self._profiles_row_under_cursor(rows))
+
+    def _profiles_row_hint(self, row: dict) -> str:
+        """Подсказка строки ``row`` секции «Профили»."""
         if row["kind"] == "add":
             # Полный путь — то же правило, что у «запись:» секции «Модели»: одно
             # имя не говорит, куда именно ляжет файл.
@@ -5831,9 +5881,13 @@ class SettingsScreen(Screen):
             # там печатается. Обещание недоступного плюс лишние строки между полем
             # и ответом на него: отказ уезжал в конец секции, за чужой текст. Роль
             # клавиш в этом состоянии называет позиционный футер.
+            # Высота — под самую длинную подсказку строк (дизайн-код §9).
             frame.mount(
-                Static(
+                ReservedHint(
                     self._profiles_hint_text(rows),
+                    variants=lambda: [
+                        self._profiles_row_hint(r) for r in rows
+                    ],
                     classes="set-hint set-dyn set-profiles-hint",
                 )
             )
@@ -5892,25 +5946,6 @@ class SettingsScreen(Screen):
                     )
                 )
         inp.focus()
-
-    def _refresh_profiles_rows(self) -> None:
-        """Carry-fix (тот же приём, что `_refresh_modes_hint`): досчитать усечение
-        суффикса секций-оверлеев ПОСЛЕ layout-прохода, когда регион уже известен."""
-        if self._view != _PROFILES:
-            return
-        rows = self._profiles_rows()
-        widgets = list(self.query(".set-profiles-row"))
-        if not widgets:
-            return
-        fresh = widgets[-len(rows) :]
-        for i, row in enumerate(rows):
-            selected = i == self._profiles_idx
-            if row["kind"] == "none":
-                fresh[i].update(self._none_row_text(rows, selected))
-            elif row["kind"] == "add":
-                fresh[i].update(self._add_profile_row_text(selected))
-            else:
-                fresh[i].update(self._profile_row_text(row, rows, selected))
 
     def _refresh_profiles_hint(self) -> None:
         if self._view != _PROFILES:
@@ -6288,8 +6323,7 @@ class SettingsScreen(Screen):
 
     def _profile_overlay_width(self) -> int:
         """Ширина строки превью внутри рамки (padding 0 1 — минус 2); до layout-прохода
-        региона нет — 0, что трактуется как «без усечения» (carry-fix, как у
-        `_profiles_row_width`)."""
+        региона нет — 0, что трактуется как «без усечения» (carry-fix)."""
         widgets = list(self.query(".set-profiles-overlay"))
         if not widgets:
             return 0
@@ -6329,7 +6363,7 @@ class SettingsScreen(Screen):
 
     def _refresh_profile_overlay(self) -> None:
         """Пересчитать превью оверлеев: и усечение — ПОСЛЕ layout-прохода, когда регион
-        строки уже известен (тот же carry-fix, что `_refresh_profiles_rows`), — и сам
+        строки уже известен (carry-fix, как у `_refresh_menu_rows`), — и сам
         СОСТАВ. Состав меняет не только ширина: запись в профиль поднимает формы
         `slots`/`assign` (реестр стал непуст) или убирает их, а превью говорит ровно
         про то, чего формы НЕ показывают, — не пересчитанное, оно дублирует видимое
@@ -6449,12 +6483,16 @@ class SettingsScreen(Screen):
                 )
             )
         else:
+            # Высота — под самую длинную подсказку действий (дизайн-код §9).
             frame.mount(
-                Static(
+                ReservedHint(
                     self._update_hint_text(
                         actions[self._update_idx], resolved
                     ),
-                    classes=_CLS_SET_HINT_SET_DYN,
+                    variants=lambda: [
+                        self._update_hint_text(a, resolved) for a in actions
+                    ],
+                    classes="set-hint set-dyn set-update-hint",
                 )
             )
 

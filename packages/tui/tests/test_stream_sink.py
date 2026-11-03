@@ -125,3 +125,58 @@ def test_reasoning_line_empty():
 
     assert format_reasoning_line(think="") == ""
     assert format_reasoning_line(think="   ") == ""
+
+
+def test_sink_numbers_attempts_by_reset():
+    """Метку попытки ставит сам sink: новая на каждом `reset` ядра."""
+    s = StreamSink()
+    assert s.attempt() is None
+    s.push("reset", "")
+    s.push("think", "x")
+    first = s.attempt()
+    s.push("reset", "")
+    assert first is not None
+    assert s.attempt() not in (None, first)
+    s.reset()
+    assert s.attempt() is None
+
+
+def test_glance_hidden_when_show_reasoning():
+    from gc_tui.services.stream_sink import select_stream_render
+
+    assert select_stream_render(
+        "answer_reasoning", "", "⠇ x", show_reasoning=True
+    ) == ("none", False)
+    assert select_stream_render(
+        "answer_reasoning", "ok", "⠇ x", show_reasoning=True
+    ) == ("answer", False)
+
+
+def test_reasoning_seconds_runs_then_freezes():
+    """Время фазы мысли строке ленты: идёт, пока мысль идёт, застывает с
+    первой `answer` / `tool`; мысли нет — None."""
+    clk = {"t": 10.0}
+    s = StreamSink(clock=lambda: clk["t"])
+    assert s.reasoning_seconds() is None
+    s.push("think", "a")
+    clk["t"] = 13.0
+    assert s.reasoning_seconds() == 3.0
+    s.push("tool", "{}")
+    clk["t"] = 20.0
+    assert s.reasoning_seconds() == 3.0
+
+
+def test_clear_answer_keeps_thought_and_attempt():
+    """Строка ленты закоммичена под флагом мыслей: уходит только канал
+    ответа — мысль, метка попытки и фаза мысли остаются."""
+    clk = {"t": 1.0}
+    s = StreamSink(clock=lambda: clk["t"])
+    s.push("reset", "")
+    attempt = s.attempt()
+    s.push("think", "план")
+    clk["t"] = 3.0
+    s.push("answer", "ответ")
+    s.clear_answer()
+    assert s.snapshot() == ("план", "")
+    assert s.attempt() == attempt
+    assert s.reasoning_seconds() == 2.0

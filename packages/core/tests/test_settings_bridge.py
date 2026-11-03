@@ -38,7 +38,7 @@ def _rich_settings():
             },
             "slots": {"light": "flash"},
             "mcp.servers": {"x": {"transport": "stdio", "command": "echo"}},
-            "tui.finish_gate_mode": "on",
+            "tui.finish_gate_mode": "always",
         },
     )
 

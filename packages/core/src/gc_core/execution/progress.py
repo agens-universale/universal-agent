@@ -28,6 +28,7 @@ from gc_core.constants.tool_display import (
     LEGACY_TOOL_NAMES,
     TOOL_DISPLAY,
     DisplayCategory,
+    think_parts,
     tool_display,
 )
 from gc_core.constants.tool_names import (
@@ -37,6 +38,7 @@ from gc_core.constants.tool_names import (
     FS_LIST_FILES_NAME,
     PROJECT_MEMORY_TOOL_NAME,
     SESSION_MEMORY_TOOL_NAME,
+    SESSION_THINK_TOOL_NAME,
     SESSION_TODO_TOOL_NAME,
     SKILLS_READ_ASSET_NAME,
     SKILLS_READ_REFERENCE_NAME,
@@ -380,6 +382,9 @@ def _primary_summary(
     shown = tool_display(name, nested=nested)
     if shown.category is DisplayCategory.MCP:
         return _first_scalar(data)
+    if name == SESSION_THINK_TOOL_NAME:
+        # Поля Think необязательные: первое заполненное, а не одно `thoughts`.
+        return next(iter(think_parts(data)), "")
     key = shown.primary_arg
     value = data.get(key) if key else None
     if not isinstance(value, str) or not value.strip():

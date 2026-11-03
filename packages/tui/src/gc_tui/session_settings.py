@@ -90,6 +90,7 @@ SESSION_KEYS: Dict[str, SessionKey] = {
     "tui.text_answer_mode": SessionKey(
         "tui.text_answer_mode", text_answer_mode_of
     ),
+    "tui.show_reasoning": SessionKey("tui.show_reasoning"),
     # Профили и модель: `model` — обычный ключ, ложится сессионным слоем поверх
     # настроек как любой другой. `profile` тоже регистрируется здесь для
     # персиста/восстановления/санации (белый список), но слоем НЕ накладывается —

@@ -28,7 +28,11 @@ from gc_tui.services.trace_render import (
     NESTED_USER_PREFIX,
     USER_PREFIX,
 )
-from gc_tui.widgets.click_model import ClickModelMixin, confirm_is_active
+from gc_tui.widgets.click_model import (
+    ClickModelMixin,
+    confirm_is_active,
+    opens_event,
+)
 from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.reply_layout import LineSpec, ReplyLayout
@@ -250,7 +254,7 @@ class _ImageLinksMixin:
         image_id = _image_id_under(event)
         self._pressed = (
             (image_id, event.screen_offset)
-            if image_id and event.button == 1 and not event.ctrl
+            if image_id and event.button == 1 and not opens_event(event)
             else None
         )
 

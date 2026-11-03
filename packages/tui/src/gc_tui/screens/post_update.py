@@ -22,6 +22,7 @@ from gc_tui.form_frame import (
     scroll_body,
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
+from gc_tui.services.column_row import ColumnRow
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SEL_PU_SCROLL = "#pu-scroll"
@@ -190,7 +191,9 @@ class PostUpdateScreen(Screen):
             t.append(f"Агент обновлён · v{new}")
         return t
 
-    def _row_text(self, key: str, i: int) -> Text:
+    def _row_text(self, key: str, i: int) -> ColumnRow | Text:
+        """Хвост строки (список MCP, версии движка) переносится в своей
+        колонке (дизайн-код §10)."""
         t = Text()
         t.append("▸" if i == self._idx else " ", style=ACCENT)
         checked = key in self._marked
@@ -198,14 +201,19 @@ class PostUpdateScreen(Screen):
             "[●] " if checked else "[ ] ", style=INK if checked else DEEP_DIM
         )
         if key == "mcp":
-            t.append("Обновить подключённые MCP")
-            t.append("   ")
-            t.append(", ".join(self._mcp_outdated), style=DIM)
+            t.append("Обновить подключённые MCP   ")
+            names = ", ".join(self._mcp_outdated).split(" ")
+            return ColumnRow(
+                t,
+                [
+                    Text((" " if j else "") + n, style=DIM)
+                    for j, n in enumerate(names)
+                ],
+            )
         elif key == "voice":
             have, want = self._voice_update
-            t.append("Обновить голосовой движок")
-            t.append("   ")
-            t.append(f"{have} → {want}", style=DIM)
+            t.append("Обновить голосовой движок   ")
+            return ColumnRow(t, [Text(f"{have} → {want}", style=DIM)])
         else:
             t.append("Обновить config.yml до текущей версии")
         return t

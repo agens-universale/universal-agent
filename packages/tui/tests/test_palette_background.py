@@ -20,7 +20,7 @@ _FIXED_CSS = {
     "muted": "#6e7681",
     "deep-dim": "#7a8290",
     "accent": "#54B3A6",
-    "code": "#afbdff",
+    "code": "#afd7ff",
     "tool-name": "#BCC3CC",
     "code-block": "#9aa4b2",
     "ok": "#5FAE7F",

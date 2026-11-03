@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from typing import Any, Dict
 
 from gc_core.execution_workspace import ExecutionWorkspace
@@ -100,11 +101,17 @@ class AbstractSimpleTool(ABC):
         raise NotImplementedError
 
     @classmethod
-    def prepare_args_before_strip(cls, args: Dict[str, Any]) -> Dict[str, Any]:
+    def prepare_args_before_strip(
+        cls,
+        args: Dict[str, Any],
+        *,
+        injected_fields: Collection[str] = (),
+    ) -> Dict[str, Any]:
         """Adjust parsed args before injected schema fields are stripped.
 
         Override in tools that need to preserve injected values (e.g. remap
-        injected ``reason`` into a native field). Default: no-op.
+        injected ``reason`` into a native field); ``injected_fields`` — names
+        of those service fields. Default: no-op.
         """
         return args
 

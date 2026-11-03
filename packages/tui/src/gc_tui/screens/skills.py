@@ -13,8 +13,11 @@ from textual.widgets import Input, Static
 
 from gc_tui.palette import DIM, MUTED, SKILL, SUB_INK
 from gc_tui.services.skill_view import source_label, truncate_path_left
+from gc_tui.services.trace_glyphs import PROMPT
 
-_FOOTER = "[↑↓] выбрать  [Enter] открыть  [Esc] назад  /skill <id>"
+_FOOTER = (
+    "↑/↓ — выбор · Enter — открыть · /skill <id> — запустить · Esc — назад"
+)
 _PATH_MIN = 16  # минимально видимая длина пути (хвост-папка)
 _DEFAULT_WIDTH = 80  # пока ширина списка неизвестна (до первой раскладки)
 _TYPE_RESERVE = 16  # длиннейший RU-ярлык типа ("пользовательский")
@@ -45,7 +48,7 @@ class SkillsScreen(Screen):
                 yield Static("", id="header-left", markup=False)
             yield VerticalScroll(id="skills-list")
             with Horizontal(id="skills-filter-row"):
-                yield Static("> ", id="skills-filter-prompt", markup=False)
+                yield Static(PROMPT, id="skills-filter-prompt", markup=False)
                 yield Input(placeholder="фильтр…", id="skills-filter")
             yield Static(_FOOTER, id="footer", markup=False)
 
@@ -193,4 +196,6 @@ class SkillsScreen(Screen):
         from gc_tui.services.skill_view import build_skill_viewer
 
         title, body = build_skill_viewer(detail)
-        self.app.push_screen(ViewerScreen(title=title, content=body))
+        self.app.push_screen(
+            ViewerScreen(title=title, content=body, markdown=True)
+        )

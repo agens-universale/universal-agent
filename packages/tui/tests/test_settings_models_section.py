@@ -1607,7 +1607,7 @@ def test_command_judge_label_names_both_roles():
     from gc_tui.editors.models_section import consumer_labels
 
     assert consumer_labels()["command_judge"] == (
-        "судья command_judge · команды в edit, действия в режиме auto"
+        "судья команд · команды в edit, действия в режиме auto"
     )
 
 
@@ -1914,9 +1914,9 @@ def test_subagent_rows_come_from_the_code_registry():
 
 
 def test_consumer_labels_reuse_the_transport_dictionary():
-    """6 готовых подписей берутся ИЗ транспортного словаря, а не копируются в UI
-    (копия разошлась бы с ним на первой же правке); свой UI-словарь — только для
-    остальных: субагенты поимённо, wildcard."""
+    """Имя служебного потребителя — одно на ядро и экран: строка назначений
+    берёт его из словаря ядра (им же говорит уведомление о замене модели) и
+    лишь дописывает пояснение."""
     from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
     from gc_tui.editors import models_section
 
@@ -1924,8 +1924,137 @@ def test_consumer_labels_reuse_the_transport_dictionary():
     for consumer, label in CONSUMER_RU_LABEL.items():
         role = models_section._CONSUMER_ROLE.get(consumer)
         assert labels[consumer] == (f"{label} · {role}" if role else label)
-    assert not set(models_section._UI_CONSUMER_LABEL) & set(CONSUMER_RU_LABEL)
     assert set(labels) == set(models_section.assign_consumers())
+
+
+def test_knob_labels_match_the_judge_names_of_the_core():
+    """Судья с ручкой называется в «Режимах работы» так же, как в назначениях
+    и в уведомлениях ядра. Ядро TUI не импортирует, поэтому общий источник —
+    словарь ядра, а подписи ручек сверяются с ним здесь."""
+    from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
+    from gc_tui.toggles import TOGGLES
+
+    assert TOGGLES["gate"].label == CONSUMER_RU_LABEL["finish_gate"]
+    assert TOGGLES["answers"].label == CONSUMER_RU_LABEL["text_answer_judge"]
+
+
+def test_assign_rows_are_named_for_people_not_by_config_keys():
+    """Строки назначений — человеческими названиями, ключ конфига — подсказкой
+    выбранной строки: судьи с ручкой — подписью ручки «Режимов работы»,
+    субагенты — ролью и пояснением, `*` — «остальные субагенты»."""
+    from gc_tui.editors.models_section import consumer_labels
+
+    assert consumer_labels() == {
+        "finish_gate": "самопроверка выполнения задачи",
+        "text_answer_judge": "формат ответа",
+        "command_judge": (
+            "судья команд · команды в edit, действия в режиме auto"
+        ),
+        "summary": "суммаризация",
+        "intent_scope": (
+            "журнал намерений · помнит ход после сжатия контекста"
+        ),
+        "memory_compaction": "компакция памяти",
+        "vision": "модель для зрения",
+        "routing_judge": "судья автовыбора",
+        "subagents.subagent_worker": "Worker · выполнение задач",
+        "subagents.subagent_code_generator": "Coder · генерация кода",
+        "subagents.subagent_code_planner": "Code planner · планирование кода",
+        "subagents.subagent_planner": "Planner · общее планирование",
+        "subagents.subagent_critic": "Critic · критика решений",
+        "subagents.subagent_code_reviewer": "Reviewer · ревью кода",
+        "subagents.subagent_special_agent": (
+            "Special agent · роль по описанию главного агента"
+        ),
+        "*": "остальные субагенты · кастомные и будущие",
+    }
+
+
+def test_assign_labels_share_their_sources(monkeypatch):
+    """Один источник на одно имя: служебный потребитель — словарь ядра
+    (`CONSUMER_RU_LABEL`), субагент — таблица ролей ядра (`SUBAGENT_ROLES`).
+    Правка источника доезжает до строки сама."""
+    from gc_core.constants.tool_display import SUBAGENT_ROLES
+    from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
+    from gc_tui.editors.models_section import consumer_labels
+
+    monkeypatch.setitem(CONSUMER_RU_LABEL, "finish_gate", "проверка")
+    monkeypatch.setitem(CONSUMER_RU_LABEL, "intent_scope", "журнал")
+    monkeypatch.setitem(SUBAGENT_ROLES, "subagent_worker", "Doer")
+
+    labels = consumer_labels()
+    assert labels["finish_gate"] == "проверка"
+    assert labels["intent_scope"] == (
+        "журнал · помнит ход после сжатия контекста"
+    )
+    assert labels["subagents.subagent_worker"] == "Doer · выполнение задач"
+
+
+def test_assign_key_follows_the_assign_config_paths():
+    """Путь ключа строки назначений — настоящий путь `AssignConfig`: служебный
+    потребитель — плоское поле, субагент — словарь `subagents`, `*` — в
+    кавычках, как его пишут в YAML."""
+    from gc_core.config_modules.model_registry import AssignConfig
+    from gc_tui.editors.models_section import assign_consumers, assign_key
+
+    assert assign_key("finish_gate") == "assign.finish_gate"
+    assert (
+        assign_key("subagents.subagent_worker")
+        == "assign.subagents.subagent_worker"
+    )
+    assert assign_key("*") == 'assign.subagents."*"'
+    for consumer in assign_consumers():
+        field = assign_key(consumer).split(".")[1]
+        assert field in AssignConfig.model_fields, consumer
+
+
+def _key_line(text) -> str | None:
+    lines = text.split("\n")
+    return lines[1] if len(lines) > 1 else None
+
+
+async def test_the_selected_assign_row_shows_its_config_key(tmp_path):
+    """Ключ конфига — второй строкой под ВЫБРАННОЙ строкой назначений (канон
+    «в текущей сессии: …»); у остальных строк второй строки нет, курсор ушёл —
+    подсказка переехала к новой строке."""
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        for consumer, key in (
+            ("finish_gate", "assign.finish_gate"),
+            ("subagents.subagent_worker", "assign.subagents.subagent_worker"),
+            ("*", 'assign.subagents."*"'),
+        ):
+            _goto(ed, "assign", consumer=consumer)
+            await pilot.pause()
+            texts = [str(w.render()) for w in ed.query(".models-row")]
+            assert _key_line(texts[ed._idx]) == f"  ключ: {key}"
+            others = texts[: ed._idx] + texts[ed._idx + 1 :]
+            assert [t for t in others if "\n" in t] == []
+
+
+async def test_the_config_key_line_is_dim_italic_label_and_dim_path(tmp_path):
+    """Вид подсказки — как у «в текущей сессии: …»: подпись курсивом DEEP_DIM,
+    путь DEEP_DIM. Не влезает в рамку — режется многоточием, не переносится."""
+    from gc_tui.palette import DEEP_DIM
+    from rich.style import Style
+
+    async with _section(tmp_path, _REGISTRY) as (_pilot, scr, _cfg_file):
+        ed = _editor(scr)
+        ed._row_width = lambda: 100
+        row = {"kind": "assign", "consumer": "finish_gate"}
+        assert _key_line(ed._row_text(row, False).plain) is None
+        text = ed._row_text(row, True)
+        label = next(
+            s for s in text.spans if s.start == text.plain.index("ключ:")
+        )
+        assert Style.parse(str(label.style)).italic
+        assert _value_color(text, "ключ:") == _rgb(DEEP_DIM)
+        assert _value_color(text, "assign.finish_gate") == _rgb(DEEP_DIM)
+
+        ed._row_width = lambda: 20
+        worker = {"kind": "assign", "consumer": "subagents.subagent_worker"}
+        line = _key_line(ed._row_text(worker, True).plain)
+        assert len(line) == 20 and line.endswith("…")
 
 
 def test_vision_row_is_in_the_assign_block():
@@ -2017,8 +2146,8 @@ async def test_alias_named_like_a_sentinel_is_pinned_not_dropped(tmp_path):
 
 
 async def test_binding_row_values_carry_the_color_semantics(tmp_path):
-    """§12.4 дословно: значение-уровень — цветом уровня (light=INK, default=RUN_COLOR,
-    max=ACCENT), значение-алиас (пин) — DIM, «активная»/«не задан» — DEEP_DIM."""
+    """§12.4 дословно: значение-уровень — цветом уровня (light=INK, default=ACCENT,
+    max=RUN_COLOR), значение-алиас (пин) — DIM, «активная»/«не задан» — DEEP_DIM."""
     from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, RUN_COLOR
 
     body = (
@@ -2045,9 +2174,9 @@ async def test_binding_row_values_carry_the_color_semantics(tmp_path):
             INK
         )  # уровень light
         assert _value_color(binding("text_answer_judge"), "default") == _rgb(
-            RUN_COLOR
+            ACCENT
         )
-        assert _value_color(binding("command_judge"), "max") == _rgb(ACCENT)
+        assert _value_color(binding("command_judge"), "max") == _rgb(RUN_COLOR)
         assert _value_color(binding("summary"), "opus") == _rgb(DIM)
         assert _value_color(binding("intent_scope"), "активная") == _rgb(
             DEEP_DIM
@@ -2057,7 +2186,7 @@ async def test_binding_row_values_carry_the_color_semantics(tmp_path):
 async def test_picker_rows_carry_the_same_color_semantics(tmp_path):
     """Раскрытый список — тот же визуальный язык, что и колонка значения строки
     (контракт п.3: канон-рендер дропдаунов, семантика значений §12.4)."""
-    from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK
+    from gc_tui.palette import DEEP_DIM, DIM, INK, RUN_COLOR
 
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
@@ -2069,7 +2198,7 @@ async def test_picker_rows_carry_the_same_color_semantics(tmp_path):
         texts = [w.render() for w in widgets]
         assert _value_color(texts[0], "активная") == _rgb(DEEP_DIM)
         assert _value_color(texts[1], "light") == _rgb(INK)
-        assert _value_color(texts[3], "max") == _rgb(ACCENT)
+        assert _value_color(texts[3], "max") == _rgb(RUN_COLOR)
         assert _value_color(texts[4], "flash") == _rgb(DIM)
 
 
@@ -2143,18 +2272,21 @@ _ADDRESSED = (
 
 
 async def test_wildcard_row_names_the_subagents_it_really_covers(tmp_path):
-    """`*` — не «остальные из списка» (в списке перечислены ВСЕ канонические): это
-    единственный способ привязать кастомных субагентов, которых валидатор поимённо
-    отвергает, и общая привязка для тех, кому своя не задана."""
+    """`*` — «остальные субагенты · кастомные и будущие»: единственный способ
+    привязать кастомных субагентов, которых валидатор поимённо отвергает, и общая
+    привязка для тех, кому своя не задана."""
     from gc_tui.editors.models_section import consumer_labels
 
-    assert consumer_labels()["*"] == "* · кастомные и будущие субагенты"
+    assert consumer_labels()["*"] == (
+        "остальные субагенты · кастомные и будущие"
+    )
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, _cfg_file):
         ed = _editor(scr)
         _goto(ed, "assign", consumer="*")
         await pilot.pause()
-        assert "кастомные и будущие субагенты" in " ".join(_rows(scr))
-        assert "остальные субагенты" not in " ".join(_rows(scr))
+        assert "остальные субагенты · кастомные и будущие" in " ".join(
+            _rows(scr)
+        )
 
 
 async def test_reserve_row_is_dimmed_while_the_registry_works(tmp_path):
@@ -2271,8 +2403,8 @@ async def test_slot_row_head_carries_the_colour_of_its_level(tmp_path):
             return ed._row_text({"kind": "slot", "level": level}, False)
 
         assert _value_color(head("light"), "light") == _rgb(INK)
-        assert _value_color(head("default"), "default") == _rgb(RUN_COLOR)
-        assert _value_color(head("max"), "max") == _rgb(ACCENT)
+        assert _value_color(head("default"), "default") == _rgb(ACCENT)
+        assert _value_color(head("max"), "max") == _rgb(RUN_COLOR)
         assert _value_color(head("max"), " · самая сильная") == _rgb(INK)
 
 
@@ -2298,8 +2430,8 @@ async def test_entry_row_shows_the_address_and_every_level_that_points_at_it(
         assert flash.plain.rstrip().endswith("← light, max")
         assert opus.plain.rstrip().endswith("← default")
         assert _value_color(flash, "light") == _rgb(INK)
-        assert _value_color(flash, "max") == _rgb(ACCENT)
-        assert _value_color(opus, "default") == _rgb(RUN_COLOR)
+        assert _value_color(flash, "max") == _rgb(RUN_COLOR)
+        assert _value_color(opus, "default") == _rgb(ACCENT)
         assert flash.plain.index("←") == opus.plain.index("←")
 
 
@@ -2645,7 +2777,7 @@ async def test_a_wide_frame_shows_the_longest_value_whole(tmp_path):
 async def test_the_role_is_cut_before_the_name_of_the_level(tmp_path):
     """Порядок жертв: первым ужимается ОПИСАНИЕ роли, имя уровня и его значение —
     последнее, что уходит. Цвет уровня усечение переживает."""
-    from gc_tui.palette import RUN_COLOR
+    from gc_tui.palette import ACCENT
 
     async with _section(tmp_path, _ADDRESSED) as (pilot, scr, _cfg_file):
         await pilot.pause()
@@ -2655,7 +2787,7 @@ async def test_the_role_is_cut_before_the_name_of_the_level(tmp_path):
         assert row.plain.startswith("  default · основная рабочая: повс")
         assert "…" in row.plain  # ужато описание, не строка
         assert row.plain.rstrip().endswith("opus")  # значение цело
-        assert _value_color(row, "default") == _rgb(RUN_COLOR)
+        assert _value_color(row, "default") == _rgb(ACCENT)
 
 
 async def test_a_narrow_frame_drops_the_role_whole(tmp_path):

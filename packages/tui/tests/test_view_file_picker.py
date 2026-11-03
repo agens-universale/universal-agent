@@ -397,3 +397,31 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(tmp_path):
         assert (
             hint[0].region.bottom <= picker.region.bottom
         )  # внутри рамки пикера, видна без скролла
+
+
+@pytest.mark.asyncio
+async def test_view_in_other_layout_completes_path(tmp_path):
+    """`/мшуц` — это `/view` в чужой раскладке: вставленная строка открывает
+    файловый пикер, и Tab достраивает путь, как у `/view`."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    _mk(tmp_path)
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._project_root = lambda: str(tmp_path)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.focus()
+        inp.insert("/мшуц agents")
+        await pilot.pause()
+        await settled(scr._file_search)
+        await pilot.pause()
+        assert scr._file_picker is not None
+        await pilot.press("tab")
+        await pilot.pause(0.1)
+        assert inp.text == "/мшуц agents/"
