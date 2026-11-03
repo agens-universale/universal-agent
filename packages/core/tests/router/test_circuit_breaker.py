@@ -84,3 +84,51 @@ def test_replace_from_is_independent_copy():
     breaker.replace_from(src)
     breaker.trip("glm-local", "401")
     assert src == {"flash": "5xx"}
+
+
+def test_breaker_reason_keeps_original_reason_of_open_alias():
+    from gc_core.model_router import (
+        AliasCircuitOpenError,
+        ResolvedModel,
+        breaker_reason,
+    )
+
+    resolved = ResolvedModel(
+        alias="gc_v3",
+        model="gc",
+        url="http://hub",
+        authorization=None,
+        backend_overrides={},
+        tariff=None,
+        source="slot default",
+    )
+    exc = AliasCircuitOpenError(resolved, "ReadError")
+    assert breaker_reason(exc) == "ReadError"
+
+
+def test_breaker_reason_of_plain_error_is_its_text():
+    from gc_core.model_router import breaker_reason
+
+    assert breaker_reason(RuntimeError("  5xx  ")) == "5xx"
+    assert breaker_reason(RuntimeError("")) == "RuntimeError"
+
+
+def test_failure_text_names_open_alias_once():
+    from gc_core.model_router import (
+        AliasCircuitOpenError,
+        ResolvedModel,
+        failure_text,
+    )
+
+    resolved = ResolvedModel(
+        alias="gc_v3",
+        model="gc",
+        url="http://hub",
+        authorization=None,
+        backend_overrides={},
+        tariff=None,
+        source="slot default",
+    )
+    exc = AliasCircuitOpenError(resolved, "ReadError")
+    assert failure_text(exc) == "алиас 'gc_v3' в предохранителе: ReadError"
+    assert failure_text(RuntimeError("")) == "RuntimeError"

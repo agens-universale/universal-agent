@@ -161,7 +161,11 @@ from gc_core.message_policy.user_stop import (
     not_started_due_to_user_stop_output,
 )
 from gc_core.model_choice import anote_applied
-from gc_core.model_router import AliasCircuitOpenError
+from gc_core.model_router import (
+    AliasCircuitOpenError,
+    breaker_reason,
+    failure_text,
+)
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
@@ -488,15 +492,18 @@ def _endpoint_path_advice(
 
 
 def _raise_honest_main_unavailable(
-    ctx: Any, resolved: Any, reason: str, source_exc: BaseException
+    ctx: Any, resolved: Any, source_exc: BaseException
 ) -> NoReturn:
     """Класс 2 фоллбэков недоступности (спека §8): исчерпаны существующие ретраи
     (transport/adaptive max_tokens/401-refresh) для активной модели main-трейса.
     Никаких тихих подмен — честная ошибка хода с моделью/endpoint/причиной и
-    подсказкой спасения; ставит per-alias предохранитель + notice."""
+    подсказкой спасения; ставит per-alias предохранитель + notice. Текст
+    ошибки — сам сбой (отказ открытого алиаса так и назван), в предохранитель
+    — исходная причина (`breaker_reason`)."""
+    reason = failure_text(source_exc)
     router = getattr(ctx, "model_router", None)
     if router is not None and resolved.alias is not None:
-        router.breaker.trip(resolved.alias, reason)
+        router.breaker.trip(resolved.alias, breaker_reason(source_exc))
     maybe_push_llm_failure_notice(
         source_exc,
         request_label="main_agent",
@@ -544,7 +551,7 @@ def resolve_main_for_call(
     except AliasCircuitOpenError as exc:
         if getattr(router, "is_subagent_child", False):
             raise
-        _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
+        _raise_honest_main_unavailable(ctx, exc.resolved, exc)
     state.default_model = resolved.model
     return resolved
 
@@ -713,9 +720,7 @@ def _reroute_level(
         return None
     if not router.breaker.is_open(failed.alias):
         # Честная ошибка основного хода уже взвела его с исходной причиной.
-        router.breaker.trip(
-            failed.alias, str(exc).strip()[:300] or type(exc).__name__
-        )
+        router.breaker.trip(failed.alias, breaker_reason(exc))
     if _stop_honored(bool(getattr(state, "stop_requested", False)), ctx):
         raise ModelRequestStopped("Ход остановлен") from exc
     level = next_level(getattr(state, "_call_level", None) or "default")
@@ -893,8 +898,7 @@ def _maybe_trip_and_raise_main_unavailable(
         return
     if resolved is None or resolved.alias is None:
         return  # легаси — предохранитель не ведётся
-    reason = str(exc).strip()[:300] or exc.__class__.__name__
-    _raise_honest_main_unavailable(ctx, resolved, reason, exc)
+    _raise_honest_main_unavailable(ctx, resolved, exc)
 
 
 def begin_turn_main_trace(state: State, ctx: Any) -> None:

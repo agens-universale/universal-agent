@@ -601,6 +601,36 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
     assert "glm-local" in message
 
 
+def test_turns_against_open_alias_keep_original_breaker_reason():
+    """Каждый ход против открытого алиаса — честная ошибка с исходной
+    причиной: текст ошибки называет предохранитель один раз, а причина в
+    предохранителе не обрастает префиксами «алиас … в предохранителе»."""
+    from gc_core import processing_responses as pr
+
+    router = _router(
+        {"models": {"glm-local": {}}, "slots": {"default": "glm-local"}},
+        level="default",
+    )
+    router.breaker.trip("glm-local", "ReadError")
+    ctx = fake_ctx(
+        {},
+        model_router=router,
+        auth_connector=None,
+        logger=None,
+        is_tui=False,
+    )
+
+    messages = []
+    for _ in range(3):
+        with pytest.raises(RuntimeError) as excinfo:
+            pr.begin_turn_main_trace(_service_state(), ctx)
+        messages.append(str(excinfo.value))
+
+    assert router.breaker.snapshot() == {"glm-local": "ReadError"}
+    assert messages[0] == messages[2]
+    assert messages[2].count("в предохранителе") == 1
+
+
 def test_begin_turn_main_trace_legacy_is_plain_passthrough():
     """Легаси (пустой реестр) — begin_turn резолвит плоский model без предохранителя;
     обёртка не вмешивается."""
@@ -884,6 +914,40 @@ async def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
     assert payload["result"] == "ok"
     assert calls["n"] == 2
     assert parent_router.breaker.is_open("deepseek-max") is True
+
+
+async def test_subagent_open_alias_failure_keeps_original_breaker_reason(
+    tmp_path,
+):
+    """Ребёнок упал на уже открытом алиасе: предохранитель хранит исходную
+    причину, а не текст `AliasCircuitOpenError` поверх неё."""
+    from gc_core.model_router import AliasCircuitOpenError
+    from gc_core.tools.subagents.runner import SubagentRunner
+
+    raw = {
+        "models": {"flash": {}, "deepseek-max": {}},
+        "slots": {"default": "flash"},
+        "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
+    }
+    cfg = _subagent_cfg(tmp_path, raw)
+    parent_router = _router(raw, level="default")
+    parent_ctx = _subagent_ctx(cfg, parent_router)
+    runner = SubagentRunner(parent_ctx, _subagent_orchestrator_state(), cfg)
+
+    calls = {"n": 0}
+
+    async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            resolved = child_ctx.model_router.resolve("main")
+            raise AliasCircuitOpenError(resolved, "ReadError")
+        return "ok"
+
+    await runner.arun(
+        "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
+    )
+
+    assert parent_router.breaker.snapshot() == {"deepseek-max": "ReadError"}
 
 
 @pytest.mark.parametrize("independent", [True, False])

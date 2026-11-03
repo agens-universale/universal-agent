@@ -60,6 +60,7 @@ from gc_core.model_router import (
     SUBAGENT_CONSUMER_PREFIX,
     AliasCircuitOpenError,
     ModelRouter,
+    breaker_reason,
 )
 from gc_core.run_context import RunContext
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
@@ -986,10 +987,7 @@ class SubagentRunner:
 
         # Фейл подтверждён — предохранитель встаёт независимо от того, есть ли
         # куда деградировать (см. докстроку выше).
-        router.breaker.trip(
-            failed_resolved.alias,
-            str(exc).strip()[:300] or exc.__class__.__name__,
-        )
+        router.breaker.trip(failed_resolved.alias, breaker_reason(exc))
 
         if (
             active_already_open

@@ -13,6 +13,7 @@ from gc_core.execution.ports import port
 from gc_core.model_router import (
     AliasCircuitOpenError,
     ResolvedModel,
+    breaker_reason,
 )
 from gc_core.request_backend_policy import (
     _raise_on_embedded_choice_error,
@@ -665,7 +666,7 @@ async def _arequest_chat_completion_outcome_local(
     # сравнения ниже упал бы AliasCircuitOpenError раньше времени.
     active_resolved = _resolve_active_model(router)
     if newly_failed_alias is not None:
-        router.breaker.trip(newly_failed_alias, _breaker_reason(primary_exc))
+        router.breaker.trip(newly_failed_alias, breaker_reason(primary_exc))
 
     if active_resolved.alias == failed_alias:
         # Деградировать некуда: привязка и есть активная модель — то же самое
@@ -687,7 +688,7 @@ async def _arequest_chat_completion_outcome_local(
         return await send(resolved=active_resolved)
     except Exception as exc:
         if _trips_breaker(exc, active_resolved.alias, isolated=isolated):
-            router.breaker.trip(active_resolved.alias, _breaker_reason(exc))
+            router.breaker.trip(active_resolved.alias, breaker_reason(exc))
         raise
 
 
@@ -726,10 +727,6 @@ def _resolve_active_model(router: Any):
         return router.resolve("main")
     except AliasCircuitOpenError as open_exc:
         return open_exc.resolved
-
-
-def _breaker_reason(exc: BaseException) -> str:
-    return str(exc).strip()[:300] or exc.__class__.__name__
 
 
 def _trips_breaker(

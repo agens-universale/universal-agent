@@ -142,6 +142,20 @@ class AliasCircuitOpenError(RuntimeError):
         )
 
 
+def failure_text(exc: BaseException) -> str:
+    """Текст сбоя вызова: само сообщение (обрезанное) или имя класса."""
+    return str(exc).strip()[:300] or exc.__class__.__name__
+
+
+def breaker_reason(exc: BaseException) -> str:
+    """Причина для предохранителя из сбоя вызова. Отказ уже открытого алиаса
+    несёт исходную причину — её и берём, иначе каждый повтор оборачивал бы
+    причину ещё одним «алиас … в предохранителе»."""
+    if isinstance(exc, AliasCircuitOpenError):
+        return exc.reason
+    return failure_text(exc)
+
+
 class CircuitBreaker:
     """Сессионный per-alias предохранитель (спека §8). Ключ — алиас модели, не привязка.
 
