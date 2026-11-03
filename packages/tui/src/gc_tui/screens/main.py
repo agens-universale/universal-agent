@@ -10058,8 +10058,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # check_breaker=False: /status показывает модель честно даже при открытом
         # активном алиасе (спека §12.2); недоступность отражаем отдельным флагом.
         resolved = router.resolve("main", check_breaker=False)
-        breaker_open = bool(resolved.alias) and router.breaker.is_open(
-            resolved.alias
+        breaker_open = (
+            bool(resolved.alias)
+            and router.breaker.known_unavailable(resolved.alias) is not None
         )
         ref = self.app.active_profile_ref()
         # Действующий выбор модели — тем же правилом, что у палитры и пикера.
