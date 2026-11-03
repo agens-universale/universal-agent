@@ -623,7 +623,8 @@ async def _arequest_chat_completion_outcome_local(
     Вызов со своим бюджетом повторов (``isolated_timeout_sec``, судья действий)
     предохранитель не трогает и на свежем сбое не деградирует: его сбой — не
     знание о модели основного хода, повторяет и считает он сам. Деградация при
-    уже открытом предохранителе — как у всех.
+    уже открытом предохранителе — как у всех; алиас, ждущий пробы, для него
+    тоже открыт: право пробы остаётся основному ходу.
 
     ``allow_images=True`` — вызов несёт картинки (``content`` списком частей): так
     зовут только «глаза» (``vision/eyes``). Без флага картинки — ``ValueError``."""
@@ -652,7 +653,7 @@ async def _arequest_chat_completion_outcome_local(
     primary_exc: Optional[Exception] = None
     newly_failed_alias: Optional[str] = None
     try:
-        resolved = router.resolve(consumer)
+        resolved = _resolve_for_call(router, consumer, isolated=isolated)
     except AliasCircuitOpenError as exc:
         # Алиас уже известен как мёртвый — сразу к деградации, 0 обращений в транспорт.
         failed_alias = exc.alias
@@ -728,6 +729,16 @@ async def arequest_chat_completion_text(
         isolated_timeout_sec=isolated_timeout_sec,
     )
     return outcome.text
+
+
+def _resolve_for_call(router: Any, consumer: str, *, isolated: bool):
+    """Резолв привязки. Изолированный вызов право пробы не берёт, поэтому
+    алиас, ждущий пробы, для него открыт: право остаётся основному ходу."""
+    resolved = router.resolve(consumer)
+    reason = router.breaker.known_unavailable(resolved.alias)
+    if isolated and reason is not None:
+        raise AliasCircuitOpenError(resolved, reason)
+    return resolved
 
 
 def _resolve_active_model(router: Any):

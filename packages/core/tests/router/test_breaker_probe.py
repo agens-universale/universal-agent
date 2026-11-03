@@ -24,8 +24,8 @@ RAW = {
 USER = [{"role": "user", "content": "привет", "id": "m_u"}]
 
 
-def _ctx(level: str = "default"):
-    raw = dict(RAW)
+def _ctx(level: str = "default", **extra):
+    raw = {**RAW, **extra}
     raw["agent"] = {
         "auto_routing_safe_level": "default",
         "auto_routing_two_level": {"weak_steps": 10, "strong_steps": 2},
@@ -235,12 +235,12 @@ def test_aux_call_takes_probe_once(monkeypatch):
 
 
 def test_isolated_call_keeps_probe_right(monkeypatch):
-    ctx = _ctx()
+    ctx = _ctx("max", assign={"summary": "mid"})
     sent = _aux_transport(monkeypatch)
     _open_with_right(ctx)
     _aux_call(ctx, isolated_timeout_sec=5.0)
-    assert sent[0]["adaptive_retry"] is False
-    assert ctx.model_router.breaker.known_unavailable("mid") is not None
+    models = [kw["payload_factory"](64)["model"] for kw in sent]
+    assert models == ["big"]
     assert ctx.model_router.breaker.take_probe("mid") is True
 
 
