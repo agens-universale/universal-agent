@@ -86,7 +86,7 @@
     Только TUI копирует это в рабочий ключ `text_answer_mode`.
   - `acp.text_answer_mode` (`deny | judge | allow`, по умолчанию `allow`) — то же для
     канала `gc-acp` (IDE). По умолчанию проза разрешена без судьи.
-  - `acp.finish_gate_mode` (`on | off | smart`, по умолчанию `off`) — судья на
+  - `acp.finish_gate_mode` (`off | smart | always`, по умолчанию `off`) — судья на
     `turn_finish` в ACP; в IDE человек сам видит ответ и сверяет с интентом.
   - `acp.todo_reminder_steps` (число, по умолчанию `0`) — technical reminder про
     `session_todo`; `0` = выкл. В IDE-чате иначе легко толкает к реализации вопреки обсуждению.

@@ -1811,7 +1811,9 @@ async def test_overriding_layer_name_answers_by_files_like_the_write_gate(
     )
     # Managed-слой теста — `tmp_path/config.local.yml` (автофикстура
     # `_isolated_config_layers`): достаточно его записать.
-    _write(tmp_path / "config.local.yml", 'tui:\n  finish_gate_mode: "on"\n')
+    _write(
+        tmp_path / "config.local.yml", 'tui:\n  finish_gate_mode: "always"\n'
+    )
 
     app = _app_launched_with(base_cfg, "")
     async with app.run_test() as pilot:
