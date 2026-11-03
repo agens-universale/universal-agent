@@ -17,6 +17,7 @@ Router читает секции `models`/`slots`/`assign` из снимка н�
 
 from __future__ import annotations
 
+import threading
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping
@@ -157,23 +158,49 @@ def breaker_reason(exc: BaseException) -> str:
 
 
 class CircuitBreaker:
-    """Сессионный per-alias предохранитель (спека §8). Ключ — алиас модели, не привязка.
+    """Сессионный per-alias предохранитель. Ключ — алиас модели, не привязка.
 
-    Владелец состояния — сессия-тред: `snapshot()`/`restore()` персистят набор открытых
-    алиасов в meta треда, чтобы предохранитель пережил пересборку executor внутри сессии.
+    Два состояния алиаса: открыт (`_tripped`, резолв отказывает мгновенно) и
+    ждёт пробы (`_probe`, резолв пропускает, первое обращение — проба).
+    Все методы идут под одним замком: петля детей живёт в другом потоке.
+    `snapshot()`/`restore()` работают только с открытыми алиасами.
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._tripped: dict[str, str] = {}
+        self._probe: dict[str, str] = {}
 
     def is_open(self, alias: str) -> bool:
-        return alias in self._tripped
+        with self._lock:
+            return alias in self._tripped
 
     def trip(self, alias: str, reason: str) -> None:
-        self._tripped[alias] = reason
+        with self._lock:
+            self._probe.pop(alias, None)
+            self._tripped[alias] = reason
+
+    def allow_probe(self) -> None:
+        """Все открытые алиасы получают право на одну пробу."""
+        with self._lock:
+            self._probe.update(self._tripped)
+            self._tripped.clear()
+
+    def take_probe(self, alias: str) -> bool:
+        """Атомарно: True, если этот вызов и есть проба алиаса."""
+        with self._lock:
+            return self._probe.pop(alias, None) is not None
+
+    def known_unavailable(self, alias: str) -> str | None:
+        """Причина, если алиас открыт или ждёт пробы, иначе None."""
+        with self._lock:
+            if alias in self._tripped:
+                return self._tripped[alias]
+            return self._probe.get(alias)
 
     def snapshot(self) -> dict[str, str]:
-        return dict(self._tripped)
+        with self._lock:
+            return dict(self._tripped)
 
     @classmethod
     def restore(cls, snapshot: dict) -> CircuitBreaker:
@@ -181,16 +208,26 @@ class CircuitBreaker:
         breaker._tripped = dict(snapshot or {})
         return breaker
 
+    def copy(self) -> CircuitBreaker:
+        with self._lock:
+            clone = CircuitBreaker()
+            clone._tripped = dict(self._tripped)
+            clone._probe = dict(self._probe)
+            return clone
+
     def replace_from(self, snapshot: dict) -> None:
-        """Restore-in-place: заменить содержимое предохранителя набором из снапшота
-        БЕЗ подмены объекта. Прогретый executor и витрины держат ссылку на ЭТОТ
-        объект (передан в `ctx.model_router` при сборке executor); подмена ссылки
-        осиротила бы их — трипы рана уходили бы в старый breaker, а persist писал бы
-        новый пустой (спека §8). См. `TuiApp.load_circuit_breaker`."""
-        self._tripped = dict(snapshot or {})
+        """Restore-in-place: заменить открытые алиасы набором из снапшота
+        БЕЗ подмены объекта: прогретый executor и витрины держат ссылку на
+        ЭТОТ объект. Право на пробу снимается только у алиасов снапшота."""
+        with self._lock:
+            self._tripped = dict(snapshot or {})
+            for alias in self._tripped:
+                self._probe.pop(alias, None)
 
     def reset(self) -> None:
-        self._tripped.clear()
+        with self._lock:
+            self._tripped.clear()
+            self._probe.clear()
 
 
 def _level_phrase(requested_level: str, resolved_level: str) -> str:
@@ -597,6 +634,12 @@ class ModelRouter:
                 resolved, self.breaker.snapshot().get(alias, "")
             )
         return resolved
+
+    def take_probe(self, resolved: ResolvedModel | None) -> bool:
+        """True, если обращение к ``resolved`` — проба алиаса."""
+        if resolved is None or resolved.alias is None:
+            return False
+        return self.breaker.take_probe(resolved.alias)
 
     def _resolve_legacy(self, source: str) -> ResolvedModel:
         return ResolvedModel(

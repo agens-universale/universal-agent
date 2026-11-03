@@ -132,3 +132,78 @@ def test_failure_text_names_open_alias_once():
     exc = AliasCircuitOpenError(resolved, "ReadError")
     assert failure_text(exc) == "алиас 'gc_v3' в предохранителе: ReadError"
     assert failure_text(RuntimeError("")) == "RuntimeError"
+
+
+def test_allow_probe_moves_open_alias_to_probe():
+    b = CircuitBreaker()
+    b.trip("flash", "ReadError")
+    b.allow_probe()
+    assert b.is_open("flash") is False
+    assert b.known_unavailable("flash") == "ReadError"
+    assert b.snapshot() == {}
+
+
+def test_take_probe_is_one_shot():
+    b = CircuitBreaker()
+    b.trip("flash", "x")
+    b.allow_probe()
+    assert b.take_probe("flash") is True
+    assert b.take_probe("flash") is False
+    assert b.known_unavailable("flash") is None
+
+
+def test_trip_during_probe_reopens_with_fresh_reason():
+    b = CircuitBreaker()
+    b.trip("flash", "old")
+    b.allow_probe()
+    b.trip("flash", "new")
+    assert b.is_open("flash") is True
+    assert b.take_probe("flash") is False
+    assert b.known_unavailable("flash") == "new"
+
+
+def test_replace_from_drops_probe_only_for_snapshot_keys():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.trip("b", "2")
+    b.allow_probe()
+    b.replace_from({"a": "3"})
+    assert b.is_open("a") is True and b.take_probe("a") is False
+    assert b.take_probe("b") is True
+
+
+def test_reset_clears_probe():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.allow_probe()
+    b.reset()
+    assert b.known_unavailable("a") is None
+
+
+def test_copy_keeps_both_states():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.allow_probe()
+    b.trip("c", "2")
+    c = b.copy()
+    assert c is not b
+    assert c.take_probe("a") is True and c.is_open("c") is True
+    assert b.take_probe("a") is True  # копия независима
+
+
+def test_take_probe_is_atomic_across_threads():
+    import threading
+
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.allow_probe()
+    wins = []
+    threads = [
+        threading.Thread(target=lambda: wins.append(b.take_probe("a")))
+        for _ in range(16)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert wins.count(True) == 1

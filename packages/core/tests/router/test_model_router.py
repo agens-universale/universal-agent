@@ -671,3 +671,18 @@ def test_resolve_main_at_alias_target_even_when_auto_allowed():
         _alias_settings({"default": "a"}), choice_provider=lambda: "auto"
     )
     assert router.resolve_main_at("b").alias == "b"
+
+
+def test_router_take_probe_none_and_legacy_resolve_are_false():
+    router = _router({})
+    assert router.take_probe(None) is False
+    legacy = replace(_pin(), alias=None)
+    assert router.take_probe(legacy) is False
+
+
+def test_router_take_probe_is_one_shot_for_allowed_alias():
+    router = _router({})
+    router.breaker.trip("pinned", "ReadError")
+    router.breaker.allow_probe()
+    assert router.take_probe(_pin()) is True
+    assert router.take_probe(_pin()) is False
