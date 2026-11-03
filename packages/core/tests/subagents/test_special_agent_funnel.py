@@ -35,6 +35,11 @@ from gc_testkit import as_coro, run_coro
 from gc_testkit.settings import fake_ctx
 
 
+def _no_probe_right(_resolved) -> bool:
+    """У фейкового роутера предохранителя нет — и права на пробу тоже."""
+    return False
+
+
 def _resolved(**overrides) -> ResolvedModel:
     base = dict(
         alias=None,
@@ -183,7 +188,9 @@ def test_special_agent_role_generation_declares_own_consumer(monkeypatch):
         as_coro(lambda _s, _c, resolved=None: {}),
     )
 
-    router = SimpleNamespace(resolve=Mock(return_value=_resolved()))
+    router = SimpleNamespace(
+        take_probe=_no_probe_right, resolve=Mock(return_value=_resolved())
+    )
     ctx = _ctx(model_router=router)
 
     instance = _create_instance()
