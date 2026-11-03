@@ -37,6 +37,7 @@ from rich.text import Text
 from textual import events
 from textual.widgets import Static
 
+from gc_tui import textual_compat
 from gc_tui.messages import OpenEditsScreenRequest
 from gc_tui.palette import DEEP_DIM, DIM, INK
 from gc_tui.services.trace_render import fit_lines
@@ -61,6 +62,8 @@ TURN_REASON_CLASS = "turn-reason"
 _FALLBACK_WIDTH = 80
 _FAILED_WORD = "failed"
 _REASON_SEP = " · "
+# Меньше — у обрезки по словам нет места даже на букву и `…`.
+_MIN_TAIL = 2
 _EXPANDED = "-expanded"
 # Части строки, которые отвечают мыши.
 _SUMMARY = "summary"
@@ -172,6 +175,7 @@ class TurnLine(ClickModelMixin, Static):
         self.remove_class(TURN_LINE_LATEST)
         self._pressed_on = None
         self._summary_hover = False
+        self._tail_hover = False
         self._open = False
         self._update()
 
@@ -228,8 +232,9 @@ class TurnLine(ClickModelMixin, Static):
 
     def on_unmount(self) -> None:
         """Строка ушла (откат, замена записью, перерисовка) — и тело."""
-        if self._body is not None and self._body.is_attached:
-            self._body.remove()
+        body = self._body
+        if body is not None and not textual_compat.is_being_removed(body):
+            body.remove()
 
     # ---- отрисовка -------------------------------------------------------
 
@@ -249,7 +254,7 @@ class TurnLine(ClickModelMixin, Static):
             return head
         # Голова — тем же `DEEP_DIM`, что у осевшей (цвет из стиля):
         # явным стилем она не сливается в один прогон с зазором до сводки.
-        head.stylize(DEEP_DIM, 0, self.text.cell_len)
+        head.stylize(DEEP_DIM, 0, len(self.text))
         line, self._summary_span = compose_status_line(
             head, summary, self._status_width(), hover=self._summary_hover
         )
@@ -270,6 +275,10 @@ class TurnLine(ClickModelMixin, Static):
         flat = " ".join(reason.split())
         if cell_len(flat) <= room:
             return flat, False
+        # Места почти нет: хвост — один `…` или ничего, строка остаётся
+        # одной; причина всё равно разворачивается.
+        if room < _MIN_TAIL:
+            return ("…" if room > 0 else ""), True
         return fit_lines(flat, room, 1), True
 
     def _status_width(self) -> int:

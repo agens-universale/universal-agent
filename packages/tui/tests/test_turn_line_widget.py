@@ -279,3 +279,23 @@ async def test_no_tooltip_on_error_line():
         line.settle()
         await pilot.pause()
         assert line.tooltip is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [38, 39, 40, 41])
+async def test_narrow_row_keeps_error_line_one_row(width):
+    """Голова и сводка почти заняли строку: хвоста нет или один `…`, строка
+    остаётся одной, причина по-прежнему разворачивается."""
+    line = _failed_line()
+    async with LineApp(line).run_test(size=(width, 20)) as pilot:
+        line.freshen((2, 14, 3), _LONG)
+        await pilot.pause()
+        line.toggle()  # свежая развернулась сама — свернуть
+        await pilot.pause()
+        assert line.expanded is False
+        assert line.region.height == 1
+        assert line.render().cell_len <= line.size.width
+        assert _plain(line).endswith("изменено 2 файла · +14 −3")
+        line.focus()
+        await pilot.press("space")
+        assert line.expanded is True
