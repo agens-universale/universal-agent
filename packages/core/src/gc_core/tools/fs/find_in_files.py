@@ -40,6 +40,7 @@ from gc_core.settings import settings_of
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
 from gc_core.tools.fs.cooperative import LoopYielder
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.user_stop import UserStopInterrupt
 from gc_core.utils.file_text import (
     BINARY_SAMPLE_BYTES,
     classify_content_from_sample,
@@ -96,6 +97,7 @@ class _ScanShared:
     content_paths_touched: int = 0
     skipped_binary: int = 0
     skipped_encoding: int = 0
+    skipped_read_errors: int = 0
     bytes_read: int = 0
     shortlist_len: int = 0
 
@@ -2139,7 +2141,7 @@ class FindInFiles(AbstractSimpleTool):
                 )
         except PermissionError as exc:
             return self._error("permission_denied", message=str(exc))
-        except RuntimeUnavailable:
+        except (RuntimeUnavailable, UserStopInterrupt):
             raise
         except Exception as exc:
             return self._error("unexpected_error", message=str(exc))
@@ -2163,6 +2165,7 @@ class FindInFiles(AbstractSimpleTool):
             files_too_large=files_too_large or None,
             skipped_binary=shared.skipped_binary or None,
             skipped_encoding=shared.skipped_encoding or None,
+            skipped_read_errors=shared.skipped_read_errors or None,
             stop_reason=stop_reason,
             guidance=guidance,
             scan_complete=scan_complete,
@@ -2319,7 +2322,7 @@ class FindInFiles(AbstractSimpleTool):
             return [], 0, self._error("walk_too_large", message=str(exc))
         except PermissionError as exc:
             return [], 0, self._error("permission_denied", message=str(exc))
-        except RuntimeUnavailable:
+        except (RuntimeUnavailable, UserStopInterrupt):
             raise
         except Exception as exc:
             return [], 0, self._error("unexpected_error", message=str(exc))
@@ -2481,7 +2484,10 @@ class FindInFiles(AbstractSimpleTool):
         if skip == "encoding":
             shared.skipped_encoding += 1
             return False
-        if skip == "read_error" or text is None:
+        if skip == "read_error":
+            shared.skipped_read_errors += 1
+            return False
+        if text is None:
             return False
         if shared.stop or len(shared.matches) >= limit_eff:
             shared.stop = True
@@ -2669,19 +2675,35 @@ class FindInFiles(AbstractSimpleTool):
             stop_reason, guidance = self._cap_stop_info(
                 True, limit_requested, limit_eff, count=count
             )
-        if files_too_large or shared.skipped_encoding:
+        if (
+            files_too_large
+            or shared.skipped_encoding
+            or shared.skipped_read_errors
+        ):
             scan_complete = False
             more_matches_may_exist = True
+        skipped_guidance = self._skipped_files_guidance(
+            shared.skipped_encoding,
+            files_too_large,
+            shared.skipped_read_errors,
+        )
         if guidance is None:
-            guidance = self._skipped_files_guidance(
-                shared.skipped_encoding, files_too_large
-            )
+            guidance = skipped_guidance
+        elif shared.skipped_read_errors:
+            guidance = f"{guidance} {skipped_guidance}"
         return stop_reason, guidance, scan_complete, more_matches_may_exist
 
     @staticmethod
     def _skipped_files_guidance(
-        skipped_encoding: int, files_too_large: int
+        skipped_encoding: int,
+        files_too_large: int,
+        skipped_read_errors: int = 0,
     ) -> Optional[str]:
+        if skipped_read_errors:
+            return (
+                f"{skipped_read_errors} file(s) could not be read and were not "
+                "searched. Do not assume the pattern is absent from them."
+            )
         if skipped_encoding:
             return (
                 f"{skipped_encoding} file(s) could not be decoded as text and were "
@@ -2775,6 +2797,7 @@ class FindInFiles(AbstractSimpleTool):
         files_too_large: Optional[int] = None,
         skipped_binary: Optional[int] = None,
         skipped_encoding: Optional[int] = None,
+        skipped_read_errors: Optional[int] = None,
         fallback_reason: Optional[str] = None,
         prefilter: Optional[str] = None,
     ) -> str:
@@ -2811,6 +2834,7 @@ class FindInFiles(AbstractSimpleTool):
             ("files_too_large", files_too_large),
             ("skipped_binary", skipped_binary),
             ("skipped_encoding", skipped_encoding),
+            ("skipped_read_errors", skipped_read_errors),
         ):
             if value:
                 payload[key] = value

@@ -76,6 +76,11 @@ unset _gc_saved_path _gc_ifs _gc_dir _gc_noglob _gc_new
 
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_SYMLINK_DOWNLOAD_REFUSAL_RE = re.compile(
+    r"Engine cp failed \('[^':\n]+:(?P<source>/[^'\n]*)' -> "
+    r"'(?P<target>[^'\n]+)'\): invalid symlink "
+    r'"(?P=target)" -> "[^"\n]+"'
+)
 
 
 def _env_assignment_prefix(env: Optional[dict]) -> str:
@@ -366,7 +371,18 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
-            await self._aawait(self._env.download_file(path, tmp_path))
+            try:
+                await self._aawait(self._env.download_file(path, tmp_path))
+            except RuntimeError as exc:
+                # A valid container symlink can be refused when copied alone.
+                failure = _SYMLINK_DOWNLOAD_REFUSAL_RE.fullmatch(str(exc))
+                if (
+                    failure is None
+                    or failure["source"] != path
+                    or failure["target"] != str(tmp_path)
+                ):
+                    raise
+                raise OSError(str(exc)) from exc
             return tmp_path.read_bytes()
         finally:
             tmp_path.unlink(missing_ok=True)
