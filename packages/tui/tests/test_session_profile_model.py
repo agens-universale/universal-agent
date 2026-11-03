@@ -23,11 +23,7 @@ from gc_core.runtime_notices import (
 from gc_tui.app import TuiApp
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.stores.record_view import tui_section
-from gc_tui.session_settings import (
-    SESSION_KEYS,
-    read_breaker_from_tui,
-    read_from_tui,
-)
+from gc_tui.session_settings import SESSION_KEYS, read_from_tui
 
 
 def _write_yaml(path: Path, body: dict) -> Path:
@@ -514,174 +510,7 @@ def test_reload_config_if_changed_keeps_base_when_config_profile_pointer_broken(
     ]
 
 
-# --- 6. Предохранитель: персист/restore/сброс по mtime и по смене профиля ----------
-
-
-def test_circuit_breaker_persists_and_restores_across_windows(tmp_path):
-    app = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app.tui_state.active_task_id = "t-breaker"
-    app._circuit_breaker.trip("flash", "недоступна")
-    app.persist_circuit_breaker()
-
-    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_tui(
-        tui_section(store.get_record("t-breaker"))
-    )
-    assert snapshot.get("flash") == "недоступна"
-
-    app2 = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app2.load_circuit_breaker(snapshot)
-    assert app2._circuit_breaker.is_open("flash") is True
-
-
-def test_run_completion_persists_circuit_breaker(tmp_path):
-    """Проводка: `_on_runner_complete` персистит предохранитель — трипы во время
-    рана обязаны пережить пересборку executor следующего хода."""
-    app = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app.tui_state.active_task_id = "t-run"
-
-    class _Exec:
-        last_terminal_outcome = "finished"
-
-        def add_message(self, m):
-            pass
-
-        async def arun(self, *a, **k):
-            app._circuit_breaker.trip("flash", "недоступна")
-            return "done"
-
-        def stop_run(self):
-            pass
-
-    app._executor_factory = lambda: _Exec()
-    runner = app.get_runner()
-    runner.start(query="q", thread_id="t-run")
-    runner.wait(timeout=5)
-
-    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_tui(tui_section(store.get_record("t-run")))
-    assert snapshot.get("flash") == "недоступна"
-
-
-def test_run_failure_persists_circuit_breaker(tmp_path):
-    """Ран упал (бэкенд лёг) — путь `_emit_error`, а не `_on_runner_complete`.
-    Трип обязан пережить падение: иначе следующий ход снова ломится в мёртвый
-    алиас, и §8 не работает ровно там, где нужен."""
-    app = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app.tui_state.active_task_id = "t-fail"
-
-    class _Exec:
-        last_terminal_outcome = None
-
-        def add_message(self, m):
-            pass
-
-        async def arun(self, *a, **k):
-            app._circuit_breaker.trip("flash", "5xx")
-            raise RuntimeError("backend down")
-
-        def stop_run(self):
-            pass
-
-    app._executor_factory = lambda: _Exec()
-    runner = app.get_runner()
-    runner.start(query="q", thread_id="t-fail")
-    runner.wait(timeout=5)
-
-    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_tui(tui_section(store.get_record("t-fail")))
-    assert snapshot.get("flash") == "5xx"
-
-
-def test_run_persists_circuit_breaker_even_after_runner_replaced(tmp_path):
-    """Ctrl+C: `_stop_and_replace_runner` обнуляет `active_runner`, и проверка
-    владельца в колбэке отсекает UI-поля чужого раннера. Предохранитель под неё
-    попадать не должен — объект один на приложение, трипы уже случились."""
-    app = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app.tui_state.active_task_id = "t-stop"
-
-    class _Exec:
-        last_terminal_outcome = "stopped"
-
-        def add_message(self, m):
-            pass
-
-        async def arun(self, *a, **k):
-            app._circuit_breaker.trip("flash", "недоступна")
-            app.active_runner = None  # как _stop_and_replace_runner
-            return "done"
-
-        def stop_run(self):
-            pass
-
-    app._executor_factory = lambda: _Exec()
-    runner = app.get_runner()
-    runner.start(query="q", thread_id="t-stop")
-    runner.wait(timeout=5)
-
-    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_tui(tui_section(store.get_record("t-stop")))
-    assert snapshot.get("flash") == "недоступна"
-
-
-def test_breaker_persist_is_marshalled_to_ui_thread(tmp_path):
-    """`persist_circuit_breaker` — read-modify-write meta.json, а UI-поток пишет
-    туда же на спаде is_running (статус треда, session overrides). Запись прямо
-    с воркер-потока теряет одну из правок и может оставить обрезанный файл —
-    мост на UI-поток обязателен, как у остальных колбэков раннера."""
-    app = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app.tui_state.active_task_id = "t-thread"
-    marshalled = []
-
-    def _fake_call_from_thread(fn, *a, **k):
-        marshalled.append(fn)
-        return fn(*a, **k)
-
-    app.call_from_thread = _fake_call_from_thread
-
-    class _Exec:
-        last_terminal_outcome = "finished"
-
-        def add_message(self, m):
-            pass
-
-        async def arun(self, *a, **k):
-            app._circuit_breaker.trip("flash", "недоступна")
-            return "done"
-
-        def stop_run(self):
-            pass
-
-    app._executor_factory = lambda: _Exec()
-    runner = app.get_runner()
-    runner.start(query="q", thread_id="t-thread")
-    runner.wait(timeout=5)
-
-    assert app.persist_circuit_breaker in marshalled
+# --- 6. Предохранитель: сброс по mtime и по смене профиля ----------
 
 
 def test_reload_config_resets_breaker_on_mtime_change(tmp_path):
@@ -707,23 +536,14 @@ def test_switch_session_profile_resets_breaker(tmp_path):
     assert app._circuit_breaker.is_open("flash") is False
 
 
-def test_load_circuit_breaker_restores_in_place_keeping_executor_wired(
+def test_reset_circuit_breaker_clears_in_place_keeping_executor_wired(
     tmp_path,
 ):
-    """Important-1: attach нового треда НЕ подменяет объект предохранителя —
-    прогретый executor держит ссылку на ТОТ ЖЕ объект. Иначе трипы рана уходят в
-    осиротевший breaker, а persist_circuit_breaker пишет пустой новый (§8)."""
+    """Сброс при attach НЕ подменяет объект: прогретый executor держит
+    ссылку на тот же предохранитель."""
     from gc_core.model_router import ModelRouter
 
-    app = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app.tui_state.active_task_id = "t-2"
-
-    # executor-router собран с текущим breaker — как _build_real_executor (circuit_breaker=self._circuit_breaker)
-    breaker_at_build = app._circuit_breaker
+    app = _app_with_base(tmp_path)
     executor_router = ModelRouter(
         make_settings(
             {"models": {"flash": {}}, "slots": {"default": "flash"}}
@@ -731,22 +551,12 @@ def test_load_circuit_breaker_restores_in_place_keeping_executor_wired(
         choice_provider=lambda: "default",
         breaker=app._circuit_breaker,
     )
+    app._circuit_breaker.trip("flash", "недоступна")
 
-    # attach другого треда с непустым персистированным снапшотом
-    app.load_circuit_breaker({"deepseek-max": "5xx"})
+    app.reset_circuit_breaker()
 
-    # объект не подменён — executor видит новое содержимое (a)/(c)
-    assert app._circuit_breaker is breaker_at_build
     assert executor_router.breaker is app._circuit_breaker
-    assert executor_router.breaker.is_open("deepseek-max") is True
-
-    # трип рана через тот же объект виден в persist (b)
-    executor_router.breaker.trip("flash", "run trip")
-    app.persist_circuit_breaker()
-    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    snapshot = read_breaker_from_tui(tui_section(store.get_record("t-2")))
-    assert snapshot.get("flash") == "run trip"
-    assert snapshot.get("deepseek-max") == "5xx"
+    assert executor_router.breaker.snapshot() == {}
 
 
 @pytest.mark.asyncio

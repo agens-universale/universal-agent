@@ -102,17 +102,6 @@ SESSION_KEYS: Dict[str, SessionKey] = {
 
 
 META_KEY = "session_settings"
-BREAKER_META_KEY = "circuit_breaker"
-
-
-def read_breaker_from_tui(tui: Dict[str, Any]) -> Dict[str, str]:
-    """Снимок предохранителя моделей (спека §8) из секции TUI треда."""
-    return dict((tui or {}).get(BREAKER_META_KEY) or {})
-
-
-def to_breaker_meta_patch(snapshot: Dict[str, str]) -> Dict[str, Any]:
-    """Снимок предохранителя как патч для meta.tui."""
-    return {BREAKER_META_KEY: dict(snapshot or {})}
 
 
 def read_from_tui(tui: Dict[str, Any]) -> Dict[str, Any]:

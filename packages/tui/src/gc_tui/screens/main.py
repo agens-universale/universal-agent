@@ -232,7 +232,7 @@ from gc_tui.services.usage_meter import (
     usage_segments,
 )
 from gc_tui.services.voice_pill import render_pill
-from gc_tui.session_settings import read_breaker_from_tui, read_from_tui
+from gc_tui.session_settings import read_from_tui
 from gc_tui.toggles import (
     PROFILE_NONE_VALUE,
     apply_toggle,
@@ -2434,7 +2434,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         task_record = self._store.get_record(task_id)
         task_tui = tui_section(task_record)
         saved = read_from_tui(task_tui)
-        self._adopt_thread_breaker(task_tui)
+        self._reset_thread_breaker()
         # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
         # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
         # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
@@ -5963,15 +5963,14 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Тред прогона раннера: его цель, иначе активный."""
         return self.app.run_thread_id(runner) or self._active_task_id
 
-    def _adopt_thread_breaker(self, task_tui: dict) -> None:
-        """Предохранитель моделей — владение треда (спека §8): restore
-        ЦЕЛИКОМ заменяет breaker окна под открытый тред. Пока идёт ход,
-        предохранитель принадлежит его треду — им пользуется исполнитель;
-        открытый получит свой в конце хода (`_on_run_finished`)."""
+    def _reset_thread_breaker(self) -> None:
+        """Подключение треда очищает предохранитель окна. Пока идёт ход,
+        предохранитель принадлежит ему — не трогаем; открытый очистится
+        в конце хода (`_on_run_finished`)."""
         runner = getattr(self.app, "active_runner", None)
         if runner is not None and runner.is_running():
             return
-        self.app.load_circuit_breaker(read_breaker_from_tui(task_tui))
+        self.app.reset_circuit_breaker()
 
     def _on_run_finished(self, runner, kind: str) -> None:
         """Спадающий фронт прогона: исход — в мету треда прогона.
@@ -6015,10 +6014,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._update_terminal_title()
         if not on_screen:
             # Ход чужого треда кончился: предохранитель — открытому.
-            open_tid = self._active_task_id
-            self._adopt_thread_breaker(
-                self._task_tui(open_tid) if open_tid else {}
-            )
+            self._reset_thread_breaker()
             return
         # Ход закончился предложенным планом — баннер одобрения.
         if plan_proposed:
@@ -8639,12 +8635,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             if runner.is_running():
                 self.app.last_stop_requested = True
                 self._stopping_runner = runner
-                # Предохранитель хода — в его тред сейчас: поток доработает
-                # отвязанным, и общий объект к тому времени может держать
-                # уже другой тред.
-                self.app.persist_circuit_breaker(
-                    self.app.run_thread_id(runner)
-                )
             runner.stop()
             runner._marked_stopped = True
             # Поток может ещё досиживать HTTP — тогда логгер отдаст он сам.
