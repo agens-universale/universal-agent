@@ -395,6 +395,119 @@ def test_summary_applied_then_failed_does_not_republish_held_output(
     )
 
 
+@pytest.mark.parametrize("failure", ["error", "cancel"])
+def test_summary_failed_before_replace_persists_held_output(
+    monkeypatch, failure
+):
+    """Сбоя до подмены списка носитель ещё не в сводке — его пишем один раз.
+
+    Если ``finally`` снимет ссылку безусловно, отложенный ответ пропадёт из трейса.
+    """
+    output = _held_output()
+    persisted: list[dict] = []
+    state = _state()
+    state.backend_api_mode = "chat_completions"
+
+    async def _fake_tools(_messages, _st, _ctx, batch_trace=None, **_kwargs):
+        if isinstance(batch_trace, dict):
+            batch_trace.setdefault("executed", []).append("c1")
+        return [output]
+
+    async def _fake_outputs(_messages, _st, _ctx):
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp"
+
+    async def _compact(**_kwargs):
+        if failure == "cancel":
+            raise asyncio.CancelledError()
+        raise RuntimeError("trace failed before summary")
+
+    monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_tools)
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", _fake_outputs)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    ctx = _run_ctx()
+    coord = RunSummaryCoordinator(
+        ctx=ctx,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+
+    def _run():
+        return run_coro(
+            pr.arun_agent(
+                _tool_call_batch(),
+                state,
+                ctx,
+                pre_backend_compaction_hook=coord.apre_backend_compaction_hook,
+                persist_messages_callback=persisted.extend,
+            )
+        )
+
+    if failure == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            _run()
+    else:
+        assert _run() == "готово"
+
+    assert [message.get("id") for message in persisted].count("fco") == 1
+    assert any(message.get("id") == "fco" for message in state.messages)
+    assert all(message.get("id") != "sum" for message in state.messages)
+
+
+def test_force_compact_applied_then_failed_does_not_republish_held_output(
+    monkeypatch,
+):
+    """Аварийная сводка подменила историю и затем упала — старый ответ не дописываем.
+
+    Переполнение приходит из подготовки запроса, пока ответ ещё отложен.
+    Исключение хука уходит как есть, без ``UnboundLocalError`` на ``applied``.
+    """
+    output = _held_output()
+    persisted: list[dict] = []
+    state = _state()
+
+    async def _fake_tools(_messages, _st, _ctx, batch_trace=None, **_kwargs):
+        if isinstance(batch_trace, dict):
+            batch_trace.setdefault("executed", []).append("c1")
+        return [output]
+
+    async def _overflow(_state, _ctx):
+        raise ValueError(
+            "Requested token count exceeds the model's maximum context "
+            "length of 131072 tokens. Please reduce the number of tokens"
+        )
+
+    async def _compact():
+        state.messages = [{"role": "user", "content": "SUMMARY", "id": "sum"}]
+        raise RuntimeError("trace failed after summary")
+
+    monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_tools)
+    monkeypatch.setattr(pr, "aprepare_main_call", _overflow)
+
+    with pytest.raises(RuntimeError, match="trace failed after summary"):
+        run_coro(
+            pr.arun_agent(
+                _tool_call_batch(),
+                state,
+                _run_ctx(),
+                force_compact_hook=_compact,
+                persist_messages_callback=persisted.extend,
+            )
+        )
+
+    assert [message.get("id") for message in state.messages] == ["sum"]
+    assert all(message.get("id") != "fco" for message in persisted)
+    assert all(
+        message.get("type") != "function_call_output"
+        for message in state.messages
+    )
+
+
 def _held_output():
     return {
         "type": "function_call_output",
