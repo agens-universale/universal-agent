@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from gc_testkit.paths import ASSETS, PACKAGE_SRC_DIRS
 from gc_testkit.paths import REPO as PROJECT_ROOT
+from helpers.module_snapshot import ModuleSnapshot
 
 SKILL_DIR = ASSETS / "skills" / "skill-creator"
 
@@ -62,20 +63,16 @@ def _registry():
     """
     for _src in PACKAGE_SRC_DIRS:
         sys.path.insert(0, str(_src))
-    saved = {
-        name: sys.modules.pop(name)
-        for name in list(sys.modules)
-        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
-    }
+    snapshot = ModuleSnapshot()
+    for name in list(sys.modules):
+        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
+            sys.modules.pop(name)
     try:
         from gc_core.tools.skills.registry import SkillsRegistry
 
         yield SkillsRegistry(skills_root=str(ASSETS / "skills"))
     finally:
-        for name in list(sys.modules):
-            if name == "gc_core.tools" or name.startswith("gc_core.tools."):
-                sys.modules.pop(name, None)
-        sys.modules.update(saved)
+        snapshot.restore()
 
 
 def _sample_skill() -> tuple[Path, str]:

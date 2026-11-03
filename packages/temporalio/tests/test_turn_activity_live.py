@@ -351,3 +351,62 @@ async def test_stream_mcp_closed_in_its_opening_task(
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_rpc_error_in_a_does_not_cancel_agent_or_b(
+    tmp_path,
+    monkeypatch,
+    scripted_http,  # noqa: F811
+):
+    monkeypatch.chdir(tmp_path)
+    url, requests, script = scripted_http
+    script.extend(
+        [
+            [call("a1", "mcp_a_action", {})],
+            [call("b1", "mcp_b_action", {})],
+            [call("a2", "mcp_a_action", {"fail": True})],
+            [call("b2", "mcp_b_action", {})],
+            [finish("completed after RPC error")],
+        ]
+    )
+    server = (
+        Path(__file__).resolve().parents[2]
+        / "core/tests/tools/connect_mcp/session_server.py"
+    )
+    settings = agent_settings(url, tmp_path).with_overrides(
+        {
+            "mcp.servers": {
+                name: {
+                    "transport": "stream_stdio",
+                    "persistent_session": True,
+                    "command": sys.executable,
+                    "args": [
+                        str(server),
+                        "stdio",
+                        "0",
+                        str(tmp_path / f"{name}.jsonl"),
+                    ],
+                }
+                for name in ("a", "b")
+            }
+        }
+    )
+    runner = AgentActivity(
+        {"test": settings},
+        thread_store=FileThreadStore(str(tmp_path / "threads")),
+    )
+    result = await ActivityEnvironment().run(
+        runner.run,
+        AgentActivityRequest("test", "Complete the task", "rpc-error"),
+    )
+    assert "completed after RPC error" in str(result.answer)
+    assert len(requests) == 5
+    for name in ("a", "b"):
+        events = [
+            json.loads(line)
+            for line in (tmp_path / f"{name}.jsonl").read_text().splitlines()
+        ]
+        assert len(events) == 2
+        assert len({event["pid"] for event in events}) == 1
+        assert not psutil.pid_exists(events[0]["pid"])
+    assert events[0]["event"] == events[1]["event"] == "call"
