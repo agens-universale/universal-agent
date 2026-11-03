@@ -2963,11 +2963,7 @@ class _AgentLoop:
                 )
                 return None
             if await self._apre_backend_compaction(messages, mode):
-                self._discard_nudges_after_summary(skip_fill=True)
-                # Ответ уже вошёл в сводку. Запись на диск вернула бы его
-                # в трейс сырым, без подсказок он туда и не нужен.
-                self._nudges.carrier = None
-                self._nudges.followers = []
+                self._drop_pre_summary_output()
             if self._stopped_before_call():
                 await self._nudges.apublish(
                     messages,
@@ -3133,7 +3129,13 @@ class _AgentLoop:
             _MAX_CONTEXT_OVERFLOW_RETRIES,
             backend_exc,
         )
-        if await _acall_blocking_hook(self.force_compact_hook):
+        previous = getattr(self.state, "messages", None)
+        try:
+            applied = await _acall_blocking_hook(self.force_compact_hook)
+        finally:
+            if self._history_replaced(previous):
+                self._drop_pre_summary_output()
+        if applied and not self._history_replaced(previous):
             self._discard_nudges_after_summary(skip_fill=True)
         return True
 
@@ -3301,6 +3303,22 @@ class _AgentLoop:
         mode = check_mode(messages, self.run_logger)
         return messages, mode, _NO_RETURN
 
+    def _history_replaced(self, previous: Any) -> bool:
+        """Сводка подменила список: старые сообщения живут только в нём."""
+        current = getattr(self.state, "messages", None)
+        return isinstance(current, list) and current is not previous
+
+    def _drop_pre_summary_output(self) -> None:
+        """Отложенный ответ уже вошёл в сводку — в новый трейс его не пишем.
+
+        Подсказки старого диалога тоже не собираем заново: ближайший запрос
+        идёт по новой истории. Новое техническое сообщение (объявление
+        режима) может добавиться следом.
+        """
+        self._discard_nudges_after_summary(skip_fill=True)
+        self._nudges.carrier = None
+        self._nudges.followers = []
+
     def _discard_nudges_after_summary(self, *, skip_fill: bool) -> None:
         """Сводка заменила трейс: подсказки старого диалога выбрасываем.
 
@@ -3320,21 +3338,31 @@ class _AgentLoop:
     async def _apre_backend_compaction(self, messages, mode) -> bool:
         if self.pre_backend_compaction_hook is None:
             return False
+        previous = getattr(self.state, "messages", None)
+        applied = False
         try:
-            return bool(
-                await _acall_blocking_hook(
-                    self.pre_backend_compaction_hook, messages, mode
+            try:
+                applied = bool(
+                    await _acall_blocking_hook(
+                        self.pre_backend_compaction_hook, messages, mode
+                    )
                 )
-            )
-        except ExecutionFailure:
-            raise
-        except Exception as pre_backend_exc:
-            self.run_logger.warning(
-                "Pre-backend compaction hook warning: %s",
-                pre_backend_exc,
-                exc_info=True,
-            )
-            return False
+            except ExecutionFailure:
+                raise
+            except Exception as pre_backend_exc:
+                self.run_logger.warning(
+                    "Pre-backend compaction hook warning: %s",
+                    pre_backend_exc,
+                    exc_info=True,
+                )
+                applied = False
+        finally:
+            # Отмена и ошибка после подмены сюда тоже попадают: ссылку
+            # снимаем до ``_apersist_held_output``, иначе старый ответ
+            # допишется уже к сводке.
+            if self._history_replaced(previous):
+                self._drop_pre_summary_output()
+        return applied or self._history_replaced(previous)
 
     async def _aannounce_mode(
         self, messages, *, update_silent_mark: bool = True

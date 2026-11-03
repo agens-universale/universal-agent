@@ -1,5 +1,7 @@
 """run_agent при переполнении контекста: force-компакция + повтор, не краш."""
 
+import asyncio
+
 import pytest
 
 from gc_core import processing_responses as pr
@@ -316,6 +318,81 @@ def test_tool_output_step_compacts_while_output_is_held(monkeypatch):
     assert "fco" not in compacted["kept"]
     assert "fc" not in compacted["kept"]
     assert "fco" not in compacted["sent"]
+
+
+@pytest.mark.parametrize("failure", ["error", "cancel"])
+def test_summary_applied_then_failed_does_not_republish_held_output(
+    monkeypatch, failure
+):
+    """Сводка уже подменила историю — старый ответ в новый трейс не возвращается.
+
+    Обычное исключение ход продолжает по сводке. Отмена ход останавливает.
+    В обоих случаях сырого ``function_call_output`` нет ни в state, ни на диске.
+    """
+    output = _held_output()
+    persisted: list[dict] = []
+    state = _state()
+    state.backend_api_mode = "chat_completions"
+
+    async def _fake_tools(_messages, _st, _ctx, batch_trace=None, **_kwargs):
+        if isinstance(batch_trace, dict):
+            batch_trace.setdefault("executed", []).append("c1")
+        return [output]
+
+    async def _fake_outputs(messages, _st, _ctx):
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp"
+
+    async def _compact(**kwargs):
+        kwargs["state"].messages = [
+            {"role": "user", "content": "SUMMARY", "id": "sum"}
+        ]
+        if failure == "cancel":
+            raise asyncio.CancelledError()
+        raise RuntimeError("trace failed after summary")
+
+    monkeypatch.setattr(pr, "aprocess_tool_calls", _fake_tools)
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", _fake_outputs)
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_kw: True)
+    ctx = _run_ctx()
+    coord = RunSummaryCoordinator(
+        ctx=ctx,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+
+    def _run():
+        return run_coro(
+            pr.arun_agent(
+                _tool_call_batch(),
+                state,
+                ctx,
+                pre_backend_compaction_hook=coord.apre_backend_compaction_hook,
+                persist_messages_callback=persisted.extend,
+            )
+        )
+
+    if failure == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            _run()
+        assert [message.get("id") for message in state.messages] == ["sum"]
+    else:
+        assert _run() == "готово"
+        ids = [message.get("id") for message in state.messages]
+        assert ids[0] == "sum"
+        assert "fco" not in ids
+        assert "fc" not in ids
+
+    assert all(message.get("id") != "fco" for message in persisted)
+    assert all(
+        message.get("type") != "function_call_output"
+        for message in state.messages
+    )
 
 
 def _held_output():
