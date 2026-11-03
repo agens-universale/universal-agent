@@ -374,7 +374,11 @@ def _list_status(record: ThreadRecord) -> Optional[str]:
     """Исход сессии для списка: короткий итог последнего хода (его пишет
     ядро в любом фронтенде), кроме живого хода и хода, открытого без
     итога (``runtime.turn``), — у них статус меты. Итога нет — статус
-    меты (TUI — ``tui.status``, CLI и сервер — верхний)."""
+    меты (TUI — ``tui.status``, CLI и сервер — верхний). Тред, ход
+    которого приостановлен на вопросе (A2A), ждёт ответа: ход не закончен.
+    """
+    if record.state.pending_question:
+        return "asking"
     status = outcome_status(record)
     if status in _LIVE_STATUSES or record.runtime.turn is not None:
         return status

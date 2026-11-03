@@ -145,6 +145,10 @@ TRANSIENT_STATE_DEFAULTS = {
     # Вопрос, на котором ход приостановлен (ask_human_suspends): его пишет
     # тул в ядре и уносит запись сессии; ребёнку и в activity не нужен.
     "pending_question": lambda: None,
+    # Ход, приостановленный на вопросе (снимок для записи сессии), и ход,
+    # продолженный этим прогоном (перенесённый снимок).
+    "suspended_turn": lambda: None,
+    "resumed_turn": lambda: None,
 }
 
 
