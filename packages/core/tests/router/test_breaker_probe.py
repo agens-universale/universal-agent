@@ -187,3 +187,71 @@ def test_auto_failed_probe_reroutes_in_same_tick(monkeypatch):
     assert probe_kwargs["adaptive_retry"] is False
     assert s._call_level == "max"
     assert ctx.model_router.breaker.is_open("mid") is True
+
+
+def _aux_transport(monkeypatch):
+    from gc_core.utils import llm_chat_client as lcc
+
+    sent = []
+
+    async def fake(**kwargs):
+        sent.append(kwargs)
+        return {"choices": [{"message": {"content": "ok"}}]}, {}
+
+    monkeypatch.setattr(lcc, "_arequest_admitted_chat_completion", fake)
+    return sent
+
+
+def _aux_call(ctx, **extra):
+    from gc_core.utils.llm_chat_client import arequest_chat_completion_text
+
+    return run_coro(
+        arequest_chat_completion_text(
+            ctx=ctx,
+            state=_state(ctx),
+            messages=[{"role": "user", "content": "x"}],
+            max_tokens=64,
+            consumer="summary",
+            **extra,
+        )
+    )
+
+
+def _open_with_right(ctx, alias="mid"):
+    ctx.model_router.breaker.trip(alias, "ReadError")
+    ctx.model_router.breaker.allow_probe()
+
+
+def test_aux_call_takes_probe_once(monkeypatch):
+    ctx = _ctx()
+    sent = _aux_transport(monkeypatch)
+    _open_with_right(ctx)
+    _aux_call(ctx)
+    assert sent[0]["use_retry"] is False
+    assert sent[0]["adaptive_retry"] is False
+    _aux_call(ctx)
+    assert sent[1]["use_retry"] is True
+    assert sent[1]["adaptive_retry"] is True
+
+
+def test_isolated_call_keeps_probe_right(monkeypatch):
+    ctx = _ctx()
+    sent = _aux_transport(monkeypatch)
+    _open_with_right(ctx)
+    _aux_call(ctx, isolated_timeout_sec=5.0)
+    assert sent[0]["adaptive_retry"] is False
+    assert ctx.model_router.breaker.known_unavailable("mid") is not None
+    assert ctx.model_router.breaker.take_probe("mid") is True
+
+
+def test_snapshot_does_not_take_probe(monkeypatch):
+    ctx = _ctx()
+    sent = _aux_transport(monkeypatch)
+    _open_with_right(ctx)
+
+    async def before_send(_prepared):
+        return None
+
+    _aux_call(ctx, before_send=before_send)
+    assert sent[0]["use_retry"] is False
+    assert sent[0]["adaptive_retry"] is False

@@ -438,6 +438,14 @@ async def _asend_chat_completion_text(
         config_proxy,
         retry_embedded_choice_errors,
     ) = _network_params(settings, resolved, isolated_timeout_sec)
+    router = getattr(ctx, "model_router", None)
+    probe = (
+        isolated_timeout_sec is None
+        and router is not None
+        and router.take_probe(resolved)
+    )
+    if probe:
+        use_retry = False
 
     if prepared is not None:
 
@@ -477,7 +485,7 @@ async def _asend_chat_completion_text(
             notice_url=url,
             timeout=timeout,
             config_proxy=config_proxy,
-            adaptive_retry=isolated_timeout_sec is None,
+            adaptive_retry=isolated_timeout_sec is None and not probe,
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:
