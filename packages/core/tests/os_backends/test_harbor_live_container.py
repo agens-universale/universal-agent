@@ -183,6 +183,22 @@ async def test_read_and_write_go_through_the_container(backend):
     assert await backend.is_file("/app/written.txt") is True
 
 
+async def test_overwrite_keeps_executable_mode_in_container(backend):
+    setup = await backend.aexec_raw(
+        "printf '#!/bin/sh\\necho old\\n' > /app/executable.sh "
+        "&& chmod 755 /app/executable.sh"
+    )
+    assert setup.return_code == 0
+
+    await backend.write_bytes("/app/executable.sh", b"#!/bin/sh\necho new\n")
+
+    result = await backend.aexec_raw(
+        "stat -c %a /app/executable.sh && /app/executable.sh"
+    )
+    assert result.return_code == 0
+    assert result.stdout.splitlines() == ["755", "new"]
+
+
 async def _state(backend, pid: int) -> str:
     """Состояние процесса по `/proc`, а не по `kill -0`: тот считает живым зомби."""
     res = await backend.aexec_raw(

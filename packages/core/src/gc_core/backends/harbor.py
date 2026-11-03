@@ -13,6 +13,7 @@ import contextlib
 import re
 import shlex
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, ContextManager, Optional
 
@@ -347,19 +348,57 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             capture_max_chars=self.walk_output_max_chars,
         )
 
+    async def _aexisting_regular_mode(self, path: str) -> str:
+        quoted_path = shlex.quote(path)
+        mode_result = await self._afs_exec(f"stat -c '%F|%a' {quoted_path}")
+        if mode_result.return_code == 0:
+            kind, _, previous_mode = mode_result.stdout.strip().partition("|")
+            if not kind or not re.fullmatch(r"[0-7]{3,4}", previous_mode):
+                raise OSError(f"invalid stat response: {path}")
+            if kind.lower() != "regular file":
+                return ""
+            if not await self.writable(path):
+                raise PermissionError(f"Permission denied: {path}")
+            return previous_mode
+        failure = self._fs_failure(path, mode_result, what="stat")
+        if not isinstance(failure, FileNotFoundError):
+            raise failure
+        return ""
+
     async def _aupload_bytes(self, data: bytes, path: str) -> None:
         # mkdir и upload_file идут мимо ``_aexec_impl``.
         await self._runtime_probe.ensure(self._aprobe)
+        quoted_path = shlex.quote(path)
+        previous_mode = await self._aexisting_regular_mode(path)
+        remote_path = (
+            f"{path}.gc-write-tmp.{uuid.uuid4().hex}"
+            if previous_mode
+            else path
+        )
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp.write(data)
             tmp_path = Path(tmp.name)
         try:
             await self._aawait(
-                self._env.exec(f"mkdir -p $(dirname {shlex.quote(path)})")
+                self._env.exec(f"mkdir -p $(dirname {quoted_path})")
             )
-            await self._aawait(self._env.upload_file(tmp_path, path))
+            await self._aawait(self._env.upload_file(tmp_path, remote_path))
+            if previous_mode:
+                quoted_remote = shlex.quote(remote_path)
+                result = await self._afs_exec(
+                    f"chown --reference={quoted_path} {quoted_remote} "
+                    f"&& chmod {shlex.quote(previous_mode)} {quoted_remote} "
+                    f"&& mv -f {quoted_remote} {quoted_path}"
+                )
+                if result.return_code != 0:
+                    raise self._fs_failure(path, result, what="replace")
         finally:
             tmp_path.unlink(missing_ok=True)
+            if previous_mode:
+                try:
+                    await self._afs_exec(f"rm -f {shlex.quote(remote_path)}")
+                except Exception:
+                    pass
 
     async def _adownload_bytes(self, path: str) -> bytes:
         await self._runtime_probe.ensure(self._aprobe)

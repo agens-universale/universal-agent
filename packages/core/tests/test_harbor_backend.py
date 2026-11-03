@@ -67,6 +67,10 @@ class FakeEnv:
         if hit is not None:
             return FakeExecResult(stdout=hit, return_code=0)
         self.calls.append(command)
+        if command.startswith("stat -c '%F|%a' "):
+            return FakeExecResult(
+                stderr="No such file or directory", return_code=1
+            )
         if command.startswith("if test "):
             # Проверки существования отвечают явными 0/1 (см. PosixShellFsMixin._test).
             return FakeExecResult(stdout="1\n", return_code=0)
@@ -287,6 +291,10 @@ async def test_append_creates_file_if_missing(loop_in_thread):
         if probed is not None:
             return probed
         env.calls.append(command)
+        if command.startswith("stat -c "):
+            return FakeExecResult(
+                stderr="No such file or directory", return_code=1
+            )
         if command.startswith("test -e"):
             return FakeExecResult(stdout="", return_code=1)
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
@@ -307,6 +315,10 @@ async def test_append_concatenates_existing_content(loop_in_thread):
         if probed is not None:
             return probed
         env.calls.append(command)
+        if command.startswith("stat -c "):
+            return FakeExecResult(
+                stderr="No such file or directory", return_code=1
+            )
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
     async def fake_upload_file(src, dst):
@@ -1073,13 +1085,18 @@ async def test_upload_probes_before_mkdir(loop_in_thread):
         probed = _probe_result(command)
         if probed is not None:
             return probed
+        if command.startswith("stat -c "):
+            return FakeExecResult(
+                stderr="No such file or directory", return_code=1
+            )
         return FakeExecResult(stdout="", return_code=0)
 
     env.exec = exec_record
     backend = HarborBackend(env, loop_in_thread)
     await backend.write_bytes("/work/a.bin", b"x")
     assert probe_stdout(recorded[0]) is not None
-    assert recorded[1].startswith("mkdir -p ")
+    assert recorded[1].startswith("stat -c ")
+    assert recorded[2].startswith("mkdir -p ")
     assert env.uploaded_bytes == [b"x"]
 
 
