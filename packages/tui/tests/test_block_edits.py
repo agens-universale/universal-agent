@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from gc_core.agent_edits.delete_records import delete_record
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.thread_store import edits_journal_path
 
@@ -117,6 +118,23 @@ def test_ran_files_of_verbs_and_unrecorded(tmp_path):
     assert ran_files_of(lookup, "x2")[1] == 0
     assert ran_files_of(None, "x1") == ([], 0)
     assert ran_files_of(lookup, "nope") == ([], 0)
+
+
+def test_deleted_empty_file_is_deleted_without_lines(tmp_path):
+    """Удаление пустого файла: строк нет — ни хвоста, ни превью."""
+    record = delete_record(
+        "empty.txt",
+        "t1",
+        b"",
+        mode=0o644,
+        budget=None,
+        context_lines=3,
+        max_chars=0,
+    )
+    record.command_call_id = "x1"
+    [edit], _unrecorded = ran_files_of(_lookup(tmp_path, [record]), "x1")
+    assert edit.verb == "Deleted"
+    assert edit.deleted_without_lines is True
 
 
 def test_ran_files_of_sorted_by_path(tmp_path):

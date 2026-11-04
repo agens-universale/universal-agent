@@ -1306,6 +1306,25 @@ def test_deleted_file_with_eol_attr_keeps_crlf(repo):
     assert store.session_baseline("p.txt") == b"a\nb\n"
 
 
+def test_deleted_empty_tracked_file_is_delete_with_empty_base(repo):
+    """Пустой отслеживаемый файл: удаление без ``no_diff`` и без строк, база
+    — пустые байты, так что откат вернёт пустой файл."""
+    launch_root, threads_dir = repo
+    (launch_root / "empty.txt").write_bytes(b"")
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "empty")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, "import os; os.remove('empty.txt')")
+    delta.after_and_record()
+
+    [rec] = _records(threads_dir)
+    assert (rec.op, rec.add, rec.del_) == ("delete", 0, 0)
+    assert "no_diff" not in rec.flags
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("empty.txt") == b""
+    assert store.turn_baseline("empty.txt", "turn-1") == b""
+
+
 def test_binary_deletion_does_not_spend_the_budget(repo):
     """Бинарь, удалённый той же командой, бюджет строк не съедает: его
     бинарность узнаётся до чтения, и текстовый файл строки получает."""
