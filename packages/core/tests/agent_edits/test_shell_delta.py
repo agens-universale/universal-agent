@@ -358,7 +358,8 @@ def test_command_deleting_untracked_file_records_delete(repo):
     recs = _records(threads_dir)
     assert [r.path for r in recs] == ["scratch.txt"]
     assert recs[0].op == "delete"
-    assert recs[0].flags == ["no_diff"]
+    assert recs[0].flags == []
+    assert recs[0].del_ == 1
 
 
 def test_cyrillic_path_from_quoted_porcelain_lands_in_journal(repo):
@@ -1843,11 +1844,62 @@ def test_pocket_detects_deletion_of_known_file(tmp_path, monkeypatch):
     recs = [r for r in _records(threads_dir) if r.call_id is None]
     assert [r.path for r in recs] == ["known.txt"]
     assert recs[0].op == "delete"
-    assert recs[0].flags == ["no_diff"]
+    assert recs[0].flags == []
+    assert (recs[0].add, recs[0].del_) == (0, 2)
+    assert "-line1\n-line2\n" in recs[0].hunks
 
     store = _snapshot_store(launch_root)
     assert store.session_baseline("known.txt") == b"line1\nline2\n"
     assert store.turn_baseline("known.txt", "turn-1") == b"line1\nline2\n"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-режим файла")
+def test_pocket_delete_keeps_exec_mode(tmp_path, monkeypatch):
+    launch_root = tmp_path / "plain"
+    launch_root.mkdir()
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir()
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
+    _seed_known_file(
+        threads_dir, launch_root, "known.sh", b"echo hi\n", ts=1.0
+    )
+    (launch_root / "known.sh").chmod(0o755)
+
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, "import os; os.remove('known.sh')")
+    delta.after_and_record()
+
+    recs = [r for r in _records(threads_dir) if r.call_id is None]
+    assert recs[0].mode == 0o755
+
+
+def test_pocket_delete_over_budget_has_no_lines_but_keeps_base(
+    tmp_path, monkeypatch
+):
+    launch_root = tmp_path / "plain"
+    launch_root.mkdir()
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir()
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
+    ctx = _ctx(launch_root, threads_dir)
+    update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 10})
+    for i, name in enumerate(("a.txt", "b.txt")):
+        _seed_known_file(
+            threads_dir, launch_root, name, b"line%d\nx\n" % i, ts=1.0 + i
+        )
+
+    delta = ShellDelta.begin(ctx)
+    _run_command(
+        launch_root,
+        "import os; os.remove('a.txt'); os.remove('b.txt')",
+    )
+    delta.after_and_record()
+
+    recs = [r for r in _records(threads_dir) if r.call_id is None]
+    assert sorted(r.flags for r in recs) == [[], ["no_diff"]]
+    store = _snapshot_store(launch_root)
+    for r in recs:
+        assert store.session_baseline(r.path) is not None
 
 
 def test_pocket_append_failure_on_one_path_does_not_lose_dedup_for_another(

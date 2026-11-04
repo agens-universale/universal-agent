@@ -51,6 +51,7 @@
 from __future__ import annotations
 
 import logging
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -67,7 +68,11 @@ from gc_core.agent_edits.ctx import (
     limit,
     protected_extra_from_ctx,
 )
-from gc_core.agent_edits.delete_records import is_binary_bytes
+from gc_core.agent_edits.delete_records import (
+    DeleteBudget,
+    delete_record,
+    is_binary_bytes,
+)
 from gc_core.agent_edits.deltas import (
     abs_path_for_key,
     build_diff,
@@ -309,6 +314,7 @@ class _PocketEntry:
     abs_path: Path
     before_bytes: bytes
     before_signature: tuple[int, int]
+    mode: int
 
 
 class ShellDelta:
@@ -340,6 +346,8 @@ class ShellDelta:
         self._head_before: str | None = None
         self._head_after: str | None = None
         self._pocket: dict[str, _PocketEntry] = {}
+        # Бюджет строк удалений на команду: общий для кармана и git-подканала.
+        self._delete_budget = DeleteBudget(_max_diff_source_bytes(ctx))
 
     @classmethod
     def begin(
@@ -489,6 +497,7 @@ class ShellDelta:
                     abs_path=abs_path,
                     before_bytes=data,
                     before_signature=(st.st_size, st.st_mtime_ns),
+                    mode=stat.S_IMODE(st.st_mode),
                 )
         except Exception:
             _logger.warning(
@@ -584,6 +593,7 @@ class ShellDelta:
         пути, которые он записал, git-подканал ниже пропускает — иначе одна
         правка легла бы в журнал дважды.
         """
+        self._delete_budget = DeleteBudget(_max_diff_source_bytes(self._ctx))
         recorded = self._pocket_after_and_record()
         if self._before is None:
             # Git-подканал не активен (cache-mode либо снимок «до» не снялся):
@@ -951,12 +961,14 @@ class ShellDelta:
             exists_as_file = False
 
         if st is None or not exists_as_file:
-            record = _edit_record(
+            record = delete_record(
                 key,
                 turn_id,
-                op="delete",
-                before_sha256=before_sha256,
-                flags=["no_diff"],
+                entry.before_bytes,
+                mode=entry.mode,
+                budget=self._delete_budget,
+                context_lines=_hunk_context_lines(self._ctx),
+                max_chars=_max_diff_chars(self._ctx),
             )
             return record, entry.before_bytes
 
