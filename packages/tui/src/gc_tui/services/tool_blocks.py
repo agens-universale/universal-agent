@@ -271,7 +271,9 @@ class BlockEdit:
     @property
     def deleted_without_lines(self) -> bool:
         """Удалённый файл без строк диффа: ни счётчиков, ни ❐."""
-        return self.verb == "Deleted" and self.diff_lines == 0
+        return (
+            self.verb == command_file_verb("delete") and self.diff_lines == 0
+        )
 
 
 def _edit_tail(edit: Optional[BlockEdit]) -> Parts:

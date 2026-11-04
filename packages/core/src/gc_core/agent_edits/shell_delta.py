@@ -364,9 +364,9 @@ class ShellDelta:
         # Пути, закоммиченные самой командой (`_committed_paths`).
         self._committed: frozenset[str] = frozenset()
         self._pocket: dict[str, _PocketEntry] = {}
-        # Бюджет строк удалений на команду: общий для кармана и git-подканала;
-        # создаётся заново в `after_and_record` (бюджет — на каждую команду).
-        self._delete_budget = DeleteBudget(_max_diff_source_bytes(ctx))
+        # Бюджет строк удалений на команду, общий для кармана и git-подканала:
+        # заводится в `after_and_record` — оба подканала пишут только оттуда.
+        self._delete_budget: DeleteBudget
 
     @classmethod
     def begin(
