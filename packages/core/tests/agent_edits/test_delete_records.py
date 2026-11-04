@@ -19,8 +19,14 @@ def test_text_delete_carries_all_lines():
     rec = _rec("a.py", b"x\ny\nz\n", mode=0o644, budget=DeleteBudget(100))
     assert (rec.op, rec.add, rec.del_, rec.flags) == ("delete", 0, 3, [])
     assert rec.call_id is None
-    assert rec.hunks.startswith("diff --git a/a.py b/a.py\n")
-    assert "-x\n-y\n-z\n" in rec.hunks
+    assert rec.hunks == (
+        "diff --git a/a.py b/a.py\n"
+        "deleted file mode 100644\n"
+        "--- a/a.py\n"
+        "+++ /dev/null\n"
+        "@@ -1,3 +0,0 @@\n"
+        "-x\n-y\n-z\n"
+    )
     assert rec.before_sha256 == hashlib.sha256(b"x\ny\nz\n").hexdigest()
     assert rec.mode == 0o644
 
@@ -50,3 +56,13 @@ def test_long_delete_truncated_by_max_chars():
     )
     assert rec.del_ == 1000
     assert "truncated" in rec.flags
+
+
+def test_exec_bit_gives_executable_file_mode():
+    rec = _rec("run.sh", b"echo\n", mode=0o750, budget=DeleteBudget(100))
+    assert rec.hunks.splitlines()[1] == "deleted file mode 100755"
+
+
+def test_unknown_mode_gives_regular_file_mode():
+    rec = _rec("a.txt", b"x\n", mode=None, budget=DeleteBudget(100))
+    assert rec.hunks.splitlines()[1] == "deleted file mode 100644"

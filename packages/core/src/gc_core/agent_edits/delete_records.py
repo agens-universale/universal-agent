@@ -58,6 +58,21 @@ def _deleted_text(
     return text
 
 
+def _git_delete_patch(key: str, mode: int | None, diff: str) -> str:
+    """Удаление в форме ``git diff``: копия строки применяется ``git apply``.
+
+    Пустые заголовки ``--- ``/``+++ `` от ``build_diff`` — первые две строки
+    потока (см. его докстринг) — заменяются именами git; у пустого файла
+    хэнков нет, и, как у git, нет и строк ``---``/``+++``.
+    """
+    file_mode = "100755" if mode is not None and mode & 0o111 else "100644"
+    header = f"diff --git a/{key} b/{key}\ndeleted file mode {file_mode}\n"
+    body = diff.split("\n", 2)[2] if diff else ""
+    if not body:
+        return header
+    return f"{header}--- a/{key}\n+++ /dev/null\n{body}"
+
+
 def delete_record(
     key: str,
     turn_id: str,
@@ -76,9 +91,9 @@ def delete_record(
     text = _deleted_text(before, budget)
     hunks, add, deleted, flags = "", 0, 0, ["no_diff"]
     if text is not None:
-        body, add, deleted = build_diff(text, "", context_lines)
+        diff, add, deleted = build_diff(text, "", context_lines)
         hunks, flags = truncate_hunks(
-            f"diff --git a/{key} b/{key}\n{body}", max_chars
+            _git_delete_patch(key, mode, diff), max_chars
         )
     return EditRecord(
         path=key,

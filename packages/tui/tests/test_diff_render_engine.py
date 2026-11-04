@@ -1022,3 +1022,41 @@ def test_preview_pairs_accents_like_full_hunk():
         )
     assert _accent_cells(full, 0) == []
     assert _accent_cells(full, 2) != []
+
+
+def test_copied_delete_patch_applies_with_git(tmp_path):
+    """Скопированная запись удаления шелл-канала — патч в форме git:
+    ``git apply`` удаляет файл (решение ревью 2026-11-05)."""
+    import shutil
+    import subprocess
+
+    from gc_core.agent_edits.delete_records import DeleteBudget, delete_record
+
+    if not shutil.which("git"):
+        pytest.skip("git недоступен")
+    key = "sub/a.txt"
+    content = b"one\ntwo\nthree\n"
+    (tmp_path / "sub").mkdir()
+    (tmp_path / key).write_bytes(content)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    record = delete_record(
+        key,
+        "t1",
+        content,
+        mode=0o644,
+        budget=DeleteBudget(1000),
+        context_lines=3,
+        max_chars=0,
+    )
+    patch = tmp_path / "rm.patch"
+    patch.write_text(copyable_hunks(record.hunks, path=key), encoding="utf-8")
+
+    subprocess.run(
+        ["git", "apply", str(patch)],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    assert not (tmp_path / key).exists()
+    assert render_hunks(record.hunks, path=key).total_lines == 3
