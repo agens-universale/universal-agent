@@ -67,6 +67,7 @@ _STATE_KEYS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("judge_denials_total", ("shared", "judge_denials_total")),
     ("judge_paused", ("shared", "judge_paused")),
     ("pending_question", ("pending_question",)),
+    ("suspended_turn", ("suspended_turn",)),
 )
 #: Ключи ``shared``, у которых есть поле модели; прочие (поле ядра новее
 #: модели) возвращаются на место как есть — см. ``_state``.

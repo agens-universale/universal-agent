@@ -12,12 +12,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
 
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.levels import auto_active
 from gc_core.execution.state import ExecutionState as State
+from gc_core.execution.turn_clock import current_turn_clock
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
 )
@@ -53,6 +55,7 @@ def begin_turn(state: State, ctx: Any) -> None:
     state_ops.reset(state)
     state.turn_level = None
     state.turn_messages_start = None
+    state.resumed_turn = None
     if not getattr(state, "parent_state_id", None):
         # Ключ хода для проб зрения. В durable-исполнении id выдаёт среда
         # (``supplied_id``): ``uuid4`` в workflow недетерминирован.
@@ -81,7 +84,13 @@ def opening_reply_id(state: Any) -> str | None:
     Непокрыто: компакция посреди хода границу не сдвигает. Если она
     сжала историю, но граница осталась внутри неё, индекс указывает уже
     на другое место: реплика, ушедшая в сводку, не найдётся (``None``),
-    а позже в ходе может найтись чужая реплика из очереди."""
+    а позже в ходе может найтись чужая реплика из очереди.
+
+    Ход, продолженный после вопроса (``resume_turn``), открыт репликой
+    прошлого прогона — она и возвращается."""
+    resumed = getattr(state, "resumed_turn", None)
+    if resumed:
+        return resumed.get("opened_by")
     start = getattr(state, "turn_messages_start", None)
     if start is None:
         return None
@@ -95,4 +104,27 @@ def opening_reply_id(state: Any) -> str | None:
     return None
 
 
-__all__ = ["begin_turn", "opening_reply_id"]
+def suspended_turn(state: Any, ctx: Any) -> dict[str, Any]:
+    """Снимок хода, приостановленного на вопросе (``ask_human_suspends``):
+    начало, время работы и вызовы по часам хода и открывшая реплика. Вопрос
+    ход не завершает — следующий прогон продолжит его (``resume_turn``)."""
+    clock = current_turn_clock(ctx)
+    carried = clock.carry() if clock is not None else {}
+    return {**carried, "opened_by": opening_reply_id(state)}
+
+
+def resume_turn(
+    state: Any, ctx: Any, carried: Mapping[str, Any] | None
+) -> None:
+    """Продолжить приостановленный ход: часы — с его времени, реплика хода
+    — его. Следующий ход этого прогона (``begin_turn``) снимает продолжение.
+    """
+    if not carried:
+        return
+    state.resumed_turn = dict(carried)
+    clock = current_turn_clock(ctx)
+    if clock is not None and "elapsed" in carried:
+        clock.resume(carried)
+
+
+__all__ = ["begin_turn", "opening_reply_id", "resume_turn", "suspended_turn"]
