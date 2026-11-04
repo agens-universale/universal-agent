@@ -34,6 +34,7 @@ def _entry(
     countable=True,
     by_shell=False,
     external=False,
+    restore_mode=None,
 ) -> FileEntry:
     return FileEntry(
         path=path,
@@ -46,6 +47,7 @@ def _entry(
         external=external,
         revertable=revertable,
         last_ts=1.0,
+        restore_mode=restore_mode,
     )
 
 
@@ -390,3 +392,26 @@ def test_file_replaced_by_a_link_is_skipped(tmp_path):
 
     assert out.skipped == [("a.py", REASON_THROUGH_LINK)]
     assert outside.read_bytes() == b"theirs\n" and (root / "a.py").is_symlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="биты доступа POSIX")
+def test_reverting_deleted_exec_file_restores_mode(tmp_path):
+    key = "a.sh"
+    entry = _entry(key, kind="deleted", restore_mode=0o755)
+
+    out = revert_paths(
+        [key], {key: entry}, lambda k: b"#!/bin/sh\n", str(tmp_path)
+    )
+
+    assert out.restored == [key]
+    assert stat.S_IMODE((tmp_path / key).stat().st_mode) == 0o755
+
+
+def test_reverting_deleted_file_without_mode_uses_default(tmp_path):
+    key = "a.txt"
+    entry = _entry(key, kind="deleted", restore_mode=None)
+
+    out = revert_paths([key], {key: entry}, lambda k: b"x\n", str(tmp_path))
+
+    assert out.restored == [key]
+    assert (tmp_path / key).read_bytes() == b"x\n"

@@ -106,7 +106,13 @@ def revert_paths(
         if entry.kind == "created":
             _delete_created(key, abs_path, outcome)
             continue
-        _restore(key, abs_path, baseline_for, outcome)
+        _restore(
+            key,
+            abs_path,
+            baseline_for,
+            outcome,
+            mode=entry.restore_mode,
+        )
     return outcome
 
 
@@ -128,6 +134,8 @@ def _restore(
     abs_path: Path,
     baseline_for: Callable[[str], Optional[bytes]],
     outcome: RevertOutcome,
+    *,
+    mode: int | None,
 ) -> None:
     try:
         baseline = baseline_for(key)
@@ -136,6 +144,8 @@ def _restore(
     if baseline is None:
         outcome.skipped.append((key, REASON_NO_BASELINE))
         return
+    # Файла нет (откат удаления) — переносить режим не с чего, берём записанный.
+    absent = not abs_path.exists()
 
     # Имя временного файла — СВОЁ, и создаётся он эксклюзивно: с предсказуемым
     # `<файл>.revert.tmp` запись шла по заранее подложенной на этом месте
@@ -155,7 +165,10 @@ def _restore(
         )
         with os.fdopen(fd, "wb") as fh:
             fh.write(baseline)
-        _carry_mode(abs_path, tmp)
+        if absent and mode is not None:
+            _chmod_quiet(tmp, mode)
+        else:
+            _carry_mode(abs_path, tmp)
         atomic_replace(tmp, abs_path)
     except OSError:
         try:
@@ -165,6 +178,14 @@ def _restore(
         outcome.skipped.append((key, REASON_WRITE_FAILED))
         return
     outcome.restored.append(key)
+
+
+def _chmod_quiet(path: Path, mode: int) -> None:
+    """Выставить ``mode``; отказ молчаливый, как у ``_carry_mode``."""
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
 
 
 def _carry_mode(source: Path, dest: Path) -> None:

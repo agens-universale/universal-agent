@@ -229,6 +229,10 @@ class FileEntry:
     # несёт: созданный и удалённый путь — это ``deleted``, а для правила
     # «пусто — значит нет строки» он — исходное «файла нет».
     created: bool = False
+    # Режим файла из последней записи удаления: откат вернёт его вместе с
+    # содержимым. ``None`` — последняя запись пути не удаление либо режим не
+    # снят.
+    restore_mode: Optional[int] = None
 
 
 def file_entries(
@@ -343,11 +347,18 @@ def file_entries(
                 revertable=revertable,
                 last_ts=path_records[-1].ts,
                 created=created,
+                restore_mode=_restore_mode(path_records),
             )
         )
 
     entries.sort(key=lambda entry: entry.last_ts, reverse=True)
     return entries
+
+
+def _restore_mode(path_records: list[EditRecord]) -> Optional[int]:
+    """Режим из последней записи пути — если это удаление."""
+    last = path_records[-1]
+    return last.mode if last.op == "delete" else None
 
 
 def _group_by_path(
