@@ -439,7 +439,9 @@ def custom_filter_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
 def _paths_with_attrs(
     launch_root: str, rels: Sequence[str], attrs: Sequence[str]
 ) -> set[str]:
-    """Какие из ``rels`` несут хоть один из ``attrs`` (не ``unspecified``/``unset``).
+    """Какие из ``rels`` несут хоть один из ``attrs``.
+
+    Несёт — значение не ``unspecified`` и не ``unset``.
 
     Один ``git check-attr -z --stdin`` на кусок (``_STDIN_CHUNK_PATHS``). Git
     отказал или про путь ответил не по всем атрибутам — путь в ответе:

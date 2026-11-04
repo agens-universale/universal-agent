@@ -1347,6 +1347,23 @@ def test_binary_deletion_does_not_spend_the_budget(repo):
     assert by_path["b.txt"].del_ == 40_000
 
 
+def test_deleted_utf16_text_file_gets_lines(repo):
+    """UTF-16 с BOM git считает бинарём, а классификатор проекта — текстом:
+    git-подканал даёт такому удалению строки, как и карман."""
+    launch_root, threads_dir = repo
+    (launch_root / "u16.txt").write_bytes("один\nдва\n".encode("utf-16"))
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "utf16")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, "import os; os.remove('u16.txt')")
+    delta.after_and_record()
+
+    [rec] = _records(threads_dir)
+    assert rec.op == "delete"
+    assert "no_diff" not in rec.flags
+    assert rec.del_ == 2
+
+
 @pytest.mark.skipif(os.name == "nt", reason="бит исполнения — не на Windows")
 def test_deleted_exec_file_records_mode(repo):
     launch_root, threads_dir = repo
