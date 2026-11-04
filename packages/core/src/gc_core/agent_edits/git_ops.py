@@ -74,6 +74,13 @@ _CRLF = b"\r\n"
 # из сырого блоба по такому пути собирать нельзя (см. ``has_custom_filter``).
 _WORKTREE_ATTRS = ("filter", "working-tree-encoding", "ident")
 
+# Атрибуты, при которых выкладка меняет и концы строк: сырой блоб по такому
+# пути не равен форме рабочего дерева (см. ``blobs_filtered_at``).
+_EOL_ATTRS = ("text", "eol", "crlf", *_WORKTREE_ATTRS)
+
+# Ложные значения булевой настройки git.
+_GIT_FALSE = frozenset({"false", "no", "off", "0"})
+
 # Снимок рабочего дерева. ``-u`` (каждый неотслеживаемый файл, а не каталог
 # целиком) нужен шелл-каналу: файл, созданный командой, иначе виден только
 # папкой. Аргументы общие обоим читателям — снимок обязан быть одним и тем же.
@@ -426,32 +433,44 @@ def custom_filter_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
     ``_STDIN_CHUNK_PATHS``: отказ одного запуска объявляет «с фильтром» только
     свой кусок.
     """
+    return _paths_with_attrs(launch_root, rels, _WORKTREE_ATTRS)
+
+
+def _paths_with_attrs(
+    launch_root: str, rels: Sequence[str], attrs: Sequence[str]
+) -> set[str]:
+    """Какие из ``rels`` несут хоть один из ``attrs`` (не ``unspecified``/``unset``).
+
+    Один ``git check-attr -z --stdin`` на кусок (``_STDIN_CHUNK_PATHS``). Git
+    отказал или про путь ответил не по всем атрибутам — путь в ответе:
+    вызывающим это безопасная сторона.
+    """
     rels = list(rels)
-    filtered: set[str] = set()
+    found: set[str] = set()
     for start in range(0, len(rels), _STDIN_CHUNK_PATHS):
         chunk = rels[start : start + _STDIN_CHUNK_PATHS]
         stdin = _stdin_paths(f"{rel}\x00" for rel in chunk)
         code, out = run_git(
             launch_root,
-            ["check-attr", "-z", "--stdin", *_WORKTREE_ATTRS],
+            ["check-attr", "-z", "--stdin", *attrs],
             stdin=stdin,
         )
         if code != 0:
-            filtered.update(chunk)
+            found.update(chunk)
             continue
         fields = out.decode("utf-8", errors="surrogateescape").split("\x00")
         values: dict[str, list[str]] = {}
         for i in range(0, len(fields) - 2, 3):
             values.setdefault(fields[i], []).append(fields[i + 2])
-        filtered.update(
+        found.update(
             rel
             for rel in chunk
-            if len(values.get(rel, ())) < len(_WORKTREE_ATTRS)
+            if len(values.get(rel, ())) < len(attrs)
             or any(
                 value not in ("unspecified", "unset") for value in values[rel]
             )
         )
-    return filtered
+    return found
 
 
 def ignored_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
@@ -850,23 +869,59 @@ def blobs_filtered_at(
 ) -> dict[str, bytes | None]:
     """``{путь: содержимое в форме рабочего дерева}`` из ревизии ``rev``.
 
-    ``cat-file --filters`` ПО ФАЙЛУ, параллельно (``run_git_many``): пачкой
-    ``--batch --filters`` с ``rev:path`` git падает, а заголовок пачки несёт
-    размер без фильтра. Число файлов ограничено бюджетом команды. ``None`` —
-    git по пути отказал.
+    Путь, чью выкладку фильтры не меняют (``_eol_affected_paths``), — сырой
+    блоб, одной пачкой ``blobs_at``. Остальные и те, кого пачка не прочитала,
+    — ``cat-file --filters`` ПО ФАЙЛУ, параллельно (``run_git_many``):
+    ``--batch --filters`` для них не годится — заголовок пачки несёт размер
+    без фильтра, и разбор ломается. Бюджет вызывающего ограничивает байты,
+    а не число файлов. ``None`` — git по пути отказал.
     """
     rels = list(rels)
+    affected = _eol_affected_paths(launch_root, rels)
+    result = blobs_at(
+        launch_root, [rel for rel in rels if rel not in affected], rev=rev
+    )
+    per_file = [rel for rel in rels if rel not in result]
     answers = run_git_many(
         launch_root,
         [
             [*_QUOTEPATH_OFF, "cat-file", "--filters", f"{rev}:{rel}"]
-            for rel in rels
+            for rel in per_file
         ],
     )
-    return {
-        rel: out if code == 0 else None
-        for rel, (code, out) in zip(rels, answers)
-    }
+    result.update(
+        (rel, out if code == 0 else None)
+        for rel, (code, out) in zip(per_file, answers)
+    )
+    return result
+
+
+def _eol_affected_paths(launch_root: str, rels: list[str]) -> set[str]:
+    """Пути, чью выкладку фильтры меняют: атрибуты концов строк, ``ident``,
+    кодировка, фильтр — или настройка репозитория для всех путей сразу
+    (``core.autocrlf`` включён, ``core.eol`` задан)."""
+    if not rels:
+        return set()
+    if _config_converts_eol(launch_root):
+        return set(rels)
+    return _paths_with_attrs(launch_root, rels, _EOL_ATTRS)
+
+
+def _config_converts_eol(launch_root: str) -> bool:
+    """``core.autocrlf`` включён или ``core.eol`` задан; отказ git — да."""
+    code, out = run_git(
+        launch_root,
+        ["config", "--get-regexp", r"^core\.(autocrlf|eol)$"],
+    )
+    if code == 1:
+        return False  # ни одного ключа нет
+    if code != 0:
+        return True
+    for line in _decode(out).splitlines():
+        key, _sep, value = line.partition(" ")
+        if key == "core.eol" or value.lower() not in _GIT_FALSE:
+            return True
+    return False
 
 
 def is_ancestor(launch_root: str, older: str, newer: str) -> bool:

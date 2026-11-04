@@ -1220,21 +1220,7 @@ def test_mass_delete_respects_budget_and_batches(repo, monkeypatch):
     ctx = _ctx(launch_root, threads_dir)
     update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 1000})
     ls_tree: list[list[str]] = []
-    cat_files: list[list[str]] = []
-    real_run_git = git_ops.run_git
-    real_many = git_ops.run_git_many
-
-    def run_git(root, args, **kwargs):
-        if "ls-tree" in args and "-l" in args:
-            ls_tree.append(list(args))
-        return real_run_git(root, args, **kwargs)
-
-    def run_git_many(root, argvs):
-        cat_files.extend(a for a in argvs if "cat-file" in a)
-        return real_many(root, argvs)
-
-    monkeypatch.setattr(git_ops, "run_git", run_git)
-    monkeypatch.setattr(git_ops, "run_git_many", run_git_many)
+    reads = _spy_content_reads(monkeypatch, ls_tree)
     delta = ShellDelta.begin(ctx)
     _run_command(
         launch_root,
@@ -1246,7 +1232,78 @@ def test_mass_delete_respects_budget_and_batches(repo, monkeypatch):
     assert len(recs) == 30
     assert sum(1 for r in recs if not r.flags) == 10
     assert len(ls_tree) == 1
-    assert len(cat_files) == 10
+    assert sum(paths for _proc, paths in reads) == 10
+
+
+def _spy_content_reads(monkeypatch, ls_tree=None) -> list[tuple[str, int]]:
+    """Чтения содержимого git: ``(процесс, сколько путей он прочитал)``.
+
+    Пачка ``cat-file --batch`` — один процесс на все пути из stdin;
+    ``cat-file --filters`` через ``run_git_many`` — процесс на путь.
+    """
+    reads: list[tuple[str, int]] = []
+    real_run_git = git_ops.run_git
+    real_many = git_ops.run_git_many
+
+    def run_git(root, args, **kwargs):
+        if ls_tree is not None and "ls-tree" in args and "-l" in args:
+            ls_tree.append(list(args))
+        if "cat-file" in args:
+            stdin = kwargs.get("stdin") or b""
+            reads.append(("batch", stdin.count(b"\n") or 1))
+        return real_run_git(root, args, **kwargs)
+
+    def run_git_many(root, argvs):
+        reads.extend(("filters", 1) for a in argvs if "cat-file" in a)
+        return real_many(root, argvs)
+
+    monkeypatch.setattr(git_ops, "run_git", run_git)
+    monkeypatch.setattr(git_ops, "run_git_many", run_git_many)
+    return reads
+
+
+def test_mass_delete_without_eol_attrs_reads_blobs_in_one_batch(
+    repo, monkeypatch
+):
+    """Пути, чьё содержимое фильтры выкладки не меняют, читаются одной
+    пачкой, а не процессом на файл."""
+    launch_root, threads_dir = repo
+    for i in range(50):
+        (launch_root / f"f{i:02}.txt").write_bytes(b"x\n")
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "many")
+    reads = _spy_content_reads(monkeypatch)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import os\nfor i in range(50): os.remove(f'f{i:02}.txt')",
+    )
+    delta.after_and_record()
+
+    recs = _records(threads_dir)
+    assert len(recs) == 50
+    assert all(r.del_ == 1 for r in recs)
+    assert len(reads) <= 2
+
+
+def test_deleted_file_with_eol_attr_keeps_crlf(repo):
+    """Путь с ``eol=crlf`` читается через фильтры: строки и база — в форме
+    рабочего дерева."""
+    launch_root, threads_dir = repo
+    (launch_root / ".gitattributes").write_bytes(b"w.txt eol=crlf\n")
+    (launch_root / "w.txt").write_bytes(b"a\r\nb\r\n")
+    (launch_root / "p.txt").write_bytes(b"a\nb\n")
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "crlf")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root, "import os; os.remove('w.txt'); os.remove('p.txt')"
+    )
+    delta.after_and_record()
+
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("w.txt") == b"a\r\nb\r\n"
+    assert store.session_baseline("p.txt") == b"a\nb\n"
 
 
 def test_binary_deletion_does_not_spend_the_budget(repo):

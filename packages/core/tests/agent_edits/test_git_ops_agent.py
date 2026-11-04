@@ -1129,6 +1129,18 @@ def test_binary_paths_at_git_refusal_is_none(tmp_git_repo):
     )
 
 
+def test_blobs_filtered_at_honours_autocrlf(tmp_git_repo):
+    """``core.autocrlf=true`` меняет выкладку каждого пути: сырой блоб из
+    пачки не годится."""
+    root = tmp_git_repo
+    (root / "a.txt").write_bytes(b"x\ny\n")
+    head = _commit_all(root, "lf blob")
+    run_git(str(root), ["config", "core.autocrlf", "true"])
+    assert git_ops.blobs_filtered_at(str(root), ["a.txt"], rev=head) == {
+        "a.txt": b"x\r\ny\r\n"
+    }
+
+
 def test_is_ancestor_and_commit_times(two_commits):
     root, first, second = two_commits
     assert git_ops.is_ancestor(str(root), first, second) is True
