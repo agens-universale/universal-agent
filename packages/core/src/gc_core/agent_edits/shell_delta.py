@@ -42,7 +42,8 @@
 команды в ТОЧНОЕ пространство (``.orig``/``.turn``), и такая правка
 становится откатываемой. Пути, которые команда сама закоммитила, в status
 не видны вовсе — их добирает разница деревьев ``HEAD`` до и после за тем же
-гейтом (``_committed_paths``). Иначе (путь был грязен, неслит после
+гейтом (``_committed_paths``); они пишутся со строками, но без базы и без
+отметки создания — без отката: коммит в окне команды мог быть чужим. Иначе (путь был грязен, неслит после
 команды, ``HEAD`` сдвинут чужой историей — ``checkout``, ``pull``,
 ``reset`` — или у пути настроен кастомный фильтр) — «до» поднимается из
 ИНДЕКСА git (``.gitorig``/``.gitturn``) и годится только для счётчиков:
@@ -794,21 +795,15 @@ class ShellDelta:
         ложится на КАЖДУЮ её запись (какая бы ни осталась в виде экрана, признак
         неполноты не потеряется).
 
-        Закоммиченный командой путь (``_committed``) пишется от HEAD до
-        команды: был там — правка с точной базой, не было — создание
-        (охраны ``_created_rels``) либо правка без базы и отметки.
+        Закоммиченный командой путь (``_committed``) пишется со строками от
+        HEAD до команды, но без базы и без отметки создания — откатить его
+        нельзя: коммит в окне команды мог сделать кто-то ещё (параллельный
+        субагент, пользователь), гейт ``_own_commits`` его не отличит, и
+        откат затёр бы чужую закоммиченную работу.
         """
         planned = self._plan(part)
         diffs = self._diffs_for(planned, before, after)
-        committed_new = self._committed_new(planned)
-        created_rels = self._created_rels(
-            planned, before, after, committed_new
-        )
-        # Закоммиченный командой путь, которого не было в HEAD до команды,
-        # но не прошедший охраны создания: давний файл пользователя после
-        # `git add -f … && git commit`. Ни базы, ни отметки — откат удалил бы
-        # его.
-        unbased = committed_new - created_rels
+        created_rels = self._created_rels(planned, before, after)
         deleted = self._slice_deleted_contents(planned, before, after)
         needs_base: list[tuple[str, str, bool]] = []
         delete_bases: list[tuple[str, str, bytes]] = []
@@ -842,7 +837,9 @@ class ShellDelta:
             self._remember(record)
             if record.op == "create":
                 self._mark_created(store, rel, record.path)
-            elif not record.hunks or rel in unbased:
+            elif not record.hunks or rel in self._committed:
+                # Закоммиченный командой путь создания не бывает (в status
+                # после его нет, ``_created_by_command``) — и базы не пишется.
                 continue
             elif record.op == "shell":
                 exact = self._exact_step(clean_before, _xy(entry))
@@ -901,29 +898,6 @@ class ShellDelta:
                 rel,
                 exc_info=True,
             )
-
-    def _committed_new(
-        self, planned: list[tuple[str, str, _FileFacts]]
-    ) -> set[str]:
-        """Закоммиченные командой пути куска на диске, которых нет в HEAD до неё.
-
-        Кандидаты в созданные (``_created_rels``); не прошедшие охраны пишутся
-        без базы. Отказ git — пусто: пути пишутся как правки.
-        """
-        rels = [
-            rel
-            for rel, _key, file in planned
-            if file.exists and rel in self._committed
-        ]
-        if not rels:
-            return set()
-        entries = git_ops.tree_entries(
-            self._launch_root, rels, rev=self._head_before
-        )
-        if entries is None:
-            _logger.warning("shell delta: дерево HEAD до команды не прочитано")
-            return set()
-        return set(rels) - entries.keys()
 
     def _slice_deleted_contents(
         self,
@@ -1349,14 +1323,9 @@ class ShellDelta:
         planned: list[tuple[str, str, _FileFacts]],
         before: dict[str, _StatusEntry],
         after: dict[str, _StatusEntry],
-        committed_new: set[str],
     ) -> set[str]:
-        """Пути куска, созданные командой, — за вычетом игнорируемых.
-
-        Кандидаты двух пород: из status (``_created_by_command``) и
-        закоммиченные самой командой пути, которых не было в HEAD до неё
-        (``committed_new``), если файл свежее снимка «до». Охрана
-        игнорирования (``_not_ignored``) у обеих одна.
+        """Пути куска, созданные командой (``_created_by_command``), — за
+        вычетом игнорируемых.
 
         Игнорируемого пути в ``git status`` нет никогда, поэтому «пути не было
         до команды» для него ничего не доказывает: файл пользователя, который
@@ -1377,10 +1346,6 @@ class ShellDelta:
             rel
             for rel, _key, _file in planned
             if self._created_by_command(rel, after.get(rel), before)
-            or (
-                rel in committed_new
-                and self._fresh(_file_signature(self._abs(rel)))
-            )
         ]
         return self._not_ignored(candidates)
 

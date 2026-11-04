@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
-from gc_core.agent_edits import git_ops, shell_delta
+from gc_core.agent_edits import deltas, git_ops, shell_delta
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.shell_delta import ShellDelta
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
@@ -1807,11 +1807,22 @@ def test_edit_committed_by_command_is_recorded(repo):
     by_path = {r.path: r for r in _records(threads_dir)}
     assert by_path["tracked.txt"].op == "shell"
     assert by_path["tracked.txt"].add == 1
+    _assert_no_base_no_mark(launch_root, "tracked.txt")
+
+
+def _assert_no_base_no_mark(launch_root, rel: str) -> None:
+    """Закоммиченный командой путь: ни базы (точной и счётной), ни отметки
+    создания — откат такого пути не предлагается (F1)."""
     store = _snapshot_store(launch_root)
-    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+    assert store.session_baseline(rel) is None
+    assert store.counting_session_baseline(rel) is None
+    assert store.turn_baseline(rel, "turn-1") is None
+    assert store.created_head_rev(rel) is None
 
 
-def test_file_created_and_committed_by_command_is_create(repo):
+def test_file_created_and_committed_by_command_is_shell_without_mark(repo):
+    """Созданный и закоммиченный командой путь — правка от пустоты, не
+    ``create``: создание откатывается удалением, а коммит мог быть чужим."""
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(
@@ -1824,11 +1835,9 @@ def test_file_created_and_committed_by_command_is_create(repo):
     delta.after_and_record()
 
     by_path = {r.path: r for r in _records(threads_dir)}
-    assert by_path["new.txt"].op == "create"
+    assert by_path["new.txt"].op == "shell"
     assert by_path["new.txt"].add == 1
-    store = _snapshot_store(launch_root)
-    assert store.created_head_rev("new.txt") == delta._head_before
-    assert store.session_baseline("new.txt") is None
+    _assert_no_base_no_mark(launch_root, "new.txt")
 
 
 def test_old_ignored_file_force_added_and_committed_is_not_created(repo):
@@ -1893,8 +1902,40 @@ def test_file_deleted_and_committed_by_command_has_lines(repo):
     by_path = {r.path: r for r in _records(threads_dir)}
     rec = by_path["tracked.txt"]
     assert (rec.op, rec.del_) == ("delete", 2)
+    assert "-line1" in rec.hunks
+    _assert_no_base_no_mark(launch_root, "tracked.txt")
+
+
+def test_paths_committed_by_command_are_not_revertable(repo):
+    """Правленный, созданный и удалённый командой и ею закоммиченные пути на
+    экране видны, но откатить их нельзя: коммит в окне команды мог быть
+    чужим (параллельный субагент, пользователь), и откат затёр бы его."""
+    launch_root, threads_dir = _repo_with_a_txt(repo)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "open('tracked.txt','wb').write(b'line1\\nline2x\\n')\n"
+        "open('new.txt','wb').write(b'alpha\\n')\n"
+        + _git_script(
+            ("git", "rm", "-q", "a.txt"),
+            ("git", "add", "-A"),
+            ("git", "commit", "-qm", "all"),
+        ),
+    )
+    delta.after_and_record()
+
     store = _snapshot_store(launch_root)
-    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+    entries = deltas.file_entries(
+        _records(threads_dir),
+        lambda key: store.counting_turn_baseline(key, "turn-1"),
+        str(launch_root),
+        revertable_for=lambda key: store.has_turn_baseline(key, "turn-1"),
+    )
+    assert {e.path: e.revertable for e in entries} == {
+        "tracked.txt": False,
+        "new.txt": False,
+        "a.txt": False,
+    }
 
 
 def _foreign_history(launch_root) -> None:
