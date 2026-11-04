@@ -1050,3 +1050,76 @@ def test_status_entries_for_answers_only_about_the_given_paths(tmp_git_repo):
 
     assert {path for path, _xy in rows} == {tracked, "new[1].py"}
     assert status_entries_for(str(root / "no-such-dir"), [tracked]) is None
+
+
+def _commit_all(root: Path, msg: str) -> str:
+    run_git(str(root), ["add", "-A"])
+    run_git(str(root), ["commit", "-m", msg])
+    return rev_parse_head(str(root))
+
+
+@pytest.fixture
+def two_commits(tmp_git_repo):
+    """(root, first, second): второй коммит правит, добавляет и удаляет."""
+    root = tmp_git_repo
+    (root / "tracked.txt").write_bytes(b"line1\nline2\n")
+    (root / "run.sh").write_bytes(b"#!/bin/sh\n")
+    os.chmod(root / "run.sh", 0o755)
+    (root / "a.txt").write_bytes(b"x\ny\n")
+    os.symlink("tracked.txt", root / "link")
+    first = _commit_all(root, "first")
+    (root / "tracked.txt").write_bytes(b"changed\n")
+    (root / "new.txt").write_bytes(b"n\n")
+    (root / "a.txt").unlink()
+    second = _commit_all(root, "second")
+    return root, first, second
+
+
+def test_tree_entries_reports_mode_and_size(two_commits):
+    root, first, _second = two_commits
+    entries = git_ops.tree_entries(
+        str(root), ["tracked.txt", "run.sh", "link"], rev=first
+    )
+    assert entries["tracked.txt"] == git_ops.TreeEntry("100644", 12)
+    assert entries["run.sh"].mode == "100755"
+    assert entries["link"].mode == "120000"
+
+
+def test_tree_entries_missing_path_absent(two_commits):
+    root, first, _second = two_commits
+    assert git_ops.tree_entries(str(root), ["nope.txt"], rev=first) == {}
+
+
+def test_tree_entries_git_refusal_is_none(two_commits):
+    root, _first, _second = two_commits
+    assert git_ops.tree_entries(str(root), ["a.txt"], rev="nope") is None
+
+
+def test_blobs_filtered_at_applies_eol_filter(tmp_git_repo):
+    root = tmp_git_repo
+    (root / "a.txt").write_bytes(b"x\ny\n")
+    _commit_all(root, "lf blob")
+    (root / ".gitattributes").write_bytes(b"*.txt eol=crlf\n")
+    head = _commit_all(root, "attrs")
+    assert git_ops.blobs_filtered_at(str(root), ["a.txt", "no"], rev=head) == {
+        "a.txt": b"x\r\ny\r\n",
+        "no": None,
+    }
+
+
+def test_is_ancestor_and_commit_times(two_commits):
+    root, first, second = two_commits
+    assert git_ops.is_ancestor(str(root), first, second) is True
+    assert git_ops.is_ancestor(str(root), second, first) is False
+    assert len(git_ops.commit_times(str(root), first, second)) == 1
+    assert git_ops.commit_times(str(root), "nope", second) is None
+
+
+def test_paths_changed_between_lists_added_edited_deleted(two_commits):
+    root, first, second = two_commits
+    assert git_ops.paths_changed_between(str(root), first, second) == {
+        "a.txt",
+        "tracked.txt",
+        "new.txt",
+    }
+    assert git_ops.paths_changed_between(str(root), "nope", second) is None

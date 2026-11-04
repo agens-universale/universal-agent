@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -762,6 +763,113 @@ def paths_committed_since(
     return {
         path for out in outputs for path in _decode(out).split("\x00") if path
     }
+
+
+@dataclass(frozen=True)
+class TreeEntry:
+    """Запись дерева ревизии: ``mode`` — строка git (``"100644"``,
+    ``"120000"``, ``"160000"``…), ``size`` — байты блоба без фильтров;
+    ``None`` у не-блоба (подмодуль, дерево).
+    """
+
+    mode: str
+    size: int | None
+
+
+def tree_entries(
+    launch_root: str, rels: Sequence[str], *, rev: str
+) -> dict[str, TreeEntry] | None:
+    """``{путь: TreeEntry}`` для ``rels`` в ревизии ``rev`` — ``ls-tree -l``.
+
+    Пути, которого в ревизии нет, среди ключей нет; отказ git — ``None``
+    (отличим от «ни одного пути»).
+    """
+    rels = list(rels)
+    if not rels:
+        return {}
+    outputs = _chunked_outputs(
+        launch_root, ["ls-tree", "-z", "-l", rev, "--"], rels
+    )
+    if outputs is None:
+        return None
+    entries: dict[str, TreeEntry] = {}
+    for out in outputs:
+        for record in _decode(out).split("\x00"):
+            meta, sep, path = record.partition("\t")
+            fields = meta.split()
+            if not sep or len(fields) < 4:
+                continue
+            size = fields[3]
+            entries[path] = TreeEntry(
+                fields[0], int(size) if size.isdigit() else None
+            )
+    return entries
+
+
+def blobs_filtered_at(
+    launch_root: str, rels: Sequence[str], *, rev: str
+) -> dict[str, bytes | None]:
+    """``{путь: содержимое в форме рабочего дерева}`` из ревизии ``rev``.
+
+    ``cat-file --filters`` ПО ФАЙЛУ, параллельно (``run_git_many``): пачкой
+    ``--batch --filters`` с ``rev:path`` git падает, а заголовок пачки несёт
+    размер без фильтра. Число файлов ограничено бюджетом команды. ``None`` —
+    git по пути отказал.
+    """
+    rels = list(rels)
+    answers = run_git_many(
+        launch_root,
+        [
+            [*_QUOTEPATH_OFF, "cat-file", "--filters", f"{rev}:{rel}"]
+            for rel in rels
+        ],
+    )
+    return {
+        rel: out if code == 0 else None
+        for rel, (code, out) in zip(rels, answers)
+    }
+
+
+def is_ancestor(launch_root: str, older: str, newer: str) -> bool:
+    """``older`` — предок ``newer`` (``merge-base --is-ancestor``); отказ — ``False``."""
+    code, _out = run_git(
+        launch_root, ["merge-base", "--is-ancestor", older, newer]
+    )
+    return code == 0
+
+
+def commit_times(launch_root: str, since: str, until: str) -> list[int] | None:
+    """Секунды коммиттера коммитов ``since..until``; отказ git — ``None``."""
+    code, out = run_git(
+        launch_root, ["log", "--format=%ct", f"{since}..{until}"]
+    )
+    if code != 0:
+        return None
+    return [int(line) for line in _decode(out).split() if line.isdigit()]
+
+
+def paths_changed_between(
+    launch_root: str, older: str, newer: str
+) -> set[str] | None:
+    """Пути, различающиеся в деревьях ``older`` и ``newer``; отказ — ``None``.
+
+    В отличие от ``paths_committed_since``, отказ git отличим от пустого ответа.
+    """
+    code, out = run_git(
+        launch_root,
+        [
+            *_QUOTEPATH_OFF,
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            older,
+            newer,
+        ],
+    )
+    if code != 0:
+        return None
+    return {path for path in _decode(out).split("\x00") if path}
 
 
 def head_rev_from_files(launch_root: str) -> str | None:
