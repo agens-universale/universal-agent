@@ -1855,6 +1855,29 @@ def test_old_ignored_file_force_added_and_committed_is_not_created(repo):
     assert store.counting_session_baseline("secret.cfg") is None
 
 
+def test_old_ignored_file_edited_then_force_committed_is_not_created(repo):
+    """Давний игнорируемый файл правят и принудительно коммитят: создание
+    всё равно ложь, отметки создания и базы нет."""
+    launch_root, threads_dir = repo
+    _ignored_existing_file(launch_root, rel="secret.cfg")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "open('secret.cfg','ab').write(b'more\\n')\n"
+        + _git_script(
+            ("git", "add", "-f", "secret.cfg"),
+            ("git", "commit", "-qm", "secret"),
+        ),
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["secret.cfg"].op == "shell"
+    store = _snapshot_store(launch_root)
+    assert store.created_head_rev("secret.cfg") is None
+    assert store.session_baseline("secret.cfg") is None
+
+
 def test_file_deleted_and_committed_by_command_has_lines(repo):
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
@@ -1892,6 +1915,7 @@ _FOREIGN_MOVES = {
     "checkout_branch": ("git", "checkout", "-q", "other"),
     "reset_hard": ("git", "reset", "-q", "--hard", "HEAD~1"),
     "rebase": ("git", "rebase", "-q", "other"),
+    "merge_no_ff": ("git", "merge", "-q", "--no-ff", "-m", "m", "other"),
     "amend": ("git", "commit", "-q", "--amend", "-m", "amended"),
 }
 
