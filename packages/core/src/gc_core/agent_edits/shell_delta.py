@@ -67,6 +67,7 @@ from gc_core.agent_edits.ctx import (
     limit,
     protected_extra_from_ctx,
 )
+from gc_core.agent_edits.delete_records import is_binary_bytes
 from gc_core.agent_edits.deltas import (
     abs_path_for_key,
     build_diff,
@@ -96,8 +97,6 @@ from gc_core.config_modules.agent_edits import (
 from gc_core.thread_store import edits_journal_path
 from gc_core.tools.subagents.sidecar import current_turn_id
 from gc_core.utils.file_text import (
-    BINARY_SAMPLE_BYTES,
-    classify_content_from_sample,
     classify_file_content,
     sha256_hex_of_bytes,
     sha256_hex_of_file_bytes,
@@ -988,9 +987,7 @@ class ShellDelta:
                 None,
             )  # изменился только mtime (та же дыра, что у git-подканала)
 
-        if _is_binary_bytes(entry.before_bytes) or _is_binary_bytes(
-            after_bytes
-        ):
+        if is_binary_bytes(entry.before_bytes) or is_binary_bytes(after_bytes):
             record = _edit_record(
                 key,
                 turn_id,
@@ -1641,14 +1638,6 @@ def _is_binary_file(path: Path) -> bool:
         return classify_file_content(str(path)).is_binary
     except OSError:
         return False
-
-
-def _is_binary_bytes(data: bytes) -> bool:
-    """Тот же классификатор, что у рекордера, но по байтам уже в памяти
-    (карманный подканал их и так читает — второго чтения файла не нужно)."""
-    return classify_content_from_sample(
-        "", data[:BINARY_SAMPLE_BYTES]
-    ).is_binary
 
 
 def _file_size(path: Path) -> int:

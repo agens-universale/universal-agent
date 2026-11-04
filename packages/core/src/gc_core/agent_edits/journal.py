@@ -88,6 +88,10 @@ class EditRecord:
     # или файл сверх капа исходника). ``None`` — запись с диффом, удаление,
     # файл пропал между пробами или журнал до поля.
     size_bytes: Optional[int] = None
+    # Режим файла (``stat.S_IMODE``) у записи удаления: по нему откат
+    # восстанавливает права. ``None`` — не удаление, режим неизвестен или
+    # журнал до поля.
+    mode: Optional[int] = None
 
     def to_json_obj(self) -> Dict[str, Any]:
         obj = {
@@ -109,6 +113,8 @@ class EditRecord:
             obj["command_call_id"] = self.command_call_id
         if self.size_bytes is not None:
             obj["size_bytes"] = self.size_bytes
+        if self.mode is not None:
+            obj["mode"] = self.mode
         return obj
 
     @classmethod
@@ -128,6 +134,7 @@ class EditRecord:
             command_paths=obj.get("command_paths"),
             command_call_id=obj.get("command_call_id"),
             size_bytes=obj.get("size_bytes"),
+            mode=obj.get("mode"),
         )
 
 
