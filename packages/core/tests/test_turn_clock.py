@@ -270,3 +270,33 @@ def test_wait_before_call_start_is_not_subtracted():
 def test_call_elapsed_of_unknown_call_is_none():
     clock, _ = _clock()
     assert clock.call_elapsed("c1") is None
+
+
+def test_carry_is_elapsed_start_and_calls_of_the_turn():
+    clock, mono = _clock()
+    clock.record_call("c1", 2.04)
+    mono.now += 3
+    clock.begin_wait()
+    mono.now += 60
+    assert clock.carry() == {
+        "started_at": "2026-10-22T11:30:53.004Z",
+        "elapsed": 3.0,
+        "calls": {"c1": 2.0},
+    }
+
+
+def test_resumed_clock_continues_the_carried_turn():
+    """Ход, приостановленный на вопросе, продолжается новым прогоном: его
+    часы стартуют с перенесённого времени, начала и вызовов."""
+    first, mono = _clock()
+    first.record_call("c1", 2.0)
+    mono.now += 3
+    carried = first.carry()
+    mono.now += 3600  # ответ человека — через час, в другом процессе
+    clock = TurnClock.start(mono=mono, wall=_Wall(mono))
+    clock.resume(carried)
+    mono.now += 4
+    assert clock.elapsed() == 7
+    assert clock.started_at == "2026-10-22T11:30:53.004Z"
+    assert clock.calls() == {"c1": 2.0}
+    assert mono.now - clock.effective_start() == 7

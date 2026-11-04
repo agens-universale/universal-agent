@@ -113,3 +113,22 @@ def test_open_turn_wins_over_last_turn(tmp_path):
     )
 
     assert _statuses(tmp_path) == {"a": "running", "b": "failed"}
+
+
+def test_pending_question_shows_the_thread_as_asking(tmp_path):
+    """Тред приостановлен на вопросе (A2A): ход не закончен — итог
+    прошлого хода не его исход, тред ждёт ответа."""
+    _write_meta(
+        tmp_path,
+        "a2a",
+        "a",
+        {
+            "thread_id": "a",
+            "pending_question": {"call_id": "ask1", "question": "A или B?"},
+            "runtime": {"last_turn": {"status": "done", "reason": None}},
+        },
+    )
+    store = FileTaskStore(threads_dir=str(tmp_path), system="a2a")
+    assert {t.thread_id: t.status for t in store.list_tasks()} == {
+        "a": "asking"
+    }

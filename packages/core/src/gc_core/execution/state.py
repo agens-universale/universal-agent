@@ -149,6 +149,10 @@ TRANSIENT_STATE_DEFAULTS = {
     # SessionStart плагина без вывода в этом ходе (``plugins.hooks``);
     # сбрасывает ``turn_boundary.begin_turn``.
     "plugin_hooks_ran_turn": set,
+    # Ход, приостановленный на вопросе (снимок для записи сессии), и ход,
+    # продолженный этим прогоном (перенесённый снимок).
+    "suspended_turn": lambda: None,
+    "resumed_turn": lambda: None,
 }
 
 

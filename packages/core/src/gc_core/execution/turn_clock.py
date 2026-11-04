@@ -12,7 +12,7 @@
 
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -134,6 +134,23 @@ class TurnClock:
         with self._lock:
             end = self._now()
             return end - self._started - self._waited_until(end)
+
+    def carry(self) -> dict[str, Any]:
+        """Снимок хода на «сейчас» для продолжения другим прогоном: начало,
+        время работы и вызовы (ход приостановлен на вопросе)."""
+        return {
+            "started_at": self.started_at,
+            "elapsed": round(self.elapsed(), 1),
+            "calls": self.calls(),
+        }
+
+    def resume(self, carried: Mapping[str, Any]) -> None:
+        """Продолжить ход, перенесённый ``carry``: время работы, начало и
+        вызовы прошлых прогонов — уже на часах."""
+        with self._lock:
+            self._started -= float(carried["elapsed"])
+            self.started_at = str(carried["started_at"])
+            self._calls = {**carried["calls"], **self._calls}
 
     def effective_start(self) -> float:
         """Старт, сдвинутый на ожидания: ``now − effective_start`` — живой
