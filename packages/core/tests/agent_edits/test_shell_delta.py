@@ -1627,10 +1627,11 @@ def test_a_known_ignored_file_keeps_its_place_in_the_pocket_ahead_of_staged_file
     ]
 
 
-def test_command_that_commits_falls_back_to_counting(repo):
-    """Команда сама сдвинула HEAD (add+commit) — точная база недоказуема: HEAD,
-    прочитанный ПОСЛЕ команды, мог оказаться уже промежуточным результатом её
-    же коммита, а не тем, что было на диске ДО неё."""
+def test_command_that_commits_the_path_keeps_exact_base_from_head_before(
+    repo,
+):
+    """Команда сама закоммитила путь, затем правила дальше: база — точная,
+    блоб HEAD ДО команды (§5.3), а не индекс после её коммита."""
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(
@@ -1643,14 +1644,125 @@ def test_command_that_commits_falls_back_to_counting(repo):
     )
     delta.after_and_record()
 
-    recs = _records(threads_dir)
-    assert [(r.path, r.op) for r in recs] == [("tracked.txt", "shell")]
+    [rec] = _records(threads_dir)
+    assert (rec.path, rec.op, rec.add, rec.del_) == (
+        "tracked.txt",
+        "shell",
+        1,
+        1,
+    )
     store = _snapshot_store(launch_root)
-    # счётная база — из ИНДЕКСА (содержимое сразу после коммита команды, не
-    # исходное «до» неё): HEAD успел сдвинуться, точность не доказана.
-    assert store.counting_session_baseline("tracked.txt") == b"line1\nline2x\n"
-    assert _snapshot_names(launch_root, ".orig") == []
-    assert _snapshot_names(launch_root, ".turn") == []
+    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+    assert _snapshot_names(launch_root, ".gitorig") == []
+
+
+def _commit_b_txt(*, edit_tracked: str) -> str:
+    """Код команды: правит tracked.txt, создаёт b.txt и коммитит только его."""
+    return (
+        "import subprocess\n"
+        "def git(*a): subprocess.run(['git', *a], check=True, "
+        "capture_output=True)\n"
+        "open('tracked.txt','wb').write(b'line1\\nline2x\\n')\n"
+        f"{edit_tracked}"
+        "open('b.txt','wb').write(b'b\\n')\n"
+        "git('add', 'b.txt')\n"
+        "git('commit', '-m', 'b', '--', 'b.txt')\n"
+    )
+
+
+def _repo_with_a_txt(repo):
+    launch_root, threads_dir = repo
+    (launch_root / "a.txt").write_bytes(b"a\n")
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "a")
+    return launch_root, threads_dir
+
+
+def test_command_that_commits_keeps_exact_base_for_other_paths(repo):
+    """Команда коммитит другой файл: HEAD сдвинулся, но правленый чистый
+    путь совпадал с HEAD ДО команды — база точная, не `.gitorig`."""
+    launch_root, threads_dir = _repo_with_a_txt(repo)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, _commit_b_txt(edit_tracked=""))
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    rec = by_path["tracked.txt"]
+    assert (rec.op, rec.add, rec.del_) == ("shell", 1, 1)
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+    assert store.session_head_rev("tracked.txt") == delta._head_before
+    assert _snapshot_names(launch_root, ".gitorig") == []
+
+
+def test_command_that_commits_and_stages_edit_still_sees_it(repo):
+    """Команда индексирует правку и коммитит другой файл: дифф от HEAD до
+    команды правку видит (от индекса он был бы пуст)."""
+    launch_root, threads_dir = _repo_with_a_txt(repo)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        _commit_b_txt(edit_tracked="git('add', 'tracked.txt')\n"),
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["tracked.txt"].add == 1
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+
+
+def _conflicting_branch(launch_root, *, theirs: bytes | None) -> None:
+    """Ветка `other` правит (или удаляет при ``None``) tracked.txt, main —
+    правит по-своему; в итоге HEAD на main, дерево чистое."""
+    _git(launch_root, "checkout", "-qb", "other")
+    if theirs is None:
+        _git(launch_root, "rm", "-q", "tracked.txt")
+    else:
+        (launch_root / "tracked.txt").write_bytes(theirs)
+    _git(launch_root, "commit", "-qam", "other")
+    _git(launch_root, "checkout", "-q", "main")
+    (launch_root / "tracked.txt").write_bytes(b"line1\nours\n")
+    _git(launch_root, "commit", "-qam", "ours")
+
+
+_MERGE_OTHER = (
+    "import subprocess; "
+    "subprocess.run(['git','merge','other'], capture_output=True)"
+)
+
+
+def test_unmerged_path_stays_on_counting_base(repo):
+    """merge с конфликтом внутри команды: путь неслит (`UU`) — точной базы
+    нет, остаётся счётная (§5.1)."""
+    launch_root, threads_dir = repo
+    _conflicting_branch(launch_root, theirs=b"line1\ntheirs\n")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, _MERGE_OTHER)
+    delta.after_and_record()
+
+    assert "tracked.txt" in {r.path for r in _records(threads_dir)}
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("tracked.txt") is None
+
+
+def test_unmerged_deleted_path_has_no_lines_and_no_base(repo):
+    """Конфликт modify/delete (`UD`), и команда убирает файл с диска: путь
+    неслит — удаление без строк и без базы."""
+    launch_root, threads_dir = repo
+    _conflicting_branch(launch_root, theirs=None)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root, _MERGE_OTHER + "; import os; os.remove('tracked.txt')"
+    )
+    delta.after_and_record()
+
+    assert (
+        dict(git_ops.status_entries(str(launch_root)))["tracked.txt"] == "UD"
+    )
+    [rec] = [r for r in _records(threads_dir) if r.path == "tracked.txt"]
+    assert (rec.op, rec.flags, rec.hunks) == ("delete", ["no_diff"], "")
+    assert _snapshot_store(launch_root).session_baseline("tracked.txt") is None
 
 
 def test_custom_filter_blocks_precise_base(repo):

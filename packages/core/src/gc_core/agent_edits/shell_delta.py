@@ -36,10 +36,10 @@
 
 База «до» у канала своей породы: команду не видел ни один тул, и поднимать
 «до» приходится задним числом. Путь был ЧИСТ до команды (не значился в
-снимке ``git status`` до неё) и ``HEAD`` за команду не сдвинулся — тогда диск,
-индекс и ``HEAD`` до команды совпадали, «до» читается ИЗ ``HEAD`` в ТОЧНОЕ
-пространство (``.orig``/``.turn``), и такая правка становится откатываемой.
-Иначе (путь был грязен, ``HEAD`` сдвинулся сам — команда закоммитила, — или у
+снимке ``git status`` до неё) — тогда диск, индекс и ``HEAD`` ДО команды
+совпадали при любом движении ``HEAD`` за команду, «до» читается из ``HEAD``
+до команды в ТОЧНОЕ пространство (``.orig``/``.turn``), и такая правка
+становится откатываемой. Иначе (путь был грязен, неслит после команды или у
 пути настроен кастомный фильтр) — «до» поднимается из ИНДЕКСА git
 (``.gitorig``/``.gitturn``) и годится только для счётчиков: откату такая база
 не подаётся никогда (см. докстринг ``agent_edits.snapshots``). Файл,
@@ -129,6 +129,10 @@ _RECORD_SLICE_PATHS = 500
 # Режимы git обычного файла → режим файла записи удаления. Симлинк
 # (``120000``) и подмодуль (``160000``) строк удаления не получают.
 _REGULAR_FILE_MODES = {"100644": 0o644, "100755": 0o755}
+
+# XY неслитого пути в ``git status`` (merge/rebase внутри команды): его «до»
+# неоднозначно — точной базы и строк удаления он не получает (§5.1).
+_UNMERGED_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 
 # Суммарный кап карманного снимка «до»: байты кандидатов держатся в памяти на
 # одну команду. Кандидатов две группы — известные журналу (обычно единицы) и
@@ -703,12 +707,13 @@ class ShellDelta:
         planned = self._plan(part)
         diffs = self._diffs_for(planned, before, after)
         created_rels = self._created_rels(planned, before, after)
-        deleted = self._slice_deleted_contents(planned, before)
+        deleted = self._slice_deleted_contents(planned, before, after)
         needs_base: list[tuple[str, str, bool]] = []
         delete_bases: list[tuple[str, str, bytes]] = []
         for rel, key, file in planned:
             entry = after.get(rel)
             clean_before = rel not in before
+            exact = self._exact_step(clean_before, _xy(entry))
             created = rel in created_rels
             try:
                 record = self._build_record(
@@ -736,7 +741,7 @@ class ShellDelta:
             if record.op == "create":
                 self._mark_created(store, rel, record.path)
             elif record.op == "shell" and record.hunks:
-                needs_base.append((rel, record.path, clean_before))
+                needs_base.append((rel, record.path, exact))
             elif record.op == "delete" and record.hunks:
                 # Строки у удаления только с известным точным «до» — блобом
                 # HEAD до команды (``_deleted_contents``): он и есть база.
@@ -753,13 +758,13 @@ class ShellDelta:
             )
             facts = None
         wrote_base = False
-        for rel, key, clean_before in needs_base:
+        for rel, key, exact in needs_base:
             wrote_base |= self._capture_base(
                 store,
                 rel,
                 key,
                 turn_id,
-                clean_before=clean_before,
+                exact=exact,
                 facts=facts,
             )
         for rel, key, content in delete_bases:
@@ -796,15 +801,19 @@ class ShellDelta:
         self,
         planned: list[tuple[str, str, _FileFacts]],
         before: dict[str, _StatusEntry],
+        after: dict[str, _StatusEntry],
     ) -> dict[str, tuple[bytes, int]]:
         """``_deleted_contents`` для пропавших путей куска, чистых до команды.
 
-        Отказ git стоит строк удаления, а не записей: пути пишутся без строк.
+        Неслитый после команды путь (``_UNMERGED_XY``) содержимого не
+        получает: удаление без строк и без базы. Отказ git стоит строк
+        удаления, а не записей: пути пишутся без строк.
         """
         rels = [
             rel
             for rel, _key, file in planned
-            if not file.exists and rel not in before
+            if not file.exists
+            and self._exact_step(rel not in before, _xy(after.get(rel)))
         ]
         try:
             return self._deleted_contents(rels)
@@ -967,32 +976,36 @@ class ShellDelta:
     ) -> _BaseFacts:
         """Ответы git для ``_capture_base`` по всем путям сразу — тремя запусками.
 
-        Точная ступень (путь чист до команды, HEAD неподвижен): сперва атрибуты
+        Точная ступень (признак ``exact``, ``_exact_step``): сперва атрибуты
         — гвард фильтра обязан идти ПЕРЕД чтением содержимого, — затем блобы
-        HEAD без фильтра. Всем остальным и тем, кого HEAD не прочитал, — блобы
-        индекса для счётной базы.
+        HEAD до команды без фильтра. Всем остальным и тем, кого HEAD не
+        прочитал, — блобы индекса для счётной базы.
         """
-        exact = [
-            rel for rel, _key, clean in needs_base if self._exact_step(clean)
-        ]
+        exact = [rel for rel, _key, ok in needs_base if ok]
         filtered = git_ops.custom_filter_paths(self._launch_root, exact)
         head = git_ops.blobs_at(
             self._launch_root,
             [rel for rel in exact if rel not in filtered],
-            rev="HEAD",
+            rev=self._head_before,
         )
         index_rels = [
-            rel for rel, _key, _clean in needs_base if head.get(rel) is None
+            rel for rel, _key, _ok in needs_base if head.get(rel) is None
         ]
         index = git_ops.blobs_at(self._launch_root, index_rels, rev="")
         return _BaseFacts(filtered=filtered, head=head, index=index)
 
-    def _exact_step(self, clean_before: bool) -> bool:
-        """Годится ли пути точная база из HEAD (Р32): чист до команды, HEAD неподвижен."""
+    def _exact_step(self, clean_before: bool, xy: str | None) -> bool:
+        """Годится ли пути точная база из HEAD до команды (Р32, §5.3).
+
+        Путь чист до команды ⇒ диск = индекс = HEAD ДО команды — при любом
+        движении HEAD за команду. Неслитый после команды путь (``xy`` из
+        ``_UNMERGED_XY``) остаётся на счётной базе; ``xy=None`` — пути нет
+        в status после команды.
+        """
         return (
             clean_before
             and self._head_before is not None
-            and self._head_before == self._head_after
+            and xy not in _UNMERGED_XY
         )
 
     def _pocket_after_and_record(self) -> frozenset[str]:
@@ -1319,15 +1332,16 @@ class ShellDelta:
         key: str,
         turn_id: str,
         *,
-        clean_before: bool,
+        exact: bool,
         facts: _BaseFacts | None,
     ) -> bool:
         """База «до» этой записи. ``True`` — записали новую (сигнал для эвикции).
 
-        Путь был чист до команды (``clean_before``), ``HEAD`` за команду не
-        сдвинулся и у пути нет кастомного фильтра — диск, индекс и ``HEAD`` до
-        команды совпадали (Р32): «до» читается из ``HEAD`` в форме файла на
-        диске (``git_ops.head_bytes_like_disk``) и кладётся в ТОЧНОЕ
+        Точная ступень применима (``exact``: путь был чист до команды и не
+        неслит после) и у пути нет кастомного фильтра — диск, индекс и
+        ``HEAD`` до команды совпадали (Р32): «до» читается из ``HEAD`` до
+        команды в форме файла на диске (``git_ops.head_bytes_like_disk``) и
+        кладётся в ТОЧНОЕ
         пространство (``.orig``/``.turn``) — такой базе годится откат. Гвард
         фильтра обязан идти ПЕРЕД чтением содержимого: конфиг чужого
         репозитория не должен исполнять свой код.
@@ -1337,8 +1351,8 @@ class ShellDelta:
         унесёт его и в базу — зато файл, лежащий с LF в CRLF-репозитории, не
         считается изменённым целиком).
 
-        Иначе (путь был грязен, ``HEAD`` сдвинулся сам — команда закоммитила,
-        — фильтр есть, или ``HEAD`` не читает путь вовсе) — прежний путь:
+        Иначе (путь был грязен или неслит, фильтр есть, или ``HEAD`` до
+        команды не читает путь вовсе) — прежний путь:
         СЧЁТНАЯ база (Р13) из индекса git (``.gitorig``/``.gitturn``). Для
         отката не годится никогда: индекс не содержит несохранённых ручных
         правок пользователя (см. докстринг ``agent_edits.snapshots``).
@@ -1351,9 +1365,7 @@ class ShellDelta:
         пачка не собралась, и всё спрашивается по одному.
         """
         try:
-            content = self._exact_head_content(
-                rel, clean_before=clean_before, facts=facts
-            )
+            content = self._exact_head_content(rel, exact=exact, facts=facts)
             if content is not None:
                 wrote = store.capture_session(
                     key,
@@ -1385,15 +1397,16 @@ class ShellDelta:
             return False
 
     def _exact_head_content(
-        self, rel: str, *, clean_before: bool, facts: _BaseFacts | None
+        self, rel: str, *, exact: bool, facts: _BaseFacts | None
     ) -> bytes | None:
-        """«До» из ``HEAD`` в форме файла на диске — если точная ступень применима.
+        """«До» из ``HEAD`` до команды в форме файла на диске — если точная
+        ступень применима.
 
-        ``None`` — ступень неприменима (путь был грязен, ``HEAD`` сдвинулся,
-        у пути кастомный фильтр) или ``HEAD`` пути не читает. Гвард фильтра
-        идёт ПЕРЕД чтением содержимого (см. ``_capture_base``).
+        ``None`` — ступень неприменима (``exact`` ложен, у пути кастомный
+        фильтр) или ``HEAD`` до команды пути не читает. Гвард фильтра идёт
+        ПЕРЕД чтением содержимого (см. ``_capture_base``).
         """
-        if not self._exact_step(clean_before):
+        if not exact:
             return None
         filtered = (
             rel in facts.filtered
@@ -1407,7 +1420,7 @@ class ShellDelta:
             # Пачки нет, её кусок не прочитался, либо файл пропал уже после
             # команды («родной» формы не узнать — форма выкладки) — по одному.
             return git_ops.head_bytes_like_disk(
-                self._launch_root, rel, disk, rev="HEAD"
+                self._launch_root, rel, disk, rev=self._head_before
             )
         blob = facts.head[rel]
         return None if blob is None else git_ops.blob_like_disk(blob, disk)
@@ -1557,16 +1570,16 @@ class ShellDelta:
         add -u``, pre-commit), сдвигает обе стороны разом: дифф пуст, записи
         нет ни в журнале, ни в счётчиках хода, ни на экране.
 
-        Путь, чистый до команды, при неподвижном ``HEAD`` совпадал с ``HEAD``
-        и на диске, и в индексе — тот же инвариант Р32, на котором стоит
-        точная база в ``_capture_base``. Значит, дифф от ``HEAD`` виден
-        независимо от того, попала правка в индекс или нет, а «до» у диффа и
-        у базы остаётся одно.
+        Путь, чистый до команды, совпадал с ``HEAD`` ДО команды и на диске, и
+        в индексе — при любом движении ``HEAD`` за команду (тот же инвариант
+        Р32, на котором стоит точная база в ``_capture_base``, §5.3). Значит,
+        дифф от ``HEAD`` до команды виден независимо от того, попала правка в
+        индекс или в коммит самой команды, а «до» у диффа и у базы одно.
 
-        Путь был грязен до команды или ``HEAD`` за команду сдвинулся (команда
-        закоммитила) — «до» этому подканалу неизвестно, и остаётся дифф от
-        индекса: правка со стейджем тогда по-прежнему не видна. Такие пути
-        ловит карманный подканал — по байтам, снятым до команды.
+        Путь был грязен до команды — «до» этому подканалу неизвестно, и
+        остаётся дифф от индекса: правка со стейджем тогда по-прежнему не
+        видна. Такие пути ловит карманный подканал — по байтам, снятым до
+        команды.
 
         Окно диффа при этом шире «индекс↔дерево»: правку, которую пользователь
         сделал И ПРОИНДЕКСИРОВАЛ вручную, пока команда работала, запись отнесёт
@@ -1576,11 +1589,7 @@ class ShellDelta:
         двум снимкам состояния нельзя в принципе, и заводить ради этого
         механизм не за что.
         """
-        if not clean_before or self._head_before is None:
-            return None
-        if self._head_before != self._head_after:
-            return None
-        return self._head_before
+        return self._head_before if clean_before else None
 
     def _diff(self, rel: str, *, untracked: bool, base_rev: str | None) -> str:
         # Код возврата здесь намеренно не читается: у --no-index exit 1 значит
@@ -1724,6 +1733,11 @@ def _snapshots_max_files(ctx: Any) -> int:
 
 def _hunk_context_lines(ctx: Any) -> int:
     return limit(None, ctx, "hunk_context_lines", DEFAULT_HUNK_CONTEXT_LINES)
+
+
+def _xy(entry: _StatusEntry | None) -> str | None:
+    """XY пути в снимке status; ``None`` — пути в снимке нет."""
+    return None if entry is None else entry.xy
 
 
 def _dedup(paths: list[str]) -> list[str]:
