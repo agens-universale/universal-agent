@@ -144,8 +144,9 @@ def _restore(
     if baseline is None:
         outcome.skipped.append((key, REASON_NO_BASELINE))
         return
-    # Файла нет (откат удаления) — переносить режим не с чего, берём записанный.
-    absent = not abs_path.exists()
+    # Файла нет (откат удаления) — переносить режим не с чего, берём записанный
+    # (``_apply_mode``).
+    recorded_mode = mode if not abs_path.exists() else None
 
     # Имя временного файла — СВОЁ, и создаётся он эксклюзивно: с предсказуемым
     # `<файл>.revert.tmp` запись шла по заранее подложенной на этом месте
@@ -161,12 +162,12 @@ def _restore(
         fd = os.open(
             tmp,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
-            0o666,
+            0o666 if recorded_mode is None else 0o777,
         )
         with os.fdopen(fd, "wb") as fh:
             fh.write(baseline)
-        if absent and mode is not None:
-            _chmod_quiet(tmp, mode)
+        if recorded_mode is not None:
+            _apply_mode(tmp, recorded_mode)
         else:
             _carry_mode(abs_path, tmp)
         atomic_replace(tmp, abs_path)
@@ -180,10 +181,16 @@ def _restore(
     outcome.restored.append(key)
 
 
-def _chmod_quiet(path: Path, mode: int) -> None:
-    """Выставить ``mode``; отказ молчаливый, как у ``_carry_mode``."""
+def _apply_mode(path: Path, mode: int) -> None:
+    """Записанный режим удалённого файла — не шире umask.
+
+    Временный файл создан с ``0o777`` под umask (``_restore``), и режим
+    пересекается с его правами: секрет ``0600`` при umask ``022`` остаётся
+    ``0600``, а ``0644`` при umask ``077`` становится ``0600``, а не
+    раскрывается. Отказ молчаливый, как у ``_carry_mode``.
+    """
     try:
-        os.chmod(path, mode)
+        os.chmod(path, mode & stat.S_IMODE(os.stat(path).st_mode))
     except OSError:
         pass
 

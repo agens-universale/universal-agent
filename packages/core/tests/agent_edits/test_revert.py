@@ -415,3 +415,32 @@ def test_reverting_deleted_file_without_mode_uses_default(tmp_path):
 
     assert out.restored == [key]
     assert (tmp_path / key).read_bytes() == b"x\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="биты доступа POSIX")
+@pytest.mark.parametrize(
+    ("umask", "mode", "expected"),
+    [
+        (0o077, 0o644, 0o600),
+        (0o077, 0o755, 0o700),
+        (0o022, 0o600, 0o600),
+        (0o022, 0o755, 0o755),
+    ],
+)
+def test_reverting_deleted_file_mode_respects_umask(
+    tmp_path, umask, mode, expected
+):
+    """Режим удалённого файла не шире umask: секрет 0600 при umask 077 не
+    становится 0644 после отката."""
+    key = "a.cfg"
+    entry = _entry(key, kind="deleted", restore_mode=mode)
+    previous = os.umask(umask)
+    try:
+        out = revert_paths(
+            [key], {key: entry}, lambda k: b"x\n", str(tmp_path)
+        )
+    finally:
+        os.umask(previous)
+
+    assert out.restored == [key]
+    assert stat.S_IMODE((tmp_path / key).stat().st_mode) == expected
