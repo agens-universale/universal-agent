@@ -73,3 +73,9 @@ def test_refund_returns_bytes_to_later_reservations():
     assert budget.take(8) is True
     budget.refund(8)
     assert budget.take(10) is True
+
+
+def test_text_without_trailing_newline_marks_it():
+    rec = _rec("a.txt", b"a\nb", budget=DeleteBudget(100))
+    assert rec.hunks.endswith("-a\n-b\n\\ No newline at end of file\n")
+    assert (rec.add, rec.del_) == (0, 2)

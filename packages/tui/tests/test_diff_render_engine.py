@@ -30,6 +30,7 @@ from gc_tui.services.diff_render import (
     _SYNTAX_MAX_LINES,
     _match_work,
     copyable_hunks,
+    diff_line_count,
     render_hunks,
 )
 
@@ -1024,9 +1025,15 @@ def test_preview_pairs_accents_like_full_hunk():
     assert _accent_cells(full, 2) != []
 
 
-def test_copied_delete_patch_applies_with_git(tmp_path):
+@pytest.mark.parametrize(
+    "content",
+    [b"one\ntwo\nthree\n", b"one\ntwo\nthree"],
+    ids=["eol", "no-eol"],
+)
+def test_copied_delete_patch_applies_with_git(tmp_path, content):
     """Скопированная запись удаления шелл-канала — патч в форме git:
-    ``git apply`` удаляет файл (решение ревью 2026-11-05)."""
+    ``git apply`` удаляет файл (решение ревью 2026-11-05), в том числе без
+    перевода строки в конце."""
     import shutil
     import subprocess
 
@@ -1035,7 +1042,6 @@ def test_copied_delete_patch_applies_with_git(tmp_path):
     if not shutil.which("git"):
         pytest.skip("git недоступен")
     key = "sub/a.txt"
-    content = b"one\ntwo\nthree\n"
     (tmp_path / "sub").mkdir()
     (tmp_path / key).write_bytes(content)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -1060,3 +1066,4 @@ def test_copied_delete_patch_applies_with_git(tmp_path):
 
     assert not (tmp_path / key).exists()
     assert render_hunks(record.hunks, path=key).total_lines == 3
+    assert diff_line_count(record.hunks) == 3
