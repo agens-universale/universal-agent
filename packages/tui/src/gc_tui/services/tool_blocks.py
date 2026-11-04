@@ -250,7 +250,7 @@ class BlockEdit:
     add: int
     rem: int
     #: Логических строк диффа с контекстом; 0 — диффа нет (бинарь,
-    #: удаление).
+    #: удаление без содержимого).
     diff_lines: int
     size_bytes: Optional[int]
     has_record: bool
@@ -271,7 +271,9 @@ class BlockEdit:
 
 def _edit_tail(edit: Optional[BlockEdit]) -> Parts:
     """Хвост строки файла: ` (+a −r)`, у бинаря — ` · 12 КБ`."""
-    if edit is None or not edit.has_record or edit.verb == "Deleted":
+    if edit is None or not edit.has_record:
+        return ()
+    if edit.verb == "Deleted" and edit.diff_lines == 0:
         return ()
     if edit.diff_lines == 0 and edit.size_bytes is not None:
         return ((" · ", "dim"), (format_size(edit.size_bytes), "dim"))

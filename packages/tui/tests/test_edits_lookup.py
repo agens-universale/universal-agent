@@ -7,6 +7,7 @@ turn-снимки.
 
 from pathlib import Path
 
+from gc_core.agent_edits.delete_records import delete_record
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.thread_store import edits_journal_path
@@ -239,6 +240,24 @@ def test_turn_summary_deleted_file_counts_whole_snapshot(tmp_path):
     )
 
     assert ws.lookup.turn_summary("t1") == (1, 0, 4)
+
+
+def test_turn_summary_counts_shell_delete_with_lines(tmp_path):
+    ws = _Workspace(tmp_path)
+    ws.snapshot("gone.py", "one\ntwo\n")
+    rec = delete_record(
+        "gone.py",
+        "t1",
+        b"one\ntwo\n",
+        mode=None,
+        budget=None,
+        context_lines=3,
+        max_chars=100000,
+    )
+    assert "no_diff" not in rec.flags
+    ws.journal.append(rec)
+
+    assert ws.lookup.turn_summary("t1") == (1, 0, 2)
 
 
 def test_turn_summary_no_diff_counts_as_file_not_in_sums(tmp_path):

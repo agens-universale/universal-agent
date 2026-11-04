@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from gc_core.agent_edits import deltas, git_ops
 from gc_core.agent_edits.git_ops import show_index_bytes
+from gc_core.agent_edits.delete_records import delete_record
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD
 from gc_core.agent_edits.revert import REASON_NOT_REVERTABLE
@@ -265,6 +266,33 @@ def test_turn_source_counts_shell_edit_via_counting_base(tmp_path):
     assert (entry.exact, entry.add, entry.del_) == (True, 1, 1)
     assert entry.by_shell is True
     assert entry.revertable is False  # счётная база откату не годится
+
+
+def test_deleted_file_row_and_viewer_show_removed_lines(tmp_path):
+    ws = _Workspace(tmp_path)
+    ws.turn_base("gone.py", "one\ntwo\n", "t1")
+    ws.session_base("gone.py", "one\ntwo\n")
+    ws.journal.append(
+        delete_record(
+            "gone.py",
+            "t1",
+            b"one\ntwo\n",
+            mode=None,
+            budget=None,
+            context_lines=3,
+            max_chars=100000,
+        )
+    )
+
+    [row] = ws.view.session_view(SOURCE_TURN).active
+    entry = row.entry
+    delta = ws.view.revert_deltas(SOURCE_TURN, ["gone.py"])[0]
+
+    assert entry.kind == "deleted"
+    assert (entry.add, entry.del_) == (0, 2)
+    assert entry.exact is True
+    assert entry.revertable is True
+    assert (delta.add, delta.del_) == (0, 2)
 
 
 # --- тело диффа -------------------------------------------------------------
