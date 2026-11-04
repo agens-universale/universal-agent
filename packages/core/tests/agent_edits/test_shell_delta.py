@@ -1765,6 +1765,219 @@ def test_unmerged_deleted_path_has_no_lines_and_no_base(repo):
     assert _snapshot_store(launch_root).session_baseline("tracked.txt") is None
 
 
+def _git_in_the_past(root: Path, *args: str) -> None:
+    """git-вызов с датами автора и коммиттера на сутки назад.
+
+    Подготовка чужой истории: коммит той же секунды, что ``begin()``, прошёл
+    бы гейт «свои коммиты» по времени коммиттера.
+    """
+    stamp = f"@{int(time.time()) - 86_400} +0000"
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_DATE": stamp,
+        "GIT_COMMITTER_DATE": stamp,
+    }
+    subprocess.run(
+        ["git", *args], cwd=str(root), check=True, capture_output=True, env=env
+    )
+
+
+def _git_script(*commands: tuple[str, ...]) -> str:
+    """Код команды агента: git-вызовы по очереди, с проверкой кода."""
+    lines = ["import subprocess"]
+    lines += [
+        f"subprocess.run({list(args)!r}, check=True, capture_output=True)"
+        for args in commands
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def test_edit_committed_by_command_is_recorded(repo):
+    """Команда правит чистый путь и сама его коммитит: в status путь не
+    значится ни до, ни после, но правка — её (§5.3a)."""
+    launch_root, threads_dir = repo
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "open('tracked.txt','wb').write(b'line1\\nline2\\nline3\\n')\n"
+        + _git_script(("git", "commit", "-qam", "edit")),
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["tracked.txt"].op == "shell"
+    assert by_path["tracked.txt"].add == 1
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+
+
+def test_file_created_and_committed_by_command_is_create(repo):
+    launch_root, threads_dir = repo
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "open('new.txt','wb').write(b'alpha\\n')\n"
+        + _git_script(
+            ("git", "add", "new.txt"), ("git", "commit", "-qm", "new")
+        ),
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["new.txt"].op == "create"
+    assert by_path["new.txt"].add == 1
+    store = _snapshot_store(launch_root)
+    assert store.created_head_rev("new.txt") == delta._head_before
+    assert store.session_baseline("new.txt") is None
+
+
+def test_old_ignored_file_force_added_and_committed_is_not_created(repo):
+    """Давний игнорируемый файл пользователя, принудительно закоммиченный
+    командой: в HEAD до команды его нет, но создание — ложь, откат удалил
+    бы его. Запись без базы и без отметки создания."""
+    launch_root, threads_dir = repo
+    _ignored_existing_file(launch_root, rel="secret.cfg")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        _git_script(
+            ("git", "add", "-f", "secret.cfg"),
+            ("git", "commit", "-qm", "secret"),
+        ),
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["secret.cfg"].op == "shell"
+    store = _snapshot_store(launch_root)
+    assert store.created_head_rev("secret.cfg") is None
+    assert store.session_baseline("secret.cfg") is None
+    assert store.counting_session_baseline("secret.cfg") is None
+
+
+def test_file_deleted_and_committed_by_command_has_lines(repo):
+    launch_root, threads_dir = repo
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        _git_script(
+            ("git", "rm", "-q", "tracked.txt"),
+            ("git", "commit", "-qm", "rm"),
+        ),
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    rec = by_path["tracked.txt"]
+    assert (rec.op, rec.del_) == ("delete", 2)
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+
+
+def _foreign_history(launch_root) -> None:
+    """Чужая история со старыми датами: на main лишний коммит, ветка `other`
+    от него с ещё одним коммитом. HEAD остаётся на main, дерево чистое."""
+    (launch_root / "tracked.txt").write_bytes(b"line1\nmain\n")
+    _git_in_the_past(launch_root, "commit", "-qam", "main")
+    _git(launch_root, "checkout", "-qb", "other")
+    (launch_root / "tracked.txt").write_bytes(b"line1\nother\n")
+    (launch_root / "o.txt").write_bytes(b"o\n")
+    _git(launch_root, "add", "-A")
+    _git_in_the_past(launch_root, "commit", "-qm", "other")
+    _git(launch_root, "checkout", "-q", "main")
+
+
+_FOREIGN_MOVES = {
+    "pull_ff": ("git", "merge", "-q", "--ff-only", "other"),
+    "checkout_branch": ("git", "checkout", "-q", "other"),
+    "reset_hard": ("git", "reset", "-q", "--hard", "HEAD~1"),
+    "rebase": ("git", "rebase", "-q", "other"),
+    "amend": ("git", "commit", "-q", "--amend", "-m", "amended"),
+}
+
+
+@pytest.mark.parametrize("scenario", sorted(_FOREIGN_MOVES))
+def test_foreign_head_moves_record_nothing(repo, scenario):
+    """Команда только двигает HEAD по чужой истории: гейт «свои коммиты» не
+    пропускает ни одного пути (предок не тот или даты старше команды)."""
+    launch_root, threads_dir = repo
+    _foreign_history(launch_root)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, _git_script(_FOREIGN_MOVES[scenario]))
+    delta.after_and_record()
+
+    assert delta._head_after != delta._head_before
+    assert _records(threads_dir) == []
+
+
+def test_status_paths_win_the_path_cap(repo, monkeypatch):
+    launch_root, threads_dir = repo
+    monkeypatch.setattr(shell_delta, "MAX_PATHS_PER_COMMAND", 2)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "for name in ('c1', 'c2', 'c3', 'u1', 'u2'):\n"
+        "    open(name + '.txt', 'wb').write(b'x\\n')\n"
+        + _git_script(
+            ("git", "add", "c1.txt", "c2.txt", "c3.txt"),
+            ("git", "commit", "-qm", "c"),
+        ),
+    )
+    delta.after_and_record()
+
+    recs = _records(threads_dir)
+    assert {r.path for r in recs} == {"u1.txt", "u2.txt"}
+    assert {r.command_paths for r in recs} == {5}
+
+
+def _other_branch_with_a_txt(launch_root) -> None:
+    """a.txt на main и на ветке `other` (старые даты) различается."""
+    (launch_root / "a.txt").write_bytes(b"a\n")
+    _git(launch_root, "add", "a.txt")
+    _git(launch_root, "commit", "-qm", "a")
+    _git(launch_root, "checkout", "-qb", "other")
+    (launch_root / "a.txt").write_bytes(b"a\nother\n")
+    _git_in_the_past(launch_root, "commit", "-qam", "other")
+    _git(launch_root, "checkout", "-q", "main")
+
+
+def test_edit_after_foreign_checkout_diffs_against_index_only(repo):
+    """`checkout other && правка`: HEAD до команды — другая ветка, «до» от
+    него показало бы разницу веток как правку агента, а откат записал бы
+    старую ветку поверх новой. Дифф — от индекса, точной базы нет."""
+    launch_root, threads_dir = repo
+    _other_branch_with_a_txt(launch_root)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        _git_script(("git", "checkout", "-q", "other"))
+        + "open('a.txt','wb').write(b'a\\nother\\nedit\\n')\n",
+    )
+    delta.after_and_record()
+
+    [rec] = [r for r in _records(threads_dir) if r.path == "a.txt"]
+    assert (rec.op, rec.add, rec.del_) == ("shell", 1, 0)
+    assert _snapshot_store(launch_root).session_baseline("a.txt") is None
+
+
+def test_delete_after_foreign_checkout_has_no_lines_and_no_base(repo):
+    """`checkout other && rm a.txt`: «до» удалённого — версия ветки `other`,
+    а не HEAD до команды. Удаление без строк и без базы."""
+    launch_root, threads_dir = repo
+    _other_branch_with_a_txt(launch_root)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        _git_script(("git", "checkout", "-q", "other"))
+        + "import os; os.remove('a.txt')\n",
+    )
+    delta.after_and_record()
+
+    [rec] = [r for r in _records(threads_dir) if r.path == "a.txt"]
+    assert (rec.op, rec.flags, rec.hunks) == ("delete", ["no_diff"], "")
+    assert _snapshot_store(launch_root).session_baseline("a.txt") is None
+
+
 def test_custom_filter_blocks_precise_base(repo):
     """`filter=` в атрибутах — конфиг чужого репозитория не должен исполнять
     свой код: точную базу через `cat-file --filters` не читаем вовсе."""
