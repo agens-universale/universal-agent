@@ -5,11 +5,12 @@
 сами прижали → отпускаем). Сравнение идёт с `_last_auto_y` (наша последняя
 позиция прижатия), а не с `max_scroll_y` (он растёт от контента)."""
 
-from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
 import pytest
+from gc_core.threads.file_layout import history_line
+from gc_testkit.tui_support import tui_settings
 
 
 def _write_task(tmp_path, tid):
@@ -346,9 +347,10 @@ async def test_thread_switch_with_live_watch_sticks_to_new_bottom(tmp_path):
     _write_task(tmp_path, "sw1")
     _write_task(tmp_path, "sw2")
     big = "\n".join(f"другая {i}" for i in range(80))
-    rec = {"payload": {"id": "b1", "role": "assistant", "content": big}}
+    payload = {"id": "b1", "role": "assistant", "content": big}
     (Path(tmp_path) / "data_cli_sw2.jsonl").write_text(
-        json.dumps(rec, ensure_ascii=False) + "\n", encoding="utf-8"
+        history_line("cli", "sw2", 1, "2026-06-15T12:00:00+00:00", payload),
+        encoding="utf-8",
     )
     async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr, trace = await _setup_scrolled(pilot, "sw1")
@@ -357,6 +359,7 @@ async def test_thread_switch_with_live_watch_sticks_to_new_bottom(tmp_path):
         assert scr._stick_bottom is False
         scr.attach_active_task("sw2", is_resume=True)
         await pilot.pause(0.4)
+        assert "b1" in scr._rendered_ids  # история треда прочитана
         assert trace.max_scroll_y > 0
         assert scr._stick_bottom is True
         assert trace.scroll_offset.y == trace.max_scroll_y

@@ -192,7 +192,7 @@ from gc_core.tools.arguments_validation import arguments_without_service_fields
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.tools.turn.turn_close import assistant_reply_text
-from gc_core.turn_boundary import begin_turn
+from gc_core.turn_boundary import begin_turn, suspended_turn
 from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
@@ -3447,9 +3447,12 @@ class _AgentLoop:
         Батч вливается в состояние и сохраняется без вывода вопроса: его
         ответ придёт следующим ходом. Компакции конца хода и подхвата
         очереди нет — история кончается вызовом без ответа, а ход журнала
-        намерений не закрыт: задача продолжится после ответа.
+        намерений не закрыт: задача продолжится после ответа. Итога хода
+        нет: вопрос ход не завершает — его снимок уходит в состояние треда
+        вместе с вопросом, следующий прогон продолжит ход.
         """
         state = self.state
+        state.suspended_turn = suspended_turn(state, self.ctx)
         batch_new = filter_messages_not_in_state(
             list(getattr(state, "messages", []) or []), messages
         )

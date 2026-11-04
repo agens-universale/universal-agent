@@ -115,7 +115,7 @@ from gc_core.tools.subagents.sidecar import (
     mint_turn_id,
 )
 from gc_core.trace_id import trace_id_from_config
-from gc_core.turn_boundary import opening_reply_id
+from gc_core.turn_boundary import opening_reply_id, resume_turn
 from gc_core.turn_error import describe_turn_error
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_dict, build_run_usage_report
@@ -944,6 +944,8 @@ class AgentExecutor:
                 thread_session.usage,
                 thread_session.notice,
             )
+            # Ход, приостановленный на вопросе, продолжается этим прогоном.
+            resume_turn(state, self._ctx, thread_session.state.suspended_turn)
         rendered_system_prompt: str | None = None
         if (
             backend_api_mode == "chat_completions"
@@ -2230,7 +2232,9 @@ class AgentExecutor:
         ``finally`` прогона (остальные выходы). Признак ``recorded`` ставится
         до записи: повтор ничего не пишет, даже если первая запись упала.
         Ход, не положивший в историю ни одного сообщения (стоп в сетапе),
-        записи не получает: его на диске нет. Сбой сборки или записи —
+        записи не получает: его на диске нет. Ход, приостановленный на
+        вопросе, — тоже: вопрос ход не завершает, итог запишет прогон,
+        который его продолжит. Сбой сборки или записи —
         предупреждение в журнал прогона, ход он не роняет."""
         clock = current_turn_clock(self._ctx)
         state = self.get_state()
@@ -2240,6 +2244,8 @@ class AgentExecutor:
         clock.recorded = True
         clock.close()
         if session is None or state.turn_messages_start is None:
+            return
+        if getattr(state, "terminal_outcome", None) == "input_required":
             return
         status, why = self._classify_turn_end(reason, error)
         try:
