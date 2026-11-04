@@ -268,12 +268,17 @@ class BlockEdit:
     def has_diff(self) -> bool:
         return self.has_record and self.diff_lines > 0
 
+    @property
+    def deleted_without_lines(self) -> bool:
+        """Удалённый файл без строк диффа: ни счётчиков, ни ❐."""
+        return self.verb == "Deleted" and self.diff_lines == 0
+
 
 def _edit_tail(edit: Optional[BlockEdit]) -> Parts:
     """Хвост строки файла: ` (+a −r)`, у бинаря — ` · 12 КБ`."""
     if edit is None or not edit.has_record:
         return ()
-    if edit.verb == "Deleted" and edit.diff_lines == 0:
+    if edit.deleted_without_lines:
         return ()
     if edit.diff_lines == 0 and edit.size_bytes is not None:
         return ((" · ", "dim"), (format_size(edit.size_bytes), "dim"))

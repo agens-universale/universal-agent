@@ -363,7 +363,8 @@ class ShellDelta:
         # Пути, закоммиченные самой командой (`_committed_paths`).
         self._committed: frozenset[str] = frozenset()
         self._pocket: dict[str, _PocketEntry] = {}
-        # Бюджет строк удалений на команду: общий для кармана и git-подканала.
+        # Бюджет строк удалений на команду: общий для кармана и git-подканала;
+        # создаётся заново в `after_and_record` (бюджет — на каждую команду).
         self._delete_budget = DeleteBudget(_max_diff_source_bytes(ctx))
 
     @classmethod
@@ -633,7 +634,8 @@ class ShellDelta:
         *,
         skip: frozenset[str] = frozenset(),
     ) -> None:
-        changed = self._changed_paths(before, after, skip)
+        changed, committed = self._changed_paths(before, after, skip)
+        self._committed = committed
         if not changed:
             return
         # По ВСЕМ путям команды, до потолка: правило, ослабленное в `.gitignore`
@@ -692,8 +694,8 @@ class ShellDelta:
         before: dict[str, _StatusEntry],
         after: dict[str, _StatusEntry],
         skip: frozenset[str],
-    ) -> list[str]:
-        """Пути команды: сперва разница снимков status, за ней — закоммиченные ею.
+    ) -> tuple[list[str], frozenset[str]]:
+        """Пути команды (и закоммиченные ею): сперва разница снимков status, за ней — закоммиченные ею.
 
         Порядок — часть контракта: потолок путей (``MAX_PATHS_PER_COMMAND``)
         режет хвост, и закоммиченным достаётся только остаток. Пути, уже
@@ -715,8 +717,7 @@ class ShellDelta:
             for rel in self._committed_paths(before, after)
             if rel not in skip
         ]
-        self._committed = frozenset(committed)
-        return status_changed + committed
+        return status_changed + committed, frozenset(committed)
 
     def _committed_paths(
         self,
@@ -814,6 +815,7 @@ class ShellDelta:
         for rel, key, file in planned:
             entry = after.get(rel)
             clean_before = rel not in before
+            deleted_before = deleted.get(rel)
             try:
                 record = self._build_record(
                     rel,
@@ -824,7 +826,7 @@ class ShellDelta:
                     hunks=diffs.get(rel),
                     key=key,
                     file=file,
-                    deleted=deleted.get(rel),
+                    deleted=deleted_before,
                     committed=rel in self._committed,
                 )
             except Exception:
@@ -845,10 +847,10 @@ class ShellDelta:
             elif record.op == "shell":
                 exact = self._exact_step(clean_before, _xy(entry))
                 needs_base.append((rel, record.path, exact))
-            elif record.op == "delete":
+            elif record.op == "delete" and deleted_before:
                 # Строки у удаления только с известным точным «до» — блобом
                 # HEAD до команды (``_deleted_contents``): он и есть база.
-                delete_bases.append((rel, record.path, deleted[rel][0]))
+                delete_bases.append((rel, record.path, deleted_before[0]))
 
         try:
             facts: _BaseFacts | None = self._base_facts(needs_base)
