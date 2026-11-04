@@ -1107,6 +1107,28 @@ def test_blobs_filtered_at_applies_eol_filter(tmp_git_repo):
     }
 
 
+def test_binary_paths_at_names_binary_deletions_without_content(
+    tmp_git_repo,
+):
+    root = tmp_git_repo
+    (root / "a.bin").write_bytes(b"\x00\x01" * 10)
+    (root / "b.txt").write_bytes(b"text\n")
+    head = _commit_all(root, "bin and text")
+    (root / "a.bin").unlink()
+    (root / "b.txt").unlink()
+    assert git_ops.binary_paths_at(
+        str(root), ["a.bin", "b.txt"], rev=head
+    ) == {"a.bin"}
+    assert git_ops.binary_paths_at(str(root), [], rev=head) == set()
+
+
+def test_binary_paths_at_git_refusal_is_none(tmp_git_repo):
+    assert (
+        git_ops.binary_paths_at(str(tmp_git_repo), ["a.bin"], rev="nope")
+        is None
+    )
+
+
 def test_is_ancestor_and_commit_times(two_commits):
     root, first, second = two_commits
     assert git_ops.is_ancestor(str(root), first, second) is True

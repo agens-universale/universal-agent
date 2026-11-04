@@ -806,6 +806,45 @@ def tree_entries(
     return entries
 
 
+def binary_paths_at(
+    launch_root: str, rels: Sequence[str], *, rev: str
+) -> set[str] | None:
+    """Какие из ``rels`` git считает бинарными в сравнении ``rev`` с диском.
+
+    Один ``diff --numstat`` на кусок путей: бинарная строка — ``-\t-\t<путь>``,
+    содержимое в память не читается. Без внешних диффтулов и textconv — как
+    у остальных диффов слоя. Отказ git — ``None`` (отличим от «бинарных нет»).
+    """
+    rels = list(rels)
+    if not rels:
+        return set()
+    outputs = _chunked_outputs(
+        launch_root,
+        [
+            *_QUOTEPATH_OFF,
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--numstat",
+            "-z",
+            rev,
+            "--",
+        ],
+        [f":(literal){rel}" for rel in rels],
+    )
+    if outputs is None:
+        return None
+    binary: set[str] = set()
+    for out in outputs:
+        for row in _decode(out).split("\x00"):
+            added, _tab, rest = row.partition("\t")
+            deleted, _tab, path = rest.partition("\t")
+            if added == "-" and deleted == "-" and path:
+                binary.add(path)
+    return binary
+
+
 def blobs_filtered_at(
     launch_root: str, rels: Sequence[str], *, rev: str
 ) -> dict[str, bytes | None]:

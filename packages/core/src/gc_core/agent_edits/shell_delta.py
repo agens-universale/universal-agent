@@ -937,11 +937,12 @@ class ShellDelta:
         обычные файлы (``100644``/``100755``): блоб симлинка — текст
         цели, откат поставил бы на место ссылки обычный файл. Гвард
         кастомного фильтра — ДО чтения содержимого: конфиг чужого репозитория
-        не должен исполнять свой код. Режимы и размеры — одним ``ls-tree``;
-        бюджет команды резервируется по размерам по сортированным путям ДО
-        чтения блобов (карман его уже потратил первым), так что читаются
-        только влезшие. Концы строк — форма фильтра: диска для «родной» формы
-        нет.
+        не должен исполнять свой код. Режимы и размеры — одним ``ls-tree``,
+        бинарность — одним ``diff --numstat`` (``_binary_deletions``); бюджет
+        команды резервируется по размерам по сортированным небинарным путям
+        ДО чтения блобов (карман его уже потратил первым), так что читаются
+        только влезшие. Прочитанное, что всё же не текст, бюджет возвращает.
+        Концы строк — форма фильтра: диска для «родной» формы нет.
         """
         if self._head_before is None or not rels:
             return {}
@@ -958,20 +959,33 @@ class ShellDelta:
             and entry.size is not None
             and entry.size <= max_source
         }
-        filtered = git_ops.custom_filter_paths(self._launch_root, list(sizes))
+        skipped = git_ops.custom_filter_paths(self._launch_root, list(sizes))
+        skipped |= self._binary_deletions(list(sizes))
         reserved = [
             rel
             for rel in sorted(sizes)
-            if rel not in filtered and self._delete_budget.take(sizes[rel])
+            if rel not in skipped and self._delete_budget.take(sizes[rel])
         ]
         blobs = git_ops.blobs_filtered_at(
             self._launch_root, reserved, rev=self._head_before
         )
-        return {
-            rel: (blob, _REGULAR_FILE_MODES[entries[rel].mode])
-            for rel, blob in blobs.items()
-            if blob is not None
-        }
+        contents: dict[str, tuple[bytes, int]] = {}
+        for rel in reserved:
+            blob = blobs.get(rel)
+            if blob is None or not _is_text(blob):
+                self._delete_budget.refund(sizes[rel])
+                continue
+            contents[rel] = (blob, _REGULAR_FILE_MODES[entries[rel].mode])
+        return contents
+
+    def _binary_deletions(self, rels: list[str]) -> set[str]:
+        """Бинарные из удалённых путей — до чтения содержимого: бюджет строк
+        на них не резервируется. Отказ git — пусто: бинарь тогда отсеется
+        уже после чтения, с возвратом бюджета."""
+        binary = git_ops.binary_paths_at(
+            self._launch_root, rels, rev=self._head_before
+        )
+        return binary or set()
 
     def _capture_delete_base(
         self,
@@ -1920,6 +1934,11 @@ def _paths_by_recency(records: list[EditRecord]) -> list[str]:
         if prev is None or rec.ts > prev:
             last_ts[rec.path] = rec.ts
     return sorted(last_ts, key=lambda path: last_ts[path], reverse=True)
+
+
+def _is_text(data: bytes) -> bool:
+    """Байты годятся в строки удаления: не бинарь и декодируются в текст."""
+    return not is_binary_bytes(data) and decode_edit_text(data) is not None
 
 
 def _is_binary_file(path: Path) -> bool:

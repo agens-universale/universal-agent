@@ -66,3 +66,10 @@ def test_exec_bit_gives_executable_file_mode():
 def test_unknown_mode_gives_regular_file_mode():
     rec = _rec("a.txt", b"x\n", mode=None, budget=DeleteBudget(100))
     assert rec.hunks.splitlines()[1] == "deleted file mode 100644"
+
+
+def test_refund_returns_bytes_to_later_reservations():
+    budget = DeleteBudget(10)
+    assert budget.take(8) is True
+    budget.refund(8)
+    assert budget.take(10) is True

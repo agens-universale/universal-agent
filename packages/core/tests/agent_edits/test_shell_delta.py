@@ -1249,6 +1249,28 @@ def test_mass_delete_respects_budget_and_batches(repo, monkeypatch):
     assert len(cat_files) == 10
 
 
+def test_binary_deletion_does_not_spend_the_budget(repo):
+    """Бинарь, удалённый той же командой, бюджет строк не съедает: его
+    бинарность узнаётся до чтения, и текстовый файл строки получает."""
+    launch_root, threads_dir = repo
+    (launch_root / "a.bin").write_bytes(b"\x00" * 1_900_000)
+    (launch_root / "b.txt").write_bytes(b"line\n" * 40_000)
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "bin and text")
+    ctx = _ctx(launch_root, threads_dir)
+    update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 2_000_000})
+    delta = ShellDelta.begin(ctx)
+    _run_command(
+        launch_root, "import os; os.remove('a.bin'); os.remove('b.txt')"
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["a.bin"].flags == ["no_diff"]
+    assert "no_diff" not in by_path["b.txt"].flags
+    assert by_path["b.txt"].del_ == 40_000
+
+
 @pytest.mark.skipif(os.name == "nt", reason="бит исполнения — не на Windows")
 def test_deleted_exec_file_records_mode(repo):
     launch_root, threads_dir = repo

@@ -43,6 +43,11 @@ class DeleteBudget:
         self._left -= size
         return True
 
+    def refund(self, size: int) -> None:
+        """Вернуть зарезервированное, но не потраченное (бинарь, не текст):
+        вернувшиеся байты достаются следующим резервам."""
+        self._left += size
+
 
 def _deleted_text(
     before: bytes | None, budget: DeleteBudget | None
