@@ -126,6 +126,10 @@ MAX_PATHS_PER_COMMAND = 10_000
 # запусков вместо 30 000 пофайловых.
 _RECORD_SLICE_PATHS = 500
 
+# Режимы git обычного файла → режим файла записи удаления. Симлинк
+# (``120000``) и подмодуль (``160000``) строк удаления не получают.
+_REGULAR_FILE_MODES = {"100644": 0o644, "100755": 0o755}
+
 # Суммарный кап карманного снимка «до»: байты кандидатов держатся в памяти на
 # одну команду. Кандидатов две группы — известные журналу (обычно единицы) и
 # грязные пути рабочего дерева (их бывает сколько угодно), поэтому 32 МиБ — это
@@ -699,7 +703,9 @@ class ShellDelta:
         planned = self._plan(part)
         diffs = self._diffs_for(planned, before, after)
         created_rels = self._created_rels(planned, before, after)
+        deleted = self._slice_deleted_contents(planned, before)
         needs_base: list[tuple[str, str, bool]] = []
+        delete_bases: list[tuple[str, str, bytes]] = []
         for rel, key, file in planned:
             entry = after.get(rel)
             clean_before = rel not in before
@@ -714,6 +720,7 @@ class ShellDelta:
                     hunks=diffs.get(rel),
                     key=key,
                     file=file,
+                    deleted=deleted.get(rel),
                 )
             except Exception:
                 _logger.warning(
@@ -727,27 +734,13 @@ class ShellDelta:
             journal.append(record)
             self._remember(record)
             if record.op == "create":
-                # Базы у созданного пути нет и быть не должно, но ступень HEAD
-                # ему нужна (Д1): ревизию несёт отметка создания. Берём ту, что
-                # была ДО команды, даже если команда сама коммитила, — признак
-                # отвечает за «коммит ПОСЛЕ создания» (§3.2).
-                #
-                # Свой try — как у соседей по циклу (`_build_record`,
-                # `_capture_base`): `file_lock` индекса при конкуренции
-                # (сабагенты, swarm в одном проекте) отвечает таймаутом, и
-                # улети он во внешний except — пути, оставшиеся в наборе, не
-                # попали бы в журнал НИКОГДА. Потеря отметки стоит ступени
-                # HEAD у одного пути, потеря записей — всего остатка команды.
-                try:
-                    store.mark_created(record.path, head_rev=self._head_before)
-                except Exception:
-                    _logger.warning(
-                        "shell delta: отметка создания не записана rel=%r",
-                        rel,
-                        exc_info=True,
-                    )
+                self._mark_created(store, rel, record.path)
             elif record.op == "shell" and record.hunks:
                 needs_base.append((rel, record.path, clean_before))
+            elif record.op == "delete" and record.hunks:
+                # Строки у удаления только с известным точным «до» — блобом
+                # HEAD до команды (``_deleted_contents``): он и есть база.
+                delete_bases.append((rel, record.path, deleted[rel][0]))
 
         try:
             facts: _BaseFacts | None = self._base_facts(needs_base)
@@ -769,7 +762,131 @@ class ShellDelta:
                 clean_before=clean_before,
                 facts=facts,
             )
+        for rel, key, content in delete_bases:
+            wrote_base |= self._capture_delete_base(
+                store, rel, key, content, turn_id
+            )
         return wrote_base
+
+    def _mark_created(self, store: SnapshotStore, rel: str, key: str) -> None:
+        """Отметка создания пути — ступень HEAD для пути без базы.
+
+        Базы у созданного пути нет и быть не должно, но ступень HEAD ему
+        нужна (Д1): ревизию несёт отметка создания. Берём ту, что была ДО
+        команды, даже если команда сама коммитила, — признак отвечает за
+        «коммит ПОСЛЕ создания» (§3.2).
+
+        Свой try — как у соседей по циклу (`_build_record`, `_capture_base`):
+        `file_lock` индекса при конкуренции (сабагенты, swarm в одном
+        проекте) отвечает таймаутом, и улети он во внешний except — пути,
+        оставшиеся в наборе, не попали бы в журнал НИКОГДА. Потеря отметки
+        стоит ступени HEAD у одного пути, потеря записей — всего остатка
+        команды.
+        """
+        try:
+            store.mark_created(key, head_rev=self._head_before)
+        except Exception:
+            _logger.warning(
+                "shell delta: отметка создания не записана rel=%r",
+                rel,
+                exc_info=True,
+            )
+
+    def _slice_deleted_contents(
+        self,
+        planned: list[tuple[str, str, _FileFacts]],
+        before: dict[str, _StatusEntry],
+    ) -> dict[str, tuple[bytes, int]]:
+        """``_deleted_contents`` для пропавших путей куска, чистых до команды.
+
+        Отказ git стоит строк удаления, а не записей: пути пишутся без строк.
+        """
+        rels = [
+            rel
+            for rel, _key, file in planned
+            if not file.exists and rel not in before
+        ]
+        try:
+            return self._deleted_contents(rels)
+        except Exception:
+            _logger.warning(
+                "shell delta: содержимое удалённых путей не прочитано",
+                exc_info=True,
+            )
+            return {}
+
+    def _deleted_contents(
+        self, rels: list[str]
+    ) -> dict[str, tuple[bytes, int]]:
+        """``{путь: (байты «до», режим)}`` удалённых командой чистых путей.
+
+        Путь чист до команды — его «до» есть блоб ``HEAD`` до команды (Р32).
+        Только обычные файлы (``100644``/``100755``): блоб симлинка — текст
+        цели, откат поставил бы на место ссылки обычный файл. Гвард
+        кастомного фильтра — ДО чтения содержимого: конфиг чужого репозитория
+        не должен исполнять свой код. Режимы и размеры — одним ``ls-tree``;
+        бюджет команды резервируется по размерам по сортированным путям ДО
+        чтения блобов (карман его уже потратил первым), так что читаются
+        только влезшие. Концы строк — форма фильтра: диска для «родной» формы
+        нет.
+        """
+        if self._head_before is None or not rels:
+            return {}
+        entries = git_ops.tree_entries(
+            self._launch_root, rels, rev=self._head_before
+        )
+        if not entries:
+            return {}
+        max_source = _max_diff_source_bytes(self._ctx)
+        sizes = {
+            rel: entry.size
+            for rel, entry in entries.items()
+            if entry.mode in _REGULAR_FILE_MODES
+            and entry.size is not None
+            and entry.size <= max_source
+        }
+        filtered = git_ops.custom_filter_paths(self._launch_root, list(sizes))
+        reserved = [
+            rel
+            for rel in sorted(sizes)
+            if rel not in filtered and self._delete_budget.take(sizes[rel])
+        ]
+        blobs = git_ops.blobs_filtered_at(
+            self._launch_root, reserved, rev=self._head_before
+        )
+        return {
+            rel: (blob, _REGULAR_FILE_MODES[entries[rel].mode])
+            for rel, blob in blobs.items()
+            if blob is not None
+        }
+
+    def _capture_delete_base(
+        self,
+        store: SnapshotStore,
+        rel: str,
+        key: str,
+        content: bytes,
+        turn_id: str,
+    ) -> bool:
+        """Точная база удалённого пути — его блоб ``HEAD`` до команды.
+
+        Та же точная ступень, что у ``_capture_base``: путь был чист, «до» —
+        ``HEAD`` до команды без кастомного фильтра. Soft-fail.
+        """
+        try:
+            wrote = store.capture_session(
+                key, content, head_rev=self._head_before
+            )
+            if turn_id:
+                store.capture_turn(key, content, turn_id)
+            return wrote
+        except Exception:
+            _logger.warning(
+                "shell delta: база удаления не снята rel=%r",
+                rel,
+                exc_info=True,
+            )
+            return False
 
     def _plan(self, part: list[str]) -> list[tuple[str, str, _FileFacts]]:
         """Пути куска, которые канал пишет, — с ключом и фактами о файле, ОДИН раз.
@@ -948,8 +1065,8 @@ class ShellDelta:
         Возвращает ``(запись или None, байты базы для ``_pocket_capture_base``
         или None)``. Байты базы отдаются и для ``op="delete"`` — карманный
         подканал уже держит точные байты «до» в памяти, второй (git) запрос
-        для этого не нужен (в отличие от ``_capture_base`` git-подканала,
-        который для удалённого пути базу не снимает вовсе).
+        для этого не нужен (git-подканал читает «до» удалённого пути из
+        блоба ``HEAD`` до команды, ``_deleted_contents``).
         """
         abs_path = entry.abs_path
         before_sha256 = sha256_hex_of_bytes(entry.before_bytes)
@@ -1324,9 +1441,12 @@ class ShellDelta:
         hunks: str | None = None,
         key: str | None = None,
         file: _FileFacts | None = None,
+        deleted: tuple[bytes, int] | None = None,
     ) -> EditRecord | None:
         """Запись пути. ``hunks``, ``key`` и ``file`` — уже посчитанное куском
         (``_diffs_for``, ``_plan``); ``None`` — считается здесь, по одному.
+        ``deleted`` — байты «до» и режим пропавшего пути с зарезервированным
+        бюджетом (``_deleted_contents``); ``None`` — удаление без строк.
         """
         abs_path = self._abs(rel)
         if key is None:
@@ -1347,7 +1467,16 @@ class ShellDelta:
             file = _file_facts(abs_path)
 
         if not file.exists:
-            return _edit_record(key, turn_id, op="delete", flags=["no_diff"])
+            before, mode = deleted or (None, None)
+            return delete_record(
+                key,
+                turn_id,
+                before,
+                mode=mode,
+                budget=None,
+                context_lines=_hunk_context_lines(self._ctx),
+                max_chars=_max_diff_chars(self._ctx),
+            )
         if entry is None:
             # Путь ушёл из status, файл на месте: команда сама вернула его к
             # состоянию индекса (add / commit / restore) — показывать нечего.

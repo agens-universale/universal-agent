@@ -339,12 +339,13 @@ def test_command_deleting_tracked_file_records_delete(repo):
     recs = _records(threads_dir)
     assert [r.path for r in recs] == ["tracked.txt"]
     rec = recs[0]
+    # Строки удалённого отслеживаемого файла — из блоба HEAD до команды.
     assert rec.op == "delete"
-    assert rec.hunks == ""
-    assert rec.flags == ["no_diff"]
+    assert rec.flags == []
+    assert (rec.add, rec.del_) == (0, 2)
+    assert "-line1\n-line2\n" in rec.hunks
+    assert rec.mode == 0o644
     assert rec.after_sha256 is None
-    assert rec.add == 0
-    assert rec.del_ == 0
 
 
 def test_command_deleting_untracked_file_records_delete(repo):
@@ -1168,14 +1169,100 @@ def test_no_snapshot_for_oversize_record(repo):
     assert _snapshot_names(launch_root, ".gitorig") == []
 
 
-def test_no_snapshot_for_delete_record(repo):
+def test_deleted_tracked_file_gets_exact_base(repo):
+    """Удалённый командой чистый отслеживаемый файл получает точную базу —
+    блоб из HEAD до команды: такой записи годится откат."""
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(launch_root, "import os; os.remove('tracked.txt')")
     delta.after_and_record()
 
     assert [r.op for r in _records(threads_dir)] == ["delete"]
-    assert _snapshot_names(launch_root, ".gitorig") == []
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+    assert store.turn_baseline("tracked.txt", "turn-1") == b"line1\nline2\n"
+
+
+def test_deleted_symlink_and_filtered_file_have_no_lines(repo):
+    """Симлинк (блоб — текст цели) и файл с кастомным фильтром (конфиг
+    чужого репозитория не исполняем) — удаление без строк и без базы."""
+    launch_root, threads_dir = repo
+    require_symlinks(launch_root.parent)
+    (launch_root / ".gitattributes").write_bytes(b"f.txt filter=mangle\n")
+    (launch_root / "f.txt").write_bytes(b"secret\n")
+    os.symlink("tracked.txt", launch_root / "link")
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "link and filtered")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root, "import os; os.remove('link'); os.remove('f.txt')"
+    )
+    delta.after_and_record()
+
+    recs = _records(threads_dir)
+    assert {r.path: r.flags for r in recs} == {
+        "link": ["no_diff"],
+        "f.txt": ["no_diff"],
+    }
+    store = _snapshot_store(launch_root)
+    assert store.session_baseline("link") is None
+    assert store.session_baseline("f.txt") is None
+
+
+def test_mass_delete_respects_budget_and_batches(repo, monkeypatch):
+    """Бюджет команды резервируется по размерам из одного `ls-tree` ДО
+    чтения: блобы читаются только у влезших путей."""
+    launch_root, threads_dir = repo
+    for i in range(30):
+        (launch_root / f"f{i:02}.txt").write_bytes(b"x" * 99 + b"\n")
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "many")
+    ctx = _ctx(launch_root, threads_dir)
+    update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 1000})
+    ls_tree: list[list[str]] = []
+    cat_files: list[list[str]] = []
+    real_run_git = git_ops.run_git
+    real_many = git_ops.run_git_many
+
+    def run_git(root, args, **kwargs):
+        if "ls-tree" in args and "-l" in args:
+            ls_tree.append(list(args))
+        return real_run_git(root, args, **kwargs)
+
+    def run_git_many(root, argvs):
+        cat_files.extend(a for a in argvs if "cat-file" in a)
+        return real_many(root, argvs)
+
+    monkeypatch.setattr(git_ops, "run_git", run_git)
+    monkeypatch.setattr(git_ops, "run_git_many", run_git_many)
+    delta = ShellDelta.begin(ctx)
+    _run_command(
+        launch_root,
+        "import os\nfor i in range(30): os.remove(f'f{i:02}.txt')",
+    )
+    delta.after_and_record()
+
+    recs = _records(threads_dir)
+    assert len(recs) == 30
+    assert sum(1 for r in recs if not r.flags) == 10
+    assert len(ls_tree) == 1
+    assert len(cat_files) == 10
+
+
+@pytest.mark.skipif(os.name == "nt", reason="бит исполнения — не на Windows")
+def test_deleted_exec_file_records_mode(repo):
+    launch_root, threads_dir = repo
+    script = launch_root / "run.sh"
+    script.write_bytes(b"#!/bin/sh\necho hi\n")
+    os.chmod(script, 0o755)
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "exec")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, "import os; os.remove('run.sh')")
+    delta.after_and_record()
+
+    [rec] = _records(threads_dir)
+    assert rec.mode == 0o755
 
 
 def test_shell_channel_evicts_when_it_wrote_a_new_base(repo, monkeypatch):
