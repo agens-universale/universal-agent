@@ -162,7 +162,7 @@ def _restore(
         fd = os.open(
             tmp,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
-            0o666 if recorded_mode is None else 0o777,
+            0o666,
         )
         with os.fdopen(fd, "wb") as fh:
             fh.write(baseline)
@@ -184,13 +184,17 @@ def _restore(
 def _apply_mode(path: Path, mode: int) -> None:
     """Записанный режим удалённого файла — не шире umask.
 
-    Временный файл создан с ``0o777`` под umask (``_restore``), и режим
-    пересекается с его правами: секрет ``0600`` при umask ``022`` остаётся
-    ``0600``, а ``0644`` при umask ``077`` становится ``0600``, а не
-    раскрывается. Отказ молчаливый, как у ``_carry_mode``.
+    Временный файл создан с ``0o666`` под umask (``_restore``). Допустимые
+    права — его права плюс исполнение там, где есть чтение; итог —
+    записанный режим в их пределах: секрет ``0600`` при umask ``022``
+    остаётся ``0600``, ``0644`` при umask ``077`` становится ``0600``, а
+    ``0755`` при umask ``022`` — ``0755``. Отказ молчаливый, как у
+    ``_carry_mode``: файл остаётся по umask и без исполнения.
     """
     try:
-        os.chmod(path, mode & stat.S_IMODE(os.stat(path).st_mode))
+        current = stat.S_IMODE(os.stat(path).st_mode)
+        allowed = current | ((current & 0o444) >> 2)
+        os.chmod(path, mode & allowed)
     except OSError:
         pass
 

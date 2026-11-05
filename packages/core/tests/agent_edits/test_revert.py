@@ -444,3 +444,28 @@ def test_reverting_deleted_file_mode_respects_umask(
 
     assert out.restored == [key]
     assert stat.S_IMODE((tmp_path / key).stat().st_mode) == expected
+
+
+@pytest.mark.skipif(os.name == "nt", reason="биты доступа POSIX")
+def test_reverting_deleted_exec_file_is_not_executable_if_chmod_fails(
+    tmp_path, monkeypatch
+):
+    """chmod отказал — файл остаётся с режимом по umask без исполнения, а
+    не с открытыми битами временного файла."""
+    key = "a.sh"
+    entry = _entry(key, kind="deleted", restore_mode=0o755)
+
+    def _refuse(*_args, **_kwargs):
+        raise PermissionError("chmod запрещён")
+
+    monkeypatch.setattr(os, "chmod", _refuse)
+    previous = os.umask(0o022)
+    try:
+        out = revert_paths(
+            [key], {key: entry}, lambda k: b"#!/bin/sh\n", str(tmp_path)
+        )
+    finally:
+        os.umask(previous)
+
+    assert out.restored == [key]
+    assert stat.S_IMODE((tmp_path / key).stat().st_mode) == 0o644
