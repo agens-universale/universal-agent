@@ -305,10 +305,33 @@ def test_cancel_waits_for_cooperative_worker(tmp_path, monkeypatch):
 
 
 def test_cancel_before_worker_start_skips_run_context(tmp_path, monkeypatch):
-    """A worker still queued in the pool must not start the run."""
+    """A worker still queued in the pool must not start the run.
+
+    It starts only after the grace ran out and `_dump_outcome` closed the
+    timings: the worker opens them outside the cancel lock (the first open
+    imports the agent loop, and a cancel on Harbor's loop would wait on that
+    lock), sees the cancel and closes them again.
+    """
+    import adapters.gc_cli_external as adapter
+    from adapters import step_timings
+
+    monkeypatch.setattr(adapter, "_STOP_GRACE_S", 0.05)
     agent, context, ctx_calls = _cancel_harness(
         tmp_path, monkeypatch, lambda executor: None
     )
+    sinks = []
+    attached_under_lock = []
+
+    class RecordingTimings(step_timings.StepTimings):
+        def __init__(self, path):
+            super().__init__(path)
+            sinks.append(self)
+
+        def attach(self):
+            attached_under_lock.append(agent._cancel_lock.locked())
+            super().attach()
+
+    monkeypatch.setattr(adapter, "StepTimings", RecordingTimings)
     release = threading.Event()
     submitted = []
 
@@ -325,19 +348,22 @@ def test_cancel_before_worker_start_skips_run_context(tmp_path, monkeypatch):
         try:
             await _wait_until(lambda: len(submitted) == 2)
             task.cancel()
-            await _wait_until(lambda: agent._cancelled)
+            with pytest.raises(asyncio.CancelledError):
+                await task
         finally:
             release.set()
-        await task
+            pool.shutdown(wait=True)
 
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(scenario())
+    asyncio.run(scenario())
 
     assert ctx_calls == []
     assert context.metadata["total_steps"] == 0
-    # Поток, стартовавший после отмены, не открывает тайминги: иначе файл,
-    # закрытый в `_dump_outcome`, открылся бы снова и остался открытым.
-    assert not (tmp_path / "timings.jsonl").exists()
+    assert attached_under_lock == [False]
+    # Открытые после `_dump_outcome` тайминги поток закрывает сам: иначе
+    # файл и маршрут записей этого потока остались бы открытыми.
+    (timings,) = sinks
+    assert timings._fh is None
+    assert timings not in step_timings._sinks.values()
 
 
 def test_cancel_abandons_worker_after_grace(tmp_path, monkeypatch, caplog):

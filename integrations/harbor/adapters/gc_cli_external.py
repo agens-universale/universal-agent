@@ -847,16 +847,19 @@ class GcCliExternal(BaseAgent):
         def _run_loop():
             # Отмена, пока поток стоял в очереди пула: `shield` ниже её не
             # снимает, и без этой проверки поток ушёл бы в дискавери MCP
-            # против уже снятого окружения. Проверка и `attach` — под одним
-            # локом: отмена либо видна до `attach`, либо приходит после, и
-            # тогда `_dump_outcome` закрывает уже открытый файл таймингов.
-            # Иначе в щели между ними отмена с grace и `_dump_outcome` успели
-            # бы закрыть тайминги, а поток открыл бы их снова.
+            # против уже снятого окружения. `attach` — до проверки и вне
+            # лока: первый `attach` импортирует цикл агента, а ветка отмены
+            # берёт тот же лок на loop Harbor и держала бы все трайлы. Отмена
+            # до проверки — поток сам закрывает тайминги (`_dump_outcome`
+            # мог закрыть их раньше `attach`), после — их закрывает
+            # `_dump_outcome`; `close` идемпотентен.
+            # sink routing is per thread — bind inside the worker
+            timings.attach()
             with self._cancel_lock:
-                if self._cancelled:
-                    return None
-                # sink routing is per thread — bind inside the worker
-                timings.attach()
+                cancelled = self._cancelled
+            if cancelled:
+                timings.close()
+                return None
             return asyncio.run(_agent_run())
 
         # Агент идёт СВОИМ `asyncio.run` в рабочем потоке — не через портал и не
