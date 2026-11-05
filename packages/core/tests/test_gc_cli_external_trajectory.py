@@ -374,7 +374,7 @@ def test_cancel_abandons_worker_after_grace(tmp_path, monkeypatch, caplog):
 
     def arun(_executor):
         started.set()
-        release.wait(2)
+        release.wait(10)
 
     agent, context, _ = _cancel_harness(tmp_path, monkeypatch, arun)
 
@@ -390,7 +390,9 @@ def test_cancel_abandons_worker_after_grace(tmp_path, monkeypatch, caplog):
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(scenario())
 
-    assert elapsed[0] < 1
+    # Отличает 0.2 с ожидания от 10 с блокировки потока; в замер входит и
+    # запуск агента, поэтому запас на нагруженной машине.
+    assert elapsed[0] < 5
     assert "did not finish cleanly" in caplog.text
     assert (tmp_path / "trajectory.json").exists()
 
