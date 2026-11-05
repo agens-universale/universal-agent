@@ -311,9 +311,10 @@ async def test_huge_failure_output_is_bounded():
     )
     with pytest.raises(PermissionError) as ei:
         await huge_stderr.walk_entries("/w")
-    assert str(ei.value).startswith("find: a: Permission denied")
-    assert "[середина опущена]" in str(ei.value)
-    assert len(str(ei.value)) <= 500
+    message = str(ei.value)
+    assert message.startswith(prefix + ": find: a: Permission denied")
+    assert "[середина опущена]" in message
+    assert len(message) <= len(prefix) + 2 + 500
 
 
 @pytest.mark.parametrize(
@@ -366,3 +367,54 @@ async def test_failure_tolerates_missing_output_streams():
     with pytest.raises(OSError) as ei:
         await be.listdir("/w")
     assert str(ei.value) == "find failed (exit 1): /w"
+
+
+_MISSING = "No such file or directory"
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda be: be.getsize("/w/a"),
+        lambda be: be.copy("/w/a", "/w/b"),
+        lambda be: be.makedirs("/w/d"),
+        lambda be: be.read_head_bytes("/w/a", 8),
+        lambda be: be.sha256("/w/a"),
+        lambda be: be.append("/w/a", "x"),
+    ],
+    ids=["getsize", "copy", "makedirs", "head", "sha256", "append"],
+)
+async def test_every_command_failure_is_classified(call):
+    """Регресс: шесть операций обходили классификацию — отсутствующий файл
+    давал ``OSError``, а ``stat()`` — ``FileNotFoundError``."""
+    be = RecordingShell(
+        answers={"": ExecResult(return_code=1, stderr=f"x: {_MISSING}")}
+    )
+    with pytest.raises(FileNotFoundError):
+        await call(be)
+
+
+async def test_direct_command_timeout_names_operation():
+    be = RecordingShell(
+        answers={"stat -c": ExecResult(return_code=None, timed_out=True)}
+    )
+    with pytest.raises(OSError) as ei:
+        await be.getsize("/w/a")
+    assert str(ei.value) == "stat timed out: /w/a"
+
+
+async def test_permission_denied_names_operation_and_path():
+    be = RecordingShell(
+        answers={
+            "stat -c": ExecResult(
+                return_code=1,
+                stderr="stat: cannot statx '/w/a': Permission denied\n",
+            )
+        }
+    )
+    with pytest.raises(PermissionError) as ei:
+        await be.stat("/w/a")
+    assert str(ei.value) == (
+        "stat failed (exit 1): /w/a: "
+        "stat: cannot statx '/w/a': Permission denied"
+    )

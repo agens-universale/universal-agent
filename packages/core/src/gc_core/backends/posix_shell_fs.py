@@ -130,7 +130,7 @@ class PosixShellFsMixin:
         # columns; ``b64decode(validate=False)`` ignores the newlines.
         res = await self._afs_exec(f"head -c {n} {shlex.quote(path)} | base64")
         if res.return_code != 0:
-            raise self._command_failure("head", path, res)
+            raise self._fs_failure(path, res, what="head")
         if res.stdout_hit_capture_cap:
             raise OSError(f"head output exceeded capture ceiling: {path}")
         # Как у полного скачивания: переводы строк снимаем явно, остальное строго —
@@ -196,13 +196,13 @@ class PosixShellFsMixin:
     async def getsize(self, path: str) -> int:
         res = await self._afs_exec(f"stat -c %s {shlex.quote(path)}")
         if res.return_code != 0:
-            raise self._command_failure("stat", path, res)
+            raise self._fs_failure(path, res, what="stat")
         return int(res.stdout.strip())
 
     async def sha256(self, path: str) -> str:
         res = await self._afs_exec(f"sha256sum {shlex.quote(path)}")
         if res.return_code != 0:
-            raise self._command_failure("sha256sum", path, res)
+            raise self._fs_failure(path, res, what="sha256sum")
         return res.stdout.split()[0]
 
     async def stat(self, path: str) -> dict:
@@ -267,42 +267,49 @@ class PosixShellFsMixin:
     def _failure_detail(res: Any) -> str:
         """Причина отказа для сообщения модели: stderr, а при пустом —
         stdout (Harbor-docker сливает stderr в stdout); не длиннее предела,
-        начало и конец. Классификация читает сырой stderr, не это.
+        начало и конец. Классификация читает stderr, не это.
         Вывод бывает в десятки мегабайт: сначала обрезка, потом ``strip``."""
         err = res.stderr or ""
         text = err if err and not err.isspace() else (res.stdout or "")
         return head_tail_preview(text, _FAILURE_DETAIL_CHARS).strip()
 
     @classmethod
-    def _command_failure(cls, what: str, path: str, res: Any) -> OSError:
-        """Отказ команды ФС: операция, код выхода и путь, за ними — причина
-        (если есть). Без них модель видит обрывок вывода, не зная, что
-        и где не удалось."""
+    def _failure_message(cls, what: str, path: str, res: Any) -> str:
+        """Операция, код выхода и путь, за ними — причина (если есть). Без
+        них модель видит обрывок вывода, не зная, что и где не удалось."""
         message = f"{what} failed (exit {res.return_code}): {path}"
         detail = cls._failure_detail(res)
-        return OSError(f"{message}: {detail}" if detail else message)
+        return f"{message}: {detail}" if detail else message
+
+    @staticmethod
+    def _stderr_for_classification(res: Any) -> str:
+        """Ограниченный срез stderr в нижнем регистре: вывод бывает в
+        десятки мегабайт, полная копия ради поиска маркера не нужна.
+        stdout не читаем: частичный обход может упомянуть вложенный
+        отсутствующий файл."""
+        err = res.stderr or ""
+        return head_tail_preview(err, _FAILURE_DETAIL_CHARS).lower()
 
     @classmethod
     def _fs_failure(cls, path: str, res: Any, *, what: str) -> OSError:
         """Отказ команды ФС: «файла нет» — только когда так сказала та сторона.
         Таймаут (код ``None``), пустой stderr, permission denied — ``OSError``:
         иначе модель решала бы, что файла нет, и шла его создавать."""
-        err = (res.stderr or "").strip()
-        low = err.lower()
         if getattr(res, "timed_out", False):
             return OSError(f"{what} timed out: {path}")
+        low = cls._stderr_for_classification(res)
         if "no such file" in low:
             return FileNotFoundError(path)
+        message = cls._failure_message(what, path, res)
         if "permission denied" in low:
-            return PermissionError(cls._failure_detail(res))
-        return cls._command_failure(what, path, res)
+            return PermissionError(message)
+        return OSError(message)
 
     @classmethod
     def _find_failure(cls, path: str, res: Any) -> OSError:
         """Отказ ``find``: busybox без ``-printf`` — ``OSError`` с подсказкой,
         остальное — как у любой команды ФС (``_fs_failure``)."""
-        err = (res.stderr or "").strip()
-        low = err.lower()
+        low = cls._stderr_for_classification(res)
         if any(
             m in low
             for m in (
@@ -404,7 +411,7 @@ class PosixShellFsMixin:
                 f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}"
             )
             if res.return_code != 0:
-                raise self._command_failure("append", path, res)
+                raise self._fs_failure(path, res, what="append")
         finally:
             # Best-effort: remove remote_tmp on every path (upload, exec or
             # non-zero rc).
@@ -416,12 +423,12 @@ class PosixShellFsMixin:
     async def copy(self, src: str, dst: str) -> None:
         res = await self._afs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
         if res.return_code != 0:
-            raise self._command_failure("cp", f"{src} -> {dst}", res)
+            raise self._fs_failure(f"{src} -> {dst}", res, what="cp")
 
     async def makedirs(self, path: str) -> None:
         res = await self._afs_exec(f"mkdir -p {shlex.quote(path)}")
         if res.return_code != 0:
-            raise self._command_failure("mkdir", path, res)
+            raise self._fs_failure(path, res, what="mkdir")
 
     # --- background ---
     async def aspawn_background(
