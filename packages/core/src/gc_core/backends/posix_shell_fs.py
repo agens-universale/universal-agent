@@ -144,7 +144,12 @@ class PosixShellFsMixin:
         # ``StreamReader`` readline (64 KiB). An unwrapped blob is one line and
         # raises LimitOverrunError before we see stdout. Default wrap is 76
         # columns; ``b64decode(validate=False)`` ignores the newlines.
-        res = await self._afs_exec(f"head -c {n} {shlex.quote(path)} | base64")
+        # Код конвейера — код base64 (в dash нет pipefail): пустое чтение
+        # открывает файл заранее, отказ несёт настоящий stderr с путём.
+        q = shlex.quote(path)
+        res = await self._afs_exec(
+            f"head -c 0 {q} >/dev/null && head -c {n} {q} | base64"
+        )
         if res.return_code != 0:
             raise self._fs_failure(path, res, what="head")
         if res.stdout_hit_capture_cap:

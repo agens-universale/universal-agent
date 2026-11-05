@@ -660,10 +660,7 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     backend = HarborBackend(env, loop_in_thread)
     sample = await backend.read_head_bytes("/work/a.bin", 3)
     assert sample == raw
-    assert any(
-        c.startswith("head -c 3 ") and c.endswith("| base64")
-        for c in env.calls
-    )
+    assert any("head -c 3 " in c and c.endswith("| base64") for c in env.calls)
 
 
 async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(

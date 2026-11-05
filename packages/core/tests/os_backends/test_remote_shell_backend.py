@@ -187,6 +187,16 @@ async def test_read_missing_raises_file_not_found(be, tmp_path):
         await be.read(str(tmp_path / "nope"))
 
 
+async def test_read_head_bytes_of_missing_file_is_not_empty(be, tmp_path):
+    # Код конвейера — код base64: без проверки открытия отсутствующий файл
+    # читался бы пустым.
+    with pytest.raises(FileNotFoundError):
+        await be.read_head_bytes(str(tmp_path / "nope"), 8)
+    p = tmp_path / "blob.bin"
+    p.write_bytes(b"\x00\xffabcdef")
+    assert await be.read_head_bytes(str(p), 4) == b"\x00\xffab"
+
+
 async def test_run_python_feeds_code_on_stdin(be):
     res = await be.arun_python("import sys; print(sys.argv, 2+2)")
     assert res.return_code == 0 and res.stdout.strip().endswith("4")
