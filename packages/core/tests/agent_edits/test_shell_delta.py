@@ -1923,6 +1923,22 @@ def test_edit_committed_by_command_is_recorded(repo):
     assert by_path["tracked.txt"].op == "shell"
     assert by_path["tracked.txt"].add == 1
     _assert_no_base_no_mark(launch_root, "tracked.txt")
+    _assert_commit_mark(launch_root, "tracked.txt")
+
+
+def _assert_commit_mark(launch_root, rel: str) -> None:
+    """Закоммиченный командой путь несёт отметку коммита с ревизией HEAD до
+    команды — по ней «Сессия» кладёт его в «закоммичено» (отката она не
+    даёт). Фикстура ``repo`` коммитит ровно один раз, до команды."""
+    head_before = subprocess.run(
+        ["git", "rev-parse", "HEAD~1"],
+        cwd=str(launch_root),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    store = _snapshot_store(launch_root)
+    assert store.committed_head_rev(rel) == head_before
 
 
 def _assert_no_base_no_mark(launch_root, rel: str) -> None:
@@ -1953,6 +1969,7 @@ def test_file_created_and_committed_by_command_is_shell_without_mark(repo):
     assert by_path["new.txt"].op == "shell"
     assert by_path["new.txt"].add == 1
     _assert_no_base_no_mark(launch_root, "new.txt")
+    _assert_commit_mark(launch_root, "new.txt")
 
 
 def test_old_ignored_file_force_added_and_committed_is_not_created(repo):
@@ -2019,6 +2036,7 @@ def test_file_deleted_and_committed_by_command_has_lines(repo):
     assert (rec.op, rec.del_) == ("delete", 2)
     assert "-line1" in rec.hunks
     _assert_no_base_no_mark(launch_root, "tracked.txt")
+    _assert_commit_mark(launch_root, "tracked.txt")
 
 
 def test_paths_committed_by_command_are_not_revertable(repo):

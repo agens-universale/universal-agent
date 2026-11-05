@@ -800,7 +800,8 @@ class ShellDelta:
         HEAD до команды, но без базы и без отметки создания — откатить его
         нельзя: коммит в окне команды мог сделать кто-то ещё (параллельный
         субагент, пользователь), гейт ``_own_commits`` его не отличит, и
-        откат затёр бы чужую закоммиченную работу.
+        откат затёр бы чужую закоммиченную работу. Отметка коммита
+        (``mark_committed``) нужна только группе «закоммичено» «Сессии».
         """
         planned = self._plan(part)
         diffs = self._diffs_for(planned, before, after)
@@ -838,9 +839,12 @@ class ShellDelta:
             self._remember(record)
             if record.op == "create":
                 self._mark_created(store, rel, record.path)
-            elif not record.hunks or rel in self._committed:
+            elif rel in self._committed:
                 # Закоммиченный командой путь создания не бывает (в status
                 # после его нет, ``_created_by_command``) — и базы не пишется.
+                # Отметка коммита только кладёт его в «закоммичено».
+                self._mark_committed(store, rel, record.path)
+            elif not record.hunks:
                 continue
             elif record.op == "shell":
                 exact = self._exact_step(clean_before, _xy(entry))
@@ -875,6 +879,20 @@ class ShellDelta:
                 store, rel, key, content, turn_id
             )
         return wrote_base
+
+    def _mark_committed(
+        self, store: SnapshotStore, rel: str, key: str
+    ) -> None:
+        """Отметка коммита пути с ревизией ДО команды; свой try — как у
+        ``_mark_created``: таймаут замка индекса не теряет остаток команды."""
+        try:
+            store.mark_committed(key, head_rev=self._head_before)
+        except Exception:
+            _logger.warning(
+                "shell delta: отметка коммита не записана rel=%r",
+                rel,
+                exc_info=True,
+            )
 
     def _mark_created(self, store: SnapshotStore, rel: str, key: str) -> None:
         """Отметка создания пути — ступень HEAD для пути без базы.

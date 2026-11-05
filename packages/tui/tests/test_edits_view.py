@@ -3632,3 +3632,64 @@ def test_view_after_a_commit_asks_git_status_only_about_journal_paths(
         assert tail and all(
             "p" in spec and "unrelated" not in spec for spec in tail
         ), args
+
+
+def _git_run(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args], cwd=str(root), check=True, capture_output=True
+    )
+
+
+def _committed_by_command(tmp_path) -> _Workspace:
+    """Команда правит, создаёт и удаляет пути и сама их коммитит: записи без
+    базы и без отметки создания, только отметка коммита (ревизия HEAD до
+    команды) — так пишет их шелл-канал."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("edit.py", "v1\n")
+    ws.write("gone.py", "a\nb\n")
+    _git_run(ws.root, "add", "-A")
+    _git_run(ws.root, "commit", "-qm", "seed")
+    head_before = rev_parse_head(ws.root)
+    ws.write("edit.py", "v2\n")
+    ws.write("new.py", "n\n")
+    (ws.root / "gone.py").unlink()
+    _git_run(ws.root, "add", "-A")
+    _git_run(ws.root, "commit", "-qm", "by command")
+    ws.journal.append(_rec("edit.py", op="shell", ts=1.0))
+    ws.journal.append(_rec("new.py", op="shell", ts=2.0, add=1, del_=0))
+    ws.journal.append(_rec("gone.py", op="delete", ts=3.0, add=0, del_=2))
+    for rel in ("edit.py", "new.py", "gone.py"):
+        ws.store.mark_committed(rel, head_rev=head_before)
+    return ws
+
+
+def test_paths_committed_by_command_settle_as_committed(tmp_path):
+    """Отметка коммита возвращает такие пути в «закоммичено» — как до того,
+    как они лишились базы (откат их коммита мог затереть чужую работу)."""
+    ws = _committed_by_command(tmp_path)
+
+    view = ws.view.session_view(SOURCE_SESSION)
+
+    assert [row.entry.path for row in view.active] == []
+    assert sorted((row.path, row.reason) for row in view.settled) == [
+        ("edit.py", SETTLED_COMMIT),
+        ("gone.py", SETTLED_COMMIT),
+        ("new.py", SETTLED_COMMIT),
+    ]
+    targets = ws.view.revert_targets(
+        SOURCE_SESSION, ["edit.py", "new.py", "gone.py"]
+    )
+    assert {target.kind for target in targets} == {"skip"}
+
+
+def test_paths_committed_by_command_stay_unrevertable_in_turn(tmp_path):
+    """«Ход» отметку коммита не читает: строки видны, отката нет."""
+    ws = _committed_by_command(tmp_path)
+
+    view = ws.view.session_view(SOURCE_TURN)
+
+    assert {row.entry.path: row.entry.revertable for row in view.active} == {
+        "edit.py": False,
+        "new.py": False,
+        "gone.py": False,
+    }
