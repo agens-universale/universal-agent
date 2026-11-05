@@ -52,6 +52,8 @@ _NO_PRINTF_FIND = re.compile(
     re.IGNORECASE,
 )
 _PERMISSION_DENIED = re.compile("permission denied", re.IGNORECASE)
+#: Путь в кавычках в строке ошибки: GNU ``'P'``, старые coreutils ``‘P’``.
+_QUOTED = re.compile("'[^']*'|‘[^’]*’")
 
 
 def _missing_file(path: str) -> FileNotFoundError:
@@ -306,12 +308,18 @@ class PosixShellFsMixin:
     def _names_missing(path: str, stderr: str) -> bool:
         """Строка stderr называет именно этот путь и говорит «нет файла».
 
-        Путь — ``'P'`` (GNU stat/head/cp/find) или ``P:`` (sha256sum,
-        busybox, ошибки перенаправления sh) после начала строки, пробела или
-        кавычки: ``/w/a`` не совпадает с ``/w/a/b`` и ``/x/w/a``. Ищем по
-        сырому stderr без копий: вывод бывает в десятки мегабайт."""
+        Путь — в кавычках (``'P'`` у GNU stat/head/cp/find; ``‘P’`` и
+        ```P'`` у coreutils до 8.25) или ``P:`` (sha256sum, busybox, ошибки
+        перенаправления sh) после начала строки, пробела или кавычки:
+        ``/w/a`` не совпадает с ``/w/a/b`` и ``/x/w/a``. Ищем по сырому stderr
+        без копий: вывод бывает в десятки мегабайт. Промежуток до «no such
+        file» ограничен: иначе строка с путём в тысячах мест разбиралась бы
+        за квадратичное время."""
         p = re.escape(path)
-        pattern = rf"(?:'{p}'|(?:^|[ '\"]){p}:).*(?i:no such file)"
+        pattern = (
+            rf"(?:[‘`']{p}['’]|(?:^|[ '\"]){p}:)"
+            r".{0,80}(?i:no such file)"
+        )
         return re.search(pattern, stderr, re.MULTILINE) is not None
 
     @classmethod
@@ -336,7 +344,10 @@ class PosixShellFsMixin:
     def _find_failure(cls, path: str, res: Any) -> OSError:
         """Отказ ``find``: busybox без ``-printf`` — ``OSError`` с подсказкой,
         остальное — как у любой команды ФС (``_fs_failure``)."""
-        if _NO_PRINTF_FIND.search(res.stderr or ""):
+        # busybox пишет ошибку опции первой строкой. Пути в кавычках
+        # вырезаем: «printf» в имени файла — не маркер.
+        first = re.match(r"\s*([^\n]{0,500})", res.stderr or "").group(1)
+        if _NO_PRINTF_FIND.search(_QUOTED.sub("", first)):
             return OSError(
                 "GNU find with -printf is required on the backend: "
                 f"{cls._failure_detail(res)}"

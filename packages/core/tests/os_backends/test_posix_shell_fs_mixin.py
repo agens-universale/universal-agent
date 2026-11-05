@@ -2,6 +2,7 @@
 """PosixShellFsMixin: файловые операции как POSIX-команды поверх трёх примитивов."""
 
 import shlex
+import time
 
 import pytest
 from gc_core.backends.posix_shell_fs import PosixShellFsMixin
@@ -463,16 +464,62 @@ async def test_classification_sees_markers_in_the_middle_of_long_stderr():
     )
     with pytest.raises(PermissionError):
         await denied.walk_entries("/w")
+
+
+async def test_busybox_marker_is_read_from_the_first_line():
+    """busybox пишет ошибку опции первой строкой, дальше — справку."""
     busybox = RecordingShell(
         answers={
             "-printf": ExecResult(
                 return_code=1,
-                stderr=noise + "find: unrecognized: -printf\n" + noise,
+                stderr="find: unrecognized: -printf\n" + "usage\n" * 200,
             )
         }
     )
     with pytest.raises(OSError, match="GNU find with -printf is required"):
         await busybox.listdir("/w")
+
+
+async def test_printf_in_a_path_is_not_a_busybox_marker():
+    """Регресс: путь с «printf» (частый в C-проектах) в строке отказа
+    давал подсказку про GNU find вместо «нет доступа»."""
+    be = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1,
+                stderr="find: '/w/src/printf.c': Permission denied\n",
+            )
+        }
+    )
+    with pytest.raises(PermissionError):
+        await be.walk_entries("/w")
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "stat: cannot stat \u2018/w/a\u2019: No such file or directory",
+        "stat: cannot stat `/w/a': No such file or directory",
+    ],
+    ids=["utf8-quotes", "c-locale-quotes"],
+)
+async def test_old_coreutils_quotes_name_the_path(stderr):
+    """coreutils до 8.25 (RHEL/CentOS 7) берут путь в ‘P’ или `P'."""
+    be = RecordingShell(answers={"": ExecResult(return_code=1, stderr=stderr)})
+    with pytest.raises(FileNotFoundError):
+        await be.getsize("/w/a")
+
+
+async def test_path_repeated_on_one_line_is_classified_fast():
+    """Регресс: промежуток между путём и «no such file» не ограничен —
+    строка с путём в тысячах мест разбиралась секунды."""
+    stderr = "'/w/a' " * 20_000 + "\n"
+    be = RecordingShell(answers={"": ExecResult(return_code=1, stderr=stderr)})
+    begin = time.monotonic()
+    with pytest.raises(OSError) as ei:
+        await be.getsize("/w/a")
+    assert time.monotonic() - begin < 2
+    assert not isinstance(ei.value, FileNotFoundError)
 
 
 async def test_direct_command_timeout_names_operation():
