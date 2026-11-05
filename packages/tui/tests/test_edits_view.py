@@ -3693,3 +3693,32 @@ def test_paths_committed_by_command_stay_unrevertable_in_turn(tmp_path):
         "new.py": False,
         "gone.py": False,
     }
+
+
+def test_accepted_copy_of_a_path_deleted_again_stays_revertable(tmp_path):
+    """Правило закоммиченного удаления верит ступени, если она есть.
+
+    Удаление закоммичено, агент пересоздал файл, пользователь принял копию,
+    затем агент снова удалил файл: путь отсутствует и в HEAD, и на диске, но
+    ступень — принятая копия, и строка с откатом к ней остаётся видна."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("x.py", "orig\n")
+    _git_run(ws.root, "add", "-A")
+    _git_run(ws.root, "commit", "-qm", "seed")
+    ws.session_base("x.py", "orig\n")
+    ws.write("x.py", "agent\n")
+    ws.journal.append(_rec("x.py", op="edit", ts=1.0))
+    _git_run(ws.root, "rm", "-qf", "x.py")
+    _git_run(ws.root, "commit", "-qm", "rm")
+    ws.write("x.py", "recreated\n")
+    ws.journal.append(_rec("x.py", op="edit", ts=2.0))
+    ws.view.session_view(SOURCE_SESSION)
+    ws.view.accept(["x.py"])
+    (ws.root / "x.py").unlink()
+    _git_run(ws.root, "reset", "-q", "--", "x.py")
+    ws.journal.append(_rec("x.py", op="delete", ts=3.0, add=0, del_=1))
+
+    view = ws.view.session_view(SOURCE_SESSION)
+
+    assert [row.entry.path for row in view.active] == ["x.py"]
+    assert view.settled == []

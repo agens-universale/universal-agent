@@ -1516,7 +1516,9 @@ class EditsView:
 
         Последней идёт отметка коммита (путь закоммичен шелл-командой, базы у
         него нет): снимка нет — ступени HEAD и отката нет, признак служит
-        только группе «закоммичено» (``_settled_reasons``).
+        только группе «закоммичено» (``_settled_reasons``). Отметка переживает
+        ``.orig``: вытеснит LRU базу живого треда — источником ревизии снова
+        станет старая отметка коммита; это меняет только группировку.
 
         Ревизия совпала с текущей — HEAD с тех пор не двигался, коммитов не
         было: такие пути отсеиваются БЕЗ обращения к git, и в обычной сессии
@@ -1970,13 +1972,11 @@ class EditsView:
                         elif (
                             rel in self._session_committed
                             and rel not in status_paths
-                            and self._ladder_facts.head_absent(rel)
+                            and self._head_deleted(rel)
                         ):
                             # Коммит удалил путь, и на диске его нет: закоммиченное
                             # «файла нет» и есть текущее состояние. `ls_files` такого
                             # пути не знает — правило выше его бы не поймало.
-                            # Факт спрашивается у git, а не у ступени: у пути,
-                            # закоммиченного командой, снимка — и ступени — нет.
                             settled.add(rel)
 
         return {
@@ -1987,6 +1987,18 @@ class EditsView:
             )
             for key in settled
         }
+
+    def _head_deleted(self, rel: str) -> bool:
+        """Удаление пути закоммичено в этой сессии, и файла нет и на диске.
+
+        Есть ступень — верим ей: удаление, только если это ``STEP_HEAD`` без
+        байтов (принятая ступень или фильтр git держат строку с откатом).
+        Ступени нет (путь закоммичен командой: снимка нет) — факт у git.
+        """
+        step = self._session_ladder.get(rel)
+        if step is not None:
+            return step.kind == STEP_HEAD and step.content is None
+        return self._ladder_facts.head_absent(rel)
 
     def _settled_rows(
         self, records: List[EditRecord], reasons: Dict[str, str]
