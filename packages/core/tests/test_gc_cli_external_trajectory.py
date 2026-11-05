@@ -320,7 +320,7 @@ def test_cancel_before_worker_start_skips_run_context(tmp_path, monkeypatch):
     async def scenario():
         pool = Pool(max_workers=1)
         asyncio.get_running_loop().set_default_executor(pool)
-        pool.submit(release.wait, 1)
+        pool.submit(release.wait, 10)
         task = asyncio.create_task(agent.run("do X", object(), context))
         try:
             await _wait_until(lambda: len(submitted) == 2)
