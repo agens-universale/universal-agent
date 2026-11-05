@@ -4,6 +4,7 @@ import copy
 import functools
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
@@ -369,6 +370,19 @@ def _network_params(
     return verify, cert, False, limit, proxy, embedded
 
 
+def _probing(
+    ctx: Any,
+    resolved: Optional[ResolvedModel],
+    isolated_timeout_sec: Optional[float],
+) -> AbstractContextManager[bool]:
+    """Право пробы на время вызова (спека model-breaker §2.2). Изолированный
+    вызов предохранитель не взводит — и права не берёт."""
+    router = getattr(ctx, "model_router", None)
+    if isolated_timeout_sec is not None or router is None:
+        return nullcontext(False)
+    return router.probing(resolved)
+
+
 async def _asend_chat_completion_text(
     *,
     ctx: Any,
@@ -440,15 +454,6 @@ async def _asend_chat_completion_text(
         config_proxy,
         retry_embedded_choice_errors,
     ) = _network_params(settings, resolved, isolated_timeout_sec)
-    router = getattr(ctx, "model_router", None)
-    probe = (
-        isolated_timeout_sec is None
-        and router is not None
-        and router.take_probe(resolved)
-    )
-    if probe:
-        use_retry = False
-
     if prepared is not None:
 
         def _payload_factory(requested_max_tokens):
@@ -464,8 +469,11 @@ async def _asend_chat_completion_text(
             return payload
 
     usage_category = category_for_request_label(request_label)
-    with usage_scope(
-        getattr(state, "usage", None), usage_category, "chat_completions"
+    with (
+        _probing(ctx, resolved, isolated_timeout_sec) as probe,
+        usage_scope(
+            getattr(state, "usage", None), usage_category, "chat_completions"
+        ),
     ):
         res, _call_data = await _arequest_admitted_chat_completion(
             ctx=ctx,
@@ -478,7 +486,7 @@ async def _asend_chat_completion_text(
             url=url,
             verify=verify,
             cert=cert,
-            use_retry=use_retry,
+            use_retry=use_retry and not probe,
             retry_embedded_choice_errors=retry_embedded_choice_errors,
             salvage_reasoning=False,
             logger=getattr(ctx, "logger", None),

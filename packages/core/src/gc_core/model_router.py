@@ -19,10 +19,12 @@ Temporal). Трипает его любой
 
 from __future__ import annotations
 
+import asyncio
 import threading
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from gc_core.config_modules.model_registry import (
     LEVEL_FALLBACK,
@@ -31,7 +33,9 @@ from gc_core.config_modules.model_registry import (
     configured_choice,
     effective_choice,
 )
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.settings import settings_of
+from gc_core.user_stop import UserStopInterrupt
 
 # Канонический реестр потребителей (спека §5.1). `subagent:<agent_name>` — отдельный
 # префиксный consumer id, не перечислимый статически здесь (канонический реестр имён
@@ -49,6 +53,9 @@ CONSUMERS = (
     "routing_judge",
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
+
+# Обрыв вызова до ответа модели: право пробы при них возвращается.
+_CALL_STOPS = (asyncio.CancelledError, ModelRequestStopped, UserStopInterrupt)
 
 
 # Привязки assign, у которых значение читается скалярным полем AssignConfig (все,
@@ -197,6 +204,13 @@ class CircuitBreaker:
         """Атомарно: True, если этот вызов и есть проба алиаса."""
         with self._lock:
             return self._probe.pop(alias, None) is not None
+
+    def return_probe(self, alias: str, reason: str) -> None:
+        """Вернуть право, взятое вызовом, который не дождался ответа.
+        Открытый за это время алиас не трогаем: `trip` свежее."""
+        with self._lock:
+            if alias not in self._tripped:
+                self._probe[alias] = reason
 
     def known_unavailable(self, alias: str) -> str | None:
         """Причина, если алиас открыт или ждёт пробы, иначе None."""
@@ -641,11 +655,24 @@ class ModelRouter:
                 raise AliasCircuitOpenError(resolved, reason)
         return resolved
 
-    def take_probe(self, resolved: ResolvedModel | None) -> bool:
-        """True, если обращение к ``resolved`` — проба алиаса."""
-        if resolved is None or resolved.alias is None:
-            return False
-        return self.breaker.take_probe(resolved.alias)
+    @contextmanager
+    def probing(self, resolved: ResolvedModel | None) -> Iterator[bool]:
+        """Право пробы алиаса ``resolved`` на время вызова; ``True`` — вызов
+        и есть проба. Отмена или стоп хода до ответа возвращают право с
+        прежней причиной; иначе оно израсходовано (недоступность взводит
+        `trip` штатно)."""
+        alias = None if resolved is None else resolved.alias
+        if alias is None:
+            yield False
+            return
+        reason = self.breaker.known_unavailable(alias)
+        probe = reason is not None and self.breaker.take_probe(alias)
+        try:
+            yield probe
+        except _CALL_STOPS:
+            if probe:
+                self.breaker.return_probe(alias, reason)
+            raise
 
     def _resolve_legacy(self, source: str) -> ResolvedModel:
         return ResolvedModel(

@@ -2,6 +2,7 @@
 главного трейса даёт открытым алиасам право на одну пробу, основной запрос
 забирает его и идёт к модели одним HTTP-запросом."""
 
+import asyncio
 import json
 
 import httpx
@@ -9,9 +10,13 @@ import pytest
 from gc_core import processing_responses as pr
 from gc_core import run_context as rc
 from gc_core.config_modules.root import AppConfig
-from gc_core.execution.contracts import MainModelUnavailable
+from gc_core.execution.contracts import (
+    MainModelUnavailable,
+    ModelRequestStopped,
+)
 from gc_core.model_router import breaker_reason
 from gc_core.states import State
+from gc_core.user_stop import UserStopInterrupt
 from gc_testkit import as_coro, run_coro
 
 RAW = {
@@ -150,6 +155,86 @@ def test_probe_survives_auth_retry(monkeypatch):
     assert sent[1][1]["adaptive_retry"] is False
 
 
+_STOPS = [
+    asyncio.CancelledError,
+    lambda: ModelRequestStopped("стоп"),
+    lambda: UserStopInterrupt(kind="model"),
+]
+
+
+def _interrupt_first_send(monkeypatch, sent, stop):
+    """Первая отправка обрывается стопом до ответа, дальше — штатно."""
+    answer = pr.arequest_chat_completions_with_policy
+
+    async def interrupted(**kwargs):
+        if not sent:
+            sent.append(("stop", kwargs))
+            raise stop()
+        return await answer(**kwargs)
+
+    monkeypatch.setattr(
+        pr, "arequest_chat_completions_with_policy", interrupted
+    )
+
+
+@pytest.mark.parametrize("stop", _STOPS)
+def test_probe_right_returns_when_send_is_stopped(monkeypatch, stop):
+    ctx = _ctx()
+    s = _state(ctx)
+    ctx.model_router.breaker.trip("mid", "ReadError")
+    sent = _transport(monkeypatch)
+    pr.begin_turn_main_trace(s, ctx)
+    _interrupt_first_send(monkeypatch, sent, stop)
+
+    with pytest.raises(type(stop())):
+        run_coro(pr._arequest_backend_canonical(USER, s, ctx))
+    breaker = ctx.model_router.breaker
+    assert breaker.is_open("mid") is False
+    assert breaker.known_unavailable("mid") == "ReadError"
+
+    run_coro(pr._arequest_backend_canonical(USER, s, ctx))
+    assert sent[1][1]["use_retry"] is False
+    assert sent[1][1]["adaptive_retry"] is False
+
+
+def test_probe_right_returns_when_auth_retry_is_cancelled(monkeypatch):
+    ctx = _ctx()
+    ctx.auth_connector = _Auth()
+    s = _state(ctx)
+    ctx.model_router.breaker.trip("mid", "ReadError")
+    pr.begin_turn_main_trace(s, ctx)
+    calls = []
+
+    async def fake(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise _http_error(401)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(pr, "arequest_chat_completions_with_policy", fake)
+    with pytest.raises(asyncio.CancelledError):
+        run_coro(pr._arequest_backend_canonical(USER, s, ctx))
+    assert [kw["use_retry"] for kw in calls] == [False, False]
+    assert ctx.model_router.breaker.known_unavailable("mid") == "ReadError"
+
+
+def test_probe_answered_with_error_spends_right(monkeypatch):
+    ctx = _ctx()
+    s = _state(ctx)
+    ctx.model_router.breaker.trip("mid", "ReadError")
+    pr.begin_turn_main_trace(s, ctx)
+
+    async def bad_request(**_kwargs):
+        raise _http_error(400)
+
+    monkeypatch.setattr(
+        pr, "arequest_chat_completions_with_policy", bad_request
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        run_coro(pr._arequest_backend_canonical(USER, s, ctx))
+    assert ctx.model_router.breaker.known_unavailable("mid") is None
+
+
 def test_probe_right_kept_when_preparation_fails(monkeypatch):
     ctx = _ctx()
     s = _state(ctx)
@@ -282,6 +367,27 @@ def test_aux_call_takes_probe_once(monkeypatch):
     _aux_call(ctx)
     assert sent[1]["use_retry"] is True
     assert sent[1]["adaptive_retry"] is True
+
+
+@pytest.mark.parametrize("stop", _STOPS)
+def test_aux_probe_right_returns_when_call_is_stopped(monkeypatch, stop):
+    from gc_core.utils import llm_chat_client as lcc
+
+    ctx = _ctx()
+    _open_with_right(ctx)
+
+    async def interrupted(**_kwargs):
+        raise stop()
+
+    monkeypatch.setattr(lcc, "_arequest_admitted_chat_completion", interrupted)
+    with pytest.raises(type(stop())):
+        _aux_call(ctx)
+    assert ctx.model_router.breaker.known_unavailable("mid") == "ReadError"
+
+    sent = _aux_transport(monkeypatch)
+    _aux_call(ctx)
+    assert sent[0]["use_retry"] is False
+    assert ctx.model_router.breaker.known_unavailable("mid") is None
 
 
 def test_isolated_call_keeps_probe_right(monkeypatch):

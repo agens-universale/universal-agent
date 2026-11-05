@@ -8,6 +8,7 @@
 
 import json
 import logging
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -43,12 +44,12 @@ def _serve_main_trace(router) -> None:
     `resolve` в проверках остаётся прежним. Предохранителя у фейка нет —
     права на пробу тоже."""
     router.resolve_main_at = lambda level, **_kw: router.resolve("main")
-    router.take_probe = _no_probe_right
+    router.probing = _no_probe
 
 
-def _no_probe_right(_resolved) -> bool:
+def _no_probe(_resolved):
     """У фейкового роутера предохранителя нет — и права на пробу тоже."""
-    return False
+    return nullcontext(False)
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -273,7 +274,7 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
     )
 
     router = SimpleNamespace(
-        take_probe=_no_probe_right,
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 model="light-model",
@@ -376,7 +377,7 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
     )
 
     router = SimpleNamespace(
-        take_probe=_no_probe_right,
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 backend_overrides={"use_ssl": False, "request_timeout_sec": 42}
@@ -426,7 +427,7 @@ _JUDGE_JSON = json.dumps(
 
 def _router_ctx(**cfg_overrides):
     router = SimpleNamespace(
-        take_probe=_no_probe_right, resolve=Mock(return_value=_resolved())
+        probing=_no_probe, resolve=Mock(return_value=_resolved())
     )
     cfg = {
         "backend.completions_url": "http://backend.local/v1/chat/completions",
@@ -731,7 +732,7 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     )
 
     router = SimpleNamespace(
-        take_probe=_no_probe_right,
+        probing=_no_probe,
         resolve=Mock(return_value=_resolved(model="light-model")),
     )
     _serve_main_trace(router)
@@ -803,7 +804,7 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
     )
 
     router = SimpleNamespace(
-        take_probe=_no_probe_right,
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 model="corp-model",
@@ -940,7 +941,7 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
     )
 
     router = SimpleNamespace(
-        take_probe=_no_probe_right,
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 model="corp-model",
@@ -1092,7 +1093,7 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(
     )
 
     router = SimpleNamespace(
-        take_probe=_no_probe_right,
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 model="tiny-model",
@@ -1158,7 +1159,7 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
     )
 
     router = SimpleNamespace(
-        take_probe=_no_probe_right,
+        probing=_no_probe,
         resolve=Mock(
             return_value=_resolved(
                 backend_overrides={"retry_embedded_choice_errors": False}

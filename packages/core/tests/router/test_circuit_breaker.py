@@ -172,6 +172,28 @@ def test_replace_from_takes_state_wholesale_without_probe_rights():
     assert b.known_unavailable("b") is None
 
 
+def test_return_probe_restores_waiting_with_previous_reason():
+    b = CircuitBreaker()
+    b.trip("a", "ReadError")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    b.return_probe("a", "ReadError")
+    assert b.is_open("a") is False
+    assert b.known_unavailable("a") == "ReadError"
+    assert b.take_probe("a") is True
+
+
+def test_return_probe_after_trip_changes_nothing():
+    b = CircuitBreaker()
+    b.trip("a", "old")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    b.trip("a", "new")
+    b.return_probe("a", "old")
+    assert b.open_reason("a") == "new"
+    assert b.take_probe("a") is False
+
+
 def test_reset_clears_probe():
     b = CircuitBreaker()
     b.trip("a", "1")

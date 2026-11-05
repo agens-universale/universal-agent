@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import functools
 import gc
 import inspect
@@ -1078,16 +1079,42 @@ async def _arequest_backend_canonical_local(
 
     Право пробы (спека model-breaker §2.2) берётся один раз на запрос: первая
     попытка забирает его перед отправкой, повтор после 401 видит тот же ответ.
-    Сбой подготовки до отправки право не тратит."""
+    Держится до конца обеих попыток (`ModelRouter.probing`): отмена или стоп
+    до ответа его возвращают. Сбой подготовки до отправки право не тратит."""
     if resolved is _UNRESOLVED_MAIN:
         resolved = resolve_main_for_call(
             state, ctx, target_override=getattr(state, "_call_level", None)
         )
-    auth_connector = getattr(ctx, "auth_connector", None)
     router = getattr(ctx, "model_router", None)
-    take_probe = functools.cache(
-        lambda: router is not None and router.take_probe(resolved)
-    )
+    with contextlib.ExitStack() as held:
+        take_probe = functools.cache(
+            lambda: (
+                router is not None
+                and held.enter_context(router.probing(resolved))
+            )
+        )
+        return await _arequest_with_auth_retry(
+            messages,
+            state,
+            ctx,
+            resolved=resolved,
+            set_previous_response_id=set_previous_response_id,
+            mute_answer=mute_answer,
+            take_probe=take_probe,
+        )
+
+
+async def _arequest_with_auth_retry(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    *,
+    resolved: Any,
+    set_previous_response_id: bool,
+    mute_answer: bool,
+    take_probe: Callable[[], bool],
+) -> Tuple[List[Dict], str, Dict]:
+    auth_connector = getattr(ctx, "auth_connector", None)
     try:
         return await _arequest_backend_canonical_once(
             messages,

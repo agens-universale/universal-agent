@@ -14,6 +14,7 @@ judges/memory_compaction), с заголовками из ``acreate_call_headers
 """
 
 import asyncio
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -35,9 +36,9 @@ from gc_testkit import as_coro, run_coro
 from gc_testkit.settings import fake_ctx
 
 
-def _no_probe_right(_resolved) -> bool:
+def _no_probe(_resolved):
     """У фейкового роутера предохранителя нет — и права на пробу тоже."""
-    return False
+    return nullcontext(False)
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -189,7 +190,7 @@ def test_special_agent_role_generation_declares_own_consumer(monkeypatch):
     )
 
     router = SimpleNamespace(
-        take_probe=_no_probe_right, resolve=Mock(return_value=_resolved())
+        probing=_no_probe, resolve=Mock(return_value=_resolved())
     )
     ctx = _ctx(model_router=router)
 
