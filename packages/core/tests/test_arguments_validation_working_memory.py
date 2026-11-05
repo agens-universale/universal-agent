@@ -20,6 +20,32 @@ def test_parse_and_validate_rejects_write_without_register():
         )
 
 
+def test_parse_and_validate_rejects_write_without_content():
+    spec = WorkingMemory.tool_description()
+    with pytest.raises(WrongFunctionArgumentsException):
+        parse_and_validate_tool_arguments(
+            tool_name="session_memory",
+            arguments=json.dumps({"action": "write", "register": "goal"}),
+            tool_spec=spec,
+            allow_empty_for_empty_schema=False,
+            tool_fabric=WorkingMemory,
+        )
+
+
+def test_parse_and_validate_list_accepts_empty_content():
+    spec = WorkingMemory.tool_description()
+    parsed = parse_and_validate_tool_arguments(
+        tool_name="session_memory",
+        arguments=json.dumps(
+            {"action": "list", "register": "goal", "content": ""}
+        ),
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+        tool_fabric=WorkingMemory,
+    )
+    assert parsed["content"] == ""
+
+
 def test_exception_extra_hint_in_feedback():
     exc = WrongFunctionArgumentsException(
         message="unknown field",

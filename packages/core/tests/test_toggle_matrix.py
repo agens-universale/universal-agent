@@ -71,7 +71,9 @@ from pathlib import Path
 import pytest
 from toggle_matrix import ALL_CASES, UNREPRESENTABLE, run_case
 
-#: Эталон снят на origin/develop (e66a1e90) тем же стендом.
+#: Эталон снят на origin/develop (e66a1e90) тем же стендом. Строки сводки
+#: (summary/*, prompts/summary_prompt, prompts/memory_patch_prompt, pair/* вокруг
+#: сжатия) пересняты на этой ветке: наджи и блок действующего режима меняют дамп.
 #:
 #: Раньше он снимался на merge-base bf1cb021 — «до асинхронности». Это
 #: перестало работать, когда develop сам изменил поведение хода (PR «батч с
