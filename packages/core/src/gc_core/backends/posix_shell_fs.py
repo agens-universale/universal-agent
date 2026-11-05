@@ -130,7 +130,7 @@ class PosixShellFsMixin:
         # columns; ``b64decode(validate=False)`` ignores the newlines.
         res = await self._afs_exec(f"head -c {n} {shlex.quote(path)} | base64")
         if res.return_code != 0:
-            raise OSError(self._failure_detail(res) or f"head failed: {path}")
+            raise self._command_failure("head", path, res)
         if res.stdout_hit_capture_cap:
             raise OSError(f"head output exceeded capture ceiling: {path}")
         # Как у полного скачивания: переводы строк снимаем явно, остальное строго —
@@ -196,15 +196,13 @@ class PosixShellFsMixin:
     async def getsize(self, path: str) -> int:
         res = await self._afs_exec(f"stat -c %s {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(self._failure_detail(res) or f"stat failed: {path}")
+            raise self._command_failure("stat", path, res)
         return int(res.stdout.strip())
 
     async def sha256(self, path: str) -> str:
         res = await self._afs_exec(f"sha256sum {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(
-                self._failure_detail(res) or f"sha256sum failed: {path}"
-            )
+            raise self._command_failure("sha256sum", path, res)
         return res.stdout.split()[0]
 
     async def stat(self, path: str) -> dict:
@@ -269,9 +267,20 @@ class PosixShellFsMixin:
     def _failure_detail(res: Any) -> str:
         """Причина отказа для сообщения модели: stderr, а при пустом —
         stdout (Harbor-docker сливает stderr в stdout); не длиннее предела,
-        начало и конец. Классификация читает сырой stderr, не это."""
-        text = (res.stderr or "").strip() or (res.stdout or "").strip()
-        return head_tail_preview(text, _FAILURE_DETAIL_CHARS)
+        начало и конец. Классификация читает сырой stderr, не это.
+        Вывод бывает в десятки мегабайт: сначала обрезка, потом ``strip``."""
+        err = res.stderr or ""
+        text = err if err and not err.isspace() else (res.stdout or "")
+        return head_tail_preview(text, _FAILURE_DETAIL_CHARS).strip()
+
+    @classmethod
+    def _command_failure(cls, what: str, path: str, res: Any) -> OSError:
+        """Отказ команды ФС: операция, код выхода и путь, за ними — причина
+        (если есть). Без них модель видит обрывок вывода, не зная, что
+        и где не удалось."""
+        message = f"{what} failed (exit {res.return_code}): {path}"
+        detail = cls._failure_detail(res)
+        return OSError(f"{message}: {detail}" if detail else message)
 
     @classmethod
     def _fs_failure(cls, path: str, res: Any, *, what: str) -> OSError:
@@ -284,12 +293,9 @@ class PosixShellFsMixin:
             return OSError(f"{what} timed out: {path}")
         if "no such file" in low:
             return FileNotFoundError(path)
-        detail = cls._failure_detail(res)
         if "permission denied" in low:
-            return PermissionError(detail)
-        return OSError(
-            detail or f"{what} failed (exit {res.return_code}): {path}"
-        )
+            return PermissionError(cls._failure_detail(res))
+        return cls._command_failure(what, path, res)
 
     @classmethod
     def _find_failure(cls, path: str, res: Any) -> OSError:
@@ -398,9 +404,7 @@ class PosixShellFsMixin:
                 f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}"
             )
             if res.return_code != 0:
-                raise OSError(
-                    self._failure_detail(res) or f"append failed: {path}"
-                )
+                raise self._command_failure("append", path, res)
         finally:
             # Best-effort: remove remote_tmp on every path (upload, exec or
             # non-zero rc).
@@ -412,14 +416,12 @@ class PosixShellFsMixin:
     async def copy(self, src: str, dst: str) -> None:
         res = await self._afs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
         if res.return_code != 0:
-            raise OSError(
-                self._failure_detail(res) or f"cp failed: {src} -> {dst}"
-            )
+            raise self._command_failure("cp", f"{src} -> {dst}", res)
 
     async def makedirs(self, path: str) -> None:
         res = await self._afs_exec(f"mkdir -p {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(self._failure_detail(res) or f"mkdir failed: {path}")
+            raise self._command_failure("mkdir", path, res)
 
     # --- background ---
     async def aspawn_background(

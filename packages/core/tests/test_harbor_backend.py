@@ -1098,5 +1098,8 @@ async def test_merged_docker_output_reaches_failure_message(loop_in_thread):
         env, "find: unrecognized: -printf\n", return_code=1
     )
     backend = HarborBackend(env, loop_in_thread)
-    with pytest.raises(OSError, match="unrecognized: -printf"):
+    with pytest.raises(OSError) as ei:
         await backend.listdir("/work")
+    assert str(ei.value) == (
+        "find failed (exit 1): /work: find: unrecognized: -printf"
+    )

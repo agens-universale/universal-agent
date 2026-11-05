@@ -281,8 +281,10 @@ async def test_find_failure_shows_stdout_when_stderr_empty():
         with pytest.raises(OSError) as ei:
             await call("/etc")
         assert not isinstance(ei.value, FileNotFoundError)
-        assert "unrecognized: -printf" in str(ei.value)
-        assert len(str(ei.value)) <= 500 + len("find failed: ")
+        message = str(ei.value)
+        prefix = "find failed (exit 1): /etc"
+        assert message.startswith(prefix + ": find: unrecognized: -printf")
+        assert len(message) <= len(prefix) + 2 + 500
 
 
 async def test_huge_failure_output_is_bounded():
@@ -295,7 +297,11 @@ async def test_huge_failure_output_is_bounded():
     )
     with pytest.raises(OSError) as ei:
         await huge_stdout.walk_entries("/w")
-    assert len(str(ei.value)) <= 700
+    message = str(ei.value)
+    prefix = "find failed (exit 1): /w"
+    assert message.startswith(prefix + ": x\tf\t1")
+    assert "[середина опущена]" in message
+    assert len(message) <= len(prefix) + 2 + 500
     huge_stderr = RecordingShell(
         answers={
             "-printf": ExecResult(
@@ -305,28 +311,41 @@ async def test_huge_failure_output_is_bounded():
     )
     with pytest.raises(PermissionError) as ei:
         await huge_stderr.walk_entries("/w")
-    assert len(str(ei.value)) <= 700
+    assert str(ei.value).startswith("find: a: Permission denied")
+    assert "[середина опущена]" in str(ei.value)
+    assert len(str(ei.value)) <= 500
 
 
 @pytest.mark.parametrize(
-    "call",
+    ("call", "prefix"),
     [
-        lambda be: be.stat("/w/a"),
-        lambda be: be.getsize("/w/a"),
-        lambda be: be.copy("/w/a", "/w/b"),
-        lambda be: be.makedirs("/w/d"),
-        lambda be: be.read_head_bytes("/w/a", 8),
-        lambda be: be.sha256("/w/a"),
+        (lambda be: be.stat("/w/a"), "stat failed (exit 1): /w/a"),
+        (lambda be: be.getsize("/w/a"), "stat failed (exit 1): /w/a"),
+        (
+            lambda be: be.copy("/w/a", "/w/b"),
+            "cp failed (exit 1): /w/a -> /w/b",
+        ),
+        (lambda be: be.makedirs("/w/d"), "mkdir failed (exit 1): /w/d"),
+        (
+            lambda be: be.read_head_bytes("/w/a", 8),
+            "head failed (exit 1): /w/a",
+        ),
+        (lambda be: be.sha256("/w/a"), "sha256sum failed (exit 1): /w/a"),
+        (
+            lambda be: be.append("/w/a", "x"),
+            "append failed (exit 1): /w/a",
+        ),
     ],
 )
-async def test_single_command_failures_show_stdout(call):
+async def test_single_command_failures_show_stdout(call, prefix):
     be = RecordingShell(
         answers={
-            "": ExecResult(return_code=1, stdout="boom: reason", stderr="")
+            "": ExecResult(return_code=1, stdout="boom: reason\n", stderr="")
         }
     )
-    with pytest.raises(OSError, match="boom: reason"):
+    with pytest.raises(OSError) as ei:
         await call(be)
+    assert str(ei.value) == prefix + ": boom: reason"
 
 
 async def test_failure_without_output_keeps_generic_text():
