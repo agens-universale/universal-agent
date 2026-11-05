@@ -356,6 +356,16 @@ async def test_download_errors_are_not_all_file_not_found(be, tmp_path):
         await be.read_bytes(str(tmp_path / "missing.txt"))
 
 
+async def test_download_of_missing_file_names_reason_and_path(be, tmp_path):
+    # Общая классификация: причина и путь, как у локального бэкенда, а не
+    # сырой stderr оболочки («cannot open …: No such file»).
+    missing = str(tmp_path / "missing.txt")
+    with pytest.raises(FileNotFoundError) as ei:
+        await be.read_bytes(missing)
+    assert "No such file or directory" in str(ei.value)
+    assert ei.value.filename == missing
+
+
 def test_env_names_must_be_identifiers():
     # Имя переменной уходит в `export K=V` без кавычек: `X=1; cmd; Y` в имени —
     # команда мимо модерации. Тул режет раньше, бэкенд — страховка.
