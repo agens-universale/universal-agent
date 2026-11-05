@@ -727,3 +727,46 @@ def test_native_tools_keep_strict(openai_strict: bool) -> None:
     assert [(spec["name"], spec.get("strict")) for spec in sent] == [
         (spec["name"], spec.get("strict")) for spec in specs
     ]
+
+
+def _strict_projected_optional(extra_schema: dict) -> dict:
+    """Спека с обязательным ``key`` и необязательным ``extra`` после
+    проекции под ``openai_strict``."""
+    from gc_core.utils.connect_backend import project_tool_specs
+
+    raw = _single_param_spec({"type": "string"}, name="key")
+    raw["parameters"]["properties"]["extra"] = extra_schema
+    (sent,) = project_tool_specs(
+        [normalize_tool_spec_for_agent(raw)],
+        openai_strict=True,
+        send_tool_strict=True,
+    )
+    return sent
+
+
+def test_optional_untyped_param_gets_skip_hint_under_strict() -> None:
+    """Регресс: под strict поле без типа обязательно на проводе, а подсказки
+    «пропусти пустой строкой» у него не было — модель выдумывала значение."""
+    from gc_core.execution.tool_schema import OPTIONAL_EMPTY_AS_OMIT_HINT
+
+    params = _strict_projected_optional({})["parameters"]
+    assert "extra" in params["required"]
+    desc = params["properties"]["extra"]["description"]
+    assert OPTIONAL_EMPTY_AS_OMIT_HINT in desc
+
+
+def test_optional_untyped_empty_string_is_omitted() -> None:
+    sent = _strict_projected_optional({})
+    assert _validated(sent, {"key": "k", "extra": ""}) == {"key": "k"}
+
+
+def test_optional_untyped_enum_gets_no_hint() -> None:
+    from gc_core.execution.tool_schema import (
+        OPTIONAL_EMPTY_AS_OMIT_HINT,
+        OPTIONAL_OMIT_HINT,
+    )
+
+    sent = _strict_projected_optional({"enum": [1, 2]})
+    desc = sent["parameters"]["properties"]["extra"].get("description", "")
+    assert OPTIONAL_EMPTY_AS_OMIT_HINT not in desc
+    assert OPTIONAL_OMIT_HINT not in desc
