@@ -176,20 +176,18 @@ def _normalize_combinator_branches(
 def _infer_missing_type(schema: dict) -> None:
     # Schema-combinator constructs (anyOf / oneOf / allOf) define the type via
     # their branches; a top-level `type` is optional in JSON Schema and adding
-    # one here breaks validation when it conflicts with the combinator.
-    # Example: {"anyOf": [{"type": "integer"}, {"type": "null"}]} for `int | None`
-    # would otherwise gain `type: "string"` here, making any value invalid
+    # one here breaks validation when it conflicts with the combinator
     # (validator AND-s `type` with `anyOf`).
     has_combinator = any(k in schema for k in ("anyOf", "oneOf", "allOf"))
     has_ref = isinstance(schema.get("$ref"), str)
     if "type" in schema or has_combinator or has_ref:
         return
+    # Без структурных ключей узел — «любое значение»: `type` не ставим, strict
+    # для такого инструмента снимает проекция на отправке (`has_free_node`).
     if "properties" in schema or "additionalProperties" in schema:
         schema["type"] = "object"
     elif "items" in schema:
         schema["type"] = "array"
-    else:
-        schema["type"] = "string"
 
 
 def _normalize_property(
@@ -198,11 +196,6 @@ def _normalize_property(
     normalized = _normalize_schema_recursive(
         subschema, param_name=name, openai_strict=openai_strict
     )
-    if not isinstance(normalized, dict):
-        normalized = {
-            "type": "string",
-            "description": f"{name} parameter.",
-        }
     _ensure_param_description(normalized, name)
     return normalized
 
@@ -211,7 +204,7 @@ def _normalize_object_schema(schema: dict, *, openai_strict: bool) -> None:
     # Объект без перечисленных ключей (`fields: dict`, `dict[str, str]`) —
     # свободный: по JSON Schema лишние ключи разрешены, если не запрещены явно.
     # Закрыть его — запретить все ключи. Оставляем открытым; strict для такого
-    # инструмента снимает проекция на отправке (`has_open_object`).
+    # инструмента снимает проекция на отправке (`has_free_node`).
     if not schema.get("properties") and "additionalProperties" not in schema:
         schema["additionalProperties"] = True
     if is_open_object(schema):
@@ -257,8 +250,8 @@ def _normalize_schema_recursive(
     здесь. При False сохраняем исходный `required` MCP-сервера.
     """
     if not isinstance(schema, dict):
+        # Булева `true`, кортежные `items` и прочее — «любое значение».
         return {
-            "type": "string",
             "description": f"{param_name} parameter. Raw schema value: {schema!r}",
         }
 

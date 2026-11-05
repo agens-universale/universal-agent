@@ -153,7 +153,7 @@ def is_open_object(schema: Any) -> bool:
     Закрыть его (``additionalProperties: false``) — значит запретить все
     ключи: модель сможет передать только ``{}``. OpenAI strict такой узел не
     принимает, поэтому инструмент с ним уходит без ``strict``
-    (``has_open_object``).
+    (``has_free_node``).
     """
     if not isinstance(schema, dict) or schema.get("type") != "object":
         return False
@@ -163,16 +163,31 @@ def is_open_object(schema: Any) -> bool:
     return extra is True or isinstance(extra, dict)
 
 
-def has_open_object(schema: Any) -> bool:
-    """True, если в схеме (на любой глубине) есть свободный объект."""
+def is_free_node(schema: Any) -> bool:
+    """Узел, который strict не выразит: «любое значение» или свободный объект.
+
+    Булева ``true`` и словарь без ``type``, комбинатора и ``$ref`` по JSON
+    Schema принимают любое значение; strict требует ``type`` на каждом узле.
+    """
+    if schema is True or is_open_object(schema):
+        return True
+    if not isinstance(schema, dict) or "type" in schema:
+        return False
+    if any(key in schema for key in ("anyOf", "oneOf", "allOf")):
+        return False
+    return not isinstance(schema.get("$ref"), str)
+
+
+def has_free_node(schema: Any) -> bool:
+    """True, если в схеме (на любой глубине) есть свободный узел."""
     seen: set[int] = set()
 
     def _walk(node: Any) -> bool:
+        if is_free_node(node):
+            return True
         if not isinstance(node, dict) or id(node) in seen:
             return False
         seen.add(id(node))
-        if is_open_object(node):
-            return True
         return any(_walk(sub) for sub in _nested_schemas(node))
 
     return _walk(schema)
