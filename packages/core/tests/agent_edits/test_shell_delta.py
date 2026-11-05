@@ -1742,11 +1742,22 @@ def test_a_known_ignored_file_keeps_its_place_in_the_pocket_ahead_of_staged_file
     ]
 
 
-def test_command_that_commits_the_path_keeps_exact_base_from_head_before(
-    repo,
-):
-    """Команда сама закоммитила путь, затем правила дальше: база — точная,
-    блоб HEAD ДО команды (§5.3), а не индекс после её коммита."""
+def _revertable(launch_root, threads_dir) -> dict[str, bool]:
+    """Откатываемость путей хода ``turn-1`` — как её видит экран."""
+    store = _snapshot_store(launch_root)
+    entries = deltas.file_entries(
+        _records(threads_dir),
+        lambda key: store.counting_turn_baseline(key, "turn-1"),
+        str(launch_root),
+        revertable_for=lambda key: store.has_turn_baseline(key, "turn-1"),
+    )
+    return {e.path: e.revertable for e in entries}
+
+
+def test_command_that_commits_the_path_has_no_exact_base(repo):
+    """Команда сама закоммитила путь, затем правила дальше: HEAD сдвинулся,
+    точной базы нет (коммит в окне команды мог быть чужим) — дифф и
+    счётная база от индекса, как прежде; откатить нельзя (§5.3)."""
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(
@@ -1766,9 +1777,11 @@ def test_command_that_commits_the_path_keeps_exact_base_from_head_before(
         1,
         1,
     )
+    assert "-line2x" in rec.hunks
     store = _snapshot_store(launch_root)
-    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
-    assert _snapshot_names(launch_root, ".gitorig") == []
+    assert store.session_baseline("tracked.txt") is None
+    assert store.counting_session_baseline("tracked.txt") == b"line1\nline2x\n"
+    assert _revertable(launch_root, threads_dir) == {"tracked.txt": False}
 
 
 def _commit_b_txt(*, edit_tracked: str) -> str:
@@ -1793,9 +1806,10 @@ def _repo_with_a_txt(repo):
     return launch_root, threads_dir
 
 
-def test_command_that_commits_keeps_exact_base_for_other_paths(repo):
-    """Команда коммитит другой файл: HEAD сдвинулся, но правленый чистый
-    путь совпадал с HEAD ДО команды — база точная, не `.gitorig`."""
+def test_command_that_commits_has_no_exact_base_for_other_paths(repo):
+    """Команда коммитит другой файл: HEAD сдвинулся — правленый чистый путь
+    без точной базы, откатить нельзя: тот же гейт пропустил бы и чужой
+    коммит в окне команды, а откат затёр бы его (§5.3)."""
     launch_root, threads_dir = _repo_with_a_txt(repo)
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(launch_root, _commit_b_txt(edit_tracked=""))
@@ -1805,14 +1819,15 @@ def test_command_that_commits_keeps_exact_base_for_other_paths(repo):
     rec = by_path["tracked.txt"]
     assert (rec.op, rec.add, rec.del_) == ("shell", 1, 1)
     store = _snapshot_store(launch_root)
-    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
-    assert store.session_head_rev("tracked.txt") == delta._head_before
-    assert _snapshot_names(launch_root, ".gitorig") == []
+    assert store.session_baseline("tracked.txt") is None
+    assert store.counting_session_baseline("tracked.txt") == b"line1\nline2\n"
+    assert _revertable(launch_root, threads_dir)["tracked.txt"] is False
 
 
-def test_command_that_commits_and_stages_edit_still_sees_it(repo):
-    """Команда индексирует правку и коммитит другой файл: дифф от HEAD до
-    команды правку видит (от индекса он был бы пуст)."""
+def test_command_that_commits_and_stages_edit_diffs_from_index(repo):
+    """Команда индексирует правку и коммитит другой файл: HEAD сдвинулся,
+    дифф от индекса, как прежде, — проиндексированная правка не видна
+    (счётная база тоже от индекса: счётчики не расходятся с журналом)."""
     launch_root, threads_dir = _repo_with_a_txt(repo)
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(
@@ -1821,10 +1836,25 @@ def test_command_that_commits_and_stages_edit_still_sees_it(repo):
     )
     delta.after_and_record()
 
-    by_path = {r.path: r for r in _records(threads_dir)}
-    assert by_path["tracked.txt"].add == 1
-    store = _snapshot_store(launch_root)
-    assert store.session_baseline("tracked.txt") == b"line1\nline2\n"
+    assert "tracked.txt" not in {r.path for r in _records(threads_dir)}
+    assert _snapshot_store(launch_root).session_baseline("tracked.txt") is None
+
+
+def test_delete_in_command_that_commits_other_path_has_no_base(repo):
+    """Команда удаляет чистый файл и коммитит другой: строки удаления от
+    HEAD до команды (только показ), базы нет — откатить нельзя."""
+    launch_root, threads_dir = _repo_with_a_txt(repo)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        _commit_b_txt(edit_tracked="import os; os.remove('a.txt')\n"),
+    )
+    delta.after_and_record()
+
+    [rec] = [r for r in _records(threads_dir) if r.path == "a.txt"]
+    assert (rec.op, rec.del_) == ("delete", 1)
+    assert _snapshot_store(launch_root).session_baseline("a.txt") is None
+    assert _revertable(launch_root, threads_dir)["a.txt"] is False
 
 
 def _conflicting_branch(launch_root, *, theirs: bytes | None) -> None:
