@@ -11,13 +11,13 @@ def test_logo_shape():
 
 def test_gradient_color_stops():
     # амбер (RUN_COLOR) -> олива (OLIVE) -> teal (ACCENT)
-    assert branding.gradient_color(0.0) == "#D4A574"
+    assert branding.gradient_color(0.0) == "#DBA265"
     assert branding.gradient_color(0.5) == "#8FA05A"
     assert branding.gradient_color(1.0) == "#54B3A6"
 
 
 def test_gradient_color_clamps():
-    assert branding.gradient_color(-1.0) == "#D4A574"
+    assert branding.gradient_color(-1.0) == "#DBA265"
     assert branding.gradient_color(2.0) == "#54B3A6"
 
 
