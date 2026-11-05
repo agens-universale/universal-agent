@@ -20,6 +20,7 @@ from gc_tui.services.yaml_view import (
     yaml_syntax_renderable,
     yaml_syntax_widget,
 )
+from gc_tui.widgets.column_static import ColumnStatic
 
 _FOOTER = "↑/↓ / PgUp/PgDn — прокрутка · Esc — назад"
 _SNAPSHOT_HINT = (
@@ -257,7 +258,7 @@ class ConfigScreen(Screen):
                 yield Static(
                     _SNAPSHOT_HINT, classes="config-caption", markup=False
                 )
-                paths = Static(
+                paths = ColumnStatic(
                     _paths_block(
                         self._settings,
                         self._config_path,

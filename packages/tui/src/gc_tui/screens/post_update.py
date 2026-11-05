@@ -23,6 +23,7 @@ from gc_tui.form_frame import (
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
 from gc_tui.services.column_row import ColumnRow
+from gc_tui.widgets.column_static import ColumnStatic
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SEL_PU_SCROLL = "#pu-scroll"
@@ -156,7 +157,7 @@ class PostUpdateScreen(Screen):
                     if self._items:
                         yield Static(_HINT, classes="post-update-hint pu-hint")
                     for i, key in enumerate(self._items):
-                        yield Static(
+                        yield ColumnStatic(
                             self._row_text(key, i), classes="post-update-item"
                         )
             yield Static(self._footer_text(), id="footer", markup=False)
@@ -239,7 +240,9 @@ class PostUpdateScreen(Screen):
             frame.mount(Static(_HINT, classes="post-update-hint pu-hint"))
         for i, key in enumerate(self._items):
             frame.mount(
-                Static(self._row_text(key, i), classes="post-update-item")
+                ColumnStatic(
+                    self._row_text(key, i), classes="post-update-item"
+                )
             )
         self._sync_footer()
         # Полный футер длиннее и на узком окне занимает больше строк — потолок
