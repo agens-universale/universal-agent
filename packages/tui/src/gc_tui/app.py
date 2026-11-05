@@ -441,7 +441,8 @@ class TuiApp(App):
         from gc_core.model_router import CircuitBreaker
 
         # Предохранитель моделей окна: живёт в памяти, в мету треда не
-        # пишется; подключение треда его очищает (reset_circuit_breaker).
+        # пишется; подключение треда его не трогает — доступность модели
+        # не зависит от треда.
         self._circuit_breaker = CircuitBreaker()
         self._onboarding_config_path = (
             None  # куда писать конфиг (user_config_path)
@@ -1595,12 +1596,6 @@ class TuiApp(App):
             pump.close()
         self._stream_pump = None
         self._subagent_progress_sink = None
-
-    def reset_circuit_breaker(self) -> None:
-        """Очистить предохранитель окна при подключении треда: отметки
-        прежнего треда в новый не текут. Объект тот же — прогретый executor
-        держит ссылку на него."""
-        self._circuit_breaker.reset()
 
     def set_session_override(self, dotted: str, value) -> None:
         """Переопределить ключ в текущей сессии (в файл конфига НЕ пишет).

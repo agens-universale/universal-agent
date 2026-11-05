@@ -2456,7 +2456,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         task_record = self._store.get_record(task_id)
         task_tui = tui_section(task_record)
         saved = read_from_tui(task_tui)
-        self._reset_thread_breaker()
         # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
         # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
         # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
@@ -6107,15 +6106,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Тред прогона раннера: его цель, иначе активный."""
         return self.app.run_thread_id(runner) or self._active_task_id
 
-    def _reset_thread_breaker(self) -> None:
-        """Подключение треда очищает предохранитель окна. Пока идёт ход,
-        предохранитель принадлежит ему — не трогаем; открытый очистится
-        в конце хода (`_on_run_finished`)."""
-        runner = getattr(self.app, "active_runner", None)
-        if runner is not None and runner.is_running():
-            return
-        self.app.reset_circuit_breaker()
-
     def _on_run_finished(self, runner, kind: str) -> None:
         """Спадающий фронт прогона: исход — в мету треда прогона.
 
@@ -6157,8 +6147,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
-            # Ход чужого треда кончился: предохранитель — открытому.
-            self._reset_thread_breaker()
             return
         # Ход закончился предложенным планом — баннер одобрения.
         if plan_proposed:

@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from gc_testkit.settings import make_settings
 from gc_testkit.tui_support import tui_settings
 
 pytest.importorskip("textual")
@@ -536,29 +535,6 @@ def test_switch_session_profile_resets_breaker(tmp_path):
     assert app._circuit_breaker.is_open("flash") is False
 
 
-def test_reset_circuit_breaker_clears_in_place_keeping_executor_wired(
-    tmp_path,
-):
-    """Сброс при attach НЕ подменяет объект: прогретый executor держит
-    ссылку на тот же предохранитель."""
-    from gc_core.model_router import ModelRouter
-
-    app = _app_with_base(tmp_path)
-    executor_router = ModelRouter(
-        make_settings(
-            {"models": {"flash": {}}, "slots": {"default": "flash"}}
-        ),
-        choice_provider=lambda: "default",
-        breaker=app._circuit_breaker,
-    )
-    app._circuit_breaker.trip("flash", "недоступна")
-
-    app.reset_circuit_breaker()
-
-    assert executor_router.breaker is app._circuit_breaker
-    assert executor_router.breaker.snapshot() == {}
-
-
 @pytest.mark.asyncio
 async def test_footer_model_name_survives_open_active_alias(tmp_path):
     """Important-3: открытый активный алиас не должен молча замораживать футер —
@@ -619,23 +595,6 @@ async def test_status_survives_open_active_alias(tmp_path):
         app._circuit_breaker.trip("flash", "5xx")
         scr._cmd_status("")  # не должно бросить AliasCircuitOpenError
         await pilot.pause(0.05)
-
-
-@pytest.mark.asyncio
-async def test_new_session_thread_gets_fresh_breaker(tmp_path):
-    """Новая сессия (другой тред без персистированного предохранителя) не
-    наследует трипы окна (§8: «сброс — новая сессия»)."""
-    app = TuiApp(
-        threads_dir=str(tmp_path / "threads"),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app.tui_state.active_task_id = "t-old"
-    app._circuit_breaker.trip("flash", "недоступна")
-    async with app.run_test() as pilot:
-        pilot.app.screen.attach_active_task("t-new")
-        await pilot.pause(0.1)
-        assert app._circuit_breaker.is_open("flash") is False
 
 
 # --- 7. Boot-frozen-diff при пересборке (спека §3.2) --------------------------------

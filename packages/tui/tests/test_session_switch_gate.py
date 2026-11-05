@@ -385,30 +385,24 @@ async def test_late_trip_of_stopped_run_stays_out_of_window_breaker(tmp_path):
         assert "circuit_breaker" not in (b_meta.get("tui") or {})
 
 
+_NEW = "gate0000000000000000000000000000c"
+
+
 @pytest.mark.asyncio
-async def test_attach_thread_resets_window_breaker(tmp_path):
-    """Подключение другого треда очищает предохранитель окна, объект тот же."""
+@pytest.mark.parametrize("target", [_B, _A, _NEW])
+async def test_attach_thread_keeps_window_breaker(tmp_path, target):
+    """Доступность модели — свойство модели, не треда: открытый алиас
+    переживает подключение другого треда, того же и нового."""
     async with _app(tmp_path).run_test() as pilot:
         app = pilot.app
         scr = app.screen
         scr.attach_active_task(_A, is_resume=True)
         breaker = app._circuit_breaker
         breaker.trip("flash", "x")
-        scr.attach_active_task(_B, is_resume=True)
+        scr.attach_active_task(target, is_resume=target != _NEW)
         await pilot.pause()
         assert app._circuit_breaker is breaker
-        assert breaker.snapshot() == {}
-
-
-@pytest.mark.asyncio
-async def test_attach_during_run_keeps_breaker(tmp_path):
-    """Идёт ход — предохранитель принадлежит ему, подключение не трогает."""
-    async with _app(tmp_path).run_test() as pilot:
-        app = pilot.app
-        scr, _runner = await _run_in_a(pilot)
-        app._circuit_breaker.trip("flash", "x")
-        scr._reset_thread_breaker()
-        assert app._circuit_breaker.snapshot() == {"flash": "x"}
+        assert breaker.snapshot() == {"flash": "x"}
 
 
 @pytest.mark.asyncio
