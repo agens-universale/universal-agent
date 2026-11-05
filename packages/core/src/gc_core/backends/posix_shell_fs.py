@@ -11,6 +11,8 @@
 """
 
 import base64
+import errno
+import os
 import posixpath
 import shlex
 import uuid
@@ -42,6 +44,12 @@ BACKGROUND_SPAWN_TIMEOUT_SEC = 30
 
 #: Предел причины отказа команды ФС в сообщении модели (как у пробы среды).
 _FAILURE_DETAIL_CHARS = 500
+
+
+def _missing_file(path: str) -> FileNotFoundError:
+    """«Файла нет» с причиной и путём, как у локального бэкенда:
+    ``FileNotFoundError(path)`` модель видела бы голым путём."""
+    return FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
 
 
 def build_find_walk_command(
@@ -98,7 +106,7 @@ class PosixShellFsMixin:
     async def read(self, path: str) -> str:
         # Raw bytes via download, then same codec as local ``read_text_for_edit``.
         if not await self.exists(path):
-            raise FileNotFoundError(path)
+            raise _missing_file(path)
         text = decode_text_best_effort(await self.read_bytes(path))
         if text is not None:
             return text
@@ -299,7 +307,7 @@ class PosixShellFsMixin:
             return OSError(f"{what} timed out: {path}")
         low = cls._stderr_for_classification(res)
         if "no such file" in low:
-            return FileNotFoundError(path)
+            return _missing_file(path)
         message = cls._failure_message(what, path, res)
         if "permission denied" in low:
             return PermissionError(message)

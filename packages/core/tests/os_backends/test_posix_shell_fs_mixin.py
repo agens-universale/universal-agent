@@ -390,8 +390,11 @@ async def test_every_command_failure_is_classified(call):
     be = RecordingShell(
         answers={"": ExecResult(return_code=1, stderr=f"x: {_MISSING}")}
     )
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError) as ei:
         await call(be)
+    # Текст причины и путь, как у локального бэкенда, а не голый путь.
+    assert "No such file or directory" in str(ei.value)
+    assert ei.value.filename.startswith("/w/")
 
 
 async def test_direct_command_timeout_names_operation():
