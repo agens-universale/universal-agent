@@ -110,10 +110,10 @@ def test_function_call_output_pair_in_current_batch():
         mode="function_call_output",
         state_messages=[],
     )
-    assert batch == [call, out]
+    assert batch == []
 
 
-def test_function_call_output_finds_call_earlier_in_state():
+def test_function_call_output_does_not_keep_call_from_state():
     call = {
         "type": "function_call",
         "call_id": "c_old",
@@ -133,9 +133,7 @@ def test_function_call_output_finds_call_earlier_in_state():
         mode="function_call_output",
         state_messages=state_messages,
     )
-    assert len(batch) == 2
-    assert batch[0] == call
-    assert batch[1] == out
+    assert batch == []
 
 
 def test_function_call_output_skips_orphan():
@@ -191,7 +189,7 @@ def test_function_call_output_mixed_multiple_outputs_dedupes():
         mode="function_call_output",
         state_messages=[],
     )
-    assert batch == [c1, o1, c2, o2]
+    assert batch == []
 
 
 def test_function_call_output_pairing_passes_repair():
@@ -242,7 +240,7 @@ def test_tool_pair_variants_accepted():
         mode="function_call_output",
         state_messages=[],
     )
-    assert batch == [call, out]
+    assert batch == []
 
 
 def test_remove_exact_suffix_truncates_matching_tail_only():
@@ -329,8 +327,8 @@ def _technical(text: str, msg_id: str, **extra) -> dict:
     }
 
 
-def test_function_call_output_keeps_trailing_technical_tail_in_order():
-    """Пары «вызов → ответ» и за ними хвост батча: напоминание и картинка тула."""
+def test_function_call_output_keeps_image_and_user_line():
+    """После сводки остаются картинка и реплика. Пара и напоминание — нет."""
     c1, c2 = _call("c1"), _call("c2")
     o1, o2 = _output("c1"), _output("c2")
     notice = _technical(
@@ -342,17 +340,17 @@ def test_function_call_output_keeps_trailing_technical_tail_in_order():
         "m_i",
         attachments=[_IMAGE_REF],
     )
+    human = {"role": "user", "content": "а что на скриншоте?", "id": "m_h"}
     batch = build_preserved_batch(
-        current_messages=[o1, o2, notice, image],
+        current_messages=[o1, o2, notice, image, human],
         mode="function_call_output",
-        state_messages=[c1, c2, o1, o2, notice, image],
+        state_messages=[c1, c2, o1, o2, notice, image, human],
     )
-    assert batch == [c1, o1, c2, o2, notice, image]
+    assert batch == [image, human]
 
 
-def test_function_call_output_keeps_only_the_tail_after_last_output():
-    """Техническое сообщение внутри батча вызовов (фидбэк битого вызова из снимка
-    session_compact) хвостом не считается: хвост — только после последнего ответа."""
+def test_function_call_output_drops_pair_and_technical_feedback():
+    """Технический фидбэк и пара вызова после сводки не остаются."""
     c1 = _call("c1")
     o1 = _output("c1")
     feedback = _technical(
@@ -363,7 +361,7 @@ def test_function_call_output_keeps_only_the_tail_after_last_output():
         mode="function_call_output",
         state_messages=[],
     )
-    assert batch == [c1, o1]
+    assert batch == []
 
 
 def test_user_ask_keeps_technical_message_with_attachments():

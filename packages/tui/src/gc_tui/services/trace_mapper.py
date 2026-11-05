@@ -9,6 +9,7 @@ from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
 from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
+from gc_core.message_policy.nudges import output_for_card
 from gc_core.utils.path_truncate import truncate_path
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
@@ -884,6 +885,7 @@ def _truncate_word_boundary(text: str, limit: int) -> str:
 def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(output, str):
         return ""
+    output = output_for_card(output)
     # Единый unwrap: голый dict, double-encoded, list-обёртка, stored_tool_output
     # envelope (с partial-parser для truncated). Та же логика что у preview.
     from gc_tui.services.tool_preview import unwrap_tool_output_dict

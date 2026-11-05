@@ -30,6 +30,7 @@ from gc_core.execution.progress import (
     parse_tool_result_status,
     tool_args_summary,
 )
+from gc_core.message_policy.nudges import output_for_card
 from gc_core.threads.facade import Cursor, Threads
 from gc_core.threads.models import StreamEntry, ThreadKey
 
@@ -346,6 +347,7 @@ def _preview_text(output: Any) -> str | None:
     if isinstance(output, str):
         if output == "":
             return None
+        output = output_for_card(output)
         try:
             value = json.loads(output)
         except json.JSONDecodeError:
