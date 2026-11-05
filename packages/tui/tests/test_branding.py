@@ -10,15 +10,15 @@ def test_logo_shape():
 
 
 def test_gradient_color_stops():
-    # амбер (RUN_COLOR) -> олива (OLIVE) -> teal (ACCENT)
+    # стопы градиента бренда: GRADIENT_WARM -> MID -> COOL
     assert branding.gradient_color(0.0) == "#DBA265"
-    assert branding.gradient_color(0.5) == "#8FA05A"
-    assert branding.gradient_color(1.0) == "#54B3A6"
+    assert branding.gradient_color(0.5) == "#8FA055"
+    assert branding.gradient_color(1.0) == "#45B5A7"
 
 
 def test_gradient_color_clamps():
     assert branding.gradient_color(-1.0) == "#DBA265"
-    assert branding.gradient_color(2.0) == "#54B3A6"
+    assert branding.gradient_color(2.0) == "#45B5A7"
 
 
 def test_logo_text_plain_matches_and_spaces_unstyled():

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from rich.text import Text
 
-from gc_tui.palette import ACCENT, OLIVE, RUN_COLOR
+from gc_tui.palette import GRADIENT_COOL, GRADIENT_MID, GRADIENT_WARM
 
 APP_NAME = "GigaCode"
 
@@ -29,10 +29,10 @@ TAGLINE = "Universal Agent"
 # Приветственная строка для свежего экрана (хедер-слева, нет активной задачи).
 WELCOME = "Добро пожаловать в GigaCode"
 
-# Стопы градиента логотипа: амбер → олива → teal (всё из палитры).
-_WARM = RUN_COLOR
-_OLIVE = OLIVE
-_TEAL = ACCENT
+# Стопы градиента логотипа: амбер → олива → teal (свои токены палитры).
+_WARM = GRADIENT_WARM
+_OLIVE = GRADIENT_MID
+_TEAL = GRADIENT_COOL
 
 
 def _hex_to_rgb(h: str) -> tuple[int, int, int]:
