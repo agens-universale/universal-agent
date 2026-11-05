@@ -1,9 +1,9 @@
-"""Legacy routing execution preserves develop's requests, results and persisted state.
+"""Legacy routing execution preserves the recorded trace of requests, results and state.
 
 Only model HTTP responses are scripted; the executor, loop, tools, finish gate,
-serialization and thread store run normally. Reference digests are captured by
-running this same harness against the recorded develop revision, never by
-accepting snapshots from the implementation under test.
+serialization and thread store run normally. The digest file started on develop
+``320ed0b19``. It was refreshed on this branch: service nudges and the live
+permission-mode block change the trace, and that change is what lands in develop.
 """
 
 import hashlib

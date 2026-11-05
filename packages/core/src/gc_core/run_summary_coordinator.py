@@ -200,24 +200,25 @@ class RunSummaryCoordinator:
 
     async def apre_run_compact_if_needed(
         self, *, trigger_reason: str = "pre_run"
-    ) -> None:
+    ) -> bool:
         """Догнать историю до порога перед стартом run'а.
 
         Единственная форма: сетевой шаг внутри ``arun_summary_compaction``
         ждётся нативно, поэтому компакция не занимает поток из пула на всё
-        время суммаризации.
+        время суммаризации. ``True`` — сводка хотя бы раз заменила трейс.
         """
         logger = self._logger
         state = self._state
         if state.backend_api_mode != "chat_completions":
-            return
+            return False
         self._refresh_limits()
         if (
             self._summary_trigger_chars <= 0
             and self._summary_trigger_tokens <= 0
         ):
-            return
+            return False
         rounds = 0
+        applied = False
         try:
             while True:
                 hits = exceeded_summary_triggers(
@@ -251,6 +252,7 @@ class RunSummaryCoordinator:
                         exceeded_chars=exceeded_chars,
                         exceeded_tokens=exceeded_tokens,
                     )
+                applied = True
                 # Число забыто сжатием. Символы выключены — спросить провайдера
                 # некого, следующий круг вёл бы только их.
                 if self._summary_trigger_chars <= 0:
@@ -272,17 +274,18 @@ class RunSummaryCoordinator:
                 ),
                 summarize_exc,
             )
+        return applied
 
     async def aforce_compact_once(
         self, *, trigger_reason: str = "manual"
-    ) -> None:
+    ) -> bool:
         """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
         Та же машинерия, что и автосжатие; персист через on_summary_applied.
 
         Основная и единственная реализация; синхронное имя ``force_compact_once``"""
         state = self._state
         if state.backend_api_mode != "chat_completions":
-            return
+            return False
         self._refresh_limits()
         async with _asummarizing_flag(self._thread_session):
             await arun_summary_compaction(
@@ -295,6 +298,7 @@ class RunSummaryCoordinator:
             )
         # C1: старая история отцеплена компакцией — собираем циклический мусор.
         self._collect_garbage()
+        return True
 
     def _warn_if_token_trigger_blind(self) -> None:
         """Раз за прогон сказать в лог, что токенный порог не может сработать.
@@ -328,13 +332,17 @@ class RunSummaryCoordinator:
         self,
         current_messages: list[dict],
         mode: str,
-    ) -> None:
-        """Сжатие после выбора модели; первый вызов догоняет стартовую историю."""
+    ) -> bool:
+        """Сжатие после выбора модели; первый вызов догоняет стартовую историю.
+
+        ``True`` — сводка хотя бы раз заменила трейс.
+        """
         startup = self._startup_compaction_pending
         self._startup_compaction_pending = False
         reason = "pre_run" if startup else self._pre_backend_trigger_reason
         rounds = _PRE_RUN_SUMMARY_MAX_ROUNDS if startup else 1
         guard_progress = startup and self._startup_progress_guard
+        applied = False
         for done in range(1, rounds + 1):
             before_chars = (
                 self._history_chars(self._state.messages)
@@ -344,23 +352,25 @@ class RunSummaryCoordinator:
             compacted = await self._acompact_backend_batch(
                 current_messages, mode, reason
             )
+            applied = applied or compacted
             if (
                 not compacted
                 or not startup
                 or self._summary_trigger_chars <= 0
             ):
-                return
+                return applied
             if guard_progress and self._startup_stalled(
                 current_messages, before_chars
             ):
                 self._log_startup_stop(done)
-                return
+                return applied
         if self._startup_trigger_exceeded():
             log_pre_run_max_rounds(
                 self._logger,
                 thread_id=getattr(self._thread_session, "thread_id", None),
                 max_rounds=_PRE_RUN_SUMMARY_MAX_ROUNDS,
             )
+        return applied
 
     def _startup_stalled(
         self, current_messages: list[dict], before_chars: int
@@ -401,16 +411,24 @@ class RunSummaryCoordinator:
     async def _acompact_backend_batch(
         self, current_messages: list[dict], mode: str, trigger_reason: str
     ) -> bool:
-        """Сжать полный контекст, сохранив текущий батч для отправки модели."""
+        """Сжать историю, если она вышла за порог.
+
+        Вызов и ответ уже в ``state``: они входят в сводку и после неё
+        не остаются. Свежие реплики и картинки возвращаются следом.
+        """
         state = self._state
+        state_tail = getattr(state, "messages", None)
+        if not isinstance(state_tail, list):
+            return False
+        if not current_messages or not _messages_tail_matches(
+            state_tail, list(current_messages)
+        ):
+            return False
+
         hits = self._backend_batch_trigger_hits()
         if not hits:
             return False
         exceeded_chars, exceeded_tokens = _hit_pair(hits)
-
-        state_tail = getattr(state, "messages", None)
-        if not isinstance(state_tail, list):
-            return False
 
         preserved_batch = build_preserved_batch(
             current_messages=list(current_messages),
@@ -418,9 +436,6 @@ class RunSummaryCoordinator:
             state_messages=list(state_tail),
             message_keys_already_persisted=self._keys_persisted_before_last_batch(),
         )
-        suffix_exact = list(current_messages)
-        if not _messages_tail_matches(state_tail, suffix_exact):
-            return False
 
         # State заменяется до callback: текущий батч должен вернуться даже
         # при сбое трассы, снятия флага или отмене после применения сводки.
@@ -459,7 +474,8 @@ class RunSummaryCoordinator:
 
     def _backend_batch_trigger_hits(self) -> Any:
         """Сработавшие триггеры сжатия перед вызовом бэкенда; пусто — сжимать
-        не нужно (не `chat_completions` или триггеры выключены)."""
+        не нужно (не `chat_completions` или триггеры выключены).
+        """
         if self._state.backend_api_mode != "chat_completions":
             return None
         self._refresh_limits()
@@ -497,7 +513,7 @@ class RunSummaryCoordinator:
             "summary-batch-preservation-v1"
         )
 
-    async def aturn_end_compact_if_needed(self) -> None:
+    async def aturn_end_compact_if_needed(self) -> bool:
         """Compaction после accept ``turn_finish`` (turn-end trigger).
 
         Основная и единственная реализация; в ``arun_agent`` уезжает аргументом
@@ -505,13 +521,13 @@ class RunSummaryCoordinator:
         """
         state = self._state
         if state.backend_api_mode != "chat_completions":
-            return
+            return False
         self._refresh_limits()
         if (
             self._turn_end_trigger_chars <= 0
             and self._turn_end_trigger_tokens <= 0
         ):
-            return
+            return False
         hits = exceeded_summary_triggers(
             state=state,
             summary_trigger_chars=self._turn_end_trigger_chars,
@@ -520,7 +536,7 @@ class RunSummaryCoordinator:
             strip_think=True,
         )
         if not hits:
-            return
+            return False
         exceeded_chars, exceeded_tokens = _hit_pair(hits)
 
         logger = self._logger
@@ -538,6 +554,7 @@ class RunSummaryCoordinator:
                 )
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             self._collect_garbage()
+            return True
         except ExecutionFailure:
             raise
         except Exception as summarize_exc:
@@ -551,3 +568,4 @@ class RunSummaryCoordinator:
                 ),
                 summarize_exc,
             )
+        return False
