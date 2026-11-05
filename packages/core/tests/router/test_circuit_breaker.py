@@ -162,14 +162,14 @@ def test_trip_during_probe_reopens_with_fresh_reason():
     assert b.known_unavailable("flash") == "new"
 
 
-def test_replace_from_drops_probe_only_for_snapshot_keys():
+def test_replace_from_takes_state_wholesale_without_probe_rights():
     b = CircuitBreaker()
     b.trip("a", "1")
     b.trip("b", "2")
     b.allow_probe()
     b.replace_from({"a": "3"})
     assert b.is_open("a") is True and b.take_probe("a") is False
-    assert b.take_probe("b") is True
+    assert b.known_unavailable("b") is None
 
 
 def test_reset_clears_probe():

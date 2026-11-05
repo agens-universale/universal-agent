@@ -223,13 +223,12 @@ class CircuitBreaker:
             return clone
 
     def replace_from(self, snapshot: dict) -> None:
-        """Restore-in-place: заменить открытые алиасы набором из снапшота
-        БЕЗ подмены объекта: прогретый executor и витрины держат ссылку на
-        ЭТОТ объект. Право на пробу снимается только у алиасов снапшота."""
+        """Restore-in-place: состояние целиком из снапшота БЕЗ подмены
+        объекта: прогретый executor и витрины держат ссылку на ЭТОТ объект.
+        Снапшот прав на пробу не несёт — после замены их нет."""
         with self._lock:
             self._tripped = dict(snapshot or {})
-            for alias in self._tripped:
-                self._probe.pop(alias, None)
+            self._probe.clear()
 
     def reset(self) -> None:
         with self._lock:
