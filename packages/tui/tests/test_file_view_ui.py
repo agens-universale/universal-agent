@@ -378,6 +378,42 @@ async def test_whole_file_reopens_at_the_same_line(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["whole", "paged"])
+async def test_reopens_after_file_shrank(tmp_path, monkeypatch, mode):
+    """Файл укоротили между открытиями: сохранённая строка за концом —
+    просмотр открывается на доступных строках, а не падает (целиком и
+    окнами)."""
+    if mode == "paged":
+        from gc_tui.services import file_view
+
+        monkeypatch.setattr(file_view, "WHOLE_FILE_MAX_BYTES", 0)
+    f = tmp_path / "long.txt"
+    f.write_text("\n".join(f"W{i}" for i in range(1, 301)) + "\n")
+
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.file_view import FileViewerScreen
+    from textual.widgets import TextArea
+
+    app = TuiApp(threads_dir=str(tmp_path))
+    async with app.run_test(size=(80, 30)) as pilot:
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.pause()
+        await pilot.press("pagedown", "pagedown")
+        await pilot.pause()
+        assert pilot.app.screen._start_line > 3
+        await pilot.press("escape")
+        await pilot.pause()
+        f.write_text("W1\nW2\nW3\n")
+        pilot.app.screen._cmd_view(str(f))
+        await pilot.pause()
+        await pilot.pause()
+        viewer = pilot.app.screen
+        assert isinstance(viewer, FileViewerScreen)
+        body = viewer.query_one("#file-view-body", TextArea)
+        assert "W3" in body.text
+
+
+@pytest.mark.asyncio
 async def test_paged_wheel_and_click_move_the_window(tmp_path, paged):
     """Окнами: колесо листает файл, клик по полосе — прыжок в это место."""
     f = tmp_path / "big.txt"

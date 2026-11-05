@@ -15,6 +15,7 @@ from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import OK as _OK
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.column_row import ColumnRow, ColumnRows
+from gc_tui.widgets.column_static import ColumnStatic
 
 _FOOTER = (
     "↑/↓ — серверы · Enter — раскрыть · PgUp/PgDn — прокрутка · Esc — назад"
@@ -32,7 +33,7 @@ def _truncate(text: str, limit: int = 80) -> str:
 _TOOL_DESC_LIMIT = 80  # описание тула в раскрытом списке — одна строка
 
 
-class ServerCard(Static):
+class ServerCard(ColumnStatic):
     """Карточка MCP-сервера: фокусируемая, Enter/Space/клик раскрывает тулы.
 
     Рендер — Rich Text: маркер ▸/▾ ($deep-dim) + статус ✓/✗ ($ok/$err) + имя.

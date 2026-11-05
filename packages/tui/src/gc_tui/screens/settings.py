@@ -42,6 +42,7 @@ from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.toggles import PROFILE_ACTIVE_STATUS, PROFILE_NONE_VALUE
+from gc_tui.widgets.column_static import ColumnStatic
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 from gc_tui.widgets.reserved_hint import ReservedHint
 
@@ -5867,7 +5868,7 @@ class SettingsScreen(Screen):
                 text = self._add_profile_row_text(selected)
             else:
                 text = self._profile_row_text(row, rows, selected)
-            frame.mount(Static(text, classes=cls))
+            frame.mount(ColumnStatic(text, classes=cls))
             if self._name_prompt_belongs_to(row):
                 self._mount_profile_name_prompt(frame)
         if (self._profiles_name_prompt or {}).get("mode") == "create":
