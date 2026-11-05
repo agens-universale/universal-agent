@@ -143,6 +143,18 @@ def test_think_summary_takes_any_key_after_the_known_fields():
     assert tool_args_summary("session_think", {"thought": "x"}) == "x"
 
 
+def test_think_summary_skips_injected_fields_unless_nothing_else():
+    """Служебные поля схемы (`agent.inject_tool_fields`) в сводку Think не
+    идут, пока у модели есть свой текст, — как в мысли целиком."""
+    args = {"reason": "SERVICE", "analysis": "MODEL THOUGHT"}
+    summary = tool_args_summary("session_think", args, injected={"reason"})
+    assert summary == "MODEL THOUGHT"
+    only = {"reason": "SERVICE"}
+    assert tool_args_summary("session_think", only, injected={"reason"}) == (
+        "SERVICE"
+    )
+
+
 def test_mcp_without_scalar_falls_back_to_pairs():
     summary = tool_args_summary("mcp_office_read", {"pages": [1, 2]})
     assert summary == "pages=<list 2>"

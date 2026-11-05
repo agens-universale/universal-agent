@@ -483,3 +483,101 @@ async def test_old_rejected_think_with_text_keeps_its_error(tmp_path):
         )
         (row,) = scr.query(ToolCallRow)
         assert row._outcome == "error"
+
+
+# --- мысль доживает до отрисовки и стоит перед своим шагом ---------------
+
+
+async def _running(pilot):
+    """Открытый тред с идущим прогоном; стрим пока пуст."""
+    scr = pilot.app.screen
+    scr.attach_active_task(TID)
+    runner = _Runner()
+    pilot.app.active_runner = runner
+    return scr, pilot.app._stream_sink, runner
+
+
+@pytest.mark.asyncio
+async def test_retry_between_ticks_keeps_both_thoughts(tmp_path):
+    """Попытка целиком уложилась между тиками и сменилась ретраем: строка
+    есть у обеих, у прежней — вся её мысль."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr, sink, _runner = await _running(pilot)
+        sink.push("reset", "")
+        sink.push("think", "первая попытка")
+        sink.push("reset", "")
+        sink.push("think", "вторая попытка")
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 2, "две мысли")
+        first, second = _thoughts(scr)
+        await wait_until(
+            pilot,
+            lambda: "вторая попытка" in _line(second),
+            "строка второй попытки",
+        )
+        assert first.settled
+        assert _line(first).startswith("● Thought  первая попытка")
+
+
+@pytest.mark.asyncio
+async def test_retry_keeps_thought_text_after_last_tick(tmp_path):
+    """Хвост мысли пришёл после последнего тика и сразу ретрай: строка
+    прежней попытки получает весь текст, а не тот, что успела показать."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr, sink, _runner = await _live(pilot, "начало")
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
+        sink.push("think", " и конец")
+        sink.push("reset", "")
+        await wait_until(
+            pilot, lambda: _thoughts(scr)[0].settled, "строка законченная"
+        )
+        assert _line(_thoughts(scr)[0]).startswith("● Thought  начало и конец")
+
+
+@pytest.mark.asyncio
+async def test_short_turn_keeps_thought(tmp_path):
+    """Ход кончился раньше, чем тик увидел мысль: строка `Thought` всё
+    равно встаёт."""
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr, sink, runner = await _running(pilot)
+        sink.push("reset", "")
+        sink.push("think", "коротко")
+        runner.running = False
+        await wait_until(pilot, lambda: len(_thoughts(scr)) == 1, "мысль")
+        row = _thoughts(scr)[0]
+        await wait_until(
+            pilot,
+            lambda: (
+                row.settled and _line(row).startswith("● Thought  коротко")
+            ),
+            "строка законченная",
+        )
+
+
+@pytest.mark.asyncio
+async def test_thought_and_its_call_in_one_tick_keep_thought_above(tmp_path):
+    """Мысль и вызов её шага пришли одним тиком (рассуждение одним куском
+    в конце ответа): мысль над вызовом."""
+    from gc_tui.widgets.thought_row import ThoughtRow
+
+    _write_thread(tmp_path)
+    _messages(tmp_path, _reply())
+    async with _app(tmp_path).run_test(size=(100, 40)) as pilot:
+        scr, sink, _runner = await _running(pilot)
+        sink.push("reset", "")
+        sink.push("think", "план")
+        sink.push("tool", "{}")
+        _messages(tmp_path, _call(), _output(), start_seq=1)
+        await wait_until(
+            pilot,
+            lambda: (
+                len(_thoughts(scr)) == 1 and _top_index(scr, ToolCallRow) >= 0
+            ),
+            "мысль и вызов",
+        )
+        assert _top_index(scr, ThoughtRow) < _top_index(scr, ToolCallRow)

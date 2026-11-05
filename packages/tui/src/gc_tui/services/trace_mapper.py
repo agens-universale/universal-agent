@@ -960,7 +960,7 @@ def _map_function_event(
         if wire_name == SESSION_THINK_TOOL_NAME and not thought:
             return None  # пустой Think: ошибка — только модели
         args_summary = tool_args_summary(
-            wire_name, msg.get("arguments"), root=root
+            wire_name, msg.get("arguments"), root=root, injected=injected
         )
         return TraceEvent(
             no=no,

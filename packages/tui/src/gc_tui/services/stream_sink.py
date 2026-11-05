@@ -12,16 +12,38 @@ from __future__ import annotations
 import re
 import threading
 import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from gc_core.message_policy.chat_completions import is_bridge_echo
 
 _THINK_RE = re.compile(r"<think>(.*?)(?:</think>|$)", re.DOTALL)
 
 
+@dataclass(frozen=True)
+class ThoughtSnapshot:
+    """Мысль одной попытки стрима: метка, весь текст, время фазы мысли,
+    идёт ли она ещё и когда началась попытка (часы записей треда — по
+    ним мысль встаёт перед записями своего шага)."""
+
+    attempt: str
+    text: str
+    seconds: float
+    live: bool
+    started_at: datetime
+
+
 class StreamSink:
-    def __init__(self, *, clock=time.monotonic) -> None:
+    def __init__(
+        self, *, clock=time.monotonic, wall=lambda: datetime.now(UTC)
+    ) -> None:
         self._lock = threading.Lock()
         self._clock = clock
+        self._wall = wall
+        self._attempt_started_at = None  # datetime | None
+        # Мысли законченных попыток, ещё не забранные лентой: сброс между
+        # тиками не должен их терять.
+        self._finished: list[ThoughtSnapshot] = []
         self._think = ""
         self._answer = ""
         self._chars = 0
@@ -33,6 +55,7 @@ class StreamSink:
     def push(self, kind: str, text: str) -> None:
         with self._lock:
             if kind == "reset":
+                self._stash_thought()
                 self._think = ""
                 self._answer = ""
                 self._chars = 0
@@ -40,6 +63,7 @@ class StreamSink:
                 self._reasoning_ended_at = None
                 self._resets += 1
                 self._attempt = f"a{self._resets}"
+                self._attempt_started_at = self._wall()
                 return
             if kind == "think":
                 self._think += text
@@ -118,13 +142,53 @@ class StreamSink:
             return (self._clock() if ended is None else ended) - started
 
     def reset(self) -> None:
+        """Сброс экраном (конец хода, смена треда): мысль попытки уходит в
+        законченные — лента её ещё заберёт; выбросить — `discard_thoughts`."""
         with self._lock:
+            self._stash_thought()
             self._think = ""
             self._answer = ""
             self._chars = 0
             self._reasoning_started_at = None
             self._reasoning_ended_at = None
             self._attempt = None
+            self._attempt_started_at = None
+
+    def take_thoughts(self) -> list[ThoughtSnapshot]:
+        """Мысли для ленты: законченные с прошлого раза (забираются) и мысль
+        идущей попытки (остаётся в стриме)."""
+        with self._lock:
+            taken, self._finished = self._finished, []
+            current = self._thought_snapshot(live=True)
+            return taken if current is None else [*taken, current]
+
+    def discard_thoughts(self) -> None:
+        """Лента начата заново (смена треда): незабранные мысли не нужны."""
+        with self._lock:
+            self._finished = []
+
+    def _stash_thought(self) -> None:
+        snapshot = self._thought_snapshot(live=False)
+        if snapshot is not None:
+            self._finished.append(snapshot)
+
+    def _thought_snapshot(self, *, live: bool) -> ThoughtSnapshot | None:
+        """Снимок мысли текущей попытки; без метки или мысли — None.
+        ``live=False`` — попытка кончилась: мысль законченная."""
+        if self._attempt is None or not self._think:
+            return None
+        started = self._reasoning_started_at
+        ended = self._reasoning_ended_at
+        seconds = 0.0
+        if started is not None:
+            seconds = (self._clock() if ended is None else ended) - started
+        return ThoughtSnapshot(
+            attempt=self._attempt,
+            text=self._think,
+            seconds=seconds,
+            live=live and ended is None,
+            started_at=self._attempt_started_at or self._wall(),
+        )
 
 
 def format_stream_block(*, answer: str) -> str:
