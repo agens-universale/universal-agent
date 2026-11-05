@@ -74,6 +74,8 @@ _ROLE_TO_SOURCE = {"system": "system", "user": "user", "assistant": "agent"}
 DEFAULT_CONTAINER_SKILLS_ROOT = "/harbor/skills"
 # Ключ настроек каталога скиллов в overrides агента.
 _SKILLS_PATH_KEY = "paths.skills_data_path"
+# Сколько ждать выхода рабочего потока после `stop_run()` при отмене.
+_STOP_GRACE_S = 30
 
 # Dependency files (prompts/, skills/) are copied next to adapters/ in the image
 # (see harbor/Dockerfile) and live at repo-root in editable/local runs. Resolve them
@@ -810,6 +812,12 @@ class GcCliExternal(BaseAgent):
             from gc_core.utils.async_http import aclose_clients
             from gc_core.utils.logging_module import release_run_logger
 
+            # Отмена, пока поток стоял в очереди пула: `shield` ниже её не
+            # снимает, и без этой проверки поток ушёл бы в дискавери MCP
+            # против уже снятого окружения.
+            with self._cancel_lock:
+                if self._cancelled:
+                    return None
             ctx = None
             try:
                 ctx = await acreate_run_context(
@@ -863,18 +871,21 @@ class GcCliExternal(BaseAgent):
         state = None
         fut = loop.run_in_executor(None, _run_loop)
         try:
-            state = await fut
+            state = await asyncio.shield(fut)
         except asyncio.CancelledError:
             with self._cancel_lock:
                 self._cancelled = True
             if executor is not None:
                 executor.stop_run()
             try:
-                state = await asyncio.wait_for(asyncio.shield(fut), timeout=30)
-            except TimeoutError:
+                state = await asyncio.wait_for(
+                    asyncio.shield(fut), timeout=_STOP_GRACE_S
+                )
+            except Exception:
                 self.logger.warning(
-                    "gc-cli worker thread still running after stop_run(); "
-                    "abandoning it and dumping best-effort partial state"
+                    "gc-cli worker thread did not finish cleanly after "
+                    "stop_run(); dumping best-effort partial state",
+                    exc_info=True,
                 )
             raise
         finally:

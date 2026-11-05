@@ -6,6 +6,9 @@ Requires the `harbor` framework (dependency-group `test`).
 import asyncio
 import json
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -220,6 +223,161 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
     traj = tmp_path / "trajectory.json"
     assert traj.exists()  # partial trace flushed despite the abort
     assert context.metadata["total_steps"] == 2
+
+
+def _cancel_harness(tmp_path, monkeypatch, arun):
+    """Agent wired to a fake executor whose `arun(self)` is `arun`.
+
+    Returns the agent, the Harbor context and a list of
+    `acreate_run_context` calls. `stop_run()` sets `executor.stop`.
+    """
+    ctx_calls = []
+
+    class FakeExecutor:
+        def __init__(self, ctx):
+            self.state = SimpleNamespace(
+                messages=[
+                    {"role": "user", "content": "do X"},
+                    {"role": "assistant", "content": "working"},
+                ]
+            )
+            self.stop = threading.Event()
+
+        async def arun(self, messages):
+            arun(self)
+
+        def stop_run(self):
+            self.stop.set()
+
+        def get_state(self):
+            return self.state
+
+    async def _actx(*_a, **_k):
+        ctx_calls.append(1)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("gc_core.run_context.acreate_run_context", _actx)
+    monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", FakeExecutor)
+    agent = GcCliExternal(
+        logs_dir=tmp_path,
+        model_name="openai/m",
+        session_id="s",
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions"
+        },
+    )
+    return agent, SimpleNamespace(metadata=None), ctx_calls
+
+
+async def _wait_until(predicate):
+    for _ in range(100):
+        if predicate():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition not reached within 1 s")
+
+
+async def _cancel_once_started(agent, context, started):
+    task = asyncio.create_task(agent.run("do X", object(), context))
+    await _wait_until(started.is_set)
+    task.cancel()
+    await task
+
+
+def test_cancel_waits_for_cooperative_worker(tmp_path, monkeypatch):
+    """After `stop_run()` the worker finishes its step; the dump sees it."""
+    started = threading.Event()
+
+    def arun(executor):
+        started.set()
+        executor.stop.wait(1)
+        time.sleep(0.2)
+        executor.state.messages.append(
+            {"role": "assistant", "content": "finished"}
+        )
+
+    agent, context, _ = _cancel_harness(tmp_path, monkeypatch, arun)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_cancel_once_started(agent, context, started))
+
+    assert context.metadata["total_steps"] == 3
+
+
+def test_cancel_before_worker_start_skips_run_context(tmp_path, monkeypatch):
+    """A worker still queued in the pool must not start the run."""
+    agent, context, ctx_calls = _cancel_harness(
+        tmp_path, monkeypatch, lambda executor: None
+    )
+    release = threading.Event()
+    submitted = []
+
+    class Pool(ThreadPoolExecutor):
+        def submit(self, fn, /, *args, **kwargs):
+            submitted.append(fn)
+            return super().submit(fn, *args, **kwargs)
+
+    async def scenario():
+        pool = Pool(max_workers=1)
+        asyncio.get_running_loop().set_default_executor(pool)
+        pool.submit(release.wait, 1)
+        task = asyncio.create_task(agent.run("do X", object(), context))
+        try:
+            await _wait_until(lambda: len(submitted) == 2)
+            task.cancel()
+        finally:
+            release.set()
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(scenario())
+
+    assert ctx_calls == []
+    assert context.metadata["total_steps"] == 0
+
+
+def test_cancel_abandons_worker_after_grace(tmp_path, monkeypatch, caplog):
+    """A worker ignoring the stop is abandoned once the grace runs out."""
+    monkeypatch.setattr("adapters.gc_cli_external._STOP_GRACE_S", 0.2)
+    started = threading.Event()
+    release = threading.Event()
+
+    def arun(_executor):
+        started.set()
+        release.wait(2)
+
+    agent, context, _ = _cancel_harness(tmp_path, monkeypatch, arun)
+
+    async def scenario():
+        try:
+            await _cancel_once_started(agent, context, started)
+        finally:
+            elapsed.append(time.monotonic() - begin)
+            release.set()
+
+    elapsed = []
+    begin = time.monotonic()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(scenario())
+
+    assert elapsed[0] < 1
+    assert "did not finish cleanly" in caplog.text
+    assert (tmp_path / "trajectory.json").exists()
+
+
+def test_worker_error_during_grace_still_cancels(tmp_path, monkeypatch):
+    """A worker failing after `stop_run()` must not mask the cancel."""
+    started = threading.Event()
+
+    def arun(executor):
+        started.set()
+        executor.stop.wait(1)
+        raise RuntimeError("boom after stop")
+
+    agent, context, _ = _cancel_harness(tmp_path, monkeypatch, arun)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_cancel_once_started(agent, context, started))
 
 
 def _agent(**kwargs) -> GcCliExternal:
