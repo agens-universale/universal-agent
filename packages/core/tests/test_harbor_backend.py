@@ -1089,3 +1089,14 @@ def test_env_prefix_rejects_non_identifier_names():
     with pytest.raises(ValueError, match="invalid environment variable name"):
         _env_assignment_prefix({"X=1; touch /tmp/pwned; Y": "v"})
     assert _env_assignment_prefix({"OK": "v"}) == "env OK=v "
+
+
+async def test_merged_docker_output_reaches_failure_message(loop_in_thread):
+    # Docker-окружение Harbor сливает stderr в stdout: причина отказа — там.
+    env = FakeEnv()
+    env.exec = _make_exec_returning(
+        env, "find: unrecognized: -printf\n", return_code=1
+    )
+    backend = HarborBackend(env, loop_in_thread)
+    with pytest.raises(OSError, match="unrecognized: -printf"):
+        await backend.listdir("/work")

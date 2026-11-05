@@ -29,6 +29,7 @@ from gc_core.utils.file_text import (
     encode_text_for_write,
 )
 from gc_core.utils.native_fs_search import find_prune_group, find_walk_head
+from gc_core.utils.text_preview import head_tail_preview
 
 #: Потолок на один вопрос «где мы» при сборке контекста. Со стороны ядра
 #: дедлайна нет, и без него медленный контейнер задерживал бы сборку сколько
@@ -38,6 +39,9 @@ CWD_PRIME_TIMEOUT_SEC = 20
 #: Потолок на запуск фоновой команды. Сам запуск — это `exec`, который только
 #: отцепляет команду и печатает pid, ответ приходит за доли секунды.
 BACKGROUND_SPAWN_TIMEOUT_SEC = 30
+
+#: Предел причины отказа команды ФС в сообщении модели (как у пробы среды).
+_FAILURE_DETAIL_CHARS = 500
 
 
 def build_find_walk_command(
@@ -126,7 +130,7 @@ class PosixShellFsMixin:
         # columns; ``b64decode(validate=False)`` ignores the newlines.
         res = await self._afs_exec(f"head -c {n} {shlex.quote(path)} | base64")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"head failed: {path}")
+            raise OSError(self._failure_detail(res) or f"head failed: {path}")
         if res.stdout_hit_capture_cap:
             raise OSError(f"head output exceeded capture ceiling: {path}")
         # Как у полного скачивания: переводы строк снимаем явно, остальное строго —
@@ -192,13 +196,15 @@ class PosixShellFsMixin:
     async def getsize(self, path: str) -> int:
         res = await self._afs_exec(f"stat -c %s {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"stat failed: {path}")
+            raise OSError(self._failure_detail(res) or f"stat failed: {path}")
         return int(res.stdout.strip())
 
     async def sha256(self, path: str) -> str:
         res = await self._afs_exec(f"sha256sum {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"sha256sum failed: {path}")
+            raise OSError(
+                self._failure_detail(res) or f"sha256sum failed: {path}"
+            )
         return res.stdout.split()[0]
 
     async def stat(self, path: str) -> dict:
@@ -260,7 +266,15 @@ class PosixShellFsMixin:
         return [(e.rel, e.is_dir) for e in await self.walk_entries(path)]
 
     @staticmethod
-    def _fs_failure(path: str, res: Any, *, what: str) -> OSError:
+    def _failure_detail(res: Any) -> str:
+        """Причина отказа для сообщения модели: stderr, а при пустом —
+        stdout (Harbor-docker сливает stderr в stdout); не длиннее предела,
+        начало и конец. Классификация читает сырой stderr, не это."""
+        text = (res.stderr or "").strip() or (res.stdout or "").strip()
+        return head_tail_preview(text, _FAILURE_DETAIL_CHARS)
+
+    @classmethod
+    def _fs_failure(cls, path: str, res: Any, *, what: str) -> OSError:
         """Отказ команды ФС: «файла нет» — только когда так сказала та сторона.
         Таймаут (код ``None``), пустой stderr, permission denied — ``OSError``:
         иначе модель решала бы, что файла нет, и шла его создавать."""
@@ -270,10 +284,11 @@ class PosixShellFsMixin:
             return OSError(f"{what} timed out: {path}")
         if "no such file" in low:
             return FileNotFoundError(path)
+        detail = cls._failure_detail(res)
         if "permission denied" in low:
-            return PermissionError(err)
+            return PermissionError(detail)
         return OSError(
-            err or f"{what} failed (exit {res.return_code}): {path}"
+            detail or f"{what} failed (exit {res.return_code}): {path}"
         )
 
     @classmethod
@@ -293,7 +308,8 @@ class PosixShellFsMixin:
             )
         ):
             return OSError(
-                f"GNU find with -printf is required on the backend: {err}"
+                "GNU find with -printf is required on the backend: "
+                f"{cls._failure_detail(res)}"
             )
         return cls._fs_failure(path, res, what="find")
 
@@ -382,7 +398,9 @@ class PosixShellFsMixin:
                 f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; rm -f {shlex.quote(remote_tmp)}"
             )
             if res.return_code != 0:
-                raise OSError(res.stderr.strip() or f"append failed: {path}")
+                raise OSError(
+                    self._failure_detail(res) or f"append failed: {path}"
+                )
         finally:
             # Best-effort: upload/exec may leave remote_tmp if the cat+rm line never ran.
             try:
@@ -393,12 +411,14 @@ class PosixShellFsMixin:
     async def copy(self, src: str, dst: str) -> None:
         res = await self._afs_exec(f"cp {shlex.quote(src)} {shlex.quote(dst)}")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"cp failed: {src} -> {dst}")
+            raise OSError(
+                self._failure_detail(res) or f"cp failed: {src} -> {dst}"
+            )
 
     async def makedirs(self, path: str) -> None:
         res = await self._afs_exec(f"mkdir -p {shlex.quote(path)}")
         if res.return_code != 0:
-            raise OSError(res.stderr.strip() or f"mkdir failed: {path}")
+            raise OSError(self._failure_detail(res) or f"mkdir failed: {path}")
 
     # --- background ---
     async def aspawn_background(

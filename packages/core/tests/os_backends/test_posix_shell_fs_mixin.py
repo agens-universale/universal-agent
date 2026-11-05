@@ -267,3 +267,83 @@ async def test_readable_writable_ask_the_remote_side():
     )
     assert await be.readable("/etc/shadow") is True
     assert await be.writable("/etc/shadow") is False
+
+
+_HELP = "help " * 400
+
+
+async def test_find_failure_shows_stdout_when_stderr_empty():
+    out = "find: unrecognized: -printf\n" + _HELP
+    be = RecordingShell(
+        answers={"-printf": ExecResult(return_code=1, stdout=out, stderr="")}
+    )
+    for call in (be.listdir, be.walk_entries):
+        with pytest.raises(OSError) as ei:
+            await call("/etc")
+        assert not isinstance(ei.value, FileNotFoundError)
+        assert "unrecognized: -printf" in str(ei.value)
+        assert len(str(ei.value)) <= 500 + len("find failed: ")
+
+
+async def test_huge_failure_output_is_bounded():
+    huge_stdout = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1, stdout="x\tf\t1\n" * 200_000, stderr=""
+            )
+        }
+    )
+    with pytest.raises(OSError) as ei:
+        await huge_stdout.walk_entries("/w")
+    assert len(str(ei.value)) <= 700
+    huge_stderr = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1, stderr="find: a: Permission denied\n" * 40_000
+            )
+        }
+    )
+    with pytest.raises(PermissionError) as ei:
+        await huge_stderr.walk_entries("/w")
+    assert len(str(ei.value)) <= 700
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda be: be.stat("/w/a"),
+        lambda be: be.getsize("/w/a"),
+        lambda be: be.copy("/w/a", "/w/b"),
+        lambda be: be.makedirs("/w/d"),
+        lambda be: be.read_head_bytes("/w/a", 8),
+        lambda be: be.sha256("/w/a"),
+    ],
+)
+async def test_single_command_failures_show_stdout(call):
+    be = RecordingShell(
+        answers={
+            "": ExecResult(return_code=1, stdout="boom: reason", stderr="")
+        }
+    )
+    with pytest.raises(OSError, match="boom: reason"):
+        await call(be)
+
+
+async def test_failure_without_output_keeps_generic_text():
+    be = RecordingShell(
+        answers={"-printf": ExecResult(return_code=1, stdout="", stderr="")}
+    )
+    with pytest.raises(OSError) as ei:
+        await be.listdir("/w")
+    assert str(ei.value) == "find failed (exit 1): /w"
+
+
+async def test_failure_tolerates_missing_output_streams():
+    be = RecordingShell(
+        answers={
+            "-printf": ExecResult(return_code=1, stdout=None, stderr=None)
+        }
+    )
+    with pytest.raises(OSError) as ei:
+        await be.listdir("/w")
+    assert str(ei.value) == "find failed (exit 1): /w"
