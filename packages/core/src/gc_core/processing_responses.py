@@ -3118,7 +3118,9 @@ class _AgentLoop:
             self._nudges.clear(self.state)
             return _Outcome(result=None)
         except Exception as backend_exc:
-            if not await self._atry_recover_context_overflow(backend_exc):
+            if not await self._atry_recover_context_overflow(
+                backend_exc, messages, mode
+            ):
                 raise
             # Тот же шаг: подсказки уже в messages, notices_sent не снимаем.
             return self._overflow_resume(messages, mode)
@@ -3308,7 +3310,7 @@ class _AgentLoop:
         ]
 
     async def _atry_recover_context_overflow(
-        self, backend_exc: Exception
+        self, backend_exc: Exception, messages, mode: str
     ) -> bool:
         # Переполнение контекстного окна модели → не крашимся: форс-сжатие
         # истории (безусловное, как /compact) и повтор запроса со сжатым
@@ -3329,7 +3331,11 @@ class _AgentLoop:
         )
         previous = getattr(self.state, "messages", None)
         try:
-            applied = await _acall_blocking_hook(self.force_compact_hook)
+            # Батч и режим — чтобы сводка вернула реплики и картинки шага.
+            # Ответ тула хук не оставляет: вызов уже уйдёт в сводку.
+            applied = await _acall_blocking_hook(
+                self.force_compact_hook, messages, mode
+            )
         finally:
             if self._history_replaced(previous):
                 self._drop_pre_summary_output()
@@ -4096,7 +4102,7 @@ async def arun_agent(
         Callable[[List[Dict], str], None]
     ] = None,
     turn_end_compaction_hook: Optional[Callable[[], None]] = None,
-    force_compact_hook: Optional[Callable[[], None]] = None,
+    force_compact_hook: Optional[Callable[..., Any]] = None,
     get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,
