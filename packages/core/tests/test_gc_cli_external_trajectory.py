@@ -335,6 +335,9 @@ def test_cancel_before_worker_start_skips_run_context(tmp_path, monkeypatch):
 
     assert ctx_calls == []
     assert context.metadata["total_steps"] == 0
+    # Поток, стартовавший после отмены, не открывает тайминги: иначе файл,
+    # закрытый в `_dump_outcome`, открылся бы снова и остался открытым.
+    assert not (tmp_path / "timings.jsonl").exists()
 
 
 def test_cancel_abandons_worker_after_grace(tmp_path, monkeypatch, caplog):

@@ -812,12 +812,6 @@ class GcCliExternal(BaseAgent):
             from gc_core.utils.async_http import aclose_clients
             from gc_core.utils.logging_module import release_run_logger
 
-            # Отмена, пока поток стоял в очереди пула: `shield` ниже её не
-            # снимает, и без этой проверки поток ушёл бы в дискавери MCP
-            # против уже снятого окружения.
-            with self._cancel_lock:
-                if self._cancelled:
-                    return None
             ctx = None
             try:
                 ctx = await acreate_run_context(
@@ -851,6 +845,13 @@ class GcCliExternal(BaseAgent):
                 await aclose_clients()
 
         def _run_loop():
+            # Отмена, пока поток стоял в очереди пула: `shield` ниже её не
+            # снимает, и без этой проверки поток ушёл бы в дискавери MCP
+            # против уже снятого окружения. До `attach`: иначе поток, начавший
+            # после `_dump_outcome`, снова открыл бы закрытый файл таймингов.
+            with self._cancel_lock:
+                if self._cancelled:
+                    return None
             timings.attach()  # sink routing is per thread — bind inside the worker
             return asyncio.run(_agent_run())
 
