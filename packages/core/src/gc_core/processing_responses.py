@@ -2358,8 +2358,73 @@ def _track_repeat_errors(
     return is_unknown
 
 
+def _skipped_after_compact_output(tool_name: str) -> str:
+    """Хвост батча после сводки не исполняется. Карточка закрывается отказом."""
+    payload = {
+        "tool": str(tool_name or "unknown_tool"),
+        "ok": False,
+        "status": "not_started_due_to_session_compact",
+        "message": "Tool was not started: session_compact replaced the history.",
+        "error": None,
+        "synthetic": True,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _closings_after_session_compact(
+    done: List[Dict], pending: List[Dict]
+) -> List[Dict]:
+    """Вывод самой сводки и отказы вызовов за ней. В новый трейс не входят."""
+    closing: List[Dict] = []
+    if done:
+        last = done[-1]
+        if (
+            isinstance(last, dict)
+            and last.get("type") == "function_call_output"
+        ):
+            closing.append(last)
+    for call in pending:
+        if not isinstance(call, dict):
+            continue
+        call_id = call.get("call_id")
+        if not call_id:
+            continue
+        closing.append(
+            _function_call_output_message(
+                call_id,
+                _skipped_after_compact_output(str(call.get("name") or "")),
+            )
+        )
+    return closing
+
+
+def _hold_summary_archive(ctx: Any) -> Dict[str, Any]:
+    """Перезапись файла сводкой откладывается, пока в старый тред не лягут выводы."""
+    real = getattr(ctx, "on_summary_applied", None)
+    box: Dict[str, Any] = {"real": real, "event": None, "done": False}
+
+    async def held(event):
+        box["event"] = event
+
+    if real is not None:
+        ctx.on_summary_applied = held
+    return box
+
+
+async def _release_summary_archive(ctx: Any, box: Dict[str, Any]) -> None:
+    if box.get("done"):
+        return
+    box["done"] = True
+    real = box.get("real")
+    event = box.get("event")
+    if real is not None:
+        ctx.on_summary_applied = real
+    if real is not None and event is not None:
+        await await_callback(real(event))
+
+
 def _log_unstarted_after_session_compact(ctx: Any, calls: List[Dict]) -> None:
-    """Хвост батча после сводки не стартует и в трейс не пишется. Только лог."""
+    """Хвост после сводки не стартует. Отказы пишутся отдельно, здесь только лог."""
     parts: List[str] = []
     for call in calls:
         if not isinstance(call, dict):
@@ -2571,6 +2636,70 @@ async def _aexecute_one_batch_call(
     )
 
 
+async def _astep_executed_call(
+    i: int,
+    call: Dict,
+    *,
+    executed: List[Dict],
+    tools_outputs: List[Dict],
+    skip_outputs: List[Dict],
+    state: State,
+    ctx: Any,
+    run_agent_func,
+    persist_messages_callback,
+    batch_trace: Optional[Dict],
+) -> Tuple[bool, bool, int, bool]:
+    """Один вызов батча. Последний флаг — сводка заменила трейс, хвост закрыт."""
+    archive = None
+    if str(call.get("name") or "") == SESSION_COMPACT_TOOL_NAME:
+        archive = _hold_summary_archive(ctx)
+    try:
+        was_invalid, ask_ok, unknown_hit = await _aexecute_one_batch_call(
+            i,
+            call,
+            tools_outputs=tools_outputs,
+            skip_outputs=skip_outputs,
+            state=state,
+            ctx=ctx,
+            run_agent_func=run_agent_func,
+            persist_messages_callback=persist_messages_callback,
+            batch_trace=batch_trace,
+        )
+        if getattr(state, "session_compact_applied", False):
+            await _aclose_after_session_compact(
+                ctx,
+                state,
+                tools_outputs,
+                executed[i + 1 :],
+                persist_messages_callback,
+                archive,
+            )
+            return bool(was_invalid), bool(ask_ok), unknown_hit, True
+        return bool(was_invalid), bool(ask_ok), unknown_hit, False
+    finally:
+        if archive is not None:
+            await _release_summary_archive(ctx, archive)
+
+
+async def _aclose_after_session_compact(
+    ctx: Any,
+    state: State,
+    tools_outputs: List[Dict],
+    pending: List[Dict],
+    persist_messages_callback,
+    archive: Dict[str, Any] | None,
+) -> None:
+    """Выводы сводки и хвоста — в старый тред, затем файл заменяется сводкой."""
+    await _maybe_persist(
+        persist_messages_callback,
+        _closings_after_session_compact(tools_outputs, pending),
+        state,
+    )
+    if archive is not None:
+        await _release_summary_archive(ctx, archive)
+    _log_unstarted_after_session_compact(ctx, pending)
+
+
 async def _arun_executed_tool_batch(
     executed: List[Dict],
     skip_outputs: List[Dict],
@@ -2610,9 +2739,15 @@ async def _arun_executed_tool_batch(
         if ended is not None:
             tools_outputs.append(ended)
             continue
-        was_invalid, ask_ok, unknown_hit = await _aexecute_one_batch_call(
+        (
+            was_invalid,
+            ask_ok,
+            unknown_hit,
+            compacted,
+        ) = await _astep_executed_call(
             i,
             call,
+            executed=executed,
             tools_outputs=tools_outputs,
             skip_outputs=skip_outputs,
             state=state,
@@ -2623,9 +2758,7 @@ async def _arun_executed_tool_batch(
         )
         invalid_in_batch += int(was_invalid)
         unknown_in_batch += unknown_hit
-        if getattr(state, "session_compact_applied", False):
-            # Сводка заменила трейс. Хвост батча не стартует и выходов не получает.
-            _log_unstarted_after_session_compact(ctx, executed[i + 1 :])
+        if compacted:
             break
         if ask_ok:
             successful_ask_human = True

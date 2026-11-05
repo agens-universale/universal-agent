@@ -903,6 +903,8 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         return "отменено"
     if status == "not_started_due_to_user_stop":
         return "не запущено (стоп)"
+    if status == "not_started_due_to_session_compact":
+        return "не исполнен: сводка заменила историю"
     if status == "step_limit":
         return "лимит шагов"
     if status == "token_limit":
