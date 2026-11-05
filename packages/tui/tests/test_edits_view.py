@@ -3722,3 +3722,29 @@ def test_accepted_copy_of_a_path_deleted_again_stays_revertable(tmp_path):
 
     assert [row.entry.path for row in view.active] == ["x.py"]
     assert view.settled == []
+
+
+def test_filtered_path_with_snapshot_keeps_the_old_rule_after_commit(
+    tmp_path,
+):
+    """Запасное правило удаления — только для пути с одной отметкой коммита.
+
+    У пути есть снимок сессии, но ступени нет: кастомный фильтр запрещает
+    читать HEAD. Пользователь закоммитил удаление — путь остаётся активным
+    с откатом к снимку, как до отметки коммита."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write(".gitattributes", "x.bin filter=lfs\n")
+    ws.write("x.bin", "orig\n")
+    _git_run(ws.root, "add", "-A")
+    _git_run(ws.root, "commit", "-qm", "seed")
+    ws.session_base("x.bin", "orig\n")
+    ws.write("x.bin", "agent\n")
+    ws.journal.append(_rec("x.bin", op="edit", ts=1.0))
+    _git_run(ws.root, "rm", "-qf", "x.bin")
+    _git_run(ws.root, "commit", "-qm", "rm")
+
+    view = ws.view.session_view(SOURCE_SESSION)
+
+    assert [row.entry.path for row in view.active] == ["x.bin"]
+    assert view.settled == []
+    assert view.active[0].entry.revertable is True

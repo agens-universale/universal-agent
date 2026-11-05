@@ -1992,13 +1992,20 @@ class EditsView:
         """Удаление пути закоммичено в этой сессии, и файла нет и на диске.
 
         Есть ступень — верим ей: удаление, только если это ``STEP_HEAD`` без
-        байтов (принятая ступень или фильтр git держат строку с откатом).
-        Ступени нет (путь закоммичен командой: снимка нет) — факт у git.
+        байтов (принятая ступень держит строку с откатом). Ступени нет — факт
+        у git, но только у пути с одной отметкой коммита (закоммичен
+        командой: ни снимка сессии, ни отметки создания). Путь со снимком,
+        которому ступень отказана (кастомный фильтр, HEAD не читается),
+        остаётся строкой с откатом, как прежде.
         """
         step = self._session_ladder.get(rel)
         if step is not None:
             return step.kind == STEP_HEAD and step.content is None
-        return self._ladder_facts.head_absent(rel)
+        return (
+            not self._store.has_session_baseline(rel)
+            and self._store.created_head_rev(rel) is None
+            and self._ladder_facts.head_absent(rel)
+        )
 
     def _settled_rows(
         self, records: List[EditRecord], reasons: Dict[str, str]
