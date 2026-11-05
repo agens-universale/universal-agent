@@ -987,7 +987,10 @@ def _config_converts_eol(launch_root: str) -> bool:
 
 
 def is_ancestor(launch_root: str, older: str, newer: str) -> bool:
-    """``older`` — предок ``newer`` (``merge-base --is-ancestor``); отказ — ``False``."""
+    """``older`` — предок ``newer`` (``merge-base --is-ancestor``).
+
+    Отказ git — ``False``.
+    """
     code, _out = run_git(
         launch_root, ["merge-base", "--is-ancestor", older, newer]
     )
@@ -1009,7 +1012,8 @@ def paths_changed_between(
 ) -> set[str] | None:
     """Пути, различающиеся в деревьях ``older`` и ``newer``; отказ — ``None``.
 
-    В отличие от ``paths_committed_since``, отказ git отличим от пустого ответа.
+    В отличие от ``paths_committed_since``, отказ git отличим от пустого
+    ответа.
     """
     code, out = run_git(
         launch_root,

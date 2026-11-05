@@ -55,7 +55,7 @@ class DeleteBudget:
 
 
 def deletion_text(before: bytes) -> str | None:
-    """Текст «до» для строк удаления: не бинарь и декодируется; иначе ``None``."""
+    """Текст «до» для строк удаления; бинарь или недекодируемый — ``None``."""
     if is_binary_bytes(before):
         return None
     return decode_edit_text(before)
