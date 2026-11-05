@@ -650,3 +650,51 @@ def test_resume_phrase_does_not_set_nudge_flag(monkeypatch):
     assert state.tool_usage_notice_cnt == {"session_todo": 3}
     assert state.todo_reminder_cnt == 4
     assert session_meta["project_memory_check_cnt"] == 7
+
+
+def test_drop_pre_summary_keeps_follower_user_ask_in_intent():
+    """Сводка отменяет запись хвоста. Реплика из него остаётся в намерениях."""
+    from gc_core.message_policy.user_message_policy import (
+        wrap_technical_user_content,
+    )
+
+    state = _compact_state()
+    state.user_turn_seq = 2
+    loop = _agent_loop(state, {})
+    user = {"role": "user", "content": "сделай ещё вот это", "id": "u_mid"}
+    loop._nudges.carrier = {
+        "type": "function_call_output",
+        "call_id": "c_last",
+        "id": "out_last",
+        "output": "{}",
+    }
+    loop._nudges.followers = [
+        user,
+        {
+            "role": "user",
+            "content": wrap_technical_user_content("resume"),
+            "id": "u_tech",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "c_img",
+            "id": "out_img",
+            "output": "{}",
+        },
+    ]
+
+    loop._drop_pre_summary_output()
+
+    assert [record.content for record in state.current_user_intent] == [
+        "сделай ещё вот это"
+    ]
+    assert state.current_user_intent[0].turn == 3
+    assert loop._nudges.followers == []
+    assert loop._nudges.carrier is None
+    assert loop._nudges.skip_fill is True
+
+    loop._nudges.followers = [user]
+    loop._drop_pre_summary_output()
+    assert [record.content for record in state.current_user_intent] == [
+        "сделай ещё вот это"
+    ]

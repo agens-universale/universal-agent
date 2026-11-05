@@ -98,6 +98,7 @@ from gc_core.intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
 )
+from gc_core.intent_log.user_turn import append_user_asks_from_messages
 from gc_core.intent_scope.final_answer import (
     amaybe_record_final_answer_intent,
     record_plan_outcome,
@@ -3510,9 +3511,16 @@ class _AgentLoop:
 
         Подсказки старого диалога тоже не собираем заново: ближайший запрос
         идёт по новой истории. Новое техническое сообщение (объявление
-        режима) может добавиться следом.
+        режима) может добавиться следом. Реплика из отложенного хвоста на
+        диск уже не попадёт — в намерения открытого хода её пишем до сброса.
         """
         self._discard_nudges_after_summary(skip_fill=True)
+        state = self.state
+        state.current_user_intent = append_user_asks_from_messages(
+            state.current_user_intent,
+            self._nudges.followers,
+            user_turn_seq=state.user_turn_seq,
+        )
         self._nudges.carrier = None
         self._nudges.followers = []
 
