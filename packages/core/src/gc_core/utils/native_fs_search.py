@@ -52,6 +52,13 @@ _GREP_CLEAN_ENV = {
     "GREP_COLORS": "",
     "GREP_COLOR": "",
 }
+_MATCH_LOCATOR_INPUT_MAX_BYTES = 64 * 1024
+_MATCH_LOCATOR_SCRIPT = """\
+while IFS= read -r line; do
+    first=$(printf '%s\\n' "$line" | "$@" | head -n 1)
+    printf '%s\\n' "$first"
+done
+"""
 
 
 def _split_grep_record(raw: str) -> Optional[Tuple[str, int, str]]:
@@ -90,30 +97,52 @@ def _grep_env(plan: NativeGrepPlan) -> Dict[str, str]:
     return env
 
 
-async def alocate_native_grep_match(
-    backend: Any, line: str, plan: NativeGrepPlan
-) -> Optional[Tuple[int, int]]:
-    """Locate the first hit with grep's locale/case rules on a returned line.
+def _bounded_locator_rows(lines: Sequence[str]) -> List[Tuple[int, bytes]]:
+    """Keep the combined stdin small enough for shell-backed exec transports."""
+    selected: List[Tuple[int, bytes]] = []
+    remaining = _MATCH_LOCATOR_INPUT_MAX_BYTES
+    for index, line in enumerate(lines):
+        if len(line) >= remaining or "\n" in line or "\0" in line:
+            continue
+        raw = line.encode("utf-8")
+        # Shell-backed aexec_argv quotes stdin with shlex.quote. Each embedded
+        # single quote expands from one byte to five, plus the row newline.
+        input_size = len(raw) + 4 * line.count("'") + 1
+        if input_size <= remaining:
+            selected.append((index, raw))
+            remaining -= input_size
+    return selected
 
-    Offsets from ``-b -o`` count UTF-8 bytes of stdin, not Python characters.
-    Only a complete first record is usable; capped/failed probes lose no hits.
-    """
-    argv = ["grep", "-b", "-o", "-m", "1", "--color=never"]
+
+async def alocate_native_grep_matches(
+    backend: Any, lines: Sequence[str], plan: NativeGrepPlan
+) -> List[Optional[Tuple[int, int]]]:
+    """Find first spans in one bounded request using the original grep semantics."""
+    spans: List[Optional[Tuple[int, int]]] = [None] * len(lines)
+    selected = _bounded_locator_rows(lines)
+    if not selected:
+        return spans
+
+    # Keep one complete output record per input row, even when -o finds
+    # thousands of occurrences or grep finds no nonempty match on that row.
+    argv = ["sh", "-c", _MATCH_LOCATOR_SCRIPT, "grep-offsets", "env"]
+    argv.extend(f"{key}={value}" for key, value in _grep_env(plan).items())
+    argv.extend(["grep", "-b", "-o", "--color=never"])
     if plan.case_insensitive:
         argv.append("-i")
     argv.extend(["-F" if plan.fixed else "-E", "--", plan.pattern])
     try:
         result = await aexec_port(backend).aexec_argv(
             argv,
-            stdin=line,
+            stdin="".join(lines[index] + "\n" for index, _ in selected),
             timeout=2,
-            env=_grep_env(plan),
-            capture_max_chars=4096,
+            capture_max_chars=_MATCH_LOCATOR_INPUT_MAX_BYTES
+            + 16 * len(selected),
         )
     except (UserStopInterrupt, RuntimeUnavailable):
         raise
     except Exception:
-        return None
+        return spans
     if getattr(result, "stopped_by_user", False):
         raise UserStopInterrupt(kind="exec")
     if (
@@ -121,17 +150,25 @@ async def alocate_native_grep_match(
         or result.return_code != 0
         or result.stdout_hit_capture_cap
     ):
-        return None
-    record, newline, _rest = result.stdout.partition("\n")
+        return spans
+    records = result.stdout.split("\n")
+    if records[-1] or len(records) != len(selected) + 1:
+        return spans
+    for (index, raw), record in zip(selected, records):
+        spans[index] = _native_match_span(record, raw)
+    return spans
+
+
+def _native_match_span(record: str, raw: bytes) -> Optional[Tuple[int, int]]:
+    """Validate a grep byte offset and convert it to character offsets."""
     offset, sep, matched = record.partition(":")
     if (
-        not newline
-        or not sep
+        not sep
+        or len(offset) > len(str(len(raw)))
         or not offset.isascii()
         or not offset.isdecimal()
     ):
         return None
-    raw = line.encode("utf-8")
     start = int(offset)
     needle = matched.encode("utf-8")
     if not needle or raw[start : start + len(needle)] != needle:
@@ -622,6 +659,8 @@ async def anative_prefilter_candidates(
         res = await arun_backend_exec_raw(
             backend, cmd, **_prefilter_run_kwargs(backend)
         )
+    except (UserStopInterrupt, RuntimeUnavailable):
+        raise
     except Exception as exc:
         log.debug("native prefilter failed: %s", exc)
         return None, "failed"
@@ -642,6 +681,8 @@ def _prefilter_result(
     res: Any, backend: Any, path: str
 ) -> tuple[Optional[List[str]], Optional[str]]:
     """Разбор результата префильтра — общий для обеих форм."""
+    if getattr(res, "stopped_by_user", False):
+        raise UserStopInterrupt(kind="exec")
     if getattr(res, "timed_out", False):
         return None, "timeout"
     if getattr(res, "stdout_hit_capture_cap", False):
@@ -781,6 +822,8 @@ async def arun_native_grep(
             if recipe.shell
             else await port.aexec_argv(recipe.target, **recipe.kwargs)
         )
+    except (UserStopInterrupt, RuntimeUnavailable):
+        raise
     except Exception as exc:
         log.debug("native grep failed: %s", exc)
         return NativeGrepResult(
@@ -790,8 +833,6 @@ async def arun_native_grep(
             failure="native_error",
         )
     if getattr(res, "stopped_by_user", False):
-        from gc_core.user_stop import UserStopInterrupt
-
         raise UserStopInterrupt(kind="exec")
 
     return _grep_result(

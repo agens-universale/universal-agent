@@ -94,6 +94,7 @@ class _ScanShared:
     stop: bool = False
     stop_reason: Optional[str] = None
     files_opened_regex: int = 0
+    regex_match_budget_files: int = 0
     content_paths_touched: int = 0
     skipped_binary: int = 0
     skipped_encoding: int = 0
@@ -1707,29 +1708,38 @@ class FindInFiles(AbstractSimpleTool):
 
     async def _clip_native_matches(
         self, shown: List[Dict[str, Any]], plan: Any
-    ) -> bool:
+    ) -> None:
         """Bound each row without discarding native hits when a span is unknown."""
-        from gc_core.utils.native_fs_search import alocate_native_grep_match
+        from gc_core.utils.native_fs_search import alocate_native_grep_matches
 
-        complete = True
-        probes = 0
         for row in shown:
-            line = row["line_content"]
             row.pop("context", None)
-            if len(line) <= self.max_line_content_chars:
-                continue
-            span = self._native_literal_match_span(line, plan)
-            if (
-                span is None
-                and not row.get("line_content_truncated")
-                and probes < self.max_native_match_locators
-            ):
-                probes += 1
-                span = await alocate_native_grep_match(
-                    self._backend, line, plan
-                )
+        long_rows = [
+            row
+            for row in shown
+            if len(row["line_content"]) > self.max_line_content_chars
+        ]
+        spans = [
+            self._native_literal_match_span(row["line_content"], plan)
+            for row in long_rows
+        ]
+        probes = [
+            i
+            for i, (row, span) in enumerate(zip(long_rows, spans))
+            if span is None and not row.get("line_content_truncated")
+        ][: self.max_native_match_locators]
+        if probes:
+            located = await alocate_native_grep_matches(
+                self._backend,
+                [long_rows[i]["line_content"] for i in probes],
+                plan,
+            )
+            for i, span in zip(probes, located):
+                spans[i] = span
+
+        for row, span in zip(long_rows, spans):
+            line = row["line_content"]
             if span is None:
-                complete = False
                 row["line_content"] = (
                     line[: self.max_line_content_chars]
                     + "...[line_truncated: match location unavailable]"
@@ -1738,7 +1748,6 @@ class FindInFiles(AbstractSimpleTool):
                 row["line_content"] = self._clip_line_content(
                     line, match_start=span[0], match_end=span[1]
                 )
-        return complete
 
     def _has_native_grep(self) -> bool:
         try:
@@ -1874,7 +1883,7 @@ class FindInFiles(AbstractSimpleTool):
             else len(ranked)
         )
         shown = ranked[:limit_eff]
-        windows_complete = await self._clip_native_matches(shown, plan)
+        await self._clip_native_matches(shown, plan)
         await self._attach_native_match_contexts(shown, max_bytes)
         for m in shown:
             m["file"] = tool_report_abspath(
@@ -1907,15 +1916,14 @@ class FindInFiles(AbstractSimpleTool):
             limit_capped=limit_capped,
             limit_requested=limit_requested,
             count=count,
-            windows_complete=windows_complete,
         )
         return self._build_response(
             matches=shown,
             count=count,
             stop_reason=stop_reason,
             guidance=guidance,
-            scan_complete=not hit_limit and windows_complete,
-            more_matches_may_exist=hit_limit or not windows_complete,
+            scan_complete=not hit_limit,
+            more_matches_may_exist=hit_limit,
             **common,
         ), None
 
@@ -1949,14 +1957,7 @@ class FindInFiles(AbstractSimpleTool):
         limit_capped: bool,
         limit_requested: int,
         count: int,
-        windows_complete: bool,
     ) -> Tuple[Optional[str], Optional[str]]:
-        if not windows_complete:
-            return "native_match_offset_unavailable", (
-                "Native matches are retained, but a displayed line fragment may "
-                "omit its match. Use shell grep on the reported file/line to "
-                "locate it; increasing limit will not restore the fragment."
-            )
         if hit_limit:
             return "match_limit", self._match_limit_guidance(
                 limit_eff,
@@ -2166,6 +2167,7 @@ class FindInFiles(AbstractSimpleTool):
             skipped_binary=shared.skipped_binary or None,
             skipped_encoding=shared.skipped_encoding or None,
             skipped_read_errors=shared.skipped_read_errors or None,
+            regex_match_budget_files=shared.regex_match_budget_files or None,
             stop_reason=stop_reason,
             guidance=guidance,
             scan_complete=scan_complete,
@@ -2562,9 +2564,8 @@ class FindInFiles(AbstractSimpleTool):
             self._absorb_file_matches(
                 shared, file_matches, ran_re, params.limit_eff
             )
-            if budget_hit and not shared.stop:
-                shared.stop = True
-                shared.stop_reason = "regex_match_budget"
+            if budget_hit:
+                shared.regex_match_budget_files += 1
 
     async def _ascan_cooperatively(
         self,
@@ -2666,14 +2667,24 @@ class FindInFiles(AbstractSimpleTool):
                 f"Narrow path (e.g. path={report_path}) or simplify pattern; "
                 "shell rg is a fallback."
             )
-        elif shared.stop_reason == "regex_match_budget":
+        elif shared.regex_match_budget_files:
             stop_reason = "regex_match_budget"
             more_matches_may_exist = True
             scan_complete = False
-            guidance = self._regex_match_budget_guidance()
         elif limit_capped:
             stop_reason, guidance = self._cap_stop_info(
                 True, limit_requested, limit_eff, count=count
+            )
+        if shared.regex_match_budget_files:
+            budget_guidance = (
+                "Files that reached the regex occurrence budget were only "
+                "partially scanned. Use a more specific pattern to find more "
+                "distinct matches in those files."
+            )
+            guidance = (
+                f"{guidance} {budget_guidance}"
+                if guidance
+                else budget_guidance
             )
         if (
             files_too_large
@@ -2798,6 +2809,7 @@ class FindInFiles(AbstractSimpleTool):
         skipped_binary: Optional[int] = None,
         skipped_encoding: Optional[int] = None,
         skipped_read_errors: Optional[int] = None,
+        regex_match_budget_files: Optional[int] = None,
         fallback_reason: Optional[str] = None,
         prefilter: Optional[str] = None,
     ) -> str:
@@ -2835,6 +2847,7 @@ class FindInFiles(AbstractSimpleTool):
             ("skipped_binary", skipped_binary),
             ("skipped_encoding", skipped_encoding),
             ("skipped_read_errors", skipped_read_errors),
+            ("regex_match_budget_files", regex_match_budget_files),
         ):
             if value:
                 payload[key] = value

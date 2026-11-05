@@ -475,6 +475,39 @@ def test_native_or_keeps_the_longest_matching_branch(tmp_path):
 
 
 @requires_native_search
+async def test_dense_long_rows_share_one_bounded_grep_request(
+    tmp_path, monkeypatch
+):
+    line = "é" * 600 + " K_id" * 4000
+    (tmp_path / "dense.txt").write_text((line + "\n") * 2, encoding="utf-8")
+    tool = _tool(tmp_path)
+    calls = await _spy_exec(monkeypatch, tool._backend)
+
+    data = json.loads(
+        await tool.acall(
+            path=str(tmp_path),
+            pattern="k_id|OTHER",
+            query_mode="python-re",
+            case_insensitive=True,
+        )
+    )
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 2
+    assert all("K_id" in row["line_content"] for row in data["matches"])
+    assert (
+        len(
+            [
+                argv
+                for kind, argv in calls
+                if kind == "argv" and "-b" in argv and "-o" in argv
+            ]
+        )
+        == 1
+    )
+
+
+@requires_native_search
 def test_non_ascii_ignore_case_uses_native_offsets(tmp_path):
     (tmp_path / "one.txt").write_text(
         "a" * 700 + "École" + "b" * 700, encoding="utf-8"

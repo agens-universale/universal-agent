@@ -25,6 +25,15 @@ def _transfer_message(source, target):
     )
 
 
+def _missing_source_message(source, target):
+    container = "eb67c6337a5d"
+    return (
+        f"Engine cp failed ({f'{container}:{source}'!r} -> {str(target)!r}): "
+        f"Error response from daemon: Could not find the file {source} "
+        f"in container {container}\n"
+    )
+
+
 class _DownloadEnvironment:
     """Execute the probe locally; fail only the provider's download boundary."""
 
@@ -131,6 +140,122 @@ async def test_download_requires_exact_source_and_destination(
         assert caught.value is failures[0]
 
 
+@pytest.mark.parametrize("path", ["/app/missing.txt", "/app/agent's file.txt"])
+async def test_download_normalizes_confirmed_missing_source(monkeypatch, path):
+    environment = _DownloadEnvironment()
+    failures = []
+
+    async def refuse_download(source, target):
+        failure = RuntimeError(_missing_source_message(source, target))
+        failures.append(failure)
+        raise failure
+
+    monkeypatch.setattr(environment, "download_file", refuse_download)
+    with pytest.raises(FileNotFoundError) as caught:
+        await _backend(environment).read_bytes(path)
+    assert caught.value.__cause__ is failures[0]
+    assert str(caught.value) == str(failures[0])
+
+
+@pytest.mark.parametrize(
+    "reported_source, reported_target, diagnostic",
+    [
+        ("/app/other.txt", None, None),
+        (None, "/tmp/different-download", None),
+        (
+            None,
+            None,
+            "Could not find the file /app/other.txt in container cid",
+        ),
+        (
+            None,
+            None,
+            "Could not find the file /app/missing.txt in container other",
+        ),
+        (None, None, "No such container: cid"),
+        (None, None, "Cannot connect to the Docker daemon"),
+        (None, None, "no such file or directory"),
+        (
+            None,
+            None,
+            "Could not find the file /app/missing.txt in container cid\n"
+            "error during connect",
+        ),
+    ],
+)
+async def test_download_preserves_unbound_or_ambiguous_copy_failure(
+    monkeypatch, reported_source, reported_target, diagnostic
+):
+    environment = _DownloadEnvironment()
+    failures = []
+
+    async def refuse_download(source, target):
+        error = (
+            diagnostic or f"Could not find the file {source} in container cid"
+        )
+        failure = RuntimeError(
+            f"Engine cp failed ('cid:{reported_source or source}' -> "
+            f"'{reported_target or target}'): Error response from daemon: {error}\n"
+        )
+        failures.append(failure)
+        raise failure
+
+    monkeypatch.setattr(environment, "download_file", refuse_download)
+    with pytest.raises(RuntimeError) as caught:
+        await _backend(environment).read_bytes("/app/missing.txt")
+    assert caught.value is failures[0]
+
+
+@pytest.mark.parametrize(
+    "case, expected",
+    [
+        ("plain", FileNotFoundError),
+        ("quiet", FileNotFoundError),
+        ("wrong_source", RuntimeError),
+        ("wrong_target", RuntimeError),
+        ("wrong_diagnostic", RuntimeError),
+        ("other_error", RuntimeError),
+    ],
+)
+async def test_compose_download_classifies_only_bound_missing_source(
+    monkeypatch, case, expected
+):
+    environment = _DownloadEnvironment()
+    failures = []
+
+    async def refuse_download(source, target):
+        args = f"cp main:{source} {target}"
+        if case == "wrong_source":
+            args = f"cp main:/other cp main:{source} {target}"
+        elif case == "wrong_target":
+            args = f"cp main:{source} /tmp/other"
+        reported = "/app/other.txt" if case == "wrong_diagnostic" else source
+        stdout = (
+            f"Error response from daemon: Could not find the file {reported} "
+            "in container eb67c6337a5d\n"
+        )
+        if case == "plain":
+            stdout = f" bench-main-1 copy bench-main-1:{source} to {target} Copying\n{stdout}"
+        elif case == "other_error":
+            stdout = f"error during connect\n{stdout}"
+        failure = RuntimeError(
+            "Docker compose command failed for environment test. "
+            "Command: docker compose --project-name bench "
+            f"--project-directory /task -f /task/docker-compose.yaml {args}. "
+            f"Return code: 1. Stdout: {stdout}. Stderr: None. "
+        )
+        failures.append(failure)
+        raise failure
+
+    monkeypatch.setattr(environment, "download_file", refuse_download)
+    with pytest.raises(expected) as caught:
+        await _backend(environment).read_bytes("/app/missing file.txt")
+    if expected is FileNotFoundError:
+        assert caught.value.__cause__ is failures[0]
+    else:
+        assert caught.value is failures[0]
+
+
 @pytest.mark.parametrize(
     "failure",
     [
@@ -169,6 +294,42 @@ async def test_probe_failure_does_not_enter_download_conversion(monkeypatch):
         await backend.read_bytes("/app/link.txt")
     assert caught.value is failure
     assert environment.downloads == []
+
+
+@requires_native_search
+async def test_native_keeps_hits_and_good_context_when_source_disappears(
+    tmp_path, monkeypatch
+):
+    root, good, bad = _pair(tmp_path)
+    environment = _DownloadEnvironment()
+    download = environment.download_file
+
+    async def download_with_race(source, target):
+        if source == str(bad):
+            bad.unlink()
+            environment.downloads.append(source)
+            raise RuntimeError(_missing_source_message(source, target))
+        await download(source, target)
+
+    monkeypatch.setattr(environment, "download_file", download_with_race)
+    backend = _local_with_harbor_download(
+        environment, monkeypatch, native=True
+    )
+    data = json.loads(
+        await _tool(FindInFiles, root, backend).acall(
+            path=str(root), pattern="TOKEN|OTHER", query_mode="python-re"
+        )
+    )
+
+    assert not bad.exists()
+    assert data["ok"] is True and data["search_backend"] == "grep"
+    assert data["count"] == 3
+    bad_hits = [row for row in data["matches"] if row["file"] == str(bad)]
+    assert len(bad_hits) == 2
+    assert all(row["context_omitted"] == "read_error" for row in bad_hits)
+    good_hit = next(row for row in data["matches"] if row["file"] == str(good))
+    assert "good before" in good_hit["context"]
+    assert Counter(environment.downloads) == {str(good): 1, str(bad): 1}
 
 
 @requires_native_search
@@ -218,12 +379,11 @@ async def test_native_keeps_hits_and_good_context_after_download_refusal(
     assert locators
     if locator_available:
         assert all(token in row["line_content"] for row in bad_hits)
-        assert data["scan_complete"] is True
-        assert data["more_matches_may_exist"] is False
     else:
-        assert data["stop_reason"] == "native_match_offset_unavailable"
-        assert data["scan_complete"] is False
-        assert data["more_matches_may_exist"] is True
+        assert "match location unavailable" in bad_hits[0]["line_content"]
+    assert "stop_reason" not in data
+    assert data["scan_complete"] is True
+    assert data["more_matches_may_exist"] is False
 
 
 @requires_native_search
