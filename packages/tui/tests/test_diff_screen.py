@@ -21,7 +21,15 @@ from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.thread_store import edits_journal_path
 from gc_testkit.tui_support import as_settings, span_style, tui_settings
-from gc_tui.palette import ACCENT, BRIGHT, DEEP_DIM, ERR, INK, MUTED, OK
+from gc_tui.palette import (
+    ACCENT,
+    BRIGHT,
+    DEEP_DIM,
+    DIFF_ADD_INK,
+    DIFF_DEL_INK,
+    INK,
+    MUTED,
+)
 from gc_tui.screens.diff import (
     ACCEPTED_GLYPH,
     APPROX,
@@ -621,13 +629,14 @@ def test_settled_rows_path_and_kind_stay_muted():
 def test_settled_rows_counters_are_dim_green_and_red_not_grey():
     """С2 смоука волны 4: строка группы серая, но `+`/`−` красятся притушённым
     вариантом смысловых цветов, не сливаются с приглушённым путём/причиной.
-    Не новый оттенок — существующие `OK`/`ERR` с рендер-атрибутом Rich `dim`.
+    Не новый оттенок — цвета «добавлено / удалено» с рендер-атрибутом Rich
+    `dim`.
     """
     [row] = build_settled_rows(
         [_settled("a.py", add=1, del_=1)], selected=-1, width=100
     )
-    assert span_style(row, "+1") == f"{OK} dim"
-    assert span_style(row, "−1") == f"{ERR} dim"
+    assert span_style(row, "+1") == f"{DIFF_ADD_INK} dim"
+    assert span_style(row, "−1") == f"{DIFF_DEL_INK} dim"
     assert span_style(row, "+1") != MUTED
     assert span_style(row, "−1") != MUTED
 
@@ -650,15 +659,15 @@ def test_settled_row_cursor_glyph():
 
 
 def test_counters_are_painted_by_meaning_not_grey():
-    """`+N` — зелёный `OK`, `−M` — красный `ERR` (макет дизайн-гейта).
+    """`+N` — зелёный `DIFF_ADD_INK`, `−M` — красный `DIFF_DEL_INK` (макет дизайн-гейта).
 
     Те же семантические цвета носит гаттер тела диффа: один смысл — один цвет,
     и колонка счётчиков читается цветом, а не чтением чисел.
     """
     rows = build_rows(_GRID, selected=0, width=100)
     for entry, row in zip(_GRID, rows):
-        assert span_style(row, f"+{entry.add}") == OK, row.plain
-        assert span_style(row, f"−{entry.del_}") == ERR, row.plain
+        assert span_style(row, f"+{entry.add}") == DIFF_ADD_INK, row.plain
+        assert span_style(row, f"−{entry.del_}") == DIFF_DEL_INK, row.plain
 
 
 def test_zero_counter_keeps_the_colour_of_its_column():
@@ -668,7 +677,7 @@ def test_zero_counter_keeps_the_colour_of_its_column():
         for row in build_rows(_GRID, selected=0, width=100)
         if "revert.py" in row.plain
     )
-    assert span_style(row, "−0") == ERR
+    assert span_style(row, "−0") == DIFF_DEL_INK
 
 
 def test_approx_sign_stays_dim():
@@ -686,8 +695,8 @@ def test_cursor_brightens_the_path_but_not_the_counters():
     rows = build_rows(_GRID, selected=0, width=100)
     assert span_style(rows[0], "diff.py") == BRIGHT  # строка под курсором
     assert span_style(rows[1], "revert.py") == INK  # соседняя
-    assert span_style(rows[0], "+84") == OK
-    assert span_style(rows[0], "−12") == ERR
+    assert span_style(rows[0], "+84") == DIFF_ADD_INK
+    assert span_style(rows[0], "−12") == DIFF_DEL_INK
 
 
 # --- шапка -------------------------------------------------------------------
@@ -700,8 +709,8 @@ def test_header_counters_are_painted_like_the_rows():
     )
     painted = paint_counters(left)
     assert painted.plain == left  # текст тот же, добавлен только цвет
-    assert span_style(painted, "+120") == OK
-    assert span_style(painted, "−15") == ERR
+    assert span_style(painted, "+120") == DIFF_ADD_INK
+    assert span_style(painted, "−15") == DIFF_DEL_INK
 
 
 def test_header_without_numbers_is_not_painted_at_all():
@@ -717,8 +726,8 @@ def test_header_without_numbers_is_not_painted_at_all():
 def test_header_paints_the_counters_not_a_plus_inside_the_path():
     """Красится последняя пара строки: счётчики всегда в хвосте, путь — нет."""
     painted = paint_counters("изменения · сессия · src/c++/a+1 −2.py · +9 −4")
-    assert span_style(painted, "+9") == OK
-    assert span_style(painted, "−4") == ERR
+    assert span_style(painted, "+9") == DIFF_ADD_INK
+    assert span_style(painted, "−4") == DIFF_DEL_INK
     assert span_style(painted, "+1") == ""  # пара внутри пути не тронута
 
 
@@ -1581,8 +1590,8 @@ async def test_header_shows_source_and_cumulative_counters(tmp_path):
         assert header == "изменения · сессия · 2 файла · +4 −1"
         # цвет доезжает до живой шапки, а не остаётся в чистой функции
         content = scr.query_one("#header-left").content
-        assert span_style(content, "+4") == OK
-        assert span_style(content, "−1") == ERR
+        assert span_style(content, "+4") == DIFF_ADD_INK
+        assert span_style(content, "−1") == DIFF_DEL_INK
 
 
 @pytest.mark.asyncio
