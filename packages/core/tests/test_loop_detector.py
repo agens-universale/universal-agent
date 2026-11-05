@@ -605,11 +605,71 @@ def test_process_tool_calls_second_read_executes_and_emits_technical(
         "c1",
         "c2",
     ]
-    tech = [o for o in outs if o.get("role") == "user"]
-    assert len(tech) == 1
-    assert "Loop detector:" in tech[0]["content"]
-    assert "fs_read_file" in tech[0]["content"]
-    assert LOOP in state.tick_signals
+    # Напоминание дописывает продолжающийся ход, не сам батч: до решения
+    # finish/stop отдельного user нет и LOOP ещё не тикает.
+    assert all(o.get("role") != "user" for o in outs)
+    assert state.loop_detector_pending
+    assert LOOP not in state.tick_signals
+
+
+def test_process_tool_calls_after_summary_drops_loop_without_notice(
+    monkeypatch,
+):
+    """После session_compact resume продолжает ход — loop не клеим и не тикаем."""
+    from gc_core import processing_responses as pr
+
+    state = _ptc_state()
+    sys_m = {"role": "system", "content": "s", "id": "sys"}
+    state.messages = [
+        sys_m,
+        {"role": "user", "content": "history", "id": "u0"},
+    ]
+
+    def fake_apply(**kw):
+        if kw["tool_name"] == "session_compact":
+            state.messages = [
+                sys_m,
+                {"role": "user", "content": "summary", "id": "sum"},
+            ]
+            state.session_compact_applied = True
+            return json.dumps({"tool": "session_compact", "ok": True})
+        return json.dumps({"ok": True, "path": "a.py"})
+
+    monkeypatch.setattr(pr, "aapply_tool", as_coro(fake_apply))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **_kw: None)
+    )
+    monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
+
+    args = json.dumps({"path": "a.py"})
+    tools_data = {
+        "fs_read_file": _entry(**READ_PROFILE),
+        "session_compact": {},
+    }
+    outs = run_coro(
+        pr.aprocess_tool_calls(
+            messages=[
+                _fc("fs_read_file", "c1", args),
+                _fc("fs_read_file", "c2", args),
+                _fc("session_compact", "c_compact", '{"reason": "done"}'),
+            ],
+            state=state,
+            ctx=_ptc_ctx(tools_data),
+            run_agent_func=None,
+        )
+    )
+    assert state.loop_detector_window == []
+    assert state.loop_detector_pending == []
+    assert LOOP not in state.tick_signals
+    assert not any("Loop detector:" in str(o.get("content", "")) for o in outs)
+    assert any(
+        o.get("role") == "user"
+        and "session_compact finished" in str(o.get("content") or "")
+        for o in outs
+    )
 
 
 def test_process_tool_calls_user_stop_clears_window(monkeypatch):
