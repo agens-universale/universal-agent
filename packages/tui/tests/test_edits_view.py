@@ -42,6 +42,7 @@ from gc_tui.services.edits_view import (
     diff_limits,
 )
 from gc_testkit.git_support import rev_parse_head
+from gc_tui.screens.diff import build_rows
 
 
 def _rec(
@@ -3748,3 +3749,26 @@ def test_filtered_path_with_snapshot_keeps_the_old_rule_after_commit(
     assert [row.entry.path for row in view.active] == ["x.bin"]
     assert view.settled == []
     assert view.active[0].entry.revertable is True
+
+
+def test_created_and_committed_by_command_is_labeled_created(tmp_path):
+    """Файл создан и закоммичен командой: на /diff подпись «создан», а
+    ``kind``/``revertable`` прежние — откат удалением ему не положен."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("new.py", "one\n")
+    for args in (["add", "--", "new.py"], ["commit", "-m", "add new.py"]):
+        subprocess.run(
+            ["git", *args], cwd=str(ws.root), check=True, capture_output=True
+        )
+    ws.journal.append(
+        _rec("new.py", ts=1.0, op="shell", add=1, del_=0, flags=["created"])
+    )
+
+    [row] = ws.view.session_view(SOURCE_TURN).active
+
+    assert (row.entry.kind, row.entry.revertable) == ("modified", False)
+    assert row.entry.created is False
+    assert row.entry.shown_created is True
+    [text] = build_rows([row.entry], selected=0, width=80)
+    assert "создан" in str(text)
+    assert "изменён" not in str(text)

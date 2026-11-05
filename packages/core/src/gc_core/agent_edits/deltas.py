@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Tuple
 
-from gc_core.agent_edits.journal import EditRecord
+from gc_core.agent_edits.journal import CREATED_FLAG, EditRecord
 from gc_core.agent_edits.paths import is_external_key
 from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
@@ -233,6 +233,10 @@ class FileEntry:
     # содержимым. ``None`` — последняя запись пути не удаление либо режим не
     # снят.
     restore_mode: Optional[int] = None
+    # Только подпись: путь создан и закоммичен командой (первая запись с
+    # ``CREATED_FLAG``), файл на диске. ``kind``/``created``/``revertable``
+    # не трогает — откат удалением такому пути не положен.
+    shown_created: bool = False
 
 
 def file_entries(
@@ -348,6 +352,8 @@ def file_entries(
                 last_ts=path_records[-1].ts,
                 created=created,
                 restore_mode=_restore_mode(path_records),
+                shown_created=on_disk
+                and CREATED_FLAG in path_records[0].flags,
             )
         )
 
