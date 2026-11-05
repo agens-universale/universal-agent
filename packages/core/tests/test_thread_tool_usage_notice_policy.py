@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from gc_core.config_modules.message_notice import ToolUsageNoticeRule
@@ -133,6 +134,43 @@ def test_batch_used_tool_detects_function_call():
     assert not batch_used_tool(
         [{"type": "function_call", "name": "fs_read_file"}], "session_memory"
     )
+
+
+def test_batch_used_tool_detects_function_call_output():
+    """Имя тула в батче flush — поле tool JSON-ответа, не name сообщения."""
+    output = {
+        "type": "function_call_output",
+        "output": json.dumps({"tool": "session_memory", "ok": True}),
+    }
+    assert batch_used_tool([output], "session_memory")
+    assert not batch_used_tool([output], "session_todo")
+
+    stored = {
+        "type": "function_call_output",
+        "output": json.dumps(
+            {
+                "type": "stored_tool_output",
+                "source_tool": "session_memory",
+                "ok": True,
+            }
+        ),
+    }
+    assert batch_used_tool([stored], "session_memory")
+
+    # Страница чтения хранит source_tool исходного тула, а вызван сам reader.
+    page = {
+        "type": "function_call_output",
+        "output": json.dumps(
+            {
+                "type": "stored_tool_output",
+                "tool": "session_read_stored_tool_output",
+                "source_tool": "session_memory",
+                "ok": True,
+            }
+        ),
+    }
+    assert batch_used_tool([page], "session_read_stored_tool_output")
+    assert not batch_used_tool([page], "session_memory")
 
 
 def test_collect_tool_usage_notices_respects_threshold_and_stop_tools():

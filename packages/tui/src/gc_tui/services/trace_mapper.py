@@ -11,6 +11,7 @@ from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
 from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
 from gc_core.execution.progress import tool_args_summary
 from gc_core.message_policy.chat_completions import is_bridge_echo
+from gc_core.message_policy.nudges import output_for_card
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -834,6 +835,7 @@ def classify_stop(
 def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(output, str):
         return ""
+    output = output_for_card(output)
     # Единый unwrap: голый dict, double-encoded, list-обёртка, stored_tool_output
     # envelope (с partial-parser для truncated). Та же логика что у preview.
     from gc_tui.services.tool_preview import unwrap_tool_output_dict
