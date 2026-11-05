@@ -19,7 +19,7 @@ from rich.text import Text
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
-from gc_tui.palette import ERR, OK
+from gc_tui.palette import DIFF_ADD_INK, DIFF_DEL_INK
 from gc_tui.services.diff_render import copyable_hunks
 
 SHORT_HUNKS = (
@@ -194,8 +194,8 @@ async def test_diff_block_mounted_right_after_its_tool_row(tmp_path):
 
 @pytest.mark.asyncio
 async def test_edit_counts_live_in_call_row(tmp_path):
-    """Счётчики правки — в строке вызова после объекта: `+N` цветом OK,
-    `−M` — ERR; строки `└ изменено:` под вызовом больше нет. Блок правок
+    """Счётчики правки — в строке вызова после объекта: `+N` цветом
+    DIFF_ADD_INK, `−M` — DIFF_DEL_INK; строки `└ изменено:` под вызовом больше нет. Блок правок
     (P4 §6.2): глагол по результату и счётчики в скобках `(+a −r)`."""
     tid = "counts"
     _write_thread(
@@ -212,8 +212,8 @@ async def test_edit_counts_live_in_call_row(tmp_path):
     async with _screen(tmp_path, tid) as scr:
         content = _row_content(scr.query_one(ToolCallRow))
         assert content.plain == "Edited src/app.py (+12 −3)"
-        assert _span_color(content, "+12") == OK
-        assert _span_color(content, "−3") == ERR
+        assert _span_color(content, "+12") == DIFF_ADD_INK
+        assert _span_color(content, "−3") == DIFF_DEL_INK
         assert not any("изменено:" in s for s in _screen_lines(scr))
 
 
