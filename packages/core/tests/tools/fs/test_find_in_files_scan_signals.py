@@ -117,13 +117,16 @@ def test_regex_match_budget_does_not_stop_directory_scan(
     )
 
     assert data["search_backend"] == "python"
-    assert [(m["file"], m["line"]) for m in data["matches"]] == [
+    # Parallel workers can finish files in a different order.
+    assert sorted((m["file"], m["line"]) for m in data["matches"]) == [
         (str(tmp_path / name), 1)
         for name in ("a.txt", "a.txt", "b.txt", "b.txt", "c.txt")
     ]
     assert data["count"] == 5
     assert data["stop_reason"] == stop_reason
-    assert data["regex_match_budget_files"] == 2
+    # The global limit can stop the last dense file before its own budget.
+    budget_counts = (1, 2) if stop_reason == "match_limit" else (2,)
+    assert data["regex_match_budget_files"] in budget_counts
     assert data["scan_complete"] is False
     assert data["more_matches_may_exist"] is True
     assert "more specific pattern" in data["guidance"]
