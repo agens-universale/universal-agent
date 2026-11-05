@@ -86,9 +86,7 @@ def _is_string_like_property(prop_schema: Any) -> bool:
     for branch in prop_schema.get("anyOf") or prop_schema.get("oneOf") or []:
         if isinstance(branch, dict) and branch.get("type") == "string":
             return True
-    # Узел без типа (не комбинатор, не $ref) принимает и строку; свободный
-    # объект (``type: object``) — нет.
-    return "type" not in prop_schema and is_free_node(prop_schema)
+    return False
 
 
 def _accepts_empty_string(prop_schema: Any) -> bool:

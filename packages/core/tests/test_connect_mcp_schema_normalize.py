@@ -744,29 +744,36 @@ def _strict_projected_optional(extra_schema: dict) -> dict:
     return sent
 
 
-def test_optional_untyped_param_gets_skip_hint_under_strict() -> None:
-    """Регресс: под strict поле без типа обязательно на проводе, а подсказки
-    «пропусти пустой строкой» у него не было — модель выдумывала значение."""
-    from gc_core.execution.tool_schema import OPTIONAL_EMPTY_AS_OMIT_HINT
-
-    params = _strict_projected_optional({})["parameters"]
-    assert "extra" in params["required"]
-    desc = params["properties"]["extra"]["description"]
-    assert OPTIONAL_EMPTY_AS_OMIT_HINT in desc
-
-
-def test_optional_untyped_empty_string_is_omitted() -> None:
-    sent = _strict_projected_optional({})
-    assert _validated(sent, {"key": "k", "extra": ""}) == {"key": "k"}
-
-
-def test_optional_untyped_enum_gets_no_hint() -> None:
+@pytest.mark.parametrize(
+    "extra_schema",
+    [{}, {"type": "object", "additionalProperties": True}],
+    ids=["free_node", "free_object"],
+)
+def test_free_tool_is_not_strict_expanded(extra_schema: dict) -> None:
+    """Регресс: инструмент со свободным узлом уходил со ``strict: false``,
+    но с развёрнутым ``required`` и подсказкой «пропуск недоступен» —
+    необязательное поле выглядело обязательным."""
     from gc_core.execution.tool_schema import (
         OPTIONAL_EMPTY_AS_OMIT_HINT,
         OPTIONAL_OMIT_HINT,
     )
 
-    sent = _strict_projected_optional({"enum": [1, 2]})
-    desc = sent["parameters"]["properties"]["extra"].get("description", "")
+    sent = _strict_projected_optional(extra_schema)
+    params = sent["parameters"]
+    assert sent["strict"] is False
+    assert params["required"] == ["key"]
+    desc = params["properties"]["extra"].get("description", "")
     assert OPTIONAL_EMPTY_AS_OMIT_HINT not in desc
     assert OPTIONAL_OMIT_HINT not in desc
+    assert _validated(sent, {"key": "k"}) == {"key": "k"}
+
+
+def test_typed_tool_keeps_strict_expansion() -> None:
+    from gc_core.execution.tool_schema import OPTIONAL_EMPTY_AS_OMIT_HINT
+
+    sent = _strict_projected_optional({"type": "string"})
+    params = sent["parameters"]
+    assert sent["strict"] is True
+    assert params["required"] == ["key", "extra"]
+    desc = params["properties"]["extra"]["description"]
+    assert OPTIONAL_EMPTY_AS_OMIT_HINT in desc
