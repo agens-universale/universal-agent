@@ -1348,6 +1348,67 @@ def test_binary_deletion_does_not_spend_the_budget(repo):
     assert by_path["b.txt"].del_ == 40_000
 
 
+def test_refunded_budget_is_reused_in_the_same_slice(repo):
+    """Не-текст, который резервом шёл первым, возвращает бюджет — и путь,
+    не влезший в первый проход, получает строки во втором."""
+    launch_root, threads_dir = repo
+    (launch_root / "a_bad.txt").write_bytes(
+        bytes(range(0x80, 0x100)) * 14_843 + b"\n"
+    )
+    (launch_root / "b_good.txt").write_bytes(b"x" * 99 + b"\n" * 1)
+    with (launch_root / "b_good.txt").open("ab") as fh:
+        fh.write((b"y" * 99 + b"\n") * 9_999)
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "big")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import os; os.remove('a_bad.txt'); os.remove('b_good.txt')",
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["a_bad.txt"].flags == ["no_diff"]
+    assert by_path["b_good.txt"].del_ == 10_000
+
+
+def _git_calls(monkeypatch) -> list[list[str]]:
+    """Аргументы всех ``run_git`` за время теста."""
+    calls: list[list[str]] = []
+    real_run_git = git_ops.run_git
+
+    def run_git(root, args, **kwargs):
+        calls.append(list(args))
+        return real_run_git(root, args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "run_git", run_git)
+    return calls
+
+
+def test_small_deletions_skip_binary_probe_and_ask_attrs_once(
+    repo, monkeypatch
+):
+    """Удаления, которые целиком влезают в бюджет, не спрашивают бинарность
+    у git (порядок резерва не важен), а атрибуты и настройка концов строк
+    спрашиваются по разу на кусок."""
+    launch_root, threads_dir = repo
+    for i in range(3):
+        (launch_root / f"f{i}.txt").write_bytes(b"x\n")
+    _git(launch_root, "add", "-A")
+    _git(launch_root, "commit", "-qm", "few")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root, "import os\nfor i in range(3): os.remove(f'f{i}.txt')"
+    )
+    calls = _git_calls(monkeypatch)
+    delta.after_and_record()
+
+    assert all(r.del_ == 1 for r in _records(threads_dir))
+    assert not [a for a in calls if "--numstat" in a]
+    assert len([a for a in calls if "check-attr" in a]) == 1
+    assert len([a for a in calls if "config" in a]) == 1
+
+
 def test_deleted_utf16_text_file_gets_lines(repo):
     """UTF-16 с BOM git считает бинарём, а классификатор проекта — текстом:
     git-подканал даёт такому удалению строки, как и карман."""

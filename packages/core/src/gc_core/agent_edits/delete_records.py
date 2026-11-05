@@ -14,6 +14,7 @@ from gc_core.agent_edits.deltas import (
     decode_edit_text,
     truncate_hunks,
 )
+from gc_core.agent_edits.git_ops import quote_c_path
 from gc_core.agent_edits.journal import EditRecord
 from gc_core.utils.file_text import (
     BINARY_SAMPLE_BYTES,
@@ -43,19 +44,30 @@ class DeleteBudget:
         self._left -= size
         return True
 
+    def fits(self, size: int) -> bool:
+        """Влезает ли ``size`` в остаток — без резерва."""
+        return size <= self._left
+
     def refund(self, size: int) -> None:
         """Вернуть зарезервированное, но не потраченное (бинарь, не текст):
         вернувшиеся байты достаются следующим резервам."""
         self._left += size
 
 
+def deletion_text(before: bytes) -> str | None:
+    """Текст «до» для строк удаления: не бинарь и декодируется; иначе ``None``."""
+    if is_binary_bytes(before):
+        return None
+    return decode_edit_text(before)
+
+
 def _deleted_text(
     before: bytes | None, budget: DeleteBudget | None
 ) -> str | None:
     """Текст «до», если строки удаления положены; бюджет тратится последним."""
-    if before is None or is_binary_bytes(before):
+    if before is None:
         return None
-    text = decode_edit_text(before)
+    text = deletion_text(before)
     if text is None:
         return None
     if budget is not None and not budget.take(len(before)):
@@ -71,15 +83,18 @@ def _git_delete_patch(key: str, mode: int | None, text: str, diff: str) -> str:
     хэнков нет, и, как у git, нет и строк ``---``/``+++``. ``build_diff``
     дописывает перевод строки последней строке без него — без маркера
     ``\\ No newline at end of file`` такой патч ``git apply`` не принимает.
+    Имя с табуляцией, переводом строки, ``"`` или ``\\`` — в C-кавычках,
+    как у git (``git_ops.quote_c_path``).
     """
     file_mode = "100755" if mode is not None and mode & 0o111 else "100644"
-    header = f"diff --git a/{key} b/{key}\ndeleted file mode {file_mode}\n"
+    old, new = quote_c_path(f"a/{key}"), quote_c_path(f"b/{key}")
+    header = f"diff --git {old} {new}\ndeleted file mode {file_mode}\n"
     body = diff.split("\n", 2)[2] if diff else ""
     if not body:
         return header
     if not text.endswith("\n"):
         body += "\\ No newline at end of file\n"
-    return f"{header}--- a/{key}\n+++ /dev/null\n{body}"
+    return f"{header}--- {old}\n+++ /dev/null\n{body}"
 
 
 def delete_record(

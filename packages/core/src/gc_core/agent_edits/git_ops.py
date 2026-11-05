@@ -247,6 +247,23 @@ def _unquote_c_path(raw: str) -> str:
     return out.decode("utf-8", errors="surrogateescape")
 
 
+# Символы, из-за которых git берёт имя пути в кавычки (``quote_c_path``).
+_C_QUOTED = {'"': '\\"', "\\": "\\\\", "\t": "\\t", "\n": "\\n"}
+
+
+def quote_c_path(path: str) -> str:
+    """Имя пути для заголовка патча — C-кавычки, как у git, когда в имени
+    табуляция, перевод строки, ``"`` или ``\\``; иначе как есть.
+
+    Обратная ``_unquote_c_path`` в части, нужной ``git apply``: без кавычек
+    он режет имя по табуляции. Не-ASCII не экранируется — ``git apply``
+    принимает его и так.
+    """
+    if not any(char in _C_QUOTED for char in path):
+        return path
+    return '"' + "".join(_C_QUOTED.get(char, char) for char in path) + '"'
+
+
 def show_index_bytes(launch_root: str, rel: str) -> Optional[bytes]:
     """``git show :<rel>`` — содержимое пути в ИНДЕКСЕ git.
 
@@ -433,22 +450,48 @@ def custom_filter_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
     ``_STDIN_CHUNK_PATHS``: отказ одного запуска объявляет «с фильтром» только
     свой кусок.
     """
-    return _paths_with_attrs(launch_root, rels, _WORKTREE_ATTRS)
+    return set(_set_attrs(launch_root, rels, _WORKTREE_ATTRS))
 
 
-def _paths_with_attrs(
-    launch_root: str, rels: Sequence[str], attrs: Sequence[str]
-) -> set[str]:
-    """Какие из ``rels`` несут хоть один из ``attrs``.
+def worktree_attr_paths(
+    launch_root: str, rels: Sequence[str]
+) -> tuple[set[str], set[str]]:
+    """``(custom_filter_paths, пути, чью выкладку фильтры меняют)`` разом.
 
-    Несёт — значение не ``unspecified`` и не ``unset``.
-
-    Один ``git check-attr -z --stdin`` на кусок (``_STDIN_CHUNK_PATHS``). Git
-    отказал или про путь ответил не по всем атрибутам — путь в ответе:
-    вызывающим это безопасная сторона.
+    Один ``check-attr`` по атрибутам концов строк (их набор включает
+    атрибуты фильтра) и одна проба настройки репозитория вместо двух
+    запросов атрибутов — ``custom_filter_paths`` и ``blobs_filtered_at``
+    (второе множество передаётся туда в ``affected``). Страховка та же:
+    неизвестное — в обоих множествах.
     """
     rels = list(rels)
-    found: set[str] = set()
+    if not rels:
+        return set(), set()
+    attrs = _set_attrs(launch_root, rels, _EOL_ATTRS)
+    filtered = {
+        rel
+        for rel, names in attrs.items()
+        if names is None or names & set(_WORKTREE_ATTRS)
+    }
+    if _config_converts_eol(launch_root):
+        return filtered, set(rels)
+    return filtered, set(attrs)
+
+
+def _set_attrs(
+    launch_root: str, rels: Sequence[str], attrs: Sequence[str]
+) -> dict[str, set[str] | None]:
+    """``{путь: заданные атрибуты}`` для путей, несущих хоть один из ``attrs``.
+
+    Задан — значение не ``unspecified`` и не ``unset``. ``None`` — ответ
+    неизвестен.
+
+    Один ``git check-attr -z --stdin`` на кусок (``_STDIN_CHUNK_PATHS``). Git
+    отказал или про путь ответил не по всем атрибутам — путь в ответе с
+    ``None``: вызывающим это безопасная сторона.
+    """
+    rels = list(rels)
+    found: dict[str, set[str] | None] = {}
     for start in range(0, len(rels), _STDIN_CHUNK_PATHS):
         chunk = rels[start : start + _STDIN_CHUNK_PATHS]
         stdin = _stdin_paths(f"{rel}\x00" for rel in chunk)
@@ -458,21 +501,31 @@ def _paths_with_attrs(
             stdin=stdin,
         )
         if code != 0:
-            found.update(chunk)
+            found.update(dict.fromkeys(chunk))
             continue
         fields = out.decode("utf-8", errors="surrogateescape").split("\x00")
-        values: dict[str, list[str]] = {}
+        answers: dict[str, dict[str, str]] = {}
         for i in range(0, len(fields) - 2, 3):
-            values.setdefault(fields[i], []).append(fields[i + 2])
-        found.update(
-            rel
-            for rel in chunk
-            if len(values.get(rel, ())) < len(attrs)
-            or any(
-                value not in ("unspecified", "unset") for value in values[rel]
-            )
-        )
+            answers.setdefault(fields[i], {})[fields[i + 1]] = fields[i + 2]
+        for rel in chunk:
+            names = _names_set(answers.get(rel, {}), attrs)
+            if names is None or names:
+                found[rel] = names
     return found
+
+
+def _names_set(
+    answer: dict[str, str], attrs: Sequence[str]
+) -> set[str] | None:
+    """Заданные атрибуты из ответа ``check-attr`` по пути; ``None`` — git
+    ответил не по всем спрошенным."""
+    if len(answer) < len(attrs):
+        return None
+    return {
+        name
+        for name, value in answer.items()
+        if value not in ("unspecified", "unset")
+    }
 
 
 def ignored_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
@@ -867,7 +920,11 @@ def binary_paths_at(
 
 
 def blobs_filtered_at(
-    launch_root: str, rels: Sequence[str], *, rev: str
+    launch_root: str,
+    rels: Sequence[str],
+    *,
+    rev: str,
+    affected: set[str] | None = None,
 ) -> dict[str, bytes | None]:
     """``{путь: содержимое в форме рабочего дерева}`` из ревизии ``rev``.
 
@@ -876,10 +933,13 @@ def blobs_filtered_at(
     — ``cat-file --filters`` ПО ФАЙЛУ, параллельно (``run_git_many``):
     ``--batch --filters`` для них не годится — заголовок пачки несёт размер
     без фильтра, и разбор ломается. Бюджет вызывающего ограничивает байты,
-    а не число файлов. ``None`` — git по пути отказал.
+    а не число файлов. ``None`` — git по пути отказал. ``affected`` — уже
+    известный ответ ``_eol_affected_paths`` (``worktree_attr_paths``);
+    ``None`` — спросить здесь.
     """
     rels = list(rels)
-    affected = _eol_affected_paths(launch_root, rels)
+    if affected is None:
+        affected = _eol_affected_paths(launch_root, rels)
     result = blobs_at(
         launch_root, [rel for rel in rels if rel not in affected], rev=rev
     )
@@ -906,7 +966,7 @@ def _eol_affected_paths(launch_root: str, rels: list[str]) -> set[str]:
         return set()
     if _config_converts_eol(launch_root):
         return set(rels)
-    return _paths_with_attrs(launch_root, rels, _EOL_ATTRS)
+    return set(_set_attrs(launch_root, rels, _EOL_ATTRS))
 
 
 def _config_converts_eol(launch_root: str) -> bool:

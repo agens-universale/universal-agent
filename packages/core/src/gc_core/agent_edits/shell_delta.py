@@ -78,6 +78,7 @@ from gc_core.agent_edits.ctx import (
 from gc_core.agent_edits.delete_records import (
     DeleteBudget,
     delete_record,
+    deletion_text,
     is_binary_bytes,
 )
 from gc_core.agent_edits.deltas import (
@@ -988,13 +989,14 @@ class ShellDelta:
         обычные файлы (``100644``/``100755``): блоб симлинка — текст
         цели, откат поставил бы на место ссылки обычный файл. Гвард
         кастомного фильтра — ДО чтения содержимого: конфиг чужого репозитория
-        не должен исполнять свой код. Режимы и размеры — одним ``ls-tree``,
-        бинарность по git — одним ``diff --numstat`` (``_binary_deletions``);
-        бюджет команды резервируется по размерам ДО чтения блобов (карман его
-        уже потратил первым): сперва небинарные пути, затем бинарные по git,
-        каждая группа по сортировке путей, — читаются только влезшие.
-        Прочитанное, что всё же не текст, бюджет возвращает.
-        Концы строк — форма фильтра: диска для «родной» формы нет.
+        не должен исполнять свой код; атрибуты для него и для формы выкладки
+        — одним запросом (``git_ops.worktree_attr_paths``). Режимы и размеры
+        — одним ``ls-tree``; бюджет команды резервируется по размерам ДО
+        чтения блобов (карман его уже потратил первым) в порядке
+        ``_reserve_order`` — читаются только влезшие. Прочитанное, что всё же
+        не текст, бюджет возвращает, и возвращённое достаётся ещё одним
+        проходом путям, не влезшим в первый. Концы строк — форма фильтра:
+        диска для «родной» формы нет.
         """
         if self._head_before is None or not rels:
             return {}
@@ -1011,23 +1013,68 @@ class ShellDelta:
             and entry.size is not None
             and entry.size <= max_source
         }
-        filtered = git_ops.custom_filter_paths(self._launch_root, list(sizes))
-        binary = self._binary_deletions(list(sizes))
-        reserved = [
-            rel
-            for rel in sorted(sizes, key=lambda rel: (rel in binary, rel))
-            if rel not in filtered and self._delete_budget.take(sizes[rel])
-        ]
+        modes = {rel: _REGULAR_FILE_MODES[entries[rel].mode] for rel in sizes}
+        filtered, affected = git_ops.worktree_attr_paths(
+            self._launch_root, list(sizes)
+        )
+        order = self._reserve_order(
+            [rel for rel in sizes if rel not in filtered], sizes
+        )
+        return self._reserve_and_read(order, sizes, modes, affected)
+
+    def _reserve_and_read(
+        self,
+        order: list[str],
+        sizes: dict[str, int],
+        modes: dict[str, int],
+        affected: set[str],
+    ) -> dict[str, tuple[bytes, int]]:
+        """Резерв по ``order`` и чтение влезших — двумя проходами: доля,
+        которую вернул не-текст первого, достаётся не влезшим в него."""
+        contents: dict[str, tuple[bytes, int]] = {}
+        pending = order
+        for _pass in range(2):
+            reserved = [
+                rel for rel in pending if self._delete_budget.take(sizes[rel])
+            ]
+            contents.update(
+                self._read_deleted(reserved, sizes, modes, affected)
+            )
+            taken = set(reserved)
+            pending = [rel for rel in pending if rel not in taken]
+        return contents
+
+    def _reserve_order(
+        self, rels: list[str], sizes: dict[str, int]
+    ) -> list[str]:
+        """Порядок резерва бюджета: сперва небинарные по git, затем бинарные,
+        каждая группа по путям. Влезают все — порядок не важен, и git о
+        бинарности не спрашивается."""
+        if self._delete_budget.fits(sum(sizes[rel] for rel in rels)):
+            return sorted(rels)
+        binary = self._binary_deletions(rels)
+        return sorted(rels, key=lambda rel: (rel in binary, rel))
+
+    def _read_deleted(
+        self,
+        rels: list[str],
+        sizes: dict[str, int],
+        modes: dict[str, int],
+        affected: set[str],
+    ) -> dict[str, tuple[bytes, int]]:
+        """Блобы зарезервированных путей; не текст возвращает бюджет."""
+        if not rels:
+            return {}
         blobs = git_ops.blobs_filtered_at(
-            self._launch_root, reserved, rev=self._head_before
+            self._launch_root, rels, rev=self._head_before, affected=affected
         )
         contents: dict[str, tuple[bytes, int]] = {}
-        for rel in reserved:
+        for rel in rels:
             blob = blobs.get(rel)
-            if blob is None or not _is_text(blob):
+            if blob is None or deletion_text(blob) is None:
                 self._delete_budget.refund(sizes[rel])
                 continue
-            contents[rel] = (blob, _REGULAR_FILE_MODES[entries[rel].mode])
+            contents[rel] = (blob, modes[rel])
         return contents
 
     def _binary_deletions(self, rels: list[str]) -> set[str]:
@@ -2026,11 +2073,6 @@ def _paths_by_recency(records: list[EditRecord]) -> list[str]:
         if prev is None or rec.ts > prev:
             last_ts[rec.path] = rec.ts
     return sorted(last_ts, key=lambda path: last_ts[path], reverse=True)
-
-
-def _is_text(data: bytes) -> bool:
-    """Байты годятся в строки удаления: не бинарь и декодируются в текст."""
-    return not is_binary_bytes(data) and decode_edit_text(data) is not None
 
 
 def _is_binary_file(path: Path) -> bool:
