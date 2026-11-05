@@ -2979,6 +2979,9 @@ class _AgentLoop:
         self.max_unknown_tool_repeats = int(
             agent_cfg.max_unknown_tool_repeats or 5
         )
+        # Отказ судьи финиша ждёт подсказки и пишется на следующем шаге.
+        # Стоп этот шаг отменяет — вывод закрываем отдельно.
+        self._pending_finish_output: Optional[Dict] = None
         state.last_unknown_tool_name = None
         state.unknown_tool_repeat_count = 0
         state.last_batch_unknown_tool_count = 0
@@ -2989,6 +2992,27 @@ class _AgentLoop:
         await _maybe_persist(
             self.persist_messages_callback, messages, self.state
         )
+        self._drop_pending_finish(messages)
+
+    def _drop_pending_finish(self, messages: List[Dict]) -> None:
+        """Вывод финиша уже ушёл обычной записью — повторно при Стопе не пишем."""
+        pending = self._pending_finish_output
+        if pending is None or is_persist_discarded(self.state):
+            return
+        if any(message is pending for message in messages or []):
+            self._pending_finish_output = None
+
+    async def _aclose_pending_finish_on_stop(self) -> None:
+        """Стоп не дожидается подсказок: закрыть turn_finish тем, что уже в state."""
+        pending = self._pending_finish_output
+        self._pending_finish_output = None
+        if not isinstance(pending, dict):
+            return
+        await _commit_user_stop_pairing(
+            self.state,
+            [pending],
+            self.persist_messages_callback,
+        )
 
     # ------------------------------------------------------------------ loop
     async def arun(self, messages) -> Union[str, None]:
@@ -2996,6 +3020,7 @@ class _AgentLoop:
         first_poll = True
         while True:
             if self.check_stop is not None and self.check_stop():
+                await self._aclose_pending_finish_on_stop()
                 self._nudges.clear(state)
                 return None
             messages = await self._apoll_pending(
@@ -3126,22 +3151,24 @@ class _AgentLoop:
         if backend_mode == "chat_completions":
             await aprepare_main_call(self.state, self.ctx)
             if self._stopped_before_call():
-                await self._nudges.apublish(
-                    messages,
-                    state=self.state,
-                    apersist=self._anudge_persist,
-                )
+                await self._apublish_held_on_stop(messages)
                 return None
             if await self._apre_backend_compaction(messages, mode):
                 self._drop_pre_summary_output()
             if self._stopped_before_call():
-                await self._nudges.apublish(
-                    messages,
-                    state=self.state,
-                    apersist=self._anudge_persist,
-                )
+                await self._apublish_held_on_stop(messages)
                 return None
         return await self._aflush_nudges(messages, backend_mode)
+
+    async def _apublish_held_on_stop(self, messages: List[Dict]) -> None:
+        """Стоп после prepare: обычная запись вывода отбрасывается, закрытие — нет."""
+        if is_persist_discarded(self.state):
+            await self._aclose_pending_finish_on_stop()
+        await self._nudges.apublish(
+            messages,
+            state=self.state,
+            apersist=self._anudge_persist,
+        )
 
     def _stopped_before_call(self) -> bool:
         """Стоп во время судьи пары или сжатия — как stop между шагами."""
@@ -3719,6 +3746,15 @@ class _AgentLoop:
             finish_call_id,
             persist_output=False,
         )
+        return await self._aapply_finish_decision(
+            messages, decision, finish_arguments, finish_new, tail_new
+        )
+
+    async def _aapply_finish_decision(
+        self, messages, decision, finish_arguments, finish_new, tail_new
+    ) -> _Outcome:
+        """Reject ждёт подсказки. Принятый финиш закрывает ход сразу."""
+        state = self.state
         if decision.outcome == "reject":
             state.tick_signals.add(FINISH_REJECT)
             if tail_new:
@@ -3728,6 +3764,9 @@ class _AgentLoop:
                 )
             # Вердикт уже в output turn_finish. Reject → ход продолжается:
             # flush буфера на следующем prepare в этот finish output.
+            # Стоп prepare не дождётся — вывод закроет выход из цикла.
+            if finish_new:
+                self._pending_finish_output = finish_new[0]
             return _Outcome(messages, completed_step=True)
         # accept / fail_open_error / fail_open_limit / прочее —
         # все завершают ход одинаково.
@@ -3739,9 +3778,14 @@ class _AgentLoop:
             )
         if finish_new:
             # Accept: наджи не нужны — clear, output без harness.
+            # Стоп во время судьи уже выставил discard: обычная запись
+            # пропала бы, вызов остался бы без ответа.
             self._nudges.buffer.clear()
             await _maybe_persist(
-                self.persist_messages_callback, finish_new, state
+                self.persist_messages_callback,
+                finish_new,
+                state,
+                pairing=is_persist_discarded(state),
             )
         state.steps += 1
         state.flush_current_user_intent()
