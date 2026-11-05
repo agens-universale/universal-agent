@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from gc_core.agent_edits.journal import EditRecord
+from gc_core.message_policy.nudges import output_for_card
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -138,6 +139,8 @@ class ToolCallDetailScreen(Screen):
         output_val = (
             payload.get("output") if isinstance(payload, dict) else payload
         )
+        if isinstance(output_val, str):
+            output_val = output_for_card(output_val)
         if output_val is None:
             return Static("(пустой output)", classes="line-meta", markup=False)
         if self._edit_record is not None:
