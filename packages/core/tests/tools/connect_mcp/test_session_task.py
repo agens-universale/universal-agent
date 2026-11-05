@@ -108,9 +108,9 @@ async def test_rpc_error_does_not_cancel_turn_or_repeat_tool(servers):
 
 
 @pytest.mark.parametrize("timeout", [False, True])
-async def test_cancelled_call_closes_a_but_keeps_b(servers, timeout):
+async def test_cancelled_request_keeps_both_sessions(servers, timeout):
     manager, call, configs = servers
-    await call(0)
+    a = await call(0)
     b = await call(1)
     pending = asyncio.create_task(call(0, delay=30))
     async with asyncio.timeout(5):
@@ -124,7 +124,10 @@ async def test_cancelled_call_closes_a_but_keeps_b(servers, timeout):
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(pending, 10)
     assert await call(1) == dict(b, count=2)
-    assert len(manager._workers) == 1
+    assert await call(0) == dict(a, count=3)
+    assert len(manager._workers) == 2
+    await manager.aclose_all()
+    assert not manager._workers and not manager._sessions
 
 
 async def test_independent_agents_and_per_call_progress(servers):
@@ -188,3 +191,34 @@ async def test_queued_cancellation_does_not_cancel_active_call():
     assert await worker.call(block) == "default"
     await worker.close()
     assert closed == [worker.task]
+
+
+async def test_user_stop_preserves_session_and_next_request(servers):
+    from gc_core.tools.connect_mcp.client_port import _mcp_call_under_stop
+    from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
+
+    manager, call, configs = servers
+    first = await call(0)
+    gate = UserStop()
+    gate.prepare_run(asyncio.get_running_loop(), None)
+
+    async def work():
+        with bind_user_stop(gate):
+            return await _mcp_call_under_stop(
+                object(), "action", lambda: call(0, delay=30)
+            )
+
+    pending = asyncio.create_task(work())
+    try:
+        async with asyncio.timeout(5):
+            while configs[0][1].read_text().count('"call"') < 2:
+                await asyncio.sleep(0.01)
+        gate.request()
+        with pytest.raises(UserStopInterrupt):
+            await asyncio.wait_for(pending, 3)
+        assert await call(0) == dict(first, count=3)
+        await manager.aclose_all()
+        assert not manager._sessions and not manager._workers
+    finally:
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)

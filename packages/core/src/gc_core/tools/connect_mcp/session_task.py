@@ -1,4 +1,4 @@
-"""Одна asyncio-задача открывает, вызывает и закрывает одну SDK-сессию."""
+"""Владелец SDK-сессии и отдельный отменяемый запрос внутри неё."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from gc_core.mcp_session_owner import use_owner
 
 
 class SessionTask:
-    """Команды выполняются inline: anyio-контексты не переходят между задачами."""
+    """Контексты сессии остаются у владельца; отмена запроса их не закрывает."""
 
     def __init__(self, owner, close):
         self._queue = asyncio.Queue()
@@ -17,6 +17,7 @@ class SessionTask:
         self._pending = set()
         self._accepting = True
         self._active = None
+        self._request = None
         self.task = asyncio.create_task(
             self._run(owner), name="mcp-session", context=Context()
         )
@@ -30,14 +31,34 @@ class SessionTask:
         try:
             return await asyncio.shield(future)
         except asyncio.CancelledError:
+            if future.done() and not future.cancelled():
+                return future.result()
             future.cancel()
-            # Настоящая отмена вызова закрывает его ресурс, а не бросает
-            # выполнение в фоне. Остальные серверы имеют других владельцев.
             if self._active is future:
-                self._accepting = False
-                self.task.cancel()
-                await asyncio.shield(self.task)
+                await self._cancel_active()
             raise
+
+    async def _cancel_active(self):
+        request = self._request
+        if request is not None:
+            request.cancel()
+            await asyncio.shield(
+                asyncio.gather(request, return_exceptions=True)
+            )
+            return
+        # Отмена во время открытия/закрытия: ресурс ещё не готов или уже
+        # негоден. Владелец обязан закончить уборку, а не ждать новую команду.
+        self._accepting = False
+        self.task.cancel()
+        await asyncio.shield(self.task)
+
+    async def request(self, callback):
+        """Снять один SDK-запрос, сохранив anyio-контексты сессии у владельца."""
+        self._request = asyncio.create_task(callback(), name="mcp-request")
+        try:
+            return await self._request
+        finally:
+            self._request = None
 
     async def close(self):
         if self._accepting:
@@ -56,6 +77,11 @@ class SessionTask:
             result = await callback()
             if not future.done():
                 future.set_result(result)
+        except asyncio.CancelledError:
+            if self.task.cancelling() or not self._accepting:
+                raise
+            if not future.done():
+                future.set_exception(RuntimeError("MCP request cancelled"))
         except Exception as exc:
             if not future.done():
                 future.set_exception(exc)
@@ -69,7 +95,10 @@ class SessionTask:
     async def _run(self, owner):
         with use_owner(owner):
             try:
-                while (command := await self._queue.get()) is not None:
+                while self._accepting:
+                    command = await self._queue.get()
+                    if command is None:
+                        break
                     await self._invoke(command)
             except asyncio.CancelledError:
                 # Отмена transport task group не должна отменять задачу агента.
@@ -78,6 +107,8 @@ class SessionTask:
                 self._accepting = False
                 try:
                     await self._close()
+                except asyncio.CancelledError:
+                    pass  # Стек уже пройден целиком; владелец завершается.
                 finally:
                     for future in self._pending:
                         if not future.done():

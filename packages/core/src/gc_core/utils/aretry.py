@@ -1,7 +1,7 @@
 """Асинхронный двойник ``utils.retry`` (план async-переезда, Задача 7).
 
-Отличий от синхронного ровно три: ``async def`` у обёртки, ``await`` у вызова
-и ``asyncio.sleep`` вместо ``time.sleep``. Всё остальное — извлечение
+Корутинная форма ждёт вызов через ``await``; пауза между попытками
+кооперативна и прерывается пользовательским стопом. Всё остальное — извлечение
 ``use_retry``/``logger`` из kwargs, фильтрация kwargs по сигнатуре, ре-инъекция
 логгера, тексты и уровни логов — не повторено, а взято из ``utils.retry``
 (``_RetryPolicy``, ``_retry_decorator``): политика ретраев и её следы в логах
@@ -14,6 +14,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Optional, TypeVar
 
+from gc_core.user_stop import UserStopInterrupt, current_user_stop
 from gc_core.utils.retry import _PreparedCall, _retry_decorator, _RetryPolicy
 
 _T = TypeVar("_T")
@@ -33,6 +34,31 @@ def _wrap_async(
         )
 
     return wrapper
+
+
+async def _wait_before_retry(delay: float) -> None:
+    stop = current_user_stop()
+    if stop is None:
+        await asyncio.sleep(delay)
+        return
+    task = asyncio.current_task()
+    cancelled_by_stop = False
+
+    async def release():
+        nonlocal cancelled_by_stop
+        cancelled_by_stop = task.cancel()
+
+    try:
+        async with stop.arm(kind="retry", release=release):
+            await asyncio.sleep(delay)
+    except UserStopInterrupt:
+        # Остановлена пауза после уже начатой попытки, а не новый инструмент.
+        raise UserStopInterrupt(kind="retry", started=True) from None
+    except asyncio.CancelledError:
+        if not cancelled_by_stop:
+            raise
+        task.uncancel()
+        raise UserStopInterrupt(kind="retry", started=True) from None
 
 
 async def _run_with_retries_async(
@@ -55,9 +81,7 @@ async def _run_with_retries_async(
                 policy.log_no_more_retries(logger, attempt, url, exc)
                 raise
             policy.log_retrying(logger, attempt, delay, url, exc)
-            # Именно asyncio.sleep через атрибут модуля: тесты подменяют его
-            # (monkeypatch.setattr(aretry.asyncio, "sleep", ...)).
-            await asyncio.sleep(delay)
+            await _wait_before_retry(delay)
             delay *= policy.backoff_factor
     if last_exc is not None:
         raise last_exc

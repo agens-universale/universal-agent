@@ -41,8 +41,9 @@ _LOGGER = logging.getLogger(__name__)
 class _PersistentSessionManager:
     """Сессии изолированы по владельцу агента, event loop и серверу.
 
-    Каждую SDK-сессию обслуживает постоянная SessionTask: открытие, вызовы
-    и закрытие anyio-контекстов происходят в одной задаче. Поэтому ошибка A
+    Каждую SDK-сессию обслуживает постоянная SessionTask: открытие
+    и закрытие anyio-контекстов происходят в одной задаче. Запросы отменяются
+    отдельно от сессии. Поэтому ошибка A
     не закрывает вложенный scope B и не отменяет весь ход агента.
     Низкоуровневые get/set/ainvalidate вызываются из задачи данной сессии.
     """
@@ -70,6 +71,10 @@ class _PersistentSessionManager:
                 lambda done: self._worker_done(key, worker, done)
             )
         return await worker.call(callback)
+
+    async def request(self, server_key, callback):
+        worker = self._workers[self._key(server_key)]
+        return await worker.request(callback)
 
     def _worker_done(self, key, worker, done):
         if self._workers.get(key) is worker:
@@ -201,11 +206,16 @@ class _PersistentSessionManager:
                     getattr(opened_in, "get_name", lambda: opened_in)(),
                     getattr(here, "get_name", lambda: here)(),
                 )
+        cancelled = None
         for cm in reversed(cms):
             try:
                 await cm.__aexit__(None, None, None)
-            except (Exception, asyncio.CancelledError):
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+            except Exception:
                 pass
+        if cancelled is not None:
+            raise cancelled
 
     async def aclose_all(self, *, in_owner_task: bool = False) -> None:
         """Закрыть сессии ЭТОГО владельца на ЭТОМ loop.
@@ -270,9 +280,20 @@ def _in_session_task(function):
     return invoke
 
 
+class McpToolCallError(McpError):
+    """Сервер ответил ошибкой на tools/call: повтор может дублировать эффект."""
+
+
+async def _call_tool_request(session, name, arguments):
+    try:
+        return await call_tool_with_progress(session, name, arguments)
+    except McpError as exc:
+        raise McpToolCallError(exc.error) from exc
+
+
 def _raise_rpc_error(exc):
     # Ошибка инструмента — ответ сервера, а не повод повторять внешний эффект.
-    if isinstance(exc, McpError) and not _is_session_terminated(exc):
+    if isinstance(exc, McpToolCallError) and not _is_session_terminated(exc):
         raise exc
 
 
@@ -580,7 +601,7 @@ async def _call_tool_stream_sse_async(
     ):
         await session.initialize()
 
-        result = await call_tool_with_progress(session, tool_name, arguments)
+        result = await _call_tool_request(session, tool_name, arguments)
 
         # Преобразуем контент в JSON-совместимый вид.
         content_items: List[Any] = []
@@ -626,23 +647,14 @@ async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
     try:
         await session.__aenter__()
     except BaseException:
-        await _exit_quietly(transport_cm)
+        await _SESSION_MANAGER._aclose_stack((transport_cm,))
         raise
     try:
         await session.initialize()
     except BaseException:
-        await _exit_quietly(session)
-        await _exit_quietly(transport_cm)
+        await _SESSION_MANAGER._aclose_stack((transport_cm, session))
         raise
     return session, (transport_cm, session)
-
-
-async def _exit_quietly(cm: Any) -> None:
-    """Выйти из контекст-менеджера, не подменяя исходную ошибку."""
-    try:
-        await cm.__aexit__(None, None, None)
-    except Exception:
-        pass
 
 
 @_in_session_task
@@ -683,7 +695,7 @@ async def _call_tool_stream_sse_persistent(
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await call_tool_with_progress(s, tool_name, arguments)
+        result = await _call_tool_request(s, tool_name, arguments)
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
@@ -701,7 +713,9 @@ async def _call_tool_stream_sse_persistent(
 
     if session is not None:
         try:
-            return await _call(session)
+            return await _SESSION_MANAGER.request(
+                server_key, lambda session=session: _call(session)
+            )
         except Exception as exc:
             _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
@@ -709,7 +723,9 @@ async def _call_tool_stream_sse_persistent(
             session = None
 
     session = await _open_session()
-    return await _call(session)
+    return await _SESSION_MANAGER.request(
+        server_key, lambda session=session: _call(session)
+    )
 
 
 async def acall_tool_stream_sse(
@@ -882,7 +898,7 @@ async def _call_tool_stream_http_async(
             ):
                 await session.initialize()
 
-                result = await call_tool_with_progress(
+                result = await _call_tool_request(
                     session, tool_name, arguments
                 )
 
@@ -945,21 +961,20 @@ async def _aopen_persistent_http_session(
     try:
         read_stream, write_stream, _ = await transport.__aenter__()
     except BaseException:
-        await _exit_quietly(http_client)
+        await _SESSION_MANAGER._aclose_stack((http_client,))
         raise
     new_session = ClientSession(read_stream, write_stream)
     try:
         await new_session.__aenter__()
     except BaseException:
-        await _exit_quietly(transport)
-        await _exit_quietly(http_client)
+        await _SESSION_MANAGER._aclose_stack((http_client, transport))
         raise
     try:
         await new_session.initialize()
     except BaseException:
-        await _exit_quietly(new_session)
-        await _exit_quietly(transport)
-        await _exit_quietly(http_client)
+        await _SESSION_MANAGER._aclose_stack(
+            (http_client, transport, new_session)
+        )
         raise
     _SESSION_MANAGER.set_session(
         server_key, new_session, (http_client, transport, new_session)
@@ -970,7 +985,7 @@ async def _aopen_persistent_http_session(
 async def _acall_tool_on_session(
     s: ClientSession, tool_name: str, arguments: Dict[str, Any]
 ) -> Dict[str, Any]:
-    result = await call_tool_with_progress(s, tool_name, arguments)
+    result = await _call_tool_request(s, tool_name, arguments)
     content_items: List[Any] = []
     for item in getattr(result, "content", []) or []:
         if hasattr(item, "model_dump"):
@@ -1023,7 +1038,9 @@ async def _call_tool_stream_http_persistent(
     # Try with cached session first
     if session is not None:
         try:
-            return await _call(session)
+            return await _SESSION_MANAGER.request(
+                server_key, lambda session=session: _call(session)
+            )
         except Exception as exc:
             _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
@@ -1035,7 +1052,9 @@ async def _call_tool_stream_http_persistent(
     for endpoint in endpoints:
         try:
             session = await _open_session(endpoint)
-            return await _call(session)
+            return await _SESSION_MANAGER.request(
+                server_key, lambda session=session: _call(session)
+            )
         except McpError as exc:
             _raise_rpc_error(exc)
             last_error = exc
@@ -1195,7 +1214,7 @@ async def _call_tool_stream_stdio_async(
     ):
         await session.initialize()
 
-        result = await call_tool_with_progress(session, tool_name, arguments)
+        result = await _call_tool_request(session, tool_name, arguments)
 
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
@@ -1247,7 +1266,7 @@ async def _call_tool_stream_stdio_persistent(
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await call_tool_with_progress(s, tool_name, arguments)
+        result = await _call_tool_request(s, tool_name, arguments)
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
@@ -1265,7 +1284,9 @@ async def _call_tool_stream_stdio_persistent(
 
     if session is not None:
         try:
-            return await _call(session)
+            return await _SESSION_MANAGER.request(
+                server_key, lambda session=session: _call(session)
+            )
         except Exception as exc:
             _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
@@ -1273,7 +1294,9 @@ async def _call_tool_stream_stdio_persistent(
             session = None
 
     session = await _open_session()
-    return await _call(session)
+    return await _SESSION_MANAGER.request(
+        server_key, lambda session=session: _call(session)
+    )
 
 
 async def acall_tool_stream_stdio(

@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from gc_core.config_modules.env_vars import mcp_media_dir
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
+from gc_core.tools.connect_mcp.stream_client import McpToolCallError
 from gc_core.tools.connect_mcp.transport_policy import (
     resolve_effective_transport,
 )
@@ -445,6 +446,7 @@ async def acall_mcp_tool(
     )
 
     @retry_with_backoff_async(
+        should_retry=lambda exc: not isinstance(exc, McpToolCallError),
         operation_name=(
             f"MCP tool call ({target.server_key}:{target.base_tool_name})"
         ),
