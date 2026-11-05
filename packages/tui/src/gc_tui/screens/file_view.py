@@ -254,8 +254,11 @@ class FileViewerScreen(Screen):
         self.call_after_refresh(self._restore_whole_position)
 
     def _restore_whole_position(self) -> None:
+        """Сохранённая строка — в пределах загруженного документа: файл
+        могли укоротить между открытиями."""
         body = self._body()
-        line = max(0, self._start_line - 1)
+        last = max(0, body.document.line_count - 1)
+        line = min(max(0, self._start_line - 1), last)
         if line:
             row = body.wrapped_document.location_to_offset((line, 0)).y
             body.scroll_to(y=row, animate=False)

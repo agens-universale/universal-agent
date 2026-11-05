@@ -421,3 +421,28 @@ def test_profile_header_shows_the_working_model_when_auto_is_unavailable(
     text = _profile_header_text(as_settings(cfg), profile_source=None).plain
     assert "модель: ● " in text
     assert "auto" not in text
+
+
+@pytest.mark.asyncio
+async def test_config_paths_copy_selected_text(tmp_path):
+    """Выделение мышью в панели путей отдаёт сами пути."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
+    from textual.selection import Selection
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    app._config_path = "/p/config.yml"
+    async with app.run_test() as pilot:
+        scr = ConfigScreen(
+            settings=app.base_settings(), config_path=app._config_path
+        )
+        await app.push_screen(scr)
+        await pilot.pause()
+        paths = list(scr.query(".config-panel"))[0]
+        text, _ = paths.get_selection(Selection(None, None))
+        assert "config.yml:" in text and "/p/config.yml" in text
