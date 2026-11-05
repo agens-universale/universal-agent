@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from gc_core.agent_edits import deltas, git_ops, shell_delta
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
+from gc_core.agent_edits.revert import REASON_NOT_REVERTABLE, revert_paths
 from gc_core.agent_edits.shell_delta import ShellDelta
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.agent_edits.tracking import TrackingFsBackend
@@ -1982,8 +1983,9 @@ def _assert_no_base_no_mark(launch_root, rel: str) -> None:
 
 
 def test_file_created_and_committed_by_command_is_shell_without_mark(repo):
-    """Созданный и закоммиченный командой путь — правка от пустоты, не
-    ``create``: создание откатывается удалением, а коммит мог быть чужим."""
+    """Созданный и закоммиченный командой путь — правка от пустоты с флагом
+    ``created`` (экран зовёт её Added), не ``create``: создание
+    откатывается удалением, а коммит мог быть чужим."""
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(
@@ -1997,9 +1999,26 @@ def test_file_created_and_committed_by_command_is_shell_without_mark(repo):
 
     by_path = {r.path: r for r in _records(threads_dir)}
     assert by_path["new.txt"].op == "shell"
+    assert by_path["new.txt"].flags == ["created"]
     assert by_path["new.txt"].add == 1
     _assert_no_base_no_mark(launch_root, "new.txt")
     _assert_commit_mark(launch_root, "new.txt")
+    store = _snapshot_store(launch_root)
+    entries = deltas.file_entries(
+        _records(threads_dir),
+        lambda key: store.counting_session_baseline(key),
+        str(launch_root),
+        revertable_for=store.has_session_baseline,
+    )
+    assert [(e.path, e.revertable) for e in entries] == [("new.txt", False)]
+    out = revert_paths(
+        ["new.txt"],
+        {e.path: e for e in entries},
+        store.session_baseline,
+        str(launch_root),
+    )
+    assert out.skipped == [("new.txt", REASON_NOT_REVERTABLE)]
+    assert (launch_root / "new.txt").read_bytes() == b"alpha\n"
 
 
 def test_old_ignored_file_force_added_and_committed_is_not_created(repo):
@@ -2020,6 +2039,7 @@ def test_old_ignored_file_force_added_and_committed_is_not_created(repo):
 
     by_path = {r.path: r for r in _records(threads_dir)}
     assert by_path["secret.cfg"].op == "shell"
+    assert "created" not in by_path["secret.cfg"].flags
     store = _snapshot_store(launch_root)
     assert store.created_head_rev("secret.cfg") is None
     assert store.session_baseline("secret.cfg") is None

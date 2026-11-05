@@ -99,6 +99,7 @@ def test_ran_files_of_verbs_and_unrecorded(tmp_path):
         [
             shell("new.py", "create"),
             shell("old.py", "shell"),
+            shell("put.py", "shell", flags=["created"]),
             shell("gone.py", "delete", hunks="", flags=["no_diff"]),
             _rec("other.py", call_id=None, op="shell", command_call_id="x2"),
         ],
@@ -108,13 +109,15 @@ def test_ran_files_of_verbs_and_unrecorded(tmp_path):
         ("gone.py", "Deleted"),
         ("new.py", "Added"),
         ("old.py", "Edited"),
+        ("put.py", "Added"),
     ]
     assert [f.key for f in files] == [
         "x1:gone.py",
         "x1:new.py",
         "x1:old.py",
+        "x1:put.py",
     ]
-    assert unrecorded == 3
+    assert unrecorded == 2
     assert ran_files_of(lookup, "x2")[1] == 0
     assert ran_files_of(None, "x1") == ([], 0)
     assert ran_files_of(lookup, "nope") == ([], 0)

@@ -54,6 +54,11 @@ from gc_core.utils.file_lock import file_lock
 
 _logger = logging.getLogger(__name__)
 
+# Флаг записи шелл-канала: путь, который команда создала и сама закоммитила.
+# ``op`` у такой записи ``"shell"``: ``"create"`` дал бы откат удалением, а
+# коммит в окне команды мог быть чужим. Флаг нужен только глаголу экрана.
+CREATED_FLAG = "created"
+
 
 @dataclass
 class EditRecord:

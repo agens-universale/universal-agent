@@ -86,7 +86,11 @@ from gc_core.agent_edits.deltas import (
     decode_edit_text,
     truncate_hunks,
 )
-from gc_core.agent_edits.journal import EditRecord, EditsJournal
+from gc_core.agent_edits.journal import (
+    CREATED_FLAG,
+    EditRecord,
+    EditsJournal,
+)
 from gc_core.agent_edits.mode import resolve_mode
 from gc_core.agent_edits.paths import (
     canonical_path_key,
@@ -813,6 +817,7 @@ class ShellDelta:
         planned = self._plan(part)
         diffs = self._diffs_for(planned, before, after)
         created_rels = self._created_rels(planned, before, after)
+        added_by_commit = self._committed_created(planned)
         deleted = self._slice_deleted_contents(planned, before, after)
         needs_base: list[tuple[str, str, bool]] = []
         delete_bases: list[tuple[str, str, bytes]] = []
@@ -840,8 +845,7 @@ class ShellDelta:
                 continue
             if record is None:
                 continue
-            record.command_paths = command_paths
-            record.command_call_id = self._command_call_id
+            self._stamp(record, command_paths, created=rel in added_by_commit)
             journal.append(record)
             self._remember(record)
             if record.op == "create":
@@ -891,6 +895,20 @@ class ShellDelta:
                 store, rel, key, content, turn_id
             )
         return wrote_base
+
+    def _stamp(
+        self,
+        record: EditRecord,
+        command_paths: int | None,
+        *,
+        created: bool,
+    ) -> None:
+        """Поля команды на записи; ``created`` — флаг ``CREATED_FLAG``
+        закоммиченного пути, созданного командой (``_committed_created``)."""
+        if created:
+            record.flags.append(CREATED_FLAG)
+        record.command_paths = command_paths
+        record.command_call_id = self._command_call_id
 
     def _mark_committed(
         self, store: SnapshotStore, rel: str, key: str
@@ -1396,6 +1414,46 @@ class ShellDelta:
             if self._created_by_command(rel, after.get(rel), before)
         ]
         return self._not_ignored(candidates)
+
+    def _committed_created(
+        self, planned: list[tuple[str, str, _FileFacts]]
+    ) -> set[str]:
+        """Закоммиченные командой пути куска, которые она же и создала.
+
+        Те же признаки, что у ``_created_by_command``, в форме для пути вне
+        status: в ``HEAD`` до команды пути нет, файл свежее снимка «до» и не
+        скрыт правилами игнорирования (``_not_ignored``). Запись остаётся
+        ``op="shell"`` — ``op="create"`` дал бы откат удалением, а коммит мог
+        быть чужим; создание несёт только флаг ``created`` для глагола
+        экрана. Отказ git — пусто: путь покажется правкой.
+        """
+        rels = [
+            rel
+            for rel, _key, file in planned
+            if rel in self._committed and file.exists
+        ]
+        if not rels or self._head_before is None:
+            return set()
+        try:
+            in_head = git_ops.tree_entries(
+                self._launch_root, rels, rev=self._head_before
+            )
+            if in_head is None:
+                return set()
+            return self._not_ignored(
+                [
+                    rel
+                    for rel in rels
+                    if rel not in in_head
+                    and self._fresh(_file_signature(self._abs(rel)))
+                ]
+            )
+        except Exception:
+            _logger.warning(
+                "shell delta: созданные закоммиченные пути не определены",
+                exc_info=True,
+            )
+            return set()
 
     def _not_ignored(self, candidates: list[str]) -> set[str]:
         """Кандидаты в созданные, которых не скрывают правила игнорирования.
