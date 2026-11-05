@@ -132,3 +132,23 @@ def test_pending_question_shows_the_thread_as_asking(tmp_path):
     assert {t.thread_id: t.status for t in store.list_tasks()} == {
         "a": "asking"
     }
+
+
+def test_resumed_turn_is_running_before_the_question_is_cleared(tmp_path):
+    """Ответ пришёл, ход продолжается: до первой записи хода вопрос ещё в
+    состоянии треда, но ход уже идёт (``runtime.turn``) — не «ждёт»."""
+    _write_meta(
+        tmp_path,
+        "a2a",
+        "a",
+        {
+            "thread_id": "a",
+            "status": "running",
+            "pending_question": {"call_id": "ask1", "question": "A или B?"},
+            "runtime": {"turn": "running"},
+        },
+    )
+    store = FileTaskStore(threads_dir=str(tmp_path), system="a2a")
+    assert {t.thread_id: t.status for t in store.list_tasks()} == {
+        "a": "running"
+    }

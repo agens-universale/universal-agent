@@ -405,9 +405,11 @@ def _list_status(record: ThreadRecord) -> Optional[str]:
     ядро в любом фронтенде), кроме живого хода и хода, открытого без
     итога (``runtime.turn``), — у них статус меты. Итога нет — статус
     меты (TUI — ``tui.status``, CLI и сервер — верхний). Тред, ход
-    которого приостановлен на вопросе (A2A), ждёт ответа: ход не закончен.
+    которого приостановлен на вопросе (A2A), ждёт ответа: ход не закончен;
+    продолженный ответом ход идёт, хотя вопрос снимет лишь его первая
+    запись.
     """
-    if record.state.pending_question:
+    if record.state.pending_question and record.runtime.turn is None:
         return "asking"
     status = outcome_status(record)
     if status in _LIVE_STATUSES or record.runtime.turn is not None:
