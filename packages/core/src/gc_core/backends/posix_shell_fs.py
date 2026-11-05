@@ -402,7 +402,8 @@ class PosixShellFsMixin:
                     self._failure_detail(res) or f"append failed: {path}"
                 )
         finally:
-            # Best-effort: upload/exec may leave remote_tmp if the cat+rm line never ran.
+            # Best-effort: remove remote_tmp on every path (upload, exec or
+            # non-zero rc).
             try:
                 await self._afs_exec(f"rm -f {shlex.quote(remote_tmp)}")
             except Exception:

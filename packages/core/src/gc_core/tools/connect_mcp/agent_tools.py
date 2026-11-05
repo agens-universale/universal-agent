@@ -335,7 +335,8 @@ def normalize_tool_spec_for_agent(
     - type: "function"
     - непустой description
     - parameters.type == "object"
-    - для всех parameters.properties.* есть description и адекватный type
+    - у каждого parameters.properties.* есть description; узел без type
+      допустим и означает любое значение
     """
     spec = copy.deepcopy(tool_spec) if isinstance(tool_spec, dict) else {}
 
