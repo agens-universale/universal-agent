@@ -1,5 +1,6 @@
 """A failed summary must not replace the history sent to the main model."""
 
+import json
 import types
 
 import pytest
@@ -26,6 +27,7 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
         {
             "agent.model": "test-model",
             "backend.completions_url": "http://example.test/v1/chat/completions",
+            "logging.save_logs": False,
             "summary.incremental_batch_chars": batch_chars,
             "summary.max_accumulated_summary_chars": max_accumulated_summary_chars,
         },
@@ -36,11 +38,25 @@ def _ctx(max_accumulated_summary_chars=20000, batch_chars=100000):
 @pytest.mark.parametrize("has_previous_summary", [False, True])
 @pytest.mark.parametrize(
     "response_mode",
-    ["malformed", "template", "compression", "oversize", "late_batch"],
+    [
+        "malformed",
+        "template",
+        "compression",
+        "oversize",
+        "late_batch",
+        "incomplete_compression",
+        "truncated_compression",
+    ],
 )
 async def test_failed_summary_preserves_live_and_saved_history(
     tmp_path, monkeypatch, has_previous_summary, response_mode
 ):
+    compression_failure = response_mode in {
+        "compression",
+        "oversize",
+        "incomplete_compression",
+        "truncated_compression",
+    }
     thread_id = f"failed-summary-{has_previous_summary}"
     prior = valid_summary_xml_for_tests(seed="confirmed-prior-context")
     messages = [{"role": "user", "content": "Original user requirement"}]
@@ -73,17 +89,29 @@ async def test_failed_summary_preserves_live_and_saved_history(
     before = list(state.messages)
 
     async def failed_completion(**kwargs):
+        if response_mode == "truncated_compression":
+            if kwargs["request_label"] == "summary_compress":
+                return (
+                    render_output_shape_for_prompt().split(
+                        "</recent_artifacts>"
+                    )[0]
+                    + "</recent_artif"
+                )
+            return valid_summary_xml_for_tests(seed="valid-before-compression")
         if (
             response_mode == "late_batch"
             and kwargs["request_label"] == "summary_batch_1"
         ):
             return valid_summary_xml_for_tests(seed="first-successful-batch")
-        if response_mode == "oversize":
+        if response_mode in {"oversize", "incomplete_compression"}:
             if kwargs["request_label"] == "summary_compress":
-                return (
-                    "<summary><task_and_context>"
-                    + " " * 200
-                    + "Useful late fact</task_and_context></summary>"
+                return assemble_summary_xml(
+                    {
+                        "task_and_context": "x" * 101
+                        if response_mode == "oversize"
+                        else "short"
+                    },
+                    only_present=response_mode == "incomplete_compression",
                 )
             return valid_summary_xml_for_tests(seed="valid-before-compression")
         if (
@@ -129,12 +157,15 @@ async def test_failed_summary_preserves_live_and_saved_history(
             event["summary_payload"]
         )
 
+    trace_path = tmp_path / "rejected-summary.jsonl"
+    ctx = _ctx(
+        100 if compression_failure else 20000,
+        batch_chars=1 if response_mode == "late_batch" else 100000,
+    )
+    ctx.summary_trace_path = str(trace_path)
     with pytest.raises(ValueError, match="usable summary"):
         await arun_summary_compaction(
-            ctx=_ctx(
-                100 if response_mode in {"compression", "oversize"} else 20000,
-                batch_chars=1 if response_mode == "late_batch" else 100000,
-            ),
+            ctx=ctx,
             state=state,
             trigger_reason="test",
             is_cli_mode=False,
@@ -150,6 +181,20 @@ async def test_failed_summary_preserves_live_and_saved_history(
     )
     assert reloaded.get_full_history_messages() == before
     assert not archived
+    (record,) = [
+        json.loads(line) for line in trace_path.read_text().splitlines()
+    ]
+    assert record["trigger_reason"] == "test"
+    assert record["newly_summarized_message_id"] == ""
+    trace = record["summary_trace"]
+    assert trace["status"] == "rejected"
+    batch = trace["step1_batches"][-1]
+    if compression_failure:
+        assert batch["compression"]["output_summary_text"]
+    else:
+        assert batch["repair"]["repaired_text"]
+    if response_mode == "late_batch":
+        assert len(trace["step1_batches"]) == 2
     if has_previous_summary:
         assert "confirmed-prior-context" in str(state.messages)
 

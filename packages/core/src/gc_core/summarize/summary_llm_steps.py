@@ -6,8 +6,12 @@ from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.summary_spec import (
     render_output_shape_for_prompt,
     render_tag_roles_for_prompt,
+    summary_body_chars,
 )
-from gc_core.summarize.summary_validation import has_nonempty_summary_body
+from gc_core.summarize.summary_validation import (
+    SummaryRejectedError,
+    validate_summary_text,
+)
 
 
 async def acompress_summary_text(
@@ -17,12 +21,13 @@ async def acompress_summary_text(
     summary_text: str,
     max_chars: int,
     max_tokens: int,
+    trace: dict[str, Any] | None = None,
 ) -> str:
     """Сжимает слишком длинную сводку вторым вызовом LLM с сохранением смысла.
 
     Основная (и единственная) реализация шага: синхронный ``compress_summary_text``
     """
-    if not summary_text or len(summary_text) <= max_chars:
+    if summary_body_chars(summary_text) <= max_chars:
         return summary_text
     system = (
         "You shorten an existing <summary> XML document. Keep every child tag; "
@@ -48,10 +53,18 @@ async def acompress_summary_text(
         consumer="summary",
         max_tokens=max_tokens,
     )
-    if not has_nonempty_summary_body(text):
-        raise ValueError("summary compression produced no usable summary")
-    if len(text) > max_chars:
-        raise ValueError(
+    if trace is not None:
+        trace["compression"] = {
+            "max_body_chars": max_chars,
+            "output_summary_text": text,
+        }
+    valid, reason = validate_summary_text(text, require_closed_structure=True)
+    if not valid:
+        raise SummaryRejectedError(
+            f"summary compression produced no usable summary ({reason})"
+        )
+    if summary_body_chars(text) > max_chars:
+        raise SummaryRejectedError(
             "summary compression produced no usable summary within character limit"
         )
     return text

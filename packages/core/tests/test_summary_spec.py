@@ -18,7 +18,6 @@ from gc_core.summarize.summary_spec import (
 )
 from gc_core.summarize.summary_validation import (
     merge_repaired_summary,
-    resolve_after_repair_failure,
     validate_summary_text,
 )
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
@@ -129,28 +128,18 @@ class SummarySpecTest(unittest.TestCase):
 
     def test_useful_partial_merge_keeps_preserved_content(self) -> None:
         pad = "- test content for validation padding."
-        invalid = assemble_summary_xml({"task_and_context": f"keep\n{pad}"})
-        repaired = "<summary></summary>"
+        invalid = assemble_summary_xml(
+            {"task_and_context": f"keep\n{pad}"}, only_present=True
+        )
+        repaired = assemble_summary_xml(
+            {"open_tasks": "- n/a"}, only_present=True
+        )
         merged = merge_repaired_summary(
             invalid_text=invalid, repaired_text=repaired
         )
-        text, resolution = resolve_after_repair_failure(
-            merged_text=merged,
-        )
-        self.assertEqual(resolution, "partial_merged")
-        self.assertIn("keep", text)
-        ok, reason = validate_summary_text(text)
+        self.assertIn("keep", merged)
+        ok, reason = validate_summary_text(merged)
         self.assertTrue(ok, reason)
-
-    def test_failed_repair_without_usable_prior_aborts_summary(self) -> None:
-        merged = merge_repaired_summary(
-            invalid_text="malformed initial answer",
-            repaired_text="malformed repair answer",
-        )
-        with self.assertRaisesRegex(ValueError, "usable summary"):
-            resolve_after_repair_failure(
-                merged_text=merged,
-            )
 
     def test_merge_summary_bodies_repair_overrides(self) -> None:
         merged = merge_summary_bodies(
@@ -290,8 +279,13 @@ class SummarySpecTest(unittest.TestCase):
         self.assertEqual(bodies["active_constraints"], pad)
         self.assertEqual(bodies["recent_artifacts"], pad)
 
-    def test_validate_accepts_short_all_n_a_sections(self) -> None:
+    def test_validate_rejects_all_n_a_sections(self) -> None:
+        xml = assemble_summary_xml(dict.fromkeys(section_tags(), "- N/A"))
+        self.assertEqual(validate_summary_text(xml), (False, "empty_content"))
+
+    def test_validate_accepts_n_a_in_individual_sections(self) -> None:
         bodies = dict.fromkeys(section_tags(), "- n/a")
+        bodies["task_and_context"] = "Keep the verified result"
         xml = assemble_summary_xml(bodies)
         ok, reason = validate_summary_text(xml)
         self.assertTrue(ok, reason)

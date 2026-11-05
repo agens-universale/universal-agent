@@ -101,7 +101,7 @@ def section_tags() -> tuple[str, ...]:
 
 
 def primary_section_tag() -> str:
-    """Первая секция в каноне (fallback-текст в `fallback_summary_xml`)."""
+    """Return the first section in the canonical order."""
     return SUMMARY_SECTIONS[0].tag
 
 
@@ -173,7 +173,9 @@ def _last_body(pattern: re.Pattern[str], text: str) -> str | None:
     return last_match.group(1).strip()
 
 
-def extract_summary_bodies(text: str) -> dict[str, str]:
+def extract_summary_bodies(
+    text: str, *, allow_unclosed: bool = True
+) -> dict[str, str]:
     """Вырезает тела известных секций (последний match); пустое тело → ``''``.
 
     Сначала строгий ``<tag>…</tag>``; если пары нет — незакрытый ``<tag>`` до
@@ -185,11 +187,16 @@ def extract_summary_bodies(text: str) -> dict[str, str]:
     bodies: dict[str, str] = {}
     for section in SUMMARY_SECTIONS:
         body = _last_body(_SECTION_BODY_PATTERNS[section.tag], s)
-        if body is None:
+        if body is None and allow_unclosed:
             body = _last_body(_UNCLOSED_SECTION_PATTERNS[section.tag], s)
         if body is not None:
             bodies[section.tag] = body
     return bodies
+
+
+def summary_body_chars(text: str) -> int:
+    """Count the characters in section bodies, excluding XML markup."""
+    return sum(len(body) for body in extract_summary_bodies(text).values())
 
 
 def assemble_summary_xml(

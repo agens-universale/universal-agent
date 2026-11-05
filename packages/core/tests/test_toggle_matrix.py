@@ -88,7 +88,7 @@ REFERENCE = (
 VALID_SUMMARY_REFERENCE = (
     Path(__file__).parent
     / "fixtures"
-    / "toggle_matrix_valid_summary_0a2aac511.json"
+    / "toggle_matrix_valid_summary_9af72d28b.json"
 )
 
 #: Поля, по которым идёт сверка.
@@ -119,7 +119,7 @@ def _normalize(obj):
 def reference() -> dict:
     data = json.loads(REFERENCE.read_text(encoding="utf-8"))
     rows = {row["id"]: row for row in data}
-    # Captured on develop 0a2aac511 with the same valid summary stimulus.
+    # Captured on develop 9af72d28b with the same valid summary stimulus.
     # Invalid-summary preservation is covered by test_summary_content_preservation.
     valid_summary_rows = json.loads(
         VALID_SUMMARY_REFERENCE.read_text(encoding="utf-8")
@@ -148,7 +148,7 @@ async def test_toggle_matches_pre_async(
     actual = await run_case(case, tmp_path, monkeypatch)
 
     if case.id in COMPRESSION_REFUSAL_CASES:
-        # These limits cannot hold the scripted XML. D01 must preserve the
+        # The scripted section bodies exceed these limits. D01 must preserve the
         # original messages instead of applying a truncated synthetic summary.
         assert actual["error"] is None
         assert _normalize(actual["dump"][:5]) == _normalize(

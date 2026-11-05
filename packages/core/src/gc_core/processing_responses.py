@@ -163,6 +163,7 @@ from gc_core.security.permission_mode import (
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
+from gc_core.summarize.summary_validation import SummaryRejectedError
 from gc_core.threads.errors import ThreadStoreError
 from gc_core.tools import (
     WrongFunctionArgumentsException,
@@ -3132,6 +3133,11 @@ class _AgentLoop:
         previous = getattr(self.state, "messages", None)
         try:
             applied = await _acall_blocking_hook(self.force_compact_hook)
+        except SummaryRejectedError as exc:
+            self.run_logger.warning(
+                "Context overflow compaction rejected: %s", exc
+            )
+            return False
         finally:
             if self._history_replaced(previous):
                 self._drop_pre_summary_output()

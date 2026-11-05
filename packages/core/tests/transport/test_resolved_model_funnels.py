@@ -562,8 +562,8 @@ def test_summary_compress_declares_own_consumer(monkeypatch):
         acompress_summary_text(
             ctx=ctx,
             state=_state(),
-            summary_text="x" * 1000,
-            max_chars=len(short),
+            summary_text=assemble_summary_xml({"task_and_context": "longer"}),
+            max_chars=len("short"),
             max_tokens=50,
         )
     )

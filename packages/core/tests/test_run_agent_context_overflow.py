@@ -9,6 +9,7 @@ from gc_core import run_summary_coordinator as rsc
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.message_policy import nudges as nudge_mod
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_core.summarize import compaction
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
 
@@ -24,6 +25,44 @@ def _state():
     s.user_intent_log = []
     s.flush_current_user_intent = lambda: None
     return s
+
+
+def test_rejected_compaction_preserves_original_context_overflow(monkeypatch):
+    overflow = ValueError(
+        "Requested token count exceeds the model's maximum context length of 131072 tokens"
+    )
+    attempts = []
+
+    async def fail_request(*_args):
+        attempts.append("request")
+        raise overflow
+
+    async def empty_summary(**_kwargs):
+        return {"raw_summary": ""}
+
+    monkeypatch.setattr(pr, "aprocess_user_ask", fail_request)
+    monkeypatch.setattr(
+        compaction, "asummarize_dialog_via_chat_completions", empty_summary
+    )
+    state, ctx = _state(), _run_ctx({"logging.save_logs": False})
+
+    async def compact():
+        await compaction.arun_summary_compaction(
+            ctx=ctx, state=state, trigger_reason="overflow", is_cli_mode=False
+        )
+
+    with pytest.raises(ValueError) as caught:
+        run_coro(
+            pr.arun_agent(
+                [{"role": "user", "content": "Keep this", "id": "u1"}],
+                state,
+                ctx,
+                force_compact_hook=compact,
+            )
+        )
+    assert caught.value is overflow
+    assert attempts == ["request"]
+    assert any(message["content"] == "Keep this" for message in state.messages)
 
 
 def _run_ctx(overrides=None):

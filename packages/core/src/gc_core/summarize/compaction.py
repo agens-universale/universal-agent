@@ -36,6 +36,7 @@ from gc_core.settings import settings_of
 from gc_core.summarize.config import resolve_summary_limits_at_level
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
+    aappend_rejected_summary_trace,
     log_compaction_completed,
     log_compaction_started,
     log_summary_message_body,
@@ -54,7 +55,7 @@ from gc_core.summarize.summary_spec import (
     slice_summary,
 )
 from gc_core.summarize.summary_validation import (
-    FALLBACK_SUMMARY,
+    SummaryRejectedError,
     has_nonempty_summary_body,
 )
 from gc_core.summarize.thread_summarizer import (
@@ -471,20 +472,26 @@ async def arun_summary_compaction(
         getattr(ctx, "model_router", None),
         getattr(state, "_call_level", None),
     )
-    summary_result = await asummarize_dialog_via_chat_completions(
-        ctx=ctx,
-        state=state,
-        full_history_messages=full_messages,
-        batch_chars=limits.incremental_batch_chars,
-        max_dialogue_chars=limits.max_dialogue_chars,
-        persistent_state_block=render_persistent_state_for_prompt(
-            memory_snapshot,
-            session_todo=read_session_todo_from_state(state),
-        ),
-        user_intent_log=source_user_log,
-        current_user_intent=source_current_intent,
-        steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
-    )
+    try:
+        summary_result = await asummarize_dialog_via_chat_completions(
+            ctx=ctx,
+            state=state,
+            full_history_messages=full_messages,
+            batch_chars=limits.incremental_batch_chars,
+            max_dialogue_chars=limits.max_dialogue_chars,
+            persistent_state_block=render_persistent_state_for_prompt(
+                memory_snapshot,
+                session_todo=read_session_todo_from_state(state),
+            ),
+            user_intent_log=source_user_log,
+            current_user_intent=source_current_intent,
+            steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
+        )
+    except SummaryRejectedError as exc:
+        await aappend_rejected_summary_trace(
+            ctx, trigger_reason=trigger_reason, trace=exc.trace, error=exc
+        )
+        raise
     raw_summary = str(summary_result.get("raw_summary") or "")
     num_batches = int(summary_result.get("num_batches") or 0)
     trace = summary_result.get("trace")
@@ -509,10 +516,12 @@ async def arun_summary_compaction(
         )
         agent_summary_text = raw_summary
     # Reject unusable projected content before changing state or persistence.
-    if raw_summary == FALLBACK_SUMMARY or not has_nonempty_summary_body(
-        agent_summary_text
-    ):
-        raise ValueError("compaction produced no usable summary")
+    if not has_nonempty_summary_body(agent_summary_text):
+        error = SummaryRejectedError("compaction produced no usable summary")
+        await aappend_rejected_summary_trace(
+            ctx, trigger_reason=trigger_reason, trace=trace, error=error
+        )
+        raise error
     memory_append_deltas = coerce_working_memory_deltas(
         summary_result.get("memory_append_deltas")
     )
