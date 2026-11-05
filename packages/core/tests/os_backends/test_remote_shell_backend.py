@@ -166,6 +166,22 @@ async def test_append_round_trip(be, tmp_path):
     assert await be.read(p) == "a\nb\n"
 
 
+async def test_append_failure_is_reported(be, tmp_path):
+    dir_path = tmp_path / "d"
+    dir_path.mkdir()
+    with pytest.raises(OSError):
+        await be.append(str(dir_path), "x")
+    assert list(tmp_path.glob("d.gc-append-tmp.*")) == []
+
+
+async def test_append_success_removes_temp_file(be, tmp_path):
+    p = tmp_path / "log.txt"
+    await be.write(str(p), "a\n")
+    await be.append(str(p), "b\n")
+    assert p.read_text() == "a\nb\n"
+    assert list(tmp_path.glob("log.txt.gc-append-tmp.*")) == []
+
+
 async def test_read_missing_raises_file_not_found(be, tmp_path):
     with pytest.raises(FileNotFoundError):
         await be.read(str(tmp_path / "nope"))

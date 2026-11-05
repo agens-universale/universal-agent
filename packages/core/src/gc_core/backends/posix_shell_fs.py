@@ -395,7 +395,7 @@ class PosixShellFsMixin:
         try:
             await self._aupload_bytes(data, remote_tmp)
             res = await self._afs_exec(
-                f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}; rm -f {shlex.quote(remote_tmp)}"
+                f"cat {shlex.quote(remote_tmp)} >> {shlex.quote(path)}"
             )
             if res.return_code != 0:
                 raise OSError(
