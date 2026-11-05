@@ -14,6 +14,7 @@ import base64
 import errno
 import os
 import posixpath
+import re
 import shlex
 import uuid
 from abc import abstractmethod
@@ -44,6 +45,13 @@ BACKGROUND_SPAWN_TIMEOUT_SEC = 30
 
 #: Предел причины отказа команды ФС в сообщении модели (как у пробы среды).
 _FAILURE_DETAIL_CHARS = 500
+
+#: Маркеры find без ``-printf`` (busybox) в stderr.
+_NO_PRINTF_FIND = re.compile(
+    "printf|unrecognized|bad option|invalid predicate|unknown predicate",
+    re.IGNORECASE,
+)
+_PERMISSION_DENIED = re.compile("permission denied", re.IGNORECASE)
 
 
 def _missing_file(path: str) -> FileNotFoundError:
@@ -290,26 +298,32 @@ class PosixShellFsMixin:
         return f"{message}: {detail}" if detail else message
 
     @staticmethod
-    def _stderr_for_classification(res: Any) -> str:
-        """Ограниченный срез stderr в нижнем регистре: вывод бывает в
-        десятки мегабайт, полная копия ради поиска маркера не нужна.
-        stdout не читаем: частичный обход может упомянуть вложенный
-        отсутствующий файл."""
-        err = res.stderr or ""
-        return head_tail_preview(err, _FAILURE_DETAIL_CHARS).lower()
+    def _names_missing(path: str, stderr: str) -> bool:
+        """Строка stderr называет именно этот путь и говорит «нет файла».
+
+        Путь — ``'P'`` (GNU stat/head/cp/find) или ``P:`` (sha256sum,
+        busybox, ошибки перенаправления sh) после начала строки, пробела или
+        кавычки: ``/w/a`` не совпадает с ``/w/a/b`` и ``/x/w/a``. Ищем по
+        сырому stderr без копий: вывод бывает в десятки мегабайт."""
+        p = re.escape(path)
+        pattern = rf"(?:'{p}'|(?:^|[ '\"]){p}:).*(?i:no such file)"
+        return re.search(pattern, stderr, re.MULTILINE) is not None
 
     @classmethod
     def _fs_failure(cls, path: str, res: Any, *, what: str) -> OSError:
-        """Отказ команды ФС: «файла нет» — только когда так сказала та сторона.
-        Таймаут (код ``None``), пустой stderr, permission denied — ``OSError``:
-        иначе модель решала бы, что файла нет, и шла его создавать."""
+        """Отказ команды ФС: «файла нет» — только когда та сторона назвала
+        этот путь. Таймаут (код ``None``), пустой stderr, permission denied,
+        отсутствие другого пути (сторона копирования, временный файл,
+        исчезнувший при обходе вложенный элемент) — ``OSError``: иначе модель
+        решала бы, что файла нет, и шла его создавать. stdout не читаем:
+        частичный обход может упомянуть вложенный отсутствующий файл."""
         if getattr(res, "timed_out", False):
             return OSError(f"{what} timed out: {path}")
-        low = cls._stderr_for_classification(res)
-        if "no such file" in low:
+        err = res.stderr or ""
+        if cls._names_missing(path, err):
             return _missing_file(path)
         message = cls._failure_message(what, path, res)
-        if "permission denied" in low:
+        if _PERMISSION_DENIED.search(err):
             return PermissionError(message)
         return OSError(message)
 
@@ -317,17 +331,7 @@ class PosixShellFsMixin:
     def _find_failure(cls, path: str, res: Any) -> OSError:
         """Отказ ``find``: busybox без ``-printf`` — ``OSError`` с подсказкой,
         остальное — как у любой команды ФС (``_fs_failure``)."""
-        low = cls._stderr_for_classification(res)
-        if any(
-            m in low
-            for m in (
-                "printf",
-                "unrecognized",
-                "bad option",
-                "invalid predicate",
-                "unknown predicate",
-            )
-        ):
+        if _NO_PRINTF_FIND.search(res.stderr or ""):
             return OSError(
                 "GNU find with -printf is required on the backend: "
                 f"{cls._failure_detail(res)}"

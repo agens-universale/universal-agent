@@ -373,28 +373,106 @@ _MISSING = "No such file or directory"
 
 
 @pytest.mark.parametrize(
-    "call",
+    ("call", "stderr"),
     [
-        lambda be: be.getsize("/w/a"),
-        lambda be: be.copy("/w/a", "/w/b"),
-        lambda be: be.makedirs("/w/d"),
-        lambda be: be.read_head_bytes("/w/a", 8),
-        lambda be: be.sha256("/w/a"),
-        lambda be: be.append("/w/a", "x"),
+        (
+            lambda be: be.getsize("/w/a"),
+            f"stat: cannot statx '/w/a': {_MISSING}",
+        ),
+        (
+            lambda be: be.stat("/w/a"),
+            f"stat: cannot statx '/w/a': {_MISSING}",
+        ),
+        (
+            lambda be: be.makedirs("/w/d"),
+            f"mkdir: cannot create directory '/w/d': {_MISSING}",
+        ),
+        (
+            lambda be: be.read_head_bytes("/w/a", 8),
+            f"head: cannot open '/w/a' for reading: {_MISSING}",
+        ),
+        (
+            lambda be: be.sha256("/w/a"),
+            f"sha256sum: /w/a: {_MISSING}",
+        ),
     ],
-    ids=["getsize", "copy", "makedirs", "head", "sha256", "append"],
+    ids=["getsize", "stat", "makedirs", "head", "sha256"],
 )
-async def test_every_command_failure_is_classified(call):
-    """Регресс: шесть операций обходили классификацию — отсутствующий файл
+async def test_every_command_failure_is_classified(call, stderr):
+    """Регресс: операции обходили классификацию — отсутствующий файл
     давал ``OSError``, а ``stat()`` — ``FileNotFoundError``."""
-    be = RecordingShell(
-        answers={"": ExecResult(return_code=1, stderr=f"x: {_MISSING}")}
-    )
+    be = RecordingShell(answers={"": ExecResult(return_code=1, stderr=stderr)})
     with pytest.raises(FileNotFoundError) as ei:
         await call(be)
     # Текст причины и путь, как у локального бэкенда, а не голый путь.
     assert "No such file or directory" in str(ei.value)
     assert ei.value.filename.startswith("/w/")
+
+
+@pytest.mark.parametrize(
+    ("call", "stderr", "prefix"),
+    [
+        (
+            lambda be: be.copy("/w/a", "/w/b"),
+            f"cp: cannot stat '/w/a': {_MISSING}",
+            "cp failed (exit 1): /w/a -> /w/b",
+        ),
+        (
+            lambda be: be.append("/w/a", "x"),
+            f"cat: /w/a.gc-append-tmp.x: {_MISSING}",
+            "append failed (exit 1): /w/a",
+        ),
+        (
+            lambda be: be.listdir("/w/a"),
+            f"find: '/w/a/b': {_MISSING}",
+            "find failed (exit 1): /w/a",
+        ),
+        (
+            lambda be: be.walk_entries("/w/a"),
+            f"find: '/w/a/b': {_MISSING}",
+            "find failed (exit 1): /w/a",
+        ),
+        (
+            lambda be: be.stat("/w/a"),
+            f"stat: cannot statx '/x/w/a': {_MISSING}",
+            "stat failed (exit 1): /w/a",
+        ),
+    ],
+    ids=["copy", "append-tmp", "listdir-nested", "walk-nested", "other"],
+)
+async def test_missing_other_path_is_not_a_missing_file(call, stderr, prefix):
+    """«Нет такого файла» про другой путь (сторону копирования, временный
+    файл дозаписи, исчезнувший при обходе вложенный элемент) — не повод
+    говорить модели, что нет запрошенного пути."""
+    be = RecordingShell(answers={"": ExecResult(return_code=1, stderr=stderr)})
+    with pytest.raises(OSError) as ei:
+        await call(be)
+    assert not isinstance(ei.value, FileNotFoundError)
+    assert str(ei.value) == f"{prefix}: {stderr}"
+
+
+async def test_classification_sees_markers_in_the_middle_of_long_stderr():
+    noise = "find: warning: noise\n" * 100
+    denied = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1,
+                stderr=noise + "find: '/w/x': Permission denied\n" + noise,
+            )
+        }
+    )
+    with pytest.raises(PermissionError):
+        await denied.walk_entries("/w")
+    busybox = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1,
+                stderr=noise + "find: unrecognized: -printf\n" + noise,
+            )
+        }
+    )
+    with pytest.raises(OSError, match="GNU find with -printf is required"):
+        await busybox.listdir("/w")
 
 
 async def test_direct_command_timeout_names_operation():
