@@ -1401,6 +1401,39 @@ async def _aprepare_native_vision(
     return key
 
 
+def _function_call_output_id(message) -> str:
+    if not isinstance(message, dict):
+        return ""
+    if message.get("type") != "function_call_output":
+        return ""
+    call_id = message.get("call_id")
+    if isinstance(call_id, str):
+        return call_id
+    return ""
+
+
+def _answered_call_ids(history) -> set[str]:
+    answered: set[str] = set()
+    for batch in history:
+        for message in batch or []:
+            call_id = _function_call_output_id(message)
+            if call_id:
+                answered.add(call_id)
+    return answered
+
+
+def _keep_answered_invalid_tool_call(history) -> Callable[[Dict], Dict]:
+    """Вызов с уже записанным выводом не подменяем: пара уходит как лежит в треде."""
+    answered = _answered_call_ids(history)
+
+    def factory(message: Dict) -> Dict:
+        if message.get("call_id") in answered:
+            return message
+        return build_invalid_tool_call_feedback_message(message)
+
+    return factory
+
+
 async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
@@ -1464,13 +1497,17 @@ async def _arequest_backend_canonical_once(
         if resolved is not None
         else settings.backend.completions_url
     )
+    state_messages = getattr(state, "messages", []) or []
+    keep_answered = _keep_answered_invalid_tool_call(
+        (state_messages, messages)
+    )
     sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
-        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+        invalid_tool_call_factory=keep_answered,
     )
     sanitized_state_messages = sanitize_messages_for_chat_completions(
-        getattr(state, "messages", []) or [],
-        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+        state_messages,
+        invalid_tool_call_factory=keep_answered,
     )
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл

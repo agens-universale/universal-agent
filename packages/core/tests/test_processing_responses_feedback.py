@@ -182,3 +182,126 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
     assert payload_messages[0]["role"] == "user"
     assert '<technical type="error_message">' in payload_messages[0]["content"]
     assert payload_messages[1]["role"] == "user"
+
+
+def test_request_keeps_malformed_tool_call_that_already_has_output(
+    monkeypatch,
+):
+    """Ответ уже записан — вызов с битым JSON уходит парой, без подмены на user."""
+    captured = {}
+
+    def _fake_create_call_headers(_state, _ctx, resolved=None):
+        return {"Authorization": "Bearer fake"}
+
+    async def _fake_request_backend_chat_completions(data, *_args, **_kwargs):
+        captured["messages"] = data.get("messages", [])
+        return {
+            "id": "chat_1",
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "ok"},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        processing_module,
+        "acreate_call_headers",
+        as_coro(_fake_create_call_headers),
+    )
+    monkeypatch.setattr(
+        "gc_core.request_backend_policy.arequest_backend_chat_completions",
+        _fake_request_backend_chat_completions,
+    )
+
+    broken_arguments = '{"path": '
+    error_output = '{"ok": false, "message": "некорректный JSON"}'
+    state = State(
+        verbose=False,
+        model="CodeChat",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=2,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
+    state.messages = [
+        {
+            "id": "fc_good",
+            "type": "function_call",
+            "call_id": "good",
+            "name": "fs_read_file",
+            "arguments": '{"path": "ok.txt"}',
+            "status": "completed",
+        },
+        {
+            "id": "fc_bad",
+            "type": "function_call",
+            "call_id": "bad",
+            "name": "fs_read_file",
+            "arguments": broken_arguments,
+            "status": "completed",
+        },
+        {
+            "id": "out_good",
+            "type": "function_call_output",
+            "call_id": "good",
+            "output": '{"ok": true}',
+        },
+        {
+            "id": "out_bad",
+            "type": "function_call_output",
+            "call_id": "bad",
+            "output": error_output,
+        },
+    ]
+    ctx = fake_ctx(
+        {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
+        },
+        logger=None,
+    )
+
+    run_coro(
+        processing_module._arequest_backend_canonical(
+            [{"role": "user", "content": "next", "id": "m_1"}],
+            state,
+            ctx,
+            resolved=None,
+        )
+    )
+
+    payload_messages = captured["messages"]
+    assistant = next(
+        message
+        for message in payload_messages
+        if message.get("role") == "assistant" and message.get("tool_calls")
+    )
+    tool_calls = assistant["tool_calls"]
+    assert [call["id"] for call in tool_calls] == ["good", "bad"]
+    assert tool_calls[1]["function"]["arguments"] == broken_arguments
+    bad_tool = next(
+        message
+        for message in payload_messages
+        if message.get("role") == "tool"
+        and message.get("tool_call_id") == "bad"
+    )
+    assert bad_tool["content"] == error_output
+    assistant_at = payload_messages.index(assistant)
+    bad_at = payload_messages.index(bad_tool)
+    assert assistant_at < bad_at
+    assert all(
+        message.get("role") == "tool"
+        for message in payload_messages[assistant_at + 1 : bad_at + 1]
+    )
+    assert not any(
+        message.get("role") == "user"
+        and "error_message" in str(message.get("content"))
+        for message in payload_messages
+    )
