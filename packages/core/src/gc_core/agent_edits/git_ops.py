@@ -247,21 +247,43 @@ def _unquote_c_path(raw: str) -> str:
     return out.decode("utf-8", errors="surrogateescape")
 
 
-# Символы, из-за которых git берёт имя пути в кавычки (``quote_c_path``).
-_C_QUOTED = {'"': '\\"', "\\": "\\\\", "\t": "\\t", "\n": "\\n"}
+# Экранирование git для символов с буквенной формой; прочие управляющие
+# (< 0x20 и 0x7f) git пишет трёхзначной восьмеричной (``quote_c_path``).
+_C_QUOTED = {
+    '"': '\\"',
+    "\\": "\\\\",
+    "\a": "\\a",
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\v": "\\v",
+    "\f": "\\f",
+    "\r": "\\r",
+}
+
+
+def _needs_c_quote(char: str) -> bool:
+    return char in _C_QUOTED or char < " " or char == "\x7f"
+
+
+def _c_quote_char(char: str) -> str:
+    escaped = _C_QUOTED.get(char)
+    if escaped is not None:
+        return escaped
+    return f"\\{ord(char):03o}" if _needs_c_quote(char) else char
 
 
 def quote_c_path(path: str) -> str:
-    """Имя пути для заголовка патча — C-кавычки, как у git, когда в имени
-    табуляция, перевод строки, ``"`` или ``\\``; иначе как есть.
+    """Имя пути для заголовка патча — C-кавычки, как у git (``quotepath``
+    выключен): ``"``, ``\\`` и управляющие символы экранируются, иначе имя
+    как есть.
 
-    Обратная ``_unquote_c_path`` в части, нужной ``git apply``: без кавычек
-    он режет имя по табуляции. Не-ASCII не экранируется — ``git apply``
-    принимает его и так.
+    Обратная ``_unquote_c_path``. Без кавычек ``git apply`` режет имя по
+    табуляции. Не-ASCII не экранируется — ``git apply`` принимает его и так.
     """
-    if not any(char in _C_QUOTED for char in path):
+    if not any(_needs_c_quote(char) for char in path):
         return path
-    return '"' + "".join(_C_QUOTED.get(char, char) for char in path) + '"'
+    return '"' + "".join(_c_quote_char(char) for char in path) + '"'
 
 
 def show_index_bytes(launch_root: str, rel: str) -> Optional[bytes]:

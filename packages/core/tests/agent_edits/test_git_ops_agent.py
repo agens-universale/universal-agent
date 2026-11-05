@@ -1157,3 +1157,39 @@ def test_paths_changed_between_lists_added_edited_deleted(two_commits):
         "new.txt",
     }
     assert git_ops.paths_changed_between(str(root), "nope", second) is None
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["a\rb", "a\x01b", "a\x7fb", "a\tb", 'a"b', "a\\b", "файл", "a\x07\x0b"],
+)
+def test_quote_c_path_is_inverse_of_unquote(name):
+    quoted = git_ops.quote_c_path(name)
+
+    assert git_ops._unquote_c_path(quoted) == name
+
+
+def test_quote_c_path_matches_git_for_control_chars(tmp_path):
+    """Те же кавычки, что у живого git (``core.quotepath=false``)."""
+    if shutil.which("git") is None:
+        pytest.skip("git недоступен")
+    name = 'a\rb\x01c\x7fd"e.txt'
+    run = lambda *args: (
+        subprocess.run(  # noqa: E731
+            ["git", "-c", "core.quotepath=false", *args],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    run("init", "-q")
+    try:
+        (tmp_path / name).write_text("x\n")
+    except OSError:
+        pytest.skip("ФС не принимает такое имя")
+    run("add", "-N", "--", name)
+
+    out = run("diff", "--name-only").strip("\n")
+
+    assert out == git_ops.quote_c_path(name)
