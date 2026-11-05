@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import shlex
 import shutil
 import stat
 import subprocess
@@ -43,7 +42,7 @@ class _LocalHarborEnvironment:
     def __init__(self):
         self.fail_write = False
         self.fail_replace = False
-        self.fail_stat = False
+        self.fail_prepare = False
         self.malformed_stat = False
         self.uploaded = []
 
@@ -51,26 +50,27 @@ class _LocalHarborEnvironment:
         probe = probe_stdout(command)
         if probe is not None:
             return ExecResult(stdout=probe, stderr="", return_code=0)
-        if self.fail_stat and command.startswith("stat -c "):
+        if self.fail_prepare and 'mkdir -m 700 -- "$stage"' in command:
             return ExecResult(
                 stdout="", stderr="Permission denied", return_code=1
             )
-        if self.malformed_stat and command.startswith("stat -c "):
-            return ExecResult(stdout="", stderr="", return_code=0)
-        if self.fail_write and "cat -- " in command:
-            return ExecResult(stdout="", stderr="write failed", return_code=1)
-        if self.fail_replace and command.startswith("mv -f -- "):
-            return ExecResult(
-                stdout="", stderr="replace failed", return_code=1
-            )
         if sys.platform == "darwin":
-            command = command.replace("stat -c '%F|%a'", "stat -f '%HT|%Lp'")
-        if command.startswith("chown --reference="):
-            _, reference_arg, candidate = shlex.split(command)
-            reference = Path(reference_arg.removeprefix("--reference="))
-            owner = reference.stat()
-            os.chown(candidate, owner.st_uid, owner.st_gid)
-            return ExecResult(stdout="", stderr="", return_code=0)
+            command = (
+                command.replace("stat -c '%u:%g %a'", "stat -f '%u:%g %Lp'")
+                .replace("stat -c '%u:%g'", "stat -f '%u:%g'")
+                .replace("mv -fT --", "mv -fh --")
+            )
+        if self.malformed_stat:
+            command = "stat() { return 0; }\n" + command
+        if self.fail_write:
+            command = (
+                "cat() { printf partial; echo 'write failed' >&2; return 1; }\n"
+                + command
+            )
+        if self.fail_replace:
+            command = (
+                "mv() { echo 'replace failed' >&2; return 1; }\n" + command
+            )
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True
         )
@@ -119,6 +119,18 @@ async def test_harbor_overwrite_preserves_executable_mode(
         subprocess.run([str(path)], capture_output=True, check=True).stdout
         == b"new\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_harbor_write_rejects_directory(tmp_path, harbor_loop):
+    path = tmp_path / "directory"
+    path.mkdir()
+    backend = HarborBackend(_LocalHarborEnvironment(), harbor_loop)
+
+    with pytest.raises(IsADirectoryError):
+        await backend.write_bytes(str(path), b"new")
+
+    assert list(path.iterdir()) == []
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are required")
@@ -234,7 +246,7 @@ async def test_harbor_failed_write_leaves_existing_file_unchanged(
 
     assert path.read_bytes() == b"old"
     assert _mode(path) == 0o755
-    assert not list(tmp_path.glob("script.sh.gc-write-tmp.*"))
+    assert not list(tmp_path.glob(".gc-write-*"))
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes are required")
@@ -254,17 +266,17 @@ async def test_harbor_failed_replace_leaves_existing_file_unchanged(
 
     assert path.read_bytes() == b"old"
     assert _mode(path) == 0o755
-    assert not list(tmp_path.glob("script.sh.gc-write-tmp.*"))
+    assert not list(tmp_path.glob(".gc-write-*"))
 
 
 @pytest.mark.asyncio
-async def test_harbor_stat_permission_error_does_not_upload(
+async def test_harbor_prepare_permission_error_does_not_upload(
     tmp_path, harbor_loop
 ):
     path = tmp_path / "existing.txt"
     path.write_bytes(b"old")
     environment = _LocalHarborEnvironment()
-    environment.fail_stat = True
+    environment.fail_prepare = True
     backend = HarborBackend(environment, harbor_loop)
 
     with pytest.raises(PermissionError, match="Permission denied"):
@@ -302,4 +314,4 @@ async def test_harbor_rejects_malformed_stat_response(tmp_path, harbor_loop):
         await backend.write_bytes(str(path), b"new")
 
     assert path.read_bytes() == b"old"
-    assert environment.uploaded == []
+    assert not list(tmp_path.glob(".gc-write-*"))

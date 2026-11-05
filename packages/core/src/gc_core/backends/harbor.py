@@ -35,6 +35,76 @@ from gc_core.backends.runtime_probe import (
 )
 from gc_core.backends.walk_util import FlatWalkMixin
 from gc_core.user_stop import current_user_stop
+from gc_core.utils.file_text import encode_text_for_append
+
+_CHECK_WRITE_TARGET = """\
+export LC_ALL=C
+check_target() {
+    if [ "$operation" = write ] && [ -L "$target" ]; then return 0; fi
+    if [ -d "$target" ]; then
+        printf 'Is a directory: %s\\n' "$target" >&2; return 1
+    fi
+    if [ -f "$target" ] && [ ! -w "$target" ]; then
+        printf 'Permission denied: %s\\n' "$target" >&2; return 1
+    fi
+    if [ -e "$target" ] && [ ! -f "$target" ]; then
+        printf 'Not a regular file: %s\\n' "$target" >&2; return 1
+    fi
+}
+check_target || exit 1
+"""
+
+_PREPARE_WRITE = (
+    _CHECK_WRITE_TARGET
+    + """\
+if [ ! -d "$parent" ]; then mkdir -p -- "$parent" || exit 1; fi
+if [ -w "$parent" ]; then stage=$adjacent; else stage=$fallback; fi
+mkdir -m 700 -- "$stage" || exit 1
+printf '%s\\n' "$stage"
+"""
+)
+
+_CLEAN_WRITE_STAGE = (
+    'rm -f -- "$stage/payload" "$stage/candidate"; rmdir -- "$stage"'
+)
+
+_PUBLISH_WRITE = (
+    f"trap '{_CLEAN_WRITE_STAGE}' EXIT\n"
+    + _CHECK_WRITE_TARGET
+    + """\
+if [ "$operation" = append ]; then
+    cat < "$stage/payload" >> "$target"
+    exit $?
+fi
+overwrite_in_place() {
+    # Rename requires directory access and a candidate with matching ownership.
+    # A permitted write to the existing inode preserves both owner and mode.
+    [ ! -L "$target" ] && [ -f "$target" ] || return 1
+    cat < "$stage/payload" > "$target"
+}
+if [ "$stage" != "$adjacent" ]; then
+    overwrite_in_place
+    exit $?
+fi
+candidate=$stage/candidate
+cat < "$stage/payload" > "$candidate" || exit 1
+if [ ! -L "$target" ] && [ -f "$target" ]; then
+    metadata=$(stat -c '%u:%g %a' -- "$target") || exit 1
+    set -f
+    set -- $metadata
+    if [ "$#" -ne 2 ]; then echo 'invalid stat response' >&2; exit 1; fi
+    candidate_owner=$(stat -c '%u:%g' -- "$candidate") || exit 1
+    if [ "$candidate_owner" != "$1" ] && ! chown "$1" "$candidate"; then
+        uid=$(id -u) || exit 1
+        [ "$uid" != 0 ] || exit 1
+        overwrite_in_place
+        exit $?
+    fi
+    chmod "$2" "$candidate" || exit 1
+fi
+mv -fT -- "$candidate" "$target"
+"""
+)
 
 # Встроенная политика ``harbor_exec_init: bashrc``. Неинтерактивный ``bash -c``
 # иначе пропускает bashrc (``[ -z "$PS1" ] && return``). Потоки профиля
@@ -350,105 +420,58 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             capture_max_chars=self.walk_output_max_chars,
         )
 
-    async def _aexisting_regular_mode(self, path: str) -> str:
-        quoted_path = shlex.quote(path)
-        mode_result = await self._afs_exec(f"stat -c '%F|%a' {quoted_path}")
-        if mode_result.return_code == 0:
-            kind, _, previous_mode = mode_result.stdout.strip().partition("|")
-            if not kind or not re.fullmatch(r"[0-7]{3,4}", previous_mode):
-                raise OSError(f"invalid stat response: {path}")
-            if kind.lower() != "regular file":
-                return ""
-            if not await self.writable(path):
-                raise PermissionError(f"Permission denied: {path}")
-            return previous_mode
-        failure = self._fs_failure(path, mode_result, what="stat")
-        if not isinstance(failure, FileNotFoundError):
-            raise failure
-        return ""
-
-    async def _arequire_fs_command(
-        self, command: str, path: str, *, what: str
-    ) -> None:
-        result = await self._afs_exec(command)
-        if result.return_code != 0:
-            raise self._fs_failure(path, result, what=what)
-
-    async def _apublish_staged_bytes(
-        self, staged: str, path: str, previous_mode: str, suffix: str
-    ) -> None:
-        candidate = f"{path}.gc-write-tmp.{suffix}"
-        quoted_candidate = shlex.quote(candidate)
-        quoted_path = shlex.quote(path)
-        if previous_mode and not await self.writable(posixpath.dirname(path)):
-            # Without directory write access, replacing the inode is impossible
-            # for the task user. Updating the writable inode keeps its owner/mode.
-            await self._arequire_fs_command(
-                f"cat -- {shlex.quote(staged)} > {quoted_path}",
-                path,
-                what="write",
-            )
-            return
-        try:
-            await self._arequire_fs_command(
-                f": > {quoted_candidate} && cat -- {shlex.quote(staged)} > {quoted_candidate}",
-                path,
-                what="stage",
-            )
-            if previous_mode:
-                await self._arequire_fs_command(
-                    f"chown --reference={quoted_path} {quoted_candidate}",
-                    path,
-                    what="owner",
-                )
-                await self._arequire_fs_command(
-                    f"chmod {shlex.quote(previous_mode)} {quoted_candidate}",
-                    path,
-                    what="mode",
-                )
-            await self._arequire_fs_command(
-                f"mv -f -- {quoted_candidate} {quoted_path}",
-                path,
-                what="replace",
-            )
-        finally:
-            try:
-                await self._afs_exec(f"rm -f -- {quoted_candidate}")
-            except Exception:
-                pass
-
     async def _aupload_bytes(self, data: bytes, path: str) -> None:
-        # mkdir и upload_file идут мимо ``_aexec_impl``.
-        await self._runtime_probe.ensure(self._aprobe)
-        quoted_path = shlex.quote(path)
-        previous_mode = await self._aexisting_regular_mode(path)
-        suffix = uuid.uuid4().hex
-        remote_dir = f"/tmp/.gc-write-{suffix}"
-        staged = f"{remote_dir}/payload"
+        await self._awrite_payload(data, path, operation="write")
+
+    async def append(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
+        await self._awrite_payload(
+            encode_text_for_append(content, encoding), path, operation="append"
+        )
+
+    async def _awrite_payload(
+        self, data: bytes, path: str, *, operation: str
+    ) -> None:
+        parent = posixpath.dirname(path) or "."
+        stage_name = f".gc-write-{uuid.uuid4().hex}"
+        adjacent = posixpath.join(parent, stage_name)
+        fallback = posixpath.join("/tmp", stage_name)
+        variables = (
+            f"target={shlex.quote(path)}\n"
+            f"parent={shlex.quote(parent)}\n"
+            f"adjacent={shlex.quote(adjacent)}\n"
+            f"fallback={shlex.quote(fallback)}\n"
+            f"operation={operation}\n"
+        )
         with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir) / "payload"
-            tmp_path.write_bytes(data)
-            os.chmod(tmp_path, 0o644)
-            await self._aawait(
-                self._env.exec(f"mkdir -p $(dirname {quoted_path})")
-            )
-            await self._arequire_fs_command(
-                f"mkdir -m 700 -- {shlex.quote(remote_dir)}",
-                path,
-                what="stage directory",
-            )
+            payload = Path(tmp_dir) / "payload"
+            payload.write_bytes(data)
+            # The transport may assign a different UID. Both staging dirs are private.
+            os.chmod(payload, 0o644)
+            prepared = await self._afs_exec(variables + _PREPARE_WRITE)
+            if prepared.return_code != 0:
+                raise self._fs_failure(path, prepared, what=operation)
+            stage = prepared.stdout.removesuffix("\n")
+            if stage not in (adjacent, fallback):
+                raise OSError(f"invalid staging response: {path}")
+            stage_var = f"stage={shlex.quote(stage)}\n"
             try:
-                await self._aawait(self._env.upload_file(tmp_path, staged))
-                await self._apublish_staged_bytes(
-                    staged, path, previous_mode, suffix
-                )
-            finally:
-                try:
-                    await self._afs_exec(
-                        f"rm -f -- {shlex.quote(staged)}; rmdir -- {shlex.quote(remote_dir)}"
+                await self._aawait(
+                    self._env.upload_file(
+                        payload, posixpath.join(stage, "payload")
                     )
-                except Exception:
-                    pass
+                )
+                result = await self._afs_exec(
+                    variables + stage_var + _PUBLISH_WRITE
+                )
+                if result.return_code != 0:
+                    raise self._fs_failure(path, result, what=operation)
+            except BaseException:
+                # The shell trap cannot run if upload or exec transport fails.
+                with contextlib.suppress(Exception):
+                    await self._afs_exec(stage_var + _CLEAN_WRITE_STAGE)
+                raise
 
     async def _adownload_bytes(self, path: str) -> bytes:
         await self._runtime_probe.ensure(self._aprobe)
