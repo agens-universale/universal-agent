@@ -9,7 +9,6 @@ import pytest
 # роняем сбор всего сьюта.
 pytest.importorskip("office_mcp")
 
-from gc_core.execution.tool_schema import has_free_node
 from gc_core.tools.connect_mcp.agent_tools import normalize_tool_spec_for_agent
 from gc_core.utils.connect_backend import project_tool_specs
 from mcp.server.fastmcp.utilities.func_metadata import func_metadata
@@ -81,19 +80,6 @@ def _strict_schema_errors(
     return errors
 
 
-def _free_node_strict_errors(spec: dict, name: str) -> list[str]:
-    """Свободный узел (``items: {}`` и т.п.) допустим, но тогда инструмент
-    уходит без strict."""
-    if not has_free_node(spec["parameters"]):
-        return []
-    (sent,) = project_tool_specs(
-        [spec], openai_strict=True, send_tool_strict=True
-    )
-    if sent.get("strict"):
-        return [f"{name}: free schema node, but strict is kept"]
-    return []
-
-
 def test_all_office_mcp_tools_normalize_for_openai_strict() -> None:
     cfg = ServerConfig(
         allowed_dirs=["/tmp"],
@@ -117,7 +103,13 @@ def test_all_office_mcp_tools_normalize_for_openai_strict() -> None:
         )
         params = normalized["parameters"]
         errors.extend(_strict_schema_errors(params, (name,)))
-        errors.extend(_free_node_strict_errors(normalized, name))
+        # office-mcp типизирован полностью: появился узел без типа — strict
+        # снимется, и это решают осознанно, а не узнают из запросов.
+        (sent,) = project_tool_specs(
+            [normalized], openai_strict=True, send_tool_strict=True
+        )
+        if sent["strict"] is not True:
+            errors.append(f"{name}: strict dropped by projection")
         errors.extend(
             _dangling_ref_errors(
                 params, params.get("$defs"), (name, "parameters")
