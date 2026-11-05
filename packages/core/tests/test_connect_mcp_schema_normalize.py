@@ -696,6 +696,13 @@ def test_free_node_inside_defs_drops_strict() -> None:
     assert sent["strict"] is False
 
 
+def test_has_free_node_walks_defs() -> None:
+    from gc_core.execution.tool_schema import has_free_node
+
+    schema = {"type": "object", "properties": {}, "$defs": {"V": {}}}
+    assert has_free_node(schema) is True
+
+
 def test_anyof_true_branch_drops_strict() -> None:
     raw = _single_param_spec({"anyOf": [True, {"type": "null"}]})
     sent = _project_strict(normalize_tool_spec_for_agent(raw))

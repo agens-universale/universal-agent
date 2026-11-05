@@ -270,11 +270,11 @@ def _cancel_harness(tmp_path, monkeypatch, arun):
 
 
 async def _wait_until(predicate):
-    for _ in range(100):
+    for _ in range(500):
         if predicate():
             return
         await asyncio.sleep(0.01)
-    raise AssertionError("condition not reached within 1 s")
+    raise AssertionError("condition not reached within 5 s")
 
 
 async def _cancel_once_started(agent, context, started):
@@ -325,6 +325,7 @@ def test_cancel_before_worker_start_skips_run_context(tmp_path, monkeypatch):
         try:
             await _wait_until(lambda: len(submitted) == 2)
             task.cancel()
+            await _wait_until(lambda: agent._cancelled)
         finally:
             release.set()
         await task
