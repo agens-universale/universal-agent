@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -2213,6 +2214,55 @@ def test_foreign_head_moves_record_nothing(repo, scenario):
     _foreign_history(launch_root)
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(launch_root, _git_script(_FOREIGN_MOVES[scenario]))
+    delta.after_and_record()
+
+    assert delta._head_after != delta._head_before
+    assert _records(threads_dir) == []
+
+
+def _git_in_the_future(root: Path, *args: str) -> None:
+    """git-вызов с датой коммиттера на минуту вперёд: чужой коммит той же
+    секунды, что ``begin()``, или со спешащими часами — гейт по времени его
+    не отличит от своего."""
+    stamp = f"@{int(time.time()) + 60} +0000"
+    env = {**os.environ, "GIT_COMMITTER_DATE": stamp}
+    subprocess.run(
+        ["git", *args], cwd=str(root), check=True, capture_output=True, env=env
+    )
+
+
+@pytest.mark.parametrize("scenario", ["pull_ff", "checkout_branch"])
+def test_foreign_fresh_commits_moved_in_by_command_record_nothing(
+    repo, scenario
+):
+    """Чужая ветка-потомок с датой коммиттера не раньше начала команды:
+    журнал HEAD показывает переход, а не коммит — путей нет."""
+    launch_root, threads_dir = repo
+    _git(launch_root, "checkout", "-qb", "other")
+    (launch_root / "o.txt").write_bytes(b"o\n")
+    _git(launch_root, "add", "o.txt")
+    _git_in_the_future(launch_root, "commit", "-qm", "other")
+    _git(launch_root, "checkout", "-q", "main")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, _git_script(_FOREIGN_MOVES[scenario]))
+    delta.after_and_record()
+
+    assert delta._head_after != delta._head_before
+    assert _records(threads_dir) == []
+
+
+def test_own_commit_without_head_journal_records_nothing(repo):
+    """Журнал HEAD выключен — свои коммиты не доказать: команда со сдвигом
+    HEAD остаётся без закоммиченных путей, как до гейта."""
+    launch_root, threads_dir = repo
+    shutil.rmtree(launch_root / ".git" / "logs")
+    _git(launch_root, "config", "core.logAllRefUpdates", "false")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "open('tracked.txt','wb').write(b'line1\\nline2\\nline3\\n')\n"
+        + _git_script(("git", "commit", "-qam", "edit")),
+    )
     delta.after_and_record()
 
     assert delta._head_after != delta._head_before

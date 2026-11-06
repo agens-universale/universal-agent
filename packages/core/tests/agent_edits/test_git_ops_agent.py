@@ -1149,6 +1149,19 @@ def test_is_ancestor_and_commit_times(two_commits):
     assert git_ops.commit_times(str(root), "nope", second) is None
 
 
+def test_head_reflog_lists_newest_moves_first(two_commits):
+    root, first, second = two_commits
+    entries = git_ops.head_reflog(str(root), 2)
+    assert [rev for rev, _subject in entries] == [second, first]
+    assert entries[0][1].startswith("commit")
+
+
+def test_head_reflog_without_journal_is_none(two_commits):
+    root, _first, _second = two_commits
+    shutil.rmtree(root / ".git" / "logs")
+    assert git_ops.head_reflog(str(root), 2) is None
+
+
 def test_paths_changed_between_lists_added_edited_deleted(two_commits):
     root, first, second = two_commits
     assert git_ops.paths_changed_between(str(root), first, second) == {

@@ -146,6 +146,11 @@ _REGULAR_FILE_MODES = {"100644": 0o644, "100755": 0o755}
 # неоднозначно — точной базы и строк удаления он не получает (§5.1).
 _UNMERGED_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 
+# Темы журнала HEAD у коммитов, созданных самой командой (гейт
+# ``_own_commits``): ``commit``, ``commit (initial)``, ``commit (merge)``,
+# ``cherry-pick``, ``revert``. Чужие коммиты слияния отсекает время.
+_OWN_COMMIT_REFLOG = ("commit", "cherry-pick", "revert")
+
 # Суммарный кап карманного снимка «до»: байты кандидатов держатся в памяти на
 # одну команду. Кандидатов две группы — известные журналу (обычно единицы) и
 # грязные пути рабочего дерева (их бывает сколько угодно), поэтому 32 МиБ — это
@@ -755,11 +760,14 @@ class ShellDelta:
     def _own_commits(self) -> bool:
         """HEAD за команду сдвинули только коммиты ЭТОЙ команды (гейт §5.3a).
 
-        Одновременно: HEAD сдвинулся, HEAD до команды — предок нового, и у
-        всех коммитов между ними время коммиттера не раньше начала команды.
+        Одновременно: HEAD сдвинулся, HEAD до команды — предок нового, у
+        всех коммитов между ними время коммиттера не раньше начала команды,
+        и журнал HEAD показывает ровно эти коммиты поверх старого HEAD.
         pull, merge и checkout ветки-потомка приносят коммиты со старыми
-        датами; у reset, amend, rebase и checkout чужой ветки старый HEAD не
-        предок. Считается раз на команду.
+        датами, а со свежими (та же секунда, спешащие часы) — оставляют в
+        журнале запись перехода, не коммита; у reset, amend, rebase и
+        checkout чужой ветки старый HEAD не предок. Журнал выключен —
+        не свои. Считается раз на команду.
         """
         if self._own_commits_memo is None:
             self._own_commits_memo = self._check_own_commits()
@@ -773,7 +781,21 @@ class ShellDelta:
             return False
         times = git_ops.commit_times(self._launch_root, before, after)
         start = self._before_ts_ns // 1_000_000_000
-        return times is not None and all(ts >= start for ts in times)
+        if times is None or not all(ts >= start for ts in times):
+            return False
+        return self._journal_shows_commits(before, len(times))
+
+    def _journal_shows_commits(self, before: str, count: int) -> bool:
+        """Журнал HEAD: ``count`` верхних записей — коммиты, под ними —
+        ``before``. Переход на чужую ветку (checkout, pull, merge) — одна
+        запись другого вида, даже если даты коммитов свежие."""
+        entries = git_ops.head_reflog(self._launch_root, count + 1)
+        if entries is None or len(entries) != count + 1:
+            return False
+        *moves, (prior, _subject) = entries
+        return prior == before and all(
+            subject.startswith(_OWN_COMMIT_REFLOG) for _rev, subject in moves
+        )
 
     def _head_unmoved(self) -> bool:
         """HEAD за команду не сдвинулся — условие точной базы (Р32, §5.3)."""

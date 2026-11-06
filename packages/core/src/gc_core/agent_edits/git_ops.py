@@ -1029,6 +1029,25 @@ def commit_times(launch_root: str, since: str, until: str) -> list[int] | None:
     return [int(line) for line in _decode(out).split() if line.isdigit()]
 
 
+def head_reflog(launch_root: str, count: int) -> list[tuple[str, str]] | None:
+    """Последние ``count`` записей журнала HEAD: (ревизия после, тема).
+
+    Новые первыми. Журнала нет или отказ git — ``None``.
+    """
+    code, out = run_git(
+        launch_root,
+        ["log", "-g", "--format=%H%x00%gs", "-n", str(count), "HEAD"],
+    )
+    if code != 0:
+        return None
+    entries = [
+        tuple(line.split("\0", 1))
+        for line in _decode(out).splitlines()
+        if "\0" in line
+    ]
+    return entries or None
+
+
 def paths_changed_between(
     launch_root: str, older: str, newer: str
 ) -> set[str] | None:
