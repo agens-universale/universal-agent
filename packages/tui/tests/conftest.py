@@ -223,6 +223,42 @@ def _no_clipboard_probe(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_skills_warm(monkeypatch):
+    """Главный экран прогревает кэш скиллов в фоне на старте и после каждого
+    прогона — по умолчанию тесты настоящий реестр не обходят. Тест, которому
+    прогрев нужен, просит фикстуру `skills_warm` и сам подменяет реестр.
+    Возвращает настоящий метод прогрева."""
+    from gc_tui.screens.main import TraceScreen
+
+    real = TraceScreen._warm_skills_cache
+    monkeypatch.setattr(TraceScreen, "_warm_skills_cache", lambda self: None)
+    return real
+
+
+@pytest.fixture
+def skills_warm(_no_skills_warm, monkeypatch):
+    """Вернуть настоящий фоновый прогрев кэша скиллов
+    (см. `_no_skills_warm`)."""
+    from gc_tui.screens.main import TraceScreen
+
+    monkeypatch.setattr(TraceScreen, "_warm_skills_cache", _no_skills_warm)
+
+
+@pytest.fixture(autouse=True)
+def _no_terminal_probe(monkeypatch):
+    """Тесты не опрашивают настоящий терминал (OSC 11 при старте `main()`) и
+    после себя возвращают палитру к теме gigacode: apply_background меняет
+    глобалы модуля. Тесты пробы держат ссылку на настоящую функцию,
+    взятую при импорте, поэтому подмена атрибута модуля им не мешает."""
+    from gc_tui import palette
+    from gc_tui.services import terminal_caps
+
+    monkeypatch.setattr(terminal_caps, "query_background", lambda: None)
+    yield
+    palette.reset()
+
+
+@pytest.fixture(autouse=True)
 def _no_network_model_fetch(monkeypatch):
     """По умолчанию TUI-тесты не ходят в сеть за списком моделей.
 

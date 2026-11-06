@@ -90,6 +90,9 @@ class PaletteRowsMixin:
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:
-            self.call_after_refresh(
-                selected_widget.scroll_visible, animate=False
-            )
+            self.call_after_refresh(self._reveal, selected_widget)
+
+    def _reveal(self, row: Static) -> None:
+        """Докрутить подсвеченную строку в видимую область (после раскладки);
+        наследник может показать вместе с ней и соседние строки."""
+        row.scroll_visible(animate=False)

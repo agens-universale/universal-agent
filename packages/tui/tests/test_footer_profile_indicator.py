@@ -996,18 +996,17 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
         assert "→" in plain
 
 
-# --- Task 17: единая шестиступенчатая лесенка --------------------------------
+# --- Task 17: единая лесенка жертв -----------------------------------------
 #
 # Правая колонка (#footer-right, width: auto) ЗАЯВЛЯЕТ потребность, левая
 # (#footer-left, 1fr) получает остаток — поэтому ступени лесенки различаются
-# ровно тем, сколько рядов при этом остатке занимает левая. Ширину здесь не
-# подсовывают: её задаёт настоящий размер терминала (`pilot.resize_terminal`),
-# как в жизни, — иначе взаимодействие колонок не проверить.
+# ровно тем, встаёт ли при этом остатке строка 1 левой (режим + хвост) и бейдж
+# уведомлений. Ширину здесь не подсовывают: её задаёт настоящий размер
+# терминала (`pilot.resize_terminal`), как в жизни, — иначе взаимодействие
+# колонок не проверить.
 #
-# Порядок жертв (решение юзера, дословно): 1) всё одной строкой; 2) цены вниз;
-# 3) имя профиля 14 → 5; 4) левая переносит подсказки, имя пробуется снова от
-# 14 к 5; 5) имя снимается — только когда слева двигать нечего; 6) снимается
-# блок за стрелкой.
+# Порядок жертв: 1) всё одной строкой; 2) цены вниз; 3) пилюля режима — глиф;
+# 4) имя профиля 14 → 5; 5) имя снимается; 6) снимается блок за стрелкой.
 
 _FOOTER_CHROME = 5  # padding'и футера + зазор между колонками (main.py)
 _PRICING = {
@@ -1030,38 +1029,30 @@ def _usage_meta(inp, out):
     return acc.to_meta()
 
 
-def _rows(text: str, width: int) -> int:
-    """Сколько РЯДОВ займёт `text` при ширине `width` — той же меркой, какой его
-    рисует Rich (перенос по словам), с учётом явных переносов."""
-    from rich.console import Console
-    from rich.text import Text
-
-    console = Console(width=width)
-    return sum(
-        len(Text(line).wrap(console, width)) for line in text.split("\n")
-    )
-
-
-def _left_rows_beside(scr, total: int, right_plain: str) -> int:
-    """Сколько рядов займёт левая колонка, когда правая забрала своё."""
-    from gc_tui.services.notices_ui import (
-        footer_left_with_badge,
-        format_notices_badge,
-    )
+def _left_room(total: int, right_plain: str) -> int:
+    """Сколько колонок остаётся строкам левой, когда правая забрала своё."""
     from rich.cells import cell_len
 
     need = max(cell_len(line) for line in right_plain.split("\n"))
-    width = total - need - _FOOTER_CHROME
-    if width <= 0:
-        return 99
-    return _rows(
-        footer_left_with_badge(
-            scr._footer_left_commands(),
-            format_notices_badge(scr._collect_footer_notices()),
-            width=width,
-        ),
-        width,
-    )
+    return total - need - _FOOTER_CHROME
+
+
+def _mode_line_cols(scr, *, glyph: bool = False) -> int:
+    """Ширина строки 1 левой: пилюля полная или глифом + хвост команд."""
+    from rich.cells import cell_len
+
+    return cell_len(scr._footer_mode_variants()[int(glyph)].plain)
+
+
+def _left_fits(scr, total: int, right_plain: str, *, glyph: bool) -> bool:
+    """Встают ли строка 1 (в заданной форме пилюли) и бейдж уведомлений рядом
+    с таким вариантом правой — то самое условие, по которому решает лесенка."""
+    from gc_tui.services.notices_ui import format_notices_badge
+    from rich.cells import cell_len
+
+    badge = format_notices_badge(scr._collect_footer_notices())
+    need = max(_mode_line_cols(scr, glyph=glyph), cell_len(badge), 1)
+    return _left_room(total, right_plain) >= need
 
 
 def _visible_profile_cols(right_plain: str) -> int:
@@ -1073,30 +1064,6 @@ def _visible_profile_cols(right_plain: str) -> int:
     if head_line.startswith("●"):
         return 0
     return cell_len(head_line.split(" ●")[0])
-
-
-def _left_rows_requested(scr, total: int, right_plain: str) -> int:
-    """Сколько рядов левая ЗАПРОСИЛА бы при таком варианте правой — то самое
-    число, по которому решает лесенка (считается ДО сторожа двух рядов, потому
-    что сторож любой запрос кламповал бы до двух)."""
-    from gc_tui.services.notices_ui import (
-        footer_left_rows,
-        format_notices_badge,
-    )
-    from rich.cells import cell_len
-
-    need = max(cell_len(line) for line in right_plain.split("\n"))
-    width = total - need - _FOOTER_CHROME
-    # Платные ступени меряют левую с пилюлей режима в один глиф, и уже этого
-    # пола правая отнять не может.
-    commands = scr._footer_left_commands(narrow=True)
-    if width < max(1, cell_len(commands)):
-        return 99
-    return footer_left_rows(
-        commands,
-        format_notices_badge(scr._collect_footer_notices()),
-        width=width,
-    )
 
 
 def _narrowest_named_variant(scr, cols: int) -> str:
@@ -1185,15 +1152,9 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
             head, request_seg, session_seg, 0
         )
         need = max(cell_len(line) for line in stacked.plain.split("\n"))
-        commands = scr._footer_left_commands()
         # Ширина: правой ровно на «цены вниз» с полным именем, левой — ровно
-        # столько, сколько ей нужно на ДВА ряда (одного ряда уже не хватает).
-        left_two = min(
-            w
-            for w in range(1, cell_len(commands) + 1)
-            if _rows(commands, w) <= 2
-        )
-        total = need + _FOOTER_CHROME + left_two
+        # на строку 1 с полной пилюлей.
+        total = need + _FOOTER_CHROME + _mode_line_cols(scr)
 
         await pilot.resize_terminal(total, 30)
         plain = scr._compose_footer_right().plain
@@ -1203,21 +1164,17 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
         assert first.startswith(_CEILING)  # имя профиля цело (в потолке)
         assert "→" in first  # и переход тоже
         assert "запрос" in second and "сессия" in second
-        assert _left_rows_beside(scr, total, plain) == 2
+        assert _left_fits(scr, total, plain, glyph=False)
 
 
 @pytest.mark.asyncio
-async def test_footer_moves_left_to_two_rows_before_shrinking_profile(
+async def test_footer_turns_pill_to_glyph_before_shrinking_profile(
     tmp_path, monkeypatch
 ):
-    """Ступень 3 ПЕРЕД ступенью 4 (живой смок юзера, фикс-раунд 3): на ширине,
-    где потолку имени не хватает ровно одной колонки, левая уходит в два ряда, а
-    имя остаётся ПОЛНЫМ.
-
-    Раньше проход с однорядной левой перебирал имя целиком — и имя ужималось
-    (`openrout…`) при том, что слева все шесть подсказок спокойно стояли в один
-    ряд. Перенос подсказок вниз ничего не теряет (второй ряд футера оплачен и
-    так), а срез имени теряет: бесплатный ход обязан идти раньше платного."""
+    """Ступень 3 ПЕРЕД ступенью 4: на ширине, где потолку имени не хватает
+    ровно одной колонки рядом с полной пилюлей, пилюля режима сжимается до
+    глифа, а имя профиля остаётся в потолке — сначала уступает левая форма,
+    потом правое содержимое."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
@@ -1240,26 +1197,25 @@ async def test_footer_moves_left_to_two_rows_before_shrinking_profile(
                 snapshot=scr._footer_head_snapshot(),
             ).plain
         )
-        commands = scr._footer_left_commands()
-        # Ровно одной колонки не хватает, чтобы потолок имени ужился с левой в
-        # одном ряду: прежний порядок резал здесь имя, новый — переносит левую.
-        total = ceiling_need + _FOOTER_CHROME + cell_len(commands) - 1
+        # Ровно одной колонки не хватает потолку имени рядом с полной пилюлей.
+        total = ceiling_need + _FOOTER_CHROME + _mode_line_cols(scr) - 1
 
         await pilot.resize_terminal(total, 30)
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_CEILING)  # имя целое, не ужато
         assert "→" in plain
-        assert _left_rows_beside(scr, total, plain) == 2
+        assert not _left_fits(scr, total, plain, glyph=False)
+        assert _left_fits(scr, total, plain, glyph=True)
 
 
 @pytest.mark.asyncio
-async def test_footer_keeps_full_profile_when_left_goes_two_rows(
+async def test_footer_keeps_full_profile_while_glyph_frees_room(
     tmp_path, monkeypatch
 ):
-    """То же правило на ширине, где не хватает даже самому узкому имени при
-    однорядной левой: имя всё равно остаётся в потолке — перебор имени живёт
-    целиком во втором проходе, после того как левая уже разложилась в два ряда."""
+    """То же правило на ширине, где рядом с полной пилюлей не хватает даже
+    самому узкому имени: имя всё равно остаётся в потолке — перебор имени
+    живёт целиком во втором проходе, после того как пилюля стала глифом."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
@@ -1283,23 +1239,20 @@ async def test_footer_keeps_full_profile_when_left_goes_two_rows(
                 snapshot=snapshot,
             ).plain
         )
-        commands = scr._footer_left_commands()
-        # Левой на один ряд не хватает одной колонки даже при самом узком
-        # варианте правой с именем — значит, придётся идти в два ряда.
-        total = floor_need + _FOOTER_CHROME + cell_len(commands) - 1
+        # Полной пилюле не хватает одной колонки даже рядом с самым узким
+        # вариантом правой с именем — значит, пилюля станет глифом.
+        total = floor_need + _FOOTER_CHROME + _mode_line_cols(scr) - 1
 
         await pilot.resize_terminal(total, 30)
         plain = scr._compose_footer_right().plain
 
         assert plain.startswith(_CEILING)  # имя в потолке, не ужато
         assert "→" in plain
-        assert _left_rows_beside(scr, total, plain) == 2
+        assert _left_fits(scr, total, plain, glyph=True)
 
 
 @pytest.mark.asyncio
-async def test_footer_shrinks_profile_on_the_two_row_pass(
-    tmp_path, monkeypatch
-):
+async def test_footer_shrinks_profile_on_the_glyph_pass(tmp_path, monkeypatch):
     """Имя профиля ужимается 14 → 5 — но ТОЛЬКО в платном проходе, когда
     бесплатные ходы кончились и пилюля режима слева уже сжата до глифа. Ширина
     здесь на одну колонку меньше, чем нужно потолку имени рядом с полом левой, —
@@ -1328,7 +1281,7 @@ async def test_footer_shrinks_profile_on_the_two_row_pass(
             ).plain
         )
         # Пол левой: пилюля режима в один глиф (за ней в покое ничего нет).
-        floor = cell_len(scr._footer_left_commands(narrow=True))
+        floor = _mode_line_cols(scr, glyph=True)
         # На одну колонку уже, чем нужно потолку имени рядом с полом левой.
         total = ceiling_need + _FOOTER_CHROME + floor - 1
 
@@ -1345,11 +1298,11 @@ async def test_footer_shrinks_profile_on_the_two_row_pass(
 async def test_footer_ladder_order_holds_across_terminal_widths(
     tmp_path, monkeypatch
 ):
-    """Ступени 5 и 6 как порядок, а не как одна ширина: перебор реальных ширин
+    """Ступени 5 и 7 как порядок, а не как одна ширина: перебор реальных ширин
     терминала сверху вниз.
 
     - имя профиля снимается, только когда с ним не прошёл ни один вариант:
-      даже с минимальным именем левая запросила бы третий ряд;
+      даже с минимальным именем строка 1 с глифом не встаёт;
     - имя профиля при сужении только укорачивается, никогда не растёт
       (фикс-раунд 3: перебор имени целиком во втором проходе, и он тоже
       начинается с потолка);
@@ -1392,8 +1345,9 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
             if not has_profile:
                 seen_profile_dropped = True
                 floor = _narrowest_named_variant(scr, _PROFILE_NAME_MIN_COLS)
-                assert _left_rows_requested(scr, total, floor) > 2, (
-                    f"ширина {total}: имя снято, хотя с минимальным именем левой хватило бы двух рядов — {plain!r}"
+                assert not _left_fits(scr, total, floor, glyph=True), (
+                    f"ширина {total}: имя снято, хотя с минимальным "
+                    f"именем строка 1 вставала — {plain!r}"
                 )
             if "→" not in plain:
                 seen_transition_dropped = True
@@ -1411,7 +1365,7 @@ async def test_footer_ladder_is_monotone_prices_never_come_back_up(
     ухудшается.
 
     Цены уезжают вниз ПЕРВЫМИ и остаются внизу. Обратный прыжок возможен ровно
-    на границе ступени 3: левой разрешили 2 ряда, места правой стало больше — и
+    на границе ступени 3: пилюля стала глифом, места правой стало больше — и
     если вариант «всё одной строкой» пробуется во втором проходе, цены
     возвращаются наверх. Это то самое дёрганье, из-за которого задача заведена.
 
@@ -1421,7 +1375,7 @@ async def test_footer_ladder_is_monotone_prices_never_come_back_up(
 
     Раскладка подобрана так, чтобы прыжок был ДОСТИЖИМ: короткая модель и
     отсутствие перехода делают однострочный вариант достаточно узким, чтобы он
-    влез при двухрядной левой (с длинной головой он не влезает никогда, и
+    влез рядом с глифом (с длинной головой он не влезает никогда, и
     сторож молчал бы вхолостую)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)

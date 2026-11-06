@@ -226,7 +226,7 @@ async def test_settings_enter_opens_section_and_esc_returns():
 
 async def test_settings_ctrl_pgup_pgdn_switch_sections():
     from gc_tui import app as app_mod
-    from gc_tui.screens.settings import _MCP, _MODES, _UPDATE, _VOICE
+    from gc_tui.screens.settings import _LOOK, _MCP, _MODES, _UPDATE, _VOICE
 
     app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
@@ -239,12 +239,14 @@ async def test_settings_ctrl_pgup_pgdn_switch_sections():
         assert scr._view == _VOICE
         await pilot.press("ctrl+pagedown")  # → Режимы работы
         assert scr._view == _MODES
-        await pilot.press("ctrl+pagedown")  # → Обновление (6/6)
+        await pilot.press("ctrl+pagedown")  # → Внешний вид
+        assert scr._view == _LOOK
+        await pilot.press("ctrl+pagedown")  # → Обновление (последняя)
         assert scr._view == _UPDATE
         await pilot.press("ctrl+pagedown")  # край: остаёмся (без wrap)
         assert scr._view == _UPDATE
         await pilot.press("ctrl+pageup")
-        assert scr._view == _MODES
+        assert scr._view == _LOOK
 
 
 async def test_ctrl_pgdn_works_with_focus_in_input():
@@ -3418,8 +3420,9 @@ async def test_save_without_session_does_not_warn_about_counters(tmp_path):
 
 
 def test_sections_composition_merged():
-    """7 секций: «Подключение» первая, «Профили» сразу за «Моделями», «Голосовой
-    ввод» между MCP и «Режимами работы», «Режимы работы» перед «Обновлением».
+    """8 секций: «Подключение» первая, «Профили» сразу за «Моделями», «Голосовой
+    ввод» между MCP и «Режимами работы», за ними «Внешний вид», последним —
+    «Обновление».
 
     Волна B: легаси-«Модель» поглощена секцией «Модели», и та вышла из save-машины
     — редакторная теперь одна (`{conn}`), probe — тоже (`{conn}`). Гейт записи
@@ -3433,6 +3436,7 @@ def test_sections_composition_merged():
         "MCP-серверы",
         "Голосовой ввод",
         "Режимы работы",
+        "Внешний вид",
         "Обновление",
     )
     assert (
@@ -3442,7 +3446,8 @@ def test_sections_composition_merged():
         and s._MCP == 3
         and s._VOICE == 4
         and s._MODES == 5
-        and s._UPDATE == 6
+        and s._LOOK == 6
+        and s._UPDATE == 7
     )
     assert {s._CONNECTION} == s._EDITOR_SECTIONS
     assert {s._CONNECTION} == s._PROBE_SECTIONS
@@ -3459,6 +3464,7 @@ def test_sections_order_contains_modes():
         "MCP-серверы",
         "Голосовой ввод",
         "Режимы работы",
+        "Внешний вид",
         "Обновление",
     )
 
@@ -3605,7 +3611,7 @@ async def test_modes_footer_shows_value_hint(tmp_path):
             FOOTER_SCROLL, ""
         )
         assert footer == (
-            "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню"
+            "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню"
         )
         scr._modes_idx = modes_row_index("rigor")
         scr._render_view()
@@ -3993,6 +3999,25 @@ async def test_modes_apply_blocked_when_not_writable(tmp_path, monkeypatch):
         assert cfg_file.read_text(encoding="utf-8") == original
         notice = " ".join(str(w.render()) for w in scr.query(Static))
         assert "недоступен для записи" in notice
+
+
+async def test_modes_enter_on_toggle_row_does_nothing(tmp_path):
+    """Enter на строке ручки в «Режимах работы» значение не меняет и
+    ничего не пишет; меняют ←/→."""
+    app, cfg_file = _app_with_config(
+        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+    )
+    original = cfg_file.read_text(encoding="utf-8")
+    async with app.run_test() as pilot:
+        scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("gate")
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert cfg_file.read_text(encoding="utf-8") == original
+
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        assert cfg_file.read_text(encoding="utf-8") != original
 
 
 async def test_modes_apply_preserves_unrelated_keys(tmp_path):

@@ -16,7 +16,7 @@ async def test_paste_collapse_shows_footer_hint():
         inp = pilot.app.screen.query_one("#cmdinput", CommandTextArea)
         inp._handle_paste("a\n" * 4 + "a")  # 5 строк → сворачивается
         await pilot.pause()
-        left = pilot.app.screen.query_one("#footer-left", Static)
+        left = pilot.app.screen.query_one("#footer-slot", Static)
         assert "развернуть" in str(left.render())
 
 
@@ -51,7 +51,7 @@ async def test_footer_refusal_yields_to_the_next_keystroke():
         scr = pilot.app.screen
         scr._show_footer_refusal("✗ не сохранено: причина")
         await pilot.pause()
-        left = pilot.app.screen.query_one("#footer-left", Static)
+        left = pilot.app.screen.query_one("#footer-slot", Static)
         assert "не сохранено" in str(left.render())
         await pilot.press("x")
         assert "не сохранено" not in str(left.render())
@@ -76,9 +76,10 @@ async def test_footer_refusal_yields_to_a_running_task():
         pilot.app.tui_state.active_task_id = "t1"
         pilot.app.active_runner = _Runner()
         scr._refresh_footer()
-        left = pilot.app.screen.query_one("#footer-left", Static)
+        left = pilot.app.screen.query_one("#footer-slot", Static)
         assert "не сохранено" not in str(left.render())
-        assert "Ctrl+C/stop" in str(left.render())
+        mode = pilot.app.screen.query_one("#footer-mode", Static)
+        assert "Ctrl+C/stop" in str(mode.render())
 
 
 @pytest.mark.asyncio
@@ -103,7 +104,7 @@ async def test_footer_refusal_survives_the_deferred_input_clear():
         inp.text = ""
         scr._show_footer_refusal("✗ не сохранено: причина")
         await pilot.pause()
-        left = scr.query_one("#footer-left", Static)
+        left = scr.query_one("#footer-slot", Static)
         assert "не сохранено" in str(
             left.render()
         )  # пережил отложенный Changed
@@ -126,7 +127,7 @@ async def test_ordinary_hint_after_a_refusal_keeps_its_own_canon():
         await pilot.pause()
         scr._show_footer_hint("обычная подсказка", seconds=5.0)
         await pilot.pause()
-        left = scr.query_one("#footer-left", Static)
+        left = scr.query_one("#footer-slot", Static)
         await pilot.press("q")
         assert "обычная подсказка" in str(left.render())  # печать её не гасит
 
@@ -152,7 +153,7 @@ async def test_refusal_raised_during_a_run_survives_the_poll_tick():
         scr._show_footer_refusal("✗ не сохранено: причина")
         await pilot.pause()
         scr._refresh_footer()  # тик поллера при ТОМ ЖЕ прогоне
-        left = scr.query_one("#footer-left", Static)
+        left = scr.query_one("#footer-slot", Static)
         assert "не сохранено" in str(left.render())
         pilot.app.tui_state.active_task_id = "t2"  # НОВЫЙ прогон — уступить
         scr._refresh_footer()

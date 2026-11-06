@@ -20,8 +20,8 @@ from typing import (
 
 from gc_core.attachments.model import Attachment, attachments_of
 from gc_core.execution.progress import (
-    brief_args_summary,
     parse_tool_result_status,
+    tool_args_summary,
 )
 
 from gc_tui.models import TraceEvent
@@ -112,9 +112,9 @@ def plan_sidecar_nested_actions(
                         parent_call_id=pid,
                         tool_name=str(name) if name else "",
                         tool_call_id=str(call_id) if call_id else "",
-                        args_summary=brief_args_summary(
+                        args_summary=tool_args_summary(
+                            str(name) if name else None,
                             payload.get("arguments"),
-                            tool_name=str(name) if name else None,
                         ),
                     )
                 )
@@ -246,9 +246,8 @@ def apply_sidecar_nested_actions(
                     parent_call_id=act.parent_call_id,
                     tool_name="session_todo",
                     tool_call_id=act.tool_call_id or "",
-                    args_summary=brief_args_summary(
-                        {"todos": act.todo_items or []},
-                        tool_name="session_todo",
+                    args_summary=tool_args_summary(
+                        "session_todo", {"todos": act.todo_items or []}
                     ),
                 )
 
@@ -307,9 +306,7 @@ def trace_events_from_nested_detail(
         event_ts_utc_iso="",
         kind="call",
         title=name,
-        summary=brief_args_summary(
-            call_payload.get("arguments"), tool_name=name or None
-        ),
+        summary=tool_args_summary(name or None, call_payload.get("arguments")),
         full_payload=call_payload,
         call_id=call_id,
         tool_name=name,

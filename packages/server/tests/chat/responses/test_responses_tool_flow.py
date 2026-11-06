@@ -60,7 +60,7 @@ async def test_card_has_title_and_no_bodies():
     assert card["op"] == "open"
     assert card["name"] == "read_file"
     assert card["title"].startswith("read_file(")
-    assert "path" in card["title"]
+    assert card["title"] == "read_file(src/app.py)"
     assert "arguments" not in card
     assert "output" not in card
     await _write(
@@ -195,7 +195,7 @@ async def test_poll_after_compaction_reads_the_new_history():
     reports = await flow.poll()
     assert [item["call_id"] for item in reports] == ["after"]
     assert reports[0]["op"] == "open"
-    assert reports[0]["title"] == "exec_command(command='ls')"
+    assert reports[0]["title"] == "exec_command(ls)"
     assert "сводка" not in json.dumps(reports)
 
 

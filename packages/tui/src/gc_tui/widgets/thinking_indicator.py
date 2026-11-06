@@ -41,7 +41,10 @@ from gc_tui.messages import OpenEditsScreenRequest
 # `_ACCENT` здесь занят янтарным цветом РАБОТЫ (RUN_COLOR) — это другой смысл.
 from gc_tui.palette import ACCENT as _HOVER
 from gc_tui.palette import DEEP_DIM as _DIM
+from gc_tui.palette import GLOW_SHADES
+from gc_tui.palette import PROCESSING_SHADES as _PROCESSING_SHADES
 from gc_tui.palette import RUN_COLOR as _ACCENT
+from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
 from gc_tui.services.duration_format import format_compact_int, format_duration
 from gc_tui.services.plural import files_word
 
@@ -106,56 +109,9 @@ MORPH_FRAMES = ["·", "▴", "◂", "▾", "▸", "▴", "◂", "✦", "✧", "+
 # раскадрованы независимо (списки разной длины), см. _anim().
 FRAME_HOLD = 2
 
-# Рампа «дыхания» цветом (ping-pong уже зашит в список): gold тускло→ярко→тускло.
-GLOW_SHADES = [
-    "#9c7a4a",
-    "#b8915c",
-    "#d4a574",
-    "#e0b585",
-    "#ecc596",
-    "#f0c896",
-    "#ecc596",
-    "#e0b585",
-    "#d4a574",
-    "#b8915c",
-]
-
 # Период счётчика кадров: общий кратный темпа глифа и рампы цвета — счётчик
 # остаётся ограниченным, а обе под-анимации выходят на старт синхронно.
 _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
-
-# «Дыхание» точки «сверяюсь…» (судья сверяет ответ перед закрытием хода): одна
-# точка • статична по форме, её ЦВЕТ плавно тускнеет↔светлеет по ТЁМНО-серой
-# рампе — та же техника дыхания яркостью, что у ✦/▸, но в самых глубоких серых
-# (тише всего: лесенка громкости ▸ > ✦ > •). Плавно на 0.1с-тике, без морфа формы.
-_PROCESSING_SHADES = [
-    "#4c525b",
-    "#545b65",
-    "#5d646e",
-    "#666e78",
-    "#6f7782",
-    "#7a8290",
-    "#6f7782",
-    "#666e78",
-    "#5d646e",
-    "#545b65",
-]
-
-# «Дыхание» искры «завершаю…»: ✦ статична по форме, цвет плавно тускнеет↔
-# светлеет (серая рампа, ping-pong, ~1.0с) — спокойная финализация. Та же
-# техника, что пульс running-глифа ▸, но в приглушённых серых.
-_VALIDATING_SHADES = [
-    "#5e6675",
-    "#69727f",
-    "#747e8b",
-    "#808c99",
-    "#8c98a6",
-    "#9aa4b2",
-    "#8c98a6",
-    "#808c99",
-    "#747e8b",
-    "#69727f",
-]
 
 _STATE_THINKING = "thinking"
 _STATE_VALIDATING = "validating"

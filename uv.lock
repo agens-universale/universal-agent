@@ -1493,7 +1493,7 @@ requires-dist = [
     { name = "pygments", specifier = ">=2.13" },
     { name = "rich", specifier = ">=13" },
     { name = "sounddevice", specifier = ">=0.4" },
-    { name = "textual", specifier = ">=0.55" },
+    { name = "textual", specifier = ">=8.2.8,<8.3" },
     { name = "truststore", specifier = ">=0.9" },
 ]
 
@@ -1601,7 +1601,7 @@ dev = [
     { name = "pytest-textual-snapshot", specifier = ">=1.0,<1.1" },
     { name = "rich", specifier = ">=13" },
     { name = "ruff", specifier = ">=0.14" },
-    { name = "textual", specifier = ">=0.55" },
+    { name = "textual", specifier = ">=8.2.8,<8.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
     { name = "vulture", specifier = ">=2.14" },
 ]
@@ -1627,7 +1627,7 @@ test = [
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "pytest-textual-snapshot", specifier = ">=1.0,<1.1" },
     { name = "rich", specifier = ">=13" },
-    { name = "textual", specifier = ">=0.55" },
+    { name = "textual", specifier = ">=8.2.8,<8.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
 

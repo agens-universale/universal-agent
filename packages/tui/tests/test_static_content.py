@@ -1,7 +1,11 @@
 """Хелпер сравнения и обновления Static."""
 
 import pytest
-from gc_tui.widgets.static_content import same_content, update_if_changed
+from gc_tui.widgets.static_content import (
+    same_content,
+    text_key,
+    update_if_changed,
+)
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import Static
@@ -33,6 +37,14 @@ def test_text_justify_differs():
     assert (
         same_content(Text("x", justify="left"), Text("x", justify="right"))
         is False
+    )
+
+
+def test_text_key_by_content_not_identity():
+    assert text_key(None) is None
+    assert text_key(Text("x", style="red")) == text_key(Text("x", style="red"))
+    assert text_key(Text("x", style="red")) != text_key(
+        Text("x", style="blue")
     )
 
 

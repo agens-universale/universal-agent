@@ -211,7 +211,7 @@ def test_history_places_a_tool_call_between_prose():
     ]
     assert updates[1]["toolCallId"] == "c1"
     assert updates[1]["status"] == "in_progress"
-    assert updates[1]["title"] == "fs_read_file(path='src/a.py')"
+    assert updates[1]["title"] == "fs_read_file(src/a.py)"
     assert updates[1]["name"] == "fs_read_file"
     assert updates[1]["rawInput"] == {"path": "src/a.py"}
     assert updates[1]["locations"] == [{"path": os.path.abspath("src/a.py")}]
@@ -740,7 +740,7 @@ def test_history_shows_subagent_tools_as_agent_actions():
         ("tool_call_update", "sub", "completed"),
         ("agent_message_chunk", None, None),
     ]
-    assert updates[3]["title"] == "fs_read_file(path='a.py')"
+    assert updates[3]["title"] == "fs_read_file(a.py)"
     assert updates[3]["name"] == "fs_read_file"
     assert updates[3]["rawInput"] == {"path": "a.py"}
     assert updates[3]["locations"] == [{"path": os.path.abspath("a.py")}]

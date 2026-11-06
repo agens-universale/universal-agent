@@ -997,6 +997,7 @@ NOT_IN_MATRIX = {
     "project_memory.enable_project_memory_notice": "эталон develop случая не содержит; покрытие — test_project_memory_notice_policy",
     "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
     "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
+    "tui.theme": "только палитра TUI, не ход агента; покрытие — tui/test_theme_startup",
 }
 
 

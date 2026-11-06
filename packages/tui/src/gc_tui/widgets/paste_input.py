@@ -12,14 +12,22 @@ from textual.widgets import Input
 
 
 class PasteInput(Input):
+    def __init__(self, *args, classes: str | None = None, **kwargs) -> None:
+        # DEFAULT_CLASSES Textual применяет, только когда classes не задан, —
+        # а поля форм задают его всегда; класс вида добавляем сами.
+        super().__init__(
+            *args, classes=f"form-field {classes or ''}".strip(), **kwargs
+        )
+
     def _sync_group_disabled(self) -> None:
         """Отключённое поле в группе гасит рамку ГРУППЫ (единый язык форм §3.3).
 
         Своей рамки у поля внутри `.field-group` нет — класс `set-framed` оно
         теряет, иначе рамок было бы две, — поэтому правило одинокого поля
-        (`#conn-token.set-framed:disabled`) сюда не достаёт. Селектора `:has`
-        в Textual 8.2.7 нет, так что признак ставим отсюда: это единственное
-        место, через которое проходит любое изменение `disabled` у поля формы.
+        (`.form-field.set-framed.set-muted:disabled`) сюда не достаёт.
+        Селектора `:has` в Textual 8.2.7 нет, так что признак ставим отсюда:
+        это единственное место, через которое проходит любое изменение
+        `disabled` у поля формы.
         Поле вне группы — no-op: у него своя рамка и своё правило."""
         parent = self.parent
         if parent is not None and parent.has_class("field-group"):

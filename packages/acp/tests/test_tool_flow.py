@@ -70,7 +70,7 @@ async def test_poll_skips_entries_already_written_and_hides_bookkeeping():
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "c1",
-            "title": "exec_command(command='pytest -q')",
+            "title": "exec_command(pytest -q)",
             "status": "in_progress",
             "name": "exec_command",
             "rawInput": {"command": "pytest -q"},
@@ -101,7 +101,7 @@ async def test_poll_after_compaction_reads_the_new_history():
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "after",
-            "title": "exec_command(command='ls')",
+            "title": "exec_command(ls)",
             "status": "in_progress",
             "name": "exec_command",
             "rawInput": {"command": "ls"},
@@ -123,7 +123,7 @@ async def test_poll_places_subagent_tools_between_call_and_result():
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub",
-            "title": "subagent_explore(task='найти')",
+            "title": "subagent_explore(найти)",
             "status": "in_progress",
             "name": "subagent_explore",
             "rawInput": {"task": "найти"},
@@ -131,7 +131,7 @@ async def test_poll_places_subagent_tools_between_call_and_result():
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub:c1",
-            "title": "fs_read_file(path='a.py')",
+            "title": "fs_read_file(a.py)",
             "status": "in_progress",
             "name": "fs_read_file",
             "rawInput": {"path": "a.py"},
@@ -165,7 +165,7 @@ async def test_poll_reads_thread_created_after_start():
         {
             "sessionUpdate": "tool_call",
             "toolCallId": "sub:c1",
-            "title": "exec_command(command='ls')",
+            "title": "exec_command(ls)",
             "status": "in_progress",
             "name": "exec_command",
             "rawInput": {"command": "ls"},
@@ -295,7 +295,7 @@ def test_call_card_is_the_signature_without_kind_or_content():
     assert report == {
         "sessionUpdate": "tool_call",
         "toolCallId": "c1",
-        "title": "fs_read_file(path='a.py', offset=10)",
+        "title": "fs_read_file(a.py)",
         "status": "in_progress",
         "name": "fs_read_file",
         "rawInput": {"path": "a.py", "offset": 10},
@@ -445,9 +445,7 @@ def test_write_file_card_omits_the_file_body():
         "path": "docs/note.md",
         "make_dirs": True,
     }
-    assert (
-        report["title"] == "fs_write_file(path='docs/note.md', make_dirs=True)"
-    )
+    assert report["title"] == "fs_write_file(docs/note.md)"
 
 
 def test_other_file_writes_omit_the_written_text():

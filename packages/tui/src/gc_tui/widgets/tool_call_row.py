@@ -29,6 +29,7 @@ from textual.widgets import Static
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import OK as _OK
+from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
@@ -39,21 +40,6 @@ from gc_tui.widgets.static_content import update_if_changed
 # паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
 # эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
 _PAUSE_GLYPH = "‖"
-# Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло (ping-pong, пик —
-# RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. _sync_pulse) → плавное
-# дыхание 10fps; 10 кадров → цикл ≈1.0с.
-_PULSE_SHADES = [
-    "#8a6a3a",
-    "#977448",
-    "#a47f55",
-    "#b18a62",
-    "#c4986b",
-    "#d4a574",
-    "#c4986b",
-    "#b18a62",
-    "#a47f55",
-    "#977448",
-]
 
 
 class ToolCallRow(ClickModelMixin, Widget):

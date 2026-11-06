@@ -1,11 +1,14 @@
-"""Toggle-строки палитры: состояние справа, ←/→/Enter в открытой палитре
+"""Toggle-строки палитры: состояние справа, ←/→ в открытой палитре
 циклят и применяют значение МГНОВЕННО (спека 2026-07-18 §1 — черновик
-отменён); Enter текстом (палитра уже закрыта) — только инфо-флеш."""
+отменён), Enter закрывает палитру (P5 §2); Enter текстом (палитра уже
+закрыта) — только инфо-флеш."""
 
 from gc_testkit.develop_files import meta_of
 
 from gc_testkit.tui_support import tui_settings
 import pytest
+
+from gc_tui.toggles import toggle_state
 
 
 def test_cycle_value_wraps_around():
@@ -437,10 +440,9 @@ async def test_palette_arrow_applies_toggle_immediately_both_directions(
 
 
 @pytest.mark.asyncio
-async def test_palette_enter_cycles_and_applies_keeps_palette_open(tmp_path):
-    """(б) Enter на toggle-строке циклит (+1) и применяет мгновенно — тот же
-    путь, что ←/→: сессия изменилась, config.yml не тронут, палитра открыта,
-    текст поля НЕ сабмитится."""
+async def test_palette_enter_closes_palette_keeps_value(tmp_path):
+    """Enter на toggle-строке — «готово»: палитра закрыта, поле очищено (как
+    Esc), значение сессии и config.yml не тронуты. Меняют значение ←/→."""
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
         tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
@@ -454,16 +456,10 @@ async def test_palette_enter_cycles_and_applies_keeps_palette_open(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.05)
 
-        assert pilot.app.query(".palette")  # палитра осталась открыта
+        assert not pilot.app.query(".palette")
+        assert pilot.app.query_one("#cmdinput").text == ""
         assert cfg_file.read_text(encoding="utf-8") == original
-        palette = pilot.app.query_one(".palette")
-        rows_text = "\n".join(
-            r.render().plain for r in palette.query(".palette-toggle-row")
-        )
-        assert "●" in rows_text and rows_text.rstrip().endswith("off")
-        assert (
-            pilot.app.query_one("#cmdinput").text == "/gate"
-        )  # текст не сабмитится
+        assert toggle_state(pilot.app, "gate") == "on"
 
 
 @pytest.mark.asyncio
@@ -538,9 +534,9 @@ async def test_typed_gate_command_shows_info_without_changing_value(tmp_path):
             cfg_file.read_text(encoding="utf-8")
             == 'tui:\n  finish_gate_mode: "on"\n'
         )
-        footer = pilot.app.query_one("#footer-left")
+        footer = pilot.app.query_one("#footer-slot")
         footer_text = str(footer.render())
-        assert "/gate" in footer_text and "текущее значение: on" in footer_text
+        assert "/gate: on" in footer_text
         assert "←/→" in footer_text
 
 
@@ -567,12 +563,9 @@ async def test_typed_answers_command_shows_info_without_changing_value(
             cfg_file.read_text(encoding="utf-8")
             == 'tui:\n  text_answer_mode: "judge"\n'
         )
-        footer = pilot.app.query_one("#footer-left")
+        footer = pilot.app.query_one("#footer-slot")
         footer_text = str(footer.render())
-        assert (
-            "/answers" in footer_text
-            and "текущее значение: judge" in footer_text
-        )
+        assert "/answers: judge" in footer_text
         assert "←/→" in footer_text
 
 
@@ -596,18 +589,16 @@ async def test_typed_rigor_command_shows_info_without_changing_value(tmp_path):
         await pilot.pause(0.05)
 
         assert cfg_file.read_text(encoding="utf-8") == original
-        footer = pilot.app.query_one("#footer-left")
+        footer = pilot.app.query_one("#footer-slot")
         footer_text = str(footer.render())
-        assert (
-            "/rigor" in footer_text and "текущее значение: high" in footer_text
-        )
+        assert "/rigor: high" in footer_text
         assert "←/→" in footer_text
 
 
 @pytest.mark.asyncio
 async def test_palette_filter_change_does_not_touch_config(tmp_path):
     """Смена фильтра сама по себе ничего не пишет и не применяет — значение
-    тоггла меняется только явным ←/→/Enter на самой строке."""
+    тоггла меняется только явным ←/→ на самой строке."""
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
         tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
@@ -788,7 +779,13 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
-    state = {"rigor": "high", "gate": "on", "answers": "deny"}
+    state = {
+        "level": "default",
+        "profiles": "",
+        "rigor": "high",
+        "gate": "on",
+        "answers": "deny",
+    }
 
     def _extra(name):
         return False if TOGGLES[name].preset_keys else None
@@ -1066,7 +1063,7 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(
 
 def test_toggle_hint_shows_value_meaning(monkeypatch):
     """Выделенная toggle-строка — hint = <значение> — <подсказка из TOGGLES>  ·
-    ←/→/Enter — переключить (значение/подсказка всегда от применённого —
+    ←/→ — изменить (значение/подсказка всегда от применённого —
     черновика не существует; про Esc в toggle-hint не пишем — спека §6)."""
     reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
@@ -1075,7 +1072,7 @@ def test_toggle_hint_shows_value_meaning(monkeypatch):
     hint = pal._toggle_hint(reg.lookup("gate"))
 
     assert hint.startswith("on — самопроверка не даст закончить")
-    assert "←/→/Enter — переключить" in hint
+    assert "←/→ — изменить" in hint
 
 
 def test_toggle_hint_updates_after_state_changes(monkeypatch):
@@ -1094,11 +1091,10 @@ def test_toggle_hint_updates_after_state_changes(monkeypatch):
 
 
 def test_toggle_hint_carries_scope_inline(monkeypatch):
-    """§6.1 модели уровней настроек (2026-07-21): область действия ВЕРНУЛАСЬ —
-    внутрь клавишной части подсказки, не отдельным сегментом (отвергнутые
-    подходы — отдельный сегмент-хвост / строка-легенда — см. дизайн §6.1).
+    """Клавишная часть подсказки ручки: стрелки меняют, Enter — готово
+    (область «в текущей сессии» из подсказки убрана, спека P5 §2).
     Несмонтированная палитра → width=0 → `_fit_hint` не усекает вовсе
-    (см. первый guard), поэтому hint содержит область целиком."""
+    (см. первый guard), поэтому hint содержит обе клавиши целиком."""
     reg = _reg_with_gate_answers(monkeypatch)
     pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
     pal._selected = len(pal._visible_rows())  # первая тоггл-строка (gate)
@@ -1106,14 +1102,14 @@ def test_toggle_hint_carries_scope_inline(monkeypatch):
     hint = pal._toggle_hint(reg.lookup("gate"))
 
     assert hint.startswith("on — самопроверка не даст закончить")
-    assert "←/→/Enter — переключить в текущей сессии" in hint
+    assert "←/→ — изменить · Enter — готово" in hint
 
 
 def test_fit_hint_priority_truncation():
     """Порядок жертв §6.1 (4 ступени): 1) хвост подсказки после последнего
-    ' · '; 2) клавиши теряют область — «переключить в текущей сессии» →
-    «переключить», область уходит ЦЕЛЫМ куском, не обрывком; 3) клавиши
-    сжимаются до ←/→/Enter; 4) многоточие на смысле. Механика видима всегда."""
+    ' · '; 2) клавиши теряют «Enter — готово» ЦЕЛЫМ куском, не обрывком;
+    3) клавиши сжимаются до ←/→; 4) многоточие на смысле. Механика видима
+    всегда."""
     from gc_tui.toggles import (
         _HINT_KEYS_TOGGLE_MEDIUM,
         _HINT_KEYS_TOGGLE_SHORT,
@@ -1125,20 +1121,20 @@ def test_fit_hint_priority_truncation():
 
     full = _fit_hint(value, hint, keys, width=200)
     assert "для сложных задач" in full
-    assert "в текущей сессии" in full  # область на месте
+    assert "Enter — готово" in full  # обе клавиши на месте
 
     w120 = _fit_hint(value, hint, keys, width=120)
     assert "для сложных задач" not in w120  # 1) хвост ушёл первым
     assert "самопроверка" in w120
-    assert "в текущей сессии" in w120  # область ещё цела в клавишах
+    assert "Enter — готово" in w120  # Enter ещё цел в клавишах
 
     w90 = _fit_hint(value, hint, keys, width=90)
-    assert "в текущей сессии" not in w90  # 2) область ушла ЦЕЛЫМ куском
-    assert "в теку" not in w90  # не обрывок
+    assert "Enter — готово" not in w90  # 2) Enter ушёл ЦЕЛЫМ куском
+    assert "Enter — го" not in w90  # не обрывок
     assert _HINT_KEYS_TOGGLE_MEDIUM in w90
     assert "самопроверка" in w90
 
-    w80 = _fit_hint(value, hint, keys, width=80)
+    w80 = _fit_hint(value, hint, keys, width=70)
     assert _HINT_KEYS_TOGGLE_MEDIUM not in w80  # 3) клавиши сжались дальше
     assert _HINT_KEYS_TOGGLE_SHORT in w80
 
@@ -1155,10 +1151,10 @@ async def test_toggle_hint_scope_visible_wide_and_gracefully_truncated_narrow(
     (как в e2e-тестах роутинга выше). Значение `off` — короткий смысл, чтобы
     область была видна целиком на широком терминале.
 
-    Широкий терминал (140 колонок) — hint содержит «в текущей сессии»
-    целиком. Узкий (70 колонок) — область усечена ЦЕЛЫМ куском (клавиши
-    падают на `_HINT_KEYS_TOGGLE_MEDIUM`): «в текущей сессии» отсутствует
-    полностью, обрывка «в теку…» нет."""
+    Широкий терминал (140 колонок) — hint содержит «Enter — готово»
+    целиком. Узкий (50 колонок) — оно усечено ЦЕЛЫМ куском (клавиши
+    падают на `_HINT_KEYS_TOGGLE_MEDIUM`): «Enter — готово» отсутствует
+    полностью, обрывка «Enter — го…» нет."""
     pytest.importorskip("textual")
 
     app_wide, _ = _app_with_config(
@@ -1171,21 +1167,21 @@ async def test_toggle_hint_scope_visible_wide_and_gracefully_truncated_narrow(
         palette = pilot.app.query_one(".palette")
         hint_wide = palette.query_one(".palette-hint").render().plain
 
-        assert "переключить в текущей сессии" in hint_wide
+        assert "←/→ — изменить · Enter — готово" in hint_wide
 
     app_narrow, _ = _app_with_config(
         tmp_path, 'tui:\n  finish_gate_mode: "off"\n'
     )
-    async with app_narrow.run_test(size=(70, 24)) as pilot:
+    async with app_narrow.run_test(size=(50, 24)) as pilot:
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/gate"
         await pilot.pause(0.1)
         palette = pilot.app.query_one(".palette")
         hint_narrow = palette.query_one(".palette-hint").render().plain
 
-        assert "в текущей сессии" not in hint_narrow  # ушла ЦЕЛЫМ куском
-        assert "в теку" not in hint_narrow  # не обрывок
-        assert "переключить" in hint_narrow  # клавиши-механика жива
+        assert "Enter — готово" not in hint_narrow  # ушло ЦЕЛЫМ куском
+        assert "Enter — го" not in hint_narrow  # не обрывок
+        assert "←/→" in hint_narrow  # клавиши-механика жива
 
 
 def test_non_toggle_hint_unchanged():
@@ -1264,7 +1260,7 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
     """Находка ревью: apply_toggle кидает (напр. запись на диск невозможна) → флеш
     «✗ не сохранено: …» в футере, палитра остаётся открытой, значение не изменилось
     (config.yml не тронут). Монкипатчим apply_toggle в неймспейсе роутинга main.py —
-    интеграция роутинга ←/→/Enter, не файловой записи. Оба маршрута (←/Enter) —
+    интеграция роутинга ←/→, не файловой записи. Оба направления (←/→) —
     один и тот же try/except в screens/main.py."""
     pytest.importorskip("textual")
     from gc_tui.screens import main as main_screen
@@ -1286,7 +1282,7 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
         await pilot.press("left")
         await pilot.pause(0.05)
 
-        footer_text = str(pilot.app.query_one("#footer-left").render())
+        footer_text = str(pilot.app.query_one("#footer-slot").render())
         assert "не сохранено" in footer_text
         assert pilot.app.query(".palette")
         assert (
@@ -1294,10 +1290,10 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
             == 'tui:\n  finish_gate_mode: "on"\n'
         )
 
-        await pilot.press("enter")
+        await pilot.press("right")
         await pilot.pause(0.05)
 
-        footer_text = str(pilot.app.query_one("#footer-left").render())
+        footer_text = str(pilot.app.query_one("#footer-slot").render())
         assert "не сохранено" in footer_text
         assert pilot.app.query(".palette")
         assert (
@@ -1475,3 +1471,80 @@ async def test_regular_row_hint_unaffected_by_visible_toggles(tmp_path):
 
         hint = pal.query_one(".palette-hint")
         assert hint.render().plain == _HINT_NO_ARGS
+
+
+def test_toggle_hint_texts_do_not_promise_enter_cycles():
+    """Тексты ручек (toggles.py) и футер «Режимов работы» (settings.py) не
+    обещают «Enter — переключить» и не сводят клавиши в «←/→/Enter»."""
+    from pathlib import Path
+
+    from gc_tui import toggles
+    from gc_tui.screens import settings
+
+    for module in (toggles, settings):
+        text = Path(module.__file__).read_text(encoding="utf-8")
+        assert "←/→/Enter" not in text
+        assert "Enter — переключить" not in text
+
+
+def _main_app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+
+
+def _row_text(app, row) -> str:
+    """Текст строки палитры так, как он реально нарисован на экране."""
+    region = row.content_region
+    strip = app.screen._compositor.render_strips()[region.y]
+    line = "".join(seg.text for seg in strip)
+    return line[region.x : region.right]
+
+
+async def _open_full_palette(pilot):
+    await pilot.pause(0.3)
+    scr = pilot.app.screen
+    scr._open_palette(prefix="")
+    await pilot.pause(0.5)
+    pal = scr._palette
+    assert pal.show_vertical_scrollbar  # список длиннее окна
+    return pal
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 100, 120])
+async def test_full_palette_with_scrollbar_keeps_toggle_values_whole(
+    tmp_path, width
+):
+    pytest.importorskip("textual")
+    async with _main_app(tmp_path).run_test(size=(width, 24)) as pilot:
+        pal = await _open_full_palette(pilot)
+        rows = list(pal.query(".palette-toggle-row"))
+        toggles = pal._visible_toggle_rows()
+        assert len(rows) == len(toggles) >= 2
+        for row, cmd in zip(rows, toggles):
+            assert row.region.height == 1
+            value = toggle_state(pilot.app, cmd.name) or "без профиля"
+            assert _row_text(pilot.app, row).rstrip().endswith(value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", [90, 100, 120])
+async def test_profiles_value_starts_at_level_track(tmp_path, width):
+    pytest.importorskip("textual")
+    async with _main_app(tmp_path).run_test(size=(width, 24)) as pilot:
+        pal = await _open_full_palette(pilot)
+        rows = {
+            r.render().plain.split()[0]: _row_text(pilot.app, r)
+            for r in pal.query(".palette-toggle-row")
+        }
+        level = rows["/level"]
+        first_circle = min(i for i, ch in enumerate(level) if ch in "○●")
+        value = toggle_state(pilot.app, "profiles") or "без профиля"
+        assert rows["/profiles"].index(value) == first_circle

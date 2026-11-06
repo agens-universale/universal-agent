@@ -686,7 +686,7 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
         for item in _updates(writer)
         if item.get("sessionUpdate") == "tool_call"
     )
-    assert tool["title"] == "fs_read_file(path='src/a.py')"
+    assert tool["title"] == "fs_read_file(src/a.py)"
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
 

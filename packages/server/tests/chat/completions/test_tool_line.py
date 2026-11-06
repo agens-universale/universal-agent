@@ -2,10 +2,10 @@
 
 import json
 
-from gc_server.chat.completions.content import ContentMap
-from gc_server.chat.tool_flow import ToolFlow
 from gc_core.threads.facade import Threads
 from gc_core.threads.models import ThreadKey
+from gc_server.chat.completions.content import ContentMap
+from gc_server.chat.tool_flow import ToolFlow
 from gc_testkit.memory_thread_store_v2 import MemoryThreadStore
 
 KEY = ThreadKey(system="completions", thread="t")
@@ -37,7 +37,7 @@ async def test_card_line_omits_arguments_and_hides_turn_finish():
     mapper.finish("готово")
     assert "turn_finish" not in mapper.content
     assert "сырой json" not in mapper.content
-    assert "read_file(path='src/app.py') — in_progress" in mapper.content
+    assert "read_file(src/app.py) — in_progress" in mapper.content
 
 
 async def test_card_hides_harness_key_and_keeps_failure():

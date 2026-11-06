@@ -275,7 +275,13 @@ def test_filtered_gate_row_is_dimmed_child_flat():
     from gc_tui.widgets.command_palette import CommandPalette
 
     reg = build_default_registry()
-    state = {"rigor": "high", "gate": "on", "answers": "deny"}
+    state = {
+        "level": "default",
+        "profiles": "",
+        "rigor": "high",
+        "gate": "on",
+        "answers": "deny",
+    }
     pal = CommandPalette(
         reg, initial_filter="", toggle_state=lambda n: state[n]
     )

@@ -1,23 +1,22 @@
 """Отправка сообщений с картинками: отказ «с командой», ветки хода, ответ на вопрос
 агента, pending, история и имя сессии, откат отправки, смена сессии (дизайн §12, §20.3)."""
 
-from gc_testkit.develop_files import meta_of
-
 import json
 from pathlib import Path
 
 import pytest
+from gc_testkit.develop_files import meta_of
 
 pytest.importorskip("textual")
 
 from gc_core.attachments.model import chip_text, user_label
+from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.models import TraceEvent
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.user_reply import UserReplyContainer
 from image_helpers import make_attachment_file
-from gc_testkit.tui_support import tui_settings
 
 
 class _StartRunner:
@@ -123,7 +122,7 @@ async def test_images_with_a_command_are_refused_and_the_input_is_kept(
             CommandTextArea.Submitted(value=inp.text, attachments=(att,))
         )
         await pilot.pause()
-        assert str(scr.query_one("#footer-left").render()) == (
+        assert str(scr.query_one("#footer-slot").render()) == (
             "✗ изображения нельзя отправить вместе с командой"
         )
         assert inp.text == f"{typed} {chip_text(1)}"

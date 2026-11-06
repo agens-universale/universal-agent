@@ -12,6 +12,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import (
     Any,
+    Callable,
     Deque,
     Dict,
     List,
@@ -21,7 +22,21 @@ from typing import (
     runtime_checkable,
 )
 
-from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
+from gc_core.constants.tool_display import (
+    LEGACY_TOOL_NAMES,
+    DisplayCategory,
+    tool_display,
+)
+from gc_core.constants.tool_names import (
+    EXEC_PYTHON_NAME,
+    FS_FILE_INFO_NAME,
+    FS_FIND_IN_FILES_NAME,
+    FS_LIST_FILES_NAME,
+    SESSION_TODO_TOOL_NAME,
+    SKILLS_READ_ASSET_NAME,
+    SKILLS_READ_REFERENCE_NAME,
+)
+from gc_core.utils.path_truncate import truncate_path
 
 ProgressKind = Literal[
     "started",
@@ -117,7 +132,7 @@ def _todo_args_summary(todos: Any, *, limit: int = _ARGS_SUMMARY_MAX) -> str:
     """`чек-лист K/M · текущий пункт` — одной строкой для строки трассы.
 
     Запасной путь для потребителей, которые не умеют рисовать развёрнутый блок;
-    ``limit`` соблюдается как во всех прочих ветках ``brief_args_summary`` —
+    ``limit`` соблюдается как во всех прочих ветках ``tool_args_summary`` —
     иначе длинный пункт расползается на несколько строк.
     """
     total = 0
@@ -139,7 +154,7 @@ def _todo_args_summary(todos: Any, *, limit: int = _ARGS_SUMMARY_MAX) -> str:
         return "чек-лист очищен"
     head = f"чек-лист {done}/{total}"
     text = f"{head} · {current}" if current else head
-    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+    return _clip(text, limit)
 
 
 _TODO_ITEM_STATUSES = ("pending", "in_progress", "completed")
@@ -189,32 +204,115 @@ def _todo_item_from(item: Any) -> Optional[Dict[str, str]]:
     return {"content": content.strip(), "status": status}
 
 
-def brief_args_summary(
+def tool_args_summary(
+    wire_name: Optional[str],
     arguments: Any,
     *,
-    tool_name: Optional[str] = None,
     limit: int = _ARGS_SUMMARY_MAX,
 ) -> str:
-    """Compact one-line args preview for progress events (no TUI dependency)."""
+    """Однострочная сводка аргументов вызова тула (спека P1a §2.5).
+
+    Главный аргумент — по таблице отображения ядра; его нет — до трёх пар
+    ``key=preview``. Длина сводки не превышает ``limit``."""
     data: Any = arguments
     if isinstance(arguments, str):
         try:
             data = json.loads(arguments) if arguments.strip() else {}
         except json.JSONDecodeError:
-            text = " ".join(arguments.split())
-            return text if len(text) <= limit else text[:limit].rstrip() + "…"
-    if tool_name == SESSION_TODO_TOOL_NAME:
+            return _clip(arguments, limit)
+    name = LEGACY_TOOL_NAMES.get(wire_name, wire_name) if wire_name else None
+    if name == SESSION_TODO_TOOL_NAME:
         items = todo_items_from_arguments(data)
         if items is not None:
-            return _todo_args_summary(items)
+            return _todo_args_summary(items, limit=limit)
         # битые аргументы — генерик-превью, «чек-лист очищен» не врём
     if not isinstance(data, dict) or not data:
         return ""
+    primary = _primary_summary(name, data, limit) if name else None
+    if primary:
+        return _clip(primary, limit)
+    return _pairs_summary(data, limit)
+
+
+def _clip(text: str, limit: int) -> str:
+    """Схлопнуть пробелы и обрезать до ``limit`` символов вместе с ``…``."""
+    flat = " ".join(text.split())
+    if len(flat) <= limit:
+        return flat
+    return flat[: max(limit - 1, 0)].rstrip() + "…"
+
+
+def _primary_summary(name: str, data: Dict[str, Any], limit: int) -> str:
+    """Сводка по главному аргументу; пустая строка — главного нет."""
+    shown = tool_display(name)
+    if shown.category is DisplayCategory.MCP:
+        return _first_scalar(data)
+    key = shown.primary_arg
+    value = data.get(key) if key else None
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    rule = _PRIMARY_RULES.get(name)
+    if rule is not None:
+        return rule(value, data, limit)
+    if key == "path":
+        return truncate_path(value, limit)
+    return value
+
+
+def _first_scalar(data: Dict[str, Any]) -> str:
+    for value in data.values():
+        if isinstance(value, (str, int, float, bool)) and str(value).strip():
+            return str(value)
+    return ""
+
+
+def _find_in_files(pattern: str, data: Dict[str, Any], limit: int) -> str:
+    head = f'"{pattern}"'
+    path = data.get("path")
+    if not isinstance(path, str) or not path:
+        return head
+    head += " in "
+    return head + truncate_path(path, limit - len(head))
+
+
+def _list_files(path: str, _data: Dict[str, Any], limit: int) -> str:
+    if path.endswith(("/", "\\")):
+        return truncate_path(path, limit - 1) + "*"
+    return truncate_path(path, limit - 2) + "/*"
+
+
+def _file_info(path: str, _data: Dict[str, Any], limit: int) -> str:
+    suffix = " · info"
+    return truncate_path(path, limit - len(suffix)) + suffix
+
+
+def _python_code(code: str, _data: Dict[str, Any], _limit: int) -> str:
+    count = len(code.splitlines())
+    return f"python · {count} {'line' if count == 1 else 'lines'}"
+
+
+def _skill_file(skill_id: str, data: Dict[str, Any], _limit: int) -> str:
+    slug = data.get("slug")
+    if isinstance(slug, str) and slug.strip():
+        return f"{skill_id} · {slug}"
+    return skill_id
+
+
+_PRIMARY_RULES: Dict[str, Callable[[str, Dict[str, Any], int], str]] = {
+    FS_FIND_IN_FILES_NAME: _find_in_files,
+    FS_LIST_FILES_NAME: _list_files,
+    FS_FILE_INFO_NAME: _file_info,
+    EXEC_PYTHON_NAME: _python_code,
+    SKILLS_READ_REFERENCE_NAME: _skill_file,
+    SKILLS_READ_ASSET_NAME: _skill_file,
+}
+
+
+def _pairs_summary(data: Dict[str, Any], limit: int) -> str:
     pairs = [
         _arg_pair_preview(key, value) for key, value in list(data.items())[:3]
     ]
-    text = ", ".join(pairs)
-    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+    return _clip(", ".join(pairs), limit)
 
 
 def _arg_pair_preview(key: str, value: Any) -> str:
@@ -336,10 +434,10 @@ __all__ = [
     "QueueSubagentProgressSink",
     "SubagentProgressEvent",
     "SubagentProgressSink",
-    "brief_args_summary",
     "child_progress_enabled",
     "emit_progress",
     "extract_intermediate_prose",
     "parse_tool_result_status",
     "resolve_progress_sink",
+    "tool_args_summary",
 ]

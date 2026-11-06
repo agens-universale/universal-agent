@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 from gc_core.agent_edits.ctx import section_limit
 from gc_core.attachments.model import Attachment, attachments_of
-from gc_core.attachments.normalize import REASON_NOT_AN_IMAGE, REASON_TOO_LARGE
 from gc_core.config_modules.agent_edits import (
     DEFAULT_REPLAY_EXPANDED_TURNS,
     DEFAULT_TRACE_INLINE_MAX_LINES,
@@ -37,6 +36,15 @@ from gc_core.runtime_notices import collect_unread_runtime_notices
 from gc_core.security.permission_mode import Mode, mode_label
 from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.models import ThreadRecord
+from gc_core.tools.skills.skill_arg_resolver import (
+    Failed,
+    Resolved,
+    ResolveResult,
+    catalog_from_entries,
+    resolve_skill_exact,
+    suggest_skills,
+)
+from gc_core.utils.path_truncate import truncate_path
 from rich.cells import cell_len
 from rich.text import Text
 from textual import events
@@ -61,20 +69,30 @@ from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import export_thread
+from gc_tui.services.footer_slot import (
+    HINT_TEXT,
+    IMAGE_OPEN_TIP,
+    IMAGE_PASTE_BUSY_HINT,
+    IMAGE_PASTE_OWN_HINTS,
+    IMAGE_PASTE_REFUSALS,
+    IMAGE_PASTE_WAIT_HINT,
+    IMAGE_REFUSAL_EMPTY_CLIPBOARD,
+    IMAGES_WITH_COMMAND_REFUSAL,
+    NESTED_NO_DETAIL,
+    PASTE_HINT_TEXT,
+    RETENTION_DETAIL_HINT,
+    toggle_info_line,
+)
 from gc_tui.services.git_info import current_branch
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
 from gc_tui.services.mode_pill import (
     MODE_HINTS,
     PILL_GAP,
+    mode_hint_rows,
     render_mode_pill,
 )
-from gc_tui.services.notices_ui import (
-    footer_left_rows,
-    footer_left_with_badge,
-    format_notices_badge,
-)
-from gc_tui.services.path_display import truncate_path
+from gc_tui.services.notices_ui import format_notices_badge
 from gc_tui.services.reasoning_clock import COGNITIVE_TOOLS, ReasoningClock
 from gc_tui.services.session_lock import (
     BUSY_MESSAGE,
@@ -123,7 +141,6 @@ from gc_tui.services.trace_render import (
     build_compaction_marker_event,
 )
 from gc_tui.services.trace_retention import (
-    RETENTION_DETAIL_HINT,
     apply_payload_retention,
     events_leaving_window,
     filter_sidecar_to_parents,
@@ -157,7 +174,7 @@ from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.plan_panel import PlanPanel
-from gc_tui.widgets.static_content import update_if_changed
+from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import (
     DONE_LABEL,
     DONE_LABEL_PLAN,
@@ -171,7 +188,8 @@ from gc_tui.widgets.trace_row import TraceRow
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _PREFIX_EXPORTED = "[exported] "
 _SEL_CMDINPUT = "#cmdinput"
-_SEL_FOOTER_LEFT = "#footer-left"
+_SEL_FOOTER_MODE = "#footer-mode"
+_SEL_FOOTER_SLOT = "#footer-slot"
 _SEL_INDICATOR_BAR = "#indicator-bar"
 _SEL_INPUT_ROW = "#input-row"
 _SEL_ROOT = "#root"
@@ -312,45 +330,16 @@ _PLAN_CMD_ENTERED = (
 _PLAN_CMD_NO_PLAN = "плана пока нет — опишите задачу, и агент предложит план"
 _PLAN_CMD_NO_PLAN_BUSY = "плана пока нет"
 _PLAN_CLEAR_HINT = "/plan clear — убрать план из сессии"
-_HINT_TEXT = {
-    "clear": "Esc ещё раз, чтобы очистить",
-    "stop": "Esc ещё раз, чтобы остановить",
-    "paste": "Esc ещё раз, чтобы отменить вставку",
-}
-_PASTE_HINT_TEXT = "вставьте ещё раз, чтобы развернуть"
-# Отказы картинок, которые ставит отправка и Ctrl+клик (визуальный контракт
-# картинок §2–§3); отказы вставки — рядом, у источников вставки.
-_IMAGES_WITH_COMMAND_REFUSAL = (
-    "✗ изображения нельзя отправить вместе с командой"
-)
 # Серая строка «изображение не просмотрено» — идиома маркера [skill] (дизайн §10).
 _IMAGE_NOTE_PREFIX = "[изображение] "
 # Вставка изображения (спека §12, визуальный контракт §2). «Вставка…» держится до
 # результата: погасшая поверх неё подсказка и её собственный таймер возвращают её же
 # (`_clear_footer_hint`), снимает её конец вставки; саму вставку ограничивает
 # `image_paste.PASTE_TIMEOUT_SECONDS`.
-_IMAGE_PASTE_BUSY_HINT = "Вставка…"
-_IMAGE_PASTE_WAIT_HINT = "дождитесь окончания вставки"
 _IMAGE_PASTE_HINT_SECONDS = 30.0
-_IMAGE_REFUSAL_EMPTY_CLIPBOARD = "✗ в буфере обмена нет изображения"
-# Подсказки самой вставки: их (и только их) снимает конец вставки.
-_IMAGE_PASTE_OWN_HINTS = (
-    _IMAGE_PASTE_BUSY_HINT,
-    _IMAGE_PASTE_WAIT_HINT,
-    _HINT_TEXT["paste"],
-)
 # «Изображения нет» у вставки: текст вместо картинки (путь, текст ОС) или свой буфер
 # приложения; Alt+V читает текст ОС вне UI-потока — корутиной.
 _OnMiss = Callable[[], Optional[Awaitable[None]]]
-# Отказы вставки по причине `image_paste.PasteRefusal`; `{n}` — `images.max_per_message`.
-_IMAGE_PASTE_REFUSALS = {
-    image_paste.REFUSE_LIMIT: "✗ не больше {n} изображений в одном сообщении",
-    REASON_NOT_AN_IMAGE: "✗ это не изображение",
-    REASON_TOO_LARGE: "✗ изображение слишком большое",
-    image_paste.REFUSE_NO_TOOL: "✗ для вставки изображений нужен wl-paste или xclip",
-    image_paste.REFUSE_SAVE_FAILED: "✗ не удалось сохранить изображение",
-    image_paste.REFUSE_TIMEOUT: "✗ вставка не удалась: истекло время ожидания",
-}
 # Модель и backend-режим показываются в шапке экрана (_compose_header_segments).
 
 # Лесенка усечения имени профиля в футере (Task 9, docs
@@ -388,6 +377,13 @@ _FooterHeadSnapshot = namedtuple(
     "_FooterHeadSnapshot",
     ("profile", "mode_auto", "level_color", "model", "running", "transition"),
     defaults=(None,),
+)
+
+# Данные одной сборки футера, резолвятся ОДИН раз на кадр и идут в обе
+# колонки: бейдж уведомлений (строка 2 левой и резерв лесенки правой),
+# снимок шапки, плашка контекста и сегменты цен («запрос», «сессия»).
+_FooterFrame = namedtuple(
+    "_FooterFrame", ("badge", "snapshot", "meter", "usage")
 )
 
 
@@ -592,7 +588,6 @@ class TraceScreen(Screen):
         self._suppress_picker_reopen: bool = False
         # Spec 2026-05-26: ThinkingIndicator state.
         self._thinking = None  # type: Optional["ThinkingIndicator"]
-        self._trace_max_height = None  # type: Optional[int]
         self._stick_bottom = (
             True  # автоскролл-намерение «липнуть к низу» трейса
         )
@@ -652,7 +647,8 @@ class TraceScreen(Screen):
         # дважды (подготовка и страховочная сетка), и вторая не вправе её
         # двигать. Снимается на спадающем фронте.
         self._edits_baseline_taken = False
-        # Транзиентная подсказка в footer-left (esc-confirm и paste-hint делят слот).
+        # Транзиентная подсказка в слоте футера (строка 2: esc-confirm,
+        # paste-hint, отказы и советы делят его).
         self._esc_confirm_kind: Optional[str] = (
             None  # "clear" | "stop" | "paste" | None
         )
@@ -661,9 +657,18 @@ class TraceScreen(Screen):
         self._footer_hint_text: Optional[str] = (
             None  # текст активной подсказки
         )
+        # Активная подсказка — пояснение режима: занимает обе строки левой
+        # части. Shift+Tab во время записи откладывает пояснение до её конца.
+        self._footer_mode_hint: Optional[str] = None
+        self._mode_hint_after_voice: Optional[str] = None
         self._footer_refusal_active: bool = False
         self._refusal_run_id = None  # прогон, ШЕДШИЙ при постановке отказа
         self._refusal_input_text = ""  # текст поля ввода при постановке отказа
+        # Ключ последней сборки футера (`_footer_inputs`); None — не собран.
+        self._footer_key: Optional[tuple] = None
+        # Части футера, чей сбой уже в логе: пишем раз на эпизод,
+        # не каждый тик.
+        self._footer_faults: set[str] = set()
         # Input history: per-project ↑/↓ навигация.
         # _history создаётся в on_mount (project_dir = threads_dir.parent).
         self._history = None  # type: Optional["InputHistory"]
@@ -722,7 +727,9 @@ class TraceScreen(Screen):
                     placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )
             with Horizontal(id="footer"):
-                yield Static("", id="footer-left", markup=False)
+                with Vertical(id="footer-left"):
+                    yield Static("", id="footer-mode", markup=False)
+                    yield Static("", id="footer-slot", markup=False)
                 yield Static(
                     self._compose_footer_right(),
                     id="footer-right",
@@ -758,7 +765,7 @@ class TraceScreen(Screen):
     def on_resize(self, event) -> None:
         self._refresh_header()  # пересчитать усечение пути под новую ширину
         self._refresh_footer()  # адаптивная вёрстка usage (стек сессии) под новую ширину
-        self._sync_trace_max_height()  # потолок #trace под новую высоту экрана
+        self._sync_chrome_caps()  # потолки хрома под новую высоту экрана
         # Раскладка бренд-карточки выбиралась только при сборке: сузив окно уже после
         # старта, человек получал колонку статусов в пару символов шириной — слова
         # рвались по буквам («подк / люче / ны»), а совсем узко она схлопывалась в ноль.
@@ -1058,66 +1065,47 @@ class TraceScreen(Screen):
             head.append_text(meter)
         return head
 
-    def _compose_footer_right(self) -> Text:
+    def _compose_footer_right(self, frame: _FooterFrame | None = None) -> Text:
         """Правый край футера: [профиль ]●[ модель] · контекст [+ цены вниз].
 
-        Единая лесенка жертв (Task 17, порядок — дословное решение юзера);
-        первое подошедшее и есть ответ:
+        Единая лесенка жертв; первое подошедшее и есть ответ:
 
-        1. всё одной строкой справа, левая в одну строку, имя профиля в потолке;
+        1. всё одной строкой справа, пилюля режима слева полная, имя профиля
+           в потолке;
         2. цены («запрос · сессия») уезжают на 2-ю строку справа, контекст
-           остаётся наверху; левая ещё в одну строку, имя в потолке;
-        3. левая занимает свою 2-ю строку (туда уходит счётчик уведомлений,
-           перенос делает Rich-wrap); имя профиля ВСЁ ЕЩЁ в потолке;
-        4. пилюля режима слева сжимается до глифа (имя режима и подпись
-           хоткея уходят, режим остаётся виден);
-        5. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
-        6. имя профиля снимается целиком;
-        7. имя модели ужимается по середине до `_MODEL_NAME_MIN_COLS`;
-        8. снимается имя модели (или слово `auto`), затем у auto — стрелка с
-           точкой уровня; точка режима/уровня и плашка контекста остаются
-           всегда.
+           остаётся наверху;
+        3. пилюля режима слева сжимается до глифа (режим остаётся виден);
+        4. имя профиля ужимается `_PROFILE_NAME_MAX_COLS` → `_MIN_COLS`;
+        5. имя профиля снимается целиком;
+        6. имя модели ужимается по середине до `_MODEL_NAME_MIN_COLS`;
+        7. снимается имя модели (или слово `auto`), затем у auto — стрелка с
+           точкой уровня; затем цены — «запрос», потом целиком. Точка
+           режима/уровня и плашка контекста остаются всегда.
 
-        Ступени 1-3 ничего не теряют: вторая строка футера (height: 2)
-        зарезервирована в ОБЕИХ колонках и так, и перенос левой вниз — то же
-        перекладывание в уже оплаченное место, что и перенос цен. Потеря
-        информации начинается с 4-й. Отсюда и порядок (живой смок юзера,
-        фикс-раунд 3): бесплатные ходы идут раньше платных, поэтому перебор
-        имени живёт ЦЕЛИКОМ в платном проходе, а в бесплатных пробуется только
-        потолок — раньше имя ужималось при левой, спокойно стоявшей в один ряд.
+        Ступени 1-2 ничего не теряют: вторая строка правой колонки оплачена
+        высотой футера. Потеря начинается с 3-й, поэтому перебор имени живёт
+        целиком в проходе с глифом.
 
-        Лесенка МОНОТОННА по СОДЕРЖИМОМУ: при сужении окна цены, имя профиля и
-        имя модели не возвращаются. Поэтому вариант «всё одной строкой» живёт лишь
-        в первом проходе — иначе на границе ступени 3 (левой разрешили 2 ряда,
-        места стало больше) цены прыгали бы обратно наверх, а это ровно то
-        дёрганье, против которого задача и заведена. Уехали вниз — остались
-        внизу. По той же причине в платном проходе перебор имени начинается с
-        потолка: имя, ужатое раньше, иначе «подросло» бы обратно.
+        Ширину правая колонка ЗАЯВЛЯЕТ: #footer-right — width: auto,
+        #footer-left — 1fr, остаток достаётся левой. Вариант подходит, если в
+        остатке целиком встаёт строка 1 левой (режим + хвост команд — теми же
+        `_footer_mode_variants`, что её рисуют) и бейдж уведомлений строки 2.
+        Подсказки слота в отбор не входят: длинные гаснут многоточием.
 
-        Число рядов ЛЕВОЙ монотонности не подчиняется, и запирать его не надо
-        (решение по ревью): на ступенях 6-7 освободившаяся ширина может вернуть
-        левую в один ряд. Это зеркало того же обмена «ряд слева ↔ сегмент
-        справа», информации при этом не теряется, а искусственный запрет
-        тратил бы место впустую.
+        Лесенка монотонна по содержимому: при сужении окна цены, имя профиля и
+        имя модели не возвращаются. Поэтому «всё одной строкой» пробуется лишь
+        рядом с полной пилюлей, а перебор имени начинается с потолка.
 
-        Ширину правая колонка не «получает», а ЗАЯВЛЯЕТ: #footer-right —
-        width: auto, #footer-left — 1fr, остаток достаётся левой. Поэтому
-        лесенка перебирает варианты правой с предикатом «сколько рядов при
-        этом остатке занимает левая», а не считает бюджет от левой (так было
-        до Task 17: левая не отдавала ни колонки никогда, и правая заранее
-        теряла имя профиля и имя модели — живой смок).
-
-        «Рядов левой» считает `footer_left_rows` — то же ядро, что её и
-        рисует: параллельный оценщик разъехался бы с отрисовкой.
-
-        `snapshot` резолвится ОДИН раз на кадр (perf, cfccade9) — лесенка
-        получает его готовым и заново не резолвит."""
-        request_seg, session_seg = self._usage_segments()
+        Данные кадра (`frame`, `_footer_frame`) резолвятся ОДИН раз (perf) —
+        лесенка получает их готовыми и заново не резолвит. Не передан —
+        резолвим сами (одиночный вызов вне сборки футера)."""
+        if frame is None:
+            frame = self._footer_frame()
+        request_seg, session_seg = frame.usage
         available = self._footer_right_available_width()
         total = self._footer_total_width()
-        snapshot = self._footer_head_snapshot()
-        meter = self._context_meter()
-        left_badge = format_notices_badge(self._collect_footer_notices())
+        snapshot = frame.snapshot
+        meter = frame.meter
 
         def build(
             profile_cols: int | None,
@@ -1152,61 +1140,41 @@ class TraceScreen(Screen):
         def width_of(result: Text) -> int:
             return max(cell_len(line) for line in result.plain.split("\n"))
 
-        # Левая колонка меряется в двух формах пилюли режима. Полная (имя и
-        # подпись хоткея) — мерка бесплатных ступеней. Узкая (один глиф) —
-        # мерка платных и пол: режим должен быть виден всегда, а «Ctrl+C/stop»
-        # и ответ на ask_human урезать нечем — другого способа остановить
-        # агента или ответить ему нет. Ширина пола резервируется, и жертвует
-        # дальше правая.
-        left_full = self._footer_left_commands()
-        left_narrow = self._footer_left_commands(narrow=True)
-        left_floor = cell_len(left_narrow)
+        # Строка 1 меряется в двух формах пилюли: полная — мерка бесплатных
+        # ступеней, глиф — платных и пол: «Ctrl+C/stop» и ответ агенту урезать
+        # нечем. Пол и бейдж резервируются, дальше жертвует правая.
+        full_line, glyph_line = self._footer_mode_variants()
+        badge_cols = self._footer_badge_line(frame.badge).cell_len
 
-        def fits(
-            result: Text, allowed_left_rows: int, left_commands: str
-        ) -> bool:
-            lines = result.plain.split("\n")
+        def fits(result: Text, mode_line: Text) -> bool:
             need = width_of(result)
-            if len(lines) > 2 or need > available:
+            if result.plain.count("\n") > 1 or need > available:
                 return False
-            left_width = total - need - _FOOTER_CHROME_COLS
-            if left_width < left_floor:
-                return False
-            return (
-                left_width > 0
-                and footer_left_rows(
-                    left_commands, left_badge, width=left_width
-                )
-                <= allowed_left_rows
-            )
+            left = total - need - _FOOTER_CHROME_COLS
+            return left >= max(mode_line.cell_len, badge_cols, 1)
 
-        # Первый проход (левая в один ряд) — только бесплатные ступени 1-2, имя
-        # всегда в потолке. Второй (левая в два ряда, пилюля режима полная) —
-        # бесплатная ступень 3. Всё платное живёт в третьем (пилюля — глиф):
-        # перебор имени 14 → 5 и его снятие. «Одной строкой» дальше первого
-        # прохода не переходит — монотонность, см. докстринг.
         prices_down = [
             (cols, _RIGHT_PRICES_DOWN)
             for cols in range(
                 _PROFILE_NAME_MAX_COLS, _PROFILE_NAME_MIN_COLS - 1, -1
             )
         ]
+        # Бесплатный проход — ступени 1-2 рядом с полной пилюлей; платный —
+        # рядом с глифом: перебор имени 14 → 5 и его снятие.
         passes = (
             (
-                1,
-                left_full,
+                full_line,
                 [
                     (_PROFILE_NAME_MAX_COLS, _RIGHT_ONE_LINE),
                     (_PROFILE_NAME_MAX_COLS, _RIGHT_PRICES_DOWN),
                 ],
             ),
-            (2, left_full, [(_PROFILE_NAME_MAX_COLS, _RIGHT_PRICES_DOWN)]),
-            (2, left_narrow, [*prices_down, (None, _RIGHT_PRICES_DOWN)]),
+            (glyph_line, [*prices_down, (None, _RIGHT_PRICES_DOWN)]),
         )
-        for allowed_left_rows, left_commands, variants in passes:
+        for mode_line, variants in passes:
             for cols, layout_width in variants:
                 result = build(cols, layout_width)
-                if fits(result, allowed_left_rows, left_commands):
+                if fits(result, mode_line):
                     return result
 
         # Резерв (рунги шапки × до 3 уровней цен), от богатого к бедному:
@@ -1261,8 +1229,8 @@ class TraceScreen(Screen):
             *((None, True, True, False, c) for c in squeeze),
             *drop_name,
         )
-        # Ценами жертвуем ТОЛЬКО ради пола левой колонки (глиф режима и
-        # критичные клавиши).
+        # Ценами жертвуем ТОЛЬКО ради пола левой колонки (глиф режима,
+        # критичные клавиши и бейдж уведомлений).
         price_ladder = ({}, {"with_request": False}, {"with_prices": False})
         # Лениво: до хвоста резерва доходит только узкое окно.
         reserve = (
@@ -1280,7 +1248,7 @@ class TraceScreen(Screen):
         )
         tried: list[Text] = []
         for candidate in reserve:
-            if fits(candidate, 2, left_narrow):
+            if fits(candidate, glyph_line):
                 return candidate
             tried.append(candidate)
         # Не подошло ничего — и дальше важно, ПОЧЕМУ.
@@ -1308,7 +1276,7 @@ class TraceScreen(Screen):
 
         Не «остаток от левой» (так было до Task 17): #footer-right (width:auto)
         заявляет потребность первым, а сколько при этом останется левой — решает
-        лесенка `_compose_footer_right` по числу её рядов."""
+        лесенка `_compose_footer_right`."""
         return max(10, self._footer_total_width() - _FOOTER_CHROME_COLS)
 
     def _usage_segments(self) -> tuple[Text | None, Text | None]:
@@ -1475,22 +1443,6 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
-    def _footer_left_commands(self, *, narrow: bool = False) -> str:
-        """Строка-мерка footer-left без суффикса уведомлений.
-
-        `narrow` — с пилюлей режима в один глиф: по этой форме считается пол
-        левой колонки, в ней же она рисуется, когда полная не укладывается."""
-        if self._voice is not None and self._voice.state != "idle":
-            # Во время записи слева не команды, а пилюля с таймером и эквалайзером
-            # (её рисует `_voice_footer_render`). Лесенка правой колонки меряет левую
-            # через `footer_left_rows`, а «пол» ширины считает по этой же строке —
-            # значит и то и другое обязано видеть пилюлю: иначе правая колонка мерит
-            # команды, которых на экране нет, и выдавливает пилюлю на второй ряд.
-            return self._voice_footer_render().plain
-        tail = self._footer_tail_commands()
-        head = self._mode_pill(narrow=narrow).plain
-        return f"{head}{PILL_GAP}{tail}" if tail else head
-
     def _mode_pill(self, *, narrow: bool = False) -> Text:
         return render_mode_pill(
             self.app.effective_permission_mode(), narrow=narrow
@@ -1505,86 +1457,155 @@ class TraceScreen(Screen):
             return "Esc/stop  Enter/ответить"
         return _FOOTER_RUNNING_LEFT if self._run_in_progress() else ""
 
-    def _footer_left_text(self) -> Text:
-        """Пилюля режима + команды + счётчик уведомлений, собранные по фактической ширине.
+    def _voice_busy(self) -> bool:
+        """Идёт голосовая стадия (запись или распознавание)."""
+        return self._voice is not None and self._voice.state != "idle"
 
-        Сборку делает footer_left_with_badge: блок уведомлений либо стоит в строке с
-        командами (тогда перед ним разделитель-точка), либо уходит вниз целиком и без
-        точки. Ширина — контентная ширина самого #footer-left; до первого layout она
-        нулевая, и сборка оптимистична — resize/refresh пересоберут по месту (канон
-        бренд-карточки: раскладку выбирает фактическая ширина, а не момент сборки)."""
-        badge = format_notices_badge(self._collect_footer_notices())
+    def _footer_row_width(self) -> int:
+        """Контентная ширина строк левой части; до первого layout — 0."""
         try:
-            width = self.query_one(_SEL_FOOTER_LEFT, Static).content_size.width
+            return self.query_one(_SEL_FOOTER_MODE, Static).content_size.width
         except Exception:
-            width = 0
-        # Пилюля — в самой богатой форме, с которой левая укладывается в свои
-        # два ряда (то же условие, по которому правая колонка оставляла ей
-        # место): полная, затем один глиф. Если рядом с критичной командой не
-        # встаёт и глиф, уступает он: команду остановки терять нельзя ни на
-        # какой ширине.
+            return 0
+
+    def _footer_mode_variants(self) -> tuple[Text, Text]:
+        """Строка 1 в двух формах пилюли режима: полной и глифом (+ хвост).
+
+        Во время записи обе формы — пилюля голоса. Ими же меряет строку 1
+        лесенка правой колонки: отдельный оценщик разошёлся бы с отрисовкой."""
+        if self._voice_busy():
+            voice = self._voice_footer_render()
+            return voice, voice
         tail = self._footer_tail_commands()
-        forms = [
-            (pill, f"{pill.plain}{PILL_GAP}{tail}" if tail else pill.plain)
-            for pill in (self._mode_pill(), self._mode_pill(narrow=True))
-        ]
+        full, glyph = self._mode_pill(), self._mode_pill(narrow=True)
         if tail:
-            forms.append((Text(), tail))
-        # Первая форма, что укладывается; не уложилась ни одна — последняя.
-        pill, commands = next(
-            (
-                form
-                for form in forms
-                if width <= 0
-                or footer_left_rows(form[1], badge, width=width) <= 2
-            ),
-            forms[-1],
-        )
-        # Сборка работает со строками; цвет пилюли возвращается поверх: она
-        # стоит в начале текста, и её разметка ложится по тем же позициям.
-        out = Text(footer_left_with_badge(commands, badge, width=width))
-        for span in pill.spans:
-            out.stylize(span.style, span.start, span.end)
+            full.append(f"{PILL_GAP}{tail}")
+            glyph.append(f"{PILL_GAP}{tail}")
+        return full, glyph
+
+    def _footer_mode_line(self) -> Text:
+        """Строка 1: пилюля режима + хвост команд; во время записи — пилюля
+        голоса.
+
+        Пилюля — в самой богатой форме, что встаёт в строку целиком: полная,
+        затем один глиф. Не встаёт и глиф — уступает он: хвост (команда
+        остановки, ответ агенту) не теряется ни на какой ширине. Ширина 0
+        (layout ещё не прошёл) — полная форма; resize пересоберёт по месту."""
+        variants = self._footer_mode_variants()
+        if self._voice_busy():
+            return variants[0]
+        width = self._footer_row_width()
+        for line in variants:
+            if width <= 0 or line.cell_len <= width:
+                return line
+        tail = self._footer_tail_commands()
+        return Text(tail) if tail else variants[1]
+
+    def _footer_slot_line(self, badge: str) -> Text:
+        """Строка 2 (слот): подсказка/отказ/совет, иначе бейдж уведомлений."""
+        if self._footer_hint_active and self._footer_mode_hint is None:
+            return self._footer_slot_with(Text(self._footer_hint_text or ""))
+        return self._footer_badge_line(badge)
+
+    def _footer_badge_line(self, badge: str) -> Text:
+        """Слот с бейджем уведомлений — его ширину резервирует лесенка."""
+        return self._footer_slot_with(Text(badge))
+
+    def _footer_slot_with(self, body: Text) -> Text:
+        """Слот с телом `body`. Во время записи первым стоит глиф режима его
+        цветом: строку 1 заняла пилюля голоса, а режим должен быть виден."""
+        out = Text()
+        if self._voice_busy():
+            out.append_text(self._mode_pill(narrow=True))
+        if out and body:
+            out.append(PILL_GAP)
+        out.append_text(body)
         return out
 
-    def _refresh_notices_footer(self) -> None:
-        """Обновить счётчик уведомлений в footer-left (без затрагивания footer-right)."""
-        if self._footer_hint_active:
-            return
-        # Во время голосовой стадии footer-left занят пилюлей — событийный
-        # runtime-notice не должен её затирать (тик записи восстановит счётчик).
-        if self._voice is not None and self._voice.state != "idle":
-            return
-        try:
-            update_if_changed(
-                self.query_one(_SEL_FOOTER_LEFT, Static),
-                self._footer_left_text(),
+    def _footer_left_rows(self, badge: str) -> tuple[Text, Text]:
+        """Обе строки левой части по текущему состоянию.
+
+        Пояснение режима — исключение: «пилюля — пояснение» переносится на
+        обе строки, хвост и бейдж на это время скрыты. Во время записи оно
+        не рисуется — строка 1 отдана пилюле голоса."""
+        if self._footer_mode_hint is not None and not self._voice_busy():
+            return mode_hint_rows(
+                self._footer_mode_hint, self._footer_row_width()
             )
+        return self._footer_mode_line(), self._footer_slot_line(badge)
+
+    def _refresh_notices_footer(self) -> None:
+        """Событие уведомлений: та же сборка — бейдж влияет и на правую
+        колонку (её лесенка резервирует его ширину)."""
+        self._refresh_footer()
+
+    def _footer_frame(self) -> _FooterFrame:
+        """Данные кадра футера: каждое резолвится один раз на обе колонки.
+
+        Части независимы: сбой одной (Router, мета треда, уведомления)
+        гасит только её, остальной футер живёт. Снимок шапки None — правая
+        колонка на этот кадр не собирается."""
+        part = self._footer_part
+        return _FooterFrame(
+            badge=part(
+                "badge",
+                lambda: format_notices_badge(self._collect_footer_notices()),
+                "",
+            ),
+            snapshot=part("snapshot", self._footer_head_snapshot, None),
+            meter=part("meter", self._context_meter, None),
+            usage=part("usage", self._usage_segments, (None, None)),
+        )
+
+    def _footer_part(self, kind: str, resolve, fallback):
+        """`resolve()` или `fallback` при сбое; сбой пишется в лог один раз
+        на эпизод — до первого успешного резолва этой части."""
+        try:
+            value = resolve()
         except Exception:
-            pass
+            if kind not in self._footer_faults:
+                self._footer_faults.add(kind)
+                _log.exception("футер: сбой части %s", kind)
+            return fallback
+        self._footer_faults.discard(kind)
+        return value
+
+    def _footer_inputs(self, frame: _FooterFrame) -> tuple:
+        """Ключ сборки футера: всё, от чего зависит его вид.
+
+        Неизменяемый кортеж примитивов; Rich `Text` — по `text_key` (текст
+        и стили), не по identity. Вход, не попавший сюда, футер не увидит
+        до смены другого входа."""
+        voice = self._voice_footer_render() if self._voice_busy() else None
+        return (
+            self._footer_total_width(),
+            self._footer_row_width(),
+            self.app.effective_permission_mode(),
+            self._run_in_progress(),
+            self.app.tui_state.ask_human_state is not None,
+            frame.badge,
+            frame.snapshot,
+            text_key(frame.meter),
+            tuple(text_key(seg) for seg in frame.usage),
+            text_key(voice),
+            self._footer_hint_active,
+            self._footer_hint_text,
+            self._footer_mode_hint,
+        )
 
     def _refresh_footer(self) -> None:
-        """Switch footer text between empty-state and main-screen based on active task.
+        """Пересобрать футер, если изменились его входные данные.
 
-        Left-side update пропускается, если активен Esc-confirm hint — иначе
-        тиковый poll затирал бы подсказку до её 2-секундного таймера.
-        Right-side (модель·контекст) обновляется каждый тик — метр контекста
-        растёт по ходу прогона.
+        Тик опроса зовёт его каждые 250 мс, поэтому без изменений он дёшев:
+        данные кадра резолвятся, лесенка правой колонки и строки левой — нет.
+        Все пути перерисовки (тик, подсказки, режим, голос, уведомления,
+        resize) идут сюда: изменение одного входа пересобирает обе колонки.
         """
         try:
-            update_if_changed(
-                self.query_one("#footer-right", Static),
-                self._compose_footer_right(),
-            )
+            right = self.query_one("#footer-right", Static)
+            mode = self.query_one(_SEL_FOOTER_MODE, Static)
+            slot = self.query_one(_SEL_FOOTER_SLOT, Static)
         except Exception:
-            pass
-        try:
-            left = self.query_one(_SEL_FOOTER_LEFT, Static)
-        except Exception:
-            return
-        # Голосовая пилюля вытесняет остальной footer-left, пока стадия активна.
-        if self._voice is not None and self._voice.state != "idle":
-            update_if_changed(left, self._voice_footer_render())
             return
         # Подсказка уступает место запущенному прогону: пока отказ дожёвывает
         # свои 5 секунд, человек мог отправить запрос — футер обязан показать
@@ -1595,8 +1616,32 @@ class TraceScreen(Screen):
             and self.app.tui_state.active_task_id != self._refusal_run_id
         ):
             self._reset_footer_hint_state()
-        if not self._footer_hint_active:
-            update_if_changed(left, self._footer_left_text())
+        frame = self._footer_frame()
+        key = self._footer_inputs(frame)
+        if key == self._footer_key:
+            return
+        right_built = self._build_footer_right(right, frame)
+        first, second = self._footer_left_rows(frame.badge)
+        update_if_changed(mode, first)
+        update_if_changed(slot, second)
+        # Ключ — только за собранный футер: сбой сборки правой не входит в
+        # ключ, и следующий тик обязан попробовать снова.
+        self._footer_key = key if right_built else None
+
+    def _build_footer_right(self, widget: Static, frame: _FooterFrame) -> bool:
+        """Собрать правую колонку; False — сборка упала (левая живёт).
+
+        Без снимка шапки колонка держит прежний вид: снимок в ключе, его
+        возврат пересоберёт футер."""
+        if frame.snapshot is None:
+            return True
+        content = self._footer_part(
+            "right", lambda: self._compose_footer_right(frame), None
+        )
+        if content is None:
+            return False
+        update_if_changed(widget, content)
+        return True
 
     def on_screen_resume(self) -> None:
         """После возврата с под-экрана — освежить карточку и футер уведомлений."""
@@ -1608,7 +1653,7 @@ class TraceScreen(Screen):
         return str(Path.cwd())
 
     def _show_footer_refusal(self, text: str) -> None:
-        """Содержательный отказ («✗ не сохранено: <причина>») в footer-left.
+        """Содержательный отказ («✗ не сохранено: <причина>») в слоте футера.
 
         Отдельно от `_show_footer_hint`: у отказа есть причина с координатой
         («slots.default: алиас "ghost" не найден…»), и 2-секундного дефолта
@@ -1641,8 +1686,8 @@ class TraceScreen(Screen):
             self._refusal_input_text = ""
 
     def _show_footer_tip(self, text: str) -> None:
-        """Совет в footer-left (подсказки картинок) — по канону отказа: 5 с, следующее
-        действие человека гасит его раньше."""
+        """Совет в слоте футера (подсказки картинок) — по канону отказа: 5 с,
+        следующее действие человека гасит его раньше."""
         self._show_footer_refusal(text)
 
     def _footer_tip_fits(self) -> bool:
@@ -1658,15 +1703,16 @@ class TraceScreen(Screen):
             return False
 
     def _show_footer_hint(self, text: str, seconds: float = 2.0) -> None:
-        """Короткая подсказка в footer-left (esc-confirm — 2с, paste-hint — 5с,
-        содержательные отказы — `_show_footer_refusal`)."""
+        """Короткая подсказка в слоте футера (esc-confirm — 2с, paste-hint —
+        5с, содержательные отказы — `_show_footer_refusal`)."""
         # Новая подсказка снимает режим отказа: иначе paste-hint, показанный
         # ПОСЛЕ отказа, гасился бы первой печатью — не по своему канону
         # (`_show_footer_refusal` ставит флаг заново, после этого вызова).
         self._footer_refusal_active = False
         self._footer_hint_active = True
         self._footer_hint_text = text
-        self.query_one(_SEL_FOOTER_LEFT).update(text)
+        self._footer_mode_hint = None
+        self._refresh_footer()
         if self._footer_hint_timer is not None:
             self._footer_hint_timer.stop()
         self._footer_hint_timer = self.set_timer(
@@ -1677,22 +1723,25 @@ class TraceScreen(Screen):
         """Смена режима: пилюля перерисовывается сразу, плюс короткое пояснение.
 
         Пояснение склеивается с пилюлей в одну фразу («⏸ manual mode —
-        подтверждение всех действий, кроме чтения»): имя стоит в пилюле, текст
-        его не повторяет.
+        подтверждение всех действий, кроме чтения») и занимает обе строки
+        левой части на 2,5 с: имя стоит в пилюле, текст его не повторяет.
+        Во время записи режим меняется сразу (глиф в слоте), а пояснение
+        ждёт её конца — строка 1 занята пилюлей голоса.
         """
         self._refresh_footer()
-        hint = MODE_HINTS.get(mode)
-        if not hint:
+        if mode not in MODE_HINTS:
             return
-        text = Text()
-        text.append_text(render_mode_pill(mode, hint=False))
-        text.append(f" — {hint}")
-        self._show_footer_hint(text, seconds=2.5)
+        if self._voice_busy():
+            self._mode_hint_after_voice = mode
+            return
+        self._show_footer_hint(MODE_HINTS[mode], seconds=2.5)
+        self._footer_mode_hint = mode
+        self._refresh_footer()
 
     def _show_esc_hint(self, kind: str) -> None:
         """Esc-confirm hint: запоминает kind (для 2-го Esc) + показывает подсказку."""
         self._esc_confirm_kind = kind
-        self._show_footer_hint(_HINT_TEXT[kind])
+        self._show_footer_hint(HINT_TEXT[kind])
 
     def _reset_footer_hint_state(self) -> None:
         """Снять hint-state без перерисовки — для вызова ИЗ `_refresh_footer`
@@ -1700,6 +1749,7 @@ class TraceScreen(Screen):
         self._esc_confirm_kind = None
         self._footer_hint_active = False
         self._footer_hint_text = None
+        self._footer_mode_hint = None
         self._footer_refusal_active = False
         self._refusal_run_id = None
         if self._footer_hint_timer is not None:
@@ -1707,21 +1757,21 @@ class TraceScreen(Screen):
             self._footer_hint_timer = None
 
     def _clear_footer_hint(self) -> None:
-        """Сбросить hint-state (esc + paste) + восстановить footer-left (команды).
+        """Сбросить hint-state (esc + paste) и вернуть слоту бейдж.
 
         Пока идёт вставка изображения, покой футера — «Вставка…» (контракт картинок §2):
         отказ, «дождитесь…» и Esc-подсказка гаснут обратно в неё, а не в команды."""
         self._reset_footer_hint_state()
         if self._image_paste_busy:
             self._show_footer_hint(
-                _IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
+                IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
             )
             return
         self._refresh_footer()
 
     def _run_in_progress(self) -> bool:
         """Прогон реально идёт: активная задача + живой раннер. Один предикат на
-        выбор `Ctrl+C/stop` в footer-left и на уступку подсказки прогону."""
+        выбор `Ctrl+C/stop` в строке режима и на уступку подсказки прогону."""
         runner = getattr(self.app, "active_runner", None)
         return (
             self.app.tui_state.active_task_id is not None
@@ -1936,6 +1986,13 @@ class TraceScreen(Screen):
                 # Конфиг перечитали, пока шла запись: рвать её было нельзя, а теперь
                 # можно — следующая диктовка соберётся на свежей voice-секции.
                 self._drop_voice_flow()
+            pending, self._mode_hint_after_voice = (
+                self._mode_hint_after_voice,
+                None,
+            )
+            if pending is not None:
+                self.on_permission_mode_changed(pending)
+                return
         elif self._voice_timer is None:
             self._voice_frame = 0
             # 0.08 с (было 0.15): эквалайзер обязан успевать за голосом, а звук теперь
@@ -1993,6 +2050,7 @@ class TraceScreen(Screen):
         warm = getattr(runner, "warm", None)
         if callable(warm):
             warm()
+        self._warm_skills_cache()
         self._sync_indicator_reserve()  # пустой старт → резерв бара 2 (без лишней строки)
         # Совет вставить картинку из буфера: на старте и при возвращении в окно
         # терминала — буфер меняется только снаружи; переходы внутри приложения его не
@@ -2677,24 +2735,22 @@ class TraceScreen(Screen):
             return region_h
         return min(estimated, cap)
 
-    def _sync_trace_max_height(self) -> None:
-        """Потолок #trace = экран минус хром #root.
+    def _sync_chrome_caps(self) -> None:
+        """Потолки хрома #root, чтобы ввод и подвал оставались на экране.
 
-        Без оверлея: #trace `auto` сам сжимается до контента, хром ниже (индикатор/
-        ввод/футер) следует за концом контента (Claude-style), пустота — внизу под
-        футером; потолок лишь включает скролл при заполнении экрана. БЕЗ замера высоты
-        контента → нет покадровой гонки (она давала «прыжок»).
+        #trace — `1fr`: забирает всё, что осталось над хромом, поэтому ввод и
+        подвал всегда прижаты к низу экрана, а пустота пустой сессии — между
+        бренд-карточкой и вводом. Своего потолка у ленты нет.
 
-        С открытым input-оверлеем (палитра/пикер): #trace ужимается под его ЖЕЛАЕМУЮ
-        высоту (`virtual_size` — полный контент, а НЕ зажатый `region`: region зависит
-        от #trace, #trace — от него → петля, оверлей оставался бы вжатым в остаток),
-        оставляя оверлею место и min строк трейса; сам оверлей — со своим потолком.
+        Открытый input-оверлей (палитра/пикер) стоит в раскладке над вводом и
+        получает потолок: не больше половины экрана и оставляет ленте min строк;
+        дальше — его скролл. Свою высоту оверлей держит сам (min-height из
+        `desired_height`), лента берёт остаток.
 
         Sticky-баннер (ask_human/confirm) тоже капается: иначе длинный вопрос
         раздувает chrome и выдавливает поле ввода за край экрана."""
         try:
             root = self.query_one(_SEL_ROOT, Vertical)
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return
         overlay = self._open_overlay_widget()
@@ -2710,38 +2766,19 @@ class TraceScreen(Screen):
         banner_h = 0
         if banner is not None:
             banner_h = self._cap_sticky_banner(banner, chrome=chrome)
-        chrome_with_banner = chrome + banner_h
-        if overlay is not None:
-            # Оверлей ≤ половины экрана (дальше — его скролл) и оставляет ≥ min строк
-            # трейса. На малых экранах вторая граница жёстче, на больших — половина.
-            cap = min(
-                self.size.height // 2,
-                self.size.height
-                - chrome_with_banner
-                - self._MIN_TRACE_WITH_OVERLAY,
-            )
-            if cap <= 0:
-                return
-            overlay.styles.max_height = (
-                cap  # потолок оверлея → дальше его скролл
-            )
-            # Желаемая высота: все наши оверлеи (CommandPalette, SkillPicker,
-            # ArgPicker, FilePicker) отдают честный `desired_height` (дети +
-            # margin hint'а + рамка; у палитры — ещё докнутый подвал). Фолбэк
-            # `len(children)+2` — только для гипотетического оверлея без свойства.
-            # len(children) обновляется при фильтре сразу, а virtual_size залипает.
-            desired = min(
-                getattr(overlay, "desired_height", len(overlay.children) + 2),
-                cap,
-            )
-            available = self.size.height - chrome_with_banner - desired
-        else:
-            available = self.size.height - chrome_with_banner
-        if available <= 0:
+        if overlay is None:
             return
-        if available != self._trace_max_height:
-            self._trace_max_height = available
-            trace.styles.max_height = available
+        # Оверлей ≤ половины экрана (дальше — его скролл) и оставляет ≥ min строк
+        # трейса. На малых экранах вторая граница жёстче, на больших — половина.
+        cap = min(
+            self.size.height // 2,
+            self.size.height
+            - chrome
+            - banner_h
+            - self._MIN_TRACE_WITH_OVERLAY,
+        )
+        if cap > 0:
+            overlay.styles.max_height = cap  # потолок оверлея → дальше скролл
 
     _STICK_TOL = 2
 
@@ -2760,13 +2797,18 @@ class TraceScreen(Screen):
         контент растёт вниз, offset при этом не двигается, поэтому добавление контента
         липкость не роняет — её снимает только реальный уход юзера вверх. Возврат к
         низу — возвращает. Вызывать ПЕРЕД прижатием (детект всегда предшествует
-        скроллу → юзера не «дёргает» назад при уходе вверх)."""
+        скроллу → юзера не «дёргает» назад при уходе вверх). Offset ниже прижатого,
+        но лента у низа — это не уход вверх: выросшая лента (снят баннер, сжался
+        или закрыт список над вводом) сама срезала прокрутку до нового низа."""
         try:
             trace = self.query_one(_SEL_TRACE, VerticalScroll)
         except Exception:
             return
         if self._stick_bottom:
-            if trace.scroll_offset.y < self._last_auto_y - self._STICK_TOL:
+            if (
+                trace.scroll_offset.y < self._last_auto_y - self._STICK_TOL
+                and not self._trace_is_at_bottom()
+            ):
                 self._stick_bottom = False
         elif self._trace_is_at_bottom():
             self._stick_bottom = True
@@ -3725,11 +3767,13 @@ class TraceScreen(Screen):
     def _close_turn_edits(self, kind: str) -> Optional[tuple]:
         """Конец прогона: сбросить состояние хода, вернуть сводку его правок.
 
-        Агент мог создать скилл → TUI-кэш скиллов инвалидируется (ленивый
-        релоад при следующем /skill). Следующий прогон снимет свою границу
-        журнала правок заново. Сводка правок — тихий правый сегмент
-        строки-итога; compact ходом не считается, правок в нём нет."""
+        Агент мог создать скилл → TUI-кэш скиллов (/skill picker/inline,
+        строки скиллов палитры) инвалидируется и тихо прогревается заново в
+        фоне. Следующий прогон снимет свою границу журнала правок заново.
+        Сводка правок — тихий правый сегмент строки-итога; compact ходом не
+        считается, правок в нём нет."""
         self._skills_cache = None
+        self._warm_skills_cache()
         self._edits_baseline_taken = False
         if kind == "compact":
             return None
@@ -3871,7 +3915,7 @@ class TraceScreen(Screen):
         # (_cap_sticky_banner), иначе длинный вопрос выдавливает input/footer.
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
         self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
-        self.call_after_refresh(self._sync_trace_max_height)
+        self.call_after_refresh(self._sync_chrome_caps)
         # switch input to ask-human mode
         inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         self._sync_input_placeholder()
@@ -3938,7 +3982,7 @@ class TraceScreen(Screen):
         self._confirm_active = True
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
         self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
-        self.call_after_refresh(self._sync_trace_max_height)
+        self.call_after_refresh(self._sync_chrome_caps)
         inp_row.add_class("hidden")
         # Инпут на время confirm: СИНХРОННО disabled (иначе «y» утекает в TextArea).
         # Фокус — на сам баннер, не set_focus(None): при None следующий Tab/клик
@@ -3962,7 +4006,7 @@ class TraceScreen(Screen):
             except Exception:
                 pass
             self._confirm_banner = None
-        self._settle_trace_after_banner()
+        self._keep_trace_bottom()
 
     def _return_focus_to_input(self) -> None:
         """Вернуть поле ввода и фокус в него — ДО снятия баннера. Фокус стоит
@@ -3984,14 +4028,15 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
-    def _settle_trace_after_banner(self) -> None:
-        """Баннер снят: место под ним отдаётся ленте, и её низ сдвигается на
-        высоту баннера. Опрос принял бы сдвиг за уход человека вверх и снял
-        бы липкость — лента, прижатая к низу до снятия, туда и возвращается."""
+    def _keep_trace_bottom(self) -> None:
+        """Хром над вводом сменил высоту (снят баннер, открыт, отфильтрован
+        или закрыт список из поля): высота ленты сдвигается, и сжатие прячет её
+        хвост за список. Лента, прижатая к низу до перемены, туда и
+        возвращается."""
         sticky = self._stick_bottom
 
         def _settle() -> None:
-            self._sync_trace_max_height()
+            self._sync_chrome_caps()
             if sticky:
                 self._stick_bottom = True
                 self._scroll_trace_end()
@@ -4012,7 +4057,7 @@ class TraceScreen(Screen):
         self._plan_banner = banner
         inp_row = self.query_one(_SEL_INPUT_ROW, Horizontal)
         self.query_one(_SEL_ROOT, Vertical).mount(banner, before=inp_row)
-        self.call_after_refresh(self._sync_trace_max_height)
+        self.call_after_refresh(self._sync_chrome_caps)
         inp_row.add_class("hidden")
         try:
             self.query_one(_SEL_CMDINPUT, CommandTextArea).disabled = True
@@ -4037,7 +4082,7 @@ class TraceScreen(Screen):
             self._sync_input_placeholder()
         except Exception:
             pass
-        self._settle_trace_after_banner()
+        self._keep_trace_bottom()
 
     def _session_plan(self) -> Optional[dict]:
         """План открытой сессии из её меты — то, что загрузит следующий прогон
@@ -4684,10 +4729,8 @@ class TraceScreen(Screen):
             row.refresh_running_elapsed()
 
     def _poll_tick(self) -> None:
-        # Потолок #trace = экран минус хром. Зависит только от стабильных высот  # noqa: ERA001  # описание формата, не выключенный код
-        # (header/indicator-bar[зарезервирован]/input/footer) → пересчёт синхронный и
-        # без гонки (на гарде ставит max-height лишь при ресайзе / росте ввода).
-        self._sync_trace_max_height()
+        # Потолки списка над вводом и sticky-баннера: ввод и подвал на экране.
+        self._sync_chrome_caps()
         # Freeze UI на время app-select (§3.2 F2–F5). Пока Screen._selecting —
         # точечно глушим UI-мутации трейса (stick/scroll/stream paint/wipe),
         # но НЕ весь poll: footer/OSC/title/runner-логика/orphan/tail-события
@@ -5792,11 +5835,13 @@ class TraceScreen(Screen):
             # иначе — обычная строка: не перехватываем, ←/→ уходит в TextArea (каретка)
         elif event.key == "tab":
             cmd = self._palette.selected_command()
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
             if cmd is not None:
-                inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
                 inp.text = f"/{cmd.name} "
                 inp.move_cursor(inp.document.end)
                 self._close_palette()
+            else:
+                self._insert_palette_skill(inp, inp.text)
             event.stop()
             event.prevent_default()
 
@@ -5823,6 +5868,8 @@ class TraceScreen(Screen):
             current_text = event.text_area.text
             if current_text != self._history_last_programmatic_text:
                 self._reset_history_navigation()
+        if self._open_overlay_widget() is not None:
+            self._keep_trace_bottom()  # фильтр меняет высоту списка над вводом
         # Для палитры/пикера важна только первая строка (команды без переносов).
         val = event.text_area.text.split("\n", 1)[0]
 
@@ -5865,8 +5912,8 @@ class TraceScreen(Screen):
                 if self._skills_cache is None:
                     self._skills_cache = await self._load_skills_safe()
                 skill_first, _, skill_rest = rest.partition(" ")
-                if skill_rest.strip() and any(
-                    str(s.get("id")) == skill_first for s in self._skills_cache
+                if skill_rest.strip() and isinstance(
+                    self._resolve_cached_skill(skill_first), Resolved
                 ):
                     if self._skill_picker is not None:
                         self._close_skill_picker()
@@ -5981,15 +6028,14 @@ class TraceScreen(Screen):
         )
 
     def _mount_input_overlay(self, widget) -> None:
-        """Смонтировать input-оверлей (палитра / skill/arg/file-picker) СРАЗУ ПОД
-        полем ввода — список раскрывается ВНИЗ (новая раскладка: ввод следует за
-        контентом, под ним есть место). Потолок оверлея и ужатие #trace под его
-        желаемую высоту считает _sync_trace_max_height (по virtual_size оверлея);
-        отложенный вызов даёт это сразу, не дожидаясь poll-тика."""
+        """Смонтировать input-оверлей (палитра / skill/arg/file-picker) СРАЗУ НАД
+        полем ввода — список раскрывается ВВЕРХ: ввод прижат к низу экрана и не
+        двигается, список поднимает ленту, а не накрывает её. Потолок оверлея
+        считает _sync_chrome_caps, хвост ленты держит _keep_trace_bottom."""
         self.query_one(_SEL_ROOT, Vertical).mount(
-            widget, after=self.query_one(_SEL_INPUT_ROW, Horizontal)
+            widget, before=self.query_one(_SEL_INPUT_ROW, Horizontal)
         )
-        self.call_after_refresh(self._sync_trace_max_height)
+        self._keep_trace_bottom()
 
     def _open_palette(self, *, prefix: str) -> None:
         if self._palette is not None:
@@ -6005,6 +6051,7 @@ class TraceScreen(Screen):
                 self.app, name, value
             ),
             toggle_values=lambda name: effective_toggle_values(self.app, name),
+            skills=self._palette_skills,
         )
         self._palette = palette
         self._mount_input_overlay(palette)
@@ -6014,6 +6061,7 @@ class TraceScreen(Screen):
             return
         self._palette.remove()
         self._palette = None
+        self._keep_trace_bottom()
 
     async def _open_skill_picker(self, *, prefix: str) -> None:
         if self._skill_picker is not None:
@@ -6031,6 +6079,7 @@ class TraceScreen(Screen):
             return
         self._skill_picker.remove()
         self._skill_picker = None
+        self._keep_trace_bottom()
 
     def _open_arg_picker(
         self,
@@ -6064,6 +6113,7 @@ class TraceScreen(Screen):
             return
         self._arg_picker.remove()
         self._arg_picker = None
+        self._keep_trace_bottom()
 
     def _project_root(self) -> str:
         """Корень обзора @-аттача = текущий cwd проекта (корень FS-тулов агента)."""
@@ -6189,6 +6239,7 @@ class TraceScreen(Screen):
             if self._file_picker is not None:
                 self._file_picker.remove()
                 self._file_picker = None
+                self._keep_trace_bottom()
             return
         if self._file_picker is None:
             from gc_tui.widgets.file_picker import FilePicker
@@ -6202,6 +6253,7 @@ class TraceScreen(Screen):
             self._file_picker.set_entries(
                 entries, truncated=truncated, searching=searching, total=total
             )
+            self._keep_trace_bottom()
 
     def _close_file_picker(self) -> None:
         # Конец сеанса: результат поиска в полёте устарел, поток сеанса больше не нужен.
@@ -6219,6 +6271,7 @@ class TraceScreen(Screen):
             return
         self._file_picker.remove()
         self._file_picker = None
+        self._keep_trace_bottom()
 
     def _complete_file_picker(self) -> None:
         """Достроить выбранный путь в открытом файловом пикере — два контекста,
@@ -6290,14 +6343,19 @@ class TraceScreen(Screen):
         """Набранное — команда (`/…`, `!…`), а не текст агенту.
 
         Поле одно на ответ и команды. Пока висит вопрос агента, командой
-        считается только известная `/команда`; прочее с «/» (путь и т.п.) и с
-        «!» — ответ. Вне вопроса любое `/…` — команда (неизвестная получит
+        считается только известная `/команда` или `/имя` скилла из прогретого
+        кэша (холодный кэш — ответ); прочее с «/» (путь и т.п.) и с «!» —
+        ответ. Вне вопроса любое `/…` — команда (неизвестная получит
         «нет такой команды»), `!…` — shell.
         """
         asking = self.app.tui_state.ask_human_state is not None
         if text.startswith("/"):
             name = (text[1:].split(None, 1) or [""])[0]
-            return not asking or self._registry.lookup(name) is not None
+            return (
+                not asking
+                or self._registry.lookup(name) is not None
+                or isinstance(self._resolve_cached_skill(name), Resolved)
+            )
         return text.startswith("!") and not asking
 
     async def on_command_text_area_submitted(
@@ -6312,7 +6370,7 @@ class TraceScreen(Screen):
         # Идёт вставка изображения: Enter не отправляет — сообщение ушло бы без
         # картинки; текст остаётся в поле (контракт §2).
         if self._image_paste_busy:
-            self._show_footer_hint(_IMAGE_PASTE_WAIT_HINT)
+            self._show_footer_hint(IMAGE_PASTE_WAIT_HINT)
             return
 
         # Картинки с командой не отправляются (визуальный контракт картинок §2):
@@ -6320,7 +6378,7 @@ class TraceScreen(Screen):
         # плашками должно остаться в поле.
         images = event.attachments
         if images and self._is_command_input(event.value.strip()):
-            self._show_footer_refusal(_IMAGES_WITH_COMMAND_REFUSAL)
+            self._show_footer_refusal(IMAGES_WITH_COMMAND_REFUSAL)
             return
 
         # Skill picker открыт → выполнить выбранный skill (или ввод как есть)
@@ -6383,6 +6441,8 @@ class TraceScreen(Screen):
         # необязательный аргумент без меню (`/plan`) выполняется сразу
         # (`Command.runs_on_enter`).
         if self._palette is not None:
+            if self._insert_palette_skill(inp, event.value):
+                return
             cmd = self._palette.selected_command()
             if cmd is not None and cmd.is_toggle:
                 spec = TOGGLES.get(cmd.name)
@@ -6390,17 +6450,10 @@ class TraceScreen(Screen):
                     # /profiles: Enter раскрывает пикер (спека §12.1, ревизия).
                     self._open_profiles_picker(cmd.name)
                     return
-                # Toggle-строка: Enter не сабмитит текст — циклит (+1) и
-                # применяет мгновенно, тот же путь, что ←/→ (спека 2026-07-18
-                # §1). custom не выбирается (ревизия 4) — тот же роутинг, что
-                # и ←/→ выше. Палитра остаётся открытой.
-                new_value = next_toggle_value(self.app, cmd.name, 1)
-                try:
-                    apply_toggle(self.app, cmd.name, new_value)
-                except (ValueError, OSError) as exc:
-                    self._show_footer_refusal(f"✗ не сохранено: {exc}")
-                else:
-                    self._palette.refresh_toggle_state()
+                # Toggle-строка: Enter значение не трогает — «готово»: закрыть
+                # палитру и очистить поле, как Esc. Меняют значение ←/→.
+                self._close_palette()
+                inp.text = ""
                 return
             typed = event.value.strip()
             has_args = len(typed.split()) > 1
@@ -6596,7 +6649,7 @@ class TraceScreen(Screen):
     def on_command_text_area_paste_collapsed(
         self, event: CommandTextArea.PasteCollapsed
     ) -> None:
-        self._show_footer_hint(_PASTE_HINT_TEXT, seconds=5.0)
+        self._show_footer_hint(PASTE_HINT_TEXT, seconds=5.0)
 
     def on_command_text_area_image_paste_requested(
         self, event: CommandTextArea.ImagePasteRequested
@@ -6630,11 +6683,11 @@ class TraceScreen(Screen):
                 # проскочат).
                 self._image_paste_queue.append((path, on_miss, files_only))
             else:
-                self._show_footer_hint(_IMAGE_PASTE_WAIT_HINT)
+                self._show_footer_hint(IMAGE_PASTE_WAIT_HINT)
             return
         self._image_paste_busy = True
         self._show_footer_hint(
-            _IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
+            IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
         )
         self._image_paste_worker = self.run_worker(
             self._image_paste(
@@ -6719,7 +6772,7 @@ class TraceScreen(Screen):
                     if inspect.isawaitable(missed):
                         await missed
                 self._show_footer_refusal(
-                    _IMAGE_PASTE_REFUSALS[outcome.reason].format(n=limit)
+                    IMAGE_PASTE_REFUSALS[outcome.reason].format(n=limit)
                 )
             elif outcome:
                 # Номер — после чтения: пока оно шло, могла смениться сессия.
@@ -6731,7 +6784,7 @@ class TraceScreen(Screen):
                     )
                 return True
             elif on_miss is None:
-                self._show_footer_refusal(_IMAGE_REFUSAL_EMPTY_CLIPBOARD)
+                self._show_footer_refusal(IMAGE_REFUSAL_EMPTY_CLIPBOARD)
             else:
                 missed = on_miss()
                 if inspect.isawaitable(missed):
@@ -6747,7 +6800,7 @@ class TraceScreen(Screen):
         self._clipboard_tip_stamp = self._clipboard_stamp
         if not self._image_open_tip_shown and self._footer_tip_fits():
             self._image_open_tip_shown = True
-            self._show_footer_tip(image_hints.IMAGE_OPEN_TIP)
+            self._show_footer_tip(IMAGE_OPEN_TIP)
 
     def _on_terminal_focus(self, focused: bool) -> None:
         if focused:
@@ -6802,7 +6855,7 @@ class TraceScreen(Screen):
         своему канону."""
         if (
             self._footer_hint_active
-            and self._footer_hint_text in _IMAGE_PASTE_OWN_HINTS
+            and self._footer_hint_text in IMAGE_PASTE_OWN_HINTS
         ):
             self._clear_footer_hint()
 
@@ -6813,7 +6866,7 @@ class TraceScreen(Screen):
         if text:
             inp._handle_paste(text)
         else:
-            self._show_footer_refusal(_IMAGE_REFUSAL_EMPTY_CLIPBOARD)
+            self._show_footer_refusal(IMAGE_REFUSAL_EMPTY_CLIPBOARD)
 
     async def _consume_pending_prefix(self, text: str) -> tuple[str, dict]:
         """Встроить отложенный skill в сообщение; вернуть (query, meta-patch).
@@ -7360,6 +7413,103 @@ class TraceScreen(Screen):
         except Exception:
             pass
 
+    def _resolve_cached_skill(self, name: str) -> ResolveResult | None:
+        """Точный разбор имени скилла (полный id, пак, короткое имя) по
+        прогретому кэшу, без нечёткого поиска; холодный кэш — None."""
+        if self._skills_cache is None:
+            return None
+        catalog = catalog_from_entries(self._skills_cache)
+        return resolve_skill_exact(name, catalog)
+
+    def _insert_palette_skill(self, inp: TextArea, typed: str) -> bool:
+        """Enter на строке скилла палитры: вставить `/имя ` — текст
+        дописывают и отправляют следующим Enter (спека P5 §3.2)."""
+        skill = self._palette.selected_skill()
+        if skill is None or " " in typed.strip():
+            return False
+        inp.text = f"/{self._skill_input_name(skill)} "
+        inp.move_cursor(inp.document.end)
+        self._close_palette()
+        inp.focus()
+        return True
+
+    def _palette_skills(self) -> list[dict]:
+        """Скиллы для палитры: запись + запускаемое имя (`input_name`) —
+        то же, что вставит Enter."""
+        return [
+            {**s, "input_name": self._skill_input_name(s)}
+            for s in self._skills_cache or []
+        ]
+
+    def _skill_input_name(self, skill: dict) -> str:
+        """Запускаемый вид скилла в поле: короткое имя, если оно ведёт
+        ровно к этому скиллу и не занято командой или алиасом, иначе
+        полный id."""
+        sid = str(skill.get("id", ""))
+        short = sid.rpartition(":")[2]
+        if self._registry.lookup(short) is not None:
+            return sid
+        res = self._resolve_cached_skill(short)
+        if isinstance(res, Resolved) and res.canonical_id == sid:
+            return short
+        return sid
+
+    async def _cmd_skill(self, arg: str) -> None:
+        """`/skill <имя> [текст]`: имя — полный id или короткое (точный
+        разбор); с текстом — немедленная пара, без — pending/running путь."""
+        if self._skills_cache is None:
+            self._skills_cache = await self._load_skills_safe()
+        first, _, rest = arg.partition(" ")
+        res = self._resolve_cached_skill(first)
+        if isinstance(res, Resolved):
+            await self._cmd_use_skill(res.canonical_id, prompt=rest.strip())
+        elif isinstance(res, Failed) and res.reason == "ambiguous":
+            self._render_skill_ambiguous(first, res.suggestions)
+        else:
+            # первый токен не скилл → весь arg = id (может содержать
+            # пробелы/слэши), промпта нет → штатный pending/running путь
+            await self._cmd_use_skill(arg.strip(), prompt="")
+
+    async def _dispatch_skill_by_name(self, name: str, arg: str) -> None:
+        """`/имя текст` без такой команды ≡ `/skill имя текст` — только при
+        точном совпадении по прогретому кэшу. Опечатка скилл не запускает:
+        «неизвестная команда» с кандидатами — команда, затем скиллы.
+        Холодный кэш — «неизвестная команда» (без ожидания прогрева)."""
+        res = self._resolve_cached_skill(name)
+        if isinstance(res, Resolved):
+            await self._cmd_use_skill(res.canonical_id, prompt=arg)
+        elif isinstance(res, Failed) and res.reason == "ambiguous":
+            self._render_skill_ambiguous(name, res.suggestions)
+        else:
+            self._render_command_error(name, self._command_candidates(name))
+
+    def _command_candidates(self, name: str) -> list[str]:
+        """«Вы имели в виду»: ближайшая команда, затем нечёткие скиллы."""
+        found = closest_command(name, self._registry)
+        out = [found] if found else []
+        for sid in self._fuzzy_skill_ids(name):
+            runnable = "/" + self._skill_input_name({"id": sid})
+            if runnable[1:] not in out:
+                out.append(runnable[1:])
+        return out
+
+    def _fuzzy_skill_ids(self, name: str) -> list[str]:
+        """Полные id скиллов, близких к `name`: короткое неоднозначное
+        имя раскрывается во все свои id."""
+        if not self._skills_cache:
+            return []
+        catalog = catalog_from_entries(self._skills_cache)
+        ids: list[str] = []
+        for cand in suggest_skills(name, catalog, 3):
+            res = resolve_skill_exact(cand, catalog)
+            found = (
+                [res.canonical_id]
+                if isinstance(res, Resolved)
+                else list(res.suggestions)
+            )
+            ids += [i for i in found if i not in ids]
+        return ids
+
     async def _cmd_use_skill(self, skill_id: str, *, prompt: str = "") -> None:
         if not skill_id:
             self._mount_trace_row(
@@ -7744,9 +7894,7 @@ class TraceScreen(Screen):
         arg = parts[1].strip() if len(parts) > 1 else ""
         cmd = self._registry.lookup(name)
         if cmd is None:
-            self._render_command_error(
-                name, closest_command(name, self._registry)
-            )
+            await self._dispatch_skill_by_name(name, arg)
             return
         # Нормализуем alias → canonical, чтобы диспетчер видел только канон.
         name = cmd.name
@@ -7760,19 +7908,7 @@ class TraceScreen(Screen):
             self._cmd_new()
             return
         if name == "skill":
-            if self._skills_cache is None:
-                self._skills_cache = await self._load_skills_safe()
-            first, _, rest = arg.partition(" ")
-            rest = rest.strip()
-            if rest and any(
-                str(s.get("id")) == first for s in self._skills_cache
-            ):
-                # /skill <валидный_id> <промпт> → немедленная пара
-                await self._cmd_use_skill(first, prompt=rest)
-            else:
-                # первый токен не валидный id → весь arg = id (может содержать
-                # пробелы/слэши), промпта нет → штатный pending/running путь
-                await self._cmd_use_skill(arg.strip(), prompt="")
+            await self._cmd_skill(arg)
             return
         if name == "help":
             self.app.action_help()
@@ -7878,9 +8014,9 @@ class TraceScreen(Screen):
         стрелки палитры — у toggle-команд нет args-схемы, поэтому пробел после
         имени закрывает палитру и Enter доходит сюда как обычная команда):
         ничего не меняет (иначе набор команды был бы неочевидным side-effect'ом) —
-        показывает текущее значение и как переключать (←/→ и Enter в открытой
-        палитре). Набранное значение, которого тоггл сейчас не предлагает
-        (`/level auto` при недоступном автовыборе), получает ответ с причиной, а не
+        показывает текущее значение и как менять (←/→ в открытой палитре).
+        Набранное значение, которого тоггл сейчас не предлагает (`/level auto`
+        при недоступном автовыборе), получает ответ с причиной, а не
         молчаливое игнорирование."""
         unavailable = (
             toggle_unavailable_hint(self.app, name, arg) if arg else None
@@ -7890,10 +8026,8 @@ class TraceScreen(Screen):
                 f"/{name} {arg} — {unavailable}", seconds=5.0
             )
             return
-        current = toggle_state(self.app, name)
         self._show_footer_hint(
-            f"/{name} — текущее значение: {current} · для переключения: ←/→ и Enter в меню команд",
-            seconds=5.0,
+            toggle_info_line(name, toggle_state(self.app, name)), seconds=5.0
         )
 
     def _open_event_by_no(self, no: int) -> None:
@@ -7992,9 +8126,7 @@ class TraceScreen(Screen):
             )
         if call_ev is None:
             if message.call_id and message.call_id in self._nested_tool_rows:
-                self._show_footer_hint(
-                    "нет args/output для этого nested-тула", seconds=3.0
-                )
+                self._show_footer_hint(NESTED_NO_DETAIL, seconds=3.0)
             return
         self.app.push_screen(
             ToolCallDetailScreen(
@@ -8035,14 +8167,36 @@ class TraceScreen(Screen):
             return None, None
         return trace_events_from_nested_detail(call_id, detail)
 
+    async def _fetch_skills(self) -> list[dict]:
+        """Список скиллов из core-реестра (обход диска — вне цикла
+        интерфейса); ошибки — вызывающему."""
+        from gc_tui.services.skills_scan import list_skills_off_loop
+
+        return await list_skills_off_loop(self.app.base_settings())
+
+    def _warm_skills_cache(self) -> None:
+        """Тихий фоновый прогрев `_skills_cache` (спека P5 §3.1): палитре
+        скиллы нужны с первой буквы, без I/O на нажатие. Ошибка — только в
+        лог: кэш остаётся холодным, явный /skill загрузит и покажет её сам.
+        `exclusive` отменяет прежний прогрев: его устаревший снимок в кэш не
+        попадёт; воркер экрана отменяется и при его снятии."""
+        self.run_worker(
+            self._warm_skills(), group="skills-warm", exclusive=True
+        )
+
+    async def _warm_skills(self) -> None:
+        try:
+            skills = await self._fetch_skills()
+        except Exception:
+            _log.warning("прогрев кэша скиллов не удался", exc_info=True)
+            return
+        if self._skills_cache is None:
+            self._skills_cache = skills
+
     async def _load_skills_safe(self) -> list[dict]:
         """Загрузить список скиллов из core-реестра; на ошибке вернуть []."""
         try:
-            from gc_core.tools.skills.registry import get_skills_registry
-
-            reg = get_skills_registry(self.app.base_settings())
-            # include_all=True — показываем и внутренние скиллы паков, не только bootstrap.
-            return await reg.list_skills(include_all=True)
+            return await self._fetch_skills()
         except Exception as exc:
             self._mount_trace_row(
                 prefix="[!] ",
@@ -8326,16 +8480,29 @@ class TraceScreen(Screen):
             message_id=msg_id,
         )
 
-    def _render_command_error(self, name: str, suggestion: str | None) -> None:
+    def _render_command_error(
+        self,
+        name: str,
+        suggestions: list[str],
+        *,
+        title: str = "неизвестная команда",
+    ) -> None:
         """Команда-ошибка по единому правилу (§3.3). Одна строка одним Static;
-        подсказка closest-match — deep-dim в той же строке."""
+        кандидаты «вы имели в виду» — deep-dim в той же строке."""
         from rich.text import Text
 
         line = Text()
-        line.append(f"[!] неизвестная команда: /{name}", style=_ERR_RED)
-        if suggestion:
-            line.append(f" (вы имели в виду /{suggestion}?)", style=_DEEP_DIM)
+        line.append(f"[!] {title}: /{name}", style=_ERR_RED)
+        if suggestions:
+            names = ", ".join(f"/{s}" for s in suggestions)
+            line.append(f" (вы имели в виду {names}?)", style=_DEEP_DIM)
         self._trace_mount(Static(line, classes="line-error", markup=False))
+
+    def _render_skill_ambiguous(self, name: str, ids: list[str]) -> None:
+        """Короткое имя у нескольких скиллов — не запуск, подсказать id."""
+        self._render_command_error(
+            name, ids, title="несколько скиллов с именем"
+        )
 
     def _mount_trace_row(
         self,

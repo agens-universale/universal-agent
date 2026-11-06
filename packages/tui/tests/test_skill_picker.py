@@ -1,7 +1,7 @@
 """SkillPicker integration в TraceScreen: триггер, фильтр, mutex с командной палитрой."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 class _FakeReg:
@@ -61,9 +61,38 @@ async def test_picker_filters_by_id_substring(tmp_path, monkeypatch):
         rows_text = "\n".join(
             str(s.render()) for s in picker.query(".palette-row")
         )
-        assert "supercoder:planner" in rows_text
-        assert "supercoder:coder" in rows_text
-        assert "codebase:using-codebase" not in rows_text
+        heads = [str(s.render()) for s in picker.query(".palette-pack-head")]
+        # строки — короткие имена под шапкой пакета, полный id не нужен
+        assert [h.strip() for h in heads] == ["supercoder"]
+        assert "planner" in rows_text
+        assert "coder" in rows_text
+        assert "supercoder:" not in rows_text
+        assert "using-codebase" not in rows_text
+
+
+@pytest.mark.asyncio
+async def test_tab_after_arrows_inserts_full_id_of_flat_skill(
+    tmp_path, monkeypatch
+):
+    """Стрелки идут по скиллам мимо шапок пакетов; Tab вставляет полный id."""
+    pytest.importorskip("textual")
+    _patch_registry(monkeypatch)
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/skill "
+        await pilot.pause(0.1)
+        # skill-creator (без пакета) первым, затем пакеты по алфавиту
+        await pilot.press("down")
+        await pilot.press("tab")
+        await pilot.pause(0.1)
+        assert inp.text == "/skill codebase:using-codebase"
 
 
 @pytest.mark.asyncio
@@ -146,7 +175,7 @@ async def test_tab_completes_id_into_input_and_closes_picker(
         await pilot.press("tab")
         await pilot.pause(0.1)
 
-        assert inp.text == "/skill supercoder:planner"
+        assert inp.text == "/skill supercoder:coder"  # первый по алфавиту
         assert len(pilot.app.query(SkillPicker)) == 0
 
 
@@ -205,7 +234,7 @@ async def test_skills_loaded_only_once_per_session(tmp_path, monkeypatch):
 
     from gc_core.tools.skills import registry as reg_mod
 
-    def factory(cfg=None):
+    def factory(cfg=None):  # noqa: ARG001  # сигнатура фабрики реестра
         calls["n"] += 1
         return _FakeReg()
 
@@ -238,7 +267,7 @@ async def test_hint_has_keys_margin_and_honest_desired_height(
     tmp_path, monkeypatch
 ):
     """Hint SkillPicker — докнутый footer (.palette-footer) с воздухом (.palette-keys),
-    desired_height включает строку margin (шов main.py::_sync_trace_max_height)."""
+    desired_height включает строку margin (это min-height пикера)."""
     pytest.importorskip("textual")
     _patch_registry(monkeypatch)
     from gc_tui.app import TuiApp
@@ -304,3 +333,113 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(
         assert (
             hint[0].region.bottom <= picker.region.bottom
         )  # внутри рамки пикера, видна без скролла
+
+
+def _patch_big_registry(monkeypatch, skills):
+    class _BigReg:
+        async def list_skills(self, *, pack=None, include_all=False):
+            return skills
+
+    from gc_core.tools.skills import registry as reg_mod
+
+    monkeypatch.setattr(
+        reg_mod, "get_skills_registry", lambda cfg=None: _BigReg()
+    )
+
+
+def _on_screen(picker, widget) -> bool:
+    """Строка целиком внутри видимой области списка пикера."""
+    top = picker.scroll_offset.y
+    y = widget.virtual_region.y
+    return top <= y and y + 1 <= top + picker.scrollable_content_region.height
+
+
+async def _open_picker(pilot):
+    from gc_tui.widgets.skill_picker import SkillPicker
+
+    inp = pilot.app.query_one("#cmdinput")
+    inp.text = "/skill "
+    await pilot.pause(0.1)
+    return pilot.app.query_one(SkillPicker)
+
+
+_LONG = (
+    [{"id": "flat-skill"}]
+    + [{"id": f"alpha:a{i:02d}"} for i in range(20)]
+    + [{"id": f"beta:b{i:02d}"} for i in range(20)]
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("skills", [_LONG, _LONG[1:]], ids=["flat", "head"])
+async def test_scroll_back_to_top_shows_first_row(
+    tmp_path, monkeypatch, skills
+):
+    """Вниз до конца и обратно наверх — список снова с самого верха: первая
+    строка (скилл без пакета или шапка первого пакета) видна."""
+    pytest.importorskip("textual")
+    _patch_big_registry(monkeypatch, skills)
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=(80, 24)) as pilot:
+        picker = await _open_picker(pilot)
+        n = len(picker._visible_rows())
+        for _ in range(n - 1):
+            await pilot.press("down")
+        await pilot.pause(0.1)
+        assert picker.scroll_offset.y > 0
+        for _ in range(n - 1):
+            await pilot.press("up")
+        await pilot.pause(0.1)
+        assert picker.selected_skill() == skills[0]
+        assert picker.scroll_offset.y == 0
+
+
+@pytest.mark.asyncio
+async def test_first_skill_of_group_shows_its_header(tmp_path, monkeypatch):
+    """Подъём на первый скилл группы показывает и шапку над ним."""
+    pytest.importorskip("textual")
+    _patch_big_registry(monkeypatch, _LONG)
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=(80, 24)) as pilot:
+        picker = await _open_picker(pilot)
+        n = len(picker._visible_rows())
+        for _ in range(n - 1):
+            await pilot.press("down")
+        for _ in range(19):  # с последнего b19 на b00 — первый в beta
+            await pilot.press("up")
+        await pilot.pause(0.1)
+        assert picker.selected_skill()["id"] == "beta:b00"
+        heads = list(picker.query(".palette-pack-head"))
+        beta = next(h for h in heads if str(h.content).strip() == "beta")
+        assert _on_screen(picker, beta)
+
+
+@pytest.mark.asyncio
+async def test_pack_header_colour_is_note_ink(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    _patch_registry(monkeypatch)
+    from gc_tui.app import TuiApp
+    from gc_tui.palette import NOTE_INK
+    from textual.color import Color
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        picker = await _open_picker(pilot)
+        head = picker.query(".palette-pack-head").first()
+        assert head.styles.color == Color.parse(NOTE_INK)

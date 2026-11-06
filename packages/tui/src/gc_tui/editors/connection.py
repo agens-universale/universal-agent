@@ -231,9 +231,8 @@ class ConnectionEditor(Vertical):
             classes="onb-dyn group-field",
         )
         with Vertical(classes="field-group onb-dyn", id="conn-url-group"):
-            # Без set-framed: рамку рисует группа, а класс поля перебил бы её по
-            # специфичности (#conn-url.set-framed — id+класс) и дал бы вторую
-            # рамку внутри первой.
+            # Без set-framed: рамку рисует группа, а правило
+            # .form-field.set-framed дало бы вторую рамку внутри первой.
             yield self._url_input
         yield Static(
             self._token_label(),
@@ -243,7 +242,11 @@ class ConnectionEditor(Vertical):
         # has-saved: placeholder говорит одно из двух (маска сохранённого /
         # подсказка-объяснение), и различать их надо не вчитываясь — маркер красит
         # маску цветом значения (спека §3.4).
-        tcls = icls + (" has-saved" if self._token_is_mask() else "")
+        tcls = (
+            icls
+            + " set-muted"
+            + (" has-saved" if self._token_is_mask() else "")
+        )
         yield PasteInput(
             value="",
             placeholder=self._token_placeholder(),

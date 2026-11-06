@@ -190,10 +190,8 @@ def test_hint_provider_not_called_twice_for_the_same_selection():
 
 
 def test_hint_provider_not_called_again_on_repeated_desired_height():
-    """`desired_height` дёргает поллинг главного экрана каждые 250 мс, пока
-    пикер просто открыт (`TraceScreen._poll_active` → `_sync_trace_max_height`).
-    Без кэша это провайдер (полная сборка конфига для /profiles) 4 раза в
-    секунду на UI-потоке — никто не нажимал ни одной клавиши."""
+    """Повторный `desired_height` без смены выбора не зовёт провайдер (полная
+    сборка конфига для /profiles) снова."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
