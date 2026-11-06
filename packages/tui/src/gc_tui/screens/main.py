@@ -7962,15 +7962,17 @@ class TraceScreen(TraceFollowMixin, Screen):
         return not ids.isdisjoint(slash.candidates)
 
     def _is_plugin_command(self, name: str) -> bool:
-        """`/имя` — команда плагина (не перекрыта командой TUI), набранная
-        как есть или в другой раскладке: строка уходит ядру обычным
-        запросом, подстановку делает ядро."""
+        """`/имя` — команда плагина (не перекрыта командой TUI): строка
+        уходит ядру обычным запросом, подстановку делает ядро."""
+        return self._plugin_command_name(name) is not None
+
+    def _plugin_command_name(self, name: str) -> str | None:
+        """Имя команды плагина, набранной как есть или в другой раскладке
+        (не перекрытой командой TUI); иначе None."""
         known = self._known_name(name)
-        return (
-            known is not None
-            and self._registry.lookup(known) is None
-            and self._is_plugin_word(known)
-        )
+        if known is None or self._registry.lookup(known) is not None:
+            return None
+        return known if self._is_plugin_word(known) else None
 
     def _is_plugin_word(self, name: str) -> bool:
         return self._slash_resolution(name).kind == "command"
@@ -7979,9 +7981,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Запрос `/команда …` плагина — с именем в нужной раскладке
         (как в `_word_on_space`); прочее — как набрано."""
         name = (text[1:].split(None, 1) or [""])[0]
-        if not (text.startswith("/" + name) and self._is_plugin_command(name)):
+        if not text.startswith("/" + name):
             return text
-        return "/" + self._typed_name(name) + text[1 + len(name) :]
+        known = self._plugin_command_name(name)
+        return text if known is None else f"/{known}{text[1 + len(name) :]}"
 
     def _is_known_command(self, name: str) -> bool:
         """`/имя` запустит команду (или алиас), скилл или команду плагина —
