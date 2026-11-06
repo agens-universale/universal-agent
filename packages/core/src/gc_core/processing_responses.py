@@ -162,7 +162,7 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.message_policy.user_stop import (
     not_started_due_to_user_stop_output,
 )
-from gc_core.model_choice import anote_applied
+from gc_core.model_choice import awrite_pending, note_applied
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
@@ -899,7 +899,7 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
     """Единая точка выбора модели перед основным запросом.
 
     Записывает фактический уровень в State; только на новом такте логирует
-    решение и сверяет применённый выбор (`model_choice.anote_applied`).
+    решение и сверяет применённый выбор (`model_choice.note_applied`).
     Повтор запроса после переполнения контекста получает то же решение.
     Канонические схемы инструментов проецируются транспортом для выбранной модели."""
     active, decision, effective, is_new = await aroute_before_call(state, ctx)
@@ -910,7 +910,7 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
         effective,
     )
     if is_new:
-        await anote_applied(state, ctx, state._tick_decision[0])
+        note_applied(state, ctx, state._tick_decision[0])
         log_routing_decision(
             getattr(ctx, "logger", None) or _fallback_logger,
             state,
@@ -1935,6 +1935,8 @@ async def _amain_call(messages, state: State, ctx: Any):
     чью прозу заведомо переиграют, идёт с приглушённым каналом `answer` потока
     (`_answer_stream_muted`); переигранный — с полным."""
     resolved = await aprepare_main_call(state, ctx)
+    # Отложенный вывод тула цикл уже дописал: смена встаёт за ним.
+    await awrite_pending(state, ctx)
     usage_before = (
         _usage_snapshot(state)
         if getattr(state, "current_level", None) is not None

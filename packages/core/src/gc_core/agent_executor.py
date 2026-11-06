@@ -45,7 +45,7 @@ from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
-from gc_core.model_choice import note_applied_at_run_end
+from gc_core.model_choice import note_applied_at_run_end, take_pending
 from gc_core.model_router import main_model_identity
 from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.session_state import (
@@ -1454,6 +1454,13 @@ class AgentExecutor:
             if logger is not None:
                 logger.warning("model_choice_write_failed", exc_info=True)
 
+    async def _arecord_model_choices(
+        self, records: tuple[Optional[ModelChoiceRecord], ...]
+    ) -> None:
+        """Записи смены по порядку — завершение рана пишет до двух."""
+        for record in records:
+            await self._arecord_model_choice(record)
+
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
         # Keep the unconsumed queue before the await; messages arriving during
         # MCP cleanup remain pending and are returned by take_undelivered_messages.
@@ -1885,9 +1892,13 @@ class AgentExecutor:
             _stop_bound.__exit__(None, None, None)
             await _stop_lease_keeper(poller)
             await _stop_lease_keeper(keeper)
-            # Выбор, так и не дошедший до вызова; запись смены пишут после
-            # итога хода — так её строку показывает лента.
-            choice_record = note_applied_at_run_end(state, self._ctx)
+            # Смена, остановленная до запроса, и выбор, так и не дошедший
+            # до вызова; записи смены пишут после итога хода — так их
+            # строки показывает лента.
+            choice_records = (
+                take_pending(state),
+                note_applied_at_run_end(state, self._ctx),
+            )
             state_ops.leave(state)
             state.turn_level = None
             try:
@@ -1896,7 +1907,7 @@ class AgentExecutor:
                 # доходит, а `asyncio.timeout` и TaskGroup вызывающего
                 # опираются на `cancelling()`.
                 await self._arecord_turn_outcome(None, error=run_error)
-                await self._arecord_model_choice(choice_record)
+                await self._arecord_model_choices(choice_records)
             finally:
                 # Упавший ход отпускает тред выше (``_arun_turn``) — после
                 # отметки «ход окончен», не до неё.
