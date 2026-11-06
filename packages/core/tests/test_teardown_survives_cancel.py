@@ -31,7 +31,8 @@ def _wire(monkeypatch, order: list, *, stdio_raises=None, stream_raises=None):
                 raise stdio_raises
 
     class _StreamManager:
-        async def aclose_all(self):
+        async def aclose_all(self, *, in_owner_task=False):
+            assert in_owner_task
             order.append("stream")
             if stream_raises is not None:
                 raise stream_raises

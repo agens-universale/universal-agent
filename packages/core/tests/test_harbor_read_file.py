@@ -37,6 +37,11 @@ def _run_both(tmp_path, content, **kwargs):
 _CASES = [
     ("whole_file", CONTENT, {}),
     ("line_offset_limit", CONTENT, {"offset": 2, "limit": 2}),
+    (
+        "line_numbers",
+        CONTENT,
+        {"offset": 2, "limit": 2, "add_line_numbers": True},
+    ),
     ("not_found", None, {}),
     ("bad_limit", CONTENT, {"limit": "x"}),
 ]

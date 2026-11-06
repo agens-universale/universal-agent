@@ -24,7 +24,7 @@ class _Capture(logging.Handler):
         self.lines.append(logging.Formatter("%(message)s").format(record))
 
 
-def _logger(enabled, handler, root):
+def _logger(enabled, handler):
     settings = make_settings(
         {
             "logging.save_logs": False,
@@ -40,7 +40,7 @@ def test_foreign_and_root_handlers_get_masked_records():
     handler, root = _Capture(), _Capture()
     logging.getLogger().addHandler(root)
     try:
-        logger = _logger(True, handler, root)
+        logger = _logger(True, handler)
         logger.warning("Authorization: Bearer %s", TOKEN)
         logger.info("event", extra={"api_key": TOKEN, "body": f"key {TOKEN}"})
         try:
@@ -59,8 +59,30 @@ def test_foreign_and_root_handlers_get_masked_records():
 
 
 def test_masking_is_off_when_redaction_is_disabled():
-    handler, root = _Capture(), _Capture()
-    logger = _logger(False, handler, root)
+    handler = _Capture()
+    logger = _logger(False, handler)
     logger.warning("Bearer %s", TOKEN)
     release_run_logger(logger)
     assert TOKEN in handler.lines[0]
+
+
+def test_structured_message_keeps_fields_and_masks_keys_for_foreign_handler():
+    handler = _Capture()
+    logger = _logger(True, handler)
+    payload = {
+        "event": "request_done",
+        "api_key": "arbitrary-private-value",
+        "data": {"password": "another-private-value", "count": 3},
+    }
+    try:
+        logger.info(payload)
+    finally:
+        release_run_logger(logger)
+    record = handler.records[0]
+    assert isinstance(record.msg, dict)
+    assert record.msg["event"] == "request_done"
+    assert record.msg["data"]["count"] == 3
+    assert "arbitrary-private-value" not in str(record.__dict__)
+    assert "another-private-value" not in str(record.__dict__)
+    assert payload["api_key"] == "arbitrary-private-value"
+    assert payload["data"]["password"] == "another-private-value"

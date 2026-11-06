@@ -1,7 +1,6 @@
 """Tests for config-driven injection of synthetic tool schema fields."""
 
 import json
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,6 +11,7 @@ from gc_core.tools.inject_tool_fields import (
     resolve_inject_tool_fields,
     strip_injected_tool_args,
 )
+from gc_testkit.plugin import ensure_real_tools_package
 from gc_testkit.settings import fake_ctx, make_settings
 
 _REASON = "reason"
@@ -28,21 +28,8 @@ def _reason_fields(**extra: str) -> dict[str, str]:
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    stale = [
-        name
-        for name in sys.modules
-        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
-    ]
-    for name in stale:
-        sys.modules.pop(name, None)
-    yield
-    stale = [
-        name
-        for name in sys.modules
-        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
-    ]
-    for name in stale:
-        sys.modules.pop(name, None)
+    """Keep the real module identity shared by tool calls and teardown."""
+    ensure_real_tools_package()
 
 
 def _base_config(**overrides):
