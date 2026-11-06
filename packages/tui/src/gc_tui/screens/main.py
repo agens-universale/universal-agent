@@ -7962,18 +7962,32 @@ class TraceScreen(TraceFollowMixin, Screen):
         return not ids.isdisjoint(slash.candidates)
 
     def _is_plugin_command(self, name: str) -> bool:
-        """`/имя` — команда плагина (не перекрыта командой TUI): строка
-        уходит ядру обычным запросом, подстановку делает ядро."""
+        """`/имя` — команда плагина (не перекрыта командой TUI), набранная
+        как есть или в другой раскладке: строка уходит ядру обычным
+        запросом, подстановку делает ядро."""
+        known = self._known_name(name)
         return (
-            self._registry.lookup(name) is None
-            and self._slash_resolution(name).kind == "command"
+            known is not None
+            and self._registry.lookup(known) is None
+            and self._is_plugin_word(known)
         )
 
+    def _is_plugin_word(self, name: str) -> bool:
+        return self._slash_resolution(name).kind == "command"
+
+    def _plugin_command_text(self, text: str) -> str:
+        """Запрос `/команда …` плагина — с именем в нужной раскладке
+        (как в `_word_on_space`); прочее — как набрано."""
+        name = (text[1:].split(None, 1) or [""])[0]
+        if not (text.startswith("/" + name) and self._is_plugin_command(name)):
+            return text
+        return "/" + self._typed_name(name) + text[1 + len(name) :]
+
     def _is_known_command(self, name: str) -> bool:
-        """`/имя` запустит команду (или алиас) или скилл — точный разбор
-        по прогретому кэшу, как при запуске. Набранное как есть важнее
-        перевода раскладки; среди набранного как есть команда сильнее
-        скилла с тем же именем."""
+        """`/имя` запустит команду (или алиас), скилл или команду плагина —
+        точный разбор по прогретому кэшу, как при запуске. Набранное как
+        есть важнее перевода раскладки; среди набранного как есть команда
+        сильнее скилла с тем же именем."""
         return self._known_name(name) is not None
 
     async def on_command_text_area_submitted(
@@ -8111,6 +8125,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if is_command and text.startswith("/"):
             await self._handle_command(text[1:])
             return
+        text = self._plugin_command_text(text)
 
         # Ask-human mode: input is the answer to the agent's question.
         if self.app.tui_state.ask_human_state is not None:
@@ -9212,10 +9227,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         self, name: str, knows: Callable[[str], bool] | None = None
     ) -> str | None:
         """`name`, если оно распознаётся (`knows`, по умолчанию — команда,
-        алиас или скилл); иначе то же слово в другой раскладке, если так
-        оно распознаётся (`ьщвуд` → `model`); иначе None. Набранное как
-        есть важнее перевода. Единственное место, где ввод переводится
-        между раскладками."""
+        алиас, скилл или команда плагина); иначе то же слово в другой
+        раскладке, если так оно распознаётся (`ьщвуд` → `model`); иначе
+        None. Набранное как есть важнее перевода. Единственное место, где
+        ввод переводится между раскладками."""
         knows = knows or self._knows
         if knows(name):
             return name
@@ -9223,7 +9238,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         return swapped if knows(swapped) else None
 
     def _knows(self, name: str) -> bool:
-        return self._registry.lookup(name) is not None or self._is_skill(name)
+        return (
+            self._registry.lookup(name) is not None
+            or self._is_skill(name)
+            or self._is_plugin_word(name)
+        )
 
     def _is_skill(self, name: str) -> bool:
         return isinstance(self._resolve_cached_skill(name), Resolved)

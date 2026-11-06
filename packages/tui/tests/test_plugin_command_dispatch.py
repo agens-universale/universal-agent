@@ -148,3 +148,62 @@ async def test_plugin_command_shadowed_by_tui_word_runs_by_full_id(tmp_path):
         await pilot.press("enter")
         await pilot.pause(0.3)
         assert captured == [["/plug:clear go"]]
+
+
+@pytest.mark.asyncio
+async def test_plugin_command_in_other_layout_reaches_core_translated(
+    tmp_path,
+):
+    pytest.importorskip("textual")
+    from gc_tui.services.keyboard_layout import swap_layout
+
+    captured = []
+    app = _app(tmp_path, captured)
+    typed = swap_layout("review")
+    async with app.run_test() as pilot:
+        pilot.app.screen._skills_cache = [{"id": "other"}]
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = f"/{typed} main.py"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        assert captured == [["/review main.py"]]
+
+
+@pytest.mark.asyncio
+async def test_plugin_command_known_to_highlight_and_space(tmp_path):
+    """Подсветка и замена по пробелу знают команды плагинов — набранные
+    как есть и в другой раскладке."""
+    pytest.importorskip("textual")
+    from gc_tui.services.keyboard_layout import swap_layout
+
+    app = _app(tmp_path, [])
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "other"}]
+        swapped = swap_layout("review")
+        for name in ("review", "plug:review", swapped):
+            assert scr._is_known_command(name)
+            assert scr._is_plugin_command(name)
+        assert scr._word_on_space(swapped) == "review"
+        assert scr._word_on_space("review") is None
+
+
+@pytest.mark.asyncio
+async def test_tui_word_in_other_layout_beats_plugin_command(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.services.keyboard_layout import swap_layout
+
+    captured = []
+    app = _app(tmp_path, captured, command="clear")
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "other"}]
+        assert not scr._is_plugin_command(swap_layout("clear"))
+        new_calls = []
+        scr._cmd_new = lambda: new_calls.append(True)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = f"/{swap_layout('clear')} go"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        assert new_calls == [True]
+        assert captured == []
