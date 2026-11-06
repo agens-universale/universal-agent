@@ -159,10 +159,12 @@ def _restore(
         abs_path.parent.mkdir(
             parents=True, exist_ok=True
         )  # файл мог быть удалён
+        # Исполнение — только записанное: umask срежет запрещённое сама.
+        exec_bits = recorded_mode & 0o111 if recorded_mode is not None else 0
         fd = os.open(
             tmp,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
-            0o666,
+            0o666 | exec_bits,
         )
         with os.fdopen(fd, "wb") as fh:
             fh.write(baseline)
@@ -184,17 +186,17 @@ def _restore(
 def _apply_mode(path: Path, mode: int) -> None:
     """Записанный режим удалённого файла — не шире umask.
 
-    Временный файл создан с ``0o666`` под umask (``_restore``). Допустимые
-    права — его права плюс исполнение там, где есть чтение; итог —
-    записанный режим в их пределах: секрет ``0600`` при umask ``022``
-    остаётся ``0600``, ``0644`` при umask ``077`` становится ``0600``, а
-    ``0755`` при umask ``022`` — ``0755``. Отказ молчаливый, как у
-    ``_carry_mode``: файл остаётся по umask и без исполнения.
+    Временный файл создан с ``0o666`` и битами исполнения записанного режима
+    под umask (``_restore``) — это и есть допустимые права; chmod только
+    сужает их до записанного: секрет ``0600`` при umask ``022`` остаётся
+    ``0600``, ``0644`` при umask ``077`` становится ``0600``, ``0755`` при
+    umask ``022`` — ``0755``, а при ``0111`` — ``0644``: исполнения нет,
+    как у ``git checkout``. Отказ молчаливый, как у ``_carry_mode``: файл остаётся
+    по umask, исполняемый — только если таким был удалённый.
     """
     try:
         current = stat.S_IMODE(os.stat(path).st_mode)
-        allowed = current | ((current & 0o444) >> 2)
-        os.chmod(path, mode & allowed)
+        os.chmod(path, mode & current)
     except OSError:
         pass
 

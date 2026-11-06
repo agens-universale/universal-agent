@@ -425,13 +425,15 @@ def test_reverting_deleted_file_without_mode_uses_default(tmp_path):
         (0o077, 0o755, 0o700),
         (0o022, 0o600, 0o600),
         (0o022, 0o755, 0o755),
+        (0o111, 0o755, 0o644),
     ],
 )
 def test_reverting_deleted_file_mode_respects_umask(
     tmp_path, umask, mode, expected
 ):
     """Режим удалённого файла не шире umask: секрет 0600 при umask 077 не
-    становится 0644 после отката."""
+    становится 0644 после отката, а umask 0111 не даёт исполнения — как
+    ``git checkout``."""
     key = "a.cfg"
     entry = _entry(key, kind="deleted", restore_mode=mode)
     previous = os.umask(umask)
@@ -447,13 +449,16 @@ def test_reverting_deleted_file_mode_respects_umask(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="биты доступа POSIX")
-def test_reverting_deleted_exec_file_is_not_executable_if_chmod_fails(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    ("mode", "expected"), [(0o755, 0o755), (0o644, 0o644)]
+)
+def test_reverting_deleted_file_if_chmod_fails_keeps_exec_only_if_recorded(
+    tmp_path, monkeypatch, mode, expected
 ):
-    """chmod отказал — файл остаётся с режимом по umask без исполнения, а
-    не с открытыми битами временного файла."""
+    """chmod отказал — файл остаётся с режимом временного файла по umask:
+    исполнение есть, только если оно было у удалённого файла."""
     key = "a.sh"
-    entry = _entry(key, kind="deleted", restore_mode=0o755)
+    entry = _entry(key, kind="deleted", restore_mode=mode)
 
     def _refuse(*_args, **_kwargs):
         raise PermissionError("chmod запрещён")
@@ -468,4 +473,4 @@ def test_reverting_deleted_exec_file_is_not_executable_if_chmod_fails(
         os.umask(previous)
 
     assert out.restored == [key]
-    assert stat.S_IMODE((tmp_path / key).stat().st_mode) == 0o644
+    assert stat.S_IMODE((tmp_path / key).stat().st_mode) == expected
