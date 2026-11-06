@@ -17,6 +17,7 @@ from parity_harness import (
     install,
     judge_accept,
     parity_config,
+    run_thread_dump,
 )
 
 PY = sys.executable
@@ -727,3 +728,105 @@ async def test_queued_command_dropped_by_summary_logs_expanded_intent(
     intents = repr([state.user_intent_log, state.current_user_intent])
     assert "SAY-HI again" in intents
     assert "/plug:hi again" not in intents
+
+
+def _disk(ctx):
+    """Сообщения треда ``t1`` на диске: (тип или роль, текст или имя
+    вызова; у ответа тула — пусто)."""
+    rows = [row["payload"] for row in run_thread_dump(ctx, "cli", "t1")]
+    return [
+        (
+            m.get("type") or m["role"],
+            "" if "output" in m else str(m.get("content") or m.get("name")),
+        )
+        for m in rows
+    ]
+
+
+async def test_queued_message_lands_after_tool_output_on_disk(
+    tmp_path, monkeypatch
+):
+    """Реплика из очереди, пришедшая во время тула, на диске — сразу за
+    ответом тула, сообщения плагинов на неё — следом."""
+    from gc_core import processing_responses as pr
+
+    log = tmp_path / "hooks.log"
+    root = _plugin(
+        tmp_path,
+        "plug",
+        {
+            "UserPromptSubmit": _logging(log, "UPS-CTX"),
+            "SessionStart": _logging(log, "BOOT"),
+        },
+    )
+    install(monkeypatch, ScriptedBackend(_two_step_turn()))
+    executor = None
+    real = pr.aapply_tool
+
+    async def _apply(**kw):
+        if kw.get("tool_name") == "exec_calculator":
+            executor.add_message({"role": "user", "content": "queued-q"})
+        return await real(**kw)
+
+    monkeypatch.setattr(pr, "aapply_tool", _apply)
+    ctx = await _ctx(tmp_path, monkeypatch, [root])
+    executor = AgentExecutor(ctx)
+    await executor.arun(["один"], thread_id="t1")
+
+    disk = _disk(ctx)
+    call = disk.index(("function_call", "exec_calculator"))
+    assert disk[call : call + 4] == [
+        ("function_call", "exec_calculator"),
+        ("function_call_output", ""),
+        ("user", "queued-q"),
+        ("user", '<technical type="current_context">UPS-CTX</technical>'),
+    ]
+
+
+@pytest.mark.parametrize("discard", [False, True])
+async def test_stop_during_session_start_before_next_request(
+    tmp_path, monkeypatch, discard
+):
+    """Стоп, пока SessionStart работает перед вторым запросом хода: модель
+    больше не зовётся, пара вызова и ответа тула на диске цела. Вывод хука
+    записывается, только если записи после стопа не отбрасываются."""
+    from gc_core import processing_responses as pr
+
+    root = _plugin(
+        tmp_path, "plug", {"SessionStart": _logging(tmp_path / "l", "BOOT")}
+    )
+    backend = install(monkeypatch, ScriptedBackend(_two_step_turn()))
+    executor = None
+    real = pr.acontext_hook_messages
+    starts = []
+
+    async def _hooks(state, ctx, messages, *, user_prompt):
+        if not user_prompt:
+            starts.append(True)
+            if len(starts) == 2:
+                # Маркера в истории нет (как после сводки): хук сработает.
+                state.messages = [
+                    m
+                    for m in state.messages
+                    if "plugin_session_start" not in str(m.get("id"))
+                ]
+                executor.stop_run()
+        return await real(state, ctx, messages, user_prompt=user_prompt)
+
+    monkeypatch.setattr(pr, "acontext_hook_messages", _hooks)
+    ctx = await _ctx(tmp_path, monkeypatch, [root])
+    executor = AgentExecutor(ctx)
+    await executor.arun(
+        ["один"], thread_id="t1", discard_writes_after_stop=discard
+    )
+
+    boot = ("user", '<technical type="current_context">BOOT</technical>')
+    after_tool = [] if discard else [boot]
+    assert len(backend.calls) == 1
+    assert _disk(ctx) == [
+        ("user", "один"),
+        boot,
+        ("function_call", "exec_calculator"),
+        ("function_call_output", ""),
+        *after_tool,
+    ]
