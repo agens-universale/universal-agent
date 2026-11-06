@@ -911,3 +911,87 @@ def test_nothing_in_state_is_missing_from_the_thread(monkeypatch):
         assert in_state <= in_store, (
             f"{kw or 'chat_completions'}: в хранилище нет того, что уже в state: {sorted(in_state - in_store)}"
         )
+
+
+def _reject_validation() -> ValidationResult:
+    return ValidationResult(
+        ok=False,
+        action="fix_report_and_continue",
+        trace_ok=False,
+        report_ok=False,
+        trace_gaps=["m"],
+        report_mismatches=["c"],
+        missing_requirements=["m"],
+        conflicts=["c"],
+        coverage_score=0.0,
+        feedback_for_agent="improve the answer",
+    )
+
+
+def test_stop_after_finish_reject_writes_the_output(monkeypatch):
+    """Стоп после отказа судьи закрывает turn_finish в треде, без подсказок.
+
+    Запись обычным путём после Стопа отбрасывается. Вывод уже лежит в state.
+    """
+    applied: list[str] = []
+    _patch_run_agent_apply(monkeypatch, applied)
+
+    async def _reject(**_kwargs):
+        state.stop_requested = True
+        return _reject_validation()
+
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _reject,
+    )
+    state = _agent_state()
+    state.discard_writes_after_stop = True
+    persisted: list = []
+    finish = _fc("turn_finish", "call_finish", _finish_args())
+    result = run_coro(
+        arun_agent(
+            [finish],
+            state,
+            _agent_ctx(**{"agent.strict_turn_finish_validation": True}),
+            persist_messages_callback=persisted.extend,
+            check_stop=lambda: state.stop_requested,
+        )
+    )
+    assert result is None
+    assert "call_finish" in _persisted_calls(persisted)
+    payload = json.loads(_outputs_by_call(persisted)["call_finish"]["output"])
+    assert payload["status"] == "rejected_by_finish_gate"
+
+
+def test_stop_during_finish_judge_writes_the_output(monkeypatch):
+    """Обрыв запроса судьи — fail-open, но вывод turn_finish всё равно в треде."""
+    from gc_core.execution.contracts import ModelRequestStopped
+
+    applied: list[str] = []
+    _patch_run_agent_apply(monkeypatch, applied)
+
+    async def _stopped(**_kwargs):
+        state.stop_requested = True
+        raise ModelRequestStopped("Ход остановлен")
+
+    monkeypatch.setattr(
+        intent_guard_guard,
+        "avalidate_final_report_vs_user_intent",
+        _stopped,
+    )
+    state = _agent_state()
+    state.discard_writes_after_stop = True
+    persisted: list = []
+    finish = _fc("turn_finish", "call_finish", _finish_args())
+    result = run_coro(
+        arun_agent(
+            [finish],
+            state,
+            _agent_ctx(**{"agent.strict_turn_finish_validation": True}),
+            persist_messages_callback=persisted.extend,
+            check_stop=lambda: state.stop_requested,
+        )
+    )
+    assert result == finish["arguments"]
+    assert "call_finish" in _persisted_calls(persisted)

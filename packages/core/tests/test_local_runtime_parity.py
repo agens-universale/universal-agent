@@ -1,9 +1,9 @@
-"""Legacy routing execution preserves the recorded trace of requests, results and state.
+"""Legacy routing execution preserves develop's requests, results and persisted state.
 
 Only model HTTP responses are scripted; the executor, loop, tools, finish gate,
-serialization and thread store run normally. The digest file started on develop
-``320ed0b19``. It was refreshed on this branch: service nudges and the live
-permission-mode block change the trace, and that change is what lands in develop.
+serialization and thread store run normally. Reference digests are captured by
+running this same harness against the recorded develop revision, never by
+accepting snapshots from the implementation under test.
 """
 
 import hashlib
@@ -37,6 +37,21 @@ from parity_harness import (
 
 REFERENCE = (
     Path(__file__).parent / "fixtures/local_runtime_reference_320ed0b19.json"
+)
+#: Принятые отличия от эталона develop. Сам эталон из-за них не перезаписывается.
+#:
+#: - ``requests`` во всех сценариях: в запрос к модели входят служебные наджи
+#:   и живой блок режима разрешений.
+#: - ``memory_two_turns``, ``file_roundtrip``: наджи записаны в output тула,
+#:   поэтому меняются ещё ``thread``, ``meta`` и ``state``. Число вызовов и
+#:   шагов прежнее.
+#: - ``invalid_json``: вызов с битым JSON остаётся в треде и исполняется.
+#:   Вызовов и шагов на один больше; меняются ``thread``, ``meta``, ``state``
+#:   и счётчики. В запросе к модели этот вызов не подменяется служебной
+#:   репликой, если ответ уже записан, поэтому ``requests`` тоже другой.
+ACCEPTED_TRACE_CHANGES = (
+    Path(__file__).parent
+    / "fixtures/local_runtime_accepted_trace_changes.json"
 )
 
 
@@ -558,8 +573,16 @@ async def test_legacy_routing_runtime_matches_develop(
         legacy_routing_contract=True,
     )
     reference = json.loads(REFERENCE.read_text())
+    accepted = json.loads(ACCEPTED_TRACE_CHANGES.read_text())
     key = f"{name}:{'sse' if streaming else 'json'}"
-    assert summary == reference["scenarios"][key]
+    expected = dict(reference["scenarios"][key])
+    for field, value in accepted["scenarios"][key].items():
+        assert field in expected, f"{key}: в эталоне нет поля {field}"
+        assert expected[field] != value, (
+            f"{key}.{field}: принятое отличие совпало с эталоном develop"
+        )
+        expected[field] = value
+    assert summary == expected
 
 
 def test_strip_removes_only_listed_keys():
