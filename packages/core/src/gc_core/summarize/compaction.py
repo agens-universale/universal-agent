@@ -20,7 +20,10 @@ from gc_core.message_format.serialization import (
     calc_history_chars_for_trigger,
     calc_messages_chars_total,
 )
-from gc_core.message_policy.mode_messages import render_mode_block
+from gc_core.message_policy.mode_messages import (
+    mode_boundary_messages,
+    render_mode_block,
+)
 from gc_core.message_policy.todo_context import (
     render_todo_for_persistent_state,
 )
@@ -28,11 +31,12 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
-from gc_core.security.permission_mode import offers_plan_tool
+from gc_core.security.permission_mode import offers_plan_tool, resolve_mode
 from gc_core.settings import settings_of
 from gc_core.summarize.config import resolve_summary_limits_at_level
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
+    aappend_rejected_summary_trace,
     log_compaction_completed,
     log_compaction_started,
     log_summary_message_body,
@@ -49,6 +53,10 @@ from gc_core.summarize.summary_message_body import (
 from gc_core.summarize.summary_spec import (
     agent_summary_slice_mode,
     slice_summary,
+)
+from gc_core.summarize.summary_validation import (
+    SummaryRejectedError,
+    has_nonempty_summary_body,
 )
 from gc_core.summarize.thread_summarizer import (
     asummarize_dialog_via_chat_completions,
@@ -333,7 +341,9 @@ def exceeded_summary_triggers(
     tokens_hit = False
     if summary_trigger_tokens > 0:
         estimate = _prompt_token_estimate(
-            state, tags=tags, strip_think=strip_think
+            state,
+            tags=tags,
+            strip_think=strip_think,
         )
         tokens_hit = estimate is not None and estimate > summary_trigger_tokens
     return SummaryTriggerHits(chars=chars_hit, tokens=tokens_hit)
@@ -462,20 +472,26 @@ async def arun_summary_compaction(
         getattr(ctx, "model_router", None),
         getattr(state, "_call_level", None),
     )
-    summary_result = await asummarize_dialog_via_chat_completions(
-        ctx=ctx,
-        state=state,
-        full_history_messages=full_messages,
-        batch_chars=limits.incremental_batch_chars,
-        max_dialogue_chars=limits.max_dialogue_chars,
-        persistent_state_block=render_persistent_state_for_prompt(
-            memory_snapshot,
-            session_todo=read_session_todo_from_state(state),
-        ),
-        user_intent_log=source_user_log,
-        current_user_intent=source_current_intent,
-        steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
-    )
+    try:
+        summary_result = await asummarize_dialog_via_chat_completions(
+            ctx=ctx,
+            state=state,
+            full_history_messages=full_messages,
+            batch_chars=limits.incremental_batch_chars,
+            max_dialogue_chars=limits.max_dialogue_chars,
+            persistent_state_block=render_persistent_state_for_prompt(
+                memory_snapshot,
+                session_todo=read_session_todo_from_state(state),
+            ),
+            user_intent_log=source_user_log,
+            current_user_intent=source_current_intent,
+            steps_offset=int(getattr(state, "dialog_steps_offset", 0) or 0),
+        )
+    except SummaryRejectedError as exc:
+        await aappend_rejected_summary_trace(
+            ctx, trigger_reason=trigger_reason, trace=exc.trace, error=exc
+        )
+        raise
     raw_summary = str(summary_result.get("raw_summary") or "")
     num_batches = int(summary_result.get("num_batches") or 0)
     trace = summary_result.get("trace")
@@ -499,6 +515,13 @@ async def arun_summary_compaction(
             raw_summary_chars=len(raw_summary),
         )
         agent_summary_text = raw_summary
+    # Reject unusable projected content before changing state or persistence.
+    if not has_nonempty_summary_body(agent_summary_text):
+        error = SummaryRejectedError("compaction produced no usable summary")
+        await aappend_rejected_summary_trace(
+            ctx, trigger_reason=trigger_reason, trace=trace, error=error
+        )
+        raise error
     memory_append_deltas = coerce_working_memory_deltas(
         summary_result.get("memory_append_deltas")
     )
@@ -510,6 +533,16 @@ async def arun_summary_compaction(
     preview_chars = _intent_log_preview_chars_from_ctx(ctx)
     log_summary_raw_text(logger, log_ctx, raw_summary)
 
+    # Сводка — baseline. Блок режима в ней про режим, который действует
+    # сейчас, а не про отметку до сжатия. Фразы выхода не дописываем: старый
+    # текст входа из истории вырезан, и пустой блок — это и есть выход.
+    # Служебный user после сводки остаётся, если сжатие прошло мимо этого сдвига.
+    can_propose_plan = offers_plan_tool(ctx, state)
+    _, state.mode_announced = mode_boundary_messages(
+        current=resolve_mode(ctx).value,
+        announced=getattr(state, "mode_announced", None),
+        can_propose_plan=can_propose_plan,
+    )
     summary_message_content = apply_summary_state_patch(
         state=state,
         raw_summary=agent_summary_text,
@@ -521,7 +554,7 @@ async def arun_summary_compaction(
         summarized_messages_count=len(full_messages),
         intent_log_preview_chars=preview_chars,
         kept_messages=kept_messages,
-        can_propose_plan=offers_plan_tool(ctx, state),
+        can_propose_plan=can_propose_plan,
     )
     if isinstance(trace, dict):
         _fill_trace_final_output(

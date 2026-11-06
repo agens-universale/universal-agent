@@ -32,6 +32,50 @@ def _coord(monkeypatch, calls, backend="chat_completions"):
     return coord
 
 
+def test_force_without_batch_keeps_nothing(monkeypatch):
+    """Ручной /compact батч не получает и хвост не дописывает."""
+    calls = []
+    coord = _coord(monkeypatch, calls)
+    coord._state.messages = [{"role": "user", "content": "давно", "id": "old"}]
+
+    async def _replace(**kw):
+        calls.append(kw)
+        kw["state"].messages = [
+            {"role": "user", "content": "SUMMARY", "id": "sum"}
+        ]
+
+    rsc = importlib.import_module("gc_core.run_summary_coordinator")
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _replace)
+    run_coro(coord.aforce_compact_once())
+    assert calls[0]["kept_messages"] == []
+    assert [m["id"] for m in coord._state.messages] == ["sum"]
+
+
+def test_force_ignores_batch_that_is_not_the_tail(monkeypatch):
+    """Батч не в конце истории — в сводку он не возвращается."""
+    calls = []
+    coord = _coord(monkeypatch, calls)
+    coord._state.messages = [{"role": "user", "content": "давно", "id": "old"}]
+    stray = {
+        "role": "user",
+        "content": "посмотри",
+        "id": "u_img",
+        "attachments": [{"id": "img", "origin": "user"}],
+    }
+
+    async def _replace(**kw):
+        calls.append(kw)
+        kw["state"].messages = [
+            {"role": "user", "content": "SUMMARY", "id": "sum"}
+        ]
+
+    rsc = importlib.import_module("gc_core.run_summary_coordinator")
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _replace)
+    run_coro(coord.aforce_compact_once([stray], "user_ask"))
+    assert calls[0]["kept_messages"] == []
+    assert [m["id"] for m in coord._state.messages] == ["sum"]
+
+
 def test_force_compacts_once_ignoring_threshold(monkeypatch):
     calls = []
     coord = _coord(monkeypatch, calls)
@@ -47,3 +91,17 @@ def test_force_noop_in_responses_mode(monkeypatch):
     coord = _coord(monkeypatch, calls, backend="responses")
     run_coro(coord.aforce_compact_once())
     assert calls == []
+
+
+def test_force_compact_leaves_nudge_counters_to_the_caller(monkeypatch):
+    """Сводка не знает про подсказки: счётчики остаются вызывающему."""
+    calls = []
+    coord = _coord(monkeypatch, calls)
+    coord._state.tool_usage_notice_cnt = {"session_memory": 4}
+    coord._state.todo_reminder_cnt = 3
+
+    applied = run_coro(coord.aforce_compact_once())
+
+    assert applied is True
+    assert coord._state.tool_usage_notice_cnt == {"session_memory": 4}
+    assert coord._state.todo_reminder_cnt == 3

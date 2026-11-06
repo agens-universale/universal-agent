@@ -150,6 +150,8 @@ TRANSIENT_STATE_DEFAULTS = {
     # продолженный этим прогоном (перенесённый снимок).
     "suspended_turn": lambda: None,
     "resumed_turn": lambda: None,
+    # Запись смены модели между подготовкой вызова и запросом.
+    "pending_choice_record": lambda: None,
 }
 
 

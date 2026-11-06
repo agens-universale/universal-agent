@@ -565,19 +565,21 @@ def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
 
 def test_summary_compress_declares_own_consumer(monkeypatch):
     from gc_core.summarize.summary_llm_steps import acompress_summary_text
+    from gc_core.summarize.summary_spec import assemble_summary_xml
 
-    _patch_llm_transport(monkeypatch, "short")
+    short = assemble_summary_xml({"task_and_context": "short"})
+    _patch_llm_transport(monkeypatch, short)
     ctx, router = _router_ctx()
     out = run_coro(
         acompress_summary_text(
             ctx=ctx,
             state=_state(),
-            summary_text="x" * 100,
-            max_chars=10,
+            summary_text=assemble_summary_xml({"task_and_context": "longer"}),
+            max_chars=len("short"),
             max_tokens=50,
         )
     )
-    assert out == "short"
+    assert out == short
     router.resolve.assert_called_once_with("summary")
 
 

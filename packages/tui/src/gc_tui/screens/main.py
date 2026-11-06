@@ -6146,6 +6146,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Тред прогона раннера: его цель, иначе активный."""
         return self.app.run_thread_id(runner) or self._active_task_id
 
+    def _show_compact_error(self, on_screen: bool) -> None:
+        """Упавшее `/compact` открытого треда — строкой ошибки: сжатие не
+        ход, строки итога «✕ Ошибка» у него нет."""
+        err = self._active_run_error()
+        if on_screen and err:
+            self._mount_standalone(f"runtime: {err}", "error")
+
     def _on_run_finished(self, runner, kind: str) -> None:
         """Спадающий фронт прогона: исход — в мету треда прогона.
 
@@ -6157,7 +6164,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         run_tid = self._run_task_id(runner)
         on_screen = run_tid == self._active_task_id
         edits = self._close_turn_edits(kind, run_tid, on_screen=on_screen)
-        if self._store is None or run_tid is None or kind == "compact":
+        if kind == "compact":
+            self._show_compact_error(on_screen)
+            return
+        if self._store is None or run_tid is None:
             return
         # Запись итога этого хода уже в файле (ядро пишет её до выхода
         # прогона): дочитать хвост до решения.

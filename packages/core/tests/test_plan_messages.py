@@ -13,6 +13,7 @@ from gc_core.message_policy.plan_messages import (
     plan_resumed_message,
 )
 from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
@@ -116,14 +117,20 @@ def _told(ex, state):
 def test_agent_is_told_about_plan_once_and_the_mark_is_kept():
     ex, state = _executor("plan")
     assert _told(ex, state) == [
-        wrap_technical_user_content(PLAN_ENTER_MESSAGE)
+        wrap_technical_user_content(
+            PLAN_ENTER_MESSAGE,
+            technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
+        )
     ]
     assert state.shared.mode_announced == "plan"
     assert _told(ex, state) == []  # второй запрос молчит
 
     state.shared.permission_mode = "edit"
     assert _told(ex, state) == [
-        wrap_technical_user_content(plan_cancel_message("edit"))
+        wrap_technical_user_content(
+            plan_cancel_message("edit"),
+            technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
+        )
     ]
     assert state.shared.mode_announced is None
 

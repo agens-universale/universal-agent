@@ -1,30 +1,17 @@
 """Acceptance: session_think + inject_tool_fields.reason (spec 03)."""
 
 import json
-import sys
 
 import pytest
 from gc_core.tools import aapply_tool, abuild_tools_data
+from gc_testkit.plugin import ensure_real_tools_package
 from gc_testkit.settings import fake_ctx, make_settings
 
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    stale = [
-        name
-        for name in sys.modules
-        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
-    ]
-    for name in stale:
-        sys.modules.pop(name, None)
-    yield
-    stale = [
-        name
-        for name in sys.modules
-        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
-    ]
-    for name in stale:
-        sys.modules.pop(name, None)
+    """Keep the real module identity shared by tool calls and teardown."""
+    ensure_real_tools_package()
 
 
 def _inject_config(**overrides):

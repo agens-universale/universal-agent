@@ -5,6 +5,7 @@ import logging
 import os
 import weakref
 from datetime import timedelta
+from functools import wraps
 from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlsplit, urlunsplit
 
@@ -21,6 +22,7 @@ from gc_core.tools.connect_mcp.durable_scope import (
     call_tool_with_progress,
     require_no_reconnect,
 )
+from gc_core.tools.connect_mcp.session_task import SessionTask
 from gc_core.tools.connect_mcp.transport import _resolve_command
 from gc_core.utils.async_http import build_ssl_context
 from gc_core.utils.ssl_config import get_client_cert, get_verify_ssl
@@ -37,29 +39,13 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class _PersistentSessionManager:
-    """Кэш живых ``ClientSession``, ключ — ``(id(loop), server_key)``.
+    """Сессии изолированы по владельцу агента, event loop и серверу.
 
-    Раньше здесь крутился ВЕЧНЫЙ event loop в фоновом демон-потоке, а вызовы
-    уезжали в него через ``run_coroutine_threadsafe``. Это было нужно, пока
-    ядро было синхронным: корутину SDK негде было исполнить. Теперь цикл
-    агента асинхронный, и сессия живёт прямо на loop вызывающего.
-
-    Ключ включает ``id(loop)`` по той же причине, что у httpx-клиентов в
-    ``utils/async_http.py``: ``ClientSession`` держит открытые соединения,
-    привязанные к своему loop. Сессия, открытая на одном loop и
-    переиспользованная на другом, дала бы «Event loop is closed» в самый
-    неудобный момент — посреди вызова тула.
-
-    Ключ включает и ВЛАДЕЛЬЦА (см. ``gc_core.mcp_session_owner``). Без него сессии были
-    общими для всех прогонов на одном loop, и ``arun`` первого доигравшего
-    агента закрывал живые сессии остальных. Для ``stream_*`` это не просто
-    потеря состояния, а падение: сессии SDK построены на anyio-scope'ах, вошли
-    в них задачи-владельцы, и закрытие из чужой задачи отменяет не ту::
-
-        CancelledError: Cancelled via cancel scope … by <Task pending Task-5>
-
-    Воспроизводилось тремя ``AsyncAgent`` на одном loop, каждый со своим
-    браузерным сервером.
+    Каждую SDK-сессию обслуживает постоянная SessionTask: открытие
+    и закрытие anyio-контекстов происходят в одной задаче. Запросы отменяются
+    отдельно от сессии. Поэтому ошибка A
+    не закрывает вложенный scope B и не отменяет весь ход агента.
+    Низкоуровневые get/set/ainvalidate вызываются из задачи данной сессии.
     """
 
     def __init__(self) -> None:
@@ -71,6 +57,30 @@ class _PersistentSessionManager:
         self._loops: Dict[tuple, Any] = {}
         # key -> weakref на задачу, в которой сессию открыли.
         self._tasks: Dict[tuple, Any] = {}
+        self._workers: Dict[tuple, SessionTask] = {}
+
+    async def call(self, server_key, callback):
+        key = self._key(server_key)
+        worker = self._workers.get(key)
+        if worker is None or worker.task.done():
+            worker = SessionTask(
+                current_owner(), lambda: self.ainvalidate(server_key)
+            )
+            self._workers[key] = worker
+            worker.task.add_done_callback(
+                lambda done: self._worker_done(key, worker, done)
+            )
+        return await worker.call(callback)
+
+    async def request(self, server_key, callback):
+        worker = self._workers[self._key(server_key)]
+        return await worker.request(callback)
+
+    def _worker_done(self, key, worker, done):
+        if self._workers.get(key) is worker:
+            self._workers.pop(key, None)
+        if not done.cancelled() and (error := done.exception()) is not None:
+            _LOGGER.warning("MCP session owner cleanup failed: %s", error)
 
     @staticmethod
     def _loop_id() -> int:
@@ -152,6 +162,14 @@ class _PersistentSessionManager:
         Закрываем сами и молча: стек всё равно уже негоден, а ошибки закрытия
         не должны подменять исходную причину, из-за которой сессию сносят.
         """
+        worker = self._workers.get(self._key(server_key))
+        if worker is not None and worker.task is not asyncio.current_task():
+            try:
+                await worker.close()
+            finally:
+                if worker.task.done():
+                    self._workers.pop(self._key(server_key), None)
+            return
         try:
             owner_task = self._tasks.pop(self._key(server_key), None)
         except RuntimeError:
@@ -170,11 +188,9 @@ class _PersistentSessionManager:
         выход из cancel scope в чужой задаче даёт ``RuntimeError``, который
         мы здесь же и глотаем — то есть сессия остаётся незакрытой МОЛЧА.
 
-        Сегодня инвариант держится сам собой: тулы ждутся инлайн, и закрытие
-        приходит из той же задачи. Сломает его первый же параллельный
-        диспетчер или ``asyncio.wait_for`` у встраивающего — и сломает без
-        единой строки в логе. Поэтому сверяем задачу и предупреждаем: молчать
-        о нарушенном инварианте хуже, чем шуметь.
+        Рабочий путь вызывает закрытие через постоянную SessionTask.
+        Проверка оставлена для низкоуровневых клиентов set_session: нельзя
+        передать чужой anyio-стек и молча считать его корректно закрытым.
         """
         if opened_in is not None:
             try:
@@ -190,11 +206,16 @@ class _PersistentSessionManager:
                     getattr(opened_in, "get_name", lambda: opened_in)(),
                     getattr(here, "get_name", lambda: here)(),
                 )
+        cancelled = None
         for cm in reversed(cms):
             try:
                 await cm.__aexit__(None, None, None)
+            except asyncio.CancelledError as exc:
+                cancelled = exc
             except Exception:
                 pass
+        if cancelled is not None:
+            raise cancelled
 
     async def aclose_all(self, *, in_owner_task: bool = False) -> None:
         """Закрыть сессии ЭТОГО владельца на ЭТОМ loop.
@@ -209,10 +230,24 @@ class _PersistentSessionManager:
         except RuntimeError:
             return
         owner = current_owner()
+        workers = [
+            (key, worker)
+            for key, worker in self._workers.items()
+            if key[0] == owner and key[1] == loop_id
+        ]
+        if workers:
+            # Сразу послать закрытие всем: отмена ожидающего не оставляет B/C
+            # без команды закрытия. Каждый стек закрывает его постоянная задача.
+            closing = asyncio.gather(
+                *(worker.close() for _, worker in workers)
+            )
+            await asyncio.shield(closing)
         keys = [
             k for k in self._cm_stacks if k[0] == owner and k[1] == loop_id
         ]
-        for key in keys:
+        # SDK sessions enter nested anyio scopes in their owner task.
+        # Close servers in reverse opening order, not just each server's stack.
+        for key in reversed(keys):
             cms = self._cm_stacks.pop(key, None)
             self._sessions.pop(key, None)
             self._loops.pop(key, None)
@@ -232,6 +267,34 @@ class _PersistentSessionManager:
 
 
 _SESSION_MANAGER = _PersistentSessionManager()
+
+
+def _in_session_task(function):
+    @wraps(function)
+    async def invoke(*args, **kwargs):
+        server_key = kwargs.get("server_key", args[0] if args else None)
+        return await _SESSION_MANAGER.call(
+            server_key, lambda: function(*args, **kwargs)
+        )
+
+    return invoke
+
+
+class McpToolCallError(McpError):
+    """Сервер ответил ошибкой на tools/call: повтор может дублировать эффект."""
+
+
+async def _call_tool_request(session, name, arguments):
+    try:
+        return await call_tool_with_progress(session, name, arguments)
+    except McpError as exc:
+        raise McpToolCallError(exc.error) from exc
+
+
+def _raise_rpc_error(exc):
+    # Ошибка инструмента — ответ сервера, а не повод повторять внешний эффект.
+    if isinstance(exc, McpToolCallError) and not _is_session_terminated(exc):
+        raise exc
 
 
 def _is_loopback_url(url: str) -> bool:
@@ -538,7 +601,7 @@ async def _call_tool_stream_sse_async(
     ):
         await session.initialize()
 
-        result = await call_tool_with_progress(session, tool_name, arguments)
+        result = await _call_tool_request(session, tool_name, arguments)
 
         # Преобразуем контент в JSON-совместимый вид.
         content_items: List[Any] = []
@@ -584,25 +647,17 @@ async def _enter_session(transport_cm: Any) -> Tuple[Any, Any]:
     try:
         await session.__aenter__()
     except BaseException:
-        await _exit_quietly(transport_cm)
+        await _SESSION_MANAGER._aclose_stack((transport_cm,))
         raise
     try:
         await session.initialize()
     except BaseException:
-        await _exit_quietly(session)
-        await _exit_quietly(transport_cm)
+        await _SESSION_MANAGER._aclose_stack((transport_cm, session))
         raise
     return session, (transport_cm, session)
 
 
-async def _exit_quietly(cm: Any) -> None:
-    """Выйти из контекст-менеджера, не подменяя исходную ошибку."""
-    try:
-        await cm.__aexit__(None, None, None)
-    except Exception:
-        pass
-
-
+@_in_session_task
 async def _call_tool_stream_sse_persistent(
     server_key: str,
     base_url: str,
@@ -616,7 +671,7 @@ async def _call_tool_stream_sse_persistent(
 ) -> Dict[str, Any]:
     """
     Persistent вариант: держим открытой одну ClientSession поверх живого
-    SSE-коннекта в фоновом event loop _SESSION_MANAGER, переиспользуем между вызовами.
+    SSE-коннекта в постоянной задаче текущего event loop.
     """
     session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
 
@@ -640,7 +695,7 @@ async def _call_tool_stream_sse_persistent(
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await call_tool_with_progress(s, tool_name, arguments)
+        result = await _call_tool_request(s, tool_name, arguments)
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
@@ -658,14 +713,19 @@ async def _call_tool_stream_sse_persistent(
 
     if session is not None:
         try:
-            return await _call(session)
-        except Exception:
+            return await _SESSION_MANAGER.request(
+                server_key, lambda session=session: _call(session)
+            )
+        except Exception as exc:
+            _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
             require_no_reconnect()
             session = None
 
     session = await _open_session()
-    return await _call(session)
+    return await _SESSION_MANAGER.request(
+        server_key, lambda session=session: _call(session)
+    )
 
 
 async def acall_tool_stream_sse(
@@ -701,7 +761,8 @@ async def acall_tool_stream_sse(
                 arguments=arguments,
                 cert=cert,
             )
-        except Exception:
+        except Exception as exc:
+            _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
             require_no_reconnect()
 
@@ -766,6 +827,7 @@ async def _list_tools_stream_http_async(
 
                 return tools
         except McpError as exc:
+            _raise_rpc_error(exc)
             last_error = exc
             is_session_terminated = _is_session_terminated(exc)
             has_fallback = endpoint != endpoints[-1]
@@ -836,7 +898,7 @@ async def _call_tool_stream_http_async(
             ):
                 await session.initialize()
 
-                result = await call_tool_with_progress(
+                result = await _call_tool_request(
                     session, tool_name, arguments
                 )
 
@@ -858,6 +920,7 @@ async def _call_tool_stream_http_async(
                     "isError": is_error,
                 }
         except McpError as exc:
+            _raise_rpc_error(exc)
             last_error = exc
             is_session_terminated = _is_session_terminated(exc)
             has_fallback = endpoint != endpoints[-1]
@@ -898,16 +961,20 @@ async def _aopen_persistent_http_session(
     try:
         read_stream, write_stream, _ = await transport.__aenter__()
     except BaseException:
-        await _exit_quietly(http_client)
+        await _SESSION_MANAGER._aclose_stack((http_client,))
         raise
     new_session = ClientSession(read_stream, write_stream)
     try:
         await new_session.__aenter__()
+    except BaseException:
+        await _SESSION_MANAGER._aclose_stack((http_client, transport))
+        raise
+    try:
         await new_session.initialize()
     except BaseException:
-        await _exit_quietly(new_session)
-        await _exit_quietly(transport)
-        await _exit_quietly(http_client)
+        await _SESSION_MANAGER._aclose_stack(
+            (http_client, transport, new_session)
+        )
         raise
     _SESSION_MANAGER.set_session(
         server_key, new_session, (http_client, transport, new_session)
@@ -918,7 +985,7 @@ async def _aopen_persistent_http_session(
 async def _acall_tool_on_session(
     s: ClientSession, tool_name: str, arguments: Dict[str, Any]
 ) -> Dict[str, Any]:
-    result = await call_tool_with_progress(s, tool_name, arguments)
+    result = await _call_tool_request(s, tool_name, arguments)
     content_items: List[Any] = []
     for item in getattr(result, "content", []) or []:
         if hasattr(item, "model_dump"):
@@ -933,6 +1000,7 @@ async def _acall_tool_on_session(
     }
 
 
+@_in_session_task
 async def _call_tool_stream_http_persistent(
     server_key: str,
     base_url: str,
@@ -970,8 +1038,11 @@ async def _call_tool_stream_http_persistent(
     # Try with cached session first
     if session is not None:
         try:
-            return await _call(session)
-        except Exception:
+            return await _SESSION_MANAGER.request(
+                server_key, lambda session=session: _call(session)
+            )
+        except Exception as exc:
+            _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
             require_no_reconnect()
             session = None
@@ -981,8 +1052,11 @@ async def _call_tool_stream_http_persistent(
     for endpoint in endpoints:
         try:
             session = await _open_session(endpoint)
-            return await _call(session)
+            return await _SESSION_MANAGER.request(
+                server_key, lambda session=session: _call(session)
+            )
         except McpError as exc:
+            _raise_rpc_error(exc)
             last_error = exc
             await _SESSION_MANAGER.ainvalidate(server_key)
             require_no_reconnect()
@@ -1046,7 +1120,8 @@ async def acall_tool_stream_http(
             arguments=arguments,
             cert=cert,
         )
-    except Exception:
+    except Exception as exc:
+        _raise_rpc_error(exc)
         # Персистентная сессия не задалась — забываем её и идём stateless.
         await _SESSION_MANAGER.ainvalidate(server_key)
         require_no_reconnect()
@@ -1139,7 +1214,7 @@ async def _call_tool_stream_stdio_async(
     ):
         await session.initialize()
 
-        result = await call_tool_with_progress(session, tool_name, arguments)
+        result = await _call_tool_request(session, tool_name, arguments)
 
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
@@ -1160,6 +1235,7 @@ async def _call_tool_stream_stdio_async(
         }
 
 
+@_in_session_task
 async def _call_tool_stream_stdio_persistent(
     server_key: str,
     server_cfg: Dict[str, Any],
@@ -1169,7 +1245,7 @@ async def _call_tool_stream_stdio_persistent(
 ) -> Dict[str, Any]:
     """
     Persistent вариант: держим stdio MCP-сервер живым (один subprocess +
-    одна ClientSession) в фоновом event loop _SESSION_MANAGER.
+    одна ClientSession) в постоянной задаче текущего event loop.
     """
     session: Optional[ClientSession] = _SESSION_MANAGER.get_session(server_key)
 
@@ -1190,7 +1266,7 @@ async def _call_tool_stream_stdio_persistent(
         return new_session
 
     async def _call(s: ClientSession) -> Dict[str, Any]:
-        result = await call_tool_with_progress(s, tool_name, arguments)
+        result = await _call_tool_request(s, tool_name, arguments)
         content_items: List[Any] = []
         for item in getattr(result, "content", []) or []:
             if hasattr(item, "model_dump"):
@@ -1208,14 +1284,19 @@ async def _call_tool_stream_stdio_persistent(
 
     if session is not None:
         try:
-            return await _call(session)
-        except Exception:
+            return await _SESSION_MANAGER.request(
+                server_key, lambda session=session: _call(session)
+            )
+        except Exception as exc:
+            _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
             require_no_reconnect()
             session = None
 
     session = await _open_session()
-    return await _call(session)
+    return await _SESSION_MANAGER.request(
+        server_key, lambda session=session: _call(session)
+    )
 
 
 async def acall_tool_stream_stdio(
@@ -1246,7 +1327,8 @@ async def acall_tool_stream_stdio(
                 tool_name=tool_name,
                 arguments=arguments,
             )
-        except Exception:
+        except Exception as exc:
+            _raise_rpc_error(exc)
             await _SESSION_MANAGER.ainvalidate(server_key)
             require_no_reconnect()
 
