@@ -839,7 +839,7 @@ def create_profile_file(path, skeleton: str) -> None:
 
 
 def ensure_pointer_anchor(path, template_path, key: str = "profile") -> None:
-    """Гарантировать топ-уровневый якорь `key:` (`profile:`/`level:`) в СУЩЕСТВУЮЩЕМ
+    """Гарантировать топ-уровневый якорь `key:` (`profile:`/`model:`) в СУЩЕСТВУЮЩЕМ
     config.yml.
 
     Якорь уже есть (любое значение) — идемпотентный no-op. Иначе вставляет блок

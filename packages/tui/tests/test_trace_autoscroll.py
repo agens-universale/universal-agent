@@ -3,8 +3,8 @@
 Пока агент работает и юзер отскроллил вверх читать — новые события НЕ дёргают
 вид вниз. Отправка своего сообщения (pending) форсит скролл вниз (re-engage)."""
 
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 @pytest.mark.asyncio
@@ -22,6 +22,30 @@ async def test_at_bottom_true_when_no_overflow(tmp_path):
         assert (
             scr._trace_is_at_bottom() is True
         )  # пустой трейс — тривиально внизу
+
+
+@pytest.mark.asyncio
+async def test_short_trace_stays_top_aligned(tmp_path):
+    """Лента ниже окна прижата к низу якорем, но прокрутка не уходит
+    в минус: контент стоит сверху."""
+    from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test(size=(80, 40)) as pilot:
+        scr = pilot.app.screen
+        scr._mount_trace_row(
+            prefix="x ", content="новое", kind_class="line-meta"
+        )
+        await pilot.pause()
+        await pilot.pause()
+        trace = scr.query_one("#trace", VerticalScroll)
+        assert trace.max_scroll_y == 0
+        assert trace.scroll_y == 0
 
 
 @pytest.mark.asyncio
@@ -170,6 +194,7 @@ async def test_thinking_indicator_reshow_visible_does_not_scroll(tmp_path):
         scr = pilot.app.screen
         scr._show_thinking_indicator(state="thinking")  # видим, не скрыт
         await pilot.pause()
+        await pilot.pause()  # прижатие первого показа — две отсрочки
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         trace.scroll_end = lambda **kw: calls.append(kw)
@@ -264,9 +289,9 @@ async def test_user_send_force_scrolls_to_very_bottom(tmp_path):
         assert (
             trace.scroll_offset.y >= trace.max_scroll_y - 1
         )  # (1) доехали до низа
-        # старт прогона: индикатор появляется → _sync_trace_max_height меняет потолок
+        # старт прогона: индикатор появляется → высота ленты меняется
         scr._show_thinking_indicator(state="thinking")
-        await pilot.pause(0.5)  # poll → пересчёт потолка
+        await pilot.pause(0.5)
         assert (
             trace.scroll_offset.y >= trace.max_scroll_y - 1
         )  # (2) остались у низа

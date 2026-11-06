@@ -235,30 +235,74 @@ def test_profile_content_overlays_project_config(isolated_cwd, tmp_path):
     assert meta.ref is not None and meta.ref.root_kind == "project"
 
 
-def test_level_from_profile_beats_project_but_loses_to_cli(
+def test_model_from_profile_beats_project_but_loses_to_cli(
     isolated_cwd, tmp_path
 ):
+    """Слово уровня — выбор только при непустом реестре: без реестра флаг
+    уходит в легаси `agent.model`."""
+    from gc_core.config import apply_cli_overrides, load_settings
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(
+        base_config,
+        {**_MINIMAL_BASE, "models": {"a": {}}, "slots": {"default": "a"}},
+    )
+
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {"profile": "work", "model": "max"},
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml", {"model": "light"}
+    )
+
+    loaded = load_settings(str(base_config))
+    assert loaded.settings.model == "light"
+
+    overridden = apply_cli_overrides(
+        loaded, extra_overrides={"model": "default"}
+    )
+    assert overridden.settings.model == "default"
+    assert overridden.provenance.source("model").layer == "cli"
+
+
+def test_profile_level_beats_base_model(isolated_cwd, tmp_path):
+    """Старый ключ профиля `level` переносится на своём слое и перебивает
+    `model` основного конфига; слово уровня резолвится в модель своего слота."""
+    from gc_core.config import load_settings
+    from gc_core.model_router import ModelRouter
+
+    base_config = tmp_path / "base_config.yml"
+    _write_yaml(
+        base_config,
+        {
+            **_MINIMAL_BASE,
+            "profile": "work",
+            "model": "a",
+            "models": {"a": {}, "b": {}},
+            "slots": {"default": "a"},
+        },
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml",
+        {"level": "max", "slots": {"max": "b"}},
+    )
+
+    loaded = load_settings(str(base_config))
+    assert loaded.settings.model == "max"
+    router = ModelRouter(loaded, choice_provider=lambda: "max")
+    assert router.resolve("main").alias == "b"
+
+
+def test_param_override_level_maps_to_model(isolated_cwd, tmp_path):
     from gc_core.config import apply_cli_overrides, load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
-
-    _write_yaml(
-        isolated_cwd / ".gc" / "config.yml",
-        {"profile": "work", "level": "max"},
-    )
-    _write_yaml(
-        isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"}
-    )
-
     loaded = load_settings(str(base_config))
-    assert loaded.settings.level == "light"
 
-    overridden = apply_cli_overrides(
-        loaded, extra_overrides={"level": "default"}
-    )
-    assert overridden.settings.level == "default"
-    assert overridden.provenance.source("level").layer == "cli"
+    overridden = apply_cli_overrides(loaded, extra_overrides={"level": "auto"})
+    assert overridden.settings.model == "auto"
 
 
 def test_env_interpolation_per_file_before_validation(
@@ -482,7 +526,7 @@ def test_model_inherits_from_backend_overridden_by_profile(
     )
 
     loaded = load_settings(str(base_config))
-    resolved = ModelRouter(loaded, level_provider=lambda: "default").resolve(
+    resolved = ModelRouter(loaded, choice_provider=lambda: "default").resolve(
         "main"
     )
 

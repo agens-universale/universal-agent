@@ -742,3 +742,24 @@ def test_url_error_comes_from_one_dictionary():
 
     assert connection._URL_ERROR is URL_ERROR
     assert model_entry_form._URL_ERROR is URL_ERROR
+
+
+def test_no_footer_uses_bracketed_keys():
+    """Подсказки клавиш — «Клавиша — действие» через ` · ` (дизайн-код §11),
+    а не старое «[Esc] back»."""
+    import re
+
+    import gc_tui
+    from pathlib import Path
+
+    bracketed = re.compile(r"\[(Esc|Enter|↑|↓|PgUp|PgDn|End|Home|Tab|Space)\b")
+    root = Path(gc_tui.__file__).parent
+    hits = [
+        f"{path.relative_to(root)}:{n}"
+        for path in root.rglob("*.py")
+        for n, line in enumerate(
+            path.read_text(encoding="utf-8").split("\n"), 1
+        )
+        if bracketed.search(line)
+    ]
+    assert hits == []

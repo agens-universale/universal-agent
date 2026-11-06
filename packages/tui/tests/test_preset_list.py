@@ -65,11 +65,11 @@ async def test_open_mounts_status_and_rows_with_cursor_on_first():
         await pilot.pause()
         rows = list(host.query(".test-preset-row"))
         assert len(rows) == 3
-        assert str(rows[0].render()).startswith("▸ OpenRouter")
+        assert str(rows[0].content).startswith("▸ OpenRouter")
         assert "https://openrouter.ai/api/v1/chat/completions" in str(
-            rows[0].render()
+            rows[0].content
         )
-        assert str(rows[1].render()).startswith("  Cloud.ru")
+        assert str(rows[1].content).startswith("  Cloud.ru")
         status = str(host.query_one(".host-url-preset-hint").render())
         assert status == _HINT
 
@@ -84,8 +84,8 @@ async def test_move_advances_cursor_to_next_row():
         host.ctrl.move(1)
         await pilot.pause()
         rows = list(host.query(".test-preset-row"))
-        assert str(rows[0].render()).startswith("  OpenRouter")
-        assert str(rows[1].render()).startswith("▸ Cloud.ru")
+        assert str(rows[0].content).startswith("  OpenRouter")
+        assert str(rows[1].content).startswith("▸ Cloud.ru")
 
 
 async def test_pick_returns_selected_url_and_closes_list():
@@ -177,7 +177,7 @@ async def test_apply_filter_narrows_to_one_row_empty_filter_shows_all():
         await pilot.pause()
         visible = [w for w in host.query(".test-preset-row") if w.display]
         assert len(visible) == 1
-        assert "Cloud.ru" in str(visible[0].render())
+        assert "Cloud.ru" in str(visible[0].content)
         host.ctrl.apply_filter("")
         await pilot.pause()
         visible = [w for w in host.query(".test-preset-row") if w.display]

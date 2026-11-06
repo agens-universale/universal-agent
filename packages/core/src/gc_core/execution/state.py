@@ -126,6 +126,7 @@ STATE_FIELDS = ROUTING_FIELDS + (
     "_session_compact_batch_snapshot",
     "session_compact_applied",
     "allow_pairing_persist",
+    "applied_choice",
     "pending_tool_attachments",
     "vision_probe_turn",
 )
@@ -134,6 +135,9 @@ STATE_FIELDS = ROUTING_FIELDS + (
 #: §9) и в снимок не идут — после восстановления берут эти умолчания.
 TRANSIENT_STATE_DEFAULTS = {
     "closing_reply": str,
+    # «Прогон что-то выдал» — для отката отправки во фронтенде; живёт в
+    # памяти прогона, снимок его не несёт.
+    "produced_output": bool,
     "vision_audience": lambda: None,
     "vision_live_ids": frozenset,
     "vision_request_limit": lambda: None,
@@ -142,6 +146,12 @@ TRANSIENT_STATE_DEFAULTS = {
     # Вопрос, на котором ход приостановлен (ask_human_suspends): его пишет
     # тул в ядре и уносит запись сессии; ребёнку и в activity не нужен.
     "pending_question": lambda: None,
+    # Ход, приостановленный на вопросе (снимок для записи сессии), и ход,
+    # продолженный этим прогоном (перенесённый снимок).
+    "suspended_turn": lambda: None,
+    "resumed_turn": lambda: None,
+    # Запись смены модели между подготовкой вызова и запросом.
+    "pending_choice_record": lambda: None,
 }
 
 
@@ -314,6 +324,7 @@ class ExecutionState:
                 )
             data["_tick_decision"] = (memo[0], memo[1], decision, memo[3])
         data.setdefault("turn_messages_start", None)
+        data.setdefault("applied_choice", None)
         state.__dict__ = data
         state.shared = SharedStateData(**data["shared"])
         state.tool_call_outputs_store = ToolCallOutputsStore.from_dict(

@@ -18,7 +18,7 @@ class AskHumanBanner(VerticalScroll):
     """Banner с вопросом агента.
 
     VerticalScroll + max-height: длинный вопрос скроллится внутри баннера,
-    не выдавливает поле ввода и футер (см. _sync_trace_max_height).
+    не выдавливает поле ввода и футер (см. _sync_chrome_caps).
 
     Тон ink/bright (НЕ violet — violet только в empty-state).
     Стили — `.ask-human-banner` в styles.tcss.

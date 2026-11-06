@@ -106,7 +106,13 @@ def revert_paths(
         if entry.kind == "created":
             _delete_created(key, abs_path, outcome)
             continue
-        _restore(key, abs_path, baseline_for, outcome)
+        _restore(
+            key,
+            abs_path,
+            baseline_for,
+            outcome,
+            mode=entry.restore_mode,
+        )
     return outcome
 
 
@@ -128,6 +134,8 @@ def _restore(
     abs_path: Path,
     baseline_for: Callable[[str], Optional[bytes]],
     outcome: RevertOutcome,
+    *,
+    mode: int | None,
 ) -> None:
     try:
         baseline = baseline_for(key)
@@ -136,6 +144,9 @@ def _restore(
     if baseline is None:
         outcome.skipped.append((key, REASON_NO_BASELINE))
         return
+    # Файла нет (откат удаления) — переносить режим не с чего, берём записанный
+    # (``_apply_mode``).
+    recorded_mode = mode if not abs_path.exists() else None
 
     # Имя временного файла — СВОЁ, и создаётся он эксклюзивно: с предсказуемым
     # `<файл>.revert.tmp` запись шла по заранее подложенной на этом месте
@@ -148,14 +159,19 @@ def _restore(
         abs_path.parent.mkdir(
             parents=True, exist_ok=True
         )  # файл мог быть удалён
+        # Исполнение — только записанное: umask срежет запрещённое сама.
+        exec_bits = recorded_mode & 0o111 if recorded_mode is not None else 0
         fd = os.open(
             tmp,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
-            0o666,
+            0o666 | exec_bits,
         )
         with os.fdopen(fd, "wb") as fh:
             fh.write(baseline)
-        _carry_mode(abs_path, tmp)
+        if recorded_mode is not None:
+            _apply_mode(tmp, recorded_mode)
+        else:
+            _carry_mode(abs_path, tmp)
         atomic_replace(tmp, abs_path)
     except OSError:
         try:
@@ -165,6 +181,24 @@ def _restore(
         outcome.skipped.append((key, REASON_WRITE_FAILED))
         return
     outcome.restored.append(key)
+
+
+def _apply_mode(path: Path, mode: int) -> None:
+    """Записанный режим удалённого файла — не шире umask.
+
+    Временный файл создан с ``0o666`` и битами исполнения записанного режима
+    под umask (``_restore``) — это и есть допустимые права; chmod только
+    сужает их до записанного: секрет ``0600`` при umask ``022`` остаётся
+    ``0600``, ``0644`` при umask ``077`` становится ``0600``, ``0755`` при
+    umask ``022`` — ``0755``, а при ``0111`` — ``0644``: исполнения нет,
+    как у ``git checkout``. Отказ молчаливый, как у ``_carry_mode``: файл
+    остаётся по umask, исполняемый — только если таким был удалённый.
+    """
+    try:
+        current = stat.S_IMODE(os.stat(path).st_mode)
+        os.chmod(path, mode & current)
+    except OSError:
+        pass
 
 
 def _carry_mode(source: Path, dest: Path) -> None:

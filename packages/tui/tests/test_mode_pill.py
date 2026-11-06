@@ -1,7 +1,7 @@
 """Пилюля режима разрешений: глиф, имя, подсказка хоткея, ширина."""
 
 from gc_core.security.permission_mode import AVAILABLE_MODES, mode_label
-from gc_tui.palette import DEEP_DIM, INK
+from gc_tui.palette import AUTO_MODE, DEEP_DIM, INK, RUN_COLOR
 from gc_tui.services.mode_pill import MODE_HINTS, render_mode_pill
 
 _MODES = [mode.value for mode in AVAILABLE_MODES]
@@ -25,6 +25,13 @@ def test_every_available_mode_has_a_unique_glyph_a_name_and_a_hint():
 def test_pill_colors_by_mode():
     assert INK in str(render_mode_pill("edit").spans[0].style)
     assert DEEP_DIM in str(render_mode_pill("manual").spans[0].style)
+
+
+def test_auto_mode_is_lighter_amber_than_frames():
+    """Подпись авторежима — свой светлый амбер, рамки остаются RUN_COLOR."""
+    style = str(render_mode_pill("auto").spans[0].style)
+    assert AUTO_MODE in style
+    assert AUTO_MODE != RUN_COLOR
 
 
 def test_pill_width_follows_its_content():

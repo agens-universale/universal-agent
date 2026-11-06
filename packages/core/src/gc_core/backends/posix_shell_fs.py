@@ -16,6 +16,7 @@ import os
 import posixpath
 import re
 import shlex
+import stat as stat_module
 import uuid
 from abc import abstractmethod
 from typing import Any, Iterable, Optional, Sequence
@@ -52,6 +53,7 @@ _NO_PRINTF_FIND = re.compile(
     re.IGNORECASE,
 )
 _PERMISSION_DENIED = re.compile("permission denied", re.IGNORECASE)
+_IS_A_DIRECTORY = re.compile("is a directory", re.IGNORECASE)
 #: Путь в кавычках в строке ошибки: GNU ``'P'``, старые coreutils ``‘P’``.
 _QUOTED = re.compile("'[^']*'|‘[^’]*’")
 
@@ -230,24 +232,25 @@ class PosixShellFsMixin:
 
     async def stat(self, path: str) -> dict:
         res = await self._afs_exec(
-            f"stat -c '%s|%Y|%a|%F' {shlex.quote(path)}"
+            f"stat -c '%s|%Y|%a|%f' {shlex.quote(path)}"
         )
         if res.return_code != 0:
             raise self._fs_failure(path, res, what="stat")
-        size, mtime, mode, kind = res.stdout.strip().split("|", 3)
+        size, mtime, mode, mode_hex = res.stdout.strip().split("|", 3)
+        raw_mode = int(mode_hex, 16)
         return {
             "size": int(size),
             "mtime": int(mtime),
             "mode": mode,
-            "is_file": kind == "regular file",
-            "is_dir": kind == "directory",
-            "is_symlink": "symbolic link" in kind,
+            "is_file": stat_module.S_ISREG(raw_mode),
+            "is_dir": stat_module.S_ISDIR(raw_mode),
+            "is_symlink": stat_module.S_ISLNK(raw_mode),
         }
 
     async def stat_info(
         self, path: str, follow_symlinks: bool = False
     ) -> dict:
-        st = await self.stat(path)  # stat -c '%s|%Y|%a|%F' wrapper
+        st = await self.stat(path)
         return {
             "size": st["size"],
             "mtime": st["mtime"],
@@ -338,6 +341,8 @@ class PosixShellFsMixin:
         message = cls._failure_message(what, path, res)
         if _PERMISSION_DENIED.search(err):
             return PermissionError(message)
+        if _IS_A_DIRECTORY.search(err):
+            return IsADirectoryError(message)
         return OSError(message)
 
     @classmethod

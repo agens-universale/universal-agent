@@ -42,17 +42,17 @@ def test_alias_strip_think_overrides_the_global_flag():
             },
         }
     )
-    router = ModelRouter(cfg, level_provider=lambda: "light")
+    router = ModelRouter(cfg, choice_provider=lambda: "light")
     keep = router.resolve("main")
     assert keep.strip_think is False
     assert persist_reasoning_content_for_model(keep, cfg) is True
 
-    router = ModelRouter(cfg, level_provider=lambda: "default")
+    router = ModelRouter(cfg, choice_provider=lambda: "default")
     drop = router.resolve("main")
     assert drop.strip_think is True
     assert persist_reasoning_content_for_model(drop, cfg) is False
 
-    router = ModelRouter(cfg, level_provider=lambda: "max")
+    router = ModelRouter(cfg, choice_provider=lambda: "max")
     inherit = router.resolve("main")
     assert inherit.strip_think is None
     assert persist_reasoning_content_for_model(inherit, cfg) is False

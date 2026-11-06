@@ -13,14 +13,14 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
-from gc_tui.palette import ACCENT, BRIGHT, DIM, INK
+from gc_tui.palette import ACCENT, BG, BRIGHT, DIM, INK, OVERLAY_BG
 
 
 class RenameScreen(ModalScreen[Optional[str]]):
     DEFAULT_CSS = f"""
     RenameScreen {{ align: center middle; }}
     #rename-dialog {{
-        background: #161A23;
+        background: {OVERLAY_BG};
         border: round {ACCENT};
         border-title-color: {BRIGHT};
         border-title-style: bold;
@@ -28,7 +28,7 @@ class RenameScreen(ModalScreen[Optional[str]]):
         width: 64;
         height: auto;
     }}
-    #rename-input {{ border: none; background: #0E1119; color: {INK}; }}
+    #rename-input {{ border: none; background: {BG}; color: {INK}; }}
     #rename-hint {{ color: {DIM}; margin-top: 1; }}
     """
 

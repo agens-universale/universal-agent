@@ -40,7 +40,7 @@ def _registry(**agent):
     raw = {**RAW, "agent": {"use_local_subagents": True, **agent}}
     cfg = AppConfig.model_validate(raw)
     ctx = run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: "default")
+        rc.acreate_run_context(cfg, choice_provider=lambda: "default")
     )
     return ctx.tools_data, cfg
 

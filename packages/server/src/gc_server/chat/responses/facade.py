@@ -252,7 +252,7 @@ class ResponsesFacade:
             await self._admissions[thread_id].validate()
             await self._index.save(record)
             flow = await ToolFlow.start(
-                self._index.threads, thread_key(thread_id)
+                self._index.threads, thread_key(thread_id), root=cwd
             )
         except BaseException:
             await self._release(thread_id, "")

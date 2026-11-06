@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import tui_settings, wait_until
 
 pytestmark = pytest.mark.asyncio
 
@@ -302,18 +302,44 @@ async def test_plan_stands_in_a_titled_frame_and_feedback_leaves_a_trace_line(
         assert _rework_lines(screen) == 1
 
 
-def test_turn_that_ended_with_a_plan_is_not_called_done():
-    from gc_tui.widgets.thinking_indicator import (
-        DONE_LABEL_PLAN,
-        ThinkingIndicator,
-    )
+async def test_turn_that_ended_with_a_plan_is_not_called_done():
+    from gc_tui.services.turn_outcome import turn_head
 
-    plain = ThinkingIndicator(state="done", frozen_elapsed=6)
-    assert "Выполнил за 6с" in plain._render_text().plain
-    plan = ThinkingIndicator(
-        state="done", frozen_elapsed=6, done_label=DONE_LABEL_PLAN
-    )
-    assert "План готов за 6с" in plan._render_text().plain
+    def head(plan):
+        return turn_head(
+            "completed", plan=plan, duration_sec=6, ended_at=None
+        ).plain
+
+    assert "Выполнил за 6с" in head(False)
+    assert "План готов за 6с" in head(True)
+
+
+class _ApprovingRunner(_Runner):
+    """Продолжение, как у исполнителя: в начале прогона принятый план
+    становится утверждённым в мете сессии."""
+
+    def __init__(self, tmp_path) -> None:
+        super().__init__()
+        self._tmp_path = tmp_path
+
+    def start(self, **kwargs):
+        mode, _thread_id = self.transitions[-1]
+        _save_plan(self._tmp_path, status="approved", mode=mode)
+        return super().start(**kwargs)
+
+
+class _ApprovingRunner(_Runner):
+    """Продолжение, как у исполнителя: в начале прогона принятый план
+    становится утверждённым в мете сессии."""
+
+    def __init__(self, tmp_path) -> None:
+        super().__init__()
+        self._tmp_path = tmp_path
+
+    def start(self, **kwargs):
+        mode, _thread_id = self.transitions[-1]
+        _save_plan(self._tmp_path, status="approved", mode=mode)
+        return super().start(**kwargs)
 
 
 async def test_plan_frame_changes_colour_once_the_plan_is_accepted(tmp_path):
@@ -322,14 +348,17 @@ async def test_plan_frame_changes_colour_once_the_plan_is_accepted(tmp_path):
     _save_plan(tmp_path)
     async with _app(tmp_path).run_test() as pilot:
         screen = pilot.app.screen
-        await _open_session(pilot)
+        await _open_session(pilot, _ApprovingRunner(tmp_path))
         screen._cmd_plan()
         await pilot.pause()
         panel = screen.query_one(".plan-panel")
         assert not panel.has_class("plan-accepted")
         assert str(panel.border_title) == "☰ предложенный план"
         await pilot.press("1")
-        await pilot.pause()
+        # Продолжение запущено и закрыто тиком: рамка сверена с сессией.
+        await wait_until(
+            pilot, lambda: not screen._run_pending, "ход продолжения закрыт"
+        )
         assert panel.has_class("plan-accepted")
         assert str(panel.border_title) == "☰ утверждённый план"
         screen._rework_plan()
@@ -337,7 +366,7 @@ async def test_plan_frame_changes_colour_once_the_plan_is_accepted(tmp_path):
         assert str(panel.border_title) == "☰ предложенный план"
 
 
-def test_only_the_current_accepted_plan_counts_as_accepted():
+async def test_only_the_current_accepted_plan_counts_as_accepted():
     from gc_core.plan_store import new_plan_block, plan_is_accepted
 
     plan = new_plan_block("1. шаг")
@@ -443,3 +472,33 @@ async def test_closing_the_banner_keeps_a_trace_scrolled_up_in_place(
         await pilot.pause(0.5)
 
         assert trace.scroll_offset.y == 10
+
+
+async def test_plan_options_height_stays_on_selection():
+    """Пояснение режима — только у выделенного варианта, в узком окне оно
+    переносится: высота блока вариантов — под самый длинный выбор, ↑/↓ не
+    двигают ни варианты, ни тело плашки (дизайн-код §9)."""
+    from gc_tui.services.hint_height import wrapped_lines
+    from gc_tui.widgets.plan_banner import PLAN_OPTIONS, PlanApprovalBanner
+    from textual.app import App
+
+    banner = PlanApprovalBanner()
+
+    class _A(App):
+        def compose(self):
+            yield banner
+
+    async with _A().run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        opts = banner.query_one(".cb-options")
+        heights = {opts.size.height}
+        for _ in range(len(PLAN_OPTIONS)):
+            banner.move_selection(1)
+            await pilot.pause()
+            heights.add(opts.size.height)
+        assert len(heights) == 1
+        width = opts.content_region.width
+        longest = max(wrapped_lines(v, width) for v in opts._variants())
+        # Перенос есть (вариантов с подсказкой — 6 строк), и он влезает.
+        assert longest > len(PLAN_OPTIONS) + 2
+        assert heights.pop() >= longest

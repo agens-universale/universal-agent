@@ -120,3 +120,45 @@ def test_assistant_none_content_returns_none():
     msg = {"role": "assistant", "content": None, "id": "m1"}
     ev = map_message(msg, no=1, ts="2026-05-22T12:00:00+00:00")
     assert ev is None
+
+
+def test_skill_message_carries_skill_id():
+    ev = map_message(
+        {
+            "role": "user",
+            "content": "WIRE\nпридумай",
+            "display_content": "придумай",
+            "skill_loaded": "supercoder:brainstorming",
+        },
+        no=1,
+        ts="",
+    )
+    assert ev.kind == "user"
+    assert ev.summary == "придумай"
+    assert ev.skill == "supercoder:brainstorming"
+
+
+def test_skill_only_delivery_is_reply_with_empty_text():
+    ev = map_message(
+        {
+            "role": "user",
+            "content": "WIRE",
+            "display_content": "",
+            "skill_loaded": "qa-x",
+        },
+        no=1,
+        ts="",
+    )
+    assert ev.kind == "user"
+    assert ev.summary == ""
+    assert ev.skill == "qa-x"
+
+
+def test_empty_display_without_skill_is_not_rendered():
+    msg = {"role": "user", "content": "WIRE", "display_content": ""}
+    assert map_message(msg, no=1, ts="") is None
+
+
+def test_plain_user_message_has_no_skill():
+    ev = map_message({"role": "user", "content": "привет"}, no=1, ts="")
+    assert ev.skill is None

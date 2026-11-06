@@ -77,7 +77,7 @@ def preparation(monkeypatch, tmp_path):
         loaded = make_settings(
             {
                 "models": models,
-                "level": mode,
+                "model": mode,
                 "slots": {"light": "fast", "default": "mid", "max": "big"},
                 "backend.api_mode": "chat_completions",
                 "backend.vision": False,
@@ -114,7 +114,7 @@ def preparation(monkeypatch, tmp_path):
             skills_registry=SimpleNamespace(list_skills=skills),
             agent_store=MemoryAgentStore(fallback=None),
         )
-        ctx.model_router = ModelRouter(ctx, level_provider=lambda: "light")
+        ctx.model_router = ModelRouter(ctx, choice_provider=lambda: "light")
         native = SimpleNamespace(
             context_provider=None,
             stores={"files": SimpleNamespace()},
@@ -209,7 +209,7 @@ async def test_actual_root_preparation_preserves_private_request_pairs(
     root, observed = await root_turn(monkeypatch, worker, native)
     assert root.auto_available is True
     assert root.routing_params.safe_level == "auto"
-    assert root.model_router.live_level() == "auto"
+    assert root.model_router.live_choice() == "auto"
     assert root.prepared_request_equivalence.groups == (0, 1, 2)
     assert (
         root.prepared_request_equivalence.context_id
@@ -221,7 +221,7 @@ async def test_actual_root_preparation_preserves_private_request_pairs(
     ) < observed["events"].index("prepare")
     assert observed["data"]["require_request_equivalence"] is True
     for weak, strong in (("light", "default"), ("default", "max")):
-        resolved = root.model_router.resolve("main", level_override=weak)
+        resolved = root.model_router.resolve("main", target_override=weak)
         assert (
             _floor_target(
                 root, weak, resolved, RoutingParams(safe_level=strong)
@@ -252,7 +252,7 @@ async def test_equivalent_root_aliases_do_not_enable_auto(
         _floor_target(
             root,
             "light",
-            root.model_router.resolve("main", level_override="light"),
+            root.model_router.resolve("main", target_override="light"),
             RoutingParams(safe_level="default"),
         )
         is None
@@ -350,8 +350,8 @@ async def test_prepared_root_preserves_manual_level(
 ):
     worker, native = preparation(mode=mode)
     root, _ = await root_turn(monkeypatch, worker, native)
-    assert root.model_router.live_level() == mode
-    assert root.model_router.active_level() == mode
+    assert root.model_router.live_choice() == mode
+    assert root.model_router.active_target() == mode
     assert root.prepared_request_equivalence.groups == (0, 1, 2)
 
 

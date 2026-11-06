@@ -114,6 +114,29 @@ class SummaryCompactionLog:
         return trigger_reason_label(self.trigger_reason)
 
 
+async def aappend_rejected_summary_trace(
+    ctx: Any,
+    *,
+    trigger_reason: str,
+    trace: Mapping[str, Any] | None,
+    error: ValueError,
+) -> None:
+    """Record a refusal without masking it if diagnostics are unavailable."""
+    trace_data = dict(trace or {})
+    trace_data.update(status="rejected", error=str(error))
+    try:
+        await aappend_summary_trace_record(
+            ctx,
+            trigger_reason=trigger_reason,
+            trace_data=trace_data,
+            newly_summarized_message_id="",
+        )
+    except Exception as exc:
+        logger = logger_from_ctx(ctx)
+        if logger is not None:
+            logger.warning("Could not record rejected summary trace: %s", exc)
+
+
 def _cli_print(*lines: str) -> None:
     for line in lines:
         if line.startswith("[summary]"):

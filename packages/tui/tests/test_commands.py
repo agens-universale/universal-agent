@@ -1,11 +1,13 @@
 """Реестр команд: метаданные, lookup, closest-match (§4)."""
 
+import pytest
 from gc_testkit.tui_support import tui_settings
 from gc_tui.commands import (
     Command,
     CommandRegistry,
     build_default_registry,
     closest_command,
+    field_word,
 )
 
 
@@ -84,16 +86,18 @@ def test_default_registry_is_exactly_keep_set():
             "diff",
             "view",
             "export",
+            "copy",
             "help",
             "init",
             "compact",
             "quit",
             "buffer",
-            "level",
-            "profiles",
+            "model",
+            "profile",
             "rigor",
             "gate",
             "answers",
+            "reasoning",
         ]
     )
 
@@ -112,11 +116,79 @@ def test_init_description_is_analysis_and_generation():
     )
 
 
-def test_sessions_command_has_no_aliases():
+def test_legacy_session_names_are_not_aliases():
     reg = build_default_registry()
-    assert reg.lookup("sessions") is not None
-    for removed in ("resume", "tasks", "history"):
+    for removed in ("tasks", "history"):
         assert reg.lookup(removed) is None
+
+
+_ALIASES = {
+    "help": ("?", "справка", "помощь"),
+    "sessions": ("resume", "continue", "сессии", "сессия"),
+    "model": ("models", "модель", "модели"),
+    "profile": ("profiles", "профиль", "профили"),
+    "diff": ("правки", "дифф"),
+    "view": ("просмотр",),
+    "notices": ("уведомления",),
+    "new": ("clear", "новая", "очистить"),
+    "plan": ("план",),
+    "config": ("конфиг",),
+    "settings": ("настройки",),
+    "voice": ("голос",),
+    "export": ("экспорт",),
+    "copy": ("копировать", "копия"),
+    "compact": ("summarize", "сжать"),
+    "init": ("инит",),
+    "skills": ("навыки", "скиллы"),
+    "skill": ("навык", "скилл"),
+    "status": ("статус",),
+    "stop": ("cancel", "стоп", "отмена"),
+    "mcp": ("мсп",),
+    "buffer": ("буфер",),
+    "quit": ("exit", "выход", "выйти"),
+    "rigor": ("строгость",),
+    "gate": ("самопроверка", "гейт"),
+    "answers": ("формат",),
+    "reasoning": ("рассуждения",),
+}
+
+
+def test_default_registry_aliases():
+    reg = build_default_registry()
+    assert {c.name: c.aliases for c in reg.list_commands()} == _ALIASES
+
+
+def _bare(name: str, *aliases: str) -> Command:
+    return Command(name, aliases, "", "")
+
+
+def test_register_rejects_alias_taken_by_name():
+    reg = CommandRegistry()
+    reg.register(_bare("new"))
+    with pytest.raises(ValueError, match="new"):
+        reg.register(_bare("sessions", "new"))
+
+
+def test_register_rejects_alias_taken_by_alias():
+    reg = CommandRegistry()
+    reg.register(_bare("new", "clear"))
+    with pytest.raises(ValueError, match="clear"):
+        reg.register(_bare("plan", "clear"))
+
+
+def test_register_rejects_name_taken_by_alias():
+    reg = CommandRegistry()
+    reg.register(_bare("new", "clear"))
+    with pytest.raises(ValueError, match="clear"):
+        reg.register(_bare("clear"))
+
+
+def test_lookup_takes_word_as_typed():
+    """Раскладку переводит экран (сначала команда или скилл как набрано),
+    реестр ищет только набранное."""
+    reg = build_default_registry()
+    assert reg.lookup("модели").name == "model"
+    assert reg.lookup("ьщвуд") is None
 
 
 def test_sessions_description_has_no_picker_word():
@@ -151,6 +223,7 @@ def test_command_hotkeys():
         "new": "Ctrl+N",
         "config": "F5 · Ctrl+G",
         "export": "",
+        "copy": "",
         "compact": "",
         "init": "",
         "view": "",
@@ -174,6 +247,8 @@ def test_default_registry_frequency_order():
     assert names == [
         "help",
         "sessions",
+        "model",
+        "profile",
         "diff",
         "view",
         "notices",
@@ -183,6 +258,7 @@ def test_default_registry_frequency_order():
         "settings",
         "voice",
         "export",
+        "copy",
         "compact",
         "init",
         "skills",
@@ -192,11 +268,10 @@ def test_default_registry_frequency_order():
         "mcp",
         "buffer",
         "quit",
-        "level",
-        "profiles",
         "rigor",
         "gate",
         "answers",
+        "reasoning",
     ]
 
 
@@ -239,8 +314,10 @@ def test_settings_command_description_lists_all_sections():
     description = (
         build_default_registry().lookup("settings").description.lower()
     )
-    for section in SECTIONS:
-        head = section.lower().split()[0].split("-")[0]
+    # «Обновление» не вмещается в ширину палитры и осознанно опущено
+    # (решение владельца); остальные названы основой слова.
+    for section in set(SECTIONS) - {"Обновление"}:
+        head = section.lower().split()[0].split("-")[0][:5]
         assert head in description, (
             f"секция «{section}» не названа в: {description}"
         )
@@ -287,6 +364,13 @@ def test_toggle_descriptions_generated_from_specs():
         assert cmd.description == raw[:1].upper() + raw[1:]
 
 
+def test_reasoning_description_is_label_only():
+    from gc_tui.commands import build_default_registry
+
+    cmd = build_default_registry().lookup("reasoning")
+    assert cmd.description == "Рассуждения модели в ленте (reasoning)"
+
+
 async def test_f6_opens_settings_with_input_focused():
     """F6 открывает /settings при фокусе в поле ввода.
 
@@ -313,3 +397,11 @@ def test_voice_command_registered_with_hotkey():
     assert cmd is not None
     assert cmd.hotkey == "Ctrl+T"  # F1-справка генерится из реестра
     assert not cmd.is_toggle and not cmd.args  # без аргумента
+
+
+def test_field_word_writes_russian_alias_as_command():
+    reg = build_default_registry()
+    new = reg.lookup("new")
+    assert field_word(new, "очистить") == "new"
+    assert field_word(new, "clear") == "clear"
+    assert field_word(new, "new") == "new"

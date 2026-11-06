@@ -124,9 +124,10 @@ chat:
 `agent_overrides` → `agent_overrides` поверхности. Ключ правки — путь настройки
 через точку (`agent.max_steps`, `backend.completions_url`) или вложенная секция
 (`agent: {max_steps: 100}`); прежние плоские имена (`max_steps`) — отказ старта
-с подсказкой пути. `agent_overrides.level: auto` включает автовыбор уровня
-модели ([auto-routing.md](auto-routing.md)); недоступен — уведомление в лог
-прогона уровнем `warning`, агент работает уровнем `default`.
+с подсказкой пути. `agent_overrides.model: auto` включает автовыбор модели
+([auto-routing.md](auto-routing.md)); недоступен — уведомление в лог прогона
+уровнем `warning`, агент работает моделью слота `default`. Поля выбора модели
+в теле запроса нет: выбор задаёт только конфиг сервера.
 
 **Токен.** Непустой `auth_token` — каждый запрос с
 `Authorization: Bearer <token>`, иначе `403`. POST принимается только с

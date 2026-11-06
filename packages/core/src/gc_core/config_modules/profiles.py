@@ -370,7 +370,9 @@ def find_active_ref(
     return discover_profiles(roots).get(name)
 
 
-_MODEL_SECTION_KEYS = frozenset({"models", "slots", "assign", "level"})
+_MODEL_SECTION_KEYS = frozenset(
+    {"models", "slots", "assign", "model", "level"}
+)
 
 
 @dataclass(frozen=True)

@@ -45,7 +45,7 @@ def _parent_ctx(cfg, *, level: str):
     ctx.tools_spec = []
     ctx.tools_description = []
     ctx.is_tui = False
-    ctx.model_router = ModelRouter(cfg, level_provider=lambda: level)
+    ctx.model_router = ModelRouter(cfg, choice_provider=lambda: level)
     return ctx
 
 
@@ -171,6 +171,52 @@ class TestChildModelResolve:
             == "deepseek-max"
         )
 
+    def test_child_breaker_error_suggests_model_command(self, tmp_path):
+        """Пин и активная модель в предохранителе — честная ошибка с
+        подсказкой /model, не /level."""
+        import pytest
+
+        raw = {
+            "models": {"flash": {}, "deepseek-max": {}},
+            "slots": {"default": "flash"},
+            "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
+        }
+        cfg = _make_config(tmp_path, raw)
+        ctx = _parent_ctx(cfg, level="default")
+        ctx.model_router.breaker.trip("flash", "5xx")
+        ctx.model_router.breaker.trip("deepseek-max", "5xx")
+        runner = SubagentRunner(ctx, _make_orchestrator_state())
+
+        with pytest.raises(RuntimeError) as excinfo:
+            _await(runner._build_child_ctx(tool_name="subagent_planner"))
+
+        message = str(excinfo.value)
+        assert "Выберите другую модель /model или профиль /profile." in (
+            message
+        )
+        assert "/level" not in message
+
+    def test_child_freezes_parent_applied_choice_not_pending(self, tmp_path):
+        """Ребёнок берёт применённый выбор родителя: ожидающий выбор (тихая
+        отметка) ещё не действует ни у родителя, ни у ребёнка."""
+        raw = {
+            "models": {"flash": {}, "smart": {}},
+            "slots": {"light": "flash", "max": "smart"},
+        }
+        cfg = _make_config(tmp_path, raw)
+        ctx = _parent_ctx(cfg, level="max")
+        parent_state = _make_orchestrator_state()
+        parent_state.applied_choice = "light"
+        ctx.active_state = parent_state
+        runner = SubagentRunner(ctx, parent_state)
+
+        child_ctx = _await(
+            runner._build_child_ctx(tool_name="subagent_worker")
+        )
+
+        assert child_ctx.model_router.live_choice() == "light"
+        assert child_ctx.model_router.resolve("main").alias == "flash"
+
     def test_unpinned_subagent_falls_back_to_active_level(self, tmp_path):
         raw = {
             "models": {"flash": {}, "deepseek-max": {}},
@@ -241,8 +287,8 @@ class TestChildModelResolve:
         assert child_ctx.model_router.resolve("summary").alias == "flash"
         assert child_ctx.model_router.resolve("main").alias == "deepseek-max"
 
-    def test_child_router_level_provider_is_frozen_not_live(self, tmp_path):
-        """level_provider ребёнка — константа уровня хода родителя, не живой
+    def test_child_router_choice_provider_is_frozen_not_live(self, tmp_path):
+        """choice_provider ребёнка — константа уровня хода родителя, не живой
         TUI-провайдер: смена /level посреди работы субагента не должна уводить
         модель уже стартовавшего дочернего хода."""
         raw = {
@@ -262,7 +308,7 @@ class TestChildModelResolve:
         ctx.tools_description = []
         ctx.is_tui = False
         ctx.model_router = ModelRouter(
-            cfg, level_provider=lambda: level_box["value"]
+            cfg, choice_provider=lambda: level_box["value"]
         )
         runner = SubagentRunner(ctx, _make_orchestrator_state())
 
@@ -337,7 +383,7 @@ class TestChildModelResolve:
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="default")
         ctx.model_router = ModelRouter(
-            cfg, level_provider=lambda: "default", force_legacy=True
+            cfg, choice_provider=lambda: "default", force_legacy=True
         )
         runner = SubagentRunner(ctx, _make_orchestrator_state())
 
@@ -382,7 +428,7 @@ class TestChildModelResolve:
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "backend": {"api_mode": "chat_completions"},
-            "level": "auto",
+            "model": "auto",
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
@@ -394,7 +440,7 @@ class TestChildModelResolve:
             child_ctx.model_router.is_subagent_child
             and child_ctx.model_router.auto_allowed
         )
-        assert child_ctx.model_router.live_level() == "auto"
+        assert child_ctx.model_router.live_choice() == "auto"
         child_state = _await(runner._build_child_state("worker"))
         child_ctx.attach_state(child_state)
         assert (
@@ -416,7 +462,7 @@ class TestChildModelResolve:
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "backend": {"api_mode": "chat_completions"},
-            "level": "auto",
+            "model": "auto",
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
@@ -448,7 +494,7 @@ class TestChildModelResolve:
             "models": {"only": {}},
             "slots": {"default": "only"},
             "backend": {"api_mode": "chat_completions"},
-            "level": "auto",
+            "model": "auto",
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
@@ -456,12 +502,12 @@ class TestChildModelResolve:
         child_ctx = _await(
             runner._build_child_ctx(tool_name="subagent_worker")
         )
-        assert child_ctx.model_router.live_level() == "auto"
+        assert child_ctx.model_router.live_choice() == "auto"
         assert child_ctx.auto_available is False
         child_state = _await(runner._build_child_state("worker"))
         child_ctx.attach_state(child_state)
         child_state.current_level = "light"  # даже при чужом решении
-        assert child_ctx.model_router.active_level() == "default"
+        assert child_ctx.model_router.active_target() == "default"
 
     def test_bound_child_has_no_auto(self, tmp_path):
         raw = {
@@ -469,7 +515,7 @@ class TestChildModelResolve:
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "assign": {"subagents": {"subagent_worker": "big"}},
             "backend": {"api_mode": "chat_completions"},
-            "level": "auto",
+            "model": "auto",
         }
         cfg = _make_config(tmp_path, raw)
         ctx = _parent_ctx(cfg, level="auto")
@@ -512,7 +558,7 @@ class TestChildCtxToolsSurviveModelSelection:
                 },
             },
             "slots": {"light": "loose", "default": "strict", "max": "strict"},
-            "level": "auto",
+            "model": "auto",
             "backend": {
                 "openai_strict_tools_schema": False,
                 "send_tool_strict": True,
@@ -607,14 +653,14 @@ class TestChildLeavesItsLevelAfterRun:
     (`state_ops.leave` во внутреннем `finally` `SubagentRunner._arun_internal`),
     симметрично `AgentExecutor.arun`
     (`test_active_state_cleared_after_agent_executor_run_completes`): иначе
-    `child_ctx.model_router.active_level()` после возврата показывал бы уровень
+    `child_ctx.model_router.active_target()` после возврата показывал бы уровень
     последнего решения ребёнка вместо нейтрального default."""
 
     RAW = {
         "models": {"fast": {}, "mid": {}, "big": {}},
         "slots": {"light": "fast", "default": "mid", "max": "big"},
         "backend": {"api_mode": "chat_completions"},
-        "level": "auto",
+        "model": "auto",
     }
 
     def _run(self, tmp_path, fake_run_agent):
@@ -642,7 +688,7 @@ class TestChildLeavesItsLevelAfterRun:
         self._run(tmp_path, fake_run_agent)
 
         assert seen["state"].current_level is None
-        assert seen["ctx"].model_router.active_level() == "default"
+        assert seen["ctx"].model_router.active_target() == "default"
 
     def test_level_is_left_when_the_child_run_fails(self, tmp_path):
         seen = {}
@@ -656,4 +702,4 @@ class TestChildLeavesItsLevelAfterRun:
 
         assert "subagent_run_failed" in out
         assert seen["state"].current_level is None
-        assert seen["ctx"].model_router.active_level() == "default"
+        assert seen["ctx"].model_router.active_target() == "default"

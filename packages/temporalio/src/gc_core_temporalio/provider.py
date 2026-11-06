@@ -26,6 +26,7 @@ from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv, is_explicit
+from gc_core.trace_id import normalize_trace_id
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_core_temporalio.activity_config import ActivitiesConfig
@@ -268,6 +269,20 @@ def _digest(value):
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
+
+
+def _with_trace_id(loaded, trace_id):
+    """Настройки профиля с trace_id вызова в рантайме; без трейса — как есть.
+
+    Кривое значение — ``ValueError`` здесь, а не ретраи каждого запроса к
+    модели на ``InvalidHeader``.
+    """
+    normalized = normalize_trace_id(trace_id)
+    if normalized is None:
+        return loaded
+    return replace(
+        loaded, runtime=replace(loaded.runtime, trace_id=normalized)
+    )
 
 
 _NO_EDITS_RECORDING = AgentEditsRecordConfig(
@@ -522,11 +537,14 @@ class ContextProvider:
             raise ValueError(
                 "Requested thread store differs from pinned profile"
             )
-        digest = _digest([call.profile, store_id, call.child_context])
+        loaded = _with_trace_id(loaded, call.trace_id)
+        digest = _digest(
+            [call.profile, store_id, call.child_context, call.trace_id]
+        )
         bound = self._bound.setdefault(call.owner_id, digest)
         if bound != digest:
             raise ValueError(
-                "Context owner is bound to another profile or store"
+                "Context owner is bound to another profile, store or trace"
             )
         return store_id, loaded
 

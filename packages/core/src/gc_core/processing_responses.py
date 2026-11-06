@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import functools
 import gc
 import inspect
@@ -24,7 +25,7 @@ from typing import (
 from gc_core.attachments.model import attachments_of
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.judge_runner import arun_pair_judge
-from gc_core.auto_routing.levels import auto_active, effective_level
+from gc_core.auto_routing.levels import auto_active, effective_target
 from gc_core.auto_routing.log_events import (
     log_artifact_reroute,
     log_routing_decision,
@@ -55,6 +56,10 @@ from gc_core.auto_routing.policy import (
 from gc_core.auto_routing.reroute import floor_verdict
 from gc_core.auto_routing.response import discarded_answer
 from gc_core.config import parse_chat_completions_max_tokens
+from gc_core.config_modules.backend import (
+    ENDPOINT_PATHS,
+    endpoint_path_hint,
+)
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.images import read_images_config
 from gc_core.config_modules.strip_tags_projection import (
@@ -86,18 +91,32 @@ from gc_core.execution.output_wrapping import (
 )
 from gc_core.execution.ports import port
 from gc_core.execution.progress import (
-    brief_args_summary,
+    child_progress_enabled,
     emit_progress,
     extract_intermediate_prose,
     parse_tool_result_status,
+    result_facts,
+    run_command_text,
     todo_items_from_arguments,
+    tool_args_summary,
+)
+from gc_core.execution.turn_clock import (
+    TurnClock,
+    begin_call_time,
+    bind_turn_clock,
+    record_call_time,
+    turn_clock_sources,
 )
 from gc_core.intent_guard.guard import FinishGateGuard
-from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
+from gc_core.intent_guard.text_answer_judge import (
+    ashould_return_text_answer,
+    text_answer_goes_to_judge,
+)
 from gc_core.intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
 )
+from gc_core.intent_log.user_turn import append_user_asks_from_messages
 from gc_core.intent_scope.final_answer import (
     amaybe_record_final_answer_intent,
     record_plan_outcome,
@@ -144,7 +163,12 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.message_policy.user_stop import (
     not_started_due_to_user_stop_output,
 )
-from gc_core.model_router import AliasCircuitOpenError
+from gc_core.model_choice import awrite_pending, note_applied
+from gc_core.model_router import (
+    AliasCircuitOpenError,
+    breaker_reason,
+    failure_text,
+)
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
@@ -163,6 +187,7 @@ from gc_core.security.permission_mode import (
 from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
+from gc_core.summarize.summary_validation import SummaryRejectedError
 from gc_core.threads.errors import ThreadStoreError
 from gc_core.tools import (
     WrongFunctionArgumentsException,
@@ -174,7 +199,7 @@ from gc_core.tools.arguments_validation import arguments_without_service_fields
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.tools.turn.turn_close import assistant_reply_text
-from gc_core.turn_boundary import begin_turn
+from gc_core.turn_boundary import begin_turn, suspended_turn
 from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
@@ -185,6 +210,7 @@ from gc_core.utils.backend_errors import (
     classify_finish_kind,
     finish_blocks_final,
     finish_prevents_text_final,
+    http_status_code,
     is_auth_error,
     is_context_overflow_error,
     is_image_request_error,
@@ -286,6 +312,8 @@ async def _maybe_persist(
         return
     if is_persist_discarded(state, pairing=pairing):
         return
+    if any(_is_agent_record(m) for m in messages):
+        state.produced_output = True
     token = False
     if pairing:
         token = True
@@ -305,6 +333,32 @@ async def _maybe_persist(
     finally:
         if token:
             state.allow_pairing_persist = False
+
+
+def _is_agent_record(message: Any) -> bool:
+    """Запись агента (ответ, вызов, вывод тула), а не служебная реплика:
+    реплики человека и техзаметки ядра идут ролью user, промпт — system."""
+    return isinstance(message, dict) and message.get("role") not in {
+        "user",
+        "system",
+    }
+
+
+def _main_call_on_delta(
+    ctx: Any, state: State, *, stream_on: bool, mute_answer: bool
+) -> Optional[Callable[[str, str], None]]:
+    """Приёмник дельт основного вызова: первая видимая дельта отмечает,
+    что прогон что-то выдал. Заглушённый ответ видимым не считается."""
+    on_delta = getattr(ctx, "on_stream_delta", None) if stream_on else None
+    if on_delta is None:
+        return None
+
+    def marking(kind: str, text: str) -> None:
+        if kind != "reset":
+            state.produced_output = True
+        on_delta(kind, text)
+
+    return without_answer_deltas(marking) if mute_answer else marking
 
 
 def _function_call_output_message(call_id: Any, output: str) -> Dict:
@@ -471,16 +525,39 @@ def _mode_requires_backend_call(mode: str) -> bool:
     return mode in {"user_ask", "function_call_output"}
 
 
+_ENDPOINT_PATH_HINT = (
+    "Если адрес задан вручную, проверьте адрес: обычно он оканчивается "
+    "на {path}."
+)
+
+
+def _endpoint_path_advice(
+    ctx: Any, url: Any, exc: BaseException
+) -> Optional[str]:
+    """Совет проверить адрес при 404 по адресу без пути эндпоинта режима:
+    запрос ушёл ровно по адресу записи, и «модель недоступна» — скорее
+    неполный адрес."""
+    if http_status_code(exc) != 404:
+        return None
+    api_mode = _get_backend_api_mode(ctx)
+    if endpoint_path_hint(str(url or ""), api_mode) is None:
+        return None
+    return _ENDPOINT_PATH_HINT.format(path=ENDPOINT_PATHS[api_mode])
+
+
 def _raise_honest_main_unavailable(
-    ctx: Any, resolved: Any, reason: str, source_exc: BaseException
+    ctx: Any, resolved: Any, source_exc: BaseException
 ) -> NoReturn:
     """Класс 2 фоллбэков недоступности (спека §8): исчерпаны существующие ретраи
     (transport/adaptive max_tokens/401-refresh) для активной модели main-трейса.
     Никаких тихих подмен — честная ошибка хода с моделью/endpoint/причиной и
-    подсказкой спасения; ставит per-alias предохранитель + notice."""
+    подсказкой спасения; ставит per-alias предохранитель + notice. Текст
+    ошибки — сам сбой (отказ открытого алиаса так и назван), в предохранитель
+    — исходная причина (`breaker_reason`)."""
+    reason = failure_text(source_exc)
     router = getattr(ctx, "model_router", None)
     if router is not None and resolved.alias is not None:
-        router.breaker.trip(resolved.alias, reason)
+        router.breaker.trip(resolved.alias, breaker_reason(source_exc))
     maybe_push_llm_failure_notice(
         source_exc,
         request_label="main_agent",
@@ -489,15 +566,18 @@ def _raise_honest_main_unavailable(
     )
     message = (
         f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
-        f"{resolved.url}: {reason}. Переключите уровень /level или профиль /profiles."
+        f"{resolved.url}: {reason}. Выберите другую модель /model или профиль /profile."
     )
+    advice = _endpoint_path_advice(ctx, resolved.url, source_exc)
+    if advice:
+        message += f" {advice}"
     logger = getattr(ctx, "logger", None) or _fallback_logger
     logger.error(message)
     raise MainModelUnavailable(message) from source_exc
 
 
 def resolve_main_for_call(
-    state: State, ctx: Any, *, level_override: Optional[str] = None
+    state: State, ctx: Any, *, target_override: Optional[str] = None
 ) -> Optional[Any]:
     """Единственный резолв модели главного трейса перед LLM-вызовом (спека
     автороутинга §5.2 п.3): ручной уровень и AUTO используют решение текущего
@@ -506,10 +586,10 @@ def resolve_main_for_call(
     повторных резолвов нет — иначе смена уровня между решением и отправкой давала
     бы «половинчатую подмену» (лог от одной модели, запрос к другой).
 
-    `level_override` — зафиксированный уровень из точки решения (`aroute_before_call`):
+    `target_override` — зафиксированный уровень из точки решения (`aroute_before_call`):
     без него `router.resolve("main")` читал бы
     провайдер уровня ЗАНОВО, независимо от чтения внутри `aroute_before_call` — и
-    `/level` между решением и этим резолвом развёл бы их. `None` (вызовы вне
+    `/model` между решением и этим резолвом развёл бы их. `None` (вызовы вне
     `aprepare_main_call`, напр. существующие тесты) — прежнее поведение, живой
     провайдер.
 
@@ -521,11 +601,11 @@ def resolve_main_for_call(
     if router is None:
         return None
     try:
-        resolved = router.resolve("main", level_override=level_override)
+        resolved = router.resolve("main", target_override=target_override)
     except AliasCircuitOpenError as exc:
         if getattr(router, "is_subagent_child", False):
             raise
-        _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
+        _raise_honest_main_unavailable(ctx, exc.resolved, exc)
     state.default_model = resolved.model
     return resolved
 
@@ -626,7 +706,7 @@ def _first_alive_level(
 
     def is_alive(level: str) -> bool:
         try:
-            kits[level] = router.resolve("main", level_override=level)
+            kits[level] = router.resolve("main", target_override=level)
         except AliasCircuitOpenError:
             return False
         return True
@@ -644,6 +724,11 @@ UNAVAILABLE_REROUTE_PATCH = "main-unavailable-reroute-v1"
 #: пары, сжатие) или отказа основного запроса, не пускает такт дальше — ни к
 #: основному запросу, ни к замене модели. Без маркера — прежнее поведение.
 STOP_AFTER_ROUTING_PATCH = "stop-after-routing-v1"
+
+#: Маркер durable-истории: начало хода главного даёт открытым алиасам право
+#: на одну пробу (спека model-breaker §2.2) — ход, который падал до запроса к
+#: модели, теперь его делает. Без маркера — прежняя честная ошибка на старте.
+MODEL_BREAKER_PROBE_PATCH = "model-breaker-probe-v1"
 
 
 def _stop_honored(stopped: bool, ctx: Any) -> bool:
@@ -694,9 +779,7 @@ def _reroute_level(
         return None
     if not router.breaker.is_open(failed.alias):
         # Честная ошибка основного хода уже взвела его с исходной причиной.
-        router.breaker.trip(
-            failed.alias, str(exc).strip()[:300] or type(exc).__name__
-        )
+        router.breaker.trip(failed.alias, breaker_reason(exc))
     if _stop_honored(bool(getattr(state, "stop_requested", False)), ctx):
         raise ModelRequestStopped("Ход остановлен") from exc
     level = next_level(getattr(state, "_call_level", None) or "default")
@@ -769,7 +852,7 @@ async def aroute_before_call(
         return cached_active, cached_decision, cached_effective, False
 
     router = getattr(ctx, "model_router", None)
-    live = router.live_level() if router is not None else "default"
+    live = router.live_choice() if router is not None else "default"
     available = getattr(ctx, "auto_available", True)
     active = auto_active(router, live, available)
 
@@ -810,7 +893,7 @@ async def aroute_before_call(
                 decision, alive[0], current=state.current_level
             )
         state_ops.apply_decision(state, decision)
-    effective = effective_level(
+    effective = effective_target(
         live, getattr(state, "current_level", None), available
     )
     state._tick_decision = (live, active, decision, effective)
@@ -819,7 +902,7 @@ async def aroute_before_call(
 
 def _apply_call_kit(state: State, ctx: Any, level: str) -> Optional[Any]:
     """Комплект вызова и фактический уровень такта; схемы проецируются транспортом."""
-    resolved = resolve_main_for_call(state, ctx, level_override=level)
+    resolved = resolve_main_for_call(state, ctx, target_override=level)
     state._call_level = level
     return resolved
 
@@ -827,8 +910,9 @@ def _apply_call_kit(state: State, ctx: Any, level: str) -> Optional[Any]:
 async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
     """Единая точка выбора модели перед основным запросом.
 
-    Записывает фактический уровень в State и логирует только новое решение
-    такта. Повтор запроса после переполнения контекста получает то же решение.
+    Записывает фактический уровень в State; только на новом такте логирует
+    решение и сверяет применённый выбор (`model_choice.note_applied`).
+    Повтор запроса после переполнения контекста получает то же решение.
     Канонические схемы инструментов проецируются транспортом для выбранной модели."""
     active, decision, effective, is_new = await aroute_before_call(state, ctx)
     params = _routing_params(ctx, state)
@@ -838,6 +922,7 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
         effective,
     )
     if is_new:
+        note_applied(state, ctx, state._tick_decision[0])
         log_routing_decision(
             getattr(ctx, "logger", None) or _fallback_logger,
             state,
@@ -872,33 +957,65 @@ def _maybe_trip_and_raise_main_unavailable(
         return
     if resolved is None or resolved.alias is None:
         return  # легаси — предохранитель не ведётся
-    reason = str(exc).strip()[:300] or exc.__class__.__name__
-    _raise_honest_main_unavailable(ctx, resolved, reason, exc)
+    _raise_honest_main_unavailable(ctx, resolved, exc)
 
 
 def begin_turn_main_trace(state: State, ctx: Any) -> None:
     """Начало хода ГЛАВНОГО трейса (спека §6.4/§8): ставит стартовый
     `default_model` хода (`turn_boundary.begin_turn`) — каждый вызов внутри хода
     резолвит модель перед отправкой (`resolve_main_for_call`); ручной выбор и
-    AUTO закрепляются только на такт —
-    и, если активный алиас уже в предохранителе (trip прошлого хода /
-    персистированный breaker при attach), поднимает честную ошибку класса 2 ДО
-    похода в транспорт — с той же моделью/endpoint/причиной и подсказкой /level
-    //profiles, что и `_arequest_backend_canonical`.
+    AUTO закрепляются только на такт.
 
-    В ручном режиме `begin_turn` резолвит `main` с проверкой предохранителя,
-    поэтому открытый алиас прилетает сюда сырым `AliasCircuitOpenError`;
-    переводим его в тот же честный класс 2 через
+    До `begin_turn` открытые алиасы получают право на одну пробу (спека
+    model-breaker §2.2): резолв их пропускает, первый основной запрос к
+    алиасу идёт к модели одним HTTP-запросом и при провале снова открывает
+    его до следующего хода главного. Право выдаётся только главному трейсу и
+    только если durable-история знает `MODEL_BREAKER_PROBE_PATCH`; в
+    durable-исполнении пробы нет — отметки просто снимаются.
+
+    Без маркера (и у ребёнка, который права не получает) открытый алиас в
+    ручном режиме прилетает из `begin_turn` сырым `AliasCircuitOpenError`;
+    переводим его в честную ошибку класса 2 через
     `_maybe_trip_and_raise_main_unavailable` (единый текст, без дублирования).
     При активном auto стартовый резолв предохранитель не проверяет — живость за
     точкой решения (`aroute_before_call`), и отказ, если мертвы все три уровня,
     приходит на первом вызове. Субагентские `begin_turn` идут мимо — их class-1
-    ведёт `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы."""
+    ведёт `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы.
+
+    Первым делом — часы хода, только у главного трейса (тот же признак, что
+    в `turn_boundary.begin_turn`): ребёнок подхватывает очередь этим же
+    вызовом на своём `ctx` с часами родителя и перепривязать их не должен.
+    Падение `begin_turn` часы не отменяет — ход начат."""
+    if not getattr(state, "parent_state_id", None):
+        mono, wall = turn_clock_sources(ctx)
+        bind_turn_clock(ctx, TurnClock.start(mono=mono, wall=wall))
+        _allow_breaker_probe(ctx)
     try:
         begin_turn(state, ctx)
     except AliasCircuitOpenError as exc:
         _maybe_trip_and_raise_main_unavailable(ctx, exc, resolved=exc.resolved)
         raise
+
+
+def _allow_breaker_probe(ctx: Any) -> None:
+    """Право на пробу открытым алиасам — если durable-история знает маркер.
+
+    В durable-исполнении пробы нет: запрос к модели там — activity, которую
+    Temporal повторяет по своей политике (по умолчанию без ограничения
+    попыток), и ход ждёт восстановления модели. Начало хода только снимает
+    отметки, activity получает пустой снимок и шлёт обычный запрос."""
+    router = getattr(ctx, "model_router", None)
+    if router is None:
+        return
+    execution_patch = port(ctx, "execution_patch")
+    if execution_patch is not None and not execution_patch(
+        MODEL_BREAKER_PROBE_PATCH
+    ):
+        return
+    if getattr(ctx, "durable_execution", False):
+        router.breaker.clear_open()
+    else:
+        router.breaker.allow_probe()
 
 
 def _request_audience(
@@ -1023,11 +1140,45 @@ async def _arequest_backend_canonical_local(
     (см. `_raise_honest_main_unavailable`).
 
     `mute_answer` — вызов идёт без дельт `answer` в потоке; решает вызывающий
-    (`_answer_stream_muted`), в повтор после 401 значение едет то же."""
+    (`_answer_stream_muted`), в повтор после 401 значение едет то же.
+
+    Право пробы (спека model-breaker §2.2) берётся один раз на запрос: первая
+    попытка забирает его перед отправкой, повтор после 401 видит тот же ответ.
+    Держится до конца обеих попыток (`ModelRouter.probing`): отмена или стоп
+    до ответа его возвращают. Сбой подготовки до отправки право не тратит."""
     if resolved is _UNRESOLVED_MAIN:
         resolved = resolve_main_for_call(
-            state, ctx, level_override=getattr(state, "_call_level", None)
+            state, ctx, target_override=getattr(state, "_call_level", None)
         )
+    router = getattr(ctx, "model_router", None)
+    with contextlib.ExitStack() as held:
+        take_probe = functools.cache(
+            lambda: (
+                router is not None
+                and held.enter_context(router.probing(resolved))
+            )
+        )
+        return await _arequest_with_auth_retry(
+            messages,
+            state,
+            ctx,
+            resolved=resolved,
+            set_previous_response_id=set_previous_response_id,
+            mute_answer=mute_answer,
+            take_probe=take_probe,
+        )
+
+
+async def _arequest_with_auth_retry(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    *,
+    resolved: Any,
+    set_previous_response_id: bool,
+    mute_answer: bool,
+    take_probe: Callable[[], bool],
+) -> Tuple[List[Dict], str, Dict]:
     auth_connector = getattr(ctx, "auth_connector", None)
     try:
         return await _arequest_backend_canonical_once(
@@ -1037,6 +1188,7 @@ async def _arequest_backend_canonical_local(
             resolved=resolved,
             set_previous_response_id=set_previous_response_id,
             mute_answer=mute_answer,
+            take_probe=take_probe,
         )
     except Exception as exc:
         if auth_connector is not None and is_auth_error(exc):
@@ -1056,6 +1208,7 @@ async def _arequest_backend_canonical_local(
                     resolved=resolved,
                     set_previous_response_id=set_previous_response_id,
                     mute_answer=mute_answer,
+                    take_probe=take_probe,
                 )
             except Exception as retry_exc:
                 _maybe_trip_and_raise_main_unavailable(
@@ -1076,6 +1229,7 @@ async def _arequest_responses_once(
     settings: AppConfig,
     set_previous_response_id: bool,
     network: tuple,
+    take_probe: Callable[[], bool],
 ) -> Tuple[List[Dict], str, Dict]:
     # Адрес — backend.completions_url в обоих режимах API. Прежний плоский
     # `agent_url` в схеме не существует (строгая валидация его не пропустит).
@@ -1109,6 +1263,8 @@ async def _arequest_responses_once(
         resolved=resolved,
         settings=settings,
     )
+    if take_probe():
+        use_retry = False
     with usage_scope(
         getattr(state, "usage", None), USAGE_CATEGORY_MAIN, "responses"
     ):
@@ -1401,6 +1557,43 @@ async def _aprepare_native_vision(
     return key
 
 
+def _no_probe_right() -> bool:
+    return False
+
+
+def _function_call_output_id(message) -> str:
+    if not isinstance(message, dict):
+        return ""
+    if message.get("type") != "function_call_output":
+        return ""
+    call_id = message.get("call_id")
+    if isinstance(call_id, str):
+        return call_id
+    return ""
+
+
+def _answered_call_ids(history) -> set[str]:
+    answered: set[str] = set()
+    for batch in history:
+        for message in batch or []:
+            call_id = _function_call_output_id(message)
+            if call_id:
+                answered.add(call_id)
+    return answered
+
+
+def _keep_answered_invalid_tool_call(history) -> Callable[[Dict], Dict]:
+    """Вызов с уже записанным выводом не подменяем: пара уходит как лежит в треде."""
+    answered = _answered_call_ids(history)
+
+    def factory(message: Dict) -> Dict:
+        if message.get("call_id") in answered:
+            return message
+        return build_invalid_tool_call_feedback_message(message)
+
+    return factory
+
+
 async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
@@ -1409,9 +1602,14 @@ async def _arequest_backend_canonical_once(
     resolved: Any = _UNRESOLVED_MAIN,
     set_previous_response_id: bool = True,
     mute_answer: bool = False,
+    take_probe: Callable[[], bool] = _no_probe_right,
 ) -> Tuple[List[Dict], str, Dict]:
     """
     Унифицированный вызов backend для двух режимов API (одна попытка).
+
+    `take_probe` забирает право пробы алиаса из предохранителя (см.
+    `_arequest_backend_canonical_local`) — его зовут прямо перед отправкой:
+    проба — один HTTP-запрос, без ретраев транспорта и адаптивных повторов.
 
     Возвращает:
     - канонические сообщения (responses-like),
@@ -1453,24 +1651,32 @@ async def _arequest_backend_canonical_once(
                 request_timeout_sec,
                 config_proxy,
             ),
+            take_probe=take_probe,
         )
 
     route_key = await _aprepare_native_vision(
         state, ctx, resolved, call_headers, messages, settings
     )
+    probe = take_probe()
+    if probe:
+        use_retry = False
 
     url = (
         resolved.url
         if resolved is not None
         else settings.backend.completions_url
     )
+    state_messages = getattr(state, "messages", []) or []
+    keep_answered = _keep_answered_invalid_tool_call(
+        (state_messages, messages)
+    )
     sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
-        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+        invalid_tool_call_factory=keep_answered,
     )
     sanitized_state_messages = sanitize_messages_for_chat_completions(
-        getattr(state, "messages", []) or [],
-        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+        state_messages,
+        invalid_tool_call_factory=keep_answered,
     )
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
@@ -1480,10 +1686,12 @@ async def _arequest_backend_canonical_once(
         settings, resolved_for_network
     )
 
-    _stream_on = _tui_stream_enabled(settings)
-    _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
-    if mute_answer and _on_delta is not None:
-        _on_delta = without_answer_deltas(_on_delta)
+    _on_delta = _main_call_on_delta(
+        ctx,
+        state,
+        stream_on=_tui_stream_enabled(settings),
+        mute_answer=mute_answer,
+    )
     prompt_message_count = len(getattr(state, "messages", []) or [])
 
     send = functools.partial(
@@ -1503,6 +1711,7 @@ async def _arequest_backend_canonical_once(
             "verify": verify,
             "cert": cert,
             "use_retry": use_retry,
+            "adaptive_retry": not probe,
             "retry_embedded_choice_errors": retry_embedded_choice_errors,
             "salvage_reasoning": True,
             "logger": getattr(ctx, "logger", None),
@@ -1815,6 +2024,8 @@ async def _amain_call(messages, state: State, ctx: Any):
     чью прозу заведомо переиграют, идёт с приглушённым каналом `answer` потока
     (`_answer_stream_muted`); переигранный — с полным."""
     resolved = await aprepare_main_call(state, ctx)
+    # Отложенный вывод тула цикл уже дописал: смена встаёт за ним.
+    await awrite_pending(state, ctx)
     usage_before = (
         _usage_snapshot(state)
         if getattr(state, "current_level", None) is not None
@@ -2090,6 +2301,39 @@ def _not_started_outputs(
     return outputs
 
 
+def _emit_tool_start(
+    ctx: Any,
+    state: State,
+    tool_name: str,
+    tool_arguments: str,
+    call_id_str: Optional[str],
+) -> None:
+    """Live-прогресс субагента «тул пошёл»; путь в сводке — от корня рана."""
+    if not child_progress_enabled(ctx):
+        return
+    todo_items = (
+        todo_items_from_arguments(tool_arguments)
+        if tool_name == SESSION_TODO_TOOL_NAME
+        else None
+    )
+    emit_progress(
+        ctx,
+        state,
+        "tool_start",
+        tool_name=tool_name,
+        tool_call_id=call_id_str,
+        args_summary=tool_args_summary(
+            tool_name,
+            tool_arguments,
+            root=ctx.workspace.root,
+            nested=True,
+            injected=settings_of(ctx).agent.inject_tool_fields,
+        ),
+        todo_items=todo_items,
+        command=run_command_text(tool_name, tool_arguments),
+    )
+
+
 async def _aexecute_tool_call(
     m: Dict,
     tool_name: str,
@@ -2116,25 +2360,16 @@ async def _aexecute_tool_call(
         not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
     )
     emit_tool_row = persist_tool_trace
-    if emit_tool_row:
-        _todo_items = (
-            todo_items_from_arguments(tool_arguments)
-            if tool_name == SESSION_TODO_TOOL_NAME
-            else None
-        )
-        emit_progress(
-            ctx,
-            state,
-            "tool_start",
-            tool_name=tool_name,
-            tool_call_id=call_id_str,
-            args_summary=brief_args_summary(
-                tool_arguments, tool_name=tool_name
-            ),
-            todo_items=_todo_items,
-        )
+    # Старт на часах хода — у вызова со строкой ленты: её живой счёт.
+    waited_at_start = begin_call_time(
+        ctx, call_id_str if emit_tool_row else None
+    )
+    # Sidecar-запись вызова — ДО события начала: команду длиннее потолка
+    # события TUI читает оттуда, и к приходу события запись обязана быть.
     if persist_tool_trace:
         await apersist_subagent_trace(ctx, kind="call", payload=dict(m))
+    if emit_tool_row:
+        _emit_tool_start(ctx, state, tool_name, tool_arguments, call_id_str)
     was_invalid = False
     # Исключение мимо WrongFunctionArgumentsException не доходит до записи
     # result/error ниже. Открытый call в sidecar потом прилипает к confirm.
@@ -2163,7 +2398,8 @@ async def _aexecute_tool_call(
             tool_res_raw = exc.to_tool_output()
         # Live-прогресс: тул закончил — или текст intermediate_reply.
         # В историю треда это не пишется.
-        elapsed_ms = int((clock() - started_at) * 1000)
+        elapsed = clock() - started_at
+        elapsed_ms = int(elapsed * 1000)
         ok, error_brief = parse_tool_result_status(tool_res_raw)
         if is_intermediate:
             await _aemit_intermediate_reply(
@@ -2178,23 +2414,14 @@ async def _aexecute_tool_call(
                 error_brief=error_brief,
             )
             return tool_res_raw, was_invalid, ok
-        if emit_tool_row:
-            emit_progress(
-                ctx,
-                state,
-                "tool_end",
-                elapsed_ms=elapsed_ms,
-                tool_name=tool_name,
-                tool_call_id=call_id_str,
-                ok=ok if ok is not None else True,
-                error_brief=error_brief,
-            )
         if persist_tool_trace:
             out_text = (
                 tool_res_raw
                 if isinstance(tool_res_raw, str)
                 else json.dumps(tool_res_raw, ensure_ascii=False)
             )
+            # Sidecar-запись результата — ДО события конца: вывод длиннее
+            # потолка события TUI читает оттуда.
             await apersist_subagent_trace(
                 ctx,
                 kind="error" if ok is False else "result",
@@ -2205,6 +2432,25 @@ async def _aexecute_tool_call(
                 },
             )
             trace_open = False
+            # Строка ленты = вызов с sidecar-записью (`emit_tool_row`).
+            # Время вызова в записи итога хода — без ожидания человека.
+            record_call_time(ctx, call_id_str, elapsed, waited_at_start)
+            status, fields = (
+                result_facts(tool_res_raw) if ok is False else (None, None)
+            )
+            emit_progress(
+                ctx,
+                state,
+                "tool_end",
+                elapsed_ms=elapsed_ms,
+                tool_name=tool_name,
+                tool_call_id=call_id_str,
+                ok=ok if ok is not None else True,
+                error_brief=error_brief,
+                result_status=status,
+                result_error=fields,
+                output=out_text,
+            )
         return tool_res_raw, was_invalid, ok
     finally:
         await _aclose_sidecar_call(ctx, tool_call_id, trace_open)
@@ -2285,6 +2531,10 @@ async def _aemit_intermediate_reply(
     ir_payload: Dict[str, Any] = {"prose": prose or ""}
     if call_id_str:
         ir_payload["call_id"] = call_id_str
+    if ok is False:
+        ir_payload["ok"] = False
+        if error_brief:
+            ir_payload["error_brief"] = error_brief
     await apersist_subagent_trace(
         ctx, kind="intermediate_reply", payload=ir_payload
     )
@@ -2321,8 +2571,73 @@ def _track_repeat_errors(
     return is_unknown
 
 
+def _skipped_after_compact_output(tool_name: str) -> str:
+    """Хвост батча после сводки не исполняется. Карточка закрывается отказом."""
+    payload = {
+        "tool": str(tool_name or "unknown_tool"),
+        "ok": False,
+        "status": "not_started_due_to_session_compact",
+        "message": "Tool was not started: session_compact replaced the history.",
+        "error": None,
+        "synthetic": True,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _closings_after_session_compact(
+    done: List[Dict], pending: List[Dict]
+) -> List[Dict]:
+    """Вывод самой сводки и отказы вызовов за ней. В новый трейс не входят."""
+    closing: List[Dict] = []
+    if done:
+        last = done[-1]
+        if (
+            isinstance(last, dict)
+            and last.get("type") == "function_call_output"
+        ):
+            closing.append(last)
+    for call in pending:
+        if not isinstance(call, dict):
+            continue
+        call_id = call.get("call_id")
+        if not call_id:
+            continue
+        closing.append(
+            _function_call_output_message(
+                call_id,
+                _skipped_after_compact_output(str(call.get("name") or "")),
+            )
+        )
+    return closing
+
+
+def _hold_summary_archive(ctx: Any) -> Dict[str, Any]:
+    """Перезапись файла сводкой откладывается, пока в старый тред не лягут выводы."""
+    real = getattr(ctx, "on_summary_applied", None)
+    box: Dict[str, Any] = {"real": real, "event": None, "done": False}
+
+    async def held(event):
+        box["event"] = event
+
+    if real is not None:
+        ctx.on_summary_applied = held
+    return box
+
+
+async def _release_summary_archive(ctx: Any, box: Dict[str, Any]) -> None:
+    if box.get("done"):
+        return
+    box["done"] = True
+    real = box.get("real")
+    event = box.get("event")
+    if real is not None:
+        ctx.on_summary_applied = real
+    if real is not None and event is not None:
+        await await_callback(real(event))
+
+
 def _log_unstarted_after_session_compact(ctx: Any, calls: List[Dict]) -> None:
-    """Хвост батча после сводки не стартует и в трейс не пишется. Только лог."""
+    """Хвост после сводки не стартует. Отказы пишутся отдельно, здесь только лог."""
     parts: List[str] = []
     for call in calls:
         if not isinstance(call, dict):
@@ -2431,6 +2746,7 @@ async def _abefore_tool_call(
     prior: List[Dict],
     persist_messages_callback,
 ) -> None:
+    state.produced_output = True
     # smart-гейт (спека §3): считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
     if tool_name not in TURN_FINALIZING_TOOLS:
         state.turn_tool_calls += 1
@@ -2534,6 +2850,70 @@ async def _aexecute_one_batch_call(
     )
 
 
+async def _astep_executed_call(
+    i: int,
+    call: Dict,
+    *,
+    executed: List[Dict],
+    tools_outputs: List[Dict],
+    skip_outputs: List[Dict],
+    state: State,
+    ctx: Any,
+    run_agent_func,
+    persist_messages_callback,
+    batch_trace: Optional[Dict],
+) -> Tuple[bool, bool, int, bool]:
+    """Один вызов батча. Последний флаг — сводка заменила трейс, хвост закрыт."""
+    archive = None
+    if str(call.get("name") or "") == SESSION_COMPACT_TOOL_NAME:
+        archive = _hold_summary_archive(ctx)
+    try:
+        was_invalid, ask_ok, unknown_hit = await _aexecute_one_batch_call(
+            i,
+            call,
+            tools_outputs=tools_outputs,
+            skip_outputs=skip_outputs,
+            state=state,
+            ctx=ctx,
+            run_agent_func=run_agent_func,
+            persist_messages_callback=persist_messages_callback,
+            batch_trace=batch_trace,
+        )
+        if getattr(state, "session_compact_applied", False):
+            await _aclose_after_session_compact(
+                ctx,
+                state,
+                tools_outputs,
+                executed[i + 1 :],
+                persist_messages_callback,
+                archive,
+            )
+            return bool(was_invalid), bool(ask_ok), unknown_hit, True
+        return bool(was_invalid), bool(ask_ok), unknown_hit, False
+    finally:
+        if archive is not None:
+            await _release_summary_archive(ctx, archive)
+
+
+async def _aclose_after_session_compact(
+    ctx: Any,
+    state: State,
+    tools_outputs: List[Dict],
+    pending: List[Dict],
+    persist_messages_callback,
+    archive: Dict[str, Any] | None,
+) -> None:
+    """Выводы сводки и хвоста — в старый тред, затем файл заменяется сводкой."""
+    await _maybe_persist(
+        persist_messages_callback,
+        _closings_after_session_compact(tools_outputs, pending),
+        state,
+    )
+    if archive is not None:
+        await _release_summary_archive(ctx, archive)
+    _log_unstarted_after_session_compact(ctx, pending)
+
+
 async def _arun_executed_tool_batch(
     executed: List[Dict],
     skip_outputs: List[Dict],
@@ -2573,9 +2953,15 @@ async def _arun_executed_tool_batch(
         if ended is not None:
             tools_outputs.append(ended)
             continue
-        was_invalid, ask_ok, unknown_hit = await _aexecute_one_batch_call(
+        (
+            was_invalid,
+            ask_ok,
+            unknown_hit,
+            compacted,
+        ) = await _astep_executed_call(
             i,
             call,
+            executed=executed,
             tools_outputs=tools_outputs,
             skip_outputs=skip_outputs,
             state=state,
@@ -2586,9 +2972,7 @@ async def _arun_executed_tool_batch(
         )
         invalid_in_batch += int(was_invalid)
         unknown_in_batch += unknown_hit
-        if getattr(state, "session_compact_applied", False):
-            # Сводка заменила трейс. Хвост батча не стартует и выходов не получает.
-            _log_unstarted_after_session_compact(ctx, executed[i + 1 :])
+        if compacted:
             break
         if ask_ok:
             successful_ask_human = True
@@ -2722,7 +3106,9 @@ async def _apickup_pending_as_new_turn(
     except Exception as exc:
         # Очередь УЖЕ слита (`get_pending_messages` — drain, не peek): уронив ход
         # здесь, мы потеряли бы набранное пользователем сообщение бесследно —
-        # вернуть его в очередь некуда. Поэтому ход продолжаем на модели прошлого
+        # вернуть его в очередь некуда. С пробой главный сюда не попадает:
+        # открытый алиас получил право и ход идёт к модели. Остаются ребёнок
+        # и история без маркера пробы — ход продолжаем на модели прошлого
         # хода: тот же честный отказ придёт из резолва модели следующего вызова
         # (`resolve_main_for_call` → `_raise_honest_main_unavailable`, единая
         # точка текста), но сообщение к тому моменту уже в трейсе и в логе.
@@ -2774,6 +3160,7 @@ class _AgentLoop:
         persist_messages_callback,
         pre_backend_compaction_hook,
         turn_end_compaction_hook,
+        turn_closed_hook,
         force_compact_hook,
         get_pending_messages,
         check_stop,
@@ -2790,6 +3177,7 @@ class _AgentLoop:
         self.persist_messages_callback = persist_messages_callback
         self.pre_backend_compaction_hook = pre_backend_compaction_hook
         self.turn_end_compaction_hook = turn_end_compaction_hook
+        self.turn_closed_hook = turn_closed_hook
         self.force_compact_hook = force_compact_hook
         self.get_pending_messages = get_pending_messages
         self.check_stop = check_stop
@@ -2809,6 +3197,9 @@ class _AgentLoop:
         self.max_unknown_tool_repeats = int(
             agent_cfg.max_unknown_tool_repeats or 5
         )
+        # Отказ судьи финиша ждёт подсказки и пишется на следующем шаге.
+        # Стоп этот шаг отменяет — вывод закрываем отдельно.
+        self._pending_finish_output: Optional[Dict] = None
         state.last_unknown_tool_name = None
         state.unknown_tool_repeat_count = 0
         state.last_batch_unknown_tool_count = 0
@@ -2819,6 +3210,27 @@ class _AgentLoop:
         await _maybe_persist(
             self.persist_messages_callback, messages, self.state
         )
+        self._drop_pending_finish(messages)
+
+    def _drop_pending_finish(self, messages: List[Dict]) -> None:
+        """Вывод финиша уже ушёл обычной записью — повторно при Стопе не пишем."""
+        pending = self._pending_finish_output
+        if pending is None or is_persist_discarded(self.state):
+            return
+        if any(message is pending for message in messages or []):
+            self._pending_finish_output = None
+
+    async def _aclose_pending_finish_on_stop(self) -> None:
+        """Стоп не дожидается подсказок: закрыть turn_finish тем, что уже в state."""
+        pending = self._pending_finish_output
+        self._pending_finish_output = None
+        if not isinstance(pending, dict):
+            return
+        await _commit_user_stop_pairing(
+            self.state,
+            [pending],
+            self.persist_messages_callback,
+        )
 
     # ------------------------------------------------------------------ loop
     async def arun(self, messages) -> Union[str, None]:
@@ -2826,6 +3238,7 @@ class _AgentLoop:
         first_poll = True
         while True:
             if self.check_stop is not None and self.check_stop():
+                await self._aclose_pending_finish_on_stop()
                 self._nudges.clear(state)
                 return None
             messages = await self._apoll_pending(
@@ -2922,7 +3335,9 @@ class _AgentLoop:
             self._nudges.clear(self.state)
             return _Outcome(result=None)
         except Exception as backend_exc:
-            if not await self._atry_recover_context_overflow(backend_exc):
+            if not await self._atry_recover_context_overflow(
+                backend_exc, messages, mode
+            ):
                 raise
             # Тот же шаг: подсказки уже в messages, notices_sent не снимаем.
             return self._overflow_resume(messages, mode)
@@ -2956,22 +3371,24 @@ class _AgentLoop:
         if backend_mode == "chat_completions":
             await aprepare_main_call(self.state, self.ctx)
             if self._stopped_before_call():
-                await self._nudges.apublish(
-                    messages,
-                    state=self.state,
-                    apersist=self._anudge_persist,
-                )
+                await self._apublish_held_on_stop(messages)
                 return None
             if await self._apre_backend_compaction(messages, mode):
                 self._drop_pre_summary_output()
             if self._stopped_before_call():
-                await self._nudges.apublish(
-                    messages,
-                    state=self.state,
-                    apersist=self._anudge_persist,
-                )
+                await self._apublish_held_on_stop(messages)
                 return None
         return await self._aflush_nudges(messages, backend_mode)
+
+    async def _apublish_held_on_stop(self, messages: List[Dict]) -> None:
+        """Стоп после prepare: обычная запись вывода отбрасывается, закрытие — нет."""
+        if is_persist_discarded(self.state):
+            await self._aclose_pending_finish_on_stop()
+        await self._nudges.apublish(
+            messages,
+            state=self.state,
+            apersist=self._anudge_persist,
+        )
 
     def _stopped_before_call(self) -> bool:
         """Стоп во время судьи пары или сжатия — как stop между шагами."""
@@ -3110,7 +3527,7 @@ class _AgentLoop:
         ]
 
     async def _atry_recover_context_overflow(
-        self, backend_exc: Exception
+        self, backend_exc: Exception, messages, mode: str
     ) -> bool:
         # Переполнение контекстного окна модели → не крашимся: форс-сжатие
         # истории (безусловное, как /compact) и повтор запроса со сжатым
@@ -3131,7 +3548,16 @@ class _AgentLoop:
         )
         previous = getattr(self.state, "messages", None)
         try:
-            applied = await _acall_blocking_hook(self.force_compact_hook)
+            # Батч и режим — чтобы сводка вернула реплики и картинки шага.
+            # Ответ тула хук не оставляет: вызов уже уйдёт в сводку.
+            applied = await _acall_blocking_hook(
+                self.force_compact_hook, messages, mode
+            )
+        except SummaryRejectedError as exc:
+            self.run_logger.warning(
+                "Context overflow compaction rejected: %s", exc
+            )
+            return False
         finally:
             if self._history_replaced(previous):
                 self._drop_pre_summary_output()
@@ -3313,9 +3739,16 @@ class _AgentLoop:
 
         Подсказки старого диалога тоже не собираем заново: ближайший запрос
         идёт по новой истории. Новое техническое сообщение (объявление
-        режима) может добавиться следом.
+        режима) может добавиться следом. Реплика из отложенного хвоста на
+        диск уже не попадёт — в намерения открытого хода её пишем до сброса.
         """
         self._discard_nudges_after_summary(skip_fill=True)
+        state = self.state
+        state.current_user_intent = append_user_asks_from_messages(
+            state.current_user_intent,
+            self._nudges.followers,
+            user_turn_seq=state.user_turn_seq,
+        )
         self._nudges.carrier = None
         self._nudges.followers = []
 
@@ -3549,6 +3982,15 @@ class _AgentLoop:
             finish_call_id,
             persist_output=False,
         )
+        return await self._aapply_finish_decision(
+            messages, decision, finish_arguments, finish_new, tail_new
+        )
+
+    async def _aapply_finish_decision(
+        self, messages, decision, finish_arguments, finish_new, tail_new
+    ) -> _Outcome:
+        """Reject ждёт подсказки. Принятый финиш закрывает ход сразу."""
+        state = self.state
         if decision.outcome == "reject":
             state.tick_signals.add(FINISH_REJECT)
             if tail_new:
@@ -3558,6 +4000,9 @@ class _AgentLoop:
                 )
             # Вердикт уже в output turn_finish. Reject → ход продолжается:
             # flush буфера на следующем prepare в этот finish output.
+            # Стоп prepare не дождётся — вывод закроет выход из цикла.
+            if finish_new:
+                self._pending_finish_output = finish_new[0]
             return _Outcome(messages, completed_step=True)
         # accept / fail_open_error / fail_open_limit / прочее —
         # все завершают ход одинаково.
@@ -3569,9 +4014,14 @@ class _AgentLoop:
             )
         if finish_new:
             # Accept: наджи не нужны — clear, output без harness.
+            # Стоп во время судьи уже выставил discard: обычная запись
+            # пропала бы, вызов остался бы без ответа.
             self._nudges.buffer.clear()
             await _maybe_persist(
-                self.persist_messages_callback, finish_new, state
+                self.persist_messages_callback,
+                finish_new,
+                state,
+                pairing=is_persist_discarded(state),
             )
         state.steps += 1
         state.flush_current_user_intent()
@@ -3610,7 +4060,8 @@ class _AgentLoop:
                     "status": str(plan.get("status") or ""),
                 },
                 ensure_ascii=False,
-            )
+            ),
+            reason="plan_proposed",
         )
         if not outcome.restart:
             # Человек дослал сообщение во время хода — ход продолжается, и
@@ -3625,9 +4076,12 @@ class _AgentLoop:
         Батч вливается в состояние и сохраняется без вывода вопроса: его
         ответ придёт следующим ходом. Компакции конца хода и подхвата
         очереди нет — история кончается вызовом без ответа, а ход журнала
-        намерений не закрыт: задача продолжится после ответа.
+        намерений не закрыт: задача продолжится после ответа. Итога хода
+        нет: вопрос ход не завершает — его снимок уходит в состояние треда
+        вместе с вопросом, следующий прогон продолжит ход.
         """
         state = self.state
+        state.suspended_turn = suspended_turn(state, self.ctx)
         batch_new = filter_messages_not_in_state(
             list(getattr(state, "messages", []) or []), messages
         )
@@ -3709,8 +4163,18 @@ class _AgentLoop:
         )
         return decision
 
-    async def _aclose_turn(self, result) -> _Outcome:
-        """Конец хода: компакция turn-end и подхват pending-сообщения новым ходом."""
+    async def _aclose_turn(
+        self, result, *, reason: Optional[str] = None
+    ) -> _Outcome:
+        """Конец хода: итог хода, компакция turn-end и подхват
+        pending-сообщения новым ходом.
+
+        Итог — первым: запись встаёт за последним сообщением хода и уходит
+        в архив вместе с ним при компакции конца хода; подхват очереди
+        затем привязывает часы нового хода. ``reason`` — причина закрытия
+        из цикла (``plan_proposed``), обычный финал — ``None``."""
+        if self.turn_closed_hook is not None:
+            await self.turn_closed_hook(reason)
         if self.turn_end_compaction_hook is not None and (
             await _acall_blocking_hook(self.turn_end_compaction_hook)
         ):
@@ -3784,9 +4248,21 @@ class _AgentLoop:
         # не итог: напоминание вызвать тул, как при прозе без вызова.
         if is_bridge_echo(assistant_text):
             return False, None
-        decision = await ashould_return_text_answer(
-            self.ctx, self.state, assistant_text
+        # Судья текстового ответа — та же проверка ответа, что у turn_finish:
+        # «сверяюсь…» только когда он реально пойдёт, снять строго в finally.
+        checking = (
+            self.mark_finish_gate_checking is not None
+            and text_answer_goes_to_judge(self.ctx, assistant_text)
         )
+        if checking:
+            await await_callback(self.mark_finish_gate_checking(True))
+        try:
+            decision = await ashould_return_text_answer(
+                self.ctx, self.state, assistant_text
+            )
+        finally:
+            if checking:
+                await await_callback(self.mark_finish_gate_checking(False))
         return decision.accept, decision.reject_feedback
 
     def _text_reject_bounce_msg(
@@ -3863,7 +4339,7 @@ class _AgentLoop:
 # Keep the public helper/monkeypatch boundary while sharing one loop.
 
 
-async def arun_agent(
+async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     messages,
     state: State,
     ctx: Any,
@@ -3874,7 +4350,10 @@ async def arun_agent(
         Callable[[List[Dict], str], None]
     ] = None,
     turn_end_compaction_hook: Optional[Callable[[], None]] = None,
-    force_compact_hook: Optional[Callable[[], None]] = None,
+    turn_closed_hook: Optional[
+        Callable[[Optional[str]], Awaitable[None]]
+    ] = None,
+    force_compact_hook: Optional[Callable[..., Any]] = None,
     get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,
@@ -3888,6 +4367,7 @@ async def arun_agent(
         persist_messages_callback=persist_messages_callback,
         pre_backend_compaction_hook=pre_backend_compaction_hook,
         turn_end_compaction_hook=turn_end_compaction_hook,
+        turn_closed_hook=turn_closed_hook,
         force_compact_hook=force_compact_hook,
         get_pending_messages=get_pending_messages,
         check_stop=check_stop,

@@ -73,7 +73,7 @@ def test_finish_gate_on_overrides_agent_false():
                 "todo.reminder_steps": 2,
             }
         ),
-        ChatConfig(finish_gate_mode="on"),
+        ChatConfig(finish_gate_mode="always"),
     )
     assert loaded.settings.agent.strict_turn_finish_validation is True
     assert loaded.runtime.finish_gate_smart is False

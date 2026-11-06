@@ -31,7 +31,7 @@ def test_tool_line_has_status_and_no_body():
         {
             "op": "open",
             "call_id": "c1",
-            "title": "read_file(path='src/app.py')",
+            "title": "read_file(src/app.py)",
         }
     )
     mapper.apply_tool({"op": "close", "call_id": "c1", "status": "completed"})
@@ -40,8 +40,8 @@ def test_tool_line_has_status_and_no_body():
     assert "src/app.py" in mapper.content
     assert mapper.content == (
         "<think>\n"
-        "read_file(path='src/app.py') — in_progress\n"
-        "read_file(path='src/app.py') — completed\n"
+        "read_file(src/app.py) — in_progress\n"
+        "read_file(src/app.py) — completed\n"
         "</think>\n"
         "готово"
     )

@@ -1,16 +1,23 @@
 # tests/tui/test_main_error_msg_finalizes.py
 # Юнит на ветку рендера: подменяем _active_calls фейковой строкой и проверяем,
-# что error_msg с известным call_id финализирует её, а отдельная [!]-строка не плодится.
+# что error_msg с известным call_id финализирует её, а строка `!` не плодится.
 from gc_tui.models import TraceEvent
 from gc_tui.screens.main import TraceScreen
 
 
 class _FakeRow:
-    def __init__(self):
-        self.finalized = None
+    _result = None
+    _interrupted = False
 
-    def set_result(self, *, summary, error):
-        self.finalized = (summary, error)
+
+class _FakeBlocks:
+    """Исполнитель блоков верхнего уровня: строку финализирует он."""
+
+    def __init__(self):
+        self.results = []
+
+    def result(self, row, ev, edit, **_kw):
+        self.results.append((row, ev.summary, ev.result_outcome, edit))
 
 
 def _ev(call_id):
@@ -28,12 +35,14 @@ def _ev(call_id):
 def test_error_msg_with_call_id_finalizes_row():
     screen = TraceScreen.__new__(TraceScreen)
     row = _FakeRow()
+    blocks = _FakeBlocks()
     screen._active_calls = {"call_7": row}
+    screen._block_views = {"": blocks}
     mounted = []
-    screen._mount_trace_row = lambda **kw: mounted.append(kw)
+    screen._trace_mount = lambda w, **kw: mounted.append(w)
     screen._render_error_msg(_ev("call_7"))
-    assert row.finalized == ("Wrong arguments for `x`", True)
-    assert mounted == []  # [!]-строка подавлена
+    assert blocks.results == [(row, "Wrong arguments for `x`", "error", None)]
+    assert mounted == []  # строка `!` подавлена
     assert "call_7" not in screen._active_calls
 
 
@@ -41,7 +50,9 @@ def test_error_msg_without_match_falls_back():
     screen = TraceScreen.__new__(TraceScreen)
     screen._active_calls = {}
     mounted = []
-    screen._mount_trace_row = lambda **kw: mounted.append(kw)
+    screen._trace_mount = lambda w, **kw: mounted.append(w)
     screen._render_error_msg(_ev(None))
-    assert len(mounted) == 1  # fallback [!]-строка
-    assert mounted[0]["prefix"] == "[!] "
+    # Ошибка без владельца — `!` в колонке `●`, ERR, без квадратных скобок.
+    (row,) = mounted
+    assert (row._prefix, row._content) == ("! ", "Wrong arguments for `x`")
+    assert row.has_class("line-error")

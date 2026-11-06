@@ -6,35 +6,44 @@ Runtime кладёт события в QueueSubagentProgressSink (worker-пот�
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any, Callable, Optional, Sequence
 
 from gc_core.attachments.model import attachments_of
+from gc_core.constants.tool_display import DisplayCategory, McpToolInfo
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.execution.progress import SubagentProgressEvent
 
+from gc_tui.models import ResultOutcome
+from gc_tui.services.subagent_sidecar_mapper import nested_call_row
+from gc_tui.services.trace_mapper import classify_stop
+from gc_tui.services.trace_render import tool_caption
 
-def reconcile_batch_phases(rows: Sequence[Any]) -> None:
-    """Среди незавершённых строк batch: первая → active, остальные → waiting.
 
-    Одинаково для любых тулов (не special-case subagent). rows — в порядке
-    появления в batch (insertion order _active_calls).
-    """
-    pending = [
-        r
-        for r in rows
-        if getattr(r, "_result", None) is None
-        and not getattr(r, "_interrupted", False)
-    ]
-    if not pending:
-        return
-    first, *rest = pending
-    set_active = getattr(first, "set_active", None)
-    if callable(set_active):
-        set_active()
-    for row in rest:
-        set_waiting = getattr(row, "set_waiting", None)
-        if callable(set_waiting):
-            set_waiting()
+def _finish_facts(
+    ev: SubagentProgressEvent,
+) -> tuple[bool, Optional[str], Optional[ResultOutcome]]:
+    """Итог вложенного вызова из `tool_end`: ``(ok, сводка, исход)``.
+
+    Стоп, лимит и отказ — тем же классификатором, что у перерисовки из
+    записи субагента; событие без фактов исхода — ошибка, как раньше."""
+    ok = ev.ok if ev.ok is not None else True
+    stop = None if ok else classify_stop(ev.result_status, ev.result_error)
+    if stop is None:
+        return ok, ev.error_brief, None
+    return ok, stop[1], stop[0]
+
+
+def first_pending(rows: Sequence[Any]) -> Optional[Any]:
+    """Батч исполняется по порядку: первая незавершённая строка — та, что
+    стартовала; остальные ждут. Одинаково для любых тулов. ``rows`` — в
+    порядке появления в батче (порядок вставки `_active_calls`)."""
+    for row in rows:
+        if getattr(row, "_result", None) is None and not getattr(
+            row, "_interrupted", False
+        ):
+            return row
+    return None
 
 
 class SubagentProgressConsumer:
@@ -78,7 +87,9 @@ class SubagentProgressConsumer:
                         todo_items=ev.todo_items,
                     )
                     routed_todo = True
-                if not routed_todo:
+                if not routed_todo and nested_call_row(
+                    ev.tool_name or "", ev.args_summary or ""
+                ):
                     mount_nested_tool(
                         parent_call_id=pid,
                         tool_name=ev.tool_name or "<tool>",
@@ -86,6 +97,7 @@ class SubagentProgressConsumer:
                         args_summary=ev.args_summary or "",
                         step=ev.step,
                         max_steps=ev.max_steps,
+                        command=ev.command,
                     )
                 parent_heartbeat(
                     parent_call_id=pid,
@@ -96,14 +108,17 @@ class SubagentProgressConsumer:
             elif ev.kind == "tool_end":
                 if ev.tool_name:
                     self._last_tool[pid] = ev.tool_name
+                ok, error_brief, outcome = _finish_facts(ev)
                 finish_nested_tool(
                     parent_call_id=pid,
                     tool_name=ev.tool_name,
                     tool_call_id=ev.tool_call_id or "",
-                    ok=ev.ok if ev.ok is not None else True,
-                    error_brief=ev.error_brief,
+                    ok=ok,
+                    error_brief=error_brief,
+                    outcome=outcome,
                     step=ev.step,
                     max_steps=ev.max_steps,
+                    output=ev.output,
                 )
                 parent_heartbeat(
                     parent_call_id=pid,
@@ -115,6 +130,8 @@ class SubagentProgressConsumer:
                 mount_nested_prose(
                     parent_call_id=pid,
                     prose=ev.prose or "",
+                    ok=ev.ok is not False,
+                    error_brief=ev.error_brief,
                     tool_name=ev.tool_name,
                     step=ev.step,
                     max_steps=ev.max_steps,
@@ -185,10 +202,20 @@ class SubagentProgressConsumer:
 
 
 def format_parent_live_status(
-    *, step: int, max_steps: int, last_tool: Optional[str]
+    *,
+    step: int,
+    max_steps: int,
+    last_tool: Optional[str],
+    mcp_tools: Optional[Mapping[str, McpToolInfo]] = None,
+    mcp_servers: Iterable[str] = (),
 ) -> str:
-    """Хвост корневой строки субагента: `step 4/100 · last=fs_read_file`."""
+    """Хвост корневой строки субагента: `step 4/100 · last=Read`.
+
+    `last` — имя тула, как в строке вызова (спека P3 §2.1): подпись ядра,
+    MCP — `сервер · тул`, неизвестный — wire-имя; скрытый — без `last`."""
     parts = [f"step {step}/{max_steps}" if max_steps else f"step {step}"]
     if last_tool:
-        parts.append(f"last={last_tool}")
+        category, name = tool_caption(last_tool, mcp_tools, mcp_servers)
+        if category is not DisplayCategory.HIDDEN:
+            parts.append(f"last={name}")
     return " · ".join(parts)

@@ -107,7 +107,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
 
     async with app.run_test() as pilot:
         # Initial: empty-state — без [Esc] back/выход, без /stop, без /export.
-        footer_left = pilot.app.query_one("#footer-left")
+        footer_left = pilot.app.query_one("#footer-mode")
         rendered = str(footer_left.render())
         # слева — пилюля режима; F-клавиши перечислены в справке, не в футере
         assert rendered == "▸▸ edit mode (Shift+Tab)"
@@ -126,7 +126,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause()
 
-        footer_left = pilot.app.query_one("#footer-left")
+        footer_left = pilot.app.query_one("#footer-mode")
         rendered = str(footer_left.render())
         # слева — пилюля режима; F-клавиши перечислены в справке, не в футере
         assert rendered == "▸▸ edit mode (Shift+Tab)"

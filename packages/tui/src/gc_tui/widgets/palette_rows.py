@@ -55,11 +55,16 @@ class PaletteRowsMixin:
                 if i == self._selected
                 else "palette-row"
             )
-            w = Static(self._format_row(row), classes=classes, markup=False)
+            w = self._row_widget(row, classes)
             if i == self._selected:
                 selected_widget = w
             widgets.append(w)
         return widgets, selected_widget
+
+    def _row_widget(self, row: Any, classes: str) -> Static:
+        """Виджет одной строки; наследник может рисовать строки иначе
+        (черта `ArgPicker`)."""
+        return Static(self._format_row(row), classes=classes, markup=False)
 
     def set_filter(self, text: str) -> None:
         self._filter = text
@@ -90,6 +95,9 @@ class PaletteRowsMixin:
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:
-            self.call_after_refresh(
-                selected_widget.scroll_visible, animate=False
-            )
+            self.call_after_refresh(self._reveal, selected_widget)
+
+    def _reveal(self, row: Static) -> None:
+        """Докрутить подсвеченную строку в видимую область (после раскладки);
+        наследник может показать вместе с ней и соседние строки."""
+        row.scroll_visible(animate=False)

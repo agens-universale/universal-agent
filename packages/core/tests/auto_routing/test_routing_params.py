@@ -21,7 +21,7 @@ RAW = {
     "models": {"fast": {}, "mid": {}, "big": {}},
     "slots": {"light": "fast", "default": "mid", "max": "big"},
     "backend": {"api_mode": "chat_completions"},
-    "level": "auto",
+    "model": "auto",
     "logging": {"save_logs": False},
 }
 
@@ -94,7 +94,7 @@ def _parent_ctx(cfg, *, level: str):
     ctx.tools_spec = []
     ctx.tools_description = []
     ctx.is_tui = False
-    ctx.model_router = ModelRouter(cfg, level_provider=lambda: level)
+    ctx.model_router = ModelRouter(cfg, choice_provider=lambda: level)
     return ctx
 
 
@@ -394,7 +394,7 @@ def test_child_in_auto_replaces_a_dead_level_inside_its_own_turn(
     parent.turn_safe_level = "max"
     parent.pair_window_left = 7
     parent_ctx = _parent_ctx(cfg, level="auto")
-    parent_ctx.model_router = parent_ctx.model_router.with_level_providers(
+    parent_ctx.model_router = parent_ctx.model_router.with_choice_providers(
         lambda: "max",
         lambda: "auto",
     )
@@ -468,7 +468,7 @@ def test_child_in_auto_with_every_level_dead_ends_with_the_honest_tool_error(
     cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
     parent = _orchestrator_state()
     parent_ctx = _parent_ctx(cfg, level="auto")
-    parent_ctx.model_router = parent_ctx.model_router.with_level_providers(
+    parent_ctx.model_router = parent_ctx.model_router.with_choice_providers(
         lambda: "max", lambda: "auto"
     )
     sent, runs = [], []
@@ -538,7 +538,7 @@ def test_child_fallback_resumes_real_loop_without_reexecuting_history(
         strict_turn_finish_validation=False,
     )
     parent_ctx = _parent_ctx(cfg, level="auto")
-    parent_ctx.model_router = parent_ctx.model_router.with_level_providers(
+    parent_ctx.model_router = parent_ctx.model_router.with_choice_providers(
         lambda: "max", lambda: "auto"
     )
     parent = _orchestrator_state()
@@ -647,7 +647,7 @@ def test_child_without_the_reroute_marker_keeps_the_runner_fallback(
     cfg = _child_config(tmp_path, auto_routing_safe_level="auto")
     parent = _orchestrator_state()
     parent_ctx = _parent_ctx(cfg, level="auto")
-    parent_ctx.model_router = parent_ctx.model_router.with_level_providers(
+    parent_ctx.model_router = parent_ctx.model_router.with_choice_providers(
         lambda: "max", lambda: "auto"
     )
     sent, runs = [], []

@@ -119,8 +119,8 @@ chat:
   launch_root: null
   # Проза без тула: deny | judge | allow. Дефолт канала — allow.
   text_answer_mode: "allow"
-  # Судья на turn_finish: "off" | "on" | "smart" (кавычки обязательны: YAML
-  # читает off и on как boolean).
+  # Судья на turn_finish: "off" | "smart" | "always" ("off" — в кавычках:
+  # YAML читает off как boolean).
   finish_gate_mode: "off"
   # Напоминания про session_todo. 0 — не напоминать.
   todo_reminder_steps: 0

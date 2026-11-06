@@ -169,6 +169,110 @@ def test_discard_recounts_live_volume_and_keeps_the_rest(threads):
     asyncio.run(scenario())
 
 
+def _turn(threads, opened_by, status, reason=None):
+    """Итог хода, как его пишет ядро: запись ``turns`` и ``last_turn``."""
+    entry = {
+        "after": opened_by,
+        "outcome": {
+            "status": status,
+            "reason": reason,
+            "opened_by": opened_by,
+        },
+    }
+
+    async def write():
+        record = await threads.get(KEY)
+        runtime = record.runtime.model_copy(
+            update={"last_turn": {"status": status, "reason": reason}}
+        )
+        await threads.store.append_side(
+            KEY,
+            SideChange(
+                op_id=f"turn_{opened_by}",
+                append=[("turns", [entry])],
+                set_runtime=runtime,
+            ),
+        )
+
+    return write()
+
+
+def test_turns_reads_turn_outcome_stream(threads):
+    async def scenario():
+        assert await threads.turns(KEY) == []
+        await threads.append_messages(KEY, _msgs("u1"))
+        await _turn(threads, "u1", "done")
+        (entry,) = await threads.turns(KEY)
+        assert entry.data["outcome"]["opened_by"] == "u1"
+
+    asyncio.run(scenario())
+
+
+def test_discard_of_last_turn_opener_recounts_last_turn(threads):
+    """Снята реплика, открывшая последний ход: короткий итог — от
+    последнего хода, чья реплика осталась в истории (то же правило
+    сироты, что у ленты)."""
+
+    async def scenario():
+        await threads.append_messages(KEY, _msgs("u1"))
+        await _turn(threads, "u1", "done")
+        await threads.append_messages(KEY, _msgs("u2"))
+        await _turn(threads, "u2", "stopped", "user_stop")
+
+        assert await threads.discard_message(KEY, "u2")
+        runtime = (await threads.get(KEY)).runtime
+        assert runtime.last_turn == {"status": "done", "reason": None}
+
+    asyncio.run(scenario())
+
+
+def test_discard_of_only_turn_opener_clears_last_turn(threads):
+    async def scenario():
+        await threads.append_messages(KEY, _msgs("u1"))
+        await _turn(threads, "u1", "stopped", "user_stop")
+
+        assert await threads.discard_message(KEY, "u1")
+        assert (await threads.get(KEY)).runtime.last_turn is None
+
+    asyncio.run(scenario())
+
+
+def test_last_turn_recount_sees_compacted_turns(threads):
+    """Реплика прошлого хода ушла в архив сжатия — ход виден, как в
+    ленте: короткий итог — его."""
+
+    async def scenario():
+        await threads.append_messages(KEY, _msgs("u1"))
+        await _turn(threads, "u1", "done")
+        writer = SessionWriter(threads.store, KEY, owner="host")
+        await writer.aclaim()
+        await writer.acommit(replace_history=Compaction(messages=_msgs("sum")))
+        await writer.arelease()
+        await threads.append_messages(KEY, _msgs("u2"))
+        await _turn(threads, "u2", "stopped", "user_stop")
+
+        assert await threads.discard_message(KEY, "u2")
+        runtime = (await threads.get(KEY)).runtime
+        assert runtime.last_turn == {"status": "done", "reason": None}
+
+    asyncio.run(scenario())
+
+
+def test_discard_of_other_message_keeps_last_turn(threads):
+    async def scenario():
+        await threads.append_messages(KEY, _msgs("u1", "x"))
+        await _turn(threads, "u1", "stopped", "user_stop")
+
+        assert await threads.discard_message(KEY, "x")
+        runtime = (await threads.get(KEY)).runtime
+        assert runtime.last_turn == {
+            "status": "stopped",
+            "reason": "user_stop",
+        }
+
+    asyncio.run(scenario())
+
+
 def test_iter_threads_filters_by_system(threads):
     async def scenario():
         for system, thread in (("cli", "a"), ("cli", "b"), ("tui", "c")):

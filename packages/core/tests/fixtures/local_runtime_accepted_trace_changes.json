@@ -1,0 +1,166 @@
+{
+  "develop_commit": "320ed0b191a7010de59e34ca3290df02c5025440",
+  "changes": [
+    "requests во всех сценариях: в запрос к модели входят служебные наджи и живой блок режима разрешений.",
+    "memory_two_turns и file_roundtrip: наджи записаны в output тула, поэтому меняются ещё thread, meta и state. Число вызовов и шагов прежнее.",
+    "invalid_json: вызов с битым JSON остаётся в треде и исполняется. Вызовов и шагов на один больше; меняются thread, meta, state и счётчики. В запросе к модели этот вызов не подменяется служебной репликой, если ответ уже записан, поэтому requests тоже другой."
+  ],
+  "scenarios": {
+    "deferred_accounting_outcome:json": {
+      "requests": "1ce488f4920a35320907e91489b1686d82af0ea1b8de69a931fa07621dd73f6b"
+    },
+    "deferred_accounting_outcome:sse": {
+      "requests": "73d35612e30079bbf65a4017a87a167fc99e42935d59ac8c42b0b3fae58bae6c"
+    },
+    "deferred_accounting_length:json": {
+      "requests": "1ce488f4920a35320907e91489b1686d82af0ea1b8de69a931fa07621dd73f6b"
+    },
+    "deferred_accounting_length:sse": {
+      "requests": "73d35612e30079bbf65a4017a87a167fc99e42935d59ac8c42b0b3fae58bae6c"
+    },
+    "deferred_accounting_refusal:json": {
+      "requests": "1ce488f4920a35320907e91489b1686d82af0ea1b8de69a931fa07621dd73f6b"
+    },
+    "deferred_accounting_refusal:sse": {
+      "requests": "73d35612e30079bbf65a4017a87a167fc99e42935d59ac8c42b0b3fae58bae6c"
+    },
+    "calculator:json": {
+      "requests": "19c26bfadc393eeceb7c207aec18809536b76c752fb8146ba0c0fd623c540f6a"
+    },
+    "calculator:sse": {
+      "requests": "ec5a52e6f1212d74301974df35bad678a496714d6d7a0a8feeb0f09dd4f701c2"
+    },
+    "finish_after_work:json": {
+      "requests": "5b3dc312d3321c100e90cc00941be454b97ec3c3786e5a74c5e1e1d6b8687f06"
+    },
+    "finish_after_work:sse": {
+      "requests": "8c5f4442cceb87f33572d96591f9c2db871ec8350a759ed2e1a211ef8aa0e2af"
+    },
+    "duplicate_finish:json": {
+      "requests": "5b3dc312d3321c100e90cc00941be454b97ec3c3786e5a74c5e1e1d6b8687f06"
+    },
+    "duplicate_finish:sse": {
+      "requests": "8c5f4442cceb87f33572d96591f9c2db871ec8350a759ed2e1a211ef8aa0e2af"
+    },
+    "memory_two_turns:json": {
+      "requests": "07dbdc8dee4fa4e460dcfb74a6520d1fd7bbfe76b7280e341f8de20293e0cc2e",
+      "thread": "dcfc5feb77d4fcaf080cbb97efe898c5ef19d9d29d05a52d342258353c75115b",
+      "meta": "1bd07141989f36a859201bfaeb4aa4b2a93df3bb81f440ebbcb72e089834e372",
+      "state": "d17cd8055638acb9a56bcfc3807172fed6711f803afa586269551dfe511bc7b7"
+    },
+    "memory_two_turns:sse": {
+      "requests": "ba594e4a7f485d2829f600f64a781476444b760255153034c90bd95e601e8e2c",
+      "thread": "dcfc5feb77d4fcaf080cbb97efe898c5ef19d9d29d05a52d342258353c75115b",
+      "meta": "1bd07141989f36a859201bfaeb4aa4b2a93df3bb81f440ebbcb72e089834e372",
+      "state": "d17cd8055638acb9a56bcfc3807172fed6711f803afa586269551dfe511bc7b7"
+    },
+    "invalid_json:json": {
+      "requests": "38b3654e8b6c7927f7e329f77793925e848b281958c6982aa5fb275d2e50bc62",
+      "thread": "0321be4957f839e6fc6f5d21e8b9cfc6007ff5d782769dbcbb3d27a9110fa77b",
+      "meta": "e7b37b16ac5549ae65f9250b6b2e380fac705ba56984d725fd22da2067bbeac1",
+      "state": "d0c3d0b0579c2d1f256f4977fa14591c948e382058bd7eb0b7a0081d4c9b5efd",
+      "tool_calls": 3,
+      "recorded_tool_calls": 3,
+      "steps": 3
+    },
+    "invalid_json:sse": {
+      "requests": "2925ad8e7fedc6b946863dde4a3272a397c8659b509ec9c51b3de550b6c10376",
+      "thread": "0321be4957f839e6fc6f5d21e8b9cfc6007ff5d782769dbcbb3d27a9110fa77b",
+      "meta": "e7b37b16ac5549ae65f9250b6b2e380fac705ba56984d725fd22da2067bbeac1",
+      "state": "d0c3d0b0579c2d1f256f4977fa14591c948e382058bd7eb0b7a0081d4c9b5efd",
+      "tool_calls": 3,
+      "recorded_tool_calls": 3,
+      "steps": 3
+    },
+    "invalid_type:json": {
+      "requests": "170dd6317e7c2381c00a05bb82f4ff32c170465df9a24dc7bde9c922147b936a"
+    },
+    "invalid_type:sse": {
+      "requests": "41a4a4cf72c32652aac72e3caf6e1e81405f6c6f029035fd33de1e484fb01590"
+    },
+    "dropped_argument:json": {
+      "requests": "f57f841943125c2d1bf795cea63f960d378553bd75fc5096aaf3fbd7e3ae1b5a"
+    },
+    "dropped_argument:sse": {
+      "requests": "c31e36318875a815fb83610234f2ee9244690c01326e0c023c290ffc52012e65"
+    },
+    "unknown_tool:json": {
+      "requests": "ee89616e8d650f6238dd23ca40b84dd51bac5a4365475cfc3f43bacc46604fa7"
+    },
+    "unknown_tool:sse": {
+      "requests": "ac993af1fb54fec3373f93fc4cf77661df885eac875edb0ec29420689a540727"
+    },
+    "tool_error:json": {
+      "requests": "a00fcbbe9bf1d43105910a9c9a5fb495c753f1473ad8e31333b7f84e47c595d1"
+    },
+    "tool_error:sse": {
+      "requests": "7d07456b4da69598ee8acb0990163cef69dbf6b4be20d361dcb3ac4425c93955"
+    },
+    "text_allow:json": {
+      "requests": "5b3dc312d3321c100e90cc00941be454b97ec3c3786e5a74c5e1e1d6b8687f06"
+    },
+    "text_allow:sse": {
+      "requests": "8c5f4442cceb87f33572d96591f9c2db871ec8350a759ed2e1a211ef8aa0e2af"
+    },
+    "text_deny:json": {
+      "requests": "e05c688b26968904f787680af05bafff44285fa31ff70263ba14c77034eaefff"
+    },
+    "text_deny:sse": {
+      "requests": "a2978dc5269ee88488317f94d9402919048758b0cf7a5c8f126ee378225eefeb"
+    },
+    "text_length:json": {
+      "requests": "5a8de80911689045effbc048ea5b7b8d7e1c18acb22cc8757e6f28c4cd1b97a1"
+    },
+    "text_length:sse": {
+      "requests": "acf693d369ae8e01ec20aa5f1c19d97abc580cb564d6156e17e9bbaa6e14a4f0"
+    },
+    "finish_judge_accept:json": {
+      "requests": "4f77416c6c4dd8766c3c57671f766a6a50faa53938441fedfc157558a1987db3"
+    },
+    "finish_judge_accept:sse": {
+      "requests": "7a81aa3b0e471b1d754f2fe31455f1e001cdd1d3acd1798e8bb87c51a8ba0920"
+    },
+    "finish_judge_reject:json": {
+      "requests": "6a5dbefa4eaaecb47989b2ad5d9df885228f5e7ef0b7a08d9305af518bfcde97"
+    },
+    "finish_judge_reject:sse": {
+      "requests": "2f532f92a8a0af0c3c4636c6a03599bd4c66b12dbd27c2e0eafc8a45c6a5962a"
+    },
+    "human_boundary:json": {
+      "requests": "70192fcc17e7a09e0f2f23c330b622e20cfb7bff33c9846db0f84065e08bcbce"
+    },
+    "human_boundary:sse": {
+      "requests": "d9986f87deb5531f6faa80458ce8a813a0b9b4f3e137a08a60dfb9ff24ffb120"
+    },
+    "queued_before:json": {
+      "requests": "bc96f00ba1c10c1b29b02a6f4ec20fda61c1c176ec526b1eaab59af04c4c0336"
+    },
+    "queued_before:sse": {
+      "requests": "0e368c63eb5da973e59cb3d46813d6722e1fad4951c4847281d779f6ce4aea88"
+    },
+    "queued_during:json": {
+      "requests": "491abb6b46ed82e7f6984771baa439d90ac1b92455c696799483688278fffa1c"
+    },
+    "queued_during:sse": {
+      "requests": "a49cdeeaea819bb235a40a01ca2b9d76f2c002ed9d4d53a35692eb7100ed64e4"
+    },
+    "stop_mid_batch:json": {
+      "requests": "5b3dc312d3321c100e90cc00941be454b97ec3c3786e5a74c5e1e1d6b8687f06"
+    },
+    "stop_mid_batch:sse": {
+      "requests": "8c5f4442cceb87f33572d96591f9c2db871ec8350a759ed2e1a211ef8aa0e2af"
+    },
+    "file_roundtrip:json": {
+      "requests": "256cb90e55977e7307c19f25e3e45f378046019f4fc2c5306d45326800184f34",
+      "thread": "24a08cb3c4accf47ec5c0d1fc0d2a4ce0bb559103446aa6dc9ba893af5fbf548",
+      "meta": "ba9863311c05995c4f8b2e2a2a3681cbc38c0cf0003f390433dfe8fe3ae3b7b3",
+      "state": "fa42b21ceda47201e8d90bc019028457b7bc26e7ea5afbc856d5cef59fdd76a0"
+    },
+    "file_roundtrip:sse": {
+      "requests": "ec32ad6fc54e6ac10bd9f5d8b50cb435140238380ad70de092da5abd5f2be915",
+      "thread": "24a08cb3c4accf47ec5c0d1fc0d2a4ce0bb559103446aa6dc9ba893af5fbf548",
+      "meta": "ba9863311c05995c4f8b2e2a2a3681cbc38c0cf0003f390433dfe8fe3ae3b7b3",
+      "state": "fa42b21ceda47201e8d90bc019028457b7bc26e7ea5afbc856d5cef59fdd76a0"
+    }
+  }
+}

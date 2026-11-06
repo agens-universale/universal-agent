@@ -128,7 +128,7 @@ def resolve_summary_limits_at_level(
     resolved = None
     if router is not None:
         try:
-            resolved = router.resolve_main_at_level(level, check_breaker=False)
+            resolved = router.resolve_main_at(level, check_breaker=False)
         except Exception:
             resolved = None
     return resolve_summary_limits_for_resolved(settings, resolved)

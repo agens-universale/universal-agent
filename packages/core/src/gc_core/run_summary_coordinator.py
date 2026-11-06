@@ -277,27 +277,51 @@ class RunSummaryCoordinator:
         return applied
 
     async def aforce_compact_once(
-        self, *, trigger_reason: str = "manual"
+        self,
+        current_messages: list[dict] | None = None,
+        mode: str | None = None,
+        *,
+        trigger_reason: str = "manual",
     ) -> bool:
-        """Один безусловный проход сжатия (ручной /compact) — БЕЗ проверки порога.
-        Та же машинерия, что и автосжатие; персист через on_summary_applied.
+        """Один безусловный проход сжатия — БЕЗ проверки порога.
+
+        Ручной ``/compact`` зовёт без батча: сворачивается вся история.
+        Цикл при переполнении окна передаёт батч шага и режим. Свежие
+        реплики и картинки возвращаются следом, как при сжатии по порогу;
+        ответ инструмента без вызова в хвост не входит. Персист через
+        on_summary_applied.
 
         Основная и единственная реализация; синхронное имя ``force_compact_once``"""
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return False
         self._refresh_limits()
-        async with _asummarizing_flag(self._thread_session):
-            await arun_summary_compaction(
-                ctx=self._ctx,
-                state=state,
-                trigger_reason=trigger_reason,
-                is_cli_mode=self._is_cli_mode,
-                on_summary_applied=self.on_summary_applied,
-                trigger_threshold_chars=self._summary_trigger_chars,
+        preserved = self._preserved_tail(current_messages, mode)
+        raw_messages = getattr(state, "messages", None)
+        state_tail = raw_messages if isinstance(raw_messages, list) else []
+        completed = False
+        try:
+            async with _asummarizing_flag(self._thread_session):
+                await arun_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    trigger_reason=trigger_reason,
+                    is_cli_mode=self._is_cli_mode,
+                    on_summary_applied=self.on_summary_applied,
+                    trigger_threshold_chars=self._summary_trigger_chars,
+                    kept_messages=preserved,
+                )
+            completed = True
+        finally:
+            reattached = await self._areattach_preserved_batch(
+                preserved_batch=preserved,
+                state_tail=state_tail,
+                completed=completed,
+                current_messages=None,
             )
-        # C1: старая история отцеплена компакцией — собираем циклический мусор.
-        self._collect_garbage()
+            if completed or reattached:
+                # C1: старая история отцеплена компакцией — собираем циклический мусор.
+                self._collect_garbage()
         return True
 
     def _warn_if_token_trigger_blind(self) -> None:
@@ -430,12 +454,7 @@ class RunSummaryCoordinator:
             return False
         exceeded_chars, exceeded_tokens = _hit_pair(hits)
 
-        preserved_batch = build_preserved_batch(
-            current_messages=list(current_messages),
-            mode=str(mode),
-            state_messages=list(state_tail),
-            message_keys_already_persisted=self._keys_persisted_before_last_batch(),
-        )
+        preserved_batch = self._preserved_tail(current_messages, mode)
 
         # State заменяется до callback: текущий батч должен вернуться даже
         # при сбое трассы, снятия флага или отмене после применения сводки.
@@ -455,21 +474,69 @@ class RunSummaryCoordinator:
                 )
             completed = True
         finally:
-            msgs = getattr(state, "messages", None)
-            if completed or self._restore_after_failed_compaction(
-                msgs, state_tail
+            if await self._areattach_preserved_batch(
+                preserved_batch=preserved_batch,
+                state_tail=state_tail,
+                completed=completed,
+                current_messages=current_messages,
             ):
-                if isinstance(msgs, list):
-                    msgs.extend(
-                        filter_messages_not_in_state(msgs, preserved_batch)
-                    )
-                if self._thread_session is not None and preserved_batch:
-                    await self._thread_session.apersist_batch(
-                        preserved_batch,
-                        previous_response_id=state.previous_response_id,
-                    )
-                current_messages[:] = preserved_batch
                 self._collect_garbage()
+        return True
+
+    def _preserved_tail(
+        self,
+        current_messages: list[dict] | None,
+        mode: str | None,
+    ) -> list[dict]:
+        """Реплики и картинки текущего шага. Пусто, если батча нет или он не хвост истории.
+
+        Ответ инструмента сюда не входит: после сводки вызов уже внутри неё,
+        и ответ без вызова бэкенд отверг бы.
+        """
+        if not current_messages or not mode:
+            return []
+        state_tail = getattr(self._state, "messages", None)
+        if not isinstance(state_tail, list):
+            return []
+        batch = list(current_messages)
+        if not _messages_tail_matches(state_tail, batch):
+            return []
+        return build_preserved_batch(
+            current_messages=batch,
+            mode=str(mode),
+            state_messages=list(state_tail),
+            message_keys_already_persisted=self._keys_persisted_before_last_batch(),
+        )
+
+    async def _areattach_preserved_batch(
+        self,
+        *,
+        preserved_batch: list[dict],
+        state_tail: list,
+        completed: bool,
+        current_messages: list[dict] | None,
+    ) -> bool:
+        """Дописать хвост к новой истории и, если просят, подменить им батч шага.
+
+        ``current_messages is None`` — вызывающий сам возьмёт историю из state
+        (повтор после переполнения окна). False — сводка историю не подменила.
+        """
+        state = self._state
+        msgs = getattr(state, "messages", None)
+        if not (
+            completed
+            or self._restore_after_failed_compaction(msgs, state_tail)
+        ):
+            return False
+        if isinstance(msgs, list) and preserved_batch:
+            msgs.extend(filter_messages_not_in_state(msgs, preserved_batch))
+        if self._thread_session is not None and preserved_batch:
+            await self._thread_session.apersist_batch(
+                preserved_batch,
+                previous_response_id=state.previous_response_id,
+            )
+        if current_messages is not None:
+            current_messages[:] = preserved_batch
         return True
 
     def _backend_batch_trigger_hits(self) -> Any:

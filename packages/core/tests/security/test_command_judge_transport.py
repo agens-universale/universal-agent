@@ -30,7 +30,7 @@ def _ctx(config, *, router=True):
     attrs = {}
     if router:
         attrs["model_router"] = ModelRouter(
-            loaded, level_provider=lambda: "default"
+            loaded, choice_provider=lambda: "default"
         )
     return fake_ctx(loaded=loaded, **attrs)
 

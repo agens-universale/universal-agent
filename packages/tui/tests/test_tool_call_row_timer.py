@@ -15,7 +15,7 @@ def _make_app(row_factory=None):
             if row_factory is not None:
                 yield row_factory()
             else:
-                yield ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+                yield ToolCallRow(call_id="c1", label="t", target="")
 
     return _App()
 
@@ -31,7 +31,7 @@ async def test_live_row_has_timer():
 async def test_result_stops_timer():
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="ok", error=False)
+        row.set_result(summary="ok", outcome="ok")
         await pilot.pause()
         assert row._pulse_timer is None
 
@@ -48,8 +48,8 @@ async def test_interrupt_stops_timer():
 @pytest.mark.asyncio
 async def test_finished_before_mount_has_no_timer():
     def factory():
-        row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
-        row.set_result(summary="ok", error=False)
+        row = ToolCallRow(call_id="c1", label="t", target="")
+        row.set_result(summary="ok", outcome="ok")
         return row
 
     async with _make_app(factory).run_test() as pilot:
@@ -61,9 +61,7 @@ async def test_finished_before_mount_has_no_timer():
 @pytest.mark.asyncio
 async def test_waiting_row_has_no_timer():
     def factory():
-        return ToolCallRow(
-            call_id="c1", tool_name="t", args_summary="", waiting=True
-        )
+        return ToolCallRow(call_id="c1", label="t", target="", waiting=True)
 
     async with _make_app(factory).run_test() as pilot:
         await pilot.pause()
@@ -74,24 +72,13 @@ async def test_waiting_row_has_no_timer():
 @pytest.mark.asyncio
 async def test_set_active_starts_timer():
     def factory():
-        return ToolCallRow(
-            call_id="c1", tool_name="t", args_summary="", waiting=True
-        )
+        return ToolCallRow(call_id="c1", label="t", target="", waiting=True)
 
     async with _make_app(factory).run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
         row.set_active()
         await pilot.pause()
         assert row._pulse_timer is not None
-
-
-@pytest.mark.asyncio
-async def test_set_waiting_stops_timer():
-    async with _make_app().run_test() as pilot:
-        row = pilot.app.query_one(ToolCallRow)
-        row.set_waiting()
-        await pilot.pause()
-        assert row._pulse_timer is None
 
 
 @pytest.mark.asyncio
@@ -106,33 +93,61 @@ async def test_pause_stops_timer_and_resume_restarts():
         assert row._pulse_timer is not None
 
 
+def _glyph_styles(prefix, glyph: str) -> list[str]:
+    at = prefix.plain.index(glyph)
+    return [str(sp.style) for sp in prefix.spans if sp.start <= at < sp.end]
+
+
 @pytest.mark.asyncio
-async def test_pause_shows_pause_glyph_and_resume_restores():
+async def test_pause_shows_static_run_dot_and_resume_restores():
+    """Человеко-ожидание: статичный янтарный `●` (не `‖`), без дыхания;
+    таймер строки застыл, хвоста ожидания нет — строка не спрашивала."""
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
+        row._elapsed_s = lambda until=None: 3
         row.pause()
         await pilot.pause()
         prefix = row._prefix_static.content
-        assert "‖" in prefix.plain
-        assert "▸" not in prefix.plain
-        at = prefix.plain.index("‖")
-        glyph_styles = [
-            str(sp.style) for sp in prefix.spans if sp.start <= at < sp.end
-        ]
-        assert glyph_styles == [RUN_COLOR]
+        assert "‖" not in prefix.plain
+        assert _glyph_styles(prefix, "●") == [RUN_COLOR]
+        assert row._pulse_timer is None
+        assert row._render_content().plain == "t · 3с"
         row.resume()
         await pilot.pause()
-        assert "▸" in row._prefix_static.content.plain
+        assert row._pulse_timer is not None
 
 
 @pytest.mark.asyncio
-async def test_waiting_then_active_keeps_timer():
+async def test_asking_row_tail_replaces_timer():
+    """Строка, спросившая разрешения: на месте таймера — `· ждёт
+    разрешения` цветом живого таймера; ответ «да» — таймер и дыхание."""
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_waiting()
-        row.set_active()
+        row._elapsed_s = lambda until=None: 3
+        row.pause(asking=True)
         await pilot.pause()
+        content = row._render_content()
+        assert content.plain == "t · ждёт разрешения"
+        at = content.plain.index("ждёт")
+        styles = [str(s.style) for s in content.spans if s.start <= at]
+        assert styles[-1] == RUN_COLOR
+        assert _glyph_styles(row._prefix_static.content, "●") == [RUN_COLOR]
+        row.resume()
+        await pilot.pause()
+        assert row._render_content().plain == "t · 3с"
         assert row._pulse_timer is not None
+
+
+@pytest.mark.asyncio
+async def test_asking_row_refused_gives_undone_glyph():
+    """Отказ после вопроса — `○` и `└` причины, хвоста ожидания нет."""
+    async with _make_app().run_test() as pilot:
+        row = pilot.app.query_one(ToolCallRow)
+        row.pause(asking=True)
+        row.set_result(summary="запрещено", outcome="refused")
+        await pilot.pause()
+        assert "○" in row._prefix_static.content.plain
+        assert "ждёт" not in row._render_content().plain
 
 
 @pytest.mark.asyncio
@@ -147,7 +162,7 @@ async def test_live_row_ticks_coarse():
             super()._pulse_tick()
 
     def factory():
-        return _Counting(call_id="c1", tool_name="t", args_summary="")
+        return _Counting(call_id="c1", label="t", target="")
 
     async with _make_app(factory).run_test() as pilot:
         row = pilot.app.query_one(_Counting)

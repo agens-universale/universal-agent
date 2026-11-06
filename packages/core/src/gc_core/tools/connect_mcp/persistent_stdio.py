@@ -111,6 +111,7 @@ def _spawn_detached_stdio_process(
         cwd=cwd,
         env=env,
         text=True,
+        encoding="utf-8",
         bufsize=1,
     )
     if os.name == "posix":

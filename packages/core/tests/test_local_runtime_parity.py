@@ -1,9 +1,9 @@
-"""Legacy routing execution preserves the recorded trace of requests, results and state.
+"""Legacy routing execution preserves develop's requests, results and persisted state.
 
 Only model HTTP responses are scripted; the executor, loop, tools, finish gate,
-serialization and thread store run normally. The digest file started on develop
-``320ed0b19``. It was refreshed on this branch: service nudges and the live
-permission-mode block change the trace, and that change is what lands in develop.
+serialization and thread store run normally. Reference digests are captured by
+running this same harness against the recorded develop revision, never by
+accepting snapshots from the implementation under test.
 """
 
 import hashlib
@@ -31,33 +31,28 @@ from parity_harness import (
     install,
     judge_accept,
     parity_config,
+    strip_intended_meta_keys,
+    thread_messages,
 )
 
 REFERENCE = (
     Path(__file__).parent / "fixtures/local_runtime_reference_320ed0b19.json"
 )
-
-#: Ключи meta, которые добавляет хранилище v2 (спека
-#: docs/superpowers/specs/2026-10-14-agent-storage-v2-design.md, 5.7). Эталон
-#: develop их не знает, поэтому сравнение вырезает их — по списку, не по маске:
-#: любой другой новый ключ обязан уронить паритет.
-V2_ADDED_META_KEYS = (("workspace",), ("runtime", "turn"))
-
-
-def strip_v2_added_keys(meta):
-    out = deepcopy(meta)
-    for path in V2_ADDED_META_KEYS:
-        parent = out
-        for part in path[:-1]:
-            parent = parent.get(part)
-            if not isinstance(parent, dict):
-                break
-        else:
-            parent.pop(path[-1], None)
-    # Секцию, опустевшую после вырезания, develop не пишет вовсе.
-    if out.get("runtime") == {}:
-        out.pop("runtime")
-    return out
+#: Принятые отличия от эталона develop. Сам эталон из-за них не перезаписывается.
+#:
+#: - ``requests`` во всех сценариях: в запрос к модели входят служебные наджи
+#:   и живой блок режима разрешений.
+#: - ``memory_two_turns``, ``file_roundtrip``: наджи записаны в output тула,
+#:   поэтому меняются ещё ``thread``, ``meta`` и ``state``. Число вызовов и
+#:   шагов прежнее.
+#: - ``invalid_json``: вызов с битым JSON остаётся в треде и исполняется.
+#:   Вызовов и шагов на один больше; меняются ``thread``, ``meta``, ``state``
+#:   и счётчики. В запросе к модели этот вызов не подменяется служебной
+#:   репликой, если ответ уже записан, поэтому ``requests`` тоже другой.
+ACCEPTED_TRACE_CHANGES = (
+    Path(__file__).parent
+    / "fixtures/local_runtime_accepted_trace_changes.json"
+)
 
 
 def call(name, arguments, call_id="c1"):
@@ -476,11 +471,13 @@ async def run_scenario(
         data_path, meta_path = _thread_paths(
             resolve_threads_dir(cfg), "cli", "parity"
         )
-        records = [
-            json.loads(line)
-            for line in Path(data_path).read_text().splitlines()
-            if line.strip()
-        ]
+        records = thread_messages(
+            [
+                json.loads(line)
+                for line in Path(data_path).read_text().splitlines()
+                if line.strip()
+            ]
+        )
         assert records, "Сравнение пустых тредов не проверяет поведение"
         meta = json.loads(Path(meta_path).read_text())
         if post_run_outcome is not None:
@@ -531,7 +528,7 @@ async def run_scenario(
                 "answers": answers,
                 "requests": backend.calls,
                 "thread": records,
-                "meta": strip_v2_added_keys(meta),
+                "meta": strip_intended_meta_keys(meta),
                 "state": {
                     "messages": state.messages,
                     "steps": state.steps,
@@ -576,17 +573,29 @@ async def test_legacy_routing_runtime_matches_develop(
         legacy_routing_contract=True,
     )
     reference = json.loads(REFERENCE.read_text())
+    accepted = json.loads(ACCEPTED_TRACE_CHANGES.read_text())
     key = f"{name}:{'sse' if streaming else 'json'}"
-    assert summary == reference["scenarios"][key]
+    expected = dict(reference["scenarios"][key])
+    for field, value in accepted["scenarios"][key].items():
+        assert field in expected, f"{key}: в эталоне нет поля {field}"
+        assert expected[field] != value, (
+            f"{key}.{field}: принятое отличие совпало с эталоном develop"
+        )
+        expected[field] = value
+    assert summary == expected
 
 
 def test_strip_removes_only_listed_keys():
     meta = {
         "workspace": "/w",
-        "runtime": {"turn": "idle", "live_msg_count": 3},
+        "runtime": {
+            "turn": "idle",
+            "last_turn": {"status": "completed", "reason": None},
+            "live_msg_count": 3,
+        },
         "thread_id": "t",
     }
-    assert strip_v2_added_keys(meta) == {
+    assert strip_intended_meta_keys(meta) == {
         "runtime": {"live_msg_count": 3},
         "thread_id": "t",
     }
@@ -595,10 +604,16 @@ def test_strip_removes_only_listed_keys():
 
 def test_strip_is_noop_without_new_keys():
     meta = {"runtime": {"live_msg_count": 3}, "thread_id": "t"}
-    assert strip_v2_added_keys(meta) == meta
+    assert strip_intended_meta_keys(meta) == meta
 
 
 def test_strip_drops_emptied_runtime():
     # develop никогда не пишет пустую секцию runtime: снятие последнего
     # флага убирает её целиком (контракт thread store).
-    assert strip_v2_added_keys({"runtime": {"turn": "idle"}}) == {}
+    assert strip_intended_meta_keys({"runtime": {"turn": "idle"}}) == {}
+    assert (
+        strip_intended_meta_keys(
+            {"runtime": {"last_turn": {"status": "stopped"}}}
+        )
+        == {}
+    )

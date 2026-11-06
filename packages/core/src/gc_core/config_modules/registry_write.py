@@ -313,6 +313,8 @@ def _references(document: dict, alias: str) -> list[str]:
                     refs.append(f"assign.subagents.{name}")
         elif value == alias:
             refs.append(f"assign.{consumer}")
+    if document.get("model") == alias:
+        refs.append("model")
     return refs
 
 
@@ -429,6 +431,9 @@ def _remove_model_text(
     for reference in references:
         # Каждая ссылка — с той же проверкой: снять запись и оставить ссылку на
         # неё висеть значит сделать ровно то, что этот каскад и предотвращает.
+        if reference == "model":
+            text = _write_pointer_text(text, _template, "model", None)
+            continue
         parent, _sep, leaf = reference.rpartition(".")
         text = _drop_mapping_entry(text, parent, leaf, f"ссылки {reference}")
     return text
@@ -496,7 +501,36 @@ def _write_assign_text(text: str, _template: str, consumer: str, value) -> str:
     return ocw.upsert_mapping_entry(text, parent, key_yaml, block)
 
 
+_TOP_SCALAR_RE = r"^{key}:[ \t]*.*$"
+
+
+def _write_pointer_text(text: str, template: str, key: str, value) -> str:
+    """Задать/снять топ-скаляр-указатель (`model`). Снятие оставляет якорь
+    `key:` пустым (так он стоит в шаблоне); указателя нет — no-op. Нового
+    указателя в файле нет — якорь берётся из шаблона (`insert_missing`),
+    иначе дописывается в конец."""
+    pattern = re.compile(_TOP_SCALAR_RE.format(key=re.escape(key)), re.M)
+    if value is None and pattern.search(text) is None:
+        return text
+    if pattern.search(text) is None:
+        try:
+            text = ocw.insert_missing(text, key, template)
+        except KeyError:
+            sep = "" if text.endswith("\n") else "\n"
+            text = f"{text}{sep}{key}:\n"
+    line = (
+        f"{key}:"
+        if value is None
+        else f"{key}: {ocw.quote_scalar(str(value))}"
+    )
+    match = pattern.search(text)
+    if match is None:
+        raise RegistryWriteError(f"строки указателя {key} в файле нет")
+    return text[: match.start()] + line + text[match.end() :]
+
+
 _OPERATIONS = {
+    "write_pointer": _write_pointer_text,
     "upsert_model": _upsert_model_text,
     "remove_model": _remove_model_text,
     "write_slot": _write_slot_text,
