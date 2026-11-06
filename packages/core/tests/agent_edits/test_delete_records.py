@@ -1,4 +1,5 @@
 import hashlib
+import subprocess
 
 from gc_core.agent_edits.delete_records import DeleteBudget, delete_record
 
@@ -78,4 +79,21 @@ def test_refund_returns_bytes_to_later_reservations():
 def test_text_without_trailing_newline_marks_it():
     rec = _rec("a.txt", b"a\nb", budget=DeleteBudget(100))
     assert rec.hunks.endswith("-a\n-b\n\\ No newline at end of file\n")
+    assert (rec.add, rec.del_) == (0, 2)
+
+
+def test_bom_file_delete_patch_applies_with_git(tmp_path):
+    """Копия патча удаления файла с BOM применяется: BOM сохранён в первой
+    строке удаления, как в байтах файла, а счётчики прежние."""
+    before = b"\xef\xbb\xbfx\ny\n"
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "a.txt").write_bytes(before)
+    rec = _rec("a.txt", before, budget=DeleteBudget(100))
+    (tmp_path / "p.diff").write_text(rec.hunks, encoding="utf-8")
+
+    check = subprocess.run(
+        ["git", "apply", "--check", "p.diff"], cwd=tmp_path, check=False
+    )
+
+    assert check.returncode == 0
     assert (rec.add, rec.del_) == (0, 2)

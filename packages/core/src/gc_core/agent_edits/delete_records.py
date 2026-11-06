@@ -54,11 +54,22 @@ class DeleteBudget:
         self._left += size
 
 
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
 def deletion_text(before: bytes) -> str | None:
-    """Текст «до» для строк удаления; бинарь или недекодируемый — ``None``."""
+    """Текст «до» для строк удаления; бинарь или недекодируемый — ``None``.
+
+    Декодер срезает BOM UTF-8, а ``git apply`` сверяет строки удаления с
+    байтами файла: BOM возвращается в начало первой строки, иначе копия
+    патча не применяется. Счётчики и показ он не меняет (нулевая ширина).
+    """
     if is_binary_bytes(before):
         return None
-    return decode_edit_text(before)
+    text = decode_edit_text(before)
+    if text is not None and before.startswith(_UTF8_BOM):
+        return text if text.startswith("\ufeff") else "\ufeff" + text
+    return text
 
 
 def _deleted_text(
