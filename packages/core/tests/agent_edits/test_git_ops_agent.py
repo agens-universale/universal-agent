@@ -1050,3 +1050,153 @@ def test_status_entries_for_answers_only_about_the_given_paths(tmp_git_repo):
 
     assert {path for path, _xy in rows} == {tracked, "new[1].py"}
     assert status_entries_for(str(root / "no-such-dir"), [tracked]) is None
+
+
+def _commit_all(root: Path, msg: str) -> str:
+    run_git(str(root), ["add", "-A"])
+    run_git(str(root), ["commit", "-m", msg])
+    return rev_parse_head(str(root))
+
+
+@pytest.fixture
+def two_commits(tmp_git_repo):
+    """(root, first, second): второй коммит правит, добавляет и удаляет."""
+    root = tmp_git_repo
+    (root / "tracked.txt").write_bytes(b"line1\nline2\n")
+    (root / "run.sh").write_bytes(b"#!/bin/sh\n")
+    os.chmod(root / "run.sh", 0o755)
+    (root / "a.txt").write_bytes(b"x\ny\n")
+    os.symlink("tracked.txt", root / "link")
+    first = _commit_all(root, "first")
+    (root / "tracked.txt").write_bytes(b"changed\n")
+    (root / "new.txt").write_bytes(b"n\n")
+    (root / "a.txt").unlink()
+    second = _commit_all(root, "second")
+    return root, first, second
+
+
+def test_tree_entries_reports_mode_and_size(two_commits):
+    root, first, _second = two_commits
+    entries = git_ops.tree_entries(
+        str(root), ["tracked.txt", "run.sh", "link"], rev=first
+    )
+    assert entries["tracked.txt"] == git_ops.TreeEntry("100644", 12)
+    assert entries["run.sh"].mode == "100755"
+    assert entries["link"].mode == "120000"
+
+
+def test_tree_entries_missing_path_absent(two_commits):
+    root, first, _second = two_commits
+    assert git_ops.tree_entries(str(root), ["nope.txt"], rev=first) == {}
+
+
+def test_tree_entries_git_refusal_is_none(two_commits):
+    root, _first, _second = two_commits
+    assert git_ops.tree_entries(str(root), ["a.txt"], rev="nope") is None
+
+
+def test_blobs_filtered_at_applies_eol_filter(tmp_git_repo):
+    root = tmp_git_repo
+    (root / "a.txt").write_bytes(b"x\ny\n")
+    _commit_all(root, "lf blob")
+    (root / ".gitattributes").write_bytes(b"*.txt eol=crlf\n")
+    head = _commit_all(root, "attrs")
+    assert git_ops.blobs_filtered_at(str(root), ["a.txt", "no"], rev=head) == {
+        "a.txt": b"x\r\ny\r\n",
+        "no": None,
+    }
+
+
+def test_binary_paths_at_names_binary_deletions_without_content(
+    tmp_git_repo,
+):
+    root = tmp_git_repo
+    (root / "a.bin").write_bytes(b"\x00\x01" * 10)
+    (root / "b.txt").write_bytes(b"text\n")
+    head = _commit_all(root, "bin and text")
+    (root / "a.bin").unlink()
+    (root / "b.txt").unlink()
+    assert git_ops.binary_paths_at(
+        str(root), ["a.bin", "b.txt"], rev=head
+    ) == {"a.bin"}
+    assert git_ops.binary_paths_at(str(root), [], rev=head) == set()
+
+
+def test_binary_paths_at_git_refusal_is_none(tmp_git_repo):
+    assert (
+        git_ops.binary_paths_at(str(tmp_git_repo), ["a.bin"], rev="nope")
+        is None
+    )
+
+
+def test_blobs_filtered_at_honours_autocrlf(tmp_git_repo):
+    """``core.autocrlf=true`` меняет выкладку каждого пути: сырой блоб из
+    пачки не годится."""
+    root = tmp_git_repo
+    (root / "a.txt").write_bytes(b"x\ny\n")
+    head = _commit_all(root, "lf blob")
+    run_git(str(root), ["config", "core.autocrlf", "true"])
+    assert git_ops.blobs_filtered_at(str(root), ["a.txt"], rev=head) == {
+        "a.txt": b"x\r\ny\r\n"
+    }
+
+
+def test_head_reflog_lists_newest_moves_first(two_commits):
+    root, first, second = two_commits
+    newest, older = git_ops.head_reflog(str(root), 2)
+    assert (newest.rev, newest.parents) == (second, (first,))
+    assert newest.subject.startswith("commit: ")
+    assert newest.time > 0
+    assert older.rev == first
+
+
+def test_head_reflog_without_journal_is_none(two_commits):
+    root, _first, _second = two_commits
+    shutil.rmtree(root / ".git" / "logs")
+    assert git_ops.head_reflog(str(root), 2) is None
+
+
+def test_paths_changed_between_lists_added_edited_deleted(two_commits):
+    root, first, second = two_commits
+    assert git_ops.paths_changed_between(str(root), first, second) == {
+        "a.txt",
+        "tracked.txt",
+        "new.txt",
+    }
+    assert git_ops.paths_changed_between(str(root), "nope", second) is None
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["a\rb", "a\x01b", "a\x7fb", "a\tb", 'a"b', "a\\b", "файл", "a\x07\x0b"],
+)
+def test_quote_c_path_is_inverse_of_unquote(name):
+    quoted = git_ops.quote_c_path(name)
+
+    assert git_ops._unquote_c_path(quoted) == name
+
+
+def test_quote_c_path_matches_git_for_control_chars(tmp_path):
+    """Те же кавычки, что у живого git (``core.quotepath=false``)."""
+    if shutil.which("git") is None:
+        pytest.skip("git недоступен")
+    name = 'a\rb\x01c\x7fd"e.txt'
+    run = lambda *args: (
+        subprocess.run(  # noqa: E731
+            ["git", "-c", "core.quotepath=false", *args],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    run("init", "-q")
+    try:
+        (tmp_path / name).write_text("x\n")
+    except OSError:
+        pytest.skip("ФС не принимает такое имя")
+    run("add", "-N", "--", name)
+
+    out = run("diff", "--name-only").strip("\n")
+
+    assert out == git_ops.quote_c_path(name)

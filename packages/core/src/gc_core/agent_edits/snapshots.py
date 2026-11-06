@@ -89,6 +89,11 @@ _SESSION_HEAD_REV_KEY = "session_head_rev"
 # ревизию — общий ключ затёр бы момент создания и ступень HEAD исчезла бы.
 _CREATED_HEAD_REV_KEY = "created_head_rev"
 
+# Ревизия HEAD ДО шелл-команды, которая сама закоммитила путь, — источник
+# признака «закоммичено» у пути без базы и без отметки создания. Отката не
+# даёт: коммит в окне команды мог быть чужим (``ShellDelta._record_slice``).
+_COMMITTED_HEAD_REV_KEY = "committed_head_rev"
+
 _SNAPSHOT_SUFFIXES = (
     _SUFFIX_ORIG,
     _SUFFIX_TURN,
@@ -260,7 +265,8 @@ class SnapshotStore:
 
     Отметка «создан здесь при ревизии X» (``mark_created``) живёт в
     ``index.json`` и байтового файла не имеет вовсе: база созданного пути —
-    пустота, хранить её нечем.
+    пустота, хранить её нечем. Так же живёт отметка коммита
+    (``mark_committed``).
 
     ``thread_key`` — составная строка ``f"{system_id}_{thread_id}"``, ровно
     та же, что стоит в имени журнала правок после префикса ``edits_`` (см.
@@ -567,6 +573,22 @@ class SnapshotStore:
         ступени HEAD по такому пути от отметки не будет.
         """
         value = self._index_entry(path_key).get(_CREATED_HEAD_REV_KEY)
+        return value if isinstance(value, str) and value else None
+
+    def mark_committed(self, path_key: str, *, head_rev: str | None) -> None:
+        """Отметить «путь закоммичен командой поверх ревизии ``head_rev``».
+
+        Только признак коммита для группы «закоммичено» — ни базы, ни права на
+        откат он не даёт. Пишется один раз (раньше — честнее, как у
+        ``mark_created``); ``head_rev is None`` — отметки нет.
+        """
+        if head_rev is None or self.committed_head_rev(path_key) is not None:
+            return
+        self._mark(path_key, {_COMMITTED_HEAD_REV_KEY: head_rev})
+
+    def committed_head_rev(self, path_key: str) -> Optional[str]:
+        """Ревизия отметки коммита (``mark_committed``) — или ``None``."""
+        value = self._index_entry(path_key).get(_COMMITTED_HEAD_REV_KEY)
         return value if isinstance(value, str) and value else None
 
     def capture_turn(

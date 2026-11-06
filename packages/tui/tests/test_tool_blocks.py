@@ -1197,8 +1197,8 @@ def _files(*specs):
             key=f"x:f{i}",
             path=f"f{i}.py",
             verb=verb,
-            add=lines,
-            rem=0,
+            add=0 if verb == "Deleted" else lines,
+            rem=lines if verb == "Deleted" else 0,
             diff_lines=lines,
             size_bytes=None,
             has_record=True,
@@ -1440,7 +1440,21 @@ def test_ran_parts_unrecorded():
     )
 
 
-def test_ran_parts_deleted_file():
+def test_ran_parts_deleted_file_with_lines():
+    model, fold = _edits_model()
+    _ran(model, fold)
+    files = _files(("Deleted", 30))
+    fold(
+        model.ran_parts(
+            "x", command_hidden=0, output_hidden=0, files=files, unrecorded=0
+        )
+    )
+    key = files[0].key
+    assert fold.tail(key) == " (+0 \u221230)"
+    assert fold.share(key) is not None
+
+
+def test_ran_parts_deleted_file_without_lines():
     model, fold = _edits_model()
     _ran(model, fold)
     files = _files(("Deleted", 0))

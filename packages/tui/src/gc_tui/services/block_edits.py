@@ -144,7 +144,7 @@ def ran_files_of(
         _edit_of(
             record,
             key=f"{call_id}:{record.path}",
-            verb=command_file_verb(record.op),
+            verb=command_file_verb(record.op, record.flags),
         )
         for record in records
     ]

@@ -34,6 +34,7 @@ def _entry(
     countable=True,
     by_shell=False,
     external=False,
+    restore_mode=None,
 ) -> FileEntry:
     return FileEntry(
         path=path,
@@ -46,6 +47,7 @@ def _entry(
         external=external,
         revertable=revertable,
         last_ts=1.0,
+        restore_mode=restore_mode,
     )
 
 
@@ -390,3 +392,85 @@ def test_file_replaced_by_a_link_is_skipped(tmp_path):
 
     assert out.skipped == [("a.py", REASON_THROUGH_LINK)]
     assert outside.read_bytes() == b"theirs\n" and (root / "a.py").is_symlink()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="биты доступа POSIX")
+def test_reverting_deleted_exec_file_restores_mode(tmp_path):
+    key = "a.sh"
+    entry = _entry(key, kind="deleted", restore_mode=0o755)
+
+    out = revert_paths(
+        [key], {key: entry}, lambda k: b"#!/bin/sh\n", str(tmp_path)
+    )
+
+    assert out.restored == [key]
+    assert stat.S_IMODE((tmp_path / key).stat().st_mode) == 0o755
+
+
+def test_reverting_deleted_file_without_mode_uses_default(tmp_path):
+    key = "a.txt"
+    entry = _entry(key, kind="deleted", restore_mode=None)
+
+    out = revert_paths([key], {key: entry}, lambda k: b"x\n", str(tmp_path))
+
+    assert out.restored == [key]
+    assert (tmp_path / key).read_bytes() == b"x\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="биты доступа POSIX")
+@pytest.mark.parametrize(
+    ("umask", "mode", "expected"),
+    [
+        (0o077, 0o644, 0o600),
+        (0o077, 0o755, 0o700),
+        (0o022, 0o600, 0o600),
+        (0o022, 0o755, 0o755),
+        (0o111, 0o755, 0o644),
+    ],
+)
+def test_reverting_deleted_file_mode_respects_umask(
+    tmp_path, umask, mode, expected
+):
+    """Режим удалённого файла не шире umask: секрет 0600 при umask 077 не
+    становится 0644 после отката, а umask 0111 не даёт исполнения — как
+    ``git checkout``."""
+    key = "a.cfg"
+    entry = _entry(key, kind="deleted", restore_mode=mode)
+    previous = os.umask(umask)
+    try:
+        out = revert_paths(
+            [key], {key: entry}, lambda k: b"x\n", str(tmp_path)
+        )
+    finally:
+        os.umask(previous)
+
+    assert out.restored == [key]
+    assert stat.S_IMODE((tmp_path / key).stat().st_mode) == expected
+
+
+@pytest.mark.skipif(os.name == "nt", reason="биты доступа POSIX")
+@pytest.mark.parametrize(
+    ("mode", "expected"), [(0o755, 0o755), (0o644, 0o644)]
+)
+def test_reverting_deleted_file_if_chmod_fails_keeps_exec_only_if_recorded(
+    tmp_path, monkeypatch, mode, expected
+):
+    """chmod отказал — файл остаётся с режимом временного файла по umask:
+    исполнение есть, только если оно было у удалённого файла."""
+    key = "a.sh"
+    entry = _entry(key, kind="deleted", restore_mode=mode)
+
+    def _refuse(*_args, **_kwargs):
+        raise PermissionError("chmod запрещён")
+
+    monkeypatch.setattr(os, "chmod", _refuse)
+    previous = os.umask(0o022)
+    try:
+        out = revert_paths(
+            [key], {key: entry}, lambda k: b"#!/bin/sh\n", str(tmp_path)
+        )
+    finally:
+        os.umask(previous)
+
+    assert out.restored == [key]
+    assert stat.S_IMODE((tmp_path / key).stat().st_mode) == expected

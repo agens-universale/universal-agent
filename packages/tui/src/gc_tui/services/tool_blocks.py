@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Iterable, Literal, Mapping, Optional, Sequence, Union
 
-from gc_core.agent_edits.journal import EditRecord
+from gc_core.agent_edits.journal import CREATED_FLAG, EditRecord
 from gc_core.config_modules.agent_edits import DEFAULT_TRACE_DIFF_PREVIEW_LINES
 from gc_core.constants.tool_display import DisplayCategory
 
@@ -203,8 +203,13 @@ def edit_verb(op: Optional[str], *, failed: bool) -> str:
     return "Added" if op == "create" else "Edited"
 
 
-def command_file_verb(op: Optional[str]) -> str:
-    """Глагол файла под командой: `Added` / `Deleted` / `Edited`."""
+def command_file_verb(op: Optional[str], flags: Sequence[str] = ()) -> str:
+    """Глагол файла под командой: `Added` / `Deleted` / `Edited`.
+
+    Флаг ``CREATED_FLAG`` — файл создан и закоммичен самой командой: запись
+    остаётся ``shell`` (без отката удалением), но это тоже `Added`."""
+    if CREATED_FLAG in flags:
+        return "Added"
     return {"create": "Added", "delete": "Deleted"}.get(op or "", "Edited")
 
 
@@ -250,7 +255,7 @@ class BlockEdit:
     add: int
     rem: int
     #: Логических строк диффа с контекстом; 0 — диффа нет (бинарь,
-    #: удаление).
+    #: удаление без содержимого).
     diff_lines: int
     size_bytes: Optional[int]
     has_record: bool
@@ -268,10 +273,19 @@ class BlockEdit:
     def has_diff(self) -> bool:
         return self.has_record and self.diff_lines > 0
 
+    @property
+    def deleted_without_lines(self) -> bool:
+        """Удалённый файл без строк диффа: ни счётчиков, ни ❐."""
+        return (
+            self.verb == command_file_verb("delete") and self.diff_lines == 0
+        )
+
 
 def _edit_tail(edit: Optional[BlockEdit]) -> Parts:
     """Хвост строки файла: ` (+a −r)`, у бинаря — ` · 12 КБ`."""
-    if edit is None or not edit.has_record or edit.verb == "Deleted":
+    if edit is None or not edit.has_record:
+        return ()
+    if edit.deleted_without_lines:
         return ()
     if edit.diff_lines == 0 and edit.size_bytes is not None:
         return ((" · ", "dim"), (format_size(edit.size_bytes), "dim"))

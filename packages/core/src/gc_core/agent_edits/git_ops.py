@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -72,6 +73,13 @@ _CRLF = b"\r\n"
 # Атрибуты, из-за которых выкладка меняет содержимое сверх концов строк: базу
 # из сырого блоба по такому пути собирать нельзя (см. ``has_custom_filter``).
 _WORKTREE_ATTRS = ("filter", "working-tree-encoding", "ident")
+
+# Атрибуты, при которых выкладка меняет и концы строк: сырой блоб по такому
+# пути не равен форме рабочего дерева (см. ``blobs_filtered_at``).
+_EOL_ATTRS = ("text", "eol", "crlf", *_WORKTREE_ATTRS)
+
+# Ложные значения булевой настройки git.
+_GIT_FALSE = frozenset({"false", "no", "off", "0"})
 
 # Снимок рабочего дерева. ``-u`` (каждый неотслеживаемый файл, а не каталог
 # целиком) нужен шелл-каналу: файл, созданный командой, иначе виден только
@@ -237,6 +245,45 @@ def _unquote_c_path(raw: str) -> str:
             continue
         out.extend(escaped.encode("utf-8"))
     return out.decode("utf-8", errors="surrogateescape")
+
+
+# Экранирование git для символов с буквенной формой; прочие управляющие
+# (< 0x20 и 0x7f) git пишет трёхзначной восьмеричной (``quote_c_path``).
+_C_QUOTED = {
+    '"': '\\"',
+    "\\": "\\\\",
+    "\a": "\\a",
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\v": "\\v",
+    "\f": "\\f",
+    "\r": "\\r",
+}
+
+
+def _needs_c_quote(char: str) -> bool:
+    return char in _C_QUOTED or char < " " or char == "\x7f"
+
+
+def _c_quote_char(char: str) -> str:
+    escaped = _C_QUOTED.get(char)
+    if escaped is not None:
+        return escaped
+    return f"\\{ord(char):03o}" if _needs_c_quote(char) else char
+
+
+def quote_c_path(path: str) -> str:
+    """Имя пути для заголовка патча — C-кавычки, как у git (``quotepath``
+    выключен): ``"``, ``\\`` и управляющие символы экранируются, иначе имя
+    как есть.
+
+    Обратная ``_unquote_c_path``. Без кавычек ``git apply`` режет имя по
+    табуляции. Не-ASCII не экранируется — ``git apply`` принимает его и так.
+    """
+    if not any(_needs_c_quote(char) for char in path):
+        return path
+    return '"' + "".join(_c_quote_char(char) for char in path) + '"'
 
 
 def show_index_bytes(launch_root: str, rel: str) -> Optional[bytes]:
@@ -425,32 +472,82 @@ def custom_filter_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
     ``_STDIN_CHUNK_PATHS``: отказ одного запуска объявляет «с фильтром» только
     свой кусок.
     """
+    return set(_set_attrs(launch_root, rels, _WORKTREE_ATTRS))
+
+
+def worktree_attr_paths(
+    launch_root: str, rels: Sequence[str]
+) -> tuple[set[str], set[str]]:
+    """``(custom_filter_paths, пути, чью выкладку фильтры меняют)`` разом.
+
+    Один ``check-attr`` по атрибутам концов строк (их набор включает
+    атрибуты фильтра) и одна проба настройки репозитория вместо двух
+    запросов атрибутов — ``custom_filter_paths`` и ``blobs_filtered_at``
+    (второе множество передаётся туда в ``affected``). Страховка та же:
+    неизвестное — в обоих множествах.
+    """
     rels = list(rels)
-    filtered: set[str] = set()
+    if not rels:
+        return set(), set()
+    attrs = _set_attrs(launch_root, rels, _EOL_ATTRS)
+    filtered = {
+        rel
+        for rel, names in attrs.items()
+        if names is None or names & set(_WORKTREE_ATTRS)
+    }
+    if _config_converts_eol(launch_root):
+        return filtered, set(rels)
+    return filtered, set(attrs)
+
+
+def _set_attrs(
+    launch_root: str, rels: Sequence[str], attrs: Sequence[str]
+) -> dict[str, set[str] | None]:
+    """``{путь: заданные атрибуты}`` для путей, несущих хоть один из ``attrs``.
+
+    Задан — значение не ``unspecified`` и не ``unset``. ``None`` — ответ
+    неизвестен.
+
+    Один ``git check-attr -z --stdin`` на кусок (``_STDIN_CHUNK_PATHS``). Git
+    отказал или про путь ответил не по всем атрибутам — путь в ответе с
+    ``None``: вызывающим это безопасная сторона.
+    """
+    rels = list(rels)
+    found: dict[str, set[str] | None] = {}
     for start in range(0, len(rels), _STDIN_CHUNK_PATHS):
         chunk = rels[start : start + _STDIN_CHUNK_PATHS]
         stdin = _stdin_paths(f"{rel}\x00" for rel in chunk)
         code, out = run_git(
             launch_root,
-            ["check-attr", "-z", "--stdin", *_WORKTREE_ATTRS],
+            ["check-attr", "-z", "--stdin", *attrs],
             stdin=stdin,
         )
         if code != 0:
-            filtered.update(chunk)
+            found.update(dict.fromkeys(chunk))
             continue
         fields = out.decode("utf-8", errors="surrogateescape").split("\x00")
-        values: dict[str, list[str]] = {}
+        answers: dict[str, dict[str, str]] = {}
         for i in range(0, len(fields) - 2, 3):
-            values.setdefault(fields[i], []).append(fields[i + 2])
-        filtered.update(
-            rel
-            for rel in chunk
-            if len(values.get(rel, ())) < len(_WORKTREE_ATTRS)
-            or any(
-                value not in ("unspecified", "unset") for value in values[rel]
-            )
-        )
-    return filtered
+            answers.setdefault(fields[i], {})[fields[i + 1]] = fields[i + 2]
+        for rel in chunk:
+            names = _names_set(answers.get(rel, {}), attrs)
+            if names is None or names:
+                found[rel] = names
+    return found
+
+
+def _names_set(
+    answer: dict[str, str], attrs: Sequence[str]
+) -> set[str] | None:
+    """Заданные атрибуты из ответа ``check-attr`` по пути; ``None`` — git
+    ответил не по всем спрошенным."""
+    if len(answer) < len(attrs):
+        return None
+    return {
+        name
+        for name, value in answer.items()
+        if value not in ("unspecified", "unset")
+    }
 
 
 def ignored_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
@@ -762,6 +859,218 @@ def paths_committed_since(
     return {
         path for out in outputs for path in _decode(out).split("\x00") if path
     }
+
+
+@dataclass(frozen=True)
+class TreeEntry:
+    """Запись дерева ревизии: ``mode`` — строка git (``"100644"``,
+    ``"120000"``, ``"160000"``…), ``size`` — байты блоба без фильтров;
+    ``None`` у не-блоба (подмодуль, дерево).
+    """
+
+    mode: str
+    size: int | None
+
+
+def tree_entries(
+    launch_root: str, rels: Sequence[str], *, rev: str
+) -> dict[str, TreeEntry] | None:
+    """``{путь: TreeEntry}`` для ``rels`` в ревизии ``rev`` — ``ls-tree -l``.
+
+    Пути, которого в ревизии нет, среди ключей нет; отказ git — ``None``
+    (отличим от «ни одного пути»).
+    """
+    rels = list(rels)
+    if not rels:
+        return {}
+    outputs = _chunked_outputs(
+        launch_root, ["ls-tree", "-z", "-l", rev, "--"], rels
+    )
+    if outputs is None:
+        return None
+    entries: dict[str, TreeEntry] = {}
+    for out in outputs:
+        for record in _decode(out).split("\x00"):
+            meta, sep, path = record.partition("\t")
+            fields = meta.split()
+            if not sep or len(fields) < 4:
+                continue
+            size = fields[3]
+            entries[path] = TreeEntry(
+                fields[0], int(size) if size.isdigit() else None
+            )
+    return entries
+
+
+def binary_paths_at(
+    launch_root: str, rels: Sequence[str], *, rev: str
+) -> set[str] | None:
+    """Какие из ``rels`` git считает бинарными в сравнении ``rev`` с диском.
+
+    Один ``diff --numstat`` на кусок путей: бинарная строка — ``-\t-\t<путь>``,
+    содержимое в память не читается. Без внешних диффтулов и textconv — как
+    у остальных диффов слоя. Отказ git — ``None`` (отличим от «бинарных нет»).
+    """
+    rels = list(rels)
+    if not rels:
+        return set()
+    outputs = _chunked_outputs(
+        launch_root,
+        [
+            *_QUOTEPATH_OFF,
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--numstat",
+            "-z",
+            rev,
+            "--",
+        ],
+        [f":(literal){rel}" for rel in rels],
+    )
+    if outputs is None:
+        return None
+    binary: set[str] = set()
+    for out in outputs:
+        for row in _decode(out).split("\x00"):
+            added, _tab, rest = row.partition("\t")
+            deleted, _tab, path = rest.partition("\t")
+            if added == "-" and deleted == "-" and path:
+                binary.add(path)
+    return binary
+
+
+def blobs_filtered_at(
+    launch_root: str,
+    rels: Sequence[str],
+    *,
+    rev: str,
+    affected: set[str] | None = None,
+) -> dict[str, bytes | None]:
+    """``{путь: содержимое в форме рабочего дерева}`` из ревизии ``rev``.
+
+    Путь, чью выкладку фильтры не меняют (``_eol_affected_paths``), — сырой
+    блоб, одной пачкой ``blobs_at``. Остальные и те, кого пачка не прочитала,
+    — ``cat-file --filters`` ПО ФАЙЛУ, параллельно (``run_git_many``):
+    ``--batch --filters`` для них не годится — заголовок пачки несёт размер
+    без фильтра, и разбор ломается. Бюджет вызывающего ограничивает байты,
+    а не число файлов. ``None`` — git по пути отказал. ``affected`` — уже
+    известный ответ ``_eol_affected_paths`` (``worktree_attr_paths``);
+    ``None`` — спросить здесь.
+    """
+    rels = list(rels)
+    if affected is None:
+        affected = _eol_affected_paths(launch_root, rels)
+    result = blobs_at(
+        launch_root, [rel for rel in rels if rel not in affected], rev=rev
+    )
+    per_file = [rel for rel in rels if rel not in result]
+    answers = run_git_many(
+        launch_root,
+        [
+            [*_QUOTEPATH_OFF, "cat-file", "--filters", f"{rev}:{rel}"]
+            for rel in per_file
+        ],
+    )
+    result.update(
+        (rel, out if code == 0 else None)
+        for rel, (code, out) in zip(per_file, answers)
+    )
+    return result
+
+
+def _eol_affected_paths(launch_root: str, rels: list[str]) -> set[str]:
+    """Пути, чью выкладку фильтры меняют: атрибуты концов строк, ``ident``,
+    кодировка, фильтр — или настройка репозитория для всех путей сразу
+    (``core.autocrlf`` включён, ``core.eol`` задан)."""
+    if not rels:
+        return set()
+    if _config_converts_eol(launch_root):
+        return set(rels)
+    return set(_set_attrs(launch_root, rels, _EOL_ATTRS))
+
+
+def _config_converts_eol(launch_root: str) -> bool:
+    """``core.autocrlf`` включён или ``core.eol`` задан; отказ git — да."""
+    code, out = run_git(
+        launch_root,
+        ["config", "--get-regexp", r"^core\.(autocrlf|eol)$"],
+    )
+    if code == 1:
+        return False  # ни одного ключа нет
+    if code != 0:
+        return True
+    for line in _decode(out).splitlines():
+        key, _sep, value = line.partition(" ")
+        if key == "core.eol" or value.lower() not in _GIT_FALSE:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class ReflogEntry:
+    """Запись журнала HEAD: ревизия после сдвига, её родители, время
+    коммиттера (секунды) и тема записи (``commit: …``, ``checkout: …``)."""
+
+    rev: str
+    parents: tuple[str, ...]
+    time: int
+    subject: str
+
+
+def head_reflog(launch_root: str, count: int) -> list[ReflogEntry] | None:
+    """Последние ``count`` записей журнала HEAD, новые первыми.
+
+    Журнала нет или отказ git — ``None``.
+    """
+    code, out = run_git(
+        launch_root,
+        [
+            "log",
+            "-g",
+            "--format=%H%x00%P%x00%ct%x00%gs",
+            "-n",
+            str(count),
+            "HEAD",
+        ],
+    )
+    if code != 0:
+        return None
+    entries = []
+    for line in _decode(out).splitlines():
+        fields = line.split("\0", 3)
+        if len(fields) == 4 and fields[2].isdigit():
+            rev, parents, time, subject = fields
+            entries.append(
+                ReflogEntry(rev, tuple(parents.split()), int(time), subject)
+            )
+    return entries or None
+
+
+def paths_changed_between(
+    launch_root: str, older: str, newer: str
+) -> set[str] | None:
+    """Пути, различающиеся в деревьях ``older`` и ``newer``; отказ — ``None``.
+
+    В отличие от ``paths_committed_since``, отказ git отличим от пустого
+    ответа.
+    """
+    code, out = run_git(
+        launch_root,
+        [
+            *_QUOTEPATH_OFF,
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            older,
+            newer,
+        ],
+    )
+    if code != 0:
+        return None
+    return {path for path in _decode(out).split("\x00") if path}
 
 
 def head_rev_from_files(launch_root: str) -> str | None:

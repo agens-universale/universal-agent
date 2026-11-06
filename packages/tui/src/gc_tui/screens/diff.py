@@ -1417,7 +1417,7 @@ def build_rows(
         for idx in range(len(entries))
     ]
     hashes = [_commit_hash(step) for step in row_steps]
-    kinds = [_KIND_LABELS.get(entry.kind, entry.kind) for entry in entries]
+    kinds = [_kind_label(entry) for entry in entries]
     pluses = [f"+{entry.add}" for entry in entries]
     minuses = [f"−{entry.del_}" for entry in entries]
     kind_w = max(len(kind) for kind in kinds)
@@ -1612,6 +1612,13 @@ def build_settled_rows(
         text.append(minuses[idx].rjust(minus_w), style=SETTLED_ERR)
         rows.append(text)
     return rows
+
+
+def _kind_label(entry: FileEntry) -> str:
+    """Подпись вида правки; созданный и закоммиченный командой — «создан»."""
+    if entry.shown_created and entry.kind == "modified":
+        return _KIND_LABELS["created"]
+    return _KIND_LABELS.get(entry.kind, entry.kind)
 
 
 def _settled_entry(row: SettledRow) -> FileEntry:

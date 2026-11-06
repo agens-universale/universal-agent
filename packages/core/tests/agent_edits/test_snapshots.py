@@ -662,6 +662,40 @@ def test_mark_created_is_evicted_with_thread(tmp_path):
     assert store_dead.created_head_rev("b.py") is None
 
 
+def test_mark_committed_records_the_first_rev_only(tmp_path):
+    """Отметка коммита — тоже без байтов; ревизию не двигает повтор, ``None``
+    отметки не ставит. Отметкой создания она не считается."""
+    store = _store(tmp_path)
+    store.mark_committed("a.py", head_rev="a" * 40)
+    store.mark_committed("a.py", head_rev="b" * 40)
+    store.mark_committed("outside-git.py", head_rev=None)
+
+    assert store.committed_head_rev("a.py") == "a" * 40
+    assert store.committed_head_rev("outside-git.py") is None
+    assert store.created_head_rev("a.py") is None
+    assert store.session_baseline("a.py") is None
+
+
+def test_mark_committed_is_evicted_with_thread(tmp_path):
+    """Как отметка создания: файла за ней нет, умирает с записями треда."""
+    diffs_root = tmp_path / "diffs"
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir(parents=True)
+    edits_journal_path(str(threads_dir), "sys", "th").write_text(
+        "", encoding="utf-8"
+    )
+
+    store_alive = SnapshotStore(diffs_root, "sys_th", threads_dir)
+    store_dead = SnapshotStore(diffs_root, "sys_other", threads_dir)
+    store_alive.mark_committed("a.py", head_rev="a" * 40)
+    store_dead.mark_committed("b.py", head_rev="b" * 40)
+
+    store_alive.evict_lru(max_files=1)
+
+    assert store_alive.committed_head_rev("a.py") == "a" * 40
+    assert store_dead.committed_head_rev("b.py") is None
+
+
 def test_evict_lru_keeps_index_entry_of_a_surviving_snapshot(tmp_path):
     """Уборка записей мёртвого треда не трогает те, за которыми остался файл:
     иначе снимок, переживший эвикцию, потерял бы свою turn-отметку."""
