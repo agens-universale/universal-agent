@@ -650,3 +650,33 @@ async def test_queued_message_after_overflow_runs_prompt_hook_and_command(
     assert overflowed == [True]
     assert "SAY-HI again" in _requests(backend)[0]
     assert _lines(log) == ["UserPromptSubmit:", "UserPromptSubmit:"]
+
+
+async def test_overflow_with_compaction_keeps_request_and_command(
+    tmp_path, monkeypatch
+):
+    """Сводка при переполнении окна заменила историю: в повторе запрос
+    человека и раскрытая команда — по одному разу, хук не перезапущен."""
+    from test_overflow_keeps_request import overflow_once_then_summarize
+
+    log = tmp_path / "hooks.log"
+    root = _plugin(
+        tmp_path, "plug", {"UserPromptSubmit": _logging(log, "CTX")}
+    )
+    (root / "commands").mkdir()
+    (root / "commands" / "hi.md").write_text("SAY-HI $ARGUMENTS\n")
+    backend = install(monkeypatch, ScriptedBackend(_finish_turn()))
+    overflowed = overflow_once_then_summarize(monkeypatch)
+    ctx = await _ctx(tmp_path, monkeypatch, [root])
+
+    await AgentExecutor(ctx).arun(["/plug:hi there"], thread_id="t1")
+
+    assert overflowed == [True]
+    retried = backend.calls[0]["messages"]
+    assert "dialog_summary" in retried[1]["content"]
+    live = retried[2:]
+    asks = [m for m in live if m.get("content") == "/plug:hi there"]
+    assert [m["role"] for m in asks] == ["user"]
+    expanded = [m for m in live if "SAY-HI there" in str(m["content"])]
+    assert len(expanded) == 1
+    assert _lines(log) == ["UserPromptSubmit:"]

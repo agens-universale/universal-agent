@@ -1886,6 +1886,7 @@ class AgentExecutor:
                         thread_session, active
                     )
                 ),
+                step_start_hook=summary.mark_step_start,
             )
             loop_finished = True
             self.last_response, self.loop_finished = response, True

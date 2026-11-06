@@ -159,6 +159,9 @@ class RunSummaryCoordinator:
         # сказано ли об этом в лог в этом прогоне.
         self._backend_requested = False
         self._blind_token_trigger_warned = False
+        # Ключи треда на начало шага цикла: всё, что записано позже (реплика,
+        # подсказка, сообщения плагинов), — вход этого шага.
+        self._keys_at_step_start: frozenset[str] | None = None
 
     def _refresh_limits(self) -> None:
         """Пороги срабатывания на момент проверки: от провайдера модели истории;
@@ -505,7 +508,7 @@ class RunSummaryCoordinator:
             current_messages=batch,
             mode=str(mode),
             state_messages=list(state_tail),
-            message_keys_already_persisted=self._keys_persisted_before_last_batch(),
+            message_keys_already_persisted=self._keys_at_step_start,
         )
 
     async def _areattach_preserved_batch(
@@ -561,11 +564,13 @@ class RunSummaryCoordinator:
             strip_think=True,
         )
 
-    def _keys_persisted_before_last_batch(self) -> frozenset[str] | None:
-        snap = getattr(
-            self._thread_session, "known_keys_snapshot_before_last_batch", None
+    def mark_step_start(self) -> None:
+        """Начало шага цикла: запомнить ключи, уже известные треду. Батч
+        шага при сжатии режется по ним, сколько бы записей ни было в шаге."""
+        session = self._thread_session
+        self._keys_at_step_start = (
+            None if session is None else frozenset(session.known_message_keys)
         )
-        return snap if isinstance(snap, frozenset) else None
 
     def _restore_after_failed_compaction(
         self, msgs: Any, state_tail: list
