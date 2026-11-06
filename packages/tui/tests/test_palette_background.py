@@ -24,7 +24,7 @@ _FIXED_CSS = {
     "tool-name": "#BCC3CC",
     "code-block": "#9aa4b2",
     "ok": "#5FAE7F",
-    "run-color": "#dba265",
+    "run-color": "#d8a46d",
     "olive": "#8FA05A",
     "gradient-warm": "#d9a36a",
     "gradient-mid": "#8fa059",
