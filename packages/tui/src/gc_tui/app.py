@@ -404,6 +404,8 @@ class TuiApp(App):
             None  # имена тулов до stop_tools — валидатор notices
         )
         self.active_runner = None  # AgentRunner | None
+        #: Решения по плану снятого раннера для следующего (`_retire_runner`).
+        self._carried_plan: tuple = (None, None)
         self._runner_stale = False  # конфиг изменился при живом run → пересборка после завершения
         # Режим разрешений, выбранный в сессии (Shift+Tab, флаг запуска, сохранённый
         # в сессии). None — выбора не было, действует конфиг. Единственный
@@ -1701,6 +1703,16 @@ class TuiApp(App):
         if runner is not None and runner.is_running():
             self._runner_stale = True
             return
+        self._retire_runner(runner)
+
+    def _retire_runner(self, runner) -> None:
+        """Снять простаивающий раннер под пересборку. Решения по плану, ещё
+        не отданные прогону, принадлежат окну, а не раннеру: следующий
+        раннер их получит (`get_runner`). Через getattr: тесты подставляют
+        двойников без них."""
+        decisions = getattr(runner, "plan_decisions", None)
+        if callable(decisions):
+            self._carried_plan = decisions()
         _release_runner(runner)
         self.active_runner = None
         self._runner_stale = False
@@ -1814,9 +1826,7 @@ class TuiApp(App):
             and self._runner_stale
             and not self.active_runner.is_running()
         ):
-            _release_runner(self.active_runner)
-            self.active_runner = None
-            self._runner_stale = False
+            self._retire_runner(self.active_runner)
             # Снятие выбора, отложенное перечиткой конфига посреди хода.
             self.sanitize_session_model()
         if self.active_runner is not None:
@@ -1851,6 +1861,14 @@ class TuiApp(App):
         # принадлежит окну, а не раннеру, и едет в каждый новый.
         if self._permission_mode is not None:
             self.active_runner.set_permission_mode(self._permission_mode)
+        # Так же решения по плану прежнего раннера: кнопка баннера нажата, а
+        # Enter — уже после пересборки.
+        accepted, rework = self._carried_plan
+        self._carried_plan = (None, None)
+        if accepted is not None:
+            self.active_runner.accept_plan(*accepted)
+        if rework is not None:
+            self.active_runner.arm_plan_rework(rework)
         return self.active_runner
 
     def refresh_plugin_set(self) -> bool:
