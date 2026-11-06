@@ -516,8 +516,9 @@ def test_begin_turn_resets_hook_flag():
 async def test_context_hooks_run_in_every_backend_mode(
     tmp_path, monkeypatch, backend_mode
 ):
-    """UserPromptSubmit — до служебных добавок, SessionStart — перед
-    объявлением режима; в любом api_mode."""
+    """Хуки — после выпуска подсказок (отложенный вывод инструмента уже
+    записан), в любом api_mode; UserPromptSubmit видит запрос человека,
+    а не служебные добавки выпуска."""
     from gc_core import processing_responses as pr
     from gc_core import run_context as rc
 
@@ -541,25 +542,29 @@ async def test_context_hooks_run_in_every_backend_mode(
     )
     called = []
 
-    async def hooks(_state, _ctx, _messages, *, user_prompt):
+    request = [{"role": "user", "content": "hi"}]
+    service = {"role": "user", "content": "служебное"}
+    seen = []
+
+    async def hooks(_state, _ctx, messages, *, user_prompt):
         called.append("prompt" if user_prompt else "start")
+        seen.append(messages)
         return []
 
     async def no_judge(*_a, **_kw):
         return None
 
-    async def announce(messages):
-        called.append("announce")
-        return messages
+    async def flush(messages, _backend_mode):
+        called.append("flush")
+        return [*messages, service]
 
     monkeypatch.setattr(pr, "aprepare_main_call", no_judge)
     monkeypatch.setattr(pr, "acontext_hook_messages", hooks)
-    monkeypatch.setattr(loop, "_aannounce_mode", announce)
+    monkeypatch.setattr(loop, "_aflush_nudges", flush)
 
-    await loop._aprepare_main_request(
-        [{"role": "user", "content": "hi"}], "user_ask", backend_mode
-    )
-    assert called == ["prompt", "start", "announce"]
+    await loop._aprepare_main_request(request, "user_ask", backend_mode)
+    assert called == ["flush", "prompt", "start"]
+    assert seen[0] == request
 
 
 async def test_overflow_retry_runs_prompt_hook_and_command_once(
