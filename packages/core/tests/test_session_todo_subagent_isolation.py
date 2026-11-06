@@ -8,7 +8,7 @@ replace-семантика — субагент затирал план орке
 
 import json
 
-from gc_core.message_policy.todo_reminder import apply_todo_reminder
+from gc_core.message_policy.todo_reminder import todo_reminder_text
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.working_memory_gateway import (
     read_session_todo_from_state,
@@ -133,8 +133,8 @@ def test_reminder_uses_own_checklist():
     child.session_todo = [{"content": "Готово", "status": "completed"}]
     config = make_settings({"todo": {"reminder_steps": 1}})
 
-    out = apply_todo_reminder([], child, config, step_messages=[])
+    out = todo_reminder_text(child, config, step_messages=[])
 
-    assert len(out) == 1
-    assert "without an active task checklist" in out[0]["content"]
-    assert "has not been updated" not in out[0]["content"]
+    assert out is not None
+    assert "without an active task checklist" in out
+    assert "has not been updated" not in out

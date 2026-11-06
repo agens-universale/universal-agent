@@ -167,7 +167,8 @@ def resolve_technical_user_content_type(content: str) -> str:
     return TECHNICAL_TYPE_TECHNICAL
 
 
-def build_invalid_tool_call_feedback_message(message: dict) -> dict:
+def invalid_tool_call_feedback_text(message: dict) -> str:
+    """Текст отказа битого вызова — без обёртки technical-user."""
     tool_name = str(message.get("name", "unknown_tool"))
     raw_args = message.get("arguments")
     args_text = str(raw_args) if raw_args is not None else "(missing)"
@@ -187,20 +188,24 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
             "calls with moderate chunks-not one oversized `arguments` payload."
         )
 
-    feedback = (
-        "Tool call cannot be sent to chat/completions backend because arguments are invalid.\n\n"
+    return (
+        "Tool call cannot be executed: its arguments do not match the tool schema.\n\n"
         f"Tool name: {tool_name}\n"
         f"Validation error: {error_text}\n\n"
         "Received tool arguments:\n"
         "```json\n"
         f"{args_text}\n"
         "```\n\n"
-        "Please regenerate this tool call with valid JSON arguments."
+        "Please regenerate this tool call with arguments that match the schema."
         f"{mitigation}"
     )
+
+
+def build_invalid_tool_call_feedback_message(message: dict) -> dict:
     return {
         "role": "user",
         "content": wrap_technical_user_content(
-            feedback, technical_type=TECHNICAL_TYPE_ERROR_MESSAGE
+            invalid_tool_call_feedback_text(message),
+            technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
         ),
     }

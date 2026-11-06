@@ -14,6 +14,7 @@ from gc_core.constants.tool_names import (
 )
 from gc_core.execution.progress import tool_args_summary
 from gc_core.message_policy.chat_completions import is_bridge_echo
+from gc_core.message_policy.nudges import output_for_card
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -812,6 +813,9 @@ _HALT_SUMMARIES = {
     CHECK_FAILED_TYPE: "проверка не прошла — агент может повторить",
     "cancelled_by_user": "отменено",
     "not_started_due_to_user_stop": "не запущено (стоп)",
+    "not_started_due_to_session_compact": (
+        "не исполнен: сводка заменила историю"
+    ),
     "step_limit": "лимит шагов",
     "token_limit": "лимит токенов",
     "tool_call_limit": "лимит вызовов",
@@ -863,6 +867,7 @@ def output_summary(output: Any, *, error: bool) -> str:
 def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(output, str):
         return ""
+    output = output_for_card(output)
     # Единый unwrap: голый dict, double-encoded, list-обёртка, stored_tool_output
     # envelope (с partial-parser для truncated). Та же логика что у preview.
     from gc_tui.services.tool_preview import unwrap_tool_output_dict

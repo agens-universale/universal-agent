@@ -9,6 +9,7 @@
 import json
 from collections import Counter
 
+import pytest
 from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_testkit import as_coro
 from gc_testkit.helpers.tool_ctx import with_local_ctx
@@ -95,6 +96,59 @@ def test_open_budget_exceeded_still_refuses(tmp_path):
 
     assert data["stop_reason"] == "too_many_files_opened"
     assert data["scan_complete"] is False
+
+
+@pytest.mark.parametrize("workers_threshold", [1, 20_000])
+@pytest.mark.parametrize(
+    ("limit", "stop_reason"),
+    [(20, "regex_match_budget"), (5, "match_limit")],
+)
+def test_regex_match_budget_does_not_stop_directory_scan(
+    tmp_path, workers_threshold, limit, stop_reason
+):
+    dense = "x" * (FindInFiles.max_regex_matches_examined + 100)
+    (tmp_path / "a.txt").write_text(f"{dense}\nx\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text(f"{dense}\nx\n", encoding="utf-8")
+    (tmp_path / "c.txt").write_text("x\n", encoding="utf-8")
+
+    tool = _tool(tmp_path, {"content_workers_threshold": workers_threshold})
+    data = _call(
+        tool, tmp_path, pattern=r"(?=x)", query_mode="python-re", limit=limit
+    )
+
+    assert data["search_backend"] == "python"
+    # Parallel workers can finish files in a different order.
+    assert sorted((m["file"], m["line"]) for m in data["matches"]) == [
+        (str(tmp_path / name), 1)
+        for name in ("a.txt", "a.txt", "b.txt", "b.txt", "c.txt")
+    ]
+    assert data["count"] == 5
+    assert data["stop_reason"] == stop_reason
+    # The global limit can stop the last dense file before its own budget.
+    budget_counts = (1, 2) if stop_reason == "match_limit" else (2,)
+    assert data["regex_match_budget_files"] in budget_counts
+    assert data["scan_complete"] is False
+    assert data["more_matches_may_exist"] is True
+    assert "more specific pattern" in data["guidance"]
+
+
+def test_regex_open_budget_takes_priority_over_a_capped_file(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(FindInFiles, "max_regex_matches_examined", 10)
+    (tmp_path / "a.txt").write_text("foobar" * 20, encoding="utf-8")
+    (tmp_path / "b.txt").write_text("foobaz\n", encoding="utf-8")
+
+    tool = _tool(tmp_path, {"max_open_files_affix_or": 1})
+    data = _call(
+        tool, tmp_path, pattern="foo(bar|baz)", query_mode="python-re"
+    )
+
+    assert data["count"] == 1
+    assert data["stop_reason"] == "too_many_files_opened"
+    assert data["regex_match_budget_files"] == 1
+    assert data["scan_complete"] is False
+    assert data["more_matches_may_exist"] is True
 
 
 def test_show_excluded_dirs_is_answered_not_dropped(tmp_path, monkeypatch):
@@ -422,6 +476,108 @@ def test_capture_cap_with_native_failure_does_not_fall_to_python(
     assert data["count"] == 0
     assert data["stop_reason"] == "output_capped"
     assert data["scan_complete"] is False
+    assert "fallback_reason" not in data
+
+
+def test_capture_capped_tail_preserves_native_hits(tmp_path, monkeypatch):
+    from gc_core.utils import native_fs_search
+    from gc_core.utils.native_fs_search import NativeGrepResult
+
+    path = tmp_path / "big.log"
+    path.write_text("KEY\n" + "x" * 1000 + "KEY\n", encoding="utf-8")
+    rows = [
+        {"file": str(path), "line": 1, "end_line": 1, "line_content": "KEY"},
+        {
+            "file": str(path),
+            "line": 2,
+            "end_line": 2,
+            "line_content": "x" * 600,
+            "line_content_truncated": True,
+        },
+    ]
+    monkeypatch.setattr(
+        native_fs_search,
+        "arun_native_grep",
+        as_coro(lambda *a, **k: NativeGrepResult(rows, True, True)),
+    )
+    tool = _tool(tmp_path, {"max_file_bytes": 50})
+    _native_ready(tool, monkeypatch)
+
+    data = _call(tool, tmp_path, pattern="KEY", query_mode="text")
+
+    assert data["search_backend"] == "grep"
+    assert data["count"] == 2
+    assert data["matches"][0]["line_content"] == "KEY"
+    assert data["matches"][1]["line_content_truncated"] is True
+    assert data["stop_reason"] == "output_capped"
+    assert data["scan_complete"] is False
+    assert "fallback_reason" not in data
+
+
+@pytest.mark.parametrize(
+    "total,limit,reason", [(5, 6, None), (31, 5, "match_limit")]
+)
+def test_unavailable_offsets_do_not_change_search_completeness(
+    tmp_path, monkeypatch, total, limit, reason
+):
+    from gc_core.utils import native_fs_search
+    from gc_core.utils.native_fs_search import NativeGrepResult
+
+    line = "x" * 700 + "key"
+    path = tmp_path / "big.log"
+    path.write_text((line + "\n") * total, encoding="utf-8")
+    rows = [
+        {
+            "file": str(path),
+            "line": i + 1,
+            "end_line": i + 1,
+            "line_content": line,
+        }
+        for i in range(5)
+    ]
+    monkeypatch.setattr(
+        native_fs_search,
+        "arun_native_grep",
+        as_coro(
+            lambda *a, **k: NativeGrepResult(
+                rows, False, False, total_matches=total
+            )
+        ),
+    )
+    probes = []
+
+    async def unavailable(_backend, lines, _plan):
+        probes.append(lines)
+        return [None] * len(lines)
+
+    monkeypatch.setattr(
+        native_fs_search, "alocate_native_grep_matches", unavailable
+    )
+    monkeypatch.setattr(FindInFiles, "max_native_match_locators", 2)
+    tool = _tool(tmp_path, {"max_file_bytes": 50})
+    _native_ready(tool, monkeypatch)
+
+    data = _call(
+        tool,
+        tmp_path,
+        pattern="KEY|OTHER",
+        query_mode="python-re",
+        case_insensitive=True,
+        limit=limit,
+    )
+
+    assert data["search_backend"] == "grep"
+    assert probes == [[line, line]]
+    assert data["count"] == 5
+    assert data.get("stop_reason") == reason
+    assert data["scan_complete"] is (total == 5)
+    assert data["more_matches_may_exist"] is (total > 5)
+    assert all(
+        "match location unavailable" in row["line_content"]
+        for row in data["matches"]
+    )
+    if reason is not None:
+        assert "Increase limit" in data["guidance"]
     assert "fallback_reason" not in data
 
 
