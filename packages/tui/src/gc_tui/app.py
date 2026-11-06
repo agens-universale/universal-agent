@@ -1705,6 +1705,11 @@ class TuiApp(App):
             return
         self._retire_runner(runner)
 
+    def drop_carried_plan_decisions(self) -> None:
+        """Раннер снят стопом или сменой сессии: решения по плану прежнего
+        раннера в следующий не едут."""
+        self._carried_plan = (None, None)
+
     def _retire_runner(self, runner) -> None:
         """Снять простаивающий раннер под пересборку. Решения по плану, ещё
         не отданные прогону, принадлежат окну, а не раннеру: следующий

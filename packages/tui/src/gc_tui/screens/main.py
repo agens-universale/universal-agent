@@ -8936,6 +8936,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             if callable(release):
                 release()
         self.app.active_runner = None
+        self.app.drop_carried_plan_decisions()
         self.app.detach_run_sinks()
         self._return_queue_to_input(withdrawn)
 

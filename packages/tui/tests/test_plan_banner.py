@@ -564,3 +564,18 @@ async def test_plan_decisions_taken_by_a_run_are_not_carried(tmp_path):
     executor = app.get_runner()._ensure_executor()
 
     assert executor.rework is None
+
+
+async def test_new_session_drops_carried_plan_decisions(tmp_path):
+    """Решение, перенесённое с пересобранного раннера, живёт, пока окно не
+    сняло раннер само (новая сессия, стоп): тогда оно не едет дальше, как и
+    без пересборки."""
+    async with _factory_app(tmp_path).run_test() as pilot:
+        app = pilot.app
+        app.get_runner().arm_plan_rework("t1")
+        app.invalidate_runner()
+
+        app.screen.request_thread_switch(None)
+        await pilot.pause()
+
+        assert app.get_runner()._ensure_executor().rework is None

@@ -11,10 +11,10 @@ runner: логгер прогона живёт в реестре `logging` до 
 * остановка прогона по Esc / Ctrl+C (`TraceScreen._stop_and_replace_runner`).
 """
 
-from gc_testkit.tui_support import tui_settings
 from types import SimpleNamespace
 
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 class _Runner:
@@ -125,6 +125,7 @@ def test_stop_and_replace_releases_after_stop():
             last_stop_requested=False,
             run_thread_id=lambda runner: None,
             detach_run_sinks=lambda: None,
+            drop_carried_plan_decisions=lambda: None,
         ),
         _withdraw_queue=lambda runner: [],
         _return_queue_to_input=lambda replies: None,
