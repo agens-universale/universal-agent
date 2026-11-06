@@ -506,11 +506,15 @@
    "type": "function"
   },
   "fs_read_file": {
-   "description": "Read a text file. Optional offset (1-based, default 1) and limit (default: to end of file) select a line window. Always includes full-file sha256 (for expected_file_sha256 in edit tools).",
+   "description": "Read a text file. Optional offset (1-based, default 1) and limit (default: to end of file) select a line window. Always includes full-file sha256 (for expected_file_sha256 in edit tools). Set add_line_numbers to true to prefix each line with its absolute number as N|.",
    "name": "fs_read_file",
    "parameters": {
     "additionalProperties": false,
     "properties": {
+     "add_line_numbers": {
+      "description": "Required. When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
+      "type": "boolean"
+     },
      "encoding": {
       "description": "Omit for UTF-8 (UTF-8/UTF-16 BOM is detected). Otherwise one of: utf-8-sig, cp1251, koi8-r, latin-1, utf-16, utf-16-le, utf-16-be.",
       "type": "string"
@@ -529,7 +533,8 @@
      }
     },
     "required": [
-     "path"
+     "path",
+     "add_line_numbers"
     ],
     "type": "object"
    },
@@ -783,11 +788,11 @@
       "type": "string"
      },
      "content": {
-      "description": "Markdown text for append/write. For append: ONLY the new delta. For write: the FULL updated register content (full overwrite).",
+      "description": "Required on every call. For append: ONLY the new delta (must be non-empty). For write: the FULL updated register content (must be non-empty; full overwrite). For list and read: pass an empty string.",
       "type": "string"
      },
      "reason": {
-      "description": "Optional brief justification for why this update is useful and why it belongs in this register. Recommended but optional; content is required for append/write.",
+      "description": "Optional brief justification for why this update is useful and why it belongs in this register. Recommended but optional.",
       "type": "string"
      },
      "register": {
@@ -803,7 +808,8 @@
     },
     "required": [
      "action",
-     "register"
+     "register",
+     "content"
     ],
     "type": "object"
    },
@@ -1667,11 +1673,15 @@
    "type": "function"
   },
   "fs_read_file": {
-   "description": "Read a text file. Optional offset (1-based, default 1) and limit (default: to end of file) select a line window. Always includes full-file sha256 (for expected_file_sha256 in edit tools).",
+   "description": "Read a text file. Optional offset (1-based, default 1) and limit (default: to end of file) select a line window. Always includes full-file sha256 (for expected_file_sha256 in edit tools). Set add_line_numbers to true to prefix each line with its absolute number as N|.",
    "name": "fs_read_file",
    "parameters": {
     "additionalProperties": false,
     "properties": {
+     "add_line_numbers": {
+      "description": "Required. When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
+      "type": "boolean"
+     },
      "encoding": {
       "description": "Omit for UTF-8 (UTF-8/UTF-16 BOM is detected). Otherwise one of: utf-8-sig, cp1251, koi8-r, latin-1, utf-16, utf-16-le, utf-16-be.",
       "type": "string"
@@ -1690,7 +1700,8 @@
      }
     },
     "required": [
-     "path"
+     "path",
+     "add_line_numbers"
     ],
     "type": "object"
    },
@@ -1944,11 +1955,11 @@
       "type": "string"
      },
      "content": {
-      "description": "Markdown text for append/write. For append: ONLY the new delta. For write: the FULL updated register content (full overwrite).",
+      "description": "Required on every call. For append: ONLY the new delta (must be non-empty). For write: the FULL updated register content (must be non-empty; full overwrite). For list and read: pass an empty string.",
       "type": "string"
      },
      "reason": {
-      "description": "Optional brief justification for why this update is useful and why it belongs in this register. Recommended but optional; content is required for append/write.",
+      "description": "Optional brief justification for why this update is useful and why it belongs in this register. Recommended but optional.",
       "type": "string"
      },
      "register": {
@@ -1964,7 +1975,8 @@
     },
     "required": [
      "action",
-     "register"
+     "register",
+     "content"
     ],
     "type": "object"
    },
@@ -3006,11 +3018,15 @@
    "type": "function"
   },
   "fs_read_file": {
-   "description": "Read a text file. Optional offset (1-based, default 1) and limit (default: to end of file) select a line window. Always includes full-file sha256 (for expected_file_sha256 in edit tools).",
+   "description": "Read a text file. Optional offset (1-based, default 1) and limit (default: to end of file) select a line window. Always includes full-file sha256 (for expected_file_sha256 in edit tools). Set add_line_numbers to true to prefix each line with its absolute number as N|.",
    "name": "fs_read_file",
    "parameters": {
     "additionalProperties": false,
     "properties": {
+     "add_line_numbers": {
+      "description": "Required. When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
+      "type": "boolean"
+     },
      "encoding": {
       "description": "Omit for UTF-8 (UTF-8/UTF-16 BOM is detected). Otherwise one of: utf-8-sig, cp1251, koi8-r, latin-1, utf-16, utf-16-le, utf-16-be.",
       "type": "string"
@@ -3029,7 +3045,8 @@
      }
     },
     "required": [
-     "path"
+     "path",
+     "add_line_numbers"
     ],
     "type": "object"
    },
@@ -3264,11 +3281,11 @@
       "type": "string"
      },
      "content": {
-      "description": "Markdown text for append/write. For append: ONLY the new delta. For write: the FULL updated register content (full overwrite).",
+      "description": "Required on every call. For append: ONLY the new delta (must be non-empty). For write: the FULL updated register content (must be non-empty; full overwrite). For list and read: pass an empty string.",
       "type": "string"
      },
      "reason": {
-      "description": "Optional brief justification for why this update is useful and why it belongs in this register. Recommended but optional; content is required for append/write.",
+      "description": "Optional brief justification for why this update is useful and why it belongs in this register. Recommended but optional.",
       "type": "string"
      },
      "register": {
@@ -3284,7 +3301,8 @@
     },
     "required": [
      "action",
-     "register"
+     "register",
+     "content"
     ],
     "type": "object"
    },
@@ -4115,11 +4133,15 @@
    "type": "function"
   },
   "fs_read_file": {
-   "description": "Read a text file. Optional offset (1-based, default 1) and limit (default: to end of file) select a line window. Always includes full-file sha256 (for expected_file_sha256 in edit tools).",
+   "description": "Read a text file. Optional offset (1-based, default 1) and limit (default: to end of file) select a line window. Always includes full-file sha256 (for expected_file_sha256 in edit tools). Set add_line_numbers to true to prefix each line with its absolute number as N|.",
    "name": "fs_read_file",
    "parameters": {
     "additionalProperties": false,
     "properties": {
+     "add_line_numbers": {
+      "description": "Required. When true, prefix each returned line with its absolute 1-based file line number, right-aligned (width at least 6), then '|'. Example: '     8|    line text'. false, and any non-boolean value, returns the raw line text. Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest.",
+      "type": "boolean"
+     },
      "encoding": {
       "description": "Omit for UTF-8 (UTF-8/UTF-16 BOM is detected). Otherwise one of: utf-8-sig, cp1251, koi8-r, latin-1, utf-16, utf-16-le, utf-16-be.",
       "type": "string"
@@ -4138,7 +4160,8 @@
      }
     },
     "required": [
-     "path"
+     "path",
+     "add_line_numbers"
     ],
     "type": "object"
    },
@@ -4373,11 +4396,11 @@
       "type": "string"
      },
      "content": {
-      "description": "Markdown text for append/write. For append: ONLY the new delta. For write: the FULL updated register content (full overwrite).",
+      "description": "Required on every call. For append: ONLY the new delta (must be non-empty). For write: the FULL updated register content (must be non-empty; full overwrite). For list and read: pass an empty string.",
       "type": "string"
      },
      "reason": {
-      "description": "Optional brief justification for why this update is useful and why it belongs in this register. Recommended but optional; content is required for append/write.",
+      "description": "Optional brief justification for why this update is useful and why it belongs in this register. Recommended but optional.",
       "type": "string"
      },
      "register": {
@@ -4393,7 +4416,8 @@
     },
     "required": [
      "action",
-     "register"
+     "register",
+     "content"
     ],
     "type": "object"
    },

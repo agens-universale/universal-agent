@@ -122,27 +122,29 @@ def test_subagent_tools_are_named_by_the_predicate(tools_data):
     "call",
     [
         _fc("fs_delete_everything", '{"path": "a.py"}', "call_2"),
-        _fc("fs_read_file", '{"file": "a.py"}', "call_2"),
+        _fc(
+            "fs_read_file",
+            '{"file": "a.py", "add_line_numbers": false}',
+            "call_2",
+        ),
         _fc("fs_read_file", '{"path": "a.py"', "call_2"),
     ],
     ids=["unknown_tool", "arguments_off_schema", "broken_json"],
 )
 def test_has_invalid_call_sees_one_bad_call_in_the_batch(tools_data, call):
-    assert (
-        has_invalid_call(
-            [_fc("fs_read_file", '{"path": "a.py"}'), call], tools_data
-        )
-        is True
+    valid_call = _fc(
+        "fs_read_file", '{"path": "a.py", "add_line_numbers": false}'
     )
+    assert has_invalid_call([valid_call, call], tools_data) is True
 
 
 def test_has_invalid_call_is_false_for_valid_calls_and_for_no_calls(
     tools_data,
 ):
-    assert (
-        has_invalid_call([_fc("fs_read_file", '{"path": "a.py"}')], tools_data)
-        is False
+    valid_call = _fc(
+        "fs_read_file", '{"path": "a.py", "add_line_numbers": false}'
     )
+    assert has_invalid_call([valid_call], tools_data) is False
     assert has_invalid_call([], tools_data) is False
     assert has_invalid_call([_message("Готово.")], tools_data) is False
 

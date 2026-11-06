@@ -43,7 +43,7 @@ MANIFESTS = [
 ]
 
 # Цифра — для gc-a2a, дефис — для gc-core-temporalio.
-PIN_RE = re.compile(r'"(gc-[a-z0-9-]+)==\d+\.\d+\.\d+"')
+PIN_RE = re.compile(r'"(gc-[a-z0-9-]+(?:\[[a-z0-9_,. -]+\])?)==\d+\.\d+\.\d+"')
 VERSION_RE = re.compile(
     r'^(\s*version\s*=\s*")(\d+\.\d+\.\d+)("\s*)$', re.MULTILINE
 )
