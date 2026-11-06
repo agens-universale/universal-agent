@@ -653,12 +653,13 @@ async def test_queued_message_after_overflow_runs_prompt_hook_and_command(
     assert _lines(log) == ["UserPromptSubmit:", "UserPromptSubmit:"]
 
 
+@pytest.mark.parametrize("times", [1, 2])
 async def test_overflow_with_compaction_keeps_request_and_command(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, times
 ):
     """Сводка при переполнении окна заменила историю: в повторе запрос
     человека и раскрытая команда — по одному разу, хук не перезапущен."""
-    from helpers.context_overflow import overflow_once_then_summarize
+    from helpers.context_overflow import overflow_then_summarize
 
     log = tmp_path / "hooks.log"
     root = _plugin(
@@ -667,12 +668,12 @@ async def test_overflow_with_compaction_keeps_request_and_command(
     (root / "commands").mkdir()
     (root / "commands" / "hi.md").write_text("SAY-HI $ARGUMENTS\n")
     backend = install(monkeypatch, ScriptedBackend(_finish_turn()))
-    overflowed = overflow_once_then_summarize(monkeypatch)
+    overflowed = overflow_then_summarize(monkeypatch, times=times)
     ctx = await _ctx(tmp_path, monkeypatch, [root])
 
     await AgentExecutor(ctx).arun(["/plug:hi there"], thread_id="t1")
 
-    assert overflowed == [True]
+    assert len(overflowed) == times
     retried = backend.calls[0]["messages"]
     assert "dialog_summary" in retried[1]["content"]
     live = retried[2:]

@@ -3279,7 +3279,9 @@ class _AgentLoop:
         всё ещё только в ``state``. Дописываем его здесь, пока ссылку не
         затёр следующий ``arm_prepare``.
         """
-        if self.step_start_hook is not None:
+        # Повтор после переполнения окна — тот же шаг: его вход уже записан
+        # (компакция возвращает его в историю), начало шага не сдвигаем.
+        if self.step_start_hook is not None and not self._repeat_request:
             self.step_start_hook()
         raised = False
         try:

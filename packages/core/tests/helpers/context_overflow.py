@@ -1,7 +1,7 @@
 """Переполнение окна модели на запросе и настоящая компакция после него.
 
-Общий для тестов цикла, где ход идёт через ``AgentExecutor``: первый запрос
-к модели падает переполнением окна, сводку строит настоящая компакция, у
+Общий для тестов цикла, где ход идёт через ``AgentExecutor``: первые запросы
+к модели падают переполнением окна, сводку строит настоящая компакция, у
 которой подменён только вызов суммаризатора.
 """
 
@@ -13,15 +13,16 @@ OVERFLOW = (
 )
 
 
-def overflow_once_then_summarize(monkeypatch) -> list:
-    """Подменить запрос и суммаризатор; → список попыток с переполнением."""
+def overflow_then_summarize(monkeypatch, times: int = 1) -> list:
+    """Подменить запрос и суммаризатор: первые ``times`` запросов к модели —
+    переполнение окна. → список попыток с переполнением."""
     from gc_core import processing_responses as pr
 
     real = pr.aprocess_user_ask
     overflowed = []
 
-    async def _overflow_once(messages, state, ctx):
-        if not overflowed:
+    async def _overflow(messages, state, ctx):
+        if len(overflowed) < times:
             overflowed.append(True)
             raise ValueError(OVERFLOW)
         return await real(messages, state, ctx)
@@ -34,7 +35,7 @@ def overflow_once_then_summarize(monkeypatch) -> list:
             "trace": {"memory_patch": {"executed": False}},
         }
 
-    monkeypatch.setattr(pr, "aprocess_user_ask", _overflow_once)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _overflow)
     monkeypatch.setattr(
         "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions",
         _summarize,
