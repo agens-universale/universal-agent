@@ -7,7 +7,7 @@ import os
 import re
 from copy import deepcopy
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from uuid import uuid4
 
 import httpx
@@ -415,7 +415,9 @@ async def _aread_model_response(response: Any, read):
         raise
 
 
-async def _aguard_model_call(factory, kind: str = "model"):
+async def _aguard_model_call(
+    factory, kind: Literal["model", "pause"] = "model"
+):
     """Стоп отменяет запрос к модели. Отмена — не повод его повторять.
     ``kind`` — что снято, для лога стопа (запрос или пауза между попытками)."""
     stop = current_user_stop()

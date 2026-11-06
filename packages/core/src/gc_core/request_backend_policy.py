@@ -144,14 +144,12 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
         return await _send_once(
             initial_max_tokens, transport_use_retry=use_retry
         )
-    except ModelRequestStopped:
-        # Стоп хода — не сбой модели: ни уведомления, ни повторов.
-        raise
     except Exception as first_exc:
         _raise_if_image_failure(first_exc, last_payload)
         if _adaptive_retry_allowed(first_exc, adaptive_retry):
             reply = await _aadaptive_retries(
                 _send_once,
+                first_exc,
                 last_payload,
                 initial_max_tokens=initial_max_tokens,
                 min_response_tokens=min_response_tokens,
@@ -170,6 +168,7 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
 
 async def _aadaptive_retries(
     send_once: Callable[..., Any],
+    first_exc: Exception,
     last_payload: Dict[str, Any],
     *,
     initial_max_tokens: int,
@@ -181,6 +180,7 @@ async def _aadaptive_retries(
     Стоп хода — остановка, а не очередной сбой."""
     run_logger = logger or logging.getLogger(__name__)
     current_max_tokens = initial_max_tokens
+    last_exc = first_exc
     for step in range(1, _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS + 1):
         reduced_max_tokens = _reduced_chat_completions_max_tokens(
             configured=current_max_tokens,
@@ -193,7 +193,7 @@ async def _aadaptive_retries(
             _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS,
             current_max_tokens,
             reduced_max_tokens,
-            exc_info=True,
+            exc_info=last_exc,
         )
         # Пауза кооперативная (time.sleep заморозил бы весь loop) и
         # обрывается стопом хода, как сам запрос.
@@ -203,15 +203,17 @@ async def _aadaptive_retries(
                 reduced_max_tokens, transport_use_retry=False
             )
         except ModelRequestStopped:
+            # Не «неповторяемый сбой»: иначе наверх ушла бы исходная ошибка.
             raise
         except Exception as retry_exc:
             _raise_if_image_failure(retry_exc, last_payload)
+            last_exc = retry_exc
             current_max_tokens = reduced_max_tokens
             if not is_retriable_backend_error(retry_exc):
                 break
 
     run_logger.error(
         "chat/completions adaptive max_tokens retries failed; raising original backend error",
-        exc_info=True,
+        exc_info=last_exc,
     )
     return None

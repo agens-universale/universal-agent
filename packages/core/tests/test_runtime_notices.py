@@ -5,9 +5,11 @@ from __future__ import annotations
 import httpx
 import pytest
 from gc_core import request_backend_policy as policy
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.runtime_notices import (
     clear_runtime_notices,
     collect_runtime_notices,
+    maybe_push_llm_failure_notice,
     notice_from_llm_failure,
     push_runtime_notice,
 )
@@ -73,6 +75,11 @@ def test_push_dedup_same_code_and_message():
     push_runtime_notice(n)
     push_runtime_notice(n)
     assert len(collect_runtime_notices()) == 1
+
+
+def test_stop_is_not_an_llm_failure_notice():
+    maybe_push_llm_failure_notice(ModelRequestStopped("Ход остановлен"))
+    assert collect_runtime_notices() == []
 
 
 def test_policy_pushes_notice_on_final_failure(monkeypatch):

@@ -1156,22 +1156,7 @@ async def test_stop_during_transport_retry_pause_ends_request(monkeypatch):
 
 
 async def test_stop_during_adaptive_retry_pause_ends_request(monkeypatch):
-    from gc_core.request_backend_policy import (
-        arequest_chat_completions_with_policy,
-    )
-
-    await _stop_during_retry_pause(
-        monkeypatch,
-        lambda: arequest_chat_completions_with_policy(
-            payload_factory=lambda n: {"model": "m", "max_tokens": n},
-            initial_max_tokens=1000,
-            min_response_tokens=100,
-            headers={},
-            url="http://model/v1/chat/completions",
-            verify=True,
-            use_retry=False,
-        ),
-    )
+    await _stop_during_retry_pause(monkeypatch, _policy_request)
 
 
 def _policy_request():
@@ -1194,63 +1179,60 @@ def _policy_request():
 async def test_stop_during_reduced_retry_is_a_stop_not_backend_error(
     monkeypatch,
 ):
-    """Стоп посреди повтора с уменьшенным max_tokens — остановка хода, а не
-    исходная 503 и не уведомление об ошибке модели."""
-    notices = _capture_notices(monkeypatch)
-    gate = _stop(_Log())
+    """Стоп посреди повтора с уменьшенным max_tokens обрывает висящий
+    запрос — остановка хода, а не исходная 503 и не уведомление."""
     calls = {"n": 0}
-    hang = asyncio.sleep
 
-    async def handler(_request):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return httpx.Response(503, json={})
-        gate.request()
-        await hang(600)
+    def answer_once_then_hang(gate):
+        async def handler(_request):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(503, json={})
+            return await _hang_after_stop(gate)
 
-    _install_async_transport(monkeypatch, handler)
-    with bind_user_stop(gate), pytest.raises(ModelRequestStopped):
-        await asyncio.wait_for(_policy_request(), timeout=3)
+        return handler
+
+    await _stop_policy_request(monkeypatch, answer_once_then_hang)
     assert calls["n"] == 2
-    assert notices == []
 
 
 async def test_stop_on_first_attempt_pushes_no_failure_notice(monkeypatch):
-    notices = _capture_notices(monkeypatch)
-    gate = _stop(_Log())
-    hang = asyncio.sleep
+    def hang(gate):
+        async def handler(_request):
+            return await _hang_after_stop(gate)
 
-    async def handler(_request):
-        gate.request()
-        await hang(600)
+        return handler
 
-    _install_async_transport(monkeypatch, handler)
-    with bind_user_stop(gate), pytest.raises(ModelRequestStopped):
-        await asyncio.wait_for(_policy_request(), timeout=3)
-    assert notices == []
+    await _stop_policy_request(monkeypatch, hang)
 
 
-def _capture_notices(monkeypatch) -> list:
+#: Настоящая пауза: тесты ниже подменяют ``asyncio.sleep`` глобально.
+_REAL_SLEEP = asyncio.sleep
+
+
+async def _hang_after_stop(gate: UserStop):
+    gate.request()
+    await _REAL_SLEEP(600)
+    raise AssertionError("stop did not cut the hanging request")
+
+
+async def _stop_policy_request(monkeypatch, make_handler) -> None:
+    """Стоп во время висящего запроса политики: наверх — остановка, стоп
+    снял именно запрос, уведомления об ошибке модели нет."""
     from gc_core import runtime_notices
+    from transport_fakes import install_transport
 
     notices: list = []
     monkeypatch.setattr(runtime_notices, "push_runtime_notice", notices.append)
-    monkeypatch.setattr("asyncio.sleep", _no_pause())
-    return notices
+    monkeypatch.setattr("asyncio.sleep", _no_pause)
+    log = _Log()
+    gate = _stop(log)
+    install_transport(monkeypatch, make_handler(gate))
+    with bind_user_stop(gate), pytest.raises(ModelRequestStopped):
+        await asyncio.wait_for(_policy_request(), timeout=3)
+    assert [e["kind"] for e in log.events("user_stop_killed")] == ["model"]
+    assert notices == []
 
 
-def _install_async_transport(monkeypatch, handler) -> None:
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(
-        "gc_core.utils.connect_backend.get_async_client",
-        lambda *args, **kwargs: client,
-    )
-
-
-def _no_pause():
-    real = asyncio.sleep
-
-    async def _pause(_delay, *args, **kwargs):
-        await real(0)
-
-    return _pause
+async def _no_pause(_delay, *args, **kwargs):
+    await _REAL_SLEEP(0)
