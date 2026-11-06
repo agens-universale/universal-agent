@@ -7,11 +7,19 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING, Optional
+from collections.abc import Iterable, Mapping
+from typing import TYPE_CHECKING, Literal, Optional
 
-from gc_tui.models import TraceEvent
+from gc_core.constants.tool_display import (
+    DisplayCategory,
+    McpToolInfo,
+    tool_display,
+)
+from gc_core.utils.path_truncate import truncate_path
+
+from gc_tui.models import ResultOutcome, TraceEvent
 from gc_tui.palette import INK
-from gc_tui.services.duration_format import format_compact_int
+from gc_tui.services.duration_format import format_round_int
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
     filter_sidecar_to_parents,
@@ -24,37 +32,203 @@ if TYPE_CHECKING:
     from rich.text import Text
 
     from gc_tui.services.trace_mapper import RenderContext
+    from gc_tui.widgets.consequence_line import ConsequenceLine
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.trace_row import (
+        CompactionBody,
+        CompactionRule,
+        ConsequenceTraceRow,
+        TraceRow,
+    )
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
 
-# Общие литералы вложенных (nested) строк под subagent_* — одинаковы в живом
-# трейсе (TraceScreen._mount_nested_*, main.py) и read-only превью
-# (merge_nested_readonly ниже).
-NESTED_PREFIX = "       "  # nested под subagent: +4 пробела к _PREFIX тула
-NESTED_PROSE_PREFIX = "       · "
-NESTED_USER_PREFIX = "       > "
+# Уровень вложенности события — единственный источник отступа ленты: глиф
+# события уровня n стоит в колонке `●` реплики агента плюс 2n. Живой трейс
+# (TraceScreen._mount_nested_*, main.py) и read-only превью
+# (merge_nested_readonly ниже) берут отступ отсюда.
+LEVEL_INDENT = "  "
+
+
+def level_prefix(level: int) -> str:
+    """Отступ события уровня ``level`` (0 — верхний уровень, без отступа)."""
+    return LEVEL_INDENT * level
+
+
+# Глифы колонки `●`: реплика агента (итоговая — белым, промежуточная —
+# серым по классу `line-intermediate`) и реплика пользователя.
+PROSE_BULLET = "● "
+USER_PREFIX = "› "
+NESTED_PROSE_PREFIX = level_prefix(1) + PROSE_BULLET
+NESTED_USER_PREFIX = level_prefix(1) + USER_PREFIX
 LINE_INTERMEDIATE_CLASS = "line-intermediate"
+# Вложенная реплика субагента: глиф `●` серым (CSS по классу).
+NESTED_PROSE_CLASS = f"{LINE_INTERMEDIATE_CLASS} nested-prose"
 LINE_USER_CLASS = "line-user"
 LINE_SUMMARY_CLASS = "line-summary"
 LINE_NOTE_CLASS = "line-note"
 # Метка записи конца хода жирная и прямая — и в курсивной строке итога.
 _RECORD_LABEL_STYLE = "bold not italic"
 
+# Следствия вопроса ask_human — строкой `└` внутри его рамки (спека P3 §3).
+QUESTION_UNANSWERED = "без ответа"
+QUESTION_INTERRUPTED = "прервано — продолжите сообщением или Esc"
 
-def build_compaction_label(num: int, comp: dict) -> str:
-    """Метка маркера сжатия: «контекст сжат #N · M→1 · 12.3k→3.1k симв».
 
-    Суффикс символов опускается, если chars_before/after отсутствуют (legacy).
-    """
-    label = f"контекст сжат #{num}"
-    msgs = comp.get("messages_in_segment")
-    if msgs:
-        label += f" · {msgs}→1"
-    cb, ca = comp.get("chars_before"), comp.get("chars_after")
-    if cb and ca:
-        label += f" · {format_compact_int(cb)}→{format_compact_int(ca)} симв"
-    return label
+def consequence_lead(level: int) -> Text:
+    """Начало строки следствия события уровня ``level``: `└ ` на +2 от
+    его глифа."""
+    from rich.text import Text
+
+    from gc_tui.palette import DIM
+
+    lead = Text(level_prefix(level + 1))
+    lead.append("└ ", style=DIM)
+    return lead
+
+
+def build_consequence_line(
+    level: int, body: Text, *, selectable: bool = True
+) -> ConsequenceLine:
+    """Строка следствия `└ body` события уровня ``level``.
+
+    Общий вид для вызова, реплики и вопроса — следствие рисуется внутри
+    виджета своего события (спека P3 §3); перенос тела — под текстом
+    после `└ `. ``selectable=False`` — тело вне выделения мышью."""
+    from gc_tui.widgets.consequence_line import ConsequenceLine
+
+    return ConsequenceLine(
+        consequence_lead(level), body, selectable=selectable
+    )
+
+
+# Строка без владельца (спека P3 §10, ответ 5): глиф `!` в колонке `●`,
+# цвет — классом важности; статус вызова — круги `●`/`○`.
+STANDALONE_PREFIX = "! "
+
+
+def build_standalone_row(
+    text: str,
+    *,
+    severity: Literal["error", "warn"],
+    event_no: int = 0,
+) -> TraceRow:
+    """Строка ленты без владельца: `! текст`, `ERR` или `WARN` классом;
+    `line-standalone` — пустая строка сверху, как у любого события (§2.1)."""
+    from gc_tui.widgets.trace_row import TraceRow
+
+    return TraceRow(
+        prefix=STANDALONE_PREFIX,
+        content=text,
+        kind_class=f"line-{severity} line-standalone",
+        event_no=event_no,
+    )
+
+
+def build_orphan_result_row(
+    summary: str, outcome: ResultOutcome, *, event_no: int = 0
+) -> TraceRow:
+    """Итог вызова, к которому нет строки вызова (ушла в сжатие, call_id
+    неизвестен). Ошибка — строка `!` (`ERR`); отказ и стоп — не сбой: глиф
+    `○` цветом исхода (отказ — `REFUSED`, стоп — `DIM`) и серый текст
+    «кто: почему» — таблица исходов строки вызова (`_OUTCOME_LOOK`, спека
+    P3 §10). Один билдер для живой ленты и превью."""
+    from rich.text import Text
+
+    from gc_tui.widgets.tool_call_row import _OUTCOME_LOOK
+    from gc_tui.widgets.trace_row import TraceRow
+
+    if outcome not in ("refused", "halted"):
+        return build_standalone_row(
+            summary, severity="error", event_no=event_no
+        )
+    glyph, glyph_style, text_style = _OUTCOME_LOOK[outcome]
+    return TraceRow(
+        prefix=Text().append(f"{glyph} ", style=glyph_style),
+        content=Text().append(summary, style=text_style),
+        kind_class="line-standalone",
+        event_no=event_no,
+    )
+
+
+def note_consequence(text: str) -> Text:
+    """Тело следствия-пометки под владельцем: `! текст` цветом `WARN`
+    (строку `└` дорисует владелец — `add_consequence`)."""
+    from rich.text import Text
+
+    from gc_tui.palette import WARN
+
+    body = Text()
+    body.append(STANDALONE_PREFIX + text, style=WARN)
+    return body
+
+
+# Лестница подписи метки сжатия (макеты p3_compaction_*): первая, что
+# влезла между полосами. Подпись без недостающих полей (сводка вне
+# сегментов — без номера, тред без счёта — без чисел) пропускается.
+COMPACTION_LABELS = (
+    "контекст сжат #{num} · {before} → {after} символов",
+    "контекст сжат #{num} · {before} → {after}",
+    "сжат #{num} · {before} → {after}",
+    "контекст сжат #{num}",
+    "сжат #{num}",
+    "контекст сжат",
+    "сжат",
+)
+_RULE = "─"
+_RULE_MIN = 2  # полоса с каждой стороны не короче
+
+
+def _compaction_label_values(num: Optional[int], comp: Mapping) -> dict:
+    values: dict = {} if num is None else {"num": num}
+    before, after = comp.get("chars_before"), comp.get("chars_after")
+    if before and after:
+        values["before"] = format_round_int(before)
+        values["after"] = format_round_int(after)
+    return values
+
+
+def compaction_labels(num: Optional[int], comp: Mapping) -> list[str]:
+    """Ступени подписи метки от полной к короткой — по данным сжатия."""
+    values = _compaction_label_values(num, comp)
+    labels = []
+    for template in COMPACTION_LABELS:
+        try:
+            labels.append(template.format_map(values))
+        except KeyError:
+            continue
+    return labels
+
+
+def compaction_rule(
+    num: Optional[int], comp: Mapping, width: int, *, expanded: bool
+) -> Text:
+    """Метка сжатия во всю ширину ``width``: `──── ▸ подпись ────`.
+
+    Полосы — `FRAME_ARCHIVE`, подпись — `DIM` (спека P3 §2.5, §10 B).
+    Подпись — первая ступень лестницы, при которой полосы не короче
+    `_RULE_MIN`; не влезла и последняя — она обрезается с `…`."""
+    from rich.cells import cell_len
+    from rich.text import Text
+
+    from gc_tui.palette import DIM, FRAME_ARCHIVE
+
+    arrow = "▾" if expanded else "▸"
+    budget = width - 2 * _RULE_MIN - len(f" {arrow}  ")
+    labels = compaction_labels(num, comp)
+    label = next((x for x in labels if cell_len(x) <= budget), None)
+    if label is None:
+        label = Text(labels[-1])
+        label.truncate(max(budget, 1), overflow="ellipsis")
+        label = label.plain
+    middle = f" {arrow} {label} "
+    bars = max(width - cell_len(middle), 2 * _RULE_MIN)
+    text = Text()
+    text.append(_RULE * (bars // 2), style=FRAME_ARCHIVE)
+    text.append(middle, style=DIM)
+    text.append(_RULE * (bars - bars // 2), style=FRAME_ARCHIVE)
+    return text
 
 
 def _segments(text: str, lead: Optional[Text]) -> list:
@@ -80,16 +254,47 @@ def build_compaction_marker_event(
     """Событие-маркер сжатия сегмента ``segment_index`` (его ``compacted_by``).
 
     Одно на полную перерисовку и шаг сжатия: оба пути строят маркер одинаково.
-    """
+    Номер и данные сжатия — в ``full_payload``: по ним метка пересобирается
+    под ширину ленты."""
+    num = segment_index + 1
     return TraceEvent(
         no=no,
         event_ts_utc_iso=comp.get("ts", ""),
         kind="summary",
         title="summary",
-        summary=build_compaction_label(segment_index + 1, comp),
+        summary=compaction_labels(num, comp)[0],
         summary_content=comp["synthesis"],
-        full_payload={},
+        full_payload={"num": num, "comp": comp},
     )
+
+
+def build_compaction_widgets(
+    ev: TraceEvent, *, focusable: bool
+) -> tuple[CompactionRule, Optional[CompactionBody]]:
+    """Метка сжатия и свёрнутое тело сводки — для живой ленты и превью.
+
+    ``focusable=False`` — превью: Enter там открывает тред, а не сводку.
+    Событие сводки вне сегментов (``dialog_summary`` маппера) номера и
+    счёта не несёт — метка без чисел. Тела нет без текста сводки."""
+    from gc_tui.widgets.trace_row import CompactionBody, CompactionRule
+
+    payload = ev.full_payload if isinstance(ev.full_payload, dict) else {}
+    comp = payload.get("comp") or {}
+    rule = CompactionRule(
+        num=payload.get("num"),
+        comp=comp,
+        event_no=ev.no,
+        focusable=focusable,
+    )
+    text = (ev.summary_content or "").strip()
+    if not text:
+        return rule, None
+    body = CompactionBody(
+        messages=comp.get("messages_in_segment"),
+        text=text,
+        event_no=ev.no,
+    )
+    return rule, body
 
 
 def build_block_widgets(
@@ -97,15 +302,16 @@ def build_block_widgets(
     *,
     prose_bullet: bool,
     event_no: int,
-    bullet: str = "● ",
+    bullet: str = PROSE_BULLET,
     kind_class_base: str = "line-agent",
     ink: str = INK,
     lead: Optional[Text] = None,
 ) -> list:
-    """Markdown → виджеты трейса. `prose_bullet` — префикс `bullet` на прозе (трейс/превью);
-    False — без него (баннер ask_human). `bullet`/`kind_class_base` переопределяют маркер и
-    класс прозовых строк (intermediate_reply → «· »/line-intermediate). Код и таблицы —
-    BlockPanel. focusable=True только у первого виджета события.
+    """Markdown → виджеты трейса. `prose_bullet` — префикс `bullet` на прозе
+    (трейс/превью, по умолчанию `● `); False — без него (баннер ask_human).
+    `kind_class_base` — класс прозовых строк (intermediate_reply →
+    line-intermediate, глиф серым). Код и таблицы — BlockPanel.
+    focusable=True только у первого виджета события.
     `ink` — стиль простого текста прозы (см. render_prose); `lead` — начало
     первой строки (метка записи)."""
     from gc_tui.widgets.block_panel import BlockPanel
@@ -165,11 +371,16 @@ def build_block_widgets(
 
 
 def build_answered_question_widget(
-    question, *, event_no: int = 0, extra_classes: str = ""
+    question,
+    *,
+    event_no: int = 0,
+    extra_classes: str = "",
+    call_id: Optional[str] = None,
 ):
     """Отвеченный вопрос ask_human как строка истории: серая round-рамка
     (CSS .answered-question) + янтарный маркер '?'. Тех-префикс 'ask_human:'
     не добавляем. Общий для live (main) и readonly (preview) путей.
+    Следствия (`└ без ответа`, `└ прервано …`) — `QuestionRow.add_consequence`.
 
     Цвет рамки — токен $frame-archive (серый). Альтернатива (живое сравнение
     после релиза) — янтарная рамка: сменить border в .answered-question на
@@ -177,13 +388,14 @@ def build_answered_question_widget(
     from rich.text import Text
 
     from gc_tui.palette import DIM, RUN_COLOR
-    from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.trace_row import QuestionRow
 
     content = Text()
     content.append("? ", style=RUN_COLOR)
     content.append(question, style=DIM)
     cls = ("answered-question " + extra_classes).strip()
-    return TraceRow(
+    return QuestionRow(
+        call_id=call_id,
         prefix="",
         content=content,
         kind_class=cls,
@@ -192,21 +404,47 @@ def build_answered_question_widget(
     )
 
 
-def is_tool_group_start(mount_target) -> bool:
-    """True, если последний значимый ряд в `mount_target` — НЕ tool-вызов: тогда
-    эта tool-строка открывает новую группу и получает верхний отступ (CSS
-    `.tool-group-start`). Подряд идущие tool-строки остаются компактными.
-    Общий для live (main) и readonly (preview) путей."""
-    from gc_tui.widgets.diff_block import DiffBlock
-    from gc_tui.widgets.tool_call_row import ToolCallRow
+def note_question(question, note: str) -> None:
+    """Следствие вопроса `└ note` серым — один вид для ленты и превью."""
+    from rich.text import Text
 
-    for child in reversed(list(mount_target.children)):
-        if getattr(child, "id", None) == "brand-block":
-            continue  # шапка трейса — не контент
-        if isinstance(child, DiffBlock):
-            continue  # инлайн-дифф принадлежит tool-строке выше — группу не рвёт
-        return not isinstance(child, ToolCallRow)
-    return True  # перед ним ничего — считаем стартом группы
+    from gc_tui.palette import DIM
+
+    question.add_consequence(Text(note, style=DIM))
+
+
+# Промежуточный ответ субагента, который ядро не приняло (решение
+# владельца P3b, 3): следствие серым, не ошибка.
+NESTED_PROSE_REJECTED = "· не принят"
+
+
+def build_nested_prose_row(
+    prose: str, *, ok: bool = True, error_brief: Optional[str] = None
+) -> ConsequenceTraceRow:
+    """Промежуточная реплика субагента: серый `●` на уровне 1.
+
+    Не принятая ядром — со следствием `└ · не принят — причина` (`DIM`)
+    внутри виджета. Один билдер для живой ленты и превью."""
+    from rich.text import Text
+
+    from gc_tui.palette import DIM
+    from gc_tui.widgets.trace_row import ConsequenceTraceRow
+
+    consequences = []
+    if not ok:
+        note = NESTED_PROSE_REJECTED
+        if error_brief:
+            note = f"{note} — {error_brief}"
+        consequences.append(Text(note, style=DIM))
+    return ConsequenceTraceRow(
+        prefix=NESTED_PROSE_PREFIX,
+        content=prose,
+        kind_class=NESTED_PROSE_CLASS,
+        event_no=0,
+        focusable=False,
+        consequence_level=1,
+        consequences=consequences,
+    )
 
 
 def build_agent_widgets(summary: str, *, event_no: int) -> list:
@@ -215,14 +453,14 @@ def build_agent_widgets(summary: str, *, event_no: int) -> list:
 
 
 def build_intermediate_widgets(summary: str, *, event_no: int) -> list:
-    """·-реплика intermediate_reply: тот же markdown/код-пайплайн, что и проза
-    (build_agent_widgets), но маркер «· » и класс line-intermediate."""
+    """Промежуточная реплика intermediate_reply: тот же markdown/код-пайплайн,
+    что и проза (build_agent_widgets), но класс line-intermediate — глиф `●`
+    серым (спека P3 §10)."""
     return build_block_widgets(
         summary,
         prose_bullet=True,
         event_no=event_no,
-        bullet="· ",
-        kind_class_base="line-intermediate",
+        kind_class_base=LINE_INTERMEDIATE_CLASS,
     )
 
 
@@ -240,6 +478,91 @@ def note_text(comment: str) -> Text:
     t = _record_label(LABEL_NOTE)
     t.append(comment, style="italic")
     return t
+
+
+def tool_caption(
+    wire_name: str,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+) -> tuple[DisplayCategory, str]:
+    """Категория и имя тула для ленты по отображению ядра (спека P3 §2.1).
+
+    MCP — `сервер · тул`; тул без подписи (неизвестный или скрытый
+    политикой) — сырое wire-имя; остальные — подпись ядра."""
+    shown = tool_display(
+        wire_name, mcp_tools=mcp_tools, mcp_servers=mcp_servers
+    )
+    if shown.category is DisplayCategory.MCP:
+        return shown.category, f"{shown.label} · {shown.detail}"
+    if shown.category in (DisplayCategory.CALLED, DisplayCategory.HIDDEN):
+        return shown.category, wire_name
+    return shown.category, shown.label
+
+
+def _call_caption(
+    wire_name: str,
+    args_summary: str,
+    mcp_tools: Mapping[str, McpToolInfo] | None,
+    mcp_servers: Iterable[str],
+) -> tuple[str, str]:
+    """(подпись, объект) строки вызова: тул без подписи (неизвестный или
+    скрытый, но всё же дошедший до ленты) — `Called` и сырое имя в
+    объекте."""
+    category, name = tool_caption(wire_name, mcp_tools, mcp_servers)
+    if category in (DisplayCategory.CALLED, DisplayCategory.HIDDEN):
+        target = " ".join(p for p in (name, args_summary) if p)
+        return DisplayCategory.CALLED.value, target
+    return name, args_summary
+
+
+#: Объект строки вызова под длинным хвостом не короче (если сам длиннее):
+#: хвост режется после того, как объект дошёл до этого минимума.
+CALL_TARGET_MIN_COLS = 16
+
+
+def fit_call_target(target: str, cols: int, *, path: bool) -> str:
+    """Объект строки вызова в `cols` символов: путь — серединой в `…`
+    (`truncate_path`), остальное (команда, запрос) — с конца в `…`."""
+    if len(target) <= cols:
+        return target
+    if cols <= 0:
+        return ""
+    if path:
+        return truncate_path(target, cols)
+    return target[: cols - 1].rstrip() + "…"
+
+
+def build_call_row(
+    *,
+    call_id: str,
+    wire_name: str,
+    args_summary: str,
+    level: int,
+    event_no: int = 0,
+    waiting: bool = False,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+) -> ToolCallRow:
+    """Строка вызова — один билдер для живой ленты, превью и вложенных."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    label, target = _call_caption(
+        wire_name, args_summary, mcp_tools, mcp_servers
+    )
+    shown = tool_display(
+        wire_name, mcp_tools=mcp_tools, mcp_servers=mcp_servers
+    )
+    return ToolCallRow(
+        call_id=call_id,
+        label=label,
+        target=target,
+        path_target=shown.primary_arg == "path",
+        skill_target=shown.primary_arg == "skill_id",
+        wire_name=wire_name,
+        event_no=event_no,
+        waiting=waiting,
+        level=level,
+    )
 
 
 def build_summary_widgets(note: str, *, event_no: int) -> list:
@@ -310,13 +633,6 @@ def build_finish_widgets(close: TurnClose, *, event_no: int) -> list:
     return widgets
 
 
-def args_portion(summary: str) -> str:
-    """Аргументы из summary вида "name(args)" — содержимое скобок."""
-    if summary and "(" in summary:
-        return summary.split("(", 1)[1].rstrip(")")
-    return ""
-
-
 def raw_output(ev) -> Optional[str]:
     """Поле `output` из full_payload result-event как raw string."""
     if isinstance(ev.full_payload, dict):
@@ -329,47 +645,39 @@ def raw_output(ev) -> Optional[str]:
     return None
 
 
-def _mount_summary_widgets(
-    mount_target, label: str, body_text: str, event_no: int
+def _mount_compaction(mount_target, ev: TraceEvent) -> None:
+    """Метка сжатия и тело в read-only превью. Метка не focusable: иначе
+    перехватывала бы Enter (в превью Enter — открыть тред); раскрытие —
+    кликом (`PreviewScreen.on_summary_toggle_request`)."""
+    rule, body = build_compaction_widgets(ev, focusable=False)
+    mount_target.mount(rule)
+    if body is not None:
+        mount_target.mount(body)
+
+
+def _dispatch_readonly(
+    mount_target,
+    ev,
+    calls: dict,
+    *,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+    questions: dict | None = None,
 ) -> None:
-    """Маркер сжатия (свёрнут) + тело (.hidden) для read-only превью.
-    Toggle — ТОЛЬКО по клику мышью (on_click постит SummaryToggleRequest;
-    обработчик — PreviewScreen.on_summary_toggle_request). Маркер НЕ focusable:
-    иначе он перехватывал бы Enter (toggle), а в превью Enter = открыть тред.
-    Маркер и тело делят event_no, чтобы toggle находил тело по нему."""
-    from gc_tui.widgets.trace_row import SummaryMarker
+    """Смонтировать виджеты одного события (read-only паритет с _render_event).
 
-    mount_target.mount(
-        SummaryMarker(
-            prefix="▸ ",
-            content=f"──── {label} ────",
-            kind_class="summary-marker",
-            event_no=event_no,
-            focusable=False,
-        )
-    )
-    if body_text:
-        mount_target.mount(
-            SummaryMarker(
-                prefix="   ",
-                content=f"Контекст сохранён:\n{body_text}",
-                kind_class="summary-body hidden",
-                event_no=event_no,
-                focusable=False,
-            )
-        )
-
-
-def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
-    """Смонтировать виджеты одного события (read-only паритет с _render_event)."""
-    from gc_tui.widgets.tool_call_row import ToolCallRow
+    ``questions`` — `{call_id: QuestionRow}` вопросов превью: ответ «без
+    ответа» дописывается под свой вопрос, а не отдельной строкой."""
     from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import UserReplyContainer
 
     if ev.kind == "user":
         mount_target.mount(
             UserReplyContainer(
-                ev.summary, event_no=ev.no, images=ev.attachments
+                ev.summary,
+                event_no=ev.no,
+                images=ev.attachments,
+                skill=ev.skill or None,
             )
         )
     elif ev.kind == "agent":
@@ -385,64 +693,62 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
         for w in widgets:
             mount_target.mount(w)
     elif ev.kind == "call":
-        row = ToolCallRow(
+        row = build_call_row(
             call_id=ev.call_id or f"_anon_{ev.no}",
-            # Показ — wire-имя реестра (Д11/R3); tool_name(канонический id) —
-            # только фолбэк на случай, если wire_name не заполнен.
-            tool_name=ev.wire_name or ev.tool_name or "<tool>",
-            args_summary=args_portion(ev.summary),
+            wire_name=ev.wire_name or ev.tool_name or "<tool>",
+            args_summary=ev.args_summary,
+            level=0,
             event_no=ev.no,
+            mcp_tools=mcp_tools,
+            mcp_servers=mcp_servers,
         )
-        if is_tool_group_start(mount_target):
-            row.add_class(
-                "tool-group-start"
-            )  # первый tool в группе — верхний отступ
         calls[row.call_id] = row
         mount_target.mount(row)
     elif ev.kind in ("result", "error"):
         row = calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
-            row.set_result(summary=ev.summary, error=(ev.kind == "error"))
+            row.set_result(summary=ev.summary, outcome=ev.result_outcome)
+        elif ev.kind == "error":
+            mount_target.mount(
+                build_orphan_result_row(
+                    ev.summary, ev.result_outcome, event_no=ev.no
+                )
+            )
         else:
-            prefix = "   " if ev.kind == "result" else "   [!] "
-            cls = "line-ok" if ev.kind == "result" else "line-error"
             mount_target.mount(
                 TraceRow(
-                    prefix=prefix,
+                    prefix="   ",
                     content=ev.summary,
-                    kind_class=cls,
+                    kind_class="line-ok",
                     event_no=ev.no,
                 )
             )
     elif ev.kind == "summary":
-        _mount_summary_widgets(
-            mount_target,
-            ev.summary or "контекст сжат",
-            (ev.summary_content or "").strip(),
-            ev.no,
-        )
+        _mount_compaction(mount_target, ev)
     elif ev.kind == "error_msg":
-        # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с известным
-        # call_id финализирует свою строку-вызов ✗ и не дублируется [!]-строкой.
-        # Иначе строка навсегда осталась бы «выполняется»: схемные ошибки приходят
-        # техническим error_message с call_id, а не function_call_output.
+        # Паритет с живым путём (TraceScreen._render_error_msg): ошибка с
+        # известным call_id финализирует свою строку-вызов (красный `●`)
+        # и не дублируется строкой `!`. Иначе строка навсегда осталась бы
+        # «выполняется»:
+        # схемные ошибки приходят техническим error_message с call_id, а не
+        # function_call_output.
         err_row = calls.get(ev.call_id) if ev.call_id else None
         if err_row is not None:
-            err_row.set_result(summary=ev.summary, error=True)
+            err_row.set_result(summary=ev.summary, outcome="error")
             calls.pop(ev.call_id, None)
         else:
             mount_target.mount(
-                TraceRow(
-                    prefix="[!] ",
-                    content=ev.summary,
-                    kind_class="line-error",
-                    event_no=ev.no,
+                build_standalone_row(
+                    ev.summary, severity="error", event_no=ev.no
                 )
             )
     elif ev.kind == "ask_human":
-        mount_target.mount(
-            build_answered_question_widget(ev.summary, event_no=ev.no)
+        question = build_answered_question_widget(
+            ev.summary, event_no=ev.no, call_id=ev.call_id
         )
+        if questions is not None and ev.call_id:
+            questions[ev.call_id] = question
+        mount_target.mount(question)
     elif ev.kind == "todo":
         # Канон spec 2026-07-31 §2: строки собирает общий билдер (он же у
         # живого канала в main.py), здесь только монтируем.
@@ -454,11 +760,17 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             (ev.full_payload or {}).get("arguments")
         )
         mount_target.mount(
-            build_todo_block(
-                items, subagent=False, indent="   ", event_no=ev.no
-            )
+            build_todo_block(items, subagent=False, indent="", event_no=ev.no)
         )
     else:
+        question = (
+            (questions or {}).get(ev.call_id)
+            if ev.tool_name == "ask_human"
+            else None
+        )
+        if question is not None:
+            note_question(question, QUESTION_UNANSWERED)
+            return
         m = TAG_RE.match(ev.summary or "")
         if m:
             mount_target.mount(
@@ -480,24 +792,6 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             )
 
 
-def _mount_skill_marker_readonly(
-    mount_target, skill_id: str, event_no: int
-) -> None:
-    """[skill] <id> загружен — паритет с MainScreen._mount_skill_marker (read-only).
-    skill_loaded ставится только когда скилл реально загрузился → всегда «загружен»."""
-    from gc_tui.widgets.trace_row import TraceRow
-
-    row = TraceRow(
-        prefix="[skill] ",
-        content=f"`{skill_id}` загружен",
-        kind_class="line-meta",
-        event_no=event_no,
-        focusable=False,
-    )
-    row.add_class("skill-marker")
-    mount_target.mount(row)
-
-
 def _render_record_readonly(
     mount_target,
     rec: dict,
@@ -506,6 +800,9 @@ def _render_record_readonly(
     context: RenderContext | None = None,
     *,
     in_window: bool = True,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+    questions: dict | None = None,
 ) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
@@ -516,27 +813,31 @@ def _render_record_readonly(
     if not isinstance(payload, dict):
         return no
     ev = map_message(payload, no=no, ts=rec.get("ts", ""), context=context)
-    if ev is not None:
-        apply_payload_retention(ev, seg_in_window=in_window)
-    # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
-    # даёт ev=None, но маркер [skill] всё равно нужен в превью.
-    sk = payload.get("skill_loaded")
     if ev is None:
-        if sk:
-            _mount_skill_marker_readonly(
-                mount_target, sk, no
-            )  # mid-run: только маркер
         return no
+    apply_payload_retention(ev, seg_in_window=in_window)
     no += 1
     if ev.hidden:
         return no
-    _dispatch_readonly(mount_target, ev, calls)
-    if sk:
-        _mount_skill_marker_readonly(mount_target, sk, no)  # после реплики
+    _dispatch_readonly(
+        mount_target,
+        ev,
+        calls,
+        mcp_tools=mcp_tools,
+        mcp_servers=mcp_servers,
+        questions=questions,
+    )
     return no
 
 
-def render_segments_readonly(mount_target, segments: list) -> dict:
+def render_segments_readonly(
+    mount_target,
+    segments: list,
+    *,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+    root: str | None = None,
+) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
     трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там).
@@ -546,11 +847,15 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
 
     no = 1
     calls: dict = {}
+    questions: dict = {}
     context = collect_render_context(
-        rec.get("payload")
-        for seg in segments
-        for rec in seg.get("messages", [])
-        if isinstance(rec, dict)
+        (
+            rec.get("payload")
+            for seg in segments
+            for rec in seg.get("messages", [])
+            if isinstance(rec, dict)
+        ),
+        root=root,
     )
     # Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
     # файле с тем же id. Рисуем первое вхождение. Payload full, пока id есть
@@ -577,12 +882,15 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
                 calls,
                 context,
                 in_window=in_window,
+                mcp_tools=mcp_tools,
+                mcp_servers=mcp_servers,
+                questions=questions,
             )
         comp = seg.get("compacted_by")
         if comp:
-            label = build_compaction_label(seg.get("index", 0) + 1, comp)
-            _mount_summary_widgets(
-                mount_target, label, (comp.get("synthesis") or "").strip(), no
+            _mount_compaction(
+                mount_target,
+                build_compaction_marker_event(no, seg.get("index", 0), comp),
             )
             no += 1
     return calls
@@ -594,6 +902,9 @@ def merge_nested_readonly(
     calls: dict,
     *,
     allowed_parent_ids: set[str] | None = None,
+    mcp_tools: Mapping[str, McpToolInfo] | None = None,
+    mcp_servers: Iterable[str] = (),
+    root: str | None = None,
 ) -> None:
     """Read-only домонтирование вложенного трейса субагентов из sidecar-records
     (превью). Паритет с MainScreen._merge_sidecar_nested: те же plan/apply,
@@ -610,8 +921,6 @@ def merge_nested_readonly(
         plan_sidecar_nested_actions,
     )
     from gc_tui.services.todo_render import build_todo_block
-    from gc_tui.widgets.tool_call_row import ToolCallRow
-    from gc_tui.widgets.trace_row import TraceRow
     from gc_tui.widgets.user_reply import NestedUserReply
 
     anchors: dict = {}  # parent_call_id -> последний смонтированный nested
@@ -629,12 +938,13 @@ def merge_nested_readonly(
         anchors[pid] = widget
 
     def _tool(*, parent_call_id, tool_name, tool_call_id, args_summary, **_kw):
-        row = ToolCallRow(
+        row = build_call_row(
             call_id=tool_call_id or f"_nested_{tool_name}",
-            tool_name=tool_name,
+            wire_name=tool_name,
             args_summary=args_summary or "",
-            nested=True,
-            waiting=False,
+            level=1,
+            mcp_tools=mcp_tools,
+            mcp_servers=mcp_servers,
         )
         if tool_call_id:
             nested_rows[tool_call_id] = row
@@ -646,27 +956,23 @@ def merge_nested_readonly(
         tool_call_id="",
         ok=True,
         error_brief=None,
+        outcome=None,
         **_kw,
     ):
         row = nested_rows.get(tool_call_id)
         if row is not None:
             row.set_result(
-                summary="" if ok else (error_brief or "error"), error=not ok
+                summary="" if ok else (error_brief or "error"),
+                outcome=outcome or ("ok" if ok else "error"),
             )
 
-    def _prose(*, parent_call_id, prose, **_kw):
+    def _prose(*, parent_call_id, prose, ok=True, error_brief=None, **_kw):
         text = (prose or "").strip()
         if not text:
             return
         _mount_after(
             parent_call_id,
-            TraceRow(
-                prefix=NESTED_PROSE_PREFIX,
-                content=text,
-                kind_class=LINE_INTERMEDIATE_CLASS,
-                event_no=0,
-                focusable=False,
-            ),
+            build_nested_prose_row(text, ok=ok, error_brief=error_brief),
         )
 
     def _user(*, parent_call_id, prose, images=(), **_kw):
@@ -684,12 +990,12 @@ def merge_nested_readonly(
         _mount_after(
             parent_call_id,
             build_todo_block(
-                todo_items or [], subagent=True, indent=NESTED_PREFIX
+                todo_items or [], subagent=True, indent=level_prefix(1)
             ),
         )
 
     apply_sidecar_nested_actions(
-        plan_sidecar_nested_actions(records),
+        plan_sidecar_nested_actions(records, root=root),
         mount_nested_tool=_tool,
         finish_nested_tool=_finish,
         mount_nested_prose=_prose,

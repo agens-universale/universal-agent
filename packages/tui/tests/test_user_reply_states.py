@@ -1,59 +1,27 @@
-"""UserReplyContainer — три состояния (normal/pending/failed): классы и инлайн-маркер."""
+"""UserReplyContainer — три состояния (normal/pending/failed): только смысл
+состояния, без классов кромки и инлайн-маркера `[!]` (спека P3 §2.2)."""
 
 import pytest
 
+pytest.importorskip("textual")
 
-def test_normal_state_no_failed_marker():
-    pytest.importorskip("textual")
-    from gc_tui.widgets.user_reply import UserReplyContainer
+from gc_tui.widgets.user_reply import UserReplyContainer
 
-    w = UserReplyContainer("привет", state="normal")
-    rendered = str(w.render())
-    assert "[!]" not in rendered
-    assert "user-reply-failed" not in w.classes
-    assert "user-reply-pending" not in w.classes
+_EDGE_CLASSES = {"user-reply-pending", "user-reply-failed"}
 
 
-def test_pending_state_has_pending_class_no_marker():
-    pytest.importorskip("textual")
-    from gc_tui.widgets.user_reply import UserReplyContainer
-
-    w = UserReplyContainer("привет", state="pending")
-    rendered = str(w.render())
-    assert "[!]" not in rendered
-    assert "user-reply-pending" in w.classes
-    assert "user-reply-failed" not in w.classes
+@pytest.mark.parametrize("state", ["normal", "pending", "failed"])
+def test_no_bang_and_no_edge_classes_in_any_state(state):
+    w = UserReplyContainer("привет", state=state)
+    assert w.state == state
+    assert "[!]" not in w._band.render().plain
+    assert not _EDGE_CLASSES & (set(w.classes) | set(w._band.classes))
 
 
-def test_failed_state_has_failed_class_and_inline_marker():
-    pytest.importorskip("textual")
-    from gc_tui.widgets.user_reply import UserReplyContainer
-
-    w = UserReplyContainer("упало", state="failed")
-    rendered = str(w.render())
-    assert "[!]" in rendered
-    assert "user-reply-failed" in w.classes
-    assert "user-reply-pending" not in w.classes
-
-
-def test_set_state_transitions_pending_to_failed():
-    pytest.importorskip("textual")
-    from gc_tui.widgets.user_reply import UserReplyContainer
-
+def test_set_state_transitions_pending_to_failed_to_normal():
     w = UserReplyContainer("x", state="pending")
-    assert "user-reply-pending" in w.classes
     w.set_state("failed")
-    assert "user-reply-pending" not in w.classes
-    assert "user-reply-failed" in w.classes
-    assert "[!]" in str(w.render())
-
-
-def test_set_state_transitions_pending_to_normal():
-    pytest.importorskip("textual")
-    from gc_tui.widgets.user_reply import UserReplyContainer
-
-    w = UserReplyContainer("x", state="pending")
+    assert w.state == "failed"
     w.set_state("normal")
-    assert "user-reply-pending" not in w.classes
-    assert "user-reply-failed" not in w.classes
-    assert "[!]" not in str(w.render())
+    assert w.state == "normal"
+    assert not _EDGE_CLASSES & (set(w.classes) | set(w._band.classes))

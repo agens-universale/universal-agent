@@ -20,20 +20,21 @@ _SKILLS = [
 ]
 
 
-class _Reg:
-    async def list_skills(self, *, pack=None, include_all=False):
-        return list(_SKILLS)
-
-
 def test_palette_open_snapshot(
     snap_compare, tmp_path, monkeypatch, skills_warm
 ):
-    from gc_core.tools.skills import registry as reg_mod
     from gc_tui.app import TuiApp
+    from gc_tui.screens.main import TraceScreen
+    from gc_tui.services import skills_scan
 
+    # Папку в шапке фиксируем — иначе снапшот стал бы машинно-зависимым.
     monkeypatch.setattr(
-        reg_mod, "get_skills_registry", lambda cfg=None: _Reg()
+        TraceScreen, "_current_cwd", lambda self: "/work/demo-project"
     )
+    # Подменяется только обход скиллов прогрева палитры: подмена всего
+    # реестра доставалась бы и рантайму агента, и тот падал бы строкой
+    # `! runtime: …` в ленте кадра.
+    monkeypatch.setattr(skills_scan, "_scan", lambda settings: list(_SKILLS))
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -50,9 +51,6 @@ def test_palette_open_snapshot(
         await wait_until(
             pilot, lambda: pilot.app.screen._skills_cache, "прогрев скиллов"
         )
-        # Фиксируем cwd для детерминированного футера в snapshot'е.
-        pilot.app.tui_state.pending_cwd = "/work/project"
-        pilot.app.screen._refresh_footer()
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "/s"  # triggers palette open with filter "s"
         await pilot.pause(0.2)

@@ -48,12 +48,16 @@ def _state(*, steps=3, max_steps=50):
     )
 
 
+_ROOT = "/work/project"
+
+
 def _child_ctx(sink: QueueSubagentProgressSink):
     return fake_ctx(
         run_id="child_run_9",
         parent_call_id="parent_fc_1",
         subagent_progress_sink=sink,
         logger=None,
+        workspace=SimpleNamespace(root=_ROOT),
     )
 
 
@@ -128,6 +132,23 @@ class TestEmitToolStartEnd:
         assert end.tool_name == "fs_read_file"
         assert end.tool_call_id == "c1"
         assert end.elapsed_ms >= 0
+
+    def test_tool_start_path_is_relative_to_the_workspace_root(
+        self, monkeypatch
+    ):
+        pr = _patch_process(monkeypatch)
+        sink = QueueSubagentProgressSink()
+        args = json.dumps({"path": f"{_ROOT}/README.md"})
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[_fc("fs_read_file", "c1", args)],
+                state=_state(),
+                ctx=_child_ctx(sink),
+                run_agent_func=None,
+            )
+        )
+        start = sink.drain()[0]
+        assert start.args_summary == "README.md"
 
     def test_parent_with_sink_does_not_emit(self, monkeypatch):
         pr = _patch_process(monkeypatch)
@@ -319,3 +340,82 @@ class TestEmitIntermediateReply:
         assert events[0].prose == answer
         assert events[0].tool_name == "turn_intermediate_reply"
         assert events[0].ok is True
+
+
+class TestToolEndResultFacts:
+    def _run(self, monkeypatch, output):
+        pr = _patch_process(monkeypatch, apply_return=output)
+        sink = QueueSubagentProgressSink()
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[_fc("fs_read_file", "c1")],
+                state=_state(),
+                ctx=_child_ctx(sink),
+                run_agent_func=None,
+            )
+        )
+        return sink.drain()[-1]
+
+    def test_status_of_failed_call(self, monkeypatch):
+        end = self._run(
+            monkeypatch, json.dumps({"ok": False, "status": "step_limit"})
+        )
+        assert end.kind == "tool_end"
+        assert end.result_status == "step_limit"
+
+    def test_mode_denial_error_fields(self, monkeypatch):
+        end = self._run(
+            monkeypatch,
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "type": "write_denied_by_mode",
+                        "mode": "plan",
+                        "reason": "r" * 300,
+                    },
+                }
+            ),
+        )
+        assert end.result_error["type"] == "write_denied_by_mode"
+        assert end.result_error["mode"] == "plan"
+        # Факты без обрезки: живой вид равен возврату в сессию.
+        assert end.result_error["reason"] == "r" * 300
+
+    def test_success_has_no_facts(self, monkeypatch):
+        end = self._run(monkeypatch, json.dumps({"ok": True}))
+        assert end.result_status is None
+        assert end.result_error is None
+
+    def test_failed_intermediate_reply_event_keeps_brief(self, monkeypatch):
+        pr = _patch_process(
+            monkeypatch,
+            apply_return=json.dumps(
+                {
+                    "ok": False,
+                    "status": "step_limit",
+                    "error": {"type": "x", "reason": "не принят"},
+                }
+            ),
+        )
+        sink = QueueSubagentProgressSink()
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc(
+                        "turn_intermediate_reply",
+                        "ir1",
+                        json.dumps({"answer": "текст"}),
+                    )
+                ],
+                state=_state(),
+                ctx=_child_ctx(sink),
+                run_agent_func=None,
+            )
+        )
+        (event,) = sink.drain()
+        assert event.ok is False
+        assert event.error_brief == "не принят"
+        # Факты исхода — только у `tool_end`: реплика — не вызов тула.
+        assert event.result_status is None
+        assert event.result_error is None

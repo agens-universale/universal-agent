@@ -520,14 +520,72 @@ def test_skill_matches_short_name_prefix():
     assert palette._visible_skill_rows() == [_BRAIN]
 
 
-def test_skill_does_not_match_by_pack_prefix():
-    pytest.importorskip("textual")
-    skills = [
-        {"id": "default-coworker:background-business"},
-        {"id": "x:deliverables-evidence"},
+_SUPER = [
+    {"id": "supercoder:brainstorming"},
+    {"id": "supercoder:coder"},
+    {"id": "superpowers:debugging"},
+    {"id": "other:systematic-debugging"},
+    {"id": "solo"},
+]
+
+
+def _shown(palette):
+    return [
+        (r.get("input_name") or r["id"].rpartition(":")[2], r["id"])
+        for r in palette._visible_skill_rows()
     ]
-    palette = _skill_palette("d", skills)
-    assert palette._visible_skill_rows() == [skills[1]]
+
+
+def test_skill_matches_pack_prefix_shown_in_full_below_name_matches():
+    pytest.importorskip("textual")
+    palette = _skill_palette("s", _SUPER)
+    assert _shown(palette) == [
+        ("solo", "solo"),
+        ("systematic-debugging", "other:systematic-debugging"),
+        ("supercoder:brainstorming", "supercoder:brainstorming"),
+        ("supercoder:coder", "supercoder:coder"),
+        ("superpowers:debugging", "superpowers:debugging"),
+    ]
+
+
+@pytest.mark.parametrize("typed", ["sup", "supercoder"])
+def test_pack_prefix_lists_pack_skills_in_full(typed):
+    pytest.importorskip("textual")
+    palette = _skill_palette(typed, _SUPER)
+    names = [n for n, _ in _shown(palette)]
+    assert names[:2] == ["supercoder:brainstorming", "supercoder:coder"]
+    assert "systematic-debugging" not in names
+
+
+def test_name_and_pack_match_is_listed_once_short():
+    pytest.importorskip("textual")
+    skills = [{"id": "debug:debugging"}]
+    assert _shown(_skill_palette("deb", skills)) == [
+        ("debugging", "debug:debugging")
+    ]
+
+
+def test_name_match_stays_short_for_cyrillic_prefix():
+    pytest.importorskip("textual")
+    skills = [{"id": "ru:бренд"}, {"id": "бр:другой"}]
+    assert _shown(_skill_palette("бр", skills)) == [
+        ("бренд", "ru:бренд"),
+        ("бр:другой", "бр:другой"),
+    ]
+
+
+def test_pack_without_prefix_match_and_flat_skill_match_by_name_only():
+    pytest.importorskip("textual")
+    palette = _skill_palette("so", _SUPER)
+    assert _shown(palette) == [("solo", "solo")]
+
+
+def test_enter_inserts_shown_name():
+    pytest.importorskip("textual")
+    palette = _skill_palette("supercoder", _SUPER)
+    assert palette.selected_skill()["input_name"] == (
+        "supercoder:brainstorming"
+    )
 
 
 def test_skill_full_id_prefix_only_with_colon():

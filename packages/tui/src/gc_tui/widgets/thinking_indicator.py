@@ -27,6 +27,7 @@ compressing; иначе по `_last_event_kind`: "_finalized" sentinel → valid
 from __future__ import annotations
 
 import random
+import textwrap
 import time
 
 from rich.text import Text
@@ -34,10 +35,11 @@ from textual import events
 from textual.timer import Timer
 from textual.widgets import Static
 
-from gc_tui.messages import OpenEditsScreenRequest
+from gc_tui import textual_compat
+from gc_tui.messages import IndicatorRowsChanged, OpenEditsScreenRequest
 
 # `_HOVER` — ровно тот `$accent`, которым база красит наведение на служебные
-# элементы блоков (`.diff-more:hover` / `.block-copy:hover` в styles.tcss).
+# элементы ленты (`.trace-action:hover` в styles.tcss).
 # `_ACCENT` здесь занят янтарным цветом РАБОТЫ (RUN_COLOR) — это другой смысл.
 from gc_tui.palette import ACCENT as _HOVER
 from gc_tui.palette import DEEP_DIM as _DIM
@@ -47,6 +49,11 @@ from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
 from gc_tui.services.duration_format import format_compact_int, format_duration
 from gc_tui.services.plural import files_word
+from gc_tui.services.trace_glyphs import blink_on
+from gc_tui.services.turn_outcome import (
+    DONE_LABEL,
+    OUTCOMES,
+)
 
 THINKING_PHRASES = [
     "думаю",
@@ -119,6 +126,11 @@ _STATE_COMPRESSING = "compressing"
 _STATE_PROCESSING = "processing"
 _STATE_DONE = "done"
 _STATE_CANCELLED = "cancelled"
+# Ход прервался вместе с процессом (мета «running» без живого хода).
+_STATE_INTERRUPTED = "interrupted"
+# Стоп запрошен, ход ещё дорабатывает: мигающий глиф стопа без текста
+# (решение 26). Не итог — анимация идёт.
+_STATE_STOPPING = "stopping"
 _STATE_FAILED = "failed"
 _STATE_STOPPED_STEPS = "stopped_steps"
 _STATE_STOPPED_ERRORS = "stopped_errors"
@@ -133,6 +145,7 @@ TERMINAL_INDICATOR_STATES = frozenset(
     {
         _STATE_DONE,
         _STATE_CANCELLED,
+        _STATE_INTERRUPTED,
         _STATE_FAILED,
         _STATE_STOPPED_STEPS,
         _STATE_STOPPED_ERRORS,
@@ -152,12 +165,17 @@ _SUMMARY_GAP = 2
 # Ширина, когда измерить нельзя (виджет вне DOM): та же страховка, что у
 # адаптивного футера.
 _FALLBACK_WIDTH = 80
+#: Причина ошибки переносится не больше чем на столько строк.
+ERROR_MAX_ROWS = 3
+_DONE = OUTCOMES["completed"]
+_STOP_GLYPH = OUTCOMES["cancelled"].glyph
 
 
 def format_turn_summary(files: int, add: int, del_: int) -> str | None:
     """«изменено 3 файла · +120 −15»; ход без правок → None.
 
-    Знаки счётчиков — те же, что в шапке DiffBlock (`+N −M`, U+2212)."""
+    Знаки счётчиков — те же, что в строке вызова с правкой (`+N −M`,
+    U+2212)."""
     if files <= 0:
         return None
     return f"изменено {files} {files_word(files)} · +{add} −{del_}"
@@ -180,8 +198,8 @@ def compose_status_line(
     цельному `Text` координаты его первой клетки не восстановить.
 
     `hover` — курсор стоит на сегменте: текст берёт АКЦЕНТ. Это единственный
-    язык наведения, который база знает: `.diff-more:hover` и `.block-copy:hover`
-    красят `$accent`, других hover-правил в проекте нет. Сегмент — такой же
+    язык наведения, который база знает: `.trace-action:hover` красит
+    `$accent`, других hover-правил в проекте нет. Сегмент — такой же
     кликабельный элемент, и отвечать руке он обязан тем же цветом.
     """
     if not summary:
@@ -197,27 +215,19 @@ def compose_status_line(
     return out, (head.cell_len + gap, out.cell_len)
 
 
-#: Подпись успешного исхода хода. Ход, кончившийся предложенным планом,
-#: работой не является: «Выполнил» под планом читалось бы как «сделано».
-DONE_LABEL = "Выполнил"
-DONE_LABEL_PLAN = "План готов"
-
 # Исходы хода, кроме «Выполнил» (у него своя голова — время хода): глиф и слова.
 _TERMINAL_ENDINGS = {
-    _STATE_CANCELLED: ("■", "Отменено"),
-    _STATE_FAILED: ("✗", "Ошибка"),
-    _STATE_STOPPED_STEPS: ("⏹", "Остановлено: превышен лимит шагов"),
-    _STATE_STOPPED_ERRORS: ("⏹", "Остановлено: превышен лимит ошибок"),
-    _STATE_STOPPED_TOKENS: ("⏹", "Остановлено: превышен лимит токенов"),
-    _STATE_STOPPED_TOOL_CALLS: (
-        "⏹",
-        "Остановлено: превышен лимит вызовов инструментов",
-    ),
-    _STATE_STOPPED_JUDGE: (
-        "⏹",
-        "Остановлено: проверка действий недоступна — повторите позже "
-        "или смените режим",
-    ),
+    state: (OUTCOMES[state].glyph, OUTCOMES[state].sentence)
+    for state in (
+        _STATE_CANCELLED,
+        _STATE_INTERRUPTED,
+        _STATE_FAILED,
+        _STATE_STOPPED_STEPS,
+        _STATE_STOPPED_ERRORS,
+        _STATE_STOPPED_TOKENS,
+        _STATE_STOPPED_TOOL_CALLS,
+        _STATE_STOPPED_JUDGE,
+    )
 }
 
 
@@ -244,8 +254,11 @@ class ThinkingIndicator(Static):
         frozen_elapsed: int | None = None,
         turn_summary: tuple[int, int, int] | None = None,
         done_label: str = DONE_LABEL,
+        error: str | None = None,
     ) -> None:
         self._clock = clock
+        # Причина упавшего хода: строка `└` под «✕ Ошибка».
+        self._error = error
         self._done_label = done_label
         self._sink = sink
         self._reasoning_tag = reasoning_tag
@@ -254,6 +267,8 @@ class ThinkingIndicator(Static):
             started_at if started_at is not None else clock()
         )
         self._frame: int = 0
+        # Кадр мигания «останавливаю» — свой счёт, без обёртки цикла дыхания.
+        self._blink_frame: int = 0
         self._state: str = state
         self._frozen_elapsed: int | None = frozen_elapsed
         self._turn_summary: str | None = (
@@ -272,6 +287,55 @@ class ThinkingIndicator(Static):
         super().__init__(
             self._render_text(), classes="thinking-indicator", markup=False
         )
+        self._sync_error_class()
+
+    @property
+    def has_error_line(self) -> bool:
+        """Под строкой-итогом есть строка причины ошибки (вторая строка)."""
+        return self._state == _STATE_FAILED and bool(self._error)
+
+    def set_error(self, error: str | None) -> None:
+        """Причина упавшего хода — строка `└` под «✕ Ошибка»."""
+        if error == self._error:
+            return
+        self._error = error
+        self._sync_error_class()
+        if self.is_mounted:
+            self.refresh(layout=True)
+
+    def _error_texts(self) -> list[str]:
+        """Причина по строкам колонки текста (под `└ `): до трёх строк,
+        дальше — обрезка `…` в последней."""
+        from gc_tui.services.trace_render import consequence_lead
+
+        col = max(1, self._status_width() - consequence_lead(0).cell_len)
+        rows = textwrap.wrap(
+            self._error or "",
+            col,
+            break_long_words=True,
+            break_on_hyphens=False,
+        ) or [""]
+        if len(rows) <= ERROR_MAX_ROWS:
+            return rows
+        last = rows[ERROR_MAX_ROWS - 1]
+        return rows[: ERROR_MAX_ROWS - 1] + [last[: col - 1].rstrip() + "…"]
+
+    @property
+    def error_rows(self) -> int:
+        """Сколько строк занимает причина (0 — её нет)."""
+        return len(self._error_texts()) if self.has_error_line else 0
+
+    def _sync_error_class(self) -> None:
+        self.set_class(self.has_error_line, "with-error")
+        self.styles.height = 1 + self.error_rows
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Ширина изменилась — причина переносится иначе: высота и резерв
+        бара следуют за числом строк."""
+        before = self.styles.height
+        self._sync_error_class()
+        if self.has_error_line and self.styles.height != before:
+            self.post_message(IndicatorRowsChanged())
 
     def set_done_label(self, label: str) -> None:
         """Подпись успешного исхода хода: «Выполнил» либо «План готов»."""
@@ -294,6 +358,8 @@ class ThinkingIndicator(Static):
             _STATE_PROCESSING,
             _STATE_DONE,
             _STATE_CANCELLED,
+            _STATE_STOPPING,
+            _STATE_INTERRUPTED,
             _STATE_FAILED,
             _STATE_STOPPED_STEPS,
             _STATE_STOPPED_ERRORS,
@@ -305,9 +371,18 @@ class ThinkingIndicator(Static):
         if self._state == state:
             return
         self._state = state
+        self._blink_frame = 0
+        self._sync_error_class()
         if state == _STATE_DONE and self._frozen_elapsed is None:
             self._frozen_elapsed = int(self._clock() - self._started_at)
         self._sync_anim()
+        if self.is_mounted:
+            self.refresh()
+
+    def freeze_elapsed(self, seconds: int) -> None:
+        """Длительность хода посчитана снаружи (конец хода): строка-итог
+        «Выполнил за N» берёт её, а не свой счёт — одно N с метой."""
+        self._frozen_elapsed = seconds
         if self.is_mounted:
             self.refresh()
 
@@ -351,11 +426,12 @@ class ThinkingIndicator(Static):
     def _tick(self) -> None:
         # F4: freeze UI на время app-select — не дёргаем анимацию (Screen._selecting).
         try:
-            if getattr(self.screen, "_selecting", False):
+            if textual_compat.is_selecting(self.screen):
                 return
         except Exception:
             pass
         self._frame = (self._frame + 1) % _ANIM_PERIOD
+        self._blink_frame += 1
         # render() читает _frame динамически — достаточно запросить refresh.
         # Guard `is_mounted` — в юнит-тестах _tick дёргается без app-контекста.
         if self.is_mounted:
@@ -367,6 +443,23 @@ class ThinkingIndicator(Static):
         glyph = MORPH_FRAMES[(self._frame // FRAME_HOLD) % len(MORPH_FRAMES)]
         color = GLOW_SHADES[self._frame % len(GLOW_SHADES)]
         return glyph, color
+
+    def _error_line(self) -> Text:
+        """`└ <класс>: <текст>` — следствие уровня 0, `DIM`; перенос до
+        трёх строк, продолжение — под колонкой текста, не под `└`."""
+        from gc_tui.palette import DIM
+        from gc_tui.services.trace_render import consequence_lead
+
+        lead = consequence_lead(0)
+        indent = " " * lead.cell_len
+        line = Text()
+        for i, row in enumerate(self._error_texts()):
+            if i:
+                line.append("\n" + indent)
+            else:
+                line.append_text(lead)
+            line.append(row, style=DIM)
+        return line
 
     def _processing_shade(self) -> str:
         """Цвет «дыхания» точки • «сверяюсь…»: тёмно-серая рампа, кадр = тик."""
@@ -401,7 +494,7 @@ class ThinkingIndicator(Static):
         паддинге шкалы разъехались бы.
         """
         span = self._summary_span
-        if span is None:
+        if span is None or event.screen_y != self.content_region.y:
             return False
         x = event.screen_x - self.content_region.x
         return span[0] <= x < span[1]
@@ -472,8 +565,13 @@ class ThinkingIndicator(Static):
         # состояниях его нет, и след прошлой отрисовки обязан пропасть вместе
         # с ним — иначе клик попал бы в пустоту на месте старых цифр.
         self._summary_span = None
+        if self._state == _STATE_STOPPING:
+            # Мигает исчезая: в паузе — пустая клетка той же ширины.
+            on = blink_on(self._blink_frame)
+            text.append(_STOP_GLYPH if on else " ", style=_DIM)
+            return text
         if self._state == _STATE_DONE:
-            text.append("✓", style=_DIM)
+            text.append(_DONE.glyph, style=_DIM)
             text.append(" ")
             # Живой done всегда замораживает elapsed в set_state → «Выполнил за N».
             # frozen_elapsed=None — восстановление старой сессии без сохранённого
@@ -508,6 +606,9 @@ class ThinkingIndicator(Static):
                 self._status_width(),
                 hover=self._summary_hover,
             )
+            if self.has_error_line:
+                line.append("\n")
+                line.append_text(self._error_line())
             return line
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())

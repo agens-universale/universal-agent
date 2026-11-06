@@ -24,7 +24,8 @@ from gc_core.execution.progress import (
     tool_args_summary,
 )
 
-from gc_tui.models import TraceEvent
+from gc_tui.models import ResultOutcome, TraceEvent
+from gc_tui.services.trace_mapper import result_stop
 
 CHILD_SUMMARY_LABEL = "контекст субагента сжат"
 
@@ -48,6 +49,8 @@ class SidecarNestedAction:
     prose: Optional[str] = None
     ok: Optional[bool] = None
     error_brief: Optional[str] = None
+    # Не-сбой ребёнка: стоп или лимит (`■`), отказ (`○`); None — по `ok`.
+    outcome: Optional[ResultOutcome] = None
     todo_items: Optional[List[Dict[str, str]]] = None
     # Картинки реплики человека ребёнку (``mount_nested_user``).
     images: tuple[Attachment, ...] = ()
@@ -60,8 +63,12 @@ def _seq_key(record: Dict[str, Any]) -> int:
 
 def plan_sidecar_nested_actions(
     records: Sequence[Dict[str, Any]],
+    *,
+    root: Optional[str] = None,
 ) -> List[SidecarNestedAction]:
-    """Group by parent_call_id, order by seq; skip finished/HITL-like noise."""
+    """Group by parent_call_id, order by seq; skip finished/HITL-like noise.
+
+    ``root`` — корень проекта: пути в подписях вызовов от него."""
     from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
     from gc_core.execution.progress import todo_items_from_arguments
 
@@ -115,6 +122,7 @@ def plan_sidecar_nested_actions(
                         args_summary=tool_args_summary(
                             str(name) if name else None,
                             payload.get("arguments"),
+                            root=root,
                         ),
                     )
                 )
@@ -130,6 +138,7 @@ def plan_sidecar_nested_actions(
                 )
             elif kind == "error":
                 call_id = payload.get("call_id")
+                stop = result_stop(payload.get("output"))
                 _ok, brief = parse_tool_result_status(payload.get("output"))
                 if brief is None and isinstance(payload.get("output"), str):
                     brief = payload["output"].strip()[:120] or None
@@ -139,17 +148,23 @@ def plan_sidecar_nested_actions(
                         parent_call_id=pid,
                         tool_call_id=str(call_id) if call_id else "",
                         ok=False,
-                        error_brief=brief,
+                        error_brief=stop[1] if stop else brief,
+                        outcome=stop[0] if stop else None,
                     )
                 )
             elif kind == "intermediate_reply":
                 prose = payload.get("prose")
                 if isinstance(prose, str) and prose.strip():
+                    brief = payload.get("error_brief")
                     actions.append(
                         SidecarNestedAction(
                             kind="mount_nested_prose",
                             parent_call_id=pid,
                             prose=prose.strip(),
+                            ok=payload.get("ok") is not False,
+                            error_brief=brief
+                            if isinstance(brief, str)
+                            else None,
                             tool_call_id=(
                                 str(payload["call_id"])
                                 if isinstance(payload.get("call_id"), str)
@@ -204,11 +219,14 @@ def apply_sidecar_nested_actions(
                 tool_call_id=act.tool_call_id or "",
                 ok=bool(act.ok) if act.ok is not None else True,
                 error_brief=act.error_brief,
+                outcome=act.outcome,
             )
         elif act.kind == "mount_nested_prose":
             mount_nested_prose(
                 parent_call_id=act.parent_call_id,
                 prose=act.prose or "",
+                ok=act.ok is not False,
+                error_brief=act.error_brief,
             )
         elif act.kind == "mount_nested_user":
             if mount_nested_user is not None:
@@ -294,22 +312,27 @@ def resolve_nested_tool_detail(
 
 
 def trace_events_from_nested_detail(
-    call_id: str, detail: Dict[str, Any]
+    call_id: str, detail: Dict[str, Any], *, root: Optional[str] = None
 ) -> Tuple[TraceEvent, Optional[TraceEvent]]:
     """Синтетические TraceEvent для ToolCallDetailScreen."""
     call_payload = detail.get("call")
     if not isinstance(call_payload, dict):
         raise ValueError("detail.call required")
     name = str(call_payload.get("name") or "")
+    args_summary = tool_args_summary(
+        name or None, call_payload.get("arguments"), root=root
+    )
     call_ev = TraceEvent(
         no=0,
         event_ts_utc_iso="",
         kind="call",
         title=name,
-        summary=tool_args_summary(name or None, call_payload.get("arguments")),
+        summary=args_summary,
+        args_summary=args_summary,
         full_payload=call_payload,
         call_id=call_id,
         tool_name=name,
+        wire_name=name or None,
     )
     result_ev: Optional[TraceEvent] = None
     result_payload = detail.get("result")

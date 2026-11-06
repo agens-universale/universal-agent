@@ -77,13 +77,34 @@ def _skill_label(skill: dict) -> str:
     return "/" + str(skill.get("input_name") or skill_short(skill))
 
 
-def _skill_matches(skill: dict, prefix: str) -> bool:
-    """Начало короткого имени; полного id — только при `:` в фильтре.
-    Регистр не важен ни у фильтра, ни у имени (`fold` с обеих сторон)."""
+def _skill_pack(skill: dict) -> str:
+    """Имя пакета скилла — часть id до `:` (у плоского — пусто)."""
+    return str(skill.get("id", "")).rpartition(":")[0]
+
+
+def _skill_shown_name(
+    skill: dict, prefix: str, taken: bool
+) -> tuple[str, bool] | None:
+    """(имя, только_по_пакету): имя, под которым скилл показан и
+    вставляется, или None, если он не подходит под фильтр. Без `:` в
+    фильтре: начало короткого имени — запускаемый вид (`input_name`),
+    начало имени пакета — полный id `пакет:имя`; подошедший обоими
+    путями — коротко. С `:` — начало
+    полного id. Короткое имя, занятое командой или алиасом (`taken`), по
+    имени скилл не пропускает. Регистр не важен (`fold` с обеих сторон)."""
     prefix = fold(prefix)
+    sid = str(skill.get("id", ""))
+    short = skill_short(skill)
+    runnable = str(skill.get("input_name") or short)
     if ":" in prefix:
-        return fold(str(skill.get("id", ""))).startswith(prefix)
-    return fold(skill_short(skill)).startswith(prefix)
+        starts = fold(sid).startswith(prefix)
+        return (runnable, False) if starts and not taken else None
+    if fold(short).startswith(prefix) and not taken:
+        return runnable, False
+    pack = _skill_pack(skill)
+    if pack and fold(pack).startswith(prefix):
+        return sid, True
+    return None
 
 
 class CommandPalette(VerticalScroll):
@@ -610,19 +631,27 @@ class CommandPalette(VerticalScroll):
         return self._filtered(toggle=True)
 
     def _matched_skills(self) -> list[dict]:
-        """Все скиллы под фильтр (голый `/` — ни одного); скилл, чьё короткое
-        имя занято командой или алиасом, не показывается. Порядок — по
-        короткому имени (`skill_name_key`), как в пикере /skill."""
+        """Все скиллы под фильтр (голый `/` — ни одного); в `input_name` —
+        имя, которое показывает строка и вставляет Enter. Сначала совпавшие
+        по имени (`skill_name_key`, как в пикере /skill), ниже совпавшие
+        только по пакету — по пакетам, внутри пакета по короткому имени."""
         f = self._filter.lower()
         if not f or self._skills is None:
             return []
-        matched = [
-            s
-            for s in self._skills()
-            if _skill_matches(s, f)
-            and self._registry.lookup(skill_short(s)) is None
-        ]
-        return sorted(matched, key=skill_name_key)
+        by_name: list[dict] = []
+        by_pack: list[dict] = []
+        for s in self._skills():
+            taken = self._registry.lookup(skill_short(s)) is not None
+            shown = _skill_shown_name(s, f, taken)
+            if shown is None:
+                continue
+            name, pack_only = shown
+            if pack_only:
+                by_pack.append({**s, "input_name": name})
+            else:
+                by_name.append(s)
+        by_pack.sort(key=lambda s: (fold(_skill_pack(s)), skill_name_key(s)))
+        return sorted(by_name, key=skill_name_key) + by_pack
 
     def _list_rows_cap(self) -> int:
         """Сколько строк списка палитра показывает без прокрутки: потолок

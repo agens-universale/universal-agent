@@ -33,3 +33,25 @@ async def test_command_error_suggestion_is_meta():
         assert "вы имели в виду" in str(text)
         # подсказка — palette.DEEP_DIM
         assert _rgb(DEEP_DIM) in {str(span.style) for span in text.spans}
+
+
+@pytest.mark.asyncio
+async def test_runtime_error_is_standalone_bang_err():
+    """Ошибка хода без треда (индикатора нет) — `runtime:` строкой без
+    владельца: `!` в колонке `●`, ERR, без `[!]`. С тредом причина — под
+    «✕ Ошибка» (`test_turn_error_reason`)."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
+
+    async with TuiApp().run_test() as pilot:
+        pilot.app.last_runner_error = "boom"
+        await pilot.pause(0.6)  # тик опроса — 250 мс
+        rows = [
+            w
+            for w in pilot.app.screen.query(TraceRow)
+            if w.has_class("line-error")
+        ]
+        assert [(r._prefix, r._content) for r in rows] == [
+            ("! ", "runtime: boom")
+        ]

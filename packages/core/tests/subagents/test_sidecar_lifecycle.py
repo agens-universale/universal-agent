@@ -144,6 +144,38 @@ class TestSidecarIntermediateReply:
         assert [r["kind"] for r in rows] == ["intermediate_reply"]
         assert rows[0]["payload"]["prose"] == answer
         assert rows[0]["payload"]["call_id"] == "ir1"
+        assert set(rows[0]["payload"]) == {"prose", "call_id"}
+
+    def test_failed_intermediate_reply_records_outcome(
+        self, tmp_path, monkeypatch
+    ):
+        pr = _patch_process(
+            monkeypatch,
+            apply_return=json.dumps(
+                {"ok": False, "error": {"reason": "не принят"}}
+            ),
+        )
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc(
+                        "turn_intermediate_reply",
+                        "ir1",
+                        json.dumps({"answer": "текст"}),
+                    )
+                ],
+                state=_state(),
+                ctx=_child_ctx(tmp_path),
+                run_agent_func=None,
+            )
+        )
+        (row,) = read_subagent_trace(str(tmp_path), "cli", "task-1")
+        assert row["payload"] == {
+            "prose": "текст",
+            "call_id": "ir1",
+            "ok": False,
+            "error_brief": "не принят",
+        }
 
 
 class TestSidecarFinished:

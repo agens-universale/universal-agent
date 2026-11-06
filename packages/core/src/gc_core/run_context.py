@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from gc_core.agent_store import (
     AgentStore,
@@ -61,6 +61,9 @@ from gc_core.tools.skills.registry import SkillsRegistry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
 from gc_core.utils.prod_auth import AuthConnector
+
+if TYPE_CHECKING:
+    from gc_core.vision.notes import TraceNote
 
 
 @dataclass
@@ -124,9 +127,10 @@ class RunContext:
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
     # Пометка в ленте о судьбе изображения («не просмотрено», спека изображений
-    # §10): текст готов к показу. Не задан — `vision.notes.emit_trace_note`
+    # §10): `TraceNote` — текст готов к показу и владелец (вызов тула или
+    # ответ). Не задан — `vision.notes.emit_trace_note`
     # пишет предупреждение в `logger` (CLI, сервер, SDK).
-    on_trace_note: Optional[Callable[[str], None]] = None
+    on_trace_note: Optional[Callable[[TraceNote], None]] = None
     # Порт «спросить человека»: обычная функция или корутинная. Не задан —
     # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
@@ -341,7 +345,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
-    on_trace_note: Optional[Callable[[str], None]] = None,
+    on_trace_note: Optional[Callable[[TraceNote], None]] = None,
     on_messages_evicted: Optional[
         Callable[[List[Dict[str, Any]]], None]
     ] = None,
@@ -690,7 +694,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     auth_connector: Optional[AuthConnector],
     environment: Optional[Any],
     on_stream_delta,
-    on_trace_note: Optional[Callable[[str], None]] = None,
+    on_trace_note: Optional[Callable[[TraceNote], None]] = None,
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]],
     is_tui: bool,
     tools_cache: Any,

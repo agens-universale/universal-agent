@@ -4,28 +4,6 @@ import pytest
 from gc_testkit.tui_support import tui_settings
 
 
-def test_compaction_label_with_chars():
-    comp = {
-        "messages_in_segment": 8,
-        "chars_before": 12300,
-        "chars_after": 3100,
-        "synthesis": "x",
-    }
-    from gc_tui.services.trace_render import build_compaction_label
-
-    assert (
-        build_compaction_label(1, comp)
-        == "контекст сжат #1 · 8→1 · 12.3k→3.1k симв"
-    )
-
-
-def test_compaction_label_legacy_no_chars():
-    comp = {"messages_in_segment": 5, "synthesis": "x"}
-    from gc_tui.services.trace_render import build_compaction_label
-
-    assert build_compaction_label(2, comp) == "контекст сжат #2 · 5→1"
-
-
 def test_block_panel_for_code_with_lang():
     pytest.importorskip("textual")
     from gc_tui.widgets.block_panel import BlockPanel
@@ -159,9 +137,9 @@ async def test_render_thread_readonly_kinds():
 
 
 @pytest.mark.asyncio
-async def test_render_thread_readonly_call_row_uses_wire_tool_name():
-    """Д11/R3: readonly-превью показывает wire-имя тула (как в реестре), не
-    канонический id маппера — fs_append_file, не append_to_file."""
+async def test_render_thread_readonly_call_row_shows_label():
+    """Спека P3 §2.1: превью рисует подпись ядра (`Write  x.py`), как живая
+    лента; wire-имя остаётся в строке только для отладки."""
     pytest.importorskip("textual")
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from textual.app import App
@@ -191,7 +169,10 @@ async def test_render_thread_readonly_call_row_uses_wire_tool_name():
 
     async with _A().run_test() as pilot:
         row = pilot.app.screen.query_one(ToolCallRow)
-        assert row._tool_name == "fs_append_file"
+        content = row._render_content().plain
+        assert content.startswith("Write  x.py")
+        assert "append" not in content
+        assert row.wire_name == "fs_append_file"
 
 
 def _seg(payloads, synthesis=None, n=0, index=0):
@@ -210,7 +191,8 @@ def _seg(payloads, synthesis=None, n=0, index=0):
 @pytest.mark.asyncio
 async def test_render_segments_readonly_parity():
     """Превью из сегментов = паритет с основным трейсом: hidden(policy) скрыт,
-    маркер сжатия #K + синтез, intermediate_reply как ·, error_msg красным."""
+    маркер сжатия #K + синтез, intermediate_reply серым ●, error_msg
+    красным."""
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import render_segments_readonly
     from gc_tui.widgets.trace_row import TraceRow
@@ -273,6 +255,7 @@ async def test_render_segments_readonly_parity():
             )
 
     async with _A().run_test() as pilot:
+        await pilot.pause()  # метка сжатия собирается под ширину раскладки
         scr = pilot.app.screen
         body = "\n".join(str(w.render()) for w in scr.query())
         # policy/technical — скрыто (hidden), как на основном экране
@@ -285,7 +268,8 @@ async def test_render_segments_readonly_parity():
         assert len(markers) == 1
         assert "контекст сжат #1" in body
         assert "СИНТЕЗ-X" in body
-        # intermediate_reply — отдельная line-intermediate (·), не обычная реплика
+        # intermediate_reply — отдельная line-intermediate (серый ●),
+        # не обычная реплика
         assert "промежуточный" in body
         assert (
             len(
@@ -315,15 +299,15 @@ def test_build_agent_widgets_has_bullet_prefix():
 
 
 def test_build_intermediate_widgets_renders_code_block():
-    """·-реплика проходит тот же markdown/код-пайплайн, что и проза: код-фенс
-    становится панелью, а не сырой строкой с литеральными ```. Маркер «· »
-    и класс line-intermediate сохранены."""
+    """Промежуточная реплика проходит тот же markdown/код-пайплайн, что и
+    проза: код-фенс становится панелью, а не сырой строкой с литеральными ```.
+    Глиф `● ` (серый по классу line-intermediate)."""
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_intermediate_widgets
 
     md = "вступление\n\n```python\nprint(1)\n```"
     ws = build_intermediate_widgets(md, event_no=9)
-    assert ws[0]._prefix == "· "
+    assert ws[0]._prefix == "● "
     assert ws[0].has_class("line-intermediate")
     assert any(w.has_class("code-block-panel") for w in ws)
 
@@ -337,7 +321,7 @@ def test_build_intermediate_widgets_plain_text_single_row():
 
     ws = build_intermediate_widgets("промежуточный ответ", event_no=1)
     assert len(ws) == 1 and isinstance(ws[0], TraceRow)
-    assert ws[0]._prefix == "· " and ws[0].has_class("line-intermediate")
+    assert ws[0]._prefix == "● " and ws[0].has_class("line-intermediate")
 
 
 def test_build_block_widgets_no_bullet_prefix():
@@ -508,7 +492,7 @@ def test_event_no_bound_to_every_widget():
 
 @pytest.mark.asyncio
 async def test_intermediate_reply_row_has_top_margin(tmp_path):
-    """`·`-реплика (intermediate_reply) — фаза хода, как ●-проза:
+    """Промежуточная реплика (intermediate_reply) — фаза хода, как ●-проза:
     пустая строка сверху (margin-top: 1), не прилипает к предыдущей строке."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
@@ -523,7 +507,7 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         row = TraceRow(
-            prefix="· ",
+            prefix="● ",
             content="промежуточный ответ",
             kind_class="line-intermediate",
         )
@@ -608,7 +592,7 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
         event_ts_utc_iso="",
         kind="todo",
         title="session_todo",
-        summary="чек-лист 1/2",
+        summary="Чек-лист 1/2",
         full_payload=payload,
         call_id="c1",
         tool_name="session_todo",
@@ -626,12 +610,12 @@ def test_todo_event_renders_rich_text_with_glyph_colors():
     rows = mounted[0]._rows
     header = rows[0]._content
     assert isinstance(header, RichText)
-    assert header.plain == "session_todo   чек-лист 1/2"
+    assert header.plain == "Чек-лист 1/2"
     # Текст пункта — в content-колонке, отступ+глиф — в prefix: перенос
     # длинного пункта выравнивается под началом текста.
-    assert rows[1]._prefix.plain == "     ✓ "
+    assert rows[1]._prefix.plain == "  ✓ "
     assert rows[1]._content.plain == "Шаг раз"
-    assert rows[2]._prefix.plain == "     → "
+    assert rows[2]._prefix.plain == "  → "
     assert rows[2]._content.plain == "Шаг два"
     # Tab-стоп один — сам блок; строки внутри не фокусируются.
     assert mounted[0].can_focus and not any(r.can_focus for r in rows)
@@ -652,8 +636,6 @@ def test_readonly_error_msg_finalizes_its_call_row():
     mounted = []
 
     class _Target:
-        children = ()  # is_tool_group_start смотрит на потомков контейнера
-
         def mount(self, w, **kw):
             mounted.append(w)
 
@@ -683,7 +665,7 @@ def test_readonly_error_msg_finalizes_its_call_row():
     assert len(mounted) == 1, "ошибка не должна добавлять отдельную [!]-строку"
     row = mounted[0]
     assert isinstance(row, ToolCallRow)
-    assert row._is_error is True and row._result is not None
+    assert row._outcome == "error" and row._result is not None
 
 
 def test_readonly_error_msg_without_call_row_still_shown():
@@ -709,6 +691,88 @@ def test_readonly_error_msg_without_call_row_still_shown():
     )
     _dispatch_readonly(_Target(), ev, {})
     assert len(mounted) == 1
+
+
+# --- строки без владельца (спека P3 §10, ответ 5) ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("severity", "cls"), [("error", "line-error"), ("warn", "line-warn")]
+)
+def test_standalone_row_bang_in_bullet_column(severity, cls):
+    """Строка без владельца: `!` в колонке `●`, цвет — классом важности,
+    квадратных скобок нет."""
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_standalone_row
+
+    row = build_standalone_row("сломалось", severity=severity, event_no=3)
+    assert row._prefix == "! "
+    assert row._content == "сломалось"
+    assert row.has_class(cls)
+    assert row._event_no == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("severity", ["error", "warn"])
+async def test_standalone_row_has_blank_line_above(tmp_path, severity):
+    """Строка без владельца — своё событие ленты: пустая строка сверху
+    (§2.1), не прилипает к предыдущему событию."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.services.trace_render import build_standalone_row
+    from textual.containers import VerticalScroll
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        row = build_standalone_row("сломалось", severity=severity)
+        pilot.app.screen.query_one("#trace", VerticalScroll).mount(row)
+        await pilot.pause()
+        assert row.styles.margin.top == 1
+
+
+def test_note_consequence_is_bang_text_in_warn():
+    from gc_tui.palette import WARN
+    from gc_tui.services.trace_render import note_consequence
+
+    body = note_consequence("не просмотрено")
+    assert body.plain == "! не просмотрено"
+    assert {str(s.style) for s in body.spans} == {WARN}
+
+
+def _readonly_orphan(kind: str):
+    pytest.importorskip("textual")
+    from gc_tui.models import TraceEvent
+    from gc_tui.services.trace_render import _dispatch_readonly
+
+    mounted = []
+
+    class _Target:
+        def mount(self, w, **kw):
+            mounted.append(w)
+
+    ev = TraceEvent(
+        no=4,
+        event_ts_utc_iso="",
+        kind=kind,
+        title="",
+        summary="ENOENT",
+        full_payload={},
+        call_id="unknown",
+    )
+    _dispatch_readonly(_Target(), ev, {})
+    return mounted
+
+
+@pytest.mark.parametrize("kind", ["error_msg", "error"])
+def test_readonly_orphan_error_is_standalone_bang_err(kind):
+    """Превью: error_msg без вызова и ошибка без строки вызова — `! …` ERR."""
+    (row,) = _readonly_orphan(kind)
+    assert (row._prefix, row._content) == ("! ", "ENOENT")
+    assert row.has_class("line-error")
 
 
 def test_note_text_label_bold_text_italic():
@@ -894,3 +958,38 @@ def test_finish_comment_after_table_is_own_row():
     assert ws[-1]._content.plain == "Нет."
     assert len(ws) == 3
     assert type(ws[1]).__name__ != "TraceRow"
+
+
+def test_nested_prose_row_accepted_has_no_consequence():
+    from gc_tui.services.trace_render import (
+        NESTED_PROSE_CLASS,
+        NESTED_PROSE_PREFIX,
+        build_nested_prose_row,
+    )
+
+    row = build_nested_prose_row("проверю")
+    assert (row._prefix, row._content, row._consequences) == (
+        NESTED_PROSE_PREFIX,
+        "проверю",
+        [],
+    )
+    assert all(row.has_class(c) for c in NESTED_PROSE_CLASS.split())
+
+
+def test_nested_prose_row_rejected_is_dim_consequence():
+    """Решение владельца P3b, 3: `└ · не принят — причина` серым."""
+    from gc_tui.palette import DIM
+    from gc_tui.services.trace_render import build_nested_prose_row
+    from rich.text import Text
+
+    row = build_nested_prose_row("проверю", ok=False, error_brief="нет")
+    assert row._consequences == [Text("· не принят — нет", style=DIM)]
+
+
+def test_nested_prose_row_rejected_without_reason():
+    from gc_tui.palette import DIM
+    from gc_tui.services.trace_render import build_nested_prose_row
+    from rich.text import Text
+
+    row = build_nested_prose_row("проверю", ok=False)
+    assert row._consequences == [Text("· не принят", style=DIM)]

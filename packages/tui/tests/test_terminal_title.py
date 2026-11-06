@@ -33,13 +33,13 @@ def test_status_glyph_is_separator():
     # Глиф статуса сам разделяет имя и промпт — без ·.
     assert (
         format_terminal_title("сделай рефактор", "running")
-        == "✦ GigaCode ▸ сделай рефактор"
+        == "✦ GigaCode ● сделай рефактор"
     )
     assert (
         format_terminal_title("готово", "completed") == "✦ GigaCode ✓ готово"
     )
     assert format_terminal_title("стоп", "stopped") == "✦ GigaCode ■ стоп"
-    assert format_terminal_title("упало", "failed") == "✦ GigaCode ✗ упало"
+    assert format_terminal_title("упало", "failed") == "✦ GigaCode ✕ упало"
     assert format_terminal_title("ждём", "asking") == "✦ GigaCode ? ждём"
 
 
@@ -55,7 +55,7 @@ def test_unknown_status_falls_back_to_dot():
 def test_base_and_status_kept_prompt_truncated():
     long = "x" * 200
     out = format_terminal_title(long, status="running", max_len=10)
-    assert out.startswith("✦ GigaCode ▸ ")
+    assert out.startswith("✦ GigaCode ● ")
     assert out.endswith("…")
 
 

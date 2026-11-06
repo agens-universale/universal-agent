@@ -15,6 +15,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.security.confirm_port import call_with_optional
 
 from gc_tui.services.stdin_bridge import redirect_stdin
@@ -151,6 +152,9 @@ class AgentRunner:
         #: Тред и система последнего прогона: в них доигрывается сообщение,
         #: опоздавшее к закрытию.
         self._last_target: Optional[tuple[str, str]] = None
+        #: Монотоника старта последнего прогона: от неё — длительность хода
+        #: в его итоге, даже если к концу на экране уже другая сессия.
+        self.run_started_at: Optional[float] = None
         self._stop_requested = False
         # TUI _stop_and_replace_runner: runner снят с active_runner, но поток ещё
         # может досидеть HTTP/ретраи. Его on_error не должен залипать ✗ Ошибка
@@ -387,6 +391,9 @@ class AgentRunner:
             if self._thread is not None and self._thread.is_alive():
                 return False
             self._thread_kind = "compact"
+            # Цель — сжимаемый тред: всё, что решается по цели раннера
+            # (чья ошибка, куда ход реплики после сжатия), — про него.
+            self._last_target = (thread_id, system)
 
             def _target() -> None:
                 try:
@@ -506,6 +513,7 @@ class AgentRunner:
         self._thread_kind = "run"
         self._accepting = True
         self._last_target = (thread_id, system)
+        self.run_started_at = time.monotonic()
         t = threading.Thread(
             target=self._run_worker,
             args=(batch, thread_id, start_new_thread, system),
@@ -738,6 +746,19 @@ class AgentRunner:
             )
         t.start()
 
+    def withdraw_message(self, msg_id: str) -> bool:
+        """Забрать реплику из очереди, пока агент её не впустил.
+
+        Сначала буфер сборки, затем очередь исполнителя. Замки — в том же
+        порядке, что у `add_message` (раннер → исполнитель): под `_lock`
+        воркер не перельёт буфер и не заведёт ход хвоста между проверками.
+        """
+        with self._lock:
+            if withdraw_from_queue(self._prebuild_messages, msg_id):
+                return True
+            ex = self._executor
+            return ex is not None and ex.withdraw_message(msg_id)
+
     def is_child_input_active(self) -> bool:
         """Ждёт ли ввод субагент ЭТОГО прогона.
 
@@ -791,6 +812,10 @@ class AgentRunner:
         ) -> str:
             self._confirm_event.clear()
             self._confirm_choice = "deny_once"
+            # Остановленный прогон дорабатывает отвязанным: его вопрос встал
+            # бы баннером в чужой открытой сессии — fail-closed без показа.
+            if self._stop_requested or self._marked_stopped:
+                return "deny_once"
             try:
                 mounted = call_with_optional(
                     present,

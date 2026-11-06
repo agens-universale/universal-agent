@@ -20,6 +20,9 @@ Kind = Literal[
     "todo",
 ]
 Status = Literal["running", "stopped", "completed", "failed"]
+#: Итог вызова в ленте: успех `●` зелёным, сбой `●` красным, стоп или лимит `○`
+#: серым, отказ политики, режима, судьи или человека `○` (спека P3 §10).
+ResultOutcome = Literal["ok", "error", "halted", "refused"]
 
 
 @dataclass
@@ -93,6 +96,9 @@ class TraceEvent:
     # tool_name остаётся каноническим id — на нём завязана логика маппера/экрана
     # (COGNITIVE_TOOLS, "intermediate_reply"/"submit_solution"/"subagent_*" и т.д.).
     wire_name: Optional[str] = None
+    # Сводка аргументов вызова от ядра (`tool_args_summary`) — объект строки
+    # вызова; заполняется только у kind="call".
+    args_summary: str = ""
     hidden: bool = False  # True → не рендерить в трейс (но kind учитывается polling-логикой)
     summary_content: str = (
         ""  # очищенный текст сводки (только для kind="summary")
@@ -100,3 +106,16 @@ class TraceEvent:
     # Картинки реплики (kind="user"): вложения сообщения, а у ответа на
     # turn_ask_human — из следующего технического сообщения (дизайн картинок §20.3).
     attachments: tuple[Attachment, ...] = ()
+    # Не-сбой среди kind="error": стоп или лимит (`halted`), отказ
+    # (`refused`). Ставит маппер; None — по kind (`result_outcome`).
+    outcome: Optional[ResultOutcome] = None
+    # Скилл реплики (kind="user"): id из `skill_loaded` записи — рисуется
+    # именем первым словом реплики (спека P3 §2.3).
+    skill: Optional[str] = None
+
+    @property
+    def result_outcome(self) -> ResultOutcome:
+        """Итог вызова для строки ленты (у результата и ошибки)."""
+        if self.outcome is not None:
+            return self.outcome
+        return "error" if self.kind == "error" else "ok"

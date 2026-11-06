@@ -387,7 +387,7 @@ class AcpFacade:
             await self._fail(request_id)
             return
         try:
-            await self._replay(record.session_id)
+            await self._replay(record.session_id, live.cwd)
         except Exception:
             logger.exception("session/load")
             await self._fail(request_id)
@@ -540,14 +540,16 @@ class AcpFacade:
         self._sessions[record.session_id] = live
         return live
 
-    async def _replay(self, session_id: str) -> None:
+    async def _replay(self, session_id: str, cwd: str) -> None:
         threads, key = self._index.threads, thread_key(session_id)
         messages = _unique(entry.data for entry in await threads.history(key))
         records = [
             {"ts": entry.ts, "seq": entry.seq, **entry.data}
             for entry in await threads.subagent_events(key)
         ]
-        for update in history_updates(messages, subagent_records=records):
+        for update in history_updates(
+            messages, subagent_records=records, root=cwd
+        ):
             await self._notify(session_id, update)
 
     async def _asession_fields(self, live: LiveSession) -> dict:
@@ -750,7 +752,7 @@ class AcpFacade:
         """
         await self._announce_model(live)
         flow = await ToolFlow.start(
-            self._index.threads, thread_key(live.session_id)
+            self._index.threads, thread_key(live.session_id), root=live.cwd
         )
         live.tool_flow = flow
         stop = asyncio.Event()

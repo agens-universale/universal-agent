@@ -1,7 +1,11 @@
 """format_duration: человекочитаемая длительность Nс / Nм Mс / Nч Mм."""
 
 import pytest
-from gc_tui.services.duration_format import format_compact_int, format_duration
+from gc_tui.services.duration_format import (
+    format_compact_int,
+    format_duration,
+    format_round_int,
+)
 
 
 @pytest.mark.parametrize(
@@ -37,3 +41,20 @@ def test_format_duration(seconds, expected):
 )
 def test_format_compact_int(n, expected):
     assert format_compact_int(n) == expected
+
+
+@pytest.mark.parametrize(
+    "n,expected",
+    [
+        (0, "0"),
+        (999, "999"),
+        (1000, "1k"),
+        (6_100, "6k"),
+        (128_300, "128k"),
+        (999_999, "999k"),
+        (1_000_000, "1.0M"),
+        (1_234_567, "1.2M"),
+    ],
+)
+def test_format_round_int(n, expected):
+    assert format_round_int(n) == expected

@@ -9,8 +9,9 @@ from typing import Any, Iterable, Mapping, Optional
 
 from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
 from gc_core.constants.tool_names import PROPOSE_PLAN_TOOL_NAME
+from gc_core.execution.progress import tool_args_summary
+from gc_core.message_policy.chat_completions import is_bridge_echo
 from gc_core.message_policy.nudges import output_for_card
-from gc_core.utils.path_truncate import truncate_path
 from gc_core.vision.errors import (
     ERR_NO_IMAGE_STORE,
     ERR_NO_VISION_MODEL,
@@ -20,9 +21,11 @@ from gc_core.vision.errors import (
     REASON_HTTP,
 )
 
-from gc_tui.models import TraceEvent
+from gc_tui.models import ResultOutcome, TraceEvent
 from gc_tui.services.image_chips import images_mentioned
+from gc_tui.services.plural import plural_form
 from gc_tui.services.tool_identity import tool_id
+from gc_tui.services.tool_refusal import refusal_text
 
 #: Сводки строки fs_view_image в ленте (визуальный контракт картинок §4): модель
 #: получает английский текст ошибки, человек — русский по типу ошибки.
@@ -178,14 +181,18 @@ class RenderContext:
     ``image_index`` — пользовательские картинки батча по подписи (см.
     collect_image_index): ответ на turn_ask_human берёт из него свои картинки.
     ``closing_replies`` — call_id закрывающего вызова → текст модели того же
-    ответа (turn_close.closing_replies): по нему отчёт становится итогом."""
+    ответа (turn_close.closing_replies): по нему отчёт становится итогом.
+    ``root`` — корень проекта сессии: пути в подписях вызовов от него."""
 
     skipped_call_ids: frozenset = frozenset()
     image_index: Mapping[str, Attachment] = field(default_factory=dict)
     closing_replies: Mapping[str, str] = field(default_factory=dict)
+    root: Optional[str] = None
 
 
-def collect_render_context(messages: Iterable) -> RenderContext:
+def collect_render_context(
+    messages: Iterable, *, root: Optional[str] = None
+) -> RenderContext:
     """Pre-pass по payload'ам батча — один на всех вызывающих (лента, превью, сегменты
     сжатого треда)."""
     # Ленивый импорт: пакет тулов тянет всё ядро, лента грузится без него.
@@ -196,6 +203,7 @@ def collect_render_context(messages: Iterable) -> RenderContext:
         skipped_call_ids=frozenset(collect_skipped_call_ids(payloads)),
         image_index=collect_image_index(payloads),
         closing_replies=closing_replies(payloads),
+        root=root,
     )
 
 
@@ -261,8 +269,10 @@ def map_message(
         # технического разбора: скилл-сообщения не technical.
         if "display_content" in msg:
             disp = (msg.get("display_content") or "").strip()
-            if not disp:
-                return None  # mid-run доставка → реплику не рисуем
+            skill = _str_or_none(msg.get("skill_loaded")) or None
+            if not disp and skill is None:
+                return None  # пустая реплика без скилла — не рисуем
+            # Mid-run доставка скилла без текста — реплика из одного имени.
             return TraceEvent(
                 no=no,
                 event_ts_utc_iso=ts,
@@ -272,6 +282,7 @@ def map_message(
                 full_payload=msg,
                 message_id=mid,
                 attachments=tuple(attachments_of(msg)),
+                skill=skill,
             )
         content = msg.get("content")
         if isinstance(content, str) and content.strip():
@@ -355,7 +366,9 @@ def map_message(
     # AGENT (text)  # noqa: ERA001  # описание формата, не выключенный код
     if role == "assistant":
         text = _extract_assistant_text(msg.get("content"))
-        if text:
+        # Повтор нашего моста целиком — не ответ (ядро его тоже не
+        # принимает): ни показа, ни учёта в /copy и счётчике плашки.
+        if text and not is_bridge_echo(text):
             return TraceEvent(
                 no=no,
                 event_ts_utc_iso=ts,
@@ -626,7 +639,9 @@ def map_message(
 
     # function_call / function_call_output — Task 2.6
     if typ in ("function_call", "function_call_output"):
-        return _map_function_event(msg, no=no, ts=ts, mid=mid)
+        return _map_function_event(
+            msg, no=no, ts=ts, mid=mid, root=context.root
+        )
 
     return None
 
@@ -670,66 +685,11 @@ def _extract_ask_human_response(output: Any) -> Optional[str]:
     return stripped
 
 
-# Аргумент с таким именем — путь (Е6 батча 3): показывается всегда; свёртка
-# `<N chars>` — только для содержимого.
-_PATH_KEYS = frozenset(
-    {"path", "file", "file_path", "dir", "directory", "cwd", "src", "dst"}
-)
-
-# Путь показывается ЦЕЛИКОМ (Ж2 батча 4): строка ленты переносится по ширине,
-# как это уже происходит с длинным текстом ошибки, и фиксированный бюджет
-# прятал каталог и начало имени там, где на экране хватало места. Потолок —
-# страховка от патологии (глубокое дерево, генерированные имена), не бюджет.
-# Величина — со смоука 5: обрезка сегментная и имя файла держит при любом
-# потолке, платят за него только промежуточные каталоги. 100 оставляет корень,
-# первый каталог и имя, укладывая строку вызова в две строки ленты; 160 отдавал
-# третью строку за один каталог сверху.
-_PATH_LIMIT = 100
-
-
-def _path_preview(value: str) -> str:
-    """Путь под потолком — целиком, за потолком — со схлопнутой серединой.
-
-    Режем именно `truncate_path`, а НЕ прозаическим `_truncate_word_boundary`:
-    пробел в пути — не граница слова, а часть имени каталога (`C:\\Program
-    Files`, `C:\\Users\\Имя Фамилия`, `OneDrive - Company`). Прозаическое
-    правило на таком пути отрезало бы всё после первого же пробела, и от
-    длинного пути осталось бы `'C:\\Program…'` — без каталога и без имени файла.
-    `truncate_path` схлопывает середину и всегда сохраняет имя файла — ровно то,
-    ради чего путь и показывают в строке вызова.
-    """
-    return repr(truncate_path(value, _PATH_LIMIT))
-
-
-def _scalar_preview(v: Any) -> str:
-    if isinstance(v, str):
-        if len(v) > 60:
-            return f"<{len(v)} chars>"
-        return repr(v)
-    if isinstance(v, (int, float, bool)) or v is None:
-        return repr(v)
-    if isinstance(v, list):
-        return f"<list {len(v)}>"
-    if isinstance(v, dict):
-        return "<object>"
-    return "<?>"
-
-
-def _text_preview(v: Any, limit: int) -> str:
-    """Обрезать длинную строку до ~limit символов с «…», без `<N chars>`."""
-    if not isinstance(v, str):
-        return _scalar_preview(v)
-    text = " ".join(v.split())
-    if len(text) > limit:
-        text = text[:limit].rstrip() + "…"
-    return repr(text)
-
-
 _TODO_GLYPHS = {"completed": "✓", "in_progress": "→", "pending": "○"}
 
 
 def _todo_checklist_summary(todos: list) -> str:
-    """Первая строка `чек-лист K/M`, далее пункты ✓/→/○. Пустой список — «очищен»."""
+    """Первая строка `Чек-лист K/M`, далее пункты ✓/→/○. Пустой список — «очищен»."""
     lines: list[str] = []
     done = 0
     for item in todos:
@@ -743,72 +703,8 @@ def _todo_checklist_summary(todos: list) -> str:
             done += 1
         lines.append(f"  {glyph} {content}")
     if not lines:
-        return "чек-лист очищен"
-    return "\n".join([f"чек-лист {done}/{len(lines)}", *lines])
-
-
-def _arg_summary(name: str, args: dict) -> str:
-    if name.startswith("subagent_"):
-        # Спека: reason ~80, task ~60 — текст, не <N chars>.
-        pairs: list[str] = []
-        if "reason" in args:
-            pairs.append(f"reason={_text_preview(args.get('reason'), 80)}")
-        if "task" in args:
-            pairs.append(f"task={_text_preview(args.get('task'), 60)}")
-        return ", ".join(pairs)
-    if name in ("read_file", "list_files"):
-        p = args.get("path")
-        return f"path={_path_preview(p)}" if isinstance(p, str) else ""
-    if name in ("write_to_file", "append_to_file"):
-        p = args.get("path")
-        c = args.get("content", "")
-        clen = len(c) if isinstance(c, str) else 0
-        return (
-            f"path={_path_preview(p)}, content=<{clen} chars>"
-            if isinstance(p, str)
-            else ""
-        )
-    if name == "search_and_replace":
-        # Имена — как в схеме тула (`search`/`replace`), а не `old`/`new`:
-        # схема запрещает лишние ключи, поэтому по старым именам подпись
-        # ВСЕГДА показывала `<0 chars>` — при любом вызове.
-        p = args.get("path")
-        o = args.get("search", "")
-        n = args.get("replace", "")
-        path_shown = (
-            _path_preview(p) if isinstance(p, str) else _scalar_preview(p)
-        )
-        return (
-            f"path={path_shown}, "
-            f"search=<{len(o) if isinstance(o, str) else 0} chars>, "
-            f"replace=<{len(n) if isinstance(n, str) else 0} chars>"
-        )
-    if name == "search_files":
-        q = args.get("query") or args.get("pattern")
-        return f"query={q!r}" if isinstance(q, str) else ""
-    if name == "execute_command":
-        c = args.get("command")
-        return f"command={c!r}" if isinstance(c, str) else ""
-    if name == "run_python_code":
-        code = args.get("code", "")
-        return f"code=<{len(code) if isinstance(code, str) else 0} chars>"
-    if name == "fetch_url":
-        u = args.get("url")
-        return f"url={u!r}" if isinstance(u, str) else ""
-    if name == "thread_notes":
-        a = args.get("action")
-        return f"action={a!r}"
-
-    # default: name + 1-3 short scalars.
-    pairs = []
-    for k, v in list(args.items())[:3]:
-        shown = (
-            _path_preview(v)
-            if (k in _PATH_KEYS and isinstance(v, str))
-            else _scalar_preview(v)
-        )
-        pairs.append(f"{k}={shown}")
-    return ", ".join(pairs)
+        return "Чек-лист очищен"
+    return "\n".join([f"Чек-лист {done}/{len(lines)}", *lines])
 
 
 def _looks_like_error(output: Any) -> bool:
@@ -870,9 +766,9 @@ def _truncate_word_boundary(text: str, limit: int) -> str:
     Правило «резать по пробелу» верно ТОЛЬКО для прозы — сводки результата,
     текста ошибки, технической врезки. Структурированную строку, где пробел не
     граница слова, оно калечит: у пути после раннего пробела (`C:\\Program
-    Files\\…`) отрезается всё, включая имя файла. Путь режет `_path_preview`
-    через `path_display.truncate_path`; третьему вызывающему со структурой, а не
-    прозой, сюда тоже нельзя."""
+    Files\\…`) отрезается всё, включая имя файла. Путь режет
+    `path_truncate.truncate_path`; вызывающему со структурой, а не прозой, сюда
+    нельзя."""
     if len(text) <= limit:
         return text
     cut = text[:limit]
@@ -880,6 +776,63 @@ def _truncate_word_boundary(text: str, limit: int) -> str:
     if boundary > 0:
         cut = cut[:boundary]
     return cut.rstrip() + "…"
+
+
+#: `gc_core.security.action_judge_step.CHECK_FAILED_TYPE`: модуль судьи тянет
+#: всё ядро, а лента грузит только лёгкие константы (страж в
+#: `test_image_feed`); совпадение держит `test_trace_refusals`.
+CHECK_FAILED_TYPE = "action_check_failed"
+
+# Стоп пользователя и лимиты — не сбой тула (K4: стоп серый `○`, ошибка
+# красный `●`): короткий статус вместо длинного error.message, строка
+# вызова — «halted».
+# Несостоявшаяся проверка судьи — не отказ: действие не оценено.
+_HALT_SUMMARIES = {
+    CHECK_FAILED_TYPE: "проверка не прошла — агент может повторить",
+    "cancelled_by_user": "отменено",
+    "not_started_due_to_user_stop": "не запущено (стоп)",
+    "not_started_due_to_session_compact": (
+        "не исполнен: сводка заменила историю"
+    ),
+    "step_limit": "лимит шагов",
+    "token_limit": "лимит токенов",
+    "tool_call_limit": "лимит вызовов",
+}
+
+
+def result_stop(output: Any) -> Optional[tuple[ResultOutcome, str]]:
+    """Не-сбой среди ошибок тула — один классификатор для всех путей ленты.
+
+    Стоп или лимит — `("halted", сводка)`, отказ политики, режима, судьи
+    или человека — `("refused", кто: почему)`; None — обычный итог."""
+    if not isinstance(output, str):
+        return None
+    from gc_tui.services.tool_preview import unwrap_tool_output_dict
+
+    data = unwrap_tool_output_dict(output)
+    if not isinstance(data, dict):
+        return None
+    return classify_stop(data.get("status"), data.get("error"))
+
+
+def classify_stop(
+    status: Any, error: Any
+) -> Optional[tuple[ResultOutcome, str]]:
+    """Ядро `result_stop` по готовым фактам вывода: ``status`` и ``error``.
+
+    Живой путь вложенных вызовов получает факты событием прогресса ядра
+    (`result_status`, `result_error`), перерисовка — разбором вывода;
+    решение одно."""
+    # Стоп во время проверки стражем — тело отказа с ``type`` вместо
+    # ``status`` (``cancelled_by_user_error``): тоже остановка пользователем.
+    kind = error.get("type") if isinstance(error, dict) else None
+    halted = _HALT_SUMMARIES.get(status) or _HALT_SUMMARIES.get(kind)
+    if halted:
+        return "halted", halted
+    refused = refusal_text(error)
+    if refused:
+        return "refused", refused
+    return None
 
 
 def _summarize_output(output: Any, *, error: bool) -> str:
@@ -896,21 +849,6 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         return _truncate_word_boundary(output.replace("\n", " "), 80)
     if not isinstance(data, dict):
         return str(data)[:80]
-
-    # User-stop / step-limit: короткие статусы вместо длинного error.message.
-    status = data.get("status")
-    if status == "cancelled_by_user":
-        return "отменено"
-    if status == "not_started_due_to_user_stop":
-        return "не запущено (стоп)"
-    if status == "not_started_due_to_session_compact":
-        return "не исполнен: сводка заменила историю"
-    if status == "step_limit":
-        return "лимит шагов"
-    if status == "token_limit":
-        return "лимит токенов"
-    if status == "tool_call_limit":
-        return "лимит вызовов"
 
     if error:
         err = data.get("error") or data.get("message") or ""
@@ -934,43 +872,58 @@ def _summarize_output(output: Any, *, error: bool) -> str:
             err = data["message"]
         return _truncate_word_boundary(str(err), 160)
 
+    bits = _result_bits(data)
+    if bits:
+        return " · ".join(bits)
+    # Fallback — пустой summary; ToolCallRow отрендерит строку без хвоста.
+    return ""
+
+
+def _counted(value: Any, one: str, few: str, many: str) -> str:
+    """`N слово` по-русски; нечисловое значение — с формой «много»."""
+    n = value if isinstance(value, int) else None
+    word = plural_form(n, one, few, many) if n is not None else many
+    return f"{value} {word}"
+
+
+def _result_bits(data: dict) -> list[str]:
+    """Хвост успешного результата по-русски: `40 строк · 6 совпадений`."""
     bits: list[str] = []
     # Порядок важен — сначала более конкретные ключи.
-    if "total_lines" in data:
-        bits.append(f"{data['total_lines']} строк")
-    elif "lines" in data:
-        bits.append(f"{data['lines']} строк")
+    lines = data.get("total_lines", data.get("lines"))
+    if lines is not None:
+        bits.append(_counted(lines, "строка", "строки", "строк"))
     if "chars" in data:
-        bits.append(f"{data['chars']} chars")
+        bits.append(_counted(data["chars"], "символ", "символа", "символов"))
     if "matches" in data:
         # matches может быть либо count (int), либо list (для search_files —
         # массив объектов с file/line). Без len() мы бы вкладывали str(list).
         mv = data["matches"]
         mcount = len(mv) if isinstance(mv, (list, tuple)) else mv
-        bits.append(f"{mcount} matches")
-    if "entries" in data:
-        entries = data["entries"]
-        entries_count = data.get(
-            "count",
-            len(entries) if isinstance(entries, list) else "?",
-        )
-        bits.append(f"{entries_count} entries")
-    elif "count" in data:
-        bits.append(f"count={data['count']}")
+        bits.append(_counted(mcount, "совпадение", "совпадения", "совпадений"))
+    entries = data.get("entries")
+    # У поиска `count` — то же число совпадений: второй раз не пишем.
+    count = None if "matches" in data else data.get("count")
+    if count is None and "entries" in data:
+        count = len(entries) if isinstance(entries, list) else "?"
+    if count is not None:
+        bits.append(_counted(count, "запись", "записи", "записей"))
     if "bytes" in data:
-        bits.append(f"{data['bytes']} bytes")
+        bits.append(_counted(data["bytes"], "байт", "байта", "байт"))
     if "exit" in data:
-        bits.append(f"exit={data['exit']}")
+        bits.append(f"код выхода {data['exit']}")
     if "source" in data:
-        bits.append(f"source={data['source']}")
-    if bits:
-        return " · ".join(bits)
-    # Fallback — пустой summary; ToolCallRow отрендерит без `-> ...`.
-    return ""
+        bits.append(f"источник {data['source']}")
+    return bits
 
 
 def _map_function_event(
-    msg: dict, *, no: int, ts: str, mid: Optional[str]
+    msg: dict,
+    *,
+    no: int,
+    ts: str,
+    mid: Optional[str],
+    root: Optional[str] = None,
 ) -> Optional[TraceEvent]:
     typ = msg.get("type")
     wire_name = msg.get("name") if isinstance(msg.get("name"), str) else None
@@ -980,14 +933,16 @@ def _map_function_event(
     )
 
     if typ == "function_call":
-        args = coerce_args(msg.get("arguments"))
-        summary = f"{name or '<tool>'}({_arg_summary(name or '', args)})"
+        args_summary = tool_args_summary(
+            wire_name, msg.get("arguments"), root=root
+        )
         return TraceEvent(
             no=no,
             event_ts_utc_iso=ts,
             kind="call",
             title=name or "",
-            summary=summary,
+            summary=args_summary,
+            args_summary=args_summary,
             full_payload=msg,
             message_id=mid,
             call_id=call_id,
@@ -999,7 +954,8 @@ def _map_function_event(
         output = msg.get("output")
         is_err = _looks_like_error(output)
         kind = "error" if is_err else "result"
-        summary = _summarize_output(output, error=is_err)
+        stop = result_stop(output) if is_err else None
+        summary = stop[1] if stop else _summarize_output(output, error=is_err)
         return TraceEvent(
             no=no,
             event_ts_utc_iso=ts,
@@ -1010,6 +966,7 @@ def _map_function_event(
             message_id=mid,
             call_id=call_id,
             tool_name=name,
+            outcome=stop[0] if stop else None,
         )
 
     return None

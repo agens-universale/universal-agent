@@ -8,23 +8,28 @@ async def test_confirm_title_in_border_and_content():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.confirm import ConfirmScreen
+    from gc_tui.services.session_switch import (
+        RUN_SWITCH_HINT,
+        RUN_SWITCH_MESSAGE,
+        RUN_SWITCH_TITLE,
+    )
 
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(
             ConfirmScreen(
-                title="Новая задача",
-                message="Активная задача в процессе.",
-                hint="[Y] да, прервать   [N] нет, продолжить",
+                title=RUN_SWITCH_TITLE,
+                message=RUN_SWITCH_MESSAGE,
+                hint=RUN_SWITCH_HINT,
             )
         )
         await pilot.pause()
         dlg = pilot.app.screen.query_one("#confirm-dialog")
-        assert dlg.border_title == "Новая задача"
+        assert dlg.border_title == "Идёт ход"
         msg = str(pilot.app.screen.query_one("#confirm-message").render())
-        assert "Активная задача" in msg
+        assert "В этой сессии идёт ход" in msg
         hint = str(pilot.app.screen.query_one("#confirm-hint").render())
-        assert "[Y]" in hint and "прервать" in hint
-        assert "[N]" in hint and "продолжить" in hint
+        assert "[Y]" in hint and "Остановить и перейти" in hint
+        assert "[N]" in hint and "Остаться" in hint
 
 
 @pytest.mark.asyncio

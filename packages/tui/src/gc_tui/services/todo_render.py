@@ -79,16 +79,14 @@ def _build_lines(
         return [
             TodoLine(
                 prefix=Text(indent),
-                content=Text(
-                    f"session_todo   {header_label} очищен", style=header_style
-                ),
+                content=Text(f"{header_label} очищен", style=header_style),
             )
         ]
     lines = [
         TodoLine(
             prefix=Text(indent),
             content=Text(
-                f"session_todo   {header_label} {done}/{len(rows)}",
+                f"{header_label} {done}/{len(rows)}",
                 style=header_style,
             ),
         )
@@ -111,7 +109,7 @@ def _build_lines(
 def build_main_todo_lines(items: list, *, indent: str = "") -> list[TodoLine]:
     """Основной чек-лист (§2) построчно; indent — базовый отступ трейса."""
     return _build_lines(
-        items, header_label="чек-лист", indent=indent, subagent=False
+        items, header_label="Чек-лист", indent=indent, subagent=False
     )
 
 
@@ -120,7 +118,7 @@ def build_subagent_todo_lines(
 ) -> list[TodoLine]:
     """Чек-лист субагента (§3) построчно; indent — nested-отступ блока."""
     return _build_lines(
-        items, header_label="чек-лист субагента", indent=indent, subagent=True
+        items, header_label="Чек-лист субагента", indent=indent, subagent=True
     )
 
 

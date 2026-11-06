@@ -11,6 +11,7 @@ import time
 from dataclasses import replace
 
 from gc_core.settings import runtime_of, settings_of
+from gc_core.utils.path_display import home_path
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -35,7 +36,6 @@ from gc_tui.form_frame import (
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, ERR, INK, OK, SUB_INK, WARN
 from gc_tui.services.footer_slot import MAIN_FOOTER_MIN_COLS
-from gc_tui.services.path_display import home_path
 from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 

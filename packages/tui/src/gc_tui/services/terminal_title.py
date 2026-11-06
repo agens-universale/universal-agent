@@ -7,18 +7,10 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
+from gc_tui.services.turn_outcome import outcome_of
+
 _EMBLEM = "✦"  # U+2726
 _APP_NAME = "GigaCode"
-
-# Статус-слово (из _session_status_word) → глиф. Глиф служит разделителем
-# между именем и промптом. Неизвестное/None → глифа нет (разделитель ·).
-_STATUS_GLYPHS = {
-    "running": "▸",
-    "completed": "✓",
-    "stopped": "■",
-    "failed": "✗",
-    "asking": "?",
-}
 
 
 def format_terminal_title(
@@ -28,7 +20,11 @@ def format_terminal_title(
     max_len: int = 50,
 ) -> str:
     base = f"{_EMBLEM} {_APP_NAME}"
-    glyph = _STATUS_GLYPHS.get(status) if status else None
+    # Глиф статуса — из словаря итогов хода, общего с лентой и
+    # `/sessions`; он же разделяет имя и промпт. Незнакомое слово или None —
+    # глифа нет, разделитель `·`.
+    outcome = outcome_of(status)
+    glyph = outcome.glyph if outcome else None
     one_line = " ".join(task.split()) if task else ""
     if one_line and len(one_line) > max_len:
         one_line = one_line[:max_len] + "…"

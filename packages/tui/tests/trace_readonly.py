@@ -16,8 +16,11 @@ def render_thread_readonly(mount_target, records: list) -> None:
 
     no = 1
     calls: dict = {}
+    questions: dict = {}
     context = collect_render_context(
         rec.get("payload") for rec in records if isinstance(rec, dict)
     )
     for rec in records:
-        no = _render_record_readonly(mount_target, rec, no, calls, context)
+        no = _render_record_readonly(
+            mount_target, rec, no, calls, context, questions=questions
+        )

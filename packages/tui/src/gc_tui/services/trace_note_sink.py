@@ -14,31 +14,32 @@ from collections import deque
 from typing import Any, Callable, Optional
 
 from gc_core.thread_paths import thread_address
+from gc_core.vision.notes import TraceNote
 
 
 class TraceNoteSink:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._notes: deque[tuple[Optional[str], str]] = deque()
+        self._notes: deque[tuple[Optional[str], TraceNote]] = deque()
 
-    def push(self, thread_id: Optional[str], text: str) -> None:
+    def push(self, thread_id: Optional[str], note: TraceNote) -> None:
         with self._lock:
-            self._notes.append((thread_id, text))
+            self._notes.append((thread_id, note))
 
-    def hook_for(self, ctx: Any) -> Callable[[str], None]:
+    def hook_for(self, ctx: Any) -> Callable[[TraceNote], None]:
         """Хук `on_trace_note` контекста: пометка — с тредом прогона на момент вызова
         (`thread_address`; субагент наследует хук и тред родителя)."""
 
-        def hook(text: str) -> None:
+        def hook(note: TraceNote) -> None:
             address = thread_address(ctx)
-            self.push(address[1] if address else None, text)
+            self.push(address[1] if address else None, note)
 
         return hook
 
-    def drain(self, thread_id: Optional[str]) -> list[str]:
+    def drain(self, thread_id: Optional[str]) -> list[TraceNote]:
         """Пометки треда `thread_id` по порядку. Пометки других тредов выбрасываются:
         пометка только живая, а в чужой ленте ей не место."""
         with self._lock:
-            notes = [text for tid, text in self._notes if tid == thread_id]
+            notes = [note for tid, note in self._notes if tid == thread_id]
             self._notes.clear()
             return notes

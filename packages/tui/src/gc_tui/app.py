@@ -36,12 +36,15 @@ from textual.app import App
 from textual.binding import Binding
 from textual.screen import Screen
 
-from gc_tui import branding, palette
+from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
+from gc_tui.services.session_lock import is_held_by_other
 from gc_tui.services.stream_sink import StreamSink
 from gc_tui.services.trace_note_sink import TraceNoteSink
 from gc_tui.services.voice_notices import voice_notices
+
+textual_compat.apply_textual_patches()
 
 _AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings → Обновление"
 
@@ -1462,23 +1465,65 @@ class TuiApp(App):
             self.effective_settings()
         )
 
-    def persist_circuit_breaker(self) -> None:
+    def persist_circuit_breaker(
+        self,
+        task_id: Optional[str] = None,
+        snapshot: Optional[dict] = None,
+    ) -> None:
         """Снимок предохранителя моделей (спека §8) в meta треда — переживает
-        пересборки executor внутри сессии (владелец состояния — сессия-тред)."""
-        task_id = getattr(self.tui_state, "active_task_id", None)
+        пересборки executor внутри сессии (владелец состояния — сессия-тред).
+        По умолчанию — открытый тред и текущее состояние предохранителя."""
+        task_id = task_id or getattr(self.tui_state, "active_task_id", None)
         if not task_id or not self._threads_dir:
             return
         from gc_tui.services.stores.file_store import FileTaskStore
         from gc_tui.session_settings import to_breaker_meta_patch
 
+        if snapshot is None:
+            snapshot = self._circuit_breaker.snapshot()
         store = FileTaskStore(
             threads_dir=self._threads_dir, system=self._system
         )
-        store.update_tui_meta(
-            task_id, to_breaker_meta_patch(self._circuit_breaker.snapshot())
+        store.update_tui_meta(task_id, to_breaker_meta_patch(snapshot))
+
+    def thread_run_is_live(self, thread_id: str) -> bool:
+        """Ход треда держит живой процесс: этот — своим раннером, другой
+        TUI — свежим замком сессии. Иначе «running» в мете — остаток
+        процесса, умершего посреди хода."""
+        runner = self.active_runner
+        if (
+            runner is not None
+            and runner.is_running()
+            and self.run_thread_id(runner) == thread_id
+        ):
+            return True
+        tui_id = getattr(self, "tui_id", "") or ""
+        return bool(self._threads_dir and tui_id) and is_held_by_other(
+            self._threads_dir, self._system, thread_id, tui_id
         )
 
-    def _persist_breaker_after_worker(self) -> None:
+    def session_run_is_live(self, thread_id: str) -> bool:
+        """Ход сессии жив — для показа статуса. Открытая сессия — признаком
+        главного экрана: он знает и ход, который тик ещё не закрыл.
+        Прочие — живой процесс (`thread_run_is_live`)."""
+        main = self._main_screen()
+        if main is not None and thread_id == self.tui_state.active_task_id:
+            return main.open_run_is_live()
+        return self.thread_run_is_live(thread_id)
+
+    def run_thread_id(self, runner) -> Optional[str]:
+        """Тред прогона раннера; None — работа не прогон (сжатие, прогрев)
+        или цели нет: тогда она принадлежит открытому треду."""
+        target = getattr(runner, "_last_target", None)
+        if (
+            getattr(runner, "_thread_kind", "run") == "run"
+            and target
+            and target[1] == self._system
+        ):
+            return target[0]
+        return None
+
+    def _persist_breaker_after_worker(self, runner) -> None:
         """`persist_circuit_breaker`, вызванный ИЗ worker-потока раннера.
 
         Мост на UI-поток обязателен: persist — полный read-modify-write meta.json
@@ -1487,13 +1532,46 @@ class TuiApp(App):
         перезаписи от разных потоков теряют одну правку, а прерванная запись
         оставляет обрезанный файл, который потом читается как пустой.
 
+        Тред и снимок берутся здесь, на воркере: снимок принадлежит треду
+        прогона, а не открытому. Иначе трип хода сессии B, пока открыта A,
+        лёг бы в meta A, а запись, дошедшая до UI-потока после смены сессии,
+        унесла бы туда уже загруженное состояние новой.
+
         RuntimeError из `call_from_thread` — приложение не запущено (тесты,
         headless) или мы уже на UI-потоке: гонки в этом случае нет, пишем
         напрямую, потому что потерять трип хуже."""
+        task_id = self.run_thread_id(runner)
+        # Отвязанный (остановленный) прогон, чей тред уже не открыт: его
+        # предохранитель записан при стопе, а общий объект теперь держит
+        # состояние открытого треда — писать его в тред прогона нельзя.
+        if runner is not self.active_runner and task_id != getattr(
+            self.tui_state, "active_task_id", None
+        ):
+            return
+        snapshot = self._circuit_breaker.snapshot()
         try:
-            self.call_from_thread(self.persist_circuit_breaker)
+            self.call_from_thread(
+                self.persist_circuit_breaker, task_id, snapshot
+            )
         except RuntimeError:
-            self.persist_circuit_breaker()
+            self.persist_circuit_breaker(task_id, snapshot)
+
+    def detach_run_sinks(self) -> None:
+        """Остановленный прогон дорабатывает в фоне, отвязанный от окна: его
+        стрим, прогресс субагентов и предохранитель окну больше не
+        принадлежат. Следующая сборка исполнителя заводит свои; у окна —
+        свой предохранитель с тем же состоянием, старый объект остаётся
+        отвязанному исполнителю (его поздние трипы — только его)."""
+        from gc_core.model_router import CircuitBreaker
+
+        self._circuit_breaker = CircuitBreaker.restore(
+            self._circuit_breaker.snapshot()
+        )
+        pump = getattr(self, "_stream_pump", None)
+        if pump is not None:
+            pump.close()
+        self._stream_pump = None
+        self._subagent_progress_sink = None
 
     def load_circuit_breaker(self, snapshot: dict) -> None:
         """Восстановить предохранитель из meta треда при attach (спека §8):
@@ -1674,7 +1752,7 @@ class TuiApp(App):
     def _record_runner_error(
         self, runner: AgentRunner | None, exc: BaseException
     ) -> None:
-        self._persist_breaker_after_worker()
+        self._persist_breaker_after_worker(runner)
         if runner is None or runner is not self.active_runner:
             return
         if getattr(runner, "_marked_stopped", False):
@@ -1685,7 +1763,9 @@ class TuiApp(App):
         ):
             self.last_runner_error = "Сжатие не удалось. История не изменена."
             return
-        self.last_runner_error = str(exc) or exc.__class__.__name__
+        from gc_tui.services.turn_error import describe_turn_error
+
+        self.last_runner_error = describe_turn_error(exc)
 
     def get_runner(self):
         """Lazy-build the AgentRunner (one per app instance for MVP).
@@ -1725,8 +1805,8 @@ class TuiApp(App):
             )
 
         def _on_runner_complete(outcome: Optional[str]) -> None:
-            self._persist_breaker_after_worker()
             runner = runner_ref[0] if runner_ref else None
+            self._persist_breaker_after_worker(runner)
             if runner is None or runner is not self.active_runner:
                 return
             self.last_terminal_outcome = outcome

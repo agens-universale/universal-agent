@@ -119,7 +119,7 @@ async def test_diff_block_copy_carries_an_applicable_diff():
     block = DiffBlock.for_record(record, event_no=1, collapsed_max_lines=5)
     app = _DiffBlockHost(block)
     async with app.run_test(size=(70, 20)) as pilot:
-        await pilot.click(".block-copy")
+        await pilot.click(".block-body", times=2)
         await pilot.pause()
 
     assert len(app.copied) == 1

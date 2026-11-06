@@ -223,8 +223,8 @@ async def test_tool_call_row_plain_click_focuses_and_does_not_open():
         def compose(self) -> ComposeResult:
             yield ToolCallRow(
                 call_id="c42",
-                tool_name="read_file",
-                args_summary="",
+                label="read_file",
+                target="",
                 event_no=1,
             )
 
@@ -250,8 +250,8 @@ async def test_tool_call_row_ctrl_click_opens_detail():
         def compose(self) -> ComposeResult:
             yield ToolCallRow(
                 call_id="c42",
-                tool_name="read_file",
-                args_summary="",
+                label="read_file",
+                target="",
                 event_no=1,
             )
 
@@ -282,8 +282,8 @@ async def test_tool_call_row_ctrl_click_also_focuses():
         def compose(self) -> ComposeResult:
             yield ToolCallRow(
                 call_id="c42",
-                tool_name="read_file",
-                args_summary="",
+                label="read_file",
+                target="",
                 event_no=1,
             )
 
@@ -308,8 +308,8 @@ async def test_tool_call_row_double_click_no_longer_opens():
         def compose(self) -> ComposeResult:
             yield ToolCallRow(
                 call_id="c42",
-                tool_name="read_file",
-                args_summary="",
+                label="read_file",
+                target="",
                 event_no=1,
             )
 
@@ -334,8 +334,8 @@ async def test_tool_call_row_focus_does_not_mount_preview_widget():
         def compose(self) -> ComposeResult:
             yield ToolCallRow(
                 call_id="c42",
-                tool_name="read_file",
-                args_summary="",
+                label="read_file",
+                target="",
                 event_no=1,
             )
 

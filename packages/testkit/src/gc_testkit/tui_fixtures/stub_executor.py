@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from gc_core.execution.message_keys import withdraw_from_queue
+
 from gc_testkit.tui_fixtures.scenarios import SCENARIOS
 
 
@@ -26,6 +28,8 @@ class StubExecutor:
         self.scenario = scenario
         self.step_delay = step_delay
         self.stopped = False
+        #: Очередь `add_message`: из неё снимает `withdraw_message`.
+        self.queued: list[dict] = []
 
     def run(
         self,
@@ -64,7 +68,10 @@ class StubExecutor:
         self.stopped = True
 
     def add_message(self, message: dict) -> None:
-        pass  # для snapshot-тестов не используется
+        self.queued.append(message)
+
+    def withdraw_message(self, msg_id: str) -> bool:
+        return withdraw_from_queue(self.queued, msg_id)
 
     def _build_records(
         self, user_messages: list, *, scenario: str

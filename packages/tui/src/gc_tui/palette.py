@@ -47,7 +47,6 @@ BAND_BG = "#1f2128"
 # должен читаться карточкой, но не «выпирать» из почти чёрного трейса.
 # Дистанция до BG: 15.6 против 27.7 у BAND_BG (метрика _distance тестов палитры).
 BLOCK_BG = "#171a22"
-FOCUS_BG = "#363b47"  # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
 
 # Выделение текста мышью. Тот же синий, которым Textual выделяет текст в
 # TextArea (экран /buffer): #368AE9 с прозрачностью 40% поверх фона даёт
@@ -58,10 +57,17 @@ FOCUS_BG = "#363b47"  # подсветка строки трассы в фоку
 # (см. services/code_render) подобрана так, чтобы читаемым осталось всё.
 # Границы закреплены тестами в packages/tui/tests/test_palette_sync.py.
 SCREEN_SELECTION_BACKGROUND = "#1e416c"
-CARD_SELECT_BG = "#2e323d"  # выбранная карточка (/sessions, /skills, /mcp) — мягче focus-bg, светлее band-bg
+# Выбранная карточка (/sessions, /skills, /mcp): мягче USER_BAND_BG,
+# светлее BAND_BG.
+CARD_SELECT_BG = "#2e323d"
 FRAME_ARCHIVE = "#4b525d"  # серая рамка «архив/история» (отвеченный вопрос)
 NOTE_INK = "#a5adb8"  # ремарка: чуть светлее DIM
-USER_BAND_BG = "#282c36"  # подложка реплики: светлее BAND_BG, темнее FOCUS_BG
+# Подложка реплики. Светлее BAND_BG, темнее HIGHLIGHT_BG.
+USER_BAND_BG = "#363b47"
+# Выбранная строка списков и пикеров (палитра, /diff, настройки,
+# онбординг, /mcp). Свой токен: от подложки реплики и подсветки ленты не
+# зависит, значение пока то же, что у USER_BAND_BG.
+LIST_SELECT_BG = "#363b47"
 OVERLAY_BG = "#161A23"  # фон оверлеев (палитра, сессии, предпросмотр)
 ZEBRA_BG = "#232836"  # чётная строка зебры (справка)
 SKILL = "#afd7ff"  # имя скилла
@@ -121,9 +127,32 @@ DIFF_GUTTER = MUTED  # колонка номеров строк — сущест
 DIFF_ADD_GUTTER = OK
 DIFF_DEL_GUTTER = ERR
 
+# Отказ вызова в ленте (глиф `○`): приглушённый оранжевый — заметен, но не
+# спорит с ошибкой и предупреждением. В теме auto — от фона (_derived).
+_REFUSED_SHARE = 0.55
+REFUSED = _mix(BG, WARN, _REFUSED_SHARE)
 
-# Кромка неотправленной реплики; в теме auto — _mix(BG, ACCENT, 0.64).
-USER_PENDING_EDGE = "#3a7a72"
+# Реплика в очереди (ждёт впуска ядром): подложка тише обычной — между фоном
+# ленты и USER_BAND_BG. В теме auto — от пересчитанных фона и USER_BAND_BG.
+_QUEUE_SHARE = 0.5
+QUEUE_BG = _mix(BG, USER_BAND_BG, _QUEUE_SHARE)
+
+# «Тихая реплика»: один вид у реплики в очереди и у липкой реплики над
+# лентой. Подложка — QUEUE_BG; текст — DIM; маркер — MUTED; имя скилла —
+# цветом текста (отдельного токена нет); ховер липкой — HIGHLIGHT_BG.
+# В теме auto — от пересчитанного QUEUE_BG (_derived).
+QUIET_REPLY_INK = DIM
+QUIET_REPLY_MARK = MUTED
+# Текст липкой реплики бледнее, чем у реплики в очереди (решение 32):
+# подложка и маркер общие, ink — свой.
+STICKY_REPLY_INK = DEEP_DIM
+
+# Подсветка: фокус и выделение строки ленты, ховер накладок (липкая реплика
+# и плашка «в конец») — один фон, светлее USER_BAND_BG; текст не меняется
+# (у накладок — исключение из ховера `$accent`). В теме auto — от
+# пересчитанного USER_BAND_BG.
+_HIGHLIGHT_SHARE = 0.12
+HIGHLIGHT_BG = _mix(USER_BAND_BG, INK, _HIGHLIGHT_SHARE)
 
 
 # Рампы анимаций (ping-pong, пик — токен палитры); значения те же, что были
@@ -167,33 +196,21 @@ VALIDATING_SHADES = [
     "#747e8b",
     "#69727f",
 ]
-# Пульс running-глифа ▸: амбер, пик RUN_COLOR.
-PULSE_SHADES = [
-    "#8a6a3a",
-    "#977448",
-    "#a47f55",
-    "#b18a62",
-    "#c4986b",
-    RUN_COLOR,
-    "#c4986b",
-    "#b18a62",
-    "#a47f55",
-    "#977448",
-]
 
 
 # ── Тема auto: палитра от фона терминала ───────────────────────────────────
 # Всё выше — тема gigacode (литералы, снапшоты неизменны). apply_background
 # подменяет фон и зависящие от него токены; reset возвращает литералы.
 
-# Тон синеватых поверхностей (фокус, карточки, оверлеи, трек метра). Один
-# параметр: "#ffffff" даёт нейтральные поверхности той же светлоты. Подобран
-# так, что при фоне gigacode каждая поверхность расходится с литералом <= 2.
+# Тон синеватых поверхностей (подложка реплики, карточки, оверлеи, трек
+# метра). Один параметр: "#ffffff" даёт нейтральные поверхности той же
+# светлоты. Подобран так, что при фоне gigacode каждая поверхность
+# расходится с литералом <= 2.
 SURFACE_TINT = "#78829b"
 _TINTED = (
-    "FOCUS_BG",
     "CARD_SELECT_BG",
     "USER_BAND_BG",
+    "LIST_SELECT_BG",
     "OVERLAY_BG",
     "ZEBRA_BG",
     "TRACK",
@@ -207,7 +224,6 @@ _RAMP_PEAKS = {
     "GLOW_SHADES": "#f0c896",
     "PROCESSING_SHADES": DEEP_DIM,
     "VALIDATING_SHADES": CODE_BLOCK,
-    "PULSE_SHADES": RUN_COLOR,
 }
 _GIGACODE = {
     name: globals()[name]
@@ -215,7 +231,9 @@ _GIGACODE = {
         "BG",
         "BAND_BG",
         "BLOCK_BG",
-        "USER_PENDING_EDGE",
+        "REFUSED",
+        "QUEUE_BG",
+        "HIGHLIGHT_BG",
         *_DIFF,
         *_TINTED,
         *_RAMP_PEAKS,
@@ -258,9 +276,11 @@ def _derived(bg: str) -> dict[str, object]:
         "BG": bg,
         "BAND_BG": _mix(bg, INK, 0.075),
         "BLOCK_BG": _mix(bg, INK, 0.042),
-        "USER_PENDING_EDGE": _mix(bg, ACCENT, 0.64),
+        "REFUSED": _mix(bg, WARN, _REFUSED_SHARE),
         **{name: _shift(_GIGACODE[name], bg) for name in _DIFF},
         **tinted,
+        "QUEUE_BG": _mix(bg, tinted["USER_BAND_BG"], _QUEUE_SHARE),
+        "HIGHLIGHT_BG": _mix(tinted["USER_BAND_BG"], INK, _HIGHLIGHT_SHARE),
         **ramps,
     }
 
@@ -337,20 +357,24 @@ def css_variables() -> dict[str, str]:
         "olive": OLIVE,
         "err": ERR,
         "warn": WARN,
+        "refused": REFUSED,
         "info": INFO,
         "brand": BRAND,
         "band-bg": BAND_BG,
         "block-bg": BLOCK_BG,
-        "focus-bg": FOCUS_BG,
         "screen-selection-background": SCREEN_SELECTION_BACKGROUND,
         "card-select-bg": CARD_SELECT_BG,
         "frame-archive": FRAME_ARCHIVE,
         "note-ink": NOTE_INK,
         "user-band-bg": USER_BAND_BG,
-        "user-pending-edge": USER_PENDING_EDGE,
+        "list-select-bg": LIST_SELECT_BG,
+        "queue-bg": QUEUE_BG,
+        "highlight-bg": HIGHLIGHT_BG,
         "overlay-bg": OVERLAY_BG,
         "zebra-bg": ZEBRA_BG,
         "skill": SKILL,
+        "quiet-reply-ink": QUIET_REPLY_INK,
+        "quiet-reply-mark": QUIET_REPLY_MARK,
         "diff-add-bg": DIFF_ADD_BG,
         "diff-del-bg": DIFF_DEL_BG,
         "diff-add-hl": DIFF_ADD_HL,

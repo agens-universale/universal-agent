@@ -100,8 +100,8 @@ async def test_active_running_session_shows_running_not_completed(tmp_path):
         )
         await pilot.pause()
         text = _rows_text(pilot)
-        assert "[running]" in text
-        assert "[completed]" not in text
+        assert "● идёт" in text
+        assert "выполнено" not in text
 
 
 @pytest.mark.asyncio
@@ -856,3 +856,29 @@ async def test_search_matches_subtitle(tmp_path):
         text = _rows_text(pilot)
         assert "Написать тесты" in text
         assert "Починить парсер" not in text
+
+
+@pytest.mark.asyncio
+async def test_preview_gets_the_mcp_snapshot_of_the_thread(tmp_path):
+    """Предпросмотр подписывает вызовы MCP снимком рантайма своего треда."""
+    pytest.importorskip("textual")
+    _seed(tmp_path, "mcp00000", "задача с jira")
+    meta_file = Path(tmp_path) / "meta_cli_mcp00000.json"
+    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+    snapshot = {"jira": {"tools": [{"name": "mcp_jira_create_issue"}]}}
+    meta["runtime"] = {"mcp_tools": snapshot}
+    meta_file.write_text(json.dumps(meta), encoding="utf-8")
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.preview import PreviewScreen
+    from gc_tui.screens.sessions import SessionsScreen
+
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
+        scr = SessionsScreen(threads_dir=str(tmp_path), system="cli")
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._preview_selected()
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, PreviewScreen)
+        assert pilot.app.screen._mcp_snapshot == snapshot

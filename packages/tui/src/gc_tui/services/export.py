@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Optional
 
 from gc_core.attachments.model import attachments_of, chip_of, wh_text
 from gc_core.message_policy.user_message_policy import (
@@ -11,6 +12,10 @@ from gc_core.message_policy.user_message_policy import (
     resolve_technical_user_content_type,
     user_content_to_text,
 )
+
+from gc_tui.services.answer_flow import AnswerFlow
+from gc_tui.services.trace_mapper import collect_render_context, map_message
+from gc_tui.services.trace_render import finish_close_of
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _TECH_INNER_RE = re.compile(
@@ -231,6 +236,84 @@ def _render_txt(segments: list[dict], header: dict) -> str:
     if n == 0 and not any(s.get("compacted_by") for s in segments):
         out.append("(пусто)")
     return "\n".join(out).rstrip() + "\n"
+
+
+# --- ответы агента --------------------------------------------------------
+
+
+def agent_answers(segments: list[dict]) -> list[str]:
+    """Ответы агента треда по порядку (по сегментам сжатия): проза, отчёт
+    финала и план ровно так, как их показывает лента (`AnswerFlow`):
+    повторы внутри хода и отклонённые попытки turn_finish не считаются.
+    Реплики, вывод тулов и промежуточные ответы не входят. Как в ленте:
+    контекст рендера — по всем сегментам, сохранённая при сжатии копия
+    записи (тот же `id` в следующем файле) не считается второй раз."""
+    payloads = [
+        r["payload"]
+        for seg in segments
+        for r in seg["messages"]
+        if isinstance(r.get("payload"), dict)
+    ]
+    context = collect_render_context(payloads)
+    flow = AnswerFlow()
+    answers: list[str] = []
+    attempt: Optional[int] = None  # индекс отчёта попытки в answers
+    for no, payload in enumerate(_first_by_id(payloads)):
+        ev = map_message(payload, no=no, ts="", context=context)
+        if ev is None:
+            continue
+        if ev.kind == "user":
+            flow.new_turn()
+            attempt = None
+        elif ev.kind == "agent":
+            attempt = _take_agent(flow, ev, answers, attempt)
+    return answers
+
+
+def _first_by_id(payloads: list[dict]) -> list[dict]:
+    """Записи без повторов `id`: первое вхождение (правило ленты)."""
+    seen: set = set()
+    out = []
+    for payload in payloads:
+        mid = payload.get("id")
+        if mid is not None:
+            if mid in seen:
+                continue
+            seen.add(mid)
+        out.append(payload)
+    return out
+
+
+def _take_agent(flow, ev, answers: list[str], attempt: Optional[int]):
+    """Учесть agent-событие; вернуть индекс отчёта текущей попытки."""
+    if ev.tool_name == "submit_solution":
+        close = flow.finish(finish_close_of(ev), tracked=bool(ev.call_id))
+        text = (close.body or close.note).strip()
+        if flow.report_of_intermediate:
+            text = ev.summary.strip()
+        if ev.call_id:
+            _forget(answers, attempt)
+            attempt = None
+        if text:
+            answers.append(text)
+            if ev.call_id:
+                attempt = len(answers) - 1
+        return attempt
+    if not (ev.summary or "").strip():
+        return attempt
+    intermediate = ev.tool_name == "intermediate_reply"
+    verdict = flow.agent((ev.summary or "").strip(), intermediate=intermediate)
+    if verdict.drop_attempt:
+        _forget(answers, attempt)
+        attempt = None
+    if verdict.final_of_intermediate or (verdict.show and not intermediate):
+        answers.append(ev.summary)
+    return attempt
+
+
+def _forget(answers: list[str], index: Optional[int]) -> None:
+    if index is not None:
+        del answers[index]
 
 
 # --- public API -----------------------------------------------------------

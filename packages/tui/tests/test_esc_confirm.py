@@ -238,7 +238,7 @@ async def test_esc_during_run_zero_events_with_text_clears_first():
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
         scr._events_since_last_user_send = 0
-        scr._last_user_send_text = "previous"
+        scr._mount_user_reply("previous", state="pending")
         pilot.app.query_one("#cmdinput").text = "новый текст"
         await pilot.press("escape")
         await pilot.pause()
@@ -263,7 +263,7 @@ async def test_esc_during_active_run_zero_events_cancels_immediately():
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
         scr._events_since_last_user_send = 0
-        scr._last_user_send_text = "previous"
+        scr._mount_user_reply("previous", state="pending")
         pilot.app.query_one("#cmdinput").text = ""
         await pilot.press("escape")
         await pilot.pause()

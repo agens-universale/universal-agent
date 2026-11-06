@@ -608,3 +608,14 @@ def test_report_without_call_id_is_skipped():
         is None
     )
     assert seen == set()
+
+
+async def test_title_path_is_relative_to_the_session_cwd():
+    """Пути в подписи — от корня проекта, как в ленте TUI (спека P3 §10)."""
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY, root="/work/app")
+    read = {"path": "/work/app/src/a.py"}
+    await _write(threads, _call("fs_read_file", "c1", read))
+    await _subagent(threads, "call", _call("fs_read_file", "n1", read))
+    titles = [update["title"] for update in await flow.poll()]
+    assert titles == ["fs_read_file(src/a.py)", "fs_read_file(src/a.py)"]

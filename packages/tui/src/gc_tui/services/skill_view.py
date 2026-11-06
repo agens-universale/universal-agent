@@ -1,11 +1,20 @@
-"""Презентация скилла для TUI: RU-метки типа, усечение пути, контент вьювера.
+"""Презентация скилла для TUI: RU-метки типа, усечение пути, контент вьювера,
+запускаемое имя.
 
 Владелец ответственности «как показать скилл» — этот модуль; SkillsScreen
 использует его (source_label / truncate_path_left / build_skill_viewer),
-не дублируя форматирование.
+палитра и реплика — skill_input_name, не дублируя форматирование.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
+
+from gc_core.tools.skills.skill_arg_resolver import (
+    Resolved,
+    SkillCatalog,
+    resolve_skill_exact,
+)
 
 SOURCE_LABELS = {
     "system": "системный",
@@ -49,3 +58,24 @@ def build_skill_viewer(detail: dict) -> tuple[str, str]:
         ]
     )
     return title, body
+
+
+def skill_input_name(
+    skill_id: str,
+    catalog: SkillCatalog | None = None,
+    *,
+    is_command: Callable[[str], bool] | None = None,
+) -> str:
+    """Запускаемый вид скилла (без `/`) — как его вставляют Enter/Tab
+    палитры и как он показан в реплике: короткое имя, если оно ведёт ровно
+    к этому скиллу и не занято командой или алиасом, иначе полный id.
+    Каталога нет (холодный кэш, превью) — короткое имя."""
+    short = skill_id.rpartition(":")[2]
+    if is_command is not None and is_command(short):
+        return skill_id
+    if catalog is None:
+        return short
+    res = resolve_skill_exact(short, catalog)
+    if isinstance(res, Resolved) and res.canonical_id == skill_id:
+        return short
+    return skill_id

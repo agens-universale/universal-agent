@@ -212,3 +212,36 @@ def tool_display(
     if name.startswith(_MCP_PREFIX):
         return _mcp_display(name, mcp_tools, mcp_servers)
     return ToolDisplay(_C.CALLED, _C.CALLED.value, None, wire_name)
+
+
+def _snapshot_tools(server: str, entry: object) -> dict[str, McpToolInfo]:
+    tools = entry.get("tools") if isinstance(entry, Mapping) else None
+    found: dict[str, McpToolInfo] = {}
+    for item in tools if isinstance(tools, list) else ():
+        if not isinstance(item, Mapping):
+            continue
+        wire, tool = item.get("name"), item.get("tool")
+        if not (wire and tool and isinstance(wire, str)):
+            continue
+        title = item.get("title")
+        found[wire] = {
+            "server": server,
+            "tool": str(tool),
+            "title": title if isinstance(title, str) and title else None,
+        }
+    return found
+
+
+def mcp_tools_from_snapshot(
+    snapshot: Mapping[str, object] | None,
+) -> dict[str, McpToolInfo]:
+    """Снимок `build_mcp_tools_snapshot` -> `wire-имя -> McpToolInfo`."""
+    result: dict[str, McpToolInfo] = {}
+    for server, entry in (snapshot or {}).items():
+        result.update(_snapshot_tools(server, entry))
+    return result
+
+
+def mcp_servers_of(snapshot: Mapping[str, object] | None) -> tuple[str, ...]:
+    """Имена серверов снимка (фолбэк `tool_display(mcp_servers=...)`)."""
+    return tuple(snapshot or ())

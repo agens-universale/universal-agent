@@ -29,7 +29,7 @@ from gc_core.attachments.texts import (
 )
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.model_router import ModelRouter
-from gc_core.vision.notes import NOTE_MAIN_BLIND
+from gc_core.vision.notes import NOTE_MAIN_BLIND, TraceNote
 from gc_core.vision.rejects import (
     process_image_rejects,
 )
@@ -199,7 +199,10 @@ def test_image_rejection_marks_the_model_and_retries_once_without_images(
         }
     ]
     assert unsupported(route_key(ctx, url=URL, model="blind-model")) is True
-    assert notes == [NOTE_MAIN_BLIND.format(alias="blind-model")]
+    # Отказ модели хода — вне вызова тула: пометка принадлежит ответу.
+    assert notes == [
+        TraceNote(NOTE_MAIN_BLIND.format(alias="blind-model"), "reply")
+    ]
     assert state.vision_audience.nobody is True
 
 

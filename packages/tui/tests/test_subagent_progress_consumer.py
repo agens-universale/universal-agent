@@ -146,3 +146,85 @@ class TestConsumerApply:
             parent_heartbeat=lambda **kw: None,
         )
         assert [k for k, _ in mounted] == ["tool"]
+
+
+def _finish_of(**end) -> dict:
+    """Аргументы `finish_nested_tool` для одного `tool_end` с ``end``."""
+    finished: list[dict] = []
+    SubagentProgressConsumer().apply_drained(
+        [_ev(kind="tool_end", tool_call_id="tc1", ok=False, **end)],
+        mount_nested_tool=lambda **kw: None,
+        finish_nested_tool=lambda **kw: finished.append(kw),
+        mount_nested_prose=lambda **kw: None,
+        parent_heartbeat=lambda **kw: None,
+    )
+    (kw,) = finished
+    return kw
+
+
+class TestNestedCallOutcome:
+    """Статус вложенного вызова вживую — фактами ядра на `tool_end`."""
+
+    def test_step_limit_is_halted(self):
+        kw = _finish_of(error_brief="limit", result_status="step_limit")
+        assert (kw["outcome"], kw["error_brief"]) == ("halted", "лимит шагов")
+
+    def test_user_stop_is_halted(self):
+        kw = _finish_of(result_status="cancelled_by_user")
+        assert (kw["outcome"], kw["error_brief"]) == ("halted", "отменено")
+
+    def test_mode_denial_is_refused(self):
+        kw = _finish_of(
+            error_brief="x",
+            result_error={
+                "type": "write_denied_by_mode",
+                "mode": "plan",
+                "reason": "x",
+            },
+        )
+        assert (kw["outcome"], kw["error_brief"]) == (
+            "refused",
+            "режим plan: запись запрещена",
+        )
+
+    def test_plain_error_stays_error(self):
+        kw = _finish_of(
+            error_brief="нет файла",
+            result_error={"type": "not_found", "message": "нет файла"},
+        )
+        assert (kw["ok"], kw["outcome"], kw["error_brief"]) == (
+            False,
+            None,
+            "нет файла",
+        )
+
+    def test_old_stream_without_facts_stays_error(self):
+        kw = _finish_of(error_brief="boom")
+        assert (kw["ok"], kw["outcome"], kw["error_brief"]) == (
+            False,
+            None,
+            "boom",
+        )
+
+
+def _prose_of(**reply) -> dict:
+    mounted: list[dict] = []
+    SubagentProgressConsumer().apply_drained(
+        [_ev(kind="intermediate_reply", prose="проверю", **reply)],
+        mount_nested_tool=lambda **kw: None,
+        finish_nested_tool=lambda **kw: None,
+        mount_nested_prose=lambda **kw: mounted.append(kw),
+        parent_heartbeat=lambda **kw: None,
+    )
+    (kw,) = mounted
+    return kw
+
+
+def test_rejected_intermediate_reply_carries_its_reason():
+    kw = _prose_of(ok=False, error_brief="нет плана")
+    assert (kw["ok"], kw["error_brief"]) == (False, "нет плана")
+
+
+def test_accepted_intermediate_reply_is_ok():
+    kw = _prose_of(ok=True)
+    assert (kw["ok"], kw["error_brief"]) == (True, None)

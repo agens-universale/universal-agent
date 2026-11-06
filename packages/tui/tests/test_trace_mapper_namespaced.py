@@ -57,7 +57,8 @@ def test_session_compact_call_renders_generic():
     )
     assert ev is not None
     assert ev.kind == "call"
-    assert "session_compact" in (ev.summary or "")
+    assert ev.wire_name == "session_compact"
+    assert ev.summary == "reason='phase done'"
 
 
 def test_session_compact_output_not_treated_as_final_answer():
@@ -75,10 +76,10 @@ def test_session_compact_output_not_treated_as_final_answer():
     assert ev.kind != "agent"
 
 
-def test_generic_arg_summary_keeps_normal_skill_arguments():
+def test_skill_call_summary_is_the_skill_id():
     ev = map_message(
         _fc("skills_load", {"skill_id": "bench", "reason": "inspect"}),
         no=1,
         ts="t",
     )
-    assert ev.summary == "skills_load(skill_id='bench', reason='inspect')"
+    assert ev.summary == "bench"

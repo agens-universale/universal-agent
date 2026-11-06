@@ -171,7 +171,7 @@ async def test_tab_visits_each_event_once(tmp_path):
 
     tid = "tab1"
     # Сценарий: user-reply (ev1) → agent prose из 2 prose-блоков (ev2)
-    # → tool-вызов (ev3) → framework [skill] (ev4).
+    # → tool-вызов (ev3) → framework [meta] (ev4).
     events = [
         {
             "type": "message",
@@ -228,7 +228,7 @@ async def test_tab_visits_each_event_once(tmp_path):
             )
         )
         scr._mount_trace_row(
-            prefix="[skill] ",
+            prefix="[meta] ",
             content="x применится",
             kind_class="line-meta",
             event_no=4,
@@ -242,7 +242,7 @@ async def test_tab_visits_each_event_once(tmp_path):
             if w.can_focus
         ]
         # Ожидаем: user reply (ev1) + первая prose агента (ev2)
-        # + ToolCallRow (ev3) + framework TraceRow [skill] (ev4) = 4 стопа.
+        # + ToolCallRow (ev3) + framework TraceRow [meta] (ev4) = 4 стопа.
         assert len(focusables) == 4, (
             f"Ожидалось 4 Tab-стопа, получено {len(focusables)}: {[type(w).__name__ for w in focusables]}"
         )

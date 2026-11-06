@@ -36,12 +36,6 @@ _TUI_DIR = Path(__file__).parent.resolve()
 # Именно этого не делал тихий skip — из-за него дыру и не замечали.
 _SNAPSHOT_DRIFT = {
     "test_confirm_banner_snapshot",
-    "test_empty_state_snapshot",
-    "test_event_focus_snapshot",
-    "test_main_full_dialog_snapshot",
-    "test_main_running_snapshot",
-    "test_palette_open_snapshot",
-    "test_unknown_command_snapshot",
 }
 
 

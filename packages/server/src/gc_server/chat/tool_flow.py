@@ -43,11 +43,15 @@ _HIDDEN = frozenset(
 )
 
 
-def report_from_record(message: dict, seen: set[str]) -> dict | None:
-    """Один function_call или его результат. Чужое и служебное — None."""
+def report_from_record(
+    message: dict, seen: set[str], *, root: str | None = None
+) -> dict | None:
+    """Один function_call или его результат. Чужое и служебное — None.
+
+    ``root`` — cwd хода: пути в подписи вызова от него."""
     kind = message.get("type")
     if kind == _CALL:
-        return _call_report(message, seen)
+        return _call_report(message, seen, root=root)
     if kind == _CALL_OUTPUT:
         return _output_report(message, seen)
     return None
@@ -59,17 +63,23 @@ class ToolFlow:
     Рядом с историей читается трасса субагента: вложенный тул — отдельная
     карточка, ``call_id`` склеен с ``parent_call_id``. Сжатие истории посреди
     хода начинает её чтение заново; показанные карточки не повторяются.
+    ``root`` — cwd хода: пути в подписях вызовов от него.
     """
 
-    def __init__(self, threads: Threads, key: ThreadKey) -> None:
+    def __init__(
+        self, threads: Threads, key: ThreadKey, *, root: str | None = None
+    ) -> None:
         self._threads = threads
         self._key = key
         self._cursor: Cursor | None = None
         self._seen: set[str] = set()
+        self._root = root
 
     @classmethod
-    async def start(cls, threads: Threads, key: ThreadKey) -> ToolFlow:
-        flow = cls(threads, key)
+    async def start(
+        cls, threads: Threads, key: ThreadKey, *, root: str | None = None
+    ) -> ToolFlow:
+        flow = cls(threads, key, root=root)
         flow._cursor = (
             await threads.tail(key, (_HISTORY, _SUBAGENTS), None)
         ).cursor
@@ -83,9 +93,11 @@ class ToolFlow:
         reports: list[dict] = []
         for stream, entry in batch.entries:
             if stream == _SUBAGENTS:
-                report = _from_sidecar(entry.data, self._seen)
+                report = _from_sidecar(entry.data, self._seen, self._root)
             else:
-                report = report_from_record(entry.data, self._seen)
+                report = report_from_record(
+                    entry.data, self._seen, root=self._root
+                )
             if report is not None:
                 reports.append(report)
         return reports
@@ -98,7 +110,11 @@ def _card_id(call_id: str, parent: str | None) -> str:
 
 
 def _call_report(
-    message: dict, seen: set[str], *, parent: str | None = None
+    message: dict,
+    seen: set[str],
+    *,
+    parent: str | None = None,
+    root: str | None = None,
 ) -> dict | None:
     name = message.get("name")
     call_id = _call_id(message)
@@ -114,7 +130,7 @@ def _call_report(
         "op": "open",
         "call_id": card_id,
         "name": name,
-        "title": _title(name, message.get("arguments")),
+        "title": _title(name, message.get("arguments"), root),
     }
     if parent is not None:
         report["parent_call_id"] = parent
@@ -142,8 +158,8 @@ def _output_report(
     return {"op": "close", "call_id": card_id, "status": status}
 
 
-def _title(name: str, arguments: Any) -> str:
-    preview = tool_args_summary(name, arguments)
+def _title(name: str, arguments: Any, root: str | None) -> str:
+    preview = tool_args_summary(name, arguments, root=root)
     if preview == "":
         return name
     return f"{name}({preview})"
@@ -159,7 +175,9 @@ def _call_id(message: dict) -> str | None:
     return None
 
 
-def _from_sidecar(record: dict, seen: set[str]) -> dict | None:
+def _from_sidecar(
+    record: dict, seen: set[str], root: str | None
+) -> dict | None:
     payload = record.get("payload")
     parent = record.get("parent_call_id")
     if not isinstance(payload, dict):
@@ -168,7 +186,7 @@ def _from_sidecar(record: dict, seen: set[str]) -> dict | None:
         return None
     kind = record.get("kind")
     if kind == _SIDECAR_CALL:
-        return _call_report(payload, seen, parent=parent)
+        return _call_report(payload, seen, parent=parent, root=root)
     if kind == _SIDECAR_RESULT:
         return _output_report(payload, seen, parent=parent)
     if kind == _SIDECAR_ERROR:

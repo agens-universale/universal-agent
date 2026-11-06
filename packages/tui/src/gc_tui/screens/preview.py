@@ -37,12 +37,15 @@ class PreviewScreen(Screen[bool]):
         thread_id: str = "",
         project_path: str = "",
         subagent_records: list | None = None,
+        mcp_snapshot: dict | None = None,
     ) -> None:
         super().__init__()
         self._segments = segments
         self._thread_id = thread_id
         self._project_path = project_path
         self._subagent_records = subagent_records
+        # Снимок MCP треда (meta.runtime.mcp_tools) — подписи MCP-вызовов.
+        self._mcp_snapshot = mcp_snapshot
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -65,6 +68,11 @@ class PreviewScreen(Screen[bool]):
             )
 
     def on_mount(self) -> None:
+        from gc_core.constants.tool_display import (
+            mcp_servers_of,
+            mcp_tools_from_snapshot,
+        )
+
         from gc_tui.services.trace_render import (
             merge_nested_readonly,
             render_segments_readonly,
@@ -73,13 +81,20 @@ class PreviewScreen(Screen[bool]):
         trace = self.query_one("#trace", VerticalScroll)
         segments = self._segments
         records = self._subagent_records
-        calls = render_segments_readonly(trace, segments)
+        opts = {
+            "mcp_tools": mcp_tools_from_snapshot(self._mcp_snapshot),
+            "mcp_servers": mcp_servers_of(self._mcp_snapshot),
+            # корень из шапки превью: пути в подписях вызовов — от него
+            "root": self._project_path or None,
+        }
+        calls = render_segments_readonly(trace, segments, **opts)
         if records:
             merge_nested_readonly(
                 trace,
                 records,
                 calls,
                 allowed_parent_ids=subagent_parent_ids_in_window(segments),
+                **opts,
             )
         # Сырьё сегментов и sidecar после монтажа не держим: в виджетах уже
         # короткий трейс, тяжёлые tool output / nested вне окна не нужны.
@@ -107,15 +122,12 @@ class PreviewScreen(Screen[bool]):
                 marker = w
         if body is None:
             return
-        if body.has_class("hidden"):
-            body.remove_class("hidden")
-            if marker is not None:
-                marker.set_prefix("▾ ")
+        expand = body.has_class("hidden")
+        body.set_class(not expand, "hidden")
+        if marker is not None:
+            marker.set_expanded(expand)
+        if expand:
             self.call_after_refresh(body.scroll_visible, animate=False)
-        else:
-            body.add_class("hidden")
-            if marker is not None:
-                marker.set_prefix("▸ ")
 
     def on_open_image_request(self, message: OpenImageRequest) -> None:
         """Клик по картинке в реплике превью — как на главном экране; футера нет, поэтому

@@ -29,8 +29,15 @@ class StreamPump:
         self._throttle_s = throttle_s
         self._clock = clock
         self._last = clock() - throttle_s  # первая дельта сразу сигналит
+        self._closed = False
+
+    def close(self) -> None:
+        """Прогон отвязан от окна (стоп): его поздние дельты не рисуются."""
+        self._closed = True
 
     def on_delta(self, kind: str, text: str) -> None:
+        if self._closed:
+            return
         self._sink.push(kind, text)
         now = self._clock()
         if now - self._last >= self._throttle_s:

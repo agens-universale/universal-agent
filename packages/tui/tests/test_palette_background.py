@@ -28,17 +28,21 @@ _FIXED_CSS = {
     "olive": "#8FA05A",
     "err": "#C75C54",
     "warn": "#f0883e",
+    "refused": "#8a522d",
     "info": "#58a6ff",
     "brand": "#9A6DD7",
     "band-bg": "#1f2128",
     "block-bg": "#171a22",
-    "focus-bg": "#363b47",
     "screen-selection-background": "#1e416c",
     "card-select-bg": "#2e323d",
     "frame-archive": "#4b525d",
     "note-ink": "#a5adb8",
-    "user-band-bg": "#282c36",
-    "user-pending-edge": "#3a7a72",
+    "user-band-bg": "#363b47",
+    "list-select-bg": "#363b47",
+    "queue-bg": "#222630",
+    "highlight-bg": "#4c505a",
+    "quiet-reply-ink": "#8b949e",
+    "quiet-reply-mark": "#6e7681",
     "overlay-bg": "#161A23",
     "zebra-bg": "#232836",
     "skill": "#afd7ff",
@@ -55,12 +59,11 @@ _RAMPS = (
     "GLOW_SHADES",
     "PROCESSING_SHADES",
     "VALIDATING_SHADES",
-    "PULSE_SHADES",
 )
 _TINTED = (
-    "FOCUS_BG",
     "CARD_SELECT_BG",
     "USER_BAND_BG",
+    "LIST_SELECT_BG",
     "OVERLAY_BG",
     "ZEBRA_BG",
     "TRACK",
@@ -119,12 +122,18 @@ def test_apply_background_sets_bg_everywhere():
 
 def test_apply_background_recomputes_surfaces():
     palette.apply_background((0x21, 0x27, 0x33))
-    from gc_tui.palette import BAND_BG, DIFF_ADD_BG, PULSE_SHADES
+    from gc_tui.palette import BAND_BG, DIFF_ADD_BG
 
     assert BAND_BG == palette._mix("#212733", palette.INK, 0.075)
     assert DIFF_ADD_BG == "#385551"  # #253f37 + (#212733 − #0E1119)
-    assert PULSE_SHADES != sync_guards._PREVIOUS_RAMPS["PULSE_SHADES"]
     assert palette.css_variables()["band-bg"] == BAND_BG
+
+
+def test_refused_is_muted_warn_on_terminal_background():
+    """Отказ в ленте — приглушённый оранжевый: примесь WARN к фону."""
+    palette.apply_background((0x21, 0x27, 0x33))
+    assert palette.REFUSED == palette._mix("#212733", palette.WARN, 0.55)
+    assert palette.css_variables()["refused"] == palette.REFUSED
 
 
 def test_bg_derived_exact_at_gigacode_background():
@@ -140,11 +149,6 @@ def test_tinted_surfaces_close_at_gigacode_background(name):
     gigacode = getattr(palette, name)
     palette.apply_background(_FIXED_BG)
     assert _channel_gap(getattr(palette, name), gigacode) <= 3
-
-
-def test_pending_edge_close_at_gigacode_background():
-    palette.apply_background(_FIXED_BG)
-    assert _channel_gap(palette.USER_PENDING_EDGE, "#3a7a72") <= 3
 
 
 @pytest.mark.parametrize("name", _RAMPS)
@@ -177,6 +181,49 @@ def test_guards_hold_on_terminal_background(bg, guard):
     palette.apply_background(_rgb(bg))
     module, name = guard
     getattr(module, name)()
+
+
+def _lum(color: str) -> float:
+    return palette._luminance(_rgb(color))
+
+
+_LIST_SELECTORS = (
+    ".palette-row.selected",
+    ".diff-row.selected",
+    ".mcp-row-managed.selected, .mcp-action-row.selected",
+    ".onb-option.selected",
+    ".set-menurow.selected",
+    ".set-row.selected",
+)
+
+
+def test_list_select_is_own_token_used_by_list_rules():
+    from gc_testkit.paths import TUI_PKG
+
+    assert palette.LIST_SELECT_BG == "#363b47"
+    assert "LIST_SELECT_BG" not in palette._DIFF
+    css = (TUI_PKG / "styles.tcss").read_text(encoding="utf-8")
+    for selector in _LIST_SELECTORS:
+        assert f"{selector} {{ background: $list-select-bg;" in css
+
+
+def test_user_band_is_former_focus_colour():
+    assert palette.USER_BAND_BG == "#363b47"
+    assert palette.HIGHLIGHT_BG == palette._mix(
+        palette.USER_BAND_BG, palette.INK, 0.12
+    )
+
+
+@pytest.mark.parametrize("bg", [None, *_TERMINAL_BGS])
+def test_quiet_band_below_band_below_highlight(bg):
+    if bg is not None:
+        palette.apply_background(_rgb(bg))
+    queue, band = palette.QUEUE_BG, palette.USER_BAND_BG
+    highlight = palette.HIGHLIGHT_BG
+    assert _lum(queue) < _lum(band) < _lum(highlight)
+    assert queue == palette._mix(palette.BG, band, palette._QUEUE_SHARE)
+    assert highlight == palette._mix(band, palette.INK, 0.12)
+    assert palette.css_variables()["highlight-bg"] == highlight
 
 
 def test_contrast_is_wcag_ratio():

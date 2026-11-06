@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from gc_tui.services.trace_mapper import _looks_like_error, _summarize_output
+from gc_tui.services.trace_mapper import _looks_like_error, result_stop
 
 
 def test_cancelled_by_user_looks_like_error():
@@ -22,7 +22,7 @@ def test_cancelled_by_user_looks_like_error():
         }
     )
     assert _looks_like_error(out) is True
-    assert _summarize_output(out, error=True) == "отменено"
+    assert result_stop(out) == ("halted", "отменено")
 
 
 def test_not_started_due_to_user_stop_looks_like_error():
@@ -37,22 +37,41 @@ def test_not_started_due_to_user_stop_looks_like_error():
         }
     )
     assert _looks_like_error(out) is True
-    assert _summarize_output(out, error=True) == "не запущено (стоп)"
+    assert result_stop(out) == ("halted", "не запущено (стоп)")
 
 
-def test_not_started_due_to_session_compact_looks_like_error():
+def test_guard_cancelled_by_user_is_a_stop_not_an_error():
+    """Стоп во время проверки стражем — тело отказа с ``type`` без
+    ``status``: это остановка пользователем (`■`), а не ошибка."""
+    out = json.dumps(
+        {
+            "ok": False,
+            "error": {
+                "type": "cancelled_by_user",
+                "path": "/work/x.txt",
+                "reason": "Tool was interrupted by user stop.",
+                "retryable": True,
+            },
+        }
+    )
+    assert result_stop(out) == ("halted", "отменено")
+
+
+def test_not_started_due_to_session_compact_is_halted():
     out = json.dumps(
         {
             "tool": "session_think",
             "ok": False,
             "status": "not_started_due_to_session_compact",
-            "message": "Tool was not started: session_compact replaced the history.",
+            "message": (
+                "Tool was not started: session_compact replaced the history."
+            ),
             "error": None,
             "synthetic": True,
         }
     )
     assert _looks_like_error(out) is True
-    assert (
-        _summarize_output(out, error=True)
-        == "не исполнен: сводка заменила историю"
+    assert result_stop(out) == (
+        "halted",
+        "не исполнен: сводка заменила историю",
     )

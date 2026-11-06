@@ -1,5 +1,5 @@
-"""Список скиллов реестра без захвата цикла интерфейса (технический слой:
-без Textual и текстов интерфейса).
+"""Список скиллов и доставка скилла без захвата цикла интерфейса
+(технический слой: без Textual и текстов интерфейса).
 
 Реестр обходит диск синхронно внутри своих async-методов, поэтому на цикле
 интерфейса обход держит ввод. Обход идёт в потоке-демоне со своим циклом и
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Any
+from typing import Any, Callable
 
 
 def _scan(settings: Any) -> list[dict]:
@@ -23,6 +23,21 @@ def _scan(settings: Any) -> list[dict]:
     reg = get_skills_registry(settings)
     # include_all=True — и внутренние скиллы паков, не только bootstrap.
     return asyncio.run(reg.list_skills(include_all=True))
+
+
+def _delivery(settings: Any, skill_id: str) -> tuple[str, bool]:
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_core.tools.skills.registry import get_skills_registry
+
+    reg = get_skills_registry(settings)
+
+    async def _both() -> tuple[str, bool]:
+        return (
+            await sd.build_skill_delivery(skill_id, reg),
+            await sd.skill_is_available(skill_id, reg),
+        )
+
+    return asyncio.run(_both())
 
 
 def _deliver(fut: asyncio.Future, result: Any, exc: Any) -> None:
@@ -36,13 +51,27 @@ def _deliver(fut: asyncio.Future, result: Any, exc: Any) -> None:
 
 async def list_skills_off_loop(settings: Any) -> list[dict]:
     """Все скиллы реестра; обход диска — вне текущего цикла."""
+    return await _off_loop(lambda: _scan(settings), "skills-scan")
+
+
+async def skill_delivery_off_loop(
+    settings: Any, skill_id: str
+) -> tuple[str, bool]:
+    """Текст доставки скилла и загружен ли он (`build_skill_delivery`,
+    `skill_is_available`); чтение диска — вне текущего цикла."""
+    return await _off_loop(
+        lambda: _delivery(settings, skill_id), "skill-delivery"
+    )
+
+
+async def _off_loop(work: Callable[[], Any], name: str) -> Any:
     loop = asyncio.get_running_loop()
     fut: asyncio.Future = loop.create_future()
 
     def _work() -> None:
         result, exc = None, None
         try:
-            result = _scan(settings)
+            result = work()
         except Exception as err:  # отдаём вызывающему как есть
             exc = err
         try:
@@ -50,5 +79,5 @@ async def list_skills_off_loop(settings: Any) -> list[dict]:
         except RuntimeError:  # цикл уже закрыт — приложение вышло
             pass
 
-    threading.Thread(target=_work, daemon=True, name="skills-scan").start()
+    threading.Thread(target=_work, daemon=True, name=name).start()
     return await fut

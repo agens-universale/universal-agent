@@ -15,7 +15,7 @@ def _make_app(row_factory=None):
             if row_factory is not None:
                 yield row_factory()
             else:
-                yield ToolCallRow(call_id="c1", tool_name="t", args_summary="")
+                yield ToolCallRow(call_id="c1", label="t", target="")
 
     return _App()
 
@@ -31,7 +31,7 @@ async def test_live_row_has_timer():
 async def test_result_stops_timer():
     async with _make_app().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="ok", error=False)
+        row.set_result(summary="ok", outcome="ok")
         await pilot.pause()
         assert row._pulse_timer is None
 
@@ -48,8 +48,8 @@ async def test_interrupt_stops_timer():
 @pytest.mark.asyncio
 async def test_finished_before_mount_has_no_timer():
     def factory():
-        row = ToolCallRow(call_id="c1", tool_name="t", args_summary="")
-        row.set_result(summary="ok", error=False)
+        row = ToolCallRow(call_id="c1", label="t", target="")
+        row.set_result(summary="ok", outcome="ok")
         return row
 
     async with _make_app(factory).run_test() as pilot:
@@ -61,9 +61,7 @@ async def test_finished_before_mount_has_no_timer():
 @pytest.mark.asyncio
 async def test_waiting_row_has_no_timer():
     def factory():
-        return ToolCallRow(
-            call_id="c1", tool_name="t", args_summary="", waiting=True
-        )
+        return ToolCallRow(call_id="c1", label="t", target="", waiting=True)
 
     async with _make_app(factory).run_test() as pilot:
         await pilot.pause()
@@ -74,9 +72,7 @@ async def test_waiting_row_has_no_timer():
 @pytest.mark.asyncio
 async def test_set_active_starts_timer():
     def factory():
-        return ToolCallRow(
-            call_id="c1", tool_name="t", args_summary="", waiting=True
-        )
+        return ToolCallRow(call_id="c1", label="t", target="", waiting=True)
 
     async with _make_app(factory).run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
@@ -114,7 +110,7 @@ async def test_pause_shows_pause_glyph_and_resume_restores():
         await pilot.pause()
         prefix = row._prefix_static.content
         assert "‖" in prefix.plain
-        assert "▸" not in prefix.plain
+        assert "●" not in prefix.plain
         at = prefix.plain.index("‖")
         glyph_styles = [
             str(sp.style) for sp in prefix.spans if sp.start <= at < sp.end
@@ -122,7 +118,7 @@ async def test_pause_shows_pause_glyph_and_resume_restores():
         assert glyph_styles == [RUN_COLOR]
         row.resume()
         await pilot.pause()
-        assert "▸" in row._prefix_static.content.plain
+        assert "●" in row._prefix_static.content.plain
 
 
 @pytest.mark.asyncio
@@ -147,7 +143,7 @@ async def test_live_row_ticks_coarse():
             super()._pulse_tick()
 
     def factory():
-        return _Counting(call_id="c1", tool_name="t", args_summary="")
+        return _Counting(call_id="c1", label="t", target="")
 
     async with _make_app(factory).run_test() as pilot:
         row = pilot.app.query_one(_Counting)

@@ -3,19 +3,22 @@
 Показывается, только когда модель только что оказалась слепой (новая пометка
 `ImageRejects.mark`) и после этого смотреть некому (`Audience.nobody`). Зовут
 двое: контроллер (отказ модели запроса) и тул `fs_view_image` (отказ «глаз»).
-Канал — хук `RunContext.on_trace_note`: TUI рисует серую строку `[изображение]`
-в ленте. Хука нет (CLI, сервер, SDK) — предупреждение в журнал прогона. Не
-`runtime_notices`: пометка про конкретный запрос этой сессии, а реестр
-уведомлений общий на процесс.
+Канал — хук `RunContext.on_trace_note(TraceNote)`: TUI рисует `└ !` под
+владельцем пометки — вызовом тула (`owner="call"`, его `call_id`) или ответом
+(`owner="reply"`). Хука нет (CLI, сервер, SDK) — предупреждение в журнал
+прогона. Не `runtime_notices`: пометка про конкретный запрос этой сессии, а
+реестр уведомлений общий на процесс.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from gc_core.model_router import ResolvedModel
+from gc_core.security.call_scope import current_call
 
 NOTE_MAIN_BLIND = (
     "{alias} не работает с изображениями — изображение не просмотрено. "
@@ -25,6 +28,17 @@ NOTE_EYES_BLIND = (
     "Модель для зрения {alias} не работает с изображениями — изображение не "
     "просмотрено. Выберите другую в /settings → Модели."
 )
+
+
+@dataclass(frozen=True)
+class TraceNote:
+    """Пометка ленты с владельцем: `call` — вызов тула `call_id`, `reply` —
+    ответ хода (пометка вне вызова тула)."""
+
+    text: str
+    owner: Literal["reply", "call"]
+    call_id: str | None = None
+
 
 _logger = logging.getLogger(__name__)
 _probe_notice_lock = threading.Lock()
@@ -48,11 +62,16 @@ def note_blind(
 
 
 def emit_trace_note(ctx: Any, text: str, *, logger: Any = None) -> None:
-    """Отдать пометку хуку `ctx.on_trace_note`; хука нет — `warning` в
-    переданный логгер, иначе в журнал прогона `ctx.logger`."""
+    """Отдать пометку хуку `ctx.on_trace_note` как `TraceNote`; хука нет —
+    `warning` с тем же текстом в переданный логгер, иначе в `ctx.logger`.
+    Владелец — вызов тула, внутри которого пометка возникла (привязка
+    `current_call()` с `call_id`), иначе ответ."""
     hook = getattr(ctx, "on_trace_note", None)
     if hook is not None:
-        hook(text)
+        scope = current_call()
+        call_id = scope.call_id if scope is not None else None
+        owner = "call" if call_id else "reply"
+        hook(TraceNote(text, owner, call_id))
         return
     (logger or getattr(ctx, "logger", None) or _logger).warning(text)
 

@@ -8,6 +8,8 @@ from collections.abc import Callable, Sequence
 from functools import partial
 
 from gc_core.attachments.model import Attachment
+from rich.style import Style
+from rich.text import Text
 from textual import events
 from textual.binding import Binding
 from textual.message import Message
@@ -22,6 +24,7 @@ from textual.widgets.text_area import (
 )
 
 from gc_tui.messages import OpenImageRequest
+from gc_tui.palette import SKILL
 from gc_tui.services.image_chips import chip_number, chip_spans
 from gc_tui.services.image_paste import pasted_file_path
 from gc_tui.services.paste_chips import (
@@ -83,6 +86,9 @@ def _edge_off_chip(
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _ACT_SELECT_ALL = "выделить всё"
+
+#: Первое слово `/имя` — известная команда или скилл.
+_COMMAND_STYLE = Style(color=SKILL)
 
 
 class CommandTextArea(TextArea):
@@ -176,6 +182,9 @@ class CommandTextArea(TextArea):
         self._pointer_selecting = (
             False  # идёт жест мыши (см. _selection_off_chips)
         )
+        # Известно ли имя команды или скилла (без «/»): правило запуска
+        # задаёт экран; None — первое слово не подсвечивается.
+        self.is_known_command: Callable[[str], bool] | None = None
 
     def _set_document(self, text: str, language: str | None) -> None:
         """Документ поля и перенос, не разрывающий плашки (`widgets/chip_wrap`): расчёт
@@ -189,6 +198,33 @@ class CommandTextArea(TextArea):
         )
         self.navigator = DocumentNavigator(self.wrapped_document)
         self._rewrap_and_refresh_virtual_size()
+
+    def get_component_rich_style(self, *names: str, **kwargs) -> Style:
+        """Подложка строки курсора — только фон. Штатный стиль несёт и цвет
+        текста: `_render_line` кладёт его поверх `get_line` и гасит `SKILL`
+        у `/имени` на строке с курсором (а это почти всегда она)."""
+        if names == ("text-area--cursor-line",):
+            full = super().get_component_rich_style(*names, **kwargs)
+            return Style(bgcolor=full.bgcolor)
+        return super().get_component_rich_style(*names, **kwargs)
+
+    def refresh_command_highlight(self) -> None:
+        """Перерисовать поле после смены ответа `is_known_command` (кэш
+        скиллов прогрет или сброшен): кэш строк TextArea ключуется без него."""
+        self._line_cache.clear()
+        self.refresh()
+
+    def get_line(self, line_index: int) -> Text:
+        """Строка поля; у первой — `/имя` цветом `SKILL`, если экран знает
+        это имя (рисование Textual зовёт этот метод на каждую строку)."""
+        line = super().get_line(line_index)
+        known = self.is_known_command
+        if line_index or known is None or not line.plain.startswith("/"):
+            return line
+        token = line.plain.split(None, 1)[0]
+        if known(token[1:]):
+            line.stylize(_COMMAND_STYLE, 0, len(token))
+        return line
 
     def _chip_spans_by_row(self) -> dict[int, list[tuple[int, int]]]:
         """Спаны плашек текущего текста по строкам — для `ChipWrapDocument`. Пока идёт
@@ -260,6 +296,14 @@ class CommandTextArea(TextArea):
         self._insert_replacing_selection(text)
         self._close_expand_window()
         return used
+
+    def is_blank(self) -> bool:
+        """Поле пустое: нет текста и нет видимой подсказки реплики.
+
+        Шов `feat/prompt-suggestions`: подсказка живёт в `TextArea.suggestion`
+        (реактив Textual), и поле с ней — не пустое. Единственный предикат
+        «поле пустое» для ↑, плашки «в конец» и Enter (спека P3 §2.4)."""
+        return not self.text and not self.suggestion
 
     def images_in_buffer(self) -> tuple[Attachment, ...]:
         """Вложения сообщения: image-плашки буфера, первое вхождение каждого id, по порядку."""

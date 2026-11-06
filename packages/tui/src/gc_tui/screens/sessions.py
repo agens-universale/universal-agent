@@ -33,6 +33,7 @@ from gc_tui.services.session_lock import BUSY_MESSAGE, is_held_by_other
 from gc_tui.services.session_title import display_name, task_subtitle
 from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.services.stores.file_store import FileTaskStore
+from gc_tui.services.turn_outcome import outcome_of, settled_status
 from gc_tui.services.usage_meter import format_nonzero_cost
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -55,9 +56,23 @@ _STATUS_COLOR = {
     "running": RUN_COLOR,
     "asking": RUN_COLOR,
     "stopped": DIM,
+    "cancelled": DIM,
+    "interrupted": DIM,
     "completed": OK,
     "failed": ERR,
+    "unknown_failed": ERR,
 }
+
+
+def _status_badge(status: str) -> Text:
+    """`✓ выполнено` словарём итогов хода; незнакомое слово — как есть, DIM."""
+    outcome = outcome_of(status)
+    if outcome is None or outcome.list_label is None:
+        return Text(status, style=DIM)
+    return Text(
+        f"{outcome.glyph} {outcome.list_label}",
+        style=_STATUS_COLOR.get(status, DIM),
+    )
 
 
 def _short_id(thread_id: str) -> str:
@@ -230,14 +245,19 @@ class SessionsScreen(Screen):
         active_tid = (
             getattr(tui_state, "active_task_id", None) if tui_state else None
         )
-        if not active_tid or task.thread_id != active_tid:
+        if active_tid and task.thread_id == active_tid:
+            if tui_state.ask_human_state is not None:
+                return "asking"
+            runner = getattr(self.app, "active_runner", None)
+            if runner is not None and runner.is_running():
+                return "running"
+        # Правило «нет живого хода — прервано» — только для статуса TUI:
+        # его ход держит процесс с замком сессии. Верхний статус — как есть.
+        if (task.tui_meta or {}).get("status") != "running":
             return task.status
-        if tui_state.ask_human_state is not None:
-            return "asking"
-        runner = getattr(self.app, "active_runner", None)
-        if runner is not None and runner.is_running():
-            return "running"
-        return task.status
+        return settled_status(
+            task.status, live=self.app.session_run_is_live(task.thread_id)
+        )
 
     def _title_line(self, task, *, selected: bool) -> Text:
         title = self._title_of(task)
@@ -281,11 +301,9 @@ class SessionsScreen(Screen):
             t.append(" · ", style=MUTED)
             t.append(cost, style=DIM)
         status = self._task_display_status(task)
-        if (
-            status
-        ):  # None — исход не записан → бейдж не показываем (без пустых «[]»)
+        if status:  # None — исход не записан → статус не показываем
             t.append(" · ", style=MUTED)
-            t.append(f"[{status}]", style=_STATUS_COLOR.get(status, DEEP_DIM))
+            t.append_text(_status_badge(status))
         if self._session_is_busy(task.thread_id):
             t.append(" · ", style=MUTED)
             t.append("🔒 занято", style=ERR)
@@ -448,9 +466,9 @@ class SessionsScreen(Screen):
 
         scr = self.app.screen
         if isinstance(scr, TraceScreen):
+            # Через вход смены треда: идёт ход — «остановить и перейти».
             # acquire(B) → release(A) → attach внутри attach_active_task
-            if not scr.attach_active_task(thread_id, is_resume=True):
-                return
+            scr.request_thread_switch(thread_id)
         else:
             self.app.tui_state.active_task_id = thread_id
 
@@ -559,6 +577,7 @@ class SessionsScreen(Screen):
         tid = task.thread_id
         segments = self._store.read_segments(tid)
         subagent_records = self._store.read_subagent_trace(tid)
+        record = self._store.get_record(tid)
         from gc_tui.screens.preview import PreviewScreen
 
         def _on_result(resume: bool) -> None:
@@ -571,6 +590,7 @@ class SessionsScreen(Screen):
                 thread_id=tid,
                 project_path=self._project_path(),
                 subagent_records=subagent_records,
+                mcp_snapshot=record.runtime.mcp_tools if record else None,
             ),
             _on_result,
         )

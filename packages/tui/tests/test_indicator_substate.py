@@ -13,6 +13,7 @@ def _sub(**kw):
         last_event_kind="agent",
         since_last=0.0,
         soft_hide_kinds=_SOFT,
+        saw_visible_event=True,
     )
     base.update(kw)
     return select_active_substate(**base)
@@ -67,3 +68,31 @@ def test_soft_hidden_fresh_gives_thinking():
 
 def test_default_thinking():
     assert _sub(last_event_kind="tool", since_last=10.0) == "thinking"
+
+
+def test_hidden_stale_before_any_visible_gives_thinking():
+    # Континуация одобрения плана: первое событие скрытое (system).
+    assert (
+        _sub(
+            last_event_kind="system", since_last=13.0, saw_visible_event=False
+        )
+        == "thinking"
+    )
+
+
+def test_hidden_stale_after_visible_gives_processing():
+    assert (
+        _sub(last_event_kind="system", since_last=13.0, saw_visible_event=True)
+        == "processing"
+    )
+
+
+def test_finish_gate_checking_ignores_visibility_gate():
+    assert (
+        _sub(finish_gate_checking=True, saw_visible_event=False)
+        == "processing"
+    )
+
+
+def test_finalizing_ignores_visibility_gate():
+    assert _sub(finalizing=True, saw_visible_event=False) == "validating"

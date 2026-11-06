@@ -7,6 +7,8 @@ stay unchanged. Events are never persisted to thread jsonl.
 from __future__ import annotations
 
 import json
+import os
+import re
 import threading
 from collections import deque
 from dataclasses import dataclass
@@ -24,6 +26,7 @@ from typing import (
 
 from gc_core.constants.tool_display import (
     LEGACY_TOOL_NAMES,
+    TOOL_DISPLAY,
     DisplayCategory,
     tool_display,
 )
@@ -36,6 +39,7 @@ from gc_core.constants.tool_names import (
     SKILLS_READ_ASSET_NAME,
     SKILLS_READ_REFERENCE_NAME,
 )
+from gc_core.utils.path_display import display_path
 from gc_core.utils.path_truncate import truncate_path
 
 ProgressKind = Literal[
@@ -58,6 +62,13 @@ ProgressKind = Literal[
 _ERROR_BRIEF_MAX = 120
 _ARGS_SUMMARY_MAX = 80
 
+# Приставка `cd <каталог> && ` / `cd <каталог>; ` в начале команды: каталог
+# в двойных, одинарных кавычках или без них.
+_CD_PREFIX = re.compile(
+    r"""cd\s+(?:"(?P<dq>[^"]+)"|'(?P<sq>[^']+)'|(?P<bare>[^\s;&]+))"""
+    r"[ \t]*(?:&&|;|\r?\n)\s*"
+)
+
 
 @dataclass(frozen=True)
 class SubagentProgressEvent:
@@ -78,6 +89,10 @@ class SubagentProgressEvent:
     # Картинки реплики человека ребёнку (``user_message``) — словари вложений в
     # треде, как в записях треда.
     attachments: Optional[List[Dict[str, Any]]] = None
+    # Сырые факты исхода упавшего вызова (``tool_end``): ``status`` вывода
+    # как есть и скалярные поля ``error``. Отказ или ошибка — решает потребитель.
+    result_status: Optional[str] = None
+    result_error: Optional[Dict[str, str]] = None
 
 
 @runtime_checkable
@@ -209,11 +224,15 @@ def tool_args_summary(
     arguments: Any,
     *,
     limit: int = _ARGS_SUMMARY_MAX,
+    root: Optional[str] = None,
 ) -> str:
     """Однострочная сводка аргументов вызова тула (спека P1a §2.5).
 
     Главный аргумент — по таблице отображения ядра; его нет — до трёх пар
-    ``key=preview``. Длина сводки не превышает ``limit``."""
+    ``key=preview``. Длина сводки не превышает ``limit``. ``root`` — корень
+    проекта: путь тула ядра показывается от него (``display_path``),
+    у команды снята приставка ``cd <корень> &&``; без корня — как записаны.
+    Только показ: аргументы вызова не меняются."""
     data: Any = arguments
     if isinstance(arguments, str):
         try:
@@ -228,10 +247,48 @@ def tool_args_summary(
         # битые аргументы — генерик-превью, «чек-лист очищен» не врём
     if not isinstance(data, dict) or not data:
         return ""
+    if root is not None and name in TOOL_DISPLAY:
+        data = _rooted_command(name, _rooted_path(data, root), root)
     primary = _primary_summary(name, data, limit) if name else None
     if primary:
         return _clip(primary, limit)
     return _pairs_summary(data, limit)
+
+
+def _rooted_path(data: Dict[str, Any], root: str) -> Dict[str, Any]:
+    """Аргумент ``path`` тула ядра — для показа: от корня, через ``~``."""
+    path = data.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return data
+    home = os.path.expanduser("~")
+    return {**data, "path": display_path(path, root, home)}
+
+
+def _rooted_command(
+    name: str, data: Dict[str, Any], root: str
+) -> Dict[str, Any]:
+    """Команда Run-тула — для показа: без `cd <корень проекта> &&` в начале.
+
+    Переход в любой другой каталог остаётся: он что-то говорит о команде."""
+    shown = TOOL_DISPLAY[name]
+    command = data.get("command")
+    if shown.category is not DisplayCategory.RUN or not isinstance(
+        command, str
+    ):
+        return data
+    flat = command.strip()
+    match = _CD_PREFIX.match(flat)
+    rest = flat[match.end() :] if match else ""
+    if not rest or not _same_dir(match.group("dq", "sq", "bare"), root):
+        return data
+    return {**data, "command": rest}
+
+
+def _same_dir(groups: tuple[Optional[str], ...], root: str) -> bool:
+    """Каталог `cd` (абсолютный или через `~`) — это корень проекта."""
+    target = next(g for g in groups if g)
+    expanded = os.path.expanduser(target)
+    return os.path.normpath(expanded) == os.path.normpath(root)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -335,23 +392,55 @@ def _truncate_error_brief(message: str) -> str:
     return text[:_ERROR_BRIEF_MAX].rstrip() + "…"
 
 
-def parse_tool_result_status(
-    output: Any,
-) -> tuple[Optional[bool], Optional[str]]:
-    """Extract (ok, error_brief) from a tool result payload string/dict."""
+def _result_payload(output: Any) -> Optional[Dict[str, Any]]:
+    """Вывод тула (строка JSON или dict) как dict; иначе ``None``."""
     data: Any = output
     if isinstance(output, str):
         try:
             data = json.loads(output)
         except json.JSONDecodeError:
-            return None, None
-    if not isinstance(data, dict):
+            return None
+    return data if isinstance(data, dict) else None
+
+
+def parse_tool_result_status(
+    output: Any,
+) -> tuple[Optional[bool], Optional[str]]:
+    """Extract (ok, error_brief) from a tool result payload string/dict."""
+    data = _result_payload(output)
+    if data is None:
         return None, None
     ok = data.get("ok")
     if not isinstance(ok, bool):
         ok = None
     brief = _error_brief_from_payload(data) if ok is False else None
     return ok, brief
+
+
+#: Поля ``error``, из которых потребитель строит исход вызова: тип,
+#: причина, режим, сообщение, путь. Значения — как есть, без обрезки.
+_RESULT_ERROR_KEYS = ("type", "reason", "mode", "message", "path")
+
+
+def result_facts(
+    output: Any,
+) -> tuple[Optional[str], Optional[Dict[str, str]]]:
+    """Сырые факты исхода вывода тула: ``(status, скаляры error)``.
+
+    Разбор тот же, что у ``parse_tool_result_status``. Ядро не решает,
+    отказ это или ошибка, — классификация у потребителя."""
+    data = _result_payload(output)
+    if data is None:
+        return None, None
+    status = data.get("status")
+    status = status if isinstance(status, str) and status else None
+    err = data.get("error") if isinstance(data.get("error"), dict) else {}
+    fields = {
+        key: value
+        for key in _RESULT_ERROR_KEYS
+        if isinstance(value := err.get(key), str) and value.strip()
+    }
+    return status, fields or None
 
 
 def _error_brief_from_payload(data: Dict[str, Any]) -> Optional[str]:
@@ -384,7 +473,7 @@ def extract_intermediate_prose(arguments: Any, output: Any) -> Optional[str]:
     return None
 
 
-def emit_progress(
+def emit_progress(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     ctx: Any,
     state: Any,
     kind: ProgressKind,
@@ -399,6 +488,8 @@ def emit_progress(
     usage_delta: Optional[Dict[str, Any]] = None,
     todo_items: Optional[List[Dict[str, str]]] = None,
     attachments: Optional[List[Dict[str, Any]]] = None,
+    result_status: Optional[str] = None,
+    result_error: Optional[Dict[str, str]] = None,
 ) -> None:
     """Emit a progress event when running as a child with a sink; else no-op."""
     if not child_progress_enabled(ctx):
@@ -423,6 +514,8 @@ def emit_progress(
             usage_delta=usage_delta,
             todo_items=todo_items,
             attachments=attachments,
+            result_status=result_status,
+            result_error=result_error,
         )
     )
 
@@ -439,5 +532,6 @@ __all__ = [
     "extract_intermediate_prose",
     "parse_tool_result_status",
     "resolve_progress_sink",
+    "result_facts",
     "tool_args_summary",
 ]

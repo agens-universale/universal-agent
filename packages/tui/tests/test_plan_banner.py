@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import tui_settings, wait_until
 
 pytestmark = pytest.mark.asyncio
 
@@ -303,10 +303,8 @@ async def test_plan_stands_in_a_titled_frame_and_feedback_leaves_a_trace_line(
 
 
 def test_turn_that_ended_with_a_plan_is_not_called_done():
-    from gc_tui.widgets.thinking_indicator import (
-        DONE_LABEL_PLAN,
-        ThinkingIndicator,
-    )
+    from gc_tui.services.turn_outcome import DONE_LABEL_PLAN
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
     plain = ThinkingIndicator(state="done", frozen_elapsed=6)
     assert "Выполнил за 6с" in plain._render_text().plain
@@ -316,20 +314,37 @@ def test_turn_that_ended_with_a_plan_is_not_called_done():
     assert "План готов за 6с" in plan._render_text().plain
 
 
+class _ApprovingRunner(_Runner):
+    """Продолжение, как у исполнителя: в начале прогона принятый план
+    становится утверждённым в мете сессии."""
+
+    def __init__(self, tmp_path) -> None:
+        super().__init__()
+        self._tmp_path = tmp_path
+
+    def start(self, **kwargs):
+        mode, _thread_id = self.transitions[-1]
+        _save_plan(self._tmp_path, status="approved", mode=mode)
+        return super().start(**kwargs)
+
+
 async def test_plan_frame_changes_colour_once_the_plan_is_accepted(tmp_path):
     """Серая рамка — план ждёт решения; цвета режима plan — принят, идёт
     реализация. Возврат в обсуждение снова делает её серой."""
     _save_plan(tmp_path)
     async with _app(tmp_path).run_test() as pilot:
         screen = pilot.app.screen
-        await _open_session(pilot)
+        await _open_session(pilot, _ApprovingRunner(tmp_path))
         screen._cmd_plan()
         await pilot.pause()
         panel = screen.query_one(".plan-panel")
         assert not panel.has_class("plan-accepted")
         assert str(panel.border_title) == "☰ предложенный план"
         await pilot.press("1")
-        await pilot.pause()
+        # Продолжение запущено и закрыто тиком: рамка сверена с сессией.
+        await wait_until(
+            pilot, lambda: not screen._run_pending, "ход продолжения закрыт"
+        )
         assert panel.has_class("plan-accepted")
         assert str(panel.border_title) == "☰ утверждённый план"
         screen._rework_plan()

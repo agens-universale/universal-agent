@@ -902,3 +902,21 @@ def test_history_skips_a_rejected_plan_and_a_repeat_show():
         ]
     )
     assert updates == []
+
+
+def test_history_title_path_is_relative_to_the_session_cwd():
+    """Проигрыш — те же подписи, что живой поток: путь от корня проекта."""
+    call = {
+        "type": "function_call",
+        "name": "fs_read_file",
+        "call_id": "c1",
+        "arguments": '{"path": "/work/app/src/a.py"}',
+    }
+    updates = history_updates(
+        [{**call, "name": "subagent_explore", "arguments": "{}"}],
+        subagent_records=[
+            {"seq": 1, "parent_call_id": "c1", "kind": "call", "payload": call}
+        ],
+        root="/work/app",
+    )
+    assert updates[1]["title"] == "fs_read_file(src/a.py)"

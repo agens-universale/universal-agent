@@ -162,3 +162,150 @@ def test_empty_arguments_give_empty_summary():
 )
 def test_summary_fits_limit(wire_name, arguments):
     assert len(tool_args_summary(wire_name, arguments, limit=10)) <= 10
+
+
+# ---- пути от корня проекта (решение владельца, спека P3 §10) ----
+
+ROOT = "/home/dmitry/work/project"
+
+
+@pytest.fixture
+def home(monkeypatch):
+    monkeypatch.setenv("HOME", "/home/dmitry")
+
+
+@pytest.mark.usefixtures("home")
+def test_path_inside_the_project_is_relative_to_its_root():
+    out = tool_args_summary(
+        "fs_read_file", {"path": f"{ROOT}/README.md"}, root=ROOT
+    )
+    assert out == "README.md"
+
+
+@pytest.mark.usefixtures("home")
+def test_list_files_inside_the_project_is_relative():
+    out = tool_args_summary(
+        "fs_list_files", {"path": f"{ROOT}/packages"}, root=ROOT
+    )
+    assert out == "packages/*"
+
+
+@pytest.mark.usefixtures("home")
+def test_find_in_files_path_is_relative():
+    out = tool_args_summary(
+        "fs_find_in_files",
+        {"pattern": "TIMEOUT", "path": f"{ROOT}/packages/"},
+        root=ROOT,
+    )
+    assert out == '"TIMEOUT" in packages'
+
+
+@pytest.mark.usefixtures("home")
+def test_path_outside_the_project_under_home_uses_tilde():
+    out = tool_args_summary(
+        "fs_read_file", {"path": "/home/dmitry/notes/a.md"}, root=ROOT
+    )
+    assert out == "~/notes/a.md"
+
+
+@pytest.mark.usefixtures("home")
+def test_path_outside_home_is_absolute():
+    out = tool_args_summary(
+        "fs_read_file", {"path": "/tmp/build.log"}, root=ROOT
+    )
+    assert out == "/tmp/build.log"
+
+
+@pytest.mark.usefixtures("home")
+def test_long_rooted_path_is_cut_in_the_middle():
+    out = tool_args_summary(
+        "fs_read_file",
+        {"path": f"{ROOT}/packages/tui/src/gc_tui/palette.py"},
+        root=ROOT,
+        limit=24,
+    )
+    assert out == "packages/…/palette.py"
+
+
+@pytest.mark.usefixtures("home")
+def test_run_command_is_not_rewritten():
+    out = tool_args_summary(
+        "exec_command", {"command": f"cat {ROOT}/README.md"}, root=ROOT
+    )
+    assert out == f"cat {ROOT}/README.md"
+
+
+@pytest.mark.usefixtures("home")
+def test_mcp_path_argument_is_not_rewritten():
+    """Путь MCP-тула — в координатах сервера: корень проекта не при чём."""
+    out = tool_args_summary(
+        "mcp_office_read_docx", {"path": f"{ROOT}/a.docx"}, root=ROOT
+    )
+    assert out == f"{ROOT}/a.docx"
+
+
+def test_without_root_the_path_is_shown_as_is():
+    assert tool_args_summary("fs_read_file", {"path": f"{ROOT}/a.py"}) == (
+        f"{ROOT}/a.py"
+    )
+
+
+# ---- команда без приставки `cd <корень проекта>` (решение владельца) ----
+
+
+def _run(command: str) -> str:
+    return tool_args_summary("exec_command", {"command": command}, root=ROOT)
+
+
+@pytest.mark.usefixtures("home")
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        f"cd {ROOT} && ",
+        f"cd {ROOT}/ && ",
+        f"cd {ROOT}; ",
+        f"cd {ROOT};",
+        f'cd "{ROOT}" && ',
+        f"cd '{ROOT}' && ",
+        f"  cd  {ROOT}  &&  ",
+        f"cd {ROOT}\n",
+        f"cd {ROOT}\r\n",
+        f"cd {ROOT}  \n  ",
+    ],
+)
+def test_cd_into_the_project_root_is_dropped(prefix):
+    assert _run(f"{prefix}ls -la") == "ls -la"
+
+
+@pytest.mark.usefixtures("home")
+def test_cd_into_the_root_in_tilde_form_is_dropped():
+    assert _run("cd ~/work/project && make test") == "make test"
+
+
+@pytest.mark.usefixtures("home")
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"cd {ROOT}/packages && ls",
+        "cd /tmp && ls",
+        f"cd {ROOT}",
+        f"cd {ROOT} && ",
+        f"echo cd {ROOT} && ls",
+        f"cd {ROOT} || ls",
+    ],
+)
+def test_other_commands_are_shown_as_written(command):
+    assert _run(command) == " ".join(command.split())
+
+
+@pytest.mark.usefixtures("home")
+def test_cd_prefix_is_kept_without_root():
+    out = tool_args_summary("exec_command", {"command": f"cd {ROOT} && ls"})
+    assert out == f"cd {ROOT} && ls"
+
+
+@pytest.mark.usefixtures("home")
+def test_real_arguments_are_not_changed():
+    args = {"command": f"cd {ROOT} && ls"}
+    tool_args_summary("exec_command", args, root=ROOT)
+    assert args == {"command": f"cd {ROOT} && ls"}

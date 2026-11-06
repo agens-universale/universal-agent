@@ -328,3 +328,21 @@ async def test_recreated_thread_still_reports_the_new_call():
     )
     reports = await flow.poll()
     assert [item["call_id"] for item in reports] == ["sub/after"]
+
+
+async def test_title_path_is_relative_to_the_turn_cwd():
+    """Пути в подписи — от корня проекта, как в ленте TUI (спека P3 §10)."""
+    threads = _threads()
+    flow = await ToolFlow.start(threads, KEY, root="/work/app")
+    call = {
+        "type": "function_call",
+        "name": "fs_read_file",
+        "call_id": "c1",
+        "arguments": json.dumps({"path": "/work/app/src/a.py"}),
+    }
+    await _write(threads, [call])
+    await _sidecar(
+        threads, [{"parent_call_id": "c1", "kind": "call", "payload": call}]
+    )
+    titles = [report["title"] for report in await flow.poll()]
+    assert titles == ["fs_read_file(src/a.py)", "fs_read_file(src/a.py)"]

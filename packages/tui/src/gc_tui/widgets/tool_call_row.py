@@ -1,17 +1,29 @@
 """ToolCallRow — единый виджет на один tool-вызов; мутирует waiting → running → ok/err.
 
-Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/result
-происходит внутри content-колонки = hanging indent (continuation выравнивается
-под началом имени тула, col 5 относительно левого края строки).
+Layout: Horizontal(prefix-Static, content-Static) — wrap длинного объекта/
+результата происходит внутри content-колонки = hanging indent (continuation
+выравнивается под началом подписи: отступ уровня + глиф + пробел). Под ней —
+слот следствий `└` (ConsequenceSlot.trace-consequence) на +2 от глифа: текст
+ошибки и пометки вызова (спека P3 §3); пустой — скрыт.
 
-Статус-глиф живёт в prefix-Static (▸/‖/✓/✗/·), content-Static несёт имя/args/хвост.
+Статус-глиф живёт в prefix-Static (●/○/•/‖), content-Static несёт
+`Подпись  объект` и хвост ` · сводка` успеха; у ошибки хвоста нет.
+Первая строка всегда в одну строку: подпись и ❐ не режутся, объект
+сокращается `…` под ширину content-колонки (`fit_call_target`; пересчёт —
+при смене ширины или содержимого, не на тике дыхания). Длинный хвост
+(сводка, живой статус) режется `…`, когда объект дошёл до своего минимума
+(`CALL_TARGET_MIN_COLS`); таймер и счётчики правки не режутся.
+У строки правки (`set_edit_counts`) после объекта — счётчики `+N −M`, а в конце
+строки справа — кнопка ❐ копирования её диффа (спека P3 §10).
 
 Фазы:
-- waiting  — call уже нарисован, execute ещё не начался: · dim, без elapsed;
-- running  — сейчас исполняется: ▸ + elapsed (+ опциональный live_status);
+- waiting  — call уже нарисован, execute ещё не начался: • dim, без elapsed;
+- running  — сейчас исполняется: ● (дыхание амбером) + elapsed
+  (+ опциональный live_status);
   на человеко-ожидании (pause) — ‖ без дыхания, elapsed заморожен;
-- done     — есть result: ✓/✗;
-- interrupted — стоп/обрыв до output: · + «прервано».
+- done     — есть result: ● зелёным / красным; стоп или лимит (`halted`) —
+  ○ серым, отказ (`refused`) — ○ цветом REFUSED, строка `└` серым;
+- interrupted — стоп/обрыв до output: ○ серым + «прервано».
 """
 
 from __future__ import annotations
@@ -20,40 +32,99 @@ import time
 from typing import Optional
 
 from rich.text import Text
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
 
+from gc_tui import textual_compat
+from gc_tui.models import ResultOutcome
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import OK as _OK
-from gc_tui.palette import PULSE_SHADES as _PULSE_SHADES
+from gc_tui.palette import REFUSED as _REFUSED
 from gc_tui.palette import RUN_COLOR as _RUN
+from gc_tui.palette import SKILL as _SKILL
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
+from gc_tui.services.trace_glyphs import (
+    CALL_GLYPH,
+    CALL_UNDONE_GLYPH,
+    CALL_WAITING_GLYPH,
+    blink_on,
+)
+from gc_tui.services.trace_render import (
+    CALL_TARGET_MIN_COLS,
+    fit_call_target,
+    level_prefix,
+)
+from gc_tui.widgets.block_panel import (
+    CopyFeedbackMixin,
+    _copy_request,
+    copy_glyph,
+)
 from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.consequence_line import ConsequenceSlot
+from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.static_content import update_if_changed
 
 # Running-строка на человеко-ожидании (confirm / ask_human): статичный глиф
 # паузы в базовом амбере, без дыхания; elapsed заморожен. Не ⏸: тот числится
 # эмодзи, и часть терминалов (Windows Terminal) рисует его в две клетки.
 _PAUSE_GLYPH = "‖"
+# Пустая клетка справа у полной строки: хвост не прижат к полосе прокрутки.
+_RIGHT_GUTTER = 1
+
+#: Итог вызова: глиф, его цвет и цвет строки `└` итога. Стоп и лимит —
+#: не сбой (K4), отказ — не сбой, а решение политики или человека: цветом
+#: только глиф, строка серая.
+_OUTCOME_LOOK: dict[str, tuple[str, str, str]] = {
+    "ok": (CALL_GLYPH, _OK, _OK),
+    "error": (CALL_GLYPH, _ERR, _ERR),
+    "halted": (CALL_UNDONE_GLYPH, _DIM, _DIM),
+    "refused": (CALL_UNDONE_GLYPH, _REFUSED, _DIM),
+}
 
 
-class ToolCallRow(ClickModelMixin, Widget):
+def _fit_note(note: str, room: Optional[int], used: int) -> str:
+    """Свободный текст хвоста ``note`` в ``room`` клеток за вычетом уже
+    занятых ``used``: с `…` с конца; места нет — пусто."""
+    if room is None or used + len(note) <= room:
+        return note
+    cols = room - used
+    if cols < len(" · x…"):
+        return ""
+    return note[: cols - 1].rstrip() + "…"
+
+
+class _CopyButton(NoSelectStatic):
+    """Кнопка ❐ строки: служебный элемент — клик по ней строку не выделяет.
+
+    `FOCUS_ON_CLICK = False` предъявляет экран ленты
+    (`click_model.focus_target_at`), иначе фокус на MouseDown взяла бы
+    сама строка."""
+
+    FOCUS_ON_CLICK = False
+
+
+class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
     """Строка одного tool-вызова: waiting / running / ok / error / interrupted.
 
     DOM:
         ToolCallRow
             Horizontal
-                Static(<rich Text>, classes="trace-prefix")  — ведущий статус-глиф ▸/✓/✗/·
-                Static(<rich Text>, classes="trace-content line-tool")  — имя/args/хвост
+                Static(classes="trace-prefix")  — статус-глиф ●/○/•
+                Static(classes="trace-content line-tool")  — подпись,
+                    объект, хвост
+                _CopyButton(classes="block-copy trace-action")  — ❐, видна
+                    у строки правки
+            ConsequenceSlot(classes="trace-consequence")  — строки `└`
 
     Цветовые зоны через rich.Text:
     - prefix: статус-глиф — RUN (пульс) / OK / ERR / DIM.
-    - content: name → TOOL_NAME, скобки/args/хвост → DIM, elapsed → RUN.
+    - content: подпись → TOOL_NAME, объект/хвост → DIM, elapsed → RUN.
 
     Контракт focus-handler: если в `_on_focus`/`_on_blur` synchronously читаешь
     `self.has_focus` — вызови `super()` ПЕРВЫМ, иначе прочитаешь stale Reactive-
@@ -71,47 +142,81 @@ class ToolCallRow(ClickModelMixin, Widget):
         height: auto;
         width: 1fr;
     }
+    ToolCallRow .block-copy {
+        display: none;
+        width: auto;
+        height: 1;
+        padding: 0 1 0 0;
+    }
+    ToolCallRow.edited .block-copy { display: block; }
+    ToolCallRow .trace-consequence {
+        display: none;
+        width: 1fr;
+        height: auto;
+    }
+    ToolCallRow.has-consequence .trace-consequence { display: block; }
     """
     can_focus = True
-
-    _PREFIX = "   "  # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
-    _NESTED_PREFIX = "       "  # nested под subagent: +4 пробела
 
     def __init__(
         self,
         *,
         call_id: str,
-        tool_name: str,
-        args_summary: str,
+        label: str,
+        target: str,
+        wire_name: str = "",
         event_no: int = 0,
         waiting: bool = False,
-        nested: bool = False,
+        level: int = 0,
+        path_target: bool = False,
+        skill_target: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.call_id = call_id
-        self._tool_name = tool_name
-        self._args = args_summary
+        # Подпись и объект — из ядра (trace_render.build_call_row); wire-имя
+        # в строку не попадает, хранится для отладки и тестов.
+        self._label = label
+        self._target = target
+        # Объект — путь: сокращается серединой, иначе с конца.
+        self._path_target = path_target
+        # Объект — имя скилла: цветом скилла, как в палитре и реплике.
+        self._skill_target = skill_target
+        # Последнее сокращение объекта: (ширина, текст) — без пересчёта на
+        # тиках таймера, пока ширина под объект та же.
+        self._fitted: tuple[int, str] = (-1, target)
+        self.wire_name = wire_name
         self._event_no = event_no
         self._result: Optional[str] = None
-        self._is_error: bool = False
+        # Итог вызова: глиф и цвет строки `└` (`_OUTCOME_LOOK`).
+        self._outcome: ResultOutcome = "ok"
         self._interrupted: bool = (
             False  # терминальное «прервано» (стоп/обрыв run)
         )
         self._waiting: bool = bool(waiting)
-        self._nested: bool = bool(nested)
+        # Уровень вложенности: 0 — вызов агента, 1 — вызов его субагента.
+        self._level: int = level
         self._live_status: Optional[str] = (
             None  # step/last для корневого субагента
         )
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
+        self._consequence_slot = ConsequenceSlot(
+            level, classes="trace-consequence"
+        )
+        # Следствия вызова сверх ошибки (пометки) — тела строк `└`.
+        self._consequences: list[Text] = []
+        # Правка вызова: (+N, −M) и что копирует ❐; None — не правка.
+        self._edit_counts: Optional[tuple[int, int]] = None
+        self._copy_text: str = ""
+        self._restore_timer = None  # откат ✓ → ❐ (CopyFeedbackMixin)
         self._pulse_frame: int = 0
         self._pulse_timer = (
-            None  # собственный 0.1с-тик дыхания ▸ (_sync_pulse)
+            None  # собственный 0.1с-тик мигания ● (_sync_pulse)
         )
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
-        if self._nested:
+        if self._level > 0:
             self.add_class("nested-tool")
         # Момент создания / активации — для тикающего elapsed в running.
         self._start_monotonic = time.monotonic()
@@ -131,9 +236,18 @@ class ToolCallRow(ClickModelMixin, Widget):
                 markup=False,
             )
             yield self._content_static
+            yield _CopyButton(
+                copy_glyph(), classes="block-copy trace-action", markup=False
+            )
+        yield self._consequence_slot
 
     def on_mount(self) -> None:
         self._sync_pulse()
+
+    def on_resize(self, _event: events.Resize) -> None:
+        """Новая ширина — объект первой строки сокращается заново."""
+        if self._content_static is not None:
+            update_if_changed(self._content_static, self._render_content())
 
     @property
     def _is_live(self) -> bool:
@@ -143,7 +257,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         )
 
     def _sync_pulse(self) -> None:
-        """Таймер дыхания ▸ есть только у запущенной running-строки.
+        """Таймер мигания ● есть только у запущенной running-строки.
 
         Waiting, результат, прерывание, пауза на человеко-ожидании или
         виджет ещё не запущен (рендер истории) — без таймера. Идемпотентно.
@@ -156,10 +270,10 @@ class ToolCallRow(ClickModelMixin, Widget):
             self._pulse_timer = None
 
     def _pulse_tick(self) -> None:
-        """Кадр дыхания ▸. Waiting / done / interrupted — не тикаем."""
+        """Кадр мигания ●. Waiting / done / interrupted — не тикаем."""
         # F4: freeze UI на время app-select — не тикаем анимацию (Screen._selecting).
         try:
-            if getattr(self.screen, "_selecting", False):
+            if textual_compat.is_selecting(self.screen):
                 return
         except Exception:
             pass
@@ -167,7 +281,7 @@ class ToolCallRow(ClickModelMixin, Widget):
             return
         self._pulse_frame += 1
         if self._prefix_static is not None:
-            # Меняется только цвет ▸ (ширина глифа постоянна) — без layout.
+            # Меняется только цвет ● (ширина глифа постоянна) — без layout.
             self._prefix_static.update(self._render_prefix(), layout=False)
 
     def _update(self) -> None:
@@ -175,6 +289,9 @@ class ToolCallRow(ClickModelMixin, Widget):
             update_if_changed(self._prefix_static, self._render_prefix())
         if self._content_static is not None:
             update_if_changed(self._content_static, self._render_content())
+        bodies = self._consequence_bodies()
+        self.set_class(bool(bodies), "has-consequence")
+        self._consequence_slot.set_bodies(bodies)
 
     def set_waiting(self) -> None:
         """Перевести в waiting (·, без elapsed). После result/interrupt — no-op."""
@@ -188,7 +305,7 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._update()
 
     def set_active(self) -> None:
-        """Снять waiting → running (▸ + elapsed). После result/interrupt — no-op."""
+        """Снять waiting → running (● + elapsed). После result/interrupt — no-op."""
         if self._result is not None or self._interrupted:
             return
         if not self._waiting:
@@ -207,12 +324,31 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._live_status = text
         self._update()
 
-    def set_result(self, *, summary: str, error: bool) -> None:
+    def set_result(self, *, summary: str, outcome: ResultOutcome) -> None:
+        """Итог вызова: успех — хвост ` · summary`; ошибка, стоп или лимит
+        и отказ — глиф исхода и строка `└ summary` его цветом."""
         self._result = summary
-        self._is_error = error
+        self._outcome = outcome
         self._waiting = False
         self._live_status = None
         self._sync_pulse()
+        self._update()
+
+    def add_consequence(self, body: Text) -> None:
+        """Дописать строку `└ body` под строкой вызова (пометка вызова)."""
+        self._consequences.append(body)
+        self._update()
+
+    def set_edit_counts(
+        self, add: int, removed: int, *, copy_text: str
+    ) -> None:
+        """Строка правки: ` +N −M` после объекта и ❐ в конце строки.
+
+        `copy_text` — что кладёт в буфер ❐: весь дифф правки, как и двойной
+        клик по телу блока под строкой; пусто — ❐ нет, счётчики есть."""
+        self._edit_counts = (add, removed)
+        self._copy_text = copy_text
+        self.set_class(bool(copy_text), "edited")
         self._update()
 
     def mark_interrupted(self) -> None:
@@ -255,21 +391,21 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def _status_glyph(self) -> tuple[str, str]:
         if self._result is None:
-            if self._interrupted or self._waiting:
-                return "·", _DIM
+            if self._interrupted:
+                return CALL_UNDONE_GLYPH, _DIM
+            if self._waiting:
+                return CALL_WAITING_GLYPH, _DIM
             if self._paused_at is not None:
                 return _PAUSE_GLYPH, _RUN
-            return "▸", _PULSE_SHADES[self._pulse_frame % len(_PULSE_SHADES)]
-        if self._is_error:
-            return "✗", _ERR
-        return "✓", _OK
-
-    def _indent_prefix(self) -> str:
-        return self._NESTED_PREFIX if self._nested else self._PREFIX
+            # Мигает исчезая: в паузе — пустая клетка той же ширины.
+            on = blink_on(self._pulse_frame)
+            return (CALL_GLYPH if on else " "), _RUN
+        glyph, style, _line_style = _OUTCOME_LOOK[self._outcome]
+        return glyph, style
 
     def _render_prefix(self) -> Text:
         text = Text()
-        text.append(self._indent_prefix(), style=_DIM)
+        text.append(level_prefix(self._level), style=_DIM)
         glyph, color = self._status_glyph()
         text.append(glyph, style=color)
         text.append(" ")
@@ -277,27 +413,118 @@ class ToolCallRow(ClickModelMixin, Widget):
 
     def _render_content(self) -> Text:
         text = Text()
-        text.append(self._tool_name, style=_TOOL_NAME)
-        text.append("(", style=_DIM)
-        text.append(self._args, style=_DIM)
-        if self._result is None:
-            text.append(") ", style=_DIM)
-            if self._interrupted:
-                text.append("прервано", style=_DIM)
-            elif self._waiting:
-                pass  # только имя(args), без elapsed
-            elif self._live_status:
-                text.append(f"· {self._live_status} · ", style=_DIM)
-                text.append(format_duration(self._elapsed_s()), style=_RUN)
-            else:
-                text.append(
-                    f"· {format_duration(self._elapsed_s())}", style=_RUN
-                )
-            return text
-        text.append(")", style=_DIM)
-        if self._is_error or self._result:
-            text.append(f" -> {self._result}", style=_DIM)
+        text.append(self._label, style=_TOOL_NAME)
+        tail = self._render_tail(self._tail_room(text.cell_len))
+        target = self._fit_target(
+            text.cell_len + tail.cell_len + 2 + _RIGHT_GUTTER
+        )
+        if target:
+            start = len(text.plain) + 2
+            text.append(f"  {target}", style=_DIM)
+            if self._skill_target:
+                text.stylize(_SKILL, start, start + len(target))
+        text.append_text(tail)
         return text
+
+    def _content_width(self) -> int:
+        return self._content_static.size.width if self._content_static else 0
+
+    def _tail_room(self, label_cols: int) -> Optional[int]:
+        """Сколько клеток хвосту, когда объект сжат до своего минимума
+        (`CALL_TARGET_MIN_COLS`); колонка ещё без ширины — без предела."""
+        width = self._content_width()
+        if width <= 0:
+            return None
+        room = width - label_cols - _RIGHT_GUTTER
+        if self._target:
+            room -= 2 + min(len(self._target), CALL_TARGET_MIN_COLS)
+        return room
+
+    def _fit_target(self, used: int) -> str:
+        """Объект под остаток ширины content-колонки после подписи, двух
+        пробелов и хвоста; колонка ещё без ширины — объект целиком."""
+        width = self._content_width()
+        if width <= 0:
+            return self._target
+        cols = width - used
+        if self._fitted[0] != cols:
+            fitted = fit_call_target(
+                self._target, cols, path=self._path_target
+            )
+            self._fitted = (cols, fitted)
+        return self._fitted[1]
+
+    def _render_tail(self, room: Optional[int] = None) -> Text:
+        """Хвост первой строки после объекта: таймер / прервано, счётчики
+        правки, сводка успеха. Свободный текст хвоста (сводка, живой статус)
+        режется `…` под ``room`` клеток; таймер и счётчики — нет."""
+        text = Text()
+        if self._result is None:
+            self._append_pending_tail(text, room)
+            return text
+        if self._edit_counts is not None:
+            add, removed = self._edit_counts
+            text.append(" ")
+            text.append(f"+{add}", style=_OK)
+            text.append(" ")
+            text.append(f"−{removed}", style=_ERR)
+        if self._result and not self._ends_with_line:
+            note = _fit_note(f" · {self._result}", room, text.cell_len)
+            text.append(note, style=_DIM)
+        return text
+
+    @property
+    def _ends_with_line(self) -> bool:
+        """Итог строкой `└` под вызовом, не хвостом: всё, кроме успеха."""
+        return self._outcome != "ok"
+
+    def _consequence_bodies(self) -> list[Text]:
+        """Тела строк `└` под вызовом: ошибка (`ERR`), стоп/лимит или
+        отказ (`DIM`), затем пометки."""
+        bodies = list(self._consequences)
+        if self._ends_with_line and self._result:
+            style = _OUTCOME_LOOK[self._outcome][2]
+            bodies.insert(0, Text(self._result, style=style))
+        return bodies
+
+    def _append_pending_tail(
+        self, text: Text, room: Optional[int] = None
+    ) -> None:
+        """Хвост строки без результата: прервано / elapsed (+ step/last).
+
+        Waiting — без хвоста: только подпись и объект."""
+        if self._interrupted:
+            text.append(" · прервано", style=_DIM)
+            return
+        if self._waiting:
+            return
+        elapsed = format_duration(self._elapsed_s())
+        if self._live_status:
+            note = _fit_note(
+                f" · {self._live_status}", room, len(" · ") + len(elapsed)
+            )
+            text.append(note, style=_DIM)
+        text.append(" · ", style=_DIM)
+        text.append(elapsed, style=_RUN)
+
+    def on_click(self, event: events.Click) -> None:
+        """Клик по ❐ копирует дифф правки и строку не выделяет.
+
+        Остальные клики — клик-модель строки; Ctrl+клик по кнопке открывает
+        событие, как с любой точки строки. `prevent_default()` на входе и
+        явный super(): иначе Textual по MRO вызвал бы миксин вторым."""
+        event.prevent_default()
+        widget = getattr(event, "widget", None)
+        if (
+            not event.ctrl
+            and widget is not None
+            and widget.has_class("block-copy")
+        ):
+            event.stop()
+            self.post_message(_copy_request(self._copy_text))
+            self._flash_copied()
+            return
+        super().on_click(event)
 
     def _open_request(self) -> Optional[Message]:
         # Клик/Enter → детальный экран call + output.

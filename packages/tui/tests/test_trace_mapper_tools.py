@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from gc_tui.services.trace_mapper import map_message
 
 
@@ -20,7 +21,7 @@ def test_read_file_shows_path():
     assert "src/cli.py" in ev.summary
 
 
-def test_write_to_file_shows_path_and_chars():
+def test_write_to_file_shows_path():
     body = "x" * 12400
     ev = map_message(
         {
@@ -31,8 +32,8 @@ def test_write_to_file_shows_path_and_chars():
         no=2,
         ts="t",
     )
-    assert "report.md" in ev.summary
-    assert "<12400 chars>" in ev.summary
+    # Сводка ядра: главный аргумент — путь, содержимое не пересказывается.
+    assert ev.summary == "report.md"
 
 
 def test_search_files_query_or_pattern():
@@ -99,7 +100,8 @@ def test_unknown_tool_default():
         ts="t",
     )
     assert ev.tool_name == "mystery"
-    assert "mystery" in ev.summary
+    # Имя тула — дело подписи строки (`Called  mystery …`), не сводки.
+    assert ev.summary == "foo='bar', baz='qux'"
 
 
 # --- Task 4 / Д11 / R3: wire-имя для показа, канонический id — для логики ---
@@ -228,9 +230,10 @@ def test_function_call_output_command_moderation_block_is_error_not_agent():
         ts="t",
     )
     assert ev.kind == "error"
-    assert (
-        ev.summary
-        == "Judge is unavailable; fail-closed policy blocks execution."
+    assert ev.result_outcome == "refused"
+    assert ev.summary == (
+        "модерация команд: "
+        "Judge is unavailable; fail-closed policy blocks execution."
     )
 
 
@@ -261,7 +264,8 @@ def test_function_call_output_read_guard_block_is_error():
         ts="t",
     )
     assert ev.kind == "error"
-    assert ev.summary == "path is within denied root: /etc"
+    assert ev.result_outcome == "refused"
+    assert ev.summary == "защита путей: path is within denied root: /etc"
 
 
 def _error_summary(error: dict) -> str:
@@ -291,7 +295,7 @@ def test_error_summary_prefers_human_reason_over_model_instruction():
                 "guidance": "Do NOT retry the same call.",
             }
         )
-        == "Write not permitted in the current permission mode."
+        == "режим: запись запрещена"
     )
     assert (
         _error_summary(
@@ -471,7 +475,7 @@ def test_summarize_output_total_lines():
 
 
 def test_summarize_output_entries_uses_count():
-    """list_files: entries list with explicit count → 'N entries'."""
+    """list_files: entries list with explicit count → 'N записей'."""
     msg = {
         "type": "function_call_output",
         "call_id": "c1",
@@ -486,11 +490,29 @@ def test_summarize_output_entries_uses_count():
     }
     ev = map_message(msg, no=5, ts="2026-05-21T12:00:00+00:00")
     assert ev is not None
-    assert "7 entries" in ev.summary
+    assert "7 записей" in ev.summary
+
+
+def _tail(data: dict) -> str:
+    msg = {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": json.dumps({"ok": True, **data}),
+    }
+    return map_message(msg, no=5, ts="").summary
+
+
+def test_search_count_is_not_repeated_as_entries():
+    """`count` поиска — число совпадений, второй раз записями не идёт."""
+    assert _tail({"matches": [1, 2, 3], "count": 3}) == "3 совпадения"
+
+
+def test_entries_with_count_stay_entries():
+    assert _tail({"entries": ["a", "b"], "count": 2}) == "2 записи"
 
 
 def test_summarize_output_empty_when_no_known_keys():
-    """Если нет распознаваемых ключей — summary пустой (widget уберёт `-> ...`)."""
+    """Если нет распознаваемых ключей — summary пустой (строка без хвоста)."""
     msg = {
         "type": "function_call_output",
         "call_id": "c1",
@@ -679,32 +701,46 @@ def _call(name: str, args: dict):
 LONG = "D:\\dev\\smoke-diff3\\нет-такого-файла-с-очень-длинным-именем-для-проверки-обрезки-текста.txt"
 
 
-def test_unknown_tool_path_argument_is_shown_as_a_path_not_a_length():
+def test_path_argument_is_shown_as_a_path_with_the_file_name():
     ev = _call("fs_file_info", {"path": LONG})
-    assert "<" not in ev.summary and "chars>" not in ev.summary
-    assert ev.summary.endswith(
-        "обрезки-текста.txt')"
-    )  # хвост с именем файла остаётся
-    assert "…" not in ev.summary  # путь целиком, не режем (Ж2 батча 4)
+    assert "chars>" not in ev.summary
+    assert "обрезки-текста.txt" in ev.summary  # имя файла остаётся
 
 
-def test_read_file_long_path_is_shown_whole_too():
+def test_read_file_long_path_keeps_the_file_name():
     ev = _call("fs_read_file", {"path": LONG})
-    assert "…" not in ev.summary and ev.summary.endswith("текста.txt')")
+    assert ev.summary.endswith("текста.txt")
 
 
-def test_content_arguments_keep_the_length_form():
+def test_content_arguments_are_not_retold():
     ev = _call("fs_write_file", {"path": "a.md", "content": "x" * 179})
-    assert "content=<179 chars>" in ev.summary
+    assert ev.summary == "a.md"
 
 
 def test_search_and_replace_missing_path_does_not_crash():
     """path отсутствует (сырой, ещё не провалидированный tool-call) — строка не
-    падает, search/replace остаются видны, path деградирует до scalar-превью."""
+    падает, search/replace остаются видны парами."""
     ev = _call("search_and_replace", {"search": "x", "replace": "y"})
-    assert "path=None" in ev.summary
-    assert "search=<1 chars>" in ev.summary
-    assert "replace=<1 chars>" in ev.summary
+    assert ev.summary == "search='x', replace='y'"
+
+
+@pytest.mark.parametrize(
+    ("wire", "args"),
+    [
+        ("fs_read_file", {"path": "src/x.py"}),
+        ("fs_file_info", {"path": LONG}),
+        ("exec_command", {"command": "pytest -q"}),
+        ("mystery", {"a": 1, "b": "x" * 300}),
+        ("subagent_worker", {"reason": "r", "task": "T" * 200}),
+    ],
+)
+def test_call_summary_is_the_core_args_summary(wire, args):
+    """Сводку вызова даёт ядро (`tool_args_summary`, P1a), не TUI."""
+    from gc_core.execution.progress import tool_args_summary
+
+    ev = _call(wire, args)
+    assert ev.args_summary == tool_args_summary(wire, json.dumps(args))
+    assert ev.summary == ev.args_summary
 
 
 def test_search_and_replace_non_string_path_does_not_crash():
@@ -714,25 +750,7 @@ def test_search_and_replace_non_string_path_does_not_crash():
     assert "path=42" in ev.summary
 
 
-# --- Задача 1 / Ж2 батча 4: путь в строке вызова не режется по бюджету 60
-# колонок — лента переносится по ширине сама, как и текст ошибки. Потолок
-# 100 знаков — только страховка от патологии (величина уточнена смоуком 5). ---
-
-
-LONG_NAME = (
-    "D:\\dev\\smoke\\"
-    "очень-длинное-имя-файла-которого-точно-нет-на-диске-для-проверки-показа-пути.txt"
-)
-
-
-def test_long_path_is_shown_whole_not_cut_to_a_fixed_budget():
-    ev = _call("fs_file_info", {"path": LONG_NAME})
-    # repr() экранирует «\» — сравниваем с repr(), не с сырым путём (тот же
-    # приём, что и в соседних path-тестах файла с backslash-хвостом).
-    assert (
-        repr(LONG_NAME) in ev.summary
-    )  # путь целиком, строка ленты перенесётся сама
-    assert "…" not in ev.summary
+# --- Длинный путь режется по-путевому (сводка ядра): имя файла остаётся. ---
 
 
 def test_pathological_path_keeps_the_file_name_and_cuts_the_middle():
@@ -764,18 +782,8 @@ def test_pathological_path_with_an_early_space_still_keeps_the_file_name():
     )  # не схлопнулось до `C:\Program…`
 
 
-def test_content_arguments_still_collapse_to_a_length():
-    ev = _call("fs_write_file", {"path": "a.md", "content": "x" * 179})
-    assert "content=<179 chars>" in ev.summary
-
-
-def test_search_and_replace_summary_uses_the_schema_argument_names():
-    """Подпись читает `search`/`replace` — те же имена, что в схеме тула.
-
-    По старым `old`/`new` она показывала `<0 chars>` ВСЕГДА: схема тула
-    запрещает лишние ключи, так что таких аргументов до мэппера не доходит
-    в принципе, и подпись врала при каждом вызове.
-    """
+def test_search_and_replace_summary_is_the_path():
+    """Правка: объект строки — путь; search/replace — в экране вызова."""
     ev = map_message(
         {
             "type": "function_call",
@@ -791,9 +799,7 @@ def test_search_and_replace_summary_uses_the_schema_argument_names():
         no=1,
         ts="t",
     )
-    assert "search=<13 chars>" in ev.summary
-    assert "replace=<16 chars>" in ev.summary
-    assert "<0 chars>" not in ev.summary
+    assert ev.summary == "src/mod.py"
 
 
 def test_finish_event_carries_reply_of_same_response():

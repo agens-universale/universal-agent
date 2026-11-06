@@ -185,6 +185,7 @@ def history_updates(
     messages: list[Any],
     *,
     subagent_records: list[Any] | None = None,
+    root: str | None = None,
 ) -> list[dict]:
     """Проигрыш треда: у каждого сообщения свой messageId.
 
@@ -201,6 +202,7 @@ def history_updates(
     до его результата: для клиента это такие же действия, как тулы родителя.
     Шаг, чей родительский вызов в тред не попал, не показывается: после
     компакции карточка субагента уже в сводке, и его шаги исчезают вместе с ней.
+    ``root`` — cwd сессии: пути в подписях вызовов от него, как в живом потоке.
     """
     records = subagent_records or []
     replay = _Replay(
@@ -208,6 +210,7 @@ def history_updates(
         grouped=_records_by_parent(records),
         rejected=_rejected_call_ids(messages),
         replies=closing_replies(messages),
+        root=root,
     )
     for message in messages:
         _append_history_message(replay, message)
@@ -220,6 +223,7 @@ class _Replay:
     grouped: dict[str, list[dict]]
     rejected: set[str]
     replies: dict[str, str]
+    root: str | None = None
     consumed: set[int] = field(default_factory=set)
     stack: set[str] = field(default_factory=set)
     rendered: list[dict] = field(default_factory=list)
@@ -228,7 +232,7 @@ class _Replay:
 
 
 def _append_history_message(replay: _Replay, message: Any) -> None:
-    tool = _tool_report(message, replay.seen)
+    tool = _tool_report(message, replay.seen, replay.root)
     if tool is not None:
         _append_tool(replay, tool)
         return
@@ -248,15 +252,7 @@ def _append_tool(replay: _Replay, tool: dict) -> None:
     call_id = tool.get("toolCallId")
     if not isinstance(call_id, str) or call_id == "":
         return
-    replay.rendered.extend(
-        _nested_tool_updates(
-            call_id,
-            replay.grouped,
-            replay.seen,
-            replay.consumed,
-            replay.stack,
-        )
-    )
+    replay.rendered.extend(_nested_tool_updates(call_id, replay))
 
 
 def _append_finish(replay: _Replay, message: dict) -> None:
@@ -353,10 +349,12 @@ def _output_failed(output: Any) -> bool:
     return payload.get("ok") is False
 
 
-def _tool_report(message: Any, seen: set[str]) -> dict | None:
+def _tool_report(
+    message: Any, seen: set[str], root: str | None
+) -> dict | None:
     if not isinstance(message, dict):
         return None
-    return report_from_record(message, seen)
+    return report_from_record(message, seen, root=root)
 
 
 def _records_by_parent(records: list[Any]) -> dict[str, list[dict]]:
@@ -380,25 +378,19 @@ def _record_seq(record: dict) -> int:
     return 0
 
 
-def _nested_tool_updates(
-    parent_id: str,
-    grouped: dict[str, list[dict]],
-    seen: set[str],
-    consumed: set[int],
-    stack: set[str],
-) -> list[dict]:
+def _nested_tool_updates(parent_id: str, replay: _Replay) -> list[dict]:
     """Тулы субагента и, рекурсивно, тулы вложенного субагента."""
-    rows = grouped.get(parent_id)
-    if not rows or parent_id in stack:
+    rows = replay.grouped.get(parent_id)
+    if not rows or parent_id in replay.stack:
         return []
-    stack.add(parent_id)
+    replay.stack.add(parent_id)
     updates: list[dict] = []
     for record in rows:
         mark = id(record)
-        if mark in consumed:
+        if mark in replay.consumed:
             continue
-        consumed.add(mark)
-        report = report_from_sidecar(record, seen)
+        replay.consumed.add(mark)
+        report = report_from_sidecar(record, replay.seen, root=replay.root)
         if report is not None:
             updates.append(report)
         if record.get("kind") != "call":
@@ -406,10 +398,8 @@ def _nested_tool_updates(
         payload = record.get("payload")
         raw = payload.get("call_id") if isinstance(payload, dict) else None
         if isinstance(raw, str) and raw != "":
-            updates.extend(
-                _nested_tool_updates(raw, grouped, seen, consumed, stack)
-            )
-    stack.remove(parent_id)
+            updates.extend(_nested_tool_updates(raw, replay))
+    replay.stack.remove(parent_id)
     return updates
 
 

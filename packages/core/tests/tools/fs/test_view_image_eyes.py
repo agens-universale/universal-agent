@@ -14,6 +14,7 @@ from gc_core.attachments.texts import (
     TOOL_VISION_FAILED,
     VIEW_DEFAULT_QUESTION,
 )
+from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.intent_log.operations import append_user_ask
 from gc_core.model_router import ResolvedModel
 from gc_core.tools.fs import view_image as view_image_module
@@ -200,13 +201,49 @@ async def test_eyes_rejecting_images_are_marked_once_and_nobody_is_left(
         "type": "no_vision_model",
         "message": TOOL_NO_VISION,
     }
-    assert notes == [NOTE_EYES_BLIND.format(alias="qwen")]
+    assert [n.text for n in notes] == [NOTE_EYES_BLIND.format(alias="qwen")]
     assert (
         process_vision_probes()
         .peek(VisionRouteKey(EYES_URL, "qwen-vl", "test-access"))
         .status
         is ProbeStatus.UNSUPPORTED
     )
+
+
+async def test_eyes_rejection_through_the_dispatcher_belongs_to_the_call(
+    tmp_path, monkeypatch
+):
+    """Реальный диспетчер: пометка отказа «глаз» привязана к вызову
+    `fs_view_image` с его call_id (не к ответу)."""
+    from gc_core.tools import aapply_tool
+
+    _patch_eyes(
+        monkeypatch,
+        BackendStreamError(
+            "At most 0 image(s) may be provided", status_code=400
+        ),
+    )
+    notes = []
+    tool, state = _tool(tmp_path, notes=notes)
+    ctx = tool._ctx
+    data = {
+        FS_VIEW_IMAGE_NAME: {
+            "tool_fabric": ViewImage,
+            "spec": ViewImage.tool_description(),
+            "description": "",
+        }
+    }
+
+    await aapply_tool(
+        FS_VIEW_IMAGE_NAME,
+        {"path": str(_shot(tmp_path))},
+        data,
+        ctx=ctx,
+        state=state,
+        call_id="call-7",
+    )
+
+    assert [(n.owner, n.call_id) for n in notes] == [("call", "call-7")]
 
 
 @pytest.mark.parametrize(

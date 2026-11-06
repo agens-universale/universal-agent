@@ -1,5 +1,7 @@
 """tool_identity: wire-имя тула → канонический id (старое голое имя)."""
 
+import json
+
 from gc_tui.services.tool_identity import tool_id
 
 
@@ -43,22 +45,29 @@ def test_unknown_and_empty_pass_through():
 def test_find_in_files_reaches_the_search_summary_branch():
     """Без маппинга строка трейса теряла pattern и печатала сырое wire-имя.
 
-    Ветка `search_files` в trace_mapper._arg_summary читает `query or pattern`,
-    то есть готова к новому тулу — не хватало только записи в реестре имён.
+    Канонический id — тот же, что у старого имени `fs_search_files`: старые
+    и новые треды маппятся одинаково.
     """
     assert tool_id("fs_find_in_files") == "search_files"
 
 
 def test_find_in_files_summary_keeps_the_pattern():
-    from gc_tui.services.trace_mapper import _arg_summary
+    from gc_tui.services.trace_mapper import map_message
 
-    summary = _arg_summary(
-        tool_id("fs_find_in_files"),
+    ev = map_message(
         {
-            "query_mode": "text",
-            "file_pattern": "*.py",
-            "path": "/proj",
-            "pattern": "def abuild_tools_data",
+            "type": "function_call",
+            "name": "fs_find_in_files",
+            "arguments": json.dumps(
+                {
+                    "query_mode": "text",
+                    "file_pattern": "*.py",
+                    "path": "/proj",
+                    "pattern": "def abuild_tools_data",
+                }
+            ),
         },
+        no=1,
+        ts="t",
     )
-    assert "def abuild_tools_data" in summary
+    assert "def abuild_tools_data" in ev.summary

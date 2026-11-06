@@ -15,8 +15,12 @@ from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.widgets.diff_block import DiffBlock
 from gc_tui.widgets.tool_call_row import ToolCallRow
+from rich.text import Text
 from textual.containers import VerticalScroll
 from textual.widgets import Static
+
+from gc_tui.palette import ERR, OK
+from gc_tui.services.diff_render import copyable_hunks
 
 SHORT_HUNKS = (
     "--- \n+++ \n@@ -1,3 +1,3 @@\n def f():\n-    return 1\n+    return 2\n"
@@ -134,8 +138,25 @@ def _body_lines(block: DiffBlock) -> int:
     return block.query_one(".block-body", Static).visual.plain.count("\n") + 1
 
 
-def _label(block: DiffBlock) -> str:
-    return block.query_one(".block-label", Static).visual.plain
+def _capture_copies(monkeypatch) -> list[str]:
+    """Что ушло в буфер через экран ленты (`on_copy_block_request`)."""
+    copied: list[str] = []
+    monkeypatch.setattr(
+        "gc_tui.screens.main.copy_out",
+        lambda _app, payload, **_kw: copied.append(payload),
+    )
+    return copied
+
+
+def _row_content(row: ToolCallRow) -> Text:
+    return row._render_content()
+
+
+def _span_color(text: Text, fragment: str) -> str:
+    """Цвет фрагмента строки — по спану, который начинается ровно на нём."""
+    start = text.plain.index(fragment)
+    span = next(s for s in text.spans if s.start == start)
+    return str(span.style)
 
 
 def _path(block: DiffBlock) -> str:
@@ -168,14 +189,66 @@ async def test_diff_block_mounted_right_after_its_tool_row(tmp_path):
         ]
         assert len(rows) == 1 and len(blocks) == 1
         assert blocks[0] == rows[0] + 1  # непосредственно после своей строки
-        assert _label(children[blocks[0]]) == "└ изменено: +1 −1"
+        assert not children[blocks[0]].query(".block-label")  # ветки нет
+
+
+@pytest.mark.asyncio
+async def test_edit_counts_live_in_call_row(tmp_path):
+    """Счётчики правки — в строке вызова после объекта: `+N` цветом OK,
+    `−M` — ERR; строки `└ изменено:` под вызовом больше нет."""
+    tid = "counts"
+    _write_thread(
+        tmp_path,
+        tid,
+        [
+            {"id": "u1", "role": "user", "content": "правь"},
+            _call("c1", "fs_apply_file_edits", {"path": "src/app.py"}),
+            _output("c1", "fs_apply_file_edits"),
+        ],
+    )
+    _write_journal(tmp_path, tid, [_record("c1", add=12, del_=3)])
+
+    async with _screen(tmp_path, tid) as scr:
+        content = _row_content(scr.query_one(ToolCallRow))
+        assert content.plain == "Edit  src/app.py +12 −3"
+        assert _span_color(content, "+12") == OK
+        assert _span_color(content, "−3") == ERR
+        assert not any("изменено:" in s for s in _screen_lines(scr))
+
+
+@pytest.mark.asyncio
+async def test_copy_button_ends_the_call_row(tmp_path, monkeypatch):
+    """Кнопка ❐ — в конце строки вызова, справа, в той же строке экрана;
+    копирует весь дифф правки (хэнки с именем файла)."""
+    tid = "copybtn"
+    _write_thread(
+        tmp_path,
+        tid,
+        [
+            {"id": "u1", "role": "user", "content": "правь"},
+            _call("c1", "fs_apply_file_edits", {"path": "src/app.py"}),
+            _output("c1", "fs_apply_file_edits"),
+        ],
+    )
+    _write_journal(tmp_path, tid, [_record("c1")])
+
+    async with _pilot(tmp_path, tid) as pilot:
+        scr = pilot.app.screen
+        copied = _capture_copies(monkeypatch)
+        row = scr.query_one(ToolCallRow)
+        button = row.query_one(".block-copy", Static)
+        assert button.display
+        assert button.region.y == row.region.y
+        assert button.region.right == row.region.right
+        await pilot.click(button)
+        await pilot.pause()
+        assert copied == [copyable_hunks(SHORT_HUNKS, path="src/app.py")]
 
 
 @pytest.mark.asyncio
 async def test_block_is_visually_tied_to_its_tool_row(tmp_path):
-    """Блок примыкает к своей строке инструмента сверху (без верхнего отступа) и
-    отбит от следующей снизу — пустой строкой. Связку рисует ветка `└`, поэтому
-    вертикальной линии-поводка у блока больше нет."""
+    """Блок прижат к своей строке инструмента: без отступов сверху и снизу —
+    зазор до следующего события даёт верхний отступ самого события."""
     tid = "tied"
     _write_thread(
         tmp_path,
@@ -191,8 +264,8 @@ async def test_block_is_visually_tied_to_its_tool_row(tmp_path):
     async with _screen(tmp_path, tid) as scr:
         block = scr.query_one(DiffBlock)
         assert block.styles.margin.top == 0
-        assert block.styles.margin.bottom == 1
-        assert block.styles.border_left[0] == ""  # линии-поводка больше нет
+        assert block.styles.margin.bottom == 0
+        assert block.styles.border_left[0] == ""  # линии-поводка нет
 
 
 def _screen_lines(scr) -> list[str]:
@@ -208,8 +281,9 @@ def _indent(line: str) -> int:
 
 
 @pytest.mark.asyncio
-async def test_indent_ladder_tool_branch_body(tmp_path):
-    """Лесенка: строка инструмента → ветка (+2) → тело диффа (+2 от ветки)."""
+async def test_body_right_under_tool_row(tmp_path):
+    """Тело диффа — сразу под строкой инструмента, на +2 от её глифа; перед
+    следующим инструментом — пустая строка."""
     tid = "ladder"
     _write_thread(
         tmp_path,
@@ -226,19 +300,12 @@ async def test_indent_ladder_tool_branch_body(tmp_path):
 
     async with _screen(tmp_path, tid) as scr:
         lines = _screen_lines(scr)
-        tool = next(
-            i for i, s in enumerate(lines) if "fs_apply_file_edits" in s
-        )
-        branch = next(i for i, s in enumerate(lines) if "изменено:" in s)
+        tool = next(i for i, s in enumerate(lines) if "Edit  src/app.py" in s)
         body = next(i for i, s in enumerate(lines) if "def f():" in s)
-        next_tool = next(
-            i for i, s in enumerate(lines) if "run_python_code" in s
-        )
+        next_tool = next(i for i, s in enumerate(lines) if "Run  python" in s)
 
-        assert _indent(lines[branch]) - _indent(lines[tool]) == 2
-        assert _indent(lines[body]) - _indent(lines[branch]) == 2
-        # ветка сразу под своей строкой, между блоком и следующим тулом — пусто
-        assert branch == tool + 1
+        assert body == tool + 1
+        assert _indent(lines[body]) - _indent(lines[tool]) == 2
         assert lines[next_tool - 1] == ""
 
 
@@ -273,7 +340,7 @@ async def test_row_fill_reaches_the_block_edge(tmp_path, width):
         await pilot.pause(0.3)
         block = pilot.app.screen.query_one(DiffBlock)
         rows = block.query_one(".block-body", Static).visual.plain.split("\n")
-        assert len(rows[1]) == len(rows[2]) == block.size.width - 2
+        assert len(rows[1]) == len(rows[2]) == block.size.width
 
 
 @pytest.mark.asyncio
@@ -394,8 +461,8 @@ async def test_batch_block_lands_under_own_row_not_at_the_end(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_block_between_tool_rows_keeps_group_indent(tmp_path):
-    """Блок между строками тулов не делает следующую строку началом группы."""
+async def test_every_call_row_has_blank_line_above(tmp_path):
+    """Пустая строка перед каждым вызовом — и после диффа, и подряд."""
     tid = "group"
     _write_thread(
         tmp_path,
@@ -413,8 +480,8 @@ async def test_block_between_tool_rows_keeps_group_indent(tmp_path):
     async with _screen(tmp_path, tid) as scr:
         rows = [w for w in _trace_children(scr) if isinstance(w, ToolCallRow)]
         assert len(rows) == 2
-        assert rows[0].has_class("tool-group-start")  # первый в группе
-        assert not rows[1].has_class("tool-group-start")  # блок группу не рвёт
+        assert [r.styles.margin.top for r in rows] == [1, 1]
+        assert not scr.query(".tool-group-start")
 
 
 @pytest.mark.asyncio
@@ -534,11 +601,9 @@ _FOCUS_CONFIG = {
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "selector", [".block-body", ".diff-more", ".block-copy"]
-)
+@pytest.mark.parametrize("selector", [".block-body", ".diff-more"])
 async def test_click_on_block_keeps_current_focus(tmp_path, selector):
-    """Клик по телу/хвосту/кнопке фокус не двигает — ни на блок, ни на #trace."""
+    """Клик по телу/хвосту фокус не двигает — ни на блок, ни на #trace."""
     tid = "keepfocus"
     _focus_fixture(tmp_path, tid)
 
@@ -551,6 +616,27 @@ async def test_click_on_block_keeps_current_focus(tmp_path, selector):
         await pilot.pause()
 
         assert pilot.app.focused is row
+
+
+@pytest.mark.asyncio
+async def test_copy_button_click_keeps_focus_elsewhere(tmp_path, monkeypatch):
+    """Клик по ❐ в строке вызова копирует, но строку не выделяет: фокус
+    остаётся там, где был (на соседней строке)."""
+    tid = "copyfocus"
+    _focus_fixture(tmp_path, tid)
+
+    async with _pilot(tmp_path, tid, _FOCUS_CONFIG) as pilot:
+        scr = pilot.app.screen
+        copied = _capture_copies(monkeypatch)
+        first, second = list(scr.query(ToolCallRow))
+        second.focus()
+        await pilot.pause()
+
+        await pilot.click(first.query_one(".block-copy"))
+        await pilot.pause()
+
+        assert pilot.app.focused is second
+        assert copied == [_long_hunks(40)]
 
 
 @pytest.mark.asyncio

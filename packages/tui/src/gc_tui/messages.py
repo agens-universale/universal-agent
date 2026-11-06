@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from textual.message import Message
+from textual.widget import Widget
 
 
 class OpenEventRequest(Message):
@@ -27,6 +28,11 @@ class SummaryToggleRequest(Message):
     def __init__(self, event_no: int) -> None:
         super().__init__()
         self.event_no = event_no
+
+
+class IndicatorRowsChanged(Message):
+    """Число строк причины ошибки в индикаторе изменилось (ресайз) —
+    экран пересчитывает резерв бара."""
 
 
 class OpenEditsScreenRequest(Message):
@@ -59,3 +65,15 @@ class OpenImageRequest(Message):
     def __init__(self, path: str) -> None:
         super().__init__()
         self.path = path
+
+
+class ScrollToReply(Message):
+    """Клик по липкой реплике над лентой → лента показывает её сверху."""
+
+    def __init__(self, reply: Widget) -> None:
+        super().__init__()
+        self.reply = reply
+
+
+class ScrollToEnd(Message):
+    """Клик по плашке «в конец» → лента к низу и снова липнет к нему."""

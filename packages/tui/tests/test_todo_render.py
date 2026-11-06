@@ -34,7 +34,7 @@ def _spans_by_text(text: Text) -> dict[str, str]:
 
 def test_main_header_counts_completed_of_total():
     text = _text(build_main_todo_lines(ITEMS))
-    assert text.plain.splitlines()[0] == "session_todo   чек-лист 1/3"
+    assert text.plain.splitlines()[0] == "Чек-лист 1/3"
 
 
 def test_main_lines_glyphs_and_indent():
@@ -62,17 +62,15 @@ def test_main_in_progress_and_pending_ink():
 
 def test_main_empty_is_cleared_line():
     text = _text(build_main_todo_lines([]))
-    assert text.plain == "session_todo   чек-лист очищен"
+    assert text.plain == "Чек-лист очищен"
 
 
 def test_main_builder_plain_matches_summary_parity():
-    assert (
-        _text(build_main_todo_lines(ITEMS)).plain
-        == f"session_todo   {_todo_checklist_summary(ITEMS)}"
-    )
-    assert (
-        _text(build_main_todo_lines([])).plain
-        == f"session_todo   {_todo_checklist_summary([])}"
+    assert _text(
+        build_main_todo_lines(ITEMS)
+    ).plain == _todo_checklist_summary(ITEMS)
+    assert _text(build_main_todo_lines([])).plain == _todo_checklist_summary(
+        []
     )
 
 
@@ -80,13 +78,13 @@ def test_subagent_empty_is_cleared_line():
     # Достижимо с v3 (каждый вызов развёрнут): очистка тоже идёт через билдер.
     assert (
         _text(build_subagent_todo_lines([])).plain
-        == "session_todo   чек-лист субагента очищен"
+        == "Чек-лист субагента очищен"
     )
 
 
 def test_subagent_header_and_indent():
     lines = _text(build_subagent_todo_lines(ITEMS)).plain.splitlines()
-    assert lines[0] == "session_todo   чек-лист субагента 1/3"
+    assert lines[0] == "Чек-лист субагента 1/3"
     assert lines[1] == "  ✓ Изучить структуру"
 
 
@@ -96,10 +94,7 @@ def test_subagent_completed_struck_muted_open_tool_name():
     assert "strike" in done_style and palette.MUTED.lower() in done_style
     # Живая часть (→/○ и заголовок) — в тон именам тулов блока (доводка 2026-08-01).
     assert palette.TOOL_NAME.lower() in spans["Написать тесты"]
-    assert (
-        palette.TOOL_NAME.lower()
-        in spans["session_todo   чек-лист субагента 1/3"]
-    )
+    assert palette.TOOL_NAME.lower() in spans["Чек-лист субагента 1/3"]
 
 
 # --- общая обвязка строк для всех каналов -----------------------------------

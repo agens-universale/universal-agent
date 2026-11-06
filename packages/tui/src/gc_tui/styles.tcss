@@ -144,7 +144,7 @@ TraceScreen #trace { width: 100%; }
    background не рефлоунит контент, в отличие от prefix/border). */
 ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus,
 BlockPanel:focus, TodoBlock:focus {
-    background: $focus-bg;
+    background: $highlight-bg;
 }
 /* DiffBlock здесь НЕТ: он не фокусируется вовсе (can_focus=False) — событие
    трейса это вызов инструмента, дифф лишь его часть, и Tab идёт по событиям. */
@@ -182,28 +182,44 @@ BlockPanel:focus, TodoBlock:focus {
 
 /* Инлайн-дифф правки агента (раскладка — в DiffBlock.DEFAULT_CSS, здесь тема).
    Отступы — одним shorthand-правилом, как у панелей выше.
-   В отличие от панелей блок НЕ карточка рядом, а продолжение своей строки
-   инструмента: нулевой верхний отступ (примыкает к ней) и ветка `└` вместо
-   вертикального «поводка». Левый отступ 5 — вторая ступень лесенки: строка
-   инструмента идёт от колонки 4 (padding #trace + ToolCallRow._PREFIX), ветка —
-   на +2 от неё, тело диффа — ещё на +2 (margin в DiffBlock.DEFAULT_CSS).
-   Нижний отступ — пустая строка перед следующим инструментом. Подложки на самом
-   блоке нет: ветка со счётчиками читается на фоне ленты, тёмный фон несут только
-   тело и хвост. */
+   В отличие от панелей блок НЕ карточка рядом, а следствие своей строки
+   инструмента: прижат к ней без вертикальных отступов (зазор до следующего
+   события даёт его собственный верхний отступ). Счётчики `+N −M` и кнопка ❐ —
+   в самой строке вызова. Колонки ленты (trace_render.level_prefix): глиф
+   события уровня n — в колонке `●` плюс 2n; следствие — на +2 от глифа своего
+   события: левый отступ 2 у вызова агента, 4 — у вызова субагента (уровень 1);
+   тело и хвост — с колонки блока. Подложки на самом блоке нет: тёмный фон
+   несут только тело и хвост. */
 .diff-block {
     padding: 0;
-    margin: 0 0 1 5;
+    margin: 0 0 0 2;
 }
-.diff-block.diff-nested { margin: 0 0 1 9; }  /* правка субагента: та же лесенка от её отступа иерархии (+4) */
+.diff-block.diff-nested { margin: 0 0 0 4; }  /* правка субагента (уровень 1) */
 .diff-block .block-body,
 .diff-block .diff-more { background: $block-bg; }
 .diff-more { color: $dim; }
-.diff-more:hover { color: $accent; }
 
-/* Шапка блока: метка языка слева, кнопка копирования справа. */
+/* Шапка блока: метка языка слева, кнопка копирования справа; та же кнопка ❐
+   — в конце строки вызова с правкой (ToolCallRow). */
 .block-label { color: $dim; }
 .block-copy  { color: $dim; }
-.block-copy:hover { color: $accent; }
+/* Наведение на действие ленты (❐, «… ещё N строк») — одно правило. */
+.trace-action:hover { color: $accent; }
+
+/* Накладки над лентой «не внизу» (спека P3 §2.6): поверх экрана, высоты
+   ленты не занимают; место и ширину ставит код по #trace. Ховер плашки —
+   светлее фон, цвет текста прежний: осознанное исключение из
+   .trace-action:hover; так же и у StickyReply. */
+StickyReply, ScrollEndPill {
+    overlay: screen;
+    position: absolute;
+    height: 1;
+    display: none;
+}
+StickyReply { background: $queue-bg; }
+StickyReply:hover { background: $highlight-bg; }
+ScrollEndPill { background: $user-band-bg; color: $ink; }
+ScrollEndPill:hover { background: $highlight-bg; }
 
 /* spec 2026-05-27 / tool-output-detail */
 .detail-section-header {
@@ -225,7 +241,7 @@ BlockPanel:focus, TodoBlock:focus {
 
 /* чек-лист session_todo — маркер фазы хода, как ● и ·: обособлен пустой строкой
    сверху. Только margin-top (общая конвенция трейса — разделение через отступ
-   СЛЕДУЮЩЕГО элемента, см. .user-band); нижний дал бы двойной зазор перед тулами. */
+   СЛЕДУЮЩЕГО элемента, см. UserReplyContainer); нижний дал бы двойной зазор перед тулами. */
 .line-todo      { color: $ink; }        /* заголовок; воздух — на .todo-block */
 .line-todo-nested { color: $dim; }      /* заголовок чек-листа субагента */
 /* Воздух вокруг чек-листа — на блоке-контейнере: у основного только сверху
@@ -234,16 +250,19 @@ BlockPanel:focus, TodoBlock:focus {
 .todo-block        { margin-top: 1; }
 .todo-block-nested { margin: 1 0; }
 .line-tool      { color: $dim; }       /* |- механика тула */
-/* Первый tool в группе (предыдущий ряд — не tool) отделён верхним отступом;
-   подряд идущие tool-строки компактны (класс вешается в коде — Textual CSS
-   не умеет «соседний элемент»). */
-ToolCallRow.tool-group-start { margin-top: 1; }
+/* Пустая строка перед каждым вызовом — верхним и вложенным (спека P3 §2.1). */
+ToolCallRow { margin-top: 1; }
 .line-think     { color: $muted; text-style: italic; margin-top: 1; }
-.line-intermediate { color: $ink; margin-top: 1; }  /* ·-реплика — фаза хода, как ● */
+.line-intermediate { color: $ink; margin-top: 1; }  /* промежуточная реплика — фаза хода */
+/* Промежуточная реплика (основного агента и субагента): глиф `●` своего
+   уровня — серым; белый `●` — у итогового ответа (спека P3 §10). */
+.line-intermediate .trace-prefix { color: $dim; }
 .ask-human-question.hidden { display: none; }  /* вопрос скрыт, пока виден баннер */
 .answered-question { border: round $frame-archive; color: $dim; padding: 0 1; margin: 1 0; width: 1fr; }
 .answered-question.hidden { display: none; }
 .line-error     { color: $err; }
+.line-warn      { color: $warn; }   /* строка `!` без владельца — предупреждение */
+.line-standalone { margin-top: 1; }  /* строка `!` без владельца — своё событие */
 .line-code      { color: $code; }      /* inline-код/путь */
 .line-bold      { color: $accent; text-style: bold; }
 .line-heading-1 { color: $accent; text-style: bold; }
@@ -255,21 +274,24 @@ ToolCallRow.tool-group-start { margin-top: 1; }
 .line-bang      { color: $run-color; margin-top: 1; }
 .line-bang-out  { color: $dim; }
 .line-bang-fail { color: $err; }
-.skill-marker   { margin: 1 0; }  /* top И bottom: margin-bottom один перетирал margin-top от .line-meta → не было зазора над [skill] */
 .line-note      { color: $note-ink; margin-top: 1; }  /* чуть светлее $dim; пустая строка сверху — отделяет ремарку; курсив — только на тексте ремарки (см. note_text), ярлык прямой */
 /* Запись «* итог:» после ответа модели — цвет и отступ как у .line-note, текст курсивом (метка прямая — см. build_summary_widgets); проза после блока кода — без отступа сверху. Маркер «* » прямой, как у заметки. */
 .line-summary   { color: $note-ink; margin-top: 1; text-style: italic; }
 .line-summary .trace-prefix { text-style: not italic; }
 .line-summary.line-agent-cont { margin-top: 0; }
-.summary-marker { color: $deep-dim; margin: 1 0; }  /* пустая строка сверху И снизу — маркер обособлен */
+/* Метка сжатия (спека P3 §2.5): цвета полос и подписи — в самой строке
+   (`compaction_rule`); пустая строка сверху и снизу, у раскрытой — снизу
+   отделяет уже тело. */
+.summary-marker { margin: 1 0; }
+.summary-marker.expanded { margin-bottom: 0; }
 .summary-body   { color: $dim; margin-bottom: 1; }
 .summary-body.hidden { display: none; }
+.summary-body .compaction-content { width: 1fr; height: auto; }
+.summary-body .compaction-head { color: $sub-ink; }
 
-/* Подложка реплики пользователя (§2.6) */
-.user-band {
-    background: $user-band-bg;   /* чуть светлее $band-bg — реплика контрастнее в трейсе; темнее $focus-bg (фокус различим) */
-    border-left: outer $accent;
-    padding: 0 1 0 1;
+/* Реплика пользователя (спека P3 §2.2): маркер `›` в колонке `●`, подложка
+   во всю ширину ленты без кромки; строки следствий `└` — под подложкой. */
+UserReplyContainer {
     /* Только верхний отступ — общая конвенция трейса (разделение «через margin-top
      * следующего элемента»). Нижний отступ убран: он складывался с margin-top
      * индикатора через границу контейнеров (#trace ↔ #indicator-bar, где margin
@@ -278,16 +300,22 @@ ToolCallRow.tool-group-start { margin-top: 1; }
     height: auto;
     width: 1fr;
 }
-
-/* Pending: приглушённая teal-кромка (spec 2026-05-26) */
-.user-band.user-reply-pending {
-    border-left: outer $user-pending-edge;
+.user-band {
+    background: $user-band-bg;   /* светлее $band-bg — реплика контрастнее в трейсе; темнее $highlight-bg (фокус различим) */
+    padding: 0 1 0 0;
+    height: auto;
+    width: 1fr;
 }
-
-/* Failed: красная кромка + инлайн [!] (spec 2026-05-26) */
-.user-band.user-reply-failed {
-    border-left: outer $err;
+/* Реплика в очереди (P3 §2.4; «тихая реплика», как у StickyReply): тише подложка и текст; подсказка — под
+   подложкой на фоне ленты, в колонке текста после `› `. Правило очереди —
+   до правила фокуса: фокус его перекрывает. */
+UserReplyContainer.-queued > .user-band {
+    background: $queue-bg;
+    color: $quiet-reply-ink;
 }
+UserReplyContainer:focus > .user-band { background: $highlight-bg; }
+.queue-hint { display: none; height: auto; padding-left: 2; color: $muted; }
+UserReplyContainer.-queue-hint > .queue-hint { display: block; }
 
 /* Бренд-блок пустого состояния (§2.8) */
 .brand-logo { color: $brand; text-style: bold; width: auto; height: auto; }
@@ -322,9 +350,9 @@ ToolCallRow.tool-group-start { margin-top: 1; }
    длинного описания на вторую строку делал фактическую высоту больше заявленной —
    main.py отдавал трейсу лишнее место, нижняя рамка и футер уезжали за экран. */
 .palette-row   { color: $ink; padding: 0 1; text-wrap: nowrap; text-overflow: ellipsis; }
-/* $focus-bg, не $band-bg: фон оверлея (#161A23) почти совпадает с $band-bg —
-   выделение было слепым; focus-bg = подсветка фокуса в трейсе, заметно светлее. */
-.palette-row.selected { background: $focus-bg; color: $bright; }
+/* $list-select-bg, не $band-bg: фон оверлея (#161A23) почти совпадает с $band-bg —
+   выделение было слепым; list-select-bg заметно светлее. */
+.palette-row.selected { background: $list-select-bg; color: $bright; }
 /* Строки скиллов (P5 §3.1): имя голубым и на выделении; хвост «пак · описание»
    серым — стилем текста строки. «… ещё N» — невыбираемая серая строка.
    Шапка пакета в пикере /skill — невыбираемая строка, чуть светлее. */
@@ -429,14 +457,14 @@ DiffScreen #footer, DiffFileViewer #footer { margin: 1 0 0 0; }
 
 /* Строка экрана изменений (/diff). Свой класс, а не .list-row: у того правила
    .selected нет вовсе, и выбор был бы виден только глифом. Фон выбранной — тот
-   же $focus-bg, что у палитры, трейса и .set-row (§16).
+   же $list-select-bg, что у палитры и .set-row (§16).
    nowrap/ellipsis — как у карточек #sessions-list и #skills-list: строку решают
    именно эти правила (Static рендерится через Content, и overflow самого
    rich.Text не доезжает), а перенос сломал бы и сетку колонок, и шаг страницы.
    Подсветки при наведении нет — как у всех списков базы. */
 .diff-row          { color: $ink; padding: 0 1;
                      text-wrap: nowrap; text-overflow: ellipsis; }
-.diff-row.selected { background: $focus-bg; color: $bright; }
+.diff-row.selected { background: $list-select-bg; color: $bright; }
 
 /* Строка группы «принято» (§4.2 волны 4) — воздух над ней отделяет её от
    активных строк списка, как в согласованном на дизайн-гейде макете; строки
@@ -570,7 +598,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .mcp-summary { padding: 0 1; }
 .mcp-confirm { background: $band-bg; border-left: outer $warn; padding: 0 1; }
 .mcp-row { width: 1fr; text-wrap: nowrap; text-overflow: ellipsis; }   /* описание обрезается … */
-.mcp-row-managed.selected, .mcp-action-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+.mcp-row-managed.selected, .mcp-action-row.selected { background: $list-select-bg; }   /* контраст как у палитры */
 
 /* ConfigScreen — fieldset-панели (spec 2026-06-10) */
 .config-caption { color: $dim; padding: 0 1; margin: 0 0 1 0; }
@@ -643,7 +671,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 .onb-option { height: auto; padding: 0 1; width: 1fr; }
 /* Выбор — только фон, БЕЗ border-left: полоса сдвигала контент на 1 колонку,
    отчего кружки ●/○ в /settings-секциях съезжали друг относительно друга. */
-.onb-option.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+.onb-option.selected { background: $list-select-bg; }   /* контраст как у палитры */
 .onb-mcp-row { text-wrap: nowrap; text-overflow: ellipsis; }
 .set-spaced { margin-bottom: 1; }   /* воздух между строками-опциями в /settings-секциях */
 /* Вариант БЕЗ второй строки описания в списке, где у соседа она есть: воздух добирает
@@ -672,11 +700,11 @@ TextArea.ask-human-mode { border: solid $run-color; }
 /* Строка меню — горизонтальная раскладка: текст слева (1fr) + глиф статуса
    у правого края. Так глиф не «едет» при выборе и не липнет к значению. */
 .set-menurow { height: auto; layout: horizontal; padding: 0 1; margin-bottom: 1; }
-.set-menurow.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+.set-menurow.selected { background: $list-select-bg; }   /* контраст как у палитры */
 .set-rowtext { width: 1fr; height: auto; text-wrap: nowrap; text-overflow: ellipsis; }
 .set-glyph { width: 3; height: auto; text-align: right; }
 .set-row { height: auto; padding: 0 1; }
-.set-row.selected { background: $focus-bg; }   /* контраст как у палитры/трейса */
+.set-row.selected { background: $list-select-bg; }   /* контраст как у палитры */
 /* Разделитель групп секции «Режимы работы» (ревизия 7) — тот же приём, что .palette-group-sep. */
 /* Плотность B: строки блока впритык, воздух несут ГРАНИЦЫ — разделитель/подпись
    блока отбивается сверху от чужого блока и стоит вплотную к своим строкам. */

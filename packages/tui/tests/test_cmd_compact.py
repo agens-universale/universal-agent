@@ -67,7 +67,10 @@ def _chat_cfg():
             SummaryRejectedError("summary repair produced no usable summary"),
             "Сжатие не удалось. История не изменена.",
         ),
-        (RuntimeError("archive write failed"), "archive write failed"),
+        (
+            RuntimeError("archive write failed"),
+            "RuntimeError: archive write failed",
+        ),
     ],
     ids=["rejected-summary", "archive-failure"],
 )
@@ -98,10 +101,12 @@ async def test_compact_displays_the_appropriate_error(
         screen._cmd_compact()
         await asyncio.to_thread(app.active_runner.wait, 2.0)
         assert not app.active_runner.is_running()
-        screen._poll_tick()
+        screen._poll_active()
         await pilot.pause()
-        errors = screen.query(".line-error .trace-content")
-        assert [str(row.render()) for row in errors] == [f"runtime: {message}"]
+        # Причина — под «✕ Ошибка» индикатора треда.
+        assert screen._thinking._render_text().plain == (
+            f"✕ Ошибка\n  └ {message}"
+        )
 
 
 @pytest.mark.asyncio

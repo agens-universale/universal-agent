@@ -1,6 +1,6 @@
 """Реплика пользователя в ленте переносится своей раскладкой: плашка картинки целиком,
-продолжение — под текстом, а не под `> `. Выделение мышью и двойной клик копируют
-текст сообщения — без префиксов, отступов и переносов раскладки."""
+продолжение — под текстом, а не под `› `. Выделение мышью и двойной клик
+копируют текст сообщения — без префиксов, отступов и переносов раскладки."""
 
 import json
 
@@ -21,10 +21,11 @@ from gc_tui.widgets.user_reply import NestedUserReply, UserReplyContainer
 from image_helpers import make_attachment_file
 from gc_testkit.tui_support import tui_settings
 
-#: Колонки и подложка реплики — как в styles.tcss приложения (кромка и поля
-#: сужают содержимое на 3 ячейки).
+#: Колонки и подложка реплики — как в styles.tcss приложения (правое поле
+#: сужает содержимое на 1 ячейку).
 _CSS = """
-.user-band { border-left: outer red; padding: 0 1 0 1; height: auto; width: 1fr; }
+UserReplyContainer { height: auto; width: 1fr; }
+.user-band { padding: 0 1 0 0; height: auto; width: 1fr; }
 .trace-prefix { width: auto; height: auto; }
 .trace-content { width: 1fr; height: auto; }
 Static { height: auto; }
@@ -55,11 +56,11 @@ class _Host(App):
 
 
 def _lines(widget) -> list[str]:
-    return widget.render().plain.split("\n")
+    return getattr(widget, "_band", widget).render().plain.split("\n")
 
 
 def _origin(widget) -> tuple[int, int]:
-    """Сдвиг содержимого от угла виджета (кромка и поля)."""
+    """Сдвиг содержимого от угла виджета (поля)."""
     return (
         widget.content_region.x - widget.region.x,
         widget.content_region.y - widget.region.y,
@@ -94,11 +95,11 @@ async def test_reply_wraps_under_the_text_and_keeps_chips_whole(tmp_path):
     async with _Host(reply).run_test(size=(30, 20)) as pilot:
         await pilot.pause()
         lines = _lines(reply)
-        assert reply.content_size.height == len(lines) > 2
+        assert reply._band.content_size.height == len(lines) > 2
         assert all(
-            cell_len(line) <= reply.content_size.width for line in lines
+            cell_len(line) <= reply._band.content_size.width for line in lines
         )
-        assert lines[0].startswith("> ")
+        assert lines[0].startswith("› ")
         assert all(line.startswith("  ") for line in lines[1:])
         # плашка в тексте и в строке картинки — обе целиком
         assert sum(chip_text(6) in line for line in lines) == 2
@@ -109,10 +110,10 @@ async def test_reply_rewraps_on_resize():
     reply = UserReplyContainer("слово " * 20)
     async with _Host(reply).run_test(size=(30, 20)) as pilot:
         await pilot.pause()
-        narrow = reply.content_size.height
+        narrow = reply._band.content_size.height
         await pilot.resize_terminal(80, 20)
         await pilot.pause()
-        assert reply.content_size.height == len(_lines(reply)) < narrow
+        assert reply._band.content_size.height == len(_lines(reply)) < narrow
 
 
 @pytest.mark.asyncio
@@ -123,9 +124,9 @@ async def test_failed_reply_continues_under_the_text():
         reply.set_state("failed")
         await pilot.pause()
         lines = _lines(reply)
-        assert lines[0].startswith("[!] > слово")
-        assert all(line.startswith(" " * 6 + "слово") for line in lines[1:])
-        assert reply.content_size.height == len(lines)
+        assert lines[0].startswith("› слово")
+        assert all(line.startswith("  слово") for line in lines[1:])
+        assert reply._band.content_size.height == len(lines)
 
 
 @pytest.mark.asyncio
@@ -181,7 +182,7 @@ def test_image_line_shows_the_path_from_the_project_in_grey(
     _home, project = _home_and_project(tmp_path, monkeypatch)
     source = str(project / "docs" / "shot.png")
     att = make_attachment_file(6, tmp_path, source=source)
-    rendered = UserReplyContainer(chip_text(6), images=(att,)).render()
+    rendered = UserReplyContainer(chip_text(6), images=(att,))._band.render()
     assert (
         rendered.plain.split("\n")[1] == f"  └ {chip_text(6)} · docs/shot.png"
     )
@@ -198,7 +199,7 @@ def test_image_line_outside_the_project_uses_tilde(tmp_path, monkeypatch):
     att = make_attachment_file(
         6, tmp_path, source=str(home / "Desktop" / "shot.png")
     )
-    rendered = UserReplyContainer(chip_text(6), images=(att,)).render()
+    rendered = UserReplyContainer(chip_text(6), images=(att,))._band.render()
     assert rendered.plain.split("\n")[1] == (
         f"  └ {chip_text(6)} · ~/Desktop/shot.png"
     )
@@ -240,7 +241,7 @@ async def test_drag_across_a_wrap_copies_the_message_text():
         await pilot.pause()
         lines = _lines(reply)
         assert lines == [
-            "> один два три четыре",
+            "› один два три четыре",
             "  пять шесть семь",
             "  восемь",
         ]

@@ -10,6 +10,18 @@ from gc_testkit.tui_support import tui_settings
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _coder_available(monkeypatch):
+    """Скиллов тестов нет в реальном реестре — считаем их загружаемыми;
+    иное — явным monkeypatch в тесте."""
+    from gc_core.tools.skills import skill_delivery as sd
+
+    async def _available(skill_id, reg):
+        return True
+
+    monkeypatch.setattr(sd, "skill_is_available", _available)
+
+
 @pytest.mark.asyncio
 async def test_skill_inline_prompt_prefixes_single_message(tmp_path):
     pytest.importorskip("textual")
@@ -106,17 +118,25 @@ async def test_skill_without_prompt_stays_pending(tmp_path):
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
+        scr._skills_cache = [{"id": "coder"}]  # есть ли скилл — по кэшу
         await scr._handle_command("skill coder")
         await pilot.pause(0.1)
         assert app.tui_state.pending_skill_id == "coder"
 
 
 @pytest.mark.asyncio
-async def test_unknown_skill_first_token_not_inline(tmp_path):
-    """/skill <неизвестный> <текст>: первый токен не валидный id → НЕ inline-пара,
-    весь arg трактуется как id (pending), inline-доставка не срабатывает."""
+async def test_unknown_skill_first_token_not_inline(tmp_path, monkeypatch):
+    """/skill <неизвестный> <текст>: первый токен — не скилл (id скиллов без
+    пробелов) → текст уходит без скилла, весь arg скиллом не становится."""
     pytest.importorskip("textual")
+    from gc_core.tools.skills import skill_delivery as sd
     from gc_tui.app import TuiApp
+
+    async def _missing(skill_id, reg):
+        return False
+
+    monkeypatch.setattr(sd, "skill_is_available", _missing)
+    from gc_tui.widgets.user_reply import UserReplyContainer
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -128,8 +148,10 @@ async def test_unknown_skill_first_token_not_inline(tmp_path):
         scr._skills_cache = [{"id": "coder"}]  # 'foo' НЕ валиден
         await scr._handle_command("skill foo bar")
         await pilot.pause(0.1)
-        # не inline: pending_skill_id выставлен в весь arg
-        assert app.tui_state.pending_skill_id == "foo bar"
+        assert app.tui_state.pending_skill_id is None
+        (reply,) = scr.query(UserReplyContainer)
+        assert reply._text == "bar"
+        assert reply._skill_error is True
 
 
 @pytest.mark.asyncio
@@ -254,3 +276,16 @@ async def test_skill_command_short_name_without_prompt_pends_full_id(
         await pilot.app.screen._handle_command("skill brainstorming")
         await pilot.pause(0.1)
         assert app.tui_state.pending_skill_id == "supercoder:brainstorming"
+
+
+@pytest.mark.asyncio
+async def test_reply_plain_text_round_trips_with_full_id(tmp_path):
+    """↑ / Стоп возвращают `/supercoder:brainstorming текст`; повторная
+    отправка этой строки разбирается так же, как короткое имя."""
+    pytest.importorskip("textual")
+    by_short = await _wire_of(tmp_path / "a", "brainstorming придумай")
+    by_full = await _wire_of(
+        tmp_path / "b", "supercoder:brainstorming придумай"
+    )
+    assert by_full == by_short
+    assert by_full[0].startswith("Use skill `supercoder:brainstorming`.")

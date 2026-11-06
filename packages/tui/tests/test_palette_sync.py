@@ -85,7 +85,8 @@ def test_selection_distinguishable_from_focus():
     поверх фокуса. Порог 40 держит нынешнюю разницу; уронить его правкой цвета
     молча теперь нельзя."""
     assert (
-        _distance(palette.SCREEN_SELECTION_BACKGROUND, palette.FOCUS_BG) >= 40
+        _distance(palette.SCREEN_SELECTION_BACKGROUND, palette.HIGHLIGHT_BG)
+        >= 40
     )
 
 
@@ -193,18 +194,6 @@ _PREVIOUS_RAMPS = {
         "#808c99",
         "#747e8b",
         "#69727f",
-    ],
-    "PULSE_SHADES": [
-        "#8a6a3a",
-        "#977448",
-        "#a47f55",
-        "#b18a62",
-        "#c4986b",
-        "#d4a574",
-        "#c4986b",
-        "#b18a62",
-        "#a47f55",
-        "#977448",
     ],
 }
 

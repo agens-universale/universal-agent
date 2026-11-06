@@ -1,9 +1,8 @@
-"""TraceScreen счётчик _events_since_last_user_send + _last_user_send_text для cancel-with-undo."""
+"""TraceScreen счётчик _events_since_last_user_send + cancel-with-undo."""
 
-from gc_testkit.develop_files import meta_of
-
-from gc_testkit.tui_support import tui_settings
 import pytest
+from gc_testkit.develop_files import meta_of
+from gc_testkit.tui_support import tui_settings
 
 
 async def _worker_session(tmp_path, tid):
@@ -30,7 +29,6 @@ async def test_counter_resets_on_user_send():
         scr._events_since_last_user_send = 5  # симулируем накопленные события
         scr._on_user_text_submitted("hello")
         assert scr._events_since_last_user_send == 0
-        assert scr._last_user_send_text == "hello"
 
 
 @pytest.mark.asyncio
@@ -254,9 +252,11 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
         scr._cmd_stop()  # 0 событий + пустой input → cancel-with-undo
         await pilot.pause()
 
-        # Тред ещё держит остановленный ход (аренда его сессии): сразу
-        # удалить нельзя — запись в чужой ход дала бы ThreadBusy. Заявка
-        # остаётся, реплика пока на месте.
+        # Тред ещё держит остановленный ход (аренда его сессии), а раннер
+        # уже не бежит: тик опроса удалить не может — запись в чужой ход
+        # дала бы ThreadBusy. Заявка остаётся, реплика пока на месте.
+        scr._run_orphan_cleanups()
+        assert scr._pending_orphan_cleanups
         msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
         assert any(m.get("id") == msg_id for m in msgs)
 
@@ -370,22 +370,23 @@ async def test_cancel_with_undo_skipped_when_events_present():
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
+        running = True
+
         def is_running(self) -> bool:
-            return True
+            return self.running
 
         def stop(self) -> None:
-            pass
+            self.running = False  # ход кончился сразу: итог ровный
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
         scr._on_user_text_submitted("запрос")
         scr._events_since_last_user_send = 2  # агент уже что-то выдал
+        # Без паузы до стопа: тик без треда убрал бы индикатор «думаю».
         scr._show_thinking_indicator(state="thinking")
-        await pilot.pause()
-
         scr._cmd_stop()
-        await pilot.pause()
+        await pilot.pause(0.5)
         # Индикатор остаётся в терминальном состоянии cancelled.
         ind = scr._thinking
         assert ind is not None
@@ -399,11 +400,13 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
     from gc_tui.app import TuiApp
 
     class _FakeRunner:
+        running = True
+
         def is_running(self) -> bool:
-            return True
+            return self.running
 
         def stop(self) -> None:
-            pass
+            self.running = False  # ход кончился сразу: итог ровный
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
@@ -411,12 +414,59 @@ async def test_cancel_with_undo_skipped_when_input_not_empty():
         scr._on_user_text_submitted("первый запрос")
         scr._events_since_last_user_send = 0
         scr.query_one("#cmdinput").text = "новая печать"
+        # Без паузы до стопа: тик без треда убрал бы индикатор «думаю».
         scr._show_thinking_indicator(state="thinking")
-        await pilot.pause()
-
         scr._cmd_stop()
-        await pilot.pause()
+        await pilot.pause(0.5)
         # Индикатор остаётся в терминальном состоянии cancelled.
         ind = scr._thinking
         assert ind is not None
         assert ind._state == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_orphan_cleanup_keeps_claim_on_store_error(tmp_path, caplog):
+    """Сбой хранилища при удалении не снимает заявку: тик повторяет её, в
+    лог — одна запись на заявку; после сбоя удаление проходит."""
+    pytest.importorskip("textual")
+    from gc_testkit.develop_files import load_thread_messages
+    from gc_tui.app import TuiApp
+    from gc_tui.services.stores.file_store import FileTaskStore
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        tid, msg_id = "t1", "m_orphan"
+        store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
+        scr._store = store
+        session = await _worker_session(tmp_path, tid)
+        await session.apersist_batch(
+            [{"role": "user", "content": "x", "id": msg_id}],
+            previous_response_id=None,
+        )
+        await session.arelease_lease()
+        app.tui_state.active_task_id = tid
+        app.active_runner = None
+        scr._pending_orphan_cleanups = [(None, tid, msg_id)]
+
+        real_discard = store.discard_message_by_id
+
+        def broken(*_args, **_kwargs):
+            raise OSError("диск недоступен")
+
+        store.discard_message_by_id = broken
+        with caplog.at_level("WARNING", logger="gc_tui.screens.main"):
+            scr._run_orphan_cleanups()
+            scr._run_orphan_cleanups()
+        assert scr._pending_orphan_cleanups == [(None, tid, msg_id)]
+        assert len(caplog.records) == 1
+
+        store.discard_message_by_id = real_discard
+        scr._run_orphan_cleanups()
+        msgs, _, _ = load_thread_messages(str(tmp_path), "cli", tid)
+        assert all(m.get("id") != msg_id for m in msgs)
+        assert scr._pending_orphan_cleanups == []

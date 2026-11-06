@@ -1,4 +1,4 @@
-"""UserReplyContainer — реплика пользователя с band-фоном и 2px teal кромкой слева."""
+"""UserReplyContainer — реплика пользователя: маркер `› ` на подложке ленты."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import os
 from typing import Literal, NamedTuple, Optional
 
 from gc_core.attachments.model import CLIPBOARD_SOURCE, Attachment
+from gc_core.utils.path_display import display_path
 from rich.cells import cell_len
 from rich.style import Style
 from rich.text import Text
@@ -17,16 +18,30 @@ from textual.widget import Widget
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
+from gc_tui.palette import QUIET_REPLY_INK as _QUIET_INK
+from gc_tui.palette import QUIET_REPLY_MARK as _QUIET_MARK
+from gc_tui.palette import SKILL as _SKILL
 from gc_tui.services.image_chips import chip_of, chip_spans
-from gc_tui.services.path_display import display_path, fit_path
-from gc_tui.services.trace_render import LINE_USER_CLASS, NESTED_USER_PREFIX
+from gc_tui.services.path_display import fit_path
+from gc_tui.services.trace_render import (
+    LINE_USER_CLASS,
+    NESTED_USER_PREFIX,
+    USER_PREFIX,
+)
 from gc_tui.widgets.click_model import ClickModelMixin, confirm_is_active
+from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.reply_layout import LineSpec, ReplyLayout
 from gc_tui.widgets.trace_row import TraceRow
 
 #: Источник картинки из буфера обмена (`Attachment.source`) и его подпись в ленте.
 _FROM_CLIPBOARD = "из буфера"
+
+#: Следствие реплики: скилл не найден, сообщение ушло без него (P3 §2.3).
+_SKILL_MISSING = "скилл {name} не найден — отправлено без него"
+
+#: Подсказка под последней репликой в очереди (P3 §2.4, §10 ответ 2).
+QUEUE_HINT = "в очереди · ↑ — изменить до отправки"
 
 
 def _image_style(color: Optional[str], att: Attachment) -> Style:
@@ -252,28 +267,59 @@ class _ImageLinksMixin:
         return _image_path(self._images, image_id)
 
 
-_State = Literal["normal", "pending", "failed"]
+_State = Literal["normal", "pending", "queued", "failed"]
+
+#: Цвет маркера `› ` по состоянию; не названное — ACCENT.
+_MARKER_COLOR = {"failed": _ERR_RED}
 
 
-class UserReplyContainer(
-    _WrappedReply, _ImageLinksMixin, ClickModelMixin, Widget
-):
-    """Контейнер реплики пользователя.
+class _ReplyBand(_WrappedReply, Widget):
+    """Подложка реплики (`.user-band`): текст, картинки и подсветка — у
+    реплики-владельца."""
 
-    Визуал: фон `$band-bg`, 2px кромка `$accent` слева на всю высоту хода
-    (стили — `.user-band` в `src/tui/styles.tcss`, §2.6 спеки).
+    def __init__(self, owner: UserReplyContainer) -> None:
+        super().__init__(classes="user-band")
+        self._owner = owner
 
-    Состояния (spec 2026-05-26):
-    - `normal`  — обычная (зелёная) кромка, без маркеров.
-    - `pending` — приглушённая teal-кромка (`.user-reply-pending`), без маркеров.
-    - `failed`  — красная кромка (`.user-reply-failed`) + инлайн `[!] ` перед `> `.
+    @property
+    def _images(self) -> tuple[Attachment, ...]:
+        return self._owner._images
 
-    Маркер `> ` — только на первой строке; продолжение многострочной реплики
-    выравнивается без повтора маркера (blockquote-стиль) — под текстом, в том числе
-    при переносе длинной строки (`_WrappedReply`).
+    def _reply_lines(self, width: int) -> list[_ReplyLine]:
+        return self._owner._reply_lines(width)
+
+
+class UserReplyContainer(_ImageLinksMixin, ClickModelMixin, Widget):
+    """Реплика пользователя (спека P3 §2.2): подложка `.user-band` с текстом
+    и строками картинок, под ней — строки следствий `└` на фоне ленты
+    (`add_consequence`).
+
+    Маркер `› ` — в колонке `●` реплики агента, только на первой строке;
+    продолжение — под текстом, в том числе при переносе (`_WrappedReply`).
+    Состояния `normal` / `pending` выглядят одинаково; `failed` — маркер
+    цветом ошибки; `queued` — отправлена во время хода и ждёт впуска
+    ядром (спека P3 §2.4): класс `-queued` (тише подложка и текст), маркер
+    `MUTED`, под подложкой — подсказка `QUEUE_HINT` (`set_queue_hint`).
+    ``message_id`` / ``client_id`` — что снять из очереди; в поле ввода
+    возвращается `plain_text`.
+
+    ``skill`` — полный id скилла с пакетом (`supercoder:brainstorming`;
+    без пакета — просто имя): первым словом после маркера, `/id` цветом
+    `SKILL` (в тихой реплике и у ненайденного — цветом текста);
+    ``skill_error`` — скилл не найден: имя как набрано и следствие
+    `└ ✕ скилл … не найден …` (спека P3 §2.3).
     """
 
-    DEFAULT_CSS = ""  # стили — .user-band / .user-reply-pending / .user-reply-failed в styles.tcss
+    DEFAULT_CSS = """
+    UserReplyContainer .reply-consequence {
+        display: none;
+        width: 1fr;
+        height: auto;
+    }
+    UserReplyContainer.has-consequence .reply-consequence {
+        display: block;
+    }
+    """
     can_focus = True
 
     def __init__(
@@ -283,35 +329,81 @@ class UserReplyContainer(
         event_no: int = 0,
         state: _State = "normal",
         images: tuple[Attachment, ...] = (),
+        skill: str | None = None,
+        skill_error: bool = False,
+        message_id: str | None = None,
+        client_id: str | None = None,
         **kwargs,
     ) -> None:
-        classes = kwargs.pop("classes", "")
-        merged = f"user-band {classes}".strip()
-        if state == "pending":
-            merged += " user-reply-pending"
-        elif state == "failed":
-            merged += " user-reply-failed"
-        super().__init__(classes=merged, **kwargs)
+        super().__init__(**kwargs)
         self._text = text
+        self.message_id = message_id
+        self.client_id = client_id
+        self._skill = skill
+        self._skill_error = skill_error
         self._event_no = event_no
         self._state: _State = state
+        self.set_class(state == "queued", "-queued")
         # Картинки реплики: плашки в тексте и подстроки под ним (визуальный контракт §3).
         self._images: tuple[Attachment, ...] = tuple(images)
+        self._consequences: list[Text] = []
+        self._band = _ReplyBand(self)
+        self._queue_hint = NoSelectStatic(
+            QUEUE_HINT, classes="queue-hint", markup=False
+        )
+        # Следствие реплики в копию выделения не идёт.
+        self._consequence_slot = ConsequenceSlot(
+            0, selectable=False, classes="reply-consequence"
+        )
+        if skill is not None and skill_error:
+            self.add_consequence(
+                Text(_SKILL_MISSING.format(name=skill), style=_ERR_RED)
+            )
+
+    def compose(self):
+        yield self._band
+        yield self._queue_hint
+        yield self._consequence_slot
 
     @property
     def state(self) -> _State:
         return self._state
 
+    @property
+    def plain_text(self) -> str:
+        """Текст реплики без оформления; скилл — `/имя` первым словом.
+        Его же ↑, стоп и конец хода возвращают в поле ввода."""
+        if self._skill is None:
+            return self._text
+        return f"/{self._skill} {self._text}".rstrip()
+
+    @property
+    def has_images(self) -> bool:
+        return bool(self._images)
+
+    @property
+    def images(self) -> tuple[Attachment, ...]:
+        return self._images
+
     def set_state(self, new_state: _State) -> None:
-        """Переключить визуальное состояние реплики."""
-        self.remove_class("user-reply-pending")
-        self.remove_class("user-reply-failed")
-        if new_state == "pending":
-            self.add_class("user-reply-pending")
-        elif new_state == "failed":
-            self.add_class("user-reply-failed")
+        """Переключить состояние реплики: цвет маркера и вид очереди."""
         self._state = new_state
-        self.refresh(layout=True)  # ширина `[!] > ` меняет перенос и высоту
+        self.set_class(new_state == "queued", "-queued")
+        if new_state != "queued":
+            self.set_queue_hint(False)
+        self._band.refresh()
+
+    def set_queue_hint(self, shown: bool) -> None:
+        """Показать или скрыть подсказку очереди под подложкой (на фоне
+        ленты, в колонке текста). В копию выделения она не идёт."""
+        self.set_class(shown, "-queue-hint")
+
+    def add_consequence(self, body: Text) -> None:
+        """Дописать строку `└ body` под подложкой реплики (на фоне ленты).
+        В копию выделения строка не идёт."""
+        self._consequences.append(body)
+        self.add_class("has-consequence")
+        self._consequence_slot.set_bodies(self._consequences)
 
     def set_event_no(self, event_no: int) -> None:
         """Номер события треда: живая реплика получает его при сверке с записью треда —
@@ -322,19 +414,66 @@ class UserReplyContainer(
         """Заменить картинки реплики: pending-реплика при сверке получает копии из
         треда вместо файлов кармана (дизайн картинок §3)."""
         self._images = tuple(images)
-        self.refresh(layout=True)
+        self._band.refresh(layout=True)
 
     def _reply_lines(self, width: int) -> list[_ReplyLine]:
-        lead = Text()
-        if self._state == "failed":
-            lead.append("[!] ", style=_ERR_RED)
-        lead.append("> ")
-        return _build_lines(
+        quiet = self._state == "queued"
+        if quiet:
+            lead = self._quiet_lead()
+        else:
+            color = _MARKER_COLOR.get(self._state, _ACCENT)
+            lead = Text(USER_PREFIX, style=Style(color=color))
+        lines = _build_lines(
             self._text, self._images, self._hover_image_id, lead, width
+        )
+        first = lines[0]
+        if quiet:
+            body = self._quiet_body(first.body)
+        elif self._skill is not None:
+            body = self._skill_head(styled=True).append_text(first.body)
+        else:
+            return lines
+        return [first._replace(body=body), *lines[1:]]
+
+    def _skill_head(self, *, styled: bool = False) -> Text:
+        """`/id ` перед текстом первой строки; без текста — только id.
+        ``styled`` — имя цветом `SKILL`, как в строке вызова `Skill`: скилл
+        применён; ненайденный — цветом текста. Без ``styled`` (тихая
+        реплика) — цвет текста строки. Без скилла — пусто."""
+        if self._skill is None:
+            return Text()
+        style = Style(color=_SKILL) if styled and not self._skill_error else ""
+        head = Text()
+        head.append("/" + self._skill, style=style)
+        if self._text:
+            head.append(" ")
+        return head
+
+    @staticmethod
+    def _quiet_lead() -> Text:
+        """Маркер `› ` «тихой» реплики (решение 17)."""
+        return Text(USER_PREFIX, style=Style(color=_QUIET_MARK))
+
+    def _quiet_body(self, first: Text, ink: str = _QUIET_INK) -> Text:
+        """Первая строка «тихой» реплики: `/имя ` + текст цветом `ink`
+        (по умолчанию `QUIET_REPLY_INK`); плашки картинок сохраняют свои
+        стили поверх."""
+        body = self._skill_head().append_text(first)
+        body.stylize_before(Style(color=ink))
+        return body
+
+    def quiet_line(self, ink: str = _QUIET_INK) -> Text:
+        """Реплика одной строкой «тихим» видом: `›` + `/имя` + текст цветом
+        `ink`. Её первая строка в очереди собирается теми же `_quiet_lead` и
+        `_quiet_body`; липкая реплика над лентой рисует эту строку."""
+        line = self._quiet_lead()
+        line.no_wrap = True
+        return line.append_text(
+            self._quiet_body(Text(" ".join(self._text.split())), ink)
         )
 
     def _repaint_images(self) -> None:
-        self.refresh()
+        self._band.refresh()
 
     def _image_path(self, image_id: str) -> Optional[str]:
         return _image_path(self._images, image_id)
@@ -347,13 +486,18 @@ class UserReplyContainer(
         return OpenEventRequest(self._event_no)
 
 
+def is_queued(widget: object) -> bool:
+    """Реплика ждёт впуска ядром: ленте — прижать к низу (P3 §2.4)."""
+    return isinstance(widget, UserReplyContainer) and widget.state == "queued"
+
+
 def _nested_lines(
     text: str,
     images: tuple[Attachment, ...],
     hover_id: Optional[str],
     width: int,
 ) -> list[_ReplyLine]:
-    """Строки вложенного ответа: колонка текста уже стоит под `> ` — префиксов нет."""
+    """Строки вложенного ответа: колонка текста уже стоит под `› ` — префиксов нет."""
     return _build_lines(text, images, hover_id, Text(), width)
 
 
@@ -412,7 +556,7 @@ class NestedUserReply(_ImageLinksMixin, TraceRow):
         self._images = tuple(images)
 
     def _make_prefix(self) -> Widget:
-        # Маркер `> ` — не текст ответа: в копию не идёт.
+        # Маркер `› ` — не текст ответа: в копию не идёт.
         return NoSelectStatic(
             self._prefix, classes="trace-prefix", markup=False
         )
