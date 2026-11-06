@@ -791,6 +791,9 @@ _HALT_SUMMARIES = {
     CHECK_FAILED_TYPE: "проверка не прошла — агент может повторить",
     "cancelled_by_user": "отменено",
     "not_started_due_to_user_stop": "не запущено (стоп)",
+    "not_started_due_to_session_compact": (
+        "не исполнен: сводка заменила историю"
+    ),
     "step_limit": "лимит шагов",
     "token_limit": "лимит токенов",
     "tool_call_limit": "лимит вызовов",

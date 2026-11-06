@@ -100,6 +100,7 @@ from gc_core.intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
 )
+from gc_core.intent_log.user_turn import append_user_asks_from_messages
 from gc_core.intent_scope.final_answer import (
     amaybe_record_final_answer_intent,
     record_plan_outcome,
@@ -1403,6 +1404,39 @@ async def _aprepare_native_vision(
     return key
 
 
+def _function_call_output_id(message) -> str:
+    if not isinstance(message, dict):
+        return ""
+    if message.get("type") != "function_call_output":
+        return ""
+    call_id = message.get("call_id")
+    if isinstance(call_id, str):
+        return call_id
+    return ""
+
+
+def _answered_call_ids(history) -> set[str]:
+    answered: set[str] = set()
+    for batch in history:
+        for message in batch or []:
+            call_id = _function_call_output_id(message)
+            if call_id:
+                answered.add(call_id)
+    return answered
+
+
+def _keep_answered_invalid_tool_call(history) -> Callable[[Dict], Dict]:
+    """Вызов с уже записанным выводом не подменяем: пара уходит как лежит в треде."""
+    answered = _answered_call_ids(history)
+
+    def factory(message: Dict) -> Dict:
+        if message.get("call_id") in answered:
+            return message
+        return build_invalid_tool_call_feedback_message(message)
+
+    return factory
+
+
 async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
@@ -1466,13 +1500,17 @@ async def _arequest_backend_canonical_once(
         if resolved is not None
         else settings.backend.completions_url
     )
+    state_messages = getattr(state, "messages", []) or []
+    keep_answered = _keep_answered_invalid_tool_call(
+        (state_messages, messages)
+    )
     sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
-        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+        invalid_tool_call_factory=keep_answered,
     )
     sanitized_state_messages = sanitize_messages_for_chat_completions(
-        getattr(state, "messages", []) or [],
-        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+        state_messages,
+        invalid_tool_call_factory=keep_answered,
     )
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
@@ -2345,8 +2383,73 @@ def _track_repeat_errors(
     return is_unknown
 
 
+def _skipped_after_compact_output(tool_name: str) -> str:
+    """Хвост батча после сводки не исполняется. Карточка закрывается отказом."""
+    payload = {
+        "tool": str(tool_name or "unknown_tool"),
+        "ok": False,
+        "status": "not_started_due_to_session_compact",
+        "message": "Tool was not started: session_compact replaced the history.",
+        "error": None,
+        "synthetic": True,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _closings_after_session_compact(
+    done: List[Dict], pending: List[Dict]
+) -> List[Dict]:
+    """Вывод самой сводки и отказы вызовов за ней. В новый трейс не входят."""
+    closing: List[Dict] = []
+    if done:
+        last = done[-1]
+        if (
+            isinstance(last, dict)
+            and last.get("type") == "function_call_output"
+        ):
+            closing.append(last)
+    for call in pending:
+        if not isinstance(call, dict):
+            continue
+        call_id = call.get("call_id")
+        if not call_id:
+            continue
+        closing.append(
+            _function_call_output_message(
+                call_id,
+                _skipped_after_compact_output(str(call.get("name") or "")),
+            )
+        )
+    return closing
+
+
+def _hold_summary_archive(ctx: Any) -> Dict[str, Any]:
+    """Перезапись файла сводкой откладывается, пока в старый тред не лягут выводы."""
+    real = getattr(ctx, "on_summary_applied", None)
+    box: Dict[str, Any] = {"real": real, "event": None, "done": False}
+
+    async def held(event):
+        box["event"] = event
+
+    if real is not None:
+        ctx.on_summary_applied = held
+    return box
+
+
+async def _release_summary_archive(ctx: Any, box: Dict[str, Any]) -> None:
+    if box.get("done"):
+        return
+    box["done"] = True
+    real = box.get("real")
+    event = box.get("event")
+    if real is not None:
+        ctx.on_summary_applied = real
+    if real is not None and event is not None:
+        await await_callback(real(event))
+
+
 def _log_unstarted_after_session_compact(ctx: Any, calls: List[Dict]) -> None:
-    """Хвост батча после сводки не стартует и в трейс не пишется. Только лог."""
+    """Хвост после сводки не стартует. Отказы пишутся отдельно, здесь только лог."""
     parts: List[str] = []
     for call in calls:
         if not isinstance(call, dict):
@@ -2558,6 +2661,70 @@ async def _aexecute_one_batch_call(
     )
 
 
+async def _astep_executed_call(
+    i: int,
+    call: Dict,
+    *,
+    executed: List[Dict],
+    tools_outputs: List[Dict],
+    skip_outputs: List[Dict],
+    state: State,
+    ctx: Any,
+    run_agent_func,
+    persist_messages_callback,
+    batch_trace: Optional[Dict],
+) -> Tuple[bool, bool, int, bool]:
+    """Один вызов батча. Последний флаг — сводка заменила трейс, хвост закрыт."""
+    archive = None
+    if str(call.get("name") or "") == SESSION_COMPACT_TOOL_NAME:
+        archive = _hold_summary_archive(ctx)
+    try:
+        was_invalid, ask_ok, unknown_hit = await _aexecute_one_batch_call(
+            i,
+            call,
+            tools_outputs=tools_outputs,
+            skip_outputs=skip_outputs,
+            state=state,
+            ctx=ctx,
+            run_agent_func=run_agent_func,
+            persist_messages_callback=persist_messages_callback,
+            batch_trace=batch_trace,
+        )
+        if getattr(state, "session_compact_applied", False):
+            await _aclose_after_session_compact(
+                ctx,
+                state,
+                tools_outputs,
+                executed[i + 1 :],
+                persist_messages_callback,
+                archive,
+            )
+            return bool(was_invalid), bool(ask_ok), unknown_hit, True
+        return bool(was_invalid), bool(ask_ok), unknown_hit, False
+    finally:
+        if archive is not None:
+            await _release_summary_archive(ctx, archive)
+
+
+async def _aclose_after_session_compact(
+    ctx: Any,
+    state: State,
+    tools_outputs: List[Dict],
+    pending: List[Dict],
+    persist_messages_callback,
+    archive: Dict[str, Any] | None,
+) -> None:
+    """Выводы сводки и хвоста — в старый тред, затем файл заменяется сводкой."""
+    await _maybe_persist(
+        persist_messages_callback,
+        _closings_after_session_compact(tools_outputs, pending),
+        state,
+    )
+    if archive is not None:
+        await _release_summary_archive(ctx, archive)
+    _log_unstarted_after_session_compact(ctx, pending)
+
+
 async def _arun_executed_tool_batch(
     executed: List[Dict],
     skip_outputs: List[Dict],
@@ -2597,9 +2764,15 @@ async def _arun_executed_tool_batch(
         if ended is not None:
             tools_outputs.append(ended)
             continue
-        was_invalid, ask_ok, unknown_hit = await _aexecute_one_batch_call(
+        (
+            was_invalid,
+            ask_ok,
+            unknown_hit,
+            compacted,
+        ) = await _astep_executed_call(
             i,
             call,
+            executed=executed,
             tools_outputs=tools_outputs,
             skip_outputs=skip_outputs,
             state=state,
@@ -2610,9 +2783,7 @@ async def _arun_executed_tool_batch(
         )
         invalid_in_batch += int(was_invalid)
         unknown_in_batch += unknown_hit
-        if getattr(state, "session_compact_applied", False):
-            # Сводка заменила трейс. Хвост батча не стартует и выходов не получает.
-            _log_unstarted_after_session_compact(ctx, executed[i + 1 :])
+        if compacted:
             break
         if ask_ok:
             successful_ask_human = True
@@ -2833,6 +3004,9 @@ class _AgentLoop:
         self.max_unknown_tool_repeats = int(
             agent_cfg.max_unknown_tool_repeats or 5
         )
+        # Отказ судьи финиша ждёт подсказки и пишется на следующем шаге.
+        # Стоп этот шаг отменяет — вывод закрываем отдельно.
+        self._pending_finish_output: Optional[Dict] = None
         state.last_unknown_tool_name = None
         state.unknown_tool_repeat_count = 0
         state.last_batch_unknown_tool_count = 0
@@ -2843,6 +3017,27 @@ class _AgentLoop:
         await _maybe_persist(
             self.persist_messages_callback, messages, self.state
         )
+        self._drop_pending_finish(messages)
+
+    def _drop_pending_finish(self, messages: List[Dict]) -> None:
+        """Вывод финиша уже ушёл обычной записью — повторно при Стопе не пишем."""
+        pending = self._pending_finish_output
+        if pending is None or is_persist_discarded(self.state):
+            return
+        if any(message is pending for message in messages or []):
+            self._pending_finish_output = None
+
+    async def _aclose_pending_finish_on_stop(self) -> None:
+        """Стоп не дожидается подсказок: закрыть turn_finish тем, что уже в state."""
+        pending = self._pending_finish_output
+        self._pending_finish_output = None
+        if not isinstance(pending, dict):
+            return
+        await _commit_user_stop_pairing(
+            self.state,
+            [pending],
+            self.persist_messages_callback,
+        )
 
     # ------------------------------------------------------------------ loop
     async def arun(self, messages) -> Union[str, None]:
@@ -2850,6 +3045,7 @@ class _AgentLoop:
         first_poll = True
         while True:
             if self.check_stop is not None and self.check_stop():
+                await self._aclose_pending_finish_on_stop()
                 self._nudges.clear(state)
                 return None
             messages = await self._apoll_pending(
@@ -2946,7 +3142,9 @@ class _AgentLoop:
             self._nudges.clear(self.state)
             return _Outcome(result=None)
         except Exception as backend_exc:
-            if not await self._atry_recover_context_overflow(backend_exc):
+            if not await self._atry_recover_context_overflow(
+                backend_exc, messages, mode
+            ):
                 raise
             # Тот же шаг: подсказки уже в messages, notices_sent не снимаем.
             return self._overflow_resume(messages, mode)
@@ -2980,22 +3178,24 @@ class _AgentLoop:
         if backend_mode == "chat_completions":
             await aprepare_main_call(self.state, self.ctx)
             if self._stopped_before_call():
-                await self._nudges.apublish(
-                    messages,
-                    state=self.state,
-                    apersist=self._anudge_persist,
-                )
+                await self._apublish_held_on_stop(messages)
                 return None
             if await self._apre_backend_compaction(messages, mode):
                 self._drop_pre_summary_output()
             if self._stopped_before_call():
-                await self._nudges.apublish(
-                    messages,
-                    state=self.state,
-                    apersist=self._anudge_persist,
-                )
+                await self._apublish_held_on_stop(messages)
                 return None
         return await self._aflush_nudges(messages, backend_mode)
+
+    async def _apublish_held_on_stop(self, messages: List[Dict]) -> None:
+        """Стоп после prepare: обычная запись вывода отбрасывается, закрытие — нет."""
+        if is_persist_discarded(self.state):
+            await self._aclose_pending_finish_on_stop()
+        await self._nudges.apublish(
+            messages,
+            state=self.state,
+            apersist=self._anudge_persist,
+        )
 
     def _stopped_before_call(self) -> bool:
         """Стоп во время судьи пары или сжатия — как stop между шагами."""
@@ -3134,7 +3334,7 @@ class _AgentLoop:
         ]
 
     async def _atry_recover_context_overflow(
-        self, backend_exc: Exception
+        self, backend_exc: Exception, messages, mode: str
     ) -> bool:
         # Переполнение контекстного окна модели → не крашимся: форс-сжатие
         # истории (безусловное, как /compact) и повтор запроса со сжатым
@@ -3155,7 +3355,11 @@ class _AgentLoop:
         )
         previous = getattr(self.state, "messages", None)
         try:
-            applied = await _acall_blocking_hook(self.force_compact_hook)
+            # Батч и режим — чтобы сводка вернула реплики и картинки шага.
+            # Ответ тула хук не оставляет: вызов уже уйдёт в сводку.
+            applied = await _acall_blocking_hook(
+                self.force_compact_hook, messages, mode
+            )
         finally:
             if self._history_replaced(previous):
                 self._drop_pre_summary_output()
@@ -3337,9 +3541,16 @@ class _AgentLoop:
 
         Подсказки старого диалога тоже не собираем заново: ближайший запрос
         идёт по новой истории. Новое техническое сообщение (объявление
-        режима) может добавиться следом.
+        режима) может добавиться следом. Реплика из отложенного хвоста на
+        диск уже не попадёт — в намерения открытого хода её пишем до сброса.
         """
         self._discard_nudges_after_summary(skip_fill=True)
+        state = self.state
+        state.current_user_intent = append_user_asks_from_messages(
+            state.current_user_intent,
+            self._nudges.followers,
+            user_turn_seq=state.user_turn_seq,
+        )
         self._nudges.carrier = None
         self._nudges.followers = []
 
@@ -3573,6 +3784,15 @@ class _AgentLoop:
             finish_call_id,
             persist_output=False,
         )
+        return await self._aapply_finish_decision(
+            messages, decision, finish_arguments, finish_new, tail_new
+        )
+
+    async def _aapply_finish_decision(
+        self, messages, decision, finish_arguments, finish_new, tail_new
+    ) -> _Outcome:
+        """Reject ждёт подсказки. Принятый финиш закрывает ход сразу."""
+        state = self.state
         if decision.outcome == "reject":
             state.tick_signals.add(FINISH_REJECT)
             if tail_new:
@@ -3582,6 +3802,9 @@ class _AgentLoop:
                 )
             # Вердикт уже в output turn_finish. Reject → ход продолжается:
             # flush буфера на следующем prepare в этот finish output.
+            # Стоп prepare не дождётся — вывод закроет выход из цикла.
+            if finish_new:
+                self._pending_finish_output = finish_new[0]
             return _Outcome(messages, completed_step=True)
         # accept / fail_open_error / fail_open_limit / прочее —
         # все завершают ход одинаково.
@@ -3593,9 +3816,14 @@ class _AgentLoop:
             )
         if finish_new:
             # Accept: наджи не нужны — clear, output без harness.
+            # Стоп во время судьи уже выставил discard: обычная запись
+            # пропала бы, вызов остался бы без ответа.
             self._nudges.buffer.clear()
             await _maybe_persist(
-                self.persist_messages_callback, finish_new, state
+                self.persist_messages_callback,
+                finish_new,
+                state,
+                pairing=is_persist_discarded(state),
             )
         state.steps += 1
         state.flush_current_user_intent()
@@ -3898,7 +4126,7 @@ async def arun_agent(
         Callable[[List[Dict], str], None]
     ] = None,
     turn_end_compaction_hook: Optional[Callable[[], None]] = None,
-    force_compact_hook: Optional[Callable[[], None]] = None,
+    force_compact_hook: Optional[Callable[..., Any]] = None,
     get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,

@@ -379,6 +379,7 @@ class WorkflowOperations:
             data,
             resource_owner=self.resource_owner,
             child_context=self.child_context,
+            trace_id=self.start.trace_id,
         )
         level = (
             settings
