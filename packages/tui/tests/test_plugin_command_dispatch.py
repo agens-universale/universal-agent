@@ -207,3 +207,67 @@ async def test_tui_word_in_other_layout_beats_plugin_command(tmp_path):
         await pilot.pause(0.3)
         assert new_calls == [True]
         assert captured == []
+
+
+class _AskingRunner:
+    """Живой владелец вопроса агента: ответ уходит ему, нового хода нет."""
+
+    def __init__(self):
+        self.answers = []
+
+    def is_running(self):
+        return True
+
+    def submit_ask_human_reply(self, text):
+        self.answers.append(text)
+
+
+@pytest.mark.asyncio
+async def test_answer_to_live_question_is_not_translated(tmp_path):
+    """Ответ на вопрос агента уходит как набран: перевод раскладки — только
+    у нового запроса команде плагина."""
+    pytest.importorskip("textual")
+    from gc_tui.services.keyboard_layout import swap_layout
+    from gc_tui.state import AskHumanState
+
+    app = _app(tmp_path, [])
+    typed = f"/{swap_layout('review')} main.py"
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "other"}]
+        owner = _AskingRunner()
+        pilot.app.active_runner = owner
+        scr._ask_human_owner_runner = owner
+        pilot.app.tui_state.ask_human_state = AskHumanState(
+            call_id="c1", question="Q?"
+        )
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = typed
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        assert owner.answers == [typed]
+
+
+@pytest.mark.asyncio
+async def test_question_without_owner_goes_as_new_request_translated(
+    tmp_path,
+):
+    """Владельца вопроса нет — набранное уходит новым ходом, как обычный
+    запрос: команда плагина в нужной раскладке."""
+    pytest.importorskip("textual")
+    from gc_tui.services.keyboard_layout import swap_layout
+    from gc_tui.state import AskHumanState
+
+    captured = []
+    app = _app(tmp_path, captured)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "other"}]
+        pilot.app.tui_state.ask_human_state = AskHumanState(
+            call_id="c1", question="Q?"
+        )
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = f"/{swap_layout('review')} main.py"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        assert captured == [["/review main.py"]]

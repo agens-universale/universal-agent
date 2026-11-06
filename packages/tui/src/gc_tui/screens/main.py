@@ -8125,7 +8125,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         if is_command and text.startswith("/"):
             await self._handle_command(text[1:])
             return
-        text = self._plugin_command_text(text)
 
         # Ask-human mode: input is the answer to the agent's question.
         if self.app.tui_state.ask_human_state is not None:
@@ -8180,6 +8179,9 @@ class TraceScreen(TraceFollowMixin, Screen):
                 self._stop_and_replace_runner()
             # fall-through ↓ к "continue thread": тот же active_task_id, start(answer).
 
+        # Новый запрос (не ответ живому вопросу) — команда плагина в нужной
+        # раскладке; ответ агенту уходит как набран.
+        text = self._plugin_command_text(text)
         if is_command and text.startswith("!"):
             self._handle_bang_shell(text)
             return
