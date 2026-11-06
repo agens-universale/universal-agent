@@ -177,7 +177,7 @@ def test_return_probe_restores_waiting_with_previous_reason():
     b.trip("a", "ReadError")
     b.allow_probe()
     assert b.take_probe("a") is True
-    b.return_probe("a", "ReadError")
+    b.return_probe("a")
     assert b.is_open("a") is False
     assert b.known_unavailable("a") == "ReadError"
     assert b.take_probe("a") is True
@@ -189,7 +189,7 @@ def test_return_probe_after_trip_changes_nothing():
     b.allow_probe()
     assert b.take_probe("a") is True
     b.trip("a", "new")
-    b.return_probe("a", "old")
+    b.return_probe("a")
     assert b.open_reason("a") == "new"
     assert b.take_probe("a") is False
 
@@ -211,6 +211,47 @@ def test_copy_keeps_both_states():
     assert c is not b
     assert c.take_probe("a") is True and c.is_open("c") is True
     assert b.take_probe("a") is True  # копия независима
+
+
+def test_copy_keeps_running_probe_as_waiting():
+    """Стоп во время пробы: копия окна не считает модель исправной, а
+    возврат права в прежний объект копию не трогает."""
+    b = CircuitBreaker()
+    b.trip("a", "ReadError")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    c = b.copy()
+    b.return_probe("a")
+    assert c.known_unavailable("a") == "ReadError"
+    assert c.take_probe("a") is True
+
+
+def test_finished_probe_is_not_copied():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    b.finish_probe("a")
+    assert b.copy().known_unavailable("a") is None
+
+
+def test_trip_ends_running_probe():
+    b = CircuitBreaker()
+    b.trip("a", "old")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    b.trip("a", "new")
+    c = b.copy()
+    assert c.open_reason("a") == "new"
+    assert c.take_probe("a") is False
+
+
+def test_clear_open_drops_open_aliases_without_probe_rights():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.clear_open()
+    assert b.known_unavailable("a") is None
+    assert b.take_probe("a") is False
 
 
 def test_take_probe_is_atomic_across_threads():

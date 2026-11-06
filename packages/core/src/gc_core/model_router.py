@@ -171,6 +171,7 @@ class CircuitBreaker:
 
     Два состояния алиаса: открыт (`_tripped`, резолв отказывает мгновенно) и
     ждёт пробы (`_probe`, резолв пропускает, первое обращение — проба).
+    Взятая проба до ответа — в `_running`: копия переносит её как ждущую.
     Все методы идут под одним замком: петля детей живёт в другом потоке.
     `snapshot()`/`restore()` работают только с открытыми алиасами.
     """
@@ -179,6 +180,7 @@ class CircuitBreaker:
         self._lock = threading.Lock()
         self._tripped: dict[str, str] = {}
         self._probe: dict[str, str] = {}
+        self._running: dict[str, str] = {}
 
     def is_open(self, alias: str) -> bool:
         with self._lock:
@@ -192,6 +194,7 @@ class CircuitBreaker:
     def trip(self, alias: str, reason: str) -> None:
         with self._lock:
             self._probe.pop(alias, None)
+            self._running.pop(alias, None)
             self._tripped[alias] = reason
 
     def allow_probe(self) -> None:
@@ -200,17 +203,32 @@ class CircuitBreaker:
             self._probe.update(self._tripped)
             self._tripped.clear()
 
+    def clear_open(self) -> None:
+        """Снять отметки открытых алиасов без права на пробу."""
+        with self._lock:
+            self._tripped.clear()
+
     def take_probe(self, alias: str) -> bool:
         """Атомарно: True, если этот вызов и есть проба алиаса."""
         with self._lock:
-            return self._probe.pop(alias, None) is not None
+            reason = self._probe.pop(alias, None)
+            if reason is None:
+                return False
+            self._running[alias] = reason
+            return True
 
-    def return_probe(self, alias: str, reason: str) -> None:
+    def return_probe(self, alias: str) -> None:
         """Вернуть право, взятое вызовом, который не дождался ответа.
         Открытый за это время алиас не трогаем: `trip` свежее."""
         with self._lock:
-            if alias not in self._tripped:
+            reason = self._running.pop(alias, None)
+            if reason is not None:
                 self._probe[alias] = reason
+
+    def finish_probe(self, alias: str) -> None:
+        """Проба получила ответ: право израсходовано."""
+        with self._lock:
+            self._running.pop(alias, None)
 
     def known_unavailable(self, alias: str) -> str | None:
         """Причина, если алиас открыт или ждёт пробы, иначе None."""
@@ -233,7 +251,7 @@ class CircuitBreaker:
         with self._lock:
             clone = CircuitBreaker()
             clone._tripped = dict(self._tripped)
-            clone._probe = dict(self._probe)
+            clone._probe = {**self._running, **self._probe}
             return clone
 
     def replace_from(self, snapshot: dict) -> None:
@@ -243,11 +261,13 @@ class CircuitBreaker:
         with self._lock:
             self._tripped = dict(snapshot or {})
             self._probe.clear()
+            self._running.clear()
 
     def reset(self) -> None:
         with self._lock:
             self._tripped.clear()
             self._probe.clear()
+            self._running.clear()
 
 
 def _level_phrase(requested_level: str, resolved_level: str) -> str:
@@ -665,14 +685,16 @@ class ModelRouter:
         if alias is None:
             yield False
             return
-        reason = self.breaker.known_unavailable(alias)
-        probe = reason is not None and self.breaker.take_probe(alias)
+        probe = self.breaker.take_probe(alias)
         try:
             yield probe
         except _CALL_STOPS:
             if probe:
-                self.breaker.return_probe(alias, reason)
+                self.breaker.return_probe(alias)
             raise
+        finally:
+            if probe:
+                self.breaker.finish_probe(alias)
 
     def _resolve_legacy(self, source: str) -> ResolvedModel:
         return ResolvedModel(

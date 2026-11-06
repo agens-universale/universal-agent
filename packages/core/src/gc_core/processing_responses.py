@@ -917,7 +917,8 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     model-breaker §2.2): резолв их пропускает, первый основной запрос к
     алиасу идёт к модели одним HTTP-запросом и при провале снова открывает
     его до следующего хода главного. Право выдаётся только главному трейсу и
-    только если durable-история знает `MODEL_BREAKER_PROBE_PATCH`.
+    только если durable-история знает `MODEL_BREAKER_PROBE_PATCH`; в
+    durable-исполнении пробы нет — отметки просто снимаются.
 
     Без маркера (и у ребёнка, который права не получает) открытый алиас в
     ручном режиме прилетает из `begin_turn` сырым `AliasCircuitOpenError`;
@@ -944,12 +945,23 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
 
 
 def _allow_breaker_probe(ctx: Any) -> None:
-    """Право на пробу открытым алиасам — если durable-история знает маркер."""
+    """Право на пробу открытым алиасам — если durable-история знает маркер.
+
+    В durable-исполнении пробы нет: запрос к модели там — activity, которую
+    Temporal повторяет по своей политике (по умолчанию без ограничения
+    попыток), и ход ждёт восстановления модели. Начало хода только снимает
+    отметки, activity получает пустой снимок и шлёт обычный запрос."""
     router = getattr(ctx, "model_router", None)
     if router is None:
         return
     execution_patch = port(ctx, "execution_patch")
-    if execution_patch is None or execution_patch(MODEL_BREAKER_PROBE_PATCH):
+    if execution_patch is not None and not execution_patch(
+        MODEL_BREAKER_PROBE_PATCH
+    ):
+        return
+    if getattr(ctx, "durable_execution", False):
+        router.breaker.clear_open()
+    else:
         router.breaker.allow_probe()
 
 

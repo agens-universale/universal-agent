@@ -417,3 +417,19 @@ async def test_stop_detach_copies_probe_state(tmp_path):
         assert app._circuit_breaker is not old
         assert app._circuit_breaker.take_probe("flash") is True
         assert old.take_probe("flash") is True
+
+
+@pytest.mark.asyncio
+async def test_stop_during_probe_keeps_model_waiting_in_window(tmp_path):
+    """Стоп посреди пробы: право уже взято запросом, отмена вернёт его
+    отвязанному объекту — окно всё равно ждёт пробу, а не долгие ретраи."""
+    async with _app(tmp_path).run_test() as pilot:
+        app = pilot.app
+        old = app._circuit_breaker
+        old.trip("flash", "x")
+        old.allow_probe()
+        assert old.take_probe("flash") is True
+        app.detach_run_sinks()
+        old.return_probe("flash")
+        assert app._circuit_breaker.known_unavailable("flash") == "x"
+        assert app._circuit_breaker.take_probe("flash") is True

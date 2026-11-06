@@ -4,6 +4,8 @@
 
 import asyncio
 import json
+import time
+import types
 
 import httpx
 import pytest
@@ -304,6 +306,22 @@ def test_without_patch_marker_turn_start_fails_as_before():
     with pytest.raises(MainModelUnavailable):
         pr.begin_turn_main_trace(_state(ctx), ctx)
     assert ctx.model_router.breaker.is_open("mid") is True
+
+
+def test_durable_turn_start_clears_open_alias_without_probe():
+    """Temporal: ход ждёт модель по политике повторов activity, пробы нет —
+    начало хода снимает отметку, и activity получает пустой снимок."""
+    ctx = _ctx()
+    s = _state(ctx)
+    ctx.durable_execution = True
+    ctx.execution_patch = lambda patch: True
+    ctx.operations = types.SimpleNamespace(monotonic=time.monotonic)
+    breaker = ctx.model_router.breaker
+    breaker.trip("mid", "ReadError")
+    pr.begin_turn_main_trace(s, ctx)
+    assert breaker.snapshot() == {}
+    assert breaker.known_unavailable("mid") is None
+    assert breaker.take_probe("mid") is False
 
 
 def test_auto_failed_probe_reroutes_in_same_tick(monkeypatch):
