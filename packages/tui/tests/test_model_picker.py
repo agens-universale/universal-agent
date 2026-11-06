@@ -111,8 +111,8 @@ def test_picker_dots_right_aligned_to_name(tmp_path, monkeypatch):
     }
     giga = next(o for o in options if o.value == "giga-max")
     assert [str(s.style) for s in giga.lead.spans] == [
-        p.RUN_COLOR,
         p.ACCENT,
+        p.RUN_COLOR,
     ]
     picker = ArgPicker(list(options))
     rows = {

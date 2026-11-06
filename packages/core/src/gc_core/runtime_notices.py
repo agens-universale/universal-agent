@@ -25,11 +25,12 @@ _notices: List[Notice] = []
 _unread_from_index: int = 0
 _listeners: List[Callable[[], None]] = []
 
+# Ярлыки запросов, у которых нет служебного потребителя реестра. Служебного
+# потребителя уведомление называет его именем (`who`, словарь ядра
+# `CONSUMER_RU_LABEL`), своей копии имён здесь нет.
 _REQUEST_LABEL_RU = {
     "main_agent": "основной агент",
     "chat_completion": "вспомогательный LLM",
-    "intent_guard_finish_gate": "судья (finish gate)",
-    "intent_guard_finish_gate_retry": "судья (finish gate, retry)",
     "subagent_special_agent": "special agent (генерация роли)",
 }
 
@@ -38,17 +39,7 @@ def _label_ru(request_label: Optional[str]) -> str:
     label = (request_label or "").strip()
     if not label:
         return "LLM"
-    if label in _REQUEST_LABEL_RU:
-        return _REQUEST_LABEL_RU[label]
-    # Это ЯРЛЫК ЗАПРОСА, а не имя модуля: его выдаёт intent_scope/summarizer.py
-    # как f"intent_scope:{tool_name}". При разбиении на пакеты кодмод дописал
-    # сюда префикс gc_core., приняв литерал за модуль, — ветка стала мёртвой, и
-    # пользователь вместо «intent scope» видел сырой ярлык.
-    if label.startswith("intent_scope:"):
-        return "intent scope"
-    if label.startswith("summary"):
-        return "суммаризация"
-    return label
+    return _REQUEST_LABEL_RU.get(label, label)
 
 
 def register_runtime_notices_listener(callback: Callable[[], None]) -> None:
@@ -186,10 +177,12 @@ def notice_from_llm_failure(
     *,
     request_label: Optional[str] = None,
     url: Optional[str] = None,
+    who: Optional[str] = None,
 ) -> Notice:
-    """Собрать Notice из исключения backend chat/completions."""
+    """Собрать Notice из исключения backend chat/completions. `who` — имя
+    потребителя модели; без него — подпись ярлыка запроса."""
     status, detail = _extract_http_detail(exc)
-    who = _label_ru(request_label)
+    who = who or _label_ru(request_label)
     if status is not None:
         headline = f"Ошибка LLM ({who}): HTTP {status}."
     else:
@@ -212,12 +205,15 @@ def maybe_push_llm_failure_notice(
     *,
     request_label: Optional[str] = None,
     url: Optional[str] = None,
+    who: Optional[str] = None,
     enabled: bool = True,
 ) -> None:
     if not enabled:
         return
     push_runtime_notice(
-        notice_from_llm_failure(exc, request_label=request_label, url=url)
+        notice_from_llm_failure(
+            exc, request_label=request_label, url=url, who=who
+        )
     )
 
 

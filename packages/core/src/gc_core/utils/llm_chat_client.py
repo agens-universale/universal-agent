@@ -32,14 +32,15 @@ from gc_core.utils.connect_backend import (
 )
 from gc_core.utils.data_urls import mask_data_urls
 
-# РУССКИЕ ПОДПИСИ служебных потребителей (спека §5.1/§8) для notice деградации
-# «модель привязки недоступна → повтор активной моделью».
+# Человеческие имена служебных потребителей модели: notice деградации «модель
+# привязки недоступна → повтор активной моделью» (спека §5.1/§8) и витрины
+# фронтендов берут их отсюда — источник один.
 CONSUMER_RU_LABEL = {
-    "finish_gate": "судья finish_gate",
-    "text_answer_judge": "судья text_answer_judge",
-    "command_judge": "судья command_judge",
+    "finish_gate": "самопроверка выполнения задачи",
+    "text_answer_judge": "формат ответа",
+    "command_judge": "судья команд",
     "summary": "суммаризация",
-    "intent_scope": "intent scope",
+    "intent_scope": "журнал намерений",
     "memory_compaction": "компакция памяти",
     "vision": "модель для зрения",
     "routing_judge": "судья автовыбора",
@@ -374,6 +375,7 @@ async def _asend_chat_completion_text(
     messages: List[Dict[str, str]],
     max_tokens: int,
     request_label: str,
+    consumer: str,
     payload_overrides: Optional[Dict[str, Any]],
     resolved: Optional[ResolvedModel],
     before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
@@ -472,6 +474,7 @@ async def _asend_chat_completion_text(
             salvage_reasoning=False,
             logger=getattr(ctx, "logger", None),
             request_label=request_label,
+            notice_who=CONSUMER_RU_LABEL.get(consumer),
             runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
             notice_url=url,
             timeout=timeout,
@@ -631,6 +634,7 @@ async def _arequest_chat_completion_outcome_local(
         messages=messages,
         max_tokens=max_tokens,
         request_label=request_label,
+        consumer=consumer,
         payload_overrides=payload_overrides,
         before_send=before_send,
         isolated_timeout_sec=isolated_timeout_sec,

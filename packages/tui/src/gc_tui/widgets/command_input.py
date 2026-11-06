@@ -35,6 +35,7 @@ from gc_tui.services.paste_chips import (
     token_spans,
 )
 from gc_tui.widgets.chip_wrap import ChipWrapDocument
+from gc_tui.widgets.click_model import opens_event
 
 #: Плашка на строке: (строка, начало, конец) — столбцы, как у `token_spans`.
 _Span = tuple[int, int, int]
@@ -665,9 +666,10 @@ class CommandTextArea(TextArea):
         Обрабатываем сами — UX как в обычном терминале. Остальные кнопки —
         штатное поведение TextArea (позиционирование курсора / выделение).
         """
-        # Ctrl+клик по image-плашке — открыть картинку (дизайн картинок §20.2).
+        # Ctrl+клик (на Mac — Cmd+клик) по image-плашке — открыть картинку
+        # (дизайн картинок §20.2); модификатор — тот же, что у ленты.
         # Раньше правой кнопки: часть терминалов отдаёт Ctrl+клик как button 3.
-        if event.ctrl:
+        if opens_event(event):
             att = self._image_chip_at(self.get_target_document_location(event))
             if att is not None:
                 event.stop()

@@ -58,6 +58,8 @@ from textual.widgets import Static
 
 from gc_tui import textual_compat
 from gc_tui.models import ResultOutcome
+from gc_tui.palette import DIFF_ADD_INK as _DIFF_ADD
+from gc_tui.palette import DIFF_DEL_INK as _DIFF_DEL
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import INK as _INK
@@ -87,7 +89,7 @@ from gc_tui.widgets.block_panel import (
     _copy_request,
     copy_glyph,
 )
-from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.click_model import ClickModelMixin, opens_event
 from gc_tui.widgets.consequence_line import ConsequenceSlot
 from gc_tui.widgets.no_select import NoSelectStatic
 from gc_tui.widgets.ran_output import OutputTexts, RanParts, RanPhrase
@@ -123,6 +125,8 @@ LOOK_STYLE: dict[str, str] = {
     "dim": _DIM,
     "ink": _INK,
     "muted": _MUTED,
+    "add": _DIFF_ADD,
+    "del": _DIFF_DEL,
 }
 
 
@@ -881,7 +885,7 @@ class ToolCallRow(CopyFeedbackMixin, ClickModelMixin, Widget):
             self._toggle_parts(widget.toggle_key)
             return
         if (
-            not event.ctrl
+            not opens_event(event)
             and widget is not None
             and widget.has_class("block-copy")
         ):

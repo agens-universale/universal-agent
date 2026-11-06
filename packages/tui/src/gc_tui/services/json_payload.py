@@ -5,7 +5,7 @@ Payload рекурсивно разворачивается (unfold_payload): JS
 распарсенным значением, чтобы вложенный экранированный JSON (stored_tool_output.content
 и т.п.) не оставался однострочной колбасой. Многострочные строковые значения
 рендерятся блоком с реальными переносами и левой полосой ``│ ``; JSON-каркас —
-pretty-print + rich.syntax(solarized-dark). Markdown не интерпретируем:
+pretty-print + rich.syntax (тема блоков кода ленты). Markdown не интерпретируем:
 отладочный экран показывает сырые данные.
 """
 
@@ -23,6 +23,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from gc_tui.palette import BLOCK_BG, CODE_BLOCK
+from gc_tui.services.code_render import code_theme
 
 _MAX_UNFOLD_DEPTH = 5
 
@@ -234,15 +235,12 @@ def _highlighted(pretty_json: str) -> Text:
     # word_wrap=True: длинные строки JSON-payload (stdout/stderr из execute_command,
     # arguments с длинными command, content из read_file) переносятся на следующую
     # визуальную линию, иначе обрезаются за правым краем без горизонтального скролла.
-    # Альтернативы темы (pygments built-in, для тёмного фона):
-    #   приглушённые: solarized-dark (текущее), nord, gruvbox-dark, zenburn,
-    #                 one-dark, material, paraiso-dark, lightbulb, stata-dark
-    #   контрастные:  monokai, dracula, github-dark, native, fruity, inkpot
-    # Если хочется почти-без-цвета: bw (black/white), friendly_grayscale.
+    # Тема — общая с блоками кода ленты (`code_render.code_theme`; до
+    # 2026-11-01 — solarized-dark).
     syntax = Syntax(
         "",
         lexer="json",
-        theme="solarized-dark",  # solarized-dark | monokai | nord
+        theme=code_theme(),
         background_color=BLOCK_BG,
         word_wrap=True,
     )

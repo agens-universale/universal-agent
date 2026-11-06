@@ -22,6 +22,8 @@ from gc_tui.form_frame import (
     scroll_body,
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
+from gc_tui.services.column_row import ColumnRow
+from gc_tui.widgets.column_static import ColumnStatic
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SEL_PU_SCROLL = "#pu-scroll"
@@ -155,7 +157,7 @@ class PostUpdateScreen(Screen):
                     if self._items:
                         yield Static(_HINT, classes="post-update-hint pu-hint")
                     for i, key in enumerate(self._items):
-                        yield Static(
+                        yield ColumnStatic(
                             self._row_text(key, i), classes="post-update-item"
                         )
             yield Static(self._footer_text(), id="footer", markup=False)
@@ -190,7 +192,9 @@ class PostUpdateScreen(Screen):
             t.append(f"Агент обновлён · v{new}")
         return t
 
-    def _row_text(self, key: str, i: int) -> Text:
+    def _row_text(self, key: str, i: int) -> ColumnRow | Text:
+        """Хвост строки (список MCP, версии движка) переносится в своей
+        колонке (дизайн-код §10)."""
         t = Text()
         t.append("▸" if i == self._idx else " ", style=ACCENT)
         checked = key in self._marked
@@ -198,14 +202,19 @@ class PostUpdateScreen(Screen):
             "[●] " if checked else "[ ] ", style=INK if checked else DEEP_DIM
         )
         if key == "mcp":
-            t.append("Обновить подключённые MCP")
-            t.append("   ")
-            t.append(", ".join(self._mcp_outdated), style=DIM)
+            t.append("Обновить подключённые MCP   ")
+            names = ", ".join(self._mcp_outdated).split(" ")
+            return ColumnRow(
+                t,
+                [
+                    Text((" " if j else "") + n, style=DIM)
+                    for j, n in enumerate(names)
+                ],
+            )
         elif key == "voice":
             have, want = self._voice_update
-            t.append("Обновить голосовой движок")
-            t.append("   ")
-            t.append(f"{have} → {want}", style=DIM)
+            t.append("Обновить голосовой движок   ")
+            return ColumnRow(t, [Text(f"{have} → {want}", style=DIM)])
         else:
             t.append("Обновить config.yml до текущей версии")
         return t
@@ -231,7 +240,9 @@ class PostUpdateScreen(Screen):
             frame.mount(Static(_HINT, classes="post-update-hint pu-hint"))
         for i, key in enumerate(self._items):
             frame.mount(
-                Static(self._row_text(key, i), classes="post-update-item")
+                ColumnStatic(
+                    self._row_text(key, i), classes="post-update-item"
+                )
             )
         self._sync_footer()
         # Полный футер длиннее и на узком окне занимает больше строк — потолок

@@ -18,9 +18,9 @@ def test_cycle_value_wraps_around():
     def cycle(name, current, direction):
         return cycle_in(TOGGLES[name].names, current, direction)
 
-    assert cycle("gate", "on", 1) == "off"  # (idx2+1)%3 -> off
-    assert cycle("gate", "off", 1) == "smart"  # было "on" -> теперь "smart"
-    assert cycle("gate", "smart", 1) == "on"
+    assert cycle("gate", "always", 1) == "off"  # (idx2+1)%3 -> off
+    assert cycle("gate", "off", 1) == "smart"
+    assert cycle("gate", "smart", 1) == "always"
     assert cycle("answers", "judge", 1) == "deny"
     assert cycle("answers", "allow", 1) == "judge"
     assert cycle("answers", "deny", 1) == "allow"
@@ -46,13 +46,13 @@ def test_palette_renders_toggle_state(monkeypatch):
     reg.register(Command("help", (), "", "справка"))
     reg.register(Command("gate", (), "", "финиш-гейт", is_toggle=True))
     palette = CommandPalette(
-        reg, initial_filter="", toggle_state=lambda name: "on"
+        reg, initial_filter="", toggle_state=lambda name: "always"
     )
 
     gate_row = palette._format_toggle_row(reg.lookup("gate")).plain
     help_row = palette._format_row(reg.lookup("help"))
 
-    assert "●" in gate_row and gate_row.rstrip().endswith("on")
+    assert "●" in gate_row and gate_row.rstrip().endswith("always")
     assert "●" not in help_row
 
 
@@ -190,7 +190,7 @@ async def test_palette_toggle_row_visible_when_filter_empties_top_zone(
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
-            reg, initial_filter="ga", toggle_state=lambda name: "on"
+            reg, initial_filter="ga", toggle_state=lambda name: "always"
         )
         await app.screen.mount(pal)
         await pilot.pause()
@@ -232,7 +232,7 @@ async def test_palette_footer_not_hanging_below_border_with_full_list(
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
-            reg, initial_filter="", toggle_state=lambda name: "on"
+            reg, initial_filter="", toggle_state=lambda name: "always"
         )
         await app.screen.mount(pal)
         await pilot.pause()
@@ -262,7 +262,9 @@ def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
     from gc_tui.toggles import apply_toggle
 
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
+    cfg_file.write_text(
+        'tui:\n  finish_gate_mode: "always"\n', encoding="utf-8"
+    )
     app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
@@ -286,7 +288,7 @@ def test_apply_toggle_writes_session_and_invalidates_runner(tmp_path):
     assert calls["n"] == 1
     assert (
         cfg_file.read_text(encoding="utf-8")
-        == 'tui:\n  finish_gate_mode: "on"\n'
+        == 'tui:\n  finish_gate_mode: "always"\n'
     )
 
     from gc_tui.services.stores.file_store import FileTaskStore
@@ -331,7 +333,9 @@ def test_apply_toggle_rejects_value_outside_spec(tmp_path):
     from gc_tui.toggles import apply_toggle
 
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
+    cfg_file.write_text(
+        'tui:\n  finish_gate_mode: "always"\n', encoding="utf-8"
+    )
     app = TuiApp(settings=tui_settings({}))
     app._config_path = str(cfg_file)
     app.reload_config()
@@ -341,7 +345,7 @@ def test_apply_toggle_rejects_value_outside_spec(tmp_path):
 
     assert (
         cfg_file.read_text(encoding="utf-8")
-        == 'tui:\n  finish_gate_mode: "on"\n'
+        == 'tui:\n  finish_gate_mode: "always"\n'
     )
 
 
@@ -408,7 +412,7 @@ async def test_palette_arrow_applies_toggle_immediately_both_directions(
     config.yml не трогается, палитра остаётся открытой."""
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
     original = cfg_file.read_text(encoding="utf-8")
 
@@ -436,7 +440,7 @@ async def test_palette_arrow_applies_toggle_immediately_both_directions(
         rows_text = "\n".join(
             r.render().plain for r in palette.query(".palette-toggle-row")
         )
-        assert "●" in rows_text and rows_text.rstrip().endswith("on")
+        assert "●" in rows_text and rows_text.rstrip().endswith("always")
 
 
 @pytest.mark.asyncio
@@ -445,7 +449,7 @@ async def test_palette_enter_closes_palette_keeps_value(tmp_path):
     Esc), значение сессии и config.yml не тронуты. Меняют значение ←/→."""
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
     original = cfg_file.read_text(encoding="utf-8")
 
@@ -459,7 +463,7 @@ async def test_palette_enter_closes_palette_keeps_value(tmp_path):
         assert not pilot.app.query(".palette")
         assert pilot.app.query_one("#cmdinput").text == ""
         assert cfg_file.read_text(encoding="utf-8") == original
-        assert toggle_state(pilot.app, "gate") == "on"
+        assert toggle_state(pilot.app, "gate") == "always"
 
 
 @pytest.mark.asyncio
@@ -468,7 +472,7 @@ async def test_palette_esc_does_not_touch_config(tmp_path):
     существует), конфиг не тронут."""
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
 
     async with app.run_test() as pilot:
@@ -481,7 +485,7 @@ async def test_palette_esc_does_not_touch_config(tmp_path):
         assert not pilot.app.query(".palette")
         assert (
             cfg_file.read_text(encoding="utf-8")
-            == 'tui:\n  finish_gate_mode: "on"\n'
+            == 'tui:\n  finish_gate_mode: "always"\n'
         )
 
 
@@ -491,7 +495,7 @@ async def test_palette_arrow_keys_not_intercepted_for_regular_command(
 ):
     """(г) ←/→ при выделенной ОБЫЧНОЙ команде — каретка инпута, не палитра."""
     pytest.importorskip("textual")
-    app, _ = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "on"\n')
+    app, _ = _app_with_config(tmp_path, 'tui:\n  finish_gate_mode: "always"\n')
 
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -518,7 +522,7 @@ async def test_typed_gate_command_shows_info_without_changing_value(tmp_path):
     информационный флеш с текущим значением и подсказкой как переключать."""
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
 
     async with app.run_test() as pilot:
@@ -532,11 +536,11 @@ async def test_typed_gate_command_shows_info_without_changing_value(tmp_path):
 
         assert (
             cfg_file.read_text(encoding="utf-8")
-            == 'tui:\n  finish_gate_mode: "on"\n'
+            == 'tui:\n  finish_gate_mode: "always"\n'
         )
         footer = pilot.app.query_one("#footer-slot")
         footer_text = str(footer.render())
-        assert "/gate: on" in footer_text
+        assert "/gate: always" in footer_text
         assert "←/→" in footer_text
 
 
@@ -575,7 +579,7 @@ async def test_typed_rigor_command_shows_info_without_changing_value(tmp_path):
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
         tmp_path,
-        'tui:\n  finish_gate_mode: "on"\n  text_answer_mode: "deny"\n',
+        'tui:\n  finish_gate_mode: "always"\n  text_answer_mode: "deny"\n',
     )
     original = cfg_file.read_text(encoding="utf-8")
 
@@ -601,7 +605,7 @@ async def test_palette_filter_change_does_not_touch_config(tmp_path):
     тоггла меняется только явным ←/→ на самой строке."""
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
 
     async with app.run_test() as pilot:
@@ -622,7 +626,7 @@ async def test_palette_filter_change_does_not_touch_config(tmp_path):
 
         assert (
             cfg_file.read_text(encoding="utf-8")
-            == 'tui:\n  finish_gate_mode: "on"\n'
+            == 'tui:\n  finish_gate_mode: "always"\n'
         )
 
 
@@ -631,7 +635,7 @@ async def test_palette_space_on_toggle_row_does_not_cycle(tmp_path):
     """(е) Space на toggle-строке НЕ переключает значение (конфликт с ArgPicker)."""
     pytest.importorskip("textual")
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
 
     async with app.run_test() as pilot:
@@ -643,7 +647,7 @@ async def test_palette_space_on_toggle_row_does_not_cycle(tmp_path):
 
         assert (
             cfg_file.read_text(encoding="utf-8")
-            == 'tui:\n  finish_gate_mode: "on"\n'
+            == 'tui:\n  finish_gate_mode: "always"\n'
         )
 
 
@@ -705,11 +709,11 @@ def test_slider_row_plain_text_gate_track(monkeypatch):
     значения; точек-разделителей (`·`) нет — пустые позиции рисуются `○`
     (спека §2-3)."""
     reg = _reg_with_gate_answers(monkeypatch)
-    pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
+    pal = _mk_palette(reg, {"gate": "always", "answers": "judge"})
 
     txt = pal._format_toggle_row(reg.lookup("gate")).plain
 
-    assert txt.rstrip().endswith("○ ○ ●  on")  # было "○ ●  on"
+    assert txt.rstrip().endswith("○ ○ ●  always")
     assert "·" not in txt
 
 
@@ -740,7 +744,9 @@ def test_regular_and_toggle_rows_share_name_column(monkeypatch):
             is_toggle=True,
         )
     )
-    pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n: "on")
+    pal = CommandPalette(
+        reg, initial_filter="", toggle_state=lambda n: "always"
+    )
 
     plain_row = pal._format_row(reg.lookup("verylongcommand"))
     toggle_row = pal._format_toggle_row(reg.lookup("gate")).plain
@@ -753,15 +759,15 @@ def test_slider_indicator_and_track_columns_align(monkeypatch):
     5 ячеек), прижат вправо; трек answers не изменился; подписи значений
     начинаются в одной колонке в обеих строках."""
     reg = _reg_with_gate_answers(monkeypatch)
-    pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
+    pal = _mk_palette(reg, {"gate": "always", "answers": "judge"})
 
     g = pal._format_toggle_row(reg.lookup("gate")).plain
     a = pal._format_toggle_row(reg.lookup("answers")).plain
 
-    assert g.rstrip().endswith("○ ○ ●  on") and "·" not in g  # было "○ ●  on"
+    assert g.rstrip().endswith("○ ○ ●  always") and "·" not in g
     assert "○ ● ○" in a and a.rstrip().endswith("judge")
-    assert g.rindex("on") == a.rindex("judge")  # общая колонка подписей
-    assert len(g.split("on")[0]) == len(a.split("judge")[0])
+    assert g.rindex("always") == a.rindex("judge")  # общая колонка подписей
+    assert len(g.split("always")[0]) == len(a.split("judge")[0])
 
 
 def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
@@ -781,7 +787,7 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     reg = build_default_registry()
     state = {
         "rigor": "high",
-        "gate": "on",
+        "gate": "always",
         "answers": "deny",
     }
 
@@ -830,7 +836,7 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     # с левого края трека на правый (после троек/резерва).
     assert (
         rigor_plain.rindex("high")
-        == gate_plain.rindex("on")
+        == gate_plain.rindex("always")
         == answers_plain.rindex("deny")
     )
 
@@ -851,7 +857,7 @@ def test_child_rows_always_dim_flat_and_track_aligned_with_parent():
     # Подпись значения ребёнка (§4.1, новое) — тоже DIM, отдельным span'ом
     # у хвоста строки (трек между head и подписью — семантические цвета,
     # не задет).
-    gate_value_start = gate_plain.rindex("on")
+    gate_value_start = gate_plain.rindex("always")
     assert any(
         p.SUB_INK.lower() in str(s.style).lower()
         and s.start <= gate_value_start < s.end
@@ -999,8 +1005,8 @@ def test_slider_colors_semantic(monkeypatch):
     text = pal._format_toggle_row(reg.lookup("answers"))
     knob_styles = [str(s.style) for s in text.spans]
     assert any(
-        p.RUN_COLOR.lower() in st.lower() for st in knob_styles
-    )  # judge амбер
+        p.ACCENT.lower() in st.lower() for st in knob_styles
+    )  # judge бирюзовый
 
     text2 = pal._format_toggle_row(reg.lookup("gate"))
     knob_styles2 = [
@@ -1010,11 +1016,11 @@ def test_slider_colors_semantic(monkeypatch):
         p.INK.lower() in st.lower() for st in knob_styles2
     )  # off — белый ползунок
 
-    pal_on = _mk_palette(reg, {"gate": "on", "answers": "judge"})
+    pal_on = _mk_palette(reg, {"gate": "always", "answers": "judge"})
     text3 = pal_on._format_toggle_row(reg.lookup("gate"))
     assert any(
-        p.ACCENT.lower() in str(s.style).lower() for s in text3.spans
-    )  # on — teal индикатор
+        p.RUN_COLOR.lower() in str(s.style).lower() for s in text3.spans
+    )  # on — янтарный индикатор
 
 
 @pytest.mark.asyncio
@@ -1036,7 +1042,7 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(
         settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(64, 24)) as pilot:
-        pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
+        pal = _mk_palette(reg, {"gate": "always", "answers": "judge"})
         await app.screen.mount(pal)
         await pilot.pause()
 
@@ -1046,11 +1052,11 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(
         answers_row = pal._format_toggle_row(reg.lookup("answers")).plain
 
         # (1) подпись значения — в одной колонке в обеих строках.
-        assert gate_row.rindex("on") == answers_row.rindex("judge")
+        assert gate_row.rindex("always") == answers_row.rindex("judge")
         # (2) описание усечено многоточием (ветка сужения реально сработала).
         assert "…" in gate_row and "…" in answers_row
         # (3) слайдер+подпись присутствуют целиком, не усечены.
-        assert gate_row.rstrip().endswith("○ ○ ●  on")  # было "○ ●  on"
+        assert gate_row.rstrip().endswith("○ ○ ●  always")
         assert "○ ● ○" in answers_row and answers_row.rstrip().endswith(
             "judge"
         )
@@ -1064,12 +1070,12 @@ def test_toggle_hint_shows_value_meaning(monkeypatch):
     ←/→ — изменить (значение/подсказка всегда от применённого —
     черновика не существует; про Esc в toggle-hint не пишем — спека §6)."""
     reg = _reg_with_gate_answers(monkeypatch)
-    pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
+    pal = _mk_palette(reg, {"gate": "always", "answers": "judge"})
     pal._selected = len(pal._visible_rows())  # первая тоггл-строка (gate)
 
     hint = pal._toggle_hint(reg.lookup("gate"))
 
-    assert hint.startswith("on — самопроверка не даст закончить")
+    assert hint.startswith("always — самопроверка не даст закончить")
     assert "←/→ — изменить" in hint
 
 
@@ -1077,11 +1083,11 @@ def test_toggle_hint_updates_after_state_changes(monkeypatch):
     """hint строится от ПРИМЕНЁННОГО значения и меняется вслед за
     toggle_state-провайдером — переключение отражается сразу, без черновика."""
     reg = _reg_with_gate_answers(monkeypatch)
-    state = {"gate": "on", "answers": "judge"}
+    state = {"gate": "always", "answers": "judge"}
     pal = _mk_palette(reg, state)
 
     hint_on = pal._toggle_hint(reg.lookup("gate"))
-    assert hint_on.startswith("on — самопроверка не даст закончить")
+    assert hint_on.startswith("always — самопроверка не даст закончить")
 
     state["gate"] = "off"
     hint_off = pal._toggle_hint(reg.lookup("gate"))
@@ -1094,12 +1100,12 @@ def test_toggle_hint_carries_scope_inline(monkeypatch):
     Несмонтированная палитра → width=0 → `_fit_hint` не усекает вовсе
     (см. первый guard), поэтому hint содержит обе клавиши целиком."""
     reg = _reg_with_gate_answers(monkeypatch)
-    pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
+    pal = _mk_palette(reg, {"gate": "always", "answers": "judge"})
     pal._selected = len(pal._visible_rows())  # первая тоггл-строка (gate)
 
     hint = pal._toggle_hint(reg.lookup("gate"))
 
-    assert hint.startswith("on — самопроверка не даст закончить")
+    assert hint.startswith("always — самопроверка не даст закончить")
     assert "←/→ — изменить · Enter — готово" in hint
 
 
@@ -1114,7 +1120,7 @@ def test_fit_hint_priority_truncation():
     )
     from gc_tui.widgets.command_palette import _HINT_KEYS_TOGGLE, _fit_hint
 
-    value, keys = "on", _HINT_KEYS_TOGGLE
+    value, keys = "always", _HINT_KEYS_TOGGLE
     hint = "самопроверка не даст закончить, пока запрос не закрыт · для сложных задач, где важна полнота"
 
     full = _fit_hint(value, hint, keys, width=200)
@@ -1264,7 +1270,7 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
     from gc_tui.screens import main as main_screen
 
     app, cfg_file = _app_with_config(
-        tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
+        tmp_path, 'tui:\n  finish_gate_mode: "always"\n'
     )
 
     def _boom(app, name, value):
@@ -1285,7 +1291,7 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
         assert pilot.app.query(".palette")
         assert (
             cfg_file.read_text(encoding="utf-8")
-            == 'tui:\n  finish_gate_mode: "on"\n'
+            == 'tui:\n  finish_gate_mode: "always"\n'
         )
 
         await pilot.press("right")
@@ -1296,7 +1302,7 @@ async def test_palette_toggle_apply_failure_shows_flash_keeps_palette_and_value(
         assert pilot.app.query(".palette")
         assert (
             cfg_file.read_text(encoding="utf-8")
-            == 'tui:\n  finish_gate_mode: "on"\n'
+            == 'tui:\n  finish_gate_mode: "always"\n'
         )
 
 
@@ -1432,7 +1438,7 @@ async def test_palette_filter_reveals_hidden_gate(tmp_path):
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
-            reg, initial_filter="ga", toggle_state=lambda n: "on"
+            reg, initial_filter="ga", toggle_state=lambda n: "always"
         )
         await app.screen.mount(pal)
         await pilot.pause()
@@ -1456,7 +1462,7 @@ async def test_regular_row_hint_unaffected_by_visible_toggles(tmp_path):
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
-            reg, initial_filter="", toggle_state=lambda n: "on"
+            reg, initial_filter="", toggle_state=lambda n: "always"
         )
         await app.screen.mount(pal)
         await pilot.pause()

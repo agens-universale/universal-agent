@@ -26,8 +26,9 @@
 нужно только в двух местах (`_activate_selected`, открытие вьюера), не на
 каждом шаге навигации.
 
-Счётчики красятся смыслом правки: `+N` — `OK`, `−M` — `ERR`, ровно те цвета,
-которыми движок правок красит гаттер тела диффа. Тусклым остаётся только `≈`.
+Счётчики красятся смыслом правки: `+N` — `DIFF_ADD_INK`, `−M` —
+`DIFF_DEL_INK`, ровно те цвета, которыми движок правок красит гаттер тела
+диффа и лента — счётчики шапки вызова. Тусклым остаётся только `≈`.
 Правило одно на весь экран — строки списка, шапка списка, шапка вьюера и
 заголовок подтверждения отката: числа в них сверяют глазом, а не читают.
 Внутри группы «принято» тот же смысл красит счётчики притушённым вариантом
@@ -126,7 +127,16 @@ from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_tui.palette import ACCENT, BRIGHT, DEEP_DIM, ERR, INK, MUTED, OK, WARN
+from gc_tui.palette import (
+    ACCENT,
+    BRIGHT,
+    DEEP_DIM,
+    DIFF_ADD_INK,
+    DIFF_DEL_INK,
+    INK,
+    MUTED,
+    WARN,
+)
 from gc_tui.services.diff_render import HunkBody
 from gc_tui.services.edits_view import (
     ACCEPT_READ_FAILED,
@@ -860,13 +870,14 @@ _COUNTERS_RE = re.compile(r"(\+\d+)(\s+)(−\d+)")
 
 
 def paint_counters(line: str) -> Text:
-    """Шапка со счётчиками в цвете: `+N` — `OK`, `−M` — `ERR`.
+    """Шапка со счётчиками в цвете: `+N` — `DIFF_ADD_INK`, `−M` —
+    `DIFF_DEL_INK`.
 
-    Цвета — те же семантические, которыми движок правок красит гаттер тела
-    (`palette.DIFF_ADD_GUTTER`/`DIFF_DEL_GUTTER`): один смысл — один цвет во
-    всём TUI, и глаз ищет прибавленное и убранное одинаково в списке, во вьюере
-    и в подтверждении отката. Ноль не выделяется тусклым: колонка читается
-    ЦВЕТОМ, и выпавшее из него `−0` пришлось бы разбирать чтением.
+    Цвета «добавлено / удалено» — те же, что у гаттера тела диффа и у
+    счётчиков шапки вызова в ленте: глаз ищет прибавленное и убранное
+    одинаково в ленте, списке, вьюере и подтверждении отката. Ноль не
+    выделяется тусклым: колонка читается ЦВЕТОМ, и выпавшее из него `−0`
+    пришлось бы разбирать чтением.
 
     Красится ПОСЛЕДНЯЯ пара строки: счётчики всегда стоят в хвосте, а путь
     пользователя такую пару содержать может.
@@ -878,9 +889,9 @@ def paint_counters(line: str) -> Text:
         return text
     match = matches[-1]
     text.append(line[: match.start()])
-    text.append(match.group(1), style=OK)
+    text.append(match.group(1), style=DIFF_ADD_INK)
     text.append(match.group(2))
-    text.append(match.group(3), style=ERR)
+    text.append(match.group(3), style=DIFF_DEL_INK)
     text.append(line[match.end() :])
     return text
 
@@ -1487,9 +1498,9 @@ def build_rows(
         # `≈` остаётся тусклым: он про ДОСТОВЕРНОСТЬ чисел, а не про сами
         # прибавленное и убранное, и цвет счётчиков ему не принадлежит.
         text.append(APPROX if not entry.exact else " ", style=DEEP_DIM)
-        text.append(pluses[idx].rjust(plus_w), style=OK)
+        text.append(pluses[idx].rjust(plus_w), style=DIFF_ADD_INK)
         text.append(" " * _COUNTER_GAP)
-        text.append(minuses[idx].rjust(minus_w), style=ERR)
+        text.append(minuses[idx].rjust(minus_w), style=DIFF_DEL_INK)
         if marker_w:
             if marked[idx]:
                 text.append(" ")
@@ -1524,13 +1535,13 @@ def _fit(marks: List[List[str]], free: int) -> Tuple[int, int]:
 
 
 # Притушённые зелёный/красный счётчиков группы (С2 смоука волны 4) — тот же
-# смысл, что у активных строк (`OK`/`ERR`), но не так ярко: строка группы
-# приглушена целиком, а полная яркость спорила бы с этим. Не новый оттенок
-# (Global Constraints — цвета только токенами `palette.py`): существующие
-# токены с рендер-атрибутом Rich `dim`, тот же приём, что у акцента
-# `f"{_ACC} bold"` в `markdown_render.py`.
-SETTLED_OK = f"{OK} dim"
-SETTLED_ERR = f"{ERR} dim"
+# смысл, что у активных строк (`DIFF_ADD_INK`/`DIFF_DEL_INK`), но не так
+# ярко: строка группы приглушена целиком, а полная яркость спорила бы с
+# этим. Не новый оттенок (Global Constraints — цвета только токенами
+# `palette.py`): существующие токены с рендер-атрибутом Rich `dim`, тот же
+# приём, что у акцента `f"{_ACC} bold"` в `markdown_render.py`.
+SETTLED_OK = f"{DIFF_ADD_INK} dim"
+SETTLED_ERR = f"{DIFF_DEL_INK} dim"
 
 
 def group_summary(settled: Sequence[SettledRow]) -> str:
@@ -1580,8 +1591,8 @@ def build_settled_rows(
     и колонка вида остаются приглушёнными (`MUTED`), а счётчики красятся
     притушённым вариантом смысловых цветов (С2): строка группы приглушена
     целиком, но `+`/`−` обязаны нести смысл, не только украшать (не новый
-    оттенок — существующие `OK`/`ERR` с рендер-атрибутом Rich `dim`, тот же
-    приём, что у акцента `f"{_ACC} bold"` в `markdown_render.py`).
+    оттенок — `DIFF_ADD_INK`/`DIFF_DEL_INK` с рендер-атрибутом Rich `dim`,
+    тот же приём, что у акцента `f"{_ACC} bold"` в `markdown_render.py`).
     """
     if not settled:
         return []

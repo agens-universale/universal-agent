@@ -56,7 +56,7 @@ class MassDeleteScreen(ModalScreen[Optional[dict]]):
             yield Input(value="20", id="mass-n")
             yield Static("", id="mass-count", markup=False)
             yield Static(
-                "[↑↓] режим · [Enter] далее · [Esc] отмена",
+                "↑/↓ — режим · Enter — далее · Esc — отмена",
                 id="mass-hint",
                 markup=False,
             )

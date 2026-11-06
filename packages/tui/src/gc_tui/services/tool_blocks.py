@@ -61,8 +61,18 @@ CANCELLED_REASON = "отменено"
 #: без дыхания.
 GlyphLook = Literal["run", "wait", "ok", "error", "halted"]
 #: Вид цвета куска текста; токен палитры назначает исполнитель.
+#: `add` / `del` — счётчики правки (`+N` / `−M`).
 Look = Literal[
-    "run", "ok", "error", "refused", "halted", "dim", "ink", "muted"
+    "run",
+    "ok",
+    "error",
+    "refused",
+    "halted",
+    "dim",
+    "ink",
+    "muted",
+    "add",
+    "del",
 ]
 RowMode = Literal["single", "header", "member"]
 #: Колонка диффа: одиночная правка (2) или член блока (4).
@@ -218,9 +228,9 @@ def counts_text(add: int, rem: int) -> Parts:
     скобки — цветом объекта слева (`INK`)."""
     return (
         (" (", "ink"),
-        (f"+{add}", "ok"),
+        (f"+{add}", "add"),
         (" ", "dim"),
-        (f"−{rem}", "error"),
+        (f"−{rem}", "del"),
         (")", "ink"),
     )
 

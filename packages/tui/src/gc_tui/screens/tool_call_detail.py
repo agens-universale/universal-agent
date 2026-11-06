@@ -72,7 +72,7 @@ class ToolCallDetailScreen(Screen):
                 yield _section_header("OUTPUT")
                 yield self._output_widget()
             yield Static(
-                "[Esc] back  [↑↓ / PgUp PgDn] прокрутка",
+                "↑/↓ / PgUp/PgDn — прокрутка · Esc — назад",
                 id="footer",
                 markup=False,
             )

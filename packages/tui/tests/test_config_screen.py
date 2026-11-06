@@ -31,6 +31,24 @@ def test_profile_header_shows_registry_model_not_flat_key():
     assert "модель: ● flash" in text
 
 
+def test_profile_header_dot_carries_the_level_colour():
+    """Точка знака в шапке — цвет уровня по шкале значений, тот же, что в
+    футере и пикере `/model`: модель слота default — ACCENT."""
+    from gc_core import onboarding
+    from gc_tui.palette import ACCENT
+    from gc_tui.screens.config import _profile_header_text
+
+    cfg = {
+        "agent.model": onboarding.MODEL_SENTINEL,
+        "model": "default",
+        "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+        "slots": {"default": "flash"},
+    }
+    text = _profile_header_text(as_settings(cfg), profile_source=None)
+    dot = text.plain.index("●")
+    assert [str(s.style) for s in text.spans if s.start == dot] == [ACCENT]
+
+
 def test_profile_header_prefers_resolved_model_over_stale_flat_key():
     """Худший случай плоского чтения: `agent.model` заполнен руками и устарел —
     шапка называла бы моделью то, чем работа не идёт."""
@@ -179,21 +197,19 @@ async def test_config_screen_has_header_and_footer(tmp_path):
 
 def test_paths_block_is_rich_text_without_pseudo_comment():
     from gc_tui.screens.config import _paths_block
-    from rich.text import Text
 
     t = _paths_block(
         as_settings({"paths.agent_md_path": "/p/agent.md"}),
         "/p/config.yml",
         None,
     )
-    assert isinstance(t, Text)
     plain = t.plain
     assert "# Пути" not in plain  # псевдокомментарий ушёл в border_title
     assert "config.yml:" in plain and "/p/config.yml" in plain
     assert "agent.md:" in plain and "/p/agent.md" in plain
     assert "project_memory.md:" in plain
     assert "(не задано)" in plain  # threads/logs не заданы
-    assert len(t.spans) > 0  # метки подкрашены (dim)
+    assert all(row.head.style for row in t.rows)  # метки подкрашены (dim)
 
 
 def test_paths_block_project_local_line():
@@ -405,3 +421,28 @@ def test_profile_header_shows_the_working_model_when_auto_is_unavailable(
     text = _profile_header_text(as_settings(cfg), profile_source=None).plain
     assert "модель: ● " in text
     assert "auto" not in text
+
+
+@pytest.mark.asyncio
+async def test_config_paths_copy_selected_text(tmp_path):
+    """Выделение мышью в панели путей отдаёт сами пути."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.config import ConfigScreen
+    from textual.selection import Selection
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    app._config_path = "/p/config.yml"
+    async with app.run_test() as pilot:
+        scr = ConfigScreen(
+            settings=app.base_settings(), config_path=app._config_path
+        )
+        await app.push_screen(scr)
+        await pilot.pause()
+        paths = list(scr.query(".config-panel"))[0]
+        text, _ = paths.get_selection(Selection(None, None))
+        assert "config.yml:" in text and "/p/config.yml" in text

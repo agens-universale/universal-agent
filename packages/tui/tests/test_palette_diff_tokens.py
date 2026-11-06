@@ -24,6 +24,8 @@ _DIFF_TOKENS = {
     "diff-add-hl": "DIFF_ADD_HL",
     "diff-del-hl": "DIFF_DEL_HL",
     "diff-gutter": "DIFF_GUTTER",
+    "diff-add-ink": "DIFF_ADD_INK",
+    "diff-del-ink": "DIFF_DEL_INK",
     "diff-add-gutter": "DIFF_ADD_GUTTER",
     "diff-del-gutter": "DIFF_DEL_GUTTER",
 }
@@ -92,15 +94,18 @@ def test_gutter_tokens_readable_on_block_background():
         ), name
 
 
-def test_gutter_tokens_are_the_semantic_ok_err():
-    """Колонка правки красится РОВНО семантическими OK/ERR — теми же зелёным
-    галочек и красным ошибок, что уже приняты в интерфейсе (живая правка
-    2026-08-11). Дифф не заводит собственный «почти зелёный»: один смысл — один
-    цвет во всём TUI. Две попытки-предшественницы отвергнуты на смоуке: примесь
-    к MUTED вышла темнее обоих базовых цветов, примесь к INK — светлее, но
-    обесцвеченной; насыщенность тут важнее светимости."""
-    assert palette.DIFF_ADD_GUTTER == palette.OK
-    assert palette.DIFF_DEL_GUTTER == palette.ERR
+def test_gutter_tokens_readable_on_their_row_backgrounds_by_wcag():
+    """Номер и маркер лежат на заливке своей строки и читаются на ней как
+    мелкий текст: контраст WCAG не ниже 4.5. Семантические OK/ERR этого не
+    давали (ERR на красной строке — 3.3), поэтому у колонки свои токены
+    (выбор владельца 2026-11-05)."""
+    pairs = (
+        (palette.DIFF_ADD_GUTTER, palette.DIFF_ADD_BG),
+        (palette.DIFF_DEL_GUTTER, palette.DIFF_DEL_BG),
+    )
+    for ink, row in pairs:
+        ratio = palette.contrast(palette._rgb(ink), palette._rgb(row))
+        assert ratio >= 4.5, ink
 
 
 def test_gutter_tokens_differ_from_muted_context():

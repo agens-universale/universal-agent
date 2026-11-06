@@ -144,7 +144,7 @@ tui:
   text_answer_mode: "deny"
   # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
   # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
-  finish_gate_mode: "on"
+  finish_gate_mode: "always"
   # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
   # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
   agentsmd_override: false

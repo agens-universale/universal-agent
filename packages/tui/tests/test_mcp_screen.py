@@ -175,7 +175,6 @@ def test_mcp_card_reason_on_failed_line():
 
 def test_mcp_renderable_is_rich_text_with_styles():
     from gc_tui.screens.mcp import McpScreen
-    from rich.text import Text
 
     snap = {
         "office": {
@@ -186,8 +185,7 @@ def test_mcp_renderable_is_rich_text_with_styles():
         }
     }
     rend = McpScreen(tools_snapshot=snap).cards[0]._renderable()
-    assert isinstance(rend, Text)
-    assert len(rend.spans) > 0  # есть цветовые сегменты
+    assert len(rend.rows[0].spans) > 0  # есть цветовые сегменты
 
 
 # ---- ServerCard: свёрнутый/раскрытый рендер (spec 2026-06-10) ----
@@ -303,3 +301,33 @@ def test_card_toggle_flips_expanded_and_marker():
     card.toggle()
     assert card.expanded is False
     assert card._renderable().plain.startswith("▸")
+
+
+@pytest.mark.asyncio
+async def test_expanded_card_copies_tool_names():
+    """Выделение мышью в раскрытой карточке отдаёт имена и описания тулов."""
+    from textual.app import App
+    from textual.selection import Selection
+
+    card = _card(
+        "office",
+        {
+            "status": "connected",
+            "reason": None,
+            "description": "d",
+            "tools": [
+                {"name": "mcp_office_read_file", "description": "Читает"},
+            ],
+        },
+    )
+
+    class _A(App):
+        def compose(self):
+            yield card
+
+    async with _A().run_test(size=(60, 10)) as pilot:
+        await pilot.pause()
+        card.toggle()
+        await pilot.pause()
+        text, _ = card.get_selection(Selection(None, None))
+        assert "read_file" in text and "Читает" in text
