@@ -85,6 +85,7 @@ async def test_compact_displays_the_appropriate_error(
     tmp_path, error, message
 ):
     from gc_tui.app import TuiApp
+    from gc_tui.widgets.trace_row import TraceRow
 
     class FailingExecutor:
         async def acompact_thread(self, thread_id, *, system):
@@ -110,10 +111,13 @@ async def test_compact_displays_the_appropriate_error(
         assert not app.active_runner.is_running()
         screen._poll_active()
         await pilot.pause()
-        # Причина — под «✕ Ошибка» индикатора треда.
-        assert screen._thinking._render_text().plain == (
-            f"✕ Ошибка\n  └ {message}"
-        )
+        # /compact — не ход: строки итога нет, причина — строкой ошибки.
+        rows = [
+            row._content
+            for row in screen.query(TraceRow)
+            if row.has_class("line-error")
+        ]
+        assert rows == [f"runtime: {message}"]
 
 
 @pytest.mark.asyncio
