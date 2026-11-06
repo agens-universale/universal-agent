@@ -78,7 +78,8 @@ def test_processing_breathes_dot_brightness():
 
 def test_processing_word_is_dim_not_accent():
     """Слово «сверяюсь…» — серым (dim), чтобы отличаться от accent-«думаю…»."""
-    from gc_tui.widgets.thinking_indicator import _ACCENT, _DIM
+    from gc_tui.palette import RUN_COLOR
+    from gc_tui.widgets.thinking_indicator import _DIM
 
     t = ThinkingIndicator(
         started_at=0.0, state="processing", clock=lambda: 1.0
@@ -86,7 +87,7 @@ def test_processing_word_is_dim_not_accent():
     word_at = t.plain.index("сверяюсь")
     styles = [s.style for s in t.spans if s.start <= word_at < s.end]
     assert _DIM in styles
-    assert _ACCENT not in styles
+    assert RUN_COLOR not in styles
 
 
 def test_tail_thinking_no_word_but_counter():
