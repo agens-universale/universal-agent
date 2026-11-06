@@ -405,6 +405,17 @@ def _with_durable_logging(settings, profile):
     )
 
 
+def warn_profile_plugins(name, settings):
+    """Плагины в durable-режиме не поддерживаются: заданные в профиле —
+    строка в лог (снимок под воркером пуст по построению)."""
+    if settings.plugins.paths or settings.plugins.sources:
+        logger.warning(
+            "Профиль %s: plugins под воркером Temporal не "
+            "поддерживаются, плагины профиля не подключаются",
+            name,
+        )
+
+
 def _worker_runtime(profile, workspace, *, human_input):
     """Рантайм профиля под воркером: каталог старта — workspace; без
     человека (``human_input: false``) канал объявляет «человека нет», и
@@ -507,12 +518,7 @@ class ContextProvider:
             # сбой задачи вместо ошибки старта).
             snapshot = public_config_snapshot(loaded)
             settings_from_snapshot(snapshot.settings, snapshot.runtime)
-            if settings.plugins.paths or settings.plugins.sources:
-                logger.warning(
-                    "Профиль %s: plugins под воркером Temporal не "
-                    "поддерживаются, плагины профиля не подключаются",
-                    name,
-                )
+            warn_profile_plugins(name, settings)
             kind = settings.os_backend.kind
             if kind in _UNTESTED_BACKENDS:
                 logger.warning(
