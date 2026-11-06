@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, List, NamedTuple, Optional
 if TYPE_CHECKING:
     from gc_core.model_router import ModelRouter
 
+    from gc_tui.services.agent_runner import AgentRunner
+
 from gc_core.attachments.store import ImageStore
 from gc_core.config_modules.field_meta import leaf_meta
 from gc_core.runtime_notices import (
@@ -28,6 +30,7 @@ from gc_core.startup_notices import (
     auto_routing_unavailable_notice,
     collect_startup_notices,
 )
+from gc_core.summarize.summary_validation import SummaryRejectedError
 from gc_core.tools.registry import all_builtin_tool_names
 from textual.app import App
 from textual.binding import Binding
@@ -1746,6 +1749,24 @@ class TuiApp(App):
         # показать пост-апдейт экран, если это первый запуск после апгрейда.
         self._show_post_update_if_needed()
 
+    def _record_runner_error(
+        self, runner: AgentRunner | None, exc: BaseException
+    ) -> None:
+        self._persist_breaker_after_worker(runner)
+        if runner is None or runner is not self.active_runner:
+            return
+        if getattr(runner, "_marked_stopped", False):
+            return
+        if (
+            isinstance(exc, SummaryRejectedError)
+            and getattr(runner, "_thread_kind", None) == "compact"
+        ):
+            self.last_runner_error = "Сжатие не удалось. История не изменена."
+            return
+        from gc_tui.services.turn_error import describe_turn_error
+
+        self.last_runner_error = describe_turn_error(exc)
+
     def get_runner(self):
         """Lazy-build the AgentRunner (one per app instance for MVP).
 
@@ -1779,15 +1800,9 @@ class TuiApp(App):
         # Ctrl+C. Проверка владельца отсекает UI-поля ЧУЖОГО раннера — предохранитель
         # к ним не относится.
         def _on_runner_error(exc: BaseException) -> None:
-            runner = runner_ref[0] if runner_ref else None
-            self._persist_breaker_after_worker(runner)
-            if runner is None or runner is not self.active_runner:
-                return
-            if getattr(runner, "_marked_stopped", False):
-                return
-            from gc_tui.services.turn_error import describe_turn_error
-
-            self.last_runner_error = describe_turn_error(exc)
+            self._record_runner_error(
+                runner_ref[0] if runner_ref else None, exc
+            )
 
         def _on_runner_complete(outcome: Optional[str]) -> None:
             runner = runner_ref[0] if runner_ref else None
