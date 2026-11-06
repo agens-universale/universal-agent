@@ -593,3 +593,54 @@ async def test_worker_without_human_declares_the_channel(
         assert runtime.human_channel is declared
         assert runtime.launch_root == str(tmp_path.resolve())
         await provider.aclose()
+
+
+async def test_call_trace_id_reaches_context_and_mcp(tmp_path, monkeypatch):
+    """trace_id вызова — в рантайме контекста хода и в заголовках MCP."""
+    from gc_core.tools.connect_mcp.agent_tools import mcp_cache_config
+    from gc_core.trace_id import trace_id_from_config
+
+    monkeypatch.chdir(tmp_path)
+    base = profile(tmp_path)
+    core = override_settings(
+        base.core,
+        {
+            "agent.trace_header_enabled": True,
+            "agent.trace_id_header_name": "X-Trace-id",
+            "mcp.servers": {
+                "tracker": {
+                    "transport": "http",
+                    "url": "http://127.0.0.1:9/mcp",
+                    "trace_header_enabled": True,
+                }
+            },
+        },
+    )
+    provider, _ = make_provider(
+        tmp_path, {"test": base.model_copy(update={"core": core})}
+    )
+    try:
+        traced = await provider(call(owner_id="turn-1", trace_id="trace-A"))
+        plain = await provider(call(owner_id="turn-2"))
+        assert trace_id_from_config(traced) == "trace-A"
+        servers = mcp_cache_config(traced)["mcp-servers"]
+        assert servers["tracker"]["headers"]["X-Trace-id"] == "trace-A"
+        assert trace_id_from_config(plain) == ""
+        plain_servers = mcp_cache_config(plain)["mcp-servers"]
+        assert "X-Trace-id" not in (
+            plain_servers["tracker"].get("headers") or {}
+        )
+    finally:
+        await provider.aclose()
+
+
+@pytest.mark.parametrize("bad", ["a\nb", "трейс", "x" * 201])
+async def test_invalid_call_trace_id_rejected(tmp_path, monkeypatch, bad):
+    """Кривой trace_id — отказ сразу, а не ретраи запроса модели."""
+    monkeypatch.chdir(tmp_path)
+    provider, _ = make_provider(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="trace_id"):
+            await provider(call(trace_id=bad))
+    finally:
+        await provider.aclose()
