@@ -24,6 +24,7 @@ from gc_core.structured_output import (
     arephrase_turn_outcome,
 )
 from gc_core.threads.models import Lease, LeaseRequest, ThreadKey
+from gc_core.trace_id import normalize_trace_id
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 
@@ -841,6 +842,13 @@ class UniversalAgentWorkflow:
 
     def _initialize_checked(self, start):
         """``_initialize`` с отказом некорректного запроса без повторов."""
+        try:
+            normalize_trace_id(start.trace_id)
+        except ValueError as exc:
+            # Тот же отказ, что у agent_step, — до хода и его activities.
+            raise ApplicationError(
+                str(exc), type="InvalidTraceId", non_retryable=True
+            ) from exc
         try:
             self._initialize(start)
         except ValueError as exc:
