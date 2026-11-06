@@ -415,8 +415,9 @@ async def _aread_model_response(response: Any, read):
         raise
 
 
-async def _aguard_model_call(factory):
-    """Стоп отменяет запрос к модели. Отмена — не повод его повторять."""
+async def _aguard_model_call(factory, kind: str = "model"):
+    """Стоп отменяет запрос к модели. Отмена — не повод его повторять.
+    ``kind`` — что снято, для лога стопа (запрос или пауза между попытками)."""
     stop = current_user_stop()
     if stop is None:
         return await factory()
@@ -429,7 +430,7 @@ async def _aguard_model_call(factory):
             task.cancel()
 
     try:
-        async with stop.arm(kind="model", release=_release):
+        async with stop.arm(kind=kind, release=_release):
             return await task
     except UserStopInterrupt as exc:
         if not exc.started:
@@ -450,7 +451,7 @@ async def _aguard_model_call(factory):
 async def apause_model_retry(seconds: float) -> None:
     """Пауза между попытками запроса к модели. Стоп хода обрывает её, как и
     сам запрос: иначе остановленный ход досиживал бы паузу, держа тред."""
-    await _aguard_model_call(lambda: asyncio.sleep(seconds))
+    await _aguard_model_call(lambda: asyncio.sleep(seconds), kind="pause")
 
 
 async def _aopen_model_stream(client, *args, read, **kwargs):

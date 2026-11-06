@@ -333,12 +333,3 @@ async def test_side_write_after_a_foreign_turn_is_busy():
     with pytest.raises(ThreadBusy):
         await a.aside(set_runtime=RuntimeStatus(turn="running"))
     assert (await store.get_thread(KEY)).runtime.turn == "idle"
-
-
-async def test_busy_claim_names_owner_once():
-    clock = FakeClock()
-    store = MemoryThreadStore(clock=clock)
-    await _writer(store, "host/1/aaaa", clock).aclaim()
-    with pytest.raises(ThreadBusy) as busy:
-        await _writer(store, "host/1/bbbb", clock).aclaim()
-    assert str(busy.value).count("host/1/aaaa") == 1

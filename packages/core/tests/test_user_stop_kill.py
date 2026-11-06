@@ -1117,15 +1117,15 @@ async def _stop_during_retry_pause(monkeypatch, request):
     spy = install_transport(
         monkeypatch, lambda _request: httpx.Response(503, json={})
     )
-    gate = _stop(_Log())
+    log = _Log()
+    gate = _stop(log)
 
     async def _run():
         with bind_user_stop(gate):
             return await request()
 
     task = asyncio.create_task(_run())
-    while not spy.requests:
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(_first_request(spy), timeout=3)
     await asyncio.sleep(0.05)
     started = time.monotonic()
     gate.request()
@@ -1133,6 +1133,13 @@ async def _stop_during_retry_pause(monkeypatch, request):
         await asyncio.wait_for(task, timeout=3)
     assert time.monotonic() - started < 1
     assert len(spy.requests) == 1
+    killed = log.events("user_stop_killed")
+    assert [event["kind"] for event in killed] == ["pause"]
+
+
+async def _first_request(spy) -> None:
+    while not spy.requests:
+        await asyncio.sleep(0.01)
 
 
 async def test_stop_during_transport_retry_pause_ends_request(monkeypatch):
@@ -1165,3 +1172,85 @@ async def test_stop_during_adaptive_retry_pause_ends_request(monkeypatch):
             use_retry=False,
         ),
     )
+
+
+def _policy_request():
+    from gc_core.request_backend_policy import (
+        arequest_chat_completions_with_policy,
+    )
+
+    return arequest_chat_completions_with_policy(
+        payload_factory=lambda n: {"model": "m", "max_tokens": n},
+        initial_max_tokens=1000,
+        min_response_tokens=100,
+        headers={},
+        url="http://model/v1/chat/completions",
+        verify=True,
+        use_retry=False,
+        runtime_notices_enabled=True,
+    )
+
+
+async def test_stop_during_reduced_retry_is_a_stop_not_backend_error(
+    monkeypatch,
+):
+    """Стоп посреди повтора с уменьшенным max_tokens — остановка хода, а не
+    исходная 503 и не уведомление об ошибке модели."""
+    notices = _capture_notices(monkeypatch)
+    gate = _stop(_Log())
+    calls = {"n": 0}
+    hang = asyncio.sleep
+
+    async def handler(_request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(503, json={})
+        gate.request()
+        await hang(600)
+
+    _install_async_transport(monkeypatch, handler)
+    with bind_user_stop(gate), pytest.raises(ModelRequestStopped):
+        await asyncio.wait_for(_policy_request(), timeout=3)
+    assert calls["n"] == 2
+    assert notices == []
+
+
+async def test_stop_on_first_attempt_pushes_no_failure_notice(monkeypatch):
+    notices = _capture_notices(monkeypatch)
+    gate = _stop(_Log())
+    hang = asyncio.sleep
+
+    async def handler(_request):
+        gate.request()
+        await hang(600)
+
+    _install_async_transport(monkeypatch, handler)
+    with bind_user_stop(gate), pytest.raises(ModelRequestStopped):
+        await asyncio.wait_for(_policy_request(), timeout=3)
+    assert notices == []
+
+
+def _capture_notices(monkeypatch) -> list:
+    from gc_core import runtime_notices
+
+    notices: list = []
+    monkeypatch.setattr(runtime_notices, "push_runtime_notice", notices.append)
+    monkeypatch.setattr("asyncio.sleep", _no_pause())
+    return notices
+
+
+def _install_async_transport(monkeypatch, handler) -> None:
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "gc_core.utils.connect_backend.get_async_client",
+        lambda *args, **kwargs: client,
+    )
+
+
+def _no_pause():
+    real = asyncio.sleep
+
+    async def _pause(_delay, *args, **kwargs):
+        await real(0)
+
+    return _pause
