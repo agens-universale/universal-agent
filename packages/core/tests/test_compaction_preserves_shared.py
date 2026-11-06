@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from gc_core.summarize.compaction import arun_summary_compaction
+from gc_core.summarize.summary_spec import assemble_summary_xml
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
@@ -44,7 +45,9 @@ def _state_with_full_shared():
 
 async def _fake_summarize(**_kwargs):
     return {
-        "raw_summary": "<summary>ok</summary>",
+        "raw_summary": assemble_summary_xml(
+            {"task_and_context": "Verified context"}
+        ),
         "num_batches": 1,
         "last_dialog_steps": "",
         "memory_append_deltas": WorkingMemoryDeltas(),

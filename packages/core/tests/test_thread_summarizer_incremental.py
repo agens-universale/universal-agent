@@ -13,6 +13,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.summarize.compaction import apply_summary_state_patch
+from gc_core.summarize.summary_spec import assemble_summary_xml
 from gc_core.summarize.thread_summarizer import (
     asummarize_dialog_via_chat_completions,
 )
@@ -596,10 +597,12 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
         )
         seen_user_prompts.append(user_content)
         if calls["n"] == 1:
-            return _valid_summary("too-long-before-compress") + ("X" * 200)
+            return _valid_summary("too-long-before-compress")
         if calls["n"] == 2:
-            return _valid_summary("compressed-summary")
-        return _valid_summary("final-summary")
+            return assemble_summary_xml(
+                {"task_and_context": "compressed-summary"}
+            )
+        return assemble_summary_xml({"task_and_context": "final-summary"})
 
     monkeypatch.setattr(
         "gc_core.summarize.prompt_loading.aload_summary_prompt",
@@ -617,8 +620,8 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
         )
     )
     assert "final-summary" in result["raw_summary"]
-    assert calls["n"] >= 3
-    assert any("compressed-summary" in prompt for prompt in seen_user_prompts)
+    assert calls["n"] == 3
+    assert "compressed-summary" in seen_user_prompts[-1]
 
 
 def test_trim_original_user_messages_to_max_chars_takes_tail_whole_messages():

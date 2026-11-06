@@ -4,10 +4,12 @@
 сообщений выросло с момента последнего сжатия (meta.tui.last_compact_msg_count).
 """
 
-from gc_testkit.tui_support import tui_settings
+import asyncio
 import json
 
 import pytest
+from gc_core.summarize.summary_validation import SummaryRejectedError
+from gc_testkit.tui_support import tui_settings
 
 
 def _write_task(tmp_path, tid, n_messages=1, last_compact=None):
@@ -56,6 +58,50 @@ class _Runner:
 
 def _chat_cfg():
     return {"agent.model": "M", "backend.api_mode": "chat_completions"}
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            SummaryRejectedError("summary repair produced no usable summary"),
+            "Сжатие не удалось. История не изменена.",
+        ),
+        (RuntimeError("archive write failed"), "archive write failed"),
+    ],
+    ids=["rejected-summary", "archive-failure"],
+)
+async def test_compact_displays_the_appropriate_error(
+    tmp_path, error, message
+):
+    from gc_tui.app import TuiApp
+
+    class FailingExecutor:
+        async def acompact_thread(self, thread_id, *, system):
+            raise error
+
+        def stop_run(self):
+            pass
+
+    tid = "cmp00000000000000000000000001a"
+    _write_task(tmp_path, tid, n_messages=3)
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(_chat_cfg()),
+    )
+    app._executor_factory = FailingExecutor
+
+    async with app.run_test() as pilot:
+        screen = pilot.app.screen
+        screen.attach_active_task(tid)
+        screen._cmd_compact()
+        await asyncio.to_thread(app.active_runner.wait, 2.0)
+        assert not app.active_runner.is_running()
+        screen._poll_tick()
+        await pilot.pause()
+        errors = screen.query(".line-error .trace-content")
+        assert [str(row.render()) for row in errors] == [f"runtime: {message}"]
 
 
 @pytest.mark.asyncio

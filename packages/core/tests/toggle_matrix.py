@@ -35,6 +35,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from parity_harness import (
@@ -1275,7 +1277,19 @@ async def run_case(
             value = value.format(work=work)
         overrides[path] = value
 
-    backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))
+    tail = SUMMARY_TAIL
+    if (
+        case.overrides.get("summary.chat_completions_summary_trigger_chars", 0)
+        > 0
+    ):
+        # Successful compaction cases need structured auxiliary responses.
+        tail = [
+            assistant_text(
+                valid_summary_xml_for_tests(seed="previous dialogue")
+            )
+            for _ in range(40)
+        ]
+    backend = install(monkeypatch, ScriptedBackend([*TURNS, *tail]))
     result: Dict[str, Any] = {
         "id": case.id,
         "area": case.area,
