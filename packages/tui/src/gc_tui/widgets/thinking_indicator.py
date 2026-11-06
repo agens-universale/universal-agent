@@ -1,7 +1,7 @@
 """ThinkingIndicator — индикатор активности агента (spec 2026-05-26 + 2026-05-28).
 
 Виджет с тремя состояниями:
-- "thinking" — агент работает (LLM-вызов, tools): `⠋ думаю… (Nс)` accent-цвет;
+- "thinking" — агент работает (LLM-вызов, tools): `⠋ думаю… (Nс)` амбером с бегущим бликом;
   в этом состоянии при наличии stream-sink добавляется хвост
   `· ↓ N токенов · размышление / обдумал за Nс`.
 - "validating" — финальный ответ виден, идёт пост-валидация (intent_guard /
@@ -24,18 +24,17 @@ from __future__ import annotations
 
 import random
 import time
+from itertools import groupby
+from operator import itemgetter
 
 from rich.text import Text
 from textual.timer import Timer
 from textual.widgets import Static
 
 from gc_tui import textual_compat
-
-# `_ACCENT` здесь — янтарный цвет РАБОТЫ (RUN_COLOR), не `$accent` наведения.
 from gc_tui.palette import DEEP_DIM as _DIM
-from gc_tui.palette import GLOW_SHADES
+from gc_tui.palette import GLOW_SHADES, SHIMMER_SHADES
 from gc_tui.palette import PROCESSING_SHADES as _PROCESSING_SHADES
-from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.palette import VALIDATING_SHADES as _VALIDATING_SHADES
 from gc_tui.services.duration_format import (
     format_compact_int,
@@ -110,6 +109,35 @@ FRAME_HOLD = 2
 # остаётся ограниченным, а обе под-анимации выходят на старт синхронно.
 _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 
+# Блик по слову: светлое пятно бежит по буквам слева направо, буква за тик;
+# центр — пик SHIMMER_SHADES, к краям спадает до основного амбера. Проход
+# начинается и кончается за краями слова. Стартует он во вспышку глифа (пик
+# рампы GLOW_SHADES): глиф «запускает» блик, ритм у них общий.
+_SHIMMER_SPREAD = len(SHIMMER_SHADES) - 1
+_GLOW_PEAK = len(GLOW_SHADES) // 2
+
+
+def shimmer_pass(word: str) -> int:
+    """Шагов прохода блика по слову — от входа слева до ухода за правый край."""
+    return len(word) + 2 * _SHIMMER_SPREAD
+
+
+def shimmer_text(word: str, step: int) -> Text:
+    """Слово с бликом на шаге прохода `step`; шаг 0 и шаги после прохода —
+    блик за краями слова, слово ровным амбером."""
+    center = step - _SHIMMER_SPREAD
+    shades = [
+        SHIMMER_SHADES[max(0, _SHIMMER_SPREAD - abs(i - center))]
+        for i in range(len(word))
+    ]
+    # Соседние буквы одного оттенка — одним куском: вне блика слово
+    # рисуется так же, как без него.
+    text = Text()
+    for shade, run in groupby(zip(word, shades), key=itemgetter(1)):
+        text.append("".join(char for char, _ in run), style=shade)
+    return text
+
+
 _STATE_THINKING = "thinking"
 _STATE_VALIDATING = "validating"
 _STATE_COMPRESSING = "compressing"
@@ -162,6 +190,8 @@ class ThinkingIndicator(Static):
         self._frame: int = 0
         # Кадр мигания «останавливаю» — свой счёт, без обёртки цикла дыхания.
         self._blink_frame: int = 0
+        # Шаг идущего прохода блика; None — блик ждёт вспышки глифа.
+        self._shimmer_step: int | None = None
         self._state: str = state
         self._rotator = PhraseRotator(THINKING_PHRASES)
         # Таймер анимации; None до монтирования.
@@ -234,10 +264,34 @@ class ThinkingIndicator(Static):
             pass
         self._frame = (self._frame + 1) % _ANIM_PERIOD
         self._blink_frame += 1
+        self._advance_shimmer()
         # render() читает _frame динамически — достаточно запросить refresh.
         # Guard `is_mounted` — в юнит-тестах _tick дёргается без app-контекста.
         if self.is_mounted:
             self.refresh()
+
+    def _advance_shimmer(self) -> None:
+        """Шаг блика; закончив проход, он ждёт следующей вспышки глифа."""
+        word = self._shimmer_word()
+        if self._shimmer_step is not None:
+            self._shimmer_step += 1
+            if word is None or self._shimmer_step > shimmer_pass(word):
+                self._shimmer_step = None
+        glow_peak = self._frame % len(GLOW_SHADES) == _GLOW_PEAK
+        if word is not None and self._shimmer_step is None and glow_peak:
+            self._shimmer_step = 1
+
+    def _shimmer_word(self) -> str | None:
+        """Слово с бликом в текущем состоянии; None — блика нет."""
+        if self._state == _STATE_THINKING:
+            return f"{self._rotator.current()}…"
+        if self._state == _STATE_COMPRESSING:
+            return "сжимаю контекст…"
+        return None
+
+    def _shimmer(self) -> Text:
+        word = self._shimmer_word() or ""
+        return shimmer_text(word, self._shimmer_step or 0)
 
     def _anim(self) -> tuple[str, str]:
         """(глиф, цвет) текущего кадра. Глиф держится FRAME_HOLD тиков, цвет
@@ -274,7 +328,7 @@ class ThinkingIndicator(Static):
             glyph, color = self._anim()
             text.append(glyph, style=color)
             text.append(" ")
-            text.append("сжимаю контекст…", style=_ACCENT)
+            text.append_text(self._shimmer())
         elif self._state == _STATE_PROCESSING:
             text.append("•", style=self._processing_shade())
             text.append(" ")
@@ -283,7 +337,7 @@ class ThinkingIndicator(Static):
             glyph, color = self._anim()
             text.append(glyph, style=color)
             text.append(" ")
-            text.append(f"{self._rotator.current()}…", style=_ACCENT)
+            text.append_text(self._shimmer())
         parts = self._live_parts()
         if parts:
             text.append(f" ({' · '.join(parts)})")
