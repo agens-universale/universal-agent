@@ -73,7 +73,12 @@ from textual.widget import Widget
 from textual.widgets import Static, TextArea
 
 from gc_tui import branding, textual_compat
-from gc_tui.commands import build_default_registry, closest_command
+from gc_tui.commands import (
+    Command,
+    build_default_registry,
+    closest_command,
+    field_word,
+)
 from gc_tui.messages import (
     BlockToggle,
     CopyBlockRequest,
@@ -130,6 +135,7 @@ from gc_tui.services.footer_slot import (
 from gc_tui.services.git_info import current_branch
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
+from gc_tui.services.keyboard_layout import swap_layout
 from gc_tui.services.mode_pill import (
     MODE_HINTS,
     PILL_GAP,
@@ -731,6 +737,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._file_search = None  # file_search.FileSearchSession | None
         self._skills_cache_value: Optional[list[dict]] = None
+        # Каталог прогретого кэша (`_skill_catalog`); сбрасывает сеттер кэша.
+        self._skill_catalog_memo = None
         # После Tab-completion в skill picker гасим один Changed-цикл, чтобы
         # on_text_area_changed не переоткрыл только что закрытый picker.
         self._suppress_picker_reopen: bool = False
@@ -898,6 +906,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                     placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )
                 inp.is_known_command = self._is_known_command
+                inp.word_on_space = self._word_on_space
                 yield inp
             with Horizontal(id="footer"):
                 with Vertical(id="footer-left"):
@@ -7180,7 +7189,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             cmd = self._palette.selected_command()
             inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
             if cmd is not None:
-                inp.text = f"/{cmd.name} "
+                inp.text = f"/{self._palette.completion(cmd)} "
                 inp.move_cursor(inp.document.end)
                 self._close_palette()
             else:
@@ -7249,8 +7258,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Состояние 2: /skill <фильтр> → skill-picker.
         if val.startswith("/") and " " in val:
             first, _, rest = val.partition(" ")
-            cmd = first[1:]
-            if cmd == "skill":
+            cmd_obj = self._command_for(first[1:])
+            if cmd_obj is not None and cmd_obj.name == "skill":
                 self._close_file_picker()  # ушли из файлового ввода: поиск в полёте больше не нужен
                 # /skill <валидный_id> <текст> → скилл зафиксирован, дальше промпт:
                 # закрываем picker (его фильтр по 'id текст' бессмыслен).
@@ -7258,7 +7267,8 @@ class TraceScreen(TraceFollowMixin, Screen):
                     self._skills_cache = await self._load_skills_safe()
                 skill_first, _, skill_rest = rest.partition(" ")
                 if skill_rest.strip() and isinstance(
-                    self._resolve_cached_skill(skill_first), Resolved
+                    self._resolve_cached_skill(self._skill_typed(skill_first)),
+                    Resolved,
                 ):
                     if self._skill_picker is not None:
                         self._close_skill_picker()
@@ -7276,7 +7286,6 @@ class TraceScreen(TraceFollowMixin, Screen):
 
             # Состояние 3: /<cmd> <фильтр>, где у команды есть arg_options
             # (статические или динамические через arg_options_provider) → arg-picker.
-            cmd_obj = self._registry.lookup(cmd)
             if cmd_obj is not None and (
                 cmd_obj.arg_options or cmd_obj.arg_options_provider is not None
             ):
@@ -7661,7 +7670,7 @@ class TraceScreen(TraceFollowMixin, Screen):
 
         first, sep, _rest = line.partition(" ")
         cmd_obj = (
-            self._registry.lookup(first[1:])
+            self._command_for(first[1:])
             if sep and first.startswith("/")
             else None
         )
@@ -7721,10 +7730,10 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _is_known_command(self, name: str) -> bool:
         """`/имя` запустит команду (или алиас) или скилл — точный разбор
-        по прогретому кэшу, как при запуске; команда сильнее скилла."""
-        return self._registry.lookup(name) is not None or isinstance(
-            self._resolve_cached_skill(name), Resolved
-        )
+        по прогретому кэшу, как при запуске. Набранное как есть важнее
+        перевода раскладки; среди набранного как есть команда сильнее
+        скилла с тем же именем."""
+        return self._known_name(name) is not None
 
     async def on_command_text_area_submitted(
         self, event: CommandTextArea.Submitted
@@ -7826,7 +7835,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             has_args = len(typed.split()) > 1
             if cmd is not None and not has_args:
                 if not cmd.runs_on_enter:
-                    inp.text = f"/{cmd.name} "
+                    inp.text = f"/{self._palette.completion(cmd)} "
                     inp.move_cursor(inp.document.end)
                     self._close_palette()
                     inp.focus()
@@ -8939,10 +8948,61 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _resolve_cached_skill(self, name: str) -> ResolveResult | None:
         """Точный разбор имени скилла (полный id, пак, короткое имя) по
         прогретому кэшу, без нечёткого поиска; холодный кэш — None."""
+        catalog = self._skill_catalog()
+        return None if catalog is None else resolve_skill_exact(name, catalog)
+
+    def _skill_catalog(self):
+        """Каталог прогретого кэша скиллов — один на кэш; холодный — None."""
         if self._skills_cache is None:
             return None
-        catalog = catalog_from_entries(self._skills_cache)
-        return resolve_skill_exact(name, catalog)
+        if self._skill_catalog_memo is None:
+            self._skill_catalog_memo = catalog_from_entries(self._skills_cache)
+        return self._skill_catalog_memo
+
+    def _typed_name(self, name: str) -> str:
+        """Что имел в виду `/имя`; не распознано — как набрано."""
+        return self._known_name(name) or name
+
+    def _known_name(
+        self, name: str, knows: Callable[[str], bool] | None = None
+    ) -> str | None:
+        """`name`, если оно распознаётся (`knows`, по умолчанию — команда,
+        алиас или скилл); иначе то же слово в другой раскладке, если так
+        оно распознаётся (`ьщвуд` → `model`); иначе None. Набранное как
+        есть важнее перевода. Единственное место, где ввод переводится
+        между раскладками."""
+        knows = knows or self._knows
+        if knows(name):
+            return name
+        swapped = swap_layout(name)
+        return swapped if knows(swapped) else None
+
+    def _knows(self, name: str) -> bool:
+        return self._registry.lookup(name) is not None or self._is_skill(name)
+
+    def _is_skill(self, name: str) -> bool:
+        return isinstance(self._resolve_cached_skill(name), Resolved)
+
+    def _skill_typed(self, name: str) -> str:
+        """Имя скилла после `/skill`: перевод раскладки только по скиллам —
+        незнакомое слово не становится именем команды."""
+        return self._known_name(name, self._is_skill) or name
+
+    def _command_for(self, name: str) -> Command | None:
+        """Команда по набранному слову — с переводом раскладки."""
+        return self._registry.lookup(self._typed_name(name))
+
+    def _word_on_space(self, name: str) -> str | None:
+        """Чем заменить `/имя` по пробелу — команда в поле латиницей:
+        набранное не в той раскладке — тем же словом в нужной (`туц` →
+        `new`), русский алиас — именем команды (`очистить` → `new`).
+        Английский синоним, имя, скилл и незнакомое слово — None."""
+        known = self._known_name(name)
+        if known is None:
+            return None
+        cmd = self._registry.lookup(known)
+        shown = known if cmd is None else field_word(cmd, known)
+        return shown if shown != name else None
 
     def _insert_palette_skill(self, inp: TextArea, typed: str) -> bool:
         """Enter на строке скилла палитры: вставить `/имя ` — текст
@@ -8969,14 +9029,9 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _skill_input_name(self, skill: dict) -> str:
         """Запускаемый вид скилла (`skill_input_name`) по прогретому кэшу
         и реестру команд."""
-        catalog = (
-            None
-            if self._skills_cache is None
-            else catalog_from_entries(self._skills_cache)
-        )
         return skill_input_name(
             str(skill.get("id", "")),
-            catalog,
+            self._skill_catalog(),
             is_command=lambda name: self._registry.lookup(name) is not None,
         )
 
@@ -8986,6 +9041,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._skills_cache is None:
             self._skills_cache = await self._load_skills_safe()
         first, _, rest = arg.partition(" ")
+        first = self._skill_typed(first)
         res = self._resolve_cached_skill(first)
         if isinstance(res, Resolved):
             await self._cmd_use_skill(res.canonical_id, prompt=rest.strip())
@@ -9024,7 +9080,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         имя раскрывается во все свои id."""
         if not self._skills_cache:
             return []
-        catalog = catalog_from_entries(self._skills_cache)
+        catalog = self._skill_catalog()
         ids: list[str] = []
         for cand in suggest_skills(name, catalog, 3):
             res = resolve_skill_exact(cand, catalog)
@@ -9564,7 +9620,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not raw:
             return
         parts = raw.split(None, 1)
-        name = parts[0]
+        name = self._typed_name(parts[0])
         arg = parts[1].strip() if len(parts) > 1 else ""
         cmd = self._registry.lookup(name)
         if cmd is None:
@@ -9876,6 +9932,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Кэш скиллов; смена перерисовывает поле ввода: подсветка `/имени`
         зависит от кэша (холодный — не подсвечивает)."""
         self._skills_cache_value = value
+        self._skill_catalog_memo = None
         try:
             inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         except NoMatches:

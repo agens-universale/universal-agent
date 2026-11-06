@@ -88,17 +88,19 @@ class CommandRegistry:
         self._alias_to_canonical: dict[str, str] = {}
 
     def register(self, cmd: Command) -> None:
+        """Имя и алиасы команды не должны быть заняты ничьим именем или
+        алиасом: иначе одно `/слово` вело бы в две команды."""
+        for word in (cmd.name, *cmd.aliases):
+            if word in self._by_name or word in self._alias_to_canonical:
+                raise ValueError(f"/{word} уже занято другой командой")
         self._by_name[cmd.name] = cmd
         for a in cmd.aliases:
             self._alias_to_canonical[a] = cmd.name
 
     def lookup(self, name: str) -> Optional[Command]:
-        if name in self._by_name:
-            return self._by_name[name]
-        canonical = self._alias_to_canonical.get(name)
-        if canonical:
-            return self._by_name.get(canonical)
-        return None
+        """Команда по имени или алиасу ровно как набрано."""
+        canonical = self._alias_to_canonical.get(name, name)
+        return self._by_name.get(canonical)
 
     def list_commands(self) -> list[Command]:
         """Порядок регистрации = частота использования (help / палитра)."""
@@ -106,6 +108,13 @@ class CommandRegistry:
 
     def all_names(self) -> list[str]:
         return list(self._by_name) + list(self._alias_to_canonical)
+
+
+def field_word(cmd: Command, word: str) -> str:
+    """Как набранное слово команды пишется в поле — латиницей: русский
+    алиас становится именем команды (`очистить` → `new`), английский
+    синоним и имя остаются как есть."""
+    return word if word.isascii() else cmd.name
 
 
 def closest_command(name: str, registry: CommandRegistry) -> Optional[str]:
@@ -123,10 +132,16 @@ def build_default_registry() -> CommandRegistry:
         return s[:1].upper() + s[1:] if s else s
 
     cmds = [
-        Command("help", (), "", "Справка по командам", hotkey="F1 · Ctrl+/"),
+        Command(
+            "help",
+            ("?", "справка", "помощь"),
+            "",
+            "Справка по командам",
+            hotkey="F1 · Ctrl+/",
+        ),
         Command(
             "sessions",
-            (),
+            ("resume", "continue", "сессии", "сессия"),
             "",
             "Список сессий — выбрать и продолжить",
             hotkey="F2 · Ctrl+S",
@@ -135,7 +150,7 @@ def build_default_registry() -> CommandRegistry:
         # значений; текущее значение — справа, в колонке клавиш.
         Command(
             "model",
-            ("models",),
+            ("models", "модель", "модели"),
             "[модель]",
             _cap(f"{TOGGLES['model'].label}: {TOGGLES['model'].summary}"),
             arg_options_provider=model_picker_options,
@@ -146,7 +161,7 @@ def build_default_registry() -> CommandRegistry:
         ),
         Command(
             "profile",
-            ("profiles",),
+            ("profiles", "профиль", "профили"),
             "[профиль]",
             _cap(
                 f"{TOGGLES['profiles'].label}: {TOGGLES['profiles'].summary}"
@@ -160,29 +175,35 @@ def build_default_registry() -> CommandRegistry:
         ),
         Command(
             "diff",
-            (),
+            ("правки", "дифф"),
             "",
             "Правки агента: обзор, принятие, откат",
             hotkey="F3 · Ctrl+D",
         ),
         Command(
             "view",
-            (),
+            ("просмотр",),
             "<path>",
             "Постраничный просмотр текстового файла",
             arg_file=True,
         ),
         Command(
             "notices",
-            (),
+            ("уведомления",),
             "",
             "Уведомления (старт + runtime)",
             hotkey="F4 · Ctrl+O",
         ),
-        Command("new", (), "", "Новая сессия в этом окне", hotkey="Ctrl+N"),
+        Command(
+            "new",
+            ("clear", "новая", "очистить"),
+            "",
+            "Новая сессия в этом окне",
+            hotkey="Ctrl+N",
+        ),
         Command(
             "plan",
-            (),
+            ("план",),
             "[clear]",
             "Вернуться к плану сессии; clear — убрать план",
             # Без arg_options намеренно: меню аргументов открывается с
@@ -192,7 +213,7 @@ def build_default_registry() -> CommandRegistry:
         ),
         Command(
             "config",
-            (),
+            ("конфиг",),
             "",
             "Конфиг сессии + пути к файлам",
             hotkey="F5 · Ctrl+G",
@@ -204,7 +225,7 @@ def build_default_registry() -> CommandRegistry:
         # ради слова, которое уже прочитано.
         Command(
             "settings",
-            (),
+            ("настройки",),
             "",
             "Подключение, модели, профили, MCP, голос, режимы, внешний вид",
             hotkey="F6",
@@ -213,14 +234,14 @@ def build_default_registry() -> CommandRegistry:
         # («Ctrl+T / Enter — стоп · Esc — отмена»), пока диктовка идёт.
         Command(
             "voice",
-            (),
+            ("голос",),
             "",
             "Голосовой ввод: надиктовать сообщение",
             hotkey="Ctrl+T",
         ),
         Command(
             "export",
-            (),
+            ("экспорт",),
             "[txt|json|log-txt|log-json]",
             "Экспорт сессии",
             arg_options=(
@@ -232,43 +253,54 @@ def build_default_registry() -> CommandRegistry:
         ),
         Command(
             "copy",
-            (),
+            ("копировать", "копия"),
             "[N]",
             "Скопировать последний ответ агента или N-й с конца (/copy N)",
         ),
-        Command("compact", ("сжать",), "", "Сжать контекст сессии сейчас"),
-        Command("init", (), "", "Анализ проекта и генерация AGENTS.md"),
-        Command("skills", (), "", "Обзор навыков"),
-        Command("skill", (), "<id>", "Использовать навык"),
-        Command("status", (), "", "Состояние текущей сессии"),
-        Command("stop", (), "", "Остановить активную задачу", hotkey="Ctrl+C"),
-        Command("mcp", (), "", "MCP-серверы и их тулы"),
+        Command(
+            "compact",
+            ("summarize", "сжать"),
+            "",
+            "Сжать контекст сессии сейчас",
+        ),
+        Command("init", ("инит",), "", "Анализ проекта и генерация AGENTS.md"),
+        Command("skills", ("навыки", "скиллы"), "", "Обзор навыков"),
+        Command("skill", ("навык", "скилл"), "<id>", "Использовать навык"),
+        Command("status", ("статус",), "", "Состояние текущей сессии"),
+        Command(
+            "stop",
+            ("cancel", "стоп", "отмена"),
+            "",
+            "Остановить активную задачу",
+            hotkey="Ctrl+C",
+        ),
+        Command("mcp", ("мсп",), "", "MCP-серверы и их тулы"),
         Command(
             "buffer",
-            (),
+            ("буфер",),
             "",
             "Буфер сессии — текст собранных копий",
             hotkey="F7",
         ),
-        Command("quit", (), "", "Выход", hotkey="Esc"),
+        Command("quit", ("exit", "выход", "выйти"), "", "Выход", hotkey="Esc"),
         # Переключатели палитры (←/→): самопроверка хода и формат финала.
         Command(
             "rigor",
-            (),
+            ("строгость",),
             "",
             _cap(f"{TOGGLES['rigor'].label}: {TOGGLES['rigor'].summary}"),
             is_toggle=True,
         ),
         Command(
             "gate",
-            (),
+            ("самопроверка", "гейт"),
             "",
             _cap(f"{TOGGLES['gate'].label}: {TOGGLES['gate'].summary}"),
             is_toggle=True,
         ),
         Command(
             "answers",
-            (),
+            ("формат",),
             "",
             _cap(f"{TOGGLES['answers'].label}: {TOGGLES['answers'].summary}"),
             is_toggle=True,
