@@ -447,6 +447,12 @@ async def _aguard_model_call(factory):
         raise
 
 
+async def apause_model_retry(seconds: float) -> None:
+    """Пауза между попытками запроса к модели. Стоп хода обрывает её, как и
+    сам запрос: иначе остановленный ход досиживал бы паузу, держа тред."""
+    await _aguard_model_call(lambda: asyncio.sleep(seconds))
+
+
 async def _aopen_model_stream(client, *args, read, **kwargs):
     """Стрим под стопом с самого ``client.stream``, ещё до заголовков.
 
@@ -717,6 +723,7 @@ async def arequest_backend_chat_completions(
     retry_log_level=logging.ERROR,
     no_more_retries_log_level=logging.ERROR,
     operation_name="Backend request",
+    pause=apause_model_retry,
 )
 async def _arequest_with_backoff(request, headers: Dict, logger=None):
     # `logger` и `use_retry` читает декоратор ретраев; телу они не нужны.

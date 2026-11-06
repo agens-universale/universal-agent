@@ -1,7 +1,7 @@
 """Асинхронный двойник ``utils.retry`` (план async-переезда, Задача 7).
 
 Отличий от синхронного ровно три: ``async def`` у обёртки, ``await`` у вызова
-и ``asyncio.sleep`` вместо ``time.sleep``. Всё остальное — извлечение
+и ``asyncio.sleep`` вместо ``time.sleep`` (или своя пауза вызова, ``pause``). Всё остальное — извлечение
 ``use_retry``/``logger`` из kwargs, фильтрация kwargs по сигнатуре, ре-инъекция
 логгера, тексты и уровни логов — не повторено, а взято из ``utils.retry``
 (``_RetryPolicy``, ``_retry_decorator``): политика ретраев и её следы в логах
@@ -11,8 +11,11 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from typing import Any, Awaitable, Callable, Optional, TypeVar
+
+Pause = Callable[[float], Awaitable[None]]
 
 from gc_core.utils.retry import _PreparedCall, _retry_decorator, _RetryPolicy
 
@@ -23,13 +26,20 @@ def _wrap_async(
     func: Callable[..., Awaitable[_T]],
     prepare: Callable[[dict], _PreparedCall],
     policy: _RetryPolicy,
+    pause: Optional[Pause],
 ) -> Callable[..., Awaitable[_T]]:
     async def wrapper(*args: Any, **kwargs: Any) -> _T:
         call = prepare(kwargs)
         if not call.use_retry or policy.max_attempts <= 1:
             return await func(*args, **call.kwargs)
         return await _run_with_retries_async(
-            func, args, call.kwargs, policy, logger=call.logger, url=call.url
+            func,
+            args,
+            call.kwargs,
+            policy,
+            logger=call.logger,
+            url=call.url,
+            pause=pause,
         )
 
     return wrapper
@@ -43,6 +53,7 @@ async def _run_with_retries_async(
     *,
     logger: Any,
     url: Any,
+    pause: Optional[Pause] = None,
 ) -> _T:
     delay = float(policy.initial_delay_sec)
     last_exc: Optional[Exception] = None
@@ -57,7 +68,7 @@ async def _run_with_retries_async(
             policy.log_retrying(logger, attempt, delay, url, exc)
             # Именно asyncio.sleep через атрибут модуля: тесты подменяют его
             # (monkeypatch.setattr(aretry.asyncio, "sleep", ...)).
-            await asyncio.sleep(delay)
+            await (pause or asyncio.sleep)(delay)
             delay *= policy.backoff_factor
     if last_exc is not None:
         raise last_exc
@@ -73,11 +84,13 @@ def retry_with_backoff_async(
     retry_log_level: int = logging.WARNING,
     no_more_retries_log_level: int = logging.ERROR,
     operation_name: str = "Operation",
+    pause: Optional[Pause] = None,
 ) -> Callable[[Callable[..., Awaitable[_T]]], Callable[..., Awaitable[_T]]]:
     """Ретраи с экспоненциальным backoff для корутинных функций.
 
     Пауза через ``asyncio.sleep``: ``time.sleep`` заморозил бы весь loop, то
-    есть ровно то, ради чего затевался переезд.
+    есть ровно то, ради чего затевался переезд. ``pause`` — своя пауза
+    вызова (запрос к модели обрывает её стопом хода).
     """
 
     policy = _RetryPolicy(
@@ -89,7 +102,9 @@ def retry_with_backoff_async(
         no_more_retries_log_level=no_more_retries_log_level,
         operation_name=operation_name,
     )
-    return _retry_decorator(policy, _wrap_async)
+    return _retry_decorator(
+        policy, functools.partial(_wrap_async, pause=pause)
+    )
 
 
 __all__ = ["retry_with_backoff_async"]

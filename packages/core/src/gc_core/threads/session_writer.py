@@ -169,9 +169,11 @@ class SessionWriter:
         except Exception:  # владелец — только для текста
             record = None
         owner = record.lease.owner if record and record.lease else None
+        # Отказ хранилища часто сам называет владельца — не повторять его.
+        detail = "" if owner and owner in str(exc) else f" ({exc})"
         return ThreadBusy(
             f"тред {self.key.system}/{self.key.thread} занят: его ведёт "
-            f"{owner or 'другая сессия'} ({exc})",
+            f"{owner or 'другая сессия'}{detail}",
             owner=owner,
         )
 

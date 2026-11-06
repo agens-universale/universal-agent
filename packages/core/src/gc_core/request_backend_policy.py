@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -10,7 +9,10 @@ from gc_core.utils.backend_errors import (
     is_image_request_error,
     is_retriable_backend_error,
 )
-from gc_core.utils.connect_backend import arequest_backend_chat_completions
+from gc_core.utils.connect_backend import (
+    apause_model_retry,
+    arequest_backend_chat_completions,
+)
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
@@ -168,8 +170,9 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
                 reduced_max_tokens,
                 exc_info=True,
             )
-            # Пауза кооперативная: time.sleep заморозил бы весь loop.
-            await asyncio.sleep(_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC)
+            # Пауза кооперативная (time.sleep заморозил бы весь loop) и
+            # обрывается стопом хода, как сам запрос.
+            await apause_model_retry(_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC)
             try:
                 return await _send_once(
                     reduced_max_tokens, transport_use_retry=False

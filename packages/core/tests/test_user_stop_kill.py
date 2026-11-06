@@ -15,6 +15,7 @@ import threading
 import time
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from gc_core.backends.async_protocol import SyncExecAdapter
 from gc_core.backends.local import LocalFsBackend
@@ -1105,3 +1106,62 @@ def test_run_logger_accepts_the_stop_event():
     assert found[0].event == "user_stop_killed"  # type: ignore[attr-defined]
     assert found[0].kind == "exec"  # type: ignore[attr-defined]
     assert not hasattr(found[0], "stdout")
+
+
+async def _stop_during_retry_pause(monkeypatch, request):
+    """Модель отвечает 503, ход уходит в паузу между попытками — стоп в
+    паузе кончает запрос сразу: остановленный ход не держит тред до конца
+    паузы, а следующая попытка не уходит."""
+    from transport_fakes import install_transport
+
+    spy = install_transport(
+        monkeypatch, lambda _request: httpx.Response(503, json={})
+    )
+    gate = _stop(_Log())
+
+    async def _run():
+        with bind_user_stop(gate):
+            return await request()
+
+    task = asyncio.create_task(_run())
+    while not spy.requests:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
+    started = time.monotonic()
+    gate.request()
+    with pytest.raises(ModelRequestStopped):
+        await asyncio.wait_for(task, timeout=3)
+    assert time.monotonic() - started < 1
+    assert len(spy.requests) == 1
+
+
+async def test_stop_during_transport_retry_pause_ends_request(monkeypatch):
+    await _stop_during_retry_pause(
+        monkeypatch,
+        lambda: arequest_backend_chat_completions(
+            {"model": "m", "messages": []},
+            {},
+            "http://model/v1/chat/completions",
+            use_retry=True,
+            on_delta=lambda kind, text: None,
+        ),
+    )
+
+
+async def test_stop_during_adaptive_retry_pause_ends_request(monkeypatch):
+    from gc_core.request_backend_policy import (
+        arequest_chat_completions_with_policy,
+    )
+
+    await _stop_during_retry_pause(
+        monkeypatch,
+        lambda: arequest_chat_completions_with_policy(
+            payload_factory=lambda n: {"model": "m", "max_tokens": n},
+            initial_max_tokens=1000,
+            min_response_tokens=100,
+            headers={},
+            url="http://model/v1/chat/completions",
+            verify=True,
+            use_retry=False,
+        ),
+    )
