@@ -665,6 +665,45 @@ async def check_side_does_not_bump_revision(store, _clock: FakeClock) -> None:
     )
 
 
+async def check_turns_stream(store, _clock: FakeClock) -> None:
+    """Итог хода — поток ядра ``turns``: пишется сбоку по аренде хода одной
+    записью с коротким итогом в ``runtime.last_turn``; сброс и замена
+    истории поток не трогают."""
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("a"))
+    )
+    runtime = RuntimeStatus(last_turn={"status": "done", "reason": None})
+    entry = {"after": "a", "outcome": {"v": 1, "status": "done"}}
+    await store.append_side(
+        KEY,
+        SideChange(
+            op_id="t1",
+            lease=lease,
+            append=[("turns", [entry])],
+            set_runtime=runtime,
+        ),
+    )
+    record = await store.get_thread(KEY)
+    _expect(record.runtime == runtime, "короткий итог хода в runtime")
+    _expect(record.max_seq.get("turns") == 1, "max_seq потока итогов")
+    _expect(
+        [e.data for e in await store.read_stream(KEY, "turns")] == [entry],
+        "запись итога хода читается как есть",
+    )
+    await store.commit(
+        KEY,
+        _change(
+            "op2", 1, lease, replace_history=Compaction(messages=_msgs("s"))
+        ),
+    )
+    await store.commit(KEY, _change("op3", 2, lease, reset_history=True))
+    _expect(
+        len(await store.read_stream(KEY, "turns")) == 1,
+        "сжатие и сброс истории поток итогов не трогают",
+    )
+
+
 async def check_patch_frontend_merges(store, _clock: FakeClock) -> None:
     await store.append_side(
         KEY,
@@ -1341,6 +1380,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_side_does_not_bump_revision,
     check_side_creates_thread,
     check_patch_frontend_merges,
+    check_turns_stream,
     check_side_cannot_touch_messages,
     check_frontend_streams,
     check_aliases,

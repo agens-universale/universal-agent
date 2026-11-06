@@ -195,7 +195,8 @@ async def test_diff_block_mounted_right_after_its_tool_row(tmp_path):
 @pytest.mark.asyncio
 async def test_edit_counts_live_in_call_row(tmp_path):
     """Счётчики правки — в строке вызова после объекта: `+N` цветом OK,
-    `−M` — ERR; строки `└ изменено:` под вызовом больше нет."""
+    `−M` — ERR; строки `└ изменено:` под вызовом больше нет. Блок правок
+    (P4 §6.2): глагол по результату и счётчики в скобках `(+a −r)`."""
     tid = "counts"
     _write_thread(
         tmp_path,
@@ -210,7 +211,7 @@ async def test_edit_counts_live_in_call_row(tmp_path):
 
     async with _screen(tmp_path, tid) as scr:
         content = _row_content(scr.query_one(ToolCallRow))
-        assert content.plain == "Edit  src/app.py +12 −3"
+        assert content.plain == "Edited src/app.py (+12 −3)"
         assert _span_color(content, "+12") == OK
         assert _span_color(content, "−3") == ERR
         assert not any("изменено:" in s for s in _screen_lines(scr))
@@ -282,8 +283,9 @@ def _indent(line: str) -> int:
 
 @pytest.mark.asyncio
 async def test_body_right_under_tool_row(tmp_path):
-    """Тело диффа — сразу под строкой инструмента, на +2 от её глифа; перед
-    следующим инструментом — пустая строка."""
+    """Тело диффа — сразу под строкой инструмента, на +2 от её глифа (номер
+    строки под блоком прижат вправо к третьей клетке колонки диффа, P4
+    §6.2); перед следующим инструментом — пустая строка."""
     tid = "ladder"
     _write_thread(
         tmp_path,
@@ -300,12 +302,17 @@ async def test_body_right_under_tool_row(tmp_path):
 
     async with _screen(tmp_path, tid) as scr:
         lines = _screen_lines(scr)
-        tool = next(i for i, s in enumerate(lines) if "Edit  src/app.py" in s)
-        body = next(i for i, s in enumerate(lines) if "def f():" in s)
-        next_tool = next(i for i, s in enumerate(lines) if "Run  python" in s)
+        tool = next(i for i, s in enumerate(lines) if "Edited src/app.py" in s)
+        # Дифф с контекстом влезает в превью — целиком: первой идёт
+        # строка контекста.
+        body = next(i for i, s in enumerate(lines) if "def f()" in s)
+        next_tool = next(i for i, s in enumerate(lines) if "Ran  " in s)
 
         assert body == tool + 1
-        assert _indent(lines[body]) - _indent(lines[tool]) == 2
+        diff = scr.query_one(DiffBlock)
+        row = scr.query_one(ToolCallRow)
+        assert diff.region.x - row.region.x == 2
+        assert lines[body][diff.region.x : diff.region.x + 3] == "  1"
         assert lines[next_tool - 1] == ""
 
 
@@ -340,6 +347,7 @@ async def test_row_fill_reaches_the_block_edge(tmp_path, width):
         await pilot.pause(0.3)
         block = pilot.app.screen.query_one(DiffBlock)
         rows = block.query_one(".block-body", Static).visual.plain.split("\n")
+        # Залиты строки правки (`-` и `+`), контекст идёт без заливки.
         assert len(rows[1]) == len(rows[2]) == block.size.width
 
 
@@ -378,8 +386,14 @@ async def test_no_block_for_non_file_tool(tmp_path):
     _write_journal(tmp_path, tid, [_record("other")])
 
     async with _screen(tmp_path, tid) as scr:
-        assert len(scr.query(ToolCallRow)) == 1
+        # Чтение — член блока `Explored` (P4): строка вызова одна.
+        assert len(_call_rows(scr)) == 1
         assert not scr.query(DiffBlock)
+
+
+def _call_rows(scr) -> list[ToolCallRow]:
+    """Строки вызовов без заголовков блоков (P4)."""
+    return [r for r in scr.query(ToolCallRow) if r.mode != "header"]
 
 
 @pytest.mark.asyncio
@@ -410,7 +424,7 @@ async def test_two_edits_each_get_own_block(tmp_path):
         children = _trace_children(scr)
         kinds = [
             ("row", w)
-            if isinstance(w, ToolCallRow)
+            if isinstance(w, ToolCallRow) and w.mode != "header"
             else ("block", w)
             if isinstance(w, DiffBlock)
             else ("other", w)
@@ -449,7 +463,8 @@ async def test_batch_block_lands_under_own_row_not_at_the_end(tmp_path):
         seq = [
             w
             for w in _trace_children(scr)
-            if isinstance(w, (ToolCallRow, DiffBlock))
+            if isinstance(w, DiffBlock)
+            or (isinstance(w, ToolCallRow) and w.mode != "header")
         ]
         assert [type(w).__name__ for w in seq] == [
             "ToolCallRow",
@@ -462,7 +477,8 @@ async def test_batch_block_lands_under_own_row_not_at_the_end(tmp_path):
 
 @pytest.mark.asyncio
 async def test_every_call_row_has_blank_line_above(tmp_path):
-    """Пустая строка перед каждым вызовом — и после диффа, и подряд."""
+    """Пустая строка перед блоком; в блоке правок (P4 §3.1) — между
+    файлами, после диффа тоже, но не перед первым."""
     tid = "group"
     _write_thread(
         tmp_path,
@@ -479,8 +495,8 @@ async def test_every_call_row_has_blank_line_above(tmp_path):
 
     async with _screen(tmp_path, tid) as scr:
         rows = [w for w in _trace_children(scr) if isinstance(w, ToolCallRow)]
-        assert len(rows) == 2
-        assert [r.styles.margin.top for r in rows] == [1, 1]
+        assert [r.mode for r in rows] == ["header", "member", "member"]
+        assert [r.styles.margin.top for r in rows] == [1, 0, 1]
         assert not scr.query(".tool-group-start")
 
 
@@ -514,7 +530,8 @@ async def test_lookup_failure_does_not_break_trace(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_collapse_threshold_comes_from_config(tmp_path):
-    """Порог свёртки берётся из agent_edits.trace_inline_max_lines."""
+    """Порог свёртки берётся из agent_edits.trace_diff_preview_lines; под
+    блоком (P4 §4.0) своего хвоста у диффа нет — одна фраза блока."""
     tid = "threshold"
     _write_thread(
         tmp_path,
@@ -530,19 +547,21 @@ async def test_collapse_threshold_comes_from_config(tmp_path):
     )
 
     async with _screen(
-        tmp_path, tid, config={"agent_edits": {"trace_inline_max_lines": 3}}
+        tmp_path, tid, config={"agent_edits": {"trace_diff_preview_lines": 3}}
     ) as scr:
+        from gc_tui.widgets.tool_blocks_view import BlockAction
+
         block = scr.query_one(DiffBlock)
         assert _body_lines(block) == 3
-        assert (
-            block.query_one(".diff-more", Static).visual.plain
-            == "… ещё 27 строк"
-        )
+        assert not block.query(".diff-more")
+        (phrase,) = scr.query(BlockAction)
+        assert phrase.phrase == "+ ещё 27 строк"
 
 
 @pytest.mark.asyncio
 async def test_collapse_threshold_defaults_without_config(tmp_path):
-    """Без ключа в конфиге — дефолт 30 ЭКРАННЫХ рядов.
+    """Без ключа в конфиге — дефолт 10 изменённых строк превью (P4 §6.3):
+    правка на 40 строк — 10 строк.
 
     Строк берём заведомо больше дефолта: иначе тест не отличил бы работающий
     лимит от отсутствующего."""
@@ -561,7 +580,7 @@ async def test_collapse_threshold_defaults_without_config(tmp_path):
     )
 
     async with _screen(tmp_path, tid) as scr:
-        assert _body_lines(scr.query_one(DiffBlock)) == 30
+        assert _body_lines(scr.query_one(DiffBlock)) == 10
 
 
 # --- фокус: клик по диффу не трогает позицию Tab -----------------------------
@@ -586,7 +605,7 @@ def _focus_fixture(tmp_path, tid: str) -> None:
     )
     # Строк заведомо больше лимита: тестам нужна сноска «ещё N строк» — по ней
     # они и кликают. Лимит эти тесты задают СВОЙ, маленький (`_FOCUS_CONFIG`):
-    # с дефолтными 30 рядами блок вырастает так, что кнопка копирования уходит
+    # с дефолтным лимитом блок может вырасти так, что кнопка копирования уйдёт
     # за кадр, и клик промахивается мимо экрана.
     _write_journal(
         tmp_path, tid, [_record("c1", hunks=_long_hunks(40), add=40, del_=0)]
@@ -596,12 +615,12 @@ def _focus_fixture(tmp_path, tid: str) -> None:
 #: Лимит для тестов фокуса: блок обрезан (сноска есть) и при этом короток.
 _FOCUS_CONFIG = {
     "agent.model": "M",
-    "agent_edits": {"trace_inline_max_lines": 5},
+    "agent_edits": {"trace_diff_preview_lines": 5},
 }
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("selector", [".block-body", ".diff-more"])
+@pytest.mark.parametrize("selector", [".block-body", ".block-action"])
 async def test_click_on_block_keeps_current_focus(tmp_path, selector):
     """Клик по телу/хвосту фокус не двигает — ни на блок, ни на #trace."""
     tid = "keepfocus"
@@ -689,13 +708,15 @@ async def test_text_selection_in_block_still_works(tmp_path):
 
 @pytest.mark.asyncio
 async def test_tail_follows_the_width(tmp_path):
-    """Хвост «… ещё N строк» пересобирается под ширину.
+    """Под блоком ленты доля диффа — в логических строках (спека P4 §6.3).
 
-    Бюджет свёрнутого блока считается в ЭКРАННЫХ рядах, значит и факт усечения,
-    и число скрытых строк зависят от ширины. Хвост, собранный один раз до
-    раскладки, протухал бы; а если усечение появлялось только после неё —
-    хвоста не было вовсе, и блок нельзя было развернуть.
+    Строк меньше доли, но они длинные: и на узком окне, где каждая
+    переносится, и на широком показаны все, а фразы раскрытия нет — скрытых
+    логических строк нет. Хвост по ширине — только у диффа вне ленты
+    (`test_diff_block.py`).
     """
+    from gc_tui.widgets.tool_blocks_view import BlockAction
+
     tid = "tail_width"
     _write_thread(
         tmp_path,
@@ -706,8 +727,6 @@ async def test_tail_follows_the_width(tmp_path):
             _output("c1", "fs_write_file"),
         ],
     )
-    # Строк меньше лимита, но они длинные: на узком окне перенос съест бюджет
-    # рядов, и усечение появится там, где на широком его не было.
     long_hunks = "@@ -1,8 +1,8 @@" + "".join(
         "\n+" + "y" * 200 for _ in range(8)
     )
@@ -718,20 +737,18 @@ async def test_tail_follows_the_width(tmp_path):
     async with _pilot(
         tmp_path,
         tid,
-        {"agent.model": "M", "agent_edits": {"trace_inline_max_lines": 30}},
+        {"agent.model": "M", "agent_edits": {"trace_diff_preview_lines": 30}},
     ) as pilot:
-        block = pilot.app.screen.query_one(DiffBlock)
-
-        await pilot.resize_terminal(40, 30)
-        await pilot.pause()
-        await pilot.pause()
-        assert list(block.query(".diff-more")), (
-            "на узком окне усечение есть, а хвоста нет"
-        )
-
-        await pilot.resize_terminal(240, 30)
-        await pilot.pause()
-        await pilot.pause()
-        assert not list(block.query(".diff-more")), (
-            "на широком усечения нет, а хвост остался"
-        )
+        scr = pilot.app.screen
+        block = scr.query_one(DiffBlock)
+        for width in (40, 240):
+            await pilot.resize_terminal(width, 30)
+            await pilot.pause()
+            await pilot.pause()
+            body = block.query_one(".block-body", Static).visual.plain
+            numbered = [
+                row for row in body.split("\n") if row.strip()[:1].isdigit()
+            ]
+            assert len(numbered) == 8, width
+            assert not scr.query(BlockAction), width
+            assert not block.query(".diff-more"), width

@@ -79,6 +79,15 @@ class EditRecord:
     # сверх потолка не записаны, не видны и не откатываются. ``None`` — команда
     # не урезана (и все записи журналов до поля).
     command_paths: Optional[int] = None
+    # Вызов команды, которая тронула файл (шелл-канал). ``call_id`` у таких
+    # записей по-прежнему ``None`` — признак канала; это поле лишь говорит,
+    # какой вызов команды сделал правку. ``None`` — запись fs-тула, команда
+    # вне вызова тула или журнал до поля.
+    command_call_id: Optional[str] = None
+    # Размер файла после правки у записи без диффа (флаг ``no_diff``: бинарь
+    # или файл сверх капа исходника). ``None`` — запись с диффом, удаление,
+    # файл пропал между пробами или журнал до поля.
+    size_bytes: Optional[int] = None
 
     def to_json_obj(self) -> Dict[str, Any]:
         obj = {
@@ -96,6 +105,10 @@ class EditRecord:
         }
         if self.command_paths is not None:
             obj["command_paths"] = self.command_paths
+        if self.command_call_id is not None:
+            obj["command_call_id"] = self.command_call_id
+        if self.size_bytes is not None:
+            obj["size_bytes"] = self.size_bytes
         return obj
 
     @classmethod
@@ -113,6 +126,8 @@ class EditRecord:
             after_sha256=obj.get("after_sha256"),
             flags=list(obj.get("flags") or []),
             command_paths=obj.get("command_paths"),
+            command_call_id=obj.get("command_call_id"),
+            size_bytes=obj.get("size_bytes"),
         )
 
 

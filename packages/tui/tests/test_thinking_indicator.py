@@ -222,8 +222,8 @@ from pathlib import Path
 @pytest.mark.asyncio
 async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
     """После прямой остановки runner-а (runner.stop() без /stop → last_stop_requested
-    не выставляется, но runner._stop_requested=True) индикатор не уничтожается,
-    а переходит в состояние «cancelled» — прямой stop не «completed»."""
+    не выставляется, но runner._stop_requested=True) итог хода — строка
+    «■ Отменено» в ленте (S10), а не «completed»; индикатора нет."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
@@ -264,18 +264,21 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
         pilot.app.active_runner.stop()
         await pilot.pause(0.5)
 
-        assert len(pilot.app.query(ThinkingIndicator)) == 1
-        ind = pilot.app.query_one(ThinkingIndicator)
-        assert ind._state == "cancelled"  # прямой stop → stopped → cancelled
+        from gc_tui.widgets.turn_line import TurnLine
+
+        assert len(pilot.app.query(ThinkingIndicator)) == 0
+        # прямой stop → stopped → «■ Отменено»
+        lines = [line.text.plain for line in pilot.app.query(TurnLine)]
+        assert lines == ["■ Отменено"]
 
 
 @pytest.mark.asyncio
-async def test_indicator_shows_processing_after_agent_event_with_pause(
+async def test_indicator_keeps_thinking_after_agent_event_with_pause(
     tmp_path,
 ):
-    """После event kind=agent и паузы ≥1.5с, пока runner ещё работает
-    (intent_guard/policy продолжает), индикатор НЕ прячется, а показывает
-    «сверяюсь…» — объясняет статус [running] (опция A)."""
+    """После event kind=agent и паузы, пока runner ещё работает, индикатор
+    НЕ прячется и говорит «думаю…»: «сверяюсь…» — только по флагу ядра
+    (судья реально проверяет ответ), по тишине его не угадывают."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -336,15 +339,13 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
-        import time as _time
-
         inp.text = "что нового?"
         await pilot.press("enter")
         scr = pilot.app.screen
         await pilot.pause(0.5)  # дать прогону смонтировать индикатор
 
         # Пиним «живой» runner (убираем зависимость от тайминга реального прогона на
-        # момент проверки) и симулируем agent-ответ + тишину ≥1.5с.
+        # момент проверки) и симулируем agent-ответ + тишину.
         class _LiveRunner:
             def is_running(self):
                 return True
@@ -355,26 +356,12 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(
         pilot.app.active_runner = _LiveRunner()
         scr._confirm_active = False
         scr._last_event_kind = "agent"
-        scr._last_event_at = _time.monotonic() - 5
+        await pilot.pause(2.0)
         scr._poll_active()
         ind = scr._thinking
         assert ind is not None
         assert not ind.has_class("hidden")
-        assert "сверяюсь…" in str(ind._render_text().plain)
-
-
-def test_done_state_renders_vypolnil_dim_and_frozen():
-    from gc_tui.widgets import thinking_indicator as ti
-
-    clock = {"t": 100.0}
-    ind = ti.ThinkingIndicator(started_at=0.0, clock=lambda: clock["t"])
-    ind.set_state("done")  # заморозить на 100с
-    clock["t"] = 999.0  # время идёт дальше
-    txt = ind._render_text()
-    s = txt.plain
-    assert s.startswith("✓") and "Выполнил за" in s
-    # длительность заморожена (≈100с от started_at), не 999
-    assert "1м 40с" in s or "100" in s
+        assert "думаю" in str(ind._render_text().plain)
 
 
 @pytest.mark.asyncio
@@ -418,3 +405,16 @@ async def test_esc_stops_running_run(tmp_path):
         await pilot.press("escape")
         await pilot.pause(0.3)
         assert stopped["flag"] is True
+
+
+@pytest.mark.parametrize(
+    "outcome", ["done", "cancelled", "failed", "interrupted", "stopped_steps"]
+)
+def test_indicator_ignores_outcome_states(outcome):
+    """Индикатор показывает только работу (S10 §3.3): исход хода — не его
+    состояние, `set_state` молча его пропускает."""
+    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
+    ind = ThinkingIndicator(state="thinking", clock=lambda: 0.0)
+    ind.set_state(outcome)
+    assert ind.state == "thinking"

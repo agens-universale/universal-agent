@@ -37,6 +37,7 @@ def test_trace_actions_carry_the_class():
 
 def test_scroll_end_pill_is_the_hover_exception():
     """Плашка «в конец» ховер красит фоном, а не `$accent`: класса нет."""
-    main = (TUI_PKG / "screens" / "main.py").read_text(encoding="utf-8")
-    assert "ScrollEndPill(trace" in main
-    assert 'id="trace-end-pill", classes="trace-action"' not in main
+    owner = TUI_PKG / "screens" / "trace_follow.py"
+    src = owner.read_text(encoding="utf-8")
+    assert "ScrollEndPill(trace" in src
+    assert "trace-action" not in src

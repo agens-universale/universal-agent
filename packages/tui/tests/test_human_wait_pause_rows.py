@@ -15,21 +15,37 @@ def _app(tmp_path):
     )
 
 
+async def _nested_run(pilot) -> ToolCallRow:
+    """Строка `Agent` в ленте и идущий вложенный вызов под ней — через
+    модель уровня субагента (P4 Task 15)."""
+    scr = pilot.app.screen
+    root = ToolCallRow(call_id="r", label="subagent_x", target="")
+    await scr.query_one("#trace").mount(root)
+    # Опора вложенных — строка `Agent`, которую тик опроса не чистит.
+    scr._subagent_parent_rows["r"] = root
+    scr._mount_nested_tool(
+        parent_call_id="r",
+        tool_name="exec_command",
+        tool_call_id="n",
+        args_summary="",
+    )
+    await pilot.pause()
+    return root
+
+
 @pytest.mark.asyncio
 async def test_human_wait_pauses_nested_rows(tmp_path):
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        root = ToolCallRow(call_id="r", label="subagent_x", target="")
-        nested = ToolCallRow(call_id="n", label="exec_run", target="", level=1)
-        await scr.mount(root)
-        await scr.mount(nested)
+        root = await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
         # Дальше без await: живой тик опроса без раннера чистит строки.
         scr._active_calls["r"] = root
-        scr._nested_tool_rows["n"] = nested
         scr._apply_human_wait(True)
         assert nested._pulse_timer is None
-        assert "‖" in nested._prefix_static.content.plain
+        assert "●" in nested._prefix_static.content.plain
+        assert "‖" not in nested._prefix_static.content.plain
         assert root._pulse_timer is None
 
         scr._apply_human_wait(False)
@@ -39,26 +55,80 @@ async def test_human_wait_pauses_nested_rows(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_confirm_tail_only_on_asking_nested_row(tmp_path):
+    """Спросил вложенный вызов: хвост `· ждёт разрешения` — у него, строка
+    `Agent` — только статичный `●`."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        root = await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
+        scr._active_calls["r"] = root
+        scr.show_confirm_banner("Действие", "Разрешить?", call_id="n")
+        scr._apply_human_wait(True)
+        assert "ждёт разрешения" in nested._render_content().plain
+        assert "ждёт разрешения" not in root._render_content().plain
+        assert root._pulse_timer is None
+
+        scr._hide_confirm_banner()
+        scr._apply_human_wait(False)
+        assert "ждёт разрешения" not in nested._render_content().plain
+        assert nested._pulse_timer is not None
+
+
+@pytest.mark.asyncio
+async def test_confirm_tail_on_asking_top_row(tmp_path):
+    """Спросила строка верхнего уровня — хвост у неё."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        root = await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
+        scr._active_calls["r"] = root
+        scr.show_confirm_banner("Действие", "Разрешить?", call_id="r")
+        scr._apply_human_wait(True)
+        assert "ждёт разрешения" in root._render_content().plain
+        assert "ждёт разрешения" not in nested._render_content().plain
+
+
+@pytest.mark.asyncio
+async def test_ask_human_wait_has_no_tail(tmp_path):
+    """ask_human: все живые строки — статичный `●`, хвоста нет нигде."""
+    app = _app(tmp_path)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        root = await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
+        scr._active_calls["r"] = root
+        scr._apply_human_wait(True)
+        for row in (root, nested):
+            assert row._pulse_timer is None
+            assert "ждёт разрешения" not in row._render_content().plain
+
+
+@pytest.mark.asyncio
 async def test_human_wait_ticks_nested_elapsed(tmp_path, monkeypatch):
     app = _app(tmp_path)
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        nested = ToolCallRow(call_id="n", label="exec_run", target="", level=1)
-        await scr.mount(nested)
+        await _nested_run(pilot)
+        nested = scr._nested_tool_rows["n"]
         ticks = []
         monkeypatch.setattr(
             nested, "refresh_running_elapsed", lambda: ticks.append(1)
         )
-        scr._nested_tool_rows["n"] = nested
         scr._apply_human_wait(False)
         assert ticks == [1]
 
 
 @pytest.mark.asyncio
-async def test_terminal_state_unhides_indicator(tmp_path):
+async def test_terminal_state_after_hidden_indicator_is_a_line(tmp_path):
+    """Стоп во время подтверждения (индикатор скрыт): итог — видимой
+    свежей строкой в ленте, скрытый индикатор уходит."""
     import json
 
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+    from gc_tui.widgets.turn_line import TurnLine
 
     tid = "humanwait00000000000000000000001"
     meta = {
@@ -82,6 +152,8 @@ async def test_terminal_state_unhides_indicator(tmp_path):
         # Стоп во время подтверждения: индикатор скрыт, ожидание снято.
         scr._hide_thinking_indicator()
         scr._poll_active()
-        ind = pilot.app.screen.query_one(ThinkingIndicator)
-        assert ind._state == "done"
-        assert not ind.has_class("hidden")
+        await pilot.pause()
+        assert list(pilot.app.screen.query(ThinkingIndicator)) == []
+        (line,) = pilot.app.screen.query(TurnLine)
+        assert line.is_fresh and line.display
+        assert line.text.plain == "✓ Выполнил"

@@ -1,8 +1,9 @@
 """Отказ вызова в ленте — не ошибка (спека P3 §10, смоук P3a).
 
 Язык глифов ленты — круги. Отказ политики, режима, судьи или человека:
-глиф `○` приглушённым оранжевым (`REFUSED`), строка `└` серым (`DIM`) и
-начинается с того, кто отказал. Успех — `●` `OK`, ошибка — `●` и `ERR`,
+глиф `○` приглушённым оранжевым (`REFUSED`), строка `└` тем же цветом
+отказа (спека P4 §9.13) и начинается с того, кто отказал; отказ без строки
+вызова — `○ кто: почему` серым. Успех — `●` `OK`, ошибка — `●` и `ERR`,
 стоп и лимит — `○` серым; несостоявшаяся проверка судьи — не отказ, а
 остановка `○`. Каждый путь одинаково: вживую, превью, вложенный вызов
 из записи субагента."""
@@ -154,13 +155,15 @@ def _output_event(error: dict) -> TraceEvent:
     return map_message(msg, no=2, ts="")
 
 
-def _assert_refused_row(row: ToolCallRow, text: str, indent: str) -> None:
+def _assert_refused_row(
+    row: ToolCallRow, text: str, indent: str, *, reason=DIM
+) -> None:
     prefix = row._render_prefix()
     assert _styles_of(prefix, "○") == [REFUSED]
     assert "●" not in prefix.plain
     line = _lines(row)
     assert line.plain == f"{indent}└ {text}"
-    assert _styles_of(line, text) == [DIM]
+    assert _styles_of(line, text) == [reason]
 
 
 # --- маппер: классификация в одном месте ------------------------------------
@@ -249,11 +252,11 @@ def test_classify_stop_without_facts_is_plain_error():
 # --- строка вызова -----------------------------------------------------------
 
 
-def test_refused_row_is_warn_glyph_and_dim_line():
+def test_refused_row_is_refused_glyph_and_line():
     row = ToolCallRow(call_id="c1", label="Write", target="a.txt")
     row.set_result(summary="вы отклонили", outcome="refused")
     assert row._render_content().plain == "Write  a.txt"
-    _assert_refused_row(row, "вы отклонили", "  ")
+    _assert_refused_row(row, "вы отклонили", "  ", reason=REFUSED)
 
 
 def test_ok_row_is_green_circle():
@@ -285,8 +288,10 @@ class _Target:
     def __init__(self):
         self.children: list = []
 
-    def mount(self, widget, after=None):
-        if after is None:
+    def mount(self, widget, after=None, before=None):
+        if before is not None:
+            self.children.insert(self.children.index(before), widget)
+        elif after is None:
             self.children.append(widget)
         else:
             self.children.insert(self.children.index(after) + 1, widget)
@@ -305,13 +310,28 @@ def _call_event() -> TraceEvent:
     )
 
 
+def _blocks_on(target):
+    """Блоки превью на ``target``: строки вызовов идут через модель."""
+    from gc_tui.services.tool_blocks import ToolBlocks
+    from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
+
+    blocks = PreviewBlocks()
+    blocks.views[""] = ToolBlocksView(
+        target, ToolBlocks(blocks.timers), level="", depth=0
+    )
+    return blocks
+
+
 @pytest.mark.parametrize("error, text", _REFUSALS[:3])
 def test_preview_refusal_row(error, text):
+    """Превью идёт через модель блоков, как живая лента: причина отказа —
+    цветом исхода (P4 §3.3, §9.13)."""
     target, calls = _Target(), {}
-    _dispatch_readonly(target, _call_event(), calls)
-    _dispatch_readonly(target, _output_event(error), calls)
+    blocks = _blocks_on(target)
+    _dispatch_readonly(target, _call_event(), calls, blocks=blocks)
+    _dispatch_readonly(target, _output_event(error), calls, blocks=blocks)
     (row,) = target.children
-    _assert_refused_row(row, text, "  ")
+    _assert_refused_row(row, text, "  ", reason=REFUSED)
 
 
 def _sidecar(seq: int, kind: str, payload: dict) -> dict:
@@ -336,7 +356,9 @@ def test_preview_nested_refusal_row():
     target.mount(parent)
     calls["p1"] = parent
     merge_nested_readonly(target, _nested_records(declined_error()), calls)
-    _assert_refused_row(target.children[1], "вы отклонили", "    ")
+    _assert_refused_row(
+        target.children[1], "вы отклонили", "    ", reason=REFUSED
+    )
 
 
 def test_preview_nested_error_is_red_circle():
@@ -366,7 +388,11 @@ async def test_live_refusal_row(tmp_path):
         )
         await pilot.pause()
         (row,) = [r for r in scr.query(ToolCallRow) if r.call_id == "c1"]
-        _assert_refused_row(row, "отклонил судья auto: risky", "  ")
+        # Живая лента идёт через модель блоков: причина отказа — цветом
+        # исхода (P4 §3.3, §9.13); превью и вложенные — так же.
+        _assert_refused_row(
+            row, "отклонил судья auto: risky", "  ", reason=REFUSED
+        )
 
 
 @pytest.mark.asyncio
@@ -403,7 +429,9 @@ async def test_live_nested_refusal_from_subagent_record():
         )
         await pilot.pause()
         row = scr._nested_tool_rows["n1"]
-        _assert_refused_row(row, "вы запретили в этой сессии", "    ")
+        _assert_refused_row(
+            row, "вы запретили в этой сессии", "    ", reason=REFUSED
+        )
 
 
 # --- отказ без строки-владельца ---------------------------------------------

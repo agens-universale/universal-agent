@@ -14,6 +14,17 @@ class OpenEventRequest(Message):
         super().__init__()
 
 
+class BlockToggle(Message):
+    """Раскрыть / свернуть блок вызовов ``key`` модели уровня ``level``
+    (`""` — верхний уровень, иначе `parent_call_id` субагента; спека P4
+    §5): пробел на строке блока, клик по фразе."""
+
+    def __init__(self, level: str, key: str) -> None:
+        super().__init__()
+        self.level = level
+        self.key = key
+
+
 class OpenToolCallDetailRequest(Message):
     """Двойной клик / Enter на ToolCallRow → детальный экран с call + output."""
 
@@ -28,11 +39,6 @@ class SummaryToggleRequest(Message):
     def __init__(self, event_no: int) -> None:
         super().__init__()
         self.event_no = event_no
-
-
-class IndicatorRowsChanged(Message):
-    """Число строк причины ошибки в индикаторе изменилось (ресайз) —
-    экран пересчитывает резерв бара."""
 
 
 class OpenEditsScreenRequest(Message):

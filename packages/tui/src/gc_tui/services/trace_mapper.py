@@ -22,6 +22,12 @@ from gc_core.vision.errors import (
 )
 
 from gc_tui.models import ResultOutcome, TraceEvent
+from gc_tui.services.agent_head import agent_head
+from gc_tui.services.command_output import (
+    command_lines,
+    parse_command_output,
+)
+from gc_tui.services.duration_format import format_size
 from gc_tui.services.image_chips import images_mentioned
 from gc_tui.services.plural import plural_form
 from gc_tui.services.tool_identity import tool_id
@@ -835,6 +841,13 @@ def classify_stop(
     return None
 
 
+def output_summary(output: Any, *, error: bool) -> str:
+    """Хвост строки вызова по сырому выводу тула: сводка успеха
+    (`40 строк`) или причина ошибки; один маппер для ленты верхнего
+    уровня и вложенных вызовов субагента."""
+    return _summarize_output(output, error=error)
+
+
 def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(output, str):
         return ""
@@ -908,10 +921,8 @@ def _result_bits(data: dict) -> list[str]:
         count = len(entries) if isinstance(entries, list) else "?"
     if count is not None:
         bits.append(_counted(count, "запись", "записи", "записей"))
-    if "bytes" in data:
-        bits.append(_counted(data["bytes"], "байт", "байта", "байт"))
-    if "exit" in data:
-        bits.append(f"код выхода {data['exit']}")
+    if isinstance(data.get("bytes"), int):
+        bits.append(format_size(data["bytes"]))
     if "source" in data:
         bits.append(f"источник {data['source']}")
     return bits
@@ -948,6 +959,10 @@ def _map_function_event(
             call_id=call_id,
             tool_name=name,
             wire_name=wire_name,
+            command_lines=command_lines(
+                wire_name, msg.get("arguments"), root=root
+            ),
+            agent=agent_head(wire_name, msg.get("arguments")),
         )
 
     if typ == "function_call_output":
@@ -967,6 +982,7 @@ def _map_function_event(
             call_id=call_id,
             tool_name=name,
             outcome=stop[0] if stop else None,
+            command=parse_command_output(output),
         )
 
     return None

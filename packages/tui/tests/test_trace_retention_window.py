@@ -374,10 +374,17 @@ async def test_render_segments_keeps_prose_and_lights_tools_outside_window(
         rows = {r.call_id: r for r in scr.query(ToolCallRow) if not r._level}
         assert rows["call_old"].wire_name == "read_file"
         assert rows["call_sub_old"].wire_name == "subagent_worker"
-        assert "старая задача" in rows["call_sub_old"]._target
+        assert rows["call_sub_old"]._target == "Worker"
+        task = rows["call_sub_old"].query_one(".consequence-body").render()
+        assert "старая задача" in str(task)
         assert "call_live" in rows
 
-        nested = {r.call_id for r in scr.query(ToolCallRow) if r._level}
+        # Вложенные строки вызовов; заголовки блоков (P4) — не вызовы.
+        nested = {
+            r.call_id
+            for r in scr.query(ToolCallRow)
+            if r._level and r.mode != "header"
+        }
         assert nested == {"child_live"}
         assert "child_old" not in scr._nested_tool_rows
         prose = [
@@ -493,7 +500,12 @@ async def test_preview_same_retention_and_drops_sidecar_list(tmp_path):
         assert scr._subagent_records == []
         texts = [r._text for r in scr.query(UserReplyContainer)]
         assert _OLD_USER in texts and _LIVE_USER in texts
-        nested = {r.call_id for r in scr.query(ToolCallRow) if r._level}
+        # Вложенные строки вызовов; заголовки блоков (P4) — не вызовы.
+        nested = {
+            r.call_id
+            for r in scr.query(ToolCallRow)
+            if r._level and r.mode != "header"
+        }
         assert nested == {"child_live"}
         parents = {r.call_id for r in scr.query(ToolCallRow) if not r._level}
         assert "call_sub_old" in parents
@@ -590,7 +602,12 @@ async def test_preserved_id_in_window_keeps_first_row_full(tmp_path):
         kept = _event(scr, "call_sub_kept", "call")
         _assert_tool_full(kept)
         _assert_tool_full(_event(scr, "call_sub_kept", "result"))
-        nested = {r.call_id for r in scr.query(ToolCallRow) if r._level}
+        # Вложенные строки вызовов; заголовки блоков (P4) — не вызовы.
+        nested = {
+            r.call_id
+            for r in scr.query(ToolCallRow)
+            if r._level and r.mode != "header"
+        }
         assert nested == {"child_kept"}
 
         scr.on_open_tool_call_detail_request(

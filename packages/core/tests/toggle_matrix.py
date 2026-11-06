@@ -47,6 +47,7 @@ from parity_harness import (
     judge_accept,
     parity_config,
     run_thread_dump,
+    strip_intended_meta_keys,
     strip_volatile,
     with_path_overrides,
 )
@@ -957,7 +958,7 @@ NOT_IN_MATRIX = {
     # гоняет CLI-прогон, до ленты TUI он не доходит. Покрытие — наборы TUI
     # `test_trace_diff_block.py`, `test_trace_diff_replay.py`,
     # `test_turn_summary_segment.py`.
-    "agent_edits.trace_inline_max_lines": "только TUI: свёртка инлайн-диффа в ленте",
+    "agent_edits.trace_diff_preview_lines": "только TUI: свёртка инлайн-диффа в ленте",
     "agent_edits.replay_expanded_turns": "только TUI: окно развёрнутых ходов при открытии треда",
     "agent_edits.turn_summary_in_status": "только TUI: сводка правок в строке-итоге хода",
     # Запись журнала правок по режиму запуска: пишет отдельный канал (журнал и
@@ -1338,6 +1339,9 @@ async def run_case(
         from gc_testkit.develop_files import load_thread_meta
 
         meta = load_thread_meta(resolve_threads_dir(base), SYS, TID) or {}
+        # Намеренно новые ключи (итог хода в runtime и т. п.) эталон develop
+        # не знает — правило одно с паритетом локального рантайма.
+        meta = strip_intended_meta_keys(meta)
         result["meta"] = strip_volatile(
             {
                 k: v

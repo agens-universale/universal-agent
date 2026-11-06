@@ -65,7 +65,8 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
     """Esc в live ask_human → clean stop треда:
     - runner.stop() вызван (флаг stop_requested выставлен);
     - banner снят, ask_human_state сброшен;
-    - ThinkingIndicator переходит в состояние «cancelled» (вместо [stopped]-строки в трейсе);
+    - ход кончился сразу — индикатора и бара нет (исход — строкой итога в
+      ленте, S10 §4.4);
     - active_runner обнулён (clean-restart pattern)."""
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
@@ -96,8 +97,16 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
                     "submit_ask_human_reply не должен вызываться при Esc-stop"
                 )
 
+        # Ход открытого треда: строка итога встаёт в его ленте.
+        tid = "stop0000000000000000000000000001"
+        (tmp_path / f"meta_cli_{tid}.json").write_text(
+            json.dumps({"thread_id": tid}), encoding="utf-8"
+        )
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+        screen.attach_active_task(tid, is_resume=True)
         runner = _LiveStoppable()
         app.active_runner = runner
+        screen._prepare_for_new_run()
         # Смонтировать индикатор (как при живом прогоне) и banner.
         screen._show_thinking_indicator(state="thinking")
         _mount_zombie_banner(screen)
@@ -120,13 +129,14 @@ async def test_esc_in_live_ask_human_clean_stops(tmp_path):
         assert app.active_runner is None, (
             "active_runner должен быть обнулён (clean-restart pattern)"
         )
-        # Индикатор в состоянии cancelled (вместо [stopped]-строки в трейсе).
-        assert screen._thinking is not None, (
-            "ThinkingIndicator должен остаться (cancelled-state)"
-        )
-        assert screen._thinking._state == "cancelled", (
-            f"ThinkingIndicator должен быть в состоянии 'cancelled', got {screen._thinking._state!r}"
-        )
+        # Исход — не в индикаторе: ход кончился, индикатора и бара нет.
+        assert screen._thinking is None
+        assert not screen.query_one("#indicator-bar").has_class("-turn")
+        from gc_tui.widgets.turn_line import TurnLine
+
+        (line,) = screen.query_one("#trace").query(TurnLine)
+        assert line.text.plain == "■ Отменено"
+        assert line.display
 
 
 @pytest.mark.asyncio

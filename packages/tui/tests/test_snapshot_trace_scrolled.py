@@ -3,12 +3,17 @@
 Лента прокручена вверх так, что реплика ушла за верхний край: сверху её
 липкая строка с `…`, по центру последней строки ленты — плашка
 `↓ в конец · клик или Enter` (поле ввода в фокусе и пустое).
+
+Ход закрыт записью итога: кадр — покой после хода, строка итога внизу
+ленты (S10, В1). Часы и пояс кадра — общие для эталонов
+(`pinned_snapshot_clock`).
 """
 
 import json
+from datetime import UTC, timedelta
 
 import pytest
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import SNAPSHOT_NOW, tui_settings
 
 pytest.importorskip("textual")
 pytest.importorskip("pytest_textual_snapshot")
@@ -20,6 +25,8 @@ _ASK = (
 )
 # Реплика (две строки) целиком выше верхнего края ленты.
 _SCROLL_Y = 17
+# Конец хода — за 8 минут до «сейчас» эталонов (`pinned_snapshot_clock`).
+_ENDED = SNAPSHOT_NOW - timedelta(minutes=8)
 
 
 def _call(call_id: str, name: str, args: dict, output: dict) -> list[dict]:
@@ -66,7 +73,7 @@ def _payloads() -> list[dict]:
         *_call(
             "c4",
             "fs_find_in_files",
-            {"query": "503", "path": "client/"},
+            {"pattern": "503", "path": "client/"},
             {"ok": True, "count": 1},
         ),
         {"id": "a2", "role": "assistant", "content": answer},
@@ -98,6 +105,26 @@ def _write_thread(tmp_path) -> None:
     (tmp_path / f"meta_cli_{_TID}.json").write_text(
         json.dumps(meta), encoding="utf-8"
     )
+    _record_outcome(tmp_path, seq=len(records))
+
+
+def _record_outcome(tmp_path, *, seq: int) -> None:
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_testkit.thread_writes import turn_outcome_record
+
+    def iso(moment):
+        return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    outcome = TurnOutcome(
+        status="done",
+        reason=None,
+        opened_by="u1",
+        started_at=iso(_ENDED - timedelta(seconds=72)),
+        ended_at=iso(_ENDED),
+        duration_sec=72.0,
+        error=None,
+    )
+    turn_outcome_record(str(tmp_path), "cli", _TID, outcome)
 
 
 def test_trace_scrolled_snapshot(snap_compare, tmp_path, monkeypatch):

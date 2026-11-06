@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 
 def _duration_parts(seconds: float) -> tuple[tuple[int, str], ...]:
     """(число, единица) длительности: до двух старших разрядов."""
@@ -28,6 +30,18 @@ def format_duration(seconds: float) -> str:
     return " ".join(f"{n}{unit}" for n, unit in _duration_parts(seconds))
 
 
+#: Таймер вызова и хода — живой и застывший — с целой секунды.
+TIMER_MIN_S = 1.0
+
+
+def format_timer(seconds: float) -> Optional[str]:
+    """Таймер для ленты: длительность от `TIMER_MIN_S`; быстрее — `None`,
+    таймера нет (ни «0с» у идущего, ни у вызова быстрее секунды)."""
+    if seconds < TIMER_MIN_S:
+        return None
+    return format_duration(seconds)
+
+
 def format_compact_int(n: int) -> str:
     """Компактное целое: 999 → "999", 1000 → "1.0k", 12345 → "12.3k"."""
     if n >= 1000:
@@ -44,3 +58,14 @@ def format_round_int(n: int) -> str:
     if n >= 1000:
         return f"{n // 1000}k"
     return str(n)
+
+
+def format_size(n_bytes: int) -> str:
+    """Размер файла для ленты: 512 → "512 Б", 12288 → "12 КБ",
+    3565158 → "3,4 МБ" (килобайты целыми, мегабайты с одним знаком)."""
+    if n_bytes < 1024:
+        return f"{n_bytes} Б"
+    if n_bytes < 1024 * 1024:
+        return f"{round(n_bytes / 1024)} КБ"
+    megabytes = f"{n_bytes / (1024 * 1024):.1f}".replace(".", ",")
+    return f"{megabytes} МБ"

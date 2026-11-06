@@ -51,14 +51,15 @@ def test_ask_human_output_with_new_tool_field():
 
 
 def test_session_compact_call_renders_generic():
-    # новый тул master: trace_mapper его имя не сравнивает → generic-рендер, без ремапа
+    # trace_mapper имя не сравнивает → generic-рендер, без ремапа; тул ядра
+    # без главного аргумента — сводка пустая (пары только у MCP и незнакомых)
     ev = map_message(
         _fc("session_compact", {"reason": "phase done"}), no=1, ts="t"
     )
     assert ev is not None
     assert ev.kind == "call"
     assert ev.wire_name == "session_compact"
-    assert ev.summary == "reason='phase done'"
+    assert ev.summary == ""
 
 
 def test_session_compact_output_not_treated_as_final_answer():

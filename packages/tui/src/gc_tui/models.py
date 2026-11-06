@@ -78,6 +78,42 @@ class TaskSummary:
     )
 
 
+@dataclass(frozen=True)
+class CommandOutput:
+    """Вывод команды для превью `Ran` (спека P4 §4.1); разбирает
+    `services.command_output.parse_command_output`."""
+
+    #: Всё, что есть в записи: `stdout`, затем `stderr`; у обрезанного
+    #: канала — голова, строка пропуска, хвост.
+    lines: tuple[str, ...]
+    omitted_chars: int
+    #: `exit_code`, у `exec_python` — `return_code`.
+    exit_code: Optional[int]
+    timed_out: bool
+    #: Фоновый запуск: вывод не сохраняется.
+    background: bool
+    #: Свёрнутый вид — хвост: последние строки, без строки пропуска
+    #: (`tool_blocks.output_tail`).
+    tail: tuple[str, ...]
+    #: Строк записи над хвостом; строка пропуска не считается.
+    hidden: int
+
+    @property
+    def own_outcome(self) -> bool:
+        """Исход выражен самим выводом: код выхода, таймаут или фон —
+        общая причина ошибки тула его не повторяет."""
+        failed = self.exit_code not in (None, 0)
+        return failed or self.timed_out or self.background
+
+
+@dataclass(frozen=True)
+class AgentHead:
+    """Заголовок вызова субагента: короткая роль и задача (пусто — нет)."""
+
+    role: str
+    task: str
+
+
 @dataclass
 class TraceEvent:
     """Событие ленты трейса (tui3 §521, tui3_impl §4.2)."""
@@ -112,6 +148,14 @@ class TraceEvent:
     # Скилл реплики (kind="user"): id из `skill_loaded` записи — рисуется
     # именем первым словом реплики (спека P3 §2.3).
     skill: Optional[str] = None
+    # Сырая команда Run-тула построчно (kind="call") и разобранный вывод
+    # (результат Run-тула): считаются при маппинге, до облегчения
+    # retention (спека P4 §8.2).
+    command_lines: tuple[str, ...] = ()
+    command: Optional[CommandOutput] = None
+    # Заголовок вызова субагента (kind="call"): роль и задача из сырых
+    # аргументов — до облегчения retention (решение владельца 2026-10-23).
+    agent: Optional[AgentHead] = None
 
     @property
     def result_outcome(self) -> ResultOutcome:

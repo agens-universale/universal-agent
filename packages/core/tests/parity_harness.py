@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -452,6 +453,37 @@ def strip_volatile(obj: Any) -> Any:
     return obj
 
 
+#: Ключи meta, которых эталоны develop не знают НАМЕРЕННО — новые поля,
+#: а не сдвиг поведения:
+#: - ``workspace``, ``runtime.turn`` — хранилище v2 (спека
+#:   docs/superpowers/specs/2026-10-14-agent-storage-v2-design.md, 5.7);
+#: - ``runtime.last_turn`` — короткий итог хода из дизайна итогов хода
+#:   (решение владельца); его форму проверяют собственные тесты итога хода.
+#: Вырезаются по списку, не по маске: любой другой новый ключ обязан уронить
+#: паритет.
+INTENDED_NEW_META_KEYS = (
+    ("workspace",),
+    ("runtime", "turn"),
+    ("runtime", "last_turn"),
+)
+
+
+def strip_intended_meta_keys(meta: dict) -> dict:
+    out = deepcopy(meta)
+    for path in INTENDED_NEW_META_KEYS:
+        parent = out
+        for part in path[:-1]:
+            parent = parent.get(part)
+            if not isinstance(parent, dict):
+                break
+        else:
+            parent.pop(path[-1], None)
+    # Секцию, опустевшую после вырезания, develop не пишет вовсе.
+    if out.get("runtime") == {}:
+        out.pop("runtime")
+    return out
+
+
 def run_thread_dump(
     settings: Any, system_id: str, thread_id: str
 ) -> list[dict]:
@@ -469,8 +501,19 @@ def run_thread_dump(
     path = Path(data_path)
     if not path.exists():
         return []
-    return [
-        strip_volatile(json.loads(line))
+    rows = [
+        json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    return [strip_volatile(row) for row in thread_messages(rows)]
+
+
+def thread_messages(rows: list[dict]) -> list[dict]:
+    """Сообщения треда — то, по чему сняты эталоны паритета.
+
+    Прочие записи файла треда (итог хода ``turn_outcome``) — факт ядра,
+    которого в эталонах develop нет; их форму проверяют собственные тесты
+    хранилища, а сравнение с эталоном идёт только по сообщениям.
+    """
+    return [row for row in rows if row.get("type") == "message"]

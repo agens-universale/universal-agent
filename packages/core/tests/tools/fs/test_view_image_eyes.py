@@ -21,7 +21,7 @@ from gc_core.tools.fs import view_image as view_image_module
 from gc_core.tools.fs.view_image import ViewImage
 from gc_core.utils.stream_assembler import BackendStreamError
 from gc_core.vision.audience import Audience
-from gc_core.vision.notes import NOTE_EYES_BLIND
+from gc_core.vision.notes import unsupported_note
 from gc_core.vision.probe import ProbeStatus
 from gc_core.vision.registry import process_vision_probes
 from gc_core.vision.route import VisionRouteKey
@@ -201,7 +201,9 @@ async def test_eyes_rejecting_images_are_marked_once_and_nobody_is_left(
         "type": "no_vision_model",
         "message": TOOL_NO_VISION,
     }
-    assert [n.text for n in notes] == [NOTE_EYES_BLIND.format(alias="qwen")]
+    assert [(n.text, n.tone) for n in notes] == [
+        unsupported_note("qwen", eyes_role=True)
+    ]
     assert (
         process_vision_probes()
         .peek(VisionRouteKey(EYES_URL, "qwen-vl", "test-access"))

@@ -45,11 +45,11 @@ async def _mcp_call_under_stop(client: Any, tool_name: str, body) -> Any:
     """Снять текущий вызов. Процесс сервера сессии не трогаем."""
     import asyncio
 
+    from gc_core.execution.tool_call_context import current_tool_call
     from gc_core.user_stop import (
         STOP_WAIT_ONLY,
         UserStopInterrupt,
         await_cancelled,
-        current_tool_call,
         current_user_stop,
     )
 

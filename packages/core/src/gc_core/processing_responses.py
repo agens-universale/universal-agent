@@ -55,6 +55,10 @@ from gc_core.auto_routing.policy import (
 from gc_core.auto_routing.reroute import floor_verdict
 from gc_core.auto_routing.response import discarded_answer
 from gc_core.config import parse_chat_completions_max_tokens
+from gc_core.config_modules.backend import (
+    ENDPOINT_PATHS,
+    endpoint_path_hint,
+)
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.images import read_images_config
 from gc_core.config_modules.strip_tags_projection import (
@@ -91,11 +95,22 @@ from gc_core.execution.progress import (
     extract_intermediate_prose,
     parse_tool_result_status,
     result_facts,
+    run_command_text,
     todo_items_from_arguments,
     tool_args_summary,
 )
+from gc_core.execution.turn_clock import (
+    TurnClock,
+    begin_call_time,
+    bind_turn_clock,
+    record_call_time,
+    turn_clock_sources,
+)
 from gc_core.intent_guard.guard import FinishGateGuard
-from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
+from gc_core.intent_guard.text_answer_judge import (
+    ashould_return_text_answer,
+    text_answer_goes_to_judge,
+)
 from gc_core.intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
@@ -178,7 +193,7 @@ from gc_core.tools.arguments_validation import arguments_without_service_fields
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.sidecar import apersist_subagent_trace
 from gc_core.tools.turn.turn_close import assistant_reply_text
-from gc_core.turn_boundary import begin_turn
+from gc_core.turn_boundary import begin_turn, suspended_turn
 from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
@@ -189,6 +204,7 @@ from gc_core.utils.backend_errors import (
     classify_finish_kind,
     finish_blocks_final,
     finish_prevents_text_final,
+    http_status_code,
     is_auth_error,
     is_context_overflow_error,
     is_image_request_error,
@@ -290,6 +306,8 @@ async def _maybe_persist(
         return
     if is_persist_discarded(state, pairing=pairing):
         return
+    if any(_is_agent_record(m) for m in messages):
+        state.produced_output = True
     token = False
     if pairing:
         token = True
@@ -309,6 +327,32 @@ async def _maybe_persist(
     finally:
         if token:
             state.allow_pairing_persist = False
+
+
+def _is_agent_record(message: Any) -> bool:
+    """Запись агента (ответ, вызов, вывод тула), а не служебная реплика:
+    реплики человека и техзаметки ядра идут ролью user, промпт — system."""
+    return isinstance(message, dict) and message.get("role") not in {
+        "user",
+        "system",
+    }
+
+
+def _main_call_on_delta(
+    ctx: Any, state: State, *, stream_on: bool, mute_answer: bool
+) -> Optional[Callable[[str, str], None]]:
+    """Приёмник дельт основного вызова: первая видимая дельта отмечает,
+    что прогон что-то выдал. Заглушённый ответ видимым не считается."""
+    on_delta = getattr(ctx, "on_stream_delta", None) if stream_on else None
+    if on_delta is None:
+        return None
+
+    def marking(kind: str, text: str) -> None:
+        if kind != "reset":
+            state.produced_output = True
+        on_delta(kind, text)
+
+    return without_answer_deltas(marking) if mute_answer else marking
 
 
 def _function_call_output_message(call_id: Any, output: str) -> Dict:
@@ -475,6 +519,26 @@ def _mode_requires_backend_call(mode: str) -> bool:
     return mode in {"user_ask", "function_call_output"}
 
 
+_ENDPOINT_PATH_HINT = (
+    "Если адрес задан вручную, проверьте адрес: обычно он оканчивается "
+    "на {path}."
+)
+
+
+def _endpoint_path_advice(
+    ctx: Any, url: Any, exc: BaseException
+) -> Optional[str]:
+    """Совет проверить адрес при 404 по адресу без пути эндпоинта режима:
+    запрос ушёл ровно по адресу записи, и «модель недоступна» — скорее
+    неполный адрес."""
+    if http_status_code(exc) != 404:
+        return None
+    api_mode = _get_backend_api_mode(ctx)
+    if endpoint_path_hint(str(url or ""), api_mode) is None:
+        return None
+    return _ENDPOINT_PATH_HINT.format(path=ENDPOINT_PATHS[api_mode])
+
+
 def _raise_honest_main_unavailable(
     ctx: Any, resolved: Any, reason: str, source_exc: BaseException
 ) -> NoReturn:
@@ -495,6 +559,9 @@ def _raise_honest_main_unavailable(
         f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
         f"{resolved.url}: {reason}. Переключите уровень /level или профиль /profiles."
     )
+    advice = _endpoint_path_advice(ctx, resolved.url, source_exc)
+    if advice:
+        message += f" {advice}"
     logger = getattr(ctx, "logger", None) or _fallback_logger
     logger.error(message)
     raise MainModelUnavailable(message) from source_exc
@@ -897,7 +964,15 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     При активном auto стартовый резолв предохранитель не проверяет — живость за
     точкой решения (`aroute_before_call`), и отказ, если мертвы все три уровня,
     приходит на первом вызове. Субагентские `begin_turn` идут мимо — их class-1
-    ведёт `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы."""
+    ведёт `SubagentRunner`, а обёртку зовут только main-трейс call-site'ы.
+
+    Первым делом — часы хода, только у главного трейса (тот же признак, что
+    в `turn_boundary.begin_turn`): ребёнок подхватывает очередь этим же
+    вызовом на своём `ctx` с часами родителя и перепривязать их не должен.
+    Падение `begin_turn` часы не отменяет — ход начат."""
+    if not getattr(state, "parent_state_id", None):
+        mono, wall = turn_clock_sources(ctx)
+        bind_turn_clock(ctx, TurnClock.start(mono=mono, wall=wall))
     try:
         begin_turn(state, ctx)
     except AliasCircuitOpenError as exc:
@@ -1521,10 +1596,12 @@ async def _arequest_backend_canonical_once(
         settings, resolved_for_network
     )
 
-    _stream_on = _tui_stream_enabled(settings)
-    _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
-    if mute_answer and _on_delta is not None:
-        _on_delta = without_answer_deltas(_on_delta)
+    _on_delta = _main_call_on_delta(
+        ctx,
+        state,
+        stream_on=_tui_stream_enabled(settings),
+        mute_answer=mute_answer,
+    )
     prompt_message_count = len(getattr(state, "messages", []) or [])
 
     send = functools.partial(
@@ -2153,9 +2230,10 @@ def _emit_tool_start(
         tool_name=tool_name,
         tool_call_id=call_id_str,
         args_summary=tool_args_summary(
-            tool_name, tool_arguments, root=ctx.workspace.root
+            tool_name, tool_arguments, root=ctx.workspace.root, nested=True
         ),
         todo_items=todo_items,
+        command=run_command_text(tool_name, tool_arguments),
     )
 
 
@@ -2185,10 +2263,16 @@ async def _aexecute_tool_call(
         not is_intermediate and tool_name != ASK_HUMAN_TOOL_NAME
     )
     emit_tool_row = persist_tool_trace
-    if emit_tool_row:
-        _emit_tool_start(ctx, state, tool_name, tool_arguments, call_id_str)
+    # Старт на часах хода — у вызова со строкой ленты: её живой счёт.
+    waited_at_start = begin_call_time(
+        ctx, call_id_str if emit_tool_row else None
+    )
+    # Sidecar-запись вызова — ДО события начала: команду длиннее потолка
+    # события TUI читает оттуда, и к приходу события запись обязана быть.
     if persist_tool_trace:
         await apersist_subagent_trace(ctx, kind="call", payload=dict(m))
+    if emit_tool_row:
+        _emit_tool_start(ctx, state, tool_name, tool_arguments, call_id_str)
     was_invalid = False
     # Исключение мимо WrongFunctionArgumentsException не доходит до записи
     # result/error ниже. Открытый call в sidecar потом прилипает к confirm.
@@ -2217,7 +2301,8 @@ async def _aexecute_tool_call(
             tool_res_raw = exc.to_tool_output()
         # Live-прогресс: тул закончил — или текст intermediate_reply.
         # В историю треда это не пишется.
-        elapsed_ms = int((clock() - started_at) * 1000)
+        elapsed = clock() - started_at
+        elapsed_ms = int(elapsed * 1000)
         ok, error_brief = parse_tool_result_status(tool_res_raw)
         if is_intermediate:
             await _aemit_intermediate_reply(
@@ -2232,7 +2317,27 @@ async def _aexecute_tool_call(
                 error_brief=error_brief,
             )
             return tool_res_raw, was_invalid, ok
-        if emit_tool_row:
+        if persist_tool_trace:
+            out_text = (
+                tool_res_raw
+                if isinstance(tool_res_raw, str)
+                else json.dumps(tool_res_raw, ensure_ascii=False)
+            )
+            # Sidecar-запись результата — ДО события конца: вывод длиннее
+            # потолка события TUI читает оттуда.
+            await apersist_subagent_trace(
+                ctx,
+                kind="error" if ok is False else "result",
+                payload={
+                    "type": "function_call_output",
+                    "call_id": tool_call_id,
+                    "output": out_text,
+                },
+            )
+            trace_open = False
+            # Строка ленты = вызов с sidecar-записью (`emit_tool_row`).
+            # Время вызова в записи итога хода — без ожидания человека.
+            record_call_time(ctx, call_id_str, elapsed, waited_at_start)
             status, fields = (
                 result_facts(tool_res_raw) if ok is False else (None, None)
             )
@@ -2247,23 +2352,8 @@ async def _aexecute_tool_call(
                 error_brief=error_brief,
                 result_status=status,
                 result_error=fields,
+                output=out_text,
             )
-        if persist_tool_trace:
-            out_text = (
-                tool_res_raw
-                if isinstance(tool_res_raw, str)
-                else json.dumps(tool_res_raw, ensure_ascii=False)
-            )
-            await apersist_subagent_trace(
-                ctx,
-                kind="error" if ok is False else "result",
-                payload={
-                    "type": "function_call_output",
-                    "call_id": tool_call_id,
-                    "output": out_text,
-                },
-            )
-            trace_open = False
         return tool_res_raw, was_invalid, ok
     finally:
         await _aclose_sidecar_call(ctx, tool_call_id, trace_open)
@@ -2559,6 +2649,7 @@ async def _abefore_tool_call(
     prior: List[Dict],
     persist_messages_callback,
 ) -> None:
+    state.produced_output = True
     # smart-гейт (спека §3): считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
     if tool_name not in TURN_FINALIZING_TOOLS:
         state.turn_tool_calls += 1
@@ -2970,6 +3061,7 @@ class _AgentLoop:
         persist_messages_callback,
         pre_backend_compaction_hook,
         turn_end_compaction_hook,
+        turn_closed_hook,
         force_compact_hook,
         get_pending_messages,
         check_stop,
@@ -2986,6 +3078,7 @@ class _AgentLoop:
         self.persist_messages_callback = persist_messages_callback
         self.pre_backend_compaction_hook = pre_backend_compaction_hook
         self.turn_end_compaction_hook = turn_end_compaction_hook
+        self.turn_closed_hook = turn_closed_hook
         self.force_compact_hook = force_compact_hook
         self.get_pending_messages = get_pending_messages
         self.check_stop = check_stop
@@ -3868,7 +3961,8 @@ class _AgentLoop:
                     "status": str(plan.get("status") or ""),
                 },
                 ensure_ascii=False,
-            )
+            ),
+            reason="plan_proposed",
         )
         if not outcome.restart:
             # Человек дослал сообщение во время хода — ход продолжается, и
@@ -3883,9 +3977,12 @@ class _AgentLoop:
         Батч вливается в состояние и сохраняется без вывода вопроса: его
         ответ придёт следующим ходом. Компакции конца хода и подхвата
         очереди нет — история кончается вызовом без ответа, а ход журнала
-        намерений не закрыт: задача продолжится после ответа.
+        намерений не закрыт: задача продолжится после ответа. Итога хода
+        нет: вопрос ход не завершает — его снимок уходит в состояние треда
+        вместе с вопросом, следующий прогон продолжит ход.
         """
         state = self.state
+        state.suspended_turn = suspended_turn(state, self.ctx)
         batch_new = filter_messages_not_in_state(
             list(getattr(state, "messages", []) or []), messages
         )
@@ -3967,8 +4064,18 @@ class _AgentLoop:
         )
         return decision
 
-    async def _aclose_turn(self, result) -> _Outcome:
-        """Конец хода: компакция turn-end и подхват pending-сообщения новым ходом."""
+    async def _aclose_turn(
+        self, result, *, reason: Optional[str] = None
+    ) -> _Outcome:
+        """Конец хода: итог хода, компакция turn-end и подхват
+        pending-сообщения новым ходом.
+
+        Итог — первым: запись встаёт за последним сообщением хода и уходит
+        в архив вместе с ним при компакции конца хода; подхват очереди
+        затем привязывает часы нового хода. ``reason`` — причина закрытия
+        из цикла (``plan_proposed``), обычный финал — ``None``."""
+        if self.turn_closed_hook is not None:
+            await self.turn_closed_hook(reason)
         if self.turn_end_compaction_hook is not None and (
             await _acall_blocking_hook(self.turn_end_compaction_hook)
         ):
@@ -4042,9 +4149,21 @@ class _AgentLoop:
         # не итог: напоминание вызвать тул, как при прозе без вызова.
         if is_bridge_echo(assistant_text):
             return False, None
-        decision = await ashould_return_text_answer(
-            self.ctx, self.state, assistant_text
+        # Судья текстового ответа — та же проверка ответа, что у turn_finish:
+        # «сверяюсь…» только когда он реально пойдёт, снять строго в finally.
+        checking = (
+            self.mark_finish_gate_checking is not None
+            and text_answer_goes_to_judge(self.ctx, assistant_text)
         )
+        if checking:
+            await await_callback(self.mark_finish_gate_checking(True))
+        try:
+            decision = await ashould_return_text_answer(
+                self.ctx, self.state, assistant_text
+            )
+        finally:
+            if checking:
+                await await_callback(self.mark_finish_gate_checking(False))
         return decision.accept, decision.reject_feedback
 
     def _text_reject_bounce_msg(
@@ -4121,7 +4240,7 @@ class _AgentLoop:
 # Keep the public helper/monkeypatch boundary while sharing one loop.
 
 
-async def arun_agent(
+async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     messages,
     state: State,
     ctx: Any,
@@ -4132,6 +4251,9 @@ async def arun_agent(
         Callable[[List[Dict], str], None]
     ] = None,
     turn_end_compaction_hook: Optional[Callable[[], None]] = None,
+    turn_closed_hook: Optional[
+        Callable[[Optional[str]], Awaitable[None]]
+    ] = None,
     force_compact_hook: Optional[Callable[..., Any]] = None,
     get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
@@ -4146,6 +4268,7 @@ async def arun_agent(
         persist_messages_callback=persist_messages_callback,
         pre_backend_compaction_hook=pre_backend_compaction_hook,
         turn_end_compaction_hook=turn_end_compaction_hook,
+        turn_closed_hook=turn_closed_hook,
         force_compact_hook=force_compact_hook,
         get_pending_messages=get_pending_messages,
         check_stop=check_stop,

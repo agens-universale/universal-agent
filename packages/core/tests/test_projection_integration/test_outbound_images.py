@@ -16,7 +16,9 @@ from gc_core.attachments.model import ORIGIN_USER, user_label, wh_text
 from gc_core.attachments.normalize import NormalizedImage
 from gc_core.attachments.store import ImageStore
 from gc_core.attachments.texts import (
+    STUB_ATTACHED_INLINE,
     STUB_MODEL_BLIND,
+    STUB_MODEL_REJECTS_NOBODY,
     STUB_NOBODY,
     STUB_PROBE_FAILED,
     STUB_OUT_OF_CONTEXT,
@@ -157,6 +159,12 @@ def _image_part(data: bytes = PNG) -> dict:
     }
 
 
+def _pixels(att, data: bytes = PNG) -> list[dict]:
+    """Подпись картинки и её пиксели — две части подряд."""
+    label = {"type": "text", "text": _note(STUB_ATTACHED_INLINE, att)}
+    return [label, _image_part(data)]
+
+
 def _user_wire(outbound: list[dict]) -> list[dict]:
     return [m for m in outbound if m.get("role") == "user"]
 
@@ -168,7 +176,7 @@ def _tool_names(payload: dict) -> list[str]:
 def test_live_user_image_reaches_the_wire_once(tmp_path, capture_outbound):
     """Батч повторяет хвост state по id — на проводе одно сообщение с картинкой."""
     ctx = _ctx(tmp_path, _cfg())
-    _att, message = _user_with_image(ctx.image_store)
+    att, message = _user_with_image(ctx.image_store)
     state = _state([message])
     state.vision_routes = warm_routes(ctx)
     state.vision_probe_turn = "test-root"
@@ -179,7 +187,7 @@ def test_live_user_image_reaches_the_wire_once(tmp_path, capture_outbound):
         {
             "role": "user",
             "content": [
-                _image_part(),
+                *_pixels(att),
                 {"type": "text", "text": message["content"]},
             ],
         }
@@ -190,10 +198,8 @@ def test_state_history_and_new_batch_are_projected_together(
     tmp_path, capture_outbound
 ):
     ctx = _ctx(tmp_path, _cfg())
-    _a1, old = _user_with_image(ctx.image_store, "m1", 1, b"first image bytes")
-    _a2, new = _user_with_image(
-        ctx.image_store, "m2", 2, b"second image bytes"
-    )
+    a1, old = _user_with_image(ctx.image_store, "m1", 1, b"first image bytes")
+    a2, new = _user_with_image(ctx.image_store, "m2", 2, b"second image bytes")
     state = _state(
         [
             old,
@@ -214,14 +220,14 @@ def test_state_history_and_new_batch_are_projected_together(
         {
             "role": "user",
             "content": [
-                _image_part(b"first image bytes"),
+                *_pixels(a1, b"first image bytes"),
                 {"type": "text", "text": old["content"]},
             ],
         },
         {
             "role": "user",
             "content": [
-                _image_part(b"second image bytes"),
+                *_pixels(a2, b"second image bytes"),
                 {"type": "text", "text": new["content"]},
             ],
         },
@@ -236,9 +242,7 @@ def test_images_section_of_the_config_reaches_the_wire(
     cfg = {**_cfg(), "images": {"max_per_message": 1, "live_user_images": 1}}
     ctx = _ctx(tmp_path, cfg)
     a1, old = _user_with_image(ctx.image_store, "m1", 1, b"first image bytes")
-    _a2, new = _user_with_image(
-        ctx.image_store, "m2", 2, b"second image bytes"
-    )
+    a2, new = _user_with_image(ctx.image_store, "m2", 2, b"second image bytes")
     state = _state(
         [
             old,
@@ -264,7 +268,7 @@ def test_images_section_of_the_config_reaches_the_wire(
         {
             "role": "user",
             "content": [
-                _image_part(b"second image bytes"),
+                *_pixels(a2, b"second image bytes"),
                 {"type": "text", "text": new["content"]},
             ],
         },
@@ -305,8 +309,8 @@ def test_blind_request_model_gets_notes_and_no_view_tool(
     assert _user_wire(capture_outbound["messages"]) == [
         {
             "role": "user",
-            "content": STUB_PROBE_FAILED.format(
-                label=att.label, wh=wh_text(att), reason="image_unsupported"
+            "content": STUB_MODEL_REJECTS_NOBODY.format(
+                label=att.label, wh=wh_text(att), alias=MODEL
             )
             + "\n"
             + message["content"],
@@ -335,7 +339,11 @@ def test_a_model_declared_text_only_gets_notes_without_a_rejection(
     assert _user_wire(capture_outbound["messages"]) == [
         {
             "role": "user",
-            "content": _note(STUB_NOBODY, att) + "\n" + message["content"],
+            "content": STUB_MODEL_REJECTS_NOBODY.format(
+                label=att.label, wh=wh_text(att), alias=MODEL
+            )
+            + "\n"
+            + message["content"],
         }
     ]
     assert _tool_names(capture_outbound["payload"]) == ["fs_read_file"]

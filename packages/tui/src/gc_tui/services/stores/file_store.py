@@ -12,6 +12,12 @@ TUI работает с локальным файловым хранилищем
   storage_epoch   → «поколение:версия истории»
   archives        → число архивов сжатия треда
 
+Итог хода — поток ``turns``: хранилище отдаёт потоки пачками по потоку,
+поэтому запись встаёт по привязке (``after`` — последнее сообщение хода),
+а не по месту в пачке: за своим сообщением, а его нет в пачке (прочитано
+раньше) — в начало пачки. Полное чтение (снимок, сегменты) снимает
+записи-сироты: сообщения их хода в истории нет (откат, сброс).
+
 Сжатие (новая версия истории того же поколения и ровно один новый архив)
 хвост отдаёт шагом (``CompactionStep``): трейс дописывает хвост архива,
 маркер и новую живую историю, а не перерисовывается. Остальная замена
@@ -32,18 +38,31 @@ from gc_core.message_policy.user_message_policy import (
     user_content_to_text,
 )
 from gc_core.persistence.live_volume import live_volume_from_messages
+from gc_core.persistence.turn_outcome import (
+    TURN_OUTCOME_TYPE,
+    is_turn_outcome_record,
+    turn_shown_in,
+)
 from gc_core.threads.facade import Cursor, TailBatch, Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
-from gc_core.threads.models import StreamEntry, ThreadKey, ThreadRecord
+from gc_core.threads.models import (
+    TURNS,
+    StreamEntry,
+    ThreadKey,
+    ThreadRecord,
+)
 
 from gc_tui.models import CompactionStep, TailResult, TaskCursor, TaskSummary
 from gc_tui.services.stores.record_view import outcome_status, tui_section
 from gc_tui.services.trace_mapper import _clean_summary
+from gc_tui.services.turn_outcome import status_of_last_turn
 
 logger = logging.getLogger(__name__)
 
 _HISTORY = "messages"
 _TUI = "tui"
+#: Потоки ленты: история и итоги хода.
+_FEED = (_HISTORY, TURNS)
 # Сколько раз перечитать снимок, пока тред не перестанет меняться между
 # чтением записи треда и его истории: каждое сжатие рушит одну попытку, а
 # следующее требует вызова модели.
@@ -171,8 +190,9 @@ class FileTaskStore:
         if view is None:
             return [], TaskCursor(None, 0, None)
         batch, archives = view
-        records = [_envelope(key, entry) for _s, entry in batch.entries]
-        return records, _task_cursor(batch.cursor, archives)
+        return _complete(_feed(key, batch)), _task_cursor(
+            batch.cursor, archives
+        )
 
     def read_raw_thread_jsonl(
         self, task_id: str, system: Optional[str] = None
@@ -201,7 +221,7 @@ class FileTaskStore:
         лидирующая dialog_summary СЛЕДУЮЩЕЙ части; у последней (живой) — None.
         """
         key = self._key(task_id, system)
-        parts = run_sync(self._threads.parts(key))
+        parts, turns = run_sync(_aparts_and_turns(self._threads, key))
         # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
         parsed: list[tuple[list[dict], Optional[dict]]] = []
         for part in parts:
@@ -218,6 +238,7 @@ class FileTaskStore:
             segments.append(
                 {"index": i, "messages": seg, "compacted_by": compacted_by}
             )
+        _place_in_segments(segments, parsed, turns)
         return segments
 
     def tail_events(
@@ -245,12 +266,10 @@ class FileTaskStore:
                 return TailResult(new_records=[], next_cursor=cursor)
             batch, archives = view
             return TailResult(
-                new_records=[_envelope(key, e) for _s, e in batch.entries],
+                new_records=_feed(key, batch),
                 next_cursor=_task_cursor(batch.cursor, archives),
             )
-        batch = run_sync(
-            self._threads.tail(key, [_HISTORY], cursor.position_token)
-        )
+        batch = run_sync(self._threads.tail(key, _FEED, cursor.position_token))
         if batch.reset:
             step = run_sync(_acompaction_step(self._threads, key, cursor))
             if step is not None:
@@ -262,7 +281,7 @@ class FileTaskStore:
                 reason=_reset_reason(cursor.position_token, batch.cursor),
             )
         return TailResult(
-            new_records=[_envelope(key, e) for _s, e in batch.entries],
+            new_records=_feed(key, batch),
             next_cursor=_task_cursor(batch.cursor, cursor.archives),
         )
 
@@ -283,7 +302,7 @@ async def _aview(
         if record is None:
             return None
         start = Cursor(record.generation, record.history_version)
-        batch = await threads.tail(key, [_HISTORY], start)
+        batch = await threads.tail(key, _FEED, start)
         if not batch.reset:
             break
     return batch, len(record.archives)
@@ -333,16 +352,39 @@ async def _acompaction_step(
         window_ids=_payload_ids([*archived, *live_records]),
         live_records=live_records,
     )
+    # Итоги хода шаг не несёт: курсор их потока прежний, следующий тик
+    # дочитает их после шага.
     next_cursor = Cursor(
         record.generation,
         record.history_version,
-        {_HISTORY: live[-1].seq},
+        {_HISTORY: live[-1].seq, TURNS: seen.seq.get(TURNS, 0)},
     )
     return TailResult(
         new_records=[],
         next_cursor=_task_cursor(next_cursor, len(record.archives)),
         compaction=step,
     )
+
+
+#: Статусы меты, которые держит живой (или убитый посреди хода) ход.
+_LIVE_STATUSES = frozenset({"running", "asking"})
+
+
+def _list_status(record: ThreadRecord) -> Optional[str]:
+    """Исход сессии для списка: короткий итог последнего хода (его пишет
+    ядро в любом фронтенде), кроме живого хода и хода, открытого без
+    итога (``runtime.turn``), — у них статус меты. Итога нет — статус
+    меты (TUI — ``tui.status``, CLI и сервер — верхний). Тред, ход
+    которого приостановлен на вопросе (A2A), ждёт ответа: ход не закончен;
+    продолженный ответом ход идёт, хотя вопрос снимет лишь его первая
+    запись.
+    """
+    if record.state.pending_question and record.runtime.turn is None:
+        return "asking"
+    status = outcome_status(record)
+    if status in _LIVE_STATUSES or record.runtime.turn is not None:
+        return status
+    return status_of_last_turn(record.runtime.last_turn) or status
 
 
 def _summary(record: ThreadRecord) -> TaskSummary:
@@ -354,7 +396,7 @@ def _summary(record: ThreadRecord) -> TaskSummary:
     last_error = record.extra.get("last_error")
     return TaskSummary(
         thread_id=record.key.thread,
-        status=outcome_status(record),
+        status=_list_status(record),
         updated_at=record.info.updated_at or "",
         messages_count=record.info.messages_count,
         skill_id=tui_meta.get("skill_id"),
@@ -377,6 +419,100 @@ def _envelope(key: ThreadKey, entry: StreamEntry) -> dict:
     }
 
 
+def _turn_envelope(key: ThreadKey, entry: StreamEntry) -> dict:
+    """Запись итога хода в форме, которую ждут читатели ленты."""
+    return {
+        "type": TURN_OUTCOME_TYPE,
+        "thread_id": key.thread,
+        "system": key.system,
+        "seq": entry.seq,
+        "ts": entry.ts,
+        **entry.data,
+    }
+
+
+def _feed(key: ThreadKey, batch: TailBatch) -> list[dict]:
+    """Пачка хвоста одним списком: записи итога — за сообщением своей
+    привязки, а без него в пачке — в начале (их ход прочитан раньше)."""
+    records = [
+        _envelope(key, e) for stream, e in batch.entries if stream == _HISTORY
+    ]
+    turns = [
+        _turn_envelope(key, e)
+        for stream, e in batch.entries
+        if stream == TURNS
+    ]
+    return _placed(records, turns)
+
+
+def _placed(records: list[dict], turns: list[dict]) -> list[dict]:
+    lead, after = [], {}
+    ids = _payload_ids(records)
+    for turn in turns:
+        anchor = turn.get("after")
+        if anchor in ids:
+            after.setdefault(anchor, []).append(turn)
+        else:
+            lead.append(turn)
+    out = list(lead)
+    for rec in records:
+        out.append(rec)
+        out.extend(after.get((rec.get("payload") or {}).get("id"), ()))
+    return out
+
+
+def _complete(records: list[dict]) -> list[dict]:
+    """Полное чтение: без записей-сирот (их хода нет в истории)."""
+    ids = _payload_ids(records)
+    return [
+        r
+        for r in records
+        if not is_turn_outcome_record(r) or turn_shown_in(r, ids)
+    ]
+
+
+async def _aparts_and_turns(
+    threads: Threads, key: ThreadKey
+) -> tuple[list[list[StreamEntry]], list[dict]]:
+    parts = await threads.parts(key)
+    entries = await threads.turns(key) if parts else []
+    return parts, [_turn_envelope(key, e) for e in entries]
+
+
+def _place_in_segments(
+    segments: list[dict], parsed: list, turns: list[dict]
+) -> None:
+    """Записи итога — в сегмент своего хода, за сообщением привязки (или
+    за репликой хода, если привязка — сводка сжатия); сироты снимаются."""
+    where: dict[str, int] = {}
+    for i, (seg, leading) in enumerate(parsed):
+        for rec in [leading, *seg] if leading else seg:
+            mid = (rec.get("payload") or {}).get("id")
+            if isinstance(mid, str):
+                where.setdefault(mid, i)
+    for turn in turns:
+        if not turn_shown_in(turn, where):
+            continue
+        anchor = turn.get("after")
+        if anchor not in where:
+            anchor = (turn.get("outcome") or {}).get("opened_by")
+        _insert_after(segments[where[anchor]]["messages"], anchor, turn)
+
+
+def _insert_after(records: list[dict], anchor: str, turn: dict) -> None:
+    at = next(
+        (
+            i + 1
+            for i, rec in enumerate(records)
+            if (rec.get("payload") or {}).get("id") == anchor
+        ),
+        0,
+    )
+    while at < len(records) and is_turn_outcome_record(records[at]):
+        at += 1
+    records.insert(at, turn)
+
+
 def _task_cursor(cursor: Cursor, archives: int) -> TaskCursor:
     return TaskCursor(
         position_token=cursor,
@@ -393,6 +529,7 @@ def _reset_reason(before: Cursor, after: Cursor) -> str:
 
 
 def _compaction(seg: list[dict], leading: dict) -> dict:
+    seg = [r for r in seg if not is_turn_outcome_record(r)]
     payload = leading.get("payload") or {}
     synthesis = _clean_summary(user_content_to_text(payload.get("content")))
     # Мера триггера ядра: аргументы вызовов и вывод тулов тоже объём.

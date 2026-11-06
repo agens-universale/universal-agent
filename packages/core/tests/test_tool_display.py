@@ -4,8 +4,10 @@ import sys
 import pytest
 from gc_core.constants.tool_display import (
     MCP_LABEL_MAX,
+    TOOL_DISPLAY,
     DisplayCategory,
     ToolDisplay,
+    subagent_role,
     tool_display,
 )
 
@@ -103,6 +105,72 @@ def test_module_does_not_import_tools():
         " assert 'gc_core.tools' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+@pytest.mark.parametrize(
+    ("name", "role"),
+    [
+        ("subagent_worker", "Worker"),
+        ("subagent_planner", "Planner"),
+        ("subagent_code_planner", "Code planner"),
+        ("subagent_code_generator", "Coder"),
+        ("subagent_code_reviewer", "Reviewer"),
+        ("subagent_critic", "Critic"),
+        ("subagent_security_audit", "Security audit"),
+    ],
+)
+def test_subagent_role(name, role):
+    assert subagent_role(name, {"role": "Аудитор"}) == role
+
+
+@pytest.mark.parametrize(
+    ("args", "role"),
+    [
+        ({"role": " Аудитор ретраев "}, "Аудитор ретраев"),
+        ({"role": "  "}, "Special agent"),
+        ({"role": 7}, "Special agent"),
+        ({}, "Special agent"),
+    ],
+)
+def test_special_agent_role_from_argument(args, role):
+    """Роль `subagent_special_agent` — его аргумент `role`, без него —
+    суффикс имени, как у кастомного."""
+    assert subagent_role("subagent_special_agent", args) == role
+
+
+def test_finish_visible_only_nested():
+    """Сдача субагента — строка его блока; наверху `turn_finish` скрыт."""
+    assert tool_display("turn_finish").category == DisplayCategory.HIDDEN
+    nested = tool_display("turn_finish", nested=True)
+    assert nested == ToolDisplay(
+        DisplayCategory.FINISH, "Finish", "solution_type"
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["turn_ask_human", "turn_intermediate_reply", "session_compact"]
+)
+def test_other_hidden_stay_hidden_nested(name):
+    shown = tool_display(name, nested=True)
+    assert shown.category == DisplayCategory.HIDDEN
+
+
+def test_nested_regular_tool_unchanged():
+    assert tool_display("fs_read_file", nested=True) == tool_display(
+        "fs_read_file"
+    )
+
+
+def test_finish_summary_solution_type_only_nested():
+    """Главный аргумент сдачи — только во вложенной таблице: наверху
+    главного нет, а пары — только у тулов вне таблицы, сводка пуста."""
+    from gc_core.execution.progress import tool_args_summary
+
+    args = {"solution_type": "full_solution", "task": "сверить таблицу"}
+    assert TOOL_DISPLAY["turn_finish"].primary_arg is None
+    nested = tool_args_summary("turn_finish", args, nested=True)
+    assert nested == "full_solution"
+    assert tool_args_summary("turn_finish", args) == ""
 
 
 def _mcp_shown(title, *, server="office", tool="read_docx"):

@@ -21,7 +21,7 @@ def _app(tmp_path, monkeypatch, *, scenario: str, tid: str, message: str):
     fake = StubExecutor(
         threads_dir=str(tmp_path), system="cli", scenario=scenario
     )
-    fake.run([message], thread_id=tid)
+    fake.record([message], thread_id=tid)
     return TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
@@ -35,7 +35,7 @@ def _app(tmp_path, monkeypatch, *, scenario: str, tid: str, message: str):
 
 
 def test_image_reply_snapshot(snap_compare, tmp_path, monkeypatch):
-    from gc_core.vision.notes import NOTE_MAIN_BLIND, TraceNote
+    from gc_core.vision.notes import TraceNote, unsupported_note
 
     tid = "img_snap"
     app = _app(
@@ -53,7 +53,7 @@ def test_image_reply_snapshot(snap_compare, tmp_path, monkeypatch):
         # без мигания курсор виден всегда (приём `test_snapshot_forms`).
         pilot.app.screen.query_one("#cmdinput").cursor_blink = False
         pilot.app._trace_note_sink.push(
-            tid, TraceNote(NOTE_MAIN_BLIND.format(alias="glm"), "reply")
+            tid, TraceNote(unsupported_note("glm")[0], "reply")
         )
         await pilot.pause(0.6)  # тик опроса (250 мс) снимает очередь пометок
 

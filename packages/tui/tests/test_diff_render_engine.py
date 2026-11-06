@@ -883,3 +883,142 @@ def test_crlf_line_endings_are_not_line_content():
     filled = [r for r in rows if r[2:3] in ("+", "-")]
     assert len(filled) == 3
     assert len({len(r) for r in filled}) == 1, filled
+
+
+# --- свёрнутое превью под блоком ленты: один бюджет строк на файл -------
+# (решения владельца 2026-10-23 и 2026-10-26, спека P4 §6.3): дифф с
+# контекстом влезает — целиком, как раскрытый; иначе все изменённые и
+# ближайший к ним контекст; изменённых больше бюджета — первые изменённые.
+
+CTX_HUNKS = (
+    "--- \n+++ \n"
+    "@@ -1,7 +1,7 @@\n a\n b\n c\n-d\n+D\n e\n f\n g\n"
+    "@@ -40,5 +40,6 @@\n x\n y\n-z1\n-z2\n+Z1\n+Z2\n+Z3\n w\n"
+)
+
+
+def _shown(render) -> list[str]:
+    return [row.rstrip() for row in render.text.plain.split("\n")]
+
+
+def _preview(hunks: str, limit, path: str = "a.txt"):
+    return render_hunks(
+        hunks, path=path, max_lines=limit, logical=True, preview=True
+    )
+
+
+def _full(hunks: str) -> list[str]:
+    return _shown(render_hunks(hunks, path="a.txt", logical=True))
+
+
+def _rows_of(hunks: str, *picked: int) -> list[str]:
+    """Строки полного тела по позициям: номера и `⋮` — как раскрыто."""
+    full = _full(hunks)
+    return [full[i] for i in picked]
+
+
+@pytest.mark.parametrize("limit", [16, 30, None])
+def test_preview_fits_whole_like_expanded(limit):
+    render = _preview(CTX_HUNKS, limit)
+    assert _shown(render) == _full(CTX_HUNKS)
+    assert not render.truncated
+
+
+def test_preview_one_line_edit_is_whole():
+    """Правка одной строки с контекстом (8 строк) при бюджете 10 — целиком,
+    скрытого нет."""
+    hunks = "@@ -7,7 +7,7 @@\n c7\n c8\n c9\n-old\n+new\n c11\n c12\n c13\n"
+    render = _preview(hunks, 10)
+    assert _shown(render) == _full(hunks)
+    assert render.shown_lines == render.total_lines == 8
+
+
+def test_preview_six_changed_take_nearest_context():
+    """6 изменённых и 6 контекста при бюджете 10: изменённые и по две
+    ближайшие строки контекста сверху и снизу, крайние уходят."""
+    hunks = "@@ -1,9 +1,9 @@\n a\n b\n c\n-1\n-2\n-3\n+1\n+2\n+3\n e\n f\n g\n"
+    render = _preview(hunks, 10)
+    assert _shown(render) == _full(hunks)[1:11]
+    assert (render.shown_lines, render.total_lines) == (10, 12)
+
+
+def test_preview_context_spread_over_hunks():
+    """Два хэнка, бюджет 10 = 7 изменённых и 3 контекста: ближайшие к
+    изменениям строки, поровну между хэнками и сторонами; номера и `⋮`
+    — как в полном теле."""
+    render = _preview(CTX_HUNKS, 10)
+    assert _shown(render) == _rows_of(
+        CTX_HUNKS, 2, 3, 4, 5, 8, 11, 12, 13, 14, 15, 16
+    )
+    assert render.shown_lines == 10
+
+
+def test_preview_next_context_ring():
+    """Бюджет 12: весь первый круг контекста (4) и одна строка второго."""
+    render = _preview(CTX_HUNKS, 12)
+    assert _shown(render) == _rows_of(
+        CTX_HUNKS, 1, 2, 3, 4, 5, 8, 10, 11, 12, 13, 14, 15, 16
+    )
+
+
+def test_preview_context_between_changes_in_hunk():
+    hunks = "@@ -1,8 +1,8 @@\n-a\n+A\n m1\n m2\n m3\n m4\n-b\n+B\n"
+    render = _preview(hunks, 6)
+    assert _shown(render) == _rows_of(hunks, 0, 1, 2, 5, 6, 7)
+
+
+def test_preview_changed_over_budget_takes_first_changed():
+    render = _preview(CTX_HUNKS, 3)
+    assert _shown(render) == [" 4 -d", " 4 +D", " ⋮", "42 -z1"]
+    assert render.shown_lines == 3
+
+
+@pytest.mark.parametrize("count,shown", [(5, 5), (12, 10)])
+def test_preview_new_file_same_rule(count, shown):
+    hunks = f"@@ -0,0 +1,{count} @@" + "".join(
+        f"\n+l{i}" for i in range(count)
+    )
+    render = _preview(hunks, 10)
+    assert _shown(render) == _full(hunks)[:shown]
+
+
+@pytest.mark.parametrize("limit", range(1, 21))
+def test_preview_shows_min_of_lines_and_budget(limit):
+    """Показано всегда `min(строк, бюджет)` — на этом счёте модель строит
+    `+ ещё N строк`."""
+    assert _preview(CTX_HUNKS, limit).shown_lines == min(16, limit)
+
+
+def test_preview_gutter_matches_full_body():
+    """Колонка номеров — по всему телу: раскрытие её не сдвигает."""
+    short = (
+        "--- \n+++ \n@@ -1,3 +1,3 @@\n-a\n+b\n c\n@@ -99,2 +99,2 @@\n x\n y\n"
+    )
+    assert _shown(_preview(short, 2)) == ["  1 -a", "  1 +b"]
+
+
+def _accent_cells(render, line: int) -> list[int]:
+    """Клетки строки ``line`` с внутристрочным акцентом."""
+    row = render.text.plain.split("\n")[line]
+    hl = {Color.parse(DIFF_DEL_HL), Color.parse(DIFF_ADD_HL)}
+    return [i for i in range(len(row)) if _bg_at(render, line, i) in hl]
+
+
+def test_preview_pairs_accents_like_full_hunk():
+    """Пары «удалено / добавлено» для акцентов — по полному хэнку: удаление,
+    контекст, затем пара −/+ — свёрнуто подсвечено как раскрыто."""
+    hunks = (
+        "--- \n+++ \n@@ -1,4 +1,3 @@\n"
+        "-total = 3\n keep = 0\n-total = 1\n+total = 2\n tail\n"
+    )
+    full = render_hunks(hunks, path="a.py", syntax=False)
+    short = render_hunks(
+        hunks, path="a.py", syntax=False, max_lines=3, preview=True
+    )
+    # Свёрнуто: строки 0, 1, 2 — это строки 0, 2, 3 полного тела.
+    for short_line, full_line in ((0, 0), (1, 2), (2, 3)):
+        assert _accent_cells(short, short_line) == _accent_cells(
+            full, full_line
+        )
+    assert _accent_cells(full, 0) == []
+    assert _accent_cells(full, 2) != []

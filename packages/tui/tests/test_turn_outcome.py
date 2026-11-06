@@ -89,14 +89,17 @@ def test_sessions_list_unknown_status_as_is_dim():
 
 
 @pytest.mark.parametrize(
-    ("state", "status"),
-    [("done", "completed"), ("failed", "failed"), ("cancelled", "stopped")],
+    ("word", "status"),
+    [
+        ("completed", "completed"),
+        ("failed", "failed"),
+        ("cancelled", "stopped"),
+    ],
 )
-def test_indicator_and_sessions_share_glyph(state, status):
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+def test_turn_line_and_sessions_share_glyph(word, status):
+    from gc_tui.services.trace_render import build_turn_line
 
-    head = ThinkingIndicator(state=state, frozen_elapsed=1)
-    glyph = head._render_text().plain.split()[0]
+    glyph = build_turn_line(word=word).text.plain.split()[0]
     assert glyph == outcome_of(status).glyph
     assert glyph in _meta_line(status).plain
 
@@ -152,3 +155,80 @@ def test_running_without_live_run_reads_interrupted(word, live, shown):
 def test_interrupted_shares_stop_glyph():
     assert outcome_of("interrupted").glyph == outcome_of("stopped").glyph
     assert outcome_of("interrupted").list_label == "прервано"
+
+
+# --- статус ↔ слово ↔ состояние строки: один словарь (решение P3b 21) ----
+
+
+@pytest.mark.parametrize(
+    ("status", "word"),
+    [
+        ("completed", "completed"),
+        ("stopped", "cancelled"),
+        ("failed", "failed"),
+        ("unknown_failed", "failed"),
+        ("interrupted", "interrupted"),
+        ("running", None),
+        ("asking", None),
+        (None, None),
+    ],
+)
+def test_status_word_of_finished_turn(status, word):
+    from gc_tui.services.turn_outcome import word_of_status
+
+    assert word_of_status(status) == word
+
+
+def test_judge_unavailable_has_its_own_ending():
+    """Проверка действий недоступна — не «превышен лимит ошибок»: человеку
+    нужно знать, что дело в проверке и что помогает смена режима."""
+    from gc_tui.services.turn_outcome import OUTCOMES, outcome_word
+
+    outcome = outcome_word(
+        failed=False, stopped=False, reason="judge_unavailable"
+    )
+    assert outcome == "stopped_judge"
+    assert "проверка действий недоступна" in OUTCOMES[outcome].sentence
+    assert "лимит" not in OUTCOMES[outcome].sentence
+
+
+@pytest.mark.parametrize(
+    ("word", "status"),
+    [
+        ("completed", "completed"),
+        ("stopped", "stopped"),
+        ("cancelled", "stopped"),
+        ("failed", "failed"),
+        ("stopped_judge", "stopped"),
+    ],
+)
+def test_meta_status_of_word(word, status):
+    from gc_tui.services.turn_outcome import meta_status_of
+
+    assert meta_status_of(word) == status
+
+
+@pytest.mark.parametrize("reason", ["user_stop", "cancelled"])
+def test_cancelled_turn_reads_as_user_stop(reason):
+    """Отмена без запроса стопа (`cancelled`) в ленте и списке — та же
+    «■ Отменено», что и стоп пользователя."""
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_tui.services.turn_outcome import (
+        kind_of,
+        meta_status_of,
+        turn_head,
+    )
+
+    outcome = TurnOutcome(
+        status="stopped",
+        reason=reason,
+        opened_by="u1",
+        started_at="2026-10-22T10:00:00Z",
+        ended_at="2026-10-22T10:01:00Z",
+        duration_sec=60.0,
+        error=None,
+    )
+    word, plan = kind_of(outcome)
+    head = turn_head(word, plan=plan, duration_sec=60.0, ended_at=None)
+    assert (word, head.plain) == ("cancelled", "■ Отменено")
+    assert meta_status_of(word) == "stopped"

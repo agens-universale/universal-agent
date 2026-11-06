@@ -158,8 +158,9 @@ async def test_f3_opens_diff(tmp_path):
 @pytest.mark.asyncio
 async def test_tab_visits_each_event_once(tmp_path):
     """Tab прыгает от события к событию, по одной Tab-остановке на каждое
-    TraceEvent (no > 0). Continuation prose агентского ответа, `* note:`,
-    code-block-панели после первой — НЕ Tab-стопы."""
+    TraceEvent (no > 0) и одна — на заголовок блока вызовов. Continuation
+    prose агентского ответа, `* note:`, code-block-панели после первой —
+    НЕ Tab-стопы."""
     import json
     from pathlib import Path
 
@@ -242,9 +243,10 @@ async def test_tab_visits_each_event_once(tmp_path):
             if w.can_focus
         ]
         # Ожидаем: user reply (ev1) + первая prose агента (ev2)
-        # + ToolCallRow (ev3) + framework TraceRow [meta] (ev4) = 4 стопа.
-        assert len(focusables) == 4, (
-            f"Ожидалось 4 Tab-стопа, получено {len(focusables)}: {[type(w).__name__ for w in focusables]}"
+        # + блок `Explored` чтения (ev3): заголовок и строка члена
+        # + framework TraceRow [meta] (ev4) = 5 стопов.
+        assert len(focusables) == 5, (
+            f"Ожидалось 5 Tab-стопов, получено {len(focusables)}: {[type(w).__name__ for w in focusables]}"
         )
         # Первый — UserReplyContainer.
         assert isinstance(focusables[0], UserReplyContainer)
@@ -252,11 +254,14 @@ async def test_tab_visits_each_event_once(tmp_path):
         assert isinstance(focusables[1], TraceRow)
         assert focusables[1].has_class("line-agent")
         assert not focusables[1].has_class("line-agent-cont")
-        # Третий — ToolCallRow.
+        # Третий и четвёртый — заголовок блока и строка вызова.
         assert isinstance(focusables[2], ToolCallRow)
-        # Четвёртый — framework TraceRow.
-        assert isinstance(focusables[3], TraceRow)
-        assert focusables[3].has_class("line-meta")
+        assert focusables[2].mode == "header"
+        assert isinstance(focusables[3], ToolCallRow)
+        assert focusables[3].call_id == "c1"
+        # Пятый — framework TraceRow.
+        assert isinstance(focusables[4], TraceRow)
+        assert focusables[4].has_class("line-meta")
 
 
 @pytest.mark.asyncio

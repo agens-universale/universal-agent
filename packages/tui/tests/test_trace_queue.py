@@ -313,7 +313,9 @@ async def test_anchors_nested_under_parent_plan_above_queue(tmp_path):
             w for w in kids if isinstance(w, ToolCallRow) and w.call_id == "n1"
         )
         panel = next(w for w in kids if isinstance(w, PlanPanel))
-        assert kids.index(nested) == kids.index(parent) + 1
+        # Под `Agent` — блок субагента: заголовок `Explored`, затем член.
+        assert kids[kids.index(parent) + 1].mode == "header"
+        assert kids.index(nested) == kids.index(parent) + 2
         assert kids.index(panel) < kids.index(first)
         assert kids[-2:] == [first, second]
         # Рамка уже последняя над очередью — повторный вызов копии не делает.
@@ -333,8 +335,8 @@ async def test_nested_fallback_mount_stays_above_queue(tmp_path):
         await pilot.pause()
         await _send(pilot, "первое")
         # Якорь уже снят с ленты — монтирование after= падает.
-        gone = ToolCallRow(call_id="g", label="Read", target="")
-        scr._nested_anchor["p1"] = gone
+        parent.remove()
+        await pilot.pause()
         scr._mount_nested_tool(
             parent_call_id="p1",
             tool_name="fs_read_file",

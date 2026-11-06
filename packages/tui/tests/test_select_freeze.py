@@ -551,3 +551,35 @@ async def test_stream_answer_under_selection_drawn_once(tmp_path, monkeypatch):
 
     assert len(answers) == 1
     assert scr._stream_block is None and not mounted
+
+
+@pytest.mark.asyncio
+async def test_select_scrolled_up_not_pulled_back_on_release(tmp_path):
+    """F2: лента у низа, выделение протянуто вверх — по концу выделения
+    лента остаётся там, липкость снята."""
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        for i in range(40):
+            scr._mount_trace_row(
+                prefix="x ", content=f"строка {i}", kind_class="line-meta"
+            )
+        await pilot.pause()
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        assert trace.scroll_y == trace.max_scroll_y
+        top = trace.max_scroll_y - 10
+        scr._selecting = True
+        trace.scroll_to(y=top, animate=False, immediate=True)
+        await pilot.pause()
+        scr._selecting = False
+        await pilot.pause()
+        await pilot.pause()
+        assert scr._stick_bottom is False
+        assert trace.scroll_y == top

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import threading
 import uuid
@@ -38,6 +39,7 @@ from textual.screen import Screen
 
 from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
+from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.session_lock import is_held_by_other
 from gc_tui.services.stream_sink import StreamSink
@@ -394,7 +396,7 @@ class TuiApp(App):
         # писатель — set_permission_mode.
         self._permission_mode: Optional[str] = None
         self._permission_mode_locked = False  # режим задан флагом запуска
-        self.last_runner_error: Optional[str] = None
+        self.last_runner_error = None
         self._session_log_path: Optional[str] = None
         self.last_terminal_outcome: Optional[str] = None
         self.last_stop_requested: bool = (
@@ -1069,6 +1071,19 @@ class TuiApp(App):
         return self._settings
 
     @property
+    def last_runner_error(self) -> Optional[str]:
+        """Ошибка прогона активного раннера (текст для строки «└»)."""
+        return self._last_runner_error
+
+    @last_runner_error.setter
+    def last_runner_error(self, err: Optional[str]) -> None:
+        # Ошибка принадлежит прогону, в котором случилась: пара «раннер и
+        # run_seq». Следующий прогон того же раннера её не наследует.
+        self._last_runner_error = err
+        runner = self.active_runner
+        self.last_runner_error_run = (runner, getattr(runner, "run_seq", None))
+
+    @property
     def image_store(self) -> ImageStore:
         """Хранилище картинок сессии: корень — по правилу ядра (`ImageStore.for_config`),
         тот же, что у контекста запуска и охраны путей. На диске объект ничего не
@@ -1680,7 +1695,7 @@ class TuiApp(App):
         self.active_runner = None
         self._runner_stale = False
 
-    def on_unmount(self) -> None:
+    async def on_unmount(self) -> None:
         """Выход приложения — отпустить всё, что держит его из модулей ядра.
 
         Сначала `stop()`, и это не вежливость. Пока агент ждёт ответа человека,
@@ -1689,6 +1704,12 @@ class TuiApp(App):
         выходе. `/quit` зовёт `app.exit()` без остановки прогона, и процесс
         оставался жить, пока в очередь не придёт строка. `stop()` кладёт туда
         пустую (`cancel_ask_human`) и снимает ожидание подтверждения.
+
+        После стопа — короткое ожидание потока хода (`STOP_SETTLE_SEC`):
+        ядро закрывает ход записью итога, иначе он остался бы без неё. Ждём
+        в потоке пула, не на loop: поток хода ходит на UI-поток мостом
+        `call_from_thread` (дельта стрима, предохранитель, подтверждение), и
+        заблокированный loop держал бы его до таймаута.
 
         Затем логгер прогона (см. `AgentRunner.release`) и подписка на
         runtime-уведомления: и то и другое живёт в модульных реестрах до конца
@@ -1701,6 +1722,9 @@ class TuiApp(App):
                 stop()
             except Exception:
                 pass
+        wait = getattr(runner, "wait", None)
+        if callable(wait):
+            await asyncio.to_thread(wait, STOP_SETTLE_SEC)
         _release_runner(runner)
         unregister_runtime_notices_listener(self._on_runtime_notice)
         self._clear_image_pocket()
@@ -1763,7 +1787,7 @@ class TuiApp(App):
         ):
             self.last_runner_error = "Сжатие не удалось. История не изменена."
             return
-        from gc_tui.services.turn_error import describe_turn_error
+        from gc_core.turn_error import describe_turn_error
 
         self.last_runner_error = describe_turn_error(exc)
 
@@ -1934,6 +1958,7 @@ class TuiApp(App):
         fields: list,
         via: str | None = None,
         decision_key: str | None = None,
+        call_id: str | None = None,
     ) -> bool:
         """Агент-поток → UI: баннер на TraceScreen. True = mounted, False = fail.
 
@@ -1956,6 +1981,7 @@ class TuiApp(App):
                     fields,
                     via=via,
                     decision_key=decision_key,
+                    call_id=call_id,
                 )
             except Exception:
                 return False

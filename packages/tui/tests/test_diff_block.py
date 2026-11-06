@@ -526,3 +526,213 @@ async def test_body_starts_at_block_column(tui_app_factory):
                 app.query_one(selector, Static).region.x
                 == block.content_region.x
             ), selector
+
+
+# --- дифф под блоком ленты (спека P4 §5, §6.4) -----------------------------
+
+
+def _in_block(record: EditRecord, *, limit: int = 12, **kw) -> DiffBlock:
+    return DiffBlock.for_record(
+        record,
+        event_no=7,
+        collapsed_max_lines=limit,
+        in_block=True,
+        column="single",
+        **kw,
+    )
+
+
+@pytest.mark.asyncio
+async def test_in_block_has_no_own_tail():
+    app = _Host(_in_block(_record(_long_hunks(40))))
+    async with app.run_test(size=(70, 60)):
+        assert _body_lines(app) == 12
+        assert not app.query(".diff-more")
+
+
+@pytest.mark.asyncio
+async def test_set_collapsed_max_lines_rerenders_body(monkeypatch):
+    import gc_tui.widgets.diff_block as module
+
+    calls = []
+    real = module.render_hunks
+
+    def counting(*args, **kwargs):
+        calls.append(kwargs.get("max_lines"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "render_hunks", counting)
+    block = _in_block(_record(_long_hunks(40)))
+    app = _Host(block)
+    async with app.run_test(size=(70, 60)) as pilot:
+        body = app.query_one(".block-body", Static)
+        block.set_collapsed_max_lines(6)
+        await pilot.pause()
+        assert _body_lines(app) == 6
+        assert app.query_one(".block-body", Static) is body
+        before = len(calls)
+        block.set_collapsed_max_lines(6)
+        assert len(calls) == before
+
+
+@pytest.mark.asyncio
+async def test_set_expanded_shows_whole_body():
+    block = _in_block(_record(_long_hunks(40)), limit=6)
+    app = _Host(block)
+    async with app.run_test(size=(70, 60)) as pilot:
+        block.set_expanded(True)
+        await pilot.pause()
+        assert _body_lines(app) == 40
+        assert not app.query(".diff-more")
+        block.set_expanded(False)
+        await pilot.pause()
+        assert _body_lines(app) == 6
+
+
+@pytest.mark.asyncio
+async def test_set_column_switches_class_in_place():
+    block = _in_block(_record(SHORT_HUNKS))
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)) as pilot:
+        assert block.has_class("diff-single")
+        block.set_column("member")
+        await pilot.pause()
+        assert block.has_class("diff-member")
+        assert not block.has_class("diff-single")
+        assert app.query_one(DiffBlock) is block
+
+
+@pytest.mark.asyncio
+async def test_in_block_compact_body_waits_for_expand():
+    block = _in_block(_record(_long_hunks(40)), compact=True)
+    app = _Host(block)
+    async with app.run_test(size=(70, 60)) as pilot:
+        assert not app.query(".block-body")
+        block.set_expanded(True)
+        await pilot.pause()
+        assert _body_lines(app) == 40
+
+
+@pytest.mark.asyncio
+async def test_short_in_block_hides_nothing():
+    block = _in_block(_record(SHORT_HUNKS))
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)):
+        assert _body_lines(app) == 3  # влезает — весь дифф с контекстом
+        assert not app.query(".diff-more")
+
+
+# Правка в одну строку посреди контекста (`hunk_context_lines: 3`).
+ONE_LINE_HUNKS = (
+    "--- \n+++ \n@@ -7,7 +7,7 @@\n"
+    " c7\n c8\n c9\n-old\n+new\n c11\n c12\n c13\n"
+)
+
+
+ONE_LINE_FULL = [
+    "  7  c7",
+    "  8  c8",
+    "  9  c9",
+    " 10 -old",
+    " 10 +new",
+    " 11  c11",
+    " 12  c12",
+    " 13  c13",
+]
+
+
+def _body_plain(app: App) -> list[str]:
+    plain = app.query_one(".block-body", Static).visual.plain
+    return [row.rstrip() for row in plain.split("\n")]
+
+
+@pytest.mark.asyncio
+async def test_in_block_collapsed_fits_whole():
+    """Дифф с контекстом влезает в бюджет — свёрнутый равен раскрытому
+    (решение 2026-10-26)."""
+    block = _in_block(_record(ONE_LINE_HUNKS), limit=10)
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)):
+        assert _body_plain(app) == ONE_LINE_FULL
+
+
+@pytest.mark.asyncio
+async def test_in_block_collapsed_changed_then_nearest_context():
+    """Не влезает — изменённые строки и ближайший контекст на остаток
+    бюджета."""
+    block = _in_block(_record(ONE_LINE_HUNKS), limit=3)
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)):
+        assert _body_plain(app) == ["  9  c9", " 10 -old", " 10 +new"]
+
+
+@pytest.mark.asyncio
+async def test_in_block_collapsed_takes_first_changed_lines():
+    hunks = "--- \n+++ \n@@ -1,7 +1,7 @@\n c1\n-a\n-b\n-c\n+A\n+B\n c5\n"
+    block = _in_block(_record(hunks), limit=3)
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)):
+        assert _body_plain(app) == ["  2 -a", "  3 -b", "  4 -c"]
+
+
+@pytest.mark.asyncio
+async def test_in_block_expanded_shows_context():
+    """Раскрытие — дифф журнала целиком, с контекстом."""
+    block = _in_block(_record(ONE_LINE_HUNKS), limit=3)
+    app = _Host(block)
+    async with app.run_test(size=(70, 20)) as pilot:
+        block.set_expanded(True)
+        await pilot.pause()
+        assert _body_plain(app) == ONE_LINE_FULL
+        block.set_expanded(False)
+        await pilot.pause()
+        assert _body_plain(app) == ["  9  c9", " 10 -old", " 10 +new"]
+
+
+def _wide_hunks(count: int = 8, width: int = 200) -> str:
+    """`count` строк по `width` символов: на узком окне каждая переносится."""
+    return f"@@ -1,{count} +1,{count} @@" + "".join(
+        "\n+" + "y" * width for _ in range(count)
+    )
+
+
+def _numbered_rows(app: App) -> int:
+    """Логических строк в теле: номер стоит только у первого ряда строки."""
+    plain = app.query_one(".block-body", Static).visual.plain
+    return sum(1 for row in plain.split("\n") if row.strip()[:1].isdigit())
+
+
+@pytest.mark.asyncio
+async def test_in_block_budget_counts_logical_lines():
+    """Под блоком доля — в логических строках (спека P4 §6.3): на узком окне
+    перенос делает превью выше, но строки не срезаются, а скрытое — ровно
+    `N` модели (строки сверх доли)."""
+    block = _in_block(_record(_wide_hunks(8)), limit=6)
+    app = _Host(block)
+    async with app.run_test(size=(40, 80)) as pilot:
+        await pilot.pause()
+        assert _numbered_rows(app) == 6
+        assert _body_lines(app) > 6
+
+
+@pytest.mark.asyncio
+async def test_in_block_long_lines_within_share_hide_nothing():
+    block = _in_block(_record(_wide_hunks(8)), limit=30)
+    app = _Host(block)
+    async with app.run_test(size=(40, 80)) as pilot:
+        await pilot.pause()
+        assert _numbered_rows(app) == 8
+
+
+@pytest.mark.asyncio
+async def test_tail_follows_the_width_outside_trace_block():
+    """Вне блока ленты бюджет прежний — экранные ряды: хвост «… ещё N
+    строк» появляется на узком окне и уходит на широком."""
+    app = _Host(_block(_record(_wide_hunks(8)), limit=30))
+    async with app.run_test(size=(40, 80)) as pilot:
+        await pilot.pause()
+        assert app.query(".diff-more")
+        await pilot.resize_terminal(240, 80)
+        await pilot.pause()
+        await pilot.pause()
+        assert not app.query(".diff-more")

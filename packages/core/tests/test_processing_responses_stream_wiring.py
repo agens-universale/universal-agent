@@ -94,12 +94,14 @@ def chat_state_ctx():
 def test_on_delta_passed_when_stream_on(monkeypatch, chat_state_ctx):
     seen = _patch_policy(monkeypatch)
     ctx, state, messages = chat_state_ctx(stream=True)
-    cb = lambda k, t: None
-    ctx.on_stream_delta = cb
+    got = []
+    ctx.on_stream_delta = lambda k, t: got.append((k, t))
     run_coro(
         pr._arequest_backend_canonical(messages, state, ctx, resolved=None)
     )
-    assert seen["on_delta"] is cb
+    seen["on_delta"]("think", "x")
+    assert got == [("think", "x")]
+    assert state.produced_output is True
 
 
 def test_on_delta_none_when_stream_off(monkeypatch, chat_state_ctx):

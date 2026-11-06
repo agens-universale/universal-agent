@@ -356,3 +356,17 @@ SCENARIOS = {
     "image_reply": scenario_image_reply,
     "ask_human_image_answer": scenario_ask_human_image_answer,
 }
+
+#: Итог хода сценария (поля записи `turn_outcome` без `opened_by`): время
+#: закреплено, чтобы строка итога в кадрах не зависела от часов.
+DEFAULT_OUTCOME = {
+    "status": "done",
+    "reason": None,
+    "started_at": "2026-10-22T11:32:00Z",
+    "ended_at": "2026-10-22T11:32:12Z",
+    "duration_sec": 12.0,
+    "error": None,
+}
+
+#: Сценарии с иным исходом; None — ход не закрыт (ждёт ответа человека).
+SCENARIO_OUTCOMES: dict[str, dict | None] = {"ask_human_flow": None}

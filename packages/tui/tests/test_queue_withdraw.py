@@ -36,6 +36,9 @@ class _BusyRunner:
     def is_running(self) -> bool:
         return self.running
 
+    def produced_output(self) -> bool:
+        return False
+
     def stop(self) -> None:
         self.events.append("stop")
         self.running = False
@@ -510,7 +513,6 @@ async def test_stop_with_reply_held_by_core_does_not_undo(tmp_path):
         scr._poll_active()
         await pilot.pause()
         runner.running = True  # ядро взяло удержанное новым прогоном
-        scr._events_since_last_user_send = 0
         scr._cmd_stop()
         await pilot.pause()
         assert runner.events[-1] == "stop"

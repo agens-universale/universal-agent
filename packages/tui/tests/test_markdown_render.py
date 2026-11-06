@@ -91,9 +91,11 @@ def test_build_markdown_table_column_count_and_justify():
 
 
 def test_build_markdown_table_header_style():
-    """Each column header_style is accent (#54B3A6) bold."""
+    """Заголовок колонки — `INK` жирный: всё выделение — INK жирный."""
+    from gc_tui.palette import INK
+
     t = build_markdown_table(["Col"], [["val"]], ["left"])
-    assert t.columns[0].header_style == "#54B3A6 bold"
+    assert t.columns[0].header_style == f"{INK} bold"
 
 
 def test_build_markdown_table_inline_code_cell():
@@ -298,3 +300,17 @@ def test_prose_render_keeps_a_top_level_indented_fence_as_prose():
     """На верхнем уровне сдвинутые кавычки ограду не открывают и в прозе."""
     plain = render_prose("Пример:\n\n    ```\n- пункт").plain
     assert "• пункт" in plain
+
+
+def test_bold_and_heading_lines_are_ink_bold_in_css():
+    """Строки-выделения прозы (`.line-bold`, заголовки) — `$ink` жирным,
+    без акцента (решение владельца 2026-10-23)."""
+    import re
+
+    from gc_testkit.paths import TUI_PKG
+
+    css = (TUI_PKG / "styles.tcss").read_text(encoding="utf-8")
+    for cls in ("line-bold", "line-heading-1", "line-heading-2"):
+        (rule,) = re.findall(rf"^\.{cls}\s*\{{([^}}]*)\}}", css, re.M)
+        assert "color: $ink;" in rule
+        assert "text-style: bold;" in rule

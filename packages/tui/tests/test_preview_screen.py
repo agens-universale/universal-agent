@@ -288,7 +288,8 @@ async def test_preview_mounts_nested_subagent_rows():
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
         nested_tools = scr.query(ToolCallRow).filter(".nested-tool")
-        assert len(nested_tools) == 1  # fs_read_file
+        # fs_read_file — член вложенного блока `Explored` (P4 §7).
+        assert [r.mode for r in nested_tools] == ["header", "member"]
         todo_rows = scr.query(".line-todo-nested")
         assert len(todo_rows) == 1  # развёрнутый чек-лист
 

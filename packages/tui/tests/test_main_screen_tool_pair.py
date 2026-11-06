@@ -67,12 +67,16 @@ async def test_call_then_output_mutates_in_place(tmp_path):
         scr.attach_active_task(tid)
         await pilot.pause()
 
-        rows = pilot.app.query(ToolCallRow)
-        assert len(rows) == 1
-        # running: глиф ● в prefix, content несёт подпись + объект + elapsed
-        content = str(rows[0].query_one(".trace-content").render())
-        assert content.startswith("Read  src/x.py · ")
-        assert "●" in str(rows[0].query_one(".trace-prefix").render())
+        # Чтение — член блока `Explored`: строка вызова плюс заголовок
+        # блока; глиф ● несёт заголовок, у члена глифа нет.
+        rows = list(pilot.app.query(ToolCallRow))
+        (header,) = [r for r in rows if r.mode == "header"]
+        (row,) = [r for r in rows if r.call_id == "c1"]
+        assert len(rows) == 2
+        # running: подпись + объект; elapsed — с целой секунды
+        content = str(row.query_one(".trace-content").render())
+        assert content.startswith("Read  src/x.py")
+        assert "●" in str(header.query_one(".trace-prefix").render())
 
         # 2) добавляем output, ждём polling (>= 1s)
         with open(data, "a", encoding="utf-8") as f:
@@ -112,11 +116,11 @@ async def test_call_then_output_mutates_in_place(tmp_path):
         )
         await pilot.pause(0.4)  # > 250 ms polling interval
 
-        rows = pilot.app.query(ToolCallRow)
-        assert len(rows) == 1  # тот же widget, не появился новый
-        rendered = str(rows[0].query_one(".trace-content").render())
-        prefix = str(rows[0].query_one(".trace-prefix").render())
-        assert "●" in prefix  # ok-глиф в prefix
+        rows = list(pilot.app.query(ToolCallRow))
+        assert len(rows) == 2  # те же виджеты, новых не появилось
+        assert [r for r in rows if r.call_id == "c1"] == [row]
+        prefix = str(header.query_one(".trace-prefix").render())
+        assert "●" in prefix  # ok-глиф в prefix заголовка
 
 
 @pytest.mark.asyncio

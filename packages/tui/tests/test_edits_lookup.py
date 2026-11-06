@@ -498,3 +498,79 @@ def test_turn_ids_skip_turns_without_call_id(tmp_path):
     journal.append(make_rec(turn="t3", call_id="c3"))
 
     assert lookup.turn_ids() == ["t1", "t3"]
+
+
+def _shell(path, turn="t1", command="x1", **kw):
+    return make_rec(
+        path=path,
+        turn=turn,
+        call_id=None,
+        op="shell",
+        command_call_id=command,
+        **kw,
+    )
+
+
+def test_by_command_lists_records_in_journal_order(tmp_path):
+    lookup, journal = make_lookup(tmp_path)
+    for path in ("a.py", "b.py", "c.py"):
+        journal.append(_shell(path, command="c1"))
+    journal.append(_shell("d.py", command="c2"))
+    journal.append(make_rec(path="e.py", call_id="c1"))
+
+    assert [r.path for r in lookup.by_command("c1")] == [
+        "a.py",
+        "b.py",
+        "c.py",
+    ]
+    assert [r.path for r in lookup.by_command("c2")] == ["d.py"]
+    assert lookup.by_command("nope") == []
+    assert lookup.by_command("") == []
+
+
+def test_by_command_same_id_in_two_turns_is_silent(tmp_path):
+    lookup, journal = make_lookup(tmp_path)
+    journal.append(_shell("a.py", turn="t1", command="c1"))
+    journal.append(_shell("b.py", turn="t2", command="c1"))
+
+    assert lookup.by_command("c1") == []
+
+
+def test_turn_ids_count_turns_with_command_records(tmp_path):
+    lookup, journal = make_lookup(tmp_path)
+    journal.append(make_rec(turn="t1", call_id="c1"))
+    journal.append(_shell("a.py", turn="t2", command="x2"))
+    journal.append(_shell("b.py", turn="t3", command=None))
+
+    assert lookup.turn_ids() == ["t1", "t2"]
+
+
+def test_command_paths_of(tmp_path):
+    lookup, journal = make_lookup(tmp_path)
+    journal.append(_shell("a.py", command="c1", command_paths=6))
+    journal.append(_shell("b.py", command="c1", command_paths=6))
+    journal.append(_shell("c.py", command="c2"))
+
+    assert lookup.command_paths_of("c1") == 6
+    assert lookup.command_paths_of("c2") is None
+    assert lookup.command_paths_of("nope") is None
+
+
+def test_lookup_for_settings_takes_limits_from_agent_edits(tmp_path):
+    """Одна фабрика журнала правок для ленты и превью: лимиты диффа — из
+    секции `agent_edits` настроек (`edits_view.diff_limits`)."""
+    from gc_testkit.tui_support import tui_settings
+    from gc_tui.services.edits_lookup import lookup_for_settings
+
+    settings = tui_settings(
+        {
+            "agent_edits.hunk_context_lines": 1,
+            "agent_edits.max_diff_source_bytes": 1000,
+        }
+    )
+    lookup = lookup_for_settings(
+        str(tmp_path), "cli", "th1", settings, launch_root=str(tmp_path)
+    )
+    assert lookup._hunk_context_lines == 1
+    assert lookup._max_source_bytes == 1000
+    assert lookup._launch_root == str(tmp_path)

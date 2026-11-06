@@ -81,6 +81,23 @@ def test_unknown_tool_called_with_raw_name_in_target():
     assert _content(row).startswith("Called  my_tool x=1")
 
 
+def test_think_row_shows_start_of_thought_without_key():
+    from gc_core.execution.progress import tool_args_summary
+    from gc_tui.services.trace_render import build_call_row
+
+    summary = tool_args_summary(
+        "session_think", {"thoughts": "The user wants a list"}
+    )
+    row = build_call_row(
+        call_id="c1",
+        wire_name="session_think",
+        args_summary=summary,
+        level=0,
+    )
+    row.set_result(summary="", outcome="ok")
+    assert _content(row) == "Think  The user wants a list"
+
+
 def test_mapper_puts_core_args_summary_into_call_event():
     from gc_tui.services.trace_mapper import map_message
 
@@ -105,7 +122,8 @@ def test_running_and_interrupted_tails():
     row = build_call_row(
         call_id="c1", wire_name="exec_command", args_summary="ls", level=0
     )
-    assert _content(row).startswith("Run  ls · ")
+    # До целой секунды живого таймера нет.
+    assert _content(row) == "Run  ls"
     row.mark_interrupted()
     assert _content(row) == "Run  ls · прервано"
 
@@ -213,7 +231,7 @@ async def test_live_top_level_and_nested_have_no_wire_name():
         await pilot.pause()
         parent = _live_row(scr, "p1")
         nested = _live_row(scr, "n1")
-        assert _content(parent).startswith("Agent  проверка")
+        assert _content(parent).startswith("Agent  Worker")
         assert "subagent_worker" not in _content(parent)
         assert _content(nested).startswith("Read  a.py")
         assert "fs_read_file" not in _content(nested)
@@ -329,9 +347,14 @@ async def test_preview_and_sidecar_nested_have_no_wire_name():
             merge_nested_readonly(trace, records, calls, mcp_tools=_JIRA)
 
     async with _A().run_test() as pilot:
-        rows = list(pilot.app.screen.query(ToolCallRow))
+        # Заголовки блоков (P4) — не строки вызовов: подписи — у строк.
+        rows = [
+            r
+            for r in pilot.app.screen.query(ToolCallRow)
+            if r.mode != "header"
+        ]
         texts = [_content(r) for r in rows]
-        assert texts[0].startswith("Agent  проверка")
+        assert texts[0].startswith("Agent  Worker")
         assert texts[1].startswith("Read  a.py")
         assert texts[2].startswith("jira · Создать задачу  PROJ-1")
         for wire in ("subagent_worker", "fs_read_file", "mcp_jira"):
@@ -601,7 +624,11 @@ async def test_preview_shows_path_from_the_project_root(tmp_path):
         )
         await pilot.app.push_screen(screen)
         await pilot.pause()
-        texts = [_content(r) for r in screen.query(ToolCallRow)]
+        texts = [
+            _content(r)
+            for r in screen.query(ToolCallRow)
+            if r.mode != "header"
+        ]
         assert texts[0].startswith("Read  README.md")
 
 
@@ -657,7 +684,9 @@ def test_skill_name_target_uses_skill_colour():
 
 
 def test_skills_list_pack_target_keeps_usual_colour():
-    from gc_tui.palette import DIM
+    """Имя пака — не имя скилла: цвет объекта одиночной строки (§10),
+    идущей — `INK`, законченной — `SUB_INK`."""
+    from gc_tui.palette import INK, SUB_INK
     from gc_tui.services.trace_render import build_call_row
 
     row = build_call_row(
@@ -666,4 +695,71 @@ def test_skills_list_pack_target_keeps_usual_colour():
         args_summary="core",
         level=0,
     )
-    assert _target_styles(row, "  core") == [DIM]
+    assert _target_styles(row, "  core") == [INK]
+    row.set_result(summary="", outcome="ok")
+    assert _target_styles(row, "  core") == [SUB_INK]
+
+
+_MEMORY_CALLS = [
+    *(
+        ("session_memory", {"action": a, "register": r}, verb, r)
+        for a, verb in (
+            ("write", "Write"),
+            ("append", "Append"),
+            ("read", "Read"),
+        )
+        for r in ("goal", "constraints", "state", "knowledge")
+    ),
+    ("session_memory", {"action": "list", "register": "goal"}, "List", ""),
+    *(
+        ("project_memory", {"action": a}, verb, "project")
+        for a, verb in (
+            ("write", "Write"),
+            ("append", "Append"),
+            ("read", "Read"),
+        )
+    ),
+]
+
+
+@pytest.mark.parametrize(("wire", "args", "verb", "target"), _MEMORY_CALLS)
+def test_memory_caption_verb_and_target(wire, args, verb, target):
+    """Член блока Memory: глагол из действия, объект — регистр или
+    `project`; содержимое не показывается."""
+    from gc_core.execution.progress import tool_args_summary
+
+    from gc_tui.services.trace_render import build_call_row
+
+    summary = tool_args_summary(wire, {**args, "content": "секрет"})
+    row = build_call_row(
+        call_id="c1", wire_name=wire, args_summary=summary, level=0
+    )
+    caption = f"{verb}  {target}" if target else verb
+    assert _content(row).split(" · ")[0] == caption
+
+
+@pytest.mark.parametrize("wire", ["session_memory", "project_memory"])
+@pytest.mark.parametrize("args", [{}, {"register": "goal"}])
+def test_memory_without_action_is_called_whatever_args(wire, args):
+    """Без `action` член блока Memory — `Called`, какие бы ни были прочие
+    аргументы: глагол не выводится из пар `key=value`."""
+    from gc_core.execution.progress import tool_args_summary
+
+    from gc_tui.services.trace_render import build_call_row
+
+    summary = tool_args_summary(wire, args)
+    row = build_call_row(
+        call_id="c1", wire_name=wire, args_summary=summary, level=0
+    )
+    assert _content(row).split(" · ")[0] == f"Called  {wire}"
+
+
+def test_memory_caption_without_action_is_called():
+    """Память без действия: член блока `Memory` словом `Memory` повторял
+    бы заголовок — `Called` и сырое имя, как у тула без подписи."""
+    from gc_tui.services.trace_render import build_call_row
+
+    row = build_call_row(
+        call_id="c1", wire_name="session_memory", args_summary="", level=0
+    )
+    assert _content(row).split(" · ")[0] == "Called  session_memory"

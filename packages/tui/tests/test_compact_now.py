@@ -54,3 +54,19 @@ def test_compact_now_targets_its_own_thread():
     assert runner.compact_now("tB", "cli") is True
     assert runner._last_target == ("tB", "cli")
     runner._thread.join()
+
+
+def test_compact_now_bumps_run_seq():
+    """`/compact` — свой прогон раннера: номер прогона растёт, как у хода.
+    Иначе сжатие сразу после зафиксированного прогона совпало бы с его
+    парой (раннер, номер) и осталось бы без бара (S10 §3.7)."""
+
+    class _Ex:
+        async def acompact_thread(self, tid, system=None):
+            return True
+
+    runner = AgentRunner(executor=_Ex())
+    before = runner.run_seq
+    assert runner.compact_now("t1", "cli") is True
+    runner._thread.join()
+    assert runner.run_seq == before + 1

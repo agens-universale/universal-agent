@@ -1,7 +1,8 @@
 """Одна сводка аргументов вызова тула: главный аргумент по таблице отображения.
 
 Формат — спека P1a §2.5: путь сохраняет имя файла, `code` — число строк,
-поиск — `"pattern" in path`; главного нет — до трёх пар `key=preview`.
+поиск — `"pattern" in path`; главного нет — у тула ядра пусто, у MCP и
+неизвестного — до трёх пар `key=preview`.
 """
 
 from __future__ import annotations
@@ -112,8 +113,24 @@ def test_legacy_name_uses_current_rules():
     assert tool_args_summary("read_file", {"path": "a.py"}) == "a.py"
 
 
-def test_primary_not_string_falls_back_to_pairs():
-    assert tool_args_summary("fs_read_file", {"path": None}) == "path=None"
+def test_known_tool_without_primary_has_empty_summary():
+    """Пары `key=value` — только для тулов вне таблицы (MCP, неизвестные):
+    у тула ядра без главного аргумента сводка пуста."""
+    assert tool_args_summary("fs_read_file", {"path": None}) == ""
+    assert tool_args_summary("turn_ask_human", {"question": "Да?"}) == ""
+
+
+def test_think_shows_start_of_thought():
+    assert tool_args_summary("session_think", {"thoughts": "x"}) == "x"
+
+
+def test_think_without_thoughts_has_empty_summary():
+    assert tool_args_summary("session_think", {"doubts": "x"}) == ""
+
+
+def test_mcp_without_scalar_falls_back_to_pairs():
+    summary = tool_args_summary("mcp_office_read", {"pages": [1, 2]})
+    assert summary == "pages=<list 2>"
 
 
 def test_unknown_tool_falls_back_to_pairs():
@@ -309,3 +326,83 @@ def test_real_arguments_are_not_changed():
     args = {"command": f"cd {ROOT} && ls"}
     tool_args_summary("exec_command", args, root=ROOT)
     assert args == {"command": f"cd {ROOT} && ls"}
+
+
+# ---- снятие `cd <корень>` для сырой команды (TUI рисует её построчно) ----
+
+_HEREDOC = "python - <<'EOF'\nprint(1)\nEOF"
+
+
+def test_strip_root_cd_keeps_line_breaks():
+    from gc_core.execution.progress import strip_root_cd
+
+    assert strip_root_cd(f"cd /proj && {_HEREDOC}", "/proj") == _HEREDOC
+
+
+def test_strip_root_cd_keeps_other_directory():
+    from gc_core.execution.progress import strip_root_cd
+
+    command = f"cd /other && {_HEREDOC}"
+    assert strip_root_cd(command, "/proj") == command
+
+
+def test_strip_root_cd_keeps_bare_cd():
+    from gc_core.execution.progress import strip_root_cd
+
+    assert strip_root_cd("cd /proj && ", "/proj") == "cd /proj && "
+
+
+def test_strip_root_cd_without_prefix_is_unchanged():
+    from gc_core.execution.progress import strip_root_cd
+
+    assert strip_root_cd(_HEREDOC, "/proj") == _HEREDOC
+
+
+@pytest.mark.parametrize(
+    ("command", "summary"),
+    [
+        (f"cd /proj && {_HEREDOC}", "python - <<'EOF' print(1) EOF"),
+        ("cd /other && ls -la", "cd /other && ls -la"),
+        ("cd /proj\nmake test\n  && echo ok", "make test && echo ok"),
+        ('  cd "/proj" ; git status  ', "git status"),
+        ("cd /proj && ", "cd /proj &&"),
+    ],
+)
+def test_summary_of_multiline_command_is_unchanged(command, summary):
+    """Сводка — по-прежнему одна строка: значения зафиксированы по базе."""
+    out = tool_args_summary("exec_command", {"command": command}, root="/proj")
+    assert out == summary
+
+
+@pytest.mark.parametrize("action", ["write", "append", "read"])
+@pytest.mark.parametrize(
+    "register", ["goal", "constraints", "state", "knowledge"]
+)
+def test_session_memory_shows_action_and_register(action, register):
+    out = tool_args_summary(
+        "session_memory",
+        {"action": action, "register": register, "content": "секрет"},
+    )
+    assert out == f"{action} {register}"
+
+
+def test_session_memory_list_has_no_target():
+    out = tool_args_summary(
+        "session_memory", {"action": "list", "register": "goal"}
+    )
+    assert out == "list"
+
+
+@pytest.mark.parametrize("action", ["write", "append", "read"])
+def test_project_memory_shows_action_and_project(action):
+    out = tool_args_summary(
+        "project_memory", {"action": action, "content": "секрет"}
+    )
+    assert out == f"{action} project"
+
+
+@pytest.mark.parametrize("name", ["session_memory", "project_memory"])
+def test_memory_without_action_has_no_summary(name):
+    """Сводка памяти — только от действия: без `action` она пуста, пар
+    `key=value` нет (из них фронтенд не выводит глагол)."""
+    assert tool_args_summary(name, {"register": "goal"}) == ""

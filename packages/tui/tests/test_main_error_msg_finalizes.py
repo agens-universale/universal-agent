@@ -6,11 +6,18 @@ from gc_tui.screens.main import TraceScreen
 
 
 class _FakeRow:
-    def __init__(self):
-        self.finalized = None
+    _result = None
+    _interrupted = False
 
-    def set_result(self, *, summary, outcome):
-        self.finalized = (summary, outcome)
+
+class _FakeBlocks:
+    """Исполнитель блоков верхнего уровня: строку финализирует он."""
+
+    def __init__(self):
+        self.results = []
+
+    def result(self, row, ev, edit, **_kw):
+        self.results.append((row, ev.summary, ev.result_outcome, edit))
 
 
 def _ev(call_id):
@@ -28,11 +35,13 @@ def _ev(call_id):
 def test_error_msg_with_call_id_finalizes_row():
     screen = TraceScreen.__new__(TraceScreen)
     row = _FakeRow()
+    blocks = _FakeBlocks()
     screen._active_calls = {"call_7": row}
+    screen._block_views = {"": blocks}
     mounted = []
     screen._trace_mount = lambda w, **kw: mounted.append(w)
     screen._render_error_msg(_ev("call_7"))
-    assert row.finalized == ("Wrong arguments for `x`", "error")
+    assert blocks.results == [(row, "Wrong arguments for `x`", "error", None)]
     assert mounted == []  # строка `!` подавлена
     assert "call_7" not in screen._active_calls
 

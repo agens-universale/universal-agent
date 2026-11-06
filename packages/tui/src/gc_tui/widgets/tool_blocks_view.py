@@ -1,0 +1,666 @@
+"""Исполнитель решений модели блоков ленты (спека P4 §8.1).
+
+Тонкий и не виджет: события строк вызовов подаёт в модель уровня
+(`gc_tui.services.tool_blocks.ToolBlocks`), её решения применяет к виджетам
+через хост монтирования (`BlockHost.mount`) — живая лента подаёт обёртку
+над своим монтированием, превью — над целью превью. Виды цвета модели
+переводит в токены палитры. Свои виджеты (заголовки, фразы, строки, диффы)
+регистрирует до монтирования: точка закрытия групп по `issued` видит, что
+виджет выдан моделью, и группу им не закрывает.
+
+Фразы блока (`BlockAction`) — прямые дети ленты, клик шлёт `BlockToggle`
+с уровнем: одинаковые ключи `block:<n>` разных уровней не путаются,
+маршрут — `BlockViews.route`.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable, Iterable, Optional, Protocol, Sequence
+
+from gc_core.config_modules.agent_edits import (
+    DEFAULT_REPLAY_EXPANDED_TURNS,
+    DEFAULT_TRACE_DIFF_PREVIEW_LINES,
+)
+from rich.text import Text
+from textual import events
+from textual.widget import Widget
+
+from gc_tui.messages import BlockToggle
+from gc_tui.models import TraceEvent
+from gc_tui.palette import DIM, ERR
+from gc_tui.services.block_edits import RanResult, diff_block_for
+from gc_tui.services.tool_blocks import (
+    AGENT_WINDOW,
+    COMMAND_PREVIEW_LINES,
+    COMMAND_SLOT,
+    OUTPUT_SLOT,
+    BlockEdit,
+    BlockKind,
+    CallTimers,
+    Decision,
+    MountHeader,
+    MountPhrase,
+    SetConsequence,
+    SetDiffShare,
+    SetEditTail,
+    SetHeader,
+    SetMode,
+    SetPhrase,
+    SetRanParts,
+    SetTimer,
+    SetVisible,
+    SetWord,
+    ToolBlocks,
+    command_file_verb,
+    diff_key,
+    phrase_key,
+    shown_when_folded,
+)
+from gc_tui.services.trace_render import level_prefix
+from gc_tui.textual_compat import paint_after_mount
+from gc_tui.widgets.no_select import NoSelectStatic
+from gc_tui.widgets.ran_output import OutputTexts
+from gc_tui.widgets.tool_call_row import LOOK_STYLE, ToolCallRow, parts_text
+
+#: Класс скрытого виджета блока (`display: none`): вне окна, ждущий.
+HIDDEN_CLASS = "-block-hidden"
+
+
+def _lines_text(lines: Sequence[str]) -> Text:
+    return Text("\n".join(lines), style=DIM)
+
+
+def output_texts(ran: RanResult) -> Optional[OutputTexts]:
+    """Вывод `Ran` (§4.1, решение 2026-10-26): код выхода или таймаут
+    (`ERR`) — сверх превью; свёрнутый — хвост, раскрытый — весь; фон —
+    одна строка; нет вывода — `(нет вывода)`. Вывод разобран до облегчения
+    retention: раскрытый — весь вывод записи и вне окна. Не конверт exec —
+    вывода нет."""
+    out = ran.output
+    if out is None:
+        return None
+    if out.background:
+        line = Text("запущено в фоне · вывод не сохраняется", style=DIM)
+        return OutputTexts(None, line, line)
+    head = None
+    if out.timed_out:
+        head = Text("превышено время ожидания", style=ERR)
+    elif out.exit_code not in (None, 0):
+        head = Text(f"код выхода {out.exit_code}", style=ERR)
+    if head is None and not out.lines:
+        line = Text("(нет вывода)", style=DIM)
+        return OutputTexts(None, line, line)
+    return OutputTexts(head, _lines_text(out.tail), _lines_text(out.lines))
+
+
+def _reason(ev: TraceEvent, ran: Optional[RanResult]) -> str:
+    """Причина `└` исхода: у ошибки команды, чей вывод сам выражает исход
+    (код выхода, таймаут, фон), — пусто, без дубля общей ошибки тула."""
+    output = ran.output if ran is not None else None
+    own = output is not None and output.own_outcome
+    if ev.result_outcome == "error" and own:
+        return ""
+    return ev.summary
+
+
+class BlockHost(Protocol):
+    """Куда исполнитель монтирует свои виджеты; удаления нет (§9.4)."""
+
+    def mount(
+        self,
+        widget: Widget,
+        *,
+        before: Optional[Widget] = None,
+        after: Optional[Widget] = None,
+    ) -> None: ...
+
+
+class BlockAction(NoSelectStatic):
+    """Фраза блока: `… ещё N`, `+ ещё N строк`, `− свернуть`. Маркер окна
+    над членами — с `└ ` в колонке 2, прочие — в колонке 4 (фраза файла —
+    под его диффом, фраза вывода — под строкой `Ran`); обе фразы окна
+    `Agent` — без `└`, в колонке его вложенных глифов (`mark` пуст); клик
+    — тогл. Строка незаписанных файлов кликом ничего не делает."""
+
+    DEFAULT_CSS = "BlockAction { height: auto; width: 1fr; }"
+    can_focus = False
+    # Клик по фразе фокус не двигает: ни на ленту, ни на строку
+    # (`click_model.focus_target_at`).
+    FOCUS_ON_CLICK = False
+
+    def __init__(
+        self,
+        *,
+        level: str,
+        key: str,
+        depth: int,
+        mark: str,
+        clickable: bool = True,
+    ) -> None:
+        classes = "trace-action block-action" if clickable else "block-note"
+        super().__init__("", classes=classes, markup=False)
+        self.level = level
+        self.key = key
+        self.phrase = ""
+        self._depth = depth
+        self._mark = mark
+        self._clickable = clickable
+
+    def set_phrase(self, phrase: str) -> None:
+        self.phrase = phrase
+        text = Text(level_prefix(self._depth + 1))
+        text.append(self._mark, style=DIM)
+        # Цвет фразы — от CSS (`.block-action`, ховер `.trace-action:hover`).
+        text.append(phrase)
+        self.update(text)
+
+    def on_click(self, event: events.Click) -> None:
+        event.stop()
+        if self._clickable:
+            self.post_message(BlockToggle(self.level, self.key))
+
+
+class ToolBlocksView:
+    """Применяет решения модели одного уровня к виджетам ленты."""
+
+    def __init__(
+        self,
+        host: BlockHost,
+        model: ToolBlocks,
+        *,
+        level: str,
+        depth: int,
+    ) -> None:
+        self.model = model
+        self.level = level
+        self.depth = depth
+        self._host = host
+        self._widgets: dict[str, Widget] = {}
+        self._issued: set[Widget] = set()
+        self._edits: dict[str, BlockEdit] = {}
+        self._command_hidden: dict[str, int] = {}
+        self._event_count = 0
+        # Скрытая решением строка в фокусе — фокус переносит `apply`.
+        self._unfocused: Optional[str] = None
+
+    # --- выданные виджеты --------------------------------------------------
+
+    def issued(self, widget: Widget) -> bool:
+        """Виджет выдан моделью блоков — группу он не закрывает."""
+        return widget in self._issued
+
+    def register(self, key: str, widget: Widget) -> None:
+        self._widgets[key] = widget
+        self._issued.add(widget)
+
+    def set_owner(self, row: Widget) -> None:
+        """Строка `Agent` уровня субагента: под ней — фраза окна."""
+        self._widgets[AGENT_WINDOW] = row
+
+    def event_added(self, widget: Widget) -> None:
+        """Смонтированное событие уровня не из блоков (проза, чек-лист,
+        реплика): закрывает группу; у субагента — событие окна."""
+        key = f"event:{self._event_count}"
+        self._event_count += 1
+        self._widgets[key] = widget
+        self.apply(self.model.event_added(key))
+
+    # --- события строк: событие → модель → решения -------------------------
+
+    def add_call(
+        self,
+        row: ToolCallRow,
+        category,
+        *,
+        waiting: bool,
+        command: tuple[str, ...] = (),
+    ) -> None:
+        """Строка вызова; ``command`` — команда `Ran` построчно: длинная
+        раскрывается и пока идёт (§4.0)."""
+        row.block_key = (self.level, row.call_id)
+        self.register(row.call_id, row)
+        self._host.mount(row)
+        # Решения ниже (окно, фраза) ложатся сразу, а строка собирается
+        # следующим тактом: рост группы — один кадр с ней.
+        paint_after_mount(row)
+        key = row.call_id
+        self.apply(self.model.member_added(key, category, waiting=waiting))
+        if self.model.kind_of(key) != BlockKind.RAN or not command:
+            return
+        shown = shown_when_folded(len(command), COMMAND_PREVIEW_LINES)
+        row.set_command(command, shown=shown)
+        self._command_hidden[key] = len(command) - shown
+        if self._command_hidden[key]:
+            self._ran_parts(key, RanResult(output=None))
+
+    def started(self, row: ToolCallRow) -> None:
+        row.set_active()
+        self.apply(self.model.started(row.call_id))
+
+    def result(
+        self,
+        row: ToolCallRow,
+        ev: TraceEvent,
+        edit: Optional[BlockEdit],
+        *,
+        compact: bool = False,
+        ran: Optional[RanResult] = None,
+    ) -> None:
+        """Исход вызова вместе с правкой: её глагол решает группу; у
+        `Ran` — вывод и правки команды (``ran``). ``compact`` — ход вне
+        окна раскрытых: тело диффа ждёт раскрытия."""
+        key = row.call_id
+        if edit is not None:
+            edit = replace(edit, compact=compact)
+            self._edits[key] = edit
+            # Хвост файла задаёт модель; строка берёт только ❐.
+            row.set_edit_tail(Text())
+            row.set_edit_counts(edit.add, edit.rem, copy_text=edit.copy_text)
+        outcome = ev.result_outcome
+        row.set_result(summary=ev.summary, outcome=outcome)
+        self.apply(
+            self.model.result(
+                key,
+                outcome,
+                reason=_reason(ev, ran),
+                executed=None,
+                edit=edit,
+            )
+        )
+        if ran is not None and self.model.kind_of(key) == BlockKind.RAN:
+            self._ran_result(row, ran)
+
+    def _ran_result(self, row: ToolCallRow, ran: RanResult) -> None:
+        """Вывод — следствием строки; файлы команды — строками под ней (до
+        решений модели: окно и фразы ставятся по ним)."""
+        texts = output_texts(ran)
+        if texts is not None:
+            row.set_output(texts)
+        files = tuple(
+            replace(file, compact=file.key in ran.compact)
+            for file in ran.files
+        )
+        anchor: Widget = row
+        for file in files:
+            anchor = self._mount_file(row, file, after=anchor)
+        self._ran_parts(row.call_id, replace(ran, files=files))
+
+    def _mount_file(
+        self, row: ToolCallRow, file: BlockEdit, *, after: Widget
+    ) -> ToolCallRow:
+        """Строка файла под командой: `Added / Edited / Deleted путь`."""
+        line = ToolCallRow(
+            call_id=file.key,
+            label=file.verb,
+            target=file.path,
+            event_no=row.event_no,
+            level=self.depth,
+            path_target=True,
+        )
+        # Пробел на строке файла — только его дифф (решение 2026-10-26).
+        line.block_key = (self.level, file.key)
+        # Enter на строке файла — экран деталей самой команды.
+        line.set_detail_source(lambda: row.call_id)
+        line.set_word(file.verb)
+        line.set_result(summary="", outcome="ok")
+        if file.verb != command_file_verb("delete") and file.copy_text:
+            line.set_edit_counts(file.add, file.rem, copy_text=file.copy_text)
+        self._edits[file.key] = file
+        self.register(file.key, line)
+        self._host.mount(line, after=after)
+        return line
+
+    def _ran_parts(self, key: str, ran: RanResult) -> None:
+        output = ran.output
+        self.apply(
+            self.model.ran_parts(
+                key,
+                command_hidden=self._command_hidden.get(key, 0),
+                output_hidden=output.hidden if output is not None else 0,
+                files=ran.files,
+                unrecorded=ran.unrecorded,
+            )
+        )
+
+    def interrupted(self, row: ToolCallRow, *, started: bool) -> None:
+        row.mark_interrupted()
+        self.apply(self.model.interrupted(row.call_id, started=started))
+
+    def paused(self, row: ToolCallRow, *, asking: bool = False) -> None:
+        """Человеко-ожидание; ``asking`` — разрешения ждёт этот вызов."""
+        row.pause(asking=asking)
+        self.apply(self.model.paused(row.call_id))
+
+    def resumed(self, row: ToolCallRow) -> None:
+        row.resume()
+        self.apply(self.model.resumed(row.call_id))
+
+    def toggle(self, key: str) -> None:
+        self.apply(self.model.toggle(key))
+
+    def event_closing(self) -> None:
+        self.apply(self.model.event_closing())
+
+    def queued_admitted(self) -> None:
+        self.apply(self.model.queued_admitted())
+
+    def timers_updated(self, calls: Iterable[str]) -> None:
+        self.apply(self.model.timers_updated(calls))
+
+    def head_widget(self, key: str) -> Optional[Widget]:
+        """Верх раскрытого по ключу ``key``: у файла и вывода `Ran` — их
+        строка; у блока (его фразы или члена) — заголовок, у блока без
+        заголовка — его первая строка."""
+        owner = self.model.owner_of(key)
+        if owner is not None:
+            return self._widgets.get(owner)
+        block = self.model.block_of(key)
+        if block is None:
+            return None
+        head = self._widgets.get(block)
+        if head is None:
+            head = self._widgets.get(self.model.first_call(block) or "")
+        return head
+
+    def turn_ended(self, *, stopped: bool, settled: bool = False) -> None:
+        """Запись итога хода; ``stopped`` — ход остановлен пользователем.
+        ``settled`` — поток хода давно вышел (превью, уровень, домонтированный
+        после записи): строки хода без исхода оборвались, как в тике выхода
+        потока вживую (§2.2)."""
+        if stopped:
+            self.apply(self.model.turn_stopped())
+            if settled:
+                self._interrupt_unsettled()
+        self.apply(self.model.turn_ended())
+
+    def _interrupt_unsettled(self) -> None:
+        for key in self.model.turn_calls():
+            row = self._row(key)
+            if row is not None:
+                self.interrupted(row, started=not row.waiting)
+
+    # --- решения → виджеты ---------------------------------------------------
+
+    def apply(self, decisions: list[Decision]) -> None:
+        self._unfocused = None
+        for decision in decisions:
+            _HANDLERS[type(decision)](self, decision)
+        # Фокус — после всех решений: заголовок могут скрыть следом.
+        if self._unfocused is not None:
+            self._refocus(self._unfocused)
+
+    def _anchor(self, key: Optional[str]) -> Optional[Widget]:
+        """Виджет ключа; диффа нет (записи не было) — его строка."""
+        if key is None:
+            return None
+        widget = self._widgets.get(key)
+        if widget is None and key.endswith(":diff"):
+            widget = self._widgets.get(key.removesuffix(":diff"))
+        return widget
+
+    def _mount_header(self, d: MountHeader) -> None:
+        if d.block in self._widgets:
+            return
+        header = ToolCallRow(
+            call_id=f"{self.level}/{d.block}",
+            label="",
+            target="",
+            level=self.depth,
+        )
+        header.set_mode("header", lead=False)
+        header.block_key = (self.level, d.block)
+        header.set_detail_source(_last_call(self.model, d.block))
+        self.register(d.block, header)
+        self._host.mount(header, before=self._anchor(d.before))
+
+    def _mount_phrase(self, d: MountPhrase) -> None:
+        key = phrase_key(d.block, d.slot)
+        before, after = self._anchor(d.before), self._anchor(d.after)
+        phrase = self._widgets.get(key)
+        if phrase is not None:
+            # Уже стоит — переставить под новый последний виджет блока.
+            if phrase.parent is not None and (before or after) is not phrase:
+                phrase.parent.move_child(phrase, before=before, after=after)
+            return
+        # Фразы окна субагента — в колонке глифа его событий и без `└`
+        # (§7; `└` под `Agent` — у строки задачи).
+        window = d.block == AGENT_WINDOW
+        if window:
+            mark = ""
+        else:
+            mark = "└ " if d.slot == "top" else "  "
+        phrase = BlockAction(
+            level=self.level,
+            key=key,
+            depth=self.depth - 1 if window else self.depth,
+            mark=mark,
+            clickable=d.slot != "unrecorded",
+        )
+        self.register(key, phrase)
+        self._host.mount(phrase, before=before, after=after)
+
+    def _set_mode(self, d: SetMode) -> None:
+        widget = self._widgets.get(d.key)
+        if isinstance(widget, ToolCallRow):
+            widget.set_mode(d.mode, lead=d.lead, current=d.current, gap=d.gap)
+
+    def _set_visible(self, d: SetVisible) -> None:
+        for key in (d.key, diff_key(d.key)):
+            widget = self._widgets.get(key)
+            if widget is not None:
+                widget.set_class(not d.visible, HIDDEN_CLASS)
+        widget = self._widgets.get(d.key)
+        if d.visible and isinstance(widget, ToolCallRow):
+            widget.refit()
+        if not d.visible and widget is not None and widget.has_focus:
+            self._unfocused = d.key
+
+    def _refocus(self, key: str) -> None:
+        """Фокус со скрытой строки — на заголовок её блока; скрыт и он
+        (окно `Agent`) или заголовка нет — на строку `Agent` уровня
+        (§8.1)."""
+        target = self._widgets.get(self.model.block_of(key) or "")
+        if target is None or target.has_class(HIDDEN_CLASS):
+            target = self._widgets.get(AGENT_WINDOW)
+        if target is not None:
+            target.focus()
+
+    def _set_header(self, d: SetHeader) -> None:
+        header = self._widgets[d.block]
+        assert isinstance(header, ToolCallRow)
+        header.set_header(d.word, glyph=d.glyph, tail=parts_text(d.tail))
+
+    def _set_phrase(self, d: SetPhrase) -> None:
+        phrase = self._widgets.get(phrase_key(d.block, d.slot))
+        if not isinstance(phrase, BlockAction):
+            return
+        phrase.set_class(d.text is None, HIDDEN_CLASS)
+        if d.text is not None:
+            phrase.set_phrase(d.text)
+
+    def _row(self, key: str) -> Optional[ToolCallRow]:
+        widget = self._widgets.get(key)
+        return widget if isinstance(widget, ToolCallRow) else None
+
+    def _set_timer(self, d: SetTimer) -> None:
+        row = self._row(d.key)
+        if row is not None:
+            row.set_elapsed(d.seconds)
+
+    def _set_consequence(self, d: SetConsequence) -> None:
+        row = self._row(d.key)
+        if row is not None:
+            row.set_consequence(Text(d.text, style=LOOK_STYLE[d.look]))
+
+    def _set_word(self, d: SetWord) -> None:
+        row = self._row(d.key)
+        if row is not None:
+            row.set_word(d.word, role=d.role)
+
+    def _set_edit_tail(self, d: SetEditTail) -> None:
+        row = self._row(d.key)
+        if row is not None:
+            row.set_edit_tail(parts_text(d.parts))
+
+    def _set_diff_share(self, d: SetDiffShare) -> None:
+        """Дифф файла: смонтировать при первом решении, дальше — раскрытие
+        и колонка без перемонтирования."""
+        key = diff_key(d.key)
+        diff = self._widgets.get(key)
+        if diff is None:
+            edit = self._edits.get(d.key)
+            owner = self._widgets.get(d.key)
+            if edit is None or edit.record is None or owner is None:
+                return
+            diff = diff_block_for(
+                edit.record,
+                rows=d.rows or 0,
+                column=d.column,
+                compact=edit.compact,
+                event_no=getattr(owner, "event_no", 0),
+            )
+            # Колонка субагента — на 2 глубже; видимость — как у строки.
+            diff.set_class(self.depth > 0, "diff-nested")
+            diff.set_class(owner.has_class(HIDDEN_CLASS), HIDDEN_CLASS)
+            self.register(key, diff)
+            self._host.mount(diff, after=owner)
+        diff.set_expanded(d.rows is None)
+        if d.rows is not None:
+            diff.set_collapsed_max_lines(d.rows)
+        diff.set_column(d.column)
+
+    def _set_ran_parts(self, d: SetRanParts) -> None:
+        """Части `Ran`: раскрытие команды и вывода и их фразы в самой
+        строке; клик по фразе вывода — тот же тогл, что у `− свернуть`
+        под строкой."""
+        row = self._row(self.model.first_call(d.block) or "")
+        if row is not None:
+            row.set_parts(
+                command_open=d.command_open,
+                output_open=d.output_open,
+                command=d.command,
+                output=d.output,
+                keys=(
+                    phrase_key(d.block, COMMAND_SLOT),
+                    phrase_key(d.block, OUTPUT_SLOT),
+                ),
+            )
+
+
+def _last_call(model: ToolBlocks, block: str) -> Callable[[], Optional[str]]:
+    return lambda: model.last_call(block)
+
+
+_HANDLERS: dict[type, Callable[[ToolBlocksView, Decision], None]] = {
+    MountHeader: ToolBlocksView._mount_header,
+    MountPhrase: ToolBlocksView._mount_phrase,
+    SetMode: ToolBlocksView._set_mode,
+    SetVisible: ToolBlocksView._set_visible,
+    SetHeader: ToolBlocksView._set_header,
+    SetPhrase: ToolBlocksView._set_phrase,
+    SetTimer: ToolBlocksView._set_timer,
+    SetConsequence: ToolBlocksView._set_consequence,
+    SetWord: ToolBlocksView._set_word,
+    SetEditTail: ToolBlocksView._set_edit_tail,
+    SetDiffShare: ToolBlocksView._set_diff_share,
+    SetRanParts: ToolBlocksView._set_ran_parts,
+}
+
+
+class BlockViews(dict[str, ToolBlocksView]):
+    """Исполнители уровней ленты: `""` — верхний, иначе `parent_call_id`.
+    Помнит вызовы остановленных ходов: уровень субагента, домонтированный
+    после записи итога (возврат, превью), получает исход хода родителя."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._stopped: set[str] = set()
+
+    def clear(self) -> None:
+        super().clear()
+        self._stopped.clear()
+
+    def note_turn(self, *, stopped: bool) -> None:
+        """Запись итога хода — до `turn_ended` уровней."""
+        if stopped:
+            for view in self.values():
+                self._stopped.update(view.model.turn_calls())
+
+    def settle_levels(self) -> None:
+        """Уровни субагентов остановленных ходов — `○` их блокам, как
+        вживую (§2.2, §7): после домонтирования вложенных записей."""
+        for level, view in list(self.items()):
+            if level in self._stopped:
+                view.turn_ended(stopped=True, settled=True)
+
+    def route(
+        self, message: BlockToggle
+    ) -> Optional[tuple[ToolBlocksView, str]]:
+        """Тогл — в модель своего уровня; строка `Agent` раскрывает окно
+        своего субагента (§7). Возвращает исполнитель и ключ тогла."""
+        view = self.get(message.level)
+        if view is None:
+            return None
+        key = message.key
+        if view.model.kind_of(key) == BlockKind.AGENT:
+            agent = view.model.first_call(view.model.block_of(key) or "")
+            nested = self.get(agent or "")
+            if nested is None:
+                return None
+            view, key = nested, AGENT_WINDOW
+        view.toggle(key)
+        return view, key
+
+
+def end_turn(
+    views: BlockViews, timers: CallTimers, outcome: Any, *, settled: bool
+) -> None:
+    """Запись итога хода — моделям всех уровней: время вызовов хода
+    (`outcome.calls`) — застывшим таймерам; остановка пользователем
+    ставит `○` блокам этого хода. Одно правило для живой ленты и превью;
+    ``settled`` — у превью: поток хода давно вышел (`turn_ended`)."""
+    from gc_tui.services.turn_outcome import kind_of
+
+    calls = outcome.calls or {}
+    timers.update(calls)
+    stopped = kind_of(outcome)[0] == "cancelled"
+    views.note_turn(stopped=stopped)
+    for view in list(views.values()):
+        view.timers_updated(calls)
+        view.turn_ended(stopped=stopped, settled=settled)
+
+
+def nested_tail(
+    children: Sequence[Widget], level: Sequence[Widget], parent: Widget
+) -> Widget:
+    """Последний в ленте виджет уровня субагента (заголовки, фразы и
+    диффы — тоже, §9.1); у уровня без виджетов — строка `Agent`.
+    `− свернуть` окна `Agent` хвостом не считается: новое событие встаёт
+    над ним, фраза остаётся последней строкой блока."""
+    if not level:
+        return parent
+    collapse = phrase_key(AGENT_WINDOW, "bottom")
+    mine = {
+        id(w)
+        for w in level
+        if not (isinstance(w, BlockAction) and w.key == collapse)
+    }
+    for widget in reversed(children):
+        if id(widget) in mine:
+            return widget
+    return parent
+
+
+@dataclass
+class PreviewBlocks:
+    """Блоки превью `/sessions` (спека P4 §9.7, §9.10а): исполнители
+    уровней, реестр застывших таймеров и журнал правок треда (только
+    чтение) — общие для `render_segments_readonly` и
+    `merge_nested_readonly`."""
+
+    views: BlockViews = field(default_factory=BlockViews)
+    timers: CallTimers = field(default_factory=CallTimers)
+    edits_lookup: Any = None
+    diff_preview: int = DEFAULT_TRACE_DIFF_PREVIEW_LINES
+    expanded_turns: int = DEFAULT_REPLAY_EXPANDED_TURNS

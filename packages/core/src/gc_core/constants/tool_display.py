@@ -80,6 +80,7 @@ class DisplayCategory(StrEnum):
     CALC = "Calc"
     WAIT = "Wait"
     MCP = "MCP"
+    FINISH = "Finish"
     HIDDEN = "Hidden"
     CALLED = "Called"
 
@@ -127,7 +128,7 @@ TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
     FS_VIEW_IMAGE_NAME: _d(_C.VIEW, "path"),
     SESSION_MEMORY_TOOL_NAME: _d(_C.MEMORY, "action"),
     PROJECT_MEMORY_TOOL_NAME: _d(_C.MEMORY, "action"),
-    SESSION_THINK_TOOL_NAME: _d(_C.THINK, None),
+    SESSION_THINK_TOOL_NAME: _d(_C.THINK, "thoughts"),
     SKILLS_LIST_NAME: _d(_C.SKILL, "pack"),
     SKILLS_LOAD_NAME: _d(_C.SKILL, "skill_id"),
     EXEC_CALCULATOR_NAME: _d(_C.CALC, "expression"),
@@ -139,6 +140,25 @@ TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
     PROPOSE_PLAN_TOOL_NAME: _d(_C.HIDDEN, None),
     SESSION_TODO_TOOL_NAME: _d(_C.HIDDEN, None),
     SESSION_COMPACT_TOOL_NAME: _d(_C.HIDDEN, None),
+}
+
+#: Вложенный контекст (вызовы субагента): тулы, видимые только там. Сдача
+#: ребёнка — последнее событие блока `Agent`; наверху её показывает конец
+#: хода (решение владельца 2026-10-23).
+NESTED_TOOL_DISPLAY: Mapping[str, ToolDisplay] = {
+    FINISH_TOOL_NAME: _d(_C.FINISH, "solution_type"),
+}
+
+#: Короткая роль встроенного субагента — объект заголовка `Agent` во
+#: фронтендах; особый — аргумент `role`, кастомный и неизвестный — суффикс
+#: имени (`subagent_role`).
+SUBAGENT_ROLES: Mapping[str, str] = {
+    "subagent_worker": "Worker",
+    "subagent_planner": "Planner",
+    "subagent_code_planner": "Code planner",
+    "subagent_code_generator": "Coder",
+    "subagent_code_reviewer": "Reviewer",
+    "subagent_critic": "Critic",
 }
 
 # Старое имя тула (до переименования, для чтения старых тредов) -> текущее.
@@ -200,11 +220,16 @@ def _mcp_display(
 def tool_display(
     wire_name: str,
     *,
+    nested: bool = False,
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
 ) -> ToolDisplay:
+    """Отображение тула; ``nested`` — вызов субагента: сначала
+    `NESTED_TOOL_DISPLAY`."""
     name = LEGACY_TOOL_NAMES.get(wire_name, wire_name)
-    shown = TOOL_DISPLAY.get(name)
+    shown = (NESTED_TOOL_DISPLAY.get(name) if nested else None) or (
+        TOOL_DISPLAY.get(name)
+    )
     if shown is not None:
         return shown
     if name.startswith(_SUBAGENT_PREFIX):
@@ -212,6 +237,22 @@ def tool_display(
     if name.startswith(_MCP_PREFIX):
         return _mcp_display(name, mcp_tools, mcp_servers)
     return ToolDisplay(_C.CALLED, _C.CALLED.value, None, wire_name)
+
+
+def subagent_role(wire_name: str, args: Mapping[str, object]) -> str:
+    """Короткая роль субагента по имени тула и разобранным аргументам
+    вызова: у `subagent_special_agent` — его аргумент `role`; иначе из
+    `SUBAGENT_ROLES`, иначе суффикс после `subagent_` словами
+    (`security_audit` → `Security audit`)."""
+    role = args.get("role")
+    role = role.strip() if isinstance(role, str) else ""
+    if wire_name == SUBAGENT_SPECIAL_AGENT_NAME and role:
+        return role
+    known = SUBAGENT_ROLES.get(wire_name)
+    if known is not None:
+        return known
+    suffix = wire_name.removeprefix(_SUBAGENT_PREFIX).replace("_", " ")
+    return suffix.strip().capitalize() or wire_name
 
 
 def _snapshot_tools(server: str, entry: object) -> dict[str, McpToolInfo]:

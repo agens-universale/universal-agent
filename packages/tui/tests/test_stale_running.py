@@ -30,7 +30,6 @@ class _Runner:
         self._last_target = (tid, "cli")
         self._thread_kind = "run"
         self._stop_requested = False
-        self.run_started_at = None
 
     def is_running(self):
         return self._running
@@ -217,9 +216,18 @@ async def test_sessions_own_run_of_other_thread_stays_running(tmp_path):
         assert "прервано" not in text
 
 
+def _outcome_text(scr) -> str:
+    """Свежая строка итога последнего хода в ленте; индикатора нет."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    assert scr._thinking is None
+    (line,) = scr.query(TurnLine).filter(".-latest")
+    return line.render().plain
+
+
 @pytest.mark.asyncio
 async def test_reopen_stale_running_shows_interrupted(tmp_path):
-    """Переоткрытие после рестарта: строка-итог «■ Прервано», статус —
+    """Переоткрытие после рестарта: строка итога «■ Прервано», статус —
     «interrupted»; мету чтение не переписывает."""
     app = _app(tmp_path)
     _stamp_running(tmp_path, TID_A)
@@ -228,8 +236,7 @@ async def test_reopen_stale_running_shows_interrupted(tmp_path):
         scr.attach_active_task(TID_A, is_resume=True)
         await pilot.pause()
         assert scr._session_status_word() == "interrupted"
-        assert scr._thinking is not None
-        assert scr._thinking._render_text().plain.startswith("■ Прервано")
+        assert _outcome_text(scr) == "■ Прервано"
         assert _status(scr, TID_A) == "running"
 
 
@@ -237,10 +244,15 @@ async def test_reopen_stale_running_shows_interrupted(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_elapsed_live_equals_meta_after_ask_human_answer(tmp_path):
-    """Ход ждал ответа человека: после ответа счёт индикатора — от ответа.
-    «Выполнил за N» вживую и после переоткрытия — одно и то же N."""
+async def test_elapsed_live_equals_reopen_from_turn_record(tmp_path):
+    """Длительность хода — одна, из записи итога ядра: ни отсчёт экрана,
+    ни свой счёт индикатора её не подменяют. «Выполнил за N» вживую и
+    после переоткрытия — одно и то же N; в мете длительности нет."""
     import time
+
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_testkit.develop_files import append_new_thread_messages
+    from gc_testkit.thread_writes import turn_outcome_record
 
     app = _app(tmp_path)
     async with app.run_test() as pilot:
@@ -249,29 +261,42 @@ async def test_elapsed_live_equals_meta_after_ask_human_answer(tmp_path):
         scr._prepare_for_new_run()
         scr._reset_thinking_timer()
         runner = _Runner(TID_A)
-        runner.run_started_at = time.monotonic() - 42
         app.active_runner = runner
         scr._poll_active()
-        # ответ на вопрос агента: таймер хода — заново (как в _submit)
-        scr._reset_thinking_timer()
-        scr._thinking_started_at = time.monotonic() - 5
-        scr._show_thinking_indicator(state="thinking")
-        # Свой счёт индикатора нарочно другой: верное N даёт только
-        # значение, посчитанное концом хода (`freeze_elapsed`).
+        scr._thinking_started_at = time.monotonic() - 42
         scr._thinking._started_at = time.monotonic() - 9
+        append_new_thread_messages(
+            str(tmp_path),
+            "cli",
+            TID_A,
+            [{"id": "u1", "role": "user", "content": "q"}],
+            set(),
+        )
+        turn_outcome_record(
+            str(tmp_path),
+            "cli",
+            TID_A,
+            TurnOutcome(
+                status="done",
+                reason=None,
+                opened_by="u1",
+                started_at="2026-10-22T11:32:00Z",
+                ended_at="",
+                duration_sec=5.0,
+                error=None,
+            ),
+        )
         runner._running = False
         scr._poll_active()
         await pilot.pause()
-        live = scr._thinking._render_text().plain
+        live = _outcome_text(scr)
         meta = tui_section(scr._store.get_record(TID_A))["last_indicator"]
         assert live.startswith("✓ Выполнил за 5с")
-        assert meta["elapsed"] == 5
+        assert "elapsed" not in meta
         scr.attach_active_task(TID_B, is_resume=True)
         scr.attach_active_task(TID_A, is_resume=True)
         await pilot.pause()
-        assert scr._thinking._render_text().plain.startswith(
-            "✓ Выполнил за 5с"
-        )
+        assert _outcome_text(scr) == live
 
 
 @pytest.mark.asyncio

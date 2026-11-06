@@ -1,22 +1,46 @@
-"""Ход останавливается (решение 26): строка итога — один мигающий `■` без
-текста в ритме мигания вызова; ход кончился — ровный `■ Отменено`."""
+"""Ход останавливается (решение 26, S10 §4.4): пока поток стопа жив — бар
+с одним мигающим `■` без текста в ритме мигания вызова, запись стопа ждёт
+за баром; поток вышел — бар уходит, а строка «■ Отменено · ЧЧ:ММ» встаёт
+в ленте тем же движением. Один ход — одна строка."""
 
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 import pytest
 
 pytest.importorskip("textual")
 
+from gc_core.persistence.turn_outcome import USER_STOP, TurnOutcome
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
+from gc_tui.services.relative_time import parse_iso_utc
 from gc_tui.services.trace_glyphs import BLINK_PERIOD_TICKS
 from gc_tui.services.turn_outcome import OUTCOMES
 
 _A = "stop0000000000000000000000000000a"
+_B = "stop0000000000000000000000000000b"
 _GLYPH = OUTCOMES["cancelled"].glyph
-_DONE_LINE = f"{_GLYPH} {OUTCOMES['cancelled'].sentence}"
+_CANCELLED = f"{_GLYPH} {OUTCOMES['cancelled'].sentence}"
+_ENDED = "2026-10-22T11:30:12Z"
+_MID = "m_stopped"
+
+
+@pytest.fixture(autouse=True)
+def _pin_now(monkeypatch):
+    """«Сейчас» — минута после стопа: время без даты."""
+    from gc_tui.services import relative_time
+
+    now = parse_iso_utc(_ENDED).astimezone() + timedelta(minutes=1)
+    monkeypatch.setattr(relative_time, "_now_local", lambda: now)
+
+
+def _stopped_line() -> str:
+    hm = parse_iso_utc(_ENDED).astimezone().strftime("%H:%M")
+    return f"{_CANCELLED} · {hm}"
 
 
 def _write(tmp_path, tid):
@@ -26,22 +50,47 @@ def _write(tmp_path, tid):
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
 
+def _stop_record(tmp_path, tid=_A):
+    """Поток стопа дописал ход: реплику и запись стопа, как ядро."""
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        tid,
+        [{"id": _MID, "role": "user", "content": "долгая задача"}],
+        set(),
+    )
+    outcome = TurnOutcome(
+        status="stopped",
+        reason=USER_STOP,
+        opened_by=_MID,
+        started_at="2026-10-22T11:30:00Z",
+        ended_at=_ENDED,
+        duration_sec=12.0,
+        error=None,
+    )
+    turn_outcome_record(str(tmp_path), "cli", tid, outcome)
+
+
 class _SlowRunner:
-    """Стоп кооперативный: поток жив, пока тест не доведёт ход до конца."""
+    """Стоп кооперативный: поток жив, пока тест не доведёт ход до конца.
+    `on_stop` — что поток успевает до выхода сразу на стопе."""
 
     _thread_kind = "run"
 
-    def __init__(self, tid):
+    def __init__(self, tid, *, on_stop=None):
         self._last_target = (tid, "cli")
         self._stop_requested = False
-        self.run_started_at = None
         self.running = True
+        self.run_seq = 1
+        self._on_stop = on_stop
 
     def is_running(self):
         return self.running
 
     def stop(self):
         self._stop_requested = True
+        if self._on_stop is not None:
+            self._on_stop(self)
 
     def cancel_confirm(self):
         pass
@@ -51,6 +100,12 @@ class _SlowRunner:
 
     def withdraw_message(self, msg_id):
         return False
+
+    def follow(self, _other):
+        pass
+
+    def turn_effective_start(self):
+        return None
 
 
 def _app(tmp_path):
@@ -62,26 +117,30 @@ def _app(tmp_path):
     )
 
 
-async def _run_in_a(pilot):
+async def _start_in_a(pilot, *, seen=True, **kw):
+    """Ход в треде A. `seen=False` — стоп раньше первого тика, увидевшего
+    прогон."""
     scr = pilot.app.screen
     scr.attach_active_task(_A, is_resume=True)
+    runner = _SlowRunner(_A, **kw)
+    pilot.app.active_runner = runner
     scr._prepare_for_new_run()
     scr._reset_thinking_timer()
-    runner = _SlowRunner(_A)
-    pilot.app.active_runner = runner
-    scr._events_since_last_user_send = 1  # агент уже ответил: не откат
-    scr._poll_active()
-    await pilot.pause()
+    scr._last_user_message_id = None  # без отката: ход что-то выдал
+    if seen:
+        scr._poll_active()
+        await pilot.pause()
     return scr, runner
 
 
-def _frames(ind):
-    """Строка итога на целом периоде мигания."""
-    seen = []
-    for _ in range(BLINK_PERIOD_TICKS):
-        ind._tick()
-        seen.append(ind._render_text().plain)
-    return seen
+def _bar_up(scr) -> bool:
+    return scr.query_one("#indicator-bar").has_class("-turn")
+
+
+def _lines(scr):
+    from gc_tui.widgets.turn_line import TurnLine
+
+    return list(scr.query_one("#trace").query(TurnLine))
 
 
 def _assert_blinking_glyph_only(scr):
@@ -94,17 +153,148 @@ def _assert_blinking_glyph_only(scr):
     assert set(frames) == {_GLYPH, " "}
 
 
+async def _assert_stop_line_after_exit(pilot, scr, runner):
+    """Поток стопа вышел: бар снят, одна строка стопа видна свежей."""
+    runner.running = False
+    scr._poll_active()
+    await pilot.pause()
+    assert not _bar_up(scr)
+    assert scr._thinking is None
+    (line,) = _lines(scr)
+    assert line.text.plain == _stopped_line()
+    assert line.is_fresh
+    assert line.display
+
+
 @pytest.mark.asyncio
 async def test_stop_blinks_glyph_until_run_ends(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
-        scr, runner = await _run_in_a(pilot)
+        scr, runner = await _start_in_a(pilot)
         scr._cmd_stop()
         await pilot.pause()
+        assert _bar_up(scr)
+        assert scr._thinking.state == "stopping"
         _assert_blinking_glyph_only(scr)
-        runner.running = False  # ход дошёл до конца
+        _stop_record(tmp_path)
+        scr._poll_active()  # запись стопа дочитана, поток ещё жив
+        (line,) = _lines(scr)
+        assert line.has_class("-held")
+        assert _bar_up(scr)
+        await _assert_stop_line_after_exit(pilot, scr, runner)
+
+
+@pytest.mark.asyncio
+async def test_stop_before_first_tick_gives_one_line(tmp_path):
+    """Стоп раньше первого тика, увидевшего прогон: прогон стопа — тот,
+    что дорабатывает, а не сменный раннер. Строка без записи не встаёт,
+    пока поток жив; запись стопа даёт одну строку."""
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _start_in_a(pilot, seen=False)
+        scr._cmd_stop()
+        for _ in range(3):
+            scr._poll_active()
+        await pilot.pause()
+        assert _lines(scr) == []
+        assert _bar_up(scr)
+        _stop_record(tmp_path)
+        await _assert_stop_line_after_exit(pilot, scr, runner)
+
+
+@pytest.mark.asyncio
+async def test_instant_stop_shows_line_in_same_call(tmp_path):
+    """Мгновенный стоп (поток вышел к моменту показа): строка из записи
+    стопа и уход бара — в том же вызове, без тика."""
+
+    def exit_with_record(runner):
+        _stop_record(tmp_path)
+        runner.running = False
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr, _runner = await _start_in_a(pilot, on_stop=exit_with_record)
+        scr._cmd_stop()
+        assert not _bar_up(scr)
+        assert scr._thinking is None
+        (line,) = _lines(scr)
+        assert line.text.plain == _stopped_line()
+        assert line.is_fresh
+
+
+@pytest.mark.asyncio
+async def test_instant_stop_without_record_shows_fallback_line(tmp_path):
+    """Мгновенный стоп, записи нет: запасная «■ Отменено» без времени."""
+
+    def exit_now(runner):
+        runner.running = False
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr, _runner = await _start_in_a(pilot, on_stop=exit_now)
+        scr._cmd_stop()
+        assert not _bar_up(scr)
+        (line,) = _lines(scr)
+        assert line.text.plain == _CANCELLED
+        assert not line.recorded
+
+
+@pytest.mark.asyncio
+async def test_stop_for_ask_human_same_outcome(tmp_path):
+    """Esc на вопросе агента: баннер снят, дальше путь стопа — мигание,
+    затем строка «■ Отменено · ЧЧ:ММ» и уход бара одним движением."""
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _start_in_a(pilot)
+        scr._show_child_ask_human(parent_call_id="p", prose="Какой путь?")
+        await pilot.pause()
+        scr._stop_for_ask_human()
+        await pilot.pause()
+        assert scr._ask_human_banner is None
+        assert _bar_up(scr)
+        assert scr._thinking.state == "stopping"
+        _stop_record(tmp_path)
+        await _assert_stop_line_after_exit(pilot, scr, runner)
+
+
+@pytest.mark.asyncio
+async def test_esc_on_live_ask_human_gives_stop_line_in_place(tmp_path):
+    """Esc клавишей на живом вопросе агента: стоп хода, строка
+    «■ Отменено · ЧЧ:ММ» — на месте записи стопа, сразу за репликой хода."""
+    from gc_tui.widgets.user_reply import UserReplyContainer
+
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _start_in_a(pilot)
+        scr._show_child_ask_human(parent_call_id="p", prose="Какой путь?")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert runner._stop_requested
+        assert scr._ask_human_banner is None
+        _stop_record(tmp_path)
+        await _assert_stop_line_after_exit(pilot, scr, runner)
+        kids = list(scr.query_one("#trace").children)
+        (line,) = _lines(scr)
+        reply = [w for w in kids if isinstance(w, UserReplyContainer)][-1]
+        assert kids.index(line) == kids.index(reply) + 1
+
+
+@pytest.mark.asyncio
+async def test_stop_then_switch_and_back(tmp_path):
+    """Стоп и переключение: у открытой сессии бара нет; поток стопа
+    дописал своё в прежнюю — при возврате строка стопа на месте."""
+    _write(tmp_path, _B)
+    async with _app(tmp_path).run_test() as pilot:
+        scr, runner = await _start_in_a(pilot)
+        scr._cmd_stop()
+        scr.attach_active_task(_B, is_resume=True)
         scr._poll_active()
         await pilot.pause()
-        assert set(_frames(scr._thinking)) == {_DONE_LINE}
+        assert not _bar_up(scr)
+        assert _lines(scr) == []
+        _stop_record(tmp_path)
+        runner.running = False
+        scr._poll_active()
+        scr.attach_active_task(_A, is_resume=True)
+        await pilot.pause()
+        (line,) = _lines(scr)
+        assert line.text.plain == _stopped_line()
+        assert line.is_fresh
 
 
 @pytest.mark.asyncio
@@ -112,17 +302,19 @@ async def test_next_run_outcome_not_covered_by_old_stop_blink(tmp_path):
     """Старый поток ещё дорабатывает, а новый ход того же треда кончился:
     строка — итог нового хода, не мигание прошлого стопа."""
     async with _app(tmp_path).run_test() as pilot:
-        scr, old = await _run_in_a(pilot)
+        scr, old = await _start_in_a(pilot)
         scr._cmd_stop()
         await pilot.pause()
         assert old.is_running()  # поток стопа ещё жив
-        scr._prepare_for_new_run()
-        scr._reset_thinking_timer()
         new = _SlowRunner(_A)
         pilot.app.active_runner = new
+        scr._prepare_for_new_run()
+        scr._reset_thinking_timer()
         scr._poll_active()
         new.running = False  # новый ход кончился сам
         scr._poll_active()
         await pilot.pause()
         assert old.is_running()
-        assert scr._thinking._render_text().plain.startswith("✓ Выполнил")
+        assert not _bar_up(scr)
+        fresh = [line for line in _lines(scr) if line.is_fresh]
+        assert [line.text.plain for line in fresh] == ["✓ Выполнил"]

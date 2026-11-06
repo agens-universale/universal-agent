@@ -1,0 +1,1486 @@
+"""Модель блоков вызовов ленты (спека P4 §2, §3, §8.1) — без Textual.
+
+Лента плоская: заголовок блока, маркер окна, члены и фразы — прямые дети
+`#trace`. Модель уровня (верхний или один субагент) получает события
+строк вызовов и возвращает решения: что смонтировать и куда, что скрыть,
+какой режим у строки, что написать в заголовке. Применяет их исполнитель
+(`gc_tui.widgets.tool_blocks_view`); палитры здесь нет — виды глифа и цвета
+словами-ключами (`run` / `ok` / `error` / `refused` / `halted` / `dim`).
+
+Решения — разница между желаемым состоянием блока и уже выданным: модель
+помнит последнее решение по каждому ключу и повторов не выдаёт.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Iterable, Literal, Mapping, Optional, Sequence, Union
+
+from gc_core.agent_edits.journal import EditRecord
+from gc_core.config_modules.agent_edits import DEFAULT_TRACE_DIFF_PREVIEW_LINES
+from gc_core.constants.tool_display import DisplayCategory
+
+from gc_tui.models import ResultOutcome
+from gc_tui.services.duration_format import format_size
+from gc_tui.services.plural import (
+    errors_word,
+    files_word,
+    lines_word,
+    refusals_word,
+)
+
+#: Видимых элементов в окне блока: членов, файлов, событий субагента.
+WINDOW = 3
+#: Строк свёрнутого вывода команды — его хвост (`output_tail`).
+OUTPUT_PREVIEW_LINES = 3
+#: Строк команды `Ran` в свёрнутом виде: первая в строке и продолжение.
+COMMAND_PREVIEW_LINES = 3
+
+COLLAPSE_PHRASE = "− свернуть"
+#: `− свернуть` окна (`… ещё N`): прячет строки группы, а не содержимое.
+GROUP_COLLAPSE_PHRASE = "− свернуть группу"
+#: Ключ окна субагента в модели его уровня (спека §7): фраза окна
+#: `└ … ещё N` и строка `Agent` у исполнителя.
+AGENT_WINDOW = "agent"
+NOT_STARTED_REASON = "не запущено (стоп)"
+#: Места фраз: под файлом (`<файл>:more`), под строкой `Ran` (`− свернуть`
+#: раскрытых команды и вывода; их фразы раскрытия — в самой строке, где
+#: скрытое, и шлют тот же ключ) и окна файлов блока (маркер над файлами,
+#: `− свернуть` внизу).
+_MORE = "more"
+OUTPUT_SLOT = "output"
+COMMAND_SLOT = "command"
+#: Части строки `Ran`, раскрываемые каждая своей фразой.
+_RAN_SLOTS = (COMMAND_SLOT, OUTPUT_SLOT)
+_WINDOW_SLOTS = ("top", "files", "bottom")
+#: Причина идущего члена, оборванного остановкой хода.
+CANCELLED_REASON = "отменено"
+
+#: Вид глифа заголовка блока; `wait` — идёт, но член ждёт человека: `●`
+#: без дыхания.
+GlyphLook = Literal["run", "wait", "ok", "error", "halted"]
+#: Вид цвета куска текста; токен палитры назначает исполнитель.
+Look = Literal[
+    "run", "ok", "error", "refused", "halted", "dim", "ink", "muted"
+]
+RowMode = Literal["single", "header", "member"]
+#: Колонка диффа: одиночная правка (2) или член блока (4).
+DiffColumn = Literal["single", "member"]
+Parts = tuple[tuple[str, Look], ...]
+
+
+class BlockKind(StrEnum):
+    EXPLORED = "explored"
+    FETCHED = "fetched"
+    MEMORY = "memory"
+    EDITS = "edits"
+    RAN = "ran"
+    AGENT = "agent"
+    FINISH = "finish"
+    SINGLE = "single"
+
+
+_KIND_OF: dict[DisplayCategory, BlockKind] = {
+    DisplayCategory.READ: BlockKind.EXPLORED,
+    DisplayCategory.SEARCH: BlockKind.EXPLORED,
+    DisplayCategory.FIND: BlockKind.EXPLORED,
+    DisplayCategory.VIEW: BlockKind.EXPLORED,
+    DisplayCategory.EDIT: BlockKind.EDITS,
+    DisplayCategory.WRITE: BlockKind.EDITS,
+    DisplayCategory.FETCH: BlockKind.FETCHED,
+    DisplayCategory.MEMORY: BlockKind.MEMORY,
+    DisplayCategory.RUN: BlockKind.RAN,
+    DisplayCategory.AGENT: BlockKind.AGENT,
+    DisplayCategory.FINISH: BlockKind.FINISH,
+}
+#: Виды, у которых подряд идущие вызовы сворачиваются в одну группу.
+_GROUPED = frozenset(
+    {
+        BlockKind.EXPLORED,
+        BlockKind.FETCHED,
+        BlockKind.MEMORY,
+    }
+)
+
+_WORDS: dict[BlockKind, tuple[str, str]] = {
+    BlockKind.EXPLORED: ("Exploring", "Explored"),
+    BlockKind.FETCHED: ("Fetching", "Fetched"),
+    # Без времён глагола: идёт — мигает только глиф, как у `Agent`.
+    BlockKind.MEMORY: ("Memory", "Memory"),
+    BlockKind.RAN: ("Running", "Ran"),
+    BlockKind.EDITS: ("Editing", "Edited"),
+    BlockKind.AGENT: ("Agent", "Agent"),
+    BlockKind.FINISH: ("Finishing", "Finished"),
+}
+#: Слово законченного вызова со сбоем — без времени глагола, как
+#: `Edit путь` у правки (§6.1): `Finish` — сдача не принята (§7).
+_FAILED_WORDS: dict[BlockKind, str] = {BlockKind.FINISH: "Finish"}
+#: Одиночные строки со своим словом вместо подписи и его роль.
+_WORD_ROLES: dict[BlockKind, WordRole] = {
+    BlockKind.AGENT: "agent",
+    BlockKind.FINISH: "finish",
+}
+
+#: Цвет причины `└` по исходу вызова.
+_REASON_LOOK: dict[str, Look] = {
+    "error": "error",
+    "refused": "refused",
+    "halted": "dim",
+}
+
+
+def block_kind(category: DisplayCategory) -> Optional[BlockKind]:
+    """Вид блока по категории вызова (спека §2.1); `Hidden` — `None`."""
+    if category == DisplayCategory.HIDDEN:
+        return None
+    return _KIND_OF.get(category, BlockKind.SINGLE)
+
+
+def header_word(
+    kind: BlockKind, *, live: bool, verb: Optional[str] = None
+) -> str:
+    """Слово заголовка: живое (`…ing`) или прошедшее; у правок — глагол
+    по результату (`Added` / `Edited`)."""
+    going, done = _WORDS[kind]
+    if live:
+        return going
+    return verb or done
+
+
+def shown_when_folded(total: int, limit: int) -> int:
+    """Сколько из ``total`` показать свёрнутым при пределе ``limit``
+    (решение 2026-10-26): фраза `ещё N` занимает строку, как и один
+    скрытый элемент, — одного не прячем. До `limit + 1` — всё, без фразы;
+    больше — `limit`, скрыто не меньше двух. Одно правило для окон членов,
+    файлов и `Agent`, хвоста вывода, команды и бюджета диффа."""
+    return total if total <= limit + 1 else limit
+
+
+def more_phrase(n: int) -> str:
+    """Маркер окна над членами: `… ещё N`."""
+    return f"… ещё {n}"
+
+
+def more_lines_phrase(n: int) -> str:
+    """Фраза раскрытия под тем, что она раскрывает (дифф файла, вывод
+    команды): `+ ещё N строк`."""
+    return f"+ ещё {n} {lines_word(n)}"
+
+
+def more_lines_above(n: int) -> str:
+    """Фраза над хвостом вывода команды, там, где вывод начинается:
+    `… ещё N строк` — скрытое выше хвоста."""
+    return f"… ещё {n} {lines_word(n)}"
+
+
+def output_tail(lines: Sequence[str]) -> tuple[tuple[str, ...], int]:
+    """Свёрнутый вывод команды (решение 2026-10-26): последние
+    `OUTPUT_PREVIEW_LINES` строк и число скрытых над ними. Вывод растёт —
+    хвост сдвигается, скрытых больше; одно правило для живой ленты,
+    возврата и превью."""
+    shown = shown_when_folded(len(lines), OUTPUT_PREVIEW_LINES)
+    tail = tuple(lines[len(lines) - shown :])
+    return tail, len(lines) - len(tail)
+
+
+def _failure_parts(errors: int, refusals: int) -> Parts:
+    parts: list[tuple[str, Look]] = []
+    if errors:
+        parts += [(" · ", "dim"), (f"{errors} {errors_word(errors)}", "error")]
+    if refusals:
+        word = refusals_word(refusals)
+        parts += [(" · ", "dim"), (f"{refusals} {word}", "refused")]
+    return tuple(parts)
+
+
+def edit_verb(op: Optional[str], *, failed: bool) -> str:
+    """Глагол правки тула по результату (§6.1): сбой или отказ —
+    `Edit`; создан файл — `Added`; иначе `Edited`. Идущая — `Editing`
+    (`header_word`)."""
+    if failed:
+        return "Edit"
+    return "Added" if op == "create" else "Edited"
+
+
+def command_file_verb(op: Optional[str]) -> str:
+    """Глагол файла под командой: `Added` / `Deleted` / `Edited`."""
+    return {"create": "Added", "delete": "Deleted"}.get(op or "", "Edited")
+
+
+def counts_text(add: int, rem: int) -> Parts:
+    """Счётчики правки ` (+a −r)` — всегда обе части, нулевая тоже;
+    скобки — цветом объекта слева (`INK`)."""
+    return (
+        (" (", "ink"),
+        (f"+{add}", "ok"),
+        (" ", "dim"),
+        (f"−{rem}", "error"),
+        (")", "ink"),
+    )
+
+
+def diff_key(key: str) -> str:
+    """Ключ виджета диффа строки (файла) ``key``."""
+    return f"{key}:diff"
+
+
+def phrase_key(block: str, slot: str) -> str:
+    """Ключ виджета фразы ``slot`` блока ``block``."""
+    return f"{block}:{slot}"
+
+
+def block_glyph(*, running: bool, stopped: bool, any_ok: bool) -> GlyphLook:
+    """Глиф заголовка (§3.3): стоп — `halted`; идёт — `run`; закончился —
+    `ok`, если хоть один вызов прошёл, иначе `error`."""
+    if stopped:
+        return "halted"
+    if running:
+        return "run"
+    return "ok" if any_ok else "error"
+
+
+@dataclass(frozen=True)
+class BlockEdit:
+    """Что модель знает о правке файла: из записи журнала правок."""
+
+    key: str
+    path: str
+    verb: str
+    add: int
+    rem: int
+    #: Логических строк диффа с контекстом; 0 — диффа нет (бинарь,
+    #: удаление).
+    diff_lines: int
+    size_bytes: Optional[int]
+    has_record: bool
+    #: Что кладёт в буфер ❐ строки файла; пусто — кнопки нет.
+    copy_text: str = ""
+    #: Ход вне окна раскрытых (§6.3): тела нет до раскрытия, скрыты все
+    #: строки диффа.
+    compact: bool = False
+    #: Запись журнала — для `DiffBlock` исполнителя; модель её не читает.
+    record: Optional[EditRecord] = field(
+        default=None, compare=False, repr=False
+    )
+
+    @property
+    def has_diff(self) -> bool:
+        return self.has_record and self.diff_lines > 0
+
+
+def _edit_tail(edit: Optional[BlockEdit]) -> Parts:
+    """Хвост строки файла: ` (+a −r)`, у бинаря — ` · 12 КБ`."""
+    if edit is None or not edit.has_record or edit.verb == "Deleted":
+        return ()
+    if edit.diff_lines == 0 and edit.size_bytes is not None:
+        return ((" · ", "dim"), (format_size(edit.size_bytes), "dim"))
+    return counts_text(edit.add, edit.rem)
+
+
+def _lines(edit: Optional[BlockEdit]) -> int:
+    return edit.diff_lines if edit is not None and edit.has_diff else 0
+
+
+# --- решения -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MountHeader:
+    """Смонтировать заголовок блока перед строкой ``before``."""
+
+    block: str
+    before: str
+
+    @property
+    def ident(self) -> tuple:
+        return ("MountHeader", self.block)
+
+
+@dataclass(frozen=True)
+class MountPhrase:
+    """Смонтировать фразу ``slot`` блока рядом с виджетом ключа ``after``
+    или ``before``; уже смонтированную — переставить туда же."""
+
+    block: str
+    slot: str
+    after: Optional[str] = None
+    before: Optional[str] = None
+
+    @property
+    def ident(self) -> tuple:
+        return ("MountPhrase", self.block, self.slot)
+
+
+@dataclass(frozen=True)
+class SetMode:
+    """Режим строки. ``lead`` — `└ ` перед текстом члена (первый видимый
+    элемент блока); ``current`` — член идёт (`INK`); ``gap`` — пустая
+    строка сверху (между файлами блока правок)."""
+
+    key: str
+    mode: RowMode
+    lead: bool = False
+    current: bool = False
+    gap: bool = False
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetMode", self.key)
+
+
+@dataclass(frozen=True)
+class SetVisible:
+    key: str
+    visible: bool
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetVisible", self.key)
+
+
+@dataclass(frozen=True)
+class SetHeader:
+    """Слово, глиф и хвост заголовка блока."""
+
+    block: str
+    word: str
+    glyph: GlyphLook
+    tail: Parts
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetHeader", self.block)
+
+
+@dataclass(frozen=True)
+class SetPhrase:
+    """Текст фразы ``slot``; `None` — фраза скрыта."""
+
+    block: str
+    slot: str
+    text: Optional[str]
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetPhrase", self.block, self.slot)
+
+
+@dataclass(frozen=True)
+class SetTimer:
+    """Застывший таймер законченного вызова: ``seconds`` из записи хода
+    или, если `None`, часы строки на конце исполнения."""
+
+    key: str
+    seconds: Optional[float]
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetTimer", self.key)
+
+
+@dataclass(frozen=True)
+class SetConsequence:
+    """Строка `└ text` под вызовом цветом ``look``."""
+
+    key: str
+    text: str
+    look: Look
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetConsequence", self.key)
+
+
+#: Роль слова строки: глагол правки, слово команды, `Agent` или сдача
+#: субагента (`Finishing` / `Finished`: объект — только после конца).
+WordRole = Literal["edit", "command", "agent", "finish"]
+
+
+@dataclass(frozen=True)
+class SetWord:
+    """Слово одиночной строки вместо подписи категории: глагол правки
+    (`edit`: `Editing` / `Added` / `Edited` / `Edit`) или слово команды
+    (`command`: `Running` / `Ran`); вид слова и объекта строка берёт из
+    роли."""
+
+    key: str
+    word: str
+    role: WordRole = "edit"
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetWord", self.key)
+
+
+@dataclass(frozen=True)
+class SetEditTail:
+    """Хвост строки файла после пути: счётчики или размер бинаря."""
+
+    key: str
+    parts: Parts
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetEditTail", self.key)
+
+
+@dataclass(frozen=True)
+class SetDiffShare:
+    """Дифф файла: ``rows`` строк превью (`None` — раскрыт,
+    целиком с контекстом) в колонке ``column``. Смонтировать при первом
+    решении."""
+
+    key: str
+    rows: Optional[int]
+    column: DiffColumn
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetDiffShare", self.key)
+
+
+@dataclass(frozen=True)
+class SetRanParts:
+    """Части строки `Ran` (решение 2026-10-27): команда и вывод
+    раскрываются независимо. Фраза команды — под её продолжением
+    (`+ ещё K строк`, раскрыта — `− свернуть` там же); фраза вывода — над
+    хвостом (`… ещё N строк`, раскрыт — фразы нет: `− свернуть` вывода —
+    фраза блока под строкой); `None` — нет."""
+
+    block: str
+    command: Optional[str] = None
+    output: Optional[str] = None
+    command_open: bool = False
+    output_open: bool = False
+
+    @property
+    def ident(self) -> tuple:
+        return ("SetRanParts", self.block)
+
+
+Decision = Union[
+    MountHeader,
+    MountPhrase,
+    SetMode,
+    SetVisible,
+    SetHeader,
+    SetPhrase,
+    SetTimer,
+    SetConsequence,
+    SetWord,
+    SetEditTail,
+    SetDiffShare,
+    SetRanParts,
+]
+
+
+class CallTimers:
+    """Застывшие таймеры вызовов из записей итога хода (`outcome.calls`).
+
+    Один на ленту, общий для моделей всех уровней: записи разных ходов
+    сливаются — у них свои `call_id`."""
+
+    def __init__(self) -> None:
+        self._calls: dict[str, float] = {}
+
+    def update(self, calls: Mapping[str, float]) -> None:
+        self._calls.update(calls)
+
+    def get(self, call_id: str) -> Optional[float]:
+        return self._calls.get(call_id)
+
+    def __contains__(self, call_id: object) -> bool:
+        return call_id in self._calls
+
+    def clear(self) -> None:
+        self._calls.clear()
+
+
+# --- состояние -----------------------------------------------------------
+
+
+@dataclass
+class _Member:
+    key: str
+    waiting: bool
+    #: Место строки на уровне по порядку монтирования.
+    pos: int = 0
+    started: bool = False
+    outcome: Optional[ResultOutcome] = None
+    reason: str = ""
+    executed: Optional[bool] = None
+    # Без результата: процесс оборвался или стоп до старта.
+    interrupted: bool = False
+    not_started: bool = False
+    #: Ждёт человека (confirm / ask_human) — живая лента, не запись.
+    paused: bool = False
+    edit: Optional[BlockEdit] = None
+
+    @property
+    def applied(self) -> Optional[BlockEdit]:
+        """Правка вызова, если он прошёл."""
+        return self.edit if self.outcome == "ok" else None
+
+    @property
+    def verb(self) -> str:
+        return self.edit.verb if self.edit is not None else "Edited"
+
+    @property
+    def done(self) -> bool:
+        return self.outcome is not None or self.interrupted
+
+    @property
+    def live(self) -> bool:
+        return not (self.done or self.waiting)
+
+    @property
+    def stopped(self) -> bool:
+        """Оборван остановкой хода: идёт, без исхода или с исходом стопа
+        (`отменено` / `не запущено (стоп)`); остановка лимитом — нет."""
+        return (
+            not self.done
+            or self.interrupted
+            or self.not_started
+            or (self.outcome == "halted" and self.reason == CANCELLED_REASON)
+        )
+
+
+@dataclass
+class _Block:
+    key: str
+    kind: BlockKind
+    members: list[_Member] = field(default_factory=list)
+    expanded: bool = False
+    stopped: bool = False
+    # Правки: строка ещё идёт и в группу не встала; глагол группы
+    # (`None` — в группе одни сбои).
+    pending: bool = False
+    verb: Optional[str] = None
+    parts: Optional[_RanParts] = None
+
+    @property
+    def headed(self) -> bool:
+        return self.kind in _GROUPED
+
+    def shown(self) -> list[_Member]:
+        """Члены, которые могут быть видны: ждущие (`•`) — нет."""
+        return [m for m in self.members if not m.waiting]
+
+    def window(self) -> list[_Member]:
+        shown = self.shown()
+        if self.expanded:
+            return shown
+        return shown[len(shown) - shown_when_folded(len(shown), WINDOW) :]
+
+    def expandable(self) -> bool:
+        n = len(self.shown())
+        return self.headed and shown_when_folded(n, WINDOW) < n
+
+
+@dataclass(frozen=True)
+class _RanParts:
+    command_hidden: int
+    output_hidden: int
+    files: tuple[BlockEdit, ...]
+    unrecorded: int
+
+
+@dataclass(frozen=True)
+class _File:
+    """Файл блока для окна и счёта скрытого: строк диффа с контекстом; у
+    компактного тело не показано — скрыты все строки."""
+
+    key: str
+    lines: int
+    compact: bool = False
+
+    def hidden(self, rows: int) -> int:
+        """Строк, которые добавит раскрытие. Превью — ``rows`` строк файла
+        (сначала изменённые, потом ближайший контекст; отбирает
+        `diff_render`), показано `min(lines, rows)` (§6.3)."""
+        if self.compact:
+            return self.lines
+        return self.lines - shown_when_folded(self.lines, rows)
+
+    def body(self, rows: Optional[int]) -> bool:
+        """Есть ли под файлом тело сейчас: раскрытый — весь дифф, свёрнутый
+        — превью; у компактного превью нет."""
+        if rows is None:
+            return self.lines > 0
+        return not self.compact and min(self.lines, rows) > 0
+
+
+@dataclass(frozen=True)
+class _Layout:
+    """Окно файлов блока и раскрытие каждого файла."""
+
+    window: tuple[str, ...]
+    #: Строк превью по файлу (сначала изменения, затем контекст);
+    #: `None` — раскрыт, целиком.
+    rows: Mapping[str, Optional[int]]
+    #: Строк, которые добавит раскрытие файла (`+ ещё N строк` под ним).
+    hidden: Mapping[str, int]
+    #: Скрытых файлов над окном сейчас (`… ещё M`).
+    more: int
+    #: Окно файлов что-то скрывает в свёрнутом виде.
+    windowed: bool
+    #: Видимые файлы с телом: после них — пустая строка (§6.2).
+    bodied: frozenset[str] = frozenset()
+
+
+def _accepts(group: Optional[_Block], member: _Member) -> bool:
+    """Встаёт ли законченная правка в группу над ней (решение плана 4):
+    сбой — в любую группу правок; успешная — в группу своего глагола с
+    хотя бы одной применившейся."""
+    if group is None or group.kind != BlockKind.EDITS or group.pending:
+        return False
+    if member.outcome != "ok":
+        return True
+    return group.verb == member.verb
+
+
+class ToolBlocks:
+    """Модель блоков одного уровня ленты: верхнего или субагента.
+
+    ``diff_preview`` — строк свёрнутого превью диффа на файл
+    (`agent_edits.trace_diff_preview_lines`). ``agent_window`` — уровень
+    субагента: окно последних `WINDOW` событий (блок — одно событие), над
+    ним `└ … ещё N`; строка видна, если видна и в своём блоке, и в окне
+    (§7)."""
+
+    def __init__(
+        self,
+        timers: CallTimers,
+        *,
+        diff_preview: int = DEFAULT_TRACE_DIFF_PREVIEW_LINES,
+        agent_window: bool = False,
+    ) -> None:
+        self._timers = timers
+        self._preview = diff_preview
+        # Раскрытые владельцы фраз: файлы (дифф целиком) и части строк
+        # `Ran` (фразы команды и вывода блока); переживают живые
+        # обновления.
+        self._open: set[str] = set()
+        self._count = 0
+        self._blocks: list[_Block] = []
+        self._block_of: dict[str, _Block] = {}
+        self._members: dict[str, _Member] = {}
+        # Строки уровня по порядку монтирования; `None` — закрывающее
+        # событие ленты. Группу строки решает то, что стоит над ней.
+        self._order: list[Optional[_Member]] = []
+        # Первый блок текущего хода: остановка хода трогает только его.
+        self._turn_from = 0
+        self._issued: dict[tuple, Decision] = {}
+        # Окно субагента: события уровня по порядку (ключ блока или
+        # события ленты) и выданная им видимость.
+        self._window = (
+            _Block(AGENT_WINDOW, BlockKind.AGENT) if agent_window else None
+        )
+        self._events: list[str] = []
+        self._event_shown: dict[str, bool] = {}
+
+    # --- события ---------------------------------------------------------
+
+    def member_added(
+        self, call_id: str, category: DisplayCategory, *, waiting: bool
+    ) -> list[Decision]:
+        """Строка вызова смонтирована: в группу своего вида, если она
+        стоит прямо над строкой, иначе в новый блок."""
+        kind = block_kind(category)
+        if kind is None:
+            return []
+        member = _Member(call_id, waiting=waiting, pos=len(self._order))
+        above = self._block_above(member)
+        self._order.append(member)
+        self._members[call_id] = member
+        if kind in _GROUPED and above is not None and above.kind == kind:
+            block = above
+        else:
+            block = self._new_block(kind)
+            # Правка встаёт в группу по результату (§6.4).
+            block.pending = kind == BlockKind.EDITS
+        block.members.append(member)
+        self._block_of[call_id] = block
+        return self._render(block) + self._window_changes()
+
+    def started(self, call_id: str) -> list[Decision]:
+        member = self._members.get(call_id)
+        if member is None:
+            return []
+        member.started = True
+        member.waiting = False
+        return self._render(self._block_of[call_id])
+
+    def result(
+        self,
+        call_id: str,
+        outcome: ResultOutcome,
+        *,
+        reason: str,
+        executed: Optional[bool],
+        edit: Optional[BlockEdit] = None,
+    ) -> list[Decision]:
+        """Исход вызова. ``executed`` — исполнялся ли; `None` — решают
+        старт строки и реестр таймеров (после переоткрытия). ``edit`` —
+        запись журнала правки вызова: приходит вместе с исходом, её
+        глагол решает, в какую группу правка встанет."""
+        member = self._members.get(call_id)
+        if member is None:
+            return []
+        member.edit = edit
+        member.outcome = outcome
+        member.reason = reason
+        member.executed = executed
+        member.waiting = False
+        # Исход стопа «не запущено» — вызов не исполнялся, как и не
+        # начатый при переводе стопом.
+        member.not_started = (
+            outcome == "halted" and reason == NOT_STARTED_REASON
+        )
+        return self._settle(member)
+
+    def ran_parts(
+        self,
+        call_id: str,
+        *,
+        command_hidden: int,
+        output_hidden: int,
+        files: Sequence[BlockEdit],
+        unrecorded: int,
+    ) -> list[Decision]:
+        """Части блока `Ran` (§4.0, §4.2): скрытые строки команды и
+        вывода, правки команды и число её незаписанных файлов."""
+        block = self._block_of.get(call_id)
+        if block is None or block.kind != BlockKind.RAN:
+            return []
+        block.parts = _RanParts(
+            command_hidden, output_hidden, tuple(files), unrecorded
+        )
+        for file in files:
+            self._block_of[file.key] = block
+        return self._render(block)
+
+    def interrupted(self, call_id: str, *, started: bool) -> list[Decision]:
+        """Вызов закончился без результата. ``started=False`` — стоп до
+        старта: член с `└ не запущено (стоп)`; иначе (оборвался, или после
+        переоткрытия неизвестно) — без `└`."""
+        member = self._members.get(call_id)
+        if member is None or member.done:
+            return []
+        member.interrupted = True
+        member.not_started = not (started or member.started)
+        member.waiting = False
+        return self._settle(member)
+
+    def turn_stopped(self) -> list[Decision]:
+        """Ход остановлен пользователем: блоки хода, где член ещё идёт,
+        оборвался или получил исход стопа, — `halted`, в том числе уже
+        закрытые; законченные блоки и член, остановленный лимитом, глиф
+        не меняют."""
+        out: list[Decision] = []
+        for block in self._blocks[self._turn_from :]:
+            if any(m.stopped for m in block.members):
+                block.stopped = True
+                out += self._render(block)
+        return out
+
+    def turn_calls(self) -> list[str]:
+        """Ключи строк текущего хода (до `turn_ended`)."""
+        return [
+            m.key for block in self._blocks[self._turn_from :]
+            for m in block.members
+        ]  # fmt: skip
+
+    def turn_ended(self) -> list[Decision]:
+        """Запись итога хода: следующие блоки — уже другого хода."""
+        self._turn_from = len(self._blocks)
+        return []
+
+    def paused(self, call_id: str) -> list[Decision]:
+        """Ожидание человека: часы и хвост — у самой строки; у блока
+        `●` заголовка перестаёт дышать (`wait`)."""
+        return self._set_paused(call_id, True)
+
+    def resumed(self, call_id: str) -> list[Decision]:
+        return self._set_paused(call_id, False)
+
+    def _set_paused(self, call_id: str, paused: bool) -> list[Decision]:
+        member = self._members.get(call_id)
+        if member is None or member.paused == paused:
+            return []
+        member.paused = paused
+        return self._render(self._block_of[call_id])
+
+    def event_closing(self) -> list[Decision]:
+        """Событие ленты не из группы закрыло открытую группу."""
+        if self._order and self._order[-1] is not None:
+            self._order.append(None)
+        return []
+
+    def event_added(self, key: str) -> list[Decision]:
+        """Событие уровня не из блоков (проза, чек-лист, реплика) с ключом
+        ``key``: закрывает группу; у субагента — событие окна."""
+        out = self.event_closing()
+        if self._window is None:
+            return out
+        self._events.append(key)
+        return out + self._window_changes()
+
+    def queued_admitted(self) -> list[Decision]:
+        """Реплика из очереди впущена ядром — закрывает группу."""
+        return self.event_closing()
+
+    def toggle(self, key: str) -> list[Decision]:
+        """Раскрыть / свернуть по ключу (§5, решения 2026-10-26/27):
+        строка файла и его фраза — только его дифф; фраза команды `Ran` —
+        только команда, фраза вывода — только вывод; маркер окна и
+        `− свернуть` блока — окно; заголовок блока, строка команды и
+        прочие члены — блок целиком. Нечего скрывать — решений нет."""
+        if self._is_window(key):
+            return self._toggle_window()
+        block = self._resolve(key)
+        if block is None:
+            return []
+        if block.headed:
+            if not block.expandable():
+                return []
+            block.expanded = not block.expanded
+            return self._render(block)
+        if key in (phrase_key(block.key, s) for s in _WINDOW_SLOTS):
+            return self._toggle_files(block)
+        owner = key if key in _ran_keys(block) else self.owner_of(key)
+        if owner is None:
+            return self._toggle_all(block)
+        if owner not in self._owners(block):
+            return []
+        self._open ^= {owner}
+        return self._render(block)
+
+    def _toggle_files(self, block: _Block) -> list[Decision]:
+        if not self._layout(block).windowed:
+            return []
+        block.expanded = not block.expanded
+        return self._render(block)
+
+    def _toggle_all(self, block: _Block) -> list[Decision]:
+        """Весь блок: окно файлов, каждый файл и вывод — раскрыть, если
+        хоть что-то свёрнуто, иначе свернуть всё."""
+        owners = set(self._owners(block))
+        windowed = self._layout(block).windowed
+        if not owners and not windowed:
+            return []
+        opened = owners <= self._open and (block.expanded or not windowed)
+        if opened:
+            self._open -= owners
+        else:
+            self._open |= owners
+        block.expanded = windowed and not opened
+        return self._render(block)
+
+    def timers_updated(self, calls: Iterable[str]) -> list[Decision]:
+        """Реестр таймеров пополнился вызовами ``calls`` — застывшие
+        таймеры строкам; перерисовываются только их блоки."""
+        blocks = {
+            block.key: block
+            for block in map(self._block_of.get, calls)
+            if block is not None
+        }
+        out: list[Decision] = []
+        for block in blocks.values():
+            out += self._render(block)
+        return out
+
+    # --- запросы исполнителя ---------------------------------------------
+
+    def kind_of(self, key: str) -> Optional[BlockKind]:
+        """Вид блока строки ``key``."""
+        block = self._resolve(key)
+        return block.kind if block is not None else None
+
+    def owner_of(self, key: str) -> Optional[str]:
+        """Владелец фразы или строки ``key``: файл (строка файла, его
+        фраза) или строка `Ran` (фразы команды и вывода); прочее —
+        `None`."""
+        block = self._resolve(key)
+        if block is None or block.headed:
+            return None
+        if key in _ran_keys(block):
+            return block.members[0].key
+        files = {f.key for f in self._files(block)}
+        if key in files:
+            return key
+        base = key.removesuffix(":" + _MORE)
+        return base if base != key and base in files else None
+
+    def block_of(self, key: str) -> Optional[str]:
+        """Ключ блока по ключу блока, его фразы или строки."""
+        if self._is_window(key):
+            return AGENT_WINDOW
+        block = self._resolve(key)
+        return block.key if block is not None else None
+
+    def first_call(self, block: str) -> Optional[str]:
+        """Первый член блока — верх блока без заголовка."""
+        found = self._block_of.get(block)
+        if found is None or not found.members:
+            return None
+        return found.members[0].key
+
+    def last_call(self, block: str) -> Optional[str]:
+        """Последний член блока — его экран открывает Enter на заголовке."""
+        found = self._block_of.get(block)
+        if found is None or not found.members:
+            return None
+        return found.members[-1].key
+
+    # --- отрисовка -------------------------------------------------------
+
+    def _resolve(self, key: str) -> Optional[_Block]:
+        """Блок ключа строки, блока или фразы (`<блок>:<место>`)."""
+        return self._block_of.get(key) or self._block_of.get(
+            key.rsplit(":", 1)[0]
+        )
+
+    def _new_block(self, kind: BlockKind) -> _Block:
+        block = _Block(f"block:{self._count}", kind)
+        self._count += 1
+        self._blocks.append(block)
+        self._block_of[block.key] = block
+        if self._window is not None:
+            self._events.append(block.key)
+        return block
+
+    # --- окно субагента ----------------------------------------------------
+
+    def _is_window(self, key: str) -> bool:
+        return self._window is not None and (
+            key.split(":", 1)[0] == AGENT_WINDOW
+        )
+
+    def _toggle_window(self) -> list[Decision]:
+        assert self._window is not None
+        if not self._agent_windowed():
+            return []
+        self._window.expanded = not self._window.expanded
+        return self._window_changes()
+
+    def _shown_events(self) -> list[str]:
+        assert self._window is not None
+        if self._window.expanded:
+            return self._events
+        n = len(self._events)
+        return self._events[n - shown_when_folded(n, WINDOW) :]
+
+    def _agent_windowed(self) -> bool:
+        """Окно субагента что-то скрывает в свёрнутом виде."""
+        n = len(self._events)
+        return shown_when_folded(n, WINDOW) < n
+
+    def _shown(self, key: str) -> bool:
+        return self._window is None or key in self._shown_events()
+
+    def _window_changes(self) -> list[Decision]:
+        """Окно сдвинулось или раскрыто: события, сменившие видимость, —
+        заново; маркер окна над событиями, `− свернуть` — под ними."""
+        if self._window is None:
+            return []
+        shown = set(self._shown_events())
+        out: list[Decision] = []
+        for key in self._events:
+            visible = key in shown
+            if self._event_shown.get(key, True) == visible:
+                continue
+            self._event_shown[key] = visible
+            block = self._block_of.get(key)
+            if block is not None:
+                out += self._render(block)
+            else:
+                out += self._diff([SetVisible(key, visible)])
+        hidden = len(self._events) - len(shown)
+        more = more_phrase(hidden) if hidden else None
+        expanded = self._window.expanded and self._agent_windowed()
+        collapse = GROUP_COLLAPSE_PHRASE if expanded else None
+        # Маркер — под строкой `Agent`; `− свернуть` — последней строкой
+        # блока `Agent`: в конце уровня, его держит там хвост уровня.
+        decisions = self._phrase(AGENT_WINDOW, "top", more, after=AGENT_WINDOW)
+        decisions += self._phrase(AGENT_WINDOW, "bottom", collapse)
+        return out + self._diff(decisions)
+
+    def _windowed(
+        self, block: _Block, wanted: list[Decision]
+    ) -> list[Decision]:
+        """Видимость в окне субагента: блок вне окна скрыт целиком —
+        заголовок, строки, файлы и фразы (конъюнкция с окном блока)."""
+        if self._window is None:
+            return wanted
+        shown = self._shown(block.key)
+        keys = [m.key for m in block.members]
+        if block.parts is not None:
+            keys += [f.key for f in block.parts.files]
+        out: list[Decision] = []
+        covered: set[str] = set()
+        for decision in wanted:
+            if isinstance(decision, SetVisible):
+                covered.add(decision.key)
+                if not shown:
+                    decision = SetVisible(decision.key, False)
+            elif isinstance(decision, SetPhrase) and not shown:
+                decision = SetPhrase(decision.block, decision.slot, None)
+            out.append(decision)
+        out += [SetVisible(k, shown) for k in keys if k not in covered]
+        out.append(SetVisible(block.key, shown))
+        return out
+
+    def _block_above(self, member: _Member) -> Optional[_Block]:
+        """Блок строки, стоящей прямо над ``member``; над ней закрывающее
+        событие или ничего — `None`."""
+        above = self._order[member.pos - 1] if member.pos else None
+        return self._block_of[above.key] if above is not None else None
+
+    def _settle(self, member: _Member) -> list[Decision]:
+        """Законченная правка встаёт в группу правок прямо над ней или
+        открывает свою; строка над ней ещё не встала — ждёт её. Встав,
+        тянет за собой ждавшие правки под ней. У прочих вызовов блок не
+        меняется."""
+        out: list[Decision] = []
+        current: Optional[_Member] = member
+        while current is not None and current.done:
+            block = self._block_of[current.key]
+            above = self._block_above(current)
+            if not block.pending or (above is not None and above.pending):
+                out += self._render(block)
+                break
+            out += self._place(current, block, above)
+            nxt = current.pos + 1
+            current = self._order[nxt] if nxt < len(self._order) else None
+        return out
+
+    def _place(
+        self, member: _Member, block: _Block, above: Optional[_Block]
+    ) -> list[Decision]:
+        """Правка ``member`` из своего ждущего блока — в группу ``above``
+        (фразы ждущего блока прячутся) или в свой блок."""
+        if above is None or not _accepts(above, member):
+            block.pending = False
+            block.verb = member.verb if member.outcome == "ok" else None
+            return self._render(block)
+        out = self._phrase(block.key, "top", None)
+        out += self._phrase(block.key, "bottom", None)
+        self._blocks.remove(block)
+        del self._block_of[block.key]
+        if block.key in self._events:
+            self._events.remove(block.key)
+            self._event_shown.pop(block.key, None)
+        above.members.append(member)
+        self._block_of[member.key] = above
+        return self._diff(out) + self._render(above) + self._window_changes()
+
+    def _render(self, block: _Block) -> list[Decision]:
+        if block.headed:
+            wanted = self._grouped(block)
+        elif block.kind == BlockKind.EDITS:
+            wanted = self._edits(block)
+        elif block.kind == BlockKind.RAN:
+            wanted = self._ran(block)
+        else:
+            wanted = self._single(block)
+        return self._diff(self._windowed(block, wanted))
+
+    def _files(self, block: _Block) -> list[_File]:
+        """Файлы блока правок (члены) или под командой `Ran`."""
+        if block.kind == BlockKind.EDITS:
+            edits = [(m.key, m.applied) for m in block.members]
+        elif block.kind == BlockKind.RAN and block.parts is not None:
+            edits = [(f.key, f) for f in block.parts.files]
+        else:
+            return []
+        return [
+            _File(
+                key,
+                _lines(edit),
+                edit is not None and edit.compact,
+            )
+            for key, edit in edits
+        ]
+
+    def _owners(self, block: _Block) -> list[str]:
+        """Владельцы фраз блока, которым есть что раскрыть: файлы и части
+        строки `Ran` (ключи их фраз)."""
+        owners = [f.key for f in self._files(block) if f.hidden(self._preview)]
+        parts = block.parts
+        if block.kind == BlockKind.RAN and parts is not None:
+            hidden = (parts.command_hidden, parts.output_hidden)
+            owners += [k for k, n in zip(_ran_keys(block), hidden) if n]
+        return owners
+
+    def _layout(self, block: _Block) -> _Layout:
+        """Окно из последних `WINDOW` файлов (раскрыто — все) и раскрытие
+        каждого файла (§6.3): превью — бюджет строк файла, раскрытый —
+        весь дифф с контекстом."""
+        files = self._files(block)
+        rows = {f.key: self._rows(f) for f in files}
+        hidden = {f.key: f.hidden(self._preview) for f in files}
+        unrecorded = block.parts.unrecorded if block.parts else 0
+        total = len(files) + unrecorded
+        folded = shown_when_folded(total, WINDOW) < total
+        tail = files[-WINDOW:] if folded else files
+        more = total - len(tail) if folded else 0
+        shown = files if block.expanded and more else tail
+        return _Layout(
+            window=tuple(f.key for f in shown),
+            rows=rows,
+            hidden=hidden,
+            more=0 if block.expanded else more,
+            windowed=bool(more),
+            bodied=frozenset(f.key for f in shown if f.body(rows[f.key])),
+        )
+
+    def _rows(self, file: _File) -> Optional[int]:
+        if file.key in self._open and file.hidden(self._preview):
+            return None
+        # Бюджет растёт на одну строку, если скрыта была бы только она.
+        budget = self._preview
+        return max(budget, shown_when_folded(file.lines, budget))
+
+    def _file_phrase(
+        self, key: str, edit: Optional[BlockEdit], layout: _Layout
+    ) -> tuple[list[Decision], str]:
+        """Фраза файла под его диффом (решение 2026-10-26): свёрнут —
+        `+ ещё N строк` его скрытых строк, раскрыт — `− свернуть`; файлу
+        без скрытого и вне окна фразы нет. Второе — последний виджет
+        файла."""
+        end = _after_file(key, edit)
+        n = layout.hidden.get(key, 0)
+        text = None
+        if n and key in layout.window:
+            folded = layout.rows[key] is not None
+            text = more_lines_phrase(n) if folded else COLLAPSE_PHRASE
+        out = self._phrase(key, _MORE, text, after=end)
+        return out, phrase_key(key, _MORE) if text else end
+
+    def _collapse(self, block: _Block, layout: _Layout) -> Optional[str]:
+        """`− свернуть` окна файлов внизу блока — фраза блока только у
+        окна; строки диффов она не считает."""
+        return (
+            GROUP_COLLAPSE_PHRASE
+            if block.expanded and layout.windowed
+            else None
+        )
+
+    def _diff(self, wanted: list[Decision]) -> list[Decision]:
+        out: list[Decision] = []
+        for decision in wanted:
+            ident = decision.ident
+            previous = self._issued.get(ident)
+            if previous == decision:
+                continue
+            self._issued[ident] = decision
+            if previous is None and _is_default(decision):
+                continue
+            out.append(decision)
+        return out
+
+    def _single(self, block: _Block) -> list[Decision]:
+        member = block.members[0]
+        out: list[Decision] = [SetMode(member.key, "single")]
+        role = _WORD_ROLES.get(block.kind)
+        if role is not None:
+            failed = member.done and member.outcome != "ok"
+            verb = _FAILED_WORDS.get(block.kind) if failed else None
+            word = header_word(block.kind, live=not member.done, verb=verb)
+            out.append(SetWord(member.key, word, role=role))
+        return out + self._outcome_of(member)
+
+    def _grouped(self, block: _Block) -> list[Decision]:
+        shown = block.shown()
+        window = block.window()
+        hidden = len(shown) - len(window)
+        out: list[Decision] = []
+        if shown:
+            first = block.members[0].key
+            out += [MountHeader(block.key, before=first), self._head(block)]
+        out += self._phrase(
+            block.key,
+            "top",
+            more_phrase(hidden) if hidden else None,
+            after=block.key,
+        )
+        # `└ ` — у маркера окна, иначе у первого видимого члена.
+        lead = window[0] if window and not hidden else None
+        for member in block.members:
+            out += self._member(member, lead=member is lead)
+            out.append(SetVisible(member.key, member in window))
+        collapse = GROUP_COLLAPSE_PHRASE if block.expanded else None
+        out += self._phrase(
+            block.key,
+            "bottom",
+            collapse if block.expandable() else None,
+            after=block.members[-1].key,
+        )
+        return out
+
+    def _edits(self, block: _Block) -> list[Decision]:
+        """Одиночная правка или блок `Added N` / `Edited N` (§6.2)."""
+        members = block.members
+        single = len(members) == 1
+        layout = self._layout(block)
+        out: list[Decision] = []
+        if not single:
+            n = len(members)
+            prefix: Parts = ((f" {n} {files_word(n)}", "ink"),)
+            added = [
+                m.applied
+                for m in members
+                if m.applied is not None and m.applied.has_record
+            ]
+            if added:
+                prefix += counts_text(
+                    sum(e.add for e in added), sum(e.rem for e in added)
+                )
+            first = members[0].key
+            out += [
+                MountHeader(block.key, before=first),
+                self._head(block, prefix),
+            ]
+        more = more_phrase(layout.more) if layout.more else None
+        out += self._phrase(block.key, "top", more, after=block.key)
+        last = block.key
+        for member in members:
+            out += self._edit_row(member, layout, single=single)
+            phrase, last = self._file_phrase(
+                member.key, member.applied, layout
+            )
+            out += phrase
+        collapse = self._collapse(block, layout)
+        return out + self._phrase(block.key, "bottom", collapse, after=last)
+
+    def _edit_row(
+        self, member: _Member, layout: _Layout, *, single: bool
+    ) -> list[Decision]:
+        if single:
+            out: list[Decision] = [
+                SetMode(member.key, "single"),
+                SetWord(member.key, _edit_word(member)),
+            ]
+        else:
+            # Член блока правок — путь без глагола: `└ путь (+a −r)`.
+            out = [_file_mode(member.key, layout), SetWord(member.key, "")]
+        visible = member.key in layout.window
+        out.append(SetVisible(member.key, visible))
+        column: DiffColumn = "single" if single else "member"
+        out += _file_parts(member.key, member.applied, layout, column)
+        return out + self._outcome_of(member)
+
+    def _ran(self, block: _Block) -> list[Decision]:
+        """Строка `Running` / `Ran` и её части (§4.0, §4.2, решение
+        2026-10-26): раскрывают там, где скрытое (`SetRanParts`), сворачивают
+        внизу — `− свернуть` под строкой, над файлами; окно правок команды,
+        у каждого файла — своя фраза под диффом."""
+        member = block.members[0]
+        word = header_word(BlockKind.RAN, live=not member.done)
+        out = [*self._single(block), SetWord(member.key, word, role="command")]
+        parts = block.parts
+        if parts is None:
+            return out
+        layout = self._layout(block)
+        key = member.key
+        files = parts.files
+        # Под строкой команды, над файлами: файлы монтируются под строку.
+        place = {"before": files[0].key} if files else {"after": key}
+        command, output = (k in self._open for k in _ran_keys(block))
+        collapse = None
+        if output and parts.output_hidden:
+            collapse = COLLAPSE_PHRASE
+        out += self._phrase(block.key, OUTPUT_SLOT, collapse, **place)
+        more = more_phrase(layout.more) if layout.more else None
+        out += self._phrase(block.key, "files", more, **place)
+        last = key
+        for edit in files:
+            out.append(_file_mode(edit.key, layout, lead=False))
+            out.append(SetVisible(edit.key, edit.key in layout.window))
+            out += _file_parts(edit.key, edit, layout, "member")
+            phrase, last = self._file_phrase(edit.key, edit, layout)
+            out += phrase
+        k = parts.unrecorded
+        unrecorded = None
+        # Окно не прячет — строка видна и свёрнутой (одну не прячем).
+        if k and not layout.more:
+            unrecorded = f"ещё {k} {files_word(k)} не записано"
+        out += self._phrase(block.key, "unrecorded", unrecorded, after=last)
+        if unrecorded is not None:
+            last = phrase_key(block.key, "unrecorded")
+        window = self._collapse(block, layout)
+        out += self._phrase(block.key, "bottom", window, after=last)
+        out.append(
+            _ran_parts(block.key, parts, command=command, output=output)
+        )
+        return out
+
+    def _head(self, block: _Block, prefix: Parts = ()) -> SetHeader:
+        members = block.members
+        running = any(m.live for m in members)
+        # `○` — остановка хода, когда живых членов не осталось (их
+        # переводит выход потока стопа, §2.2), или член без исхода; исход
+        # «остановлен» (лимит) у члена сам `○` не ставит.
+        stopped = (block.stopped and not running) or any(
+            m.interrupted for m in members
+        )
+        glyph = block_glyph(
+            running=running,
+            stopped=stopped,
+            any_ok=any(m.outcome == "ok" for m in members),
+        )
+        errors = sum(m.outcome == "error" for m in members)
+        refusals = sum(m.outcome == "refused" for m in members)
+        live = running and not stopped
+        if glyph == "run" and any(m.live and m.paused for m in members):
+            glyph = "wait"
+        return SetHeader(
+            block.key,
+            header_word(block.kind, live=live, verb=block.verb),
+            glyph,
+            prefix + _failure_parts(errors, refusals),
+        )
+
+    def _phrase(
+        self,
+        owner: str,
+        slot: str,
+        text: Optional[str],
+        *,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+    ) -> list[Decision]:
+        """Фраза ``slot`` владельца ``owner`` (блок, файл, окно `Agent`)
+        нужна — смонтировать (переставить) и задать текст; не нужна, но уже
+        выдана — скрыть."""
+        if text is not None:
+            return [
+                MountPhrase(owner, slot, after=after, before=before),
+                SetPhrase(owner, slot, text),
+            ]
+        if ("SetPhrase", owner, slot) in self._issued:
+            return [SetPhrase(owner, slot, None)]
+        return []
+
+    def _member(self, member: _Member, *, lead: bool) -> list[Decision]:
+        mode = SetMode(member.key, "member", lead=lead, current=member.live)
+        block = self._block_of[member.key]
+        if block.stopped and member.interrupted and not member.not_started:
+            reason = SetConsequence(member.key, CANCELLED_REASON, "dim")
+            return [mode, reason, *self._outcome_of(member)]
+        return [mode, *self._outcome_of(member)]
+
+    def _outcome_of(self, member: _Member) -> list[Decision]:
+        """Следствие `└` и застывший таймер законченного вызова."""
+        out: list[Decision] = []
+        if member.not_started:
+            out.append(SetConsequence(member.key, NOT_STARTED_REASON, "dim"))
+        elif member.outcome in _REASON_LOOK and member.reason:
+            look = _REASON_LOOK[member.outcome]
+            out.append(SetConsequence(member.key, member.reason, look))
+        timer = self._timer(member)
+        if timer is not None:
+            out.append(timer)
+        return out
+
+    def _timer(self, member: _Member) -> Optional[SetTimer]:
+        """Таймер — только у исполнявшегося вызова (спека §3.4)."""
+        if not member.done or member.not_started:
+            return None
+        if member.outcome == "refused":
+            return None
+        executed = member.executed
+        if executed is None:
+            executed = member.started or member.key in self._timers
+        if not executed:
+            return None
+        return SetTimer(member.key, self._timers.get(member.key))
+
+
+def _ran_keys(block: _Block) -> tuple[str, ...]:
+    """Ключи фраз частей строки `Ran` — команды и вывода; они же —
+    раскрытые в `_open`."""
+    if block.kind != BlockKind.RAN:
+        return ()
+    return tuple(phrase_key(block.key, slot) for slot in _RAN_SLOTS)
+
+
+def _ran_parts(
+    block: str, parts: _RanParts, *, command: bool, output: bool
+) -> SetRanParts:
+    """Части `Ran`, каждая со своим раскрытием: фраза команды — под её
+    продолжением (раскрыта — `− свернуть` там же), фраза вывода — над
+    хвостом, пока он свёрнут."""
+    command_text = output_text = None
+    if parts.command_hidden:
+        command_text = (
+            COLLAPSE_PHRASE
+            if command
+            else more_lines_phrase(parts.command_hidden)
+        )
+    if parts.output_hidden and not output:
+        output_text = more_lines_above(parts.output_hidden)
+    return SetRanParts(
+        block,
+        command=command_text,
+        output=output_text,
+        command_open=command and bool(parts.command_hidden),
+        output_open=output and bool(parts.output_hidden),
+    )
+
+
+def _edit_word(member: _Member) -> str:
+    if not member.done:
+        return header_word(BlockKind.EDITS, live=True)
+    if member.outcome != "ok":
+        return edit_verb(None, failed=True)
+    return member.verb
+
+
+def _file_mode(key: str, layout: _Layout, *, lead: bool = True) -> SetMode:
+    """Файл блока: `└ ` у первого видимого без маркера окна (у файлов
+    `Ran` его нет — `└` там у вывода); пустая строка — только после
+    видимого файла с телом (§6.2): файлы без тела идут подряд."""
+    window = layout.window
+    first = window[0] if window else None
+    at = window.index(key) if key in window else 0
+    return SetMode(
+        key,
+        "member",
+        lead=lead and key == first and not layout.more,
+        gap=at > 0 and window[at - 1] in layout.bodied,
+    )
+
+
+def _file_parts(
+    key: str,
+    edit: Optional[BlockEdit],
+    layout: _Layout,
+    column: DiffColumn,
+) -> list[Decision]:
+    """Хвост файла и превью диффа видимому файлу; скрытому дифф не
+    монтируется до первого раскрытия."""
+    out: list[Decision] = [SetEditTail(key, _edit_tail(edit))]
+    if edit is not None and edit.has_diff and key in layout.window:
+        out.append(SetDiffShare(key, layout.rows[key], column))
+    return out
+
+
+def _after_file(key: str, edit: Optional[BlockEdit]) -> str:
+    """Последний виджет файла: его дифф или сама строка."""
+    if edit is not None and edit.has_diff:
+        return diff_key(key)
+    return key
+
+
+def _is_default(decision: Decision) -> bool:
+    """Решение совпадает с видом только что смонтированной строки."""
+    if isinstance(decision, SetVisible):
+        return decision.visible
+    if isinstance(decision, SetEditTail):
+        return not decision.parts
+    if isinstance(decision, SetRanParts):
+        return decision == SetRanParts(decision.block)
+    return False

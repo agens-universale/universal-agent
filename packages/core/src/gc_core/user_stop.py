@@ -14,14 +14,13 @@ import time
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, AsyncIterator, Callable, Iterator, Optional
 
+from gc_core.execution.tool_call_context import current_tool_call
+
 #: Код возврата прерванной команды, если процесс не оставил свой.
 INTERRUPTED_CODE = -15
 
 _STOP: contextvars.ContextVar[Optional[UserStop]] = contextvars.ContextVar(
     "gc_user_stop", default=None
-)
-_CALL: contextvars.ContextVar[tuple[str, str]] = contextvars.ContextVar(
-    "gc_user_stop_call", default=("", "")
 )
 
 #: Потолок ответа «работа снята»: допустимые 20 с удалённого шелла.
@@ -189,7 +188,7 @@ class UserStop:
         Так Harbor дожидается уже идущего ``env.exec`` и не отдаёт отмену тулу.
         """
         if not tool and not call_id:
-            tool, call_id = _CALL.get()
+            tool, call_id = current_tool_call()
         arm = _Arm(
             kind=kind,
             tool=tool or "",
@@ -352,19 +351,6 @@ def bind_user_stop(stop: UserStop) -> Iterator[None]:
         _STOP.reset(token)
 
 
-@contextmanager
-def bind_tool_call(tool: str, call_id: str) -> Iterator[None]:
-    token = _CALL.set((str(tool or ""), str(call_id or "")))
-    try:
-        yield
-    finally:
-        _CALL.reset(token)
-
-
-def current_tool_call() -> tuple[str, str]:
-    return _CALL.get()
-
-
 async def await_agent_stop(agent: Any) -> None:
     """Стоп агента и ожидание, пока текущая работа снята.
 
@@ -418,9 +404,7 @@ __all__ = [
     "UserStopInterrupt",
     "await_agent_stop",
     "await_cancelled",
-    "bind_tool_call",
     "bind_user_stop",
-    "current_tool_call",
     "current_user_stop",
     "interrupted_code",
 ]

@@ -2589,3 +2589,69 @@ def test_shell_channel_does_not_start_where_recording_is_off(repo):
     update_ctx(ctx, run_mode="cli")
 
     assert ShellDelta.begin(ctx) is None
+
+
+def test_binary_written_by_command_records_its_size(repo):
+    launch_root, threads_dir = repo
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root, "open('blob.bin','wb').write(b'\\x00\\x01\\x02binary')"
+    )
+    delta.after_and_record()
+
+    assert [(r.path, r.size_bytes) for r in _records(threads_dir)] == [
+        ("blob.bin", 9)
+    ]
+
+
+def test_file_over_source_cap_records_its_size(repo):
+    launch_root, threads_dir = repo
+    ctx = _ctx(launch_root, threads_dir)
+    update_ctx(ctx, **{"agent_edits.max_diff_source_bytes": 10})
+    delta = ShellDelta.begin(ctx)
+    _run_command(launch_root, "open('big.txt','wb').write(b'x' * 100)")
+    delta.after_and_record()
+
+    assert [r.size_bytes for r in _records(threads_dir)] == [100]
+
+
+def test_binary_deleted_by_command_has_no_size(repo):
+    launch_root, threads_dir = repo
+    (launch_root / "blob.bin").write_bytes(b"\x00\x01binary")
+    _git(launch_root, "add", "blob.bin")
+    _git(launch_root, "commit", "-m", "blob")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(launch_root, "import os; os.remove('blob.bin')")
+    delta.after_and_record()
+
+    assert [(r.op, r.size_bytes) for r in _records(threads_dir)] == [
+        ("delete", None)
+    ]
+
+
+def test_text_change_by_command_has_no_size(repo):
+    launch_root, threads_dir = repo
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
+    delta.after_and_record()
+
+    assert [r.size_bytes for r in _records(threads_dir)] == [None]
+
+
+def test_pocket_binary_change_records_its_size(repo):
+    """Карманный подканал: известный журналу бинарь, переписанный командой."""
+    launch_root, threads_dir = repo
+    _seed_known_file(
+        threads_dir, launch_root, "known.bin", b"\x00old", ts=time.time()
+    )
+    _age_file(launch_root / "known.bin")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root, "open('known.bin','wb').write(b'\\x00\\x01new-bytes')"
+    )
+    delta.after_and_record()
+
+    shell = [r for r in _records(threads_dir) if r.call_id is None]
+    assert [(r.path, r.size_bytes) for r in shell] == [("known.bin", 11)]

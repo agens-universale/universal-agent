@@ -121,9 +121,11 @@ def _result(data: dict) -> str:
         ({"count": 1}, "1 запись"),
         ({"count": 21}, "21 запись"),
         ({"count": 11}, "11 записей"),
-        ({"bytes": 2}, "2 байта"),
-        ({"bytes": 5}, "5 байт"),
-        ({"exit": 2}, "код выхода 2"),
+        # Размер — единицами (спека P4 §9.13): `N Б` / `N КБ` / `N,M МБ`.
+        ({"bytes": 5}, "5 Б"),
+        ({"bytes": 12288}, "12 КБ"),
+        # Код выхода — строкой `└` блока `Ran` (P4 §4.1), не хвостом.
+        ({"exit": 2}, ""),
         ({"source": "cache"}, "источник cache"),
     ],
 )
@@ -229,8 +231,23 @@ def test_mapper_real_error_not_halted():
     assert ev.kind == "error" and ev.result_outcome == "error"
 
 
+def _blocks_on(target):
+    """Блоки превью на ``target``: строки вызовов идут через модель."""
+    from gc_tui.services.tool_blocks import ToolBlocks
+    from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
+
+    blocks = PreviewBlocks()
+    blocks.views[""] = ToolBlocksView(
+        target, ToolBlocks(blocks.timers), level="", depth=0
+    )
+    return blocks
+
+
 def test_preview_halted_result_is_stop_row():
+    """Чтение — член блока `Explored` (P4): глифа у члена нет, `└
+    отменено` цветом стопа."""
     target, calls = _Target(), {}
+    blocks = _blocks_on(target)
     _dispatch_readonly(
         target,
         _ev(
@@ -241,11 +258,12 @@ def test_preview_halted_result_is_stop_row():
             args_summary="x",
         ),
         calls,
+        blocks=blocks,
     )
     ev = _output_event({"ok": False, "status": "cancelled_by_user"})
-    _dispatch_readonly(target, ev, calls)
-    (row,) = target.children
-    assert "○" in row._render_prefix().plain
+    _dispatch_readonly(target, ev, calls, blocks=blocks)
+    (header, row) = target.children
+    assert (header.mode, row.mode) == ("header", "member")
     assert _styles_of(_lines(row), "отменено") == [DIM]
 
 
@@ -260,9 +278,10 @@ def test_preview_nested_halted_is_stop_row():
         _sidecar(2, "error", {"call_id": "n1", "output": out}),
     ]
     merge_nested_readonly(target, records, calls)
-    nested = target.children[1]
-    assert "○" in nested._render_prefix().plain
-    assert _consequence(nested) == "    └ лимит шагов"
+    header, nested = target.children[1:]
+    assert (header.mode, nested.mode) == ("header", "member")
+    assert _consequence(nested).endswith("└ лимит шагов")
+    assert _styles_of(_lines(nested), "лимит шагов") == [DIM]
 
 
 def test_add_consequence_appends_line_under_row():
@@ -313,8 +332,10 @@ class _Target:
     def __init__(self):
         self.children: list = []
 
-    def mount(self, widget, after=None):
-        if after is None:
+    def mount(self, widget, after=None, before=None):
+        if before is not None:
+            self.children.insert(self.children.index(before), widget)
+        elif after is None:
             self.children.append(widget)
         else:
             self.children.insert(self.children.index(after) + 1, widget)
@@ -336,6 +357,7 @@ def _ev(kind: str, **kw) -> TraceEvent:
 
 def test_preview_error_is_line_under_call_not_tail():
     target, calls = _Target(), {}
+    blocks = _blocks_on(target)
     _dispatch_readonly(
         target,
         _ev(
@@ -346,13 +368,17 @@ def test_preview_error_is_line_under_call_not_tail():
             args_summary="x",
         ),
         calls,
+        blocks=blocks,
     )
     _dispatch_readonly(
         target,
         _ev("error", call_id="c1", summary="search не найден в файле"),
         calls,
+        blocks=blocks,
     )
-    (row,) = target.children
+    # Член блока `Explored` (P4 §3.3): причина — строкой следствия члена.
+    (_header, row) = target.children
+    assert row.mode == "member"
     assert row._render_content().plain == "Read  x"
     assert _consequence(row) == "  └ search не найден в файле"
 
@@ -370,8 +396,14 @@ def test_preview_next_nested_call_goes_after_error_line():
         _sidecar(3, "call", {"call_id": "n2", "name": "fs_read_file"}),
     ]
     merge_nested_readonly(target, records, calls)
-    first, second = target.children[1], target.children[2]
-    assert first.call_id == "n1" and second.call_id == "n2"
+    # Следующий вызов — свой блок `Explored`: заголовок встаёт за строкой
+    # упавшей правки, не между ней и её `└` (P4 §7).
+    first, header, second = target.children[1:]
+    assert (first.call_id, header.mode, second.call_id) == (
+        "n1",
+        "header",
+        "n2",
+    )
     assert _consequence(first) == "    └ boom"
 
 
@@ -423,7 +455,7 @@ async def test_live_next_nested_call_goes_after_error_line():
         )
         await pilot.pause()
         rows = [w for w in trace.children if isinstance(w, ToolCallRow)]
-        assert [r.call_id for r in rows] == ["p1", "n1", "n2"]
+        assert [r.call_id for r in rows] == ["p1", "n1", "p1/block:1", "n2"]
         assert _consequence(rows[1]) == "    └ e"
 
 
@@ -489,3 +521,28 @@ async def test_live_unanswered_question_one_frame_with_line(tmp_path):
         assert question.content_region.contains_region(line.region)
         texts = [str(w._content) for w in scr.query(TraceRow)]
         assert not any("спрашивал" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_slot_redraws_on_style_only_change():
+    """Тот же текст другим цветом — другое тело: слот перерисовывает
+    строку (причина члена блока от модели меняет только цвет)."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.consequence_line import (
+        ConsequenceLine,
+        ConsequenceSlot,
+    )
+    from textual.containers import VerticalScroll
+
+    app = TuiApp()
+    async with app.run_test(size=(60, 10)) as pilot:
+        trace = pilot.app.screen.query_one("#trace", VerticalScroll)
+        slot = ConsequenceSlot(0)
+        trace.mount(slot)
+        slot.set_bodies([Text("отказ", style=DIM)])
+        await pilot.pause()
+        slot.set_bodies([Text("отказ", style=ERR)])
+        await pilot.pause()
+        (line,) = slot.query(ConsequenceLine)
+        assert str(line.body.style) == ERR

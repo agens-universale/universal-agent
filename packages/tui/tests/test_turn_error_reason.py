@@ -1,88 +1,27 @@
 """Причина ошибки хода под `✕ Ошибка` (решение владельца 7, смоук P3a).
 
-Ход упал — под строкой индикатора строка `└ <класс>: <текст>` (`DIM`).
-Причина хранится в meta треда (`tui.last_error`): видна вживую и после
-повторного открытия треда; новый ход её очищает."""
+Ход упал — под свежей строкой итога в ленте строка `└ <класс>: <текст>`
+(`DIM`, S10 §4.6).
+Причина хранится в записи итога хода (`outcome.error.message`, пишет
+ядро): видна вживую и после повторного открытия треда; в мету TUI её не
+копирует; новый ход её снимает."""
 
 from __future__ import annotations
 
 import json
 
 import pytest
+from gc_core.persistence.turn_outcome import TurnOutcome
+from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.thread_writes import turn_outcome_record
 from gc_testkit.tui_support import tui_settings
 from gc_tui.services.stores.record_view import tui_section
-from gc_tui.palette import DIM
 
 _TID = "lerr0000000000000000000000000001a"
 
 
-class _ReadError(Exception):
-    pass
-
-
-def test_reason_is_class_and_first_line():
-    from gc_tui.services.turn_error import describe_turn_error
-
-    exc = _ReadError("connection reset by peer\ntraceback tail")
-    assert describe_turn_error(exc) == "_ReadError: connection reset by peer"
-
-
-def test_reason_without_message_is_class():
-    from gc_tui.services.turn_error import describe_turn_error
-
-    assert describe_turn_error(_ReadError()) == "_ReadError"
-
-
-def test_long_reason_is_cut():
-    from gc_tui.services.turn_error import (
-        TURN_ERROR_LIMIT,
-        describe_turn_error,
-    )
-
-    reason = describe_turn_error(_ReadError("слово " * 200))
-    assert len(reason) <= TURN_ERROR_LIMIT
-    assert reason.endswith("…")
-
-
-def test_reason_masks_secrets():
-    """Ключ в первой строке (адрес с ключом, заголовок) маскируется общим
-    редактором секретов ядра — и в meta, и на экране."""
-    from gc_core.security.log_redaction import MASK
-    from gc_tui.services.turn_error import describe_turn_error
-
-    key = "sk-" + "a1B2c3D4e5F6g7H8i9J0"
-    exc = _ReadError(f"401 for https://api.example/v1?key={key}")
-    reason = describe_turn_error(exc)
-    assert key not in reason
-    assert reason == f"_ReadError: 401 for https://api.example/v1?key={MASK}"
-
-
-def _styles_of(text, fragment: str) -> list[str]:
-    return [
-        str(s.style)
-        for s in text.spans
-        if fragment in text.plain[s.start : s.end]
-    ]
-
-
-def test_failed_indicator_shows_reason_line():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="failed", error="ReadError: boom")
-    text = ind._render_text()
-    assert text.plain == "✕ Ошибка\n  └ ReadError: boom"
-    assert _styles_of(text, "ReadError: boom") == [DIM]
-
-
-def test_failed_indicator_without_reason_is_one_line():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    assert ThinkingIndicator(state="failed")._render_text().plain == (
-        "✕ Ошибка"
-    )
-
-
-def _write_task(tmp_path, tui: dict | None = None):
+def _write_task(tmp_path, tui: dict | None = None, reason: str = ""):
+    """Тред; `reason` — последний ход упал с этой причиной (запись итога)."""
     meta = {"thread_id": _TID, "system_id": "cli"}
     if tui is not None:
         meta["tui"] = tui
@@ -90,6 +29,25 @@ def _write_task(tmp_path, tui: dict | None = None):
         json.dumps(meta), encoding="utf-8"
     )
     (tmp_path / f"data_cli_{_TID}.jsonl").write_text("", encoding="utf-8")
+    if not reason:
+        return
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        _TID,
+        [{"id": "u1", "role": "user", "content": "q"}],
+        set(),
+    )
+    outcome = TurnOutcome(
+        status="error",
+        reason=None,
+        opened_by="u1",
+        started_at="2026-10-22T11:32:00Z",
+        ended_at="",
+        duration_sec=1.0,
+        error={"type": reason.split(":")[0], "message": reason},
+    )
+    turn_outcome_record(str(tmp_path), "cli", _TID, outcome)
 
 
 def _app(tmp_path):
@@ -110,13 +68,20 @@ class _Runner:
         pass
 
 
-def _indicator_text(scr) -> str:
-    assert scr._thinking is not None
-    return scr._thinking._render_text().plain
+def _fresh_line(scr):
+    from gc_tui.widgets.turn_line import TurnLine
+
+    assert scr._thinking is None
+    (line,) = scr.query(TurnLine).filter(".-latest")
+    return line
+
+
+def _line_text(scr) -> str:
+    return _fresh_line(scr).render().plain
 
 
 @pytest.mark.asyncio
-async def test_live_failure_shows_and_stores_reason(tmp_path):
+async def test_live_failure_shows_reason_without_meta_copy(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.widgets.trace_row import TraceRow
 
@@ -129,10 +94,10 @@ async def test_live_failure_shows_and_stores_reason(tmp_path):
         pilot.app.last_runner_error = "ReadError: boom"
         scr._poll_active()
         await pilot.pause()
-        assert _indicator_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
+        assert _line_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
         tui = tui_section(scr._store.get_record(_TID))
-        assert tui["last_error"] == "ReadError: boom"
-        # Причина — под индикатором, не отдельной строкой `!` в ленте.
+        assert "last_error" not in tui
+        # Причина — под строкой итога, не отдельной строкой `!` в ленте.
         rows = [r for r in scr.query(TraceRow) if r.has_class("line-error")]
         assert rows == []
 
@@ -140,56 +105,42 @@ async def test_live_failure_shows_and_stores_reason(tmp_path):
 @pytest.mark.asyncio
 async def test_reopen_restores_reason(tmp_path):
     pytest.importorskip("textual")
-    _write_task(
-        tmp_path,
-        {
-            "status": "failed",
-            "last_indicator": {"kind": "failed", "elapsed": None},
-            "last_error": "ReadError: boom",
-        },
-    )
+    _write_task(tmp_path, {"status": "failed"}, reason="ReadError: boom")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        assert _indicator_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
+        assert _line_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
 
 
 @pytest.mark.asyncio
 async def test_new_turn_clears_reason(tmp_path):
     pytest.importorskip("textual")
-    _write_task(
-        tmp_path,
-        {
-            "status": "failed",
-            "last_indicator": {"kind": "failed", "elapsed": None},
-            "last_error": "ReadError: boom",
-        },
-    )
+    _write_task(tmp_path, {"status": "failed"}, reason="ReadError: boom")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID)
+        assert scr._latest_turn_outcome() is not None
         scr._prepare_for_new_run()
-        tui = tui_section(scr._store.get_record(_TID))
-        assert tui["last_error"] is None
+        # Запись упавшего хода — уже не строка последнего хода.
+        assert scr._latest_turn_outcome() is None
 
 
 @pytest.mark.asyncio
-async def test_new_turn_after_failure_shrinks_indicator_bar(tmp_path):
-    """Причина ушла с новым ходом — бар снова на строку ниже."""
+async def test_new_turn_after_failure_settles_reason_line(tmp_path):
+    """Причина ушла с новым ходом — строка ошибки осела в одну строку."""
     pytest.importorskip("textual")
-    from textual.containers import Vertical
-
-    _write_task(tmp_path)
+    _write_task(tmp_path, {"status": "failed"}, reason="ReadError: boom")
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
-        scr.attach_active_task(_TID)
-        scr._show_thinking_indicator(state="failed")
-        scr._set_indicator_error("ReadError: boom")
-        bar = scr.query_one("#indicator-bar", Vertical)
-        assert bar.styles.height.value == 4
-        scr._show_thinking_indicator(state="thinking")
-        assert bar.styles.height.value == 3
+        scr.attach_active_task(_TID, is_resume=True)
+        await pilot.pause()
+        line = _fresh_line(scr)
+        assert line.region.height == 2
+        scr._prepare_for_new_run()
+        await pilot.pause()
+        assert not line.is_fresh
+        assert line.region.height == 1
 
 
 _LONG = "MainModelUnavailable: " + "модель недоступна " * 8  # ~150 симв.
@@ -199,81 +150,41 @@ def _rows(text: str) -> list[str]:
     return text.split("\n")[1:]
 
 
-def test_long_reason_wraps_under_text_column():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="failed", error=_LONG)
-    rows = _rows(ind._render_text().plain)
-    assert 2 <= len(rows) <= 3
-    assert rows[0].startswith("  └ ")
-    assert all(r.startswith("    ") and r[4] != " " for r in rows[1:])
-    assert not rows[-1].endswith("…")
-    assert ind.error_rows == len(rows)
-
-
-def test_reason_beyond_three_rows_is_cut():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="failed", error="слово " * 80)
-    rows = _rows(ind._render_text().plain)
-    assert len(rows) == 3
-    assert rows[-1].endswith("…")
-
-
-def test_short_reason_is_one_row():
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    ind = ThinkingIndicator(state="failed", error="ReadError: boom")
-    assert ind.error_rows == 1
-
-
-async def _bar_height(scr):
+async def _bar_display(scr):
     from textual.containers import Vertical
 
-    return scr.query_one("#indicator-bar", Vertical).styles.height.value
+    return scr.query_one("#indicator-bar", Vertical).display
 
 
 @pytest.mark.asyncio
-async def test_long_reason_grows_bar_live_and_after_reopen(tmp_path):
+async def test_long_reason_wraps_in_line_after_reopen(tmp_path):
+    """Длинная причина — до трёх строк `└` у свежей строки; растёт лента,
+    бара в покое нет."""
     pytest.importorskip("textual")
-    _write_task(
-        tmp_path,
-        {
-            "status": "failed",
-            "last_indicator": {"kind": "failed", "elapsed": None},
-            "last_error": _LONG,
-        },
-    )
+    _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
     async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        rows = scr._thinking.error_rows
-        assert rows >= 2
-        assert await _bar_height(scr) == 3 + rows
-        scr._show_thinking_indicator(state="thinking")
-        assert await _bar_height(scr) == 3
+        line = _fresh_line(scr)
+        rows = len(_rows(_line_text(scr)))
+        assert 2 <= rows <= 3
+        assert line.region.height == 1 + rows
+        assert await _bar_display(scr) is False
 
 
 @pytest.mark.asyncio
 async def test_resize_follows_reason_rows(tmp_path):
     pytest.importorskip("textual")
-    _write_task(
-        tmp_path,
-        {
-            "status": "failed",
-            "last_indicator": {"kind": "failed", "elapsed": None},
-            "last_error": _LONG,
-        },
-    )
+    _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
     async with _app(tmp_path).run_test(size=(200, 30)) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        assert scr._thinking.error_rows == 1
-        assert await _bar_height(scr) == 4
+        line = _fresh_line(scr)
+        assert line.region.height == 2
         await pilot.resize_terminal(70, 30)
         await pilot.pause()
-        rows = scr._thinking.error_rows
+        rows = len(_rows(_line_text(scr)))
         assert rows >= 2
-        assert await _bar_height(scr) == 3 + rows
+        assert line.region.height == 1 + rows

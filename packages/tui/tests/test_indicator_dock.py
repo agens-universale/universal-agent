@@ -1,11 +1,13 @@
 """Индикатор живёт в фиксированной #indicator-bar (вне скролла #trace) —
 растущий стрим не может на него наложиться."""
 
-from gc_testkit.tui_support import tui_settings
 import json
+import threading
 from pathlib import Path
 
 import pytest
+from gc_testkit.tui_support import tui_settings
+from gc_tui.services.stores.record_view import tui_section
 
 
 def _write_task(tmp_path, tid):
@@ -39,6 +41,8 @@ async def test_indicator_docked_not_in_trace(tmp_path):
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
+        # Индикатор — только у идущей работы: тик покоя его снял бы.
+        pilot.app.active_runner = _Run(tid)
         scr.attach_active_task(tid)
         scr._show_thinking_indicator(state="thinking")
         await pilot.pause()
@@ -69,6 +73,8 @@ async def test_trace_row_lands_in_trace_with_indicator_docked(tmp_path):
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
+        # Индикатор — только у идущей работы: тик покоя его снял бы.
+        pilot.app.active_runner = _Run(tid)
         scr.attach_active_task(tid)
         scr._show_thinking_indicator(state="thinking")
         scr._render_record(
@@ -89,3 +95,691 @@ async def test_trace_row_lands_in_trace_with_indicator_docked(tmp_path):
         assert not any(
             isinstance(w, ThinkingIndicator) for w in trace.children
         )  # индикатор — нет
+
+
+# --- S10: бар стоит только во время работы открытого треда ------------------
+
+
+def _app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+
+
+class _Run:
+    """Прогон треда `tid`; `seq=None` — раннер без `run_seq` (заглушка)."""
+
+    _thread_kind = "run"
+
+    def __init__(self, tid, *, running=True, seq=1):
+        self._last_target = (tid, "cli")
+        self.running = running
+        if seq is not None:
+            self.run_seq = seq
+
+    def is_running(self):
+        return self.running
+
+    def stop(self):
+        self.running = False
+
+    def turn_effective_start(self):
+        return None
+
+
+def _bar(pilot):
+    from textual.containers import Vertical
+
+    return pilot.app.query_one("#indicator-bar", Vertical)
+
+
+@pytest.mark.asyncio
+async def test_bar_absent_when_idle(tmp_path):
+    _write_task(tmp_path, "idle1")
+    async with _app(tmp_path).run_test() as pilot:
+        bar = _bar(pilot)
+        assert bar.display is False
+        scr = pilot.app.screen
+        scr.attach_active_task("idle1")
+        scr._poll_active()
+        await pilot.pause()
+        assert bar.display is False
+        assert bar.region.height == 0
+
+
+@pytest.mark.asyncio
+async def test_bar_rule_on_attach(tmp_path):
+    for tid in ("ra1", "ra2"):
+        _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        bar = _bar(pilot)
+
+        pilot.app.active_runner = _Run("ra1")  # живой прогон треда
+        scr.attach_active_task("ra1", is_resume=True)
+        await pilot.pause()
+        assert bar.display is True
+        assert bar.region.height == 2
+
+        pilot.app.active_runner = None  # стоп: поток дорабатывает
+        scr._stopping_runner = _Run("ra1")
+        scr.attach_active_task("ra1", is_resume=True)
+        assert bar.display is True
+
+        # Стоп и переключение: у открытого треда прогона нет.
+        scr.attach_active_task("ra2", is_resume=True)
+        await pilot.pause()
+        assert bar.display is False
+
+        scr._run_pending = True  # ход запущен отсюда, тик его не видел
+        scr.attach_active_task("ra2", is_resume=True)
+        assert bar.display is True
+        scr._run_pending = False
+
+
+@pytest.mark.asyncio
+async def test_bar_on_auto_created_thread(tmp_path):
+    """Автосоздание треда под отправку: тред открыт до старта хода, бар
+    стоит с репликой и при живом прогоне нового треда."""
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        tid = scr._begin_auto_created_task()
+        assert scr._active_task_id == tid
+        pilot.app.active_runner = _Run(tid)
+        scr._prepare_for_new_run()
+        await pilot.pause()
+        assert _bar(pilot).display is True
+        pilot.app.active_runner = None
+
+
+@pytest.mark.asyncio
+async def test_bar_rule_tolerates_runner_without_run_seq(tmp_path):
+    _write_task(tmp_path, "seq1")
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task("seq1")
+        pilot.app.active_runner = _Run("seq1", seq=None)
+        assert scr._bar_wanted() is True
+        scr._settled_run = (pilot.app.active_runner, None)
+        assert scr._bar_wanted() is False
+        pilot.app.active_runner = None
+
+
+@pytest.mark.asyncio
+async def test_trace_height_follows_bar(tmp_path):
+    """Бар встаёт — лента ниже на его две строки, уходит — возвращает их;
+    поле ввода прижато к низу и не двигается."""
+    _write_task(tmp_path, "ceil1")
+    async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task("ceil1")
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        idle, input_y = trace.region.height, _input_y(scr)
+        # Работа — живым прогоном треда: голый `_run_pending` без раннера
+        # тик опроса (250 мс) честно закрыл бы как кончившийся ход.
+        run = _Run("ceil1")
+        pilot.app.active_runner = run
+        scr._sync_indicator_bar()
+        await pilot.pause()
+        assert trace.region.height == idle - 2
+        assert _input_y(scr) == input_y
+        run.running = False
+        scr._sync_indicator_bar()
+        await pilot.pause()
+        assert trace.region.height == idle
+        assert _input_y(scr) == input_y
+        pilot.app.active_runner = None
+
+
+def _input_y(scr) -> int:
+    return scr.query_one("#input-row").region.y
+
+
+# --- S10 §3.4: сквозной ход — бар 2 строки до спадающего фронта -------------
+
+SCRIPT_TID = "scripted0000000000000000000001a"
+
+
+def _summary(text):
+    return (
+        '<technical type="dialog_summary">'
+        f"<summary>{text}</summary></technical>"
+    )
+
+
+class _ScriptedExecutor:
+    """Ход по шагам. Шаг `i` ждёт `release[i]`; `at` — номер шага, на
+    котором ход стоит. Шаги: думаю, стрим, «сверяюсь», «завершаю», вопрос
+    агента, подтверждение, запись хода 1 и впуск реплики из очереди,
+    запись хода 2 и автосжатие в конце хода (флаг, затем шаг сжатия)."""
+
+    STEPS = 9
+
+    def __init__(self, threads_dir):
+        self.dir = str(threads_dir)
+        self.release = [threading.Event() for _ in range(self.STEPS)]
+        self.at = -1
+        self.queued: list[dict] = []
+        self.seq = 0
+
+    def _wait(self, step):
+        self.at = step
+        self.release[step].wait(10)
+
+    def _messages(self, tid, *payloads):
+        from gc_testkit.develop_files import append_new_thread_messages
+
+        append_new_thread_messages(
+            self.dir, "cli", tid, list(payloads), set(), start_seq=self.seq
+        )
+        self.seq += len(payloads)
+
+    def _record(self, tid, opened_by, minute):
+        from gc_core.persistence.turn_outcome import TurnOutcome
+        from gc_testkit.thread_writes import turn_outcome_record
+
+        outcome = TurnOutcome(
+            status="done",
+            reason=None,
+            opened_by=opened_by,
+            started_at="2026-10-22T11:30:00Z",
+            ended_at=f"2026-10-22T11:3{minute}:12Z",
+            duration_sec=12.0,
+            error=None,
+        )
+        turn_outcome_record(self.dir, "cli", tid, outcome)
+
+    def _flag(self, tid, flag, active):
+        from gc_testkit.thread_writes import runtime_flag
+
+        runtime_flag(self.dir, "cli", tid, flag, active=active)
+
+    def _answer(self, text):
+        return {
+            "id": f"a{self.seq}",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": text}],
+        }
+
+    async def arun(self, messages, *, thread_id, message_ids=None, **_kw):
+        tid = thread_id
+        mid = (message_ids or [None])[0]
+        self._messages(tid, {"id": mid, "role": "user", "content": "первый"})
+        self._wait(0)  # думаю
+        self._messages(tid, self._answer("стрим ответа"))
+        self._wait(1)
+        self._flag(tid, "finish_gate_checking", True)
+        self._wait(2)  # сверяюсь
+        self._flag(tid, "finish_gate_checking", False)
+        self._flag(tid, "finalizing", True)
+        self._wait(3)  # завершаю
+        self._flag(tid, "finalizing", False)
+        self._wait(4)  # вопрос агента — баннер ставит тест
+        self._wait(5)  # подтверждение — баннер ставит тест
+        self._record(tid, mid, 1)
+        nxt = self.queued.pop(0)
+        self._messages(
+            tid,
+            {"id": nxt["id"], "role": "user", "content": nxt["content"]},
+            self._answer("ответ второму"),
+        )
+        self._wait(6)  # ход из очереди впущен внутри прогона
+        self._record(tid, nxt["id"], 2)
+        self._flag(tid, "summarizing", True)
+        self._wait(7)  # сжимаю контекст
+        self._compact(tid)
+        self._wait(8)  # маркер сжатия в ленте
+        self._flag(tid, "summarizing", False)
+
+    def _compact(self, tid):
+        from gc_testkit.tui_support import compact_thread
+
+        compact_thread(
+            self.dir,
+            "cli",
+            tid,
+            [{"id": "s1", "role": "user", "content": _summary("c")}],
+        )
+
+    def stop_run(self):
+        for event in self.release:
+            event.set()
+
+    def turn_effective_start(self):
+        return None
+
+    def add_message(self, message):
+        self.queued.append(message)
+
+    def withdraw_message(self, msg_id):
+        return False
+
+    def take_undelivered_messages(self):
+        return []
+
+
+def _frame(scr):
+    """Кадр прошлого тика (его раскладка уже применена): бар, его высота,
+    верх поля ввода, видна ли свежая строка итога, видна ли осевшая, стоит
+    ли sticky-баннер."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    bar = scr.query_one("#indicator-bar")
+    lines = list(scr.query_one("#trace").query(TurnLine))
+    banner = scr._sticky_banner_widget()
+    return (
+        bar.display,
+        bar.region.height,
+        scr.query_one("#input-row").region.y,
+        any(w.display and w.is_fresh for w in lines),
+        any(w.display and not w.is_fresh for w in lines),
+        banner is not None and banner.region.height > 0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_bar_through_scripted_turn(tmp_path):
+    from gc_testkit.tui_support import wait_until
+
+    _write_task(tmp_path, SCRIPT_TID)
+    ex = _ScriptedExecutor(tmp_path)
+    app = _app(tmp_path)
+    app._executor_factory = lambda: ex
+    frames: list[tuple] = []
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(SCRIPT_TID, is_resume=True)
+        tick = scr._poll_tick
+
+        def recorded_tick():
+            frames.append(_frame(scr))
+            tick()
+
+        scr._poll_tick = recorded_tick
+        try:
+            inp = pilot.app.query_one("#cmdinput")
+            inp.text = "первый"
+            await pilot.press("enter")
+            for step in range(ex.STEPS):
+                await wait_until(pilot, lambda: ex.at == step, f"шаг {step}")
+                if step == 3:
+                    inp.text = "второй"  # в очередь, пока ход идёт
+                    await pilot.press("enter")
+                    await wait_until(pilot, lambda: ex.queued, "очередь")
+                if step == 4:
+                    scr._show_child_ask_human(parent_call_id="p", prose="?")
+                if step == 5:
+                    scr.show_confirm_banner("Действие", "Разрешить?")
+                if step == 8:
+                    await wait_until(
+                        pilot, lambda: scr._summary_marker_widgets, "маркер"
+                    )
+                await pilot.pause(0.6)  # пара тиков на шаге
+                if step == 4:
+                    scr._unmount_ask_human_banner()
+                if step == 5:
+                    scr._hide_confirm_banner()
+                if step == 6:
+                    # Впуск из очереди: строка хода 1 осела и видна.
+                    assert frames[-1][4] is True
+                ex.release[step].set()
+            await wait_until(
+                pilot,
+                lambda: not pilot.app.active_runner.is_running(),
+                "прогон вышел",
+            )
+            await wait_until(pilot, lambda: not frames[-1][0], "бар снят")
+            await pilot.pause(0.6)
+        finally:
+            ex.stop_run()
+        # Пока стоит баннер, бар снят (§4.12): спадающий фронт — первый
+        # кадр без бара и без баннера.
+        edge = next(i for i, f in enumerate(frames) if not f[0] and not f[5])
+        assert edge > 0
+        assert any(f[5] for f in frames[:edge])
+        for bar_up, height, _y, fresh, _settled, banner in frames[:edge]:
+            assert bar_up is not banner
+            assert height == (0 if banner else 2)
+            assert fresh is False
+        assert frames[edge][2] == frames[edge - 1][2]
+        assert frames[edge][3] is True
+        assert all(not f[0] for f in frames[edge:])
+
+
+class _QuickEndExecutor(_ScriptedExecutor):
+    """Ответ, один шаг, затем запись итога — и сразу выход прогона."""
+
+    STEPS = 1
+
+    async def arun(self, messages, *, thread_id, message_ids=None, **_kw):
+        mid = (message_ids or [None])[0]
+        self._messages(
+            thread_id, {"id": mid, "role": "user", "content": "первый"}
+        )
+        self._messages(thread_id, self._answer("ответ"))
+        self._wait(0)
+        self._record(thread_id, mid, 1)
+
+
+def _layout_frame(scr):
+    """Кадр раскладки: бар поднят, верх поля ввода, видна ли строка."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    lines = list(scr.query_one("#trace").query(TurnLine))
+    return (
+        scr.query_one("#indicator-bar").has_class("-turn"),
+        scr.query_one("#input-row").region.y,
+        any(w.display and w.region.height > 0 for w in lines),
+    )
+
+
+@pytest.mark.asyncio
+async def test_turn_end_one_movement_per_layout_frame(tmp_path):
+    """Конец хода — одно движение в каждом кадре раскладки: от последнего
+    кадра с поднятым баром низ на месте, и нет кадра «бар снят, строки
+    ещё нет» (S10 §3.4)."""
+    from gc_testkit.tui_support import wait_until
+
+    _write_task(tmp_path, SCRIPT_TID)
+    ex = _QuickEndExecutor(tmp_path)
+    app = _app(tmp_path)
+    app._executor_factory = lambda: ex
+    frames: list[tuple] = []
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(SCRIPT_TID, is_resume=True)
+        layout = scr._refresh_layout
+
+        def recorded_layout(*args, **kwargs):
+            layout(*args, **kwargs)
+            frames.append(_layout_frame(scr))
+
+        scr._refresh_layout = recorded_layout
+        try:
+            pilot.app.query_one("#cmdinput").text = "первый"
+            await pilot.press("enter")
+            await wait_until(pilot, lambda: ex.at == 0, "шаг")
+            await pilot.pause(0.3)
+            ex.release[0].set()
+            await wait_until(
+                pilot,
+                lambda: not pilot.app.active_runner.is_running(),
+                "прогон вышел",
+            )
+            await wait_until(
+                pilot, lambda: frames and frames[-1][2], "строка видна"
+            )
+            await pilot.pause(0.6)
+        finally:
+            ex.stop_run()
+        last_up = max(i for i, f in enumerate(frames) if f[0])
+        tail = frames[last_up:]
+        assert {y for _up, y, _shown in tail} == {tail[0][1]}
+        assert not [f for f in tail if not f[0] and not f[2]]
+
+
+def _history(tmp_path, tid, n):
+    """`n` пар реплика-ответ в треде: лента выше окна."""
+    from gc_testkit.develop_files import append_new_thread_messages
+
+    rows = []
+    for i in range(n):
+        rows.append({"id": f"u{i}", "role": "user", "content": f"вопрос {i}"})
+        rows.append(
+            {
+                "id": f"a{i}",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": f"ответ {i}"}],
+            }
+        )
+    append_new_thread_messages(
+        str(tmp_path), "cli", tid, rows, set(), start_seq=0
+    )
+    return len(rows)
+
+
+def _start_frame(scr):
+    """Кадр начала хода: высота бара, прокрутка ленты, верх поля ввода."""
+    return (
+        scr.query_one("#indicator-bar").region.height,
+        round(scr.query_one("#trace").scroll_y),
+        _input_y(scr),
+    )
+
+
+class _IdleExecutor(_ScriptedExecutor):
+    """Ход стоит на первом шаге, в тред не пишет."""
+
+    STEPS = 1
+
+    async def arun(self, messages, *, thread_id, message_ids=None, **_kw):
+        self._wait(0)
+
+
+async def _send_enter(pilot):
+    pilot.app.query_one("#cmdinput").text = "первый"
+    await pilot.press("enter")
+
+
+async def _send_init(pilot):
+    pilot.app.query_one("#cmdinput").text = "/init"
+    await pilot.press("enter")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("send", [_send_enter, _send_init])
+async def test_turn_start_one_movement_per_frame(tmp_path, monkeypatch, send):
+    """Начало хода у низа: строки запуска и бар встают одним движением —
+    первый кадр с переменой уже итоговый: лента у низа, последняя строка
+    прямо над баром, поле ввода на месте. И Enter, и синхронный /init."""
+    from gc_testkit.tui_support import wait_until
+    from textual.app import App
+
+    _write_task(tmp_path, SCRIPT_TID)
+    ex = _IdleExecutor(tmp_path)
+    ex.seq = _history(tmp_path, SCRIPT_TID, 12)
+    app = _app(tmp_path)
+    app._executor_factory = lambda: ex
+    frames: list[tuple] = []
+    async with app.run_test(size=(100, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(SCRIPT_TID, is_resume=True)
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        before = _start_frame(scr)
+        display = App._display
+
+        def recorded(app, screen, renderable):
+            frames.append(_start_frame(scr))
+            return display(app, screen, renderable)
+
+        monkeypatch.setattr(App, "_display", recorded)
+        try:
+            await send(pilot)
+            await wait_until(pilot, lambda: ex.at == 0, "думаю")
+            await pilot.pause(0.6)
+        finally:
+            ex.stop_run()
+        after = (2, trace.max_scroll_y, before[2])
+        states = [f for k, f in enumerate(frames) if frames[k - 1 : k] != [f]]
+        assert states in ([after], [before, after])
+        assert trace.children[-1].region.bottom == trace.region.bottom
+
+
+@pytest.mark.asyncio
+async def test_start_run_raises_bar_after_rows_mount(tmp_path):
+    """Шаг начала прогона: бар поднимается, когда строки запуска уже
+    смонтированы, и экран не рисует между ними."""
+    _write_task(tmp_path, SCRIPT_TID)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(SCRIPT_TID, is_resume=True)
+        await pilot.pause()
+        reply = scr._mount_user_reply("первый", state="pending")
+        seen = []
+        prepare = scr._prepare_for_new_run
+
+        def recorded():
+            seen.append((reply.is_mounted, pilot.app._batch_count > 0))
+            prepare()
+
+        scr._prepare_for_new_run = recorded
+        await scr._start_run()
+        assert seen == [(True, True)]
+        assert _bar(pilot).has_class("-turn")
+
+
+# --- S10 §3.7: ошибка до конца раннера — прогон фиксируется парой -----------
+
+
+@pytest.mark.asyncio
+async def test_error_rising_edge_ignored_for_settled_run(tmp_path):
+    """Ошибка при живом потоке раннера — спадающий фронт в том же тике:
+    строка «✕» видна, бара нет, мета не `running`. Следующие тики бар не
+    возвращают и строку не оседают; поток позже выходит — исход прогона
+    записан один раз."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    tid = "err0000000000000000000000000001a"
+    _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid, is_resume=True)
+        run = _Run(tid)
+        pilot.app.active_runner = run
+        scr._prepare_for_new_run()
+        scr._poll_tick()  # тик застал прогон
+        finished, statuses = [], []
+        on_finished, write_meta = scr._on_run_finished, scr._write_tui_meta
+
+        def counted_finish(runner, kind):
+            finished.append(runner)
+            on_finished(runner, kind)
+
+        def counted_write(task_id, patch):
+            if "status" in patch:
+                statuses.append(patch["status"])
+            write_meta(task_id, patch)
+
+        scr._on_run_finished = counted_finish
+        scr._write_tui_meta = counted_write
+        pilot.app.last_runner_error = "ReadTimeout: сервер не ответил"
+        scr._poll_tick()
+        await pilot.pause()
+        (line,) = scr.query(TurnLine)
+        assert line.word == "failed"
+        assert line.is_fresh
+        assert line.display
+        assert not _bar(pilot).has_class("-turn")
+        assert statuses == ["failed"]
+
+        for _ in range(3):
+            scr._poll_tick()
+        assert not _bar(pilot).has_class("-turn")
+        assert line.is_fresh
+        assert statuses == ["failed"]
+
+        run.running = False  # поток раннера с ошибкой вышел
+        scr._poll_tick()
+        scr._poll_tick()
+        assert finished == [run]
+        assert statuses == ["failed"]
+        tui = tui_section(scr._store.get_record(tid))
+        assert tui["status"] == "failed"
+
+
+# --- §4.12: баннер посреди хода снимает бар ----------------------------------
+
+
+def _show_banner(scr, kind):
+    if kind == "confirm":
+        scr.show_confirm_banner("Действие", "Разрешить?")
+        return scr._confirm_banner
+    if kind == "plan":
+        scr._show_plan_banner()
+        return scr._plan_banner
+    scr._show_child_ask_human(parent_call_id="p1", prose="Какой путь?")
+    return scr._ask_human_banner
+
+
+def _hide_banner(scr, kind):
+    if kind == "confirm":
+        scr._hide_confirm_banner()
+    elif kind == "plan":
+        scr._hide_plan_banner()
+    else:
+        scr._unmount_ask_human_banner()
+
+
+async def _turn_with_bar(pilot, tid):
+    scr = pilot.app.screen
+    scr.attach_active_task(tid)
+    scr._mount_user_reply("первая")
+    pilot.app.active_runner = _Run(tid)
+    scr._show_thinking_indicator()
+    scr._sync_indicator_bar()
+    await pilot.pause()
+    return scr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["ask", "confirm", "plan"])
+async def test_banner_mid_turn_one_empty_row_above_it(tmp_path, kind):
+    """Баннер посреди хода: бар снят, между лентой и рамкой баннера — один
+    пустой ряд (нижний зазор ленты), как над полем ввода в покое; короткая
+    лента ниже себя оставляет пустоту — ввод прижат к низу."""
+    tid = f"gap{kind}"
+    _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _turn_with_bar(pilot, tid)
+        banner = _show_banner(scr, kind)
+        await pilot.pause()
+        scr._sync_chrome_caps()
+        await pilot.pause()
+        trace = scr.query_one("#trace")
+        last = [w for w in trace.children if w.display][-1]
+        assert last.region.bottom <= trace.region.bottom
+        assert banner.region.y - trace.region.bottom == 1
+        assert _bar(pilot).display is False
+        pilot.app.active_runner = None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["ask", "confirm", "plan"])
+async def test_bar_returns_in_frame_banner_leaves(tmp_path, kind):
+    """Баннер снят посреди хода: бар встаёт в том же кадре раскладки, в
+    котором баннер ушёл, — нет кадра ни без обоих, ни с обоими."""
+    tid = f"ret{kind}"
+    _write_task(tmp_path, tid)
+    async with _app(tmp_path).run_test(size=(100, 30)) as pilot:
+        scr = await _turn_with_bar(pilot, tid)
+        banner = _show_banner(scr, kind)
+        await pilot.pause()
+        frames: list[tuple] = []
+        layout = scr._refresh_layout
+
+        def recorded_layout(*args, **kwargs):
+            layout(*args, **kwargs)
+            frames.append(
+                (
+                    _bar(pilot).has_class("-turn"),
+                    banner.region.height > 0,
+                )
+            )
+
+        scr._refresh_layout = recorded_layout
+        _hide_banner(scr, kind)
+        await pilot.pause()
+        await pilot.pause()
+        assert frames
+        assert set(frames) == {(True, False)}
+        pilot.app.active_runner = None

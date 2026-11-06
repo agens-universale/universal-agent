@@ -1,11 +1,6 @@
 """ToolCallRow — один виджет, который мутирует от running к ok/err."""
 
 import pytest
-from gc_tui.palette import TOOL_NAME
-
-_TOOL_NAME_HEX = TOOL_NAME[
-    1:
-].lower()  # '#XXXXXX' → 'xxxxxx' для substring-проверок в span.style
 
 
 def _shown_lines(row) -> str:
@@ -210,38 +205,19 @@ async def test_tool_call_row_ok_state_uses_styled_text():
         assert any("●" in seg for seg in green), f"spans={prefix.spans}"
 
 
-@pytest.mark.asyncio
-async def test_tool_call_row_tool_name_uses_tool_name_color():
-    """Имя тула (без скобок) красится palette.TOOL_NAME — primary-сигнал в строке;
-    скобки/args/путь — DIM (один общий тон обвеса)."""
-    pytest.importorskip("textual")
+@pytest.mark.parametrize("live", [True, False])
+def test_single_row_word_ink_bold_object_by_state(live):
+    """Одиночная строка (MCP, Skill, прочие одиночные категории, §10):
+    слово `INK` жирным; объект идущей — `INK`, законченной — `SUB_INK`."""
+    from gc_tui.palette import INK, SUB_INK
     from gc_tui.widgets.tool_call_row import ToolCallRow
-    from rich.text import Text
-    from textual.app import App, ComposeResult
 
-    class _App(App):
-        def compose(self) -> ComposeResult:
-            yield ToolCallRow(
-                call_id="c1",
-                label="read_file",
-                target="path='src/thread_store.py'",
-            )
-
-    async with _App().run_test() as pilot:
-        row = pilot.app.query_one(ToolCallRow)
-        row.set_result(summary="312 строк", outcome="ok")
-        await pilot.pause()
-        rendered = row._render_content()
-        assert isinstance(rendered, Text)
-        tool_name_spans = [
-            rendered.plain[s.start : s.end]
-            for s in rendered.spans
-            if _TOOL_NAME_HEX in str(s.style).lower()
-        ]
-        assert "read_file" in tool_name_spans, (
-            f"No TOOL_NAME-colored span equal to 'read_file'; spans="
-            f"{[(rendered.plain[s.start : s.end], str(s.style)) for s in rendered.spans]}"
-        )
+    row = ToolCallRow(call_id="m1", label="Jira", target="search  KEY-1")
+    if not live:
+        row.set_result(summary="", outcome="ok")
+    content = row._render_content()
+    assert _style_at(content, "Jira") == f"bold {INK}"
+    assert _style_at(content, "KEY-1") == (INK if live else SUB_INK)
 
 
 @pytest.mark.asyncio
@@ -501,6 +477,32 @@ def test_trace_timer_tail_has_no_space_before_unit():
     assert row._render_content().plain.endswith("· 2с")
 
 
+@pytest.mark.parametrize(
+    "seconds, tail",
+    [(0.0, ""), (0.9, ""), (1.0, " · 1с"), (72.0, " · 1м 12с")],
+)
+def test_frozen_timer_only_from_one_second(seconds, tail):
+    """Застывший таймер — только у вызова от 1 с; быстрее — без таймера,
+    без «· 0с» (владелец 2026-10-23)."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="c1", label="Read", target="a.py")
+    row.set_result(summary="", outcome="ok")
+    row.set_elapsed(seconds)
+    assert row._render_content().plain == f"Read  a.py{tail}"
+
+
+@pytest.mark.parametrize("seconds, tail", [(0, ""), (1, " · 1с")])
+def test_live_timer_only_from_one_second(seconds, tail):
+    """Идущий вызов: до целой секунды — без таймера, только дыхание `●`
+    (владелец 2026-10-26)."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="c1", label="Read", target="a.py")
+    row._elapsed_s = lambda: seconds
+    assert row._render_content().plain == f"Read  a.py{tail}"
+
+
 def test_pulse_tick_advances_pulse_while_running():
     """Пульс ▸ двигается на собственном 0.1с-тике (_pulse_tick), пока running."""
     from gc_tui.widgets.tool_call_row import ToolCallRow
@@ -637,19 +639,37 @@ def _edit_row():
 
 
 def test_edit_counts_follow_the_object():
-    """` +N −M` — сразу после объекта, до хвоста результата; `+N` — OK,
-    `−M` — ERR."""
-    from gc_tui.palette import ERR, OK
+    """` (+a −r)` — сразу после объекта, до хвоста результата; `+a` — OK,
+    `−r` — ERR, скобки — INK, как объект слева (спека P4 §10)."""
+    from gc_tui.palette import ERR, INK, OK
 
     row = _edit_row()
     row.set_edit_counts(12, 3, copy_text="diff")
     content = row._render_content()
-    assert content.plain == "Edit  a.py +12 −3 · ok"
+    assert content.plain == "Edit  a.py (+12 −3) · ok"
     styles = {
         content.plain[s.start : s.end]: str(s.style) for s in content.spans
     }
     assert styles["+12"] == OK
     assert styles["−3"] == ERR
+    assert styles[" ("] == INK
+    assert styles[")"] == INK
+
+
+@pytest.mark.parametrize(
+    "add, removed, tail",
+    [
+        (4, 2, " (+4 −2)"),
+        (37, 0, " (+37 −0)"),
+        (0, 3, " (+0 −3)"),
+        (0, 0, " (+0 −0)"),
+    ],
+)
+def test_edit_counts_keep_zero_part(add, removed, tail):
+    """Счётчики всегда в обе части, нулевая тоже (владелец 2026-10-23)."""
+    row = _edit_row()
+    row.set_edit_counts(add, removed, copy_text="diff")
+    assert row._render_content().plain == f"Edit  a.py{tail} · ok"
 
 
 def test_row_without_edit_has_no_counts():
@@ -716,7 +736,7 @@ async def test_no_copy_button_without_diff_text():
         row.set_edit_counts(2, 0, copy_text="")
         await pilot.pause()
         assert not row.query_one(".block-copy", Static).display
-        assert "+2 −0" in row._render_content().plain
+        assert "(+2 −0)" in row._render_content().plain
 
 
 @pytest.mark.asyncio
@@ -768,3 +788,70 @@ async def test_copy_button_keeps_hover_canon(tui_app_factory):
             app.query_one(".block-copy", Static).styles.color.hex
             == palette.ACCENT.upper()
         )
+
+
+# ---- слово строки: роль задаёт вид (P4 §10) ----
+
+
+def _style_at(content, fragment: str) -> str:
+    """Стиль спана, на который приходится начало ``fragment``."""
+    at = content.plain.index(fragment)
+    (span,) = [s for s in content.spans if s.start <= at < s.end]
+    return str(span.style)
+
+
+def test_command_word_role_decides_look():
+    """Слово команды — явная роль: `Ran  команда` через два пробела, слово
+    `INK` жирным, законченная команда `SUB_INK`."""
+    from gc_tui.palette import INK, SUB_INK
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="x1", label="Run", target="make docs")
+    row.set_result(summary="", outcome="ok")
+    row.set_word("Ran", role="command")
+    content = row._render_content()
+    assert content.plain.startswith("Ran  make docs")
+    assert _style_at(content, "Ran") == f"bold {INK}"
+    assert _style_at(content, "make docs") == SUB_INK
+
+
+def test_single_edit_word_ink_bold_path_ink():
+    """Одиночная правка (§6.2, §10): слово `INK` жирным через пробел,
+    путь `INK` — и после конца."""
+    from gc_tui.palette import INK
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="e1", label="Edit", target="a.py")
+    row.set_result(summary="", outcome="ok")
+    row.set_word("Edited", role="edit")
+    content = row._render_content()
+    assert content.plain.startswith("Edited a.py")
+    assert _style_at(content, "Edited") == f"bold {INK}"
+    assert _style_at(content, "a.py") == INK
+
+
+def test_agent_word_role_name_is_ink():
+    """`Agent`: слово `INK` жирным, имя субагента `INK` и после конца."""
+    from gc_tui.palette import INK
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    row = ToolCallRow(call_id="a1", label="Agent", target="worker")
+    row.set_result(summary="", outcome="ok")
+    row.set_word("Agent", role="agent")
+    content = row._render_content()
+    assert content.plain.startswith("Agent  worker")
+    assert _style_at(content, "Agent") == f"bold {INK}"
+    assert _style_at(content, "worker") == INK
+
+
+@pytest.mark.parametrize("shown", [1, 3, 5])
+def test_folded_command_shows_count_from_model(shown):
+    """Свёрнутая команда показывает столько строк, сколько решил блок
+    (`shown`): строка сама их не пересчитывает."""
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    lines = ("a1", "b2", "c3", "d4", "e5")
+    row = ToolCallRow(call_id="r1", label="Run", target="")
+    row.set_command(lines, shown=shown)
+    content = row._render_content().plain
+    assert [ln for ln in lines if ln in content] == list(lines[:shown])

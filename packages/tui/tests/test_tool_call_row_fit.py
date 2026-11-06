@@ -33,6 +33,13 @@ def _line_height(row) -> int:
     return row.query_one(Horizontal).size.height
 
 
+async def _aged(pilot, row) -> None:
+    """Идущая строка 5 с: живой таймер виден с целой секунды."""
+    row._start_monotonic -= 5
+    row._update()
+    await pilot.pause()
+
+
 def _app(build):
     from textual.app import App
     from textual.containers import VerticalScroll
@@ -67,9 +74,10 @@ async def test_running_long_command_keeps_timer_on_one_line(width, level):
     ).run_test(size=(width, 20)) as pilot:
         await pilot.pause()
         row = pilot.app.query_one(ToolCallRow)
+        await _aged(pilot, row)
         line = _first_line(row)
         assert line.startswith("Run  cd /Users/")
-        assert line.endswith(" · 0с")
+        assert line.endswith(" · 5с")
         assert "…" in line
         assert _line_height(row) == 1
         assert row.size.height == 1
@@ -108,7 +116,7 @@ async def test_edit_row_keeps_counts_and_copy_button(width):
         line = _first_line(row)
         # путь серединой в `…`: имя файла цело
         assert line.startswith("Edit  packages/")
-        assert line.endswith("…/tool_call_row.py +12 −3")
+        assert line.endswith("…/tool_call_row.py (+12 −3)")
         assert row.query_one(".block-copy").display
         assert _line_height(row) == 1
 
@@ -137,13 +145,13 @@ async def test_resize_refits_target():
         size=(120, 20)
     ) as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        await pilot.pause()
+        await _aged(pilot, row)
         wide = _first_line(row)
         await pilot.resize_terminal(60, 20)
         await pilot.pause()
         narrow = _first_line(row)
         assert len(narrow) < len(wide)
-        assert narrow.endswith(" · 0с")
+        assert narrow.endswith(" · 5с")
         assert _line_height(row) == 1
 
 
@@ -187,22 +195,33 @@ async def test_preview_row_fits_one_line(width):
         await pilot.pause()
         row = pilot.app.query_one(ToolCallRow)
         line = _first_line(row)
-        assert line.startswith("Run  cd /Users/")
+        # Превью — через модель блоков, как живая лента: `Ran` (P4 §4).
+        assert line.startswith("Ran  cd /Users/")
         assert line.endswith("… · 188 строк")
         assert _line_height(row) == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("width", _WIDTHS)
-@pytest.mark.parametrize("elapsed", (0, 6, 3725))
-async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
+@pytest.mark.parametrize("elapsed", (1, 6, 3725))
+async def test_running_tail_not_under_scrollbar(
+    tmp_path, monkeypatch, width, elapsed
+):
     """С полосой прокрутки хвост ` · N с` виден целиком левее полосы:
-    ширина под объект считается от content-колонки, полоса в неё не входит."""
+    ширина под объект считается от content-колонки, полоса в неё не входит.
+    Часы строки стоят: проверяется место под хвост, а не ход таймера."""
     pytest.importorskip("textual")
+    from types import SimpleNamespace
+
     from gc_tui.app import TuiApp
     from gc_tui.services.duration_format import format_duration
+    from gc_tui.widgets import tool_call_row
     from textual.containers import VerticalScroll
 
+    clock = [1000.0]
+    monkeypatch.setattr(
+        tool_call_row, "time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test(size=(width, 24)) as pilot:
         trace = pilot.app.screen.query_one("#trace", VerticalScroll)
@@ -213,7 +232,7 @@ async def test_running_tail_not_under_scrollbar(tmp_path, width, elapsed):
         row = _row("exec_command", _CMD)
         trace.mount(row)
         await pilot.pause()
-        row._start_monotonic -= elapsed
+        clock[0] += elapsed
         row._update()
         trace.scroll_end(animate=False)
         await pilot.pause()
@@ -269,8 +288,66 @@ async def test_long_live_status_keeps_timer():
     ) as pilot:
         row = pilot.app.query_one(ToolCallRow)
         row.set_live_status(_LONG_TAIL)
-        await pilot.pause()
+        await _aged(pilot, row)
         line = _first_line(row)
         assert _line_height(row) == 1
-        assert line.endswith("… · 0с")
+        assert line.endswith("… · 5с")
         assert len(_shown_target(line, "Run")) >= CALL_TARGET_MIN_COLS
+
+
+_TASK = (
+    "Review the changes in client/retry.py for correctness and edge "
+    "cases, check the retry table against the policy and report every "
+    "mismatch with a short reason and the line it is on"
+)
+
+
+def _agent_row(task: str):
+    from gc_tui.models import AgentHead
+    from gc_tui.services.trace_render import build_call_row
+
+    return build_call_row(
+        call_id="a1",
+        wire_name="subagent_code_reviewer",
+        args_summary=task,
+        level=0,
+        agent=AgentHead("Reviewer", task),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("width", (40, 60, 80))
+async def test_agent_task_line_two_rows_then_ellipsis(width):
+    """Задача субагента — `└` под заголовком: не больше двух строк,
+    дальше `…`; заголовок — роль в одну строку."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with _app(lambda t: t.mount(_agent_row(_TASK))).run_test(
+        size=(width, 20)
+    ) as pilot:
+        await pilot.pause()
+        row = pilot.app.query_one(ToolCallRow)
+        assert _first_line(row).startswith("Agent  Reviewer")
+        assert row.size.height == 3
+        body = str(row.query_one(".consequence-body").render())
+        assert body.startswith("Review the changes")
+        assert body.endswith("…")
+        assert len(body.split("\n")) == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_short_task_one_row():
+    pytest.importorskip("textual")
+    from gc_tui.palette import DIM
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with _app(lambda t: t.mount(_agent_row("проверь клиент"))).run_test(
+        size=(80, 20)
+    ) as pilot:
+        await pilot.pause()
+        row = pilot.app.query_one(ToolCallRow)
+        assert row.size.height == 2
+        body = str(row.query_one(".consequence-body").render())
+        assert body == "проверь клиент"
+        assert row._consequence_bodies()[0].style == DIM

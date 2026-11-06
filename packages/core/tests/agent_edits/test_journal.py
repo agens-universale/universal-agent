@@ -261,3 +261,22 @@ def test_command_paths_survives_the_roundtrip_and_old_lines_read_as_none(
         '"command_paths"'
         not in path.read_text(encoding="utf-8").splitlines()[1]
     )
+
+
+def test_size_bytes_roundtrip_and_key_only_when_set(tmp_path):
+    """Размер бинаря — необязательное поле: ключ в JSON только при значении."""
+    path = tmp_path / "edits.jsonl"
+    j = EditsJournal(path)
+    j.append(make_rec(flags=["no_diff"], size_bytes=12_288))
+    j.append(make_rec())
+
+    recs = EditsJournal(path).read_all()
+    assert [r.size_bytes for r in recs] == [12_288, None]
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert '"size_bytes"' in lines[0]
+    assert '"size_bytes"' not in lines[1]
+
+
+def test_old_line_without_size_bytes_reads_as_none():
+    obj = {"path": "a.bin", "turn_id": "t", "call_id": "c", "op": "write"}
+    assert EditRecord.from_json_obj(obj).size_bytes is None

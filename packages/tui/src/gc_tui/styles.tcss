@@ -63,14 +63,18 @@ VerticalScroll {
  * вводом). Список из поля ввода встаёт над вводом и поднимает ленту.
  * Ширина — 100%, а не `1fr` по умолчанию: вертикальная раскладка Textual даёт
  * fr-детям ширину контейнера минус НАИБОЛЬШИЙ боковой margin соседей, и баннер
- * с `margin: 0 1` сужал ленту на две колонки. */
-TraceScreen #trace { width: 100%; }
-/* Докнутая статус-строка индикатора — вне скролла #trace (стрим не накладывается).
- * Высота по умолчанию 2 (пустой старт без задачи: [отступ][индикатор-место]).
- * При активной задаче код поднимает до 3 (_sync_indicator_reserve): добавляется
- * нижняя строка-отступ — индикатор отделён и от трейса, и от поля ввода.
- * В пределах состояния высота фиксирована → нет «прыжка». */
-#indicator-bar { height: 2; padding: 0 1; background: $bg; }
+ * с `margin: 0 1` сужал ленту на две колонки.
+ * Нижний зазор ленты — пустая строка над баром, баннером, списком или полем
+ * ввода (S10). Полный шортхенд (частичный margin затирается); margin, а не
+ * padding: дорожка скроллбара в ряд зазора не заходит. Общий #trace не
+ * трогаем — его переиспользуют экраны только для чтения. */
+TraceScreen #trace { width: 100%; margin: 0 0 1 0; }
+/* Бар индикатора — вне скролла #trace (стрим не накладывается). Стоит только
+ * во время работы открытого треда (класс -turn, _sync_indicator_bar): строка
+ * индикатора и нижний ряд, на котором стоит плашка «в конец». Высота внутри
+ * хода постоянна → нет «прыжка». */
+#indicator-bar { display: none; height: 2; padding: 0 1; background: $bg; }
+#indicator-bar.-turn { display: block; }
 
 /* Brand-блок — постоянная шапка трейса (Claude-style: стартовый экран = начало
  * трейса; ниже flow'ом индикатор загрузки MCP и далее диалог; не скрывается). */
@@ -184,8 +188,9 @@ BlockPanel:focus, TodoBlock:focus {
    Отступы — одним shorthand-правилом, как у панелей выше.
    В отличие от панелей блок НЕ карточка рядом, а следствие своей строки
    инструмента: прижат к ней без вертикальных отступов (зазор до следующего
-   события даёт его собственный верхний отступ). Счётчики `+N −M` и кнопка ❐ —
-   в самой строке вызова. Колонки ленты (trace_render.level_prefix): глиф
+   события даёт его собственный верхний отступ). Счётчики `(+a −r)` и
+   кнопка ❐ — в самой строке вызова. Колонки ленты
+   (trace_render.level_prefix): глиф
    события уровня n — в колонке `●` плюс 2n; следствие — на +2 от глифа своего
    события: левый отступ 2 у вызова агента, 4 — у вызова субагента (уровень 1);
    тело и хвост — с колонки блока. Подложки на самом блоке нет: тёмный фон
@@ -195,6 +200,12 @@ BlockPanel:focus, TodoBlock:focus {
     margin: 0 0 0 2;
 }
 .diff-block.diff-nested { margin: 0 0 0 4; }  /* правка субагента (уровень 1) */
+/* Дифф под блоком P4: колонка 2 (одиночная правка) или 4 (член блока) от
+   глифа своего уровня; у субагента — на 2 глубже. */
+.diff-block.diff-single { margin: 0 0 0 2; }
+.diff-block.diff-member { margin: 0 0 0 4; }
+.diff-block.diff-nested.diff-single { margin: 0 0 0 4; }
+.diff-block.diff-nested.diff-member { margin: 0 0 0 6; }
 .diff-block .block-body,
 .diff-block .diff-more { background: $block-bg; }
 .diff-more { color: $dim; }
@@ -252,6 +263,21 @@ ScrollEndPill:hover { background: $highlight-bg; }
 .line-tool      { color: $dim; }       /* |- механика тула */
 /* Пустая строка перед каждым вызовом — верхним и вложенным (спека P3 §2.1). */
 ToolCallRow { margin-top: 1; }
+/* Блоки P4: члены и строки внутри блока субагента — без пустой строки
+   сверху; между видимыми файлами блока правок — есть (спека P4 §3.1). */
+ToolCallRow.-member, ToolCallRow.-in-agent { margin-top: 0; }
+ToolCallRow.-gap { margin-top: 1; }
+/* Внутри блока субагента пустых строк нет совсем (спека P4 §3.1, §7):
+   ни перед событиями, ни между файлами правок. */
+ToolCallRow.-in-agent.-gap { margin-top: 0; }
+.line-intermediate.-in-agent { margin-top: 0; }
+.todo-block-nested.-in-agent { margin: 0; }
+/* Скрытое блоком: вне окна, ждущий вызов группы, скрытая фраза. */
+.-block-hidden { display: none; }
+/* Фразы блока: управляющие — MUTED (ховер — .trace-action:hover), строка
+   незаписанных файлов — DIM. */
+.block-action { color: $muted; }
+.block-note { color: $dim; }
 .line-think     { color: $muted; text-style: italic; margin-top: 1; }
 .line-intermediate { color: $ink; margin-top: 1; }  /* промежуточная реплика — фаза хода */
 /* Промежуточная реплика (основного агента и субагента): глиф `●` своего
@@ -264,9 +290,9 @@ ToolCallRow { margin-top: 1; }
 .line-warn      { color: $warn; }   /* строка `!` без владельца — предупреждение */
 .line-standalone { margin-top: 1; }  /* строка `!` без владельца — своё событие */
 .line-code      { color: $code; }      /* inline-код/путь */
-.line-bold      { color: $accent; text-style: bold; }
-.line-heading-1 { color: $accent; text-style: bold; }
-.line-heading-2 { color: $accent; text-style: bold; }      /* вес легче — render-A */
+.line-bold      { color: $ink; text-style: bold; }
+.line-heading-1 { color: $ink; text-style: bold; }
+.line-heading-2 { color: $ink; text-style: bold; }      /* вес легче — render-A */
 .line-block     { color: $code-block; }
 .line-ok        { color: $ok; }
 .line-run       { color: $run-color; }
@@ -335,8 +361,14 @@ UserReplyContainer.-queue-hint > .queue-hint { display: block; }
 /* ThinkingIndicator — «думаю…» (spec 2026-05-26) */
 /* padding слева = 0: глиф встаёт по колонке буллетов ●/> строк трейса
    (.trace-prefix padding:0); правый отступ 1 сохраняем. */
-.thinking-indicator { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: 1; }
+.thinking-indicator { color: $deep-dim; padding: 0 1 0 0; height: 1; }
 .thinking-indicator.hidden { display: none; }
+/* Строка итога хода (P1b, S10): уровень 0, глиф в колонке ●, пустая
+   строка сверху, тусклая. Свежая (-latest) — со сводкой правок и причиной. */
+TurnLine { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: auto; }
+/* Итог за баром (S10 §3.4): строка хода и маркер /compact скрыты, пока
+   стоит бар индикатора. */
+TurnLine.-held, CompactionRule.-held { display: none; }
 
 /* StreamBlock — эфемерный in-progress поток текущего шага (chat_completions) */
 /* левый padding 0 — выравнивание с индикатором и колонкой буллетов трейса. */

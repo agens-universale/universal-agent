@@ -34,6 +34,9 @@ class _Runner:
     def release(self) -> None:
         self.events.append("release")
 
+    def wait(self, timeout=None) -> None:
+        self.events.append("wait")
+
 
 @pytest.fixture
 def app(tmp_path):
@@ -93,12 +96,16 @@ def test_exit_stops_the_runner_before_releasing_it(app):
     зовёт `app.exit()` и прогон не останавливает, поэтому снять ожидание должен
     `on_unmount`: `stop()` кладёт в очередь пустую строку и гасит confirm.
     """
+    import asyncio
+
     runner = _Runner(running=True)
     app.active_runner = runner
 
-    app.on_unmount()
+    asyncio.run(app.on_unmount())
 
-    assert runner.events == ["stop", "release"], (
+    # Между стопом и отдачей логгера — ожидание потока хода (решение
+    # плана 6): ядро успевает закрыть ход записью итога.
+    assert runner.events == ["stop", "wait", "release"], (
         f"порядок на выходе: {runner.events} — ожидание человека не снято"
     )
 

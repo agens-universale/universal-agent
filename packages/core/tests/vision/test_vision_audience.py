@@ -105,6 +105,7 @@ def test_a_marked_request_model_without_eyes_leaves_nobody():
         eyes=None,
         tool_visible=False,
         probe_reason="image_unsupported",
+        blind_alias="glm",
     )
     assert audience.nobody is True
 
@@ -119,6 +120,7 @@ def test_a_marked_request_model_hands_over_to_the_assigned_eyes():
     assert audience.native is None
     assert audience.eyes.alias == "qwen"
     assert audience.tool_visible is True
+    assert audience.blind_alias == "glm"
 
 
 def test_marked_eyes_do_not_hide_a_seeing_request_model():
@@ -132,6 +134,7 @@ def test_marked_eyes_do_not_hide_a_seeing_request_model():
     assert audience.eyes is None
     assert audience.tool_visible is True
     assert audience.nobody is False
+    assert audience.blind_alias is None
 
 
 def test_responses_mode_never_shows_images_natively():
@@ -143,6 +146,17 @@ def test_responses_mode_never_shows_images_natively():
     assert audience.native is None
     assert audience.eyes == router.resolve("main")
     assert audience.tool_visible is True
+    assert audience.blind_alias is None
+
+
+def test_a_marked_request_model_in_responses_mode_is_not_named_blind():
+    """`responses` сохраняет прежние записки модели."""
+    router = _router({"vision": "qwen"})
+    mark_blind(_key(_GLM_URL, "glm-5.1"))
+
+    audience = _audience(router, ImageRejects(), api_mode="responses")
+
+    assert audience.blind_alias is None
 
 
 def test_the_tool_is_invisible_when_it_is_not_in_the_set():
@@ -251,7 +265,9 @@ def test_a_model_declared_text_only_never_gets_images_natively():
 
     audience = _audience(router, ImageRejects())
 
-    assert audience == Audience(native=None, eyes=None, tool_visible=False)
+    assert audience == Audience(
+        native=None, eyes=None, tool_visible=False, blind_alias="glm"
+    )
 
 
 def test_a_model_declared_text_only_hands_over_to_the_assigned_eyes():
@@ -319,6 +335,7 @@ def test_unknown_candidate_offers_tool_without_admitting_pixels():
     )
     assert audience.native is None and audience.eyes is None
     assert audience.tool_visible
+    assert audience.blind_alias is None
 
 
 def test_explicit_true_still_requires_confirmation():

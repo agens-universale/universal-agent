@@ -18,6 +18,15 @@ def _read_pending(tmp_path, tid):
     return (meta.get("tui") or {}).get("pending_user_messages", [])
 
 
+def _core_meta(tmp_path, tid, **fields):
+    """Запись меты исполнителем: секция `tui` принадлежит TUI и остаётся
+    (владение ключами меты), как у настоящего ядра."""
+    p = Path(tmp_path) / f"meta_cli_{tid}.json"
+    meta = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    meta.update({"thread_id": tid, **fields})
+    p.write_text(json.dumps(meta), encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_send_records_pending_in_meta(tmp_path):
     pytest.importorskip("textual")
@@ -25,10 +34,7 @@ async def test_send_records_pending_in_meta(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -68,10 +74,7 @@ async def test_pending_widget_mounted_with_pending_state(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -198,10 +201,7 @@ async def test_pending_cap_drops_oldest(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             self._evt = threading.Event()
             self._evt.wait(timeout=30.0)
 
@@ -268,10 +268,7 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             raise RuntimeError("model unavailable")
 
         def stop_run(self):
@@ -304,20 +301,23 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
 
 @pytest.mark.asyncio
 async def test_error_shown_resets_between_runs(tmp_path):
-    """Две ошибки подряд → у каждой своя причина под «✕ Ошибка» (флаг
-    сбрасывается): `└ <класс>: <текст>`."""
+    """Две ошибки подряд → у каждой своя причина под «✕ Ошибка» свежей
+    строки итога (флаг сбрасывается): `└ <класс>: <текст>`."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
+    from gc_tui.widgets.turn_line import TurnLine
+
+    def fresh_text(scr):
+        lines = [w for w in scr.query(TurnLine) if w.is_fresh]
+        return lines[0].render().plain if len(lines) == 1 else ""
 
     call = {"n": 0}
 
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             call["n"] += 1
-            (Path(tmp_path) / f"meta_cli_{thread_id}.json").write_text(
-                json.dumps({"thread_id": thread_id, "messages_count": 0}),
-                encoding="utf-8",
-            )
+            _core_meta(tmp_path, thread_id, messages_count=0)
             raise RuntimeError(f"fail #{call['n']}")
 
         def stop_run(self):
@@ -337,17 +337,13 @@ async def test_error_shown_resets_between_runs(tmp_path):
         scr = pilot.app.screen
         inp.text = "первая"
         await pilot.press("enter")
-        await pilot.pause(0.5)
-        first = scr._thinking._render_text().plain
+        await wait_until(pilot, lambda: "fail #1" in fresh_text(scr), "#1")
+        assert fresh_text(scr).endswith("└ RuntimeError: fail #1")
 
         inp.text = "вторая"
         await pilot.press("enter")
-        await pilot.pause(0.5)
-
-        assert first.endswith("└ RuntimeError: fail #1")
-        assert scr._thinking._render_text().plain.endswith(
-            "└ RuntimeError: fail #2"
-        )
+        await wait_until(pilot, lambda: "fail #2" in fresh_text(scr), "#2")
+        assert fresh_text(scr).endswith("└ RuntimeError: fail #2")
 
 
 @pytest.mark.asyncio

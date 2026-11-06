@@ -20,8 +20,11 @@ from gc_core.attachments.model import (
     wh_text,
 )
 from gc_core.attachments.texts import (
+    STUB_ATTACHED_INLINE,
     STUB_FILE_MISSING,
     STUB_MODEL_BLIND,
+    STUB_MODEL_REJECTS_NOBODY,
+    STUB_MODEL_REJECTS_VIEW,
     STUB_NOBODY,
     STUB_OUT_OF_CONTEXT,
     STUB_PROBE_FAILED,
@@ -330,12 +333,16 @@ def _project_message(
     shown: frozenset[str],
     api_mode: str,
 ) -> dict[str, Any]:
-    """Одно сообщение с вложениями: часть на вложение, затем текст сообщения.
-    ``message_key`` — ключ сообщения в ``places``."""
+    """Одно сообщение с вложениями: часть на вложение (пикселям предшествует
+    подпись), затем текст сообщения. ``message_key`` — ключ в ``places``."""
     parts: list[dict[str, Any]] = []
     for j, att in enumerate(attachments_of(message)):
         place = places.get(att.id)
         if place is not None and place[:2] == (message_key, j):
+            label = STUB_ATTACHED_INLINE.format(
+                label=att.label, wh=wh_text(att)
+            )
+            parts.append({"type": "text", "text": label})
             parts.append(
                 {
                     "type": "image_url",
@@ -367,9 +374,23 @@ def _project_message(
 def _note(att: Attachment, audience: Audience, *, file_missing: bool) -> str:
     """Записка на месте картинки (спека §5). Подсказка про ``fs_view_image`` вшита
     в тексты «вне контекста» и «модель не видит», поэтому без тула в наборе или
-    без смотрящего (``not audience.tool_visible``) уходит «видеть некому»."""
+    без смотрящего (``not audience.tool_visible``) уходит «видеть некому».
+    Модель запроса известна слепой (``audience.blind_alias``) — записка с её
+    именем: позвать тул или попросить пользователя."""
     if file_missing:
         template = STUB_FILE_MISSING
+    elif audience.blind_alias is not None:
+        template = (
+            STUB_MODEL_REJECTS_VIEW
+            if audience.tool_visible
+            else STUB_MODEL_REJECTS_NOBODY
+        )
+        return template.format(
+            label=att.label,
+            wh=wh_text(att),
+            alias=audience.blind_alias,
+            path=att.path,
+        )
     elif audience.probe_reason and not audience.tool_visible:
         return STUB_PROBE_FAILED.format(
             label=att.label, wh=wh_text(att), reason=audience.probe_reason

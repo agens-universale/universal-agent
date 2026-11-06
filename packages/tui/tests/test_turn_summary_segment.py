@@ -1,9 +1,11 @@
-"""Тихая сводка правок хода в строке-итоге индикатора (вместо CTA-блока).
+"""Тихая сводка правок хода в строке итога (вместо CTA-блока).
 
 Три слоя:
-* чистые хелперы виджета (`format_turn_summary` / `compose_status_line`);
-* проводка спадающего фронта в TraceScreen (сводка + отсутствие CTA в ленте);
-* восстановление строки-итога на resume (цифры только из meta того же хода).
+* чистые хелперы сервиса итогов (`format_turn_summary` /
+  `compose_status_line`);
+* проводка спадающего фронта в TraceScreen (сводка у свежей строки итога в
+  ленте, S10; отсутствие CTA в ленте);
+* восстановление строки итога на resume (цифры только из meta того же хода).
 """
 
 import json
@@ -12,11 +14,14 @@ import re
 import pytest
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
+from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_core.thread_store import edits_journal_path
+from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.paths import module_dir
-from gc_testkit.tui_support import tui_settings
-from gc_tui.widgets.thinking_indicator import (
-    ThinkingIndicator,
+from gc_testkit.thread_writes import turn_outcome_record
+from gc_testkit.tui_support import tui_settings, wait_until
+from gc_tui.services.trace_render import build_turn_line
+from gc_tui.services.turn_outcome import (
     compose_status_line,
     format_turn_summary,
 )
@@ -28,6 +33,27 @@ def _write_task(tmp_path, tid):
         json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8"
     )
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+
+
+def _done_turn(tmp_path, tid):
+    """Закрытый ход: реплика и запись итога ядра «за 12с»."""
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        tid,
+        [{"id": "u1", "role": "user", "content": "q"}],
+        set(),
+    )
+    outcome = TurnOutcome(
+        status="done",
+        reason=None,
+        opened_by="u1",
+        started_at="2026-10-22T11:32:00Z",
+        ended_at="",
+        duration_sec=12.0,
+        error=None,
+    )
+    turn_outcome_record(str(tmp_path), "cli", tid, outcome)
 
 
 def _append_edit(
@@ -153,6 +179,33 @@ def test_span_is_none_without_summary():
     assert span is None
 
 
+# --- строка итога без записи: исход раннера или статуса сессии -------------
+
+
+def test_turn_line_without_record_has_head_without_time():
+    line = build_turn_line(word="interrupted")
+    assert line.text.plain == "■ Прервано"
+
+
+def test_turn_line_needs_record_or_word():
+    with pytest.raises(ValueError):
+        build_turn_line()
+
+
+def test_turn_line_takes_record_or_word_not_both():
+    outcome = TurnOutcome(
+        status="done",
+        reason=None,
+        opened_by="u1",
+        started_at="2026-10-22T11:32:00Z",
+        ended_at="2026-10-22T11:32:12Z",
+        duration_sec=12.0,
+        error=None,
+    )
+    with pytest.raises(ValueError):
+        build_turn_line(outcome, word="completed")
+
+
 def test_hover_paints_the_segment_with_the_accent_of_block_buttons():
     """Ревизия 7: наведение — АКЦЕНТ, тот же, что у кнопок блоков.
 
@@ -201,41 +254,6 @@ def test_hover_speaks_the_same_color_as_every_hover_rule_of_the_base():
     assert styles == {css_variables()[token] for token in tokens}
 
 
-def test_indicator_remembers_the_span_it_rendered():
-    ind = ThinkingIndicator(
-        state="done",
-        frozen_elapsed=12,
-        clock=lambda: 0.0,
-        turn_summary=(2, 5, 6),
-    )
-    plain = ind._render_text().plain
-    start, end = ind._summary_span
-    assert plain[start:end] == "изменено 2 файла · +5 −6"
-
-
-def test_indicator_forgets_the_span_without_summary():
-    ind = ThinkingIndicator(state="done", frozen_elapsed=12, clock=lambda: 0.0)
-    ind._render_text()
-    assert ind._summary_span is None
-
-
-def test_indicator_done_without_summary_unchanged():
-    ind = ThinkingIndicator(state="done", frozen_elapsed=12, clock=lambda: 0.0)
-    assert ind._render_text().plain == "✓ Выполнил за 12с"
-
-
-def test_indicator_done_with_summary_shows_segment():
-    ind = ThinkingIndicator(
-        state="done",
-        frozen_elapsed=12,
-        clock=lambda: 0.0,
-        turn_summary=(2, 5, 6),
-    )
-    plain = ind._render_text().plain
-    assert plain.startswith("✓ Выполнил за 12с")
-    assert plain.endswith("изменено 2 файла · +5 −6")
-
-
 @pytest.mark.parametrize(
     "state, head",
     [
@@ -250,22 +268,34 @@ def test_indicator_done_with_summary_shows_segment():
         ),
     ],
 )
-def test_every_terminal_state_shows_the_edits_summary(state, head):
+def test_every_outcome_line_shows_the_edits_summary(state, head):
     """Ход, упавший или остановленный, файлы уже менял — и об этом строка говорит.
 
     Сводку сохраняли для любого исхода, а рисовали только у «Выполнил»: после
     ошибки пользователь видел одно «Ошибка», хотя именно тогда ему важнее всего
     знать, что файлы тронуты (ревью PR, находка 7)."""
-    ind = ThinkingIndicator(
-        state=state, clock=lambda: 0.0, turn_summary=(1, 1, 1)
-    )
-    plain = ind._render_text().plain
+    line = build_turn_line(word=state)
+    line.freshen((1, 1, 1), None)
+    plain = line.render().plain
     assert plain.startswith(head)
     assert plain.endswith("изменено 1 файл · +1 −1")
-    assert ind._summary_span is not None
+    assert "изменено" in line.render().plain
 
 
 # --- проводка спадающего фронта --------------------------------------------
+
+
+def _fresh(scr):
+    """Свежая строка итога последнего хода; индикатор ушёл."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    assert scr._thinking is None
+    (line,) = scr.query(TurnLine).filter(".-latest")
+    return line
+
+
+def _outcome_text(scr) -> str:
+    return _fresh(scr).render().plain
 
 
 async def _falling_edge(pilot, scr, tid):
@@ -315,10 +345,7 @@ async def test_turn_with_edits_shows_summary_from_journal(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert scr._thinking is not None
-        assert scr._thinking._render_text().plain.endswith(
-            "изменено 2 файла · +3 −1"
-        )
+        assert _outcome_text(scr).endswith("изменено 2 файла · +3 −1")
 
 
 @pytest.mark.asyncio
@@ -361,9 +388,7 @@ async def test_turn_summary_shows_net_delta_not_sum_of_records(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert scr._thinking._render_text().plain.endswith(
-            "изменено 1 файл · +133 −22"
-        )
+        assert _outcome_text(scr).endswith("изменено 1 файл · +133 −22")
 
 
 @pytest.mark.asyncio
@@ -385,7 +410,7 @@ async def test_turn_without_edits_has_no_segment(tmp_path):
         scr.attach_active_task(tid)
         scr._stamp_tui_running()  # старт нового хода → отметка журнала
         await _falling_edge(pilot, scr, tid)
-        assert "изменено" not in scr._thinking._render_text().plain
+        assert "изменено" not in _outcome_text(scr)
 
 
 @pytest.mark.asyncio
@@ -419,7 +444,7 @@ async def test_second_stamp_does_not_move_the_turn_boundary(tmp_path):
         scr._stamp_tui_running()  # страховочная сетка, уже после правки
         await _falling_edge(pilot, scr, tid)
 
-        assert "изменено" in scr._thinking._render_text().plain
+        assert "изменено" in _outcome_text(scr)
 
 
 @pytest.mark.asyncio
@@ -437,7 +462,7 @@ async def test_empty_journal_has_no_segment(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert "изменено" not in scr._thinking._render_text().plain
+        assert "изменено" not in _outcome_text(scr)
 
 
 @pytest.mark.asyncio
@@ -461,7 +486,7 @@ async def test_config_switch_off_hides_segment(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert "изменено" not in scr._thinking._render_text().plain
+        assert "изменено" not in _outcome_text(scr)
 
 
 @pytest.mark.asyncio
@@ -497,12 +522,24 @@ async def test_no_cta_block_in_trace_after_turn_with_edits(tmp_path):
 
 
 async def _turn_with_edits(pilot, tmp_path, tid):
-    """Завершённый ход с правками: индикатор показывает сегмент сводки."""
+    """Завершённый ход с правками: свежая строка показывает сегмент
+    сводки."""
     scr = pilot.app.screen
     await _falling_edge(pilot, scr, tid)
+    # Потолки хрома считаются от прошлой раскладки: досчитать до
+    # жестов, иначе тик опроса сдвинет строку под указателем.
+    scr._sync_chrome_caps()
     await pilot.pause()
-    ind = scr._thinking
-    assert ind is not None and ind._summary_span is not None
+    ind = _fresh(scr)
+    assert ind._summary_span is not None
+
+    def _on_top() -> bool:
+        region = ind.region
+        return pilot.app.screen.get_widget_at(region.x, region.y)[0] is ind
+
+    # Строка в ленте: жесты — когда раскладка улеглась и строку не
+    # накрывает бар.
+    await wait_until(pilot, _on_top, "строка итога под указателем")
     return scr, ind
 
 
@@ -555,6 +592,7 @@ def _post_gesture(pilot, widget, down_dx, up_dx=None, *, button=1):
     if up_dx is None:
         up_dx = down_dx
     y = widget.region.y
+
     for cls, dx in ((MouseDown, down_dx), (MouseUp, up_dx)):
         x = widget.region.x + dx
         pilot.app.post_message(
@@ -585,6 +623,14 @@ def _diff_screens(pilot):
     from gc_tui.screens.diff import DiffScreen
 
     return [s for s in pilot.app.screen_stack if isinstance(s, DiffScreen)]
+
+
+async def _wait_diff_screen(pilot):
+    """Запрос всплывает из строки ленты через контейнеры до экрана —
+    несколько тактов."""
+    await wait_until(
+        pilot, lambda: len(_diff_screens(pilot)) == 1, "экран изменений"
+    )
 
 
 async def _app_with_turn_edits(tmp_path, tid):
@@ -631,6 +677,7 @@ async def test_click_inside_summary_span_opens_screen_in_turn_source(tmp_path):
         # успевает выставить _pressed_in_summary — под нагрузкой клик молчит.
         # Тот же путь, что у test_single_click_still_opens_the_screen_through_the_queue.
         await _gesture(pilot, ind, start + 1)
+        await _wait_diff_screen(pilot)
 
         assert isinstance(pilot.app.screen, DiffScreen)
         assert pilot.app.screen.source == SOURCE_TURN
@@ -740,6 +787,7 @@ async def test_double_click_on_summary_opens_exactly_one_screen(tmp_path):
         _post_gesture(pilot, ind, start + 1)  # тот же пиксель → chain 2
         await pilot.pause()
         await pilot.pause()
+        await _wait_diff_screen(pilot)
 
         assert len(requests) == 1  # второй клик молчит
         assert len(_diff_screens(pilot)) == 1
@@ -793,6 +841,7 @@ async def test_single_click_still_opens_the_screen_through_the_queue(tmp_path):
         start, _end = ind._summary_span
 
         await _gesture(pilot, ind, start + 1)
+        await _wait_diff_screen(pilot)
 
         assert len(_diff_screens(pilot)) == 1
         assert pilot.app.screen.source == SOURCE_TURN
@@ -811,7 +860,7 @@ async def test_stale_request_does_not_stack_over_the_open_screen(tmp_path):
         scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
         await _gesture(pilot, ind, start + 1)
-        assert len(_diff_screens(pilot)) == 1
+        await _wait_diff_screen(pilot)
         depth = len(pilot.app.screen_stack)
 
         scr.post_message(OpenEditsScreenRequest(SOURCE_TURN))  # запоздавший
@@ -840,7 +889,7 @@ async def test_click_on_indicator_without_summary_is_inert(tmp_path):
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        ind = scr._thinking
+        ind = _fresh(scr)
         assert ind._summary_span is None
 
         await pilot.click(ind, offset=(2, 0))
@@ -856,6 +905,7 @@ async def test_resume_shows_summary_saved_with_indicator(tmp_path):
 
     tid = "turn0000000000000000000000000006a"
     _write_task(tmp_path, tid)
+    _done_turn(tmp_path, tid)
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
@@ -866,20 +916,13 @@ async def test_resume_shows_summary_saved_with_indicator(tmp_path):
         scr.attach_active_task(tid)
         scr._store.update_tui_meta(
             tid,
-            {
-                "status": "completed",
-                "last_indicator": {
-                    "kind": "done",
-                    "elapsed": 12,
-                    "edits": [2, 5, 6],
-                },
-            },
+            {"status": "completed", "last_indicator": {"edits": [2, 5, 6]}},
         )
         pilot.app.active_runner = None
         scr._destroy_thinking_indicator()
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
-        plain = scr._thinking._render_text().plain
+        plain = _outcome_text(scr)
         assert plain.startswith("✓ Выполнил за 12с")
         assert plain.endswith("изменено 2 файла · +5 −6")
 
@@ -893,6 +936,7 @@ async def test_resume_without_saved_summary_shows_no_stale_numbers(tmp_path):
 
     tid = "turn0000000000000000000000000007a"
     _write_task(tmp_path, tid)
+    _done_turn(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T0", add=9, del_=9)
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -904,16 +948,13 @@ async def test_resume_without_saved_summary_shows_no_stale_numbers(tmp_path):
         scr.attach_active_task(tid)
         scr._store.update_tui_meta(
             tid,
-            {
-                "status": "completed",
-                "last_indicator": {"kind": "done", "elapsed": 12},
-            },
+            {"status": "completed", "last_indicator": {"edits": None}},
         )
         pilot.app.active_runner = None
         scr._destroy_thinking_indicator()
-        scr._restore_terminal_indicator()
+        scr._restore_latest_turn_line()
         await pilot.pause()
-        assert scr._thinking._render_text().plain == "✓ Выполнил за 12с"
+        assert _outcome_text(scr) == "✓ Выполнил за 12с"
 
 
 def test_finished_turn_summary_survives_a_busy_snapshot_index():
@@ -941,3 +982,121 @@ def test_finished_turn_summary_survives_a_busy_snapshot_index():
     )
 
     assert TraceScreen._finished_turn_summary(screen) is None
+
+
+# --- клик по сводке свежей строки итога в ленте (S10) -----------------------
+
+
+async def _line_app_requests(line, gestures):
+    """Свежая строка со сводкой в тестовом приложении: жесты по ней и
+    запросы экрана изменений, которые до приложения дошли."""
+    from gc_tui.messages import OpenEditsScreenRequest
+    from test_turn_line_widget import LineApp
+
+    class _App(LineApp):
+        def __init__(self, line) -> None:
+            super().__init__(line)
+            self.requests: list = []
+
+        def on_open_edits_screen_request(self, message) -> None:
+            assert isinstance(message, OpenEditsScreenRequest)
+            self.requests.append(message.source)
+
+    app = _App(line)
+    async with app.run_test(size=(80, 10)) as pilot:
+        line.freshen((2, 14, 3), None)
+        await pilot.pause()
+        line.render()
+        await gestures(pilot, line)
+        await pilot.pause()
+        return app.requests
+
+
+def _fresh_line():
+    return build_turn_line(word="completed")
+
+
+def _summary_x(line) -> int:
+    """Первая клетка сегмента сводки в отрисованной строке."""
+    return line.render().plain.index("изменено")
+
+
+@pytest.mark.asyncio
+async def test_click_on_fresh_line_summary_sends_one_turn_request():
+    from gc_tui.services.edits_view import SOURCE_TURN
+
+    async def click(pilot, line):
+        await _gesture(pilot, line, _summary_x(line) + 1)
+
+    assert await _line_app_requests(_fresh_line(), click) == [SOURCE_TURN]
+
+
+@pytest.mark.asyncio
+async def test_double_click_on_fresh_line_summary_sends_one_request():
+    async def double(pilot, line):
+        x = _summary_x(line) + 1
+        _post_gesture(pilot, line, x)
+        _post_gesture(pilot, line, x)  # тот же пиксель → chain 2
+        await pilot.pause()
+
+    assert len(await _line_app_requests(_fresh_line(), double)) == 1
+
+
+@pytest.mark.asyncio
+async def test_right_click_on_fresh_line_summary_sends_nothing():
+    async def right(pilot, line):
+        await _gesture(pilot, line, _summary_x(line) + 1, button=3)
+
+    assert await _line_app_requests(_fresh_line(), right) == []
+
+
+@pytest.mark.asyncio
+async def test_selection_drag_from_head_to_summary_sends_nothing():
+    async def drag(pilot, line):
+        await _gesture(pilot, line, 0, _summary_x(line) + 1)
+
+    assert await _line_app_requests(_fresh_line(), drag) == []
+
+
+@pytest.mark.asyncio
+async def test_leaving_line_between_press_and_release_sends_nothing():
+    from textual.events import Leave
+
+    async def leave(pilot, line):
+        from textual.events import MouseDown, MouseUp
+
+        x = line.region.x + _summary_x(line) + 1
+        y = line.region.y
+        kw = dict(
+            x=x,
+            y=y,
+            delta_x=0,
+            delta_y=0,
+            button=1,
+            shift=False,
+            meta=False,
+            ctrl=False,
+            screen_x=x,
+            screen_y=y,
+        )
+        pilot.app.post_message(MouseDown(line, **kw))
+        await pilot.pause()
+        line.post_message(Leave(line))
+        await pilot.pause()
+        pilot.app.post_message(MouseUp(line, **kw))
+        await pilot.pause()
+
+    assert await _line_app_requests(_fresh_line(), leave) == []
+
+
+@pytest.mark.asyncio
+async def test_settled_line_click_sends_nothing():
+    async def settle_then_click(pilot, line):
+        x = _summary_x(line) + 1
+        line.settle()
+        await pilot.pause()
+        line.render()
+        assert "изменено" not in line.render().plain
+        await _gesture(pilot, line, x)
+
+    assert await _line_app_requests(_fresh_line(), settle_then_click) == []

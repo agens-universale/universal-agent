@@ -21,6 +21,9 @@ class _Runner:
     def is_running(self) -> bool:
         return True
 
+    def produced_output(self) -> bool:
+        return False
+
     def stop(self) -> None:
         pass
 
@@ -28,7 +31,7 @@ class _Runner:
 async def _undo(pilot):
     scr = pilot.app.screen
     pilot.app.active_runner = _Runner()
-    scr._events_since_last_user_send = 0
+    scr._last_user_message_id = "m_undo"  # отправка, агент ничего не выдал
     pilot.app.query_one("#cmdinput").text = ""
     await pilot.press("escape")
     await pilot.pause()

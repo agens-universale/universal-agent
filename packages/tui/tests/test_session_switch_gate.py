@@ -42,7 +42,6 @@ class _Runner:
     def __init__(self, tid, *, slow=False):
         self._last_target = (tid, "cli")
         self._stop_requested = False
-        self.run_started_at = None
         self.running = True
         self.slow = slow
         self.stops = 0
@@ -179,7 +178,6 @@ async def test_plain_stop_then_new_switches_at_once(tmp_path):
     """После обычного стопа поток хода ещё жив — /new не ждёт его."""
     async with _app(tmp_path).run_test() as pilot:
         scr, runner = await _run_in_a(pilot, slow=True)
-        scr._events_since_last_user_send = 1  # не откат
         scr._cmd_stop()
         await pilot.pause()
         assert runner.is_running()
@@ -292,13 +290,36 @@ async def test_new_thread_line_does_not_blink_for_old_stop(tmp_path):
     """Мигающий «■» — строка останавливаемого хода своей сессии; в
     открытой после перехода сессии итог её собственный."""
     app = _app(tmp_path)
+    from gc_core.persistence.turn_outcome import TurnOutcome
+    from gc_testkit.develop_files import append_new_thread_messages
+    from gc_testkit.thread_writes import turn_outcome_record
+
     path = tmp_path / f"meta_cli_{_B}.json"
     meta = json.loads(path.read_text(encoding="utf-8"))
-    meta["tui"] = {
-        "status": "completed",
-        "last_indicator": {"kind": "done", "elapsed": 3},
-    }
+    meta["tui"] = {"status": "completed"}
     path.write_text(json.dumps(meta), encoding="utf-8")
+    # Свой закрытый ход B: реплика и запись итога ядра «за 3с».
+    append_new_thread_messages(
+        str(tmp_path),
+        "cli",
+        _B,
+        [{"id": "u1", "role": "user", "content": "q"}],
+        set(),
+    )
+    turn_outcome_record(
+        str(tmp_path),
+        "cli",
+        _B,
+        TurnOutcome(
+            status="done",
+            reason=None,
+            opened_by="u1",
+            started_at="2026-10-22T11:32:00Z",
+            ended_at="",
+            duration_sec=3.0,
+            error=None,
+        ),
+    )
     async with app.run_test() as pilot:
         scr, runner = await _run_in_a(pilot, slow=True)
         await _pick_b(pilot, tmp_path)
@@ -307,7 +328,12 @@ async def test_new_thread_line_does_not_blink_for_old_stop(tmp_path):
         scr._poll_active()
         await pilot.pause()
         assert scr._active_task_id == _B
-        assert scr._thinking._render_text().plain == "✓ Выполнил за 3с"
+        # Итог — строкой в ленте (S10), мигания чужого стопа нет.
+        from gc_tui.widgets.turn_line import TurnLine
+
+        assert scr._thinking is None
+        (line,) = scr.query(TurnLine).filter(".-latest")
+        assert line.text.plain == "✓ Выполнил за 3с"
 
 
 @pytest.mark.asyncio
@@ -320,7 +346,6 @@ async def test_switch_forgets_undo_of_previous_send(tmp_path, path):
         scr = pilot.app.screen
         scr.attach_active_task(_A, is_resume=True)
         scr._last_user_message_id = "m_a"
-        scr._events_since_last_user_send = 0  # отправка только что в A
         await _switch(pilot, tmp_path, path)
         assert scr._active_task_id == _TARGET[path]
         assert scr._last_user_message_id is None

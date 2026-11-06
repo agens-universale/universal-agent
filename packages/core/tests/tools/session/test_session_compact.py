@@ -555,6 +555,7 @@ def _agent_loop(state, session_meta):
         persist_messages_callback=None,
         pre_backend_compaction_hook=None,
         turn_end_compaction_hook=None,
+        turn_closed_hook=None,
         force_compact_hook=None,
         get_pending_messages=None,
         check_stop=None,

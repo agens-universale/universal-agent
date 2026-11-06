@@ -15,6 +15,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from gc_core.execution.tool_call_context import bind_tool_call
 from gc_core.mcp_session_owner import current_owner
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient
 from gc_core.tools.connect_mcp.persistent_stdio import (
@@ -25,7 +26,6 @@ from gc_core.tools.connect_mcp.transport import forget_stdio_reader
 from gc_core.user_stop import (
     UserStop,
     UserStopInterrupt,
-    bind_tool_call,
     bind_user_stop,
 )
 

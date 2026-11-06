@@ -7,8 +7,9 @@
 
 Блок — следствие своей строки инструмента: стоит сразу под ней, на +2 от её
 глифа (правила `.diff-block` в styles.tcss), тело — с колонки блока. Счётчики
-`+N −M` и кнопка ❐ живут в самой строке вызова (`ToolCallRow.set_edit_counts`,
-спека P3 §10): имя файла там уже есть, второй строки-ветки блоку не нужно.
+`(+a −r)` и кнопка ❐ живут в самой строке вызова
+(`ToolCallRow.set_edit_counts`, спека P3 §10): имя файла там уже есть, второй
+строки-ветки блоку не нужно.
 
 Тело монтируется, только если в свёрнутом состоянии есть что показать: у
 компактного блока (`compact=True` — старый ход при реплее) его нет вовсе,
@@ -30,6 +31,14 @@ get_selection()->None) — иначе в буфер попадала бы его
   приёмом, что таблица в BlockPanel, — но только когда ширина реально сменилась;
 * в буфер уходят сырые хэнки записи, а не `.plain` отрендеренного текста — в
   нём номера строк, маркеры и хвостовые пробелы фоновой заливки.
+
+Под блоком ленты (`in_block=True`, спека P4 §5, §6.3, §6.4) дифф подчиняется
+блоку: своего хвоста нет, раскрытие задаёт блок (`set_expanded`), бюджет
+строк превью — модель (`set_collapsed_max_lines`), колонку — класс
+`diff-single` / `diff-member` (`set_column`); всё без перемонтирования.
+Свёрнутый — влезает целиком — весь дифф, иначе сначала изменённые строки,
+потом ближайший контекст (`render_hunks(preview=True)`); раскрытый — дифф
+журнала целиком. Строки не режутся по рядам: на узком окне превью выше.
 """
 
 from __future__ import annotations
@@ -53,6 +62,9 @@ from gc_tui.widgets.click_model import ClickModelMixin
 from gc_tui.widgets.no_select import NoSelectStatic
 
 COLLAPSE_LABEL = "свернуть"
+#: Колонка номеров диффа под блоком ленты: номер прижат вправо к третьей
+#: клетке колонки диффа (спека P4 §6.2, сетка §3.1).
+_BLOCK_GUTTER = 3
 
 
 class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
@@ -89,6 +101,8 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         event_no: int,
         collapsed_max_lines: int,
         compact: bool = False,
+        in_block: bool = False,
+        column: Optional[str] = None,
     ) -> None:
         super().__init__(classes="diff-block")
         self._record = record
@@ -97,7 +111,11 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         # совсем, только шапка и хвост-разворот. Выражено нулевым порогом
         # свёртки: движок при max_lines=0 отдаёт пустое тело и честный total,
         # так что и хвост «… ещё N строк», и разворот работают как обычно.
+        self._compact = compact
         self._collapsed_max_lines = 0 if compact else collapsed_max_lines
+        self._in_block = in_block
+        if column is not None:
+            self.set_column(column)
         self._expanded = False
         self._cache: dict[
             tuple[str, str, Optional[int], Optional[int]], DiffRender
@@ -116,6 +134,8 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         event_no: int,
         collapsed_max_lines: int,
         compact: bool = False,
+        in_block: bool = False,
+        column: Optional[str] = None,
     ) -> DiffBlock:
         """Блок по записи журнала правок."""
         return cls(
@@ -123,7 +143,39 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
             event_no=event_no,
             collapsed_max_lines=collapsed_max_lines,
             compact=compact,
+            in_block=in_block,
+            column=column,
         )
+
+    # --- под блоком ленты --------------------------------------------------
+
+    @property
+    def in_block(self) -> bool:
+        """Дифф под блоком ленты: без своего хвоста."""
+        return self._in_block
+
+    def set_collapsed_max_lines(self, n: int) -> None:
+        """Новый бюджет строк свёрнутого тела; тот же `n` — без перерасчёта.
+        Компактный блок держит тело пустым до раскрытия."""
+        n = 0 if self._compact else n
+        if n == self._collapsed_max_lines:
+            return
+        self._collapsed_max_lines = n
+        if self.is_mounted:
+            self._sync_body()
+
+    def set_column(self, column: str) -> None:
+        """Колонка под блоком: `single` (2) или `member` (4) от глифа."""
+        self.set_class(column == "single", "diff-single")
+        self.set_class(column == "member", "diff-member")
+
+    def set_expanded(self, expanded: bool) -> None:
+        """Раскрытие задаёт блок: весь дифф или превью."""
+        if expanded == self._expanded:
+            return
+        self._expanded = expanded
+        if self.is_mounted:
+            self._sync_body()
 
     # --- сборка ------------------------------------------------------------
 
@@ -133,7 +185,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
             return  # binary / delete / no_diff — пустой блок, без рамки
         if collapsed.shown_lines:
             yield Static(collapsed.text, classes="block-body", markup=False)
-        if collapsed.truncated:
+        if collapsed.truncated and not self._in_block:
             yield NoSelectStatic(
                 self._tail_label(),
                 classes="diff-more trace-action",
@@ -183,6 +235,9 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
                 max_lines=max_lines,
                 fill_width=fill,
                 wrap=True,
+                min_gutter=_BLOCK_GUTTER if self._in_block else 1,
+                logical=self._in_block,
+                preview=self._in_block and not expanded,
             )
             self._cache[key] = cached
         return cached
@@ -201,11 +256,13 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
         elif body:
             body.first(Static).remove()
         elif render.shown_lines:
+            tail = self.query(".diff-more")
             self.mount(
                 Static(render.text, classes="block-body", markup=False),
-                before=self.query_one(".diff-more"),
+                before=tail.first() if tail else None,
             )
-        self._sync_tail()
+        if not self._in_block:
+            self._sync_tail()
 
     def _sync_tail(self) -> None:
         """Хвост «… ещё N строк» — под текущую ширину.

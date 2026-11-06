@@ -15,6 +15,7 @@ from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.execution.progress import SubagentProgressEvent
 
 from gc_tui.models import ResultOutcome
+from gc_tui.services.subagent_sidecar_mapper import nested_call_row
 from gc_tui.services.trace_mapper import classify_stop
 from gc_tui.services.trace_render import tool_caption
 
@@ -33,28 +34,16 @@ def _finish_facts(
     return ok, stop[1], stop[0]
 
 
-def reconcile_batch_phases(rows: Sequence[Any]) -> None:
-    """Среди незавершённых строк batch: первая → active, остальные → waiting.
-
-    Одинаково для любых тулов (не special-case subagent). rows — в порядке
-    появления в batch (insertion order _active_calls).
-    """
-    pending = [
-        r
-        for r in rows
-        if getattr(r, "_result", None) is None
-        and not getattr(r, "_interrupted", False)
-    ]
-    if not pending:
-        return
-    first, *rest = pending
-    set_active = getattr(first, "set_active", None)
-    if callable(set_active):
-        set_active()
-    for row in rest:
-        set_waiting = getattr(row, "set_waiting", None)
-        if callable(set_waiting):
-            set_waiting()
+def first_pending(rows: Sequence[Any]) -> Optional[Any]:
+    """Батч исполняется по порядку: первая незавершённая строка — та, что
+    стартовала; остальные ждут. Одинаково для любых тулов. ``rows`` — в
+    порядке появления в батче (порядок вставки `_active_calls`)."""
+    for row in rows:
+        if getattr(row, "_result", None) is None and not getattr(
+            row, "_interrupted", False
+        ):
+            return row
+    return None
 
 
 class SubagentProgressConsumer:
@@ -98,7 +87,7 @@ class SubagentProgressConsumer:
                         todo_items=ev.todo_items,
                     )
                     routed_todo = True
-                if not routed_todo:
+                if not routed_todo and nested_call_row(ev.tool_name or ""):
                     mount_nested_tool(
                         parent_call_id=pid,
                         tool_name=ev.tool_name or "<tool>",
@@ -106,6 +95,7 @@ class SubagentProgressConsumer:
                         args_summary=ev.args_summary or "",
                         step=ev.step,
                         max_steps=ev.max_steps,
+                        command=ev.command,
                     )
                 parent_heartbeat(
                     parent_call_id=pid,
@@ -126,6 +116,7 @@ class SubagentProgressConsumer:
                     outcome=outcome,
                     step=ev.step,
                     max_steps=ev.max_steps,
+                    output=ev.output,
                 )
                 parent_heartbeat(
                     parent_call_id=pid,

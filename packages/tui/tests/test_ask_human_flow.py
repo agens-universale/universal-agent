@@ -42,7 +42,7 @@ async def test_ask_human_banner_appears_and_disappears(tmp_path):
     fake = StubExecutor(
         threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow"
     )
-    fake.run(["используй скилл skill-creator"], thread_id=tid)
+    fake.record(["используй скилл skill-creator"], thread_id=tid)
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -355,7 +355,7 @@ async def test_ask_human_esc_clean_stops(tmp_path):
     fake = StubExecutor(
         threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow"
     )
-    fake.run(["используй скилл skill-creator"], thread_id=tid)
+    fake.record(["используй скилл skill-creator"], thread_id=tid)
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -401,7 +401,7 @@ async def test_ask_human_esc_closes_open_overlay_first(tmp_path):
     fake = StubExecutor(
         threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow"
     )
-    fake.run(["используй скилл skill-creator"], thread_id=tid)
+    fake.record(["используй скилл skill-creator"], thread_id=tid)
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -454,7 +454,7 @@ async def test_ask_human_esc_with_text_clears_input_first(tmp_path):
     fake = StubExecutor(
         threads_dir=str(tmp_path), system="cli", scenario="ask_human_flow"
     )
-    fake.run(["используй скилл skill-creator"], thread_id=tid)
+    fake.record(["используй скилл skill-creator"], thread_id=tid)
 
     app = TuiApp(
         threads_dir=str(tmp_path),

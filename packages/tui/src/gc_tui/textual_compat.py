@@ -4,28 +4,46 @@
 версии `PATCHED_TEXTUAL`: на иной патч не ставится, протяжка ниже ленты
 не работает, в журнал уходит предупреждение, страж
 `test_textual_compat.py` падает с напоминанием пересмотреть модуль.
+Исключение — `mounted` и `paint_after_mount`: только публичный API, к
+версии не привязаны.
 
 Ошибка Textual 8.2.8 (апстрим #6639): `SelectStart.pointer_start_offset`
 прибавляет сдвиг прокрутки контейнера вместо вычитания — при прокрутке во
 время выделения его начало уезжает. Стенды — `test_textual_compat.py`
 (перенос `repro.py` и `repro2.py` из решений захода TUI 2026-10-20).
+
+Ошибки якоря Textual 8.2.8: раскладка ставит якорному контейнеру
+`scroll_y` = низ контента − высота окна через `set_reactive`, мимо
+валидатора, и высоту берёт из прошлой раскладки (`container_size`
+обновляется после). Лента сменила высоту (бар, баннер, список у ввода) —
+низ уезжает на разницу до следующего кадра; контент ниже окна — прокрутка
+уходит в минус, контент прижат к низу окна. `AnchoredScroll` считает
+якорную прокрутку от высоты той же раскладки, не ниже нуля; на иной
+версии Textual — обычный якорь.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 
 import textual
 from textual import selection
-from textual.geometry import Offset
+from textual.containers import VerticalScroll
+from textual.geometry import Offset, Size
 from textual.screen import Screen
-from textual.widget import Widget
+from textual.widget import AwaitMount, Widget
 
 PATCHED_TEXTUAL = "8.2.8"
 
 # Потолок скорости протяжки ниже ленты (доля скорости Textual).
 _MAX_BELOW_SPEED = 2.0
+# Сколько экран ждёт монтирования строки, прежде чем рисовать без неё:
+# страховка от строки, снятой до монтирования, — экран не замирает.
+_PAINT_HOLD_LIMIT = 1.0
+# Ждущие монтирования задачи — ссылка, чтобы их не собрал сборщик.
+_PAINT_HOLDS: set[asyncio.Task] = set()
 
 _log = logging.getLogger(__name__)
 
@@ -65,9 +83,87 @@ def apply_textual_patches() -> bool:
     return True
 
 
+class AnchoredScroll(VerticalScroll):
+    """Прокрутка с якорем Textual и поправкой двух его ошибок 8.2.8:
+    якорная прокрутка считается от высоты окна прошлой раскладки (лента
+    сменила высоту — низ уезжает на разницу до следующего кадра) и ставится
+    мимо валидатора (контент ниже окна — прокрутка в минус). Здесь — от
+    высоты той же раскладки, не ниже нуля. Только для `PATCHED_TEXTUAL`:
+    на иной версии — обычный якорь Textual."""
+
+    _anchor_y = 0
+
+    def arrange(self, size: Size, optimal: bool = False):
+        result = super().arrange(size, optimal)
+        if not optimal and textual_is_patched_version():
+            bottom = result.spatial_map.total_region.bottom
+            self._anchor_y = max(0, bottom - size.height)
+        return result
+
+    def set_reactive(self, reactive, value) -> None:
+        scroll = reactive in (Widget.scroll_y, Widget.scroll_target_y)
+        # Версия — до приватного состояния якоря: на иной его может не быть.
+        if scroll and textual_is_patched_version() and self._anchor_held():
+            value = self._anchor_y
+        super().set_reactive(reactive, value)
+
+    def _anchor_held(self) -> bool:
+        return self._anchored and not self._anchor_released
+
+
+async def mounted(parent: Widget, widgets: list[Widget]) -> None:
+    """Дождаться монтирования детей, уже отданных `parent.mount()`."""
+    await AwaitMount(parent, widgets)
+
+
+def paint_after_mount(widget: Widget) -> None:
+    """Экран не рисует, пока ``widget``, уже отданный `mount()`, не
+    смонтирован (его дети собираются следующим тактом): перемены соседей,
+    сделанные до того, ложатся одним кадром с ним. Уже смонтированный или
+    без родителя — ничего не ждёт."""
+    parent = widget.parent
+    if widget.is_mounted or not isinstance(parent, Widget):
+        return
+    batch = widget.app.batch_update()
+
+    async def release() -> None:
+        try:
+            await asyncio.wait_for(
+                mounted(parent, [widget]), _PAINT_HOLD_LIMIT
+            )
+        except TimeoutError:
+            _log.debug("строка не смонтирована за %s с", _PAINT_HOLD_LIMIT)
+        finally:
+            batch.__exit__(None, None, None)
+
+    # Сначала путь отпускания, потом удержание: задача стартует не раньше
+    # следующего такта, а не заведённая задача экран не держит.
+    task = asyncio.get_running_loop().create_task(release())
+    batch.__enter__()
+    _PAINT_HOLDS.add(task)
+    task.add_done_callback(_PAINT_HOLDS.discard)
+
+
+def is_being_removed(widget: Widget) -> bool:
+    """Виджет снят `remove()`, но ещё в DOM до следующего такта: `query()`
+    его находит."""
+    return bool(getattr(widget, "_pruning", False))
+
+
 def is_selecting(screen: Screen) -> bool:
     """Идёт ли выделение мышью на экране."""
     return bool(getattr(screen, "_selecting", False))
+
+
+def watch_selecting(screen: Screen, callback: Callable[[bool], None]) -> bool:
+    """Звать `callback` на начало и конец выделения мышью на экране.
+
+    Только для `PATCHED_TEXTUAL`: на иной версии не подписывается
+    (`False`)."""
+    if not textual_is_patched_version():
+        return False
+    screen.watch(screen, "_selecting", callback)
+    return True
 
 
 def stop_selecting(screen: Screen) -> None:

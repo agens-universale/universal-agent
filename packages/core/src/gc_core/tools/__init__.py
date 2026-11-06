@@ -14,6 +14,7 @@ from gc_core.execution.contracts import (
     ToolResult,
 )
 from gc_core.execution.reducers import apply_state_delta, tool_state_view
+from gc_core.execution.tool_call_context import bind_tool_call
 from gc_core.execution.tool_schema import apply_openai_strict_parameters
 from gc_core.security.call_scope import call_scope, current_call
 from gc_core.security.permission_mode import OFFERED_IN_MODE_KEY
@@ -37,7 +38,6 @@ from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.user_stop import (
     UserStopInterrupt,
     await_cancelled,
-    bind_tool_call,
     current_user_stop,
 )
 

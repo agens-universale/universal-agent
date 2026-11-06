@@ -1,14 +1,12 @@
 """SessionsScreen: карточки (2 строки), пагинация, фильтр веток, поиск, rename, preview."""
 
-from gc_testkit.develop_files import meta_of
-
-from gc_testkit.tui_support import tui_settings
 import json
 from datetime import UTC
 from pathlib import Path
 
 import pytest
-from gc_testkit.develop_files import append_new_thread_messages
+from gc_testkit.develop_files import append_new_thread_messages, meta_of
+from gc_testkit.tui_support import tui_settings
 from gc_tui.services.stores.file_store import FileTaskStore
 
 

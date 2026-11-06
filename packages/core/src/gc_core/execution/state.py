@@ -134,6 +134,9 @@ STATE_FIELDS = ROUTING_FIELDS + (
 #: §9) и в снимок не идут — после восстановления берут эти умолчания.
 TRANSIENT_STATE_DEFAULTS = {
     "closing_reply": str,
+    # «Прогон что-то выдал» — для отката отправки во фронтенде; живёт в
+    # памяти прогона, снимок его не несёт.
+    "produced_output": bool,
     "vision_audience": lambda: None,
     "vision_live_ids": frozenset,
     "vision_request_limit": lambda: None,
@@ -142,6 +145,10 @@ TRANSIENT_STATE_DEFAULTS = {
     # Вопрос, на котором ход приостановлен (ask_human_suspends): его пишет
     # тул в ядре и уносит запись сессии; ребёнку и в activity не нужен.
     "pending_question": lambda: None,
+    # Ход, приостановленный на вопросе (снимок для записи сессии), и ход,
+    # продолженный этим прогоном (перенесённый снимок).
+    "suspended_turn": lambda: None,
+    "resumed_turn": lambda: None,
 }
 
 

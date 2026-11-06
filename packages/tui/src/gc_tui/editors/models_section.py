@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gc_core.config_modules.backend import endpoint_path_hint
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.model_registry import (
     LEVEL_FALLBACK,
@@ -42,6 +43,7 @@ from gc_core.config_modules.model_registry import (
     resolve_entry_address,
 )
 from gc_core.config_modules.model_sections_validation import SUBAGENT_NAMES
+from gc_core.settings import settings_of
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -300,6 +302,11 @@ _NOTICE_REMOVE_RACED = "✗ не удалено: записи «{alias}» бол
 # честного no-op секции (`settings._save_legacy_model`, Enter без правок).
 _NOTICE_NO_CHANGE = "ничего не изменено"
 _NOTICE_ENTRY_SAVED = "Запись «{alias}» сохранена — {file}"
+# Адрес записи без пути эндпоинта режима: сохраняется (у прокси бывает свой
+# путь), но 404 по нему выглядел бы недоступной моделью.
+_ENDPOINT_PATH_HINT = (
+    "адрес обычно оканчивается путём эндпоинта — проверьте: {full}"
+)
 # Секрет-политика проектных профилей (docs/configuration.md, спека §3.5): файл
 # лежит в РЕПОЗИТОРИИ, и литеральный токен в нём — секрет, уезжающий в git.
 # Текст — ДОСЛОВНО тот, что печатает загрузчик (`profiles.load_profile_document`,
@@ -2512,7 +2519,13 @@ class ModelsSectionEditor(Vertical):
         self._reload()
         self._cursor_to(alias)
         self._refresh_rows()
-        if not self._entry_address(alias):
+        path_hint = self._endpoint_path_hint(alias)
+        if path_hint is not None:
+            self._warn_literal_tokens(
+                f"⚠ запись «{alias}» сохранена в {Path(self._target).name}, "
+                + _ENDPOINT_PATH_HINT.format(full=path_hint)
+            )
+        elif not self._entry_address(alias):
             # Оба предупреждения (адрес и литеральный токен) едут каналом `ok=None`
             # — ОДНИМ виджетом (`_singleton`), и второй вызов подряд его не
             # дополняет, а замещает. Склеены здесь, а не по два отдельных вызова
@@ -2528,6 +2541,28 @@ class ModelsSectionEditor(Vertical):
                 ok=True,
             )
             self._warn_literal_tokens()
+
+    def _endpoint_path_hint(self, alias: str) -> str | None:
+        """Полный адрес, если СВОЙ адрес записи не оканчивается путём
+        эндпоинта режима бэкенда (`endpoint_path_hint`); иначе None."""
+        api_mode = self._api_mode()
+        if api_mode is None:
+            return None
+        return endpoint_path_hint(
+            entry_address(self._entry(alias), ""), api_mode
+        )
+
+    def _api_mode(self) -> str | None:
+        """Режим API, которым пойдут записи цели. Профиль — верхний файловый
+        слой своего стека: его `backend.api_mode` решает, если задан; иначе —
+        конфиг стека (`global_config`)."""
+        backend = self._document.get("backend") if self._is_profile else None
+        own = backend.get("api_mode") if isinstance(backend, dict) else None
+        if own:
+            return str(own).strip().lower()
+        if self._global_config is None:
+            return None
+        return settings_of(self._global_config).backend.api_mode
 
     def _warn_literal_tokens(self, pending: str | None = None) -> None:
         """Предупреждение секрет-политики — рядом с итогом записи и по ИТОГОВОМУ

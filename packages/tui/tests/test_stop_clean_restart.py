@@ -1,12 +1,14 @@
 """TraceScreen._cmd_stop — индикатор → «■ Отменено» + replace runner для clean restart."""
 
+import json
+
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_cmd_stop_sets_indicator_cancelled():
-    """После _cmd_stop (при живом индикаторе) индикатор переходит в состояние
-    «cancelled» («■ Отменено») — отдельная [stopped]-строка в трейсе не добавляется."""
+async def test_cmd_stop_of_ended_run_drops_indicator(tmp_path):
+    """После _cmd_stop хода, который тут же кончился, индикатора нет: исход
+    — строкой итога в ленте (S10 §3.3), не состоянием индикатора."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
@@ -20,10 +22,17 @@ async def test_cmd_stop_sets_indicator_cancelled():
         def stop(self) -> None:
             self.running = False  # ход кончился сразу: итог ровный
 
-    async with TuiApp().run_test() as pilot:
+    async with TuiApp(threads_dir=str(tmp_path)).run_test() as pilot:
         scr = pilot.app.screen
-        scr._events_since_last_user_send = 5  # не cancel-with-undo
+        # Ход открытого треда: строка итога встаёт в его ленте.
+        tid = "stop0000000000000000000000000001"
+        (tmp_path / f"meta_cli_{tid}.json").write_text(
+            json.dumps({"thread_id": tid}), encoding="utf-8"
+        )
+        (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+        scr.attach_active_task(tid, is_resume=True)
         pilot.app.active_runner = _FakeRunner()
+        scr._prepare_for_new_run()
         # Смонтировать индикатор
         scr._show_thinking_indicator()
         await pilot.pause()
@@ -31,10 +40,12 @@ async def test_cmd_stop_sets_indicator_cancelled():
 
         scr._cmd_stop()
         await pilot.pause()
-        # Индикатор остаётся, но в терминальном состоянии «cancelled».
-        assert len(scr.query(ThinkingIndicator)) == 1
-        ind = scr.query_one(ThinkingIndicator)
-        assert ind._state == "cancelled"
+        assert len(scr.query(ThinkingIndicator)) == 0
+        from gc_tui.widgets.turn_line import TurnLine
+
+        (line,) = scr.query_one("#trace").query(TurnLine)
+        assert line.text.plain == "■ Отменено"
+        assert line.display
 
 
 @pytest.mark.asyncio
@@ -54,7 +65,6 @@ async def test_cmd_stop_no_stopped_trace_row_when_run_cancelled():
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
-        scr._events_since_last_user_send = 5
         pilot.app.active_runner = _FakeRunner()
         scr._cmd_stop()
         await pilot.pause()
@@ -84,7 +94,6 @@ async def test_cmd_stop_marks_runner_stopped_and_clears_active():
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
-        scr._events_since_last_user_send = 5
         fake = _FakeRunner()
         pilot.app.active_runner = fake
         scr._cmd_stop()

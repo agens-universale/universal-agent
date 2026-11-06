@@ -12,10 +12,12 @@ from pathlib import Path
 import pytest
 
 from gc_tui.services.plural import (
+    errors_word,
     files_word,
     files_word_genitive,
     lines_word,
     plural_form,
+    refusals_word,
 )
 from gc_testkit.paths import module_dir
 
@@ -80,6 +82,22 @@ def test_files_word_genitive(n, word):
 )
 def test_lines_word(n, word):
     assert lines_word(n) == word
+
+
+@pytest.mark.parametrize(
+    "n,word",
+    [(1, "ошибка"), (2, "ошибки"), (5, "ошибок"), (11, "ошибок")],
+)
+def test_errors_word(n, word):
+    assert errors_word(n) == word
+
+
+@pytest.mark.parametrize(
+    "n,word",
+    [(1, "отказ"), (2, "отказа"), (5, "отказов"), (21, "отказ")],
+)
+def test_refusals_word(n, word):
+    assert refusals_word(n) == word
 
 
 @pytest.mark.parametrize(

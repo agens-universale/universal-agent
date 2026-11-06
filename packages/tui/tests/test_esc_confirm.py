@@ -176,7 +176,6 @@ async def test_esc_during_active_run_with_events_shows_stop_hint():
 
     async with TuiApp().run_test() as pilot:
         pilot.app.active_runner = _FakeRunner()
-        pilot.app.screen._events_since_last_user_send = 3
         pilot.app.query_one("#cmdinput").text = ""
         await pilot.press("escape")
         await pilot.pause()
@@ -203,7 +202,6 @@ async def test_esc_during_run_with_text_shows_clear_hint_not_stop():
 
     async with TuiApp().run_test() as pilot:
         pilot.app.active_runner = _FakeRunner()
-        pilot.app.screen._events_since_last_user_send = 3
         pilot.app.query_one("#cmdinput").text = "недописанное сообщение"
         await pilot.press("escape")
         await pilot.pause()
@@ -231,13 +229,16 @@ async def test_esc_during_run_zero_events_with_text_clears_first():
         def is_running(self) -> bool:
             return True
 
+        def produced_output(self) -> bool:
+            return False
+
         def stop(self) -> None:
             pass
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
-        scr._events_since_last_user_send = 0
+        scr._last_user_message_id = "m_undo"
         scr._mount_user_reply("previous", state="pending")
         pilot.app.query_one("#cmdinput").text = "новый текст"
         await pilot.press("escape")
@@ -256,13 +257,16 @@ async def test_esc_during_active_run_zero_events_cancels_immediately():
         def is_running(self) -> bool:
             return True
 
+        def produced_output(self) -> bool:
+            return False
+
         def stop(self) -> None:
             pass
 
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         pilot.app.active_runner = _FakeRunner()
-        scr._events_since_last_user_send = 0
+        scr._last_user_message_id = "m_undo"
         scr._mount_user_reply("previous", state="pending")
         pilot.app.query_one("#cmdinput").text = ""
         await pilot.press("escape")

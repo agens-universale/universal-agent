@@ -35,6 +35,8 @@ from gc_core.constants.tool_names import (
     FS_FILE_INFO_NAME,
     FS_FIND_IN_FILES_NAME,
     FS_LIST_FILES_NAME,
+    PROJECT_MEMORY_TOOL_NAME,
+    SESSION_MEMORY_TOOL_NAME,
     SESSION_TODO_TOOL_NAME,
     SKILLS_READ_ASSET_NAME,
     SKILLS_READ_REFERENCE_NAME,
@@ -61,6 +63,15 @@ ProgressKind = Literal[
 
 _ERROR_BRIEF_MAX = 120
 _ARGS_SUMMARY_MAX = 80
+# Потолок сырого текста команды в событии начала вложенного вызова: длиннее —
+# поле пустое, и потребитель читает команду из sidecar-записи вызова.
+TOOL_START_COMMAND_MAX = 4_096
+# Потолок сырого вывода в событии конца вложенного вызова: длиннее — поле
+# пустое, и потребитель читает вывод из sidecar-записи результата. Обрезки
+# нет: разбор конверта вывода требует целой строки.
+TOOL_END_OUTPUT_MAX = 16_384
+# Аргументы Run-тула, которые несут исполняемый текст (команда, код).
+_RAW_COMMAND_ARGS = ("command", "code")
 
 # Приставка `cd <каталог> && ` / `cd <каталог>; ` в начале команды: каталог
 # в двойных, одинарных кавычках или без них.
@@ -93,6 +104,16 @@ class SubagentProgressEvent:
     # как есть и скалярные поля ``error``. Отказ или ошибка — решает потребитель.
     result_status: Optional[str] = None
     result_error: Optional[Dict[str, str]] = None
+    # Сырой текст команды Run-тула (``tool_start``) — целиком, если не длиннее
+    # ``TOOL_START_COMMAND_MAX``; иначе ``None``, и команда читается из
+    # sidecar-записи вызова (она пишется до события). Внутрипроцессное поле:
+    # не сохраняется и в модель не уходит.
+    command: Optional[str] = None
+    # Сырой вывод тула (``tool_end``) — целиком, если не длиннее
+    # ``TOOL_END_OUTPUT_MAX``; иначе ``None``, и вывод читается из
+    # sidecar-записи результата (она пишется до события). Внутрипроцессное
+    # поле: не сохраняется и в модель не уходит.
+    output: Optional[str] = None
 
 
 @runtime_checkable
@@ -225,13 +246,17 @@ def tool_args_summary(
     *,
     limit: int = _ARGS_SUMMARY_MAX,
     root: Optional[str] = None,
+    nested: bool = False,
 ) -> str:
     """Однострочная сводка аргументов вызова тула (спека P1a §2.5).
 
-    Главный аргумент — по таблице отображения ядра; его нет — до трёх пар
-    ``key=preview``. Длина сводки не превышает ``limit``. ``root`` — корень
-    проекта: путь тула ядра показывается от него (``display_path``),
-    у команды снята приставка ``cd <корень> &&``; без корня — как записаны.
+    Главный аргумент — по таблице отображения ядра; его нет — у тула ядра
+    пусто, у MCP и неизвестного — до трёх пар ``key=preview``. Длина
+    сводки не превышает ``limit``. ``root`` — корень проекта: путь тула
+    ядра показывается от него (``display_path``), у команды снята
+    приставка ``cd <корень> &&``; без корня — как записаны.
+    ``nested`` — вызов субагента: таблица — с вложенным контекстом
+    (``tool_display(..., nested=True)``).
     Только показ: аргументы вызова не меняются."""
     data: Any = arguments
     if isinstance(arguments, str):
@@ -244,14 +269,28 @@ def tool_args_summary(
         items = todo_items_from_arguments(data)
         if items is not None:
             return _todo_args_summary(items, limit=limit)
-        # битые аргументы — генерик-превью, «чек-лист очищен» не врём
+        # битые аргументы — общая ветка, «чек-лист очищен» не врём
     if not isinstance(data, dict) or not data:
         return ""
     if root is not None and name in TOOL_DISPLAY:
         data = _rooted_command(name, _rooted_path(data, root), root)
-    primary = _primary_summary(name, data, limit) if name else None
+    primary = _primary_summary(name, data, limit, nested) if name else None
     if primary:
         return _clip(primary, limit)
+    return _fallback_summary(name, data, limit)
+
+
+#: Тулы вне таблицы отображения: их сводка без главного — пары.
+_UNLISTED = frozenset({DisplayCategory.MCP, DisplayCategory.CALLED})
+
+
+def _fallback_summary(
+    name: Optional[str], data: Dict[str, Any], limit: int
+) -> str:
+    """Главного аргумента нет: пары ``key=preview`` — только у тула, которого
+    таблица не знает (MCP, неизвестный); у тула ядра сводка пуста."""
+    if name and tool_display(name).category not in _UNLISTED:
+        return ""
     return _pairs_summary(data, limit)
 
 
@@ -276,12 +315,47 @@ def _rooted_command(
         command, str
     ):
         return data
-    flat = command.strip()
-    match = _CD_PREFIX.match(flat)
-    rest = flat[match.end() :] if match else ""
-    if not rest or not _same_dir(match.group("dq", "sq", "bare"), root):
+    rest = strip_root_cd(command, root)
+    if rest == command:
         return data
     return {**data, "command": rest}
+
+
+def strip_root_cd(command: str, root: str) -> str:
+    """Команда без `cd <корень проекта> &&` / `;` / перевода строки в начале.
+
+    Переход в любой другой каталог остаётся: он что-то говорит о команде.
+    Переводы строк и длину остатка не трогает — им пользуются и однострочная
+    сводка, и построчный показ команды. Снимать нечего — та же строка."""
+    match = _CD_PREFIX.match(command.lstrip())
+    if match is None:
+        return command
+    rest = command.lstrip()[match.end() :]
+    if not rest.strip() or not _same_dir(
+        match.group("dq", "sq", "bare"), root
+    ):
+        return command
+    return rest
+
+
+def run_command_text(
+    wire_name: Optional[str], arguments: Any
+) -> Optional[str]:
+    """Сырой исполняемый текст Run-тула (команда, код); у прочих — ``None``."""
+    name = LEGACY_TOOL_NAMES.get(wire_name, wire_name) if wire_name else None
+    shown = TOOL_DISPLAY.get(name) if name else None
+    if shown is None or shown.category is not DisplayCategory.RUN:
+        return None
+    if shown.primary_arg not in _RAW_COMMAND_ARGS:
+        return None
+    data = arguments
+    if isinstance(arguments, str):
+        try:
+            data = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError:
+            return None
+    value = data.get(shown.primary_arg) if isinstance(data, dict) else None
+    return value if isinstance(value, str) else None
 
 
 def _same_dir(groups: tuple[Optional[str], ...], root: str) -> bool:
@@ -299,9 +373,11 @@ def _clip(text: str, limit: int) -> str:
     return flat[: max(limit - 1, 0)].rstrip() + "…"
 
 
-def _primary_summary(name: str, data: Dict[str, Any], limit: int) -> str:
+def _primary_summary(
+    name: str, data: Dict[str, Any], limit: int, nested: bool
+) -> str:
     """Сводка по главному аргументу; пустая строка — главного нет."""
-    shown = tool_display(name)
+    shown = tool_display(name, nested=nested)
     if shown.category is DisplayCategory.MCP:
         return _first_scalar(data)
     key = shown.primary_arg
@@ -355,7 +431,21 @@ def _skill_file(skill_id: str, data: Dict[str, Any], _limit: int) -> str:
     return skill_id
 
 
+def _session_memory(action: str, data: Dict[str, Any], _limit: int) -> str:
+    """`действие регистр`; у `list` регистра нет (тул его игнорирует)."""
+    register = data.get("register")
+    if action == "list" or not isinstance(register, str):
+        return action
+    return f"{action} {register}".strip()
+
+
+def _project_memory(action: str, _data: Dict[str, Any], _limit: int) -> str:
+    return f"{action} project"
+
+
 _PRIMARY_RULES: Dict[str, Callable[[str, Dict[str, Any], int], str]] = {
+    SESSION_MEMORY_TOOL_NAME: _session_memory,
+    PROJECT_MEMORY_TOOL_NAME: _project_memory,
     FS_FIND_IN_FILES_NAME: _find_in_files,
     FS_LIST_FILES_NAME: _list_files,
     FS_FILE_INFO_NAME: _file_info,
@@ -490,8 +580,14 @@ def emit_progress(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     attachments: Optional[List[Dict[str, Any]]] = None,
     result_status: Optional[str] = None,
     result_error: Optional[Dict[str, str]] = None,
+    command: Optional[str] = None,
+    output: Optional[str] = None,
 ) -> None:
-    """Emit a progress event when running as a child with a sink; else no-op."""
+    """Emit a progress event when running as a child with a sink; else no-op.
+
+    ``command`` и ``output`` сверх своих потолков (``TOOL_START_COMMAND_MAX``,
+    ``TOOL_END_OUTPUT_MAX``) не обрезаются, а уходят ``None``: потребитель
+    берёт их из sidecar."""
     if not child_progress_enabled(ctx):
         return
     sink = ctx.subagent_progress_sink
@@ -516,8 +612,17 @@ def emit_progress(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
             attachments=attachments,
             result_status=result_status,
             result_error=result_error,
+            command=_within(command, TOOL_START_COMMAND_MAX),
+            output=_within(output, TOOL_END_OUTPUT_MAX),
         )
     )
+
+
+def _within(text: Optional[str], limit: int) -> Optional[str]:
+    """Текст целиком, если не длиннее потолка; иначе ``None``."""
+    if text is None or len(text) > limit:
+        return None
+    return text
 
 
 __all__ = [
@@ -533,5 +638,7 @@ __all__ = [
     "parse_tool_result_status",
     "resolve_progress_sink",
     "result_facts",
+    "run_command_text",
+    "strip_root_cd",
     "tool_args_summary",
 ]

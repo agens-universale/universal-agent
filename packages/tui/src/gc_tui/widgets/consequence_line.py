@@ -17,6 +17,10 @@ from textual.widgets import Static
 from gc_tui.widgets.no_select import NoSelectStatic
 
 
+def _look(body: Text) -> tuple:
+    return (body.plain, str(body.style), tuple(body.spans))
+
+
 class ConsequenceLine(Horizontal):
     """Одна строка `└ тело`. Отступ и `└ ` в выделение не входят; тело —
     по `selectable` (у реплики пользователя следствие в копию не идёт)."""
@@ -67,9 +71,20 @@ class ConsequenceSlot(Vertical):
         self._bodies: list[Text] = []
         self._composed = False
 
+    def set_level(self, level: int) -> None:
+        """Уровень `└`: у члена блока — под началом его текста."""
+        if level == self._level:
+            return
+        self._level = level
+        if self._composed:
+            self.remove_children()
+            self.mount_all(self._lines())
+
     def set_bodies(self, bodies: Iterable[Text]) -> None:
         bodies = list(bodies)
-        if bodies == self._bodies:
+        # Сравнение `Text` не видит базового стиля: тот же текст другим
+        # цветом (причина отказа от модели блоков) — другое тело.
+        if [_look(b) for b in bodies] == [_look(b) for b in self._bodies]:
             return
         self._bodies = bodies
         if self._composed:

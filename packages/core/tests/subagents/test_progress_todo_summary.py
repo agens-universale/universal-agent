@@ -110,11 +110,11 @@ def test_parse_valid_empty_returns_empty_list():
     assert todo_items_from_arguments('{"todos": []}') == []
 
 
-def test_tool_args_summary_garbage_args_fall_back_to_generic():
+def test_tool_args_summary_garbage_args_give_empty_summary():
     """Битые аргументы session_todo не должны рендериться «чек-лист очищен»."""
     out = tool_args_summary(SESSION_TODO_TOOL_NAME, {"other": 1})
     assert "очищен" not in out
-    assert out == "other=1"
+    assert out == ""
 
 
 def test_tool_args_summary_valid_empty_stays_cleared():
@@ -122,12 +122,13 @@ def test_tool_args_summary_valid_empty_stays_cleared():
     assert out == "чек-лист очищен"
 
 
-def test_tool_args_summary_partially_broken_list_falls_back_to_generic():
-    """Частично битый список — не «очищен», а обычное превью аргументов."""
+def test_tool_args_summary_partially_broken_list_gives_empty_summary():
+    """Частично битый список — не «очищен»: сводка пуста, как у тула
+    ядра без главного аргумента."""
     raw = {"todos": [{"content": "Шаг", "status": "нетакой"}]}
     out = tool_args_summary(SESSION_TODO_TOOL_NAME, raw)
     assert "очищен" not in out
-    assert out == "todos=<list 1>"
+    assert out == ""
 
 
 def test_tool_args_summary_truncates_long_current_item():

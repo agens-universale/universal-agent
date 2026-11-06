@@ -9,6 +9,7 @@ from gc_core.attachments.model import Attachment, chip_of
 from gc_core.attachments.store import acommit_to_run_thread
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.execution.ports import port as runtime_port
+from gc_core.execution.turn_clock import human_wait
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _logger = logging.getLogger(__name__)
@@ -88,28 +89,29 @@ async def _aread_human_response(
     одноразовом потоке: всё, что порт держит привязанным к своему loop —
     очередь, соединение, сессия, — там просто не работало.
     """
-    native_port = runtime_port(ctx, "human_request")
-    if callable(native_port):
-        from gc_core.execution.human import HumanRequest
+    with human_wait(ctx):
+        native_port = runtime_port(ctx, "human_request")
+        if callable(native_port):
+            from gc_core.execution.human import HumanRequest
 
-        result = await native_port(
-            HumanRequest(kind="ask_human", question=question)
-        )
-        return (str(result) if result is not None else "").strip()
-    port = getattr(ctx, "ask_human", None)
-    if callable(port):
-        result = port(question)
-        if inspect.isawaitable(result):
-            result = await result
-        if isinstance(result, HumanAnswer):
-            return result  # картинки ответа: str() их потерял бы
-        return (str(result) if result is not None else "").strip()
-    # Порта нет — читаем stdin, как CLI. Это блокирующий ввод, и нативной
-    # асинхронной формы у него нет; уводим в поток, чтобы не морозить loop
-    # приложения на всё время, пока человек печатает.
-    import asyncio
+            result = await native_port(
+                HumanRequest(kind="ask_human", question=question)
+            )
+            return (str(result) if result is not None else "").strip()
+        port = getattr(ctx, "ask_human", None)
+        if callable(port):
+            result = port(question)
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, HumanAnswer):
+                return result  # картинки ответа: str() их потерял бы
+            return (str(result) if result is not None else "").strip()
+        # Порта нет — читаем stdin, как CLI. Это блокирующий ввод, и нативной
+        # асинхронной формы у него нет; уводим в поток, чтобы не морозить loop
+        # приложения на всё время, пока человек печатает.
+        import asyncio
 
-    return await asyncio.to_thread(_read_stdin_lines)
+        return await asyncio.to_thread(_read_stdin_lines)
 
 
 def _read_stdin_lines() -> str:

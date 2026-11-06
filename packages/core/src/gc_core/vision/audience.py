@@ -23,12 +23,15 @@ from gc_core.vision.registry import process_vision_probes
 class Audience:
     """`native` — модель запроса, если она увидит картинку сама; `eyes` —
     модель для зрения, если на неё можно рассчитывать; `tool_visible` — тул
-    `fs_view_image` в наборе запроса и смотреть есть кому."""
+    `fs_view_image` в наборе запроса и смотреть есть кому; `blind_alias` —
+    имя модели запроса, когда известно, что она не принимает изображения
+    (проба `UNSUPPORTED` или `vision: false`; только `chat_completions`)."""
 
     native: ResolvedModel | None
     eyes: ResolvedModel | None
     tool_visible: bool
     probe_reason: str | None = None
+    blind_alias: str | None = None
 
     @property
     def nobody(self) -> bool:
@@ -47,6 +50,21 @@ def _declared_blind(resolved: ResolvedModel, settings: Any) -> bool:
     if value is NO_BACKEND_OVERRIDE:
         value = settings_of(settings).backend.vision
     return value is False
+
+
+def _blind_alias(
+    resolved: ResolvedModel, result: Any, api_mode: str, settings: Any
+) -> str | None:
+    """Имя модели запроса, если известно, что она не принимает изображения:
+    проба `UNSUPPORTED` или `vision: false`. Только в `chat_completions` —
+    в `responses` записки прежние."""
+    if api_mode != "chat_completions":
+        return None
+    if _declared_blind(resolved, settings) or (
+        result is not None and result.status is ProbeStatus.UNSUPPORTED
+    ):
+        return resolved.alias or resolved.model
+    return None
 
 
 def _resolve_eyes(router: ModelRouter) -> ResolvedModel | None:
@@ -89,18 +107,8 @@ def compute_audience(
         )
 
     def eligible(resolved):
-        if resolved is None or _declared_blind(resolved, settings):
-            return False
-        result = result_for(resolved)
-        return (
-            result is None
-            or result.status is ProbeStatus.CONFIRMED
-            or (
-                result.status is ProbeStatus.TRANSIENT
-                and process_vision_probes().can_probe(
-                    routes[route_id(resolved)], turn_key=turn_key
-                )
-            )
+        return resolved is not None and _may_view(
+            resolved, settings, routes, turn_key=turn_key
         )
 
     native = (
@@ -111,6 +119,7 @@ def compute_audience(
     candidate = _resolve_eyes(router)
     eyes = candidate if candidate is not None and sees(candidate) else None
     result = result_for(request_resolved)
+    blind_alias = _blind_alias(request_resolved, result, api_mode, settings)
     if result is None and candidate is not None:
         result = result_for(candidate)
     return Audience(
@@ -124,6 +133,54 @@ def compute_audience(
         probe_reason=result.reason
         if result is not None and result.status is not ProbeStatus.CONFIRMED
         else None,
+        blind_alias=blind_alias,
+    )
+
+
+def viewing_eyes(
+    ctx: Any, state: Any, blind: ResolvedModel
+) -> ResolvedModel | None:
+    """Модель для зрения, которой агент посмотрит картинку за модель
+    ``blind``, или None: тул ``fs_view_image`` в наборе запуска, модель
+    зрения назначена другим маршрутом, не заявлена слепой и её проба
+    не мешает (`_may_view`)."""
+    router = getattr(ctx, "model_router", None)
+    tools = getattr(state, "tools", None) or []
+    if router is None or not view_tool_in_set(tools):
+        return None
+    eyes = _resolve_eyes(router)
+    if eyes is None or route_id(eyes) == route_id(blind):
+        return None
+    if _may_view(
+        eyes,
+        ctx,
+        getattr(state, "vision_routes", None) or {},
+        turn_key=getattr(state, "vision_probe_turn", None),
+    ):
+        return eyes
+    return None
+
+
+def _may_view(
+    resolved: ResolvedModel,
+    settings: Any,
+    routes: Mapping,
+    *,
+    turn_key: str | None,
+) -> bool:
+    """Можно ли рассчитывать, что маршрут ``resolved`` посмотрит картинку:
+    не заявлен слепым, и его проба не мешает — нет результата, подтверждена
+    или временный сбой, который в ходе ``turn_key`` можно перепроверить.
+    Одно правило для набора тулов (`Audience.tool_visible`) и пометок."""
+    if _declared_blind(resolved, settings):
+        return False
+    key = routes.get(route_id(resolved))
+    probes = process_vision_probes()
+    result = probes.peek(key) if key is not None else None
+    if result is None or result.status is ProbeStatus.CONFIRMED:
+        return True
+    return result.status is ProbeStatus.TRANSIENT and probes.can_probe(
+        key, turn_key=turn_key
     )
 
 

@@ -1,4 +1,4 @@
-"""ThinkingIndicator — таймер анимации стоит в конечном состоянии и скрытым."""
+"""ThinkingIndicator — таймер анимации тикает, только пока строка видна."""
 
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from textual.app import App
@@ -28,51 +28,10 @@ def _spy(monkeypatch, name: str, widget: ThinkingIndicator) -> list:
     return calls
 
 
-async def test_created_terminal_timer_paused():
-    w = ThinkingIndicator(state="done", frozen_elapsed=3)
-    async with _Host(w).run_test() as pilot:
-        await pilot.pause()
-        assert w._anim_timer._active.is_set() is False
-
-
-async def test_entering_terminal_pauses(monkeypatch):
-    w = ThinkingIndicator()
-    async with _Host(w).run_test() as pilot:
-        await pilot.pause()
-        pauses = _spy(monkeypatch, "pause", w)
-        w.set_state("done")
-        assert pauses == ["pause"]
-
-
-async def test_back_to_live_resumes(monkeypatch):
-    w = ThinkingIndicator(state="done", frozen_elapsed=3)
-    async with _Host(w).run_test() as pilot:
-        await pilot.pause()
-        resumes = _spy(monkeypatch, "resume", w)
-        w.set_state("thinking")
-        assert resumes == ["resume"]
-
-
 def test_set_state_before_mount_safe():
     w = ThinkingIndicator()
-    w.set_state("done")
-    assert w._state == "done"
-
-
-async def test_summary_redraws_in_terminal(monkeypatch):
-    w = ThinkingIndicator(state="done", frozen_elapsed=3)
-    async with _Host(w).run_test() as pilot:
-        await pilot.pause()
-        refreshes: list = []
-        original = w.refresh
-
-        def counting(*args, **kwargs):
-            refreshes.append(1)
-            return original(*args, **kwargs)
-
-        monkeypatch.setattr(w, "refresh", counting)
-        w.set_turn_summary((1, 2, 3))
-        assert len(refreshes) >= 1
+    w.set_state("validating")
+    assert w._state == "validating"
 
 
 async def test_live_ticks_coarse():
@@ -117,3 +76,13 @@ async def test_hidden_before_mount_starts_paused():
     async with _Host(w).run_test() as pilot:
         await pilot.pause()
         assert w._anim_timer._active.is_set() is False
+
+
+def test_live_count_hidden_below_one_second():
+    """Счёт хода индикатора — с целой секунды (владелец 2026-10-26)."""
+    now = {"t": 100.0}
+    w = ThinkingIndicator(started_at=100.0, clock=lambda: now["t"])
+    now["t"] = 100.9
+    assert w._live_parts() == []
+    now["t"] = 101.0
+    assert w._live_parts() == ["1с"]

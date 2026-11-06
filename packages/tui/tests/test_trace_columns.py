@@ -115,15 +115,19 @@ _SEGMENTS = [
     }
 ]
 
-# Ожидаемая раскладка обоих путей: (тип виджета, plain префикса).
+# Ожидаемая раскладка обоих путей: (тип виджета, plain префикса). Вызовы
+# собраны в блоки (P4): чтение — заголовок `Explored` и член без глифа, и
+# наверху, и у субагента (заголовок на +2).
 _EXPECTED = [
     ("UserReplyContainer", ""),
     ("TraceRow", "● "),
     ("TodoBlock", ""),
     ("ToolCallRow", "● "),
+    ("ToolCallRow", "  └ "),
     ("ToolCallRow", "● "),
     ("ConsequenceTraceRow", "  ● "),
     ("ToolCallRow", "  ● "),
+    ("ToolCallRow", "    └ "),
     ("NestedUserReply", "  › "),
     ("TodoBlock", "  "),
     ("TraceRow", "● "),
@@ -209,7 +213,8 @@ def test_tool_call_row_prefix_is_level_plus_glyph(level):
 
 @pytest.mark.asyncio
 async def test_live_and_preview_share_layout(tmp_path):
-    """Одни и те же записи живой лентой и превью — одна раскладка."""
+    """Одни и те же записи живой лентой и превью — одна раскладка
+    (модель блоков вызовов одна на оба пути)."""
     from textual.app import App
     from textual.containers import VerticalScroll
 
@@ -241,12 +246,16 @@ async def test_live_and_preview_share_layout(tmp_path):
 @pytest.mark.asyncio
 async def test_live_glyph_columns_step_two_per_level(tmp_path):
     """Глиф вызова уровня 0 — в колонке `●`, уровня 1 и вложенной реплики —
-    на +2; вложенная реплика субагента — серый `●`."""
+    на +2; вложенная реплика субагента — серый `●`. У члена блока глифа
+    нет (P4 §3.1) — его колонку держит заголовок. Реплика субагента — за
+    окном `Agent` (4 события): окно раскрыто."""
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
+        pilot.app.screen._block_views["sub1"].toggle("agent")
+        await pilot.pause()
         agent = next(w for w in trace.children if isinstance(w, TraceRow))
         col = _glyph_x(agent.query_one(".trace-prefix"), "● ")
-        rows = list(trace.query(ToolCallRow))
+        rows = [r for r in trace.query(ToolCallRow) if r.mode != "member"]
         top = [r for r in rows if r._level == 0]
         nested = [r for r in rows if r._level == 1]
         for row in top + nested:
@@ -261,20 +270,44 @@ async def test_live_glyph_columns_step_two_per_level(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_turn_line_sits_in_agent_bullet_column(tmp_path):
+async def test_turn_line_sits_in_agent_bullet_column(tmp_path, monkeypatch):
     """Место строки хода (§2.9): глиф индикатора в #indicator-bar — в той же
     колонке, что `●` реплики агента в #trace."""
+    from gc_tui.screens.main import TraceScreen
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
+    # Треда нет: тик опроса (250 мс) по инварианту снимает индикатор, и
+    # тест зависел бы от часов — в нагруженном прогоне тик успевал между
+    # показом и замером. Проверяется только место индикатора.
+    monkeypatch.setattr(TraceScreen, "_poll_active", lambda self: None)
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
-        pilot.app.screen._show_thinking_indicator(state="thinking")
-        await pilot.pause()
+        scr = pilot.app.screen
+        scr._bar_wanted = lambda: True  # идёт работа: бар стоит (S10 §3.3)
+        scr._show_thinking_indicator(state="thinking")
+        await pilot.pause(0.3)  # дольше тика опроса
         bar = pilot.app.query_one("#indicator-bar")
         indicator = bar.query_one(ThinkingIndicator)
         agent = next(w for w in trace.children if isinstance(w, TraceRow))
         col = _glyph_x(agent.query_one(".trace-prefix"), "● ")
         assert indicator.content_region.x == col
+
+
+@pytest.mark.asyncio
+async def test_turn_line_glyph_in_agent_bullet_column(tmp_path):
+    """Строка итога хода в ленте (S10): её глиф — в колонке `●` реплики
+    агента."""
+    from gc_tui.services.trace_render import build_turn_line
+
+    async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
+        trace = await _live_trace(pilot)
+        line = build_turn_line(word="completed")
+        line.freshen((1, 2, 3), None)
+        pilot.app.screen._trace_mount(line)
+        await pilot.pause()
+        agent = next(w for w in trace.children if isinstance(w, TraceRow))
+        col = _glyph_x(agent.query_one(".trace-prefix"), "● ")
+        assert line.content_region.x == col
 
 
 def _styled(app_cls):
@@ -297,7 +330,8 @@ def _styled(app_cls):
 async def test_blank_line_before_every_call_on_both_paths(tmp_path):
     """Интервал (§2.1): пустая строка перед каждым вызовом — верхним и
     вложенным, подряд идущим тоже; класса `tool-group-start` нет ни вживую,
-    ни в превью."""
+    ни в превью. Вживую (P4 §3.1, §7) — перед каждым блоком верхнего
+    уровня: у члена блока и внутри блока субагента пустых строк нет."""
     from textual.app import App
     from textual.containers import VerticalScroll
 
@@ -308,9 +342,13 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
 
     async with _app(tmp_path).run_test(size=(120, 40)) as pilot:
         trace = await _live_trace(pilot)
-        rows = list(trace.query(ToolCallRow))
+        rows = [r for r in trace.query(ToolCallRow) if r.mode != "member"]
         assert {r._level for r in rows} == {0, 1}
-        assert [r.styles.margin.top for r in rows] == [1] * len(rows)
+        assert [r.styles.margin.top for r in rows] == [
+            0 if r._level else 1 for r in rows
+        ]
+        members = [r for r in trace.query(ToolCallRow) if r.mode == "member"]
+        assert [r.styles.margin.top for r in members] == [0, 0]
         assert not trace.query(".tool-group-start")
         lines = [
             "".join(seg.text for seg in strip).rstrip()
@@ -332,7 +370,11 @@ async def test_blank_line_before_every_call_on_both_paths(tmp_path):
     async with _styled(_Preview)().run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         trace = pilot.app.query_one("#t", VerticalScroll)
-        rows = list(trace.query(ToolCallRow))
+        rows = [r for r in trace.query(ToolCallRow) if r.mode != "member"]
         assert {r._level for r in rows} == {0, 1}
-        assert [r.styles.margin.top for r in rows] == [1] * len(rows)
+        assert [r.styles.margin.top for r in rows] == [
+            0 if r._level else 1 for r in rows
+        ]
+        members = [r for r in trace.query(ToolCallRow) if r.mode == "member"]
+        assert [r.styles.margin.top for r in members] == [0, 0]
         assert not trace.query(".tool-group-start")
