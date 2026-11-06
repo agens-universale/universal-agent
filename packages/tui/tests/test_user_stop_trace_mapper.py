@@ -38,3 +38,21 @@ def test_not_started_due_to_user_stop_looks_like_error():
     )
     assert _looks_like_error(out) is True
     assert _summarize_output(out, error=True) == "не запущено (стоп)"
+
+
+def test_not_started_due_to_session_compact_looks_like_error():
+    out = json.dumps(
+        {
+            "tool": "session_think",
+            "ok": False,
+            "status": "not_started_due_to_session_compact",
+            "message": "Tool was not started: session_compact replaced the history.",
+            "error": None,
+            "synthetic": True,
+        }
+    )
+    assert _looks_like_error(out) is True
+    assert (
+        _summarize_output(out, error=True)
+        == "не исполнен: сводка заменила историю"
+    )

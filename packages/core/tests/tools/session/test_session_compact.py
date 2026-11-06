@@ -285,6 +285,107 @@ def test_after_compact_only_resume_and_summary_sees_closed_tail(monkeypatch):
     assert "session_think" in logged
 
 
+def test_compact_closes_its_card_and_the_tail_before_archive(monkeypatch):
+    """Карточки гаснут по выводу в старом треде. В сводку эти выводы не входят."""
+    from gc_core.processing_responses import aprocess_tool_calls
+
+    sys_m = {"role": "system", "content": "s", "id": "sys"}
+    compact_call = {
+        "type": "function_call",
+        "call_id": "c_compact",
+        "name": "session_compact",
+        "arguments": '{"reason": "done"}',
+        "id": "fc_compact",
+    }
+    pending_call = {
+        "type": "function_call",
+        "call_id": "c_pending",
+        "name": "session_think",
+        "arguments": '{"thoughts": "later"}',
+        "id": "fc_pending",
+    }
+    state = State(
+        verbose=False,
+        model="CodeChat",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=2,
+        system_prompt_id="v1",
+        use_server_subagents=False,
+    )
+    state.backend_api_mode = "chat_completions"
+    state.messages = [
+        sys_m,
+        {"role": "user", "content": "history", "id": "u0"},
+        compact_call,
+        pending_call,
+    ]
+    state.session_compact_applied = False
+    persisted = []
+
+    async def persist(messages):
+        persisted.extend(messages)
+
+    async def on_summary(_event):
+        closed = {
+            message.get("call_id"): message
+            for message in persisted
+            if message.get("type") == "function_call_output"
+        }
+        assert "c_compact" in closed
+        assert "c_pending" in closed
+        compact_body = json.loads(closed["c_compact"]["output"])
+        pending_body = json.loads(closed["c_pending"]["output"])
+        assert compact_body["ok"] is True
+        assert pending_body["ok"] is False
+        assert pending_body["status"] == "not_started_due_to_session_compact"
+
+    async def apply(**kwargs):
+        if kwargs["tool_name"] == "session_compact":
+            state.messages = [
+                sys_m,
+                {"role": "user", "content": "summary", "id": "sum"},
+            ]
+            await ctx.on_summary_applied({"summary_payload": {}})
+            state.session_compact_applied = True
+            return json.dumps(
+                {"tool": "session_compact", "ok": True, "compacted": True}
+            )
+        raise AssertionError(kwargs["tool_name"])
+
+    ctx = fake_ctx(
+        logger=MagicMock(),
+        on_summary_applied=on_summary,
+    )
+    monkeypatch.setattr("gc_core.processing_responses.aapply_tool", apply)
+    monkeypatch.setattr(
+        "gc_core.processing_responses.maybe_store_and_wrap_tool_output",
+        lambda tool_res, **_kw: tool_res,
+    )
+
+    out = run_coro(
+        aprocess_tool_calls(
+            [compact_call, pending_call],
+            state,
+            ctx=ctx,
+            run_agent_func=lambda *_a, **_k: None,
+            persist_messages_callback=persist,
+        )
+    )
+
+    assert len(out) == 1
+    assert out[0]["role"] == "user"
+    assert not any(
+        message.get("type") == "function_call_output" for message in out
+    )
+    assert not any(
+        message.get("type") == "function_call_output"
+        for message in state.messages
+    )
+    assert ctx.on_summary_applied is on_summary
+
+
 def test_failed_compact_keeps_the_rest_of_the_batch(monkeypatch):
     from gc_core.processing_responses import aprocess_tool_calls
 
@@ -549,3 +650,51 @@ def test_resume_phrase_does_not_set_nudge_flag(monkeypatch):
     assert state.tool_usage_notice_cnt == {"session_todo": 3}
     assert state.todo_reminder_cnt == 4
     assert session_meta["project_memory_check_cnt"] == 7
+
+
+def test_drop_pre_summary_keeps_follower_user_ask_in_intent():
+    """Сводка отменяет запись хвоста. Реплика из него остаётся в намерениях."""
+    from gc_core.message_policy.user_message_policy import (
+        wrap_technical_user_content,
+    )
+
+    state = _compact_state()
+    state.user_turn_seq = 2
+    loop = _agent_loop(state, {})
+    user = {"role": "user", "content": "сделай ещё вот это", "id": "u_mid"}
+    loop._nudges.carrier = {
+        "type": "function_call_output",
+        "call_id": "c_last",
+        "id": "out_last",
+        "output": "{}",
+    }
+    loop._nudges.followers = [
+        user,
+        {
+            "role": "user",
+            "content": wrap_technical_user_content("resume"),
+            "id": "u_tech",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "c_img",
+            "id": "out_img",
+            "output": "{}",
+        },
+    ]
+
+    loop._drop_pre_summary_output()
+
+    assert [record.content for record in state.current_user_intent] == [
+        "сделай ещё вот это"
+    ]
+    assert state.current_user_intent[0].turn == 3
+    assert loop._nudges.followers == []
+    assert loop._nudges.carrier is None
+    assert loop._nudges.skip_fill is True
+
+    loop._nudges.followers = [user]
+    loop._drop_pre_summary_output()
+    assert [record.content for record in state.current_user_intent] == [
+        "сделай ещё вот это"
+    ]
