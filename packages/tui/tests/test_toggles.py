@@ -6,6 +6,7 @@ agent.strict_turn_finish_validation=false даёт off; иначе smart (деф
 сравнение с умолчанием)."""
 
 from gc_testkit.settings import make_settings
+from gc_testkit.tui_support import tui_settings
 from gc_tui.session_settings import finish_gate_mode_of
 
 
@@ -407,3 +408,25 @@ def test_answers_track_synchronized_with_gate_axis():
         assert gate.names.index(gate_value) == answers.names.index(
             answers_value
         )
+
+
+def test_reasoning_toggle_spec():
+    from gc_tui.toggles import TOGGLES, modes_section_names
+
+    s = TOGGLES["reasoning"]
+    assert (s.dotted, s.palette_default, s.group) == (
+        "tui.show_reasoning",
+        False,
+        "trace",
+    )
+    assert s.names == ("off", "on")
+    assert s.values[1].hint.endswith("· только в chat_completions с потоком")
+    assert modes_section_names()[-1] == "reasoning"
+
+
+def test_reasoning_state_reads_effective_flag():
+    from gc_tui.toggles import TOGGLES
+
+    on = tui_settings(**{"tui.show_reasoning": "on"})
+    assert TOGGLES["reasoning"].state(on) == "on"
+    assert TOGGLES["reasoning"].state(tui_settings()) == "off"

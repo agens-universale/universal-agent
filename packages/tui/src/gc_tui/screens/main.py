@@ -189,6 +189,8 @@ from gc_tui.services.terminal_title import (
     format_terminal_title,
     set_terminal_title,
 )
+from gc_tui.services.think_text import think_rejected
+from gc_tui.services.thought_text import thought_display_text
 from gc_tui.services.tool_blocks import (
     BlockEdit,
     BlockKind,
@@ -437,14 +439,6 @@ _FooterHeadSnapshot = namedtuple(
 _FooterFrame = namedtuple(
     "_FooterFrame", ("badge", "snapshot", "meter", "usage")
 )
-
-
-def _records_context(records: list[dict], root: str) -> RenderContext:
-    """Контекст рендера порции записей треда (по их payload)."""
-    return collect_render_context(
-        (rec.get("payload") for rec in records if isinstance(rec, dict)),
-        root=root,
-    )
 
 
 def _profile_source_label(ref) -> str | None:
@@ -752,6 +746,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
         self._stream_answer_row = None  # type: Optional["TraceRow"]
+        # Строки мыслей ленты (`ThoughtRow`, спека мыслей §7) — только из
+        # стрима, нигде не хранятся: строка на попытку, законченные стоят на
+        # своих местах до перерисовки ленты.
+        self._streamed_thoughts: list = []
+        # Действующий `tui.show_reasoning`: сменился — строки мыслей
+        # скрываются или возвращаются (None — ещё не сверяли).
+        self._thoughts_shown: Optional[bool] = None
         # Кумулятивный таймер «думаю…» — стартует на каждом user-send,
         # передаётся в виджет, чтобы elapsed не сбрасывался при show/hide циклах.
         self._thinking_started_at: Optional[float] = None
@@ -1861,6 +1862,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Рабочая папка сессии — фиксирована = папка запуска процесса."""
         return str(Path.cwd())
 
+    def _render_context(self, payloads) -> RenderContext:
+        """Контекст рендера порции payload'ов треда: корень сессии и
+        служебные поля схем тулов (в мысль Think не входят)."""
+        return collect_render_context(
+            payloads,
+            root=self._current_cwd(),
+            injected_fields=self._injected_fields(),
+        )
+
+    def _injected_fields(self) -> frozenset[str]:
+        """Служебные поля схем тулов (`agent.inject_tool_fields`) окна: в
+        мысль и сводку Think не входят, пока у модели есть свой текст."""
+        agent = self.app.effective_settings().settings.agent
+        return frozenset(agent.inject_tool_fields)
+
     def _show_footer_refusal(
         self, text: str, tone: Optional[str] = "warn"
     ) -> None:
@@ -2322,6 +2338,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._pending_wire_cache.clear()
         self._bang_blocks.clear()
         self._bang_open_block = None
+        self._streamed_thoughts.clear()
         # clear ask_human state (banner lives in #root, not #trace)
         if self._ask_human_banner is not None:
             try:
@@ -2363,6 +2380,10 @@ class TraceScreen(TraceFollowMixin, Screen):
                 pass
             self._thinking = None
         self._clear_stream_block()
+        sink = getattr(self.app, "_stream_sink", None)
+        if sink is not None:
+            # Лента начата заново: мысли прежней — не в неё.
+            sink.discard_thoughts()
         self._thinking_started_at = None
         # На смене задачи / stream_reset история событий обнуляется,
         # индикатор должен начать с чистого состояния.
@@ -2665,7 +2686,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         лежит в следующем файле с тем же id, рисуется первое вхождение.
         Payload остаётся full, пока этот id есть в окне segments[-2:]."""
         records = [rec for seg in segments for rec in seg["messages"]]
-        context = _records_context(records, self._current_cwd())
+        context = self._render_context(
+            rec.get("payload") for rec in records if isinstance(rec, dict)
+        )
         # Ответ модели, начатый в конце ленты, нужен вызову следующего тика.
         self._response_tail = response_tail(
             [rec.get("payload") for rec in records if isinstance(rec, dict)]
@@ -2700,7 +2723,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         *,
         live: bool = False,
         context: RenderContext | None = None,
+        before_record: Callable[[dict], None] | None = None,
     ) -> None:
+        """``before_record`` — перед каждой записью (мысли попыток,
+        начавшихся раньше неё, встают над ней)."""
         payloads = [
             rec.get("payload") for rec in records if isinstance(rec, dict)
         ]
@@ -2710,14 +2736,14 @@ class TraceScreen(TraceFollowMixin, Screen):
             payloads = [*self._response_tail, *payloads]
         self._response_tail = response_tail(payloads)
         if context is None:
-            context = collect_render_context(
-                payloads, root=self._current_cwd()
-            )
+            context = self._render_context(payloads)
         elif live:
             # Общий контекст шага сжатия не видит текста ответа из прошлой
             # пачки опроса.
             context = with_closing_replies(context, payloads)
         for rec in records:
+            if before_record is not None and isinstance(rec, dict):
+                before_record(rec)
             self._render_record(rec, live=live, context=context)
 
     def _render_finish(self, ev) -> None:
@@ -2827,6 +2853,92 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._last_event_kind = "_finalized"
         else:
             self._last_event_kind = ev.kind
+
+    # --- мысли модели (спека мыслей §7) ------------------------------------
+
+    def _thoughts_on(self) -> bool:
+        """Действующий `tui.show_reasoning` окна (база + сессия)."""
+        settings = self.app.effective_settings().settings
+        return settings.tui.show_reasoning == "on"
+
+    def _take_thoughts(self) -> list:
+        """Мысли стрима для этого тика: законченные попытки и идущая."""
+        sink = getattr(self.app, "_stream_sink", None)
+        return sink.take_thoughts() if sink is not None else []
+
+    def _mount_thoughts_before(self, thoughts: list, rec: dict) -> None:
+        """Перед записью хвоста — строки мыслей попыток, начавшихся раньше
+        неё: вызов шага, пришедший тем же тиком, встаёт под своей мыслью.
+        Часы записей и стрима — одного процесса."""
+        try:
+            written = datetime.fromisoformat(str(rec.get("ts") or ""))
+        except ValueError:
+            return
+        for snap in thoughts:
+            if snap.started_at < written:
+                self._thought_row(snap)
+
+    def _sync_thoughts(self, thoughts: list) -> None:
+        """Мысли тика после хвоста: строки законченных попыток получают весь
+        текст и закрываются, идущая дорастает; новые встают в конец ленты.
+        Строки попыток, которых в стриме уже нет, — законченные."""
+        current = None
+        for snap in thoughts:
+            row = self._thought_row(snap)
+            if row is None:
+                continue
+            text = thought_display_text(snap.text)
+            if text:
+                row.update_live(text, snap.seconds, snap.live)
+            if snap.live:
+                current = snap.attempt
+            else:
+                row.settle()
+        for row in self._streamed_thoughts:
+            if row.attempt != current:
+                row.settle()
+
+    def _thought_row(self, snap):
+        """Строка мысли попытки: есть — она; нет — новая в конце ленты.
+        Без флага или пустая мысль — новой нет (None)."""
+        from gc_tui.widgets.thought_row import ThoughtRow
+
+        for row in self._streamed_thoughts:
+            if row.attempt == snap.attempt:
+                return row
+        text = thought_display_text(snap.text)
+        if not text or not self._thoughts_on():
+            return None
+        row = ThoughtRow(
+            text=text,
+            live=snap.live,
+            attempt=snap.attempt,
+            seconds=snap.seconds,
+        )
+        self._streamed_thoughts.append(row)
+        self._trace_mount(row, scroll=True)
+        # Превью ответа этой попытки могло встать тем же тактом раньше —
+        # мысль над ним.
+        for preview in (self._stream_block, self._stream_answer_row):
+            if preview is not None and preview.parent is row.parent:
+                row.parent.move_child(preview, after=row)
+        return row
+
+    def _settle_thoughts(self) -> None:
+        """Конец хода (ответ, стоп, ошибка, отмена): строки мыслей остаются
+        в ленте законченными."""
+        for row in self._streamed_thoughts:
+            row.settle()
+
+    def _sync_thoughts_flag(self) -> None:
+        """Сменился действующий флаг мыслей (палитра, настройки, перечитка
+        конфига) — строки мыслей ленты скрываются или возвращаются. Мысли
+        нигде не хранятся: из треда их не перерисовать."""
+        shown = self._thoughts_on()
+        if self._thoughts_shown is not None and shown != self._thoughts_shown:
+            for row in self._streamed_thoughts:
+                row.display = shown
+        self._thoughts_shown = shown
 
     def _is_withdrawn(self, payload: dict) -> bool:
         """Реплика открытого треда снята откатом, а тред её ещё держит
@@ -3100,6 +3212,22 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         if self._stick_bottom:
             self._scroll_trace_end()
+
+    def _commit_stream(self) -> None:
+        """Строка ленты закоммичена — живой вывод шага уходит из-под неё.
+
+        Под флагом мыслей стрим с меткой попытки экран целиком не
+        сбрасывает: стрим следующей попытки мог начаться раньше, чем
+        дочитана строка прошлого шага (метка приходит до первого токена).
+        Уходит только канал ответа — он и стал строкой; мысль и метку
+        сбрасывает `reset` ядра, строку мысли ведёт метка попытки. Без
+        флага или без метки — прежний полный сброс."""
+        sink = getattr(self.app, "_stream_sink", None)
+        if sink is None or sink.attempt() is None or not self._thoughts_on():
+            self._clear_stream_block()
+            return
+        self._clear_stream_block(reset_sink=False)
+        sink.clear_answer()
 
     def _clear_stream_block(self, *, reset_sink: bool = True) -> None:
         """Снять эфемерный StreamBlock и (по умолчанию) сбросить sink.
@@ -3696,7 +3824,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Any committed canonical row supersedes the ephemeral reasoning/answer
         # preview for the current step — clear it so it can't drift above new rows.
         # (It re-mounts at the bottom on the next poll tick if streaming continues.)
-        self._clear_stream_block()
+        self._commit_stream()
 
         # ask_human-output banner cleanup — Фикс B-2.
         # Mapper эмитит для function_call_output name=ask_human либо kind='user'
@@ -3883,6 +4011,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 mcp_tools=mcp_tools,
                 mcp_servers=mcp_servers,
                 agent=ev.agent,
+                think_text=ev.think_text,
             )
             row.set_clock_source(self._core_call_elapsed)
             self._active_calls[row.call_id] = row
@@ -3917,6 +4046,8 @@ class TraceScreen(TraceFollowMixin, Screen):
                 self._reconcile_active_tool_phases()
                 return
             # Fallback (call_id unknown or no matching row) — append separate line
+            if think_rejected((ev.full_payload or {}).get("output")):
+                return  # отказ пустого Think: строки вызова нет
             if ev.kind == "error":
                 from gc_tui.services.trace_render import (
                     build_orphan_result_row,
@@ -4124,7 +4255,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not records:
             return
         actions = plan_sidecar_nested_actions(
-            records, root=self._current_cwd()
+            records, root=self._current_cwd(), injected=self._injected_fields()
         )
         apply_sidecar_nested_actions(
             actions,
@@ -6325,9 +6456,18 @@ class TraceScreen(TraceFollowMixin, Screen):
 
                 think, answer = sink.snapshot()
                 mode = self.app.base_settings().settings.tui.stream_display
+                show_reasoning = (
+                    self.app.effective_settings().settings.tui.show_reasoning
+                    == "on"
+                )
                 clean = format_stream_block(answer=answer)
                 reasoning = format_reasoning_line(think=think)
-                kind, thinking = select_stream_render(mode, clean, reasoning)
+                kind, thinking = select_stream_render(
+                    mode,
+                    clean,
+                    reasoning,
+                    show_reasoning=show_reasoning,
+                )
                 from gc_tui.widgets.trace_row import TraceRow
 
                 if kind == "answer":
@@ -6379,7 +6519,20 @@ class TraceScreen(TraceFollowMixin, Screen):
         # сброс или шаг сжатия. Пометки ленты — после записей тика: строка
         # вызова-владельца могла прийти в этом же хвосте.
         if not _frozen:
-            self._poll_trace_tail()
+            self._sync_thoughts_flag()
+            # Мысли стрима сверяются каждый тик и в любой фазе: попытка,
+            # уложившаяся между тиками, и мысль короткого хода не теряются.
+            # Новая мысль встаёт перед первой записью хвоста, сделанной после
+            # начала её попытки, — записи прошлого шага выше, вызов своего
+            # шага ниже; строки мыслей не переставляются.
+            thoughts = self._take_thoughts()
+            self._poll_trace_tail(
+                before_record=partial(self._mount_thoughts_before, thoughts)
+            )
+            self._sync_thoughts(thoughts)
+            if _indicator_mode in ("failed", "terminal"):
+                # Ход кончился, хвост дочитан: строки мыслей законченные.
+                self._settle_thoughts()
             self._drain_trace_notes()
             self._settle_pending_mark()
             self._pay_owed_follow()
@@ -6458,8 +6611,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         probe = getattr(runner, "call_elapsed", None)
         return probe(call_id) if probe is not None else None
 
-    def _poll_trace_tail(self) -> None:
-        """Дочитать и отрисовать хвост записей активного треда."""
+    def _poll_trace_tail(
+        self, before_record: Callable[[dict], None] | None = None
+    ) -> None:
+        """Дочитать и отрисовать хвост записей активного треда;
+        ``before_record`` — как у `_render_records`."""
         if (
             self._store is None
             or self._active_task_id is None
@@ -6498,7 +6654,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._rebuild_from_store()
             return
         self._cursor = tail.next_cursor
-        self._render_records(tail.new_records, live=True)
+        self._render_records(
+            tail.new_records, live=True, before_record=before_record
+        )
         self._refresh_header()
 
     def _rebuild_from_store(self) -> None:
@@ -6547,8 +6705,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Хвост архива, маркер, новый живой файл — живым путём, одним
         контекстом рендера (вызов в хвосте сводится с выводом в живом)."""
         start = len(self._task_events)
-        context = _records_context(
-            [*step.archive_tail, *step.live_records], self._current_cwd()
+        context = self._render_context(
+            rec.get("payload")
+            for rec in [*step.archive_tail, *step.live_records]
+            if isinstance(rec, dict)
         )
         self._render_records(step.archive_tail, live=True, context=context)
         self._mount_compaction_marker(step)
@@ -6824,6 +6984,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             [c for c in trace.children if c.id not in self._TRACE_HEADER_IDS]
         )
         self._show_brand()  # defensive: монтирует, только если шапки ещё нет
+        # Лента рисуется заново — с действующим флагом мыслей.
+        self._thoughts_shown = self._thoughts_on()
 
     @property
     def _any_picker_open(self) -> bool:
@@ -9948,7 +10110,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not detail or not isinstance(detail.get("call"), dict):
             return None, None
         return trace_events_from_nested_detail(
-            call_id, detail, root=self._current_cwd()
+            call_id,
+            detail,
+            root=self._current_cwd(),
+            injected=self._injected_fields(),
         )
 
     async def _fetch_skills(self) -> list[dict]:

@@ -59,6 +59,10 @@ class TuiConfig(BaseModel):
     # smart — судья только если за ход был >=1 вызов инструмента (спека §3).
     # Только TUI; CLI/server рулит agent.strict_turn_finish_validation.
     finish_gate_mode: FinishGateMode = "smart"
+    # Мысли модели (reasoning) строками Thought в живой ленте, без хранения;
+    # только chat_completions с потоком. Строки, как finish_gate_mode: тоггл
+    # пишет без конвертера.
+    show_reasoning: Literal["off", "on"] = "off"
     # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global
     # (~/.config/gc) и .gc/AGENTS.md. Игнорируется, если задан
     # paths.agent_md_path (путь главнее флага).

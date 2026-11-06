@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -21,7 +22,10 @@ from typing import (
 
 from gc_core.attachments.model import Attachment, attachments_of
 from gc_core.constants.tool_display import DisplayCategory, tool_display
-from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
+from gc_core.constants.tool_names import (
+    SESSION_THINK_TOOL_NAME,
+    SESSION_TODO_TOOL_NAME,
+)
 from gc_core.execution.progress import (
     parse_tool_result_status,
     run_command_text,
@@ -75,14 +79,18 @@ def _raw_output(payload: Dict[str, Any]) -> Optional[str]:
     return json.dumps(output, ensure_ascii=False)
 
 
-def nested_call_row(wire_name: str) -> bool:
+def nested_call_row(wire_name: str, args_summary: str) -> bool:
     """Строка ли вложенный вызов — по имени, по вложенной таблице ядра:
     скрытый тул (`Hidden`) строкой не бывает, сдача субагента — бывает
     (последнее событие `Agent`). Чек-лист (`Hidden` в таблице) — строка:
     вызывающий спрашивает о нём, только когда не развернул вызов
-    чек-листом (битые аргументы), и его сбой должен быть виден."""
+    чек-листом (битые аргументы), и его сбой должен быть виден. Пустой
+    Think (сводки нет — мысли нет) строкой не бывает: ошибка о нём —
+    только модели; исход без строки вызывающие пропускают."""
     if wire_name == SESSION_TODO_TOOL_NAME:
         return True
+    if wire_name == SESSION_THINK_TOOL_NAME and not args_summary:
+        return False
     shown = tool_display(wire_name, nested=True)
     return shown.category is not DisplayCategory.HIDDEN
 
@@ -96,10 +104,12 @@ def plan_sidecar_nested_actions(
     records: Sequence[Dict[str, Any]],
     *,
     root: Optional[str] = None,
+    injected: Collection[str] = (),
 ) -> List[SidecarNestedAction]:
     """Group by parent_call_id, order by seq; skip finished/HITL-like noise.
 
-    ``root`` — корень проекта: пути в подписях вызовов от него."""
+    ``root`` — корень проекта: пути в подписях вызовов от него.
+    ``injected`` — служебные поля схем: в сводку Think не идут."""
     from gc_core.execution.progress import todo_items_from_arguments
 
     by_parent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -143,7 +153,14 @@ def plan_sidecar_nested_actions(
                             )
                         )
                         continue
-                if not nested_call_row(str(name or "")):
+                args_summary = tool_args_summary(
+                    str(name) if name else None,
+                    payload.get("arguments"),
+                    root=root,
+                    nested=True,
+                    injected=injected,
+                )
+                if not nested_call_row(str(name or ""), args_summary):
                     continue
                 actions.append(
                     SidecarNestedAction(
@@ -151,12 +168,7 @@ def plan_sidecar_nested_actions(
                         parent_call_id=pid,
                         tool_name=str(name) if name else "",
                         tool_call_id=str(call_id) if call_id else "",
-                        args_summary=tool_args_summary(
-                            str(name) if name else None,
-                            payload.get("arguments"),
-                            root=root,
-                            nested=True,
-                        ),
+                        args_summary=args_summary,
                         command=run_command_text(
                             str(name) if name else None,
                             payload.get("arguments"),
@@ -401,7 +413,11 @@ def resolve_nested_tool_detail(
 
 
 def trace_events_from_nested_detail(
-    call_id: str, detail: Dict[str, Any], *, root: Optional[str] = None
+    call_id: str,
+    detail: Dict[str, Any],
+    *,
+    root: Optional[str] = None,
+    injected: Collection[str] = (),
 ) -> Tuple[TraceEvent, Optional[TraceEvent]]:
     """Синтетические TraceEvent для ToolCallDetailScreen."""
     call_payload = detail.get("call")
@@ -409,7 +425,11 @@ def trace_events_from_nested_detail(
         raise ValueError("detail.call required")
     name = str(call_payload.get("name") or "")
     args_summary = tool_args_summary(
-        name or None, call_payload.get("arguments"), root=root, nested=True
+        name or None,
+        call_payload.get("arguments"),
+        root=root,
+        nested=True,
+        injected=injected,
     )
     call_ev = TraceEvent(
         no=0,

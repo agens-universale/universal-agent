@@ -97,6 +97,7 @@ def test_default_registry_is_exactly_keep_set():
             "rigor",
             "gate",
             "answers",
+            "reasoning",
         ]
     )
 
@@ -148,6 +149,7 @@ _ALIASES = {
     "rigor": ("строгость",),
     "gate": ("самопроверка", "гейт"),
     "answers": ("формат",),
+    "reasoning": ("рассуждения",),
 }
 
 
@@ -269,6 +271,7 @@ def test_default_registry_frequency_order():
         "rigor",
         "gate",
         "answers",
+        "reasoning",
     ]
 
 
@@ -359,6 +362,13 @@ def test_toggle_descriptions_generated_from_specs():
         spec = TOGGLES[name]
         raw = f"{spec.label}: {spec.summary}"
         assert cmd.description == raw[:1].upper() + raw[1:]
+
+
+def test_reasoning_description_is_label_only():
+    from gc_tui.commands import build_default_registry
+
+    cmd = build_default_registry().lookup("reasoning")
+    assert cmd.description == "Рассуждения модели в ленте (reasoning)"
 
 
 async def test_f6_opens_settings_with_input_focused():

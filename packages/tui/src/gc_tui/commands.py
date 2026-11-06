@@ -305,6 +305,13 @@ def build_default_registry() -> CommandRegistry:
             _cap(f"{TOGGLES['answers'].label}: {TOGGLES['answers'].summary}"),
             is_toggle=True,
         ),
+        Command(
+            "reasoning",
+            ("рассуждения",),
+            "",
+            _cap(TOGGLES["reasoning"].label),
+            is_toggle=True,
+        ),
     ]
     for c in cmds:
         reg.register(c)

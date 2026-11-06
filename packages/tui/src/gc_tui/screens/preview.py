@@ -101,6 +101,7 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
             # корень из шапки превью: пути в подписях вызовов — от него
             "root": self._project_path or None,
             "blocks": self._blocks,
+            "injected_fields": self._injected_fields(),
         }
         calls = render_segments_readonly(
             trace, segments, model_slots=self._model_slots, **opts
@@ -123,6 +124,14 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
 
     def on_resize(self, _event) -> None:
         self.call_after_refresh(self._refresh_trace_overlays)
+
+    def _injected_fields(self) -> list[str]:
+        """Служебные поля схем тулов (`agent.inject_tool_fields`); хост
+        без настроек — нет."""
+        settings = getattr(self.app, "base_settings", None)
+        if settings is None:
+            return []
+        return list(settings().settings.agent.inject_tool_fields)
 
     def _preview_blocks(self):
         """Блоки превью с журналом правок треда (только чтение) и правилом

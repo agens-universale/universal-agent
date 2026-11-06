@@ -224,6 +224,7 @@ tui:
   # Default: judge. Не зависит от backend.stream.
   text_answer_mode: judge
   finish_gate_mode: "smart"        # /gate: always — судья всегда; smart — судья только при вызовах инструментов; off — отключить (только TUI)
+  show_reasoning: "off"            # рассуждения модели в живой ленте (reasoning): off | on; не хранятся; только в chat_completions
   # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
   # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
   agentsmd_override: false

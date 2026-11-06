@@ -10,6 +10,7 @@ import logging
 import re
 import textwrap
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, Optional
 
@@ -31,7 +32,8 @@ from gc_core.utils.path_truncate import truncate_path
 
 from gc_tui.models import AgentHead, ResultOutcome, TraceEvent
 from gc_tui.palette import INK
-from gc_tui.services.duration_format import format_round_int
+from gc_tui.services.duration_format import format_round_int, format_timer
+from gc_tui.services.think_text import think_rejected
 from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
@@ -589,6 +591,86 @@ def fit_call_target(target: str, cols: int, *, path: bool) -> str:
     return target[: cols - 1].rstrip() + "…"
 
 
+#: Слово строки мысли модели: идёт / после (спека мыслей §2).
+THOUGHT_LIVE_WORD = "Thinking"
+THOUGHT_DONE_WORD = "Thought"
+#: Глиф строки мысли (с пробелом до слова) и разделитель слова и хвоста.
+THOUGHT_GLYPH = "● "
+_THOUGHT_SEP = "  "
+
+
+@dataclass(frozen=True)
+class ThoughtLine:
+    """Части строки мысли под ширину: слово, хвост текста, таймер
+    (` · 4с` или пусто); ``cut`` — хвост обрезан, текст раскрываем."""
+
+    word: str
+    tail: str
+    timer: str
+    cut: bool
+
+    @property
+    def lead(self) -> str:
+        """Слово с разделителем перед хвостом (без хвоста — слово)."""
+        return self.word + (_THOUGHT_SEP if self.tail else "")
+
+
+#: Граница предложения в мысли: после `.`/`!`/`?`/`…` и пробела.
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?…])\s+")
+
+
+def _last_sentence_head(flat: str, room: int) -> str:
+    """Последнее предложение с начала в ``room`` знаков: до него был
+    текст — `…` в начале; не влезло — обрезка по границе слова, `…` в
+    конце."""
+    pieces = _SENTENCE_BREAK.split(flat)
+    lead = "…" if len(pieces) > 1 else ""
+    sentence = lead + pieces[-1]
+    if len(sentence) <= room:
+        return sentence
+    head = sentence[: room - 1]
+    if " " in head:
+        head = head.rsplit(" ", 1)[0]
+    return head.rstrip() + "…"
+
+
+def thought_line(
+    *,
+    live: bool,
+    text: str,
+    seconds: float | None,
+    width: int,
+    expanded: bool = False,
+) -> ThoughtLine:
+    """Строка мысли в ``width`` клеток: глиф, слово и таймер не режутся.
+    Не влезло — у идущей хвост с `…` в начале (видны новейшие слова), у
+    законченной последнее предложение с начала (`…` в начале, если до
+    него был текст, и в конце, если не влезло). Раскрытая
+    (``expanded``) — без текста: он весь под строкой. Ширины нет
+    (``<= 0``) — текст целиком."""
+    from rich.cells import cell_len
+
+    from gc_tui.services.stream_sink import reasoning_tail
+
+    word = THOUGHT_LIVE_WORD if live else THOUGHT_DONE_WORD
+    timer = format_timer(seconds) if seconds is not None else None
+    timer = f" · {timer}" if timer else ""
+    flat = " ".join(text.split())
+    room = width - cell_len(THOUGHT_GLYPH + word + _THOUGHT_SEP + timer)
+    if width <= 0 or cell_len(flat) <= room:
+        return ThoughtLine(word, "" if expanded else flat, timer, cut=False)
+    if expanded:
+        tail = ""
+    elif room <= 1:
+        tail = "…"
+    elif live:
+        # `reasoning_tail` держит `maxlen` знаков после `…`.
+        tail = reasoning_tail(flat, room - 1)
+    else:
+        tail = _last_sentence_head(flat, room)
+    return ThoughtLine(word, tail, timer, cut=True)
+
+
 #: Строк задачи субагента под заголовком `Agent`; дальше — `…`.
 AGENT_TASK_LINES = 2
 
@@ -619,6 +701,7 @@ def build_call_row(
     mcp_tools: Mapping[str, McpToolInfo] | None = None,
     mcp_servers: Iterable[str] = (),
     agent: AgentHead | None = None,
+    think_text: str = "",
 ) -> ToolCallRow:
     """Строка вызова — один билдер для живой ленты, превью и вложенных.
 
@@ -645,6 +728,7 @@ def build_call_row(
         waiting=waiting,
         level=level,
         task=agent.task if agent is not None else "",
+        think_text=think_text,
     )
 
 
@@ -906,6 +990,7 @@ def _dispatch_readonly(
             mcp_tools=mcp_tools,
             mcp_servers=mcp_servers,
             agent=ev.agent,
+            think_text=ev.think_text,
         )
         calls[row.call_id] = row
         category, _ = tool_caption(wire_name, mcp_tools, mcp_servers)
@@ -916,6 +1001,8 @@ def _dispatch_readonly(
         row = calls.get(ev.call_id) if ev.call_id else None
         if row is not None:
             _readonly_result(blocks, blocks.views[""], row, ev)
+        elif think_rejected((ev.full_payload or {}).get("output")):
+            pass  # отказ пустого Think: строки вызова нет
         elif ev.kind == "error":
             mount_target.mount(
                 build_orphan_result_row(
@@ -1067,6 +1154,7 @@ def render_segments_readonly(
     root: str | None = None,
     blocks: PreviewBlocks | None = None,
     model_slots: Mapping[str, str | None] | None = None,
+    injected_fields: Iterable[str] = (),
 ) -> dict:
     """Read-only превью из сегментов: полная история (все сегменты сырьём) +
     нумерованные маркеры сжатий #K между ними. Паритет рендера с основным
@@ -1077,7 +1165,8 @@ def render_segments_readonly(
 
     ``blocks`` — блоки превью (исполнители уровней, таймеры, журнал правок
     треда): тот же объект вызывающий отдаёт `merge_nested_readonly`; без
-    него — свои, без журнала."""
+    него — свои, без журнала. ``injected_fields`` — служебные поля схем
+    тулов: в мысль Think не входят, пока есть своё."""
     from gc_tui.services.tool_blocks import ToolBlocks
     from gc_tui.services.trace_mapper import collect_render_context
     from gc_tui.widgets.tool_blocks_view import PreviewBlocks, ToolBlocksView
@@ -1101,6 +1190,7 @@ def render_segments_readonly(
             if isinstance(rec, dict)
         ),
         root=root,
+        injected_fields=injected_fields,
     )
     # Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
     # файле с тем же id. Рисуем первое вхождение. Payload full, пока id есть
@@ -1153,6 +1243,7 @@ def merge_nested_readonly(
     mcp_servers: Iterable[str] = (),
     root: str | None = None,
     blocks: PreviewBlocks | None = None,
+    injected_fields: Iterable[str] = (),
 ) -> None:
     """Read-only домонтирование вложенного трейса субагентов из sidecar-records
     (превью). Паритет с MainScreen._merge_sidecar_nested: те же plan/apply,
@@ -1301,7 +1392,9 @@ def merge_nested_readonly(
         )
 
     apply_sidecar_nested_actions(
-        plan_sidecar_nested_actions(records, root=root),
+        plan_sidecar_nested_actions(
+            records, root=root, injected=frozenset(injected_fields)
+        ),
         mount_nested_tool=_tool,
         finish_nested_tool=_finish,
         mount_nested_prose=_prose,
