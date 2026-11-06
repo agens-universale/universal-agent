@@ -2274,15 +2274,16 @@ def test_amended_merge_of_fresh_foreign_commit_records_nothing(repo):
     assert "o.txt" not in {r.path for r in _records(threads_dir)}
 
 
-@pytest.mark.parametrize(
-    "after_commit",
-    [
-        ("git", "switch", "-qc", "feat"),
-        ("git", "checkout", "-q", "main"),
-        ("git", "stash", "-q"),
-    ],
-)
-def test_own_commit_survives_head_journal_noops(repo, after_commit):
+_NOOP_AFTER_COMMIT = {
+    "switch_new_branch": _git_script(("git", "switch", "-qc", "feat")),
+    "checkout_same_branch": _git_script(("git", "checkout", "-q", "main")),
+    "stash": "open('tracked.txt','ab').write(b'dirty\\n')\n"
+    + _git_script(("git", "stash", "-q")),
+}
+
+
+@pytest.mark.parametrize("scenario", sorted(_NOOP_AFTER_COMMIT))
+def test_own_commit_survives_head_journal_noops(repo, scenario):
     """Записи журнала без сдвига HEAD (новая ветка на месте, checkout той же
     ветки, stash) не мешают признать коммит своим."""
     launch_root, threads_dir = repo
@@ -2290,18 +2291,75 @@ def test_own_commit_survives_head_journal_noops(repo, after_commit):
     _run_command(
         launch_root,
         "open('tracked.txt','wb').write(b'line1\\nline2\\nline3\\n')\n"
-        "open('s.txt','wb').write(b's\\n')\n"
+        + _git_script(("git", "commit", "-qm", "edit", "tracked.txt"))
+        + _NOOP_AFTER_COMMIT[scenario],
+    )
+    delta.after_and_record()
+
+    subjects = _reflog_subjects(launch_root, 3)
+    assert subjects[1].startswith("commit: ")
+    assert not subjects[0].startswith("commit")
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["tracked.txt"].add == 1
+    _assert_commit_mark(launch_root, "tracked.txt")
+
+
+def _reflog_subjects(root: Path, count: int) -> list[str]:
+    """Темы последних записей журнала HEAD, новые первыми."""
+    return subprocess.run(
+        ["git", "log", "-g", "--format=%gs", "-n", str(count), "HEAD"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+
+
+def test_own_commit_with_empty_message_is_recorded(repo):
+    """Пустое сообщение: тема журнала — ``commit:`` без пробела, коммит
+    всё равно свой."""
+    launch_root, threads_dir = repo
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "open('tracked.txt','wb').write(b'line1\\nline2\\nline3\\n')\n"
         + _git_script(
-            ("git", "add", "s.txt"),
-            ("git", "commit", "-qm", "edit", "tracked.txt"),
-            after_commit,
+            (
+                "git",
+                "commit",
+                "-q",
+                "--allow-empty-message",
+                "-m",
+                "",
+                "tracked.txt",
+            ),
         ),
     )
     delta.after_and_record()
 
-    by_path = {r.path: r for r in _records(threads_dir)}
-    assert by_path["tracked.txt"].add == 1
+    assert _reflog_subjects(launch_root, 1) == ["commit:"]
     _assert_commit_mark(launch_root, "tracked.txt")
+
+
+def test_cherry_pick_fast_forward_to_old_commit_records_nothing(repo):
+    """``cherry-pick --ff`` старого чужого коммита — запись
+    ``cherry-pick: fast-forward`` с верным родителем; отсекает её только
+    время коммиттера."""
+    launch_root, threads_dir = repo
+    _git(launch_root, "checkout", "-qb", "other")
+    (launch_root / "o.txt").write_bytes(b"o\n")
+    _git(launch_root, "add", "o.txt")
+    _git_in_the_past(launch_root, "commit", "-qm", "other")
+    _git(launch_root, "checkout", "-q", "main")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root, _git_script(("git", "cherry-pick", "--ff", "other"))
+    )
+    delta.after_and_record()
+
+    assert _reflog_subjects(launch_root, 1)[0].startswith("cherry-pick:")
+    assert delta._head_after != delta._head_before
+    assert _records(threads_dir) == []
 
 
 def test_own_commit_without_head_journal_records_nothing(repo):
