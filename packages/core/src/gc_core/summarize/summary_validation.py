@@ -2,52 +2,53 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from gc_core.summarize.summary_spec import (
     assemble_summary_xml,
     extract_summary_bodies,
     merge_summary_bodies,
-    primary_section_tag,
     section_tags,
 )
 
-_FALLBACK_MSG = (
-    "Automatic summarization produced no valid output. "
-    "Continue from the latest confirmed user requirements and implementation state."
-)
+_PLACEHOLDER_LINES = {"", "...", "…", "n/a", "- n/a"}
 
 
-def has_extracted_summary_content(text: str) -> bool:
-    return bool(extract_summary_bodies(text))
+class SummaryRejectedError(ValueError):
+    """A summary failed validation before any change to the live history."""
+
+    trace: dict[str, Any] | None = None
 
 
 def has_nonempty_summary_body(text: str) -> bool:
-    """Хотя бы один известный тег с непустым телом (``- n/a`` допустим)."""
-    return any(extract_summary_bodies(text).values())
-
-
-def fallback_summary_xml() -> str:
-    filler = "- n/a"
-    bodies = dict.fromkeys(section_tags(), filler)
-    bodies[primary_section_tag()] = (
-        f"- {_FALLBACK_MSG}\n- Continue from dialog_history and session memory."
+    """Return whether a known section contains more than placeholders."""
+    return any(
+        any(
+            line.strip().casefold() not in _PLACEHOLDER_LINES
+            for line in body.splitlines()
+        )
+        for body in extract_summary_bodies(text).values()
     )
-    return assemble_summary_xml(bodies)
 
 
-# Для импортов; всегда валидный минимальный <summary>.
-FALLBACK_SUMMARY = fallback_summary_xml()
-
-
-def missing_section_tags(text: str) -> tuple[str, ...]:
-    bodies = extract_summary_bodies(text)
+def missing_section_tags(
+    text: str, *, allow_unclosed: bool = True
+) -> tuple[str, ...]:
+    bodies = extract_summary_bodies(text, allow_unclosed=allow_unclosed)
     return tuple(tag for tag in section_tags() if tag not in bodies)
 
 
-def validate_summary_text(text: str) -> tuple[bool, str]:
+def validate_summary_text(
+    text: str, *, require_closed_structure: bool = False
+) -> tuple[bool, str]:
     s = (text or "").strip()
     if not s:
         return False, "empty"
-    if missing_section_tags(s):
+    if require_closed_structure and not (
+        s.startswith("<summary>") and s.endswith("</summary>")
+    ):
+        return False, "missing_structure"
+    if missing_section_tags(s, allow_unclosed=not require_closed_structure):
         return False, "missing_structure"
     if not has_nonempty_summary_body(s):
         return False, "empty_content"
@@ -64,22 +65,3 @@ def merge_repaired_summary(*, invalid_text: str, repaired_text: str) -> str:
     return assemble_summary_xml(
         merge_summary_bodies(preserved=preserved, repaired=repaired)
     )
-
-
-def resolve_after_repair_failure(
-    *,
-    invalid_text: str,
-    merged_text: str,
-    repaired_text: str,
-    accumulated_summary: str,
-) -> tuple[str, str]:
-    """partial_merged | accumulated | fallback — если strict validate не прошёл."""
-    if (
-        has_extracted_summary_content(merged_text)
-        or has_extracted_summary_content(repaired_text)
-        or has_extracted_summary_content(invalid_text)
-    ):
-        return merged_text, "partial_merged"
-    if (accumulated_summary or "").strip():
-        return accumulated_summary, "accumulated"
-    return fallback_summary_xml(), "fallback"
