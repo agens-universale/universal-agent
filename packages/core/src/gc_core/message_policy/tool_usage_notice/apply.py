@@ -8,9 +8,8 @@ from gc_core.message_policy.project_memory_notice.policy import (
     collect_project_memory_hints,
     on_persist_steps,
     project_memory_hints_enabled,
-    wrap_project_memory_hint_user_message,
 )
-from gc_core.message_policy.todo_reminder import apply_todo_reminder
+from gc_core.message_policy.todo_reminder import todo_reminder_text
 from gc_core.message_policy.tool_availability import (
     available_tool_names,
     tool_is_available,
@@ -21,7 +20,6 @@ from gc_core.message_policy.tool_usage_notice.policy import (
     collect_tool_usage_notices,
     get_thread_memory_registers_from_shared,
     update_tool_usage_notice_after_persist,
-    wrap_tool_usage_notice_user_message,
 )
 from gc_core.message_policy.tool_usage_notice.state import (
     get_project_memory_check_cnt,
@@ -41,7 +39,9 @@ def _tool_reset_reasons(
     counters_before: dict[str, int],
     counters_after: dict[str, int],
     emitted_tools: set[str],
+    invoked_tool_names: set[str] | None = None,
 ) -> dict[str, str]:
+    invoked = invoked_tool_names or set()
     reasons: dict[str, str] = {}
     for rule in rules:
         tool_name = rule.tool_name
@@ -51,7 +51,7 @@ def _tool_reset_reasons(
             continue
         if tool_name in emitted_tools:
             reasons[tool_name] = "notice emitted"
-        elif batch_used_tool(step_messages, tool_name):
+        elif tool_name in invoked or batch_used_tool(step_messages, tool_name):
             reasons[tool_name] = "tool used in batch"
         elif after == 0:
             reasons[tool_name] = "counter cleared"
@@ -61,7 +61,6 @@ def _tool_reset_reasons(
 
 
 def _emit_project_memory_hints(
-    out: list,
     state: Any,
     meta: dict,
     ctx: Any,
@@ -70,20 +69,12 @@ def _emit_project_memory_hints(
     enabled: bool,
     memory_hash: str | None,
 ) -> list[str]:
-    """Добавить в ``out`` подсказки project_memory; вернуть их тексты."""
-    emitted: list[str] = []
+    """Тексты подсказок project_memory. Сообщение собирает вызывающий."""
     if not enabled:
-        return emitted
-    for hint_text in collect_project_memory_hints(
+        return []
+    return collect_project_memory_hints(
         state, meta, ctx, settings, get_hash_fn=lambda _ctx: memory_hash
-    ):
-        out.append(
-            wrap_project_memory_hint_user_message(
-                hint_text, suffix="mem_project"
-            )
-        )
-        emitted.append(hint_text)
-    return emitted
+    )
 
 
 def _project_counter_reset(
@@ -107,8 +98,7 @@ def _emitted_tools(
     }
 
 
-def apply_tool_usage_notice_before_llm(
-    messages: list[dict[str, Any]],
+def notice_texts_before_llm(
     state: Any,
     ctx: Any,
     meta: dict[str, Any],
@@ -116,13 +106,38 @@ def apply_tool_usage_notice_before_llm(
     step_messages: list[dict[str, Any]],
     logger: Any | None = None,
     project_memory_hash: str | None = None,
-) -> list[dict[str, Any]]:
+    reset_tool_names: set[str] | None = None,
+) -> list[str]:
+    """Тексты подсказок в порядке: project memory, tool usage, todo.
+
+    Сообщение ``user`` не собирает: его клеит цикл, в output или одним user.
+    ``reset_tool_names`` — тулы, исполненные в батче; имя берётся из вызова.
     """
-    После persist-batch, перед LLM: независимые контуры project_memory K-тик и tool_usage_notice.
-    ``project_memory_hash`` — версия памяти проекта, прочитанная заранее
-    (подсказки о памяти включены).
-    Счётчики не сбрасывают друг друга; снимок — только в текстовый log.
-    """
+    return [
+        text
+        for _kind, text in _notice_pairs_before_llm(
+            state,
+            ctx,
+            meta,
+            step_messages=step_messages,
+            logger=logger,
+            project_memory_hash=project_memory_hash,
+            reset_tool_names=reset_tool_names,
+        )
+    ]
+
+
+def _notice_pairs_before_llm(
+    state: Any,
+    ctx: Any,
+    meta: dict[str, Any],
+    *,
+    step_messages: list[dict[str, Any]],
+    logger: Any | None = None,
+    project_memory_hash: str | None = None,
+    reset_tool_names: set[str] | None = None,
+) -> list[tuple[str, str]]:
+    """Пары (вид, текст). Вид: memory, usage, todo. Порядок — канон списка."""
     settings = settings_of(ctx)
     if not isinstance(meta, dict):
         meta = {}
@@ -154,18 +169,21 @@ def apply_tool_usage_notice_before_llm(
     if project_hints_enabled:
         project_check_after_tick = on_persist_steps(meta, steps=1)
 
+    invoked = set(reset_tool_names or ())
     if notice_rules:
         update_tool_usage_notice_after_persist(
-            state, step_messages, notice_rules
+            state,
+            step_messages,
+            notice_rules,
+            reset_tool_names=invoked,
         )
 
     counters_before_collect = dict(
         getattr(state, "tool_usage_notice_cnt", None) or {}
     )
-    out = list(messages)
+    pairs: list[tuple[str, str]] = []
 
     emitted_project_hints = _emit_project_memory_hints(
-        out,
         state,
         meta,
         ctx,
@@ -173,6 +191,7 @@ def apply_tool_usage_notice_before_llm(
         enabled=project_hints_enabled,
         memory_hash=project_memory_hash,
     )
+    pairs.extend(("memory", text) for text in emitted_project_hints)
     project_check_final = (
         get_project_memory_check_cnt(meta) if project_hints_enabled else None
     )
@@ -186,15 +205,17 @@ def apply_tool_usage_notice_before_llm(
     for notice_text in collect_tool_usage_notices(
         state, notice_rules, registers=registers
     ):
-        out.append(wrap_tool_usage_notice_user_message(notice_text))
+        pairs.append(("usage", notice_text))
 
-    out = apply_todo_reminder(
-        out,
+    todo_text = todo_reminder_text(
         state,
         settings,
         step_messages=step_messages,
         available_tools=available_tools,
+        invoked_tool_names=invoked,
     )
+    if todo_text:
+        pairs.append(("todo", todo_text))
 
     counters_final = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
     emitted_tools = _emitted_tools(tool_thresholds, counters_before_collect)
@@ -204,6 +225,7 @@ def apply_tool_usage_notice_before_llm(
         counters_before=counters_before,
         counters_after=counters_final,
         emitted_tools=emitted_tools,
+        invoked_tool_names=invoked,
     )
 
     persist_tool_usage_notice_state(state, meta)
@@ -219,4 +241,4 @@ def apply_tool_usage_notice_before_llm(
         long_reset=project_reset,
         long_emit=bool(emitted_project_hints),
     )
-    return out
+    return pairs

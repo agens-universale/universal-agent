@@ -33,7 +33,6 @@ from gc_core.auto_routing.log_events import (
 )
 from gc_core.auto_routing.policy import (
     FINISH_REJECT,
-    LOOP,
     NO_TOOL_BOUNCE,
     PAIR_DESCEND,
     PAIR_LOWER,
@@ -116,6 +115,7 @@ from gc_core.intent_guard.turn_finish_emit import (
     apply_finish_gate_to_turn_finish_output_in_state,
     get_function_call_output_text,
 )
+from gc_core.intent_log.user_turn import append_user_asks_from_messages
 from gc_core.intent_scope.final_answer import (
     amaybe_record_final_answer_intent,
     record_plan_outcome,
@@ -128,7 +128,6 @@ from gc_core.loop_detector.detector import clear as clear_loop_detector
 # наблюдатели — работа с памятью на микросекундах, нативной async-формы у них нет
 # (правило ветки: «есть нативная форма — идём через неё; формы нет, работа
 # короткая — инлайн на loop»).
-from gc_core.loop_detector.detector import flush as flush_loop_detector
 from gc_core.loop_detector.detector import observe as observe_loop_detector
 from gc_core.message_policy.attachments_outbound import (
     compute_live_ids,
@@ -143,14 +142,17 @@ from gc_core.message_policy.no_tool_call_bounce import (
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
+from gc_core.message_policy.nudges import (
+    NudgeHold,
+    clear_executed_tool_names,
+    record_executed_call,
+)
 from gc_core.message_policy.stop_persist import is_persist_discarded
 from gc_core.message_policy.tool_attachments import (
     build_tool_attachments_message,
 )
-from gc_core.message_policy.tool_usage_notice.apply import (
-    apply_tool_usage_notice_before_llm,
-)
 from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
     TECHNICAL_TYPE_ERROR_MESSAGE,
     TECHNICAL_TYPE_TECHNICAL,
     build_invalid_tool_call_feedback_message,
@@ -160,13 +162,12 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.message_policy.user_stop import (
     not_started_due_to_user_stop_output,
 )
-from gc_core.model_choice import anote_applied
+from gc_core.model_choice import awrite_pending, note_applied
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
 from gc_core.run_summary_coordinator import (
-    build_preserved_batch,
     filter_messages_not_in_state,
 )
 from gc_core.runtime_notices import (
@@ -401,25 +402,63 @@ def _summarize_call_data_for_log(call_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _without_tool_call_pairs(
-    messages: List[Dict], tool_name: str
-) -> List[Dict]:
-    """Убрать пары function_call + function_call_output для ``tool_name`` из preserved batch."""
-    out: List[Dict] = []
-    i = 0
-    while i < len(messages):
-        msg = messages[i]
-        if (
-            i + 1 < len(messages)
-            and isinstance(msg, dict)
-            and msg.get("type") == "function_call"
-            and str(msg.get("name") or "") == tool_name
-        ):
-            i += 2
+_TOOL_CALL_TYPES = frozenset({"function_call", "tool_call"})
+_TOOL_OUTPUT_TYPES = frozenset({"function_call_output", "tool_call_output"})
+
+
+def _completed_output_id(message: Any) -> Any:
+    if not isinstance(message, dict):
+        return None
+    if message.get("type") not in _TOOL_OUTPUT_TYPES:
+        return None
+    return message.get("call_id") or None
+
+
+def _closed_output_ids(messages: List[Dict]) -> set:
+    return {
+        call_id
+        for message in messages
+        if (call_id := _completed_output_id(message))
+    }
+
+
+def _outputs_missing_from(outputs: List[Dict], closed_ids: set) -> List[Dict]:
+    """Выходы этого батча, которых ещё нет в истории. Дописывает их id в ``closed_ids``."""
+    extra: List[Dict] = []
+    for output in outputs:
+        call_id = _completed_output_id(output)
+        if call_id is None or call_id in closed_ids:
             continue
-        out.append(msg)
-        i += 1
-    return out
+        closed_ids.add(call_id)
+        extra.append(output)
+    return extra
+
+
+def _is_open_tool_call(message: Any, closed_ids: set) -> bool:
+    return (
+        isinstance(message, dict)
+        and message.get("type") in _TOOL_CALL_TYPES
+        and message.get("call_id") not in closed_ids
+    )
+
+
+def _history_closed_before_session_compact(
+    messages: List[Dict],
+    completed_outputs: List[Dict],
+) -> List[Dict]:
+    """История для сводки: только вызовы, у которых уже есть выход.
+
+    Выходы тулов этого батча, исполненных до ``session_compact``, дописываются
+    к истории. Вызов без выхода (сам ``session_compact`` и всё, что за ним
+    в батче) в сводку не попадает.
+    """
+    closed_ids = _closed_output_ids(messages)
+    extra_outputs = _outputs_missing_from(completed_outputs, closed_ids)
+    return [
+        message
+        for message in [*messages, *extra_outputs]
+        if not _is_open_tool_call(message, closed_ids)
+    ]
 
 
 def _make_technical_feedback_user_message(
@@ -440,16 +479,29 @@ def _make_technical_feedback_user_message(
     return msg
 
 
-def _mode_notices(state: State, ctx: Any) -> List[Dict]:
-    """Служебные сообщения о границе режима для ЭТОГО агента; сдвигает его
-    отметку (``State.mode_announced``). Пусто — режим уже объявлен. Текст
-    plan — по набору тулов агента (``offers_plan_tool``)."""
-    texts, state.mode_announced = mode_boundary_messages(
+def _mode_notices(
+    state: State, ctx: Any, *, update_silent_mark: bool = True
+) -> List[Dict]:
+    """Служебные сообщения о границе режима для ЭТОГО агента.
+
+    Сдвигает отметку (``State.mode_announced``). Пустой список — сказать
+    нечего. ``update_silent_mark=False`` не трогает отметку, если текста
+    нет: после сводки пустой пересчёт не должен её затирать.
+    Текст plan — по набору тулов агента (``offers_plan_tool``).
+    """
+    texts, announced = mode_boundary_messages(
         current=resolve_mode(ctx).value,
         announced=state.mode_announced,
         can_propose_plan=offers_plan_tool(ctx, state),
     )
-    return [_make_technical_feedback_user_message(text) for text in texts]
+    if texts or update_silent_mark:
+        state.mode_announced = announced
+    return [
+        _make_technical_feedback_user_message(
+            text, technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT
+        )
+        for text in texts
+    ]
 
 
 def _is_previous_response_cache_miss(exc: Exception) -> bool:
@@ -847,7 +899,7 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
     """Единая точка выбора модели перед основным запросом.
 
     Записывает фактический уровень в State; только на новом такте логирует
-    решение и сверяет применённый выбор (`model_choice.anote_applied`).
+    решение и сверяет применённый выбор (`model_choice.note_applied`).
     Повтор запроса после переполнения контекста получает то же решение.
     Канонические схемы инструментов проецируются транспортом для выбранной модели."""
     active, decision, effective, is_new = await aroute_before_call(state, ctx)
@@ -858,7 +910,7 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
         effective,
     )
     if is_new:
-        await anote_applied(state, ctx, state._tick_decision[0])
+        note_applied(state, ctx, state._tick_decision[0])
         log_routing_decision(
             getattr(ctx, "logger", None) or _fallback_logger,
             state,
@@ -1430,6 +1482,39 @@ async def _aprepare_native_vision(
     return key
 
 
+def _function_call_output_id(message) -> str:
+    if not isinstance(message, dict):
+        return ""
+    if message.get("type") != "function_call_output":
+        return ""
+    call_id = message.get("call_id")
+    if isinstance(call_id, str):
+        return call_id
+    return ""
+
+
+def _answered_call_ids(history) -> set[str]:
+    answered: set[str] = set()
+    for batch in history:
+        for message in batch or []:
+            call_id = _function_call_output_id(message)
+            if call_id:
+                answered.add(call_id)
+    return answered
+
+
+def _keep_answered_invalid_tool_call(history) -> Callable[[Dict], Dict]:
+    """Вызов с уже записанным выводом не подменяем: пара уходит как лежит в треде."""
+    answered = _answered_call_ids(history)
+
+    def factory(message: Dict) -> Dict:
+        if message.get("call_id") in answered:
+            return message
+        return build_invalid_tool_call_feedback_message(message)
+
+    return factory
+
+
 async def _arequest_backend_canonical_once(
     messages: List[Dict],
     state: State,
@@ -1493,13 +1578,17 @@ async def _arequest_backend_canonical_once(
         if resolved is not None
         else settings.backend.completions_url
     )
+    state_messages = getattr(state, "messages", []) or []
+    keep_answered = _keep_answered_invalid_tool_call(
+        (state_messages, messages)
+    )
     sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
-        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+        invalid_tool_call_factory=keep_answered,
     )
     sanitized_state_messages = sanitize_messages_for_chat_completions(
-        getattr(state, "messages", []) or [],
-        invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
+        state_messages,
+        invalid_tool_call_factory=keep_answered,
     )
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
@@ -1633,8 +1722,8 @@ def _is_tool_outputs_with_technical_tail(messages: List[Dict]) -> bool:
     Ни вызовов, ни ответа модели.
 
     Такой батч продолжает ответы тулов, а не открывает запрос человека. Реплика в
-    батче (в т.ч. пара «текст + @-сноска» из очереди TUI) или вызов в нём (хвост
-    ``session_compact`` несёт пары call/output) оставляют ``user_ask``.
+    батче (в т.ч. пара «текст + @-сноска» из очереди TUI) или вызов в нём
+    оставляют ``user_ask``.
     """
     has_output = False
     for message in messages:
@@ -1846,6 +1935,8 @@ async def _amain_call(messages, state: State, ctx: Any):
     чью прозу заведомо переиграют, идёт с приглушённым каналом `answer` потока
     (`_answer_stream_muted`); переигранный — с полным."""
     resolved = await aprepare_main_call(state, ctx)
+    # Отложенный вывод тула цикл уже дописал: смена встаёт за ним.
+    await awrite_pending(state, ctx)
     usage_before = (
         _usage_snapshot(state)
         if getattr(state, "current_level", None) is not None
@@ -2387,42 +2478,114 @@ def _track_repeat_errors(
     return is_unknown
 
 
-def _apply_session_compact_to_batch(
-    state: State,
-    batch_snapshot: List[Dict],
-    tools_outputs: List[Dict],
+def _skipped_after_compact_output(tool_name: str) -> str:
+    """Хвост батча после сводки не исполняется. Карточка закрывается отказом."""
+    payload = {
+        "tool": str(tool_name or "unknown_tool"),
+        "ok": False,
+        "status": "not_started_due_to_session_compact",
+        "message": "Tool was not started: session_compact replaced the history.",
+        "error": None,
+        "synthetic": True,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _closings_after_session_compact(
+    done: List[Dict], pending: List[Dict]
 ) -> List[Dict]:
-    # Если внутри batch сработал session_compact — вместо сырых output'ов
-    # вернуть сохранённые пары call/output + technical-сообщение «продолжай»,
-    # чтобы не оставить висячий function_call и не тащить старое окно дальше.
+    """Вывод самой сводки и отказы вызовов за ней. В новый трейс не входят."""
+    closing: List[Dict] = []
+    if done:
+        last = done[-1]
+        if (
+            isinstance(last, dict)
+            and last.get("type") == "function_call_output"
+        ):
+            closing.append(last)
+    for call in pending:
+        if not isinstance(call, dict):
+            continue
+        call_id = call.get("call_id")
+        if not call_id:
+            continue
+        closing.append(
+            _function_call_output_message(
+                call_id,
+                _skipped_after_compact_output(str(call.get("name") or "")),
+            )
+        )
+    return closing
+
+
+def _hold_summary_archive(ctx: Any) -> Dict[str, Any]:
+    """Перезапись файла сводкой откладывается, пока в старый тред не лягут выводы."""
+    real = getattr(ctx, "on_summary_applied", None)
+    box: Dict[str, Any] = {"real": real, "event": None, "done": False}
+
+    async def held(event):
+        box["event"] = event
+
+    if real is not None:
+        ctx.on_summary_applied = held
+    return box
+
+
+async def _release_summary_archive(ctx: Any, box: Dict[str, Any]) -> None:
+    if box.get("done"):
+        return
+    box["done"] = True
+    real = box.get("real")
+    event = box.get("event")
+    if real is not None:
+        ctx.on_summary_applied = real
+    if real is not None and event is not None:
+        await await_callback(real(event))
+
+
+def _log_unstarted_after_session_compact(ctx: Any, calls: List[Dict]) -> None:
+    """Хвост после сводки не стартует. Отказы пишутся отдельно, здесь только лог."""
+    parts: List[str] = []
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        name = str(call.get("name") or "").strip()
+        call_id = str(call.get("call_id") or "").strip()
+        if not name and not call_id:
+            continue
+        parts.append(f"{name or '?'} call_id={call_id or '?'}")
+    if not parts:
+        return
+    logger = getattr(ctx, "logger", None) or _fallback_logger
+    logger.warning(
+        "session_compact: не исполнены вызовы батча после сводки: %s",
+        ", ".join(parts),
+    )
+
+
+def _apply_session_compact_to_batch(state: State) -> List[Dict]:
+    """После сводки живой трейс продолжает одно техническое «продолжай».
+
+    Закрытые пары уже внутри сводки. Неисполненные вызовы этого батча
+    не исполняются и в трейс не возвращаются.
+    """
     state.session_compact_applied = False
-    snapshot = (
-        getattr(state, "_session_compact_batch_snapshot", None)
-        or batch_snapshot
-    )
-    if hasattr(state, "_session_compact_batch_snapshot"):
-        delattr(state, "_session_compact_batch_snapshot")
-    preserved = build_preserved_batch(
-        current_messages=[*snapshot, *tools_outputs],
-        mode="function_call_output",
-        state_messages=list(getattr(state, "messages", []) or []),
-    )
-    preserved = _without_tool_call_pairs(preserved, SESSION_COMPACT_TOOL_NAME)
-    resume = _make_technical_feedback_user_message(
-        _SESSION_COMPACT_RESUME_USER_TEXT,
-        technical_type=TECHNICAL_TYPE_TECHNICAL,
-    )
-    return [*preserved, resume]
+    return [
+        _make_technical_feedback_user_message(
+            _SESSION_COMPACT_RESUME_USER_TEXT,
+            technical_type=TECHNICAL_TYPE_TECHNICAL,
+        )
+    ]
 
 
 async def _afinalize_tool_batch(
     state: State,
     ctx: Any,
     tools_outputs: List[Dict],
-    batch_snapshot: List[Dict],
     *,
     aborted_by_user_stop: bool,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]],
+    batch_trace: Optional[Dict] = None,
 ) -> List[Dict]:
     """Хвост батча: user-stop пары, session_compact, notice loop-детектора, gc."""
     if aborted_by_user_stop:
@@ -2437,20 +2600,20 @@ async def _afinalize_tool_batch(
         # Картинки батча тоже: ход остановлен, смотреть их некому.
         state.pending_tool_attachments = []
 
-    if getattr(state, "session_compact_applied", False):
-        tools_outputs = _apply_session_compact_to_batch(
-            state, batch_snapshot, tools_outputs
-        )
+    compacted = bool(getattr(state, "session_compact_applied", False))
+    if compacted and isinstance(batch_trace, dict):
+        # Защёлка на state гасится вместе с хвостом. Окно наджей живёт
+        # дольше — его ставит контроллер цикла по этой отметке трейса.
+        batch_trace["compacted"] = True
+    if compacted:
+        tools_outputs = _apply_session_compact_to_batch(state)
+        # Картинки батча жили в старом трейсе. После сводки их нет.
+        state.pending_tool_attachments = []
 
-    notice = flush_loop_detector(state)
-    if notice:
-        state.tick_signals.add(LOOP)
-        tools_outputs.append(
-            _make_technical_feedback_user_message(
-                notice,
-                technical_type=TECHNICAL_TYPE_TECHNICAL,
-            )
-        )
+    # После саммари resume-user уже продолжает ход — harness не нужен.
+    # Иначе loop допишет `_aflush_nudges` перед запросом к модели.
+    if compacted:
+        clear_loop_detector(state)
 
     # Картинки из тулов и из ответа на turn_ask_human — одним техническим
     # сообщением в самом конце батча (спека §7.1): tool-сообщение картинку не
@@ -2531,12 +2694,213 @@ async def _afinish_tool_call(
     return _function_call_output_message(m["call_id"], tool_res)
 
 
+async def _aexecute_one_batch_call(
+    index: int,
+    call: Dict,
+    *,
+    tools_outputs: List[Dict],
+    skip_outputs: List[Dict],
+    state: State,
+    ctx: Any,
+    run_agent_func,
+    persist_messages_callback: Optional[Callable[[List[Dict]], None]],
+    batch_trace: Optional[Dict],
+) -> Tuple[bool, bool, int]:
+    """Один исполняемый call батча. → (was_invalid, ask_human_ok, unknown_hit)."""
+    tool_name = str(call.get("name") or "")
+    # smart-гейт: считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
+    # До try — упавший вызов (неверные аргументы) тоже считается.
+    await _abefore_tool_call(
+        index,
+        tool_name,
+        state,
+        prior=list(tools_outputs) + skip_outputs,
+        persist_messages_callback=persist_messages_callback,
+    )
+    record_executed_call(batch_trace, call)
+    tool_arguments = str(call.get("arguments", ""))
+    history_snapshot = None
+    prepared_history = None
+    if tool_name == SESSION_COMPACT_TOOL_NAME:
+        history_snapshot = list(getattr(state, "messages", []) or [])
+        prepared_history = _history_closed_before_session_compact(
+            history_snapshot, tools_outputs
+        )
+        state.messages = prepared_history
+    try:
+        tool_res_raw, was_invalid, ok = await _aexecute_tool_call(
+            call, tool_name, tool_arguments, state, ctx, run_agent_func
+        )
+    finally:
+        # Сводка уже подменила историю своим списком — его не откатываем.
+        # Откат только если вызов не дошёл до подмены.
+        if (
+            history_snapshot is not None
+            and state.messages is prepared_history
+            and not getattr(state, "session_compact_applied", False)
+        ):
+            state.messages = history_snapshot
+    unknown_hit = int(_track_repeat_errors(state, tool_name, tool_res_raw))
+    await _aappend_call_output(
+        tools_outputs,
+        call,
+        tool_name,
+        tool_arguments,
+        tool_res_raw,
+        state,
+        ctx,
+    )
+    return (
+        bool(was_invalid),
+        tool_name == ASK_HUMAN_TOOL_NAME and ok is True,
+        unknown_hit,
+    )
+
+
+async def _astep_executed_call(
+    i: int,
+    call: Dict,
+    *,
+    executed: List[Dict],
+    tools_outputs: List[Dict],
+    skip_outputs: List[Dict],
+    state: State,
+    ctx: Any,
+    run_agent_func,
+    persist_messages_callback,
+    batch_trace: Optional[Dict],
+) -> Tuple[bool, bool, int, bool]:
+    """Один вызов батча. Последний флаг — сводка заменила трейс, хвост закрыт."""
+    archive = None
+    if str(call.get("name") or "") == SESSION_COMPACT_TOOL_NAME:
+        archive = _hold_summary_archive(ctx)
+    try:
+        was_invalid, ask_ok, unknown_hit = await _aexecute_one_batch_call(
+            i,
+            call,
+            tools_outputs=tools_outputs,
+            skip_outputs=skip_outputs,
+            state=state,
+            ctx=ctx,
+            run_agent_func=run_agent_func,
+            persist_messages_callback=persist_messages_callback,
+            batch_trace=batch_trace,
+        )
+        if getattr(state, "session_compact_applied", False):
+            await _aclose_after_session_compact(
+                ctx,
+                state,
+                tools_outputs,
+                executed[i + 1 :],
+                persist_messages_callback,
+                archive,
+            )
+            return bool(was_invalid), bool(ask_ok), unknown_hit, True
+        return bool(was_invalid), bool(ask_ok), unknown_hit, False
+    finally:
+        if archive is not None:
+            await _release_summary_archive(ctx, archive)
+
+
+async def _aclose_after_session_compact(
+    ctx: Any,
+    state: State,
+    tools_outputs: List[Dict],
+    pending: List[Dict],
+    persist_messages_callback,
+    archive: Dict[str, Any] | None,
+) -> None:
+    """Выводы сводки и хвоста — в старый тред, затем файл заменяется сводкой."""
+    await _maybe_persist(
+        persist_messages_callback,
+        _closings_after_session_compact(tools_outputs, pending),
+        state,
+    )
+    if archive is not None:
+        await _release_summary_archive(ctx, archive)
+    _log_unstarted_after_session_compact(ctx, pending)
+
+
+async def _arun_executed_tool_batch(
+    executed: List[Dict],
+    skip_outputs: List[Dict],
+    tools_outputs: List[Dict],
+    state: State,
+    ctx: Any,
+    run_agent_func,
+    persist_messages_callback: Optional[Callable[[List[Dict]], None]],
+    batch_trace: Optional[Dict],
+) -> Tuple[bool, int, int]:
+    """Исполнить work+finish батча в ``tools_outputs``.
+
+    → (aborted_by_stop, unknown, invalid).
+    """
+    unknown_in_batch = 0
+    invalid_in_batch = 0
+    aborted_by_user_stop = False
+    successful_ask_human = False
+    # Human-wait (ask_human | confirm-in-tool): до блокировки сфлашить уже
+    # посчитанные output'ы предыдущих тулов + skip'ы (I2), чтобы TUI не держал
+    # их в running на время wait. Полный батч персистится ещё раз на выходе
+    # process_tool_calls (run_agent → _maybe_persist); уже записанные id
+    # сессия пропускает по make_message_key.
+    for i, call in enumerate(executed):
+        # Между тулами / до старта — если stop, remaining не apply_tool → envelope B.
+        if getattr(state, "stop_requested", False):
+            tools_outputs.extend(
+                _not_started_outputs(executed[i:], state, ctx)
+            )
+            aborted_by_user_stop = True
+            break
+
+        if successful_ask_human:
+            tools_outputs.append(_after_ask_human_skip_output(call["call_id"]))
+            continue
+        ended = _batch_ended_skip_output(state, call["call_id"])
+        if ended is not None:
+            tools_outputs.append(ended)
+            continue
+        (
+            was_invalid,
+            ask_ok,
+            unknown_hit,
+            compacted,
+        ) = await _astep_executed_call(
+            i,
+            call,
+            executed=executed,
+            tools_outputs=tools_outputs,
+            skip_outputs=skip_outputs,
+            state=state,
+            ctx=ctx,
+            run_agent_func=run_agent_func,
+            persist_messages_callback=persist_messages_callback,
+            batch_trace=batch_trace,
+        )
+        invalid_in_batch += int(was_invalid)
+        unknown_in_batch += unknown_hit
+        if compacted:
+            break
+        if ask_ok:
+            successful_ask_human = True
+
+        # После apply: если стопнули mid-tool (envelope A от runner) — хвост batch → B.
+        if getattr(state, "stop_requested", False):
+            tools_outputs.extend(
+                _not_started_outputs(executed[i + 1 :], state, ctx)
+            )
+            aborted_by_user_stop = True
+            break
+    return aborted_by_user_stop, unknown_in_batch, invalid_in_batch
+
+
 async def aprocess_tool_calls(
     messages: List[Dict],
     state: State,
     ctx: Any,
     run_agent_func,
     persist_messages_callback: Optional[Callable[[List[Dict]], None]] = None,
+    batch_trace: Optional[Dict] = None,
 ):
     """Исполнить batch function_call из ответа модели → список function_call_output.
 
@@ -2572,90 +2936,38 @@ async def aprocess_tool_calls(
     if len(grouped_messages["tool_outputs"]) > 0:
         raise ValueError("Messages has tool_outputs")
 
-    # Снимок batch до исполнения: если сработает session_compact, из него
-    # соберём «что оставить» вместо сырого списка output'ов.
-    batch_snapshot = list(messages)
-    state._session_compact_batch_snapshot = batch_snapshot
     state.session_compact_applied = False
     # Картинки батча (fs_view_image, ответ на turn_ask_human) копятся здесь и
     # уходят одним техническим сообщением в конце. Остаток прерванного батча
     # (исключение посреди исполнения) в новый батч не протекает.
     state.pending_tool_attachments = []
 
-    tools_outputs = []
+    tools_outputs: List[Dict] = []
+    if batch_trace is not None:
+        batch_trace["outputs"] = tools_outputs
+        batch_trace.setdefault("executed", [])
+        batch_trace.setdefault("persisted", set())
     # Work, затем не больше одного finish; skipped — лишние turn_finish.
-    unknown_in_batch = 0
-    invalid_in_batch = 0
     tool_calls = grouped_messages["tool_calls"]
     executed, skipped = partition_work_then_finish(tool_calls)
     # Skip-output'ы синтетические — считаем заранее, чтобы сфлашить ВМЕСТЕ с
     # executed-output'ами до блокирующего turn_ask_human (иначе пропущенный тул
     # тоже висит "running" до ответа юзера).
     skip_outputs = _extra_finish_skip_outputs(skipped)
-    aborted_by_user_stop = False
-    successful_ask_human = False
-    # Human-wait (ask_human | confirm-in-tool): до блокировки сфлашить уже
-    # посчитанные output'ы предыдущих тулов + skip'ы (I2), чтобы TUI не держал
-    # их в running на время wait. Полный батч персистится ещё раз на выходе
-    # process_tool_calls (run_agent → _maybe_persist); уже записанные id
-    # сессия пропускает по make_message_key.
-    for i, m in enumerate(executed):
-        # Между тулами / до старта — если stop, remaining не apply_tool → envelope B.
-        if getattr(state, "stop_requested", False):
-            tools_outputs.extend(
-                _not_started_outputs(executed[i:], state, ctx)
-            )
-            aborted_by_user_stop = True
-            break
-
-        tool_name = str(m.get("name") or "")
-        if successful_ask_human:
-            tools_outputs.append(_after_ask_human_skip_output(m["call_id"]))
-            continue
-        skipped = _batch_ended_skip_output(state, m["call_id"])
-        if skipped is not None:
-            tools_outputs.append(skipped)
-            continue
-        # smart-гейт: считаем КАЖДЫЙ исполняемый вызов, кроме завершителя хода.
-        # До try — упавший вызов (неверные аргументы) тоже считается.
-        await _abefore_tool_call(
-            i,
-            tool_name,
-            state,
-            prior=list(tools_outputs) + skip_outputs,
-            persist_messages_callback=persist_messages_callback,
-        )
-        tool_arguments = str(m.get("arguments", ""))
-        (
-            tool_res_raw,
-            was_invalid,
-            ok,
-        ) = await _aexecute_tool_call(
-            m, tool_name, tool_arguments, state, ctx, run_agent_func
-        )
-        invalid_in_batch += int(was_invalid)
-        if tool_name == ASK_HUMAN_TOOL_NAME and ok is True:
-            successful_ask_human = True
-        unknown_in_batch += int(
-            _track_repeat_errors(state, tool_name, tool_res_raw)
-        )
-        await _aappend_call_output(
-            tools_outputs,
-            m,
-            tool_name,
-            tool_arguments,
-            tool_res_raw,
-            state,
-            ctx,
-        )
-
-        # После apply: если стопнули mid-tool (envelope A от runner) — хвост batch → B.
-        if getattr(state, "stop_requested", False):
-            tools_outputs.extend(
-                _not_started_outputs(executed[i + 1 :], state, ctx)
-            )
-            aborted_by_user_stop = True
-            break
+    (
+        aborted_by_user_stop,
+        unknown_in_batch,
+        invalid_in_batch,
+    ) = await _arun_executed_tool_batch(
+        executed,
+        skip_outputs,
+        tools_outputs,
+        state,
+        ctx,
+        run_agent_func,
+        persist_messages_callback,
+        batch_trace,
+    )
 
     # Skip-output'ы уже посчитаны выше и сфлашены перед блокировкой — добавляем в
     # возврат (тред/state дедупят повторный персист по make_message_key).
@@ -2667,9 +2979,9 @@ async def aprocess_tool_calls(
         state,
         ctx,
         tools_outputs,
-        batch_snapshot,
         aborted_by_user_stop=aborted_by_user_stop,
         persist_messages_callback=persist_messages_callback,
+        batch_trace=batch_trace,
     )
 
 
@@ -2790,10 +3102,40 @@ class _AgentLoop:
         self.max_unknown_tool_repeats = int(
             agent_cfg.max_unknown_tool_repeats or 5
         )
+        # Отказ судьи финиша ждёт подсказки и пишется на следующем шаге.
+        # Стоп этот шаг отменяет — вывод закрываем отдельно.
+        self._pending_finish_output: Optional[Dict] = None
         state.last_unknown_tool_name = None
         state.unknown_tool_repeat_count = 0
         state.last_batch_unknown_tool_count = 0
         state.last_batch_invalid_arguments_count = 0
+        self._nudges = NudgeHold()
+
+    async def _anudge_persist(self, messages: List[Dict]) -> None:
+        await _maybe_persist(
+            self.persist_messages_callback, messages, self.state
+        )
+        self._drop_pending_finish(messages)
+
+    def _drop_pending_finish(self, messages: List[Dict]) -> None:
+        """Вывод финиша уже ушёл обычной записью — повторно при Стопе не пишем."""
+        pending = self._pending_finish_output
+        if pending is None or is_persist_discarded(self.state):
+            return
+        if any(message is pending for message in messages or []):
+            self._pending_finish_output = None
+
+    async def _aclose_pending_finish_on_stop(self) -> None:
+        """Стоп не дожидается подсказок: закрыть turn_finish тем, что уже в state."""
+        pending = self._pending_finish_output
+        self._pending_finish_output = None
+        if not isinstance(pending, dict):
+            return
+        await _commit_user_stop_pairing(
+            self.state,
+            [pending],
+            self.persist_messages_callback,
+        )
 
     # ------------------------------------------------------------------ loop
     async def arun(self, messages) -> Union[str, None]:
@@ -2801,7 +3143,8 @@ class _AgentLoop:
         first_poll = True
         while True:
             if self.check_stop is not None and self.check_stop():
-                clear_loop_detector(state)
+                await self._aclose_pending_finish_on_stop()
+                self._nudges.clear(state)
                 return None
             messages = await self._apoll_pending(
                 messages, first_poll=first_poll
@@ -2823,7 +3166,45 @@ class _AgentLoop:
             self._count_step(step.completed_step, step.mode)
 
     async def _astep(self, messages, backend_mode: str) -> _Outcome:
-        """Одна итерация цикла: подготовка батча и обработка режима."""
+        """Одна итерация цикла: подготовка батча и обработка режима.
+
+        Если шаг кончился раньше ``apublish``, отложенный ответ инструмента
+        всё ещё только в ``state``. Дописываем его здесь, пока ссылку не
+        затёр следующий ``arm_prepare``.
+        """
+        raised = False
+        try:
+            return await self._astep_once(messages, backend_mode)
+        except BaseException:
+            raised = True
+            raise
+        finally:
+            await self._apersist_held_output(swallow_errors=raised)
+
+    async def _apersist_held_output(self, *, swallow_errors: bool) -> None:
+        """Записать отложенный ответ без подсказок, если flush его не забрал.
+
+        Сводка и обычный ``apublish`` обнуляют ссылку сами. Ошибка этой
+        записи не подменяет исключение, из-за которого шаг уже падает.
+        """
+        if self._nudges.carrier is None:
+            return
+        try:
+            await self._nudges.apublish(
+                list(getattr(self.state, "messages", None) or []),
+                state=self.state,
+                apersist=self._anudge_persist,
+            )
+        except Exception:
+            if not swallow_errors:
+                raise
+            self.run_logger.warning(
+                "Held tool output persist failed",
+                exc_info=True,
+            )
+
+    async def _astep_once(self, messages, backend_mode: str) -> _Outcome:
+        """Подготовка батча и обработка режима, без страховки записи."""
         try:
             messages, mode, early = await self._aprepare_batch(
                 messages, backend_mode
@@ -2847,6 +3228,8 @@ class _AgentLoop:
             outcome = await self._adispatch(mode, messages, backend_mode)
         except WrongFunctionArgumentsException as e:
             # Аргументы отвалились на exec — ход модели всё равно «закрыт».
+            # Следующий запрос к модели — новый шаг, подсказки собираются снова.
+            self._nudges.notices_sent = False
             outcome = _Outcome(
                 self._bounce_wrong_arguments(e), completed_step=True
             )
@@ -2854,41 +3237,119 @@ class _AgentLoop:
             raise
         except ModelRequestStopped:
             # stop во время ожидания модели — как stop между шагами.
-            clear_loop_detector(self.state)
+            self._nudges.clear(self.state)
             return _Outcome(result=None)
         except Exception as backend_exc:
-            if not await self._atry_recover_context_overflow(backend_exc):
+            if not await self._atry_recover_context_overflow(
+                backend_exc, messages, mode
+            ):
                 raise
-            outcome = _Outcome(messages, restart=True)
+            # Тот же шаг: подсказки уже в messages, notices_sent не снимаем.
+            return self._overflow_resume(messages, mode)
+        outcome.mode = mode
+        self._nudges.notices_sent = False
+        return outcome
+
+    def _overflow_resume(self, messages, mode) -> _Outcome:
+        """Повтор шага после сводки. Старый батч поверх неё не кладём."""
+        resume = messages
+        if self._nudges.skip_fill:
+            fresh = [
+                message
+                for message in (self.state.messages or [])
+                if isinstance(message, dict)
+            ]
+            if fresh:
+                self._nudges.carrier = None
+                self._nudges.followers = []
+                resume = fresh
+        outcome = _Outcome(resume, restart=True)
         outcome.mode = mode
         return outcome
 
     async def _aprepare_main_request(
         self, messages, mode, backend_mode: str
     ) -> Optional[List[Dict]]:
-        """Всё, что идёт перед основным запросом: судья пары, сжатие,
-        подсказка об инструментах, объявление режима. None — стоп до
-        запроса."""
+        """Перед запросом к модели: судья/сжатие, затем один flush буфера."""
         if not _mode_requires_backend_call(mode):
             return messages
         if backend_mode == "chat_completions":
             await aprepare_main_call(self.state, self.ctx)
             if self._stopped_before_call():
+                await self._apublish_held_on_stop(messages)
                 return None
-            await self._apre_backend_compaction(messages, mode)
-            messages = await self._aapply_tool_usage_notice(messages)
+            if await self._apre_backend_compaction(messages, mode):
+                self._drop_pre_summary_output()
             if self._stopped_before_call():
+                await self._apublish_held_on_stop(messages)
                 return None
-        return await self._aannounce_mode(messages)
+        return await self._aflush_nudges(messages, backend_mode)
+
+    async def _apublish_held_on_stop(self, messages: List[Dict]) -> None:
+        """Стоп после prepare: обычная запись вывода отбрасывается, закрытие — нет."""
+        if is_persist_discarded(self.state):
+            await self._aclose_pending_finish_on_stop()
+        await self._nudges.apublish(
+            messages,
+            state=self.state,
+            apersist=self._anudge_persist,
+        )
 
     def _stopped_before_call(self) -> bool:
-        """Стоп во время судьи пары или сжатия — как stop между шагами:
-        ни сжатие после судьи, ни основной запрос не начинаются."""
+        """Стоп во время судьи пары или сжатия — как stop между шагами."""
         stopped = self.check_stop is not None and self.check_stop()
         if not _stop_honored(stopped, self.ctx):
             return False
-        clear_loop_detector(self.state)
+        self._nudges.clear(self.state)
         return True
+
+    async def _aflush_nudges(
+        self, messages: List[Dict], backend_mode: str
+    ) -> List[Dict]:
+        """Flush hold перед моделью.
+
+        С ответом инструмента наджи в его output. Без ответа — один
+        служебный user со всеми тегами. Повтор того же шага после
+        переполнения окна подсказки не собирает: они уже в ``messages``.
+        """
+        if self._nudges.skip_fill:
+            # Сводка только что заменила трейс. Буфер уже пуст, счётчики
+            # обнулены; этот запрос уходит без подсказок. Правила действующего
+            # режима уже в теле сводки. Технический user ниже — страховка,
+            # если сводка собралась со старой отметкой.
+            clear_executed_tool_names(self._nudges.trace)
+            self._nudges.skip_fill = False
+            await self._nudges.apublish(
+                messages,
+                state=self.state,
+                apersist=self._anudge_persist,
+            )
+            messages = await self._aannounce_mode(
+                messages, update_silent_mark=False
+            )
+            self._nudges.notices_sent = True
+            return messages
+        if self._nudges.notices_sent:
+            return messages
+        messages = await self._nudges.aflush_before_model(
+            messages,
+            state=self.state,
+            ctx=self.ctx,
+            session_meta=self.session_meta
+            if isinstance(self.session_meta, dict)
+            else None,
+            backend_mode=backend_mode,
+            logger=self.run_logger,
+            apersist=self._anudge_persist,
+        )
+        # Окно после session_compact: наджи в output не клеим. Смена режима
+        # уже в сводке; user следом — только если отметка всё ещё старая.
+        if self._nudges.compacted:
+            messages = await self._aannounce_mode(
+                messages, update_silent_mark=False
+            )
+        self._nudges.notices_sent = True
+        return messages
 
     # ----------------------------------------------------------- iteration
     async def _apoll_pending(self, messages, *, first_poll: bool):
@@ -2955,16 +3416,23 @@ class _AgentLoop:
         # свои невалидные вызовы закрывает сам в process_tool_calls.
         self.state.tick_signals.add(TOOL_CALL_ERROR)
         _attach_truncation_hint(e, self.state)
+        text = e.to_llm_feedback()
+        outputs = list((self._nudges.trace or {}).get("outputs") or [])
+        target = self._nudges.find_carrier(outputs)
+        if target is not None:
+            # В буфер: уедет в output на flush перед моделью.
+            self._nudges.buffer.emit(text)
+            return outputs
         return [
             _make_technical_feedback_user_message(
-                e.to_llm_feedback(),
+                text,
                 technical_type=TECHNICAL_TYPE_ERROR_MESSAGE,
                 call_id=getattr(e, "call_id", None),
             )
         ]
 
     async def _atry_recover_context_overflow(
-        self, backend_exc: Exception
+        self, backend_exc: Exception, messages, mode: str
     ) -> bool:
         # Переполнение контекстного окна модели → не крашимся: форс-сжатие
         # истории (безусловное, как /compact) и повтор запроса со сжатым
@@ -2983,7 +3451,18 @@ class _AgentLoop:
             _MAX_CONTEXT_OVERFLOW_RETRIES,
             backend_exc,
         )
-        await _acall_blocking_hook(self.force_compact_hook)
+        previous = getattr(self.state, "messages", None)
+        try:
+            # Батч и режим — чтобы сводка вернула реплики и картинки шага.
+            # Ответ тула хук не оставляет: вызов уже уйдёт в сводку.
+            applied = await _acall_blocking_hook(
+                self.force_compact_hook, messages, mode
+            )
+        finally:
+            if self._history_replaced(previous):
+                self._drop_pre_summary_output()
+        if applied and not self._history_replaced(previous):
+            self._discard_nudges_after_summary(skip_fill=True)
         return True
 
     def _count_step(
@@ -3024,40 +3503,30 @@ class _AgentLoop:
             )
 
     def _sanitize_batch(self, messages) -> List[Dict]:
-        # В state и в тред уходит уже санитайзнутый набор (битые function_call ->
-        # technical user message). Сырой вывод бэкенда логируется выше; если
-        # санитайз изменил батч — логируем то, что реально закоммичено (иначе
-        # в agent_log не видно подставленного фидбека, хотя он есть в threads jsonl).
+        # Битый JSON в arguments: call оставляем, исполнение само пишет
+        # failed output (тот же контракт, что schema mismatch).
+        # Сырой ответ бэкенда логируется выше; если санитайз изменил батч —
+        # логируем то, что реально закоммичено.
         _pre_sanitize_digest = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
         )
 
-        rejected_feedback: List[Dict] = []
-
         def rejected_tool_call(message: Dict) -> Dict:
-            # Рантайм сохраняет прежнюю последовательность команд при replay;
-            # локально исправленное поведение включено без отдельной настройки.
+            # Рантайм может сохранить прежнюю последовательность при replay
+            # другого маркера; без порта — оставляем call.
             execution_patch = port(self.ctx, "execution_patch")
-            feedback = build_invalid_tool_call_feedback_message(message)
             if execution_patch is None or execution_patch(
                 "tool-call-rejection-recovery-v1"
             ):
                 self.state.tick_signals.add(TOOL_CALL_ERROR)
-                rejected_feedback.append(feedback)
-            return feedback
+                # Невалидный JSON = тот же отказ исполнения, что и схема.
+                return message
+            return build_invalid_tool_call_feedback_message(message)
 
         messages = sanitize_messages_for_chat_completions(
             messages,
             invalid_tool_call_factory=rejected_tool_call,
         )
-        if rejected_feedback and _batch_has_pending_function_calls(messages):
-            # Фидбэк не должен закрыть режим батча или разорвать в истории
-            # корректный вызов и его будущий output при отправке в API.
-            messages = rejected_feedback + [
-                message
-                for message in messages
-                if message not in rejected_feedback
-            ]
         _post_sanitize_digest = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
         )
@@ -3124,6 +3593,9 @@ class _AgentLoop:
         state = self.state
         self._log_incoming(messages)
         messages = self._sanitize_batch(messages)
+        # Весь батч сразу в истории. Последний ответ и соседи за ним
+        # (реплика, картинка) на диск — после сводки: без неё уже с подсказками.
+        to_commit = self._nudges.arm_prepare(messages, state)
         new_state_messages = filter_messages_not_in_state(
             list(getattr(state, "messages", []) or []),
             list(messages),
@@ -3131,102 +3603,123 @@ class _AgentLoop:
         if new_state_messages:
             state.mark_turn_start()
             state.messages += new_state_messages
-        await _maybe_persist(self.persist_messages_callback, messages, state)
+        await _maybe_persist(
+            self._nudges.wrap_persist(self.persist_messages_callback),
+            to_commit,
+            state,
+        )
 
         envelope = await self._alimit_envelope(messages)
         if envelope is not _NO_RETURN:
+            await self._nudges.apublish(
+                messages,
+                state=state,
+                apersist=self._anudge_persist,
+            )
             return messages, None, envelope
         if self.tool_error_cnt > self.max_tool_errors:
             state.terminal_outcome = "tool_errors"
+            await self._nudges.apublish(
+                messages,
+                state=state,
+                apersist=self._anudge_persist,
+            )
             return messages, None, "Agent tools call errors."
 
         mode = check_mode(messages, self.run_logger)
         return messages, mode, _NO_RETURN
 
-    async def _apre_backend_compaction(self, messages, mode) -> None:
-        if self.pre_backend_compaction_hook is None:
-            return
-        try:
-            await _acall_blocking_hook(
-                self.pre_backend_compaction_hook, messages, mode
-            )
-        except ExecutionFailure:
-            raise
-        except Exception as pre_backend_exc:
-            self.run_logger.warning(
-                "Pre-backend compaction hook warning: %s",
-                pre_backend_exc,
-                exc_info=True,
-            )
+    def _history_replaced(self, previous: Any) -> bool:
+        """Сводка подменила список: старые сообщения живут только в нём."""
+        current = getattr(self.state, "messages", None)
+        return isinstance(current, list) and current is not previous
 
-    async def _aannounce_mode(self, messages) -> List[Dict]:
+    def _drop_pre_summary_output(self) -> None:
+        """Отложенный ответ уже вошёл в сводку — в новый трейс его не пишем.
+
+        Подсказки старого диалога тоже не собираем заново: ближайший запрос
+        идёт по новой истории. Новое техническое сообщение (объявление
+        режима) может добавиться следом. Реплика из отложенного хвоста на
+        диск уже не попадёт — в намерения открытого хода её пишем до сброса.
+        """
+        self._discard_nudges_after_summary(skip_fill=True)
+        state = self.state
+        state.current_user_intent = append_user_asks_from_messages(
+            state.current_user_intent,
+            self._nudges.followers,
+            user_turn_seq=state.user_turn_seq,
+        )
+        self._nudges.carrier = None
+        self._nudges.followers = []
+
+    def _discard_nudges_after_summary(self, *, skip_fill: bool) -> None:
+        """Сводка заменила трейс: подсказки старого диалога выбрасываем.
+
+        Счётчики те же, что после тула ``session_compact``. Объявление режима
+        и baseline hash памяти не трогаем. ``skip_fill`` — ближайший запрос
+        к модели не собирает подсказки заново.
+        """
+        self._nudges.reset_after_summary(
+            self.state,
+            session_meta=self.session_meta
+            if isinstance(self.session_meta, dict)
+            else None,
+        )
+        if skip_fill:
+            self._nudges.skip_fill = True
+
+    async def _apre_backend_compaction(self, messages, mode) -> bool:
+        if self.pre_backend_compaction_hook is None:
+            return False
+        previous = getattr(self.state, "messages", None)
+        applied = False
+        try:
+            try:
+                applied = bool(
+                    await _acall_blocking_hook(
+                        self.pre_backend_compaction_hook, messages, mode
+                    )
+                )
+            except ExecutionFailure:
+                raise
+            except Exception as pre_backend_exc:
+                self.run_logger.warning(
+                    "Pre-backend compaction hook warning: %s",
+                    pre_backend_exc,
+                    exc_info=True,
+                )
+                applied = False
+        finally:
+            # Отмена и ошибка после подмены сюда тоже попадают: ссылку
+            # снимаем до ``_apersist_held_output``, иначе старый ответ
+            # допишется уже к сводке.
+            if self._history_replaced(previous):
+                self._drop_pre_summary_output()
+        return applied or self._history_replaced(previous)
+
+    async def _aannounce_mode(
+        self, messages, *, update_silent_mark: bool = True
+    ) -> List[Dict]:
         """Сказать агенту о режиме, если он сменился с прошлого объявления.
 
         Перед каждым запросом к модели: на старте агента и после каждого
         батча — смена режима посреди хода доходит до модели на ближайшем
-        шаге. Одно правило для корня и любого субагента: отметка своя у
+        шаге. После сводки правила уже в её блоке режима. Технический user
+        здесь появляется, только если отметка всё ещё не совпала с режимом.
+        Тег тот же, что у наджей в output: ``current_context``.
+        Одно правило для корня и любого субагента: отметка своя у
         каждого, режим — общий живой. Не в хвосте батча: после принятого
         ``turn_finish`` хвост отбрасывается, а отметка уже была бы сдвинута.
         """
         state = self.state
-        notices = _mode_notices(state, self.ctx)
+        notices = _mode_notices(
+            state, self.ctx, update_silent_mark=update_silent_mark
+        )
         if not notices:
             return messages
         state.messages += notices
         await _maybe_persist(self.persist_messages_callback, notices, state)
         return [*messages, *notices]
-
-    async def _aapply_tool_usage_notice(self, messages) -> List[Dict]:
-        if not isinstance(self.session_meta, dict):
-            return messages
-        state = self.state
-        try:
-            _messages_before_notice = len(messages)
-            messages = apply_tool_usage_notice_before_llm(
-                messages,
-                state,
-                self.ctx,
-                self.session_meta,
-                step_messages=messages,
-                logger=self.run_logger,
-                project_memory_hash=await _aproject_memory_hash(self.ctx),
-            )
-            notice_messages = messages[_messages_before_notice:]
-            if notice_messages:
-                to_append = filter_messages_not_in_state(
-                    list(getattr(state, "messages", []) or []),
-                    list(notice_messages),
-                )
-                if to_append:
-                    state.messages += to_append
-                await self._apersist_notice_messages(notice_messages)
-        except ExecutionFailure:
-            raise
-        except Exception as mem_exc:
-            self.run_logger.warning(
-                "Memory messages hook warning: %s",
-                mem_exc,
-                exc_info=True,
-            )
-        return messages
-
-    async def _apersist_notice_messages(self, notice_messages) -> None:
-        if self.persist_messages_callback is None:
-            return
-        try:
-            await await_callback(
-                self.persist_messages_callback(notice_messages)
-            )
-        except ExecutionFailure:
-            raise
-        except ThreadStoreError as refused:
-            raise _store_refused(refused) from refused
-        except Exception as persist_exc:
-            self.run_logger.warning(
-                "Thread notice messages persist warning: %s",
-                persist_exc,
-                exc_info=True,
-            )
 
     # ------------------------------------------------------------ dispatch
     async def _adispatch(self, mode, messages, backend_mode: str) -> _Outcome:
@@ -3305,13 +3798,25 @@ class _AgentLoop:
             messages, tags=self.proj_tags
         )
         pending_tool_calls = group_messages(messages).get("tool_calls", [])
+        batch_trace = self._nudges.begin_tool_batch()
         messages = await aprocess_tool_calls(
             messages,
             state,
             self.ctx,
             run_agent_func=arun_agent,
-            persist_messages_callback=self.persist_messages_callback,
+            persist_messages_callback=self._nudges.wrap_persist(
+                self.persist_messages_callback
+            ),
+            batch_trace=batch_trace,
         )
+        if batch_trace.get("compacted"):
+            self._nudges.mark_compacted()
+            self._nudges.reset_after_summary(
+                state,
+                session_meta=self.session_meta
+                if isinstance(self.session_meta, dict)
+                else None,
+            )
         if getattr(state, "pending_question", None):
             return await self._asuspend_on_question(messages)
         if getattr(state, "plan_proposed", False):
@@ -3361,17 +3866,31 @@ class _AgentLoop:
         )
         if backend_mode != "chat_completions":
             if finish_new:
+                if self._nudges.buffer:
+                    self._nudges.buffer.flush_into(finish_new[0])
                 await _maybe_persist(
                     self.persist_messages_callback, finish_new, state
                 )
             state.current_user_intent = []
             state.steps += 1
-            clear_loop_detector(state)
+            self._nudges.clear(state)
             return _Outcome(result=finish_arguments)
 
+        # На reject output finish остаётся незаписанным до подсказок.
         decision = await self._aevaluate_finish_gate(
-            finish_arguments, finish_call_id
+            finish_arguments,
+            finish_call_id,
+            persist_output=False,
         )
+        return await self._aapply_finish_decision(
+            messages, decision, finish_arguments, finish_new, tail_new
+        )
+
+    async def _aapply_finish_decision(
+        self, messages, decision, finish_arguments, finish_new, tail_new
+    ) -> _Outcome:
+        """Reject ждёт подсказки. Принятый финиш закрывает ход сразу."""
+        state = self.state
         if decision.outcome == "reject":
             state.tick_signals.add(FINISH_REJECT)
             if tail_new:
@@ -3379,12 +3898,11 @@ class _AgentLoop:
                 await _maybe_persist(
                     self.persist_messages_callback, tail_new, state
                 )
-            # Вердикт уже в output turn_finish (ok: false +
-            # message). Не подменяем батч technical-user:
-            # следующий шаг цикла сам уйдёт в
-            # function_call_output и позовёт модель.
-            # Finish-reject — завершённый ход (batch + gate).
-            # Work уже в трейсе, не откатываем.
+            # Вердикт уже в output turn_finish. Reject → ход продолжается:
+            # flush буфера на следующем prepare в этот finish output.
+            # Стоп prepare не дождётся — вывод закроет выход из цикла.
+            if finish_new:
+                self._pending_finish_output = finish_new[0]
             return _Outcome(messages, completed_step=True)
         # accept / fail_open_error / fail_open_limit / прочее —
         # все завершают ход одинаково.
@@ -3394,9 +3912,20 @@ class _AgentLoop:
                 outcome=decision.outcome,
                 state=state,
             )
+        if finish_new:
+            # Accept: наджи не нужны — clear, output без harness.
+            # Стоп во время судьи уже выставил discard: обычная запись
+            # пропала бы, вызов остался бы без ответа.
+            self._nudges.buffer.clear()
+            await _maybe_persist(
+                self.persist_messages_callback,
+                finish_new,
+                state,
+                pairing=is_persist_discarded(state),
+            )
         state.steps += 1
         state.flush_current_user_intent()
-        clear_loop_detector(state)
+        self._nudges.clear(state)
         return await self._aclose_turn(finish_arguments)
 
     async def _aclose_plan_turn(self, messages) -> _Outcome:
@@ -3493,7 +4022,9 @@ class _AgentLoop:
         state.terminal_outcome = "judge_unavailable"
         return _Outcome(result=reason)
 
-    async def _aevaluate_finish_gate(self, finish_arguments, finish_call_id):
+    async def _aevaluate_finish_gate(
+        self, finish_arguments, finish_call_id, *, persist_output: bool = True
+    ):
         state, ctx = self.state, self.ctx
         gate = FinishGateGuard(ctx=ctx, state=state, logger=self.run_logger)
         # Индикатор «сверяюсь…» — только когда судья реально пойдёт
@@ -3515,7 +4046,9 @@ class _AgentLoop:
             finish_call_id=finish_call_id,
             decision=decision,
             logger=self.run_logger,
-            persist_messages_callback=self.persist_messages_callback,
+            persist_messages_callback=(
+                self.persist_messages_callback if persist_output else None
+            ),
         )
         final_submit_output = get_function_call_output_text(
             state.messages, finish_call_id
@@ -3542,8 +4075,11 @@ class _AgentLoop:
         из цикла (``plan_proposed``), обычный финал — ``None``."""
         if self.turn_closed_hook is not None:
             await self.turn_closed_hook(reason)
-        if self.turn_end_compaction_hook is not None:
+        if self.turn_end_compaction_hook is not None and (
             await _acall_blocking_hook(self.turn_end_compaction_hook)
+        ):
+            # Ход уже закрыт: счётчики обнуляем, следующий запрос считает заново.
+            self._discard_nudges_after_summary(skip_fill=False)
         # Сообщение, пришедшее во время (блокирующей) компакции, не
         # теряем: продолжаем новым ходом на уже сжатом контексте.
         new_turn_messages = await _apickup_pending_as_new_turn(
@@ -3717,7 +4253,7 @@ async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     turn_closed_hook: Optional[
         Callable[[Optional[str]], Awaitable[None]]
     ] = None,
-    force_compact_hook: Optional[Callable[[], None]] = None,
+    force_compact_hook: Optional[Callable[..., Any]] = None,
     get_pending_messages: Optional[Callable[[], Awaitable[List[Dict]]]] = None,
     check_stop: Optional[Callable[[], bool]] = None,
     session_meta: Optional[Dict[str, Any]] = None,
@@ -3740,21 +4276,3 @@ async def arun_agent(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
         mark_finish_gate_checking=mark_finish_gate_checking,
     )
     return await loop.arun(messages)
-
-
-async def _aproject_memory_hash(ctx: Any) -> Optional[str]:
-    """Версия памяти проекта для подсказок — только когда они включены:
-    память читает хранилище агента, а цепочка подсказок синхронная."""
-    from gc_core.message_policy.project_memory_notice.policy import (
-        project_memory_hints_enabled,
-    )
-
-    try:
-        enabled = project_memory_hints_enabled(ctx)
-    except TypeError:  # контекст без настроек (заглушка) — подсказок нет
-        return None
-    if not enabled:
-        return None
-    from gc_core.project_memory import aget_hash
-
-    return await aget_hash(ctx)

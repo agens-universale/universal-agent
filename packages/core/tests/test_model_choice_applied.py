@@ -94,14 +94,16 @@ async def _run(
     changes,
     *,
     stop_on=None,
+    stop_on_choice=None,
     hook=None,
     executor_spy=None,
 ):
     """Ран с выбором `initial`; `changes[n]` — выбор, заданный во время
     n-го запроса (исключение — канал выбора бросает с этого запроса);
     `stop_on` — номер запроса, во время которого человек
-    жмёт стоп; `hook` — свой приёмник события вместо списка.
-    Возвращает события и модели запросов."""
+    жмёт стоп; `stop_on_choice` — выбор, на чтении которого он жмёт стоп
+    (подготовка вызова, до запроса); `hook` — свой приёмник события
+    вместо списка. Возвращает события и модели запросов."""
     selected = {"model": initial}
     cfg = parity_config(tmp_path, monkeypatch, **CONFIG)
     monkeypatch.chdir(tmp_path)
@@ -114,9 +116,14 @@ async def _run(
             executor.stop_run()
 
     backend = install(monkeypatch, _Backend(turns, on_call))
-    ctx = await acreate_run_context(
-        cfg, choice_provider=lambda: _read_choice(selected)
-    )
+
+    def read_choice():
+        value = _read_choice(selected)
+        if value == stop_on_choice:
+            executor.stop_run()
+        return value
+
+    ctx = await acreate_run_context(cfg, choice_provider=read_choice)
     events = []
     ctx.on_model_choice_applied = hook or events.append
     executor = AgentExecutor(ctx)
@@ -189,8 +196,10 @@ def _raise(_event):
 
 
 async def _tick(state, ctx):
-    """Один такт главного цикла: подготовка вызова и закрытие такта."""
+    """Один такт главного цикла: подготовка вызова, запись смены перед
+    запросом и закрытие такта."""
     resolved = await pr.aprepare_main_call(state, ctx)
+    await model_choice.awrite_pending(state, ctx)
     state_ops.close_tick(state, state._call_level)
     return resolved
 
@@ -461,6 +470,48 @@ async def test_change_during_run_is_written_where_it_applied(
     at = [m.get("id") for m in messages].index(choice["after"])
     assert messages[at].get("type") == "function_call_output"
     assert at + 1 < len(messages)
+
+
+async def test_change_is_written_at_request_not_at_prepare(prepared):
+    """Подготовка сообщает о смене сразу, а запись ждёт запроса: до него
+    цикл ещё допишет в тред отложенный вывод тула с подсказками."""
+    selected, ctx, state, events = await prepared("light")
+    records = []
+
+    async def recorder(record):
+        records.append(record)
+
+    ctx.record_model_choice = recorder
+    selected["model"] = "max"
+    await pr.aprepare_main_call(state, ctx)
+
+    assert events == [ModelChoiceApplied("max", "big")]
+    assert records == []
+    await model_choice.awrite_pending(state, ctx)
+    await model_choice.awrite_pending(state, ctx)
+    assert records == [ModelChoiceRecord("max", "big", "fast")]
+
+
+async def test_stop_between_prepare_and_request_writes_change_at_run_end(
+    tmp_path, monkeypatch
+):
+    """Стоп после подготовки, до запроса: смена уже показана событием,
+    запись о ней дописывает завершение рана."""
+    events, models = await _run(
+        tmp_path,
+        monkeypatch,
+        "light",
+        [_work()],
+        {1: "max"},
+        stop_on_choice="max",
+    )
+
+    assert events == [ModelChoiceApplied("max", "big")]
+    assert models == ["fast"]
+    _messages, _turns, (choice,) = await _streams(tmp_path)
+    assert (
+        choice["model"] == ModelChoiceRecord("max", "big", "fast").to_payload()
+    )
 
 
 async def test_change_at_run_end_is_written_after_turn_outcome(

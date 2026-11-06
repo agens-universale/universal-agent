@@ -954,6 +954,23 @@ def test_malformed_json_from_strong_restarts_its_series(
 
     async def apply(**kw):
         executed.append(kw["call_id"])
+        arguments = kw.get("arguments") or ""
+        try:
+            json.loads(arguments)
+        except Exception as exc:
+            raise pr.WrongFunctionArgumentsException(
+                f"некорректный JSON: {exc}",
+                received_args=arguments,
+                tool_name=kw["tool_name"],
+                expected_schema={
+                    "name": kw["tool_name"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                },
+            )
         return json.dumps({"ok": True})
 
     monkeypatch.setattr(pr, "aapply_tool", apply)
@@ -971,22 +988,41 @@ def test_malformed_json_from_strong_restarts_its_series(
     )
 
     assert _aliases(calls) == ["mid", "mid", "mid", "mid"]
-    assert "bad" not in executed
+    assert executed.count("bad") == 1
+    bad_output = next(
+        message
+        for message in state.messages
+        if message.get("type") == "function_call_output"
+        and message.get("call_id") == "bad"
+    )
+    bad_body = json.loads(bad_output["output"])
+    assert bad_body["ok"] is False
+    assert bad_body["error"]["type"] == "invalid_arguments"
+    assert "некорректный JSON" in bad_body["message"]
     if batch_kind != "single":
         assert executed.count("good") == 1
         from gc_core.utils.connect_backend import create_call_data_completions
 
         payload = create_call_data_completions([], state=state)
-        good_index = next(
-            i
-            for i, m in enumerate(payload["messages"])
-            if any(c["id"] == "good" for c in m.get("tool_calls", []))
+        good_tool = next(
+            message
+            for message in payload["messages"]
+            if message.get("role") == "tool"
+            and message.get("tool_call_id") == "good"
         )
-        assert payload["messages"][good_index + 1]["role"] == "tool"
-        assert payload["messages"][good_index + 1]["tool_call_id"] == "good"
-    assert any(
-        "error_message" in str(m.get("content", "")) for m in state.messages
-    )
+        bad_tool = next(
+            message
+            for message in payload["messages"]
+            if message.get("role") == "tool"
+            and message.get("tool_call_id") == "bad"
+        )
+        # Отказ битого JSON — в его output, не в harness соседа.
+        assert "technical_system_messages" not in good_tool["content"]
+        assert "некорректный JSON" not in good_tool["content"]
+        assert "некорректный JSON" in bad_tool["content"]
+        assert '"ok": false' in bad_tool[
+            "content"
+        ] or '"ok":false' in bad_tool["content"].replace(" ", "")
 
 
 def test_malformed_json_after_weak_replay_keeps_recovery_on_strong(
@@ -1016,6 +1052,23 @@ def test_malformed_json_after_weak_replay_keeps_recovery_on_strong(
 
     async def apply(**kw):
         executed.append(kw["call_id"])
+        arguments = kw.get("arguments") or ""
+        try:
+            json.loads(arguments)
+        except Exception as exc:
+            # Битый JSON — свой failed output (SPEC_3), не drop вызова.
+            raise pr.WrongFunctionArgumentsException(
+                f"некорректный JSON: {exc}",
+                received_args=arguments,
+                tool_name=kw["tool_name"],
+                expected_schema={
+                    "name": kw["tool_name"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                    },
+                },
+            )
         return json.dumps({"ok": True})
 
     monkeypatch.setattr(pr, "aapply_tool", apply)
@@ -1042,7 +1095,19 @@ def test_malformed_json_after_weak_replay_keeps_recovery_on_strong(
         "fast",
         "mid",
     ]
-    assert "weak_bad" not in executed and "strong_bad" not in executed
+    # Weak-floor по-прежнему отыгрывает recovery до exec; сильная уже
+    # доходит до failed output битого JSON (SPEC_3), а не прячет вызов.
+    assert "weak_bad" not in executed
+    assert "strong_bad" in executed
+    strong_bad = next(
+        message
+        for message in state.messages
+        if message.get("type") == "function_call_output"
+        and message.get("call_id") == "strong_bad"
+    )
+    body = json.loads(strong_bad["output"])
+    assert body["ok"] is False
+    assert body["error"]["type"] == "invalid_arguments"
 
 
 def test_old_rejection_recovery_patch_keeps_previous_request_sequence(

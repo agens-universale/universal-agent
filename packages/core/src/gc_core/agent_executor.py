@@ -45,7 +45,7 @@ from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
-from gc_core.model_choice import note_applied_at_run_end
+from gc_core.model_choice import note_applied_at_run_end, take_pending
 from gc_core.model_router import main_model_identity
 from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.session_state import (
@@ -202,7 +202,7 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     try:
         # НЕ через to_thread: сессии ключуются по id(loop) и живут на ЭТОМ
         # loop — из чужого потока их не видно и закрыть нечем.
-        await _STREAM_SESSION_MANAGER.aclose_all()
+        await _STREAM_SESSION_MANAGER.aclose_all(in_owner_task=True)
     except asyncio.CancelledError as exc:
         cancelled = cancelled or exc
     except Exception:
@@ -450,6 +450,25 @@ async def _amark_turn(
         (logger or logging.getLogger(__name__)).warning(
             "thread turn mark failed", exc_info=True
         )
+
+
+async def _adiscard_nudges_after_pre_run(
+    summary: Any, state: Any, thread_session: Any
+) -> None:
+    """Стартовая сводка до цикла: старые подсказки в новый трейс не берём."""
+    if not await _acall_blocking_hook(
+        summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+    ):
+        return
+    from gc_core.message_policy.nudges import (
+        clear_nudge_counters_after_summary,
+    )
+
+    notice = getattr(thread_session, "notice", None)
+    clear_nudge_counters_after_summary(
+        state,
+        session_meta=notice if isinstance(notice, dict) else None,
+    )
 
 
 async def _apersist_state(
@@ -1435,6 +1454,13 @@ class AgentExecutor:
             if logger is not None:
                 logger.warning("model_choice_write_failed", exc_info=True)
 
+    async def _arecord_model_choices(
+        self, records: tuple[Optional[ModelChoiceRecord], ...]
+    ) -> None:
+        """Записи смены по порядку — завершение рана пишет до двух."""
+        for record in records:
+            await self._arecord_model_choice(record)
+
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
         # Keep the unconsumed queue before the await; messages arriving during
         # MCP cleanup remain pending and are returned by take_undelivered_messages.
@@ -1731,8 +1757,8 @@ class AgentExecutor:
         # Старые истории сохраняют порядок команд. Новые исполнения проверяют
         # стартовую историю в цикле после выбора первого комплекта модели.
         if not deferred_startup_compaction:
-            await _acall_blocking_hook(
-                summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+            await _adiscard_nudges_after_pre_run(
+                summary, state, thread_session
             )
 
         inbox_tail = await self._aread_inbox_tail(thread_session, state)
@@ -1866,9 +1892,13 @@ class AgentExecutor:
             _stop_bound.__exit__(None, None, None)
             await _stop_lease_keeper(poller)
             await _stop_lease_keeper(keeper)
-            # Выбор, так и не дошедший до вызова; запись смены пишут после
-            # итога хода — так её строку показывает лента.
-            choice_record = note_applied_at_run_end(state, self._ctx)
+            # Смена, остановленная до запроса, и выбор, так и не дошедший
+            # до вызова; записи смены пишут после итога хода — так их
+            # строки показывает лента.
+            choice_records = (
+                take_pending(state),
+                note_applied_at_run_end(state, self._ctx),
+            )
             state_ops.leave(state)
             state.turn_level = None
             try:
@@ -1877,7 +1907,7 @@ class AgentExecutor:
                 # доходит, а `asyncio.timeout` и TaskGroup вызывающего
                 # опираются на `cancelling()`.
                 await self._arecord_turn_outcome(None, error=run_error)
-                await self._arecord_model_choice(choice_record)
+                await self._arecord_model_choices(choice_records)
             finally:
                 # Упавший ход отпускает тред выше (``_arun_turn``) — после
                 # отметки «ход окончен», не до неё.

@@ -161,8 +161,20 @@ class LocalFsBackend(FsBackend):
     async def write_bytes(self, path: str, data: bytes) -> None:
         tmp_path = f"{path}.tmp"
         try:
+            try:
+                previous = os.lstat(path)
+            except FileNotFoundError:
+                previous = None
             with open(tmp_path, "wb") as fd:
                 fd.write(data)
+                if (
+                    os.name != "nt"
+                    and previous is not None
+                    and stat_module.S_ISREG(previous.st_mode)
+                ):
+                    os.fchmod(
+                        fd.fileno(), stat_module.S_IMODE(previous.st_mode)
+                    )
             os.replace(tmp_path, path)
         except Exception:
             try:
