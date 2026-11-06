@@ -156,7 +156,7 @@ _AUX_LABEL = "Параметры служебных запросов · auxiliar
 KWARGS_HINT = """\
 Поля `main` и `auxiliary` — обычный YAML, как в config.yml. Пишется то, что уходит
 в запрос, без обёртки `chat_completion_kwargs:` / `completion_kwargs:`. `main` —
-диалог и субагенты. `auxiliary` — summary, судьи, finish_gate, intent_scope.
+диалог и субагенты. `auxiliary` — суммаризация, судьи, журнал намерений.
 Секции не смешиваются: пустой `auxiliary` не забирает ключи из `main`. Одна и та
 же температура обычно стоит в обеих секциях. `tool_choice` — только в `main`:
 служебный запрос идёт без `tools`, и строгий прокси отвечает 400. В одно поле не
@@ -1417,7 +1417,11 @@ class ModelEntryForm(Vertical):
         )
         # has-saved: placeholder говорит одно из двух (маска действующего значения /
         # подсказка-объяснение), и различать их надо не вчитываясь (спека §3.4).
-        tcls = icls + (" has-saved" if self._token_is_mask() else "")
+        tcls = (
+            icls
+            + " set-muted"
+            + (" has-saved" if self._token_is_mask() else "")
+        )
         yield PasteInput(
             value="",
             placeholder=self._token_placeholder(),

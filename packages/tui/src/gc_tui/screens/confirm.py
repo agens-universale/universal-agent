@@ -16,7 +16,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
-from gc_tui.palette import ACCENT, BG, BRIGHT, DIM, INK
+from gc_tui.palette import ACCENT, BG, BRIGHT, DIM, INK, OVERLAY_BG
 
 # Парсер вариантов из hint: «[K] подпись  [K] подпись» → [(keycap, label), ...].
 # Подпись — всё до следующего «[» или конца строки, без хвостовых пробелов.
@@ -47,7 +47,7 @@ class ConfirmScreen(ModalScreen[bool]):
     DEFAULT_CSS = f"""
     ConfirmScreen {{ align: center middle; }}
     #confirm-dialog {{
-        background: #161A23;
+        background: {OVERLAY_BG};
         border: round {ACCENT};
         border-title-color: {BRIGHT};
         border-title-style: bold;

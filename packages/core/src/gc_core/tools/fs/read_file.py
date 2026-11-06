@@ -1,4 +1,5 @@
 import json
+from collections.abc import Collection
 from typing import Any, Dict, Optional
 
 from gc_core.execution.tool_schema import coalesce_optional_string
@@ -272,7 +273,12 @@ Usage:
         return description
 
     @classmethod
-    def prepare_args_before_strip(cls, args: Dict[str, Any]) -> Dict[str, Any]:
+    def prepare_args_before_strip(
+        cls,
+        args: Dict[str, Any],
+        *,
+        injected_fields: Collection[str] = (),  # договор базы
+    ) -> Dict[str, Any]:
         if (
             isinstance(args, dict)
             and "add_line_numbers" in args

@@ -204,3 +204,26 @@ def test_with_source_cite_empty_noop():
         clipboard_ops.with_source_cite("code", kind="file", path="  ")
         == "code"
     )
+
+
+def _done_on(monkeypatch, platform: str, app) -> list[bool]:
+    monkeypatch.setattr(clipboard_ops.sys, "platform", platform)
+    monkeypatch.setattr(clipboard_ops, "is_ssh_session", lambda: False)
+    monkeypatch.setattr(clipboard_ops, "write_clipboard", lambda t: False)
+    done: list[bool] = []
+    clipboard_ops.copy_out(app, "a", quiet=True, on_done=done.append)
+    return done
+
+
+def test_fallback_osc52_sent_is_success_for_caller(monkeypatch):
+    """Mac/Windows: нативная запись упала, ушёл запасной OSC 52 — для
+    вызывающего это успех (решение владельца 11 к плану P3b)."""
+    for platform in ("darwin", "win32"):
+        app = _app()
+        assert _done_on(monkeypatch, platform, app) == [True]
+        assert app._calls["osc"] == ["a"]
+
+
+def test_neither_native_nor_osc52_is_failure(monkeypatch):
+    app = SimpleNamespace(notify=lambda *a, **k: None)
+    assert _done_on(monkeypatch, "darwin", app) == [False]

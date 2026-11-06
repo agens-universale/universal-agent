@@ -118,7 +118,7 @@ async def test_live_image_of_the_store_reaches_the_model(monkeypatch):
         logger=logging.getLogger("test_thread_images_in_store"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(loaded, level_provider=lambda: "default"),
+        model_router=ModelRouter(loaded, choice_provider=lambda: "default"),
         image_store=images,
         on_trace_note=lambda _note: None,
     )

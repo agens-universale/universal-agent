@@ -650,7 +650,8 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
     agent.answer = "готово"
 
     def write_call():
-        thread.call("fs_read_file", "call-1", {"path": "src/a.py"})
+        # путь абсолютный — в подписи он от cwd сессии (спека P3 §10)
+        thread.call("fs_read_file", "call-1", {"path": "/work/app/src/a.py"})
         thread.call("turn_finish", "fin", {})
         thread.output("call-1", {"ok": True, "total_lines": 3})
 
@@ -686,7 +687,7 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
         for item in _updates(writer)
         if item.get("sessionUpdate") == "tool_call"
     )
-    assert tool["title"] == "fs_read_file(path='src/a.py')"
+    assert tool["title"] == "fs_read_file(src/a.py)"
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
 

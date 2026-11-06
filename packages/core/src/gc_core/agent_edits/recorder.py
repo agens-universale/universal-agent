@@ -220,6 +220,7 @@ def _record_edit(
         before_sha256=None if partial else _sha256_or_none(old_bytes),
         after_sha256=None if partial else _sha256_or_none(new_bytes),
         flags=flags,
+        size_bytes=_no_diff_size(flags, new_bytes),
     )
     EditsJournal(journal_path).append(rec)
 
@@ -234,6 +235,13 @@ def _record_edit(
                 None, ctx, "snapshots_max_files", DEFAULT_SNAPSHOTS_MAX_FILES
             )
         )
+
+
+def _no_diff_size(flags: list[str], new_bytes: bytes | None) -> int | None:
+    """Размер файла после правки — только у записи без диффа."""
+    if "no_diff" not in flags or new_bytes is None:
+        return None
+    return len(new_bytes)
 
 
 def _path_key_for(ctx: Any, abs_path: str, launch_root: str) -> str | None:

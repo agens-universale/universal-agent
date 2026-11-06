@@ -34,15 +34,7 @@ _TUI_DIR = Path(__file__).parent.resolve()
 # strict=True принципиален и не является «отключением теста»: когда N2 разберёт
 # эталон и кадр снова совпадёт, xpass покраснеет и заставит убрать имя отсюда.
 # Именно этого не делал тихий skip — из-за него дыру и не замечали.
-_SNAPSHOT_DRIFT = {
-    "test_confirm_banner_snapshot",
-    "test_empty_state_snapshot",
-    "test_event_focus_snapshot",
-    "test_main_full_dialog_snapshot",
-    "test_main_running_snapshot",
-    "test_palette_open_snapshot",
-    "test_unknown_command_snapshot",
-}
+_SNAPSHOT_DRIFT: set[str] = set()
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +49,20 @@ def _snapshot_color_mode(request, monkeypatch):
         monkeypatch.delenv("NO_COLOR", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _snapshot_clock(request, monkeypatch):
+    """Часы эталонов — одни на все кадры (`pinned_snapshot_clock`): время
+    строки итога не зависит от даты и пояса машины. Тест со своим
+    «сейчас» подменяет его поверх."""
+    if "snap_compare" not in request.fixturenames:
+        yield
+        return
+    from gc_testkit.tui_support import pinned_snapshot_clock
+
+    with pinned_snapshot_clock(monkeypatch):
+        yield
+
+
 def pytest_configure(config):
     """Скрыть от syrupy наши `.svg`-копии эталонов.
 
@@ -68,9 +74,9 @@ def pytest_configure(config):
     syrupy знает только про `.raw`, объявлял все `.svg` «unused unknown snapshot
     collection» и следом печатал совет «re-run pytest with --snapshot-update to
     delete unused snapshots». Совет ОПАСЕН: `--snapshot-update` заодно перезапишет
-    `.raw`-эталоны, включая девять разъехавшихся из `_SNAPSHOT_DRIFT`, которые
-    держатся под strict-xfail именно как улика. Одна послушная команда — и
-    разбирать станет нечего.
+    `.raw`-эталоны, в том числе разъехавшиеся из `_SNAPSHOT_DRIFT` (когда
+    список не пуст), которые держатся под strict-xfail именно как улика. Одна
+    послушная команда — и разбирать станет нечего.
 
     Почему здесь, а не `addopts` в манифесте: опция принадлежит syrupy, а тот
     приезжает только с `pytest-textual-snapshot` из dev-группы. В `addopts` она
@@ -220,6 +226,42 @@ def _no_clipboard_probe(monkeypatch):
     from gc_tui.services import os_ops
 
     monkeypatch.setattr(os_ops, "probe_clipboard_image", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_skills_warm(monkeypatch):
+    """Главный экран прогревает кэш скиллов в фоне на старте и после каждого
+    прогона — по умолчанию тесты настоящий реестр не обходят. Тест, которому
+    прогрев нужен, просит фикстуру `skills_warm` и сам подменяет реестр.
+    Возвращает настоящий метод прогрева."""
+    from gc_tui.screens.main import TraceScreen
+
+    real = TraceScreen._warm_skills_cache
+    monkeypatch.setattr(TraceScreen, "_warm_skills_cache", lambda self: None)
+    return real
+
+
+@pytest.fixture
+def skills_warm(_no_skills_warm, monkeypatch):
+    """Вернуть настоящий фоновый прогрев кэша скиллов
+    (см. `_no_skills_warm`)."""
+    from gc_tui.screens.main import TraceScreen
+
+    monkeypatch.setattr(TraceScreen, "_warm_skills_cache", _no_skills_warm)
+
+
+@pytest.fixture(autouse=True)
+def _no_terminal_probe(monkeypatch):
+    """Тесты не опрашивают настоящий терминал (OSC 11 при старте `main()`) и
+    после себя возвращают палитру к теме gigacode: apply_background меняет
+    глобалы модуля. Тесты пробы держат ссылку на настоящую функцию,
+    взятую при импорте, поэтому подмена атрибута модуля им не мешает."""
+    from gc_tui import palette
+    from gc_tui.services import terminal_caps
+
+    monkeypatch.setattr(terminal_caps, "query_background", lambda: None)
+    yield
+    palette.reset()
 
 
 @pytest.fixture(autouse=True)

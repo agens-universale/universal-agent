@@ -124,9 +124,11 @@ def resolve_by_mode(decision: str, action: ModeAction):
         if action.deny_fields is None
         else action.deny_fields
     )
+    mode = resolve_mode(ctx)
+    # Режим — в теле отказа: человеку лента пишет, какой режим запретил.
     return False, mode_denied_error(
         action.deny_type,
         action.deny_reason,
-        guidance=mode_denied_guidance(resolve_mode(ctx)),
-        **deny_fields,
+        guidance=mode_denied_guidance(mode),
+        **{"mode": mode.value, **deny_fields},
     )

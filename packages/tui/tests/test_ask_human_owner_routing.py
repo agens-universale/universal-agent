@@ -188,9 +188,13 @@ class _FakeRunner:
         self.submitted = []
         self.started = []
         self.stopped = False
+        self.followed = None
 
     def is_running(self):
         return self._running
+
+    def follow(self, previous):
+        self.followed = previous
 
     def submit_ask_human_reply(self, text):
         self.submitted.append(text)
@@ -305,3 +309,4 @@ async def test_nonowner_running_is_stopped_then_new_turn(tmp_path):
         assert any(
             kw.get("query") == "ответ" for kw in fresh.started
         )  # новый ход
+        assert fresh.followed is busy  # он ждёт поток остановленного

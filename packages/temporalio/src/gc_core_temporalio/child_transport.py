@@ -197,14 +197,16 @@ class ChildTransport:
             "parent_owner_id": self.operations.owner_id,
             "parent_context": self.operations.child_context,
             "tool_name": tool_name,
-            "frozen_level": router.active_level(),
+            # цель: уровень или алиас
+            "frozen_level": router.active_target(),
             "force_legacy": router.force_legacy,
             "circuit_breaker": router.breaker.snapshot(),
         }
         # Старые истории сохраняют прежний вход child workflow; новые
         # передают AUTO отдельно от уровня уже выбранного вызова родителя.
         if workflow.patched("subagent-frozen-live-level-v1"):
-            child_context["frozen_live_level"] = router.live_level()
+            # цель: уровень или алиас
+            child_context["frozen_live_level"] = router.live_choice()
         if workflow.patched("subagent-independent-auto-v1"):
             child_context["independent_auto"] = True
         # Слова человека корня — данными: лёгкий снимок родителя переписки и

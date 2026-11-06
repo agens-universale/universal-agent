@@ -207,3 +207,90 @@ async def test_answer_is_not_replayed_into_the_tail_turn(
         monkeypatch.setattr(ae, "_aclose_mcp_and_release", teardown)
         await agent.run([], answer="B", thread_id=KEY.thread)
     backend.assert_clean()
+
+
+async def _turns(store) -> list[dict]:
+    return [e.data for e in await store.read_stream(KEY, "turns")]
+
+
+async def _reply_id(store, text: str) -> str:
+    history = [e.data for e in await store.read_stream(KEY, "messages")]
+    [reply] = [
+        m
+        for m in history
+        if m.get("role") == "user" and m.get("content") == text
+    ]
+    return reply["id"]
+
+
+async def test_question_does_not_close_the_turn(tmp_path, monkeypatch, store):
+    """Вопрос ход не завершает: итога хода нет, а его начало, время и
+    открывшая реплика ждут продолжения в состоянии треда."""
+    cfg = parity_config(tmp_path, monkeypatch)
+    install(monkeypatch, ScriptedBackend([ASK]))
+    async with await _agent(cfg, store) as agent:
+        await agent.run("выбери вариант", thread_id=KEY.thread)
+    assert await _turns(store) == []
+    record = await store.get_thread(KEY)
+    assert record.runtime.last_turn is None
+    carried = record.state.suspended_turn
+    assert carried["opened_by"] == await _reply_id(store, "выбери вариант")
+    assert carried["started_at"]
+    assert carried["elapsed"] >= 0
+
+
+async def test_answer_closes_the_whole_turn_once(tmp_path, monkeypatch, store):
+    """Ответ после рестарта продолжает тот же ход: одна запись итога — с
+    началом и репликой хода, время прогона до вопроса в ней."""
+    cfg = parity_config(tmp_path, monkeypatch)
+    install(monkeypatch, ScriptedBackend([ASK]))
+    async with await _agent(cfg, store) as agent:
+        await agent.run("выбери вариант", thread_id=KEY.thread)
+    carried = (await store.get_thread(KEY)).state.suspended_turn
+    install(monkeypatch, ScriptedBackend([FINISH, judge_accept()]))
+    async with await _agent(cfg, store) as agent:
+        await agent.run([], answer="B", thread_id=KEY.thread)
+    [turn] = await _turns(store)
+    outcome = turn["outcome"]
+    assert outcome["status"] == "done"
+    assert outcome["opened_by"] == carried["opened_by"]
+    assert outcome["started_at"] == carried["started_at"]
+    assert outcome["duration_sec"] >= carried["elapsed"]
+    record = await store.get_thread(KEY)
+    assert record.state.suspended_turn is None
+    assert record.runtime.last_turn["status"] == "done"
+
+
+async def test_message_instead_of_answer_continues_the_turn(
+    tmp_path, monkeypatch, store
+):
+    cfg = parity_config(tmp_path, monkeypatch)
+    install(monkeypatch, ScriptedBackend([ASK]))
+    async with await _agent(cfg, store) as agent:
+        await agent.run("выбери вариант", thread_id=KEY.thread)
+        install(monkeypatch, ScriptedBackend([FINISH, judge_accept()]))
+        await agent.run("сделай по-своему", thread_id=KEY.thread)
+    [turn] = await _turns(store)
+    opener = await _reply_id(store, "выбери вариант")
+    assert turn["outcome"]["opened_by"] == opener
+
+
+async def test_second_question_keeps_the_turn_open(
+    tmp_path, monkeypatch, store
+):
+    """Ход с двумя вопросами — всё ещё один ход и одна запись итога."""
+    ask2 = assistant_tool_call(
+        "turn_ask_human", {"question": "А точно B?"}, call_id="ask2"
+    )
+    cfg = parity_config(tmp_path, monkeypatch)
+    install(monkeypatch, ScriptedBackend([ASK]))
+    async with await _agent(cfg, store) as agent:
+        await agent.run("выбери вариант", thread_id=KEY.thread)
+        install(monkeypatch, ScriptedBackend([ask2]))
+        await agent.run([], answer="B", thread_id=KEY.thread)
+        assert await _turns(store) == []
+        install(monkeypatch, ScriptedBackend([FINISH, judge_accept()]))
+        await agent.run([], answer="да", thread_id=KEY.thread)
+    [turn] = await _turns(store)
+    opener = await _reply_id(store, "выбери вариант")
+    assert turn["outcome"]["opened_by"] == opener

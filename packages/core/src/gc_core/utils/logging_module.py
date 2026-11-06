@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from gc_core.settings import settings_of
@@ -120,7 +121,14 @@ class RedactingFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         redactor = self._redactor
-        record.msg = redactor.redact(record.getMessage())
+        # Сохраняем структуру сообщения для JSON-обработчиков приложения.
+        # str(dict) теряет ключи, по которым маскируются произвольные секреты.
+        message = (
+            dict(record.msg)
+            if isinstance(record.msg, Mapping) and not record.args
+            else record.getMessage()
+        )
+        record.msg = redactor.redact(message)
         record.args = None
         for key, value in list(record.__dict__.items()):
             if key in _RESERVED_LOGRECORD_KEYS:

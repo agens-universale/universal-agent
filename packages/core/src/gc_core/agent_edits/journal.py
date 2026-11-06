@@ -20,7 +20,9 @@ fs-тулы, читают трейс и экран /diff (в других мод
 Карманный подканал того же шелл-канала (``call_id is None`` так же) даёт
 гибрид: синтетический заголовок ``diff --git a/<path> b/<path>`` без
 ``index``/``--- a/``/``+++ b/``, а дальше — тело ``difflib.unified_diff``, как
-у рекордера.
+у рекордера. Запись удаления со строками (оба подканала,
+``delete_records.delete_record``) — в форме git: ``diff --git``,
+``deleted file mode``, ``--- a/<path>``, ``+++ /dev/null`` и тело difflib.
 
 У любой записи с флагом ``no_diff`` поле ``hunks`` пусто. Род содержимого —
 именно ФЛАГ, а не вид правки: ``op`` отвечает на вопрос «что сделал тул»
@@ -52,6 +54,11 @@ from gc_core.utils.file_lock import file_lock
 
 _logger = logging.getLogger(__name__)
 
+# Флаг записи шелл-канала: путь, который команда создала и сама закоммитила.
+# ``op`` у такой записи ``"shell"``: ``"create"`` дал бы откат удалением, а
+# коммит в окне команды мог быть чужим. Флаг нужен только глаголу экрана.
+CREATED_FLAG = "created"
+
 
 @dataclass
 class EditRecord:
@@ -79,6 +86,19 @@ class EditRecord:
     # сверх потолка не записаны, не видны и не откатываются. ``None`` — команда
     # не урезана (и все записи журналов до поля).
     command_paths: Optional[int] = None
+    # Вызов команды, которая тронула файл (шелл-канал). ``call_id`` у таких
+    # записей по-прежнему ``None`` — признак канала; это поле лишь говорит,
+    # какой вызов команды сделал правку. ``None`` — запись fs-тула, команда
+    # вне вызова тула или журнал до поля.
+    command_call_id: Optional[str] = None
+    # Размер файла после правки у записи без диффа (флаг ``no_diff``: бинарь
+    # или файл сверх капа исходника). ``None`` — запись с диффом, удаление,
+    # файл пропал между пробами или журнал до поля.
+    size_bytes: Optional[int] = None
+    # Режим файла (``stat.S_IMODE``) у записи удаления: по нему откат
+    # восстанавливает права. ``None`` — не удаление, режим неизвестен или
+    # журнал до поля.
+    mode: Optional[int] = None
 
     def to_json_obj(self) -> Dict[str, Any]:
         obj = {
@@ -96,6 +116,12 @@ class EditRecord:
         }
         if self.command_paths is not None:
             obj["command_paths"] = self.command_paths
+        if self.command_call_id is not None:
+            obj["command_call_id"] = self.command_call_id
+        if self.size_bytes is not None:
+            obj["size_bytes"] = self.size_bytes
+        if self.mode is not None:
+            obj["mode"] = self.mode
         return obj
 
     @classmethod
@@ -113,6 +139,9 @@ class EditRecord:
             after_sha256=obj.get("after_sha256"),
             flags=list(obj.get("flags") or []),
             command_paths=obj.get("command_paths"),
+            command_call_id=obj.get("command_call_id"),
+            size_bytes=obj.get("size_bytes"),
+            mode=obj.get("mode"),
         )
 
 

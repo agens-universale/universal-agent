@@ -2,6 +2,7 @@
 
 import pytest
 from gc_testkit.tui_support import tui_settings
+from footer_text import footer_rows
 
 pytestmark = pytest.mark.asyncio
 
@@ -18,7 +19,8 @@ def _app(tmp_path, **config):
 
 
 def _footer(pilot) -> str:
-    return str(pilot.app.query_one("#footer-left").render())
+    """Строка 1 футера — там живёт пилюля режима."""
+    return footer_rows(pilot.app)[0]
 
 
 async def test_shift_tab_cycles_modes_and_the_pill_follows(tmp_path):
@@ -45,13 +47,26 @@ async def test_shift_tab_cycles_modes_and_the_pill_follows(tmp_path):
 
 
 async def test_mode_hint_sits_right_after_the_pill(tmp_path):
-    """Смена режима на пару секунд дописывает пояснение — одной фразой с пилюлей."""
-    async with _app(tmp_path).run_test() as pilot:
+    """Смена режима на 2,5 с дописывает пояснение одной фразой с пилюлей —
+    с переносом из строки 1 в строку 2; хвост и бейдж на это время скрыты,
+    потом возвращаются."""
+    async with _app(tmp_path).run_test(size=(64, 24)) as pilot:
+        pilot.app._update_available = True  # непустой бейдж
+        scr = pilot.app.screen
         await pilot.press("shift+tab")
         await pilot.pause()
-        assert (
-            _footer(pilot)
-            == "⏸ manual mode — подтверждение всех действий, кроме чтения"
+        mode, slot = footer_rows(pilot.app)
+        assert mode.startswith("⏸ manual mode — ")
+        assert slot, "пояснение не перенеслось во вторую строку"
+        assert f"{mode} {slot}" == (
+            "⏸ manual mode — подтверждение всех действий, кроме чтения"
+        )
+        assert scr._footer_hint_timer is not None
+        scr._clear_footer_hint()  # таймер 2,5 с истёк
+        await pilot.pause()
+        assert footer_rows(pilot.app) == (
+            "⏸ manual mode (Shift+Tab)",
+            "ℹ 1 · F4/notices",
         )
 
 

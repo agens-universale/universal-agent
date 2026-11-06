@@ -27,7 +27,7 @@ def _render(*, clock_live, clock_episode, reasoning_tag=True, units=0) -> str:
     ind = ThinkingIndicator(
         started_at=0.0,
         state="thinking",
-        clock=lambda: 0.0,
+        clock=lambda: 5.0,  # счёт хода виден с целой секунды
         sink=_StubSink(units),
         reasoning_tag=reasoning_tag,
         reasoning_clock=_StubClock(clock_live, clock_episode),

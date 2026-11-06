@@ -152,7 +152,7 @@ async def test_trace_row_focusable_default_true():
     class _App(App):
         def compose(self) -> ComposeResult:
             yield TraceRow(
-                prefix="[skill] ",
+                prefix="[meta] ",
                 content="x",
                 kind_class="line-meta",
                 event_no=1,

@@ -1,11 +1,41 @@
-from gc_testkit.tui_support import tui_settings
+import logging
+import time
+
+from gc_testkit.tui_support import tui_settings, wait_until
 import pytest
 
 
+class _Reg:
+    def __init__(self, entries=None, exc=None, block_s=0.0):
+        self.entries = entries or []
+        self.exc = exc
+        self.block_s = block_s
+        self.calls = 0
+
+    async def list_skills(self, *, pack=None, include_all=False):
+        self.calls += 1
+        # Синхронная пауза — как синхронный обход диска в настоящем реестре.
+        time.sleep(self.block_s)
+        if self.exc is not None:
+            raise self.exc
+        return list(self.entries)
+
+
+def _patch_registry(monkeypatch, reg):
+    from gc_core.tools.skills import registry as reg_mod
+
+    monkeypatch.setattr(reg_mod, "get_skills_registry", lambda cfg=None: reg)
+
+
 @pytest.mark.asyncio
-async def test_skills_cache_invalidated_on_run_end(tmp_path):
+async def test_skills_cache_invalidated_on_run_end(
+    tmp_path, monkeypatch, skills_warm
+):
+    """Спадающий фронт сбрасывает старый снимок и тихо прогревает свежий."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
+    _patch_registry(monkeypatch, _Reg([{"id": "fresh"}]))
 
     async with TuiApp(
         threads_dir=str(tmp_path),
@@ -17,8 +47,10 @@ async def test_skills_cache_invalidated_on_run_end(tmp_path):
         scr._was_running = True  # был прогон
         scr.app.active_runner = None  # runner завершился → is_running False
         scr._poll_active()
-        await pilot.pause()
-        assert scr._skills_cache is None  # сброшен на спадающем фронте
+        # сброшен на спадающем фронте и прогрет заново
+        await wait_until(
+            pilot, lambda: scr._skills_cache == [{"id": "fresh"}], "прогрев"
+        )
 
 
 @pytest.mark.asyncio
@@ -39,3 +71,112 @@ async def test_skills_cache_kept_while_idle(tmp_path):
         scr._poll_active()
         await pilot.pause()
         assert scr._skills_cache == [{"id": "old"}]  # не тронут
+
+
+@pytest.mark.asyncio
+async def test_skills_cache_warmed_on_mount(
+    tmp_path, monkeypatch, skills_warm
+):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    _patch_registry(monkeypatch, _Reg([{"id": "p:brainstorming"}]))
+    async with TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        await wait_until(
+            pilot,
+            lambda: scr._skills_cache == [{"id": "p:brainstorming"}],
+            "прогрев на старте",
+        )
+
+
+@pytest.mark.asyncio
+async def test_skills_warm_error_goes_to_log_not_trace(
+    tmp_path, monkeypatch, caplog, skills_warm
+):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    _patch_registry(monkeypatch, _Reg(exc=RuntimeError("boom")))
+    caplog.set_level(logging.WARNING, logger="gc_tui.screens.main")
+    async with TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    ).run_test() as pilot:
+        await wait_until(pilot, lambda: "boom" in caplog.text, "лог")
+        scr = pilot.app.screen
+        assert scr._skills_cache is None  # холодный — /skill загрузит сам
+        trace_text = "\n".join(
+            str(w.render()) for w in scr.query("#trace Static")
+        )
+        assert "boom" not in trace_text
+        assert "/skills" not in trace_text
+        assert "boom" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_skills_warm_does_not_block_ui(
+    tmp_path, monkeypatch, skills_warm
+):
+    """Обход диска идёт вне цикла интерфейса: клавиша не ждёт прогрева."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    _patch_registry(monkeypatch, _Reg())
+
+    async with TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        await wait_until(pilot, lambda: scr._skills_cache == [], "старт")
+        _patch_registry(monkeypatch, _Reg([{"id": "slow"}], block_s=0.5))
+        scr._skills_cache = None
+        scr._warm_skills_cache()
+        started = time.monotonic()
+        await pilot.press("x")
+        assert time.monotonic() - started < 0.2
+        assert pilot.app.query_one("#cmdinput").text == "x"
+        assert scr._skills_cache is None  # прогрев ещё идёт
+        await wait_until(
+            pilot, lambda: scr._skills_cache == [{"id": "slow"}], "прогрев"
+        )
+
+
+@pytest.mark.asyncio
+async def test_stale_warm_result_never_lands(
+    tmp_path, monkeypatch, skills_warm
+):
+    """Сброс → прогрев → сброс → прогрев: первый (устаревший) снимок не
+    попадает в кэш даже после того, как его обход закончился."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    _patch_registry(monkeypatch, _Reg())
+
+    async with TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        warm = scr.__class__._warm_skills_cache
+        await wait_until(pilot, lambda: scr._skills_cache == [], "старт")
+        _patch_registry(monkeypatch, _Reg([{"id": "stale"}], block_s=0.4))
+        scr._skills_cache = None
+        warm(scr)
+        await pilot.pause(0.05)  # первый обход стартовал
+        _patch_registry(monkeypatch, _Reg([{"id": "fresh"}], block_s=0.6))
+        scr._skills_cache = None
+        warm(scr)
+        await pilot.pause(0.5)  # первый обход кончился, второй ещё идёт
+        assert scr._skills_cache is None
+        await wait_until(
+            pilot, lambda: scr._skills_cache == [{"id": "fresh"}], "прогрев"
+        )

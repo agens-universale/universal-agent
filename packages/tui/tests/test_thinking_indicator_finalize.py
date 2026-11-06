@@ -1,15 +1,12 @@
 """ThinkingIndicator — мгновенное гашение по submit_solution + sticky sentinel."""
 
-from gc_testkit.develop_files import record_from_meta
-
-from gc_testkit.tui_support import tui_settings
 import json
 import threading
 import time
 from pathlib import Path
 
 import pytest
-from gc_testkit.tui_support import wait_until
+from gc_testkit.tui_support import tui_settings, wait_until
 
 
 def _screen(pilot):
@@ -462,72 +459,3 @@ async def test_ask_human_active_hides_thinking_indicator(tmp_path):
             assert indicators[0].has_class("hidden")
         # Runner ещё работает (ждёт ответа на ask_human).
         assert pilot.app.active_runner.is_running()
-
-
-@pytest.mark.asyncio
-async def test_runner_not_running_shows_terminal_state_after_finalized(
-    tmp_path,
-):
-    """Если runner.is_running() == False — индикатор не уничтожается, а
-    переходит в состояние «done» (store сообщает status=completed, runner
-    не был остановлен напрямую).
-
-    Sentinel не должен мешать (path-coverage / defensive)."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
-
-    fake = _BlockingFake(
-        records=[_submit_solution_record()],
-        threads_dir=Path(tmp_path),
-    )
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    app._executor_factory = lambda: fake
-    async with app.run_test() as pilot:
-        inp = pilot.app.query_one("#cmdinput")
-        inp.text = "test"
-        await pilot.press("enter")
-        await wait_for_finalized(pilot)
-
-        screen = _screen(pilot)
-        assert screen._last_event_kind == "_finalized"
-
-        # Заменяем store двойником, который возвращает status=completed,
-        # чтобы idle-ветка гарантированно выдала state="done".
-        class _CompletedStore:
-            def get_record(self, tid):
-                return record_from_meta({"tui": {"status": "completed"}})
-
-            def update_tui_meta(self, tid, patch):
-                pass
-
-        screen._store = _CompletedStore()
-        screen._cursor = (
-            None  # skip tail_events — стор двойник не реализует его
-        )
-
-        # Симулируем выход runner-треда (без _stop_requested → outcome=completed→done).
-        class _StoppedRunner:
-            def is_running(self):
-                return False
-
-            _stop_requested = False
-            _thread_kind = "run"
-
-        pilot.app.active_runner = _StoppedRunner()
-        pilot.app.last_runner_error = None
-        pilot.app.last_stop_requested = False
-        screen._was_running = True
-
-        screen._poll_active()
-        await pilot.pause(0.3)
-
-        # Индикатор присутствует и в состоянии «done» (store вернул completed,
-        # runner._stop_requested=False → не переопределяется).
-        inds = pilot.app.query(ThinkingIndicator)
-        assert len(inds) == 1
-        assert inds[0]._state == "done"

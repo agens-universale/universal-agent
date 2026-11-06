@@ -105,9 +105,7 @@ async def test_unknown_kwargs_are_filtered_like_in_sync_twin(monkeypatch):
     assert await f(url="http://x", use_retry=True, лишний="ключ") == "http://x"
 
 
-async def test_logger_is_reinjected_when_function_accepts_it(
-    monkeypatch, caplog
-):
+async def test_logger_is_reinjected_when_function_accepts_it():
     """logger достаётся декоратору, но возвращается функции, если та его принимает.
 
     Без ре-инъекции вызываемая функция получала бы logger=None и переставала
@@ -118,10 +116,10 @@ async def test_logger_is_reinjected_when_function_accepts_it(
     @retry_with_backoff_async(max_attempts=1)
     async def f(url: str, logger=None):
         seen["logger"] = logger
-        return "ok"
+        return url
 
     my_logger = logging.getLogger("тест-ретраев")
-    assert await f(url="http://x", logger=my_logger) == "ok"
+    assert await f(url="http://x", logger=my_logger) == "http://x"
     assert seen["logger"] is my_logger
 
 
@@ -141,3 +139,62 @@ def test_sync_twin_still_behaves_the_same(monkeypatch):
 
     assert flaky(use_retry=True) == "ok"
     assert calls["n"] == 3
+
+
+@pytest.mark.parametrize("started", [True, False])
+async def test_opted_in_user_stop_is_not_retried_with_permissive_policy(
+    started,
+):
+    from gc_core.user_stop import UserStopInterrupt
+
+    calls = []
+
+    async def stopped():
+        calls.append("stop")
+        raise UserStopInterrupt(kind="mcp", started=started)
+
+    options = dict(
+        max_attempts=3,
+        initial_delay_sec=0,
+        should_retry=lambda _: True,
+        interrupt_on_user_stop=True,
+    )
+    with pytest.raises(UserStopInterrupt):
+        await retry_with_backoff_async(**options)(stopped)(use_retry=True)
+    assert calls == ["stop"]
+
+
+@pytest.mark.parametrize("stop_at_error", [False, True])
+async def test_backoff_stops_without_an_outer_tool_handler(stop_at_error):
+    from gc_core.user_stop import UserStop, UserStopInterrupt, bind_user_stop
+
+    gate = UserStop()
+    gate.prepare_run(asyncio.get_running_loop(), None)
+    entered, calls = asyncio.Event(), []
+
+    @retry_with_backoff_async(
+        initial_delay_sec=10, interrupt_on_user_stop=True
+    )
+    async def failed():
+        calls.append("attempt")
+        entered.set()
+        if stop_at_error:
+            gate.request()
+        raise ConnectionError("offline")
+
+    async def run():
+        with bind_user_stop(gate):
+            await failed(use_retry=True)
+
+    task = asyncio.create_task(run())
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        gate.request()
+        done, _ = await asyncio.wait({task}, timeout=0.3)
+        assert done, "backoff ignored stop"
+        with pytest.raises(UserStopInterrupt):
+            await task
+        assert calls == ["attempt"]
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

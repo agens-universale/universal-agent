@@ -19,6 +19,7 @@ from gc_core.config import apply_cli_overrides
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
+from gc_core.config_modules.finish_gate_mode import FinishGateMode
 from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.config_modules.root import schema_error_details
 from gc_core.settings import LoadedSettings, expand_section_updates
@@ -256,7 +257,7 @@ class WebhookConfig(_ApiDocs, SurfaceConfig):
 class _ChannelModes(SurfaceConfig):
     launch_root: str | None = None
     text_answer_mode: Literal["deny", "judge", "allow"] = "allow"
-    finish_gate_mode: Literal["on", "off", "smart"] = "off"
+    finish_gate_mode: FinishGateMode = "off"
     todo_reminder_steps: int = Field(default=0, ge=0)
 
     @field_validator("launch_root", mode="before")

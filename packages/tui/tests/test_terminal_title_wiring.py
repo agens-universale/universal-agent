@@ -56,9 +56,6 @@ async def test_resume_title_uses_session_last_prompt(tmp_path, monkeypatch):
     ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
-        scr._last_user_send_text = (
-            ""  # resume — в этом запуске ничего не слали
-        )
         scr._resumed_prompt = (
             "что ты умеешь?"  # кэш промпта сессии (attach прочитал из стора)
         )
@@ -89,7 +86,6 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         scr._resumed_prompt = "p"
-        scr._last_user_send_text = ""
         badge = {"v": "completed"}
         monkeypatch.setattr(scr, "_session_status_word", lambda: badge["v"])
 
@@ -100,7 +96,7 @@ async def test_title_status_is_live_and_deduped(tmp_path, monkeypatch):
         assert calls == []
         badge["v"] = "running"  # статус сменился (старт прогона)
         scr._update_terminal_title()
-        assert calls == ["✦ GigaCode ▸ p"]
+        assert calls == ["✦ GigaCode ● p"]
 
 
 @pytest.mark.asyncio

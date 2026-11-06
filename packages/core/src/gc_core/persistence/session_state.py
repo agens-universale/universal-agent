@@ -218,6 +218,21 @@ def _prompt_values(
     return {}, []
 
 
+#: Приостановка хода на вопросе: вопрос, ждущий ответа, и снимок хода.
+_SUSPENSION_FIELDS = ("pending_question", "suspended_turn")
+
+
+def _suspension_values(base: SessionState, state: Any) -> dict[str, Any]:
+    """Ход приостановку либо задал (вопрос), либо снял (ответ, продолжение)
+    — прежняя снимается первой же записью хода."""
+    values: dict[str, Any] = {}
+    for name in _SUSPENSION_FIELDS:
+        value = getattr(state, name, None)
+        if value or getattr(base, name) is not None:
+            values[name] = dict(value) if value else None
+    return values
+
+
 def session_from_state(
     base: SessionState,
     state: Any,
@@ -257,11 +272,7 @@ def session_from_state(
     inbox_seq = int(field(state, "inbox_seq", 0) or 0)
     if inbox_seq or "inbox_seq" in base.model_fields_set:
         values["inbox_seq"] = inbox_seq
-    # Вопрос, ждущий ответа: ход его либо задал (приостановка), либо закрыл
-    # ответом — прежний снимается первой же записью хода.
-    pending = field(state, "pending_question", None)
-    if pending or base.pending_question is not None:
-        values["pending_question"] = dict(pending) if pending else None
+    values.update(_suspension_values(base, state))
     last_backend = getattr(state, "last_backend_response_id", None)
     if isinstance(last_backend, str) and last_backend:
         values["last_backend_response_id"] = last_backend

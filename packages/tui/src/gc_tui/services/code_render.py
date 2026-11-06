@@ -20,8 +20,11 @@ _TAB_WIDTH = 4
 _theme = None
 
 
-def _trace_theme():
+def code_theme():
     """monokai, но комментарии — цветом служебного текста проекта ($dim).
+    Одна тема на всё «кодовое»: блоки кода ленты, JSON экранов события и
+    вызова, YAML `/config` (`/view` — своя тема палитры, у TextArea свой
+    механизм).
 
     Родные комментарии monokai (#75715e) слишком тусклы: даже на обычном фоне
     панели их контраст 3.3 — на грани, а поверх выделения текста они пропадают
@@ -81,7 +84,7 @@ def highlight_code(content: str, lang: str | None) -> Text:
 
     from rich.syntax import Syntax
 
-    syntax = Syntax(code, lexer=lang, theme=_trace_theme(), word_wrap=False)
+    syntax = Syntax(code, lexer=lang, theme=code_theme(), word_wrap=False)
     if syntax.lexer is None:
         # Неизвестный язык: `Syntax` ничего не бросает — он молча оставляет текст как
         # есть и красит его цветом темы. Прежняя ловля `ClassNotFound` была

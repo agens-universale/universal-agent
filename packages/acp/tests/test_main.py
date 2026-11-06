@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from gc_acp.main import (
     _parse_args,
     apply_acp_runtime_defaults,
@@ -220,20 +221,17 @@ def test_parse_args_keeps_own_flags_and_collects_setting_paths():
 def test_parse_args_coerces_setting_values():
     args = _parse_args(
         [
-            "--level",
+            "--model",
             "max",
             "--agent.max_steps=50",
             "--agent.verbose",
             "true",
-            "--model",
-            "forced",
         ]
     )
     assert args.overrides == {
-        "level": "max",
+        "model": "max",
         "agent.max_steps": 50,
         "agent.verbose": True,
-        "agent.model": "forced",
     }
 
 
@@ -265,19 +263,16 @@ def test_setting_overrides_apply_after_profile(monkeypatch, tmp_path):
         [
             "--profile",
             "work",
-            "--level",
-            "max",
-            "--agent.max_steps",
-            "7",
             "--model",
             "forced",
+            "--agent.max_steps",
+            "7",
         ],
         {"agent.max_steps": 100, "models": {"flash": {"model": "m"}}},
     )
     assert code == 0
     loaded = held["loaded"]
     assert held["profile"] == "work"
-    assert loaded.settings.level == "max"
     assert loaded.settings.agent.max_steps == 7
     assert loaded.settings.agent.model == "forced"
     assert loaded.provenance.source("agent.model").layer == "cli"
@@ -362,8 +357,55 @@ def test_acp_declares_a_human_whose_words_are_his_own():
     assert loaded.runtime.external_user_words is False
 
 
-def test_parse_args_accepts_auto_level():
-    assert _parse_args(["--level", "auto"]).overrides == {"level": "auto"}
+def test_parse_args_accepts_auto_model():
+    assert _parse_args(["--model", "auto"]).overrides == {"model": "auto"}
+
+
+def _start_model(monkeypatch, tmp_path, value):
+    return _start(
+        monkeypatch,
+        tmp_path,
+        ["--model", value],
+        {
+            "models": {"flash": {"model": "m"}, "pro": {"model": "p"}},
+            "slots": {"default": "flash"},
+        },
+    )
+
+
+def _assert_choice(monkeypatch, tmp_path, value):
+    code, held = _start_model(monkeypatch, tmp_path, value)
+    assert code == 0
+    loaded = held["loaded"]
+    assert loaded.settings.model == value
+    assert not any("легаси-форс" in n for n in loaded.runtime.notices)
+
+
+def test_model_flag_auto_is_a_choice(monkeypatch, tmp_path):
+    _assert_choice(monkeypatch, tmp_path, "auto")
+
+
+def test_model_flag_alias_is_a_choice(monkeypatch, tmp_path):
+    _assert_choice(monkeypatch, tmp_path, "pro")
+
+
+def test_model_flag_level_word_is_a_choice(monkeypatch, tmp_path):
+    _assert_choice(monkeypatch, tmp_path, "max")
+
+
+def test_model_flag_raw_id_forces_legacy(monkeypatch, tmp_path):
+    code, held = _start_model(monkeypatch, tmp_path, "raw-id")
+    assert code == 0
+    loaded = held["loaded"]
+    assert loaded.settings.agent.model == "raw-id"
+    assert any("легаси-форс" in n for n in loaded.runtime.notices)
+
+
+def test_level_flag_errors_with_model_hint(monkeypatch, tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        _start(monkeypatch, tmp_path, ["--level", "max"])
+    assert exc.value.code == 2
+    assert "--model" in capsys.readouterr().err
 
 
 def test_backend_rejection_refuses_database_storage():

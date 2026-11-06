@@ -35,7 +35,7 @@ def _no_discovery(monkeypatch):
 
 def _cfg(tmp_path, **over) -> dict:
     cfg = {
-        "level": "auto",
+        "model": "auto",
         "auto_routing": True,
         "backend_api_mode": "chat_completions",
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -50,7 +50,7 @@ def _cfg(tmp_path, **over) -> dict:
             **{
                 k: v
                 for k, v in cfg.items()
-                if k in ("level", "models", "slots")
+                if k in ("model", "models", "slots")
             },
             "agent.auto_routing": cfg["auto_routing"],
             "backend.api_mode": cfg["backend_api_mode"],
@@ -89,7 +89,7 @@ async def test_unavailable_auto_is_a_warning_in_the_run_log(tmp_path, over):
     [
         {},  # auto доступен
         {
-            "level": "default",
+            "model": "default",
             "backend_api_mode": "responses",
         },  # auto не выбран
     ],
@@ -100,4 +100,4 @@ async def test_no_warning_when_auto_is_available_or_not_selected(
     cfg = _cfg(tmp_path, **over)
     assert auto_routing_unavailable_notice(cfg) is None
     warnings = await _run_log_warnings(cfg)
-    assert [m for m in warnings if "автовыбор моделей недоступен" in m] == []
+    assert [m for m in warnings if "автовыбор недоступен" in m] == []

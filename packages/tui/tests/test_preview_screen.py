@@ -111,7 +111,7 @@ async def test_preview_summary_marker_collapsed_then_toggles():
             for w in scr.query(SummaryMarker)
             if w.has_class("summary-marker")
         )
-        prefix = lambda: str(marker.query_one(".trace-prefix").render())
+        prefix = lambda: marker._content.plain
         # свёрнут по умолчанию — стрелка вправо
         assert body.has_class("hidden")
         assert "▸" in prefix() and "▾" not in prefix()
@@ -288,7 +288,8 @@ async def test_preview_mounts_nested_subagent_rows():
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
         nested_tools = scr.query(ToolCallRow).filter(".nested-tool")
-        assert len(nested_tools) == 1  # fs_read_file
+        # fs_read_file — член вложенного блока `Explored` (P4 §7).
+        assert [r.mode for r in nested_tools] == ["header", "member"]
         todo_rows = scr.query(".line-todo-nested")
         assert len(todo_rows) == 1  # развёрнутый чек-лист
 

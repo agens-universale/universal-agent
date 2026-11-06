@@ -26,13 +26,13 @@ from gc_core.backends.remote_shell import (
 )
 from gc_core.backends.sandbox import SandboxBackend
 from gc_core.execution.contracts import ModelRequestStopped
+from gc_core.execution.tool_call_context import bind_tool_call
 from gc_core.tools.connect_mcp.client_port import _mcp_call_under_stop
 from gc_core.tools.connect_mcp.transport import _LineReader
 from gc_core.user_stop import (
     INTERRUPTED_CODE,
     UserStop,
     UserStopInterrupt,
-    bind_tool_call,
     bind_user_stop,
 )
 from gc_core.utils.connect_backend import (
@@ -1134,7 +1134,7 @@ async def _stop_during_retry_pause(monkeypatch, request):
     assert time.monotonic() - started < 1
     assert len(spy.requests) == 1
     killed = log.events("user_stop_killed")
-    assert [event["kind"] for event in killed] == ["pause"]
+    assert [event["kind"] for event in killed] == ["retry"]
 
 
 async def _first_request(spy) -> None:
@@ -1234,5 +1234,5 @@ async def _stop_policy_request(monkeypatch, make_handler) -> None:
     assert notices == []
 
 
-async def _no_pause(_delay, *args, **kwargs):
+async def _no_pause(_delay, *_args, **_kwargs):
     await _REAL_SLEEP(0)

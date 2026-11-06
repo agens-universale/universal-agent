@@ -875,3 +875,107 @@ async def test_reset_notice_mentions_session_profile_and_onboarding_suggestion(
         assert app._session_overrides == {
             "profile": "work"
         }  # сброс базы сессию не трогает
+
+
+async def test_reset_is_refused_while_a_run_is_going(tmp_path, monkeypatch):
+    """Сброс конфига переписывает указатель `profile:` — во время хода он
+    отказывает той же фразой, что смена профиля: ни баннера, ни сброса;
+    баннер, поднятый до хода, отказывает на подтверждении."""
+    from gc_core import app_version, config_sync
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+
+    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    called = []
+    monkeypatch.setattr(
+        config_sync, "reset_config", lambda path, **k: called.append(path)
+    )
+
+    class _LiveRunner:
+        def is_running(self):
+            return True
+
+    app = app_mod.TuiApp(settings=tui_settings({}))
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(
+            settings=as_settings({}),
+            config_path=str(cfg_file),
+            on_apply=lambda: None,
+            probe_fn=lambda *a, **k: None,
+        )
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        refusal = "✗ профиль можно сменить, когда ход закончится"
+
+        app.active_runner = _LiveRunner()
+        scr._request_reset()
+        await pilot.pause()
+        assert scr._reset_awaiting_confirm is False
+        assert str(scr.query_one("#set-notice").render()) == refusal
+
+        app.active_runner = None
+        scr._request_reset()
+        app.active_runner = _LiveRunner()
+        scr._confirm_reset()
+        await pilot.pause()
+        assert scr._reset_awaiting_confirm is False
+        assert str(scr.query_one("#set-notice").render()) == refusal
+        assert called == []
+        app.active_runner = None
+
+
+async def test_update_hint_height_stays_on_cursor(tmp_path, monkeypatch):
+    """Подсказка действий «Обновления» — с резервом под самую длинную
+    («Обновить агента» с командой терминала): ↑/↓ не двигают низ рамки
+    (дизайн-код §9)."""
+    from gc_core import app_version
+    from gc_core.updater import check as check_mod
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+
+    monkeypatch.setattr(
+        app_version,
+        "install_source",
+        lambda _read=None: app_version.InstallSource(
+            "https://gitverse.ru/x/y", "master", "abc", False
+        ),
+    )
+    monkeypatch.setattr(app_version, "agent_version", lambda: "0.3.0")
+    monkeypatch.setattr(
+        check_mod,
+        "check_for_update",
+        lambda source, **k: check_mod.CheckResult(
+            "current", "abc", "установлена последняя версия"
+        ),
+    )
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        'backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8"
+    )
+    app = app_mod.TuiApp(settings=tui_settings({}))
+    async with app.run_test(size=(90, 60)) as pilot:
+        scr = SettingsScreen(
+            settings=as_settings({}),
+            config_path=str(cfg_file),
+            on_apply=lambda: None,
+            probe_fn=lambda *a, **k: None,
+        )
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+
+        def height() -> int:
+            return list(scr.query(".set-update-hint"))[-1].size.height
+
+        heights = {height()}
+        for _ in range(4):
+            await pilot.press("down")
+            await pilot.pause(0.1)
+            heights.add(height())
+        assert len(heights) == 1
+        assert heights.pop() >= 4

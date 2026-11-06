@@ -211,7 +211,7 @@ def test_history_places_a_tool_call_between_prose():
     ]
     assert updates[1]["toolCallId"] == "c1"
     assert updates[1]["status"] == "in_progress"
-    assert updates[1]["title"] == "fs_read_file(path='src/a.py')"
+    assert updates[1]["title"] == "fs_read_file(src/a.py)"
     assert updates[1]["name"] == "fs_read_file"
     assert updates[1]["rawInput"] == {"path": "src/a.py"}
     assert updates[1]["locations"] == [{"path": os.path.abspath("src/a.py")}]
@@ -740,7 +740,7 @@ def test_history_shows_subagent_tools_as_agent_actions():
         ("tool_call_update", "sub", "completed"),
         ("agent_message_chunk", None, None),
     ]
-    assert updates[3]["title"] == "fs_read_file(path='a.py')"
+    assert updates[3]["title"] == "fs_read_file(a.py)"
     assert updates[3]["name"] == "fs_read_file"
     assert updates[3]["rawInput"] == {"path": "a.py"}
     assert updates[3]["locations"] == [{"path": os.path.abspath("a.py")}]
@@ -902,3 +902,21 @@ def test_history_skips_a_rejected_plan_and_a_repeat_show():
         ]
     )
     assert updates == []
+
+
+def test_history_title_path_is_relative_to_the_session_cwd():
+    """Проигрыш — те же подписи, что живой поток: путь от корня проекта."""
+    call = {
+        "type": "function_call",
+        "name": "fs_read_file",
+        "call_id": "c1",
+        "arguments": '{"path": "/work/app/src/a.py"}',
+    }
+    updates = history_updates(
+        [{**call, "name": "subagent_explore", "arguments": "{}"}],
+        subagent_records=[
+            {"seq": 1, "parent_call_id": "c1", "kind": "call", "payload": call}
+        ],
+        root="/work/app",
+    )
+    assert updates[1]["title"] == "fs_read_file(src/a.py)"

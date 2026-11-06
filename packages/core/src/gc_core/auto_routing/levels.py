@@ -143,26 +143,26 @@ def _one_call_kit(
     )
 
 
-def auto_active(router: Any, live_level: str | None, available: bool) -> bool:
+def auto_active(router: Any, live_choice: str | None, available: bool) -> bool:
     """Работает ли auto у вызова: Router есть, его сырой режим — `auto`
-    (`live_level` — уже прочитанный `router.live_level()`: точка решения читает
+    (`live_choice` — уже прочитанный `router.live_choice()`: точка решения читает
     его один раз на вызов), автовыбор доступен конфигу (`available`, он же
     `ctx.auto_available`) и самому Router'у разрешён auto (`auto_allowed` —
     только у непривязанного, спека §5.1). Единственное место условия: его читают
     точка решения и граница хода."""
     return bool(
         router is not None
-        and live_level == AUTO
+        and live_choice == AUTO
         and available
         and getattr(router, "auto_allowed", True)
     )
 
 
-def effective_level(
-    live_level: str | None, current_level: str | None, available: bool
+def effective_target(
+    live_choice: str | None, current_level: str | None, available: bool
 ) -> str:
     """Единственное место перевода литерала `auto` в уровень (спека §3)."""
-    live = live_level or START_LEVEL
+    live = live_choice or START_LEVEL
     if live != AUTO:
         return live
     if not available:

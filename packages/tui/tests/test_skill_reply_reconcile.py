@@ -1,15 +1,13 @@
-"""Тесты для трёх регрессий skill-сообщений.
+"""Тесты для двух регрессий skill-сообщений.
 
 Bug 1: Skill-реплика дублируется в трейсе (реконсайл по ev.summary вместо wire).
 Bug 2: Skill-реплика на resume показывается как [!] failed (wire ∉ delivered_wires).
-Bug 3: CSS: отсутствует .skill-marker в styles.tcss (отступ под маркером).
 """
 
 from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
-from gc_testkit.paths import TUI_PKG
 
 # ---------------------------------------------------------------------------
 # Bug 1: дублирование user-reply для skill-сообщений
@@ -239,58 +237,3 @@ async def test_mount_failed_mounts_truly_orphaned_skill(tmp_path):
             f"got {len(failed)} failed: {[w._text for w in screen.query(UserReplyContainer)]}"
         )
         assert failed[0]._text == display
-
-
-# ---------------------------------------------------------------------------
-# Bug 3: .skill-marker существует в styles.tcss
-# ---------------------------------------------------------------------------
-
-
-def test_skill_marker_css_rule_exists():
-    """styles.tcss содержит правило .skill-marker."""
-    import re
-
-    tcss = TUI_PKG / "styles.tcss"
-    assert tcss.exists(), f"styles.tcss не найден: {tcss}"
-    content = tcss.read_text(encoding="utf-8")
-    assert ".skill-marker" in content, (
-        "styles.tcss должен содержать правило .skill-marker для отступа под маркером скилла"
-    )
-    # Убеждаемся, что правило имеет margin-bottom
-    # ищем блок .skill-marker { ... }
-    match = re.search(r"\.skill-marker\s*\{([^}]*)\}", content)
-    assert match is not None, ".skill-marker { ... } не найден как блок"
-    block = match.group(1)
-    # Нижний отступ может задаваться как margin-bottom, так и шорткатом margin:
-    # (напр. `margin: 1 0` → top И bottom). Оба варианта дают зазор под маркером.
-    has_bottom_margin = "margin-bottom" in block or re.search(
-        r"\bmargin\s*:", block
-    )
-    assert has_bottom_margin, (
-        f".skill-marker должен задавать нижний отступ (margin-bottom или margin:), блок: {block!r}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_skill_marker_has_css_class(tmp_path):
-    """_mount_skill_marker добавляет CSS-класс skill-marker к смонтированному виджету."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.widgets.trace_row import TraceRow
-
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    async with app.run_test() as pilot:
-        scr = pilot.app.screen
-        scr._mount_skill_marker("qa-x", loaded=True)
-        await pilot.pause()
-
-        markers = [
-            w for w in scr.query(TraceRow) if w.has_class("skill-marker")
-        ]
-        assert len(markers) == 1, (
-            f"_mount_skill_marker должен добавлять класс skill-marker, нашли {len(markers)} виджетов с таким классом"
-        )

@@ -43,6 +43,32 @@ def test_present_confirm_targets_trace_screen_and_returns_ack(monkeypatch):
     assert calls == [("Title", "Question?", [("Path", "/x")])]
 
 
+def test_asking_call_id_reaches_the_banner(monkeypatch):
+    """`call_id` спросившего вызова: раннер → приложение → экран."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.services.agent_runner import AgentRunner
+
+    app = TuiApp()
+    seen: list = []
+    fake_trace = types.SimpleNamespace(
+        show_confirm_banner=lambda t, q, f, call_id=None: seen.append(call_id)
+    )
+    monkeypatch.setattr(app, "_main_screen", lambda: fake_trace, raising=False)
+    monkeypatch.setattr(
+        app, "call_from_thread", lambda fn: fn(), raising=False
+    )
+    runner = AgentRunner(
+        executor=types.SimpleNamespace(
+            stop_run=lambda: None, add_message=lambda m: None
+        )
+    )
+    runner._confirm_event.set()
+    confirm = runner.make_tui_confirm(app._present_confirm, timeout_sec=0)
+    confirm(title="t", question="q", fields=[], call_id="call_7")
+    assert seen == ["call_7"]
+
+
 def test_present_confirm_returns_false_without_trace_screen(monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp

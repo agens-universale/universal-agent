@@ -319,7 +319,7 @@ async def test_main_retains_reasoning_tool_arguments_finish_and_usage(
 
     assert response_id == "chat-1"
     assert metadata == {}
-    assert messages[0]["reasoning_content"] == reasoning.strip()
+    assert messages[0]["reasoning_content"] == reasoning
     tool = next(item for item in messages if item["type"] == "function_call")
     assert tool["name"] == "fs_read_file"
     assert tool["call_id"] == "call-1"
@@ -390,7 +390,7 @@ async def test_aux_router_fallback_stays_in_the_native_provider_handler(
             "assign": {"finish_gate": "judge"},
         }
     )
-    router = ModelRouter(config, level_provider=lambda: "default")
+    router = ModelRouter(config, choice_provider=lambda: "default")
     models = []
 
     async def policy(*, payload_factory, initial_max_tokens, **_kwargs):

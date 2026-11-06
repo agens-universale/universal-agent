@@ -1,6 +1,5 @@
 """TDD: State.terminal_outcome — поле и его установка в точках терминирования."""
 
-import importlib
 import json
 import sys
 import types
@@ -10,6 +9,7 @@ from gc_core.states import State
 from gc_testkit import run_coro
 from gc_testkit.paths import module_dir
 from gc_testkit.settings import fake_ctx
+from helpers.module_snapshot import ModuleSnapshot
 
 
 def _make_state(max_steps=2):
@@ -35,17 +35,12 @@ def test_terminal_outcome_defaults_none():
 # ---------------------------------------------------------------------------
 
 
+_SNAPSHOT: ModuleSnapshot | None = None
+
+
 def teardown_module(_module) -> None:
-    for name in list(sys.modules):
-        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
-            sys.modules.pop(name, None)
-    real_tools = importlib.import_module("gc_core.tools")
-    proc = sys.modules.get("gc_core.processing_responses")
-    if proc is not None:
-        proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+    if _SNAPSHOT is not None:
+        _SNAPSHOT.restore()
 
 
 processing_module = None
@@ -54,6 +49,8 @@ arun_agent = None
 
 def setup_module(_module) -> None:
     global processing_module, arun_agent
+    global _SNAPSHOT
+    _SNAPSHOT = ModuleSnapshot()
     _stub_tools_modules()
     from gc_core import processing_responses as pm
     from gc_core.processing_responses import arun_agent as ra

@@ -31,6 +31,8 @@ from parity_harness import (
     install,
     judge_accept,
     parity_config,
+    strip_intended_meta_keys,
+    thread_messages,
 )
 
 REFERENCE = (
@@ -51,28 +53,6 @@ ACCEPTED_TRACE_CHANGES = (
     Path(__file__).parent
     / "fixtures/local_runtime_accepted_trace_changes.json"
 )
-
-#: Ключи meta, которые добавляет хранилище v2 (спека
-#: docs/superpowers/specs/2026-10-14-agent-storage-v2-design.md, 5.7). Эталон
-#: develop их не знает, поэтому сравнение вырезает их — по списку, не по маске:
-#: любой другой новый ключ обязан уронить паритет.
-V2_ADDED_META_KEYS = (("workspace",), ("runtime", "turn"))
-
-
-def strip_v2_added_keys(meta):
-    out = deepcopy(meta)
-    for path in V2_ADDED_META_KEYS:
-        parent = out
-        for part in path[:-1]:
-            parent = parent.get(part)
-            if not isinstance(parent, dict):
-                break
-        else:
-            parent.pop(path[-1], None)
-    # Секцию, опустевшую после вырезания, develop не пишет вовсе.
-    if out.get("runtime") == {}:
-        out.pop("runtime")
-    return out
 
 
 def call(name, arguments, call_id="c1"):
@@ -491,11 +471,13 @@ async def run_scenario(
         data_path, meta_path = _thread_paths(
             resolve_threads_dir(cfg), "cli", "parity"
         )
-        records = [
-            json.loads(line)
-            for line in Path(data_path).read_text().splitlines()
-            if line.strip()
-        ]
+        records = thread_messages(
+            [
+                json.loads(line)
+                for line in Path(data_path).read_text().splitlines()
+                if line.strip()
+            ]
+        )
         assert records, "Сравнение пустых тредов не проверяет поведение"
         meta = json.loads(Path(meta_path).read_text())
         if post_run_outcome is not None:
@@ -546,7 +528,7 @@ async def run_scenario(
                 "answers": answers,
                 "requests": backend.calls,
                 "thread": records,
-                "meta": strip_v2_added_keys(meta),
+                "meta": strip_intended_meta_keys(meta),
                 "state": {
                     "messages": state.messages,
                     "steps": state.steps,
@@ -606,10 +588,14 @@ async def test_legacy_routing_runtime_matches_develop(
 def test_strip_removes_only_listed_keys():
     meta = {
         "workspace": "/w",
-        "runtime": {"turn": "idle", "live_msg_count": 3},
+        "runtime": {
+            "turn": "idle",
+            "last_turn": {"status": "completed", "reason": None},
+            "live_msg_count": 3,
+        },
         "thread_id": "t",
     }
-    assert strip_v2_added_keys(meta) == {
+    assert strip_intended_meta_keys(meta) == {
         "runtime": {"live_msg_count": 3},
         "thread_id": "t",
     }
@@ -618,10 +604,16 @@ def test_strip_removes_only_listed_keys():
 
 def test_strip_is_noop_without_new_keys():
     meta = {"runtime": {"live_msg_count": 3}, "thread_id": "t"}
-    assert strip_v2_added_keys(meta) == meta
+    assert strip_intended_meta_keys(meta) == meta
 
 
 def test_strip_drops_emptied_runtime():
     # develop никогда не пишет пустую секцию runtime: снятие последнего
     # флага убирает её целиком (контракт thread store).
-    assert strip_v2_added_keys({"runtime": {"turn": "idle"}}) == {}
+    assert strip_intended_meta_keys({"runtime": {"turn": "idle"}}) == {}
+    assert (
+        strip_intended_meta_keys(
+            {"runtime": {"last_turn": {"status": "stopped"}}}
+        )
+        == {}
+    )

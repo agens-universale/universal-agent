@@ -53,7 +53,7 @@ def probe_threads(monkeypatch):
 
     class _FakeShellDelta:
         @staticmethod
-        def begin(ctx, *, seen=None, pocket_cache=None):
+        def begin(ctx, *, seen=None, pocket_cache=None, command_call_id=None):
             threads.append(threading.current_thread().name)
             return _FakeDelta()
 

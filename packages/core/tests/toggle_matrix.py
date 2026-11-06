@@ -35,6 +35,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from parity_harness import (
@@ -45,6 +47,7 @@ from parity_harness import (
     judge_accept,
     parity_config,
     run_thread_dump,
+    strip_intended_meta_keys,
     strip_volatile,
     with_path_overrides,
 )
@@ -826,7 +829,7 @@ NOT_IN_MATRIX = {
     "assign.summary": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.text_answer_judge": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.vision": "выбор модели: харнесс маршрутизирует по agent.model",
-    "level": "выбор модели: харнесс маршрутизирует по agent.model",
+    "model": "выбор модели: харнесс маршрутизирует по agent.model",
     "profile": "выбор модели: харнесс маршрутизирует по agent.model",
     "slots.default": "выбор модели: харнесс маршрутизирует по agent.model",
     "slots.light": "выбор модели: харнесс маршрутизирует по agent.model",
@@ -955,7 +958,7 @@ NOT_IN_MATRIX = {
     # гоняет CLI-прогон, до ленты TUI он не доходит. Покрытие — наборы TUI
     # `test_trace_diff_block.py`, `test_trace_diff_replay.py`,
     # `test_turn_summary_segment.py`.
-    "agent_edits.trace_inline_max_lines": "только TUI: свёртка инлайн-диффа в ленте",
+    "agent_edits.trace_diff_preview_lines": "только TUI: свёртка инлайн-диффа в ленте",
     "agent_edits.replay_expanded_turns": "только TUI: окно развёрнутых ходов при открытии треда",
     "agent_edits.turn_summary_in_status": "только TUI: сводка правок в строке-итоге хода",
     # Запись журнала правок по режиму запуска: пишет отдельный канал (журнал и
@@ -995,6 +998,8 @@ NOT_IN_MATRIX = {
     "project_memory.enable_project_memory_notice": "эталон develop случая не содержит; покрытие — test_project_memory_notice_policy",
     "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
     "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
+    "tui.theme": "только палитра TUI, не ход агента; покрытие — tui/test_theme_startup",
+    "tui.show_reasoning": "не ход агента: только показ рассуждений в живой ленте TUI; покрытие — tui/test_trace_thoughts",
 }
 
 
@@ -1274,7 +1279,19 @@ async def run_case(
             value = value.format(work=work)
         overrides[path] = value
 
-    backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))
+    tail = SUMMARY_TAIL
+    if (
+        case.overrides.get("summary.chat_completions_summary_trigger_chars", 0)
+        > 0
+    ):
+        # Successful compaction cases need structured auxiliary responses.
+        tail = [
+            assistant_text(
+                valid_summary_xml_for_tests(seed="previous dialogue")
+            )
+            for _ in range(40)
+        ]
+    backend = install(monkeypatch, ScriptedBackend([*TURNS, *tail]))
     result: Dict[str, Any] = {
         "id": case.id,
         "area": case.area,
@@ -1323,6 +1340,9 @@ async def run_case(
         from gc_testkit.develop_files import load_thread_meta
 
         meta = load_thread_meta(resolve_threads_dir(base), SYS, TID) or {}
+        # Намеренно новые ключи (итог хода в runtime и т. п.) эталон develop
+        # не знает — правило одно с паритетом локального рантайма.
+        meta = strip_intended_meta_keys(meta)
         result["meta"] = strip_volatile(
             {
                 k: v

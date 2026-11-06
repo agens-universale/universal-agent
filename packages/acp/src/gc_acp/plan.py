@@ -75,13 +75,13 @@ def usage_update(
     return body
 
 
-def context_window_size(settings: Any, level: str) -> int | None:
+def context_window_size(settings: Any, choice: str) -> int | None:
     """Размер окна текущей модели, если известен. Иначе None.
 
     Каталог провайдера (``model_context_window``) в ACP-процессе обычно
     недоступен без probe — тогда usage_update не шлём.
     """
-    del settings, level
+    del settings, choice
     return None
 
 
@@ -135,12 +135,12 @@ def todos_from_agent(agent: Any) -> list[dict[str, str]]:
     return normalize_session_todo(getattr(state, "session_todo", None))
 
 
-def usage_from_agent(agent: Any, *, settings: Any, level: str) -> dict | None:
+def usage_from_agent(agent: Any, *, settings: Any, choice: str) -> dict | None:
     state = agent_state(agent)
     if state is None:
         return None
     used = getattr(state, "last_main_prompt_tokens", None)
-    size = context_window_size(settings, level)
+    size = context_window_size(settings, choice)
     account = getattr(state, "usage", None)
     if not isinstance(account, UsageAccount):
         account = None
@@ -151,10 +151,10 @@ def usage_from_record(
     record: ThreadRecord | None,
     *,
     settings: Any,
-    level: str,
+    choice: str,
 ) -> dict | None:
     used = used_tokens_from_record(record)
-    size = context_window_size(settings, level)
+    size = context_window_size(settings, choice)
     account = usage_account_from_record(record)
     return usage_update(used=used, size=size, account=account)
 

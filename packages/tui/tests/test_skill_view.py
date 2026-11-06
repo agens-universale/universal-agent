@@ -1,7 +1,10 @@
 """skill_view — RU-метки типа, title/body вьювера."""
 
+from gc_core.tools.skills.skill_arg_resolver import catalog_from_entries
+
 from gc_tui.services.skill_view import (
     build_skill_viewer,
+    skill_input_name,
     source_label,
     truncate_path_left,
 )
@@ -55,3 +58,38 @@ def test_truncate_path_left_keeps_tail_with_ellipsis():
 
 def test_truncate_path_left_exact_length_unchanged():
     assert truncate_path_left("abc", 3) == "abc"
+
+
+_CATALOG = catalog_from_entries(
+    [
+        {"id": "supercoder:brainstorming"},
+        {"id": "a:dup"},
+        {"id": "b:dup"},
+        {"id": "x:review"},
+        {"id": "solo"},
+    ]
+)
+
+
+def test_skill_input_name_short_when_unambiguous():
+    name = skill_input_name("supercoder:brainstorming", _CATALOG)
+    assert name == "brainstorming"
+
+
+def test_skill_input_name_full_id_when_short_is_ambiguous():
+    assert skill_input_name("a:dup", _CATALOG) == "a:dup"
+
+
+def test_skill_input_name_full_id_when_short_is_a_command():
+    name = skill_input_name(
+        "x:review", _CATALOG, is_command=lambda n: n == "review"
+    )
+    assert name == "x:review"
+
+
+def test_skill_input_name_without_pack_is_id():
+    assert skill_input_name("solo", _CATALOG) == "solo"
+
+
+def test_skill_input_name_without_catalog_is_short_name():
+    assert skill_input_name("a:dup", None) == "dup"

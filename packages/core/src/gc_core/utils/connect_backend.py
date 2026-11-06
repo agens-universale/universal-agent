@@ -416,7 +416,7 @@ async def _aread_model_response(response: Any, read):
 
 
 async def _aguard_model_call(
-    factory, kind: Literal["model", "pause"] = "model"
+    factory, kind: Literal["model", "retry"] = "model"
 ):
     """Стоп отменяет запрос к модели. Отмена — не повод его повторять.
     ``kind`` — что снято, для лога стопа (запрос или пауза между попытками)."""
@@ -453,7 +453,7 @@ async def _aguard_model_call(
 async def apause_model_retry(seconds: float) -> None:
     """Пауза между попытками запроса к модели. Стоп хода обрывает её, как и
     сам запрос: иначе остановленный ход досиживал бы паузу, держа тред."""
-    await _aguard_model_call(lambda: asyncio.sleep(seconds), kind="pause")
+    await _aguard_model_call(lambda: asyncio.sleep(seconds), kind="retry")
 
 
 async def _aopen_model_stream(client, *args, read, **kwargs):
@@ -726,12 +726,22 @@ async def arequest_backend_chat_completions(
     retry_log_level=logging.ERROR,
     no_more_retries_log_level=logging.ERROR,
     operation_name="Backend request",
-    pause=apause_model_retry,
+    interrupt_on_user_stop=True,
 )
-async def _arequest_with_backoff(request, headers: Dict, logger=None):
+async def _arequest_with_retries(request, headers: Dict, logger=None):
     # `logger` и `use_retry` читает декоратор ретраев; телу они не нужны.
     del logger
     return await request(headers=headers)
+
+
+async def _arequest_with_backoff(request, headers: Dict, **retry_kwargs):
+    """Стоп в паузе между ретраями — остановка запроса к модели."""
+    try:
+        return await _arequest_with_retries(
+            request, headers=headers, **retry_kwargs
+        )
+    except UserStopInterrupt:
+        raise ModelRequestStopped(_MODEL_REQUEST_STOPPED) from None
 
 
 async def _arequest_authorized(

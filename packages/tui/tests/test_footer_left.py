@@ -1,7 +1,9 @@
-"""Footer-left контекстно зависит от наличия задачи и активного run.
+"""Левая часть футера — две строки: режим и хвост команд сверху, временное
+снизу.
 
-Idle: пилюля режима разрешений («▸▸ edit mode (Shift+Tab)») и счётчик уведомлений.
-Running: пилюля + Ctrl+C/stop. F-подсказок в футере нет ни в каком состоянии
+Строка 1: пилюля режима разрешений («▸▸ edit mode (Shift+Tab)») и хвост
+команд (Ctrl+C/stop во время хода). Строка 2 (слот): бейдж уведомлений или
+временная подсказка. F-подсказок в футере нет ни в каком состоянии
 (решение владельца): постоянный индикатор режима важнее списка клавиш, клавиши
 перечислены в справке (F1), а место нужно правой колонке — там живут стрелка
 перехода и сегмент «запрос».
@@ -13,6 +15,7 @@ Running: пилюля + Ctrl+C/stop. F-подсказок в футере нет
 """
 
 from gc_testkit.tui_support import tui_settings
+from footer_text import footer_left, footer_rows
 import json
 from pathlib import Path
 
@@ -27,15 +30,6 @@ _F_KEYS = (
     "F6/settings",
     "F7/buffer",
 )
-
-
-def _notices(*, warnings=0, infos=0):
-    """Уведомления под бейдж — ровно столько, сколько просят по уровням."""
-    from gc_core.startup_notices import Notice
-
-    return [
-        Notice("warning", f"w{i}", "предупреждение") for i in range(warnings)
-    ] + [Notice("info", f"i{i}", "сообщение") for i in range(infos)]
 
 
 def _write_task(tmp_path, tid):
@@ -57,10 +51,9 @@ async def test_footer_left_empty_state_no_back_no_stop_no_export():
     """Empty state: F-hotkeys chrome; без /mcp, [Esc], /stop, /export, Ctrl+a."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
 
     async with TuiApp().run_test() as pilot:
-        rendered = str(pilot.app.query_one("#footer-left", Static).render())
+        rendered = footer_left(pilot.app)
         assert rendered == _PILL
         assert "[F1]" not in rendered
         assert "/mcp" not in rendered
@@ -78,7 +71,6 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
     """Task active, no active_runner → тот же набор команд, /stop НЕТ."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
 
     tid = "idle1"
     _write_task(tmp_path, tid)
@@ -92,7 +84,7 @@ async def test_footer_left_task_idle_no_stop(tmp_path):
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause()
 
-        rendered = str(pilot.app.query_one("#footer-left", Static).render())
+        rendered = footer_left(pilot.app)
         assert rendered == _PILL
         assert "/mcp" not in rendered
         assert "/skills" not in rendered
@@ -114,7 +106,6 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
     уведомлений — исключение: он виден всегда."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
 
     class _FakeRunner:
         def is_running(self) -> bool:
@@ -125,7 +116,7 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
 
     tid = "run1"
     _write_task(tmp_path, tid)
-    for width in (200, 60):
+    for width in (200, 64):
         app = TuiApp(
             threads_dir=str(tmp_path),
             system="cli",
@@ -138,12 +129,11 @@ async def test_footer_left_task_running_shows_only_stop_at_any_width(tmp_path):
             # Footer обновляется в _poll_active каждые 250ms — подождём один тик.
             await pilot.pause(0.4)
 
-            rendered = str(
-                pilot.app.query_one("#footer-left", Static).render()
-            )
-            assert "Ctrl+C/stop" in rendered, width
-            assert "F4/notices" in rendered, width  # бейдж виден всегда
-            assert rendered.startswith("▸▸"), width  # режим виден всегда
+            rendered = footer_left(pilot.app)
+            mode, slot = footer_rows(pilot.app)
+            assert "Ctrl+C/stop" in mode, width
+            assert "F4/notices" in slot, width  # бейдж виден всегда
+            assert mode.startswith("▸▸"), width  # режим виден всегда
             for key in _F_KEYS:
                 assert key not in rendered, (width, key)
             assert "/mcp" not in rendered
@@ -158,7 +148,6 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
     """Когда runner перестаёт is_running() → /stop исчезает в следующий тик."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
 
     class _FakeRunner:
         def __init__(self) -> None:
@@ -182,12 +171,12 @@ async def test_footer_left_drops_stop_after_runner_finishes(tmp_path):
         runner = _FakeRunner()
         pilot.app.active_runner = runner
         await pilot.pause(0.4)
-        rendered = str(pilot.app.query_one("#footer-left", Static).render())
+        rendered = footer_left(pilot.app)
         assert "/stop" in rendered
 
         runner.stop()
         await pilot.pause(0.4)
-        rendered = str(pilot.app.query_one("#footer-left", Static).render())
+        rendered = footer_left(pilot.app)
         assert "/stop" not in rendered
         assert rendered == _PILL
         assert "Ctrl+a" not in rendered
@@ -202,65 +191,45 @@ async def test_footer_badge_counts_update_notice():
     счётчика признак исчезает вместе с карточкой при скролле."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
 
     async with TuiApp().run_test() as pilot:
         pilot.app._update_available = True
         screen = pilot.app.screen_stack[0]
         screen._refresh_notices_footer()
         await pilot.pause()
-        footer = str(pilot.app.query_one("#footer-left", Static).render())
+        footer = footer_left(pilot.app)
         assert "notices" in footer  # счётчик появился
 
 
 @pytest.mark.asyncio
-async def test_footer_shows_mode_pill_and_notices_badge_together():
-    """Пилюля режима и счётчик уведомлений живут в одной строке одновременно,
-    через точку-разделитель: ни один не вытесняет другой."""
+async def test_footer_mode_row_and_badge_slot_live_apart():
+    """Пилюля режима — в строке 1, бейдж уведомлений — в строке 2 (слот):
+    ни один не вытесняет другой, и бейдж не встаёт в строку режима."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
+    from gc_tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH
 
     async with TuiApp().run_test() as pilot:
         pilot.app._update_available = True  # даёт непустой счётчик футера
         screen = pilot.app.screen_stack[0]
         screen._refresh_notices_footer()
         await pilot.pause()
-        footer = str(pilot.app.query_one("#footer-left", Static).render())
-        assert footer.startswith(f"{_PILL}  ·  ")
-        assert footer.endswith("F4/notices")
-        assert "\n" not in footer
-        # счётчики парой, без точки между собой (решение владельца против варианта develop)
-        from gc_tui.services.notices_ui import INFO_GLYPH, WARN_GLYPH
-
-        assert f"{WARN_GLYPH} 1 · {INFO_GLYPH}" not in footer
+        mode, slot = footer_rows(pilot.app)
+        assert mode == _PILL
+        assert slot == f"{INFO_GLYPH} 1 · F4/notices"
+        # счётчики парой, без точки между собой
+        assert f"{WARN_GLYPH} 1 · {INFO_GLYPH}" not in slot
 
 
 @pytest.mark.asyncio
-async def test_footer_badge_wraps_whole_and_dotless_on_narrow():
-    """Узкое окно: блок уведомлений уходит вниз ЦЕЛИКОМ и без ведущей точки.
-
-    Частичный перенос (счётчик наверху, «F4/notices» внизу) читался как два обрывка,
-    а точка в начале строки ничего не разделяет (живая приёмка 2026-08-07). Имя
-    режима при этом не сжимается: пилюля остаётся полной в первой строке."""
+async def test_footer_slot_is_empty_without_notices():
+    """Без уведомлений слот пуст: подсказки «F4» без счётчиков нет."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
 
-    async with TuiApp().run_test(size=(48, 24)) as pilot:
-        pilot.app._update_available = True  # непустой счётчик футера
-        screen = pilot.app.screen_stack[0]
-        screen._refresh_notices_footer()
+    async with TuiApp().run_test() as pilot:
         await pilot.pause()
-        text = str(pilot.app.query_one("#footer-left", Static).render())
-        assert "F4/notices" in text
-        lines = text.split("\n")
-        assert len(lines) == 2, f"блок не уехал вниз целиком: {text!r}"
-        assert "F4/notices" in lines[1] and "notices" not in lines[0]
-        assert lines[0] == _PILL
-        assert not lines[1].lstrip().startswith("·"), (
-            "ведущая точка на строке без соседа"
-        )
+        assert footer_rows(pilot.app) == (_PILL, "")
 
     # набор для футера содержит уведомление об обновлении, для карточки — нет
     async with TuiApp().run_test() as pilot:
@@ -272,9 +241,62 @@ async def test_footer_badge_wraps_whole_and_dotless_on_narrow():
 
 
 @pytest.mark.asyncio
-async def test_footer_columns_never_touch_and_left_wraps_instead():
-    """Между колонками футера ВСЕГДА минимум 2 пробела, а что не влезло — левая
-    колонка переносит на вторую строку (футер height:2).
+async def test_hint_takes_the_slot_and_mode_row_keeps_stop_key(tmp_path):
+    """Подсказка и отказ занимают только слот: строка 1 по-прежнему держит
+    пилюлю и `Ctrl+C/stop`. Подсказка гаснет обратно в бейдж."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
+    async with app.run_test(size=(120, 30)) as pilot:
+        pilot.app._update_available = True
+        pilot.app.tui_state.active_task_id = "t"
+        pilot.app.active_runner = _RunningRunner()
+        scr = pilot.app.screen
+        await pilot.pause(0.4)
+        scr._show_footer_hint("ПОДСКАЗКА", seconds=60)
+        await pilot.pause()
+        assert footer_rows(scr) == (f"{_PILL}  Ctrl+C/stop", "ПОДСКАЗКА")
+        scr._show_footer_refusal("✗ не сохранено: причина")
+        await pilot.pause(0.4)  # тик опроса подсказку не затирает
+        mode, slot = footer_rows(scr)
+        assert mode == f"{_PILL}  Ctrl+C/stop"
+        assert slot == "✗ не сохранено: причина"
+        scr._clear_footer_hint()
+        await pilot.pause()
+        assert footer_rows(scr)[1] == "ℹ 1 · F4/notices"
+
+
+@pytest.mark.asyncio
+async def test_long_slot_text_is_one_row_with_ellipsis_at_min_width():
+    """Минимальная ширина футера: длинная справка ручки не переносится —
+    одна строка с многоточием, высота футера прежняя."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.services.footer_slot import (
+        MAIN_FOOTER_MIN_COLS,
+        toggle_info_line,
+    )
+
+    text = toggle_info_line("answers", "free_text_with_long_value")
+    async with TuiApp().run_test(size=(MAIN_FOOTER_MIN_COLS, 24)) as pilot:
+        scr = pilot.app.screen
+        scr._show_footer_hint(text, seconds=60)
+        await pilot.pause()
+        slot = scr.query_one("#footer-slot")
+        assert slot.region.height == 1
+        assert scr.query_one("#footer").region.height == 2
+        strips = scr._compositor.render_strips()
+        row = "".join(seg.text for seg in strips[slot.region.y])
+        shown = row[slot.region.x : slot.region.right].rstrip()
+        assert shown.endswith("…"), shown
+        assert shown[:-1] in text
+
+
+@pytest.mark.asyncio
+async def test_footer_columns_never_touch_and_badge_sits_in_row_two():
+    """Между колонками футера ВСЕГДА минимум 2 пробела, а бейдж уведомлений
+    стоит во второй строке левой части (футер height:2).
 
     Зазор не был зарезервирован вовсе: правая колонка (width:auto) забирает своё по
     содержимому, левая (1fr) получает остаток — и на длинном имени модели её хвост со
@@ -289,7 +311,7 @@ async def test_footer_columns_never_touch_and_left_wraps_instead():
     for width in (140, 110, 96, 90, 84):
         app = TuiApp(settings=tui_settings({"agent.model": model}))
         async with app.run_test(size=(width, 30)) as pilot:
-            # счётчик уведомлений — то, что левой колонке есть куда переносить
+            # счётчик уведомлений — содержимое второй строки левой части
             pilot.app._update_available = True
             pilot.app.screen._refresh_notices_footer()
             await pilot.pause()
@@ -312,87 +334,7 @@ async def test_footer_columns_never_touch_and_left_wraps_instead():
                 )
             if len(lines) > 1 and lines[1][: right.region.x].strip():
                 wrapped_somewhere = True
-    assert wrapped_somewhere, (
-        "ни на одной ширине хвост левой части не перенёсся вниз"
-    )
-
-
-def _rendered_rows(text: str, width: int) -> int:
-    from rich.console import Console
-    from rich.text import Text
-
-    console = Console(width=width)
-    return sum(
-        max(1, len(Text(line).wrap(console, width)))
-        for line in text.split("\n")
-    )
-
-
-def test_footer_left_never_renders_three_rows():
-    """Инвариант Task 17: сборка левой колонки НИКОГДА не занимает три ряда.
-
-    Футер высотой 2 — третий ряд просто обрезается, и обрезался бы именно бейдж
-    уведомлений: он выселяется отдельной строкой ПОД команды, а команды на узкой
-    ширине сами переносятся Rich'ем на два ряда. Раньше не всплывало, потому что
-    левую колонку никогда не сужали.
-
-    Перебор идёт с ОДНОЙ колонки (фикс-раунд 2 по ревью): ширины уже бейджа —
-    не теория, туда левую загоняет безусловная последняя ступень лесенки правой
-    колонки, и там сборка возвращала голый бейдж на три и больше рядов.
-
-    Порядок жертв: подсказка «F4/notices» уходит раньше счётчиков, счётчики —
-    раньше команд."""
-    from gc_tui.services.notices_ui import (
-        footer_left_with_badge,
-        format_notices_badge,
-    )
-    from rich.cells import cell_len
-
-    commands = (
-        "F1/help  F2/sessions  F3/diff  F5/config  F6/settings  F7/buffer"
-    )
-    # Бейдж собирает прод (`format_notices_badge`), а не тест руками: склеенное
-    # «⚠3 ℹ2» разошлось бы с «⚠ 3  ℹ 2» прода молча — сторож ширины остался бы
-    # зелёным на строке, которой в футере не бывает.
-    notices = _notices(warnings=3, infos=2)
-    counts = format_notices_badge(notices, with_hint=False)
-    badge = format_notices_badge(notices)
-    for width in range(1, 91):
-        text = footer_left_with_badge(commands, badge, width=width)
-        rows = _rendered_rows(text, width)
-        assert rows <= 2, (
-            f"ширина {width}: {rows} ряда — третий обрежется: {text!r}"
-        )
-        if width >= cell_len(counts):
-            assert counts in text, (
-                f"ширина {width}: счётчики потеряны: {text!r}"
-            )
-
-
-def test_footer_left_guard_keeps_stop_key_at_any_width():
-    """`Ctrl+C/stop` виден ВСЕГДА — инвариант юзера, без оговорок про ширину.
-
-    Регресс, найденный ревью: сторож двух рядов выбрасывал команды ЦЕЛИКОМ,
-    когда бейдж не влезал в один ряд. Во время хода это оставляло пользователя
-    без единственного способа остановить агента — и было хуже, чем на базе, где
-    терялся хвост бейджа. Ужимается бейдж; команды — последнее, что снимается
-    слева."""
-    from gc_tui.services.notices_ui import (
-        footer_left_with_badge,
-        format_notices_badge,
-    )
-    from rich.cells import cell_len
-
-    commands = "Ctrl+C/stop"
-    badge = format_notices_badge(_notices(warnings=4, infos=2))
-    # Ниже собственной ширины стоп-клавишу не показать целиком ни при какой
-    # раскладке — там остаётся только потолок в два ряда (тест выше).
-    for width in range(cell_len(commands), 91):
-        text = footer_left_with_badge(commands, badge, width=width)
-        assert commands in text, (
-            f"ширина {width}: стоп-клавиша потеряна: {text!r}"
-        )
-        assert _rendered_rows(text, width) <= 2, f"ширина {width}: {text!r}"
+    assert wrapped_somewhere, "бейдж не встал во вторую строку"
 
 
 class _RunningRunner:
@@ -405,7 +347,6 @@ class _RunningRunner:
 
 async def _running_footer(width: int, *, badge: bool) -> str:
     from gc_tui.app import TuiApp
-    from textual.widgets import Static
 
     app = TuiApp(settings=tui_settings({"agent.model": "some-model-name"}))
     async with app.run_test(size=(width, 30)) as pilot:
@@ -413,7 +354,7 @@ async def _running_footer(width: int, *, badge: bool) -> str:
         pilot.app.tui_state.active_task_id = "t"
         pilot.app.active_runner = _RunningRunner()
         await pilot.pause(0.6)  # тик опроса пересобирает футер по месту
-        return str(pilot.app.query_one("#footer-left", Static).render())
+        return footer_left(pilot.app)
 
 
 @pytest.mark.asyncio

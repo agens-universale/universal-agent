@@ -42,6 +42,7 @@ def _defaults() -> dict[str, Any]:
         "tick_signals": set(),
         "_last_effective_level": None,
         "_tick_decision": None,
+        # цель: уровень или алиас
         "_call_level": None,
         "turn_safe_level": None,
         "pair_window_left": None,
