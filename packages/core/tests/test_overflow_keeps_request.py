@@ -4,17 +4,13 @@
 
 import pytest
 from gc_core.agent_executor import AgentExecutor
+from helpers.context_overflow import overflow_once_then_summarize
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
     install,
     judge_accept,
     parity_config,
-)
-
-OVERFLOW = (
-    "Requested token count exceeds the model's maximum context "
-    "length of 131072 tokens. Please reduce the number of tokens"
 )
 
 
@@ -46,36 +42,6 @@ def _finish_turn():
         ),
         judge_accept(),
     ]
-
-
-def overflow_once_then_summarize(monkeypatch):
-    """Первый запрос к модели — переполнение окна; сводка — настоящая
-    компакция с подменённым вызовом суммаризатора."""
-    from gc_core import processing_responses as pr
-
-    real = pr.aprocess_user_ask
-    overflowed = []
-
-    async def _overflow_once(messages, state, ctx):
-        if not overflowed:
-            overflowed.append(True)
-            raise ValueError(OVERFLOW)
-        return await real(messages, state, ctx)
-
-    async def _summarize(**_kwargs):
-        return {
-            "raw_summary": "<task_and_context>итог</task_and_context>",
-            "num_batches": 1,
-            "last_dialog_steps": "",
-            "trace": {"memory_patch": {"executed": False}},
-        }
-
-    monkeypatch.setattr(pr, "aprocess_user_ask", _overflow_once)
-    monkeypatch.setattr(
-        "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions",
-        _summarize,
-    )
-    return overflowed
 
 
 async def test_nudge_note_after_request_does_not_lose_it_on_overflow(

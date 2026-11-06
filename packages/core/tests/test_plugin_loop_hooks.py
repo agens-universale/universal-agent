@@ -658,7 +658,7 @@ async def test_overflow_with_compaction_keeps_request_and_command(
 ):
     """Сводка при переполнении окна заменила историю: в повторе запрос
     человека и раскрытая команда — по одному разу, хук не перезапущен."""
-    from test_overflow_keeps_request import overflow_once_then_summarize
+    from helpers.context_overflow import overflow_once_then_summarize
 
     log = tmp_path / "hooks.log"
     root = _plugin(
