@@ -718,14 +718,19 @@ class CommandPalette(VerticalScroll):
         """Все скиллы под фильтр (голый `/` — ни одного); в `input_name` —
         имя, которое показывает строка и вставляет Enter. Сначала совпавшие
         по имени (`skill_name_key`, как в пикере /skill), ниже совпавшие
-        только по пакету — по пакетам, внутри пакета по короткому имени."""
+        только по пакету — по пакетам, внутри пакета по короткому имени.
+        Команду плагина, чьё короткое имя занято словом TUI, строка
+        показывает и по короткому имени — с полным id в `input_name`."""
         f = self._prefix()
         if not f or self._skills is None:
             return []
         by_name: list[dict] = []
         by_pack: list[dict] = []
         for s in self._skills():
-            taken = self._registry.lookup(skill_short(s)) is not None
+            taken = (
+                not s.get("plugin")
+                and self._registry.lookup(skill_short(s)) is not None
+            )
             shown = _skill_shown_name(s, f, taken)
             if shown is None:
                 continue

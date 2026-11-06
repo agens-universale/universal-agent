@@ -131,3 +131,20 @@ async def test_ambiguity_with_plugin_command_says_commands_and_skills(
         assert "несколько команд и скиллов с именем: /review" in text
         assert "/code-tools:review" in text and "/pack:review" in text
         assert "несколько скиллов" not in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", ["clear", "x:cl"])
+async def test_plugin_command_shadowed_by_tui_word_listed_by_full_id(
+    tmp_path, typed
+):
+    """Команда `x:clear` при алиасе TUI `clear`: строка плагина видна и по
+    короткому слову (ниже `/new`), и по полному id; вставляет полный id."""
+    pytest.importorskip("textual")
+    app = _app(tmp_path, [("x", _cmd("clear"))])
+    async with app.run_test() as pilot:
+        rows = await _skill_rows(pilot, [{"id": "other:zzz"}], typed)
+        assert [r.split()[0] for r in rows] == ["/x:clear"]
+        palette = pilot.app.screen._palette
+        commands = [c.name for c in palette._visible_rows()]
+        assert commands == (["new"] if typed == "clear" else [])

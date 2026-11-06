@@ -114,3 +114,37 @@ async def test_tui_pack_bootstrap_beats_skill_only_ambiguity(
         await pilot.pause(0.3)
         assert len(captured) == 1
         assert "review:start" in captured[0][0]
+
+
+@pytest.mark.asyncio
+async def test_tui_word_beats_plugin_command_with_same_short_name(tmp_path):
+    """`/clear` — алиас `/new`: слово TUI сильнее команды плагина
+    `plug:clear`, ядру ничего не уходит."""
+    pytest.importorskip("textual")
+    captured = []
+    app = _app(tmp_path, captured, command="clear")
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "other"}]
+        new_calls = []
+        scr._cmd_new = lambda: new_calls.append(True)
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/clear go"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        assert new_calls == [True]
+        assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_plugin_command_shadowed_by_tui_word_runs_by_full_id(tmp_path):
+    pytest.importorskip("textual")
+    captured = []
+    app = _app(tmp_path, captured, command="clear")
+    async with app.run_test() as pilot:
+        pilot.app.screen._skills_cache = [{"id": "other"}]
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/plug:clear go"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        assert captured == [["/plug:clear go"]]
