@@ -446,6 +446,7 @@ async def acall_mcp_tool(
     )
 
     @retry_with_backoff_async(
+        interrupt_on_user_stop=True,
         should_retry=lambda exc: not isinstance(exc, McpToolCallError),
         operation_name=(
             f"MCP tool call ({target.server_key}:{target.base_tool_name})"

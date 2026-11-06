@@ -265,13 +265,21 @@ async def test_http_fallback_depends_on_the_failed_stage(monkeypatch, failure):
     assert all(cm.closed for cm in contexts)
 
 
-async def test_tool_rpc_error_is_not_repeated_by_outer_retry(monkeypatch):
+@pytest.mark.parametrize("error_kind", ["rpc", "started", "not_started"])
+async def test_tool_error_or_stop_is_not_repeated_by_outer_retry(
+    monkeypatch, error_kind
+):
     calls = []
+    failure = (
+        McpError(ErrorData(code=-32603, message="tool failed"))
+        if error_kind == "rpc"
+        else UserStopInterrupt(kind="mcp", started=error_kind == "started")
+    )
 
     class Session:
         async def call_tool(self, *_args, **_kwargs):
             calls.append("effect")
-            raise McpError(ErrorData(code=-32603, message="tool failed"))
+            raise failure
 
     async def request(*_args, **_kwargs):
         return await sc._call_tool_request(Session(), "action", {})
@@ -284,7 +292,7 @@ async def test_tool_rpc_error_is_not_repeated_by_outer_retry(monkeypatch):
         use_retry=True,
     )
     monkeypatch.setattr(api, "_prepare_mcp_call", lambda *a, **kw: target)
-    with pytest.raises(McpError, match="tool failed"):
+    with pytest.raises(type(failure), match=str(failure)):
         await asyncio.wait_for(
             api.acall_mcp_tool("mcp_test_action", {}, {}, {}), 1
         )

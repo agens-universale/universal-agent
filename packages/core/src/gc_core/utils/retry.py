@@ -13,8 +13,6 @@ import logging
 import time
 from typing import Any, Callable, Optional, TypeVar
 
-from gc_core.user_stop import UserStopInterrupt
-
 _T = TypeVar("_T")
 
 
@@ -29,7 +27,7 @@ class _RetryPolicy:
     operation_name: str
 
     def retriable(self, attempt: int, exc: Exception) -> bool:
-        if isinstance(exc, UserStopInterrupt) or attempt >= self.max_attempts:
+        if attempt >= self.max_attempts:
             return False
         return True if self.should_retry is None else self.should_retry(exc)
 
