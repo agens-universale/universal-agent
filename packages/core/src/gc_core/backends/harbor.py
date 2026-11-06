@@ -149,6 +149,71 @@ unset _gc_saved_path _gc_ifs _gc_dir _gc_noglob _gc_new
 
 
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_CONTAINER_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
+_ENGINE_COPY_CONTAINER_RE = re.compile(
+    rf"""Engine cp failed \(['"](?P<container>{_CONTAINER_NAME_PATTERN}):"""
+)
+_SYMLINK_DOWNLOAD_REFUSAL_RE = re.compile(
+    r'invalid symlink "(?P<target>[^"\r\n]+)" -> "[^"\r\n]+"'
+)
+_DOCKER_MISSING_FILE_PREFIX = (
+    "Error response from daemon: Could not find the file "
+)
+
+
+def _engine_download_error(
+    message: str, path: str, target: str
+) -> type[OSError] | None:
+    failure = _ENGINE_COPY_CONTAINER_RE.match(message)
+    if failure is None:
+        return None
+    container = failure["container"]
+    # Harbor renders the actual copy arguments with repr and appends engine output.
+    source = f"{container}:{path}"
+    prefix = f"Engine cp failed ({source!r} -> {target!r}): "
+    if not message.startswith(prefix):
+        return None
+    diagnostic = message[len(prefix) :].rstrip("\r\n")
+    if diagnostic == (
+        f"{_DOCKER_MISSING_FILE_PREFIX}{path} in container {container}"
+    ):
+        return FileNotFoundError
+    symlink = _SYMLINK_DOWNLOAD_REFUSAL_RE.fullmatch(diagnostic)
+    if symlink is not None and symlink["target"] == target:
+        return OSError
+    return None
+
+
+def _compose_download_error(
+    message: str, path: str, target: str
+) -> type[OSError] | None:
+    # Older Harbor versions report compose cp directly, with stderr merged into stdout.
+    suffix = ". Stderr: None. "
+    if not message.startswith(
+        "Docker compose command failed for environment "
+    ) or not message.endswith(suffix):
+        return None
+    command_header, _, output = message.removesuffix(suffix).partition(
+        ". Return code: 1. Stdout: "
+    )
+    _, _, command = command_header.partition(
+        ". Command: docker compose --project-name "
+    )
+    _, _, copy_args = command.partition(" cp ")
+    if copy_args != f"main:{path} {target}":
+        return None
+
+    progress = (
+        rf" (?P<name>{_CONTAINER_NAME_PATTERN}) copy (?P=name):{re.escape(path)} "
+        rf"to {re.escape(target)} Copying\r?\n"
+    )
+    missing = (
+        rf"{re.escape(_DOCKER_MISSING_FILE_PREFIX + path)} in container "
+        rf"{_CONTAINER_NAME_PATTERN}"
+    )
+    if re.fullmatch(rf"(?:{progress})?{missing}", output.rstrip("\r\n")):
+        return FileNotFoundError
+    return None
 
 
 def _env_assignment_prefix(env: Optional[dict]) -> str:
@@ -478,7 +543,17 @@ class HarborBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
-            await self._aawait(self._env.download_file(path, tmp_path))
+            try:
+                await self._aawait(self._env.download_file(path, tmp_path))
+            except RuntimeError as exc:
+                message = str(exc)
+                target = str(tmp_path)
+                error_type = _engine_download_error(
+                    message, path, target
+                ) or _compose_download_error(message, path, target)
+                if error_type is None:
+                    raise
+                raise error_type(message) from exc
             return tmp_path.read_bytes()
         finally:
             tmp_path.unlink(missing_ok=True)
