@@ -158,7 +158,7 @@ TraceScreen #trace { width: 100%; margin: 0 0 1 0; }
 /* Фокус строки события — сдвиг-безопасная подсветка фона (заменила [N]-префикс:
    background не рефлоунит контент, в отличие от prefix/border). */
 ToolCallRow:focus, TraceRow:focus, UserReplyContainer:focus,
-BlockPanel:focus, TodoBlock:focus, ThoughtRow:focus {
+BlockPanel:focus, TodoBlock:focus, ThoughtRow:focus, TurnLine:focus {
     background: $highlight-bg;
 }
 /* DiffBlock здесь НЕТ: он не фокусируется вовсе (can_focus=False) — событие
@@ -392,8 +392,12 @@ UserReplyContainer.-queue-hint > .queue-hint { display: block; }
 .thinking-indicator { color: $deep-dim; padding: 0 1 0 0; height: 1; }
 .thinking-indicator.hidden { display: none; }
 /* Строка итога хода (P1b, S10): уровень 0, глиф в колонке ●, пустая
-   строка сверху, тусклая. Свежая (-latest) — со сводкой правок и причиной. */
+   строка сверху, тусклая. Свежая (-latest) — со сводкой правок; у ошибки —
+   хвост причины. */
 TurnLine { color: $deep-dim; padding: 0 1 0 0; margin-top: 1; height: auto; }
+/* Развёрнутая причина ошибки хода — соседний виджет сразу за строкой
+   (turn_line.py): `DIM`, как хвост, под текстом головы (+2). */
+.turn-reason { color: $dim; padding: 0 1 0 2; }
 /* Итог за баром (S10 §3.4): строка хода и маркер /compact скрыты, пока
    стоит бар индикатора. */
 TurnLine.-held, CompactionRule.-held { display: none; }

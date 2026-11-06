@@ -282,3 +282,31 @@ async def test_status_shows_model_choice(tmp_path):
         body = _viewer_body(pilot.app.screen)
         assert '"model": "mid"' in body
         assert '"routing_policy": null' in body
+
+
+@pytest.mark.asyncio
+async def test_status_flags_model_waiting_for_probe(tmp_path):
+    """Алиас, ждущий пробы, в /status по-прежнему помечен недоступным."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    cfg = {
+        "agent.model": "m",
+        "model": "mid",
+        "backend.api_mode": "chat_completions",
+        "models": {"fast": {}, "mid": {}},
+        "slots": {"default": "fast"},
+    }
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
+    app._circuit_breaker.trip("mid", "401")
+    app._circuit_breaker.allow_probe()
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/status"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+
+        body = _viewer_body(pilot.app.screen)
+        assert '"circuit_breaker_open": true' in body

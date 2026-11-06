@@ -201,21 +201,14 @@ async def test_late_events_of_stopped_run_stay_out_of_new_thread(tmp_path):
         pump = StreamPump(app._stream_sink, signal=lambda: None, throttle_s=0)
         app._stream_pump = pump
         app._subagent_progress_sink = QueueSubagentProgressSink()
-        app.load_circuit_breaker({"m-a": "tripped"})
         await _pick_b(pilot, tmp_path)
         await pilot.press("y")
         await pilot.pause()
         assert scr._active_task_id == _B
-        app.load_circuit_breaker({"m-b": "tripped"})  # предохранитель B
         # поток A дорабатывает: дельты стрима, прогресс, итог предохранителя
         pump.on_delta("answer", "поздний текст A")
         assert not app._stream_sink.has_content()
         assert app._subagent_progress_sink is None
-        app._persist_breaker_after_worker(runner)
-        a_tui = json.loads(
-            (tmp_path / f"meta_cli_{_A}.json").read_text(encoding="utf-8")
-        )["tui"]
-        assert a_tui["circuit_breaker"] == {"m-a": "tripped"}
         assert _status(tmp_path, _B) is None
         # новый ход в B — вопрос сам не всплывает
         app.active_runner = _Runner(_B)
@@ -386,8 +379,57 @@ async def test_late_trip_of_stopped_run_stays_out_of_window_breaker(tmp_path):
         assert scr._active_task_id == _B
         old.trip("m-a", "поздний сбой")
         assert app._circuit_breaker.snapshot() == {}
-        app.persist_circuit_breaker(_B)
-        b_tui = json.loads(
+        b_meta = json.loads(
             (tmp_path / f"meta_cli_{_B}.json").read_text(encoding="utf-8")
-        )["tui"]
-        assert b_tui.get("circuit_breaker") == {}
+        )
+        assert "circuit_breaker" not in (b_meta.get("tui") or {})
+
+
+_NEW = "gate0000000000000000000000000000c"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [_B, _A, _NEW])
+async def test_attach_thread_keeps_window_breaker(tmp_path, target):
+    """Доступность модели — свойство модели, не треда: открытый алиас
+    переживает подключение другого треда, того же и нового."""
+    async with _app(tmp_path).run_test() as pilot:
+        app = pilot.app
+        scr = app.screen
+        scr.attach_active_task(_A, is_resume=True)
+        breaker = app._circuit_breaker
+        breaker.trip("flash", "x")
+        scr.attach_active_task(target, is_resume=target != _NEW)
+        await pilot.pause()
+        assert app._circuit_breaker is breaker
+        assert breaker.snapshot() == {"flash": "x"}
+
+
+@pytest.mark.asyncio
+async def test_stop_detach_copies_probe_state(tmp_path):
+    """Копия окна при стопе — другой объект, право на пробу переехало."""
+    async with _app(tmp_path).run_test() as pilot:
+        app = pilot.app
+        old = app._circuit_breaker
+        old.trip("flash", "x")
+        old.allow_probe()
+        app.detach_run_sinks()
+        assert app._circuit_breaker is not old
+        assert app._circuit_breaker.take_probe("flash") is True
+        assert old.take_probe("flash") is True
+
+
+@pytest.mark.asyncio
+async def test_stop_during_probe_keeps_model_waiting_in_window(tmp_path):
+    """Стоп посреди пробы: право уже взято запросом, отмена вернёт его
+    отвязанному объекту — окно всё равно ждёт пробу, а не долгие ретраи."""
+    async with _app(tmp_path).run_test() as pilot:
+        app = pilot.app
+        old = app._circuit_breaker
+        old.trip("flash", "x")
+        old.allow_probe()
+        assert old.take_probe("flash") is True
+        app.detach_run_sinks()
+        old.return_probe("flash")
+        assert app._circuit_breaker.known_unavailable("flash") == "x"
+        assert app._circuit_breaker.take_probe("flash") is True

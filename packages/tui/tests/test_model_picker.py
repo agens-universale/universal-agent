@@ -270,7 +270,7 @@ def test_picker_auto_disabled_with_reason(tmp_path, monkeypatch):
 
 def test_picker_breaker_model_hint(tmp_path, monkeypatch):
     """Модель в предохранителе — видна и выбираема (ошибка будет честной),
-    к подсказке добавлено «недоступна в этой сессии» (Review Focus 5)."""
+    к подсказке добавлено «недоступна при последней попытке» (Review Focus 5)."""
     from gc_tui.services.model_picker import (
         model_hint,
         model_picker_options,
@@ -283,8 +283,18 @@ def test_picker_breaker_model_hint(tmp_path, monkeypatch):
     )
     assert flash.enabled
     assert model_hint(app, "glm-flash") == (
-        "zai/glm-4.5-flash · api.z.ai · недоступна в этой сессии"
+        "zai/glm-4.5-flash · api.z.ai · недоступна при последней попытке"
     )
+
+
+def test_picker_hint_marks_model_waiting_for_probe(tmp_path, monkeypatch):
+    from gc_tui.services.model_picker import UNAVAILABLE_HINT, model_hint
+
+    app = _app(tmp_path, monkeypatch, {**_AUTO_ON, **_ADDRESSED})
+    app._circuit_breaker.trip("glm-flash", "401")
+    app._circuit_breaker.allow_probe()
+    assert UNAVAILABLE_HINT == "недоступна при последней попытке"
+    assert model_hint(app, "glm-flash").endswith(UNAVAILABLE_HINT)
 
 
 def test_picker_row_status_column_follows_name(tmp_path, monkeypatch):

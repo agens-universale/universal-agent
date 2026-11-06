@@ -12,7 +12,7 @@ def test_the_honest_main_error_is_a_typed_runtime_error():
     )
     with pytest.raises(MainModelUnavailable) as caught:
         pr._raise_honest_main_unavailable(
-            SimpleNamespace(is_tui=False), resolved, "503", RuntimeError("503")
+            SimpleNamespace(is_tui=False), resolved, RuntimeError("503")
         )
     assert isinstance(caught.value, RuntimeError)
     assert "mid-model" in str(caught.value)
@@ -35,7 +35,7 @@ def _honest_message(
     exc = _http_error(status, url)
     ctx = fake_ctx({"backend.api_mode": api_mode}, is_tui=False)
     with pytest.raises(MainModelUnavailable) as caught:
-        pr._raise_honest_main_unavailable(ctx, resolved, str(exc), exc)
+        pr._raise_honest_main_unavailable(ctx, resolved, exc)
     return str(caught.value)
 
 

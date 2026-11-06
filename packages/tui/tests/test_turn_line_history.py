@@ -1298,9 +1298,9 @@ async def test_foreign_turn_has_line_and_turn_without_record_has_none(
 
 
 @pytest.mark.asyncio
-async def test_failed_earlier_turn_is_one_row_without_reason(tmp_path):
-    """Решение владельца 4: у прошлого упавшего хода — одна строка без
-    причины; причина — только у свежей строки последнего хода."""
+async def test_failed_earlier_turn_is_one_row_with_reason_tail(tmp_path):
+    """Спека предохранителя §2.4 (ревизия 3): у прошлого упавшего хода —
+    одна строка, за головой тусклый хвост с началом причины."""
     _write_thread(tmp_path, tui={"status": "completed"})
     thread = _Thread(tmp_path)
     thread.messages(_reply("u1"), _answer("a1"))
@@ -1313,9 +1313,13 @@ async def test_failed_earlier_turn_is_one_row_without_reason(tmp_path):
     thread.turn(2)
     async with _app(tmp_path).run_test() as pilot:
         scr = await _open(pilot)
+        await pilot.pause()
         first = _turn_lines(scr)[0]
-        assert first.text.plain == f"✕ Ошибка · {_hm(_ended(1))}"
-        assert "boom" not in _trace_lines(scr.query_one("#trace"))[2]
+        head = f"✕ Ошибка · {_hm(_ended(1))}"
+        assert first.text.plain == head
+        assert first.render().plain == f"{head} · ReadError: boom"
+        assert first.expanded is False
+        assert first.region.height == 1
 
 
 @pytest.mark.asyncio
@@ -1604,8 +1608,9 @@ async def test_live_and_reopen_turn_line_order_equal(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed", [False, True])
 async def test_idle_gap_is_one_row(tmp_path, failed):
-    """Между низом строки итога (с `└` — низом последней `└`) и рамкой поля
-    ввода — ровно одна пустая строка: нижний зазор ленты, бара нет."""
+    """Между низом строки итога (у ошибки с влезающей причиной — та же
+    одна строка) и рамкой поля ввода — ровно одна пустая строка: нижний
+    зазор ленты, бара нет."""
     _write_thread(
         tmp_path, tui={"status": "failed" if failed else "completed"}
     )
@@ -1620,7 +1625,7 @@ async def test_idle_gap_is_one_row(tmp_path, failed):
         scr = await _open(pilot)
         await pilot.pause()
         line = _fresh_line(scr)
-        assert line.region.height == (2 if failed else 1)
+        assert line.region.height == 1
         input_row = scr.query_one("#input-row")
         assert input_row.region.y - line.region.bottom == 1
 

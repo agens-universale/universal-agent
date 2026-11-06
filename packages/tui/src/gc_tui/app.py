@@ -443,8 +443,9 @@ class TuiApp(App):
         self._profile_source: Optional[tuple] = None
         from gc_core.model_router import CircuitBreaker
 
-        # Сессионный предохранитель моделей (спека §8) — владелец: сессия-тред;
-        # персист/restore — persist_circuit_breaker()/load_circuit_breaker() (meta треда).
+        # Предохранитель моделей окна: живёт в памяти, в мету треда не
+        # пишется; подключение треда его не трогает — доступность модели
+        # не зависит от треда.
         self._circuit_breaker = CircuitBreaker()
         self._onboarding_config_path = (
             None  # куда писать конфиг (user_config_path)
@@ -1548,27 +1549,6 @@ class TuiApp(App):
             self.effective_settings()
         )
 
-    def persist_circuit_breaker(
-        self,
-        task_id: Optional[str] = None,
-        snapshot: Optional[dict] = None,
-    ) -> None:
-        """Снимок предохранителя моделей (спека §8) в meta треда — переживает
-        пересборки executor внутри сессии (владелец состояния — сессия-тред).
-        По умолчанию — открытый тред и текущее состояние предохранителя."""
-        task_id = task_id or getattr(self.tui_state, "active_task_id", None)
-        if not task_id or not self._threads_dir:
-            return
-        from gc_tui.services.stores.file_store import FileTaskStore
-        from gc_tui.session_settings import to_breaker_meta_patch
-
-        if snapshot is None:
-            snapshot = self._circuit_breaker.snapshot()
-        store = FileTaskStore(
-            threads_dir=self._threads_dir, system=self._system
-        )
-        store.update_tui_meta(task_id, to_breaker_meta_patch(snapshot))
-
     def thread_run_is_live(self, thread_id: str) -> bool:
         """Ход треда держит живой процесс: этот — своим раннером, другой
         TUI — свежим замком сессии. Иначе «running» в мете — остаток
@@ -1606,67 +1586,19 @@ class TuiApp(App):
             return target[0]
         return None
 
-    def _persist_breaker_after_worker(self, runner) -> None:
-        """`persist_circuit_breaker`, вызванный ИЗ worker-потока раннера.
-
-        Мост на UI-поток обязателен: persist — полный read-modify-write meta.json
-        (`FileTaskStore.update_tui_meta`), а UI-поток на спаде `is_running` пишет в
-        тот же документ (статус треда, `persist_session_overrides`). Две полные
-        перезаписи от разных потоков теряют одну правку, а прерванная запись
-        оставляет обрезанный файл, который потом читается как пустой.
-
-        Тред и снимок берутся здесь, на воркере: снимок принадлежит треду
-        прогона, а не открытому. Иначе трип хода сессии B, пока открыта A,
-        лёг бы в meta A, а запись, дошедшая до UI-потока после смены сессии,
-        унесла бы туда уже загруженное состояние новой.
-
-        RuntimeError из `call_from_thread` — приложение не запущено (тесты,
-        headless) или мы уже на UI-потоке: гонки в этом случае нет, пишем
-        напрямую, потому что потерять трип хуже."""
-        task_id = self.run_thread_id(runner)
-        # Отвязанный (остановленный) прогон, чей тред уже не открыт: его
-        # предохранитель записан при стопе, а общий объект теперь держит
-        # состояние открытого треда — писать его в тред прогона нельзя.
-        if runner is not self.active_runner and task_id != getattr(
-            self.tui_state, "active_task_id", None
-        ):
-            return
-        snapshot = self._circuit_breaker.snapshot()
-        try:
-            self.call_from_thread(
-                self.persist_circuit_breaker, task_id, snapshot
-            )
-        except RuntimeError:
-            self.persist_circuit_breaker(task_id, snapshot)
-
     def detach_run_sinks(self) -> None:
         """Остановленный прогон дорабатывает в фоне, отвязанный от окна: его
         стрим, прогресс субагентов и предохранитель окну больше не
         принадлежат. Следующая сборка исполнителя заводит свои; у окна —
         свой предохранитель с тем же состоянием, старый объект остаётся
-        отвязанному исполнителю (его поздние трипы — только его)."""
-        from gc_core.model_router import CircuitBreaker
-
-        self._circuit_breaker = CircuitBreaker.restore(
-            self._circuit_breaker.snapshot()
-        )
+        отвязанному исполнителю (его поздние трипы — только его). Копия
+        несёт и право на пробу, и пробу, которую стоп оборвал до ответа."""
+        self._circuit_breaker = self._circuit_breaker.copy()
         pump = getattr(self, "_stream_pump", None)
         if pump is not None:
             pump.close()
         self._stream_pump = None
         self._subagent_progress_sink = None
-
-    def load_circuit_breaker(self, snapshot: dict) -> None:
-        """Восстановить предохранитель из meta треда при attach (спека §8):
-        заменяет СОДЕРЖИМОЕ предохранителя окна под тред, на который переключились —
-        состояние предыдущего треда не должно течь в новый (новая сессия — сброс).
-
-        Restore-in-place (не подмена объекта): прогретый executor держит ссылку на
-        ЭТОТ объект (передан в `ctx.model_router` при сборке). Подмена ссылки
-        осиротила бы его — трипы рана уходили бы в старый breaker, а
-        `persist_circuit_breaker` писал бы новый пустой; витрины и executor видели
-        бы разные предохранители."""
-        self._circuit_breaker.replace_from(snapshot or {})
 
     def set_session_override(self, dotted: str, value) -> None:
         """Переопределить ключ в текущей сессии (в файл конфига НЕ пишет).
@@ -1776,7 +1708,7 @@ class TuiApp(App):
         После стопа — короткое ожидание потока хода (`STOP_SETTLE_SEC`):
         ядро закрывает ход записью итога, иначе он остался бы без неё. Ждём
         в потоке пула, не на loop: поток хода ходит на UI-поток мостом
-        `call_from_thread` (дельта стрима, предохранитель, подтверждение), и
+        `call_from_thread` (дельта стрима, подтверждение), и
         заблокированный loop держал бы его до таймаута.
 
         Затем логгер прогона (см. `AgentRunner.release`) и подписка на
@@ -1844,7 +1776,6 @@ class TuiApp(App):
     def _record_runner_error(
         self, runner: AgentRunner | None, exc: BaseException
     ) -> None:
-        self._persist_breaker_after_worker(runner)
         if runner is None or runner is not self.active_runner:
             return
         if getattr(runner, "_marked_stopped", False):
@@ -1887,12 +1818,6 @@ class TuiApp(App):
         # игнорировать ошибки чужого/заменённого runner (см. AgentRunner._emit_error).
         runner_ref: list = []
 
-        # Снимок предохранителя — ДО проверки владельца и на обоих исходах работы
-        # воркера (спека §8): breaker один на приложение, и трипы уже случившегося
-        # прогона нужны следующему ходу, даже если ран упал (сюда приходит
-        # `_emit_error`, а не `_on_complete`) или active_runner подменили на
-        # Ctrl+C. Проверка владельца отсекает UI-поля ЧУЖОГО раннера — предохранитель
-        # к ним не относится.
         def _on_runner_error(exc: BaseException) -> None:
             self._record_runner_error(
                 runner_ref[0] if runner_ref else None, exc
@@ -1900,7 +1825,6 @@ class TuiApp(App):
 
         def _on_runner_complete(outcome: Optional[str]) -> None:
             runner = runner_ref[0] if runner_ref else None
-            self._persist_breaker_after_worker(runner)
             if runner is None or runner is not self.active_runner:
                 return
             self.last_terminal_outcome = outcome

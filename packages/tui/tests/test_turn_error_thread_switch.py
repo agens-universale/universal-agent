@@ -115,4 +115,4 @@ async def test_failure_after_switch_stays_with_failed_thread(tmp_path):
         assert _meta(tmp_path, _B)["last_indicator"] == {"edits": None}
         scr.attach_active_task(_B, is_resume=True)
         await pilot.pause()
-        assert _fresh_text(scr) == f"✕ Ошибка\n  └ {_REASON}"
+        assert _fresh_text(scr) == f"✕ Ошибка · {_REASON}"

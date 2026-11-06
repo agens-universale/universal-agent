@@ -4,6 +4,7 @@ import copy
 import functools
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
@@ -13,6 +14,7 @@ from gc_core.execution.ports import port
 from gc_core.model_router import (
     AliasCircuitOpenError,
     ResolvedModel,
+    breaker_reason,
 )
 from gc_core.request_backend_policy import (
     _raise_on_embedded_choice_error,
@@ -368,6 +370,19 @@ def _network_params(
     return verify, cert, False, limit, proxy, embedded
 
 
+def _probing(
+    ctx: Any,
+    resolved: Optional[ResolvedModel],
+    isolated_timeout_sec: Optional[float],
+) -> AbstractContextManager[bool]:
+    """Право пробы на время вызова (спека model-breaker §2.2). Изолированный
+    вызов предохранитель не взводит — и права не берёт."""
+    router = getattr(ctx, "model_router", None)
+    if isolated_timeout_sec is not None or router is None:
+        return nullcontext(False)
+    return router.probing(resolved)
+
+
 async def _asend_chat_completion_text(
     *,
     ctx: Any,
@@ -439,7 +454,6 @@ async def _asend_chat_completion_text(
         config_proxy,
         retry_embedded_choice_errors,
     ) = _network_params(settings, resolved, isolated_timeout_sec)
-
     if prepared is not None:
 
         def _payload_factory(requested_max_tokens):
@@ -455,8 +469,11 @@ async def _asend_chat_completion_text(
             return payload
 
     usage_category = category_for_request_label(request_label)
-    with usage_scope(
-        getattr(state, "usage", None), usage_category, "chat_completions"
+    with (
+        _probing(ctx, resolved, isolated_timeout_sec) as probe,
+        usage_scope(
+            getattr(state, "usage", None), usage_category, "chat_completions"
+        ),
     ):
         res, _call_data = await _arequest_admitted_chat_completion(
             ctx=ctx,
@@ -469,7 +486,7 @@ async def _asend_chat_completion_text(
             url=url,
             verify=verify,
             cert=cert,
-            use_retry=use_retry,
+            use_retry=use_retry and not probe,
             retry_embedded_choice_errors=retry_embedded_choice_errors,
             salvage_reasoning=False,
             logger=getattr(ctx, "logger", None),
@@ -479,7 +496,7 @@ async def _asend_chat_completion_text(
             notice_url=url,
             timeout=timeout,
             config_proxy=config_proxy,
-            adaptive_retry=isolated_timeout_sec is None,
+            adaptive_retry=isolated_timeout_sec is None and not probe,
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:
@@ -617,7 +634,8 @@ async def _arequest_chat_completion_outcome_local(
     Вызов со своим бюджетом повторов (``isolated_timeout_sec``, судья действий)
     предохранитель не трогает и на свежем сбое не деградирует: его сбой — не
     знание о модели основного хода, повторяет и считает он сам. Деградация при
-    уже открытом предохранителе — как у всех.
+    уже открытом предохранителе — как у всех; алиас, ждущий пробы, для него
+    тоже открыт: право пробы остаётся основному ходу.
 
     ``allow_images=True`` — вызов несёт картинки (``content`` списком частей): так
     зовут только «глаза» (``vision/eyes``). Без флага картинки — ``ValueError``."""
@@ -647,7 +665,7 @@ async def _arequest_chat_completion_outcome_local(
     primary_exc: Optional[Exception] = None
     newly_failed_alias: Optional[str] = None
     try:
-        resolved = router.resolve(consumer)
+        resolved = _resolve_for_call(router, consumer, isolated=isolated)
     except AliasCircuitOpenError as exc:
         # Алиас уже известен как мёртвый — сразу к деградации, 0 обращений в транспорт.
         failed_alias = exc.alias
@@ -669,7 +687,7 @@ async def _arequest_chat_completion_outcome_local(
     # сравнения ниже упал бы AliasCircuitOpenError раньше времени.
     active_resolved = _resolve_active_model(router)
     if newly_failed_alias is not None:
-        router.breaker.trip(newly_failed_alias, _breaker_reason(primary_exc))
+        router.breaker.trip(newly_failed_alias, breaker_reason(primary_exc))
 
     if active_resolved.alias == failed_alias:
         # Деградировать некуда: привязка и есть активная модель — то же самое
@@ -691,7 +709,7 @@ async def _arequest_chat_completion_outcome_local(
         return await send(resolved=active_resolved)
     except Exception as exc:
         if _trips_breaker(exc, active_resolved.alias, isolated=isolated):
-            router.breaker.trip(active_resolved.alias, _breaker_reason(exc))
+            router.breaker.trip(active_resolved.alias, breaker_reason(exc))
         raise
 
 
@@ -725,15 +743,23 @@ async def arequest_chat_completion_text(
     return outcome.text
 
 
+def _resolve_for_call(router: Any, consumer: str, *, isolated: bool):
+    """Резолв привязки. Изолированный вызов право пробы не берёт, поэтому
+    алиас, ждущий пробы, для него открыт: право остаётся основному ходу."""
+    resolved = router.resolve(consumer)
+    if not isolated:
+        return resolved
+    reason = router.breaker.known_unavailable(resolved.alias)
+    if reason is not None:
+        raise AliasCircuitOpenError(resolved, reason)
+    return resolved
+
+
 def _resolve_active_model(router: Any):
     try:
         return router.resolve("main")
     except AliasCircuitOpenError as open_exc:
         return open_exc.resolved
-
-
-def _breaker_reason(exc: BaseException) -> str:
-    return str(exc).strip()[:300] or exc.__class__.__name__
 
 
 def _trips_breaker(

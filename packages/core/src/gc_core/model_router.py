@@ -6,7 +6,9 @@ Router читает секции `models`/`slots`/`assign` из снимка н�
 инжектируемый `choice_provider`: сессионный слой живёт вне Router (выбор
 меняется без пересборки executor). Цель вызова — слово уровня или алиас реестра.
 
-Предохранитель — сессионный набор алиасов, признанных недоступными. Трипает его любой
+Предохранитель — набор алиасов, признанных недоступными, в памяти сессии
+(в мету треда не пишется; снимок нужен только для передачи субагентам и в
+Temporal). Трипает его любой
 потребитель, у которого подтверждённая недоступность пережила все существующие ретраи
 (`processing_responses`, `utils/llm_chat_client`, `SubagentRunner`); Router держит на
 нём единую точку отказа — открытый алиас роняет `resolve()` мгновенно
@@ -17,9 +19,12 @@ Router читает секции `models`/`slots`/`assign` из снимка н�
 
 from __future__ import annotations
 
+import asyncio
+import threading
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from gc_core.config_modules.model_registry import (
     LEVEL_FALLBACK,
@@ -28,7 +33,9 @@ from gc_core.config_modules.model_registry import (
     configured_choice,
     effective_choice,
 )
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.settings import settings_of
+from gc_core.user_stop import UserStopInterrupt
 
 # Канонический реестр потребителей (спека §5.1). `subagent:<agent_name>` — отдельный
 # префиксный consumer id, не перечислимый статически здесь (канонический реестр имён
@@ -46,6 +53,9 @@ CONSUMERS = (
     "routing_judge",
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
+
+# Обрыв вызова до ответа модели: право пробы при них возвращается.
+_CALL_STOPS = (asyncio.CancelledError, ModelRequestStopped, UserStopInterrupt)
 
 
 # Привязки assign, у которых значение читается скалярным полем AssignConfig (все,
@@ -142,24 +152,94 @@ class AliasCircuitOpenError(RuntimeError):
         )
 
 
-class CircuitBreaker:
-    """Сессионный per-alias предохранитель (спека §8). Ключ — алиас модели, не привязка.
+def failure_text(exc: BaseException) -> str:
+    """Текст сбоя вызова: само сообщение (обрезанное) или имя класса."""
+    return str(exc).strip()[:300] or exc.__class__.__name__
 
-    Владелец состояния — сессия-тред: `snapshot()`/`restore()` персистят набор открытых
-    алиасов в meta треда, чтобы предохранитель пережил пересборку executor внутри сессии.
+
+def breaker_reason(exc: BaseException) -> str:
+    """Причина для предохранителя из сбоя вызова. Отказ уже открытого алиаса
+    несёт исходную причину — её и берём, иначе каждый повтор оборачивал бы
+    причину ещё одним «алиас … в предохранителе»."""
+    if isinstance(exc, AliasCircuitOpenError):
+        return exc.reason
+    return failure_text(exc)
+
+
+class CircuitBreaker:
+    """Сессионный per-alias предохранитель. Ключ — алиас модели, не привязка.
+
+    Два состояния алиаса: открыт (`_tripped`, резолв отказывает мгновенно) и
+    ждёт пробы (`_probe`, резолв пропускает, первое обращение — проба).
+    Взятая проба до ответа — в `_running`: копия переносит её как ждущую.
+    Все методы идут под одним замком: петля детей живёт в другом потоке.
+    `snapshot()`/`restore()` работают только с открытыми алиасами.
     """
 
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._tripped: dict[str, str] = {}
+        self._probe: dict[str, str] = {}
+        self._running: dict[str, str] = {}
 
     def is_open(self, alias: str) -> bool:
-        return alias in self._tripped
+        with self._lock:
+            return alias in self._tripped
+
+    def open_reason(self, alias: str) -> str | None:
+        """Причина, если алиас открыт, иначе None — одно чтение под замком."""
+        with self._lock:
+            return self._tripped.get(alias)
 
     def trip(self, alias: str, reason: str) -> None:
-        self._tripped[alias] = reason
+        with self._lock:
+            self._probe.pop(alias, None)
+            self._running.pop(alias, None)
+            self._tripped[alias] = reason
+
+    def allow_probe(self) -> None:
+        """Все открытые алиасы получают право на одну пробу."""
+        with self._lock:
+            self._probe.update(self._tripped)
+            self._tripped.clear()
+
+    def clear_open(self) -> None:
+        """Снять отметки открытых алиасов без права на пробу."""
+        with self._lock:
+            self._tripped.clear()
+
+    def take_probe(self, alias: str) -> bool:
+        """Атомарно: True, если этот вызов и есть проба алиаса."""
+        with self._lock:
+            reason = self._probe.pop(alias, None)
+            if reason is None:
+                return False
+            self._running[alias] = reason
+            return True
+
+    def return_probe(self, alias: str) -> None:
+        """Вернуть право, взятое вызовом, который не дождался ответа.
+        Открытый за это время алиас не трогаем: `trip` свежее."""
+        with self._lock:
+            reason = self._running.pop(alias, None)
+            if reason is not None:
+                self._probe[alias] = reason
+
+    def finish_probe(self, alias: str) -> None:
+        """Проба получила ответ: право израсходовано."""
+        with self._lock:
+            self._running.pop(alias, None)
+
+    def known_unavailable(self, alias: str) -> str | None:
+        """Причина, если алиас открыт или ждёт пробы, иначе None."""
+        with self._lock:
+            if alias in self._tripped:
+                return self._tripped[alias]
+            return self._probe.get(alias)
 
     def snapshot(self) -> dict[str, str]:
-        return dict(self._tripped)
+        with self._lock:
+            return dict(self._tripped)
 
     @classmethod
     def restore(cls, snapshot: dict) -> CircuitBreaker:
@@ -167,16 +247,27 @@ class CircuitBreaker:
         breaker._tripped = dict(snapshot or {})
         return breaker
 
+    def copy(self) -> CircuitBreaker:
+        with self._lock:
+            clone = CircuitBreaker()
+            clone._tripped = dict(self._tripped)
+            clone._probe = {**self._running, **self._probe}
+            return clone
+
     def replace_from(self, snapshot: dict) -> None:
-        """Restore-in-place: заменить содержимое предохранителя набором из снапшота
-        БЕЗ подмены объекта. Прогретый executor и витрины держат ссылку на ЭТОТ
-        объект (передан в `ctx.model_router` при сборке executor); подмена ссылки
-        осиротила бы их — трипы рана уходили бы в старый breaker, а persist писал бы
-        новый пустой (спека §8). См. `TuiApp.load_circuit_breaker`."""
-        self._tripped = dict(snapshot or {})
+        """Restore-in-place: состояние целиком из снапшота БЕЗ подмены
+        объекта: прогретый executor и витрины держат ссылку на ЭТОТ объект.
+        Снапшот прав на пробу не несёт — после замены их нет."""
+        with self._lock:
+            self._tripped = dict(snapshot or {})
+            self._probe.clear()
+            self._running.clear()
 
     def reset(self) -> None:
-        self._tripped.clear()
+        with self._lock:
+            self._tripped.clear()
+            self._probe.clear()
+            self._running.clear()
 
 
 def _level_phrase(requested_level: str, resolved_level: str) -> str:
@@ -578,11 +669,32 @@ class ModelRouter:
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).
         # ``check_breaker=False`` — витринный резолв (футер/`/status`): показать
         # модель честно, не роняя резолв (§12.2).
-        if check_breaker and self.breaker.is_open(alias):
-            raise AliasCircuitOpenError(
-                resolved, self.breaker.snapshot().get(alias, "")
-            )
+        if check_breaker:
+            reason = self.breaker.open_reason(alias)
+            if reason is not None:
+                raise AliasCircuitOpenError(resolved, reason)
         return resolved
+
+    @contextmanager
+    def probing(self, resolved: ResolvedModel | None) -> Iterator[bool]:
+        """Право пробы алиаса ``resolved`` на время вызова; ``True`` — вызов
+        и есть проба. Отмена или стоп хода до ответа возвращают право с
+        прежней причиной; иначе оно израсходовано (недоступность взводит
+        `trip` штатно)."""
+        alias = None if resolved is None else resolved.alias
+        if alias is None:
+            yield False
+            return
+        probe = self.breaker.take_probe(alias)
+        try:
+            yield probe
+        except _CALL_STOPS:
+            if probe:
+                self.breaker.return_probe(alias)
+            raise
+        finally:
+            if probe:
+                self.breaker.finish_probe(alias)
 
     def _resolve_legacy(self, source: str) -> ResolvedModel:
         return ResolvedModel(

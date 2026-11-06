@@ -535,10 +535,11 @@ async def test_error_turn_from_record_with_reason(tmp_path):
             ended="2026-10-22T11:50:00Z",
             error={"type": "RuntimeError", "message": reason},
         )
-        rows = _text(scr).split("\n")
-        assert rows[0] == f"✕ Ошибка · {_hm('2026-10-22T11:50:00Z')}"
-        assert rows[1].lstrip().startswith("└ RuntimeError: сбой")
-        assert len(rows) == 4  # голова + причина до трёх строк
+        assert _text(scr) == f"✕ Ошибка · {_hm('2026-10-22T11:50:00Z')}"
+        # Длинная причина у свежей строки развёрнута под ней целиком.
+        (body,) = scr.query(".turn-reason")
+        text = str(body.query_one(".expandable-text").render())
+        assert " ".join(text.split()) == " ".join(reason.split())
         tui = tui_section(scr._store.get_record(TID))
         assert tui["status"] == "failed"
         assert "last_error" not in tui

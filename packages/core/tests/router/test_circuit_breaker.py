@@ -84,3 +84,200 @@ def test_replace_from_is_independent_copy():
     breaker.replace_from(src)
     breaker.trip("glm-local", "401")
     assert src == {"flash": "5xx"}
+
+
+def test_breaker_reason_keeps_original_reason_of_open_alias():
+    from gc_core.model_router import (
+        AliasCircuitOpenError,
+        ResolvedModel,
+        breaker_reason,
+    )
+
+    resolved = ResolvedModel(
+        alias="gc_v3",
+        model="gc",
+        url="http://hub",
+        authorization=None,
+        backend_overrides={},
+        tariff=None,
+        source="slot default",
+    )
+    exc = AliasCircuitOpenError(resolved, "ReadError")
+    assert breaker_reason(exc) == "ReadError"
+
+
+def test_breaker_reason_of_plain_error_is_its_text():
+    from gc_core.model_router import breaker_reason
+
+    assert breaker_reason(RuntimeError("  5xx  ")) == "5xx"
+    assert breaker_reason(RuntimeError("")) == "RuntimeError"
+
+
+def test_failure_text_names_open_alias_once():
+    from gc_core.model_router import (
+        AliasCircuitOpenError,
+        ResolvedModel,
+        failure_text,
+    )
+
+    resolved = ResolvedModel(
+        alias="gc_v3",
+        model="gc",
+        url="http://hub",
+        authorization=None,
+        backend_overrides={},
+        tariff=None,
+        source="slot default",
+    )
+    exc = AliasCircuitOpenError(resolved, "ReadError")
+    assert failure_text(exc) == "алиас 'gc_v3' в предохранителе: ReadError"
+    assert failure_text(RuntimeError("")) == "RuntimeError"
+
+
+def test_allow_probe_moves_open_alias_to_probe():
+    b = CircuitBreaker()
+    b.trip("flash", "ReadError")
+    b.allow_probe()
+    assert b.is_open("flash") is False
+    assert b.known_unavailable("flash") == "ReadError"
+    assert b.snapshot() == {}
+
+
+def test_take_probe_is_one_shot():
+    b = CircuitBreaker()
+    b.trip("flash", "x")
+    b.allow_probe()
+    assert b.take_probe("flash") is True
+    assert b.take_probe("flash") is False
+    assert b.known_unavailable("flash") is None
+
+
+def test_trip_during_probe_reopens_with_fresh_reason():
+    b = CircuitBreaker()
+    b.trip("flash", "old")
+    b.allow_probe()
+    b.trip("flash", "new")
+    assert b.is_open("flash") is True
+    assert b.take_probe("flash") is False
+    assert b.known_unavailable("flash") == "new"
+
+
+def test_replace_from_takes_state_wholesale_without_probe_rights():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.trip("b", "2")
+    b.allow_probe()
+    b.replace_from({"a": "3"})
+    assert b.is_open("a") is True and b.take_probe("a") is False
+    assert b.known_unavailable("b") is None
+
+
+def test_return_probe_restores_waiting_with_previous_reason():
+    b = CircuitBreaker()
+    b.trip("a", "ReadError")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    b.return_probe("a")
+    assert b.is_open("a") is False
+    assert b.known_unavailable("a") == "ReadError"
+    assert b.take_probe("a") is True
+
+
+def test_return_probe_after_trip_changes_nothing():
+    b = CircuitBreaker()
+    b.trip("a", "old")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    b.trip("a", "new")
+    b.return_probe("a")
+    assert b.open_reason("a") == "new"
+    assert b.take_probe("a") is False
+
+
+def test_reset_clears_probe():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.allow_probe()
+    b.reset()
+    assert b.known_unavailable("a") is None
+
+
+def test_copy_keeps_both_states():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.allow_probe()
+    b.trip("c", "2")
+    c = b.copy()
+    assert c is not b
+    assert c.take_probe("a") is True and c.is_open("c") is True
+    assert b.take_probe("a") is True  # копия независима
+
+
+def test_copy_keeps_running_probe_as_waiting():
+    """Стоп во время пробы: копия окна не считает модель исправной, а
+    возврат права в прежний объект копию не трогает."""
+    b = CircuitBreaker()
+    b.trip("a", "ReadError")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    c = b.copy()
+    b.return_probe("a")
+    assert c.known_unavailable("a") == "ReadError"
+    assert c.take_probe("a") is True
+
+
+def test_finished_probe_is_not_copied():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    b.finish_probe("a")
+    assert b.copy().known_unavailable("a") is None
+
+
+def test_trip_ends_running_probe():
+    b = CircuitBreaker()
+    b.trip("a", "old")
+    b.allow_probe()
+    assert b.take_probe("a") is True
+    b.trip("a", "new")
+    c = b.copy()
+    assert c.open_reason("a") == "new"
+    assert c.take_probe("a") is False
+
+
+def test_clear_open_drops_open_aliases_without_probe_rights():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.clear_open()
+    assert b.known_unavailable("a") is None
+    assert b.take_probe("a") is False
+
+
+def test_take_probe_is_atomic_across_threads():
+    import threading
+
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.allow_probe()
+    wins = []
+    threads = [
+        threading.Thread(target=lambda: wins.append(b.take_probe("a")))
+        for _ in range(16)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert wins.count(True) == 1
+
+
+def test_open_reason_reads_only_open_aliases():
+    b = CircuitBreaker()
+    b.trip("a", "1")
+    b.trip("p", "2")
+    b.allow_probe()
+    b.trip("a", "3")
+    assert b.open_reason("a") == "3"
+    assert b.open_reason("p") is None
+    assert b.open_reason("x") is None

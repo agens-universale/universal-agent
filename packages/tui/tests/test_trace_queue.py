@@ -36,6 +36,7 @@ class _BusyRunner:
     def __init__(self, *, child: bool = False):
         self.added: list[dict] = []
         self._child = child
+        self.dropped_message_ids: frozenset[str] = frozenset()
 
     def is_running(self) -> bool:
         return True
@@ -376,11 +377,14 @@ async def test_admitted_becomes_normal_in_place(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_failure_marks_queued_failed(tmp_path):
+    """Реплика очереди, которую ход уже впустил (не снять), при сбое —
+    красная; подсказка очереди гаснет."""
     async with _app(tmp_path).run_test() as pilot:
         scr = pilot.app.screen
-        await _busy(pilot, tmp_path)
+        runner = await _busy(pilot, tmp_path)
+        runner.withdraw_message = lambda _msg_id: False
         await _send(pilot, "первое")
-        scr._mark_pending_failed()
+        scr._mark_pending_failed(runner)
         await pilot.pause()
         (reply,) = _replies(pilot)
         assert reply.state == "failed"

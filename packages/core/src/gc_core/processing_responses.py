@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import functools
 import gc
 import inspect
@@ -163,7 +164,11 @@ from gc_core.message_policy.user_stop import (
     not_started_due_to_user_stop_output,
 )
 from gc_core.model_choice import awrite_pending, note_applied
-from gc_core.model_router import AliasCircuitOpenError
+from gc_core.model_router import (
+    AliasCircuitOpenError,
+    breaker_reason,
+    failure_text,
+)
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
@@ -541,15 +546,18 @@ def _endpoint_path_advice(
 
 
 def _raise_honest_main_unavailable(
-    ctx: Any, resolved: Any, reason: str, source_exc: BaseException
+    ctx: Any, resolved: Any, source_exc: BaseException
 ) -> NoReturn:
     """Класс 2 фоллбэков недоступности (спека §8): исчерпаны существующие ретраи
     (transport/adaptive max_tokens/401-refresh) для активной модели main-трейса.
     Никаких тихих подмен — честная ошибка хода с моделью/endpoint/причиной и
-    подсказкой спасения; ставит per-alias предохранитель + notice."""
+    подсказкой спасения; ставит per-alias предохранитель + notice. Текст
+    ошибки — сам сбой (отказ открытого алиаса так и назван), в предохранитель
+    — исходная причина (`breaker_reason`)."""
+    reason = failure_text(source_exc)
     router = getattr(ctx, "model_router", None)
     if router is not None and resolved.alias is not None:
-        router.breaker.trip(resolved.alias, reason)
+        router.breaker.trip(resolved.alias, breaker_reason(source_exc))
     maybe_push_llm_failure_notice(
         source_exc,
         request_label="main_agent",
@@ -597,7 +605,7 @@ def resolve_main_for_call(
     except AliasCircuitOpenError as exc:
         if getattr(router, "is_subagent_child", False):
             raise
-        _raise_honest_main_unavailable(ctx, exc.resolved, exc.reason, exc)
+        _raise_honest_main_unavailable(ctx, exc.resolved, exc)
     state.default_model = resolved.model
     return resolved
 
@@ -717,6 +725,11 @@ UNAVAILABLE_REROUTE_PATCH = "main-unavailable-reroute-v1"
 #: основному запросу, ни к замене модели. Без маркера — прежнее поведение.
 STOP_AFTER_ROUTING_PATCH = "stop-after-routing-v1"
 
+#: Маркер durable-истории: начало хода главного даёт открытым алиасам право
+#: на одну пробу (спека model-breaker §2.2) — ход, который падал до запроса к
+#: модели, теперь его делает. Без маркера — прежняя честная ошибка на старте.
+MODEL_BREAKER_PROBE_PATCH = "model-breaker-probe-v1"
+
 
 def _stop_honored(stopped: bool, ctx: Any) -> bool:
     """Стоп пользователя прерывает такт перед основным запросом или после
@@ -766,9 +779,7 @@ def _reroute_level(
         return None
     if not router.breaker.is_open(failed.alias):
         # Честная ошибка основного хода уже взвела его с исходной причиной.
-        router.breaker.trip(
-            failed.alias, str(exc).strip()[:300] or type(exc).__name__
-        )
+        router.breaker.trip(failed.alias, breaker_reason(exc))
     if _stop_honored(bool(getattr(state, "stop_requested", False)), ctx):
         raise ModelRequestStopped("Ход остановлен") from exc
     level = next_level(getattr(state, "_call_level", None) or "default")
@@ -946,23 +957,25 @@ def _maybe_trip_and_raise_main_unavailable(
         return
     if resolved is None or resolved.alias is None:
         return  # легаси — предохранитель не ведётся
-    reason = str(exc).strip()[:300] or exc.__class__.__name__
-    _raise_honest_main_unavailable(ctx, resolved, reason, exc)
+    _raise_honest_main_unavailable(ctx, resolved, exc)
 
 
 def begin_turn_main_trace(state: State, ctx: Any) -> None:
     """Начало хода ГЛАВНОГО трейса (спека §6.4/§8): ставит стартовый
     `default_model` хода (`turn_boundary.begin_turn`) — каждый вызов внутри хода
     резолвит модель перед отправкой (`resolve_main_for_call`); ручной выбор и
-    AUTO закрепляются только на такт —
-    и, если активный алиас уже в предохранителе (trip прошлого хода /
-    персистированный breaker при attach), поднимает честную ошибку класса 2 ДО
-    похода в транспорт — с той же моделью/endpoint/причиной и подсказкой /model
-    /profile, что и `_arequest_backend_canonical`.
+    AUTO закрепляются только на такт.
 
-    В ручном режиме `begin_turn` резолвит `main` с проверкой предохранителя,
-    поэтому открытый алиас прилетает сюда сырым `AliasCircuitOpenError`;
-    переводим его в тот же честный класс 2 через
+    До `begin_turn` открытые алиасы получают право на одну пробу (спека
+    model-breaker §2.2): резолв их пропускает, первый основной запрос к
+    алиасу идёт к модели одним HTTP-запросом и при провале снова открывает
+    его до следующего хода главного. Право выдаётся только главному трейсу и
+    только если durable-история знает `MODEL_BREAKER_PROBE_PATCH`; в
+    durable-исполнении пробы нет — отметки просто снимаются.
+
+    Без маркера (и у ребёнка, который права не получает) открытый алиас в
+    ручном режиме прилетает из `begin_turn` сырым `AliasCircuitOpenError`;
+    переводим его в честную ошибку класса 2 через
     `_maybe_trip_and_raise_main_unavailable` (единый текст, без дублирования).
     При активном auto стартовый резолв предохранитель не проверяет — живость за
     точкой решения (`aroute_before_call`), и отказ, если мертвы все три уровня,
@@ -976,11 +989,33 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     if not getattr(state, "parent_state_id", None):
         mono, wall = turn_clock_sources(ctx)
         bind_turn_clock(ctx, TurnClock.start(mono=mono, wall=wall))
+        _allow_breaker_probe(ctx)
     try:
         begin_turn(state, ctx)
     except AliasCircuitOpenError as exc:
         _maybe_trip_and_raise_main_unavailable(ctx, exc, resolved=exc.resolved)
         raise
+
+
+def _allow_breaker_probe(ctx: Any) -> None:
+    """Право на пробу открытым алиасам — если durable-история знает маркер.
+
+    В durable-исполнении пробы нет: запрос к модели там — activity, которую
+    Temporal повторяет по своей политике (по умолчанию без ограничения
+    попыток), и ход ждёт восстановления модели. Начало хода только снимает
+    отметки, activity получает пустой снимок и шлёт обычный запрос."""
+    router = getattr(ctx, "model_router", None)
+    if router is None:
+        return
+    execution_patch = port(ctx, "execution_patch")
+    if execution_patch is not None and not execution_patch(
+        MODEL_BREAKER_PROBE_PATCH
+    ):
+        return
+    if getattr(ctx, "durable_execution", False):
+        router.breaker.clear_open()
+    else:
+        router.breaker.allow_probe()
 
 
 def _request_audience(
@@ -1105,11 +1140,45 @@ async def _arequest_backend_canonical_local(
     (см. `_raise_honest_main_unavailable`).
 
     `mute_answer` — вызов идёт без дельт `answer` в потоке; решает вызывающий
-    (`_answer_stream_muted`), в повтор после 401 значение едет то же."""
+    (`_answer_stream_muted`), в повтор после 401 значение едет то же.
+
+    Право пробы (спека model-breaker §2.2) берётся один раз на запрос: первая
+    попытка забирает его перед отправкой, повтор после 401 видит тот же ответ.
+    Держится до конца обеих попыток (`ModelRouter.probing`): отмена или стоп
+    до ответа его возвращают. Сбой подготовки до отправки право не тратит."""
     if resolved is _UNRESOLVED_MAIN:
         resolved = resolve_main_for_call(
             state, ctx, target_override=getattr(state, "_call_level", None)
         )
+    router = getattr(ctx, "model_router", None)
+    with contextlib.ExitStack() as held:
+        take_probe = functools.cache(
+            lambda: (
+                router is not None
+                and held.enter_context(router.probing(resolved))
+            )
+        )
+        return await _arequest_with_auth_retry(
+            messages,
+            state,
+            ctx,
+            resolved=resolved,
+            set_previous_response_id=set_previous_response_id,
+            mute_answer=mute_answer,
+            take_probe=take_probe,
+        )
+
+
+async def _arequest_with_auth_retry(
+    messages: List[Dict],
+    state: State,
+    ctx: Any,
+    *,
+    resolved: Any,
+    set_previous_response_id: bool,
+    mute_answer: bool,
+    take_probe: Callable[[], bool],
+) -> Tuple[List[Dict], str, Dict]:
     auth_connector = getattr(ctx, "auth_connector", None)
     try:
         return await _arequest_backend_canonical_once(
@@ -1119,6 +1188,7 @@ async def _arequest_backend_canonical_local(
             resolved=resolved,
             set_previous_response_id=set_previous_response_id,
             mute_answer=mute_answer,
+            take_probe=take_probe,
         )
     except Exception as exc:
         if auth_connector is not None and is_auth_error(exc):
@@ -1138,6 +1208,7 @@ async def _arequest_backend_canonical_local(
                     resolved=resolved,
                     set_previous_response_id=set_previous_response_id,
                     mute_answer=mute_answer,
+                    take_probe=take_probe,
                 )
             except Exception as retry_exc:
                 _maybe_trip_and_raise_main_unavailable(
@@ -1158,6 +1229,7 @@ async def _arequest_responses_once(
     settings: AppConfig,
     set_previous_response_id: bool,
     network: tuple,
+    take_probe: Callable[[], bool],
 ) -> Tuple[List[Dict], str, Dict]:
     # Адрес — backend.completions_url в обоих режимах API. Прежний плоский
     # `agent_url` в схеме не существует (строгая валидация его не пропустит).
@@ -1191,6 +1263,8 @@ async def _arequest_responses_once(
         resolved=resolved,
         settings=settings,
     )
+    if take_probe():
+        use_retry = False
     with usage_scope(
         getattr(state, "usage", None), USAGE_CATEGORY_MAIN, "responses"
     ):
@@ -1483,6 +1557,10 @@ async def _aprepare_native_vision(
     return key
 
 
+def _no_probe_right() -> bool:
+    return False
+
+
 def _function_call_output_id(message) -> str:
     if not isinstance(message, dict):
         return ""
@@ -1524,9 +1602,14 @@ async def _arequest_backend_canonical_once(
     resolved: Any = _UNRESOLVED_MAIN,
     set_previous_response_id: bool = True,
     mute_answer: bool = False,
+    take_probe: Callable[[], bool] = _no_probe_right,
 ) -> Tuple[List[Dict], str, Dict]:
     """
     Унифицированный вызов backend для двух режимов API (одна попытка).
+
+    `take_probe` забирает право пробы алиаса из предохранителя (см.
+    `_arequest_backend_canonical_local`) — его зовут прямо перед отправкой:
+    проба — один HTTP-запрос, без ретраев транспорта и адаптивных повторов.
 
     Возвращает:
     - канонические сообщения (responses-like),
@@ -1568,11 +1651,15 @@ async def _arequest_backend_canonical_once(
                 request_timeout_sec,
                 config_proxy,
             ),
+            take_probe=take_probe,
         )
 
     route_key = await _aprepare_native_vision(
         state, ctx, resolved, call_headers, messages, settings
     )
+    probe = take_probe()
+    if probe:
+        use_retry = False
 
     url = (
         resolved.url
@@ -1624,6 +1711,7 @@ async def _arequest_backend_canonical_once(
             "verify": verify,
             "cert": cert,
             "use_retry": use_retry,
+            "adaptive_retry": not probe,
             "retry_embedded_choice_errors": retry_embedded_choice_errors,
             "salvage_reasoning": True,
             "logger": getattr(ctx, "logger", None),
@@ -3018,7 +3106,9 @@ async def _apickup_pending_as_new_turn(
     except Exception as exc:
         # Очередь УЖЕ слита (`get_pending_messages` — drain, не peek): уронив ход
         # здесь, мы потеряли бы набранное пользователем сообщение бесследно —
-        # вернуть его в очередь некуда. Поэтому ход продолжаем на модели прошлого
+        # вернуть его в очередь некуда. С пробой главный сюда не попадает:
+        # открытый алиас получил право и ход идёт к модели. Остаются ребёнок
+        # и история без маркера пробы — ход продолжаем на модели прошлого
         # хода: тот же честный отказ придёт из резолва модели следующего вызова
         # (`resolve_main_for_call` → `_raise_honest_main_unavailable`, единая
         # точка текста), но сообщение к тому моменту уже в трейсе и в логе.

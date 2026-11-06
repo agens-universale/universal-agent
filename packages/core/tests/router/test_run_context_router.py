@@ -275,6 +275,7 @@ def test_request_uses_resolved_passed_from_decision_point(monkeypatch):
         resolved,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         captured["resolved"] = resolved
         return [], "rid", {}

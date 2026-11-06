@@ -241,7 +241,7 @@ from gc_tui.services.usage_meter import (
     usage_segments,
 )
 from gc_tui.services.voice_pill import render_pill
-from gc_tui.session_settings import read_breaker_from_tui, read_from_tui
+from gc_tui.session_settings import read_from_tui
 from gc_tui.toggles import (
     PROFILE_NONE_VALUE,
     apply_toggle,
@@ -2465,7 +2465,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         task_record = self._store.get_record(task_id)
         task_tui = tui_section(task_record)
         saved = read_from_tui(task_tui)
-        self._adopt_thread_breaker(task_tui)
         # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
         # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
         # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
@@ -5722,10 +5721,23 @@ class TraceScreen(TraceFollowMixin, Screen):
         if len(new_list) != len(existing):
             self._write_tui_meta(tid, {"pending_user_messages": new_list})
 
-    def _mark_pending_failed(self) -> None:
-        """При фейле run'а: все текущие pending-виджеты → state=failed,
-        записи в meta.tui.pending_user_messages → status=failed.
+    def _take_back_failed_queue(self, runner) -> list:
+        """Реплики очереди упавшего хода, которые ход не впустил: снятые
+        у исполнителя (сбой `/compact`, хвост ещё не слит) и выброшенные
+        раннером (`dropped_message_ids`). Делим по факту, не по виду."""
+        return [
+            reply
+            for reply in self._queued_replies()
+            if runner.withdraw_message(reply.message_id)
+            or reply.message_id in runner.dropped_message_ids
+        ]
+
+    def _mark_pending_failed(self, runner) -> None:
+        """При фейле run'а: невпущенные реплики очереди — в поле ввода, как
+        при стопе; остальные pending-виджеты → state=failed, записи в
+        meta.tui.pending_user_messages → status=failed.
         Очищает self._pending_user_widgets (виджеты остаются на экране как failed)."""
+        self._return_queue_to_input(self._take_back_failed_queue(runner))
         if not self._pending_user_widgets:
             return
         tid = self.app.tui_state.active_task_id
@@ -6111,10 +6123,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         прошлого прогона того же раннера не рисуются."""
         if not self._runner_is_for_active_thread():
             return None
-        runner = self._watched_runner or getattr(
-            self.app, "active_runner", None
-        )
-        return self._run_error_of(runner)
+        return self._run_error_of(self._observed_runner())
+
+    def _observed_runner(self):
+        """Раннер наблюдаемого прогона: застанный тиком, иначе активный."""
+        return self._watched_runner or getattr(self.app, "active_runner", None)
 
     def _run_error_of(self, runner) -> str | None:
         """Ошибка прогона раннера: пара «раннер и `run_seq`» прогона —
@@ -6132,16 +6145,6 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _run_task_id(self, runner) -> str | None:
         """Тред прогона раннера: его цель, иначе активный."""
         return self.app.run_thread_id(runner) or self._active_task_id
-
-    def _adopt_thread_breaker(self, task_tui: dict) -> None:
-        """Предохранитель моделей — владение треда (спека §8): restore
-        ЦЕЛИКОМ заменяет breaker окна под открытый тред. Пока идёт ход,
-        предохранитель принадлежит его треду — им пользуется исполнитель;
-        открытый получит свой в конце хода (`_on_run_finished`)."""
-        runner = getattr(self.app, "active_runner", None)
-        if runner is not None and runner.is_running():
-            return
-        self.app.load_circuit_breaker(read_breaker_from_tui(task_tui))
 
     def _show_compact_error(self, on_screen: bool) -> None:
         """Упавшее `/compact` открытого треда — строкой ошибки: сжатие не
@@ -6194,11 +6197,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
-            # Ход чужого треда кончился: предохранитель — открытому.
-            open_tid = self._active_task_id
-            self._adopt_thread_breaker(
-                self._task_tui(open_tid) if open_tid else {}
-            )
             return
         # Ход закончился предложенным планом — баннер одобрения.
         if plan_proposed:
@@ -6281,7 +6279,18 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._arg_picker.sync_lock()
         self._pump_reasoning_stream_source()
         err = self._active_run_error()
-        if err and not self._error_shown:
+        # Пока выделение заморожено, хвост треда не дочитан: впущенная, но
+        # не сверенная реплика ушла бы в поле и продублировалась. Пометка
+        # сбоя — на первом тике после разморозки. Ошибка видна раньше выхода
+        # потока, а выброшенные реплики (`dropped_message_ids`) раннер
+        # отдаёт на выходе — пометка ждёт его.
+        observed = self._observed_runner()
+        if (
+            err
+            and not self._error_shown
+            and not _frozen
+            and not (observed is not None and observed.is_running())
+        ):
             # Причина — строкой `└` под «✕ Ошибка» свежей строки итога в
             # ленте. Без треда строки итога нет — тогда строкой без
             # владельца.
@@ -6292,9 +6301,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             # до ошибки и сверится со своей отправкой; иначе пометка «не
             # отправлено» сняла бы её с ожидания, и запись смонтировалась
             # бы второй репликой.
-            if not _frozen:
-                self._poll_trace_tail()
-            self._mark_pending_failed()
+            self._poll_trace_tail()
+            self._mark_pending_failed(observed)
         # Инвариант: running tool-строки живут, только пока задача жива (live
         # runner / ask_human). Любой НЕ-live статус — стоп, обрыв runner'а, resume
         # брошенного треда или неизвестный исход (бейдж None) → осиротевшие вызовы
@@ -8855,12 +8863,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             if runner.is_running():
                 self.app.last_stop_requested = True
                 self._stopping_runner = runner
-                # Предохранитель хода — в его тред сейчас: поток доработает
-                # отвязанным, и общий объект к тому времени может держать
-                # уже другой тред.
-                self.app.persist_circuit_breaker(
-                    self.app.run_thread_id(runner)
-                )
             runner.stop()
             runner._marked_stopped = True
             # Поток может ещё досиживать HTTP — тогда логгер отдаст он сам.
@@ -10325,8 +10327,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # check_breaker=False: /status показывает модель честно даже при открытом
         # активном алиасе (спека §12.2); недоступность отражаем отдельным флагом.
         resolved = router.resolve("main", check_breaker=False)
-        breaker_open = bool(resolved.alias) and router.breaker.is_open(
-            resolved.alias
+        breaker_open = (
+            bool(resolved.alias)
+            and router.breaker.known_unavailable(resolved.alias) is not None
         )
         ref = self.app.active_profile_ref()
         # Действующий выбор модели — тем же правилом, что у палитры и пикера.
