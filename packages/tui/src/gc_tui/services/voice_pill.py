@@ -1,6 +1,6 @@
 """Рендер «голосовой пилюли» для footer-left: rich.Text шириной PILL_WIDTH ячеек.
 
-Чистые функции (без Textual): поячеечный градиент логотипа (RUN_COLOR→OLIVE→ACCENT),
+Чистые функции (без Textual): поячеечный градиент логотипа (GRADIENT_WARM→MID→COOL),
 запись — «● REC» + живой спектр-эквалайзер, распознавание — волна расщепления;
 таймер справа. Кадры листает вызывающий (set_interval экрана), сюда приходит
 номер кадра. Визуал зафиксирован единый (живая приёмка 2026-07-05), без
@@ -46,10 +46,12 @@ def _lerp_hex(c1: str, c2: str, t: float) -> str:
 
 
 def _gradient_bg(pos: float) -> str:
-    """Логотипная лента: RUN_COLOR → OLIVE → ACCENT (pos 0..1)."""
+    """Логотипная лента: GRADIENT_WARM → MID → COOL (pos 0..1)."""
     if pos <= 0.5:
-        return _lerp_hex(palette.RUN_COLOR, palette.OLIVE, pos * 2)
-    return _lerp_hex(palette.OLIVE, palette.ACCENT, (pos - 0.5) * 2)
+        return _lerp_hex(palette.GRADIENT_WARM, palette.GRADIENT_MID, pos * 2)
+    return _lerp_hex(
+        palette.GRADIENT_MID, palette.GRADIENT_COOL, (pos - 0.5) * 2
+    )
 
 
 _WAVE_NODES = (0.0,) + tuple(float(v) for v in _WAVE) + (0.0,)  # мягкие концы

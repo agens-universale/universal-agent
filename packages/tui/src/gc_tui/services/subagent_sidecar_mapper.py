@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -103,10 +104,12 @@ def plan_sidecar_nested_actions(
     records: Sequence[Dict[str, Any]],
     *,
     root: Optional[str] = None,
+    injected: Collection[str] = (),
 ) -> List[SidecarNestedAction]:
     """Group by parent_call_id, order by seq; skip finished/HITL-like noise.
 
-    ``root`` — корень проекта: пути в подписях вызовов от него."""
+    ``root`` — корень проекта: пути в подписях вызовов от него.
+    ``injected`` — служебные поля схем: в сводку Think не идут."""
     from gc_core.execution.progress import todo_items_from_arguments
 
     by_parent: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -155,6 +158,7 @@ def plan_sidecar_nested_actions(
                     payload.get("arguments"),
                     root=root,
                     nested=True,
+                    injected=injected,
                 )
                 if not nested_call_row(str(name or ""), args_summary):
                     continue
@@ -409,7 +413,11 @@ def resolve_nested_tool_detail(
 
 
 def trace_events_from_nested_detail(
-    call_id: str, detail: Dict[str, Any], *, root: Optional[str] = None
+    call_id: str,
+    detail: Dict[str, Any],
+    *,
+    root: Optional[str] = None,
+    injected: Collection[str] = (),
 ) -> Tuple[TraceEvent, Optional[TraceEvent]]:
     """Синтетические TraceEvent для ToolCallDetailScreen."""
     call_payload = detail.get("call")
@@ -417,7 +425,11 @@ def trace_events_from_nested_detail(
         raise ValueError("detail.call required")
     name = str(call_payload.get("name") or "")
     args_summary = tool_args_summary(
-        name or None, call_payload.get("arguments"), root=root, nested=True
+        name or None,
+        call_payload.get("arguments"),
+        root=root,
+        nested=True,
+        injected=injected,
     )
     call_ev = TraceEvent(
         no=0,

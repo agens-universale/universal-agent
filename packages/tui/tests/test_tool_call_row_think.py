@@ -312,6 +312,47 @@ def test_mapper_drops_injected_fields_from_think_text():
     assert event.think_text == "мысль"
 
 
+def test_mapper_think_summary_and_text_skip_injected_fields():
+    """Свёрнутая сводка и раскрытие строятся из одного отфильтрованного
+    текста: служебное поле не видно ни там, ни там."""
+    from gc_tui.services.trace_mapper import RenderContext, map_message
+
+    call = {
+        "type": "function_call",
+        "name": "session_think",
+        "call_id": "t2",
+        "arguments": json.dumps(
+            {"reason": "SERVICE", "analysis": "MODEL THOUGHT"}
+        ),
+    }
+    context = RenderContext(injected_fields=frozenset({"reason"}))
+    event = map_message(call, no=1, ts="", context=context)
+    assert event.args_summary == "MODEL THOUGHT"
+    assert event.think_text == "MODEL THOUGHT"
+
+
+def test_nested_think_summary_skips_injected_fields():
+    from gc_tui.services.subagent_sidecar_mapper import (
+        plan_sidecar_nested_actions,
+        trace_events_from_nested_detail,
+    )
+
+    call = {
+        "call_id": "c1",
+        "name": "session_think",
+        "arguments": {"reason": "SERVICE", "analysis": "MODEL THOUGHT"},
+    }
+    records = [
+        {"parent_call_id": "p1", "seq": 1, "kind": "call", "payload": call}
+    ]
+    actions = plan_sidecar_nested_actions(records, injected={"reason"})
+    assert [a.args_summary for a in actions] == ["MODEL THOUGHT"]
+    event, _ = trace_events_from_nested_detail(
+        "c1", {"call": call}, injected={"reason"}
+    )
+    assert event.args_summary == "MODEL THOUGHT"
+
+
 def test_think_rejection_is_recognised_by_output():
     from gc_core.tools.session.think import Think
     from gc_testkit.helpers.tool_ctx import CallableTool

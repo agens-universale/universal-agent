@@ -1865,12 +1865,17 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _render_context(self, payloads) -> RenderContext:
         """Контекст рендера порции payload'ов треда: корень сессии и
         служебные поля схем тулов (в мысль Think не входят)."""
-        agent = self.app.effective_settings().settings.agent
         return collect_render_context(
             payloads,
             root=self._current_cwd(),
-            injected_fields=agent.inject_tool_fields,
+            injected_fields=self._injected_fields(),
         )
+
+    def _injected_fields(self) -> frozenset[str]:
+        """Служебные поля схем тулов (`agent.inject_tool_fields`) окна: в
+        мысль и сводку Think не входят, пока у модели есть свой текст."""
+        agent = self.app.effective_settings().settings.agent
+        return frozenset(agent.inject_tool_fields)
 
     def _show_footer_refusal(
         self, text: str, tone: Optional[str] = "warn"
@@ -2375,6 +2380,10 @@ class TraceScreen(TraceFollowMixin, Screen):
                 pass
             self._thinking = None
         self._clear_stream_block()
+        sink = getattr(self.app, "_stream_sink", None)
+        if sink is not None:
+            # Лента начата заново: мысли прежней — не в неё.
+            sink.discard_thoughts()
         self._thinking_started_at = None
         # На смене задачи / stream_reset история событий обнуляется,
         # индикатор должен начать с чистого состояния.
@@ -2713,7 +2722,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         *,
         live: bool = False,
         context: RenderContext | None = None,
+        before_record: Callable[[dict], None] | None = None,
     ) -> None:
+        """``before_record`` — перед каждой записью (мысли попыток,
+        начавшихся раньше неё, встают над ней)."""
         payloads = [
             rec.get("payload") for rec in records if isinstance(rec, dict)
         ]
@@ -2729,6 +2741,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             # пачки опроса.
             context = with_closing_replies(context, payloads)
         for rec in records:
+            if before_record is not None and isinstance(rec, dict):
+                before_record(rec)
             self._render_record(rec, live=live, context=context)
 
     def _render_finish(self, ev) -> None:
@@ -2846,34 +2860,59 @@ class TraceScreen(TraceFollowMixin, Screen):
         settings = self.app.effective_settings().settings
         return settings.tui.show_reasoning == "on"
 
-    def _sync_live_thought(self, sink) -> None:
-        """Мысль идущей попытки — строкой в конце ленты: текст — вся мысль
-        стрима, время — фаза мысли. Строку ведёт метка попытки стрима: у
-        попытки уже есть строка — она дорастает; строки прежних попыток
-        остаются на своих местах законченными. Стрим без метки строки не
-        даёт."""
+    def _take_thoughts(self) -> list:
+        """Мысли стрима для этого тика: законченные попытки и идущая."""
+        sink = getattr(self.app, "_stream_sink", None)
+        return sink.take_thoughts() if sink is not None else []
+
+    def _mount_thoughts_before(self, thoughts: list, rec: dict) -> None:
+        """Перед записью хвоста — строки мыслей попыток, начавшихся раньше
+        неё: вызов шага, пришедший тем же тиком, встаёт под своей мыслью.
+        Часы записей и стрима — одного процесса."""
+        try:
+            written = datetime.fromisoformat(str(rec.get("ts") or ""))
+        except ValueError:
+            return
+        for snap in thoughts:
+            if snap.started_at < written:
+                self._thought_row(snap)
+
+    def _sync_thoughts(self, thoughts: list) -> None:
+        """Мысли тика после хвоста: строки законченных попыток получают весь
+        текст и закрываются, идущая дорастает; новые встают в конец ленты.
+        Строки попыток, которых в стриме уже нет, — законченные."""
+        current = None
+        for snap in thoughts:
+            row = self._thought_row(snap)
+            if row is None:
+                continue
+            text = thought_display_text(snap.text)
+            if text:
+                row.update_live(text, snap.seconds, snap.live)
+            if snap.live:
+                current = snap.attempt
+            else:
+                row.settle()
+        for row in self._streamed_thoughts:
+            if row.attempt != current:
+                row.settle()
+
+    def _thought_row(self, snap):
+        """Строка мысли попытки: есть — она; нет — новая в конце ленты.
+        Без флага или пустая мысль — новой нет (None)."""
         from gc_tui.widgets.thought_row import ThoughtRow
 
-        attempt = sink.attempt()
-        current = None
         for row in self._streamed_thoughts:
-            if row.attempt == attempt:
-                current = row
-            else:
-                # Новая попытка — прежние законченные, даже если новая
-                # (пока) без мысли.
-                row.settle()
-        think = thought_display_text(sink.snapshot()[0])
-        if attempt is None or not think or not self._thoughts_on():
-            return
-        state, _duration = sink.reasoning_state()
-        seconds = sink.reasoning_seconds() or 0.0
-        live = state == "thinking"
-        if current is not None:
-            current.update_live(think, seconds, live)
-            return
+            if row.attempt == snap.attempt:
+                return row
+        text = thought_display_text(snap.text)
+        if not text or not self._thoughts_on():
+            return None
         row = ThoughtRow(
-            text=think, live=live, attempt=attempt, seconds=seconds
+            text=text,
+            live=snap.live,
+            attempt=snap.attempt,
+            seconds=snap.seconds,
         )
         self._streamed_thoughts.append(row)
         self._trace_mount(row, scroll=True)
@@ -2882,6 +2921,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         for preview in (self._stream_block, self._stream_answer_row):
             if preview is not None and preview.parent is row.parent:
                 row.parent.move_child(preview, after=row)
+        return row
 
     def _settle_thoughts(self) -> None:
         """Конец хода (ответ, стоп, ошибка, отмена): строки мыслей остаются
@@ -4214,7 +4254,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not records:
             return
         actions = plan_sidecar_nested_actions(
-            records, root=self._current_cwd()
+            records, root=self._current_cwd(), injected=self._injected_fields()
         )
         apply_sidecar_nested_actions(
             actions,
@@ -6211,8 +6251,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         # но НЕ весь poll: footer/OSC/title/runner-логика/orphan/tail-события
         # без мутаций экрана продолжаются (F6 — runner жив, UI не тупеет целиком).
         _frozen = self._select_watchdog()
-        # Стрим с мыслью идущей попытки: строка мысли — после хвоста ленты.
-        thought_sink = None
         # Липкость к низу: детект ручного скролла + повторное прижатие.
         # F2: при freeze — не обновляем stick и не прижимаем (текст стоит на месте).
         if not _frozen:
@@ -6398,10 +6436,6 @@ class TraceScreen(TraceFollowMixin, Screen):
                 and (self._last_event_kind != "_finalized")
             )
             sink = getattr(self.app, "_stream_sink", None)
-            if _thinking_phase and sink is not None and not _frozen:
-                # Строки мыслей сверяются и с пустым стримом: новая попытка
-                # без мысли закрывает строки прежних.
-                thought_sink = sink
             # F3: при freeze не монтируем/не красим стрим-виджеты (mount/switch/
             # set_content дрожали бы экран под выделением). Контент догонит после MouseUp.
             if (
@@ -6484,12 +6518,16 @@ class TraceScreen(TraceFollowMixin, Screen):
         # вызова-владельца могла прийти в этом же хвосте.
         if not _frozen:
             self._sync_thoughts_flag()
-            self._poll_trace_tail()
-            if thought_sink is not None:
-                # После хвоста: строки прошлого шага, дочитанные в этом тике,
-                # встают раньше мысли новой попытки — строки мыслей не
-                # переставляются.
-                self._sync_live_thought(thought_sink)
+            # Мысли стрима сверяются каждый тик и в любой фазе: попытка,
+            # уложившаяся между тиками, и мысль короткого хода не теряются.
+            # Новая мысль встаёт перед первой записью хвоста, сделанной после
+            # начала её попытки, — записи прошлого шага выше, вызов своего
+            # шага ниже; строки мыслей не переставляются.
+            thoughts = self._take_thoughts()
+            self._poll_trace_tail(
+                before_record=partial(self._mount_thoughts_before, thoughts)
+            )
+            self._sync_thoughts(thoughts)
             if _indicator_mode in ("failed", "terminal"):
                 # Ход кончился, хвост дочитан: строки мыслей законченные.
                 self._settle_thoughts()
@@ -6571,8 +6609,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         probe = getattr(runner, "call_elapsed", None)
         return probe(call_id) if probe is not None else None
 
-    def _poll_trace_tail(self) -> None:
-        """Дочитать и отрисовать хвост записей активного треда."""
+    def _poll_trace_tail(
+        self, before_record: Callable[[dict], None] | None = None
+    ) -> None:
+        """Дочитать и отрисовать хвост записей активного треда;
+        ``before_record`` — как у `_render_records`."""
         if (
             self._store is None
             or self._active_task_id is None
@@ -6611,7 +6652,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._rebuild_from_store()
             return
         self._cursor = tail.next_cursor
-        self._render_records(tail.new_records, live=True)
+        self._render_records(
+            tail.new_records, live=True, before_record=before_record
+        )
         self._refresh_header()
 
     def _rebuild_from_store(self) -> None:
@@ -10059,7 +10102,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not detail or not isinstance(detail.get("call"), dict):
             return None, None
         return trace_events_from_nested_detail(
-            call_id, detail, root=self._current_cwd()
+            call_id,
+            detail,
+            root=self._current_cwd(),
+            injected=self._injected_fields(),
         )
 
     async def _fetch_skills(self) -> list[dict]:

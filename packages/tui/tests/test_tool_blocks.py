@@ -834,23 +834,23 @@ def test_command_file_verb(op, verb):
 def test_counts_text():
     assert counts_text(4, 2) == (
         (" (", "ink"),
-        ("+4", "ok"),
+        ("+4", "add"),
         (" ", "dim"),
-        ("−2", "error"),
+        ("−2", "del"),
         (")", "ink"),
     )
     assert counts_text(5, 0) == (
         (" (", "ink"),
-        ("+5", "ok"),
+        ("+5", "add"),
         (" ", "dim"),
-        ("−0", "error"),
+        ("−0", "del"),
         (")", "ink"),
     )
     assert counts_text(0, 0) == (
         (" (", "ink"),
-        ("+0", "ok"),
+        ("+0", "add"),
         (" ", "dim"),
-        ("−0", "error"),
+        ("−0", "del"),
         (")", "ink"),
     )
 

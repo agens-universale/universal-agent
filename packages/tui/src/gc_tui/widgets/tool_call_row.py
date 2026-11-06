@@ -57,6 +57,8 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from gc_tui.models import ResultOutcome
+from gc_tui.palette import DIFF_ADD_INK as _DIFF_ADD
+from gc_tui.palette import DIFF_DEL_INK as _DIFF_DEL
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
 from gc_tui.palette import INK as _INK
@@ -127,6 +129,8 @@ LOOK_STYLE: dict[str, str] = {
     "dim": _DIM,
     "ink": _INK,
     "muted": _MUTED,
+    "add": _DIFF_ADD,
+    "del": _DIFF_DEL,
 }
 
 

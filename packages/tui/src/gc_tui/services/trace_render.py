@@ -1243,6 +1243,7 @@ def merge_nested_readonly(
     mcp_servers: Iterable[str] = (),
     root: str | None = None,
     blocks: PreviewBlocks | None = None,
+    injected_fields: Iterable[str] = (),
 ) -> None:
     """Read-only домонтирование вложенного трейса субагентов из sidecar-records
     (превью). Паритет с MainScreen._merge_sidecar_nested: те же plan/apply,
@@ -1391,7 +1392,9 @@ def merge_nested_readonly(
         )
 
     apply_sidecar_nested_actions(
-        plan_sidecar_nested_actions(records, root=root),
+        plan_sidecar_nested_actions(
+            records, root=root, injected=frozenset(injected_fields)
+        ),
         mount_nested_tool=_tool,
         finish_nested_tool=_finish,
         mount_nested_prose=_prose,

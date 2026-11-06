@@ -101,13 +101,10 @@ class PreviewScreen(TraceFollowMixin, Screen[bool]):
             # корень из шапки превью: пути в подписях вызовов — от него
             "root": self._project_path or None,
             "blocks": self._blocks,
+            "injected_fields": self._injected_fields(),
         }
         calls = render_segments_readonly(
-            trace,
-            segments,
-            model_slots=self._model_slots,
-            injected_fields=self._injected_fields(),
-            **opts,
+            trace, segments, model_slots=self._model_slots, **opts
         )
         if records:
             merge_nested_readonly(

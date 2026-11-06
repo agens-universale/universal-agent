@@ -180,3 +180,40 @@ def test_clear_answer_keeps_thought_and_attempt():
     assert s.snapshot() == ("план", "")
     assert s.attempt() == attempt
     assert s.reasoning_seconds() == 2.0
+
+
+def test_take_thoughts_keeps_each_attempt_until_taken():
+    """Сброс не теряет мысль: законченная попытка ждёт ленту целиком, со
+    своим временем и моментом начала; идущая отдаётся и остаётся."""
+    from datetime import UTC, datetime
+
+    clk = {"t": 0.0}
+    walls = iter(datetime(2026, 1, 1, 0, 0, s, tzinfo=UTC) for s in (1, 2))
+    s = StreamSink(clock=lambda: clk["t"], wall=lambda: next(walls))
+    s.push("reset", "")
+    s.push("think", "первая")
+    clk["t"] = 2.0
+    s.push("reset", "")
+    s.push("think", "вторая")
+    first, second = s.take_thoughts()
+    assert (first.attempt, first.text, first.live) == ("a1", "первая", False)
+    assert first.seconds == 2.0
+    assert first.started_at.second == 1
+    assert (second.attempt, second.text, second.live) == ("a2", "вторая", True)
+    assert second.started_at.second == 2
+    assert [t.attempt for t in s.take_thoughts()] == ["a2"]
+
+
+def test_screen_reset_keeps_thought_and_discard_drops_it():
+    s = StreamSink()
+    s.push("reset", "")
+    s.push("think", "коротко")
+    s.reset()
+    assert [(t.text, t.live) for t in s.take_thoughts()] == [
+        ("коротко", False)
+    ]
+    s.push("reset", "")
+    s.push("think", "чужое")
+    s.reset()
+    s.discard_thoughts()
+    assert s.take_thoughts() == []
