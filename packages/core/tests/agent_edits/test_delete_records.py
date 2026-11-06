@@ -1,6 +1,7 @@
 import hashlib
 import subprocess
 
+import pytest
 from gc_core.agent_edits.delete_records import DeleteBudget, delete_record
 
 
@@ -82,10 +83,11 @@ def test_text_without_trailing_newline_marks_it():
     assert (rec.add, rec.del_) == (0, 2)
 
 
-def test_bom_file_delete_patch_applies_with_git(tmp_path):
+@pytest.mark.parametrize("boms", [1, 2])
+def test_bom_file_delete_patch_applies_with_git(tmp_path, boms):
     """Копия патча удаления файла с BOM применяется: BOM сохранён в первой
-    строке удаления, как в байтах файла, а счётчики прежние."""
-    before = b"\xef\xbb\xbfx\ny\n"
+    строке удаления, как в байтах файла (и двойной), а счётчики прежние."""
+    before = b"\xef\xbb\xbf" * boms + b"x\ny\n"
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "a.txt").write_bytes(before)
     rec = _rec("a.txt", before, budget=DeleteBudget(100))

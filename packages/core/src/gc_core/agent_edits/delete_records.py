@@ -19,6 +19,7 @@ from gc_core.agent_edits.journal import EditRecord
 from gc_core.utils.file_text import (
     BINARY_SAMPLE_BYTES,
     classify_content_from_sample,
+    detect_unicode_bom,
     sha256_hex_of_bytes,
 )
 
@@ -54,21 +55,19 @@ class DeleteBudget:
         self._left += size
 
 
-_UTF8_BOM = b"\xef\xbb\xbf"
-
-
 def deletion_text(before: bytes) -> str | None:
     """Текст «до» для строк удаления; бинарь или недекодируемый — ``None``.
 
-    Декодер срезает BOM UTF-8, а ``git apply`` сверяет строки удаления с
-    байтами файла: BOM возвращается в начало первой строки, иначе копия
-    патча не применяется. Счётчики и показ он не меняет (нулевая ширина).
+    Декодер срезает ровно один BOM UTF-8, а ``git apply`` сверяет строки
+    удаления с байтами файла: BOM возвращается в начало первой строки, иначе
+    копия патча не применяется. Счётчики и показ он не меняет (нулевая
+    ширина).
     """
     if is_binary_bytes(before):
         return None
     text = decode_edit_text(before)
-    if text is not None and before.startswith(_UTF8_BOM):
-        return text if text.startswith("\ufeff") else "\ufeff" + text
+    if text is not None and detect_unicode_bom(before) == "utf-8-sig":
+        return "\ufeff" + text
     return text
 
 
@@ -87,7 +86,8 @@ def _deleted_text(
 
 
 def _git_delete_patch(key: str, mode: int | None, text: str, diff: str) -> str:
-    """Удаление в форме ``git diff``: копия строки применяется ``git apply``.
+    """Удаление в форме ``git diff``: копия файла в UTF-8 применяется
+    ``git apply`` (строки — декодированный текст: cp1251, UTF-16 — нет).
 
     Пустые заголовки ``--- ``/``+++ `` от ``build_diff`` — первые две строки
     потока (см. его докстринг) — заменяются именами git; у пустого файла
