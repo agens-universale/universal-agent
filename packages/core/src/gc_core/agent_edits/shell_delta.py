@@ -57,6 +57,7 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 import stat
 import time
@@ -147,9 +148,13 @@ _REGULAR_FILE_MODES = {"100644": 0o644, "100755": 0o755}
 _UNMERGED_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 
 # Темы журнала HEAD у коммитов, созданных самой командой (гейт
-# ``_own_commits``): ``commit``, ``commit (initial)``, ``commit (merge)``,
-# ``cherry-pick``, ``revert``. Чужие коммиты слияния отсекает время.
-_OWN_COMMIT_REFLOG = ("commit", "cherry-pick", "revert")
+# ``_own_commits``). Двоеточие сразу после действия: ``commit (amend):`` и
+# ``commit (merge):`` сюда не входят.
+_OWN_COMMIT_REFLOG = ("commit: ", "cherry-pick: ", "revert: ")
+
+# Сколько записей журнала HEAD гейт просматривает: команда с бо́льшим числом
+# сдвигов своими коммитами не признаётся (как до гейта).
+_REFLOG_WALK_LIMIT = 256
 
 # Суммарный кап карманного снимка «до»: байты кандидатов держатся в памяти на
 # одну команду. Кандидатов две группы — известные журналу (обычно единицы) и
@@ -340,6 +345,37 @@ class _PocketEntry:
     before_bytes: bytes
     before_signature: tuple[int, int]
     mode: int
+
+
+def _journal_proves_own_commits(
+    entries: list[git_ops.ReflogEntry], before: str, after: str, start: int
+) -> bool:
+    """Журнал HEAD от ``after`` вниз до ``before`` — только свои коммиты.
+
+    Записи без сдвига HEAD (``stash``, checkout той же ветки, ``switch -c``)
+    пропускаются. Каждый сдвиг — коммит (``_OWN_COMMIT_REFLOG``) с одним
+    родителем, равным ревизии под ним, и временем коммиттера не раньше
+    начала команды ``start``. Цепочка без слияний сама доказывает, что
+    ``before`` — предок ``after``; запись, сделанная после снимка HEAD
+    (параллельный коммит), лежит выше ``after`` и не учитывается.
+    """
+    revs = [entry.rev for entry in entries]
+    if after not in revs:
+        return False
+    walk = entries[revs.index(after) :]
+    for entry, below in itertools.pairwise(walk):
+        if entry.rev == below.rev:
+            continue
+        own = (
+            entry.subject.startswith(_OWN_COMMIT_REFLOG)
+            and entry.parents == (below.rev,)
+            and entry.time >= start
+        )
+        if not own:
+            return False
+        if below.rev == before:
+            return True
+    return False
 
 
 class ShellDelta:
@@ -760,14 +796,11 @@ class ShellDelta:
     def _own_commits(self) -> bool:
         """HEAD за команду сдвинули только коммиты ЭТОЙ команды (гейт §5.3a).
 
-        Одновременно: HEAD сдвинулся, HEAD до команды — предок нового, у
-        всех коммитов между ними время коммиттера не раньше начала команды,
-        и журнал HEAD показывает ровно эти коммиты поверх старого HEAD.
-        pull, merge и checkout ветки-потомка приносят коммиты со старыми
-        датами, а со свежими (та же секунда, спешащие часы) — оставляют в
-        журнале запись перехода, не коммита; у reset, amend, rebase и
-        checkout чужой ветки старый HEAD не предок. Журнал выключен —
-        не свои. Считается раз на команду.
+        HEAD сдвинулся, и журнал HEAD от нового HEAD вниз до старого —
+        цепочка коммитов команды (``_journal_proves_own_commits``): pull,
+        merge, checkout, reset, rebase и amend оставляют в журнале запись
+        другого вида, даже если даты коммитов свежие. Журнал выключен — не
+        свои. Считается раз на команду.
         """
         if self._own_commits_memo is None:
             self._own_commits_memo = self._check_own_commits()
@@ -777,25 +810,11 @@ class ShellDelta:
         before, after = self._head_before, self._head_after
         if before is None or after is None or before == after:
             return False
-        if not git_ops.is_ancestor(self._launch_root, before, after):
+        entries = git_ops.head_reflog(self._launch_root, _REFLOG_WALK_LIMIT)
+        if entries is None:
             return False
-        times = git_ops.commit_times(self._launch_root, before, after)
         start = self._before_ts_ns // 1_000_000_000
-        if times is None or not all(ts >= start for ts in times):
-            return False
-        return self._journal_shows_commits(before, len(times))
-
-    def _journal_shows_commits(self, before: str, count: int) -> bool:
-        """Журнал HEAD: ``count`` верхних записей — коммиты, под ними —
-        ``before``. Переход на чужую ветку (checkout, pull, merge) — одна
-        запись другого вида, даже если даты коммитов свежие."""
-        entries = git_ops.head_reflog(self._launch_root, count + 1)
-        if entries is None or len(entries) != count + 1:
-            return False
-        *moves, (prior, _subject) = entries
-        return prior == before and all(
-            subject.startswith(_OWN_COMMIT_REFLOG) for _rev, subject in moves
-        )
+        return _journal_proves_own_commits(entries, before, after, start)
 
     def _head_unmoved(self) -> bool:
         """HEAD за команду не сдвинулся — условие точной базы (Р32, §5.3)."""

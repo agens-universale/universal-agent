@@ -1141,19 +1141,13 @@ def test_blobs_filtered_at_honours_autocrlf(tmp_git_repo):
     }
 
 
-def test_is_ancestor_and_commit_times(two_commits):
-    root, first, second = two_commits
-    assert git_ops.is_ancestor(str(root), first, second) is True
-    assert git_ops.is_ancestor(str(root), second, first) is False
-    assert len(git_ops.commit_times(str(root), first, second)) == 1
-    assert git_ops.commit_times(str(root), "nope", second) is None
-
-
 def test_head_reflog_lists_newest_moves_first(two_commits):
     root, first, second = two_commits
-    entries = git_ops.head_reflog(str(root), 2)
-    assert [rev for rev, _subject in entries] == [second, first]
-    assert entries[0][1].startswith("commit")
+    newest, older = git_ops.head_reflog(str(root), 2)
+    assert (newest.rev, newest.parents) == (second, (first,))
+    assert newest.subject.startswith("commit: ")
+    assert newest.time > 0
+    assert older.rev == first
 
 
 def test_head_reflog_without_journal_is_none(two_commits):

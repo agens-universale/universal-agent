@@ -2251,6 +2251,59 @@ def test_foreign_fresh_commits_moved_in_by_command_record_nothing(
     assert _records(threads_dir) == []
 
 
+def test_amended_merge_of_fresh_foreign_commit_records_nothing(repo):
+    """Слияние свежего чужого коммита, затем amend: запись amend не
+    подменяет собой чужой коммит второго родителя — путей нет."""
+    launch_root, threads_dir = repo
+    _git(launch_root, "checkout", "-qb", "other")
+    (launch_root / "o.txt").write_bytes(b"o\n")
+    _git(launch_root, "add", "o.txt")
+    _git_in_the_future(launch_root, "commit", "-qm", "other")
+    _git(launch_root, "checkout", "-q", "main")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        _git_script(
+            ("git", "merge", "-q", "--no-commit", "--no-ff", "other"),
+            ("git", "commit", "-qm", "m"),
+            ("git", "commit", "-q", "--amend", "-m", "m2"),
+        ),
+    )
+    delta.after_and_record()
+
+    assert "o.txt" not in {r.path for r in _records(threads_dir)}
+
+
+@pytest.mark.parametrize(
+    "after_commit",
+    [
+        ("git", "switch", "-qc", "feat"),
+        ("git", "checkout", "-q", "main"),
+        ("git", "stash", "-q"),
+    ],
+)
+def test_own_commit_survives_head_journal_noops(repo, after_commit):
+    """Записи журнала без сдвига HEAD (новая ветка на месте, checkout той же
+    ветки, stash) не мешают признать коммит своим."""
+    launch_root, threads_dir = repo
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "open('tracked.txt','wb').write(b'line1\\nline2\\nline3\\n')\n"
+        "open('s.txt','wb').write(b's\\n')\n"
+        + _git_script(
+            ("git", "add", "s.txt"),
+            ("git", "commit", "-qm", "edit", "tracked.txt"),
+            after_commit,
+        ),
+    )
+    delta.after_and_record()
+
+    by_path = {r.path: r for r in _records(threads_dir)}
+    assert by_path["tracked.txt"].add == 1
+    _assert_commit_mark(launch_root, "tracked.txt")
+
+
 def test_own_commit_without_head_journal_records_nothing(repo):
     """Журнал HEAD выключен — свои коммиты не доказать: команда со сдвигом
     HEAD остаётся без закоммиченных путей, как до гейта."""

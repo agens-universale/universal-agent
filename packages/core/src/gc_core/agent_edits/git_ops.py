@@ -1008,43 +1008,43 @@ def _config_converts_eol(launch_root: str) -> bool:
     return False
 
 
-def is_ancestor(launch_root: str, older: str, newer: str) -> bool:
-    """``older`` — предок ``newer`` (``merge-base --is-ancestor``).
+@dataclass(frozen=True)
+class ReflogEntry:
+    """Запись журнала HEAD: ревизия после сдвига, её родители, время
+    коммиттера (секунды) и тема записи (``commit: …``, ``checkout: …``)."""
 
-    Отказ git — ``False``.
-    """
-    code, _out = run_git(
-        launch_root, ["merge-base", "--is-ancestor", older, newer]
-    )
-    return code == 0
-
-
-def commit_times(launch_root: str, since: str, until: str) -> list[int] | None:
-    """Секунды коммиттера коммитов ``since..until``; отказ git — ``None``."""
-    code, out = run_git(
-        launch_root, ["log", "--format=%ct", f"{since}..{until}"]
-    )
-    if code != 0:
-        return None
-    return [int(line) for line in _decode(out).split() if line.isdigit()]
+    rev: str
+    parents: tuple[str, ...]
+    time: int
+    subject: str
 
 
-def head_reflog(launch_root: str, count: int) -> list[tuple[str, str]] | None:
-    """Последние ``count`` записей журнала HEAD: (ревизия после, тема).
+def head_reflog(launch_root: str, count: int) -> list[ReflogEntry] | None:
+    """Последние ``count`` записей журнала HEAD, новые первыми.
 
-    Новые первыми. Журнала нет или отказ git — ``None``.
+    Журнала нет или отказ git — ``None``.
     """
     code, out = run_git(
         launch_root,
-        ["log", "-g", "--format=%H%x00%gs", "-n", str(count), "HEAD"],
+        [
+            "log",
+            "-g",
+            "--format=%H%x00%P%x00%ct%x00%gs",
+            "-n",
+            str(count),
+            "HEAD",
+        ],
     )
     if code != 0:
         return None
-    entries = [
-        tuple(line.split("\0", 1))
-        for line in _decode(out).splitlines()
-        if "\0" in line
-    ]
+    entries = []
+    for line in _decode(out).splitlines():
+        fields = line.split("\0", 3)
+        if len(fields) == 4 and fields[2].isdigit():
+            rev, parents, time, subject = fields
+            entries.append(
+                ReflogEntry(rev, tuple(parents.split()), int(time), subject)
+            )
     return entries or None
 
 
