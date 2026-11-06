@@ -177,7 +177,7 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     try:
         # НЕ через to_thread: сессии ключуются по id(loop) и живут на ЭТОМ
         # loop — из чужого потока их не видно и закрыть нечем.
-        await _STREAM_SESSION_MANAGER.aclose_all()
+        await _STREAM_SESSION_MANAGER.aclose_all(in_owner_task=True)
     except asyncio.CancelledError as exc:
         cancelled = cancelled or exc
     except Exception:

@@ -8,6 +8,9 @@ from gc_core import processing_responses as pr
 from gc_core import run_summary_coordinator as rsc
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.message_policy import nudges as nudge_mod
+from gc_core.message_policy.user_message_policy import (
+    wrap_technical_user_content,
+)
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.summarize import compaction
 from gc_testkit import run_coro
@@ -23,6 +26,7 @@ def _state():
     s.max_steps = 100
     s.current_user_intent = []
     s.user_intent_log = []
+    s.user_turn_seq = 0
     s.flush_current_user_intent = lambda: None
     return s
 
@@ -46,7 +50,7 @@ def test_rejected_compaction_preserves_original_context_overflow(monkeypatch):
     )
     state, ctx = _state(), _run_ctx({"logging.save_logs": False})
 
-    async def compact():
+    async def compact(_messages, _mode):
         await compaction.arun_summary_compaction(
             ctx=ctx, state=state, trigger_reason="overflow", is_cli_mode=False
         )
@@ -99,7 +103,7 @@ def test_context_overflow_triggers_compaction_and_retries(monkeypatch):
             [{"role": "user", "content": "сделай", "id": "u1"}],
             _state(),
             _run_ctx(),
-            force_compact_hook=lambda: calls.__setitem__(
+            force_compact_hook=lambda *_args, **_kwargs: calls.__setitem__(
                 "compact", calls["compact"] + 1
             ),
         )
@@ -140,7 +144,7 @@ def test_overflow_retry_collects_notices_once(monkeypatch):
             [{"role": "user", "content": "сделай", "id": "u1"}],
             _state(),
             _run_ctx(),
-            force_compact_hook=lambda: None,
+            force_compact_hook=lambda *_args, **_kwargs: None,
             session_meta={},
         )
     )
@@ -266,7 +270,7 @@ def test_overflow_retry_does_not_glue_old_batch_onto_summary(monkeypatch):
             {"role": "assistant", "type": "message", "content": "готово"}
         ], "resp_2"
 
-    def _compact():
+    def _compact(*_args, **_kwargs):
         state.messages = [{"role": "user", "content": "SUMMARY", "id": "sum"}]
         return True
 
@@ -521,7 +525,7 @@ def test_force_compact_applied_then_failed_does_not_republish_held_output(
             "length of 131072 tokens. Please reduce the number of tokens"
         )
 
-    async def _compact():
+    async def _compact(*_args, **_kwargs):
         state.messages = [{"role": "user", "content": "SUMMARY", "id": "sum"}]
         raise RuntimeError("trace failed after summary")
 
@@ -643,6 +647,148 @@ def test_check_mode_bounce_persists_held_tool_output(monkeypatch):
 
     assert result == "готово"
     assert [message.get("id") for message in persisted].count("fco") == 1
+
+
+_OVERFLOW = (
+    "Requested token count exceeds the model's maximum context "
+    "length of 131072 tokens. Please reduce the number of tokens"
+)
+
+_TOOL_IMAGE = {
+    "id": "3f9a1c27b0e4d5a6",
+    "kind": "image",
+    "mime": "image/png",
+    "origin": "tool",
+    "label": "Image from fs_view_image",
+    "path": "/threads/images/shot.png",
+}
+
+
+def _overflow_coordinator(monkeypatch, state, kept):
+    """Аварийная сводка подменяется: история становится одной сводкой."""
+
+    async def _compact(**kwargs):
+        kept.append([m.get("id") for m in kwargs.get("kept_messages") or []])
+        kwargs["state"].messages = [
+            {"role": "user", "content": "SUMMARY", "id": "sum"}
+        ]
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", _compact)
+    state.backend_api_mode = "chat_completions"
+    return RunSummaryCoordinator(
+        ctx=_run_ctx(),
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+
+
+def test_overflow_keeps_tool_image_and_drops_output(monkeypatch):
+    """Аварийная сводка оставляет картинку тула и не оставляет ответ без вызова."""
+    output = {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": "тело",
+        "id": "fco",
+    }
+    image = {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            "Image from fs_view_image: /work/shot.png"
+        ),
+        "id": "m_i",
+        "attachments": [_TOOL_IMAGE],
+    }
+    seen = []
+    kept = []
+    state = _state()
+    state.messages = [
+        {
+            "type": "function_call",
+            "call_id": "c1",
+            "name": "fs_view_image",
+            "arguments": "{}",
+            "id": "fc",
+        }
+    ]
+
+    async def _fake_main(messages, _st, _ctx):
+        seen.append([m.get("id") for m in messages])
+        if len(seen) == 1:
+            raise ValueError(_OVERFLOW)
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp_2"
+
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", _fake_main)
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_main)
+    coord = _overflow_coordinator(monkeypatch, state, kept)
+
+    result = run_coro(
+        pr.arun_agent(
+            [output, image],
+            state,
+            _run_ctx(),
+            force_compact_hook=coord.aforce_compact_once,
+        )
+    )
+
+    assert result == "готово"
+    assert seen[1] == ["sum", "m_i"]
+    assert "fco" not in seen[1]
+    assert kept == [["m_i"]]
+
+
+def test_overflow_keeps_user_image(monkeypatch):
+    """Картинка свежей реплики переживает аварийную сводку, старая история — нет."""
+    user = {
+        "role": "user",
+        "content": "посмотри",
+        "id": "u_img",
+        "attachments": [
+            {
+                "id": "aabbccddeeff0011",
+                "kind": "image",
+                "mime": "image/png",
+                "origin": "user",
+                "label": "скрин",
+                "path": "/threads/images/user.png",
+            }
+        ],
+    }
+    seen = []
+    kept = []
+    state = _state()
+    state.messages = [{"role": "user", "content": "давно", "id": "old"}]
+
+    async def _fake_main(messages, _st, _ctx):
+        seen.append([m.get("id") for m in messages])
+        if len(seen) == 1:
+            raise ValueError(_OVERFLOW)
+        return [
+            {"role": "assistant", "type": "message", "content": "готово"}
+        ], "resp_2"
+
+    monkeypatch.setattr(pr, "aprocess_user_ask", _fake_main)
+    coord = _overflow_coordinator(monkeypatch, state, kept)
+
+    result = run_coro(
+        pr.arun_agent(
+            [user],
+            state,
+            _run_ctx(),
+            force_compact_hook=coord.aforce_compact_once,
+        )
+    )
+
+    assert result == "готово"
+    assert seen[1] == ["sum", "u_img"]
+    assert seen[1].count("old") == 0
+    assert kept == [["u_img"]]
+    resumed = next(m for m in state.messages if m.get("id") == "u_img")
+    assert resumed["attachments"][0]["origin"] == "user"
 
 
 def test_non_overflow_error_still_propagates(monkeypatch):
