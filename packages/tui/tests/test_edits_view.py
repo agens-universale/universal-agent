@@ -2454,16 +2454,6 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
 
     ws = _Workspace(tmp_path, git=True)
 
-    def commit_at(msg: str, when: str) -> None:
-        env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
-        subprocess.run(
-            ["git", "commit", "-m", msg],
-            cwd=str(ws.root),
-            check=True,
-            capture_output=True,
-            env=env,
-        )
-
     # a.py: коммит, задевающий путь, случится ПОСЛЕ первой записи хода — предупреждение есть.
     ws.write("a.py", "orig\n")
     subprocess.run(
@@ -2472,7 +2462,7 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
         check=True,
         capture_output=True,
     )
-    commit_at("seed a", before_turn)
+    _commit_at(ws.root, "seed a", before_turn)
     ws.session_base("a.py", "orig\n")
     ws.turn_base("a.py", "orig\n", "t1")
 
@@ -2485,7 +2475,7 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
         check=True,
         capture_output=True,
     )
-    commit_at("seed c", before_turn)
+    _commit_at(ws.root, "seed c", before_turn)
     ws.session_base("c.py", "c0\n")
     ws.write("c.py", "c1\n")
     subprocess.run(
@@ -2494,7 +2484,7 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
         check=True,
         capture_output=True,
     )
-    commit_at("commit before turn", before_turn)
+    _commit_at(ws.root, "commit before turn", before_turn)
     ws.turn_base("c.py", "c1\n", "t1")
 
     # b.py: принятие случится ПОСЛЕ первой записи хода.
@@ -2514,7 +2504,7 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
         check=True,
         capture_output=True,
     )
-    commit_at("commit inside turn", after_turn)
+    _commit_at(ws.root, "commit inside turn", after_turn)
     ws.write("b.py", "b2\n")
     ws.view.accept(["b.py"])
 
@@ -3251,6 +3241,122 @@ def test_resetting_many_accepted_committed_paths_costs_a_constant_number_of_git_
     assert len(calls) <= 8, [c[:4] for c in calls]
 
 
+def test_turn_warns_when_created_file_was_committed_after_start(tmp_path):
+    """Созданный в ходе файл, закоммиченный позже в том же ходе: откат
+    «Хода» по-прежнему удаляет его, но предупреждает о коммите — как у
+    правленого. Пустой файл тоже (ступени HEAD у него нет: HEAD = пустота).
+    Незакоммиченный созданный — удаление без предупреждений."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("seed.txt", "s\n")
+    _git_run(ws.root, "add", "--", "seed.txt")
+    _commit_at(ws.root, "seed", "2020-01-01T00:00:00")
+    turn_start_ts = datetime.fromisoformat("2020-06-01T00:00:00").timestamp()
+    texts = {"notes.txt": "n\n", "empty.txt": "", "draft.txt": "d\n"}
+    for rel, text in texts.items():
+        ws.created_mark(rel)
+        ws.journal.append(
+            _rec(rel, ts=turn_start_ts, op="create", add=1, del_=0)
+        )
+        ws.write(rel, text)
+    _git_run(ws.root, "add", "--", "notes.txt", "empty.txt")
+    _commit_at(ws.root, "commit inside turn", "2021-01-01T00:00:00")
+
+    targets = ws.view.revert_targets(SOURCE_TURN, list(texts))
+
+    assert [t.kind for t in targets] == ["delete"] * 3
+    notes, empty, draft = targets
+    for target in (notes, empty):
+        assert any(
+            "заденет коммит" in w and "начала хода" in w for w in target.warns
+        )
+    assert draft.warns == ()
+
+
+def _created_in_turn(ws, rel: str, *, commit_when: str | None) -> None:
+    """Путь с отметкой создания и записью создания в ходе (начало хода —
+    2020-06-01); ``commit_when`` — дата коммита пути, ``None`` — без него.
+    Отметка ставится при seed-коммите, как у пути, созданного раньше."""
+    ws.write("seed.txt", "s\n")
+    _git_run(ws.root, "add", "--", "seed.txt")
+    _commit_at(ws.root, "seed", "2020-01-01T00:00:00")
+    ws.created_mark(rel)
+    ws.write(rel, "n\n")
+    if commit_when is not None:
+        _git_run(ws.root, "add", "--", rel)
+        _commit_at(ws.root, "commit", commit_when)
+    turn_start_ts = datetime.fromisoformat("2020-06-01T00:00:00").timestamp()
+    ws.journal.append(_rec(rel, ts=turn_start_ts, op="create", add=1, del_=0))
+
+
+def test_turn_does_not_warn_on_commit_of_created_path_before_turn(tmp_path):
+    """Отметка создания — самая ранняя в сессии: путь создан в прошлом ходе
+    и закоммичен между ходами, в этом ходе создан заново. Коммит был ДО
+    начала хода — предупреждать не о чем."""
+    ws = _Workspace(tmp_path, git=True)
+    _created_in_turn(ws, "notes.txt", commit_when="2020-03-01T00:00:00")
+
+    [target] = ws.view.revert_targets(SOURCE_TURN, ["notes.txt"])
+
+    assert (target.kind, target.warns) == ("delete", ())
+
+
+def test_turn_warns_on_commit_of_created_path_when_batch_failed(
+    tmp_path, monkeypatch
+):
+    """Пакет закоммиченных не посчитан (занятый индекс снимков) — созданный
+    путь проверяется поштучно и предупреждение не теряется, даже если факты
+    git прогреты под прежним HEAD."""
+    ws = _Workspace(tmp_path, git=True)
+    _created_in_turn(ws, "notes.txt", commit_when="2020-03-01T00:00:00")
+    [before] = ws.view.revert_targets(SOURCE_TURN, ["notes.txt"])
+    assert before.warns == ()  # коммит до хода; время в кэше под этим HEAD
+    ws.write("notes.txt", "n2\n")
+    _git_run(ws.root, "add", "--", "notes.txt")
+    _commit_at(ws.root, "commit inside turn", "2021-01-01T00:00:00")
+    ws.view.invalidate()
+    monkeypatch.setattr(ws.view, "_prepare_head_steps", lambda *_a: None)
+
+    [target] = ws.view.revert_targets(SOURCE_TURN, ["notes.txt"])
+
+    assert target.kind == "delete"
+    assert any("заденет коммит" in w for w in target.warns)
+
+
+def test_turn_warns_when_commit_time_is_unknown(tmp_path, monkeypatch):
+    """Коммит пути после начала хода известен, а время не прочиталось —
+    предупреждение есть: лишнее дешевле пропущенного."""
+    ws = _Workspace(tmp_path, git=True)
+    _created_in_turn(ws, "notes.txt", commit_when="2021-01-01T00:00:00")
+    monkeypatch.setattr(
+        ws.view._ladder_facts, "head_commit_ts", lambda _rel: None
+    )
+
+    [target] = ws.view.revert_targets(SOURCE_TURN, ["notes.txt"])
+
+    assert any("заденет коммит" in w for w in target.warns)
+
+
+def test_turn_warns_on_commit_in_the_same_second_as_turn_start(tmp_path):
+    """``%ct`` — целые секунды, время записи хода — дробное: коммит той же
+    секунды, что первая правка хода, — тоже после начала хода."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("a.py", "orig\n")
+    _git_run(ws.root, "add", "--", "a.py")
+    _commit_at(ws.root, "seed", "2020-01-01T00:00:00")
+    ws.session_base("a.py", "orig\n")
+    ws.turn_base("a.py", "orig\n", "t1")
+    commit_dt = "2020-06-01T00:00:00"
+    commit_ts = datetime.fromisoformat(commit_dt).timestamp()
+    ws.journal.append(_rec("a.py", turn="t1", ts=commit_ts + 0.5))
+    ws.write("a.py", "orig\nagent\n")
+    _git_run(ws.root, "add", "--", "a.py")
+    _commit_at(ws.root, "commit inside turn", commit_dt)
+
+    [target] = ws.view.revert_targets(SOURCE_TURN, ["a.py"])
+
+    assert any("заденет коммит" in w for w in target.warns)
+
+
 def test_turn_revert_targets_survive_a_busy_snapshot_index(
     tmp_path, monkeypatch
 ):
@@ -3638,6 +3744,19 @@ def test_view_after_a_commit_asks_git_status_only_about_journal_paths(
 def _git_run(root: Path, *args: str) -> None:
     subprocess.run(
         ["git", *args], cwd=str(root), check=True, capture_output=True
+    )
+
+
+def _commit_at(root: Path, msg: str, when: str) -> None:
+    """Коммит с явными датами автора и коммиттера: развести коммиты по
+    секундам ``%ct`` без сна в тесте."""
+    env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
+    subprocess.run(
+        ["git", "commit", "-m", msg],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        env=env,
     )
 
 

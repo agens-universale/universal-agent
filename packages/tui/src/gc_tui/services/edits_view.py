@@ -320,6 +320,13 @@ def _records_for_path(
     )
 
 
+def _commit_warning(ref: Optional[str]) -> str:
+    """Предупреждение «Хода» о коммите после начала хода."""
+    if ref:
+        return f"заденет коммит {ref}, сделанный после начала хода"
+    return "заденет коммит, сделанный после начала хода"
+
+
 def _format_hhmm(ts: float) -> str:
     """Момент как «часы:минуты» локального времени — формат подписей §4.4 спеки."""
     return f"{datetime.fromtimestamp(ts):%H:%M}"
@@ -917,14 +924,14 @@ class EditsView:
         """Куда вернёт `r` каждый путь — превью словами, до самого отката (§4.4 спеки).
 
         Источник задаёт форму цели (Р8): «Сессия» идёт по лестнице отсчёта
-        (``accepted``/``head``/``session``/``delete``), «Ход» — всегда к
-        началу хода (``turn``), но с предупреждениями о ступенях, возникших
-        ПОСЛЕ начала хода (принятие или коммит командой — единственные
-        реальные случаи, принятие во время прогона отклонено). Путь без
-        ступени и без точного снимка (только счётная база — контракт §12:
-        она НИКОГДА не доезжает до отката) и путь, разобранный в «Сессии»
-        (отменять нечего — §4.2), приходят как ``kind="skip"`` у ОБОИХ
-        источников.
+        (``accepted``/``head``/``session``/``delete``), «Ход» — к началу хода
+        (``turn``; созданный в ходе путь — ``delete``), с предупреждениями о
+        ступенях, возникших ПОСЛЕ начала хода (принятие или коммит командой —
+        единственные реальные случаи, принятие во время прогона отклонено).
+        Путь без ступени и без точного снимка (только счётная база — контракт
+        §12: она НИКОГДА не доезжает до отката) и путь, разобранный в
+        «Сессии» (отменять нечего — §4.2), приходят как ``kind="skip"`` у
+        ОБОИХ источников.
         """
         view = self.session_view(source)
         active_by_path = {row.entry.path: row.entry for row in view.active}
@@ -1007,10 +1014,12 @@ class EditsView:
         turn_start_ts: Optional[float],
         committed: Optional[set],
     ) -> RevertTarget:
-        """Цель «Хода» — всегда начало хода; предупреждения о более поздних ступенях."""
-        if entry.kind == "created":
-            return RevertTarget(key, "delete", TARGET_DELETE_CREATED, None, ())
+        """Цель «Хода» — начало хода; предупреждения о поздних ступенях.
 
+        Созданный в ходе файл удаляется, но с теми же предупреждениями, что
+        у правленого: закоммиченный позже в том же ходе (запись создания
+        одна, отметки коммита нет) иначе стирался бы молча.
+        """
         warns: List[str] = []
         try:
             accepted = self._store.accepted_state(key)
@@ -1031,27 +1040,77 @@ class EditsView:
             )
 
         if head_rev is not None and turn_start_ts is not None:
-            try:
-                head_step = self._head_step(key, head_rev, committed)
-            except OSError:  # TimeoutError замка — подкласс OSError
-                # Та же деградация, что у снятия принятия: превью без
-                # предупреждения о коммите беднее правды, но экран на `r` жив.
-                _logger.warning(_MSG_HEAD_STEP_UNKNOWN, key, exc_info=True)
-                head_step = None
-            if head_step is not None:
-                rel = None if Path(key).is_absolute() else key
-                commit_ts = (
-                    self._ladder_facts.head_commit_ts(rel) if rel else None
-                )
-                if commit_ts is not None and commit_ts >= turn_start_ts:
-                    ref = head_step.commit_ref
-                    warns.append(
-                        f"заденет коммит {ref}, сделанный после начала хода"
-                        if ref
-                        else "заденет коммит, сделанный после начала хода"
-                    )
+            commit_warn = self._turn_commit_warning(
+                key, entry, head_rev, turn_start_ts, committed
+            )
+            if commit_warn is not None:
+                warns.append(commit_warn)
 
+        if entry.kind == "created":
+            return RevertTarget(
+                key, "delete", TARGET_DELETE_CREATED, None, tuple(warns)
+            )
         return RevertTarget(key, "turn", TARGET_TURN_START, None, tuple(warns))
+
+    def _turn_commit_warning(
+        self,
+        key: str,
+        entry: FileEntry,
+        head_rev: str,
+        turn_start_ts: float,
+        committed: Optional[set],
+    ) -> Optional[str]:
+        """«Заденет коммит, сделанный после начала хода» — или ``None``.
+
+        Сначала «был ли коммит пути» (``_turn_commit_ref``), потом одно для
+        всех правило времени: последний коммит пути не раньше начала хода.
+        ``%ct`` — целые секунды, поэтому начало хода округляется вниз: коммит
+        той же секунды, что первая правка, считается сделанным после начала
+        (коммит той же секунды ДО правки даст лишнее предупреждение — дешевле
+        пропущенного, за которым молчаливое удаление). По той же причине
+        коммит есть, а время не прочиталось — предупреждаем. Не покрыто:
+        коммит с датой коммиттера из прошлого (подделанная, перенесённая
+        cherry-pick) правило времени пропустит.
+        """
+        if Path(key).is_absolute():
+            return None
+        try:
+            found, ref = self._turn_commit_ref(key, entry, head_rev, committed)
+        except OSError:  # TimeoutError замка — подкласс OSError
+            # Та же деградация, что у снятия принятия: превью без
+            # предупреждения о коммите беднее правды, но экран на `r` жив.
+            _logger.warning(_MSG_HEAD_STEP_UNKNOWN, key, exc_info=True)
+            return None
+        if not found:
+            return None
+        commit_ts = self._ladder_facts.head_commit_ts(key)
+        if commit_ts is not None and commit_ts < int(turn_start_ts):
+            return None
+        return _commit_warning(ref)
+
+    def _turn_commit_ref(
+        self,
+        key: str,
+        entry: FileEntry,
+        head_rev: str,
+        committed: Optional[set],
+    ) -> Tuple[bool, Optional[str]]:
+        """``(коммит коснулся пути, ref)`` для предупреждения «Хода».
+
+        Созданный путь — прямой факт коммита после отметки создания (тот же,
+        что у «Сессии»): ступень лестницы у него не годится — пустой файл
+        и фильтр git её не дают. Пакет не посчитан (``committed is None`` —
+        занятый индекс) — запрос по одному пути (``_committed_for_path``).
+        Правленый — ступень HEAD.
+        """
+        if entry.kind == "created":
+            if key not in self._committed_for_path(key, head_rev, committed):
+                return False, None
+            return True, self._ladder_facts.head_ref(key)
+        head_step = self._head_step(key, head_rev, committed)
+        if head_step is None:
+            return False, None
+        return True, head_step.commit_ref
 
     def reset_targets(self, path_keys: Sequence[str]) -> List[ResetTarget]:
         """Что снятие принятия (`u`/`Ctrl+U`) сделает с каждым путём — до
@@ -2032,6 +2091,23 @@ class EditsView:
             for e in entries
         ]
 
+    def _committed_for_path(
+        self, rel: str, head_rev: str, committed: Optional[set]
+    ) -> set:
+        """Закоммиченные пути для вопроса об одном пути — общий запасной путь
+        ``_head_step`` и предупреждения «Хода».
+
+        ``committed`` — множество, уже посчитанное батчем; ``None`` — батч из
+        одного пути (при неизменившемся HEAD git не зовётся вовсе). Факты git
+        лестницы переводятся на ``head_rev`` в обоих случаях: батч мог упасть
+        до своего ``prime``, и кэш ответил бы за прежний HEAD. head_oid
+        тай-брейка тут не нужен — лишнего `ls-tree` не заводим.
+        """
+        if committed is None:
+            committed = self._committed_since_snapshot([rel], head_rev)
+        self._ladder_facts.prime(head_rev, {})
+        return committed
+
     def _head_step(
         self,
         path_key: str,
@@ -2062,13 +2138,7 @@ class EditsView:
             return (
                 None  # ключ вне репозитория — ступени HEAD нет по построению
             )
-        if committed is None:
-            # Батч из одного пути: при неизменившемся HEAD (обычный случай)
-            # git не зовётся вовсе.
-            committed = self._committed_since_snapshot([rel], head_rev)
-        # head_oid тай-брейка тут не нужен (accepted=None выше него режет
-        # ветку) — батч пустой, лишнего `ls-tree` не заводим.
-        self._ladder_facts.prime(head_rev, {})
+        committed = self._committed_for_path(rel, head_rev, committed)
         return session_step(
             rel,
             None,
