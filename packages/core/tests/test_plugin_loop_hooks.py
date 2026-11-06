@@ -680,3 +680,50 @@ async def test_overflow_with_compaction_keeps_request_and_command(
     expanded = [m for m in live if "SAY-HI there" in str(m["content"])]
     assert len(expanded) == 1
     assert _lines(log) == ["UserPromptSubmit:"]
+
+
+async def test_queued_command_dropped_by_summary_logs_expanded_intent(
+    tmp_path, monkeypatch
+):
+    """Команда плагина из очереди пришла за ответом тула, сводка перед
+    запросом заменила историю: в намерения хода она попадает раскрытой, а
+    не текстом `/плагин:команда`."""
+    from gc_core import processing_responses as pr
+    from gc_core.run_summary_coordinator import RunSummaryCoordinator
+
+    root = _plugin(tmp_path, "plug", {})
+    (root / "commands").mkdir()
+    (root / "commands" / "hi.md").write_text("SAY-HI $ARGUMENTS\n")
+    install(monkeypatch, ScriptedBackend(_two_step_turn()))
+    executor = None
+    real_apply = pr.aapply_tool
+
+    async def _apply(**kw):
+        if kw.get("tool_name") == "exec_calculator":
+            executor.add_message({"role": "user", "content": "/plug:hi again"})
+        return await real_apply(**kw)
+
+    async def _compact(self, current_messages, mode):
+        del mode
+        kinds = [m.get("type") for m in current_messages]
+        if "function_call_output" not in kinds:
+            return False
+        state = self._state
+        state.messages = [
+            *(m for m in state.messages if m.get("role") == "system"),
+            {"id": "summary", "role": "user", "content": "S"},
+        ]
+        return True
+
+    monkeypatch.setattr(pr, "aapply_tool", _apply)
+    monkeypatch.setattr(
+        RunSummaryCoordinator, "apre_backend_compaction_hook", _compact
+    )
+    ctx = await _ctx(tmp_path, monkeypatch, [root])
+    executor = AgentExecutor(ctx)
+    await executor.arun(["один"], thread_id="t1")
+
+    state = executor.get_state()
+    intents = repr([state.user_intent_log, state.current_user_intent])
+    assert "SAY-HI again" in intents
+    assert "/plug:hi again" not in intents

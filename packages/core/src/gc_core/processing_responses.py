@@ -170,7 +170,11 @@ from gc_core.model_router import (
     breaker_reason,
     failure_text,
 )
-from gc_core.plugins.commands import command_messages, listed_skill_ids
+from gc_core.plugins.commands import (
+    command_messages,
+    listed_skill_ids,
+    user_intent_text,
+)
 from gc_core.plugins.hooks import acontext_hook_messages
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
@@ -3772,6 +3776,7 @@ class _AgentLoop:
             state.current_user_intent,
             self._nudges.followers,
             user_turn_seq=state.user_turn_seq,
+            text_of=lambda m: user_intent_text(self.ctx, state, m),
         )
         self._nudges.carrier = None
         self._nudges.followers = []

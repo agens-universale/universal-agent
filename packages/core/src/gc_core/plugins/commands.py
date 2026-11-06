@@ -18,8 +18,12 @@ from typing import Any, Literal
 from gc_core.message_policy.tool_usage_notice.policy import (
     wrap_thread_memory_technical_user_message,
 )
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+)
 from gc_core.plugins.manifest import PluginCommand
 from gc_core.plugins.snapshot import PluginSnapshot
+from gc_core.settings import runtime_of
 
 _SLASH_RE = re.compile(r"^/([\w.-]+(?::[\w.-]+)?)(?:\s+(.*))?$", re.DOTALL)
 _POSITIONAL_RE = re.compile(r"\$([1-9])")
@@ -158,3 +162,11 @@ def command_messages(
 def listed_skill_ids(skills: Sequence[Mapping[str, Any]]) -> list[str]:
     """Id skills из записей ``list_skills`` (для ``resolve_slash_name``)."""
     return [str(s["id"]) for s in skills if s.get("id")]
+
+
+def user_intent_text(ctx: Any, state: Any, message: Mapping[str, Any]) -> str:
+    """Текст реплики для лога намерений; запрос-команда плагина —
+    раскрытым текстом (§4.2)."""
+    text = extract_real_user_message_text(message)
+    skill_ids = listed_skill_ids(getattr(state, "skills_list", None) or [])
+    return expanded_prompt(runtime_of(ctx).plugins, skill_ids, text) or text
