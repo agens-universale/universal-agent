@@ -97,7 +97,7 @@ async def test_footer_refusal_survives_the_deferred_input_clear():
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         inp = scr.query_one("#cmdinput", CommandTextArea)
-        inp.text = "/profiles"
+        inp.text = "/profile"
         await pilot.pause()
         # порядок обработчика команды: очистка → исполнение → отказ; Changed("")
         # ещё в очереди, когда отказ уже активен

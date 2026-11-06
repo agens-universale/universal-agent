@@ -92,8 +92,9 @@ def test_two_tuple_row_still_plain_str_backward_compat():
 
 
 def test_three_tuple_row_renders_status_column_colored():
-    """3-tuple опции (/profiles) — статус третьим элементом рендерится ЗЕЛЁНЫМ
-    (OK), ровно как активный маркер в /settings (`_profile_row_text`)."""
+    """3-tuple опции (/profile) — статус колонкой сразу за именем, ЗЕЛЁНЫМ
+    (OK), как активный маркер в /settings (`_profile_row_text`); у
+    неактивных место пустое, описание — после колонки, SUB_INK."""
     pytest.importorskip("textual")
     from gc_tui import palette as pal
     from gc_tui.widgets.arg_picker import ArgPicker
@@ -101,60 +102,58 @@ def test_three_tuple_row_renders_status_column_colored():
     opts = [
         ("без профиля", "работать чистым конфигом", ""),
         ("openrouter", "глобальный (как в конфиге)", ""),
-        ("smoke", "глобальный", "● активен"),
+        ("smoke", "глобальный", "активен"),
     ]
     p = ArgPicker(opts, initial_filter="")
 
     none_row = p._format_row(opts[0])
     active_row = p._format_row(opts[2])
 
-    # описание начинается в общей колонке, как у 2-tuple опций
+    # описание начинается в общей колонке, после колонки статуса
     assert none_row.plain.index("работать") == active_row.plain.index(
         "глобальный"
     )
-    # статус — самая правая часть строки, только у активной
-    assert active_row.plain.rstrip().endswith("● активен")
+    status_at = active_row.plain.index("активен")
+    assert active_row.plain[:status_at].rstrip() == " smoke"
+    assert status_at < active_row.plain.index("глобальный")
     assert "активен" not in none_row.plain
+    assert none_row.plain[status_at : status_at + 7].strip() == ""
 
-    spans = [
-        s
+    styles = {
+        active_row.plain[s.start : s.end]: str(s.style)
         for s in active_row.spans
-        if active_row.plain[s.start : s.end] == "● активен"
-    ]
-    assert spans and str(spans[0].style) == pal.OK
+    }
+    assert styles["активен"] == pal.OK
+    assert styles["глобальный"] == pal.SUB_INK
 
 
 def test_three_tuple_status_visible_even_with_empty_description():
     """Ревью-фикс: пустое описание не должно молча ронять статус — 3-tuple с
     `desc=""` и непустым `status` всё равно рисует статус (контракт для
-    будущих потребителей общего виджета, не только /profiles)."""
+    будущих потребителей общего виджета, не только /profile)."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
-    p = ArgPicker([("x", "", "● активен")], initial_filter="")
-    row = p._format_row(("x", "", "● активен"))
-    assert "● активен" in row.plain
+    p = ArgPicker([("x", "", "активен")], initial_filter="")
+    row = p._format_row(("x", "", "активен"))
+    assert "активен" in row.plain
 
 
-def test_status_column_aligns_to_longest_visible_description():
-    """Колонка статуса выровнена по самому длинному ОПИСАНИЮ среди видимых
-    строк — тот же принцип, каким уже паддится value-колонка (_value_col_w)."""
+def test_status_column_width_is_widest_visible_status():
+    """Колонка статуса — по самому широкому статусу среди видимых строк:
+    длинный статус соседа сдвигает описание правее, имя и статус — нет."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
-    short_opts = [("smoke", "глобальный", "● активен")]
+    short_opts = [("smoke", "глобальный", "активен")]
     long_opts = [
-        ("openrouter", "глобальный (как в конфиге)", ""),
-        ("smoke", "глобальный", "● активен"),
+        ("smoke", "глобальный", "активен"),
+        ("bad", "проектный", "✗ не применится"),
     ]
-    p_short = ArgPicker(short_opts, initial_filter="")
-    p_long = ArgPicker(long_opts, initial_filter="")
-
-    idx_short = p_short._format_row(short_opts[0]).plain.index("● активен")
-    idx_long = p_long._format_row(long_opts[1]).plain.index("● активен")
-    # более длинное описание в списке сдвигает статус правее — колонка
-    # считается по самой длинной видимой строке, не по своей
-    assert idx_long > idx_short
+    row_short = ArgPicker(short_opts)._format_row(short_opts[0]).plain
+    row_long = ArgPicker(long_opts)._format_row(long_opts[0]).plain
+    assert row_short.index("активен") == row_long.index("активен")
+    assert row_long.index("глобальный") > row_short.index("глобальный")
 
 
 def test_set_filter_resets_selection_to_zero():
@@ -171,7 +170,7 @@ def test_set_filter_resets_selection_to_zero():
 def test_hint_provider_not_called_twice_for_the_same_selection():
     """`_build_footer` и `desired_height` спрашивали хинт КАЖДЫЙ по-своему —
     два полных вызова провайдера на одну и ту же подсветку (найдено на
-    /profiles: провайдер внутри зовёт полную сборку конфига, ~6 мс). Один и тот
+    /profile: провайдер внутри зовёт полную сборку конфига, ~6 мс). Один и тот
     же выбор обязан стоить один вызов, кто бы из двух его первым ни спросил."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
@@ -191,7 +190,7 @@ def test_hint_provider_not_called_twice_for_the_same_selection():
 
 def test_hint_provider_not_called_again_on_repeated_desired_height():
     """Повторный `desired_height` без смены выбора не зовёт провайдер (полная
-    сборка конфига для /profiles) снова."""
+    сборка конфига для /profile) снова."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
@@ -210,10 +209,10 @@ def test_hint_provider_not_called_again_on_repeated_desired_height():
     )
 
 
-def test_hint_provider_called_again_after_selection_changes():
-    """Кэш — на ЗНАЧЕНИЕ выбора, не глобальный выключатель: смена подсветки
-    (стрелка) обязана посчитать хинт для НОВОГО пункта, а не отдать текст
-    прежнего."""
+def test_hint_provider_called_once_per_value():
+    """Кэш — по ЗНАЧЕНИЮ: резерв подвала спрашивает хинты всех видимых
+    строк один раз, ход стрелкой провайдер не зовёт, а подвал показывает
+    текст НОВОГО пункта, не прежнего."""
     pytest.importorskip("textual")
     from gc_tui.widgets.arg_picker import ArgPicker
 
@@ -224,9 +223,37 @@ def test_hint_provider_called_again_after_selection_changes():
         return f"hint for {value}"
 
     p = ArgPicker(_OPTS, initial_filter="", hint_provider=hint)
+    assert sorted(calls) == sorted(value for value, _ in _OPTS)
     calls.clear()
     p.move_selection(1)
     assert p.selected_value() == "json"
     _ = p.desired_height
     p._build_footer()
-    assert calls == ["json"], f"новый выбор не пересчитал хинт: {calls}"
+    assert calls == [], f"ход стрелкой дёрнул провайдер: {calls}"
+    assert str(p._hint_static.render()) == "hint for json"
+
+
+def test_locked_picker_browses_but_takes_no_choice():
+    """Пока провайдер замка называет причину, пикер только смотрит: строка
+    клавиш — «смотреть» с причиной, Enter строку не берёт, строки не
+    тускнеют. Причина ушла — `sync_lock` возвращает обычный выбор."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import PICK_KEYS_HINT, ArgPicker
+
+    reason = ["нельзя сейчас"]
+    opts = [("alpha", "один", ""), ("beta", "два", "активен")]
+    locked = ArgPicker(
+        opts, keys_hint=PICK_KEYS_HINT, lock_provider=lambda: reason[0]
+    )
+    free = ArgPicker(opts, keys_hint=PICK_KEYS_HINT)
+
+    assert locked.keys_line() == "↑↓ смотреть · Esc закрыть · нельзя сейчас"
+    assert locked.selected_disabled()
+    locked.move_selection(1)
+    assert locked.selected_value() == "beta"
+    assert locked._format_row(opts[0]) == free._format_row(opts[0])
+
+    reason[0] = None
+    locked.sync_lock()
+    assert locked.keys_line() == PICK_KEYS_HINT
+    assert not locked.selected_disabled()

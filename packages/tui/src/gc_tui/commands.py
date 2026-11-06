@@ -12,7 +12,22 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from typing import Any, Callable, Optional
 
-from gc_tui.toggles import TOGGLES, profile_picker_hint, profile_picker_options
+from rich.text import Text
+
+from gc_tui.services.model_picker import (
+    model_hint,
+    model_name,
+    model_picker_options,
+    model_value,
+)
+from gc_tui.services.profile_lock import profile_switch_refusal
+from gc_tui.toggles import (
+    TOGGLES,
+    profile_name,
+    profile_picker_hint,
+    profile_picker_options,
+    profile_value,
+)
 
 
 @dataclass(frozen=True)
@@ -33,10 +48,23 @@ class Command:
     # не здесь (§ CLAUDE.md Architecture).
     is_toggle: bool = False
     # Динамические варианты аргумента (app -> [(value, описание)]): ArgPicker для
-    # команд, чей список известен только в рантайме (/profiles — файлы профилей).
+    # команд, чей список известен только в рантайме (/profile — файлы профилей).
     # Взаимоисключимо с arg_options; хинт подвала пикера — arg_hint_provider.
     arg_options_provider: Optional[Callable[[Any], tuple]] = None
     arg_hint_provider: Optional[Callable[[Any, Optional[str]], str]] = None
+    # Текущее значение аргумента (app -> value): на нём ArgPicker
+    # открывается (`/model` — действующий выбор).
+    arg_current_provider: Optional[Callable[[Any], Optional[str]]] = None
+    # Enter по строке пикера только выбирает значение (`/model`,
+    # `/profile`), а не запускает действие: строка клавиш — «Enter выбрать».
+    arg_picks: bool = False
+    # Причина, по которой выбор значения сейчас закрыт (app -> str | None):
+    # пикер листается, но Enter строку не берёт (`/profile` во время хода).
+    arg_lock_provider: Optional[Callable[[Any], Optional[str]]] = None
+    # Текущее значение команды (app -> Text) — палитра показывает его в
+    # правой колонке вместо хоткея (`/model` — знак модели, `/profile` —
+    # имя профиля).
+    value_provider: Optional[Callable[[Any], Optional[Text]]] = None
 
     @property
     def runs_on_enter(self) -> bool:
@@ -102,6 +130,33 @@ def build_default_registry() -> CommandRegistry:
             "",
             "Список сессий — выбрать и продолжить",
             hotkey="F2 · Ctrl+S",
+        ),
+        # Чем работаем (спека model-knob §6.2): обычные команды со списком
+        # значений; текущее значение — справа, в колонке клавиш.
+        Command(
+            "model",
+            ("models",),
+            "[модель]",
+            _cap(f"{TOGGLES['model'].label}: {TOGGLES['model'].summary}"),
+            arg_options_provider=model_picker_options,
+            arg_hint_provider=model_hint,
+            arg_current_provider=model_name,
+            arg_picks=True,
+            value_provider=model_value,
+        ),
+        Command(
+            "profile",
+            ("profiles",),
+            "[профиль]",
+            _cap(
+                f"{TOGGLES['profiles'].label}: {TOGGLES['profiles'].summary}"
+            ),
+            arg_options_provider=profile_picker_options,
+            arg_hint_provider=profile_picker_hint,
+            arg_current_provider=profile_name,
+            arg_picks=True,
+            arg_lock_provider=profile_switch_refusal,
+            value_provider=profile_value,
         ),
         Command(
             "diff",
@@ -196,26 +251,6 @@ def build_default_registry() -> CommandRegistry:
             hotkey="F7",
         ),
         Command("quit", (), "", "Выход", hotkey="Esc"),
-        # Переключатели палитры «чем работаем» (←/→, спека §12.1):
-        # уровень модели и профиль — над группой строгости завершения хода.
-        Command(
-            "level",
-            ("models",),
-            "",
-            _cap(f"{TOGGLES['level'].label}: {TOGGLES['level'].summary}"),
-            is_toggle=True,
-        ),
-        Command(
-            "profiles",
-            (),
-            "[профиль]",
-            _cap(
-                f"{TOGGLES['profiles'].label}: {TOGGLES['profiles'].summary}"
-            ),
-            is_toggle=True,
-            arg_options_provider=profile_picker_options,
-            arg_hint_provider=profile_picker_hint,
-        ),
         # Переключатели палитры (←/→): самопроверка хода и формат финала.
         Command(
             "rigor",

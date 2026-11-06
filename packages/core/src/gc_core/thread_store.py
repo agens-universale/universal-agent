@@ -10,6 +10,10 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
+from gc_core.persistence.model_choice_record import (
+    ModelChoiceRecord,
+    model_choice_entry,
+)
 from gc_core.persistence.session_state import (
     extra_for_write,
     notice_state,
@@ -33,6 +37,7 @@ from gc_core.threads.instance import session_owner
 from gc_core.threads.models import (
     CONTROL,
     INBOX,
+    MODEL_CHOICES,
     TURNS,
     Compaction,
     RuntimeStatus,
@@ -597,6 +602,23 @@ class ThreadSession:
             set_runtime=runtime,
         )
         self.runtime = runtime
+        return True
+
+    async def aappend_model_choice(
+        self, record: ModelChoiceRecord, *, discarded: bool
+    ) -> bool:
+        """Смена модели — запись потока ``model_choices`` за последним
+        записанным сообщением, сбоку по аренде хода. Те же правила, что у
+        итога хода (``aappend_turn_outcome``): отложенные шаги сначала
+        сливаются (кроме отброшенных стопом), пустой и отпущенный тред
+        записи не получают. Возвращает, записано ли."""
+        if not discarded:
+            await self.aflush_deferred()
+        if not self.history_messages or self.writer.gave_up_lease:
+            return False
+        after = await self._alast_message_id()
+        entry = model_choice_entry(record, after=after)
+        await self.writer.aside(append=[(MODEL_CHOICES, [entry])])
         return True
 
     async def _alast_message_id(self) -> Optional[str]:

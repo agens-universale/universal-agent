@@ -138,20 +138,21 @@ def test_empty_url_with_a_token_is_still_half_a_pair():
         ModelEntry.model_validate({"url": "", "token": "sk-own"})
 
 
-def test_level_auto_is_accepted():
-    """`auto` — режим автовыбора (спека auto-routing §5.2 п.6, задача 4): перевод
-    в уровень — `auto_routing.levels.effective_level`, не задача схемы."""
-    cfg = AppConfig.model_validate({"level": "auto"})
-    assert cfg.level == "auto"
+def test_model_auto_is_accepted():
+    """`auto` — режим автовыбора: перевод в уровень —
+    `auto_routing.levels.effective_target`, не задача схемы."""
+    cfg = AppConfig.model_validate({"model": "auto"})
+    assert cfg.model == "auto"
 
 
-def test_level_rejects_any_value_outside_the_three_levels():
-    """`level` принимает ровно light|default|max в волнах A–B. У `auto` свой
-    дружелюбный текст (тест выше); здесь — общая ветка: опечатка в ключе не
-    должна протекать до Router'а, где «нет такого слота» превратилось бы в
-    фоллбэк на default и молча работало бы не тем уровнем."""
-    with pytest.raises(ValidationError, match="light"):
-        AppConfig.model_validate({"level": "fast"})
+def test_blank_model_is_none():
+    assert AppConfig.model_validate({"model": ""}).model is None
+    assert AppConfig.model_validate({"model": None}).model is None
+
+
+def test_level_key_is_gone_from_the_schema():
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate({"level": "max"})
 
 
 def test_main_assign_forbidden():
@@ -235,3 +236,20 @@ def test_schema_error_details_does_not_double_the_coordinate():
         "models.opus41: token и backend.chat_completion_headers.Authorization "
         "заданы одновременно — оставьте что-то одно"
     )
+
+
+def test_effective_choice_unknown_alias_is_default():
+    from gc_core.config_modules.model_registry import (
+        choice_in_registry,
+        configured_choice,
+        effective_choice,
+    )
+    from gc_core.config_modules.root import AppConfig
+
+    settings = AppConfig.model_validate({"models": {"giga": {}}})
+    assert configured_choice(settings) == "default"
+    assert effective_choice("giga", settings) == "giga"
+    assert effective_choice("auto", settings) == "auto"
+    assert effective_choice("max", settings) == "max"
+    assert effective_choice("ghost", settings) == "default"
+    assert not choice_in_registry("ghost", settings)

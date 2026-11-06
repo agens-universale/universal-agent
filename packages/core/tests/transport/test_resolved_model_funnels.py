@@ -38,10 +38,10 @@ def _canonical_once(processing_module, *args, **kwargs):
 
 
 def _serve_main_trace(router) -> None:
-    """Main-трейс берёт модель через `ModelRouter.resolve_main_at_level` (уровень
+    """Main-трейс берёт модель через `ModelRouter.resolve_main_at` (уровень
     вызова). У фейка без уровней это тот же `resolve("main")` — счёт вызовов
     `resolve` в проверках остаётся прежним."""
-    router.resolve_main_at_level = lambda level, **_kw: router.resolve("main")
+    router.resolve_main_at = lambda level, **_kw: router.resolve("main")
 
 
 def _resolved(**overrides) -> ResolvedModel:
@@ -1276,7 +1276,7 @@ def test_openai_strict_schema_is_read_per_model_of_the_call(tmp_path):
     cfg = AppConfig.model_validate(raw)
     level = {"value": "light"}
     ctx = run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: level["value"])
+        rc.acreate_run_context(cfg, choice_provider=lambda: level["value"])
     )
     state = _state(default_model="legacy-model", tools=ctx.tools_spec)
 

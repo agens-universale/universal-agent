@@ -111,7 +111,7 @@ async def test_status_without_active_task_shows_idle(tmp_path):
 
 @pytest.mark.asyncio
 async def test_status_shows_auto_level_literal(tmp_path):
-    """level: auto (спека auto-routing §5.1) — /status показывает режим
+    """model: auto (спека auto-routing §5.1) — /status показывает режим
     (при доступном автовыборе — `auto`, правило палитры `toggle_state`), не
     резолвленный уровень такта: витрина отвечает на «в каком режиме сессия»,
     футеру нужен факт хода."""
@@ -121,7 +121,7 @@ async def test_status_shows_auto_level_literal(tmp_path):
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -138,7 +138,7 @@ async def test_status_shows_auto_level_literal(tmp_path):
 
         assert isinstance(pilot.app.screen, ViewerScreen)
         body = _viewer_body(pilot.app.screen)
-        assert '"level": "auto"' in body
+        assert '"model": "auto"' in body
 
 
 @pytest.mark.asyncio
@@ -150,7 +150,7 @@ async def test_status_shows_only_two_level_in_auto_mode(tmp_path):
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -178,7 +178,7 @@ async def test_status_leaves_routing_policy_empty_in_manual_mode(tmp_path):
 
     cfg = {
         "agent.model": "m",
-        "level": "default",
+        "model": "default",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -235,7 +235,7 @@ async def test_status_shows_the_working_level_when_auto_is_unavailable(
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -253,5 +253,32 @@ async def test_status_shows_the_working_level_when_auto_is_unavailable(
 
         body = _viewer_body(pilot.app.screen)
         assert (
-            '"level": "default"' in body and '"routing_policy": null' in body
+            '"model": "default"' in body and '"routing_policy": null' in body
         )
+
+
+@pytest.mark.asyncio
+async def test_status_shows_model_choice(tmp_path):
+    """Выбор — алиас реестра: /status называет его как есть, без политики."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    cfg = {
+        "agent.model": "m",
+        "model": "mid",
+        "backend.api_mode": "chat_completions",
+        "models": {"fast": {}, "mid": {}},
+        "slots": {"default": "fast"},
+    }
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/status"
+        await pilot.press("enter")
+        await pilot.pause(0.2)
+
+        body = _viewer_body(pilot.app.screen)
+        assert '"model": "mid"' in body
+        assert '"routing_policy": null' in body

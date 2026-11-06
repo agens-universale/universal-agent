@@ -375,6 +375,23 @@ def test_auto_judge_is_rejected_without_compat():
         AppConfig.model_validate({"assign": {"auto_judge": "max"}})
 
 
+def test_level_renamed_to_model_keeps_value():
+    raw = {"level": "max"}
+    facts = compat.apply_compat(raw)
+    assert raw == {"model": "max"} and facts
+
+
+def test_level_default_renamed_silently():
+    raw = {"level": "default"}
+    assert compat.apply_compat(raw) == [] and raw == {"model": "default"}
+
+
+def test_model_wins_over_level_in_one_layer():
+    raw = {"level": "auto", "model": "giga"}
+    compat.apply_compat(raw)
+    assert raw == {"model": "giga"}
+
+
 def test_old_trace_inline_max_lines_is_dropped_not_carried(
     tmp_path, monkeypatch
 ):

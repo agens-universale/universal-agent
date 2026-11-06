@@ -40,7 +40,7 @@ def _router(level, assign=None, unbound_override=None, registry=REGISTRY):
         raw["assign"] = assign
     return ModelRouter(
         AppConfig.model_validate(raw),
-        level_provider=lambda: level,
+        choice_provider=lambda: level,
         unbound_override=unbound_override,
     )
 

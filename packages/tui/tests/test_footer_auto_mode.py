@@ -9,9 +9,13 @@ from gc_testkit.settings import make_settings
 from gc_testkit.tui_support import tui_settings
 
 from gc_tui.app import TuiApp
+from rich.text import Text
+
 from gc_tui.palette import DIM, INK
 from gc_tui.screens.main import _FooterHeadSnapshot
-from gc_tui.toggles import AUTO_LEVEL_VALUE
+from gc_tui.services.model_sign import AUTO_COLOR, sign
+
+AUTO = "auto"
 
 
 def _app(tmp_path, config):
@@ -37,13 +41,13 @@ def _running_runner(
     `test_footer_profile_indicator.py`, расширенный auto-routing §7.1
     изменяемым `current_level`): `executor_router()` резолвит ЧЕСТНО через
     переданный `router` (breaker/slots настоящего Router'а приложения),
-    подменяя только `active_level()` — читает `.level` СВЕЖИМ на каждый
+    подменяя только `active_target()` — читает `.level` СВЕЖИМ на каждый
     вызов, как `state.current_level` у настоящего исполнителя (`level = None`
-    → «до первого решения», `effective_level` подставит `default`).
+    → «до первого решения», `effective_target` подставит `default`).
     `available` — доступность auto для симулируемого решения (по умолчанию
     True; тест недоступной фичи передаёт False явно, а не полагается на
     реальный конфиг — который сюда не долетает, `router` уже построен)."""
-    from gc_core.auto_routing.levels import effective_level
+    from gc_core.auto_routing.levels import effective_target
 
     class _FakeRunner:
         def __init__(self):
@@ -56,9 +60,9 @@ def _running_runner(
             runner = self
 
             class _LevelRouter:
-                def active_level(self):
-                    return effective_level(
-                        router.live_level(), runner.level, available
+                def active_target(self):
+                    return effective_target(
+                        router.live_choice(), runner.level, available
                     )
 
                 def __getattr__(self, name):
@@ -74,7 +78,7 @@ def _running_runner(
 
 CFG = {
     "agent.model": "m",
-    "level": "auto",
+    "model": "auto",
     "backend.api_mode": "chat_completions",
     "agent.auto_routing": True,
     "models": {"fast": {}, "mid": {}, "big": {}},
@@ -156,7 +160,7 @@ async def test_footer_running_auto_degraded_resolve_shows_default(
 
     broken = ModelRouter(
         make_settings({"models": {"x": {}, "y": {}}, "slots": {}}),
-        level_provider=lambda: "light",
+        choice_provider=lambda: "light",
     )
 
     class _DegradedRunner:
@@ -227,7 +231,7 @@ async def test_footer_auto_ladder_drops_model_then_level_block_keeps_mode_dot(
 
 @pytest.mark.asyncio
 async def test_footer_manual_unchanged(tmp_path, monkeypatch):
-    app = _app(tmp_path, {**CFG, "level": "max"})
+    app = _app(tmp_path, {**CFG, "model": "max"})
     app.active_runner = None
     async with app.run_test(size=(120, 24)):
         plain = app.screen._compose_footer_right().plain
@@ -246,37 +250,38 @@ def _span_style(text, substr):
 
 @pytest.mark.asyncio
 async def test_footer_head_auto_colors_mode_dot_arrow_and_word(tmp_path):
-    """Цвета (спека §7.1): точка режима — `bold {AUTO_LEVEL_VALUE.color}`
-    (единственный источник цвета `auto`, не литерал BRAND); хода нет — слово
-    `auto` INK; идёт ход — стрелка DIM, точка режима остаётся BRAND (точка
-    уровня — отдельным цветом снимка, здесь не проверяется)."""
+    """Цвета (спека §7.1): точка режима — `AUTO_COLOR` (единственный
+    источник цвета `auto`, не литерал BRAND); хода нет — слово `auto` INK;
+    идёт ход — стрелка DIM, точка режима остаётся BRAND (точка уровня —
+    из знака снимка, здесь не проверяется)."""
     app = _app(tmp_path, CFG)
     async with app.run_test(size=(120, 24)):
         scr = app.screen
         idle = scr._footer_head(
             with_profile=False,
             meter=None,
-            snapshot=_FooterHeadSnapshot(None, True, "#123456", "mid", False),
-        )
-        assert _span_style(idle, "●") == f"bold {AUTO_LEVEL_VALUE.color}"
-        assert _span_style(idle, " auto") == INK
+            snapshot=_FooterHeadSnapshot(None, True, sign(AUTO, {}), False),
+        )[0]
+        assert _span_style(idle, "●") == AUTO_COLOR
+        assert _span_style(idle, "auto") == INK
 
         running = scr._footer_head(
             with_profile=False,
             meter=None,
-            snapshot=_FooterHeadSnapshot(None, True, "#123456", "fast", True),
-        )
-        assert _span_style(running, "●") == f"bold {AUTO_LEVEL_VALUE.color}"
+            snapshot=_FooterHeadSnapshot(None, True, Text("● fast"), True),
+        )[0]
+        assert _span_style(running, "●") == AUTO_COLOR
         assert _span_style(running, " → ") == DIM
 
 
 @pytest.mark.asyncio
-async def test_pending_transition_keeps_the_narrowest_rung_without_level_block(
+async def test_pending_choice_keeps_the_narrowest_rung_without_level_block(
     tmp_path, monkeypatch
 ):
-    """Пока ждёт переход, имя модели не снимается — но самая узкая ступень
-    auto (без блока уровня «→ ●») остаётся: иначе на совсем узком окне правая
-    колонка не влезала и поджимала левую (глиф режима, стоп-клавишу)."""
+    """Пока выбор ждёт, его точка во второй строке остаётся, а самая узкая
+    ступень auto (без блока уровня «→ ●») — тоже: иначе на совсем узком
+    окне правая колонка не влезала и поджимала левую (глиф режима,
+    стоп-клавишу)."""
     app = _app(tmp_path, CFG)
     _set_running(
         app, _running_runner(app.display_router(), current_level="light")
@@ -286,10 +291,9 @@ async def test_pending_transition_keeps_the_narrowest_rung_without_level_block(
         snapshot = _FooterHeadSnapshot(
             None,
             True,
-            "#123456",
-            "gatewayhub/acme-lab/acme-big-coder-4.5",
+            Text("● gatewayhub/acme-lab/acme-big-coder-4.5"),
             True,
-            ("#654321", "big"),
+            Text("● big"),
         )
         monkeypatch.setattr(scr, "_footer_head_snapshot", lambda: snapshot)
         monkeypatch.setattr(scr, "_footer_right_available_width", lambda: 3)
@@ -297,3 +301,4 @@ async def test_pending_transition_keeps_the_narrowest_rung_without_level_block(
         plain = scr._compose_footer_right().plain
 
         assert "→ ●" not in plain
+        assert plain == "●\n●"

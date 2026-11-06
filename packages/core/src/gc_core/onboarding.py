@@ -361,7 +361,7 @@ def effective_model(settings: Any) -> str:
     открываться на любом конфиге. Сентинел шаблона — «ещё не задано», а не
     значение: отдаём пусто, как и на конфиге без модели вовсе.
 
-    `level: auto` (спека auto-routing §5.1) переводится через `effective_level`
+    `level: auto` (спека auto-routing §5.1) переводится через `effective_target`
     ДО `ModelRouter` — сырой литерал `auto` роняет `_resolve_level`
     (`ValueError`), и резолв ушёл бы фоллбэком на плоский ключ вместо модели
     default-слота. Только функции ядра — мастер не импортирует `gc_tui`."""
@@ -373,8 +373,15 @@ def effective_model(settings: Any) -> str:
     settings = source.settings
     name = settings.agent.model
     try:
-        from gc_core.auto_routing.levels import auto_available, effective_level
+        from gc_core.auto_routing.levels import (
+            auto_available,
+            effective_target,
+        )
         from gc_core.config import cli_forces_legacy_model
+        from gc_core.config_modules.model_registry import (
+            configured_choice,
+            effective_choice,
+        )
         from gc_core.model_router import ModelRouter
 
         available = auto_available(
@@ -382,8 +389,10 @@ def effective_model(settings: Any) -> str:
         )
         resolved = ModelRouter(
             source,
-            level_provider=lambda: effective_level(
-                settings.level, None, available
+            choice_provider=lambda: effective_target(
+                effective_choice(configured_choice(settings), settings),
+                None,
+                available,
             ),
             force_legacy=cli_forces_legacy_model(source),
         ).resolve("main", check_breaker=False)

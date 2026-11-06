@@ -12,10 +12,10 @@
 # Версия формата этого файла (не трогайте: её ведёт приложение; нет ключа = 1).
 config_version: 1
 
-# Профили и уровни моделей: указатели на активный профиль/уровень. "" = профиль не выбран.
+# Профили и модель: указатели на активный профиль и выбор модели. "" = профиль не выбран.
 # Секции models/slots/assign (реестр моделей, уровни, привязки) — опциональны.
 profile: ""
-level: default               # light | default | max | auto (уровень меняется автоматически по ходу работы)
+model:                       # auto | имя модели из реестра; пусто — модель уровня default
 
 # Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
 # раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
@@ -81,7 +81,7 @@ backend:
     # Или из файла (chmod 600): Authorization: "Bearer ${FILE:~/.secrets/gc_api_key}"
 
 agent:
-  model: "<ВПИШИТЕ_МОДЕЛЬ>"
+  model: "<ВПИШИТЕ_МОДЕЛЬ>"       # легаси: одна модель без реестра
   system_prompt_id: v1
   use_server_subagents: false
   use_local_subagents: true
@@ -98,7 +98,7 @@ agent:
   # Аварийная LLM-суммаризация трейса при лимите (step/tool/token limit).
   # Возвращает envelope с raw_trace_summary; false — пустой summary.
   limit_trace_summary: true
-  # Автовыбор уровня модели включается через level: auto.
+  # Автороутинг моделей включается через model: auto.
   auto_routing: true
   # Сильная модель пары: default — light+default, max — default+max.
   # auto — начальную пару выбирает судья (assign.routing_judge), если в обеих
@@ -224,7 +224,7 @@ paths:
   # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
   # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
   agent_md_path: ""
-  # Инструкция судьи начальной пары автовыбора (level: auto). Нет файла или пуст — ход на верхней паре.
+  # Инструкция судьи начальной пары автовыбора (model: auto). Нет файла или пуст — ход на верхней паре.
   # chat_completions_routing_pair_judge_prompt_path: "prompts/chat_completions_routing_pair_judge_prompt.md"
 
 summary:

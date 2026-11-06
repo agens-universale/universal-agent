@@ -11,7 +11,12 @@ from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 
 from gc_core.auto_routing.levels import auto_unavailable_reason
 from gc_core.config import cli_forces_legacy_model
+from gc_core.config_modules.model_registry import (
+    choice_in_registry,
+    configured_choice,
+)
 from gc_core.config_modules.pricing import resolve_model_tariff
+from gc_core.model_router import ModelRouter
 from gc_core.settings import AppConfig, LoadedSettings, settings_of
 
 
@@ -167,25 +172,26 @@ def _agentsmd(settings: AppConfig, *, is_tui: bool) -> List[Notice]:
 
 def auto_routing_unavailable_reason_text(reason: str) -> str:
     """Фраза причины недоступности автовыбора — одна на все входы (нотис при
-    старте, runtime-нотис TUI, ответ на набранный `/level auto`)."""
-    return f"автовыбор моделей недоступен: {reason}"
+    старте, runtime-нотис TUI, ответ на набранный `/model auto`, подсказка
+    строки `auto` в пикере `/model`)."""
+    return f"автовыбор недоступен: {reason}"
 
 
 def auto_routing_unavailable_message(
     reason: str, *, forced_model: bool = False
 ) -> str:
     """Текст нотиса: фраза причины и то, что работает. Ответ на набранный
-    `/level auto` берёт одну фразу — набор уровень не меняет, и хвост про
+    `/model auto` берёт одну фразу — набор уровень не меняет, и хвост про
     default соврал бы на light и max. При `--model` идёт заданная модель, а не
-    уровень default."""
-    tail = "модель из --model" if forced_model else "уровень default"
+    модель слота default."""
+    tail = "модель из --model" if forced_model else "модель слота default"
     return f"{auto_routing_unavailable_reason_text(reason)} — работает {tail}"
 
 
 def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
-    """`level: auto` выбран, а фича недоступна — один нотис с причиной (спека
-    auto-routing §6). Работает уровень default; палитра позицию auto не показывает."""
-    if str(settings_of(source).level or "").strip() != "auto":
+    """`model: auto` выбран, а фича недоступна — один нотис с причиной (спека
+    auto-routing §6). Работает модель слота default; палитра позицию auto не показывает."""
+    if str(settings_of(source).model or "").strip() != "auto":
         return None
     loaded = (
         source
@@ -203,8 +209,41 @@ def auto_routing_unavailable_notice(source: Any) -> Optional[Notice]:
     )
 
 
+def unknown_model_choice_notice(source: Any) -> Optional[Notice]:
+    """Выбор `model` не найден в реестре — запуск идёт моделью слота default.
+    Только стартовое: роутер уже подменяет выбор (`effective_choice`), нотис
+    называет, что именно заменено и чем — алиасом, как остальные витрины."""
+    settings = settings_of(source)
+    if not settings.models:
+        return None  # легаси без реестра: выбирать из чего-то нечего
+    loaded = (
+        source
+        if isinstance(source, LoadedSettings)
+        else LoadedSettings(settings=settings)
+    )
+    if cli_forces_legacy_model(loaded):
+        return None  # легаси-форс --model: идёт заданная модель
+    choice = configured_choice(settings)
+    if choice_in_registry(choice, settings):
+        return None
+    message = f"модель {choice} не найдена в реестре"
+    router = ModelRouter(settings, choice_provider=lambda: "default")
+    try:
+        resolved = router.resolve("main", check_breaker=False)
+    except ValueError:
+        pass  # default не резолвится: причину назовёт первый же вызов
+    else:
+        message += f" — работаю моделью {resolved.alias or resolved.model}"
+    return Notice("info", "unknown_model_choice", message)
+
+
 def _auto_routing(source: Any) -> List[Notice]:
     notice = auto_routing_unavailable_notice(source)
+    return [notice] if notice is not None else []
+
+
+def _unknown_model(source: Any) -> List[Notice]:
+    notice = unknown_model_choice_notice(source)
     return [notice] if notice is not None else []
 
 
@@ -375,6 +414,7 @@ def collect_startup_notices(
         + _mcp_failed(mcp_status)
         + _agentsmd(settings, is_tui=is_tui)
         + _auto_routing(source)
+        + _unknown_model(source)
         + list(extra)
         + _compat(compat_notices)
         + _pricing_no_rates(settings)

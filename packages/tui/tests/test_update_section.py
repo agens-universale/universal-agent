@@ -875,3 +875,54 @@ async def test_reset_notice_mentions_session_profile_and_onboarding_suggestion(
         assert app._session_overrides == {
             "profile": "work"
         }  # сброс базы сессию не трогает
+
+
+async def test_reset_is_refused_while_a_run_is_going(tmp_path, monkeypatch):
+    """Сброс конфига переписывает указатель `profile:` — во время хода он
+    отказывает той же фразой, что смена профиля: ни баннера, ни сброса;
+    баннер, поднятый до хода, отказывает на подтверждении."""
+    from gc_core import app_version, config_sync
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+
+    monkeypatch.setattr(app_version, "install_source", lambda _read=None: None)
+    cfg_file = tmp_path / "c.yml"
+    cfg_file.write_text("backend: {}\n", encoding="utf-8")
+    called = []
+    monkeypatch.setattr(
+        config_sync, "reset_config", lambda path, **k: called.append(path)
+    )
+
+    class _LiveRunner:
+        def is_running(self):
+            return True
+
+    app = app_mod.TuiApp(settings=tui_settings({}))
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(
+            settings=as_settings({}),
+            config_path=str(cfg_file),
+            on_apply=lambda: None,
+            probe_fn=lambda *a, **k: None,
+        )
+        app.push_screen(scr)
+        await pilot.pause()
+        open_settings_section(scr, "Обновление")
+        await pilot.pause()
+        refusal = "✗ профиль можно сменить, когда ход закончится"
+
+        app.active_runner = _LiveRunner()
+        scr._request_reset()
+        await pilot.pause()
+        assert scr._reset_awaiting_confirm is False
+        assert str(scr.query_one("#set-notice").render()) == refusal
+
+        app.active_runner = None
+        scr._request_reset()
+        app.active_runner = _LiveRunner()
+        scr._confirm_reset()
+        await pilot.pause()
+        assert scr._reset_awaiting_confirm is False
+        assert str(scr.query_one("#set-notice").render()) == refusal
+        assert called == []
+        app.active_runner = None

@@ -261,3 +261,684 @@ async def test_short_hint_still_reserves_one_line(tmp_path):
         # 3 строки + рамка(2) + клавиши (margin + строка) + хинт (margin + строка)
         assert picker.desired_height == 3 + 2 + 2 + 2
         assert picker.desired_height >= picker.outer_size.height
+
+
+def _model_like_options():
+    from gc_tui import palette as pal
+    from gc_tui.widgets.arg_picker import PickerOption
+    from rich.text import Text
+
+    return [
+        PickerOption(
+            "auto",
+            "модель выбирается автоматически по ходу работы",
+            lead=Text("●", style=pal.BRAND),
+            enabled=False,
+        ),
+        PickerOption("", "", separator=True),
+        PickerOption("glm-flash", ""),
+        PickerOption("giga-max", "", "активна"),
+        PickerOption("", "", separator=True),
+        PickerOption("qwen-coder", ""),
+    ]
+
+
+def test_separator_skipped_by_navigation_and_filter():
+    """Черта не выбирается: стрелки перешагивают её; фильтр оставляет черту,
+    только если по обе стороны есть видимые строки."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    p = ArgPicker(_model_like_options())
+    seen = [p.selected_value()]
+    for _ in range(4):
+        p.move_selection(1)
+        seen.append(p.selected_value())
+    # старт — первая доступная строка, auto недоступен
+    assert seen == ["glm-flash", "giga-max", "qwen-coder", "auto", "glm-flash"]
+    p.move_selection(-1)
+    assert p.selected_value() == "auto"
+
+    p.set_filter("g")
+    assert [o.value for o in p._visible_rows()] == ["glm-flash", "giga-max"]
+    p.set_filter("q")
+    assert [o.value for o in p._visible_rows()] == ["qwen-coder"]
+    p.set_filter("")
+    assert [o.separator for o in p._visible_rows()] == [
+        False,
+        True,
+        False,
+        False,
+        True,
+        False,
+    ]
+
+
+def test_disabled_row_is_dim_and_not_taken():
+    """`enabled=False` — строка видна приглушённой, выбор её не берёт."""
+    pytest.importorskip("textual")
+    from gc_tui import palette as pal
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    p = ArgPicker(_model_like_options(), initial_filter="a")
+    assert p.selected_value() == "auto"
+    assert p.selected_disabled()
+    row = p._format_row(p._visible_rows()[0])
+    # Знак сохраняет цвет, приглушены только имя и описание.
+    dot = row.plain.index("●")
+    styled = {(s.start, s.end): str(s.style) for s in row.spans}
+    assert styled[(dot, dot + 1)] == pal.BRAND
+    assert styled[(dot + 2, len(row.plain))] == pal.DIM
+    p.set_filter("")
+    assert p.selected_value() == "glm-flash"
+    assert not p.selected_disabled()
+    p.set_filter("zzz")  # нет видимых строк — Enter не блокируется
+    assert not p.selected_disabled()
+
+
+@pytest.mark.asyncio
+async def test_old_two_and_three_tuples_still_work(tmp_path, monkeypatch):
+    """Старые 2-кортежи (/export) и 3-кортежи (/profile) нормализуются в
+    PickerOption: значения, описания и статус на месте."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker, PickerOption
+
+    p = ArgPicker([("txt", "вся сессия"), ("json", "данные")])
+    assert p._visible_rows() == [
+        PickerOption("txt", "вся сессия"),
+        PickerOption("json", "данные"),
+    ]
+    assert p._format_row(p._visible_rows()[0]) == " txt    вся сессия"
+    p3 = ArgPicker([("smoke", "глобальный", "активен")])
+    assert p3._visible_rows()[0].status == "активен"
+    assert p3._format_row(p3._visible_rows()[0]).plain == (
+        " smoke   активен   глобальный"
+    )
+
+    monkeypatch.chdir(tmp_path)
+    async with _mk_app(tmp_path).run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        rows = pilot.app.query_one(ArgPicker)._visible_rows()
+        assert rows and all(isinstance(r, PickerOption) for r in rows)
+        assert rows[0].value == "без профиля"
+
+
+@pytest.mark.asyncio
+async def test_enter_on_disabled_row_keeps_picker_open(tmp_path, monkeypatch):
+    """Enter на недоступной строке ничего не выполняет: пикер остаётся."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    async with _mk_app(tmp_path).run_test() as pilot:
+        inp = pilot.app.query_one("#cmdinput")
+        inp.text = "/model "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        assert picker.selected_value() == "auto"
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(ArgPicker)) == 1
+        assert "model" not in pilot.app._session_overrides
+
+
+def _registry_app(tmp_path):
+    from gc_tui.app import TuiApp
+
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {
+                "models": {"glm-4.6": {}, "giga-max": {}},
+                "slots": {"default": "glm-4.6", "max": "giga-max"},
+            }
+        ),
+    )
+
+
+async def _type_and_enter(pilot, text):
+    inp = pilot.app.query_one("#cmdinput")
+    inp.text = text
+    await pilot.pause(0.1)
+    await pilot.press("enter")
+    await pilot.pause(0.1)
+
+
+@pytest.mark.asyncio
+async def test_enter_with_unknown_typed_model_reaches_the_refusal(
+    tmp_path, monkeypatch
+):
+    """Фильтр не оставил строк — Enter уходит с набранным аргументом, и
+    команда отвечает своим отказом."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        hints = []
+        pilot.app.screen._show_footer_refusal = hints.append
+        await _type_and_enter(pilot, "/model giga-mx")
+        assert len(pilot.app.query(ArgPicker)) == 0
+        assert hints == ["✗ нет такой модели: giga-mx"]
+        assert "model" not in pilot.app._session_overrides
+
+
+@pytest.mark.asyncio
+async def test_enter_with_typed_level_word_applies_it(tmp_path, monkeypatch):
+    """Слово уровня — допустимый выбор, хоть строки в пикере у него нет."""
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        await _type_and_enter(pilot, "/model light")
+        assert pilot.app._session_overrides.get("model") == "light"
+
+
+@pytest.mark.asyncio
+async def test_enter_with_unknown_profile_reaches_its_refusal(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("textual")
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        hints = []
+        pilot.app.screen._show_footer_refusal = hints.append
+        await _type_and_enter(pilot, "/profile nope")
+        assert hints and 'профиль "nope" не найден' in hints[0]
+
+
+def test_picker_opens_on_the_current_value_when_it_is_selectable():
+    """`initial_value` — стартовая подсветка на текущем значении; невидимое
+    или недоступное значение — первая доступная строка."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    opts = _model_like_options()
+    assert ArgPicker(opts, initial_value="giga-max").selected_value() == (
+        "giga-max"
+    )
+    assert ArgPicker(opts, initial_value="auto").selected_value() == (
+        "glm-flash"
+    )
+    assert ArgPicker(opts, initial_value="nope").selected_value() == (
+        "glm-flash"
+    )
+    filtered = ArgPicker(opts, initial_filter="q", initial_value="giga-max")
+    assert filtered.selected_value() == "qwen-coder"
+
+
+def test_picker_without_keys_line_drops_it_and_its_height():
+    """`keys_hint=None` — строки клавиш нет, и высота её не резервирует."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    full = ArgPicker(_model_like_options())
+    bare = ArgPicker(_model_like_options(), keys_hint=None)
+    assert full.desired_height - bare.desired_height == 2
+
+    def footer_texts(picker):
+        footer = picker._build_footer()
+        return [str(w.render()) for w in footer._pending_children]
+
+    assert any("Tab" in t for t in footer_texts(full))
+    assert not any("Tab" in t for t in footer_texts(bare))
+
+
+@pytest.mark.asyncio
+async def test_model_picker_opens_on_the_current_choice(tmp_path, monkeypatch):
+    """`/model ` открывает список на действующем выборе: Enter сразу его не
+    меняет."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    app = _registry_app(tmp_path)
+    app.apply_model_choice("max")
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/model "
+        await pilot.pause(0.1)
+        assert pilot.app.query_one(ArgPicker).selected_value() == "giga-max"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("typed", ["/model ", "/profile "])
+async def test_choice_pickers_say_enter_selects(tmp_path, monkeypatch, typed):
+    """`/model` и `/profile` только выбирают значение — строка клавиш
+    говорит «Enter выбрать»; `/export` запускает действие — «выполнить»."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = typed
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        keys = [str(w.render()) for w in picker.query(".palette-keys")]
+        assert keys[-1] == (
+            "↑↓ выбрать · Tab дополнить · Enter выбрать · Esc закрыть"
+        )
+
+
+@pytest.mark.asyncio
+async def test_action_picker_keeps_enter_runs(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.chdir(tmp_path)
+    async with _registry_app(tmp_path).run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/export "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        keys = [str(w.render()) for w in picker.query(".palette-keys")]
+        assert "Enter выполнить" in keys[-1]
+
+
+_HINTS = {
+    "short": "default gc · глобальный",
+    "long": _LONG_REASON,
+    "mid": "giga.example.ru:8443",
+}
+
+
+async def _picker_with_hints(pilot, hints: dict, prefix: str = ""):
+    """Пикер, у строк которого подсказки разной длины."""
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    pilot.app.screen._open_arg_picker(
+        options=[(value, "описание") for value in hints],
+        prefix=prefix,
+        hint_provider=lambda v: hints.get(v, ""),
+    )
+    await pilot.pause()
+    await pilot.pause()
+    return pilot.app.query_one(ArgPicker)
+
+
+def _hint_widget(picker):
+    return picker.query(".palette-keys")[0]
+
+
+@pytest.mark.asyncio
+async def test_picker_height_does_not_jump_on_selection(tmp_path):
+    """Место под подсказку — по самой длинной подсказке видимых строк, а не
+    по выбранной: ход стрелкой не меняет ни высоту пикера, ни высоту
+    подсказки (смок, раунд 2, п. 8)."""
+    pytest.importorskip("textual")
+    async with _mk_app(tmp_path).run_test(size=(80, 40)) as pilot:
+        picker = await _picker_with_hints(pilot, _HINTS)
+        assert picker.selected_value() == "short"
+        heights = set()
+        for _ in _HINTS:
+            heights.add(
+                (
+                    picker.desired_height,
+                    picker.outer_size.height,
+                    _hint_widget(picker).region.height,
+                )
+            )
+            picker.move_selection(1)
+            await pilot.pause()
+        assert len(heights) == 1, heights
+        assert _hint_widget(picker).region.height > 1  # резерв — под длинную
+
+
+@pytest.mark.asyncio
+async def test_picker_hint_reserve_follows_the_filter(tmp_path):
+    """Резерв считается по ВИДИМЫМ строкам: фильтр убрал строку с длинной
+    подсказкой — место под неё больше не держится."""
+    pytest.importorskip("textual")
+    async with _mk_app(tmp_path).run_test(size=(80, 40)) as pilot:
+        picker = await _picker_with_hints(pilot, _HINTS)
+        assert _hint_widget(picker).region.height > 1
+        picker.set_filter("s")
+        await pilot.pause()
+        assert _hint_widget(picker).region.height == 1
+        assert picker.desired_height == picker.outer_size.height
+
+
+@pytest.mark.parametrize("size", ((60, 30), (100, 24)))
+@pytest.mark.asyncio
+async def test_long_list_stays_capped_and_scrolls_to_selection(tmp_path, size):
+    """≈40 строк на узком экране: пикер не выше своего потолка (у оверлея
+    ввода — половина экрана) и прокручивается — выбранная строка видна над
+    подвалом и при переходе в конец списка, и обратно в начало."""
+    pytest.importorskip("textual")
+    hints = {f"model-{i:02d}": f"host-{i}.example.ru" for i in range(40)}
+    async with _mk_app(tmp_path).run_test(size=size) as pilot:
+        picker = await _picker_with_hints(pilot, hints)
+        screen_h = pilot.app.size.height
+        assert picker.outer_size.height <= screen_h // 2
+        for step in (-1, 1):  # заворот в конец, затем обратно в начало
+            picker.move_selection(step)
+            await pilot.pause()
+            await pilot.pause()
+            row = picker.query_one(".palette-row.selected")
+            footer = picker.query_one(".palette-footer")
+            assert row.region.height == 1, picker.selected_value()
+            assert row.region.y > picker.region.y
+            assert row.region.bottom <= footer.region.y
+
+
+@pytest.mark.asyncio
+async def test_long_list_opens_scrolled_to_the_current_value(tmp_path):
+    """Текущее значение в хвосте длинного списка видно сразу при открытии:
+    пикер докручивает к стартовой подсветке без хода стрелкой."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    async with _mk_app(tmp_path).run_test(size=(60, 30)) as pilot:
+        pilot.app.screen._open_arg_picker(
+            options=[(f"model-{i:02d}", "описание") for i in range(40)],
+            prefix="",
+            hint_provider=lambda v: v or "",
+            initial_value="model-35",
+        )
+        await pilot.pause()
+        await pilot.pause()
+        picker = pilot.app.query_one(ArgPicker)
+        row = picker.query_one(".palette-row.selected")
+        footer = picker.query_one(".palette-footer")
+        assert picker.selected_value() == "model-35"
+        assert row.region.height == 1
+        assert row.region.bottom <= footer.region.y
+
+
+@pytest.mark.asyncio
+async def test_current_value_stays_revealed_when_hint_wraps(tmp_path):
+    """Длинный хинт переносится только при фактической ширине: подвал
+    растёт уже после первой раскладки и не накрывает текущее значение —
+    докрутка идёт за раскладкой пикера, а не за первым кадром."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    async with _mk_app(tmp_path).run_test(size=(60, 30)) as pilot:
+        pilot.app.screen._open_arg_picker(
+            options=[(f"model-{i:02d}", "описание") for i in range(40)],
+            prefix="",
+            hint_provider=lambda v: f"{v} " + "длинный хинт " * 12,
+            initial_value="model-35",
+        )
+        await pilot.pause()
+        await pilot.pause()
+        picker = pilot.app.query_one(ArgPicker)
+        row = picker.query_one(".palette-row.selected")
+        footer = picker.query_one(".palette-footer")
+        assert footer.region.height > 4
+        assert row.region.height == 1
+        assert row.region.bottom <= footer.region.y
+
+
+@pytest.mark.asyncio
+async def test_current_value_stays_revealed_when_window_shrinks(tmp_path):
+    """Окно сжимается без смены содержимого пикера — подсвеченная строка
+    в хвосте длинного списка остаётся видна над подвалом."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    async with _mk_app(tmp_path).run_test(size=(80, 44)) as pilot:
+        pilot.app.screen._open_arg_picker(
+            options=[(f"model-{i:02d}", "описание") for i in range(40)],
+            prefix="",
+            initial_value="model-39",
+        )
+        await pilot.pause()
+        await pilot.resize_terminal(80, 22)
+        await pilot.pause()
+        await pilot.pause()
+        picker = pilot.app.query_one(ArgPicker)
+        row = picker.query_one(".palette-row.selected")
+        footer = picker.query_one(".palette-footer")
+        assert row.region.height == 1
+        assert row.region.bottom <= footer.region.y
+
+
+# --- Профиль не меняется во время хода ---------------------------------------
+
+_LOCKED_KEYS = (
+    "↑↓ смотреть · Esc закрыть · профиль можно сменить, когда ход закончится"
+)
+
+
+class _Runner:
+    """Раннер, чей ход идёт, пока `running`."""
+
+    def __init__(self):
+        self.running = True
+
+    def is_running(self):
+        return self.running
+
+
+def _profile_app(tmp_path, monkeypatch):
+    """Два профиля на диске, ход идёт; переключения записываются."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "profiles").mkdir()
+    for name in ("alpha", "work"):
+        (tmp_path / "profiles" / f"{name}.yml").write_text(
+            "models: {}\n", encoding="utf-8"
+        )
+    (tmp_path / "config.yml").write_text("model: default\n", encoding="utf-8")
+    app = _registry_app(tmp_path)
+    app._config_path = str(tmp_path / "config.yml")
+    app.active_runner = _Runner()
+    switched = []
+    monkeypatch.setattr(app, "switch_session_profile", switched.append)
+    return app, switched
+
+
+def _keys(picker):
+    return [str(w.render()) for w in picker.query(".palette-keys")][-1]
+
+
+@pytest.mark.asyncio
+async def test_profile_picker_during_run_browses_without_choosing(
+    tmp_path, monkeypatch
+):
+    """Во время хода пикер `/profile` открывается и листается, строка
+    клавиш говорит, когда выбор станет можно; Enter ничего не переключает
+    и пикер не закрывает. Ход закончился — тот же пикер снова выбирает."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import PICK_KEYS_HINT, ArgPicker
+
+    app, switched = _profile_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        assert _keys(picker) == _LOCKED_KEYS
+        rows_before = [w.render() for w in picker.query(".palette-row")]
+        first = picker.selected_value()
+        await pilot.press("down")
+        await pilot.pause(0.1)
+        assert picker.selected_value() != first
+        chosen = picker.selected_value()
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(ArgPicker)) == 1
+        assert switched == []
+
+        pilot.app.active_runner.running = False
+        await pilot.pause(0.4)  # тик экрана перечитывает замок
+        picker = pilot.app.query_one(ArgPicker)
+        assert _keys(picker) == PICK_KEYS_HINT
+        rows_after = [w.render() for w in picker.query(".palette-row")]
+        assert [str(r) for r in rows_after] == [str(r) for r in rows_before]
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(ArgPicker)) == 0
+        expected = "" if chosen == "без профиля" else chosen
+        assert switched == [expected]
+
+
+@pytest.mark.asyncio
+async def test_typed_profile_during_run_is_refused_in_footer(
+    tmp_path, monkeypatch
+):
+    """Набранное `/profile <имя>` во время хода — отказ во второй строке
+    футера той же фразой, профиль не меняется."""
+    pytest.importorskip("textual")
+
+    app, switched = _profile_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        hints = []
+        pilot.app.screen._show_footer_refusal = hints.append
+        await pilot.app.screen._handle_command("profile work")
+        assert hints == ["✗ профиль можно сменить, когда ход закончится"]
+        assert switched == []
+
+        pilot.app.active_runner.running = False
+        await pilot.app.screen._handle_command("profile work")
+        assert switched == ["work"]
+
+
+def _keys_text(picker):
+    return [w.render() for w in picker.query(".palette-keys")][-1]
+
+
+def _warn_part(text):
+    from gc_tui import palette
+    from textual.color import Color
+
+    warn = Color.parse(palette.WARN)
+    return "".join(
+        text.plain[s.start : s.end]
+        for s in text.spans
+        if getattr(s.style, "foreground", None) is not None
+        and s.style.foreground.rgb == warn.rgb
+    )
+
+
+@pytest.mark.asyncio
+async def test_locked_enter_lights_reason_until_cursor_moves(
+    tmp_path, monkeypatch
+):
+    """Enter в запертом пикере зажигает причину цветом WARN; сдвиг курсора
+    возвращает обычный вид; высота и открытость пикера не меняются."""
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    app, switched = _profile_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        height = picker.desired_height
+        assert _warn_part(_keys_text(picker)) == ""
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        assert _warn_part(_keys_text(picker)) == (
+            "профиль можно сменить, когда ход закончится"
+        )
+        assert picker.desired_height == height
+        assert switched == []
+        await pilot.press("down")
+        await pilot.pause(0.1)
+        assert _warn_part(_keys_text(picker)) == ""
+
+
+@pytest.mark.asyncio
+async def test_locked_enter_light_times_out(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from gc_tui.widgets import arg_picker
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    monkeypatch.setattr(arg_picker, "FLASH_SECONDS", 0.2)
+    app, _ = _profile_app(tmp_path, monkeypatch)
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        await pilot.press("enter")
+        await pilot.pause(0.05)
+        picker = pilot.app.query_one(ArgPicker)
+        assert _warn_part(_keys_text(picker)) != ""
+        await pilot.pause(0.4)
+        picker = pilot.app.query_one(ArgPicker)
+        assert _warn_part(_keys_text(picker)) == ""
+
+
+@pytest.mark.asyncio
+async def test_unlocked_enter_does_not_light(tmp_path, monkeypatch):
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker
+
+    app, switched = _profile_app(tmp_path, monkeypatch)
+    app.active_runner.running = False
+    async with app.run_test() as pilot:
+        pilot.app.query_one("#cmdinput").text = "/profile "
+        await pilot.pause(0.1)
+        picker = pilot.app.query_one(ArgPicker)
+        picker.flash_reason()
+        assert _warn_part(_keys_text(picker)) == ""
+        await pilot.press("enter")
+        await pilot.pause(0.1)
+        assert len(pilot.app.query(ArgPicker)) == 0
+        assert len(switched) == 1
+
+
+def _disabled_hint_picker():
+    from gc_tui.widgets.arg_picker import ArgPicker, PickerOption
+
+    hints = {"auto": "автовыбор недоступен: нет модели"}
+    return ArgPicker(
+        [
+            PickerOption("auto", "", enabled=False),
+            PickerOption("glm", ""),
+            PickerOption("giga", ""),
+        ],
+        hint_provider=lambda v: hints.get(v, ""),
+    )
+
+
+@pytest.mark.asyncio
+async def test_disabled_row_enter_lights_hint_line():
+    """Enter на недоступной строке зажигает её хинт цветом WARN; курсор
+    и фильтр гасят; высота не меняется; у доступной строки хинт не горит."""
+    pytest.importorskip("textual")
+    from textual.app import App
+
+    class _App(App):
+        def compose(self):
+            yield _disabled_hint_picker()
+
+    async with _App().run_test() as pilot:
+        picker = pilot.app.query_one("ArgPicker")
+        picker.set_filter("a")
+        picker.set_filter("auto")
+        await pilot.pause()
+        assert picker.selected_disabled()
+        height = picker.desired_height
+        hint = lambda: [w.render() for w in picker.query(".palette-keys")][0]
+        assert _warn_part(hint()) == ""
+        picker.flash_reason()
+        await pilot.pause()
+        assert _warn_part(hint()) == "автовыбор недоступен: нет модели"
+        assert picker.desired_height == height
+        picker.set_filter("")
+        picker.set_filter("auto")
+        await pilot.pause()
+        assert _warn_part(hint()) == ""
+        picker.flash_reason()
+        picker.set_filter("")
+        await pilot.pause()
+        assert not picker.selected_disabled()
+        picker.flash_reason()
+        await pilot.pause()
+        assert _warn_part(hint()) == ""
+
+
+@pytest.mark.asyncio
+async def test_disabled_row_without_hint_flashes_nothing():
+    pytest.importorskip("textual")
+    from gc_tui.widgets.arg_picker import ArgPicker, PickerOption
+
+    p = ArgPicker(
+        [PickerOption("auto", "", enabled=False), PickerOption("a", "")],
+        hint_provider=lambda v: "",
+        initial_filter="auto",
+    )
+    p.flash_reason()
+    assert p._flash is False

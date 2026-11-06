@@ -36,10 +36,10 @@ from gc_acp.diffs import DiffBackend, DiffLog, attach_diff
 from gc_acp.model_config import (
     MODEL_CONFIG_ID,
     active_model_line,
-    level_for_choice,
+    choice_for_value,
     listed,
     model_config_option,
-    session_level,
+    session_choice,
 )
 from gc_acp.modes import (
     MODE_CONFIG_ID,
@@ -134,9 +134,9 @@ class LiveSession:
     failed: bool = False
     tool_flow: ToolFlow | None = None
     diffs: DiffLog | None = None
-    # Выбор пикера. None — уровень конфига (``settings.level`` / ``--level``).
+    # Выбор пикера. None — выбор конфига (``settings.model`` / ``--model``).
     # close забывает сессию вместе с этим полем; в файл конфига не пишется.
-    level: str | None = None
+    choice: str | None = None
     # Title уже ушёл клиенту — повторно с тем же не слать.
     title_sent: bool = False
     # Имя тула по toolCallId (родительский ход) — для plan после session_todo.
@@ -447,12 +447,12 @@ class AcpFacade:
         return True
 
     def _choose_model(self, live: LiveSession, value: Any) -> bool:
-        level = session_level(self._settings, live.level)
-        if not listed(model_config_option(self._settings, level), value):
+        choice = session_choice(self._settings, live.choice)
+        if not listed(model_config_option(self._settings, choice), value):
             return False
-        chosen = level_for_choice(self._settings, level, value)
+        chosen = choice_for_value(self._settings, choice, value)
         if chosen is not None:
-            live.level = chosen
+            live.choice = chosen
         return True
 
     async def _apply_mode(self, live: LiveSession, mode: str) -> None:
@@ -563,7 +563,7 @@ class AcpFacade:
     def _config_options(self, live: LiveSession, mode: str) -> list[dict]:
         """Весь список опций: модель (если есть из чего выбрать) и режим."""
         model = model_config_option(
-            self._settings, session_level(self._settings, live.level)
+            self._settings, session_choice(self._settings, live.choice)
         )
         options = [] if model is None else [model]
         return [*options, mode_config_option(mode)]
@@ -580,8 +580,8 @@ class AcpFacade:
         self._loop = asyncio.get_running_loop()
         settings = self._settings.with_runtime(launch_root=live.cwd)
 
-        def level_provider() -> str:
-            return session_level(self._settings, live.level)
+        def choice_provider() -> str:
+            return session_choice(self._settings, live.choice)
 
         async with self._create_lock:
             agent = await self._agent_factory(
@@ -589,7 +589,7 @@ class AcpFacade:
                 auth_connector=self._auth,
                 tools_cache=self._tools_cache,
                 os_backend=self._session_backend(live),
-                level_provider=level_provider,
+                choice_provider=choice_provider,
             )
         try:
             bind_ask_human(agent)
@@ -881,7 +881,7 @@ class AcpFacade:
         модели не прилипло к этой строке.
         """
         text = active_model_line(
-            self._settings, session_level(self._settings, live.level)
+            self._settings, session_choice(self._settings, live.choice)
         )
         if text is None:
             return
@@ -913,8 +913,10 @@ class AcpFacade:
         if title is not None:
             await self._notify(session_id, session_info_update(title))
             live.title_sent = True
-        level = session_level(self._settings, live.level)
-        usage = usage_from_record(record, settings=self._settings, level=level)
+        choice = session_choice(self._settings, live.choice)
+        usage = usage_from_record(
+            record, settings=self._settings, choice=choice
+        )
         if usage is not None:
             await self._notify(session_id, usage)
 
@@ -937,9 +939,9 @@ class AcpFacade:
         await self._send(result_message(request_id, {"stopReason": reason}))
 
     async def _emit_usage(self, live: LiveSession) -> None:
-        level = session_level(self._settings, live.level)
+        choice = session_choice(self._settings, live.choice)
         usage = usage_from_agent(
-            live.agent, settings=self._settings, level=level
+            live.agent, settings=self._settings, choice=choice
         )
         if usage is not None:
             await self._notify(live.session_id, usage)

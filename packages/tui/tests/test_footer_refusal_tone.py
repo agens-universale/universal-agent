@@ -43,16 +43,11 @@ def _profile_not_found(scr, monkeypatch):
     from gc_tui import toggles
 
     monkeypatch.setattr(toggles, "effective_toggle_names", lambda a, n: [])
-    scr._cmd_profiles("нет-такого")
+    scr._cmd_profile("нет-такого")
 
 
-def _toggle_unavailable(scr, monkeypatch):
-    from gc_tui.screens import main
-
-    monkeypatch.setattr(
-        main, "toggle_unavailable_hint", lambda app, n, v: "недоступно"
-    )
-    scr._toggle_info_command("level", "auto")
+def _model_unknown(scr, monkeypatch):
+    scr._cmd_model("нет-такой")
 
 
 def _nested_no_detail(scr, monkeypatch):
@@ -82,7 +77,7 @@ def _paste_while_busy(scr, monkeypatch):
     [
         _open_image_refusal,
         _profile_not_found,
-        _toggle_unavailable,
+        _model_unknown,
         _nested_no_detail,
         _retention_detail,
         _paste_while_busy,
@@ -143,5 +138,5 @@ async def test_tip_and_info_are_not_warn(tmp_path):
         scr = pilot.app.screen
         scr._show_footer_tip(IMAGE_OPEN_TIP)
         assert scr._footer_hint_tone is None
-        scr._toggle_info_command("level")
+        scr._toggle_info_command("rigor")
         assert scr._footer_hint_tone is None

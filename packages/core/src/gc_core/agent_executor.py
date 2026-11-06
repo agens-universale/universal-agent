@@ -45,7 +45,9 @@ from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
+from gc_core.model_choice import note_applied_at_run_end, take_pending
 from gc_core.model_router import main_model_identity
+from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.session_state import (
     hydrate_state,
     session_from_state,
@@ -941,6 +943,11 @@ class AgentExecutor:
             attach(state)
         # Граница хода сбрасывает счётчики; модель выбирается перед вызовом.
         begin_turn_main_trace(state, self._ctx)
+        # Выбранное до старта уже показано фронтендом: применённый выбор
+        # рана — текущий, без события.
+        router = self.get_model_router()
+        if router is not None:
+            state.applied_choice = router.live_choice()
         state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(settings)
         )
@@ -1426,6 +1433,34 @@ class AgentExecutor:
                 task.uncancel()
         await self.aclose_run_accounting()
 
+    async def _arecord_model_choice(
+        self, record: Optional[ModelChoiceRecord]
+    ) -> None:
+        """Записать смену модели в тред за последним записанным сообщением.
+
+        Зовут подготовка вызова (через `RunContext.record_model_choice`) и
+        завершение рана. Сбой записи — предупреждение в журнал прогона, ран
+        он не роняет."""
+        session = self._thread_session
+        state = self.get_state()
+        if record is None or session is None or state is None:
+            return
+        try:
+            await session.aappend_model_choice(
+                record, discarded=is_persist_discarded(state)
+            )
+        except Exception:
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("model_choice_write_failed", exc_info=True)
+
+    async def _arecord_model_choices(
+        self, records: tuple[Optional[ModelChoiceRecord], ...]
+    ) -> None:
+        """Записи смены по порядку — завершение рана пишет до двух."""
+        for record in records:
+            await self._arecord_model_choice(record)
+
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
         # Keep the unconsumed queue before the await; messages arriving during
         # MCP cleanup remain pending and are returned by take_undelivered_messages.
@@ -1716,6 +1751,7 @@ class AgentExecutor:
             ),
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
+        self._ctx.record_model_choice = self._arecord_model_choice
         self._ctx.is_cli_mode = is_cli_mode
 
         # Старые истории сохраняют порядок команд. Новые исполнения проверяют
@@ -1856,6 +1892,13 @@ class AgentExecutor:
             _stop_bound.__exit__(None, None, None)
             await _stop_lease_keeper(poller)
             await _stop_lease_keeper(keeper)
+            # Смена, остановленная до запроса, и выбор, так и не дошедший
+            # до вызова; записи смены пишут после итога хода — так их
+            # строки показывает лента.
+            choice_records = (
+                take_pending(state),
+                note_applied_at_run_end(state, self._ctx),
+            )
             state_ops.leave(state)
             state.turn_level = None
             try:
@@ -1864,6 +1907,7 @@ class AgentExecutor:
                 # доходит, а `asyncio.timeout` и TaskGroup вызывающего
                 # опираются на `cancelling()`.
                 await self._arecord_turn_outcome(None, error=run_error)
+                await self._arecord_model_choices(choice_records)
             finally:
                 # Упавший ход отпускает тред выше (``_arun_turn``) — после
                 # отметки «ход окончен», не до неё.
@@ -2093,7 +2137,7 @@ class AgentExecutor:
         его жизнь (пересборка — только следующим ``get_runner()`` после ``invalidate_runner``).
 
         Футеру TUI нужен именно этот Router для резолва подготовленного вызова по
-        его уровню: живой ``display_router()`` отражает /profiles мгновенно и подменил бы
+        его уровню: живой ``display_router()`` отражает /profile мгновенно и подменил бы
         факт моделью уже переключившегося профиля (резолв — перед каждым вызовом по
         живому уровню, ``processing_responses.resolve_main_for_call``). ``None`` — у
         ``ctx`` нет ``model_router`` (тестовые двойники).

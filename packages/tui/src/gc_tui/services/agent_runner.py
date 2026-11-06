@@ -385,6 +385,16 @@ class AgentRunner:
             return None
         return getattr(ex.get_state(), "_call_level", None)
 
+    def applied_choice(self) -> Optional[str]:
+        """Применённый выбор рана из State (`auto`, уровень или алиас).
+
+        Чтение не строит executor. До старта рана — None.
+        """
+        ex = self._executor
+        if ex is None or not hasattr(ex, "get_state"):
+            return None
+        return getattr(ex.get_state(), "applied_choice", None)
+
     def call_mode(self) -> Optional[str]:
         """Режим незакрытого такта; выбранный в UI режим может уже быть другим."""
         ex = self._executor
@@ -398,7 +408,7 @@ class AgentRunner:
     def executor_router(self) -> Any:
         """Read-only: Router, зафиксированный при сборке ЭТОГО executor'а
         (`AgentExecutor.get_model_router`) — не живой `app.display_router()` TUI,
-        который отражает /profiles мгновенно. Футер резолвит модель бегущего хода
+        который отражает /profile мгновенно. Футер резолвит модель бегущего хода
         этим Router'ом по уровню подготовленного вызова: смена профиля
         посреди хода не подменяет факт моделью нового профиля.
 
@@ -410,24 +420,24 @@ class AgentRunner:
 
     def next_call_selection(self) -> Optional[tuple[bool, str, str]]:
         """Живой выбор следующего вызова в реестре работающего контекста."""
-        from gc_core.auto_routing.levels import auto_active, effective_level
+        from gc_core.auto_routing.levels import auto_active, effective_target
 
         router = self.executor_router()
         ctx = getattr(self._executor, "_ctx", None)
         if router is None or ctx is None:
             return None
-        live = router.live_level()
+        live = router.live_choice()
         available = getattr(ctx, "auto_available", True)
         selected_auto = auto_active(router, live, available)
-        level = effective_level(live, None, available)
-        resolved = router.resolve_main_at_level(level, check_breaker=False)
+        level = effective_target(live, None, available)
+        resolved = router.resolve_main_at(level, check_breaker=False)
         return selected_auto, level, resolved.alias or resolved.model
 
     def pinned_summary_limits(self) -> Any:
         """Read-only: пороги сжатия, по которым работает ЭТОТ executor
         (`AgentExecutor.summary_limits`) — его снимок конфига, его Router, уровень
         подготовленного вызова. Индикатор контекста берёт знаменатель отсюда, а не из живого конфига
-        экрана: тот отражает /level и /profiles раньше, чем их увидит ход.
+        экрана: тот отражает /level и /profile раньше, чем их увидит ход.
 
         None — executor ещё не построен."""
         ex = self._executor

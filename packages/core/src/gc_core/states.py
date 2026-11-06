@@ -127,6 +127,11 @@ class State(ExecutionState):
         self.turn_messages_start: Optional[int] = None
         # Поле прежних снимков; уровень текущего запроса хранится в _call_level.
         self.turn_level: Optional[str] = None
+        # Выбор модели, которым идёт ран (`gc_core.model_choice`): ставит
+        # старт рана, меняет подготовка основного вызова главного трейса.
+        self.applied_choice: Optional[str] = None
+        # Запись смены выбора, ждущая запроса (`gc_core.model_choice`).
+        self.pending_choice_record: Optional[Any] = None
         # Optional sink for messages dropped by context compaction.
         # Core does not retain them; harbor/other hosts may archive for trajectory.
         self.on_messages_evicted: Optional[Any] = None

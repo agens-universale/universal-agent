@@ -44,7 +44,7 @@ def _base_config_text(profile: str = "") -> str:
     config.default.yml — спека §11)."""
     return (
         f'profile: "{profile}"\n'
-        "level: default\n"
+        "model: default\n"
         "backend:\n"
         '  completions_url: "http://host/v1/chat/completions"\n'
         "agent:\n"
@@ -441,8 +441,8 @@ async def test_overlay_suffix_is_spaced_off_the_active_marker(
         await _open_profiles(pilot, scr)
         line = next(l for l in _profiles_rows_text(scr) if "work" in l)
     assert "+voice" in line, line
-    assert "активен+voice" not in line, line
-    assert "активен   +voice" in line, line
+    assert "глобальный+voice" not in line, line
+    assert "глобальный    +voice" in line, line
 
 
 async def test_active_base_profile_selected_by_project_config_shows_marker_and_hint(
@@ -450,7 +450,8 @@ async def test_active_base_profile_selected_by_project_config_shows_marker_and_h
 ):
     """Спека §12.3: активный профиль из БАЗОВОГО корня, выбранный проектным
     `.gc/config.yml` (не сам профиль — только указатель), — строка несёт
-    «глобальный» (источник ФАЙЛА профиля) + «● активен» + «· выбран проектом»;
+    «активен» сразу за именем + «глобальный» (источник ФАЙЛА профиля) +
+    «· выбран проектом»;
     hint выделенной строки — «выбор задан .gc/config.yml проекта» (ревью Task 13,
     Important-находка: settings.py:1094-1097/1129-1131, ветка `_project_sets_
     profile_pointer() and ref.root_kind != "project"` — было без регресс-теста)."""
@@ -484,8 +485,9 @@ async def test_active_base_profile_selected_by_project_config_shows_marker_and_h
         assert row["ref"].root_kind == "base"
         lines = _profiles_rows_text(scr)
         home_line = next(l for l in lines if "home" in l)
-        assert "глобальный" in home_line
-        assert "● активен" in home_line
+        assert "●" not in home_line
+        name_end = home_line.index("home") + len("home")
+        assert home_line[name_end:].lstrip().startswith("активен   глобальный")
         assert "выбран проектом" in home_line
         scr._profiles_idx = next(
             i for i, r in enumerate(rows) if r["kind"] == "profile"
@@ -838,10 +840,10 @@ async def test_voice_override_line_stands_above_both_modes(
     assert (margin.top, margin.bottom) == (1, 1), margin
 
 
-# --- /config: шапка профиль/уровень/модель + путь файла профиля ---
+# --- /config: шапка профиль/модель + путь файла профиля ---
 
 
-async def test_config_screen_header_shows_profile_level_model(
+async def test_config_screen_header_shows_profile_and_model(
     tmp_path, monkeypatch
 ):
     from gc_tui import app as app_mod
@@ -866,7 +868,7 @@ async def test_config_screen_header_shows_profile_level_model(
         settings=tui_settings(
             {
                 "profile": "work",
-                "level": "default",
+                "model": "default",
                 "agent.model": "flash",
                 "models": {"flash": {}},
                 "slots": {"default": "flash"},
@@ -881,11 +883,10 @@ async def test_config_screen_header_shows_profile_level_model(
         assert isinstance(scr, ConfigScreen)
         text = config_text(scr)
         assert "профиль: work (проектный)" in text
-        assert "уровень: default" in text
         # Модель — третье слагаемое шапки (`tui/screens/config.py:116`). Без неё
         # тест повторял бы дефект близнеца `/status` ниже: имя обещает три поля,
         # тело проверяет два, а `модель:` могла бы исчезнуть, не уронив ничего.
-        assert "модель: flash" in text
+        assert "модель: ● flash" in text
         assert str(profile_path) in text
 
 
@@ -927,7 +928,7 @@ async def test_status_command_includes_profile_level_model(
         settings=tui_settings(
             {
                 "profile": "work",
-                "level": "light",
+                "model": "light",
                 "models": {"flash": {}},
                 "slots": {"default": "flash"},
             }
@@ -943,8 +944,8 @@ async def test_status_command_includes_profile_level_model(
 
     assert profile_block["name"] == "work"
     assert profile_block["source"] == "проектный"
-    assert profile_block["level"] == "light"
-    assert profile_block["model"] == "flash"
+    assert profile_block["model"] == "light"
+    assert profile_block["resolved_model"] == "flash"
 
 
 # --- онбординг-предупреждение о перекрывающем слое (спека §11) ---
@@ -1155,7 +1156,8 @@ def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
 
 
 async def test_none_row_first_active_marker(tmp_path, monkeypatch):
-    """«— без профиля» — первая строка; при пустом указателе `● активен` на ней.
+    """«— без профиля» — первая строка; при пустом указателе «активен» на ней
+    в той же колонке, что у профилей (сразу за именем).
 
     Черты в секции больше нет: она отделяла строку уровня, а уровень переехал в
     «Режимы работы» (2026-08-27) — секция снова однородный список профилей."""
@@ -1176,7 +1178,12 @@ async def test_none_row_first_active_marker(tmp_path, monkeypatch):
         rows = scr._profiles_rows()
         assert rows[0]["kind"] == "none"
         lines = _profiles_rows_text(scr)
-        assert "без профиля" in lines[0] and "● активен" in lines[0]
+        assert "без профиля" in lines[0] and "●" not in lines[0]
+        home = next(l for l in lines if "home" in l)
+        status_at = lines[0].index("активен")
+        assert lines[0][:status_at].rstrip().endswith("без профиля")
+        assert home[status_at : status_at + 7].strip() == ""
+        assert home.index("глобальный") > status_at
         assert not list(scr.query(".set-group-sep"))  # отделять больше нечего
         hint = scr._profiles_hint_text(rows)
         assert hint == "профиль не выбран — действует чистый конфиг"
@@ -1228,6 +1235,7 @@ async def test_deactivate_writes_empty_pointer_to_base_config(
         await _open_profiles(pilot, scr)
         rows = scr._profiles_rows()
         assert rows[0]["kind"] == "none"
+        scr._profiles_idx = 0  # вход — на «home» (активен), шаг на снятие
         hint_before = scr._profiles_hint_text(rows)
         assert f"Space — деактивировать (запись: {base_cfg}" in hint_before
         scr._deactivate_profile()
@@ -1307,7 +1315,7 @@ async def test_profiles_section_refuses_to_write_into_packaged_template(
     monkeypatch.setattr(
         config_mod, "_default_config_path", lambda: str(packaged)
     )
-    cfg = dict(_base_dict(), profile="home", level="default")
+    cfg = dict(_base_dict(), profile="home", model="default")
 
     app = app_mod.TuiApp(settings=tui_settings(dict(cfg)))
     async with app.run_test() as pilot:
@@ -1582,7 +1590,7 @@ async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choic
     и при сессионном выборе врала: «действует чистый конфиг», когда действует
     профиль из сессии — тот самый, который в это же время показывает футер.
 
-    Остальная секция не врёт: маркер `● активен` честно про глобальное состояние
+    Остальная секция не врёт: маркер «активен» честно про глобальное состояние
     (её предмет — файл), а строка профиля несёт хвост «выбран в текущей сессии».
     Правится ровно фраза о действии."""
     from gc_tui import app as app_mod
@@ -1626,7 +1634,7 @@ async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choic
 # `gc-ua --profile ""` — путь отхода, который советует `explain_broken_config`:
 # профиль в файле назван, но в ЭТОМ запуске не работает. Витрина, спросившая диск
 # без действующего оверрайда, называет слой, которого в стеке нет, — и прячет за
-# ним точку починки. Сессионный выбор `/profiles` — та же ось: он тоже часть
+# ним точку починки. Сессионный выбор `/profile` — та же ось: он тоже часть
 # «действующего», и витрина обязана видеть его немедленно.
 
 
@@ -1682,7 +1690,7 @@ async def test_registry_origin_judges_the_launch_stack_not_the_pointer(
 
 async def test_registry_origin_sees_the_session_choice(tmp_path, monkeypatch):
     """Обратная сторона того же правила: указатель в файле пуст, а профиль выбран
-    в сессии (`/profiles`) — реестр перекрыт ИМ, и витрина обязана сказать это
+    в сессии (`/profile`) — реестр перекрыт ИМ, и витрина обязана сказать это
     сразу, не дожидаясь записи выбора в файл (её не будет)."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1809,3 +1817,132 @@ async def test_voice_override_text_ignores_a_profile_out_of_the_stack(
         await pilot.pause()
 
         assert scr._voice_override_text() is None
+
+
+async def test_profiles_section_opens_on_the_active_row(tmp_path, monkeypatch):
+    """Курсор при входе в «Профили» — на строке с отметкой «активен»:
+    действующий профиль, а без профиля — «без профиля»; повторный вход
+    возвращает его туда же (смок, раунд 2, п. 7)."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    for name in ("alpha", "work", "zeta"):
+        _write(tmp_path / "base" / "profiles" / f"{name}.yml", "models: {}\n")
+
+    for profile, expected in (("work", "work"), ("", None)):
+        config = {**_base_dict(), "profile": profile}
+        app = app_mod.TuiApp(settings=tui_settings(config))
+        async with app.run_test() as pilot:
+            scr = _mk_screen(config=config, config_path=base_cfg)
+            app.push_screen(scr)
+            await pilot.pause()
+            await _open_profiles(pilot, scr)
+            row = scr._profiles_rows()[scr._profiles_idx]
+            assert row.get("name") == expected, row
+            assert (row["kind"] == "none") == (expected is None)
+            scr._profiles_idx = len(scr._profiles_rows()) - 1
+            await _open_profiles(pilot, scr)
+            assert scr._profiles_rows()[scr._profiles_idx] == row
+
+
+class _LiveRunner:
+    def is_running(self):
+        return True
+
+
+async def test_profile_activation_is_refused_while_a_run_is_going(
+    tmp_path, monkeypatch
+):
+    """Во время хода «Профили» листаются, но ни активация, ни снятие не
+    пишут указатель: отказ той же фразой, что у `/profile`."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
+    _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+    _write(tmp_path / "base" / "profiles" / "work.yml", "models: {}\n")
+
+    cfg = dict(_base_dict(), profile="home")
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=cfg, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        app.active_runner = _LiveRunner()
+        before = base_cfg.read_text(encoding="utf-8")
+        work = next(r for r in scr._profiles_rows() if r.get("name") == "work")
+
+        for act in (
+            lambda: scr._activate_profile("work", work["ref"]),
+            scr._deactivate_profile,
+        ):
+            act()
+            await pilot.pause()
+            assert base_cfg.read_text(encoding="utf-8") == before
+            notice = scr.query_one("#set-notice", Static)
+            assert str(notice.render()) == (
+                "✗ профиль можно сменить, когда ход закончится"
+            )
+        app.active_runner = None
+
+
+async def test_profile_delete_and_rename_are_refused_while_a_run_is_going(
+    tmp_path, monkeypatch
+):
+    """Удаление и переименование профиля переписывают указатель `profile:` —
+    во время хода оба отказывают той же фразой: ни баннера удаления, ни
+    поля имени; начатое до хода отказывает на подтверждении."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
+    home = _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
+
+    cfg = dict(_base_dict(), profile="home")
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
+    async with app.run_test() as pilot:
+        scr = _mk_screen(config=cfg, config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        before = base_cfg.read_text(encoding="utf-8")
+
+        def refused():
+            notice = scr.query_one("#set-notice", Static)
+            return str(notice.render()) == (
+                "✗ профиль можно сменить, когда ход закончится"
+            )
+
+        app.active_runner = _LiveRunner()
+        scr._request_delete_profile("home")
+        await pilot.pause()
+        assert scr._profiles_delete_name is None and refused()
+        scr._begin_profile_name_prompt("rename", "home")
+        await pilot.pause()
+        assert scr._profiles_name_prompt is None and refused()
+
+        app.active_runner = None  # начато до хода, подтверждено во время
+        scr._request_delete_profile("home")
+        app.active_runner = _LiveRunner()
+        scr._confirm_delete_profile()
+        await pilot.pause()
+        assert refused()
+        scr._rename_profile("home", "work")
+        await pilot.pause()
+        assert refused()
+
+        assert home.exists()
+        assert base_cfg.read_text(encoding="utf-8") == before
+        app.active_runner = None

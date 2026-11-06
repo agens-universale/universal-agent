@@ -10,7 +10,7 @@ from gc_core.runtime_notices import (
 )
 from gc_testkit import run_coro
 
-_ONE_MODEL_MESSAGE = "автовыбор моделей недоступен: во всех уровнях одна модель — работает уровень default"
+_ONE_MODEL_MESSAGE = "автовыбор недоступен: во всех уровнях одна модель — работает модель слота default"
 _BACKEND = (
     "backend:\n  api_mode: chat_completions\n"
     '  completions_url: "http://127.0.0.1:8014/v1/chat/completions"\n'
@@ -36,7 +36,7 @@ def _auto_runtime_notices():
     ]
 
 
-def _app_on_disk(tmp_path, monkeypatch, body, *, level_override=None):
+def _app_on_disk(tmp_path, monkeypatch, body, *, model_override=None):
     """TuiApp на настоящем config.yml с диска — так же, как его собирает `gc-ua`
     (`load_settings` + флаг уровня через `apply_cli_overrides`)."""
     pytest.importorskip("textual")
@@ -47,14 +47,14 @@ def _app_on_disk(tmp_path, monkeypatch, body, *, level_override=None):
     from gc_tui.app import TuiApp
 
     loaded = load_settings(str(cfg))
-    if level_override:
+    if model_override:
         loaded = apply_cli_overrides(
-            loaded, extra_overrides={"level": level_override}
+            loaded, extra_overrides={"model": model_override}
         )
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
         settings=loaded,
-        level_override=level_override,
+        model_override=model_override,
     )
     app.set_config_path(str(cfg))
     return app, cfg
@@ -73,10 +73,11 @@ def _bare_trace_screen(monkeypatch, app):
 def test_level_flag_on_a_one_model_config_explains_in_the_card_and_runs_default(
     tmp_path, monkeypatch
 ):
-    from gc_tui.toggles import effective_toggle_names, toggle_state
+    from gc_tui.services.model_picker import model_picker_options
+    from gc_tui.toggles import toggle_state
 
     app, _cfg = _app_on_disk(
-        tmp_path, monkeypatch, _BACKEND + _ONE, level_override="auto"
+        tmp_path, monkeypatch, _BACKEND + _ONE, model_override="auto"
     )
 
     notices = [
@@ -86,21 +87,11 @@ def test_level_flag_on_a_one_model_config_explains_in_the_card_and_runs_default(
     ]
     assert notices == [_ONE_MODEL_MESSAGE]
     assert app.auto_mode_active() is False
-    assert toggle_state(app, "level") == "default"
-    assert "auto" not in effective_toggle_names(app, "level")
+    assert toggle_state(app, "model") == "default"
+    assert not model_picker_options(app)[0].enabled
 
 
-def test_gc_ua_has_no_model_flag():
-    """`--model` у gc-ua не объявлен (легаси-форс — вход gc-cli и сервера):
-    парсер сохраняет неизвестные аргументы для отказа точки входа с кодом 2."""
-    from gc_tui import _parse_args
-
-    args = _parse_args(["--model", "other"])
-    assert not hasattr(args, "model")
-    assert args.unknown == ["--model", "other"]
-
-
-def test_typed_level_auto_names_the_reason_when_auto_is_unavailable(
+def test_typed_model_auto_names_the_reason_when_auto_is_unavailable(
     tmp_path, monkeypatch
 ):
     app, _cfg = _app_on_disk(tmp_path, monkeypatch, _BACKEND + _ONE)
@@ -108,50 +99,57 @@ def test_typed_level_auto_names_the_reason_when_auto_is_unavailable(
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
 
-    run_coro(scr._dispatch_command("level auto"))
+    run_coro(scr._dispatch_command("model auto"))
 
     assert hints == [
-        "/level auto — автовыбор моделей недоступен: во всех уровнях одна модель"
+        "/model auto — автовыбор недоступен: во всех уровнях одна модель"
     ]
     assert (
-        app.effective_settings().settings.level == "default"
+        app.effective_settings().settings.model is None
     )  # набор ничего не переключает
 
 
-def test_typed_level_auto_on_max_names_the_reason_without_claiming_default(
+def test_typed_model_auto_on_max_names_the_reason_without_claiming_default(
     tmp_path, monkeypatch
 ):
-    """Набранное `/level auto` ничего не переключает: на уровне max ответ называет
+    """Набранное `/model auto` ничего не переключает: на уровне max ответ называет
     причину и не выдаёт default за действующий уровень."""
     app, _cfg = _app_on_disk(
         tmp_path,
         monkeypatch,
         _BACKEND + _TWO + "agent:\n  auto_routing: false\n",
     )
-    app.set_session_override("level", "max")
+    app.set_session_override("model", "max")
     hints = []
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
 
-    run_coro(scr._dispatch_command("level auto"))
+    run_coro(scr._dispatch_command("model auto"))
 
     assert hints == [
-        "/level auto — автовыбор моделей недоступен: выключен настройкой auto_routing"
+        "/model auto — автовыбор недоступен: выключен настройкой auto_routing"
     ]
-    assert app.effective_settings().settings.level == "max"
+    assert app.effective_settings().settings.model == "max"
 
 
-def test_typed_level_auto_when_available_keeps_the_info_hint(
-    tmp_path, monkeypatch
-):
+def test_typed_model_auto_when_available_selects_it(tmp_path, monkeypatch):
+    """Автовыбор доступен — набранное `/model auto` выбирает его в сессии."""
     app, _cfg = _app_on_disk(tmp_path, monkeypatch, _BACKEND + _TWO)
     hints = []
     scr = _bare_trace_screen(monkeypatch, app)
     scr._show_footer_hint = lambda text, **kw: hints.append(text)
+    # Голый экран без ленты: черту смены не монтируем (её вид и склейка с
+    # соседями — test_trace_model_mark.py), решение `_mark_model_choice` —
+    # настоящее. Шов — монтаж черты целиком: склейка читает соседей уже
+    # смонтированной черты, а их на голом экране нет.
+    mounted = []
+    scr._mount_applied_mark = lambda choice, before: mounted.append(choice)
 
-    run_coro(scr._dispatch_command("level auto"))
+    run_coro(scr._dispatch_command("model auto"))
 
-    assert len(hints) == 1 and "/level: default" in hints[0]
+    assert hints == []
+    assert mounted == ["auto"]
+    assert app.effective_settings().settings.model == "auto"
 
 
 @pytest.mark.parametrize(
@@ -171,7 +169,7 @@ def test_config_change_making_auto_unavailable_notices_once_and_recovers(
     from gc_tui.toggles import toggle_state
 
     app, cfg = _app_on_disk(tmp_path, monkeypatch, _BACKEND + _TWO)
-    app.set_session_override("level", "auto")  # auto выбран в сессии палитрой
+    app.set_session_override("model", "auto")  # auto выбран в сессии палитрой
     assert app.auto_mode_active() is True
 
     cfg.write_text(
@@ -181,10 +179,10 @@ def test_config_change_making_auto_unavailable_notices_once_and_recovers(
 
     assert (
         app.auto_mode_active() is False
-        and toggle_state(app, "level") == "default"
+        and toggle_state(app, "model") == "default"
     )
     assert _auto_runtime_notices() == [
-        f"автовыбор моделей недоступен: {reason} — работает уровень default"
+        f"автовыбор недоступен: {reason} — работает модель слота default"
     ]
 
     app.reload_config()  # перечитка того же сломанного конфига
@@ -194,7 +192,7 @@ def test_config_change_making_auto_unavailable_notices_once_and_recovers(
     app.reload_config()
 
     assert (
-        app.auto_mode_active() is True and toggle_state(app, "level") == "auto"
+        app.auto_mode_active() is True and toggle_state(app, "model") == "auto"
     )
     assert len(_auto_runtime_notices()) == 1  # обратный переход нотиса не шлёт
 
@@ -205,9 +203,9 @@ def test_saved_level_auto_is_explained_by_the_startup_card_only(
     """`level: auto` сохранён в самом config.yml — причину уже называет карточка
     стартовых уведомлений; runtime-нотис её не дублирует."""
     app, cfg = _app_on_disk(
-        tmp_path, monkeypatch, _BACKEND + _TWO + "level: auto\n"
+        tmp_path, monkeypatch, _BACKEND + _TWO + "model: auto\n"
     )
-    cfg.write_text(_BACKEND + _ONE + "level: auto\n", encoding="utf-8")
+    cfg.write_text(_BACKEND + _ONE + "model: auto\n", encoding="utf-8")
 
     app.reload_config()
 
@@ -228,7 +226,7 @@ def test_session_profile_with_one_call_kit_notices_the_reason(
     (tmp_path / "profiles" / "solo.yml").write_text(
         "slots:\n  light: mid\n  default: mid\n  max: mid\n", encoding="utf-8"
     )
-    app.set_session_override("level", "auto")
+    app.set_session_override("model", "auto")
 
     app.switch_session_profile("solo")
 
@@ -242,7 +240,7 @@ def test_opening_a_thread_saved_in_auto_notices_the_reason(
     app, _cfg = _app_on_disk(tmp_path, monkeypatch, _BACKEND + _ONE)
 
     app.load_session_overrides(
-        {"level": "auto"}
+        {"model": "auto"}
     )  # мета треда: сессия шла в auto
 
     assert app.auto_mode_active() is False

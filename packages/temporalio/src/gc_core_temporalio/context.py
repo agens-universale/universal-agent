@@ -4,6 +4,10 @@ from contextlib import nullcontext
 from copy import deepcopy
 
 from gc_core.agent_store import AgentStore
+from gc_core.config_modules.model_registry import (
+    configured_choice,
+    effective_choice,
+)
 from gc_core.config_modules.root import AppConfig
 from gc_core.context_preparation import (
     RunContextBindings,
@@ -133,7 +137,10 @@ def assemble_context(
             "tool_fabric": candidates[name]["tool_fabric"],
         }
     router = ModelRouter(
-        loaded, level_provider=lambda: loaded.settings.level or "default"
+        loaded,
+        choice_provider=lambda: effective_choice(
+            configured_choice(loaded.settings), loaded.settings
+        ),
     )
     operations.router = router
     try:

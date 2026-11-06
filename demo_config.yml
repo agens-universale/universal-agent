@@ -29,25 +29,26 @@
 config_version: 1
 
 # -----------------------------------------------------------------------------
-# Профили и уровни моделей: указатели на активный профиль/уровень.
+# Профили и модель: указатели на активный профиль и выбор модели.
 # Подробно — docs/configuration.md, раздел «Профили и уровни моделей».
 #
 # profile: "" — какой профиль активен ("" или отсутствие ключа → без профиля).
-# level: default — глобальный дефолт: light | default | max | auto (нет ключа → default).
+# model: — глобальный выбор: auto | имя модели из реестра (пусто → модель уровня default).
 #
 # Оба ключа выставляются с ЧЕТЫРЁХ поверхностей (по возрастанию приоритета —
 # обычные правила config precedence):
 #   1) ключ в config.yml (user < managed config.local.yml < проектный .gc/config.yml);
-#   2) CLI: --profile <имя>, --level <уровень> (перебивает файлы для этого запуска);
-#   3) палитра TUI: /profiles <имя>, /level (сессионный тоггл — перебивает
-#      файлы и CLI, переживает смену профиля/конфига до конца сессии);
-#   4) Settings TUI (витрина профилей/уровня) — записывает в проектный/базовый
+#   2) CLI: --profile <имя>, --model <выбор> (перебивает файлы для этого запуска);
+#   3) палитра TUI: /profiles <имя>, /model (сессионный выбор — перебивает
+#      файлы и CLI до конца сессии; модель, которой нет в новом профиле,
+#      снимается с уведомлением);
+#   4) Settings TUI (витрина профилей/модели) — записывает в проектный/базовый
 #      config.yml (та же позиция, что и ручная правка ключа выше).
 #
 # Контент выбранного профиля (секции models/slots/assign + любые обычные секции
 # как оверлей) мержится ПОВЕРХ всех файловых слоёв, но ПОД CLI и сессией.
 profile: ""
-level: default   # light | default | max | auto (уровень меняется автоматически по ходу работы)
+model:   # auto | имя модели из реестра; пусто — модель уровня default
 
 # -----------------------------------------------------------------------------
 # Секции моделей: models (реестр) / slots (уровни → алиас) / assign (привязки
@@ -272,7 +273,7 @@ agent:
   # Model steering → append в <special_instructions> (для любой активной модели).
   # model_steering: |
   #   Prefer the next concrete action over a broad survey; targeted reads that unlock that action are fine.
-  # Автовыбор уровня модели включается через level: auto.
+  # Автороутинг моделей включается через model: auto.
   auto_routing: true
   # Сильная модель пары: default — light+default, max — default+max.
   # auto — начальную пару выбирает судья (assign.routing_judge), если в обеих
@@ -392,7 +393,7 @@ paths:
   # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
   agent_md_path: ""
   # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
-  # Инструкция судьи начальной пары автовыбора (level: auto). Нет файла или пуст — ход на верхней паре.
+  # Инструкция судьи начальной пары автовыбора (model: auto). Нет файла или пуст — ход на верхней паре.
   # chat_completions_routing_pair_judge_prompt_path: "prompts/chat_completions_routing_pair_judge_prompt.md"
 
   # threads_data_path / logs_dump_dir / skills_data_path по умолчанию НЕ заданы —

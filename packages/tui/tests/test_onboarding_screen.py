@@ -2515,7 +2515,7 @@ def _two_level_cfg(tmp_path, *, level):
     )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
-    cfg["level"] = level
+    cfg["model"] = level
     return cfg_path, cfg
 
 
@@ -2637,7 +2637,7 @@ async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg = _resolved_conn_cfg(cfg_path)
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
-    cfg["level"] = "max"
+    cfg["model"] = "max"
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
     )

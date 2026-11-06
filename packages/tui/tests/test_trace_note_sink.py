@@ -62,6 +62,24 @@ def test_the_hook_tags_a_note_with_the_thread_of_its_run():
     assert sink.drain("B") == [in_b]
 
 
+def test_sink_keeps_notes_and_choice_events_per_thread():
+    """Событие «выбор применён» идёт той же очередью, что пометки: по
+    порядку, с тредом своего прогона, чужое выбрасывается."""
+    from gc_core.model_choice import ModelChoiceApplied
+
+    sink = TraceNoteSink()
+    ctx = SimpleNamespace(system_id="cli", thread_id="A")
+    hook = sink.hook_for_choice(ctx)
+    note = _note("пометка")
+    applied = ModelChoiceApplied("max", "giga-max")
+    sink.push("A", note)
+    hook(applied)
+    ctx.thread_id = "B"
+    hook(ModelChoiceApplied("light", "glm-flash"))
+    assert sink.drain("A") == [note, applied]
+    assert sink.drain("B") == []
+
+
 def test_executor_build_wires_on_trace_note_to_the_app_sink(
     tmp_path, monkeypatch
 ):
@@ -99,6 +117,11 @@ def test_executor_build_wires_on_trace_note_to_the_app_sink(
     note = TraceNote("не просмотрено", "reply")
     ctx.on_trace_note(note)
     assert app._trace_note_sink.drain("t1") == [note]
+    from gc_core.model_choice import ModelChoiceApplied
+
+    applied = ModelChoiceApplied("max", "giga-max")
+    ctx.on_model_choice_applied(applied)
+    assert app._trace_note_sink.drain("t1") == [applied]
 
 
 def _write_thread(threads, tid: str) -> None:

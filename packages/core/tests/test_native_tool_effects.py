@@ -313,7 +313,7 @@ async def test_view_image_worker_probes_the_model_of_the_actual_call(
     project.mkdir()
     config = {
         "launch_root": str(project),
-        "level": "default",
+        "model": "default",
         "backend.api_mode": "chat_completions",
         "models": {
             name: {
@@ -340,7 +340,7 @@ async def test_view_image_worker_probes_the_model_of_the_actual_call(
         ctx.tool_effect = legacy_effect
     worker.image_store = ImageStore(str(tmp_path / "images"))
     worker.model_router = ModelRouter(
-        worker.settings, level_provider=lambda: "default"
+        worker.settings, choice_provider=lambda: "default"
     )
     challenge = probe.make_challenge(retry=False)
     monkeypatch.setattr(probe, "make_challenge", lambda **_: challenge)

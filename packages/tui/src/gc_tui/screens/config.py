@@ -98,13 +98,13 @@ def _effective_model_name(config) -> str:
     мастер `agent.model` не пишет вовсе, а на легаси-конфигах ключ может быть просто
     устаревшим — обе беды показывали бы моделью не то, чем идёт работа.
 
-    Уровень берём из того же снимка, что и строка «уровень:» рядом, — шапка обязана
+    Выбор берём из того же снимка, что и знак модели в шапке, — шапка обязана
     быть внутренне согласованной. Резолв не удался (реестр нерезолвим, алиаса нет) —
     честный фоллбэк на плоский ключ, шапка не место для отказа.
 
     Имя записи (алиас) главнее провайдерского id — язык слотов и привязок (§4).
 
-    `level: auto` (спека auto-routing §5.1) переводится через `effective_level`
+    `level: auto` (спека auto-routing §5.1) переводится через `effective_target`
     ДО `ModelRouter` — сырой литерал `auto` иначе роняет `_resolve_level`
     (`ValueError`), и шапка показала бы фоллбэк вместо модели default-слота.
     Доступность фичи — через `gc_tui.toggles.auto_available_cfg` (единая точка
@@ -112,8 +112,12 @@ def _effective_model_name(config) -> str:
     `cli_forces_legacy_model`; core-аналог с той же логикой — только на
     core-функциях (`gc_core.onboarding.effective_model`, слой не позволяет
     ему знать про `gc_tui`)."""
-    from gc_core.auto_routing.levels import effective_level
+    from gc_core.auto_routing.levels import effective_target
     from gc_core.config import cli_forces_legacy_model
+    from gc_core.config_modules.model_registry import (
+        configured_choice,
+        effective_choice,
+    )
     from gc_core.model_router import ModelRouter
     from gc_core.onboarding import MODEL_SENTINEL
 
@@ -125,8 +129,10 @@ def _effective_model_name(config) -> str:
         available = auto_available_cfg(config)
         resolved = ModelRouter(
             config,
-            level_provider=lambda: effective_level(
-                settings.level, None, available
+            choice_provider=lambda: effective_target(
+                effective_choice(configured_choice(settings), settings),
+                None,
+                available,
             ),
             force_legacy=cli_forces_legacy_model(config),
         ).resolve("main", check_breaker=False)
@@ -137,14 +143,19 @@ def _effective_model_name(config) -> str:
 
 
 def _profile_header_text(config, profile_source: str | None) -> Text:
-    """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local».
-    Уровень — действующий, тем же правилом, что у палитры `/level`: `auto`, только
-    когда автовыбор доступен, иначе уровень, которым идёт работа."""
-    from gc_tui.toggles import resolve_level_state
+    """Спека §12.3a: «профиль: work (проектный) · модель: ●● glm-local».
+    Выбор — действующий, тем же правилом, что у `/model`: `● auto`, только
+    когда автовыбор доступен, иначе знак модели, которой идёт работа."""
+    from gc_tui.services import model_sign
+    from gc_tui.toggles import shown_choice
 
     profile = runtime_of(config).active_profile or None
-    level = resolve_level_state(config)
-    model = _effective_model_name(config)
+    model = (
+        "auto"
+        if shown_choice(config) == "auto"
+        else _effective_model_name(config)
+    )
+    slots = settings_of(config).slots.model_dump()
     t = Text()
     t.append("профиль: ", style=DIM)
     if profile:
@@ -153,10 +164,8 @@ def _profile_header_text(config, profile_source: str | None) -> Text:
             t.append(f" ({profile_source})", style=DIM)
     else:
         t.append("—", style=DIM)
-    t.append("  ·  уровень: ", style=DIM)
-    t.append(str(level), style=MUTED)
     t.append("  ·  модель: ", style=DIM)
-    t.append(str(model), style=MUTED)
+    t.append_text(model_sign.sign(model, slots, name_style=MUTED))
     return t
 
 

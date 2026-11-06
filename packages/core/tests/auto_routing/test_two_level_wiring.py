@@ -26,7 +26,7 @@ RAW = {
     "models": {"fast": {}, "mid": {}, "big": {}},
     "slots": {"light": "fast", "default": "mid", "max": "big"},
     "backend": {"api_mode": "chat_completions"},
-    "level": "auto",
+    "model": "auto",
     "logging": {"save_logs": False},
 }
 
@@ -63,7 +63,7 @@ def _ctx(level_box, *, registry=None, **agent):
     }
     cfg = AppConfig.model_validate(raw)
     return run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: level_box["value"])
+        rc.acreate_run_context(cfg, choice_provider=lambda: level_box["value"])
     )
 
 
@@ -428,7 +428,7 @@ def test_the_discarded_answer_survives_the_jsonl_formatter(
     }
     cfg = AppConfig.model_validate(raw)
     cfg = override_settings(cfg, {"paths.logs_dump_dir": str(tmp_path)})
-    ctx = run_coro(rc.acreate_run_context(cfg, level_provider=lambda: "auto"))
+    ctx = run_coro(rc.acreate_run_context(cfg, choice_provider=lambda: "auto"))
     s = _state(ctx)
     _stub_transport(
         monkeypatch,

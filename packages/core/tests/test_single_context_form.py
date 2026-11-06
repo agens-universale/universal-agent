@@ -49,7 +49,7 @@ def test_the_form_carries_its_real_signature():
         "thread_store",
         "tools_cache",
         "os_backend",
-        "level_provider",
+        "choice_provider",
     ):
         assert name in params, f"параметр {name} пропал из публичной сигнатуры"
 

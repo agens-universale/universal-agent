@@ -8,7 +8,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, List, NamedTuple, Optional
+from typing import TYPE_CHECKING, Callable, List, NamedTuple, Optional
 
 if TYPE_CHECKING:
     from gc_core.model_router import ModelRouter
@@ -41,6 +41,7 @@ from gc_tui import branding, palette, textual_compat
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.agent_runner import STOP_SETTLE_SEC
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
+from gc_tui.services.profile_lock import profile_switch_refusal
 from gc_tui.services.session_lock import is_held_by_other
 from gc_tui.services.stream_sink import StreamSink
 from gc_tui.services.trace_note_sink import TraceNoteSink
@@ -315,7 +316,7 @@ class TuiApp(App):
         system: str = "cli",
         settings: Optional[LoadedSettings] = None,
         profile_override: Optional[str] = None,
-        level_override: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._threads_dir = threads_dir
@@ -359,14 +360,22 @@ class TuiApp(App):
         # сессионный выбор персистится в мету треда и переживает перезапуск, а флаг
         # запуска — свойство ЭТОГО процесса (`gc-ua --profile ""` не имеет права
         # прилипнуть к треду и обходить уже починенный профиль на следующем старте).
-        # Выбор из приложения (`/profiles`) остаётся сильнее: он ложится поверх
+        # Выбор из приложения (`/profile`) остаётся сильнее: он ложится поверх
         # базы, собранной под флагом (`_session_base_settings`).
         self._profile_override = profile_override
-        # Флаг запуска `--level` — тот же оверрайд, что main() отдаёт загрузчику на
+        # Флаг запуска `--model` — тот же оверрайд, что main() отдаёт загрузчику на
         # старте: каждая пересборка базы (reload_config, _profile_remerge) обязана
-        # накладывать его снова через apply_cli_overrides, иначе выбор живёт только
-        # до первого перечитывания конфига.
-        self._level_override = level_override
+        # накладывать его снова, иначе выбор живёт только до первого
+        # перечитывания конфига. «Выбор или сырой id» решается один раз, по
+        # реестру старта: профиль без алиаса не превращает выбор в легаси-форс
+        # — такой выбор санируется, как `model:` конфига (спека §3.2).
+        from gc_core.config import split_model_flag
+
+        self._model_flag = (
+            split_model_flag({"model": model_override}, settings)
+            if model_override
+            else None
+        )
         # Сессионные переопределения конфига (спека 2026-07-20-session-scoped-settings):
         # база — self._settings (файлы), это — то, что переключено в текущем треде.
         # Хранятся по dotted-именам; накладываются в effective_settings().
@@ -842,7 +851,7 @@ class TuiApp(App):
         self._notice_profile_source_change(old_source)
         self._notice_boot_frozen_diff(old_effective, self.effective_settings())
         self._notice_auto_routing_unavailable()
-        self._notify_screen_config_changed()
+        self._notify_screen_config_changed(old_effective)
 
     def _plan_reload(self) -> _ReloadPlan:
         """Собрать новое состояние окна в локальных переменных — без единой
@@ -853,17 +862,9 @@ class TuiApp(App):
         включает кандидатные пути сессионно выбранного профиля — ревью Task 11) →
         сессионный слой (не проходит проверку под новой базой — снять с notice) →
         действующие настройки → каталог тредов новой базы."""
-        from gc_core.config import apply_cli_overrides
         from gc_core.thread_store import resolve_threads_dir
 
-        base = self._with_tui_runtime(
-            apply_cli_overrides(
-                self._load_base_settings(),
-                extra_overrides={"level": self._level_override}
-                if self._level_override
-                else None,
-            )
-        )
+        base = self._with_launch_flags(self._load_base_settings())
         snap = self._config_snapshot()
         overrides = dict(snap.overrides)
         notices: list = []
@@ -1000,8 +1001,10 @@ class TuiApp(App):
         previous = self._settings.runtime.launch_root
         return apply_tui_runtime(loaded, launch_root=previous)
 
-    def _notify_screen_config_changed(self) -> None:
-        """Сказать главному экрану, что действующий конфиг сменился.
+    def _notify_screen_config_changed(self, old_effective) -> None:
+        """Сказать главному экрану, что действующий конфиг сменился;
+        `old_effective` — действующие настройки до смены: по ним экран
+        знает модель, которой шёл бы следующий ход до неё.
 
         Экран кэширует куски конфига один раз на секцию (голосовой flow строится
         на voice-секцию), поэтому сигнал обязателен КАЖДОМУ пути смены: и
@@ -1010,9 +1013,11 @@ class TuiApp(App):
         профиль со своей секцией `voice` оставлял Ctrl+T на прежнем endpoint)."""
         if not self.is_running:
             return
+        from gc_tui.services.model_picker import model_name
+
         main = self._main_screen()
         if main is not None and hasattr(main, "config_reloaded"):
-            main.config_reloaded()
+            main.config_reloaded(model_name(self, old_effective))
 
     def reload_config_if_changed(self) -> None:
         """Гейт свежести окна: перечитать базу (reload_config), только если мтайм-набор
@@ -1185,17 +1190,20 @@ class TuiApp(App):
     def _assemble_session_profile(self, name: str):
         """Стек под профилем `name` — тем же путём, что база окна: файлы с
         `--profile name`, CLI, рантайм TUI. Исключение — профиль не собирается."""
-        from gc_core.config import apply_cli_overrides, load_settings
+        from gc_core.config import load_settings
 
         loaded = load_settings(self._config_path, profile_override=name)
-        return self._with_tui_runtime(
-            apply_cli_overrides(
-                loaded,
-                extra_overrides={"level": self._level_override}
-                if self._level_override
-                else None,
-            )
-        )
+        return self._with_launch_flags(loaded)
+
+    def _with_launch_flags(self, loaded):
+        """Флаги запуска поверх свежей загрузки: слой CLI и путь `--model`,
+        решённый на старте (без повторного решения по новому реестру)."""
+        from gc_core.config import apply_cli_overrides
+
+        loaded = apply_cli_overrides(loaded)
+        if self._model_flag:
+            loaded = loaded.with_overrides(self._model_flag, layer="cli")
+        return self._with_tui_runtime(loaded)
 
     def _maybe_notice_profile_activation(self, name: str, meta, cfg) -> None:
         """Спека §3.5: первая активация ПРОЕКТНОГО профиля в сессии — notice с
@@ -1263,6 +1271,50 @@ class TuiApp(App):
                 self.invalidate_runner()
         self._notice_auto_routing_unavailable()
 
+    def sanitize_session_model(self) -> None:
+        """Сессионный выбор модели, которого нет в реестре действующего
+        профиля (смена профиля, мета треда другого профиля), — снять и
+        сказать об этом: иначе выбор молча уходил бы в `default`.
+        Слово уровня и `auto` допустимы в любом реестре.
+
+        Пока идёт ран, профиль для него ещё не действует (пересборка — после
+        хода), и снятие сменило бы модель посреди хода: оно откладывается до
+        конца рана или пересборки раннера — оба места зовут санацию снова."""
+        from gc_core.config_modules.model_registry import choice_in_registry
+
+        runner = self.active_runner
+        if runner is not None and runner.is_running():
+            return
+        choice = self._session_overrides.get("model")
+        loaded = self.effective_settings()
+        if not choice or choice_in_registry(choice, loaded.settings):
+            return
+        with self._config_lock:
+            self._session_overrides = {
+                k: v
+                for k, v in self._session_overrides.items()
+                if k != "model"
+            }
+        try:
+            self.persist_session_overrides()
+        except OSError:
+            pass  # тред недоступен — в памяти уже чисто, персист догонит позже
+        profile = loaded.runtime.active_profile or "основной"
+        push_runtime_notice(
+            Notice(
+                "info",
+                "session_model_dropped",
+                f"модели {choice} нет в профиле {profile} — выбор снят",
+                (choice, profile),
+            )
+        )
+
+    def apply_model_choice(self, choice: str) -> None:
+        """Сессионный выбор модели: `auto`, слово уровня или алиас.
+        Executor не пересобирается — роутер читает выбор через
+        `_choice_provider` на каждом такте."""
+        self.apply_session_override("model", choice)
+
     def probe_profile_assembly(self, name: str) -> None:
         """Собирается ли конфиг с профилем `name` — проба, а не применение: ответ
         выбрасывается, спрашивается лишь «собирается ли», исключение уходит
@@ -1286,9 +1338,13 @@ class TuiApp(App):
         сессионный оверрайд (персист + restore на attach — существующим
         механизмом), но с эффектами, специфичными для профиля — предохранитель
         и кэш пере-мержа сбрасывает `set_session_override`; здесь — то, что
-        специфично для МОМЕНТА выбора: boot-frozen-diff notice и, при живом ране,
-        notice отложенного применения (пересборка сама откладывается существующим
-        `invalidate_runner` — единый механизм с обычной перечиткой конфига).
+        специфично для МОМЕНТА выбора: boot-frozen-diff notice.
+
+        Во время хода смена отклоняется (`ValueError` с фразой
+        `profile_lock`): профиль действует только со следующего хода, и выбор
+        посреди хода разошёлся бы с самим ходом. Замок — здесь, у единственной
+        точки сессионной смены; входы интерфейса спрашивают тот же предикат,
+        чтобы отказать своими словами до попытки.
 
         Профиль, с которым конфиг не собирается, отклоняется ДО применения:
         `_profile_remerge` деградирует на прежнюю базу молча для рендера, и без
@@ -1300,27 +1356,19 @@ class TuiApp(App):
 
         Снятие (`name == ""`) пробы не знает — это дверь наружу, и судить её по
         сборке снимаемого значило бы запереть человека внутри битого выбора."""
+        refusal = profile_switch_refusal(self)
+        if refusal is not None:
+            raise ValueError(refusal)
         base_name = self.base_settings().runtime.active_profile or None
         if name and name != base_name:
             self.probe_profile_assembly(name)
         old_effective = self.effective_settings()
         self.apply_session_override("profile", name)
+        self.sanitize_session_model()
         self._notice_boot_frozen_diff(old_effective, self.effective_settings())
         self._notice_auto_routing_unavailable()
-        self._notify_screen_config_changed()
-        runner = self.active_runner
-        live = runner is not None and runner.is_running()
+        self._notify_screen_config_changed(old_effective)
         self.invalidate_runner()
-        if live:
-            what = f'профиль "{name}"' if name else "отключение профиля"
-            push_runtime_notice(
-                Notice(
-                    "info",
-                    "profile_switch_deferred",
-                    f"{what}: подключения и реестр моделей применятся после завершения текущей задачи",
-                    (),
-                )
-            )
 
     def _notice_profile_source_change(
         self, old_source: Optional[tuple]
@@ -1367,7 +1415,7 @@ class TuiApp(App):
         стартовых уведомлений, второй раз не шлём; повтор того же текста гасит
         `push_runtime_notice`. При восстановлении профильного выбора проверяем
         уведомление после санации, чтобы битый профиль не давал два предупреждения."""
-        if self._level_provider() != "auto":
+        if self._choice_provider() != "auto":
             return
         notice = auto_routing_unavailable_notice(self.effective_settings())
         if notice is None or notice == auto_routing_unavailable_notice(
@@ -1406,16 +1454,33 @@ class TuiApp(App):
             )
         )
 
-    def _level_provider(self) -> str:
-        """Активный уровень для `ModelRouter` (спека §6.4): читает сессионный слой
-        напрямую, БЕЗ `effective_settings()` — `/level` переключается
+    def _run_choice_provider(self) -> Callable[[], str]:
+        """Выбор для Router'а собираемого рана: сессионный `/model` — живой
+        (смена без пересборки), выбор конфига — снимок сборки executor.
+        Смена профиля действует со следующего рана: посреди хода `model:`
+        нового профиля не подменяет выбор идущего."""
+        from gc_core.config_modules.model_registry import configured_choice
+
+        configured = configured_choice(self._session_base_settings().settings)
+
+        def provider() -> str:
+            with self._config_lock:
+                return self._session_overrides.get("model", configured)
+
+        return provider
+
+    def _choice_provider(self) -> str:
+        """Выбор модели для `ModelRouter` (спека §6.4): читает сессионный слой
+        напрямую, БЕЗ `effective_settings()` — выбор модели переключается
         без `invalidate_runner` (единственный тоггл с таким свойством), и это
         единственный потребитель, обязанный видеть смену немедленно, без
         пересборки executor."""
+        from gc_core.config_modules.model_registry import configured_choice
+
         snap = self._config_snapshot()
-        if "level" in snap.overrides:
-            return snap.overrides["level"]
-        return self._session_base_settings(snap).settings.level or "default"
+        if "model" in snap.overrides:
+            return snap.overrides["model"]
+        return configured_choice(self._session_base_settings(snap).settings)
 
     def active_profile_ref(self):
         """`ProfileRef` действующего (эффективного, сессионно-осознанного) профиля
@@ -1442,17 +1507,18 @@ class TuiApp(App):
         (§6.4), поэтому строят свой Router от текущего effective_settings()
         на каждый вызов, а не читают executor.
 
-        `level_provider` переводит сырой `_level_provider()` (может быть
-        литералом `auto`) через `effective_level` (спека auto-routing §5.1) —
+        `choice_provider` переводит сырой `_choice_provider()` (может быть
+        литералом `auto`) через `effective_target` (спека auto-routing §5.1) —
         без этого `_resolve_level` падает `ValueError` на `auto`. Вне хода
-        `current_level` неизвестен (`None` → `effective_level` отдаёт
-        `default`); `live_level_provider` остаётся сырым, чтобы `live_level()`
+        `current_level` неизвестен (`None` → `effective_target` отдаёт
+        `default`); `live_choice_provider` остаётся сырым, чтобы `live_choice()`
         этого Router'а отвечал режимом, как у Router'а рана. Витрины его сейчас
         не читают: `/status` берёт отсюда модель и предохранитель, а уровень —
         через `toggle_state` (то же правило, что у палитры: `auto`, только пока
         автовыбор доступен)."""
-        from gc_core.auto_routing.levels import effective_level
+        from gc_core.auto_routing.levels import effective_target
         from gc_core.config import cli_forces_legacy_model
+        from gc_core.config_modules.model_registry import effective_choice
         from gc_core.model_router import ModelRouter
 
         from gc_tui.toggles import auto_available_cfg
@@ -1461,10 +1527,12 @@ class TuiApp(App):
         available = auto_available_cfg(loaded)
         return ModelRouter(
             loaded,
-            level_provider=lambda: effective_level(
-                self._level_provider(), None, available
+            choice_provider=lambda: effective_target(
+                effective_choice(self._choice_provider(), loaded.settings),
+                None,
+                available,
             ),
-            live_level_provider=self._level_provider,
+            live_choice_provider=self._choice_provider,
             breaker=self._circuit_breaker,
             force_legacy=cli_forces_legacy_model(loaded),
         )
@@ -1476,7 +1544,7 @@ class TuiApp(App):
         обычной точки уровня."""
         from gc_tui.toggles import auto_available_cfg
 
-        return self._level_provider() == "auto" and auto_available_cfg(
+        return self._choice_provider() == "auto" and auto_available_cfg(
             self.effective_settings()
         )
 
@@ -1807,6 +1875,8 @@ class TuiApp(App):
             _release_runner(self.active_runner)
             self.active_runner = None
             self._runner_stale = False
+            # Снятие выбора, отложенное перечиткой конфига посреди хода.
+            self.sanitize_session_model()
         if self.active_runner is not None:
             return self.active_runner
         from gc_tui.services.agent_runner import AgentRunner
@@ -1864,6 +1934,7 @@ class TuiApp(App):
         # Своё у TUI поверх действующих настроек: промпт-ассеты, адаптивный bounce
         # текстового ответа и режим судьи /gate (CLI/server/swarm их не ставят).
         loaded = tui_agent_settings(self.effective_settings())
+        choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
         progress = McpProgress()
         progress.begin(list(settings_of(loaded).mcp.servers))
@@ -1894,7 +1965,7 @@ class TuiApp(App):
             # loop, а реестр клиентов ключуется по нему. Ход и `/compact` так и
             # делают, а сборка — нет: клиент легаси http/sse MCP оставался в
             # реестре с открытыми сокетами, и так на каждой пересборке (смена
-            # конфига сессии, `/profiles`).
+            # конфига сессии, `/profile`).
             from gc_core.utils.async_http import aclose_clients
 
             try:
@@ -1904,7 +1975,7 @@ class TuiApp(App):
                     on_progress=progress.update,
                     on_stream_delta=self._stream_pump.on_delta,
                     is_tui=True,
-                    level_provider=self._level_provider,
+                    choice_provider=choice_provider,
                     circuit_breaker=self._circuit_breaker,
                     # Легаси-форс (спека §2/§12.1): CLI --model/--completions_url
                     # поверх непустого реестра — тот же детект, что уже
@@ -1920,6 +1991,9 @@ class TuiApp(App):
         # Пометки ленты «изображение не просмотрено» (дизайн картинок §10) — с тредом
         # прогона: хук нужен уже собранному контексту, поэтому ставится здесь.
         ctx.on_trace_note = self._trace_note_sink.hook_for(ctx)
+        ctx.on_model_choice_applied = self._trace_note_sink.hook_for_choice(
+            ctx
+        )
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
         from gc_core.execution.progress import QueueSubagentProgressSink

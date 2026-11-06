@@ -204,7 +204,7 @@ async def _create_agent(
     auth_connector: Any,
     tools_cache: Any,
     os_backend: Any,
-    level_provider: Any = None,
+    choice_provider: Any = None,
 ) -> AsyncAgent:
     return await AsyncAgent.create(
         loaded,
@@ -212,7 +212,7 @@ async def _create_agent(
         tools_cache=tools_cache,
         os_backend=os_backend,
         force_legacy=cli_forces_legacy_model(loaded),
-        level_provider=level_provider,
+        choice_provider=choice_provider,
     )
 
 
@@ -221,7 +221,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
     Свои флаги — ``--config``, ``--profile`` (пустой args у VS Code и
     ``--profile acp`` в его настройках) и флаги-настройки gc-cli
-    (``--model``, ``--completions_url``, ``--level``). ``--путь.настройки``
+    (``--model``, ``--completions_url``). ``--путь.настройки``
     — правка конфига, как у gc-cli; незнакомый путь — ошибка. Остальное
     клиенты дописывают сами (JetBrains — позиционный ``acp``,
     ``--experimental``): такие токены пропускаются (``foreign_flags``).

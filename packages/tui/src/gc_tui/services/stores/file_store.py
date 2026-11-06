@@ -12,10 +12,12 @@ TUI работает с локальным файловым хранилищем
   storage_epoch   → «поколение:версия истории»
   archives        → число архивов сжатия треда
 
-Итог хода — поток ``turns``: хранилище отдаёт потоки пачками по потоку,
-поэтому запись встаёт по привязке (``after`` — последнее сообщение хода),
-а не по месту в пачке: за своим сообщением, а его нет в пачке (прочитано
-раньше) — в начало пачки. Полное чтение (снимок, сегменты) снимает
+Итог хода (поток ``turns``) и смена модели (поток ``model_choices``) —
+записи сбоку: хранилище отдаёт потоки пачками по потоку, поэтому запись
+встаёт по привязке (``after`` — последнее сообщение хода или последнее
+записанное на момент смены), а не по месту в пачке: за своим сообщением,
+а его нет в пачке (прочитано раньше) — в начало пачки; у одного сообщения
+итог хода идёт раньше смены. Полное чтение (снимок, сегменты) снимает
 записи-сироты: сообщения их хода в истории нет (откат, сброс).
 
 Сжатие (новая версия истории того же поколения и ровно один новый архив)
@@ -38,14 +40,19 @@ from gc_core.message_policy.user_message_policy import (
     user_content_to_text,
 )
 from gc_core.persistence.live_volume import live_volume_from_messages
+from gc_core.persistence.model_choice_record import (
+    MODEL_CHOICE_TYPE,
+    ModelChoiceRecord,
+)
 from gc_core.persistence.turn_outcome import (
     TURN_OUTCOME_TYPE,
-    is_turn_outcome_record,
     turn_shown_in,
 )
+from gc_core.threads.errors import ThreadBusy
 from gc_core.threads.facade import Cursor, TailBatch, Threads, run_sync
 from gc_core.threads.file_store import FileThreadStore
 from gc_core.threads.models import (
+    MODEL_CHOICES,
     TURNS,
     StreamEntry,
     ThreadKey,
@@ -61,8 +68,12 @@ logger = logging.getLogger(__name__)
 
 _HISTORY = "messages"
 _TUI = "tui"
-#: Потоки ленты: история и итоги хода.
-_FEED = (_HISTORY, TURNS)
+#: Записи сбоку, которые лента ставит за сообщением привязки: поток →
+#: тип конверта. Порядок — порядок у одного сообщения.
+_SIDE = {TURNS: TURN_OUTCOME_TYPE, MODEL_CHOICES: MODEL_CHOICE_TYPE}
+_SIDE_TYPES = frozenset(_SIDE.values())
+#: Потоки ленты: история и записи сбоку.
+_FEED = (_HISTORY, *_SIDE)
 # Сколько раз перечитать снимок, пока тред не перестанет меняться между
 # чтением записи треда и его истории: каждое сжатие рушит одну попытку, а
 # следующее требует вызова модели.
@@ -124,6 +135,22 @@ class FileTaskStore:
         """Убрать план из сессии (`/plan clear`); True — план был. Решение и
         запись — в фасаде ``Threads`` (под арендой треда)."""
         return run_sync(self._threads.clear_plan(self._key(task_id, system)))
+
+    def append_model_choice(
+        self,
+        task_id: str,
+        record: ModelChoiceRecord,
+        system: Optional[str] = None,
+    ) -> bool:
+        """Смена модели между ходами — записью треда за последним
+        сообщением; True — записана. Решение и запись — в фасаде
+        ``Threads`` (под арендой треда). Тред без сообщений и тред, занятый
+        чужим ходом, записи не получают."""
+        key = self._key(task_id, system)
+        try:
+            return run_sync(self._threads.append_model_choice(key, record))
+        except ThreadBusy:
+            return False
 
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред: историю, архивы, трассу, картинки."""
@@ -221,7 +248,7 @@ class FileTaskStore:
         лидирующая dialog_summary СЛЕДУЮЩЕЙ части; у последней (живой) — None.
         """
         key = self._key(task_id, system)
-        parts, turns = run_sync(_aparts_and_turns(self._threads, key))
+        parts, side = run_sync(_aparts_and_side(self._threads, key))
         # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
         parsed: list[tuple[list[dict], Optional[dict]]] = []
         for part in parts:
@@ -238,7 +265,7 @@ class FileTaskStore:
             segments.append(
                 {"index": i, "messages": seg, "compacted_by": compacted_by}
             )
-        _place_in_segments(segments, parsed, turns)
+        _place_in_segments(segments, parsed, side)
         return segments
 
     def tail_events(
@@ -352,12 +379,15 @@ async def _acompaction_step(
         window_ids=_payload_ids([*archived, *live_records]),
         live_records=live_records,
     )
-    # Итоги хода шаг не несёт: курсор их потока прежний, следующий тик
+    # Записи сбоку шаг не несёт: курсор их потоков прежний, следующий тик
     # дочитает их после шага.
     next_cursor = Cursor(
         record.generation,
         record.history_version,
-        {_HISTORY: live[-1].seq, TURNS: seen.seq.get(TURNS, 0)},
+        {
+            _HISTORY: live[-1].seq,
+            **{name: seen.seq.get(name, 0) for name in _SIDE},
+        },
     )
     return TailResult(
         new_records=[],
@@ -419,10 +449,10 @@ def _envelope(key: ThreadKey, entry: StreamEntry) -> dict:
     }
 
 
-def _turn_envelope(key: ThreadKey, entry: StreamEntry) -> dict:
-    """Запись итога хода в форме, которую ждут читатели ленты."""
+def _side_envelope(key: ThreadKey, stream: str, entry: StreamEntry) -> dict:
+    """Запись сбоку в форме, которую ждут читатели ленты."""
     return {
-        "type": TURN_OUTCOME_TYPE,
+        "type": _SIDE[stream],
         "thread_id": key.thread,
         "system": key.system,
         "seq": entry.seq,
@@ -432,28 +462,29 @@ def _turn_envelope(key: ThreadKey, entry: StreamEntry) -> dict:
 
 
 def _feed(key: ThreadKey, batch: TailBatch) -> list[dict]:
-    """Пачка хвоста одним списком: записи итога — за сообщением своей
+    """Пачка хвоста одним списком: записи сбоку — за сообщением своей
     привязки, а без него в пачке — в начале (их ход прочитан раньше)."""
     records = [
         _envelope(key, e) for stream, e in batch.entries if stream == _HISTORY
     ]
-    turns = [
-        _turn_envelope(key, e)
+    side = [
+        _side_envelope(key, stream, e)
+        for name in _SIDE
         for stream, e in batch.entries
-        if stream == TURNS
+        if stream == name
     ]
-    return _placed(records, turns)
+    return _placed(records, side)
 
 
-def _placed(records: list[dict], turns: list[dict]) -> list[dict]:
+def _placed(records: list[dict], side: list[dict]) -> list[dict]:
     lead, after = [], {}
     ids = _payload_ids(records)
-    for turn in turns:
-        anchor = turn.get("after")
+    for rec in side:
+        anchor = rec.get("after")
         if anchor in ids:
-            after.setdefault(anchor, []).append(turn)
+            after.setdefault(anchor, []).append(rec)
         else:
-            lead.append(turn)
+            lead.append(rec)
     out = list(lead)
     for rec in records:
         out.append(rec)
@@ -462,44 +493,52 @@ def _placed(records: list[dict], turns: list[dict]) -> list[dict]:
 
 
 def _complete(records: list[dict]) -> list[dict]:
-    """Полное чтение: без записей-сирот (их хода нет в истории)."""
+    """Полное чтение: без записей-сирот (их хода нет в истории). Правило
+    сирот одно на все записи сбоку (``turn_shown_in``)."""
     ids = _payload_ids(records)
     return [
         r
         for r in records
-        if not is_turn_outcome_record(r) or turn_shown_in(r, ids)
+        if r.get("type") not in _SIDE_TYPES or turn_shown_in(r, ids)
     ]
 
 
-async def _aparts_and_turns(
+async def _aparts_and_side(
     threads: Threads, key: ThreadKey
 ) -> tuple[list[list[StreamEntry]], list[dict]]:
     parts = await threads.parts(key)
-    entries = await threads.turns(key) if parts else []
-    return parts, [_turn_envelope(key, e) for e in entries]
+    if not parts:
+        return parts, []
+    turns = await threads.turns(key)
+    choices = await threads.model_choices(key)
+    return parts, [
+        *(_side_envelope(key, TURNS, e) for e in turns),
+        *(_side_envelope(key, MODEL_CHOICES, e) for e in choices),
+    ]
 
 
 def _place_in_segments(
-    segments: list[dict], parsed: list, turns: list[dict]
+    segments: list[dict], parsed: list, side: list[dict]
 ) -> None:
-    """Записи итога — в сегмент своего хода, за сообщением привязки (или
-    за репликой хода, если привязка — сводка сжатия); сироты снимаются."""
+    """Записи сбоку — в сегмент своего хода, за сообщением привязки (или
+    итог хода — за репликой хода, если привязка — сводка сжатия); сироты
+    снимаются."""
     where: dict[str, int] = {}
     for i, (seg, leading) in enumerate(parsed):
         for rec in [leading, *seg] if leading else seg:
             mid = (rec.get("payload") or {}).get("id")
             if isinstance(mid, str):
                 where.setdefault(mid, i)
-    for turn in turns:
-        if not turn_shown_in(turn, where):
+    for rec in side:
+        if not turn_shown_in(rec, where):
             continue
-        anchor = turn.get("after")
+        anchor = rec.get("after")
         if anchor not in where:
-            anchor = (turn.get("outcome") or {}).get("opened_by")
-        _insert_after(segments[where[anchor]]["messages"], anchor, turn)
+            anchor = (rec.get("outcome") or {}).get("opened_by")
+        _insert_after(segments[where[anchor]]["messages"], anchor, rec)
 
 
-def _insert_after(records: list[dict], anchor: str, turn: dict) -> None:
+def _insert_after(records: list[dict], anchor: str, side: dict) -> None:
     at = next(
         (
             i + 1
@@ -508,9 +547,9 @@ def _insert_after(records: list[dict], anchor: str, turn: dict) -> None:
         ),
         0,
     )
-    while at < len(records) and is_turn_outcome_record(records[at]):
+    while at < len(records) and records[at].get("type") in _SIDE_TYPES:
         at += 1
-    records.insert(at, turn)
+    records.insert(at, side)
 
 
 def _task_cursor(cursor: Cursor, archives: int) -> TaskCursor:
@@ -529,7 +568,9 @@ def _reset_reason(before: Cursor, after: Cursor) -> str:
 
 
 def _compaction(seg: list[dict], leading: dict) -> dict:
-    seg = [r for r in seg if not is_turn_outcome_record(r)]
+    """Счёт и объём — только по сообщениям: записи сбоку (итог хода, смена
+    модели) сообщениями не являются."""
+    seg = [r for r in seg if r.get("type") not in _SIDE_TYPES]
     payload = leading.get("payload") or {}
     synthesis = _clean_summary(user_content_to_text(payload.get("content")))
     # Мера триггера ядра: аргументы вызовов и вывод тулов тоже объём.

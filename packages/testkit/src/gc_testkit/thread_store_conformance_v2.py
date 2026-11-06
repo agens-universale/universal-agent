@@ -704,6 +704,28 @@ async def check_turns_stream(store, _clock: FakeClock) -> None:
     )
 
 
+async def check_model_choices_stream(store, _clock: FakeClock) -> None:
+    """Смены модели — поток ядра ``model_choices``: пишется сбоку по аренде
+    хода; сброс истории поток не трогает."""
+    lease = await _claim(store)
+    await store.commit(
+        KEY, _change("op1", 0, lease, append_messages=_msgs("a"))
+    )
+    entry = {"after": "a", "model": {"v": 1, "choice": "max"}}
+    await store.append_side(
+        KEY,
+        SideChange(
+            op_id="m1", lease=lease, append=[("model_choices", [entry])]
+        ),
+    )
+    await store.commit(KEY, _change("op2", 1, lease, reset_history=True))
+    _expect(
+        [e.data for e in await store.read_stream(KEY, "model_choices")]
+        == [entry],
+        "запись смены модели читается как есть и переживает сброс",
+    )
+
+
 async def check_patch_frontend_merges(store, _clock: FakeClock) -> None:
     await store.append_side(
         KEY,
@@ -1381,6 +1403,7 @@ CHECKS: tuple[Callable[..., Awaitable[None]], ...] = (
     check_side_creates_thread,
     check_patch_frontend_merges,
     check_turns_stream,
+    check_model_choices_stream,
     check_side_cannot_touch_messages,
     check_frontend_streams,
     check_aliases,

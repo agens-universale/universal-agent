@@ -28,7 +28,7 @@ def context():
             "assign": {"subagents": {"subagent_worker": "pin"}},
         }
     )
-    parent = ModelRouter(loaded, level_provider=lambda: "default")
+    parent = ModelRouter(loaded, choice_provider=lambda: "default")
     return fake_ctx(
         loaded=loaded,
         model_router=parent.with_override(
@@ -42,7 +42,7 @@ def test_current_child_fallback_identity_materializes_only_worker_transport():
     public = public_config_snapshot(ctx)
     parent = ModelRouter(
         settings_from_snapshot(public.settings, public.runtime),
-        level_provider=lambda: "default",
+        choice_provider=lambda: "default",
     )
     child = parent.with_override(parent.resolve("subagent:subagent_worker"))
     child = child.with_override(parent.resolve("main"))
@@ -64,6 +64,34 @@ def test_current_child_fallback_identity_materializes_only_worker_transport():
         "secret-active",
     )
     assert ctx.model_router.resolve("main").alias == "pin"
+
+
+def test_old_identity_with_level_word_materializes_as_before():
+    loaded = make_settings(
+        {
+            "models": {
+                "a": {
+                    "model": "ma",
+                    "url": "https://a.example/v1",
+                    "token": "t",
+                },
+                "b": {
+                    "model": "mb",
+                    "url": "https://b.example/v1",
+                    "token": "t",
+                },
+            },
+            "slots": {"default": "a", "max": "b"},
+        }
+    )
+    router = materialize_router_identity(
+        {"level": "max", "force_legacy": False, "unbound_override": None},
+        fake_ctx(
+            loaded=loaded,
+            model_router=ModelRouter(loaded, choice_provider=lambda: "x"),
+        ),
+    )
+    assert router.resolve("main").alias == "b"
 
 
 @pytest.mark.parametrize(
@@ -150,7 +178,7 @@ async def test_materialized_identity_keeps_worker_role_through_local_operations(
     assert "https://" not in str(identity)
     assert "private-" not in str(identity)
     worker.model_router = materialize_router_identity(identity, worker)
-    assert worker.model_router.resolve_main_at_level(
+    assert worker.model_router.resolve_main_at(
         "default", check_breaker=False
     ).summary_trigger_chars == (80000 if child else 20000)
 
@@ -223,7 +251,7 @@ async def test_prepared_child_preserves_frozen_raw_mode(
             "backend.vision": False,
             "logging.save_logs": False,
             "agent.use_local_subagents": True,
-            "level": mode,
+            "model": mode,
             "models": {"fast": {}, "mid": {}, "big": {}},
             "slots": {"light": "fast", "default": "mid", "max": "big"},
             "assign.subagents": {"subagent_worker": "big"} if bound else {},
@@ -231,7 +259,7 @@ async def test_prepared_child_preserves_frozen_raw_mode(
     )
     parent = await acreate_run_context(loaded)
     live = {"value": mode}
-    parent.model_router = parent.model_router.with_level_providers(
+    parent.model_router = parent.model_router.with_choice_providers(
         lambda: effective, lambda: live["value"]
     )
     ref = {
@@ -267,10 +295,10 @@ async def test_prepared_child_preserves_frozen_raw_mode(
         assert (first, second) == ("big", "big")
         assert child.model_router.auto_allowed is False
     elif mode == "auto":
-        assert child.model_router.live_level() == "auto"
+        assert child.model_router.live_choice() == "auto"
         assert (first, second) == ("fast", "big")
     else:
-        assert child.model_router.live_level() == "default"
+        assert child.model_router.live_choice() == "default"
         assert (first, second) == ("mid", "mid")
 
 
@@ -286,7 +314,7 @@ async def test_old_child_context_without_raw_mode_keeps_effective_level():
                 "backend.api_mode": "chat_completions",
                 "logging.save_logs": False,
                 "agent.use_local_subagents": True,
-                "level": "auto",
+                "model": "auto",
                 "models": {"fast": {}, "mid": {}},
                 "slots": {"light": "fast", "default": "mid"},
             }
@@ -306,7 +334,7 @@ async def test_old_child_context_without_raw_mode_keeps_effective_level():
         ),
         parent,
     )
-    assert child.model_router.live_level() == "light"
+    assert child.model_router.live_choice() == "light"
     assert child.model_router.resolve("main").alias == "fast"
 
 
@@ -344,7 +372,7 @@ def test_public_child_facts_preserve_working_pairs_and_floor(difference):
     full = make_settings(
         {
             "models": models,
-            "level": "auto",
+            "model": "auto",
             "backend.api_mode": "chat_completions",
             "slots": {"light": "fast", "default": "mid", "max": "big"},
         }
@@ -360,10 +388,10 @@ def test_public_child_facts_preserve_working_pairs_and_floor(difference):
             full, context_id="child"
         ),
     )
-    ctx.model_router = ModelRouter(ctx, level_provider=lambda: "light")
+    ctx.model_router = ModelRouter(ctx, choice_provider=lambda: "light")
     assert auto_available(ctx, force_legacy=False) is True
     assert resolve_routing_params(ctx).safe_level == "auto"
-    weak = ctx.model_router.resolve("main", level_override="light")
+    weak = ctx.model_router.resolve("main", target_override="light")
     assert (
         _floor_target(ctx, "light", weak, RoutingParams(safe_level="default"))
         == "default"

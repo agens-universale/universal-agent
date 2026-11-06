@@ -289,6 +289,7 @@ ToolCallRow.-in-agent.-gap { margin-top: 0; }
 .line-error     { color: $err; }
 .line-warn      { color: $warn; }   /* строка `!` без владельца — предупреждение */
 .line-standalone { margin-top: 1; }  /* строка `!` без владельца — своё событие */
+.line-model { margin-top: 1; }  /* отметка смены модели — своё событие */
 .line-code      { color: $code; }      /* inline-код/путь */
 .line-bold      { color: $ink; text-style: bold; }
 .line-heading-1 { color: $ink; text-style: bold; }

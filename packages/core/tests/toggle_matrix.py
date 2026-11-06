@@ -829,7 +829,7 @@ NOT_IN_MATRIX = {
     "assign.summary": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.text_answer_judge": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.vision": "выбор модели: харнесс маршрутизирует по agent.model",
-    "level": "выбор модели: харнесс маршрутизирует по agent.model",
+    "model": "выбор модели: харнесс маршрутизирует по agent.model",
     "profile": "выбор модели: харнесс маршрутизирует по agent.model",
     "slots.default": "выбор модели: харнесс маршрутизирует по agent.model",
     "slots.light": "выбор модели: харнесс маршрутизирует по agent.model",

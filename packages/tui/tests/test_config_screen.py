@@ -23,12 +23,12 @@ def test_profile_header_shows_registry_model_not_flat_key():
 
     cfg = {
         "agent.model": onboarding.MODEL_SENTINEL,
-        "level": "default",
+        "model": "default",
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         "slots": {"default": "flash"},
     }
     text = _profile_header_text(as_settings(cfg), profile_source=None).plain
-    assert "модель: flash" in text
+    assert "модель: ● flash" in text
 
 
 def test_profile_header_prefers_resolved_model_over_stale_flat_key():
@@ -38,13 +38,13 @@ def test_profile_header_prefers_resolved_model_over_stale_flat_key():
 
     cfg = {
         "agent.model": "stale-legacy-model",
-        "level": "default",
+        "model": "default",
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         "slots": {"default": "flash"},
     }
     text = _profile_header_text(as_settings(cfg), profile_source=None).plain
     assert "stale-legacy-model" not in text
-    assert "модель: flash" in text
+    assert "модель: ● flash" in text
 
 
 def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
@@ -54,28 +54,28 @@ def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
     text = _profile_header_text(
         as_settings({"agent.model": "qwen3-coder"}), profile_source=None
     ).plain
-    assert "модель: qwen3-coder" in text
+    assert "модель: ● qwen3-coder" in text
 
 
 def test_profile_header_resolves_auto_level_to_default_slot_model():
-    """level: auto (спека auto-routing §5.1) переводится через `effective_level`
+    """model: auto (спека auto-routing §5.1) переводится через `effective_target`
     ДО Router'а — сырой литерал иначе роняет резолв (ValueError), и шапка
-    показала бы фоллбэк вместо модели default-слота. Строка «уровень:» —
-    литерал `auto` при доступном автовыборе (как /status), иначе действующий
-    уровень."""
+    показала бы фоллбэк вместо модели default-слота. Строка «модель:» —
+    знак `auto` при доступном автовыборе (как /model), иначе модель, которой
+    идёт работа."""
     from gc_tui.screens.config import _profile_header_text
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
         "slots": {"light": "fast", "default": "mid", "max": "big"},
     }
     text = _profile_header_text(as_settings(cfg), profile_source=None).plain
-    assert "уровень: auto" in text
-    assert "модель: mid" in text
+    assert "модель: ● auto" in text
+    assert "уровень" not in text
 
 
 @pytest.mark.asyncio
@@ -233,7 +233,7 @@ async def test_config_screen_fieldset_panels(tmp_path):
 
 @pytest.mark.asyncio
 async def test_config_screen_snapshot_hint_caption(tmp_path):
-    # Подсказка-снимок: вторая строка трейса (первая — шапка профиль/уровень/модель,
+    # Подсказка-снимок: вторая строка трейса (первая — шапка профиль/модель,
     # спека §12.3a) и присутствует в тексте экрана (`config_text`).
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
@@ -388,14 +388,14 @@ async def test_config_filter_input_focused_and_filters(tmp_path):
     ],
     ids=["auto_routing_off", "responses", "one_model"],
 )
-def test_profile_header_shows_the_working_level_when_auto_is_unavailable(
+def test_profile_header_shows_the_working_model_when_auto_is_unavailable(
     extra,
 ):
     from gc_tui.screens.config import _profile_header_text
 
     cfg = {
         "agent.model": "m",
-        "level": "auto",
+        "model": "auto",
         "backend.api_mode": "chat_completions",
         "agent.auto_routing": True,
         "models": {"fast": {}, "mid": {}, "big": {}},
@@ -403,4 +403,5 @@ def test_profile_header_shows_the_working_level_when_auto_is_unavailable(
         **extra,
     }
     text = _profile_header_text(as_settings(cfg), profile_source=None).plain
-    assert "уровень: default" in text
+    assert "модель: ● " in text
+    assert "auto" not in text

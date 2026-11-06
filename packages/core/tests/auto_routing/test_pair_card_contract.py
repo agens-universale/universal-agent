@@ -84,7 +84,7 @@ async def test_finish_outcome_survives_compaction_and_meta_reload(
     monkeypatch.chdir(tmp_path)
     config = AppConfig.model_validate(
         {
-            "level": "default",
+            "model": "default",
             "logging": {"save_logs": False, "console_trace": False},
             "backend": {"api_mode": "chat_completions", "vision": False},
             "agent": {

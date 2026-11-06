@@ -24,7 +24,7 @@ from typing import (
 from gc_core.attachments.model import attachments_of
 from gc_core.auto_routing import state_ops
 from gc_core.auto_routing.judge_runner import arun_pair_judge
-from gc_core.auto_routing.levels import auto_active, effective_level
+from gc_core.auto_routing.levels import auto_active, effective_target
 from gc_core.auto_routing.log_events import (
     log_artifact_reroute,
     log_routing_decision,
@@ -162,6 +162,7 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.message_policy.user_stop import (
     not_started_due_to_user_stop_output,
 )
+from gc_core.model_choice import awrite_pending, note_applied
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
@@ -557,7 +558,7 @@ def _raise_honest_main_unavailable(
     )
     message = (
         f"Модель '{resolved.model}' (алиас '{resolved.alias}') недоступна по адресу "
-        f"{resolved.url}: {reason}. Переключите уровень /level или профиль /profiles."
+        f"{resolved.url}: {reason}. Выберите другую модель /model или профиль /profile."
     )
     advice = _endpoint_path_advice(ctx, resolved.url, source_exc)
     if advice:
@@ -568,7 +569,7 @@ def _raise_honest_main_unavailable(
 
 
 def resolve_main_for_call(
-    state: State, ctx: Any, *, level_override: Optional[str] = None
+    state: State, ctx: Any, *, target_override: Optional[str] = None
 ) -> Optional[Any]:
     """Единственный резолв модели главного трейса перед LLM-вызовом (спека
     автороутинга §5.2 п.3): ручной уровень и AUTO используют решение текущего
@@ -577,10 +578,10 @@ def resolve_main_for_call(
     повторных резолвов нет — иначе смена уровня между решением и отправкой давала
     бы «половинчатую подмену» (лог от одной модели, запрос к другой).
 
-    `level_override` — зафиксированный уровень из точки решения (`aroute_before_call`):
+    `target_override` — зафиксированный уровень из точки решения (`aroute_before_call`):
     без него `router.resolve("main")` читал бы
     провайдер уровня ЗАНОВО, независимо от чтения внутри `aroute_before_call` — и
-    `/level` между решением и этим резолвом развёл бы их. `None` (вызовы вне
+    `/model` между решением и этим резолвом развёл бы их. `None` (вызовы вне
     `aprepare_main_call`, напр. существующие тесты) — прежнее поведение, живой
     провайдер.
 
@@ -592,7 +593,7 @@ def resolve_main_for_call(
     if router is None:
         return None
     try:
-        resolved = router.resolve("main", level_override=level_override)
+        resolved = router.resolve("main", target_override=target_override)
     except AliasCircuitOpenError as exc:
         if getattr(router, "is_subagent_child", False):
             raise
@@ -697,7 +698,7 @@ def _first_alive_level(
 
     def is_alive(level: str) -> bool:
         try:
-            kits[level] = router.resolve("main", level_override=level)
+            kits[level] = router.resolve("main", target_override=level)
         except AliasCircuitOpenError:
             return False
         return True
@@ -840,7 +841,7 @@ async def aroute_before_call(
         return cached_active, cached_decision, cached_effective, False
 
     router = getattr(ctx, "model_router", None)
-    live = router.live_level() if router is not None else "default"
+    live = router.live_choice() if router is not None else "default"
     available = getattr(ctx, "auto_available", True)
     active = auto_active(router, live, available)
 
@@ -881,7 +882,7 @@ async def aroute_before_call(
                 decision, alive[0], current=state.current_level
             )
         state_ops.apply_decision(state, decision)
-    effective = effective_level(
+    effective = effective_target(
         live, getattr(state, "current_level", None), available
     )
     state._tick_decision = (live, active, decision, effective)
@@ -890,7 +891,7 @@ async def aroute_before_call(
 
 def _apply_call_kit(state: State, ctx: Any, level: str) -> Optional[Any]:
     """Комплект вызова и фактический уровень такта; схемы проецируются транспортом."""
-    resolved = resolve_main_for_call(state, ctx, level_override=level)
+    resolved = resolve_main_for_call(state, ctx, target_override=level)
     state._call_level = level
     return resolved
 
@@ -898,8 +899,9 @@ def _apply_call_kit(state: State, ctx: Any, level: str) -> Optional[Any]:
 async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
     """Единая точка выбора модели перед основным запросом.
 
-    Записывает фактический уровень в State и логирует только новое решение
-    такта. Повтор запроса после переполнения контекста получает то же решение.
+    Записывает фактический уровень в State; только на новом такте логирует
+    решение и сверяет применённый выбор (`model_choice.note_applied`).
+    Повтор запроса после переполнения контекста получает то же решение.
     Канонические схемы инструментов проецируются транспортом для выбранной модели."""
     active, decision, effective, is_new = await aroute_before_call(state, ctx)
     params = _routing_params(ctx, state)
@@ -909,6 +911,7 @@ async def aprepare_main_call(state: State, ctx: Any) -> Optional[Any]:
         effective,
     )
     if is_new:
+        note_applied(state, ctx, state._tick_decision[0])
         log_routing_decision(
             getattr(ctx, "logger", None) or _fallback_logger,
             state,
@@ -954,8 +957,8 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
     AUTO закрепляются только на такт —
     и, если активный алиас уже в предохранителе (trip прошлого хода /
     персистированный breaker при attach), поднимает честную ошибку класса 2 ДО
-    похода в транспорт — с той же моделью/endpoint/причиной и подсказкой /level
-    //profiles, что и `_arequest_backend_canonical`.
+    похода в транспорт — с той же моделью/endpoint/причиной и подсказкой /model
+    /profile, что и `_arequest_backend_canonical`.
 
     В ручном режиме `begin_turn` резолвит `main` с проверкой предохранителя,
     поэтому открытый алиас прилетает сюда сырым `AliasCircuitOpenError`;
@@ -1105,7 +1108,7 @@ async def _arequest_backend_canonical_local(
     (`_answer_stream_muted`), в повтор после 401 значение едет то же."""
     if resolved is _UNRESOLVED_MAIN:
         resolved = resolve_main_for_call(
-            state, ctx, level_override=getattr(state, "_call_level", None)
+            state, ctx, target_override=getattr(state, "_call_level", None)
         )
     auth_connector = getattr(ctx, "auth_connector", None)
     try:
@@ -1933,6 +1936,8 @@ async def _amain_call(messages, state: State, ctx: Any):
     чью прозу заведомо переиграют, идёт с приглушённым каналом `answer` потока
     (`_answer_stream_muted`); переигранный — с полным."""
     resolved = await aprepare_main_call(state, ctx)
+    # Отложенный вывод тула цикл уже дописал: смена встаёт за ним.
+    await awrite_pending(state, ctx)
     usage_before = (
         _usage_snapshot(state)
         if getattr(state, "current_level", None) is not None

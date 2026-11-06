@@ -30,12 +30,21 @@ from gc_core.thread_paths import sanitize_system_id, validate_thread_id
 JsonObject = dict[str, Any]
 
 CoreStream = Literal[
-    "messages", "subagent_events", "edits", "inbox", "control", "turns"
+    "messages",
+    "subagent_events",
+    "edits",
+    "inbox",
+    "control",
+    "turns",
+    "model_choices",
 ]
 CORE_STREAMS: frozenset[str] = frozenset(get_args(CoreStream))
 #: Поток итогов хода: одна запись на закрытый ход, привязанная к его
 #: сообщениям (``gc_core.persistence.turn_outcome``).
 TURNS = "turns"
+#: Поток смен модели: запись за последним записанным сообщением на момент
+#: смены (``gc_core.persistence.model_choice_record``).
+MODEL_CHOICES = "model_choices"
 #: Входящий поток треда: сообщения в идущий или следующий ход с любого
 #: процесса (``Threads.submit``).
 INBOX = "inbox"

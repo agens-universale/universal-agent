@@ -64,7 +64,7 @@ def begin_turn(state: State, ctx: Any) -> None:
     if router is None:
         return
     active = auto_active(
-        router, router.live_level(), getattr(ctx, "auto_available", True)
+        router, router.live_choice(), getattr(ctx, "auto_available", True)
     )
     state.default_model = router.resolve(
         "main", check_breaker=not active

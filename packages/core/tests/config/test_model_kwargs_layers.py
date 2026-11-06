@@ -65,7 +65,7 @@ def test_model_kwargs_replace_the_lower_layer(stack, layer, section, value):
         profile.parent.mkdir()
         profile.write_text(yaml.safe_dump(overlay))
         cfg = load_settings(str(base), profile_override="test")
-    model = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+    model = ModelRouter(cfg, choice_provider=lambda: "default").resolve("main")
     state = SimpleNamespace(messages=[], tools=[], default_model="sample")
     messages = [{"role": "user", "content": "hi"}]
     if section == "main":
@@ -109,7 +109,7 @@ def test_legacy_model_kwargs_are_migrated_with_notice(stack):
     }
     base.write_text(yaml.safe_dump(doc))
     cfg = load_settings(str(base))
-    model = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+    model = ModelRouter(cfg, choice_provider=lambda: "default").resolve("main")
     assert model.main == {"temperature": 0.7}
     assert any(
         "chat_completion_kwargs" in n and "main" in n
@@ -128,7 +128,9 @@ def test_explicit_main_wins_over_legacy_kwargs(stack):
     base.write_text(yaml.safe_dump(doc))
     cfg = load_settings(str(base))
     assert (
-        ModelRouter(cfg, level_provider=lambda: "default").resolve("main").main
+        ModelRouter(cfg, choice_provider=lambda: "default")
+        .resolve("main")
+        .main
         == {}
     )
     assert any("chat_completion_kwargs" in n for n in cfg.runtime.notices)

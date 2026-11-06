@@ -5,7 +5,16 @@ import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+)
 
 from gc_core.agent_store import (
     AgentStore,
@@ -17,7 +26,7 @@ from gc_core.agent_store.roles import with_role
 from gc_core.attachments.store import ImageStore, image_store_for
 from gc_core.auto_routing.levels import (
     auto_available,
-    effective_level,
+    effective_target,
     resolve_routing_params,
 )
 from gc_core.auto_routing.policy import RoutingParams
@@ -34,6 +43,10 @@ from gc_core.config_modules.env_vars import (
 from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
     intent_scope_from_config_dict,
+)
+from gc_core.config_modules.model_registry import (
+    configured_choice,
+    effective_choice,
 )
 from gc_core.context_preparation import PreparedRunContext, RunContextBindings
 from gc_core.execution.contracts import ToolEffectExecutor
@@ -63,6 +76,8 @@ from gc_core.utils.logging_module import create_run_logger, generate_run_id
 from gc_core.utils.prod_auth import AuthConnector
 
 if TYPE_CHECKING:
+    from gc_core.model_choice import ModelChoiceApplied
+    from gc_core.persistence.model_choice_record import ModelChoiceRecord
     from gc_core.vision.notes import TraceNote
 
 
@@ -131,6 +146,17 @@ class RunContext:
     # ответ). Не задан — `vision.notes.emit_trace_note`
     # пишет предупреждение в `logger` (CLI, сервер, SDK).
     on_trace_note: Optional[Callable[[TraceNote], None]] = None
+    # Живое событие «выбор модели применён» (`gc_core.model_choice`).
+    # Дочернему контексту не передаётся: субагент событий не даёт.
+    on_model_choice_applied: Optional[Callable[[ModelChoiceApplied], None]] = (
+        None
+    )
+    # Запись той же смены в тред: ставит исполнитель на время рана (пишет
+    # через тред-сессию). Фронтенду не принадлежит, дочернему контексту не
+    # передаётся.
+    record_model_choice: Optional[
+        Callable[[ModelChoiceRecord], Awaitable[None]]
+    ] = None
     # Порт «спросить человека»: обычная функция или корутинная. Не задан —
     # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
@@ -274,6 +300,7 @@ def assemble_run_context(
         model_router=bindings.model_router,
         on_stream_delta=bindings.on_stream_delta,
         on_trace_note=bindings.on_trace_note,
+        on_model_choice_applied=bindings.on_model_choice_applied,
         on_messages_evicted=bindings.on_messages_evicted,
         mcp_session_owner=prepared.mcp_session_owner,
         tools_cache=bindings.tools_cache,
@@ -320,15 +347,15 @@ def assemble_run_context(
     ctx.routing_params = resolve_routing_params(
         ctx, legacy_call_kits=not ctx.routing_contract_v2
     )
-    live = bindings.model_router.live_level
+    live = bindings.model_router.live_choice
 
     def effective_provider():
         state = ctx.active_state
-        return effective_level(
+        return effective_target(
             live(), getattr(state, "current_level", None), ctx.auto_available
         )
 
-    ctx.model_router = bindings.model_router.with_level_providers(
+    ctx.model_router = bindings.model_router.with_choice_providers(
         effective_provider, live
     )
     return ctx
@@ -353,7 +380,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     tools_cache: Any = None,
     log_handlers: Any = None,
     thread_store: Any = None,
-    level_provider: Optional[Callable[[], str]] = None,
+    choice_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
     prompt_loader: Optional[PromptLoader] = None,
@@ -401,8 +428,8 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     - Свой LocalFsBackend → ``TrackingFsBackend`` (журнал правок) там, где
       запись включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
       по конфигу); библиотечный вызов без режима запуска не оборачивается.
-    - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
-      CLI/server не передают его → константный провайдер из ``settings.level``.
+    - ``choice_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
+      CLI/server не передают его → константный провайдер из ``settings.model``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
       инверсия зависимости через этот параметр.
     - ``circuit_breaker`` — предохранитель модели (спека §8); по умолчанию свежий.
@@ -527,7 +554,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             is_tui=is_tui,
             tools_cache=tools_cache,
             thread_store=thread_store,
-            level_provider=level_provider,
+            choice_provider=choice_provider,
             circuit_breaker=circuit_breaker,
             force_legacy=force_legacy,
             prompt_loader=prompt_loader,
@@ -686,6 +713,16 @@ def _prepare_run_context(
     )
 
 
+def _sanitized_provider(
+    provider: Optional[Callable[[], str]], configured: str, settings: Any
+) -> Callable[[], str]:
+    """Один источник правды: любой выбор — от фронтенда или из конфига —
+    проходит `effective_choice` (неизвестный алиас → default)."""
+    if provider is None:
+        return lambda: configured
+    return lambda: effective_choice(provider(), settings)
+
+
 def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     prep: _RunContextPrep,
     tools: tuple,
@@ -699,7 +736,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     is_tui: bool,
     tools_cache: Any,
     thread_store: Any = None,
-    level_provider: Optional[Callable[[], str]] = None,
+    choice_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
     prompt_loader: Optional[PromptLoader] = None,
@@ -731,11 +768,13 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 
     settings = settings_of(prep.settings)
 
-    configured_level = settings.level or "default"
-    effective_level_provider = level_provider or (lambda: configured_level)
+    configured = effective_choice(configured_choice(settings), settings)
+    effective_choice_provider = _sanitized_provider(
+        choice_provider, configured, settings
+    )
     model_router = ModelRouter(
         settings,
-        level_provider=effective_level_provider,
+        choice_provider=effective_choice_provider,
         breaker=circuit_breaker,
         force_legacy=force_legacy,
     )

@@ -31,8 +31,8 @@ NOTE_UNSUPPORTED = "{alias} не принимает изображения"
 NOTE_VIA_EYES = "агент посмотрит через {eyes}"
 NOTE_NOT_VIEWED = "изображение не просмотрено"
 NOTE_HINT_MAIN = (
-    "выберите модель с поддержкой изображений или назначьте модель для "
-    "зрения в настройках"
+    "выберите модель с поддержкой изображений (/model) или назначьте "
+    "модель для зрения в настройках"
 )
 NOTE_HINT_EYES = "назначьте другую модель для зрения в настройках"
 _NOTE_SEP = " · "
@@ -146,7 +146,7 @@ def _unsupported_probe_note(ctx, state, resolved) -> tuple[str, Tone]:
     модели запроса — это «глаза»."""
     router = getattr(ctx, "model_router", None)
     if router is not None:
-        main = router.resolve_main_at_level(
+        main = router.resolve_main_at(
             getattr(state, "_call_level", None), check_breaker=False
         )
         if route_id(main) != route_id(resolved):

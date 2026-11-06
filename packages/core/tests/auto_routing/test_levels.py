@@ -5,7 +5,7 @@ from gc_testkit.settings import make_settings
 from gc_core.auto_routing.levels import (
     auto_available,
     auto_unavailable_reason,
-    effective_level,
+    effective_target,
     resolve_routing_params,
 )
 
@@ -105,14 +105,14 @@ def test_reason_names_the_first_unmet_condition():
 
 
 def test_effective_level_translates_auto_only():
-    assert effective_level("max", None, True) == "max"
+    assert effective_target("max", None, True) == "max"
     assert (
-        effective_level("max", "light", True) == "max"
+        effective_target("max", "light", True) == "max"
     )  # ручной игнорирует current
-    assert effective_level("auto", None, True) == "default"
-    assert effective_level("auto", "light", True) == "light"
+    assert effective_target("auto", None, True) == "default"
+    assert effective_target("auto", "light", True) == "light"
     assert (
-        effective_level("auto", "light", False) == "default"
+        effective_target("auto", "light", False) == "default"
     )  # недоступно → default
 
 
@@ -501,7 +501,7 @@ def test_child_binding_preserves_old_durable_alias_comparison():
         runtime=cfg.runtime,
         routing_contract_v2=False,
         subagent_independent_auto=False,
-        model_router=ModelRouter(cfg, level_provider=lambda: "auto"),
+        model_router=ModelRouter(cfg, choice_provider=lambda: "auto"),
     )
     runner = object.__new__(SubagentRunner)
     runner._ctx = SimpleNamespace()
@@ -510,4 +510,4 @@ def test_child_binding_preserves_old_durable_alias_comparison():
     result = runner._bind_child_context(child, "subagent_worker")
     assert result.auto_available is True
     assert result.routing_params.safe_level == "max"
-    assert result.model_router.live_level() == "auto"
+    assert result.model_router.live_choice() == "auto"

@@ -19,14 +19,8 @@
 `gc-server`.
 
 ```bash
-gc-serve chat --config ./config.yml
-gc-serve chat --config ./config.yml --profile <имя>
-# настройки агента путём через точку поверх профиля/config.yml (как у gc-cli):
-gc-serve chat --config ./config.yml --profile work --level max --agent.max_steps 50
-```
-
 Флаги перекрывают **настройки агента** (`--agent.max_steps 50`, `--model`,
-`--completions_url`, `--level`) — так же, как у `gc-cli` (см. [переопределение из
+`--completions_url`) — так же, как у `gc-cli` (см. [переопределение из
 CLI](configuration.md#переопределение-настроек-из-cli)). Неизвестное имя, в том
 числе прежнее плоское, — ошибка с подсказкой пути, код выхода 2, порт не
 открывается. Адрес, порт, токен и режимы хода поверхности — в секции `chat`

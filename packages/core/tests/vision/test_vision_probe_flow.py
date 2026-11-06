@@ -228,7 +228,7 @@ async def test_project_file_is_checked_lazily_before_attachment(
     )
     cfg = _cfg(launch_root=str(tmp_path))
     ctx = local_ctx(cfg)
-    ctx.model_router = ModelRouter(ctx, level_provider=lambda: "default")
+    ctx.model_router = ModelRouter(ctx, choice_provider=lambda: "default")
     ctx.image_store = ImageStore(str(tmp_path / "store"))
     ctx.on_trace_note = lambda note: None
     st = _state([])

@@ -587,7 +587,7 @@ def _app_for_session(tmp_path, base_cfg):
 async def test_delete_sanitizes_the_session_choice_with_a_notice(
     tmp_path, monkeypatch
 ):
-    """Профиль выбран ТЕКУЩЕЙ сессией (`/profiles`), а не конфигом. Удаление из
+    """Профиль выбран ТЕКУЩЕЙ сессией (`/profile`), а не конфигом. Удаление из
     UI впервые делает этот путь достижимым: оверрайд обязан сняться с notice
     (§9.2), иначе сессия осталась бы с висячей ссылкой на удалённый файл."""
     clear_runtime_notices()
@@ -1541,7 +1541,7 @@ async def test_delete_snaps_a_pointer_written_as_an_env_ref(
 async def test_rename_moves_the_session_choice_instead_of_dropping_it(
     tmp_path, monkeypatch
 ):
-    """Переименование — не исчезновение: сессионный выбор `/profiles` едет за новым
+    """Переименование — не исчезновение: сессионный выбор `/profile` едет за новым
     именем (ruling координатора), а не снимается санацией §9.2. Переезд доходит и
     до meta треда — иначе возврат в тред воскресил бы старое имя."""
     clear_runtime_notices()
@@ -1615,7 +1615,7 @@ async def test_delete_banner_and_flash_name_the_session_effect(
         await pilot.press("delete")
         await pilot.pause()
         banner = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
-        assert "Сессионный выбор /profiles" in banner
+        assert "Сессионный выбор /profile" in banner
         await pilot.press("enter")
         await pilot.pause()
         flash = _flash(scr)

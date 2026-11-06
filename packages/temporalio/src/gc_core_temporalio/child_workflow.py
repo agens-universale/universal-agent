@@ -225,10 +225,10 @@ class UniversalSubagentWorkflow:
                     parent_ctx.root_user_messages = lambda: list(root_words)
                 parent_ctx.model_router = ModelRouter(
                     parent_ctx,
-                    level_provider=lambda: request.child_context[
+                    choice_provider=lambda: request.child_context[
                         "frozen_level"
                     ],
-                    live_level_provider=lambda: request.child_context.get(
+                    live_choice_provider=lambda: request.child_context.get(
                         "frozen_live_level",
                         request.child_context["frozen_level"],
                     ),

@@ -390,7 +390,7 @@ async def test_aux_router_fallback_stays_in_the_native_provider_handler(
             "assign": {"finish_gate": "judge"},
         }
     )
-    router = ModelRouter(config, level_provider=lambda: "default")
+    router = ModelRouter(config, choice_provider=lambda: "default")
     models = []
 
     async def policy(*, payload_factory, initial_max_tokens, **_kwargs):

@@ -28,7 +28,7 @@ def _score(n):
 def _ctx(level_box, registry=THREE):
     raw = {
         "backend": {"api_mode": "chat_completions"},
-        "level": "auto",
+        "model": "auto",
         "logging": {"save_logs": False},
         **registry,
         "agent": {
@@ -38,7 +38,7 @@ def _ctx(level_box, registry=THREE):
     }
     cfg = AppConfig.model_validate(raw)
     return run_coro(
-        rc.acreate_run_context(cfg, level_provider=lambda: level_box["value"])
+        rc.acreate_run_context(cfg, choice_provider=lambda: level_box["value"])
     )
 
 

@@ -3484,7 +3484,7 @@ def test_fit_mode_pairs_whole_pairs_only():
 
 async def test_modes_section_preview_shows_toggle_pairs():
     """Превью строки «Режимы работы» в меню — пары label: value в порядке секции
-    (первая пара — уровень модели, всегда целиком; дальше — целиком либо усечены
+    (первая пара — модель, всегда целиком; дальше — целиком либо усечены
     в `· …`, смотря по фактической ширине региона в тестовом терминале)."""
     from gc_tui import app as app_mod
 
@@ -3494,7 +3494,7 @@ async def test_modes_section_preview_shows_toggle_pairs():
         await pilot.pause()
         rows = _menu_lines(app.screen)
         modes_row = next(r for r in rows if "Режимы работы" in r)
-        assert "уровень модели: " in modes_row
+        assert "модель: " in modes_row
         assert ("режим разрешений: edit" in modes_row) or ("· …" in modes_row)
 
 
@@ -3590,6 +3590,7 @@ async def test_modes_apply_error_flash_keeps_screen(tmp_path, monkeypatch):
 
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
+        scr._modes_idx = modes_row_index("gate")
         await pilot.press("right")
         await pilot.pause(0.1)
         assert scr._view == settings_section_index("Режимы работы")
@@ -3607,15 +3608,22 @@ async def test_modes_footer_shows_value_hint(tmp_path):
     )  # high -> пресет-строка
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        footer = str(scr.query_one("#set-footer", Static).render()).replace(
-            FOOTER_SCROLL, ""
-        )
-        assert footer == (
-            "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню"
+
+        def footer():
+            return str(scr.query_one("#set-footer", Static).render()).replace(
+                FOOTER_SCROLL, ""
+            )
+
+        # Первая строка — модель: её значение выбирается списком.
+        assert footer() == (
+            "↑/↓ — выбор · Enter — список · PgUp/PgDn — секции · Esc — меню"
         )
         scr._modes_idx = modes_row_index("rigor")
         scr._render_view()
         await pilot.pause(0.1)
+        assert footer() == (
+            "↑/↓ — выбор · ←/→ — изменить · PgUp/PgDn — секции · Esc — меню"
+        )
         hint0 = str(scr.query_one(".set-modes-hint", Static).render())
         assert hint0.startswith("high —")  # строка пресета, значение high
         assert "Enter" not in hint0
@@ -3992,6 +4000,7 @@ async def test_modes_apply_blocked_when_not_writable(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
         assert not scr._writable()
+        scr._modes_idx = modes_row_index("gate")
 
         await pilot.press("right")
         await pilot.pause(0.1)
@@ -4156,7 +4165,7 @@ async def test_modes_session_line_survives_a_narrow_window(tmp_path):
     app, cfg_file = _app_with_config(
         tmp_path, 'tui:\n  finish_gate_mode: "on"\n'
     )
-    async with app.run_test(size=(72, 24)) as pilot:
+    async with app.run_test(size=(73, 24)) as pilot:
         scr = await _open_modes_section(pilot)
         app.set_session_override("tui.finish_gate_mode", "off")
         scr._render_view()
@@ -4185,11 +4194,11 @@ async def test_session_line_label_is_dim_italic_and_value_has_its_track_colour(
     from gc_tui.palette import DEEP_DIM
     from gc_tui.toggles import TOGGLES
 
-    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test(size=(140, 30)) as pilot:
         scr = await _open_modes_section(pilot)
         app.set_permission_mode("plan")
-        text = scr._mode_row_text("mode", selected=False)
+        text = scr._mode_row_text("permissions", selected=False)
 
         def style_at(idx):
             return " ".join(
@@ -4199,7 +4208,7 @@ async def test_session_line_label_is_dim_italic_and_value_has_its_track_colour(
         label = style_at(text.plain.index("в текущей сессии:"))
         assert "italic" in label and DEEP_DIM.lower() in label
         plan_colour = next(
-            v.color for v in TOGGLES["mode"].values if v.value == "plan"
+            v.color for v in TOGGLES["permissions"].values if v.value == "plan"
         )
         assert text.plain.split("\n")[1].endswith("plan")
         assert plan_colour.lower() in style_at(text.plain.rindex("plan"))
@@ -5317,13 +5326,13 @@ async def test_the_models_section_names_the_level_that_is_really_acting(
 ):
     """`/level` переключает уровень на сессию, в файл не записывая, а экран
     открывается с БАЗОЙ (`screen_config()` — без сессионных переопределений).
-    Пикер привязок обещает «работает активным уровнем: сейчас …» — называть там
+    Пикер привязок обещает «работает выбранной моделью: сейчас …» — называть там
     записанное в файле значит называть не то, что работает."""
     from gc_tui import app as app_mod
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
-        "level: default\n"
+        "model: default\n"
         "backend:\n"
         '  completions_url: "http://host/v1/chat/completions"\n'
         'models:\n  flash:\n    model: "m"\n',
@@ -5331,20 +5340,20 @@ async def test_the_models_section_names_the_level_that_is_really_acting(
     )
     cfg = {
         "backend.completions_url": "http://host/v1/chat/completions",
-        "level": "default",
+        "model": "default",
     }
     app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
-        app._session_overrides["level"] = "max"  # /level посреди сессии
+        app._session_overrides["model"] = "max"  # /level посреди сессии
         scr = _mk_screen(config=cfg, config_path=str(cfg_file))
         app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Модели")
         await pilot.pause()
-        assert scr._models_editor()._active_level == "max"
+        assert scr._models_editor()._active_choice == "max"
 
 
-# --- level переехал из «Профилей» в «Режимы работы» отдельным блоком ---
+# --- model — отдельным блоком в «Режимах работы» ---
 
 
 def modes_row_index(name: str) -> int:
@@ -5355,161 +5364,74 @@ def modes_row_index(name: str) -> int:
     return modes_section_names().index(name)
 
 
-def test_modes_section_goes_level_then_permissions_then_rigor():
-    """Порядок блоков — решение владельца: сначала «чем работаем» (уровень
-    модели), потом «что агенту можно» (режим разрешений по умолчанию), потом
-    «как строго закрывать ход» (rigor с детьми). Порядок выровнен с палитрой,
-    где `/level` идёт первым. Состав секции спрашивается у одной функции —
-    знание о её композиции не размазано по местам."""
+def test_modes_section_goes_model_then_permissions_then_rigor():
+    """Порядок блоков — решение владельца: сначала «чем работаем» (модель
+    по умолчанию), потом «что агенту можно» (режим разрешений по умолчанию),
+    потом «как строго закрывать ход» (rigor с детьми). Состав секции
+    спрашивается у одной функции — знание о её композиции не размазано."""
     from gc_tui.toggles import modes_section_names
 
     assert modes_section_names() == [
-        "level",
-        "mode",
+        "model",
+        "permissions",
         "rigor",
         "gate",
         "answers",
     ]
 
 
-async def test_level_row_stands_behind_a_separator(tmp_path):
+async def test_model_row_stands_behind_a_separator(tmp_path):
     """Отдельный блок = черта на смене группы. Правило родовое: разделитель
     ставится перед новым preset-родителем ИЛИ на смене `group` — старый
     2-group страж (обе группы preset, одна `group`) от этого не страдает."""
     pytest.importorskip("textual")
 
-    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
 
         seps = list(scr.query(".set-group-sep"))
         rows = list(scr.query(".set-row"))
-        # Три блока: level | mode | rigor с детьми — две черты.
+        # Три блока: model | mode | rigor с детьми — две черты.
         assert len(seps) == 2
         assert len(rows) == 5
         assert rows[0].region.y < seps[0].region.y < rows[1].region.y
         assert rows[1].region.y < seps[1].region.y < rows[2].region.y
 
 
-async def test_level_row_keeps_its_default_wording(tmp_path):
-    """Голова строки — `level · уровень модели по умолчанию`. «По умолчанию»
-    отличает файловое значение от сессионного `/level`, и в Настройках оно
-    уместно ровно потому, что здесь правится файл. В палитре тот же тоггл
-    крутит сессию — там это слово соврало бы, поэтому `spec.label` не трогаем:
-    у секции своя подпись."""
+async def test_model_row_keeps_its_default_wording(tmp_path):
+    """Голова строки — `model · модель по умолчанию`: секция правит файл,
+    палитра тем же ключом крутит сессию — «по умолчанию» уместно только
+    здесь."""
     pytest.importorskip("textual")
 
-    app, _ = _app_with_config(tmp_path, 'level: "max"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "max"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
 
-        text = scr._mode_row_text("level", selected=False).plain
-        assert "level · уровень модели по умолчанию" in text
-        assert text.rstrip().endswith("max")
+        text = scr._mode_row_text("model", selected=False).plain
+        assert "model · модель по умолчанию" in text
 
 
 async def test_modes_hint_uses_the_dynamic_provider(tmp_path, monkeypatch):
     """Подсказка строки берёт динамический `hint_provider`, если тоггл его
-    объявил. У `level` значения статических подсказок не несут вовсе — их роль
-    играет модель, резолвнутая роутером для этого уровня, — и без провайдера
-    строка уровня осталась бы с пустой подсказкой (тот же приём, которым
-    динамический хинт получает палитра: `dynamic_toggle_hint`)."""
+    объявил. У `model` статических подсказок нет вовсе — их роль играет
+    подсказка модели: id у провайдера (тот же приём, которым динамический
+    хинт получает палитра: `dynamic_toggle_hint`)."""
     pytest.importorskip("textual")
 
     monkeypatch.chdir(tmp_path)
     app, _ = _app_with_config(
         tmp_path,
-        'level: "default"\nmodels:\n  flash:\n    model: "google/gemini-2.5-flash"\nslots:\n  default: "flash"\n',
+        'model: "default"\nmodels:\n  flash:\n    model: "google/gemini-2.5-flash"\nslots:\n  default: "flash"\n',
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
+        scr._modes_idx = modes_row_index("model")
 
         hint = scr._modes_hint_text()
 
-        assert "flash" in hint  # модель за уровнем, а не пустота
-        assert "основная рабочая" in hint  # роль уровня — канон копирайта
-
-
-async def test_level_row_track_is_lit_in_the_colour_of_the_level(
-    tmp_path, monkeypatch
-):
-    """Страж переноса: горящая позиция трека окрашена по ТЕКУЩЕМУ уровню — тем же
-    языком, что точка-индикатор футера. Свойство обеспечено общим `padded_track`,
-    но именно ради него строка и переезжала целиком, а не по кусочкам."""
-    pytest.importorskip("textual")
-    from gc_tui.toggles import TOGGLES
-
-    monkeypatch.chdir(tmp_path)
-    app, _ = _app_with_config(tmp_path, 'level: "max"\n')
-    async with app.run_test() as pilot:
-        scr = await _open_modes_section(pilot)
-
-        text = scr._mode_row_text("level", selected=False)
-        max_colour = next(
-            v.color for v in TOGGLES["level"].values if v.value == "max"
-        )
-        assert any(
-            max_colour.lower() in str(s.style).lower() for s in text.spans
-        )
-
-
-# --- level: четвёртая позиция `auto` вне шкалы (спека автороутинга §3) ------
-
-# Два разных комплекта вызова: с одной моделью автовыбор недоступен.
-_TWO_KITS_YAML = (
-    "models:\n  fast: {}\n  mid: {}\nslots:\n  light: fast\n  default: mid\n"
-)
-
-
-async def test_level_row_shows_auto_off_scale_when_available(
-    tmp_path, monkeypatch
-):
-    """Четвёртая позиция `auto` — доступна в Настройках тем же составом
-    значений, что и в палитре (`effective_toggle_values`, values_provider
-    `/level`): `backend.api_mode: chat_completions` + рубильник `auto_routing`
-    по умолчанию включён + в реестре два разных комплекта вызова."""
-    pytest.importorskip("textual")
-
-    monkeypatch.chdir(tmp_path)
-    app, _ = _app_with_config(
-        tmp_path,
-        'level: "default"\nbackend:\n  api_mode: "chat_completions"\n'
-        + _TWO_KITS_YAML,
-    )
-    async with app.run_test() as pilot:
-        scr = await _open_modes_section(pilot)
-
-        text = scr._mode_row_text("level", selected=False).plain
-        # `auto` — через двойной пробел вплотную к своей тройке, даже когда
-        # колонка трека шире (четвёрка режима разрешений).
-        assert "○ ● ○  ○ " in text
-        assert text.rstrip().endswith("default")
-
-
-async def test_level_row_cycle_includes_auto(tmp_path, monkeypatch):
-    """←/→ на строке `level` ходит по действующему составу
-    (`effective_toggle_names`) — включает `auto`, когда фича доступна, тем же
-    generic путём, каким цикл обычно идёт по трём базовым позициям."""
-    pytest.importorskip("textual")
-    import yaml
-
-    monkeypatch.chdir(tmp_path)
-    app, cfg_file = _app_with_config(
-        tmp_path,
-        'level: "max"\nbackend:\n  api_mode: "chat_completions"\n'
-        + _TWO_KITS_YAML,
-    )
-    async with app.run_test() as pilot:
-        scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
-
-        scr._modes_apply(1)  # max -> auto (4-я позиция сразу за max)
-
-        assert (
-            yaml.safe_load(cfg_file.read_text(encoding="utf-8"))["level"]
-            == "auto"
-        )
+        assert hint.startswith("google/gemini-2.5-flash · ")  # не пустота
 
 
 # --- Правило записи секции: куда пишем и что действует ---
@@ -5644,12 +5566,11 @@ async def test_modes_write_says_what_actually_acts_when_a_layer_wins(
 async def test_modes_write_creates_a_missing_top_level_anchor(
     tmp_path, monkeypatch
 ):
-    """Конфиг без строки `level:` (создан до появления ключа) не запирает
-    переключение: якорь дописывается из пакетного шаблона.
+    """Конфиг без строки `model:` (создан до появления ключа) не запирает
+    запись: якорь дописывается из пакетного шаблона.
 
-    Правило родовое, не про `level`: топ-уровневый скаляр `write_values` сам
-    дописать не умеет — его фоллбэк на шаблон работает только для dotted-ключей.
-    Переехало сюда вместе со строкой уровня."""
+    Правило родовое: топ-уровневый скаляр `write_values` сам дописать не
+    умеет — его фоллбэк на шаблон работает только для dotted-ключей."""
     pytest.importorskip("textual")
 
     monkeypatch.chdir(tmp_path)
@@ -5659,12 +5580,11 @@ async def test_modes_write_creates_a_missing_top_level_anchor(
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
 
-        scr._modes_apply(1)
+        scr._write_section_keys({"model": "max"})
         await pilot.pause()
 
-        assert 'level: "max"' in base_cfg.read_text(encoding="utf-8")
+        assert 'model: "max"' in base_cfg.read_text(encoding="utf-8")
 
 
 async def test_modes_write_flashes_the_file_it_wrote_to(tmp_path, monkeypatch):
@@ -5675,11 +5595,11 @@ async def test_modes_write_flashes_the_file_it_wrote_to(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     app, base_cfg = _app_with_config(
-        tmp_path, 'level: "default"\ntui:\n  finish_gate_mode: "off"\n'
+        tmp_path, 'model: "default"\ntui:\n  finish_gate_mode: "off"\n'
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
+        scr._modes_idx = modes_row_index("gate")
 
         scr._modes_apply(1)
         await pilot.pause()
@@ -5698,7 +5618,7 @@ async def test_modes_flash_names_the_file_absolutely(tmp_path, monkeypatch):
     pytest.importorskip("textual")
 
     monkeypatch.chdir(tmp_path)
-    app, base_cfg = _app_with_config(tmp_path, 'level: "default"\n')
+    app, base_cfg = _app_with_config(tmp_path, 'model: "default"\n')
     app._config_path = (
         "./config.yml"  # так его передаёт относительный --config
     )
@@ -5712,7 +5632,7 @@ async def test_modes_flash_names_the_file_absolutely(tmp_path, monkeypatch):
         await pilot.pause()
         open_settings_section(scr, "Режимы работы")
         await pilot.pause(0.1)
-        scr._modes_idx = modes_row_index("level")
+        scr._modes_idx = modes_row_index("gate")
 
         scr._modes_apply(1)
         await pilot.pause()
@@ -5742,7 +5662,6 @@ async def test_modes_write_leaves_the_file_untouched_when_it_fails(
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
         # правка руками, пока окно открыто: файл «новее» поддерживаемой версии
         # (лишний ключ отказа больше не даёт — только уведомление)
         base_cfg.write_text(
@@ -5751,7 +5670,7 @@ async def test_modes_write_leaves_the_file_untouched_when_it_fails(
         )
         before = base_cfg.read_text(encoding="utf-8")
 
-        scr._modes_apply(1)
+        scr._write_section_keys({"model": "max"})
         await pilot.pause()
 
         assert base_cfg.read_text(encoding="utf-8") == before
@@ -5777,11 +5696,10 @@ async def test_modes_restore_failure_is_reported_not_swallowed(
     )
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
         # правка руками, пока окно открыто: файл «новее» поддерживаемой версии
-        # валит write_values ПОСЛЕ того, как якорь level: уже дописан — снимок и
+        # валит write_values ПОСЛЕ того, как якорь model: уже дописан — снимок и
         # текущий текст расходятся, и без успешного отката файл остаётся с чужим
-        # значением уровня. (Лишний ключ отказа уже не даёт — только уведомление.)
+        # значением модели. (Лишний ключ отказа уже не даёт — только уведомление.)
         base_cfg.write_text(
             base_cfg.read_text(encoding="utf-8") + "config_version: 999\n",
             encoding="utf-8",
@@ -5794,7 +5712,7 @@ async def test_modes_restore_failure_is_reported_not_swallowed(
             "gc_core.onboarding_config_writer.write_text", boom
         )
 
-        scr._modes_apply(1)
+        scr._write_section_keys({"model": "max"})
         await pilot.pause()
 
         notices = [str(w.render()) for w in scr.query("#set-notice")]
@@ -5901,62 +5819,6 @@ async def test_modes_write_to_the_project_config_survives_a_packaged_base(
         )
 
 
-async def test_level_cycle_in_settings_never_writes_auto_when_only_the_session_profile_allows_it(
-    tmp_path, monkeypatch
-):
-    """Спека PR140 Р4: база без пары моделей, профиль сессии с парой. Палитра
-    видит `auto`, но Settings правит базу: ←/→ по всему кругу не предлагает
-    `auto` и не пишет его в файл."""
-    pytest.importorskip("textual")
-    import yaml
-
-    monkeypatch.chdir(tmp_path)
-    profile = tmp_path / "profiles" / "pair.yml"
-    profile.parent.mkdir(parents=True)
-    profile.write_text(
-        yaml.safe_dump(
-            {
-                "models": {
-                    "fast": {
-                        "url": "http://fast/v1/chat/completions",
-                        "token": "",
-                    },
-                    "mid": {
-                        "url": "http://mid/v1/chat/completions",
-                        "token": "",
-                    },
-                },
-                "slots": {"light": "fast", "default": "mid"},
-            }
-        ),
-        encoding="utf-8",
-    )
-    app, cfg_file = _app_with_config(
-        tmp_path,
-        "backend:\n  api_mode: chat_completions\n"
-        '  completions_url: "http://base/v1/chat/completions"\n'
-        'level: "default"\n',
-    )
-    app.switch_session_profile("pair")
-    from gc_tui.toggles import effective_toggle_names
-
-    assert "auto" in effective_toggle_names(app, "level")  # сессия его видит
-    async with app.run_test() as pilot:
-        scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("level")
-        written = []
-        for key in ("right",) * 5 + ("left",) * 5:
-            await pilot.press(key)
-            await pilot.pause(0.1)
-            written.append(
-                yaml.safe_load(cfg_file.read_text(encoding="utf-8")).get(
-                    "level"
-                )
-            )
-        assert "auto" not in written
-        assert set(written) >= {"light", "default", "max"}
-
-
 # --- mode: режим разрешений по умолчанию ------------------------------------
 
 
@@ -5966,12 +5828,13 @@ async def test_mode_row_writes_the_default_permission_mode(tmp_path):
     → конфиг»), сессия с выбором через Shift+Tab свой режим сохраняет."""
     pytest.importorskip("textual")
 
-    app, cfg_file = _app_with_config(tmp_path, 'level: "default"\n')
+    app, cfg_file = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("mode")
-        row = scr._mode_row_text("mode", selected=False).plain
-        assert "mode · режим разрешений по умолчанию" in row
+        scr._modes_idx = modes_row_index("permissions")
+        row = scr._mode_row_text("permissions", selected=False).plain
+        assert "permissions · режим разрешений по умолчанию" in row
+        assert row.lstrip().startswith("permissions")
         assert row.rstrip().endswith("edit")
 
         await pilot.press("right")  # edit -> manual
@@ -5999,7 +5862,7 @@ async def test_mode_row_hint_is_the_footer_description_of_the_mode(tmp_path):
     )
     async with app.run_test(size=(120, 30)) as pilot:
         scr = await _open_modes_section(pilot)
-        scr._modes_idx = modes_row_index("mode")
+        scr._modes_idx = modes_row_index("permissions")
 
         hint = scr._modes_hint_text()
         assert MODE_HINTS["manual"] in hint
@@ -6012,15 +5875,16 @@ async def test_mode_row_shows_the_mode_chosen_in_this_session(tmp_path):
     соседей: иначе Настройки молчали бы о режиме, который реально в силе."""
     pytest.importorskip("textual")
 
-    app, _ = _app_with_config(tmp_path, 'level: "default"\n')
+    app, _ = _app_with_config(tmp_path, 'model: "default"\n')
     async with app.run_test(size=(140, 30)) as pilot:
         scr = await _open_modes_section(pilot)
         assert (
-            "в текущей сессии" not in scr._mode_row_text("mode", False).plain
+            "в текущей сессии"
+            not in scr._mode_row_text("permissions", False).plain
         )
 
         app.set_permission_mode("plan")
-        row = scr._mode_row_text("mode", selected=False).plain
+        row = scr._mode_row_text("permissions", selected=False).plain
 
         assert row.split("\n")[0].rstrip().endswith("edit")
         assert _session_line(row) == "  в текущей сессии: plan"

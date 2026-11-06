@@ -93,7 +93,7 @@ def test_agent_overrides_model_with_registry_forces_legacy():
     assert loaded.provenance.source("agent.model").layer == "cli"
     assert cli_forces_legacy_model(loaded) is True
     router = ModelRouter(
-        loaded, level_provider=lambda: "default", force_legacy=True
+        loaded, choice_provider=lambda: "default", force_legacy=True
     )
     resolved = router.resolve("main")
     assert resolved.alias is None

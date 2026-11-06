@@ -4,16 +4,14 @@
 docs/specs/2026-07-23-profiles-design.md §6.4, §8, §9, §3.2, §3.3, §3.5.
 """
 
-from gc_testkit.develop_files import meta_of
-
-from gc_testkit.settings import make_settings
-from gc_testkit.tui_support import tui_settings
 import os
 import time
 from pathlib import Path
 
 import pytest
 import yaml
+from gc_testkit.settings import make_settings
+from gc_testkit.tui_support import tui_settings
 
 pytest.importorskip("textual")
 
@@ -25,7 +23,11 @@ from gc_core.runtime_notices import (
 from gc_tui.app import TuiApp
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.services.stores.record_view import tui_section
-from gc_tui.session_settings import SESSION_KEYS, read_breaker_from_tui
+from gc_tui.session_settings import (
+    SESSION_KEYS,
+    read_breaker_from_tui,
+    read_from_tui,
+)
 
 
 def _write_yaml(path: Path, body: dict) -> Path:
@@ -77,50 +79,58 @@ def _write_work_profile(
 # --- 1. `level` — обычный сессионный ключ: whitelist + restore на attach ------------
 
 
-def test_level_registered_in_session_keys():
-    assert "level" in SESSION_KEYS
-    assert SESSION_KEYS["level"].dotted == "level"
+def test_model_registered_in_session_keys():
+    assert "model" in SESSION_KEYS
+    assert SESSION_KEYS["model"].dotted == "model"
+
+
+def test_old_meta_level_restored_as_model():
+    tui = {"session_settings": {"level": "max", "profile": "w"}}
+    assert read_from_tui(tui) == {"model": "max", "profile": "w"}
+    both = {"session_settings": {"level": "max", "model": "giga"}}
+    assert read_from_tui(both) == {"model": "giga"}
 
 
 @pytest.mark.asyncio
-async def test_level_restored_on_attach(tmp_path):
+async def test_model_restored_on_attach(tmp_path):
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
-    store.update_tui_meta("t-level", {"session_settings": {"level": "max"}})
+    store.update_tui_meta("t-level", {"session_settings": {"model": "max"}})
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"agent.model": "M", "level": "default"}),
+        settings=tui_settings({"agent.model": "M", "model": "default"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task("t-level")
         await pilot.pause(0.1)
-        assert app.effective_settings().settings.level == "max"
+        assert app.effective_settings().settings.model == "max"
 
 
 # --- 2. `/level` не инвалидирует раннер; провайдер видит смену немедленно ----------
 
 
-def test_level_change_does_not_invalidate_runner(tmp_path):
+def test_model_change_does_not_invalidate_runner(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"agent.model": "M", "level": "default"}),
+        settings=tui_settings({"agent.model": "M", "model": "default"}),
     )
     calls = {"n": 0}
     app.invalidate_runner = lambda: calls.__setitem__("n", calls["n"] + 1)
-    app.apply_session_override("level", "light")
+    app.apply_model_choice("light")
     assert calls["n"] == 0
+    assert app._choice_provider() == "light"
 
 
-def test_level_provider_reflects_session_override_without_rebuild(tmp_path):
+def test_choice_provider_reflects_session_override_without_rebuild(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"agent.model": "M", "level": "default"}),
+        settings=tui_settings({"agent.model": "M", "model": "default"}),
     )
-    assert app._level_provider() == "default"
-    app.set_session_override("level", "max")
-    assert app._level_provider() == "max"  # без пересборки executor
+    assert app._choice_provider() == "default"
+    app.set_session_override("model", "max")
+    assert app._choice_provider() == "max"  # без пересборки executor
 
 
 # --- 3. session-профиль → пере-мерж effective_settings -------------------------------
@@ -140,7 +150,7 @@ def test_switch_session_profile_signals_the_screen(tmp_path, monkeypatch):
     перечитка конфига с диска.
 
     Экран кэширует куски конфига один раз на секцию (голосовой flow строится на
-    voice-секцию), и без сигнала `/profiles work`, где в профиле своя секция
+    voice-секцию), и без сигнала `/profile work`, где в профиле своя секция
     `voice`, оставлял бы Ctrl+T диктовать на ПРЕЖНИЙ endpoint: витрины и футер
     профиль уже показывают, а голос молча идёт мимо. Сигнал один на оба пути —
     `reload_config` и этот; отдельного канала для профиля не заводим."""
@@ -149,7 +159,7 @@ def test_switch_session_profile_signals_the_screen(tmp_path, monkeypatch):
     seen = []
 
     class _FakeMain:
-        def config_reloaded(self):
+        def config_reloaded(self, baseline=None):
             seen.append(True)
 
     monkeypatch.setattr(type(app), "is_running", property(lambda self: True))
@@ -178,26 +188,26 @@ def test_session_layer_stays_above_profile_in_both_directions(tmp_path):
                 }
             },
             "slots": {"default": "flash"},
-            "level": "max",
+            "model": "max",
         },
     )
     app = _app_with_base(tmp_path)
 
     # 1) сессия раньше профиля — профиль её не смывает
-    app.set_session_override("level", "light")
+    app.set_session_override("model", "light")
     app.switch_session_profile("work")
-    assert app.effective_settings().settings.level == "light"
+    assert app.effective_settings().settings.model == "light"
     assert (
         "flash" in app.effective_settings().settings.models
     )  # прочее из профиля пришло
 
     # 2) сессия позже профиля — ложится сверху
-    app.set_session_override("level", "default")
-    assert app.effective_settings().settings.level == "default"
+    app.set_session_override("model", "default")
+    assert app.effective_settings().settings.model == "default"
 
     # 3) снять сессионный ключ — из-под него проступает значение профиля
-    app._session_overrides.pop("level")
-    assert app.effective_settings().settings.level == "max"
+    app._session_overrides.pop("model")
+    assert app.effective_settings().settings.model == "max"
 
 
 # --- 4. кэш: повторные вызовы effective_settings не гоняют load_settings ----------
@@ -234,7 +244,7 @@ def test_reload_config_refreshes_stale_profile_cache(tmp_path):
     old_key = app._session_profile_cache[0]
 
     base = Path(app._config_path)
-    _write_yaml(base, {**_MINIMAL_BASE, "level": "max"})
+    _write_yaml(base, {**_MINIMAL_BASE, "model": "max"})
     _bump_mtime(base)
     app.reload_config()
 
@@ -345,6 +355,95 @@ def test_profile_remerge_notices_once_on_race_and_falls_back(tmp_path):
     assert cfg2 is app.base_settings()
     codes_after = [n.code for n in collect_runtime_notices()]
     assert codes_after.count("session_profile_remerge_failed") == 1
+
+
+# --- 4b. Выбор модели чужого профиля снимается (спека §3.5) ------------------------
+
+
+def _write_other_profile(tmp_path: Path) -> Path:
+    return _write_yaml(
+        tmp_path / "profiles" / "other.yml",
+        {
+            "models": {
+                "pro": {"url": "http://o/v1/chat/completions", "token": ""}
+            },
+            "slots": {"default": "pro"},
+        },
+    )
+
+
+def test_profile_switch_drops_foreign_session_model_with_notice(tmp_path):
+    clear_runtime_notices()
+    _write_work_profile(tmp_path)
+    _write_other_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.switch_session_profile("work")
+    app.apply_model_choice("flash")
+    assert app._choice_provider() == "flash"
+
+    app.switch_session_profile("other")
+
+    assert "model" not in app._session_overrides
+    assert app._choice_provider() == "default"
+    messages = [n.message for n in collect_runtime_notices()]
+    assert "модели flash нет в профиле other — выбор снят" in messages
+
+
+def test_profile_switch_keeps_model_present_in_new_profile(tmp_path):
+    clear_runtime_notices()
+    _write_work_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+    app.apply_model_choice("max")
+    app.switch_session_profile("work")
+    assert app._session_overrides["model"] == "max"
+    assert not [
+        n
+        for n in collect_runtime_notices()
+        if n.code == "session_model_dropped"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_restored_meta_with_foreign_model_is_dropped(tmp_path):
+    clear_runtime_notices()
+    store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
+    store.update_tui_meta(
+        "t-foreign", {"session_settings": {"model": "ghost"}}
+    )
+    app = _app_with_base(tmp_path)
+    async with app.run_test() as pilot:
+        pilot.app.screen.attach_active_task("t-foreign")
+        await pilot.pause(0.1)
+        assert "model" not in app._session_overrides
+        assert any(
+            n.code == "session_model_dropped"
+            for n in collect_runtime_notices()
+        )
+
+
+# --- 4c. Смена профиля во время хода отклоняется --------------------------------
+
+
+def test_switch_session_profile_refuses_while_a_run_is_going(tmp_path):
+    """Профиль действует только со следующего хода: во время хода смена
+    отклоняется фразой замка, сессия и раннер не тронуты."""
+    from gc_tui.services.profile_lock import PROFILE_LOCKED_REASON
+
+    _write_work_profile(tmp_path)
+    app = _app_with_base(tmp_path)
+
+    class _LiveRunner:
+        def is_running(self):
+            return True
+
+    runner = _LiveRunner()
+    app.active_runner = runner
+    with pytest.raises(ValueError, match=PROFILE_LOCKED_REASON):
+        app.switch_session_profile("work")
+
+    assert "profile" not in app._session_overrides
+    assert app.active_runner is runner
+    assert app._runner_stale is False
 
 
 # --- 5. Санация битого профиля — сессионная ветка vs конфиг-указатель (§9.4) -------
@@ -590,7 +689,7 @@ def test_reload_config_resets_breaker_on_mtime_change(tmp_path):
     app._circuit_breaker.trip("flash", "недоступна")
 
     base = Path(app._config_path)
-    _write_yaml(base, {**_MINIMAL_BASE, "level": "max"})
+    _write_yaml(base, {**_MINIMAL_BASE, "model": "max"})
     _bump_mtime(base)
 
     app.reload_config()
@@ -629,7 +728,7 @@ def test_load_circuit_breaker_restores_in_place_keeping_executor_wired(
         make_settings(
             {"models": {"flash": {}}, "slots": {"default": "flash"}}
         ),
-        level_provider=lambda: "default",
+        choice_provider=lambda: "default",
         breaker=app._circuit_breaker,
     )
 
@@ -658,7 +757,7 @@ async def test_footer_model_name_survives_open_active_alias(tmp_path):
         "backend.api_mode": "chat_completions",
         "models": {"flash": {}},
         "slots": {"default": "flash"},
-        "level": "default",
+        "model": "default",
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
@@ -698,7 +797,7 @@ async def test_status_survives_open_active_alias(tmp_path):
         "backend.api_mode": "chat_completions",
         "models": {"flash": {}},
         "slots": {"default": "flash"},
-        "level": "default",
+        "model": "default",
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
@@ -769,27 +868,6 @@ def test_boot_frozen_diff_no_notice_when_unchanged(tmp_path):
     app.switch_session_profile("work")
     codes = [n.code for n in collect_runtime_notices()]
     assert "boot_frozen_pending" not in codes
-
-
-# --- Живой ран: смена профиля откладывается до завершения + notice -----------------
-
-
-def test_switch_session_profile_defers_while_run_is_live(tmp_path):
-    clear_runtime_notices()
-    _write_work_profile(tmp_path)
-    app = _app_with_base(tmp_path)
-
-    class _LiveRunner:
-        def is_running(self):
-            return True
-
-    app.active_runner = _LiveRunner()
-    app.switch_session_profile("work")
-
-    assert app._runner_stale is True
-    assert app.active_runner is not None  # не выброшен — довершит ход
-    codes = [n.code for n in collect_runtime_notices()]
-    assert "profile_switch_deferred" in codes
 
 
 # --- Item 8: notice активации проектного профиля (спека §3.5) ----------------------
@@ -953,7 +1031,7 @@ def test_no_source_notice_when_the_profile_name_itself_changed(
 ):
     """Третья ветка: сменилось само ИМЯ активного профиля — файл, разумеется,
     другой, но это осознанное переключение, и о нём говорят свои каналы
-    (`project_profile_activated`, `profile_switch_deferred`). Notice «профиль
+    (`project_profile_activated`). Notice «профиль
     теперь берётся из другого файла» здесь был бы не предупреждением о подмене,
     а пересказом того, что пользователь только что сделал сам.
 
@@ -1266,10 +1344,12 @@ def _write_pair_profile(tmp_path: Path) -> Path:
 def test_settings_offers_auto_only_when_the_base_supports_it(tmp_path):
     """Settings правит глобальную базу: доступность `auto` считается по ней же,
     а не по профилю сессии (спека PR140 Р4). Палитра сессии — по действующему."""
-    from gc_tui.toggles import base_toggle_names, effective_toggle_names
+    from gc_tui.services.model_picker import model_picker_options
 
     _write_pair_profile(tmp_path)
     app = _app_with_base(tmp_path)
     app.switch_session_profile("pair")
-    assert "auto" in effective_toggle_names(app, "level")
-    assert "auto" not in base_toggle_names(app, "level")
+    assert model_picker_options(app)[0].enabled
+    assert not model_picker_options(app, settings=app.base_settings())[
+        0
+    ].enabled

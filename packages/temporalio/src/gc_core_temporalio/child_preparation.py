@@ -38,8 +38,8 @@ async def prepare_child_context(call, parent_ctx):
     parent.subagent_independent_auto = child_independent_auto(ref)
     parent.model_router = ModelRouter(
         parent,
-        level_provider=lambda: ref["frozen_level"],
-        live_level_provider=lambda: ref.get(
+        choice_provider=lambda: ref["frozen_level"],
+        live_choice_provider=lambda: ref.get(
             "frozen_live_level", ref["frozen_level"]
         ),
         force_legacy=ref["force_legacy"],

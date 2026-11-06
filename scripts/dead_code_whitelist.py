@@ -45,6 +45,12 @@ DurableRuntime
 _.aload_messages
 _.adiscard_message
 
+# Необязательные возможности файлового хранилища (записи итога хода и смены
+# модели): SyncThreadStoreAdapter берёт их по имени (`_optional_append(name)` →
+# getattr), сессия — свойство порта тоже по имени. gc_core/thread_store_async.py.
+_.append_turn_outcome
+_.append_model_choice
+
 # Хук AsyncThreadStoreBase — пара к ThreadStoreBase.ensure_ready; парность методов двух
 # баз сторожит packages/core/tests/test_thread_store_one_contract.py.
 _.aensure_ready

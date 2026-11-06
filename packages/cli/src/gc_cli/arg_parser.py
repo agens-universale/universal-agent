@@ -3,11 +3,11 @@ import sys
 from typing import Any, Dict
 
 from gc_core.config_modules.cli_args import (
+    add_removed_level_flag,
     coerce_cli_value,
     parse_override_args,
     setting_flag_overrides,
 )
-from gc_core.config_modules.model_registry import LEVEL_VALUES
 from gc_core.security.permission_mode import (
     AVAILABLE_MODES,
     PLAN_EXECUTION_MODES,
@@ -290,8 +290,10 @@ parser.add_argument(
     default=None,
     dest="model",
     help=(
-        "Модель на этот запуск (agent.model). При непустом реестре моделей — "
-        "легаси-форс: уровни и алиасы отключаются на этот запуск"
+        "Модель на этот запуск: auto (модель выбирается автоматически "
+        "по ходу работы), слово уровня или алиас из реестра. "
+        "Сырой идентификатор вне реестра (agent.model) при непустом реестре "
+        "моделей — легаси-форс: уровни и алиасы отключаются на этот запуск"
     ),
 )
 
@@ -317,15 +319,7 @@ parser.add_argument(
     ),
 )
 
-parser.add_argument(
-    "--level",
-    choices=list(LEVEL_VALUES),
-    default=None,
-    help=(
-        "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
-        "auto — уровень меняется автоматически по ходу работы"
-    ),
-)
+add_removed_level_flag(parser)
 
 parser.add_argument(
     "--agentsmd-override",

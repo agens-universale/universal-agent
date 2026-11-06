@@ -1666,7 +1666,7 @@ async def test_fixed_consumer_without_default_slot_shows_active(tmp_path):
         await pilot.pause()
         first = ed._picker["rows"][0]
         assert first["value"] is None and first["label"] == "активная"
-        assert str(first["desc"]).startswith("работает активным уровнем")
+        assert str(first["desc"]).startswith("работает выбранной моделью")
 
 
 async def test_alt_down_opens_the_same_picker(tmp_path):
@@ -1701,7 +1701,7 @@ async def test_escape_collapses_the_picker_without_writing(tmp_path):
 async def test_arrows_do_not_page_values_on_a_collapsed_row(tmp_path):
     """←/→ на свёрнутой строке НЕ листают значения: список произвольный (алиасы
     реестра), треком он не виден, и вслепую его не листают — та же ревизия §12.1,
-    что перевела `/profiles` с цикла на пикер."""
+    что перевела `/profile` с цикла на пикер."""
     async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
         before = cfg_file.read_bytes()
         ed = _editor(scr)
@@ -3259,8 +3259,8 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
 
 async def test_slot_picker_lists_the_whole_registry(tmp_path):
     """Селектор слота показывает весь models, не три слота. Два алиаса с одним
-    id — две строки. /level по-прежнему light/default/max."""
-    from gc_tui.toggles import TOGGLES
+    id — две строки. Уровни по-прежнему light/default/max."""
+    from gc_core.config_modules.model_registry import LEVELS
 
     body = (
         "models:\n"
@@ -3288,7 +3288,7 @@ async def test_slot_picker_lists_the_whole_registry(tmp_path):
             "shared-id",
             "shared-id",
         ]
-    assert tuple(v.value for v in TOGGLES["level"].values) == (
+    assert LEVELS == (
         "light",
         "default",
         "max",

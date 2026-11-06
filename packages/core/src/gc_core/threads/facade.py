@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
+from gc_core.persistence.model_choice_record import (
+    ModelChoiceRecord,
+    model_choice_entry,
+)
 from gc_core.persistence.turn_outcome import last_shown_turn, turn_anchor
 from gc_core.plan_store import normalize_plan_block
 from gc_core.threads.history import messages_and_keys
@@ -23,6 +27,7 @@ from gc_core.threads.instance import session_owner
 from gc_core.threads.models import (
     CONTROL,
     INBOX,
+    MODEL_CHOICES,
     TURNS,
     JsonObject,
     Receipt,
@@ -147,6 +152,10 @@ class Threads:
     async def turns(self, key: ThreadKey) -> list[StreamEntry]:
         """Поток итогов хода ``turns`` целиком."""
         return await self.store.read_stream(key, TURNS)
+
+    async def model_choices(self, key: ThreadKey) -> list[StreamEntry]:
+        """Поток смен модели ``model_choices`` целиком."""
+        return await self.store.read_stream(key, MODEL_CHOICES)
 
     async def subagent_events(self, key: ThreadKey) -> list[StreamEntry]:
         return await self.store.read_stream(key, "subagent_events")
@@ -345,6 +354,28 @@ class Threads:
                 await writer.acommit(append_messages=fresh)
             return len(fresh)
 
+        return await self._owned(key, work)
+
+    async def append_model_choice(
+        self, key: ThreadKey, record: ModelChoiceRecord
+    ) -> bool:
+        """Смена модели между ходами — запись ``model_choices`` за последним
+        сообщением истории, под своей арендой (в ходе её пишет сессия хода).
+        Истории нет — записи нет; тред занят ходом — ``ThreadBusy``.
+        Возвращает, записано ли."""
+
+        async def work(writer: SessionWriter) -> bool:
+            entries = await self.store.read_stream(key, _HISTORY)
+            if not entries:
+                return False
+            entry = model_choice_entry(
+                record, after=entries[-1].data.get("id")
+            )
+            await writer.aside(append=[(MODEL_CHOICES, [entry])])
+            return True
+
+        if await self.store.get_thread(key) is None:
+            return False
         return await self._owned(key, work)
 
     async def discard_message(

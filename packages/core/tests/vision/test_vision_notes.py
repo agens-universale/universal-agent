@@ -133,13 +133,22 @@ def test_emit_prefers_the_logger_it_was_given():
 _VIA_EYES = "deepseek не принимает изображения · агент посмотрит через gemini"
 _MAIN_NOBODY = (
     "deepseek не принимает изображения · изображение не просмотрено · "
-    "выберите модель с поддержкой изображений или назначьте модель для "
-    "зрения в настройках"
+    "выберите модель с поддержкой изображений (/model) или назначьте "
+    "модель для зрения в настройках"
 )
 _EYES_BLIND = (
     "gemini не принимает изображения · изображение не просмотрено · "
     "назначьте другую модель для зрения в настройках"
 )
+
+
+def test_image_hint_mentions_model_command():
+    from gc_core.vision.notes import NOTE_HINT_MAIN
+
+    assert NOTE_HINT_MAIN == (
+        "выберите модель с поддержкой изображений (/model) или назначьте "
+        "модель для зрения в настройках"
+    )
 
 
 def test_unsupported_note_texts_and_tones():
@@ -425,7 +434,7 @@ def _eyes_router(assign: dict) -> "ModelRouter":
             "assign": assign,
         }
     )
-    return ModelRouter(snapshot, level_provider=lambda: "default")
+    return ModelRouter(snapshot, choice_provider=lambda: "default")
 
 
 def _probe_note(

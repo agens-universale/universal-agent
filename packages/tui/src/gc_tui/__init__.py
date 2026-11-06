@@ -65,7 +65,7 @@ def _select_theme(settings) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    from gc_core.config_modules.model_registry import LEVEL_VALUES
+    from gc_core.config_modules.cli_args import add_removed_level_flag
     from gc_core.security.permission_mode import AVAILABLE_MODES
 
     parser = argparse.ArgumentParser(
@@ -83,14 +83,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--level",
-        choices=list(LEVEL_VALUES),
+        "--model",
+        type=str,
         default=None,
         help=(
-            "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
-            "auto — уровень меняется автоматически по ходу работы"
+            "Модель на этот запуск: auto (модель выбирается автоматически "
+            "по ходу работы), слово уровня или алиас из реестра "
+            "(перекрывает config.yml и профиль)"
         ),
     )
+    add_removed_level_flag(parser)
     parser.add_argument(
         "--permission-mode",
         type=str.lower,
@@ -162,7 +164,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.unknown:
         print(
             f"gc-ua: неизвестные аргументы: {' '.join(args.unknown)} (флаги не "
-            "сокращаются: --config, --profile, --level, --permission-mode, "
+            "сокращаются: --config, --profile, --model, --permission-mode, "
             "--init-config, --task-root, --no-auto-mcp; справка — gc-ua --help)",
             file=sys.stderr,
         )
@@ -296,7 +298,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 1
         settings = apply_cli_overrides(
             settings,
-            extra_overrides={"level": args.level} if args.level else None,
+            extra_overrides={"model": args.model} if args.model else None,
         )
         profile_meta = settings.profile_meta
 
@@ -374,7 +376,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         system="cli",
         settings=settings,
         profile_override=None if args.init_config else args.profile,
-        level_override=None if args.init_config else args.level,
+        model_override=None if args.init_config else args.model,
     )
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)

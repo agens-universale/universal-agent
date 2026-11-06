@@ -90,6 +90,42 @@ async def _aturn_outcome(store: Any, key: ThreadKey, outcome, after) -> None:
     )
 
 
+def model_choice_record(
+    threads_dir: str,
+    system: str,
+    thread: str,
+    record: Any,
+    *,
+    after: str | None = None,
+) -> None:
+    """Смена модели в файловый тред так, как её пишет сессия ядра: запись
+    потока ``model_choices`` за сообщением ``after`` (по умолчанию —
+    последним в истории). Синхронно (тесты TUI на ``run_test``)."""
+    from gc_core.persistence.model_choice_record import model_choice_entry
+    from gc_core.threads.facade import run_sync
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import MODEL_CHOICES, SideChange
+
+    store = FileThreadStore(threads_dir)
+    key = ThreadKey(system=system, thread=thread)
+
+    async def _achoice() -> None:
+        anchor = after
+        if anchor is None:
+            history = await store.read_stream(key, "messages")
+            anchor = history[-1].data.get("id") if history else None
+        entry = model_choice_entry(record, after=anchor)
+        await store.append_side(
+            key,
+            SideChange(
+                op_id=f"choice_{uuid.uuid4().hex}",
+                append=[(MODEL_CHOICES, [entry])],
+            ),
+        )
+
+    run_sync(_achoice())
+
+
 def runtime_flag(
     threads_dir: str, system: str, thread: str, flag: str, *, active: bool
 ) -> None:
@@ -127,4 +163,19 @@ def turn_records(threads_dir: str, system: str, thread: str) -> list[dict]:
 
     key = ThreadKey(system=system, thread=thread)
     entries = run_sync(FileThreadStore(threads_dir).read_stream(key, TURNS))
+    return [entry.data for entry in entries]
+
+
+def model_choice_records(
+    threads_dir: str, system: str, thread: str
+) -> list[dict]:
+    """Записи потока ``model_choices`` файлового треда (``after``,
+    ``model``) — проверить, что записала смена."""
+    from gc_core.threads.facade import run_sync
+    from gc_core.threads.file_store import FileThreadStore
+    from gc_core.threads.models import MODEL_CHOICES
+
+    key = ThreadKey(system=system, thread=thread)
+    store = FileThreadStore(threads_dir)
+    entries = run_sync(store.read_stream(key, MODEL_CHOICES))
     return [entry.data for entry in entries]

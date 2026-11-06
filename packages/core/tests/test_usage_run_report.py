@@ -118,7 +118,7 @@ _REGISTRY = {
 def _router(loaded):
     from gc_core.model_router import ModelRouter
 
-    return ModelRouter(loaded, level_provider=lambda: "default")
+    return ModelRouter(loaded, choice_provider=lambda: "default")
 
 
 def test_main_model_identity_follows_the_registry():
@@ -161,7 +161,7 @@ def test_main_model_identity_in_auto_is_the_start_level_model():
             "slots": {"light": "cheap", "default": "cheap", "max": "big"},
         }
     )
-    router = ModelRouter(loaded, level_provider=lambda: "auto")
+    router = ModelRouter(loaded, choice_provider=lambda: "auto")
     assert main_model_identity(loaded, router) == (
         "vendor/cheap",
         "https://openrouter.ai/api/v1/chat/completions",

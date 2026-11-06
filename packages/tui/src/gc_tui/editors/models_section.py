@@ -56,6 +56,7 @@ from gc_tui.editors.model_entry_form import (
 )
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
+from gc_tui.services.model_sign import LEVEL_COLORS
 from gc_tui.widgets.action_row import ActionRow
 
 # Виджеты подтверждения в секции моделей.
@@ -469,7 +470,7 @@ _INHERITED_LABEL = "основной"
 # потребитель следует за активным уровнем (`ModelRouter.resolve`, ветка без binding).
 # «сейчас <уровень>» — вычисленное на этот момент, слово «сейчас» и помечает его
 # как текущее состояние, а не как часть выбора.
-_ACTIVE_DESC_LEAD = "работает активным уровнем: сейчас "
+_ACTIVE_DESC_LEAD = "работает выбранной моделью: сейчас "
 _SLOT_DEAD_HINT = "уровень не резолвится: задайте хотя бы один слот"
 # Подписи потребителей, которых НЕТ в транспортном словаре `CONSUMER_RU_LABEL`
 # (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
@@ -568,9 +569,9 @@ def slot_head(level: str) -> str:
 
 
 def slot_head_text(level: str, width: int = 0) -> Text:
-    """Голова строки слота: имя уровня — ЦВЕТОМ уровня (тот же `TOGGLES["level"]`, что
-    красит уровни в раскрытом списке: одна сущность не имеет права выглядеть на одном
-    экране двумя способами), роль после «·» — обычным INK.
+    """Голова строки слота: имя уровня — ЦВЕТОМ уровня (тот же
+    `model_sign.LEVEL_COLORS`, что красит уровни в раскрытом списке: одна сущность
+    не имеет права выглядеть на одном экране двумя способами), роль после «·» — обычным INK.
 
     Текст берётся у `slot_head` целиком, а не собирается заново: ширину колонки
     считают по нему же, и вторая сборка развела бы витрину с сеткой. Под колонку он
@@ -586,8 +587,8 @@ def slot_head_text(level: str, width: int = 0) -> Text:
 
 def value_style(value: str) -> str:
     """Цвет ЗАДАННОГО значения слота/привязки — §12.4: уровень — цветом уровня из
-    `TOGGLES["level"]` (единый источник, канон `main.py::_level_color` — будущий
-    авто-режим со своим цветом подхватится сам), алиас-пин — DIM.
+    `model_sign.LEVEL_COLORS` (единый источник, по нему же точки знака
+    модели в футере), алиас-пин — DIM.
 
     Отсутствие значения («не задан»/«активная» — DEEP_DIM) сюда не попадает: это не
     значение, и решает его тот, кто ЗНАЕТ факт (ключа в файле нет / это первая
@@ -595,11 +596,7 @@ def value_style(value: str) -> str:
     схемой разрешён (`validate_model_alias` режет только `RESERVED_WORDS`). Алиас с
     именем уровня, наоборот, невозможен — они и есть `RESERVED_WORDS`."""
     if value in LEVELS:
-        from gc_tui.toggles import TOGGLES
-
-        return {v.value: v.color for v in TOGGLES["level"].values}.get(
-            value, INK
-        )
+        return LEVEL_COLORS.get(value, INK)
     return DIM
 
 
@@ -701,7 +698,7 @@ class ModelsSectionEditor(Vertical):
         verify: bool | str = True,
         config_proxy: str | None = None,
         presets=(),
-        active_level: str = "default",
+        active_choice: str = "default",
         legacy_editor_factory=None,
         legacy_hints=(),
         on_change=None,
@@ -750,7 +747,7 @@ class ModelsSectionEditor(Vertical):
         self._presets = list(presets)
         # Активный уровень — знание ЭКРАНА (config + сессионные переключатели);
         # секция показывает файл, но описание «активной» в пикере говорит о рантайме.
-        self._active_level = active_level
+        self._active_choice = active_choice
         self._legacy_editor_factory = legacy_editor_factory
         self._legacy_hints = list(legacy_hints)
         self._on_change = on_change
@@ -2438,6 +2435,8 @@ class ModelsSectionEditor(Vertical):
         for consumer in assign_consumers():
             if self._assign_value(consumer) == prev:
                 ops.append(("write_assign", consumer, alias))
+        if self._document.get("model") == prev:
+            ops.append(("write_pointer", "model", alias))
         ops.append(("remove_model", prev, True))
         return ops
 
@@ -2960,7 +2959,7 @@ class ModelsSectionEditor(Vertical):
 
     def _picker_active_desc(self) -> Text:
         t = Text(_ACTIVE_DESC_LEAD, style=DEEP_DIM)
-        t.append(self._active_level, style=value_style(self._active_level))
+        t.append(self._active_choice, style=value_style(self._active_choice))
         return t
 
     def _open_value_picker(self, row: dict) -> None:

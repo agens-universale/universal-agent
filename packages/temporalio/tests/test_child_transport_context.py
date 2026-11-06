@@ -21,10 +21,10 @@ class _Router:
     force_legacy = False
     breaker = SimpleNamespace(snapshot=lambda: {"open": []})
 
-    def active_level(self):
+    def active_target(self):
         return "default"
 
-    def live_level(self):
+    def live_choice(self):
         return "auto"
 
 

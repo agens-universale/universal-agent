@@ -243,7 +243,7 @@ def _bench_audience(config):
     ]
     from gc_core.settings import settings_of
 
-    router = ModelRouter(config, level_provider=lambda: "default")
+    router = ModelRouter(config, choice_provider=lambda: "default")
     audience = compute_audience(
         router,
         request_resolved=router.resolve("main"),

@@ -99,7 +99,7 @@ def _ctx(tmp_path, cfg: dict, *, with_router: bool = True) -> SimpleNamespace:
         logger=logging.getLogger("test_outbound_images"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(loaded, level_provider=lambda: "default")
+        model_router=ModelRouter(loaded, choice_provider=lambda: "default")
         if with_router
         else None,
         image_store=ImageStore(str(tmp_path)),
