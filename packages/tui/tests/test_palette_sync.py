@@ -171,16 +171,16 @@ def test_no_hex_in_py_outside_palette():
 
 _PREVIOUS_RAMPS = {
     "GLOW_SHADES": [
-        "#a2783b",
-        "#be8f4b",
-        "#dba265",
-        "#e7b377",
-        "#f3c389",
-        "#f7c688",
-        "#f3c389",
-        "#e7b377",
-        "#dba265",
-        "#be8f4b",
+        "#9f7943",
+        "#bb9054",
+        "#d8a46d",
+        "#e3b47e",
+        "#efc490",
+        "#f3c78f",
+        "#efc490",
+        "#e3b47e",
+        "#d8a46d",
+        "#bb9054",
     ],
     "PROCESSING_SHADES": [
         "#4c525b",
