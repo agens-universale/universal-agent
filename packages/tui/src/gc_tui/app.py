@@ -1713,11 +1713,9 @@ class TuiApp(App):
     def _retire_runner(self, runner) -> None:
         """Снять простаивающий раннер под пересборку. Решения по плану, ещё
         не отданные прогону, принадлежат окну, а не раннеру: следующий
-        раннер их получит (`get_runner`). Через getattr: тесты подставляют
-        двойников без них."""
-        decisions = getattr(runner, "plan_decisions", None)
-        if callable(decisions):
-            self._carried_plan = decisions()
+        раннер их получит (`get_runner`)."""
+        if runner is not None:
+            self._carried_plan = runner.plan_decisions()
         _release_runner(runner)
         self.active_runner = None
         self._runner_stale = False

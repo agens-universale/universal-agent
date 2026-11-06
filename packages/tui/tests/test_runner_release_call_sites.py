@@ -34,6 +34,9 @@ class _Runner:
     def release(self) -> None:
         self.events.append("release")
 
+    def plan_decisions(self) -> tuple:
+        return None, None
+
     def wait(self, timeout=None) -> None:
         self.events.append("wait")
 
