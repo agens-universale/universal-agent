@@ -1,8 +1,12 @@
 """Клик-модель строк трейса — единая точка контракта взаимодействия.
 
-Мышь и клавиатура симметричны: {клик ↔ Tab} выделение, {Ctrl+клик ↔ Enter}
-выделение + открытие экрана события. Двойной клик события не открывает
-(заменён Ctrl+кликом). Клик по СЛУЖЕБНОМУ элементу блока (кнопка копирования,
+Обычный клик строку НЕ выделяет (решение владельца 2026-11-01: выделение на
+каждый клик было навязчивым) — он уходит экрану, тот отдаёт фокус ленте.
+Клик с модификатором — Ctrl (на Mac — Cmd: терминал передаёт его тем же
+битом, что Alt; Ctrl+клик там — правый клик) — выделяет строку уже на нажатии
+и открывает экран события на отпускании. Alt — запасной там, где Ctrl+клик
+забирает терминал. С клавиатуры: Tab выделяет, Enter
+открывает. Двойной клик события не открывает. Клик по СЛУЖЕБНОМУ элементу блока (кнопка копирования,
 хвост-тогл свёртки в обоих состояниях — «… ещё N строк» и «свернуть») блок не
 выделяет: он только делает своё действие. Меняешь модификатор или порядок
 действий — меняешь здесь, а не в пяти виджетах (TraceRow, ToolCallRow,
@@ -89,31 +93,30 @@ def confirm_is_active(widget) -> bool:
         return False
 
 
+def opens_event(event: events.MouseEvent) -> bool:
+    """Клик с модификатором открытия: Ctrl или `meta` — так приходят Cmd
+    (Mac) и Alt."""
+    return event.ctrl or event.meta
+
+
 class ClickModelMixin:
-    """Клик = выделить строку (как Tab); Ctrl+клик = выделить и открыть (как Enter).
+    """Обычный клик строку не выделяет; клик с Ctrl (на Mac — Cmd) выделяет
+    на нажатии и открывает на отпускании (как Tab + Enter).
 
     Наследник реализует ``_open_request()`` — Message открытия своего экрана,
-    или None, если строке нечего открывать (тогда Ctrl+клик ведёт себя как
-    обычный клик). Наследник со своим контрактом (SummaryMarker) переопределяет
+    или None, если строке нечего открывать (тогда клик с модификатором только
+    выделяет). Наследник со своим контрактом (SummaryMarker) переопределяет
     ``on_click``/``on_key`` целиком.
     """
 
-    # У СТРОК FOCUS_ON_CLICK намеренно НЕ переопределён (наследуется True):
-    # Textual фокусирует строку уже на MouseDown (screen.py, set_focus при
-    # нажатии) — выделение видно в момент нажатия, в т.ч. при Ctrl+клике ДО
-    # того, как экран события накроет трейс. self.focus() в on_click остаётся
-    # как идемпотентная страховка (синтетические клики в тестах идут мимо
-    # mousedown-пути экрана), а event.stop() — защита от перехвата фокуса
-    # контейнером #trace (main.py.on_click) — живёт на Click-уровне.  # noqa: ERA001  # описание формата, не выключенный код
-    #
-    # БЛОКИ со служебными элементами (BlockPanel, DiffBlock) ставят
-    # FOCUS_ON_CLICK = False: экран фокусирует блок ЛЮБЫМ нажатием, в том числе
-    # по кнопке ❐ и по хвосту, и блок подсвечивался бы выделенным там, где
-    # выделять нечего. Сам по себе флаг работает только у ФОКУСИРУЕМОГО блока
-    # (BlockPanel) — за нефокусируемый (DiffBlock) его предъявляет экран, см.
-    # `focus_target_at`. У них носитель выделения — focus() ниже, поэтому он и
-    # зовётся с scroll_visible=False: кликнутый блок и так под курсором, а
-    # доводка длинного диффа в центр экрана дёргала бы трейс под рукой.
+    # Обычное нажатие строку не выделяет: экран фокусирует на MouseDown только
+    # того, кто согласен (`focus_on_click`). Нажатие с модификатором выделяет
+    # само (`on_mouse_down`) — выделение видно до того, как экран события
+    # накроет ленту. Блоки со служебными элементами (BlockPanel, DiffBlock)
+    # тем более не берут фокус нажатием по ❐ и по хвосту; за нефокусируемый
+    # блок флаг предъявляет экран (`focus_target_at`). focus() зовётся с
+    # scroll_visible=False: кликнутая строка и так под курсором.
+    FOCUS_ON_CLICK = False
 
     def _open_request(self) -> Optional[Message]:
         raise NotImplementedError
@@ -128,13 +131,16 @@ class ClickModelMixin:
         картинками решают, засчитан ли жест). У строк без картинок — None."""
         return None
 
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if opens_event(event) and self.can_focus:
+            self.focus(scroll_visible=False)
+
     def on_click(self, event: events.Click) -> None:
         # Мышиная половина того же гейта, что и Enter в on_key: пока висит
-        # security-confirm, Ctrl+клик не открывает detail/viewer — иначе экран
-        # события накрывает баннер, [Y] уходит в него, а агент ждёт ответа,
-        # которого юзер уже не видит. Ctrl+клик при этом ведёт себя как обычный
-        # клик (просто выделяет строку) — обычный клик не трогаем.
-        if event.ctrl and not confirm_is_active(self):
+        # security-confirm, клик с модификатором не открывает detail/viewer —
+        # иначе экран события накрывает баннер, [Y] уходит в него, а агент
+        # ждёт ответа, которого юзер уже не видит. Тогда клик только выделяет.
+        if opens_event(event) and not confirm_is_active(self):
             # Картинка — по месту клика (дизайн картинок §20.2): Screen кладёт стиль
             # ячейки под курсором в event.style, спан плашки/подстроки несёт image_id.
             path = self._image_path(event.style.meta.get("image_id") or "")
@@ -147,13 +153,13 @@ class ClickModelMixin:
                     self.focus(scroll_visible=False)
                 self.post_message(message)
                 return
-        if not event.ctrl and not confirm_is_active(self):
+        if not opens_event(event) and not confirm_is_active(self):
             path = self._plain_click_image_path(event)
             if path:
                 event.stop()
                 self.post_message(OpenImageRequest(path))
                 return
-        if self.can_focus:
+        if opens_event(event) and self.can_focus:
             event.stop()  # не отдать фокус контейнеру #trace (main.py.on_click)
             self.focus(scroll_visible=False)
 

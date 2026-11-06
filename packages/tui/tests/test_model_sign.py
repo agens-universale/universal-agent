@@ -20,20 +20,20 @@ def test_levels_follow_explicit_slots_only():
 def test_dots_colors_per_level_free_and_auto():
     assert ms.dots("auto", SLOTS).plain == "●"
     assert _colors(ms.dots("auto", SLOTS)) == [BRAND]
-    assert _colors(ms.dots("main", SLOTS)) == [RUN_COLOR, ACCENT]
+    assert _colors(ms.dots("main", SLOTS)) == [ACCENT, RUN_COLOR]
     assert _colors(ms.dots("fast", SLOTS)) == [INK]
     assert _colors(ms.dots("other", SLOTS)) == [DIM]
     assert ms.dots("other", SLOTS).plain == "●"
 
 
 def test_level_word_choice_shows_slot_model():
-    assert _colors(ms.dots("max", SLOTS)) == [ACCENT]
+    assert _colors(ms.dots("max", SLOTS)) == [RUN_COLOR]
     sign = ms.sign("max", SLOTS, alias="main")
     assert sign.plain == "●● main"
-    assert [str(sp.style) for sp in sign.spans[:2]] == [RUN_COLOR, ACCENT]
+    assert [str(sp.style) for sp in sign.spans[:2]] == [ACCENT, RUN_COLOR]
     bare = ms.sign("max", SLOTS)
     assert bare.plain == "● max"
-    assert str(bare.spans[0].style) == ACCENT
+    assert str(bare.spans[0].style) == RUN_COLOR
     assert ms.sign("fast", SLOTS).plain == "● fast"
     assert ms.sign("auto", SLOTS).plain == "● auto"
 
@@ -41,5 +41,5 @@ def test_level_word_choice_shows_slot_model():
 def test_parts_split_dots_and_name_with_styles():
     dots, name = ms.parts(ms.sign("main", SLOTS, name_style=DIM))
     assert (dots.plain, name.plain) == ("●●", "main")
-    assert _colors(dots) == [RUN_COLOR, ACCENT]
+    assert _colors(dots) == [ACCENT, RUN_COLOR]
     assert str(name.spans[0].style) == DIM

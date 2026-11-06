@@ -193,7 +193,108 @@ uv run --project /path/to/universal-agent --extra temporal \
   Нет ни инструмента, ни статуса памяти в промпте, ни обращений к файлу.
   Долгоживущие факты сессии — `session_memory`, она в треде.
 
-### Размещение
+### Целый ход в одной activity
+
+`AgentActivity` — дополнительный режим для приложений, которым нужен весь
+ход SDK на одном процессе. Он не заменяет `AgentPlugin` и
+`UniversalAgentWorkflow`: прежний пошаговый durable-запуск сохраняется.
+В новом режиме модель, MCP, инструменты и обработка результата выполняются
+внутри одной обычной activity `universal_agent.run`.
+
+На воркере (профили и креды не передаются через историю Temporal):
+
+```python
+from datetime import timedelta
+from gc_core_temporalio import AgentActivity
+from temporalio.worker import Worker
+
+async def publish_files(request, answer):
+    # Выгрузить локальные файлы здесь, на том же процессе, где работал агент.
+    # Вернуть JSON-данные: например, список ссылок на артефакты.
+    return await upload_to_storage(request.context["folder"])
+
+runner = AgentActivity(
+    {"shop": settings},
+    thread_store=store,  # общий PostgresThreadStore для нескольких реплик
+    postprocess=publish_files,
+)
+async with Worker(
+    client,
+    task_queue="orders",
+    workflows=[OrderWorkflow],
+    activities=[runner.run],
+    max_concurrent_activities=1,
+    graceful_shutdown_timeout=timedelta(minutes=45),
+):
+    await stop_event.wait()
+```
+
+Обработчики логов приложения передаются через
+`AgentActivity(..., log_handlers=[handler])`, как у `AgentPlugin`.
+Они подключаются к SDK на каждой попытке и остаются открытыми после её
+завершения; закрывает их приложение. Для вывода только через эти обработчики
+задайте в профиле `logging.format: jsonl`, `logging.save_logs: false`,
+`logging.console_trace: false` и `logging.propagate: false`. Так SDK сохраняет
+поля событий и контекст запуска, а формат строки (например, JSON приложения)
+определяет обработчик. `propagate: false` предотвращает повторную доставку
+через root; уровни и фильтры обработчиков настраивает приложение.
+
+В бизнес-workflow импортируйте только контракт
+`gc_core_temporalio.turn_activity_contracts` (он безопасен для песочницы):
+
+```python
+from datetime import timedelta
+from temporalio import workflow
+from temporalio.common import RetryPolicy
+from gc_core_temporalio.turn_activity_contracts import (
+    AgentActivityRequest, AgentActivityResult,
+)
+
+result = await workflow.execute_activity(
+    "universal_agent.run",
+    AgentActivityRequest(
+        agent="shop", prompt="Собери отчёт", thread_id="order-42",
+        trace_id="trace-42", context={"folder": "artifacts/order-42"},
+    ),
+    result_type=AgentActivityResult,
+    start_to_close_timeout=timedelta(minutes=45),
+    schedule_to_close_timeout=timedelta(hours=3),
+    heartbeat_timeout=timedelta(seconds=30),
+    cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+    retry_policy=RetryPolicy(
+        maximum_attempts=3, initial_interval=timedelta(minutes=1),
+    ),
+)
+# result.answer — ответ SDK; result.output — результат publish_files.
+```
+
+Одна попытка остаётся на одном процессе, поэтому несколько реплик могут
+слушать общую очередь. Heartbeat начинается до подготовки MCP и работает
+до конца postprocess; по умолчанию интервал 10 секунд. Отмена доходит до
+SDK, его контекст закрывается. Приложение останавливает Worker и затем
+закрывает общее хранилище. При штатном обновлении дайте активной activity
+время завершиться, согласовав таймаут остановки Worker и контейнера.
+
+Ограничения этого режима:
+
+- Повтор запускает **весь ход заново**, включая postprocess. Сохранённая
+  история треда читается из хранилища, но это не replay вызовов инструментов.
+  Уже выполненные внешние действия могут повториться. Пример явно выбирает
+  три попытки; приложение вправе задать другую RetryPolicy.
+- Таймаут/потеря heartbeat не доказывает, что старый процесс остановился.
+  Защита треда остаётся в ThreadStore, а идемпотентность внешних действий —
+  ответственность приложения и инструментов.
+- Постоянный workspace общий для activities процесса. Для такого workspace
+  начните с `max_concurrent_activities=1`; разные каталоги требуют отдельных
+  процессов/изолированного OS-бэкенда. Этот API не меняет cwd.
+- История в Postgres не переносит локальные файлы на другую реплику.
+  Нужные следующему ходу файлы сохраняйте и восстанавливайте отдельно.
+- Настройки — обычные настройки SDK; скрытых durable-переопределений нет.
+  Отключите ненужную память проекта и файловые журналы в серверном профиле.
+  Канал человека выключен; вопросы и подтверждения требуют отдельного
+  прикладного протокола.
+
+### Размещение пошагового режима
 
 - **Один процесс — один рабочий каталог.** Cwd воркера равен `workspace`
   профилей; для другого каталога — другой процесс.
@@ -404,6 +505,15 @@ worker = Worker(
 - Промпт больше 1 МБ в истории — `ApplicationError` типа
   `HistoryLimitExceeded` до запуска шага; ход не уложился в запись истории —
   `ApplicationError` типа `TurnFailed`.
+- Внешний трейс шага (например, от оркестратора) — `agent_step(...,
+  trace_id="…")` (или `RunRequest.trace_id`). Он уходит заголовком в каждый
+  запрос к модели шага — при `agent.trace_header_enabled: true` — и к
+  MCP-серверам с `trace_header_enabled: true`; субагенты шага шлют тот же
+  трейс. Имя заголовка — `agent.trace_id_header_name` (по умолчанию
+  `x_trace_id` для модели и `trace_id` для MCP), например `X-Trace-id`. У
+  каждого шага свой трейс; без `trace_id` заголовка нет. Кривое значение
+  (перевод строки, не latin-1, длиннее 200 символов) — `ApplicationError`
+  типа `InvalidTraceId` до запуска шага.
 - Воркер процесса несёт `AgentPlugin`. Сбой сессии шага — `ChildWorkflowError`
   в коде workflow. Код своего workflow не входит в `default_build_id()`: при
   versioning задавайте `build_id` с учётом своего кода.

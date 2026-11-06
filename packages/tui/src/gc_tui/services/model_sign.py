@@ -14,10 +14,12 @@ from rich.text import Text
 
 from gc_tui.palette import ACCENT, BRAND, DIM, INK, RUN_COLOR
 
+# Шкала значений (дизайн-код): от слабого к сильному — белый, бирюзовый,
+# янтарный.
 LEVEL_COLORS: Mapping[str, str] = {
     "light": INK,
-    "default": RUN_COLOR,
-    "max": ACCENT,
+    "default": ACCENT,
+    "max": RUN_COLOR,
 }
 AUTO_COLOR = BRAND
 FREE_COLOR = DIM

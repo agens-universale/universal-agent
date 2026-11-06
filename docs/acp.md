@@ -88,7 +88,7 @@ stderr. `console_trace` процесс принудительно выключа
 | Ключ | Дефолт | Смысл |
 |---|---|---|
 | `acp.text_answer_mode` | `allow` | `deny` / `judge` / `allow` — проза без tool-call. В IDE обсуждение и правка доки — нормальный сценарий, поэтому дефолт `allow`, не `judge` как в TUI. |
-| `acp.finish_gate_mode` | `off` | `on` / `off` / `smart` — судья на `turn_finish`. В IDE человек сам видит ответ и дифф. Значения `off` и `on` в YAML пишите в кавычках. |
+| `acp.finish_gate_mode` | `off` | `off` / `smart` / `always` — судья на `turn_finish`. В IDE человек сам видит ответ и дифф. Значение `off` в YAML пишите в кавычках. |
 | `acp.todo_reminder_steps` | `0` | Technical reminder про `session_todo` каждые N шагов. `0` — выкл. Иначе чек-лист легко толкает к «пиши код» вопреки обсуждению. |
 | `acp.confirm_timeout_sec` | `600` | Сколько секунд ждать ответ IDE на `session/request_permission`. По таймауту операция отклоняется, процесс остаётся. |
 

@@ -28,6 +28,7 @@ from gc_tui.session_settings import (
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _TUI_FINISH_GATE_MODE = "tui.finish_gate_mode"
 _TUI_TEXT_ANSWER_MODE = "tui.text_answer_mode"
+_TUI_SHOW_REASONING = "tui.show_reasoning"
 
 
 def tui_agent_settings(loaded):
@@ -65,7 +66,7 @@ PRESET_CUSTOM = "custom"
 PRESETS: Dict[str, Dict[str, str]] = {
     "low": {_TUI_FINISH_GATE_MODE: "off", _TUI_TEXT_ANSWER_MODE: "allow"},
     "medium": {_TUI_FINISH_GATE_MODE: "smart", _TUI_TEXT_ANSWER_MODE: "judge"},
-    "high": {_TUI_FINISH_GATE_MODE: "on", _TUI_TEXT_ANSWER_MODE: "deny"},
+    "high": {_TUI_FINISH_GATE_MODE: "always", _TUI_TEXT_ANSWER_MODE: "deny"},
 }
 
 
@@ -89,7 +90,9 @@ def resolve_rigor_state(settings: Any) -> str:
 @dataclass(frozen=True)
 class ToggleValue:
     """Одно значение тоггла: каноническое имя + подсказка (§5 спеки) + цвет ползунка
-    (§3 спеки; токен-константа tui/palette.py)."""
+    (§3 спеки; токен-константа tui/palette.py). У шкалы из трёх цвета идут от
+    слабого к сильному: INK, ACCENT, RUN_COLOR; у переключателя из двух —
+    INK, ACCENT (дизайн-код, п. 2a)."""
 
     value: str
     hint: str
@@ -541,7 +544,12 @@ def group_toggle_names(group: str) -> list:
 # Порядок блоков сверху вниз — решение владельца: «чем работаем» (модель по
 # умолчанию), «что агенту можно» (режим разрешений по умолчанию), «как строго
 # закрывать ход» (строгость, самопроверка, формат ответа).
-MODES_SECTION_GROUPS: Tuple[str, ...] = ("model", "permissions", "rigor")
+MODES_SECTION_GROUPS: Tuple[str, ...] = (
+    "model",
+    "permissions",
+    "rigor",
+    "trace",
+)
 
 
 def modes_section_names() -> list:
@@ -648,12 +656,12 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue(
                 "medium",
                 "самопроверка после работы с инструментами, текст — по решению самопроверки · универсальный режим",
-                _pal.RUN_COLOR,
+                _pal.ACCENT,
             ),
             ToggleValue(
                 "high",
                 "самопроверка всегда, завершать только вызовом инструмента · сложные задачи, где важна полнота",
-                _pal.ACCENT,
+                _pal.RUN_COLOR,
             ),
         ),
         state=resolve_rigor_state,
@@ -673,12 +681,12 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue(
                 "smart",
                 "самопроверка только если агент работал инструментами · разговор без действий не проверяется",
-                _pal.RUN_COLOR,
+                _pal.ACCENT,
             ),
             ToggleValue(
-                "on",
+                "always",
                 "самопроверка не даст закончить, пока запрос не закрыт · для сложных задач, где важна полнота",
-                _pal.ACCENT,
+                _pal.RUN_COLOR,
             ),
         ),
         state=finish_gate_mode_of,
@@ -697,17 +705,38 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue(
                 "judge",
                 "текстовый ответ принимается, если проходит самопроверку · универсальный режим",
-                _pal.RUN_COLOR,
+                _pal.ACCENT,
             ),
             ToggleValue(
                 "deny",
                 "текст не завершает ход: агент обязан закончить вызовом инструмента · для строгой автономии",
-                _pal.ACCENT,
+                _pal.RUN_COLOR,
             ),
         ),
         state=text_answer_mode_of,
         label="формат ответа",
         summary="допустим ли текст как финал хода",
+        palette_default=False,
+    ),
+    "reasoning": ToggleSpec(
+        dotted=_TUI_SHOW_REASONING,
+        values=(
+            ToggleValue(
+                "off",
+                "рассуждения модели в ленте не показываются",
+                _pal.INK,
+            ),
+            ToggleValue(
+                "on",
+                "рассуждения модели строками Thought в живой ленте, не хранятся"
+                " · только в chat_completions с потоком",
+                _pal.ACCENT,
+            ),
+        ),
+        state=lambda s: settings_of(s).tui.show_reasoning,
+        label="рассуждения модели в ленте (reasoning)",
+        summary="",
+        group="trace",
         palette_default=False,
     ),
 }
@@ -724,8 +753,9 @@ def _fit_hint(value: str, hint: str, keys: str, width: int) -> str:
     ' · ' уходит первым; 2) клавиши теряют «Enter — готово» (ЦЕЛЫМ куском,
     не обрывком); 3) клавиши сжимаются до `←/→`; 4) остаток смысла —
     многоточие.
-    Механика (клавиши в той или иной форме) видима всегда. Settings эту
-    функцию не вызывает (использует `_fit_value_hint`).
+    Механика (клавиши в той или иной форме) видима всегда. Settings
+    подсказку не режет: показывает целиком с резервом высоты (дизайн-код
+    §9).
 
     Владелец канонического представления тоггла (рядом с render_track) —
     переиспользуется палитрой (command_palette.py)."""
@@ -749,30 +779,6 @@ def _fit_hint(value: str, hint: str, keys: str, width: int) -> str:
     return build(
         core[: room - 1] + "…", _HINT_KEYS_TOGGLE_SHORT
     )  # 4) многоточие
-
-
-def _fit_value_hint(value: str, hint: str, width: int) -> str:
-    """Усечение строки «<значение> — <подсказка>» БЕЗ клавишной части (канон §6,
-    п.1/п.3 — п.2 «короткие клавиши» неприменим, клавиш тут нет): 1) хвост
-    подсказки после последнего ' · ' уходит первым; 2) остаток — многоточие.
-
-    Для строки внутри рамки подэкрана Settings («Режимы работы») — клавиши там
-    показывает статичный футер вне рамки (см. `_fit_hint` — та же механика,
-    но с клавишами внутри самой строки, там, где своего футера-подсказки нет)."""
-
-    def build(h: str) -> str:
-        return f"{value} — {h}"
-
-    full = build(hint)
-    if width <= 0 or len(full) <= width:
-        return full
-    core = hint.rsplit(" · ", 1)[0]
-    trimmed = build(core)
-    if len(trimmed) <= width:
-        return trimmed
-    fixed = len(build(""))
-    room = max(1, width - fixed)
-    return build(core[: room - 1] + "…")
 
 
 def render_track(

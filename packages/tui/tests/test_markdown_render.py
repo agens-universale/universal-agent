@@ -99,13 +99,13 @@ def test_build_markdown_table_header_style():
 
 
 def test_build_markdown_table_inline_code_cell():
-    """Cell containing `code` spans: backticks stripped, text rendered with code style (#afbdff)."""
+    """Cell containing `code` spans: backticks stripped, text rendered with code style (#afd7ff)."""
     t = build_markdown_table(["H"], [["`snippet`"]], ["left"])
     # The cell is a rich.Text; iterate spans to find code-styled segment.
     cell = t.columns[0]._cells[0]  # first row, first column
     styles = [span.style for span in cell._spans]
-    assert any("#afbdff" in str(s) for s in styles), (
-        f"Expected code style #afbdff in cell spans, got: {styles}"
+    assert any("#afd7ff" in str(s) for s in styles), (
+        f"Expected code style #afd7ff in cell spans, got: {styles}"
     )
 
 

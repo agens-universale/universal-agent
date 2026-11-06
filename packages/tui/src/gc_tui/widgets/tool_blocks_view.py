@@ -52,7 +52,6 @@ from gc_tui.services.tool_blocks import (
     SetVisible,
     SetWord,
     ToolBlocks,
-    command_file_verb,
     diff_key,
     phrase_key,
     shown_when_folded,
@@ -304,7 +303,7 @@ class ToolBlocksView:
         line.set_detail_source(lambda: row.call_id)
         line.set_word(file.verb)
         line.set_result(summary="", outcome="ok")
-        if file.verb != command_file_verb("delete") and file.copy_text:
+        if file.copy_text and not file.deleted_without_lines:
             line.set_edit_counts(file.add, file.rem, copy_text=file.copy_text)
         self._edits[file.key] = file
         self.register(file.key, line)

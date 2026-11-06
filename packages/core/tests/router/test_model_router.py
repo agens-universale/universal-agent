@@ -1,13 +1,16 @@
+import asyncio
 from dataclasses import replace
 
 import pytest
 from gc_core.config_modules.root import AppConfig
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.model_router import (
     CONSUMERS,
     SUBAGENT_CONSUMER_PREFIX,
     ModelRouter,
     ResolvedModel,
 )
+from gc_core.user_stop import UserStopInterrupt
 
 
 def _snapshot(raw: dict) -> AppConfig:
@@ -671,3 +674,54 @@ def test_resolve_main_at_alias_target_even_when_auto_allowed():
         _alias_settings({"default": "a"}), choice_provider=lambda: "auto"
     )
     assert router.resolve_main_at("b").alias == "b"
+
+
+def test_router_probing_none_and_legacy_resolve_are_not_probes():
+    router = _router({})
+    with router.probing(None) as probe:
+        assert probe is False
+    with router.probing(replace(_pin(), alias=None)) as probe:
+        assert probe is False
+
+
+def test_router_probing_is_one_shot_for_allowed_alias():
+    router = _router({})
+    router.breaker.trip("pinned", "ReadError")
+    router.breaker.allow_probe()
+    with router.probing(_pin()) as probe:
+        assert probe is True
+    with router.probing(_pin()) as probe:
+        assert probe is False
+    assert router.breaker.known_unavailable("pinned") is None
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [
+        asyncio.CancelledError,
+        lambda: ModelRequestStopped("стоп"),
+        lambda: UserStopInterrupt(kind="model"),
+    ],
+)
+def test_router_probing_returns_right_on_stop_before_response(stop):
+    router = _router({})
+    router.breaker.trip("pinned", "ReadError")
+    router.breaker.allow_probe()
+    with pytest.raises(type(stop())):
+        with router.probing(_pin()) as probe:
+            assert probe is True
+            raise stop()
+    assert router.breaker.is_open("pinned") is False
+    assert router.breaker.known_unavailable("pinned") == "ReadError"
+    with router.probing(_pin()) as probe:
+        assert probe is True
+
+
+def test_router_probing_spends_right_on_answered_error():
+    router = _router({})
+    router.breaker.trip("pinned", "ReadError")
+    router.breaker.allow_probe()
+    with pytest.raises(ValueError):
+        with router.probing(_pin()):
+            raise ValueError("400")
+    assert router.breaker.known_unavailable("pinned") is None

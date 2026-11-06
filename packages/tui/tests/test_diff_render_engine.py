@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -30,6 +31,7 @@ from gc_tui.services.diff_render import (
     _SYNTAX_MAX_LINES,
     _match_work,
     copyable_hunks,
+    diff_line_count,
     render_hunks,
 )
 
@@ -1022,3 +1024,83 @@ def test_preview_pairs_accents_like_full_hunk():
         )
     assert _accent_cells(full, 0) == []
     assert _accent_cells(full, 2) != []
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"one\ntwo\nthree\n", b"one\ntwo\nthree"],
+    ids=["eol", "no-eol"],
+)
+def test_copied_delete_patch_applies_with_git(tmp_path, content):
+    """Скопированная запись удаления шелл-канала — патч в форме git:
+    ``git apply`` удаляет файл (решение ревью 2026-11-05), в том числе без
+    перевода строки в конце."""
+    import shutil
+    import subprocess
+
+    from gc_core.agent_edits.delete_records import DeleteBudget, delete_record
+
+    if not shutil.which("git"):
+        pytest.skip("git недоступен")
+    key = "sub/a.txt"
+    (tmp_path / "sub").mkdir()
+    (tmp_path / key).write_bytes(content)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    record = delete_record(
+        key,
+        "t1",
+        content,
+        mode=0o644,
+        budget=DeleteBudget(1000),
+        context_lines=3,
+        max_chars=0,
+    )
+    patch = tmp_path / "rm.patch"
+    patch.write_text(copyable_hunks(record.hunks, path=key), encoding="utf-8")
+
+    subprocess.run(
+        ["git", "apply", str(patch)],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    assert not (tmp_path / key).exists()
+    assert render_hunks(record.hunks, path=key).total_lines == 3
+    assert diff_line_count(record.hunks) == 3
+
+
+@pytest.mark.skipif(os.name == "nt", reason="табуляция в имени файла")
+def test_copied_delete_patch_with_tab_in_name_applies_with_git(tmp_path):
+    """Имя с табуляцией в заголовках патча удаления C-кавычено, как у git:
+    иначе ``git apply`` резал бы имя по табуляции."""
+    import shutil
+    import subprocess
+
+    from gc_core.agent_edits.delete_records import delete_record
+
+    if not shutil.which("git"):
+        pytest.skip("git недоступен")
+    key = 'a\tb "q".txt'
+    (tmp_path / key).write_bytes(b"one\n")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    record = delete_record(
+        key,
+        "t1",
+        b"one\n",
+        mode=0o644,
+        budget=None,
+        context_lines=3,
+        max_chars=0,
+    )
+    patch = tmp_path / "rm.patch"
+    patch.write_text(copyable_hunks(record.hunks, path=key), encoding="utf-8")
+
+    subprocess.run(
+        ["git", "apply", str(patch)],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    assert not (tmp_path / key).exists()

@@ -3712,17 +3712,17 @@ async def test_level_form_escape_returns_to_the_list_without_setting(tmp_path):
 
 
 def test_level_row_paints_the_level_name_with_its_own_color():
-    """Имя уровня в строке шага несёт ЦВЕТ уровня из `TOGGLES["level"]` (max — ACCENT),
+    """Имя уровня в строке шага несёт ЦВЕТ уровня из `model_sign.LEVEL_COLORS` (max — RUN_COLOR),
     как в раскрытом списке `/level` и в слотах секции «Модели»: одна сущность не имеет
     права выглядеть на одном экране двумя способами. Роль после «·» — обычная."""
-    from gc_tui.palette import ACCENT, INK
+    from gc_tui.palette import INK, RUN_COLOR
 
     scr = _screen()
     row = scr._level_row_text(False, "max")
     styles = {
         row.plain[span.start : span.end]: span.style for span in row.spans
     }
-    assert styles.get("max") == ACCENT
+    assert styles.get("max") == RUN_COLOR
     assert styles.get(" · самая сильная: сложные задачи") == INK
 
 

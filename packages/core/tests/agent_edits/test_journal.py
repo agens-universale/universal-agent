@@ -280,3 +280,9 @@ def test_size_bytes_roundtrip_and_key_only_when_set(tmp_path):
 def test_old_line_without_size_bytes_reads_as_none():
     obj = {"path": "a.bin", "turn_id": "t", "call_id": "c", "op": "write"}
     assert EditRecord.from_json_obj(obj).size_bytes is None
+
+
+def test_mode_roundtrips_and_is_omitted_when_none():
+    assert "mode" not in make_rec().to_json_obj()
+    rec = make_rec(op="delete", mode=0o755)
+    assert EditRecord.from_json_obj(rec.to_json_obj()).mode == 0o755

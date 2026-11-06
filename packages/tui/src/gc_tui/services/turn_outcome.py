@@ -191,7 +191,7 @@ def turn_head(
 
 
 # Минимальный зазор между головой строки итога и правым сегментом сводки.
-_SUMMARY_GAP = 2
+SUMMARY_GAP = 2
 
 
 def format_turn_summary(files: int, add: int, del_: int) -> str | None:
@@ -229,7 +229,7 @@ def compose_status_line(
         return head, None
     segment = Text(summary, style=ACCENT if hover else DEEP_DIM)
     gap = available_width - head.cell_len - segment.cell_len
-    if gap < _SUMMARY_GAP:
+    if gap < SUMMARY_GAP:
         return head, None
     out = Text()
     out.append_text(head)

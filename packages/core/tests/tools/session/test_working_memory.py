@@ -131,11 +131,38 @@ def test_prompt_description_reason_optional():
     assert "content" in prompt
 
 
-def test_schema_requires_action_and_register():
+def test_schema_requires_action_register_and_content():
     required = WorkingMemory.tool_description()["parameters"]["required"]
-    assert required == ["action", "register"]
+    assert required == ["action", "register", "content"]
     prompt = WorkingMemory.prompt_description()
-    assert '"required":["action","register"]' in prompt.replace(" ", "")
+    assert '"required":["action","register","content"]' in prompt.replace(
+        " ", ""
+    )
+    content_desc = WorkingMemory.tool_description()["parameters"][
+        "properties"
+    ]["content"]["description"].lower()
+    assert "for list and read: pass an empty string." in content_desc
+
+
+def test_list_and_read_ignore_content():
+    state = _make_state({REGISTER_GOAL: "keep this"})
+    listed = _call(
+        state,
+        action="list",
+        register=REGISTER_GOAL,
+        content="should be ignored",
+    )
+    assert listed["ok"] is True
+    assert state.shared.working_memory[REGISTER_GOAL] == "keep this"
+
+    read_back = _call(
+        state,
+        action="read",
+        register=REGISTER_GOAL,
+        content="",
+    )
+    assert read_back["ok"] is True
+    assert read_back["content"] == "keep this"
 
 
 def test_invalid_register_rejected():

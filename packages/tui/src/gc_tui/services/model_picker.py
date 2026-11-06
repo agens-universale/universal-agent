@@ -25,7 +25,7 @@ from gc_tui.widgets.arg_picker import PickerOption
 AUTO = "auto"
 AUTO_DESC = "модель выбирается автоматически по ходу работы"
 ACTIVE_STATUS = "активна"
-UNAVAILABLE_HINT = "недоступна в этой сессии"
+UNAVAILABLE_HINT = "недоступна при последней попытке"
 LEGACY_HINT = "легаси: выбор модели появится с реестром моделей"
 LEGACY_FORCE_HINT = "--model: выбор модели отключён на этот запуск"
 UNKNOWN_REFUSAL = "✗ нет такой модели: {arg}"
@@ -194,7 +194,7 @@ def _address_hint(router: Any, alias: str) -> str:
 def model_hint(app: Any, value: Optional[str], settings: Any = None) -> str:
     """Подсказка про модель `value` — без её имени и уровней (они в строке):
     id у провайдера и хост адреса, у модели в предохранителе — плюс
-    «недоступна в этой сессии»; у `auto` — пары или причина."""
+    «недоступна при последней попытке»; у `auto` — пары или причина."""
     if not value:
         return ""
     loaded = _loaded(app, settings)
@@ -205,7 +205,7 @@ def model_hint(app: Any, value: Optional[str], settings: Any = None) -> str:
         return LEGACY_FORCE_HINT if router.force_legacy else LEGACY_HINT
     alias = _alias_of(router, value)
     hint = _address_hint(router, alias)
-    if router.breaker.is_open(alias):
+    if router.breaker.known_unavailable(alias) is not None:
         return f"{hint} · {UNAVAILABLE_HINT}"
     return hint
 

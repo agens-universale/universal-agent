@@ -55,3 +55,23 @@ def test_guard_cancelled_by_user_is_a_stop_not_an_error():
         }
     )
     assert result_stop(out) == ("halted", "отменено")
+
+
+def test_not_started_due_to_session_compact_is_halted():
+    out = json.dumps(
+        {
+            "tool": "session_think",
+            "ok": False,
+            "status": "not_started_due_to_session_compact",
+            "message": (
+                "Tool was not started: session_compact replaced the history."
+            ),
+            "error": None,
+            "synthetic": True,
+        }
+    )
+    assert _looks_like_error(out) is True
+    assert result_stop(out) == (
+        "halted",
+        "не исполнен: сводка заменила историю",
+    )

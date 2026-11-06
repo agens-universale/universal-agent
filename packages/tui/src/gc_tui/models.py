@@ -156,6 +156,9 @@ class TraceEvent:
     # Заголовок вызова субагента (kind="call"): роль и задача из сырых
     # аргументов — до облегчения retention (решение владельца 2026-10-23).
     agent: Optional[AgentHead] = None
+    # Полный текст явного вызова `Think` (kind="call"): раскрытие строки;
+    # считается при маппинге, до облегчения retention.
+    think_text: str = ""
 
     @property
     def result_outcome(self) -> ResultOutcome:

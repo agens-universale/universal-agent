@@ -1,28 +1,13 @@
 """Tests for all_builtin_tool_names in registry."""
 
-import sys
-
 import pytest
+from gc_testkit.plugin import ensure_real_tools_package
 
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    """Восстановить реальный модуль tools, если он был подменён tests/tools/conftest.py."""
-    stale = [
-        name
-        for name in sys.modules
-        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
-    ]
-    for name in stale:
-        sys.modules.pop(name, None)
-    yield
-    stale = [
-        name
-        for name in sys.modules
-        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
-    ]
-    for name in stale:
-        sys.modules.pop(name, None)
+    """Keep the real module identity shared by tool calls and teardown."""
+    ensure_real_tools_package()
 
 
 def test_returns_prefilter_names_ignoring_stop_tools():
@@ -52,8 +37,8 @@ def test_every_artifact_tool_name_exists_in_the_registry():
     names = all_builtin_tool_names(make_settings()) | set(
         get_skills_tools_data(None)
     )
-    assert ARTIFACT_TOOL_NAMES <= names
-    assert ARTIFACT_TOOL_NAMES == {
+    assert names >= ARTIFACT_TOOL_NAMES
+    assert {
         "fs_write_file",
         "fs_append_file",
         "fs_apply_file_edits",
@@ -63,7 +48,7 @@ def test_every_artifact_tool_name_exists_in_the_registry():
         "exec_python",
         "download_file",
         "skills_run_script",
-    }
+    } == ARTIFACT_TOOL_NAMES
 
 
 def test_file_write_and_exec_sets_have_the_exact_composition():
@@ -72,19 +57,19 @@ def test_file_write_and_exec_sets_have_the_exact_composition():
         FILE_WRITE_TOOL_NAMES,
     )
 
-    assert FILE_WRITE_TOOL_NAMES == {
+    assert {
         "fs_write_file",
         "fs_append_file",
         "fs_apply_file_edits",
         "fs_search_and_replace",
         "fs_save_base64_file",
         "download_file",
-    }
-    assert EXEC_TOOL_NAMES == {
+    } == FILE_WRITE_TOOL_NAMES
+    assert {
         "exec_command",
         "exec_python",
         "skills_run_script",
-    }
+    } == EXEC_TOOL_NAMES
     assert isinstance(FILE_WRITE_TOOL_NAMES, frozenset) and isinstance(
         EXEC_TOOL_NAMES, frozenset
     )
@@ -98,7 +83,7 @@ def test_artifact_set_is_the_union_of_file_write_and_exec():
     )
 
     assert ARTIFACT_TOOL_NAMES == FILE_WRITE_TOOL_NAMES | EXEC_TOOL_NAMES
-    assert FILE_WRITE_TOOL_NAMES & EXEC_TOOL_NAMES == set()
+    assert set() == FILE_WRITE_TOOL_NAMES & EXEC_TOOL_NAMES
     assert isinstance(ARTIFACT_TOOL_NAMES, frozenset)
 
 
@@ -111,7 +96,7 @@ def test_important_set_has_the_exact_composition_and_excludes_exec():
         IMPORTANT_TOOL_NAMES,
     )
 
-    assert IMPORTANT_TOOL_NAMES == {
+    assert {
         "fs_write_file",
         "fs_append_file",
         "fs_apply_file_edits",
@@ -124,9 +109,9 @@ def test_important_set_has_the_exact_composition_and_excludes_exec():
         "turn_finish",
         "turn_ask_human",
         "turn_propose_plan",
-    }
+    } == IMPORTANT_TOOL_NAMES
     assert FILE_WRITE_TOOL_NAMES <= IMPORTANT_TOOL_NAMES
-    assert IMPORTANT_TOOL_NAMES & EXEC_TOOL_NAMES == set()
+    assert set() == IMPORTANT_TOOL_NAMES & EXEC_TOOL_NAMES
     assert isinstance(IMPORTANT_TOOL_NAMES, frozenset)
 
 
@@ -145,5 +130,5 @@ def test_every_important_and_exec_tool_name_exists_in_the_registry():
     names = all_builtin_tool_names(
         make_settings({"backend.api_mode": "chat_completions"})
     ) | set(get_skills_tools_data(None))
-    assert IMPORTANT_TOOL_NAMES <= names
-    assert EXEC_TOOL_NAMES <= names
+    assert names >= IMPORTANT_TOOL_NAMES
+    assert names >= EXEC_TOOL_NAMES

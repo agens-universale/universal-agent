@@ -434,7 +434,7 @@ def fit_head(head: str, width: int) -> str:
     3. не влезает и имя — ужимается оно: строка не имеет права переноситься ни на
        какой ширине, но имя уровня/потребителя видно до последнего.
 
-    У служебных потребителей («суммаризация», «судья finish_gate») разделителя нет —
+    У служебных потребителей («суммаризация», «формат ответа») разделителя нет —
     вся голова считается именем и режется только на третьей ступени."""
     if width <= 0 or len(head) <= width:
         return head
@@ -472,35 +472,40 @@ _INHERITED_LABEL = "основной"
 # как текущее состояние, а не как часть выбора.
 _ACTIVE_DESC_LEAD = "работает выбранной моделью: сейчас "
 _SLOT_DEAD_HINT = "уровень не резолвится: задайте хотя бы один слот"
-# Подписи потребителей, которых НЕТ в транспортном словаре `CONSUMER_RU_LABEL`
-# (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
-# собственностью — здесь только UI-добавка (контракт п.2 волны B).
+# Строки назначений называются по-человечески; ключ конфига — подсказкой
+# выбранной строки (`_key_line`). Имена служебных потребителей — из словаря ядра
+# `CONSUMER_RU_LABEL` (`utils/llm_chat_client.py`): им же говорит уведомление о
+# замене модели, и судья с ручкой называется там так же, как ручка (страж
+# `test_knob_labels_match_the_judge_names_of_the_core`).
 #
-# `*` — не «те, кого нет в списке»: в списке перечислены ВСЕ канонические имена, и
-# поимённо чужое имя вписать нельзя (валидатор фазы 2 отвергает ключ). Реальный
-# смысл ровно два: единственный способ привязать кастомных субагентов из
-# `.md`-файлов и общая привязка «всем сразу, кому своя не задана»
-# (`ModelRouter._lookup_binding`: точное имя → `*`).
+# `*` — единственный способ привязать кастомных субагентов из `.md`-файлов
+# (поимённо чужое имя валидатор отвергает) и общая привязка «всем, кому своя не
+# задана» (`ModelRouter._lookup_binding`: точное имя → `*`).
 _UI_CONSUMER_LABEL = {
-    "*": "* · кастомные и будущие субагенты",
+    "*": "остальные субагенты",
 }
-# Роль служебного потребителя к подписи из транспортного словаря — только на
-# экране: в уведомлениях о деградации подпись остаётся короткой.
+# Пояснение к подписи — только на экране: в уведомлениях о деградации подпись
+# остаётся короткой.
 _CONSUMER_ROLE = {
     "command_judge": "команды в edit, действия в режиме auto",
+    "intent_scope": "помнит ход после сжатия контекста",
+    "*": "кастомные и будущие",
 }
-# Роль субагента рядом с его именем — грамматика «имя · описание» канона
-# `_mode_row_text`: имя ключа в файле человеку нужно (он его там и увидит),
-# описание отвечает «а это кто».
+# Пояснение к роли субагента — грамматика «имя · описание» канона
+# `_mode_row_text`; сама роль — из таблицы ролей ядра (`subagent_role`).
 _SUBAGENT_ROLE = {
-    "subagent_worker": "исполнительские шаги",
+    "subagent_worker": "выполнение задач",
     "subagent_code_generator": "генерация кода",
     "subagent_code_planner": "планирование кода",
     "subagent_planner": "общее планирование",
     "subagent_critic": "критика решений",
     "subagent_code_reviewer": "ревью кода",
-    "subagent_special_agent": "агент по описанию",
+    "subagent_special_agent": "роль по описанию главного агента",
 }
+# Подсказка ключа под выбранной строкой назначений: ровно под головой строки,
+# подпись — как «в текущей сессии:» у «Режимов работы».
+_KEY_INDENT = "  "
+_KEY_LABEL = "ключ: "
 
 
 def assign_consumers() -> list:
@@ -521,8 +526,9 @@ def assign_consumers() -> list:
 
 
 def consumer_labels() -> dict:
-    """Подпись каждой строки привязок: 7 готовых берутся ИЗ транспортного словаря
-    (копия разошлась бы с ним на первой же правке), остальные — свои."""
+    """Подпись каждой строки привязок. Служебные — из словаря ядра, субагенты —
+    ролью ядра: копия разошлась бы с источником на первой же правке."""
+    from gc_core.constants.tool_display import subagent_role
     from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
 
     labels = dict(CONSUMER_RU_LABEL)
@@ -530,12 +536,22 @@ def consumer_labels() -> dict:
     for consumer, role in _CONSUMER_ROLE.items():
         labels[consumer] = f"{labels[consumer]} · {role}"
     for name in SUBAGENT_NAMES:
+        role = subagent_role(name, {})
         # `.get`, а не индекс: новый субагент в коде появляется строкой сам — пусть
         # витрина деградирует до общей подписи, а не роняет секцию `KeyError`.
         labels[f"subagents.{name}"] = (
-            f"{name} · {_SUBAGENT_ROLE.get(name, 'субагент')}"
+            f"{role} · {_SUBAGENT_ROLE.get(name, 'субагент')}"
         )
     return labels
+
+
+def assign_key(consumer: str) -> str:
+    """Путь ключа строки привязок в конфиге — по `AssignConfig`: служебный
+    потребитель — плоское поле, субагент — словарь `subagents`, `*` — в
+    кавычках, как его пишут в YAML."""
+    if consumer == "*":
+        return 'assign.subagents."*"'
+    return f"assign.{consumer}"
 
 
 def assign_value(assign: dict, consumer: str):
@@ -1475,12 +1491,29 @@ class ModelsSectionEditor(Vertical):
 
     def _assign_row_text(self, consumer: str, selected: bool) -> Text:
         label = consumer_labels()[consumer]
-        return self._binding_row_text(
+        text = self._binding_row_text(
             lambda w: Text(fit_head(label, w), style=INK),
             self._assign_value(consumer),
             self._assign_unset_label(consumer),
             selected,
         )
+        if selected:
+            text.append("\n")
+            text.append_text(self._key_line(consumer))
+        return text
+
+    def _key_line(self, consumer: str) -> Text:
+        """Ключ конфига выбранной строки привязок — второй строкой, по канону
+        «в текущей сессии: …» `_mode_row_text`: подпись курсивом DEEP_DIM, путь
+        DEEP_DIM. Не влезает в рамку — режется многоточием: строка не
+        переносится ни на какой ширине."""
+        line = Text(_KEY_INDENT)
+        line.append(_KEY_LABEL, style=f"italic {DEEP_DIM}")
+        line.append(assign_key(consumer), style=DEEP_DIM)
+        width = self._row_width()
+        if width > 0:
+            line.truncate(width, overflow="ellipsis")
+        return line
 
     def _row_text(self, row: dict, selected: bool) -> Text:
         if row["kind"] == "reserve":

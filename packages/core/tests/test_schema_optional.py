@@ -65,6 +65,7 @@ def test_parameters_schema_for_local_validation_semantic_required():
     assert validation is not params
     assert params["required"] == api_required
     assert "path" in validation["required"]
+    assert "add_line_numbers" in validation["required"]
     for key in ("offset", "limit", "encoding"):
         assert key not in validation["required"]
         assert key in params["x-optional-keys"]
@@ -163,11 +164,19 @@ def test_strict_read_file_omits_optional_ok():
 
     args = parse_and_validate_tool_arguments(
         tool_name="fs_read_file",
-        arguments={"reason": "inspect", "path": "/tmp/f.txt"},
+        arguments={
+            "reason": "inspect",
+            "path": "/tmp/f.txt",
+            "add_line_numbers": False,
+        },
         tool_spec=spec,
         allow_empty_for_empty_schema=False,
     )
-    assert args == {"reason": "inspect", "path": "/tmp/f.txt"}
+    assert args == {
+        "reason": "inspect",
+        "path": "/tmp/f.txt",
+        "add_line_numbers": False,
+    }
 
 
 def test_strict_read_file_missing_reason_ok():
@@ -179,11 +188,11 @@ def test_strict_read_file_missing_reason_ok():
 
     args = parse_and_validate_tool_arguments(
         tool_name="fs_read_file",
-        arguments={"path": "/tmp/f.txt"},
+        arguments={"path": "/tmp/f.txt", "add_line_numbers": False},
         tool_spec=spec,
         allow_empty_for_empty_schema=False,
     )
-    assert args == {"path": "/tmp/f.txt"}
+    assert args == {"path": "/tmp/f.txt", "add_line_numbers": False}
 
 
 def test_strict_apply_file_edits_omits_top_level_flags_ok():

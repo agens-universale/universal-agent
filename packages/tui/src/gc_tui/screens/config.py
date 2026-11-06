@@ -12,14 +12,17 @@ from textual.screen import Screen
 from textual.widgets import Input, Static
 
 from gc_tui.palette import DIM, MUTED
+from gc_tui.services.column_row import ColumnRow, ColumnRows
 from gc_tui.services.redact import redact_settings
+from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.yaml_view import (
     safe_yaml_dump,
     yaml_syntax_renderable,
     yaml_syntax_widget,
 )
+from gc_tui.widgets.column_static import ColumnStatic
 
-_FOOTER = "[Esc] back  [↑↓ / PgUp PgDn] прокрутка"
+_FOOTER = "↑/↓ / PgUp/PgDn — прокрутка · Esc — назад"
 _SNAPSHOT_HINT = (
     "снимок на момент запуска · правки применятся после перезапуска"
 )
@@ -58,7 +61,7 @@ def _paths_block(
     config_path: str | None,
     project_local: str | None,
     profile_path: str | None = None,
-) -> Text:
+) -> ColumnRows:
     """Строки путей: метка (dim) + значение (ink); '(не задано)' — muted.
     Заголовок блока живёт в border_title панели, не в тексте. `settings` — всё,
     что принимает `settings_of`."""
@@ -82,14 +85,17 @@ def _paths_block(
         ("logs:", path_or_unset("logs_dump_dir")),
     ]
     width = max(len(label) for label, _ in rows)
-    t = Text()
-    for i, (label, value) in enumerate(rows):
-        if i:
-            t.append("\n")
-        t.append(label.ljust(width + 1), style=DIM)
-        absent = value.startswith("(")  # "(не задано)" / "(не определён)"
-        t.append(value, style=MUTED if absent else None)
-    return t
+    # Длинный путь переносится под свою колонку, а не под подпись (§10).
+    return ColumnRows(
+        [
+            ColumnRow(
+                Text(label.ljust(width + 1), style=DIM),
+                # Скобки — «не задано» и «не определён»: приглушены.
+                [Text(value, style=MUTED if value.startswith("(") else "")],
+            )
+            for label, value in rows
+        ]
+    )
 
 
 def _effective_model_name(config) -> str:
@@ -252,7 +258,7 @@ class ConfigScreen(Screen):
                 yield Static(
                     _SNAPSHOT_HINT, classes="config-caption", markup=False
                 )
-                paths = Static(
+                paths = ColumnStatic(
                     _paths_block(
                         self._settings,
                         self._config_path,
@@ -270,7 +276,7 @@ class ConfigScreen(Screen):
                 self._yaml_w.border_subtitle = "секреты скрыты"
                 yield self._yaml_w
             with Horizontal(id="config-filter-row"):
-                yield Static("> ", id="config-filter-prompt", markup=False)
+                yield Static(PROMPT, id="config-filter-prompt", markup=False)
                 yield Input(placeholder="фильтр ключей…", id="config-filter")
             yield Static(_FOOTER, id="footer", markup=False)
 

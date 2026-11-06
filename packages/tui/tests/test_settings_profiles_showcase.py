@@ -69,7 +69,7 @@ async def _open_profiles(pilot, screen):
 
 
 def _profiles_rows_text(screen) -> list[str]:
-    return [str(w.render()) for w in screen.query(".set-profiles-row")]
+    return [str(w.content) for w in screen.query(".set-profiles-row")]
 
 
 # --- список профилей обоих корней: имя, источник, тёзка, суффикс «+security» ---
@@ -251,22 +251,53 @@ async def test_profiles_section_slot_composition_shown_inline(
         assert any("default glm" in l and "light flash" in l for l in lines)
 
 
-def test_fit_overlay_suffix_whole_names_only():
-    """Юнит по образцу test_fit_mode_pairs_whole_pairs_only (settings.py:725-743,
-    ревью Task 13 Minor): усечение суффикса секций-оверлеев — ЦЕЛЫМИ именами,
-    не посимвольно; хвост «+…», когда обрезка нужна; «+…» без имён вовсе, если
-    не влезает даже первое."""
-    from gc_tui.screens.settings import fit_overlay_suffix
+async def test_profile_row_wraps_under_its_slots_column(tmp_path, monkeypatch):
+    """Длинный состав слотов переносится в своей колонке, под первым слотом,
+    а не под именем; пара «уровень модель» не рвётся (дизайн-код §10)."""
+    from gc_tui import app as app_mod
 
-    names = ["security", "summary", "long_memory"]
-    full = fit_overlay_suffix(names, width=200)
-    assert full == "+security+summary+long_memory"
-    tight = fit_overlay_suffix(names, width=15)
-    assert tight == "+security+…"
-    assert "summary" not in tight  # имя не режется посередине
-    tiny = fit_overlay_suffix(names, width=5)
-    assert tiny == "+…"  # не влезло даже первое имя
-    assert fit_overlay_suffix([], width=200) == ""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    models = "".join(
+        f'  {m}:\n    url: http://x\n    token: ""\n'
+        for m in ("qwen-long-light-model", "coder-next-default", "deep-max")
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        "models:\n" + models + "slots:\n  light: qwen-long-light-model\n"
+        "  default: coder-next-default\n  max: deep-max\n",
+    )
+
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
+    async with app.run_test(size=(80, 40)) as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+        await pilot.pause()
+        row = next(
+            w
+            for w in scr.query(".set-profiles-row")
+            if "work" in str(w.content)
+        )
+        lines = [
+            "".join(seg.text for seg in strip).rstrip()
+            for strip in row.render_lines(row.region.reset_offset)
+        ]
+    lines = [line for line in lines if line.strip()]
+    assert len(lines) > 1, lines
+    column = lines[0].index("light")
+    for line in lines[1:]:
+        assert len(line) - len(line.lstrip()) == column, lines
+    words = " ".join(lines).split()
+    for level, model in (
+        ("light", "qwen-long-light-model"),
+        ("default", "coder-next-default"),
+        ("max", "deep-max"),
+    ):
+        assert words[words.index(level) + 1] == model, lines
 
 
 # --- пустое состояние (текст §12.3 дословно + скелет + путь) ---
@@ -1780,7 +1811,9 @@ async def test_overriding_layer_name_answers_by_files_like_the_write_gate(
     )
     # Managed-слой теста — `tmp_path/config.local.yml` (автофикстура
     # `_isolated_config_layers`): достаточно его записать.
-    _write(tmp_path / "config.local.yml", 'tui:\n  finish_gate_mode: "on"\n')
+    _write(
+        tmp_path / "config.local.yml", 'tui:\n  finish_gate_mode: "always"\n'
+    )
 
     app = _app_launched_with(base_cfg, "")
     async with app.run_test() as pilot:
@@ -1946,3 +1979,36 @@ async def test_profile_delete_and_rename_are_refused_while_a_run_is_going(
         assert home.exists()
         assert base_cfg.read_text(encoding="utf-8") == before
         app.active_runner = None
+
+
+async def test_profiles_hint_height_stays_on_cursor(tmp_path, monkeypatch):
+    """Подсказка строк «Профилей» — с резервом под самую длинную (у профиля
+    — путь, активация, секции; у «нет» — одна фраза): ↑/↓ не двигают низ
+    рамки (дизайн-код §9)."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
+    async with app.run_test(size=(90, 50)) as pilot:
+        scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
+        app.push_screen(scr)
+        await pilot.pause()
+        await _open_profiles(pilot, scr)
+
+        def height() -> int:
+            return list(scr.query(".set-profiles-hint"))[-1].size.height
+
+        heights = {height()}
+        for _ in range(len(scr._profiles_rows())):
+            await pilot.press("down")
+            await pilot.pause(0.1)
+            heights.add(height())
+        assert len(heights) == 1
+        assert heights.pop() >= 3

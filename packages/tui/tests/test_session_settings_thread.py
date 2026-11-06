@@ -34,13 +34,32 @@ async def test_opening_thread_applies_its_settings(tmp_path):
         threads_dir=str(tmp_path / "threads"),
         system="cli",
         settings=tui_settings(
-            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+            {"agent.model": "M", "tui.finish_gate_mode": "always"}
         ),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task("t-own")
         await pilot.pause(0.1)
         assert app.effective_settings().settings.tui.finish_gate_mode == "off"
+
+
+@pytest.mark.asyncio
+async def test_thread_saved_legacy_gate_on_restores_as_always(tmp_path):
+    """Тред, сохранённый до переименования, хранит самопроверку `on` — она
+    восстанавливается как `always`, и /gate показывает `always`."""
+    from gc_tui.app import TuiApp
+    from gc_tui.session_settings import finish_gate_mode_of
+
+    _mk_thread(tmp_path, "t-old", {"tui.finish_gate_mode": "on"})
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings({"agent.model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        pilot.app.screen.attach_active_task("t-old")
+        await pilot.pause(0.1)
+        assert finish_gate_mode_of(app.effective_settings()) == "always"
 
 
 @pytest.mark.asyncio
@@ -54,14 +73,16 @@ async def test_opening_thread_without_settings_falls_back_to_default(tmp_path):
         threads_dir=str(tmp_path / "threads"),
         system="cli",
         settings=tui_settings(
-            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+            {"agent.model": "M", "tui.finish_gate_mode": "always"}
         ),
     )
     async with app.run_test() as pilot:
         app.set_session_override("tui.finish_gate_mode", "off")
         pilot.app.screen.attach_active_task("t-plain")
         await pilot.pause(0.1)
-        assert app.effective_settings().settings.tui.finish_gate_mode == "on"
+        assert (
+            app.effective_settings().settings.tui.finish_gate_mode == "always"
+        )
 
 
 @pytest.mark.asyncio
@@ -77,7 +98,7 @@ async def test_init_auto_create_inherits_session_overrides(tmp_path):
         threads_dir=str(tmp_path / "threads"),
         system="cli",
         settings=tui_settings(
-            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+            {"agent.model": "M", "tui.finish_gate_mode": "always"}
         ),
     )
     rec = _StubRunner()
@@ -114,7 +135,7 @@ async def test_freetext_auto_create_inherits_session_overrides(tmp_path):
         threads_dir=str(tmp_path / "threads"),
         system="cli",
         settings=tui_settings(
-            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+            {"agent.model": "M", "tui.finish_gate_mode": "always"}
         ),
     )
     rec = _StubRunner()
@@ -157,7 +178,7 @@ async def test_attach_without_settings_change_keeps_warm_runner(tmp_path):
         threads_dir=str(tmp_path / "threads"),
         system="cli",
         settings=tui_settings(
-            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+            {"agent.model": "M", "tui.finish_gate_mode": "always"}
         ),
     )
     async with app.run_test() as pilot:
@@ -180,7 +201,7 @@ async def test_attach_with_other_settings_invalidates_runner(tmp_path):
         threads_dir=str(tmp_path / "threads"),
         system="cli",
         settings=tui_settings(
-            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+            {"agent.model": "M", "tui.finish_gate_mode": "always"}
         ),
     )
     async with app.run_test() as pilot:
@@ -207,8 +228,8 @@ async def test_two_windows_with_different_threads_are_independent(tmp_path):
     from gc_tui.app import TuiApp
 
     _mk_thread(tmp_path, "t-a", {"tui.finish_gate_mode": "off"})
-    _mk_thread(tmp_path, "t-b", {"tui.finish_gate_mode": "on"})
-    cfg = {"agent.model": "M", "tui.finish_gate_mode": "on"}
+    _mk_thread(tmp_path, "t-b", {"tui.finish_gate_mode": "always"})
+    cfg = {"agent.model": "M", "tui.finish_gate_mode": "always"}
 
     app_a = TuiApp(
         threads_dir=str(tmp_path / "threads"),
@@ -231,7 +252,10 @@ async def test_two_windows_with_different_threads_are_independent(tmp_path):
     async with app_b.run_test() as pb:
         pb.app.screen.attach_active_task("t-b")
         await pb.pause(0.1)
-        assert app_b.effective_settings().settings.tui.finish_gate_mode == "on"
+        assert (
+            app_b.effective_settings().settings.tui.finish_gate_mode
+            == "always"
+        )
 
 
 @pytest.mark.asyncio
@@ -248,10 +272,12 @@ async def test_settings_screen_open_picks_up_default_saved_by_other_window(
     from gc_tui.screens.settings import SettingsScreen
 
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
+    cfg_file.write_text(
+        'tui:\n  finish_gate_mode: "always"\n', encoding="utf-8"
+    )
 
     # Окно B создано ДО того, как окно A сохранило новое умолчание — его
-    # in-memory база всё ещё "on". set_config_path (не голое присвоение
+    # in-memory база всё ещё "always". set_config_path (не голое присвоение
     # _config_path) засевает _config_mtime снимком ДО правки окна A — иначе
     # гейт свежести сработал бы просто от отсутствия снимка (mtime is None),
     # а не от реального расхождения mtime, и тест не отличил бы честную
@@ -259,7 +285,7 @@ async def test_settings_screen_open_picks_up_default_saved_by_other_window(
     app_b = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"tui.finish_gate_mode": "on"}),
+        settings=tui_settings({"tui.finish_gate_mode": "always"}),
     )
     app_b.set_config_path(str(cfg_file))
 
@@ -293,11 +319,13 @@ async def test_entering_settings_section_picks_up_other_window_default(
     from gc_tui.screens.settings import SettingsScreen
 
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
+    cfg_file.write_text(
+        'tui:\n  finish_gate_mode: "always"\n', encoding="utf-8"
+    )
     app_b = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"tui.finish_gate_mode": "on"}),
+        settings=tui_settings({"tui.finish_gate_mode": "always"}),
     )
     app_b.set_config_path(str(cfg_file))
 
@@ -339,11 +367,13 @@ async def test_config_screen_open_does_not_reload_other_window_default(
     from gc_tui.screens.config import ConfigScreen
 
     cfg_file = tmp_path / "config.yml"
-    cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
+    cfg_file.write_text(
+        'tui:\n  finish_gate_mode: "always"\n', encoding="utf-8"
+    )
     app_b = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"tui.finish_gate_mode": "on"}),
+        settings=tui_settings({"tui.finish_gate_mode": "always"}),
     )
     app_b.set_config_path(str(cfg_file))
 
@@ -359,5 +389,5 @@ async def test_config_screen_open_does_not_reload_other_window_default(
         await pb.pause(0.1)
         assert isinstance(pb.app.screen, ConfigScreen)
         assert (
-            pb.app.screen._settings.settings.tui.finish_gate_mode == "on"
+            pb.app.screen._settings.settings.tui.finish_gate_mode == "always"
         )  # не перечитано

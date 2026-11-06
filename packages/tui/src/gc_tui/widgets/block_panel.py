@@ -26,7 +26,7 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Static
 
-from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.click_model import ClickModelMixin, opens_event
 from gc_tui.widgets.no_select import NoSelectStatic
 
 # Глиф кнопки копирования — оба варианта «наложенные квадраты», шириной в одну
@@ -264,7 +264,7 @@ class BlockPanel(CopyFeedbackMixin, ClickModelMixin, Vertical):
         event.prevent_default()
         widget = getattr(event, "widget", None)
         if (
-            not event.ctrl
+            not opens_event(event)
             and widget is not None
             and widget.has_class("block-copy")
         ):
@@ -275,8 +275,6 @@ class BlockPanel(CopyFeedbackMixin, ClickModelMixin, Vertical):
             event.stop()
             self.query_one(".block-body", Static).text_select_all()
             self._copy_block()
-            if self.can_focus:
-                self.focus(scroll_visible=False)
             return
         super().on_click(event)
 

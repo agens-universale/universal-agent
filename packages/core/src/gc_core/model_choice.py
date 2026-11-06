@@ -4,7 +4,9 @@
 работает сейчас. Старт рана ставит его без события; точка подготовки
 основного вызова главного трейса и завершение рана сообщают фронтенду о
 смене через хук `RunContext.on_model_choice_applied` и отдают запись смены
-для треда (`ModelChoiceRecord`). Сравниваются выборы, а не модели; решения
+для треда (`ModelChoiceRecord`). Запись подготовки ждёт запроса
+(`State.pending_choice_record`): до него цикл дописывает в тред отложенный
+вывод тула, и смена встаёт за ним. Сравниваются выборы, а не модели; решения
 внутри `auto` событием не считаются. Прежний выбор запись несёт моделью
 (`model_of`): по ней фронтенд узнаёт возврат к прежней модели.
 """
@@ -31,7 +33,7 @@ class ModelChoiceApplied:
 
 
 def note_applied_at_run_end(state: Any, ctx: Any) -> ModelChoiceRecord | None:
-    """Сверка (`anote_applied`) на завершении рана: выбор, так и не
+    """Сверка (`note_applied`) на завершении рана: выбор, так и не
     дошедший до вызова, — живой выбор Router'а, его читает сама сверка.
     Запись смены возвращается — её пишет исполнитель после итога хода."""
     return _note(
@@ -99,14 +101,30 @@ def model_of(router: Any, choice: str | None) -> str | None:
     return resolved.alias or choice
 
 
-async def anote_applied(state: Any, ctx: Any, choice: str) -> None:
+def note_applied(state: Any, ctx: Any, choice: str) -> None:
     """Сверить выбор подготовленного вызова с применённым; сменился —
-    запомнить, сообщить хуку и записать смену в тред тут же — за последним
-    записанным сообщением (`RunContext.record_model_choice`).
+    запомнить и сообщить хуку сразу, а запись смены отложить до запроса
+    (`awrite_pending`).
 
     Только главный трейс: подготовка вызова субагента событий не даёт.
     Посреди рана модель — цель только что подготовленного вызова."""
     record = _note(state, ctx, lambda _router: choice, at_run_end=False)
+    if record is not None:
+        state.pending_choice_record = record
+
+
+def take_pending(state: Any) -> ModelChoiceRecord | None:
+    """Отложенная запись смены — один раз: её пишет запрос или, если стоп
+    пришёл до запроса, завершение рана."""
+    record = state.pending_choice_record
+    state.pending_choice_record = None
+    return record
+
+
+async def awrite_pending(state: Any, ctx: Any) -> None:
+    """Записать отложенную смену в тред за последним записанным
+    сообщением (`RunContext.record_model_choice`) — перед запросом."""
+    record = take_pending(state)
     recorder = getattr(ctx, "record_model_choice", None)
     if record is not None and recorder is not None:
         await recorder(record)

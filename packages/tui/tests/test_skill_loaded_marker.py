@@ -504,3 +504,36 @@ async def test_run_ends_while_skill_loads_stages_it_for_next_message(
         assert runner.added == []
         assert pilot.app.tui_state.pending_skill_id == "pack:x"
         assert _replies(scr) == []
+
+
+@pytest.mark.asyncio
+async def test_skill_command_takes_skill_name_in_other_layout(
+    tmp_path, monkeypatch
+):
+    """`/skill икфштыещкьштп …` — имя скилла в чужой раскладке."""
+    pytest.importorskip("textual")
+    _patch_delivery(monkeypatch, available=True)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "supercoder:brainstorming"}]
+        await scr._handle_command("skill икфштыещкьштп придумай")
+        await pilot.pause(0.3)
+        assert [_line(r) for r in _replies(scr)] == [
+            "› /supercoder:brainstorming придумай"
+        ]
+
+
+@pytest.mark.asyncio
+async def test_skill_name_is_translated_by_skills_only(tmp_path, monkeypatch):
+    """`ьщвуд` — это `model` в чужой раскладке, но `/skill` ищет скилл:
+    ошибка называет набранное, а не команду."""
+    pytest.importorskip("textual")
+    _patch_delivery(monkeypatch, available=True)
+    async with _app(tmp_path).run_test() as pilot:
+        scr = pilot.app.screen
+        scr._skills_cache = [{"id": "supercoder:brainstorming"}]
+        await scr._handle_command("skill ьщвуд")
+        await pilot.pause(0.2)
+        texts = _trace_texts(scr)
+        assert "ьщвуд" in texts
+        assert "model" not in texts

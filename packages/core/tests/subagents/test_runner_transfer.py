@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.state import SharedStateData
+from gc_core.model_router import CircuitBreaker
 from gc_core.security.permission_store import PermissionStore
 from gc_core.tools.subagents.runner_transfer import (
     apply_subagent_transfer,
@@ -151,3 +152,30 @@ def test_a_child_reset_wins_over_sibling_increments():
         state, ctx, baseline, capture_subagent_transfer(child, childctx)
     )
     assert state.shared.judge_denials_in_a_row == 0
+
+
+def _breaker_ctx(ctx, tripped):
+    breaker = CircuitBreaker()
+    for alias, reason in tripped.items():
+        breaker.trip(alias, reason)
+    ctx.model_router = SimpleNamespace(breaker=breaker)
+    return breaker
+
+
+def _breaker_transfer(child_tripped, parent_tripped):
+    state, ctx = fixture()
+    baseline = capture_subagent_transfer(state, ctx)
+    child, childctx = fixture()
+    _breaker_ctx(childctx, child_tripped)
+    result = capture_subagent_transfer(child, childctx)
+    breaker = _breaker_ctx(ctx, parent_tripped)
+    apply_subagent_transfer(state, ctx, baseline, result)
+    return breaker.snapshot()
+
+
+def test_breaker_merge_last_reason_wins():
+    assert _breaker_transfer({"a": "X"}, {"a": "Y"}) == {"a": "X"}
+
+
+def test_breaker_merge_keeps_parent_only_keys():
+    assert _breaker_transfer({"a": "X"}, {"b": "Z"}) == {"a": "X", "b": "Z"}

@@ -20,13 +20,16 @@ _FIXED_CSS = {
     "muted": "#6e7681",
     "deep-dim": "#7a8290",
     "accent": "#54B3A6",
-    "code": "#afbdff",
+    "code": "#afd7ff",
     "tool-name": "#BCC3CC",
     "code-block": "#9aa4b2",
     "ok": "#5FAE7F",
-    "run-color": "#D4A574",
+    "run-color": "#d8a46d",
     "olive": "#8FA05A",
-    "err": "#C75C54",
+    "gradient-warm": "#d9a36a",
+    "gradient-mid": "#8fa059",
+    "gradient-cool": "#4eb4a6",
+    "err": "#cd615a",
     "warn": "#f0883e",
     "refused": "#8a522d",
     "info": "#58a6ff",
@@ -46,13 +49,15 @@ _FIXED_CSS = {
     "overlay-bg": "#161A23",
     "zebra-bg": "#232836",
     "skill": "#afd7ff",
-    "diff-add-bg": "#253f37",
-    "diff-del-bg": "#44272a",
-    "diff-add-hl": "#36604c",
-    "diff-del-hl": "#6a3636",
+    "diff-add-bg": "#183b2a",
+    "diff-del-bg": "#501f1b",
+    "diff-add-hl": "#316348",
+    "diff-del-hl": "#7a342f",
     "diff-gutter": "#6e7681",
-    "diff-add-gutter": "#5FAE7F",
-    "diff-del-gutter": "#C75C54",
+    "diff-add-ink": "#56d364",
+    "diff-del-ink": "#fe6558",
+    "diff-add-gutter": "#56d364",
+    "diff-del-gutter": "#fe6558",
 }
 _FIXED_TRACK = "#3f4654"
 _RAMPS = (
@@ -125,7 +130,7 @@ def test_apply_background_recomputes_surfaces():
     from gc_tui.palette import BAND_BG, DIFF_ADD_BG
 
     assert BAND_BG == palette._mix("#212733", palette.INK, 0.075)
-    assert DIFF_ADD_BG == "#385551"  # #253f37 + (#212733 − #0E1119)
+    assert DIFF_ADD_BG == "#2b5144"  # #183b2a + (#212733 − #0E1119)
     assert palette.css_variables()["band-bg"] == BAND_BG
 
 
@@ -167,7 +172,12 @@ _SYNC_GUARDS = (
     "test_comments_readable_inside_selection",
     "test_selection_does_not_swallow_syntax_colors",
 )
-_DIFF_GUARDS = sorted(n for n in vars(diff_guards) if n.startswith("test_"))
+# Контраст WCAG номера и маркера на своей строке — норма 4.5 в теме
+# gigacode; на фоне терминала у него свой порог (тест ниже).
+_GUTTER_WCAG = "test_gutter_tokens_readable_on_their_row_backgrounds_by_wcag"
+_DIFF_GUARDS = sorted(
+    n for n in vars(diff_guards) if n.startswith("test_") and n != _GUTTER_WCAG
+)
 
 
 @pytest.mark.parametrize("bg", _TERMINAL_BGS)
@@ -181,6 +191,22 @@ def test_guards_hold_on_terminal_background(bg, guard):
     palette.apply_background(_rgb(bg))
     module, name = guard
     getattr(module, name)()
+
+
+@pytest.mark.parametrize("bg", _TERMINAL_BGS)
+def test_gutter_readable_on_row_on_terminal_background(bg):
+    """На фоне терминала заливка строки едет вместе с фоном, а красный
+    маркер светлее уже не становится: контраст ниже, чем в gigacode. Порог —
+    3, норма WCAG для крупного текста и элементов интерфейса: номер и маркер
+    — колонка-значок, не текст для чтения. Вид принят владельцем вживую на
+    фоне терминала (2026-11-05); худший случай из списка — 3.98."""
+    palette.apply_background(_rgb(bg))
+    pairs = (
+        (palette.DIFF_ADD_GUTTER, palette.DIFF_ADD_BG),
+        (palette.DIFF_DEL_GUTTER, palette.DIFF_DEL_BG),
+    )
+    for ink, row in pairs:
+        assert palette.contrast(_rgb(ink), _rgb(row)) >= 3, ink
 
 
 def _lum(color: str) -> float:

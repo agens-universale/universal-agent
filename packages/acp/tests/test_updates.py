@@ -235,6 +235,39 @@ def test_history_places_a_tool_call_between_prose():
     assert "locations" not in updates[2]
 
 
+def test_tool_card_hides_harness_feedback_and_keeps_failure():
+    hint = "Loop detector: same arguments again"
+    updates = history_updates(
+        [
+            {
+                "type": "function_call",
+                "name": "fs_read_file",
+                "call_id": "c1",
+                "arguments": '{"path": "src/a.py"}',
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": json.dumps(
+                    {
+                        "ok": False,
+                        "error": "нет файла",
+                        "technical_system_messages": [hint],
+                        "technical_system_messages_2": ["mode"],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+    )
+    card = updates[1]
+    assert card["status"] == "failed"
+    text = card["content"][0]["content"]["text"]
+    assert "нет файла" in text
+    assert hint not in text
+    assert "technical_system_messages" not in text
+
+
 def _finish(call_id, report, **extra):
     payload = {
         "solution_type": "direct_answer",

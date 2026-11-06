@@ -40,7 +40,7 @@ async def test_help_header_and_hotkeys():
         assert "Ctrl+D" in keys and "Ctrl+O" in keys and "Ctrl+G" in keys
         assert "Ctrl+/" in keys
         assert "Ctrl+E" not in body.split()
-        assert str(scr.query_one("#footer", Static).render()) == "[Esc] назад"
+        assert str(scr.query_one("#footer", Static).render()) == "Esc — назад"
         # блок «Связь с разработчиками / Телеграм / Сберчат» убран
         assert "Сберчат" not in body and "Телеграм" not in body
         assert "Связь с разработчиками" not in body

@@ -35,6 +35,7 @@ from gc_tui.services.paste_chips import (
     token_spans,
 )
 from gc_tui.widgets.chip_wrap import ChipWrapDocument
+from gc_tui.widgets.click_model import opens_event
 
 #: Плашка на строке: (строка, начало, конец) — столбцы, как у `token_spans`.
 _Span = tuple[int, int, int]
@@ -185,6 +186,10 @@ class CommandTextArea(TextArea):
         # Известно ли имя команды или скилла (без «/»): правило запуска
         # задаёт экран; None — первое слово не подсвечивается.
         self.is_known_command: Callable[[str], bool] | None = None
+        # Чем заменить `/имя` по пробелу сразу после него (команда в поле
+        # латиницей: чужая раскладка и русское слово); решает экран, None —
+        # замены нет.
+        self.word_on_space: Callable[[str], str | None] | None = None
 
     def _set_document(self, text: str, language: str | None) -> None:
         """Документ поля и перенос, не разрывающий плашки (`widgets/chip_wrap`): расчёт
@@ -250,8 +255,49 @@ class CommandTextArea(TextArea):
                 self.Submitted(self.submission_text(), self.images_in_buffer())
             )
             return
+        if event.key == "space":
+            word = self._command_word_on_space()
+            if word is None:
+                await super()._on_key(event)
+                return
+            # Сам пробел — без Changed: экран увидит одно изменение, уже
+            # с переведённым словом (иначе пикеры открывались бы дважды).
+            with self.prevent(TextArea.Changed):
+                await super()._on_key(event)
+            if self._char_before_cursor() == " ":
+                self._replace_command_word(word)
+            return
         # let TextArea handle other keys normally (printable insert, navigation, …)
         await super()._on_key(event)
+
+    def _command_word_on_space(self) -> str | None:
+        """Чем заменить `/имя`, если пробел нажат сразу после него в начале
+        поля (`word_on_space` экрана: команда латиницей — чужая раскладка
+        переводится, русское слово становится командой); иначе None. Только нажатие: вставка и история текст не
+        переписывают."""
+        token = self.document.get_line(0).partition(" ")[0]
+        if (
+            self.word_on_space is None
+            or not token.startswith("/")
+            or self.cursor_location != (0, len(token))
+            or not self.selection.is_empty
+        ):
+            return None
+        return self.word_on_space(token[1:])
+
+    def _char_before_cursor(self) -> str:
+        row, col = self.cursor_location
+        return self.document.get_line(row)[col - 1 : col] if col else ""
+
+    def _replace_command_word(self, word: str) -> None:
+        """Заменить `/имя` перед только что вставленным пробелом — отдельным
+        шагом истории: Ctrl+Z убирает только замену, набранное с пробелом
+        остаётся, и следующий пробел его уже не трогает."""
+        token = self.document.get_line(0).partition(" ")[0]
+        self.history.checkpoint()
+        self.replace("/" + word, (0, 0), (0, len(token)))
+        self.move_cursor((0, len(word) + 2))
+        self.history.checkpoint()
 
     # --- paste chips --------------------------------------------------
 
@@ -620,9 +666,10 @@ class CommandTextArea(TextArea):
         Обрабатываем сами — UX как в обычном терминале. Остальные кнопки —
         штатное поведение TextArea (позиционирование курсора / выделение).
         """
-        # Ctrl+клик по image-плашке — открыть картинку (дизайн картинок §20.2).
+        # Ctrl+клик (на Mac — Cmd+клик) по image-плашке — открыть картинку
+        # (дизайн картинок §20.2); модификатор — тот же, что у ленты.
         # Раньше правой кнопки: часть терминалов отдаёт Ctrl+клик как button 3.
-        if event.ctrl:
+        if opens_event(event):
             att = self._image_chip_at(self.get_target_document_location(event))
             if att is not None:
                 event.stop()

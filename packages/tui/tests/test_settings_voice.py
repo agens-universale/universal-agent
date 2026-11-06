@@ -3233,7 +3233,7 @@ def _url_widgets(scr):
 
 
 def _url_rows(scr):
-    return [str(w.render()) for w in _url_widgets(scr) if w.display]
+    return [str(w.content) for w in _url_widgets(scr) if w.display]
 
 
 def _url_selected(scr):
@@ -5391,3 +5391,26 @@ async def test_endpoint_not_saved_stays_warn(tmp_path):
         assert str(flash.render()) == (
             "⚠ не сохранено: No space left on device"
         )
+
+
+@pytest.mark.asyncio
+async def test_voice_hint_height_same_for_both_modes(tmp_path):
+    """Описание режима — с резервом под длинное из двух: курсор между
+    «локальным» и «своим endpoint» не двигает поля ниже (дизайн-код §9)."""
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.settings import _VOICE_ROW_LOCAL
+
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
+    async with app.run_test(size=(80, 60)) as pilot:
+        scr, _fake = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
+        await _open_cloud(app, scr, pilot)
+
+        def height() -> int:
+            return list(scr.query(".set-voicehint"))[-1].size.height
+
+        cloud = height()
+        await pilot.press("up")
+        await pilot.pause()
+        assert scr._voice_row == _VOICE_ROW_LOCAL
+        assert height() == cloud
+        assert cloud >= 3

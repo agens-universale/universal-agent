@@ -18,6 +18,9 @@ from pygments.util import ClassNotFound
 
 DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024
 DEFAULT_COUNT_EAGER_BYTES = 2 * 1024 * 1024
+# До этого размера `/view` грузит файл целиком: обычная прокрутка и скроллбар.
+# Больше — окнами (подсветка всего текста и переносы на мегабайтах тормозят).
+WHOLE_FILE_MAX_BYTES = 2 * 1024 * 1024
 # Пока layout не дал высоту тела — временный размер страницы (только auto-режим).
 DEFAULT_PAGE_LINES_FALLBACK = 20
 PAGE_LINES_MIN = 1
@@ -88,7 +91,8 @@ def textarea_language_for_lexer(lexer: Optional[str]) -> Optional[str]:
     return _TEXTAREA_LANG_MAP.get(lexer.lower())
 
 
-# Pygments Token → имя стиля TextAreaTheme.syntax_styles (vscode_dark и др.).
+# Pygments Token → имя стиля TextAreaTheme.syntax_styles (тема палитры
+# `services/file_view_theme.py`).
 # Ищем от конкретного типа вверх по иерархии Token.
 _PYGMENTS_TO_TA_STYLE: dict[Any, str] = {
     Token.Keyword.Constant: "constant.builtin",
@@ -104,6 +108,7 @@ _PYGMENTS_TO_TA_STYLE: dict[Any, str] = {
     Token.Name.Label: "json.label",
     Token.Name.Constant: "constant.builtin",
     Token.String.Doc: "string.documentation",
+    Token.String.Backtick: "inline_code",
     Token.String: "string",
     Token.Literal.String: "string",
     Token.Comment: "comment",
@@ -113,6 +118,8 @@ _PYGMENTS_TO_TA_STYLE: dict[Any, str] = {
     Token.Punctuation: "punctuation.delimiter",
     Token.Generic.Heading: "heading",
     Token.Generic.Subheading: "heading",
+    Token.Generic.Strong: "bold",
+    Token.Generic.Emph: "italic",
 }
 
 

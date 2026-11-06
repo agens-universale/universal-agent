@@ -24,11 +24,11 @@ from gc_core.summarize.summary_logging import (
     log_memory_patch_skipped_multi_batch,
     log_memory_patch_wm_unchanged,
 )
+from gc_core.summarize.summary_spec import summary_body_chars
 from gc_core.summarize.summary_validation import (
-    FALLBACK_SUMMARY,
+    SummaryRejectedError,
     merge_repaired_summary,
     missing_section_tags,
-    resolve_after_repair_failure,
     validate_summary_text,
 )
 from gc_core.summarize.working_memory_gateway import (
@@ -188,8 +188,8 @@ class _BatchRun:
         batch_index: int,
         batch_turns: List[List[Dict[str, Any]]],
         accumulated_summary: str,
-    ) -> tuple:
-        """→ (новая накопленная сводка, trace_batch)."""
+        trace_batches: list[dict[str, Any]],
+    ) -> str:
         batch: List[Dict[str, Any]] = [m for turn in batch_turns for m in turn]
         batch_history_text = dialog_history.build_history_text(
             batch,
@@ -223,6 +223,7 @@ class _BatchRun:
             "input_user_prompt": user_prompt,
             "output_summary_text": "",
         }
+        trace_batches.append(trace_batch)
         self.log.info(
             "summary_batch_request_full_messages batch=%s/%s messages_full=\n%s",
             batch_index,
@@ -256,12 +257,13 @@ class _BatchRun:
                 trace_batch,
             )
         accumulated_summary = text
-        if len(accumulated_summary) > self.max_accumulated_summary_chars:
+        body_chars = summary_body_chars(accumulated_summary)
+        if body_chars > self.max_accumulated_summary_chars:
             self.log.info(
                 "summary_batch_compress batch=%s/%s before_chars=%s max_chars=%s",
                 batch_index,
                 self.batch_total,
-                len(accumulated_summary),
+                body_chars,
                 self.max_accumulated_summary_chars,
             )
             accumulated_summary = (
@@ -271,9 +273,10 @@ class _BatchRun:
                     summary_text=accumulated_summary,
                     max_chars=self.max_accumulated_summary_chars,
                     max_tokens=self.max_tokens,
+                    trace=trace_batch,
                 )
             )
-        return accumulated_summary, trace_batch
+        return accumulated_summary
 
     async def _arepair(
         self,
@@ -323,12 +326,7 @@ class _BatchRun:
         elif repaired_valid:
             final_text, repair_resolution = repaired, "repaired_valid"
         else:
-            final_text, repair_resolution = resolve_after_repair_failure(
-                invalid_text=text,
-                merged_text=merged,
-                repaired_text=repaired,
-                accumulated_summary=accumulated_summary,
-            )
+            final_text, repair_resolution = "", "rejected"
         trace_batch["repair"] = {
             "reason": reason,
             "missing_tags": list(missing_tags),
@@ -339,6 +337,10 @@ class _BatchRun:
             "resolution": repair_resolution,
             "final_text_after_repair": final_text,
         }
+        if not final_text:
+            raise SummaryRejectedError(
+                "summary repair produced no usable summary"
+            )
         self.log.info(
             "summary_batch_repair_result batch=%s/%s merged_valid=%s repaired_chars=%s merged_chars=%s final_chars=%s final_preview=%s",
             batch_index,
@@ -509,10 +511,8 @@ async def asummarize_dialog_via_chat_completions(
         - Усекает историю по `max_dialogue_chars`, нормализует и усекает лог
           пользовательских запросов.
         - Группирует сообщения в ходы и делит на батчи по `incremental_batch_chars`.
-        - Для каждого батча вызывает LLM: первый батч — «с нуля», следующие —
-          обновление `previous_summary`; валидирует ответ, при провале —
-          `summary_llm_steps.arepair_summary_text` (без intent-блоков; multi-batch repair с `<previous_summary>`),
-          иначе partial merge / предыдущий батч / `FALLBACK_SUMMARY`.
+        - Summarize each batch and repair an invalid response. A useful partial
+          repair can be merged into the draft. A rejected batch aborts compaction.
         - По необходимости сжимает накопленную сводку через `summary_llm_steps.acompress_summary_text`.
         - Шаг `memory_suggestions.arequest_patch_replace` (полная перезапись всех регистров WM)
           выполняется только если весь диалог уложился в один батч (мультибатч:
@@ -635,12 +635,18 @@ async def asummarize_dialog_via_chat_completions(
         strip_think=strip_think,
     )
     accumulated_summary = ""
-    for batch_index, batch_turns in enumerate(batches, start=1):
-        accumulated_summary, trace_batch = await run.arun_batch(
-            batch_index, batch_turns, accumulated_summary
-        )
-        trace["step1_batches"].append(trace_batch)
-    text = accumulated_summary or FALLBACK_SUMMARY
+    try:
+        for batch_index, batch_turns in enumerate(batches, start=1):
+            accumulated_summary = await run.arun_batch(
+                batch_index,
+                batch_turns,
+                accumulated_summary,
+                trace["step1_batches"],
+            )
+    except SummaryRejectedError as exc:
+        exc.trace = trace
+        raise
+    text = accumulated_summary
 
     memory_append_deltas = WorkingMemoryDeltas()
     memory_replace_deltas = WorkingMemoryDeltas()

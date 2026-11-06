@@ -35,6 +35,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from parity_harness import (
@@ -998,6 +1000,7 @@ NOT_IN_MATRIX = {
     "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
     "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
     "tui.theme": "только палитра TUI, не ход агента; покрытие — tui/test_theme_startup",
+    "tui.show_reasoning": "не ход агента: только показ рассуждений в живой ленте TUI; покрытие — tui/test_trace_thoughts",
 }
 
 
@@ -1277,7 +1280,19 @@ async def run_case(
             value = value.format(work=work)
         overrides[path] = value
 
-    backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))
+    tail = SUMMARY_TAIL
+    if (
+        case.overrides.get("summary.chat_completions_summary_trigger_chars", 0)
+        > 0
+    ):
+        # Successful compaction cases need structured auxiliary responses.
+        tail = [
+            assistant_text(
+                valid_summary_xml_for_tests(seed="previous dialogue")
+            )
+            for _ in range(40)
+        ]
+    backend = install(monkeypatch, ScriptedBackend([*TURNS, *tail]))
     result: Dict[str, Any] = {
         "id": case.id,
         "area": case.area,

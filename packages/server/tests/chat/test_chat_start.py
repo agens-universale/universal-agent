@@ -113,7 +113,7 @@ def test_profile_and_cli_do_not_break_chat_contract(monkeypatch, tmp_path):
         ],
         {
             "tui.text_answer_mode": "judge",
-            "tui.finish_gate_mode": "on",
+            "tui.finish_gate_mode": "always",
             "agent.strict_turn_finish_validation": True,
             "todo.reminder_steps": 5,
         },

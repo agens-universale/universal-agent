@@ -87,7 +87,9 @@ class SubagentProgressConsumer:
                         todo_items=ev.todo_items,
                     )
                     routed_todo = True
-                if not routed_todo and nested_call_row(ev.tool_name or ""):
+                if not routed_todo and nested_call_row(
+                    ev.tool_name or "", ev.args_summary or ""
+                ):
                     mount_nested_tool(
                         parent_call_id=pid,
                         tool_name=ev.tool_name or "<tool>",

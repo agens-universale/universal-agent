@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from gc_core import run_summary_coordinator as rsc
-from gc_core.run_summary_coordinator import RunSummaryCoordinator
+from gc_core.run_summary_coordinator import (
+    RunSummaryCoordinator,
+)
 from gc_testkit import run_coro
 from gc_testkit.settings import fake_ctx
 
@@ -245,16 +247,8 @@ def test_no_orphan_outputs_in_current_after_function_call_output(
     )
     run_coro(coord.apre_backend_compaction_hook(batch, "function_call_output"))
 
-    out_ids = [
-        m.get("call_id")
-        for m in batch
-        if m.get("type") == "function_call_output"
-    ]
-    assert out_ids == ["ok"]
-    assert all(
-        batch[i].get("type") == "function_call"
-        for i in range(0, len(batch), 2)
-    )
+    assert batch == []
+    assert state.messages[-1]["id"] == "sum"
 
 
 def test_persist_batch_only_when_nonempty(monkeypatch, ctx_stub):
@@ -359,11 +353,10 @@ def test_function_call_output_clears_current_when_preservation_empty(
     assert current == []
 
 
-def test_function_call_output_keeps_technical_tail_after_compaction(
+def test_function_call_output_keeps_user_and_image_after_compaction(
     monkeypatch, ctx_stub
 ):
-    """Pre-backend компакция на шаге «ответы + напоминание»: хвост батча
-    возвращается в state и в следующий шаг вслед за парами (спека изображений §7.3)."""
+    """После сводки остаются реплика и картинка. Пара и напоминание сжаты."""
     sys_m = {"role": "system", "content": "s"}
     call = {
         "type": "function_call",
@@ -384,8 +377,15 @@ def test_function_call_output_keeps_technical_tail_after_compaction(
         "with the same arguments again.</technical>",
         "id": "m_notice",
     }
+    human = {"role": "user", "content": "глянь файл", "id": "m_human"}
+    image = {
+        "role": "user",
+        "content": '<technical type="technical">shot.png</technical>',
+        "id": "m_image",
+        "attachments": [{"id": "att1"}],
+    }
     summary = {"role": "user", "content": "<summary/>", "id": "sum"}
-    state = _minimal_state(messages=[sys_m, call, out, notice])
+    state = _minimal_state(messages=[sys_m, call, out, notice, human, image])
 
     async def mock_compact(**kwargs):
         kwargs["state"].messages = [sys_m, summary]
@@ -401,13 +401,13 @@ def test_function_call_output_keeps_technical_tail_after_compaction(
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    current = [out, notice]
+    current = [out, notice, human, image]
     run_coro(
         coord.apre_backend_compaction_hook(current, "function_call_output")
     )
 
-    assert current == [call, out, notice]
-    assert state.messages == [sys_m, summary, call, out, notice]
+    assert current == [human, image]
+    assert state.messages == [sys_m, summary, human, image]
 
 
 @pytest.mark.parametrize("rounds", [2, 20])
@@ -728,3 +728,101 @@ async def test_startup_no_progress_stop_is_logged(monkeypatch, ctx_stub):
     await coord.apre_backend_compaction_hook(current, "user_ask")
     assert len(calls) == 1
     assert stops == [{"thread_id": None, "rounds": 1}]
+
+
+def test_tool_output_in_history_is_compacted_with_it(monkeypatch, ctx_stub):
+    """Ответ уже в истории. Сводка забирает его. После остаётся картинка."""
+    sys_m = {"role": "system", "content": "s"}
+    call = {
+        "type": "function_call",
+        "call_id": "c1",
+        "name": "fs_read",
+        "arguments": "{}",
+        "id": "fc",
+    }
+    output = {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": "file body",
+        "id": "fco",
+    }
+    image = {
+        "role": "user",
+        "content": '<technical type="technical">shot.png</technical>',
+        "id": "img",
+        "attachments": [{"id": "att1"}],
+    }
+    old = {"role": "user", "content": "old history", "id": "old"}
+    summary = {"role": "user", "content": "<summary/>", "id": "sum"}
+    state = _minimal_state(messages=[sys_m, old, call, output, image])
+    captured: dict = {}
+
+    async def mock_compact(**kwargs):
+        captured["source"] = [m.get("id") for m in kwargs["state"].messages]
+        captured["kept"] = [m.get("id") for m in kwargs["kept_messages"]]
+        kwargs["state"].messages = [sys_m, summary]
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+    current = [output, image]
+    run_coro(
+        coord.apre_backend_compaction_hook(current, "function_call_output")
+    )
+
+    assert "fco" in captured["source"]
+    assert captured["kept"] == ["img"]
+    assert [m.get("id") for m in current] == ["img"]
+    ids = [m.get("id") for m in state.messages]
+    assert "fco" not in ids
+    assert "fc" not in ids
+    assert ids[-2:] == ["sum", "img"]
+
+
+def test_tool_output_counts_toward_summary_threshold(monkeypatch, ctx_stub):
+    """Длинный ответ в истории сам по себе перешагивает порог."""
+    sys_m = {"role": "system", "content": "s"}
+    call = {
+        "type": "function_call",
+        "call_id": "c1",
+        "name": "fs_read",
+        "arguments": "{}",
+        "id": "fc",
+    }
+    output = {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": "x" * 400,
+        "id": "fco",
+    }
+    state = _minimal_state(messages=[sys_m, call, output])
+    called = {"yes": False}
+
+    async def mock_compact(**kwargs):
+        called["yes"] = True
+        kwargs["state"].messages = [
+            sys_m,
+            {"role": "user", "content": "sum", "id": "sum"},
+        ]
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=50,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+
+    run_coro(
+        coord.apre_backend_compaction_hook([output], "function_call_output")
+    )
+    assert called["yes"] is True

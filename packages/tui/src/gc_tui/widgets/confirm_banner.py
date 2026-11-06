@@ -23,6 +23,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 from gc_tui.palette import ACCENT, BG, BRIGHT, DEEP_DIM, DIM, RUN_COLOR
+from gc_tui.widgets.reserved_hint import ReservedHint
 
 # Глиф защитного шлюза (caution). НЕ "?" — это не вопрос агента, а security-gate.
 # Width-safe-кандидат; если ⚠ в целевом терминале рендерится шире 1 ячейки —
@@ -229,7 +230,7 @@ class ConfirmBanner(Vertical):
         # Строка под вариантами: что делает клавиша, которой нет в списке.
         self.hint = hint
         self.selected: int = 0  # 0 = Y/affirmative по умолчанию
-        self._options_static: Static | None = None
+        self._options_static: ReservedHint | None = None
 
     @property
     def desired_height(self) -> int:
@@ -246,11 +247,19 @@ class ConfirmBanner(Vertical):
         return body_lines + self._options_rows() + 2  # +2 border
 
     def _options_rows(self) -> int:
-        """Ряды блока вариантов: отступ сверху, варианты, подсказка с зазором."""
-        return max(
-            _OPTIONS_RESERVED_ROWS,
-            1 + len(self.options) + (2 if self.hint else 0),
-        )
+        """Ряды блока вариантов: отступ сверху, варианты, подсказка с зазором;
+        с шириной — по переносу самого длинного выбора (`ReservedHint`)."""
+        rows = 1 + len(self.options) + (2 if self.hint else 0)
+        if self._options_static is not None:
+            rows = max(rows, self._options_static.reserved_height() or 0)
+        return max(_OPTIONS_RESERVED_ROWS, rows)
+
+    def _options_variants(self) -> list[str]:
+        """Блок вариантов при каждом выбранном — резерв высоты."""
+        return [
+            _render_options(i, self.options, self.hint).plain
+            for i in range(len(self.options))
+        ]
 
     # Клавиши прокрутки тела: решение принимают по полному тексту команды,
     # а колесо мыши есть не у всех.
@@ -318,8 +327,11 @@ class ConfirmBanner(Vertical):
                 yield Static(
                     f"  {label}: {text}", classes=css_class, markup=False
                 )
-        opts = Static(
+        # Пояснение есть только у выделенного варианта, и в узком окне его
+        # строка переносится: высота — под самый длинный выбор (§9).
+        opts = ReservedHint(
             _render_options(self.selected, self.options, self.hint),
+            variants=self._options_variants,
             classes="cb-options",
         )
         self._options_static = opts

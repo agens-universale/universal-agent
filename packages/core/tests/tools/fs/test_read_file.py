@@ -1,5 +1,11 @@
 import json
 
+import pytest
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+    prepare_tool_arguments,
+)
 from gc_core.tools.fs.file_info import FileInfo
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.utils.fs_size_limits import DEFAULT_FS_READ_MAX_BYTES
@@ -286,13 +292,23 @@ def test_unicode_content_not_char_sliced(tmp_path):
 def test_schema_and_prompt_have_line_axis_only():
     spec = ReadFile.tool_description()
     props = spec["parameters"]["properties"]
-    assert set(props) == {"path", "offset", "limit", "encoding"}
-    assert spec["parameters"]["required"] == ["path"]
+    assert set(props) == {
+        "path",
+        "offset",
+        "limit",
+        "encoding",
+        "add_line_numbers",
+    }
+    assert props["add_line_numbers"]["type"] == "boolean"
+    assert spec["parameters"]["required"] == ["path", "add_line_numbers"]
+    assert "do not copy" in props["add_line_numbers"]["description"]
     blob = json.dumps(spec) + ReadFile.prompt_description()
+    assert '"required": ["path", "add_line_numbers"]' in blob
     for token in _CHAR_PAGING_KEYS:
         assert token not in blob
     assert "next_char_offset" not in blob
     prompt = ReadFile.prompt_description()
+    assert "add_line_numbers" in prompt
     assert "truncated" in prompt
     assert "next_offset" in prompt
     assert "session_read_stored_tool_output" not in prompt
@@ -313,3 +329,94 @@ def test_limit_zero_means_unset_not_one_line(tmp_path):
     negative = json.loads(tool(path=str(p), offset=2, limit=-1))
     assert negative["ok"] is True
     assert negative["start_line"] == 2 and negative["end_line"] == 3
+
+
+def test_add_line_numbers_false_keeps_raw_content(tmp_path):
+    res, p = _read(tmp_path, "a\nb\n", add_line_numbers=False)
+    assert res["ok"] is True
+    assert res["content"] == "a\nb\n"
+    assert res["returned_chars"] == 4
+    assert res["sha256"] == sha256_hex_of_bytes(p.read_bytes())
+
+
+def test_add_line_numbers_prefixes_absolute_window(tmp_path):
+    text = "".join(f"    line {i}\n" for i in range(1, 11))
+    res, p = _read(tmp_path, text, offset=8, limit=2, add_line_numbers=True)
+    assert res["ok"] is True
+    assert res["start_line"] == 8
+    assert res["end_line"] == 9
+    assert res["content"] == "     8|    line 8\n     9|    line 9\n"
+    assert res["returned_chars"] == len(res["content"])
+    assert res["sha256"] == sha256_hex_of_bytes(p.read_bytes())
+
+
+def test_add_line_numbers_width_is_at_least_six(tmp_path):
+    lines = [f"L{i}" for i in range(1, 10001)]
+    text = "\n".join(lines) + "\n"
+    res, _ = _read(tmp_path, text, offset=9999, limit=2, add_line_numbers=True)
+    assert res["content"] == "  9999|L9999\n 10000|L10000\n"
+
+
+def test_add_line_numbers_width_grows_past_six_digits(tmp_path):
+    text = "\n" * 1_000_000
+    res, _ = _read(
+        tmp_path, text, offset=1_000_000, limit=1, add_line_numbers=True
+    )
+    assert res["total_lines"] == 1_000_000
+    assert res["content"] == "1000000|\n"
+
+
+def test_add_line_numbers_keeps_missing_final_newline(tmp_path):
+    res, _ = _read(tmp_path, "a\nb", add_line_numbers=True)
+    assert res["content"] == "     1|a\n     2|b"
+
+
+def test_add_line_numbers_non_bool_is_false(tmp_path):
+    p = tmp_path / "f.txt"
+    p.write_text("a\n", encoding="utf-8", newline="")
+    tool = with_local_ctx(ReadFile)
+    for value in (1, 0, "true", None, "", []):
+        res = json.loads(tool(path=str(p), add_line_numbers=value))  # type: ignore[arg-type]
+        assert res["ok"] is True, value
+        assert res["content"] == "a\n", value
+
+
+def test_schema_requires_line_numbers_and_coerces_before_validation():
+    spec = ReadFile.tool_description()
+    entry = {"spec": spec, "tool_fabric": ReadFile}
+    with pytest.raises(WrongFunctionArgumentsException):
+        prepared, _service = prepare_tool_arguments({"path": "/tmp/a"}, entry)
+        parse_and_validate_tool_arguments(
+            tool_name="fs_read_file",
+            arguments={"path": "/tmp/a"},
+            tool_spec=spec,
+            allow_empty_for_empty_schema=False,
+            tool_fabric=ReadFile,
+            prepared=prepared,
+        )
+    prepared, _service = prepare_tool_arguments(
+        {"path": "/tmp/a", "add_line_numbers": 0}, entry
+    )
+    args = parse_and_validate_tool_arguments(
+        tool_name="fs_read_file",
+        arguments={"path": "/tmp/a", "add_line_numbers": 0},
+        tool_spec=spec,
+        allow_empty_for_empty_schema=False,
+        tool_fabric=ReadFile,
+        prepared=prepared,
+    )
+    assert args["add_line_numbers"] is False
+
+
+def test_prepare_coerces_non_bool_line_numbers():
+    kept = ReadFile.prepare_args_before_strip(
+        {"path": "a", "add_line_numbers": True}
+    )
+    assert kept["add_line_numbers"] is True
+    original = {"path": "a", "add_line_numbers": 0}
+    coerced = ReadFile.prepare_args_before_strip(original)
+    assert coerced["add_line_numbers"] is False
+    assert original["add_line_numbers"] == 0
+    assert "add_line_numbers" not in ReadFile.prepare_args_before_strip(
+        {"path": "a"}
+    )

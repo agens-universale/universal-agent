@@ -1,7 +1,7 @@
-"""Клик-модель трейса: клик выделяет строку (как Tab), Ctrl+клик открывает событие.
-
-Мышь и клавиатура симметричны: {клик ↔ Tab} выделение, {Ctrl+клик ↔ Enter} открытие.
-Двойной клик события больше НЕ открывает (заменён Ctrl+кликом).
+"""Клик-модель трейса: обычный клик строку не выделяет; клик с модификатором
+(Ctrl; на Mac — Cmd, он приходит битом `meta`, как Alt) выделяет на нажатии
+и открывает событие на отпускании. С клавиатуры: Tab выделяет, Enter открывает.
+Двойной клик события не открывает.
 """
 
 import pytest
@@ -17,7 +17,7 @@ from textual.app import App, ComposeResult
 from gc_testkit.tui_support import tui_settings
 
 
-def _click(widget, *, ctrl=False, chain=1):
+def _click(widget, *, ctrl=False, meta=False, chain=1):
     """Синтетический Click на виджет (координаты внутри виджета)."""
     return events.Click(
         widget=widget,
@@ -27,19 +27,71 @@ def _click(widget, *, ctrl=False, chain=1):
         delta_y=0,
         button=1,
         shift=False,
-        meta=False,
+        meta=meta,
         ctrl=ctrl,
         chain=chain,
     )
 
 
-def test_focus_on_click_not_disabled_for_rows():
-    """Контракт СТРОК: FOCUS_ON_CLICK не переопределён (True) — Textual
-    фокусирует строку уже на MouseDown, выделение видно в момент нажатия (в
-    т.ч. при Ctrl+клике до открытия экрана события). Явный focus() в on_click —
-    лишь идемпотентная страховка, а не носитель поведения."""
+def _press(widget, *, ctrl=False, meta=False):
+    """Синтетическое нажатие кнопки мыши на виджет."""
+    return events.MouseDown(widget, 1, 0, 0, 0, 1, False, meta, ctrl)
+
+
+def test_rows_do_not_take_focus_on_plain_press():
+    """Контракт СТРОК: обычное нажатие строку не выделяет (FOCUS_ON_CLICK
+    False) — выделяет только нажатие с модификатором (`on_mouse_down`)."""
     for cls in (TraceRow, ToolCallRow, UserReplyContainer):
-        assert cls.FOCUS_ON_CLICK is True, cls.__name__
+        assert cls.FOCUS_ON_CLICK is False, cls.__name__
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mod", ["ctrl", "meta"])
+async def test_modifier_press_selects_before_release(mod):
+    """Выделение видно уже в момент нажатия с модификатором — до того, как
+    экран события накроет ленту; обычное нажатие не выделяет."""
+
+    class _App(App):
+        AUTO_FOCUS = None
+
+        def compose(self) -> ComposeResult:
+            yield TraceRow(
+                prefix="● ", content="x", kind_class="line-agent", event_no=7
+            )
+
+    async with _App().run_test() as pilot:
+        row = pilot.app.query_one(TraceRow)
+        row.on_mouse_down(_press(row))
+        await pilot.pause()
+        assert not row.has_focus
+        row.on_mouse_down(_press(row, **{mod: True}))
+        await pilot.pause()
+        assert row.has_focus
+
+
+@pytest.mark.asyncio
+async def test_alt_click_opens_like_ctrl_click():
+    """Клик с `meta` (Cmd на Mac, Alt) — тот же жест, что Ctrl+клик: на Mac
+    Ctrl+клик терминал считает правым кликом."""
+    received: list[int] = []
+
+    class _App(App):
+        AUTO_FOCUS = None
+
+        def compose(self) -> ComposeResult:
+            yield TraceRow(
+                prefix="● ", content="x", kind_class="line-agent", event_no=7
+            )
+
+        def on_open_event_request(self, message: OpenEventRequest) -> None:
+            received.append(message.event_no)
+
+    async with _App().run_test() as pilot:
+        row = pilot.app.query_one(TraceRow)
+        row.on_click(_click(row, meta=True))
+        await pilot.pause()
+        assert received == [7]
+        assert row.has_focus
 
 
 def test_focus_on_click_disabled_for_blocks():
@@ -58,8 +110,9 @@ def test_focus_on_click_disabled_for_blocks():
 
 
 @pytest.mark.asyncio
-async def test_plain_click_focuses_row_and_does_not_open():
-    """Обычный клик: строка получает фокус, OpenEventRequest НЕ постится."""
+async def test_plain_click_neither_selects_nor_opens():
+    """Обычный клик: строка не выделяется, событие не открывается, клик
+    уходит экрану (тот отдаёт фокус ленте — колесо и стрелки скроллят её)."""
     received: list[int] = []
 
     class _App(App):
@@ -77,11 +130,12 @@ async def test_plain_click_focuses_row_and_does_not_open():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(TraceRow)
-        assert not row.has_focus
-        row.on_click(_click(row))
+        click = _click(row)
+        row.on_click(click)
         await pilot.pause()
-        assert row.has_focus
+        assert not row.has_focus
         assert received == []
+        assert not click._stop_propagation
 
 
 @pytest.mark.asyncio
@@ -214,7 +268,7 @@ async def test_click_on_non_focusable_row_does_not_steal_focus():
 
 
 @pytest.mark.asyncio
-async def test_tool_call_row_plain_click_focuses_and_does_not_open():
+async def test_tool_call_row_plain_click_neither_selects_nor_opens():
     received: list[str] = []
 
     class _App(App):
@@ -235,10 +289,9 @@ async def test_tool_call_row_plain_click_focuses_and_does_not_open():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(ToolCallRow)
-        assert not row.has_focus
         row.on_click(_click(row))
         await pilot.pause()
-        assert row.has_focus
+        assert not row.has_focus
         assert received == []
 
 
@@ -327,8 +380,9 @@ async def test_tool_call_row_double_click_no_longer_opens():
 
 @pytest.mark.asyncio
 async def test_tool_call_row_focus_does_not_mount_preview_widget():
-    """Выделение (focus, Tab/клик) — только выделение: никакого inline-раскрытия
-    превью-виджета под строкой. Провалиться в событие — Ctrl+клик/Enter."""
+    """Выделение (focus, Tab или клик с модификатором) — только выделение:
+    никакого inline-раскрытия превью-виджета под строкой. Провалиться в
+    событие — отпускание клика с модификатором или Enter."""
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -351,7 +405,7 @@ async def test_tool_call_row_focus_does_not_mount_preview_widget():
 
 
 @pytest.mark.asyncio
-async def test_user_reply_plain_click_focuses_and_does_not_open():
+async def test_user_reply_plain_click_neither_selects_nor_opens():
     received: list[int] = []
 
     class _App(App):
@@ -365,10 +419,9 @@ async def test_user_reply_plain_click_focuses_and_does_not_open():
 
     async with _App().run_test() as pilot:
         row = pilot.app.query_one(UserReplyContainer)
-        assert not row.has_focus
         row.on_click(_click(row))
         await pilot.pause()
-        assert row.has_focus
+        assert not row.has_focus
         assert received == []
 
 

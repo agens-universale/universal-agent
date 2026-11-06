@@ -13,7 +13,6 @@ ERR; у строк без статуса место пустое), описан�
 
 from __future__ import annotations
 
-import textwrap
 from typing import Callable, NamedTuple, Optional
 
 from rich.text import Text
@@ -21,6 +20,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Rule, Static
 
 from gc_tui import palette as _pal
+from gc_tui.services.hint_height import wrapped_lines
 from gc_tui.widgets.palette_rows import PaletteRowsMixin
 
 # Строка клавиш: Enter запускает действие (`/export`) или только выбирает
@@ -330,13 +330,10 @@ class ArgPicker(PaletteRowsMixin, VerticalScroll):
         шириной пересчёт делает `on_resize`, а `_apply_size` зовётся заново и на
         каждой перерисовке (`_rebuild`).
 
-        Модель переноса — `textwrap` (жадная укладка по словам, длинное слово
-        ломается), а не деление длины на ширину: делением можно ЗАНИЗИТЬ, а занижение
+        Перенос — общий `hint_height.wrapped_lines` (движок Rich, как у самого
+        Static), а не деление длины на ширину: делением можно ЗАНИЗИТЬ, а занижение
         и есть баг — подвал рисуется выше выданного места и накрывает хвост списка."""
-        width = self.size.width - 4
-        if width < 1 or not text:
-            return 1
-        return max(1, len(textwrap.wrap(text, width)))
+        return wrapped_lines(text, self.size.width - 4)
 
     def _hint_text(self, value: Optional[str]) -> str:
         """Текст провайдера для `value`, посчитанный не чаще раза на значение

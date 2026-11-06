@@ -19,6 +19,7 @@ from gc_core.message_policy.plan_messages import (
     plan_research_exit_message,
 )
 from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
     wrap_technical_user_content,
 )
 from gc_core.security import permission_mode
@@ -158,13 +159,19 @@ def _told(ex, state):
 def test_agent_is_told_about_auto_once_and_when_it_is_left(monkeypatch):
     ex, state = _executor("auto", monkeypatch)
     assert _told(ex, state) == [
-        wrap_technical_user_content(AUTO_ENTER_MESSAGE)
+        wrap_technical_user_content(
+            AUTO_ENTER_MESSAGE,
+            technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
+        )
     ]
     assert state.shared.mode_announced == "auto"
     assert _told(ex, state) == []
     state.shared.permission_mode = "manual"
     assert _told(ex, state) == [
-        wrap_technical_user_content(auto_exit_message("manual"))
+        wrap_technical_user_content(
+            auto_exit_message("manual"),
+            technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
+        )
     ]
     assert state.shared.mode_announced is None
 
@@ -187,7 +194,10 @@ def test_plan_approved_with_auto_gets_the_auto_entry_and_no_cancel(
     ex.accept_plan("auto", "t1")
     ex._apply_plan_changes(state, [])
     assert _told(ex, state) == [
-        wrap_technical_user_content(AUTO_ENTER_MESSAGE)
+        wrap_technical_user_content(
+            AUTO_ENTER_MESSAGE,
+            technical_type=TECHNICAL_TYPE_CURRENT_CONTEXT,
+        )
     ]
 
 
@@ -265,6 +275,79 @@ def test_compaction_keeps_the_rules_of_the_mode_the_agent_was_told():
     assert PLAN_RESEARCH_ENTER_MESSAGE in _compacted_summary(
         announced="plan", parent_state_id="root", can_propose_plan=False
     )
+
+
+def test_compaction_puts_the_live_mode_into_the_summary(monkeypatch):
+    """Сводка — новый baseline. В её блок режима попадает действующий режим,
+    а не отметка, с которой модель жила до сжатия."""
+    from gc_core.states import State
+    from gc_core.summarize.compaction import arun_summary_compaction
+    from gc_testkit import run_coro
+
+    async def _fake_summarize(**_kwargs):
+        return {
+            "raw_summary": "итог",
+            "num_batches": 1,
+            "last_dialog_steps": "",
+            "trace": {"memory_patch": {"executed": False}},
+        }
+
+    monkeypatch.setattr(
+        "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions",
+        _fake_summarize,
+    )
+
+    def _run(
+        permission_mode: str, announced: str | None
+    ) -> tuple[str, str | None]:
+        shared = SharedStateData(
+            permission_mode=permission_mode, mode_announced=announced
+        )
+        state = State(
+            verbose=False,
+            model="m",
+            tools_spec=[],
+            tools_descr=[],
+            skills_list=[],
+            max_steps=5,
+            system_prompt_id="v1",
+            use_server_subagents=False,
+        )
+        state.shared = shared
+        state.mode_announced = announced
+        state.messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "задача"},
+            {"role": "assistant", "content": "ответ"},
+        ]
+        run_coro(
+            arun_summary_compaction(
+                ctx=fake_ctx(
+                    {"backend.api_mode": "chat_completions"},
+                    logger=None,
+                    permission_store=PermissionStore(
+                        shared.confirm_rules, shared=shared
+                    ),
+                    tools_data=get_builtin_tools_data(make_settings()),
+                ),
+                state=state,
+                trigger_reason="pre_backend",
+                is_cli_mode=False,
+            )
+        )
+        body = state.messages[-1]["content"]
+        return body, state.mode_announced
+
+    entered, entered_mark = _run("plan", "edit")
+    assert PLAN_ENTER_MESSAGE in entered
+    assert '<permission_mode name="plan">' in entered
+    assert entered_mark == "plan"
+
+    left, left_mark = _run("edit", "plan")
+    assert PLAN_ENTER_MESSAGE not in left
+    assert "<permission_mode" not in left
+    assert plan_cancel_message("edit") not in left
+    assert left_mark is None
 
 
 def test_compaction_keeps_the_session_plan_for_the_root_agent_only():

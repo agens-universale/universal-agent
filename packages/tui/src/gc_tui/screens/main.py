@@ -79,7 +79,12 @@ from textual.widget import Widget
 from textual.widgets import Static, TextArea
 
 from gc_tui import branding, textual_compat
-from gc_tui.commands import build_default_registry, closest_command
+from gc_tui.commands import (
+    Command,
+    build_default_registry,
+    closest_command,
+    field_word,
+)
 from gc_tui.messages import (
     BlockToggle,
     CopyBlockRequest,
@@ -136,6 +141,7 @@ from gc_tui.services.footer_slot import (
 from gc_tui.services.git_info import current_branch
 from gc_tui.services.image_chips import strip_image_chips
 from gc_tui.services.image_open import open_image
+from gc_tui.services.keyboard_layout import swap_layout
 from gc_tui.services.mode_pill import (
     MODE_HINTS,
     PILL_GAP,
@@ -192,6 +198,8 @@ from gc_tui.services.terminal_title import (
     format_terminal_title,
     set_terminal_title,
 )
+from gc_tui.services.think_text import think_rejected
+from gc_tui.services.thought_text import thought_display_text
 from gc_tui.services.tool_blocks import (
     BlockEdit,
     BlockKind,
@@ -199,6 +207,7 @@ from gc_tui.services.tool_blocks import (
     ToolBlocks,
     block_kind,
 )
+from gc_tui.services.trace_glyphs import PROMPT
 from gc_tui.services.trace_mapper import (
     PROPOSE_PLAN_ID,
     RenderContext,
@@ -241,7 +250,7 @@ from gc_tui.services.usage_meter import (
     usage_segments,
 )
 from gc_tui.services.voice_pill import render_pill
-from gc_tui.session_settings import read_breaker_from_tui, read_from_tui
+from gc_tui.session_settings import read_from_tui
 from gc_tui.toggles import (
     PROFILE_NONE_VALUE,
     apply_toggle,
@@ -439,14 +448,6 @@ _FooterHeadSnapshot = namedtuple(
 _FooterFrame = namedtuple(
     "_FooterFrame", ("badge", "snapshot", "meter", "usage")
 )
-
-
-def _records_context(records: list[dict], root: str) -> RenderContext:
-    """Контекст рендера порции записей треда (по их payload)."""
-    return collect_render_context(
-        (rec.get("payload") for rec in records if isinstance(rec, dict)),
-        root=root,
-    )
 
 
 def _profile_source_label(ref) -> str | None:
@@ -740,6 +741,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         )
         self._file_search = None  # file_search.FileSearchSession | None
         self._skills_cache_value: Optional[list[dict]] = None
+        # Каталог прогретого кэша (`_skill_catalog`); сбрасывает сеттер кэша.
+        self._skill_catalog_memo = None
         # После Tab-completion в skill picker гасим один Changed-цикл, чтобы
         # on_text_area_changed не переоткрыл только что закрытый picker.
         self._suppress_picker_reopen: bool = False
@@ -752,6 +755,13 @@ class TraceScreen(TraceFollowMixin, Screen):
         # снимается, когда приходит каноничная assistant-строка / run завершён.
         self._stream_block = None  # type: Optional["StreamBlock"]
         self._stream_answer_row = None  # type: Optional["TraceRow"]
+        # Строки мыслей ленты (`ThoughtRow`, спека мыслей §7) — только из
+        # стрима, нигде не хранятся: строка на попытку, законченные стоят на
+        # своих местах до перерисовки ленты.
+        self._streamed_thoughts: list = []
+        # Действующий `tui.show_reasoning`: сменился — строки мыслей
+        # скрываются или возвращаются (None — ещё не сверяли).
+        self._thoughts_shown: Optional[bool] = None
         # Кумулятивный таймер «думаю…» — стартует на каждом user-send,
         # передаётся в виджет, чтобы elapsed не сбрасывался при show/hide циклах.
         self._thinking_started_at: Optional[float] = None
@@ -902,11 +912,12 @@ class TraceScreen(TraceFollowMixin, Screen):
             yield trace
             yield Vertical(id="indicator-bar")
             with Horizontal(id="input-row"):
-                yield Static("› ", id="input-prompt", markup=False)
+                yield Static(PROMPT, id="input-prompt", markup=False)
                 inp = CommandTextArea(
                     placeholder=_PLACEHOLDER_READY_HELP, id="cmdinput"
                 )
                 inp.is_known_command = self._is_known_command
+                inp.word_on_space = self._word_on_space
                 yield inp
             with Horizontal(id="footer"):
                 with Vertical(id="footer-left"):
@@ -1860,6 +1871,21 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Рабочая папка сессии — фиксирована = папка запуска процесса."""
         return str(Path.cwd())
 
+    def _render_context(self, payloads) -> RenderContext:
+        """Контекст рендера порции payload'ов треда: корень сессии и
+        служебные поля схем тулов (в мысль Think не входят)."""
+        return collect_render_context(
+            payloads,
+            root=self._current_cwd(),
+            injected_fields=self._injected_fields(),
+        )
+
+    def _injected_fields(self) -> frozenset[str]:
+        """Служебные поля схем тулов (`agent.inject_tool_fields`) окна: в
+        мысль и сводку Think не входят, пока у модели есть свой текст."""
+        agent = self.app.effective_settings().settings.agent
+        return frozenset(agent.inject_tool_fields)
+
     def _show_footer_refusal(
         self, text: str, tone: Optional[str] = "warn"
     ) -> None:
@@ -2321,6 +2347,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._pending_wire_cache.clear()
         self._bang_blocks.clear()
         self._bang_open_block = None
+        self._streamed_thoughts.clear()
         # clear ask_human state (banner lives in #root, not #trace)
         if self._ask_human_banner is not None:
             try:
@@ -2362,6 +2389,10 @@ class TraceScreen(TraceFollowMixin, Screen):
                 pass
             self._thinking = None
         self._clear_stream_block()
+        sink = getattr(self.app, "_stream_sink", None)
+        if sink is not None:
+            # Лента начата заново: мысли прежней — не в неё.
+            sink.discard_thoughts()
         self._thinking_started_at = None
         # На смене задачи / stream_reset история событий обнуляется,
         # индикатор должен начать с чистого состояния.
@@ -2443,7 +2474,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         task_record = self._store.get_record(task_id)
         task_tui = tui_section(task_record)
         saved = read_from_tui(task_tui)
-        self._adopt_thread_breaker(task_tui)
         # Пересобираем executor только при РЕАЛЬНОЙ смене набора: attach идёт и на
         # каждом автосозданном треде, и на возврате к тому же — прогретый раннер
         # (с уже пройденным MCP-дискавери) выбрасывать зря нельзя.
@@ -2664,7 +2694,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         лежит в следующем файле с тем же id, рисуется первое вхождение.
         Payload остаётся full, пока этот id есть в окне segments[-2:]."""
         records = [rec for seg in segments for rec in seg["messages"]]
-        context = _records_context(records, self._current_cwd())
+        context = self._render_context(
+            rec.get("payload") for rec in records if isinstance(rec, dict)
+        )
         # Ответ модели, начатый в конце ленты, нужен вызову следующего тика.
         self._response_tail = response_tail(
             [rec.get("payload") for rec in records if isinstance(rec, dict)]
@@ -2699,7 +2731,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         *,
         live: bool = False,
         context: RenderContext | None = None,
+        before_record: Callable[[dict], None] | None = None,
     ) -> None:
+        """``before_record`` — перед каждой записью (мысли попыток,
+        начавшихся раньше неё, встают над ней)."""
         payloads = [
             rec.get("payload") for rec in records if isinstance(rec, dict)
         ]
@@ -2709,14 +2744,14 @@ class TraceScreen(TraceFollowMixin, Screen):
             payloads = [*self._response_tail, *payloads]
         self._response_tail = response_tail(payloads)
         if context is None:
-            context = collect_render_context(
-                payloads, root=self._current_cwd()
-            )
+            context = self._render_context(payloads)
         elif live:
             # Общий контекст шага сжатия не видит текста ответа из прошлой
             # пачки опроса.
             context = with_closing_replies(context, payloads)
         for rec in records:
+            if before_record is not None and isinstance(rec, dict):
+                before_record(rec)
             self._render_record(rec, live=live, context=context)
 
     def _render_finish(self, ev) -> None:
@@ -2826,6 +2861,92 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._last_event_kind = "_finalized"
         else:
             self._last_event_kind = ev.kind
+
+    # --- мысли модели (спека мыслей §7) ------------------------------------
+
+    def _thoughts_on(self) -> bool:
+        """Действующий `tui.show_reasoning` окна (база + сессия)."""
+        settings = self.app.effective_settings().settings
+        return settings.tui.show_reasoning == "on"
+
+    def _take_thoughts(self) -> list:
+        """Мысли стрима для этого тика: законченные попытки и идущая."""
+        sink = getattr(self.app, "_stream_sink", None)
+        return sink.take_thoughts() if sink is not None else []
+
+    def _mount_thoughts_before(self, thoughts: list, rec: dict) -> None:
+        """Перед записью хвоста — строки мыслей попыток, начавшихся раньше
+        неё: вызов шага, пришедший тем же тиком, встаёт под своей мыслью.
+        Часы записей и стрима — одного процесса."""
+        try:
+            written = datetime.fromisoformat(str(rec.get("ts") or ""))
+        except ValueError:
+            return
+        for snap in thoughts:
+            if snap.started_at < written:
+                self._thought_row(snap)
+
+    def _sync_thoughts(self, thoughts: list) -> None:
+        """Мысли тика после хвоста: строки законченных попыток получают весь
+        текст и закрываются, идущая дорастает; новые встают в конец ленты.
+        Строки попыток, которых в стриме уже нет, — законченные."""
+        current = None
+        for snap in thoughts:
+            row = self._thought_row(snap)
+            if row is None:
+                continue
+            text = thought_display_text(snap.text)
+            if text:
+                row.update_live(text, snap.seconds, snap.live)
+            if snap.live:
+                current = snap.attempt
+            else:
+                row.settle()
+        for row in self._streamed_thoughts:
+            if row.attempt != current:
+                row.settle()
+
+    def _thought_row(self, snap):
+        """Строка мысли попытки: есть — она; нет — новая в конце ленты.
+        Без флага или пустая мысль — новой нет (None)."""
+        from gc_tui.widgets.thought_row import ThoughtRow
+
+        for row in self._streamed_thoughts:
+            if row.attempt == snap.attempt:
+                return row
+        text = thought_display_text(snap.text)
+        if not text or not self._thoughts_on():
+            return None
+        row = ThoughtRow(
+            text=text,
+            live=snap.live,
+            attempt=snap.attempt,
+            seconds=snap.seconds,
+        )
+        self._streamed_thoughts.append(row)
+        self._trace_mount(row, scroll=True)
+        # Превью ответа этой попытки могло встать тем же тактом раньше —
+        # мысль над ним.
+        for preview in (self._stream_block, self._stream_answer_row):
+            if preview is not None and preview.parent is row.parent:
+                row.parent.move_child(preview, after=row)
+        return row
+
+    def _settle_thoughts(self) -> None:
+        """Конец хода (ответ, стоп, ошибка, отмена): строки мыслей остаются
+        в ленте законченными."""
+        for row in self._streamed_thoughts:
+            row.settle()
+
+    def _sync_thoughts_flag(self) -> None:
+        """Сменился действующий флаг мыслей (палитра, настройки, перечитка
+        конфига) — строки мыслей ленты скрываются или возвращаются. Мысли
+        нигде не хранятся: из треда их не перерисовать."""
+        shown = self._thoughts_on()
+        if self._thoughts_shown is not None and shown != self._thoughts_shown:
+            for row in self._streamed_thoughts:
+                row.display = shown
+        self._thoughts_shown = shown
 
     def _is_withdrawn(self, payload: dict) -> bool:
         """Реплика открытого треда снята откатом, а тред её ещё держит
@@ -3099,6 +3220,22 @@ class TraceScreen(TraceFollowMixin, Screen):
             return
         if self._stick_bottom:
             self._scroll_trace_end()
+
+    def _commit_stream(self) -> None:
+        """Строка ленты закоммичена — живой вывод шага уходит из-под неё.
+
+        Под флагом мыслей стрим с меткой попытки экран целиком не
+        сбрасывает: стрим следующей попытки мог начаться раньше, чем
+        дочитана строка прошлого шага (метка приходит до первого токена).
+        Уходит только канал ответа — он и стал строкой; мысль и метку
+        сбрасывает `reset` ядра, строку мысли ведёт метка попытки. Без
+        флага или без метки — прежний полный сброс."""
+        sink = getattr(self.app, "_stream_sink", None)
+        if sink is None or sink.attempt() is None or not self._thoughts_on():
+            self._clear_stream_block()
+            return
+        self._clear_stream_block(reset_sink=False)
+        sink.clear_answer()
 
     def _clear_stream_block(self, *, reset_sink: bool = True) -> None:
         """Снять эфемерный StreamBlock и (по умолчанию) сбросить sink.
@@ -3377,6 +3514,35 @@ class TraceScreen(TraceFollowMixin, Screen):
             for w in self._pinned_tail(trace, sent=sent)
             if not isinstance(w, ModelMark)
         ]
+
+    def _selected_event(self) -> Optional[Widget]:
+        """Выделенное событие ленты — сфокусированный прямой ребёнок
+        `#trace`; фокус в поле или в самой ленте — None."""
+        focused = self.focused
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        if focused is None or focused.parent is not trace:
+            return None
+        return focused
+
+    def _event_nav_key(self, key: str) -> bool:
+        """Режим событий: пока выделено событие (Tab, клик с модификатором),
+        ↑/↓ ходят по событиям — Shift+Tab занят режимами разрешений, — а Esc
+        возвращает в поле. Фокус в поле — клавиши его, здесь False."""
+        if key not in ("up", "down", "escape"):
+            return False
+        current = self._selected_event()
+        if current is None:
+            return False
+        if key == "escape":
+            self.query_one(_SEL_CMDINPUT, CommandTextArea).focus()
+            return True
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
+        events_ = [w for w in trace.children if w.can_focus and w.display]
+        step = -1 if key == "up" else 1
+        at = events_.index(current) + step if current in events_ else -1
+        if 0 <= at < len(events_):
+            events_[at].focus()
+        return True
 
     def _withdraw_last_queued(self) -> bool:
         """↑ забирает последнюю реплику очереди в поле (спека P3 §2.4, §10
@@ -3666,7 +3832,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Any committed canonical row supersedes the ephemeral reasoning/answer
         # preview for the current step — clear it so it can't drift above new rows.
         # (It re-mounts at the bottom on the next poll tick if streaming continues.)
-        self._clear_stream_block()
+        self._commit_stream()
 
         # ask_human-output banner cleanup — Фикс B-2.
         # Mapper эмитит для function_call_output name=ask_human либо kind='user'
@@ -3853,6 +4019,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 mcp_tools=mcp_tools,
                 mcp_servers=mcp_servers,
                 agent=ev.agent,
+                think_text=ev.think_text,
             )
             row.set_clock_source(self._core_call_elapsed)
             self._active_calls[row.call_id] = row
@@ -3887,6 +4054,8 @@ class TraceScreen(TraceFollowMixin, Screen):
                 self._reconcile_active_tool_phases()
                 return
             # Fallback (call_id unknown or no matching row) — append separate line
+            if think_rejected((ev.full_payload or {}).get("output")):
+                return  # отказ пустого Think: строки вызова нет
             if ev.kind == "error":
                 from gc_tui.services.trace_render import (
                     build_orphan_result_row,
@@ -4094,7 +4263,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not records:
             return
         actions = plan_sidecar_nested_actions(
-            records, root=self._current_cwd()
+            records, root=self._current_cwd(), injected=self._injected_fields()
         )
         apply_sidecar_nested_actions(
             actions,
@@ -5560,10 +5729,23 @@ class TraceScreen(TraceFollowMixin, Screen):
         if len(new_list) != len(existing):
             self._write_tui_meta(tid, {"pending_user_messages": new_list})
 
-    def _mark_pending_failed(self) -> None:
-        """При фейле run'а: все текущие pending-виджеты → state=failed,
-        записи в meta.tui.pending_user_messages → status=failed.
+    def _take_back_failed_queue(self, runner) -> list:
+        """Реплики очереди упавшего хода, которые ход не впустил: снятые
+        у исполнителя (сбой `/compact`, хвост ещё не слит) и выброшенные
+        раннером (`dropped_message_ids`). Делим по факту, не по виду."""
+        return [
+            reply
+            for reply in self._queued_replies()
+            if runner.withdraw_message(reply.message_id)
+            or reply.message_id in runner.dropped_message_ids
+        ]
+
+    def _mark_pending_failed(self, runner) -> None:
+        """При фейле run'а: невпущенные реплики очереди — в поле ввода, как
+        при стопе; остальные pending-виджеты → state=failed, записи в
+        meta.tui.pending_user_messages → status=failed.
         Очищает self._pending_user_widgets (виджеты остаются на экране как failed)."""
+        self._return_queue_to_input(self._take_back_failed_queue(runner))
         if not self._pending_user_widgets:
             return
         tid = self.app.tui_state.active_task_id
@@ -5949,10 +6131,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         прошлого прогона того же раннера не рисуются."""
         if not self._runner_is_for_active_thread():
             return None
-        runner = self._watched_runner or getattr(
-            self.app, "active_runner", None
-        )
-        return self._run_error_of(runner)
+        return self._run_error_of(self._observed_runner())
+
+    def _observed_runner(self):
+        """Раннер наблюдаемого прогона: застанный тиком, иначе активный."""
+        return self._watched_runner or getattr(self.app, "active_runner", None)
 
     def _run_error_of(self, runner) -> str | None:
         """Ошибка прогона раннера: пара «раннер и `run_seq`» прогона —
@@ -5971,15 +6154,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Тред прогона раннера: его цель, иначе активный."""
         return self.app.run_thread_id(runner) or self._active_task_id
 
-    def _adopt_thread_breaker(self, task_tui: dict) -> None:
-        """Предохранитель моделей — владение треда (спека §8): restore
-        ЦЕЛИКОМ заменяет breaker окна под открытый тред. Пока идёт ход,
-        предохранитель принадлежит его треду — им пользуется исполнитель;
-        открытый получит свой в конце хода (`_on_run_finished`)."""
-        runner = getattr(self.app, "active_runner", None)
-        if runner is not None and runner.is_running():
-            return
-        self.app.load_circuit_breaker(read_breaker_from_tui(task_tui))
+    def _show_compact_error(self, on_screen: bool) -> None:
+        """Упавшее `/compact` открытого треда — строкой ошибки: сжатие не
+        ход, строки итога «✕ Ошибка» у него нет."""
+        err = self._active_run_error()
+        if on_screen and err:
+            self._mount_standalone(f"runtime: {err}", "error")
 
     def _on_run_finished(self, runner, kind: str) -> None:
         """Спадающий фронт прогона: исход — в мету треда прогона.
@@ -5992,7 +6172,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         run_tid = self._run_task_id(runner)
         on_screen = run_tid == self._active_task_id
         edits = self._close_turn_edits(kind, run_tid, on_screen=on_screen)
-        if self._store is None or run_tid is None or kind == "compact":
+        if kind == "compact":
+            self._show_compact_error(on_screen)
+            return
+        if self._store is None or run_tid is None:
             return
         # Запись итога этого хода уже в файле (ядро пишет её до выхода
         # прогона): дочитать хвост до решения.
@@ -6022,11 +6205,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         self.app.last_stop_requested = False
         self._update_terminal_title()
         if not on_screen:
-            # Ход чужого треда кончился: предохранитель — открытому.
-            open_tid = self._active_task_id
-            self._adopt_thread_breaker(
-                self._task_tui(open_tid) if open_tid else {}
-            )
             return
         # Ход закончился предложенным планом — баннер одобрения.
         if plan_proposed:
@@ -6109,7 +6287,18 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._arg_picker.sync_lock()
         self._pump_reasoning_stream_source()
         err = self._active_run_error()
-        if err and not self._error_shown:
+        # Пока выделение заморожено, хвост треда не дочитан: впущенная, но
+        # не сверенная реплика ушла бы в поле и продублировалась. Пометка
+        # сбоя — на первом тике после разморозки. Ошибка видна раньше выхода
+        # потока, а выброшенные реплики (`dropped_message_ids`) раннер
+        # отдаёт на выходе — пометка ждёт его.
+        observed = self._observed_runner()
+        if (
+            err
+            and not self._error_shown
+            and not _frozen
+            and not (observed is not None and observed.is_running())
+        ):
             # Причина — строкой `└` под «✕ Ошибка» свежей строки итога в
             # ленте. Без треда строки итога нет — тогда строкой без
             # владельца.
@@ -6120,9 +6309,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             # до ошибки и сверится со своей отправкой; иначе пометка «не
             # отправлено» сняла бы её с ожидания, и запись смонтировалась
             # бы второй репликой.
-            if not _frozen:
-                self._poll_trace_tail()
-            self._mark_pending_failed()
+            self._poll_trace_tail()
+            self._mark_pending_failed(observed)
         # Инвариант: running tool-строки живут, только пока задача жива (live
         # runner / ask_human). Любой НЕ-live статус — стоп, обрыв runner'а, resume
         # брошенного треда или неизвестный исход (бейдж None) → осиротевшие вызовы
@@ -6284,9 +6472,18 @@ class TraceScreen(TraceFollowMixin, Screen):
 
                 think, answer = sink.snapshot()
                 mode = self.app.base_settings().settings.tui.stream_display
+                show_reasoning = (
+                    self.app.effective_settings().settings.tui.show_reasoning
+                    == "on"
+                )
                 clean = format_stream_block(answer=answer)
                 reasoning = format_reasoning_line(think=think)
-                kind, thinking = select_stream_render(mode, clean, reasoning)
+                kind, thinking = select_stream_render(
+                    mode,
+                    clean,
+                    reasoning,
+                    show_reasoning=show_reasoning,
+                )
                 from gc_tui.widgets.trace_row import TraceRow
 
                 if kind == "answer":
@@ -6338,7 +6535,20 @@ class TraceScreen(TraceFollowMixin, Screen):
         # сброс или шаг сжатия. Пометки ленты — после записей тика: строка
         # вызова-владельца могла прийти в этом же хвосте.
         if not _frozen:
-            self._poll_trace_tail()
+            self._sync_thoughts_flag()
+            # Мысли стрима сверяются каждый тик и в любой фазе: попытка,
+            # уложившаяся между тиками, и мысль короткого хода не теряются.
+            # Новая мысль встаёт перед первой записью хвоста, сделанной после
+            # начала её попытки, — записи прошлого шага выше, вызов своего
+            # шага ниже; строки мыслей не переставляются.
+            thoughts = self._take_thoughts()
+            self._poll_trace_tail(
+                before_record=partial(self._mount_thoughts_before, thoughts)
+            )
+            self._sync_thoughts(thoughts)
+            if _indicator_mode in ("failed", "terminal"):
+                # Ход кончился, хвост дочитан: строки мыслей законченные.
+                self._settle_thoughts()
             self._drain_trace_notes()
             self._settle_pending_mark()
             self._pay_owed_follow()
@@ -6417,8 +6627,11 @@ class TraceScreen(TraceFollowMixin, Screen):
         probe = getattr(runner, "call_elapsed", None)
         return probe(call_id) if probe is not None else None
 
-    def _poll_trace_tail(self) -> None:
-        """Дочитать и отрисовать хвост записей активного треда."""
+    def _poll_trace_tail(
+        self, before_record: Callable[[dict], None] | None = None
+    ) -> None:
+        """Дочитать и отрисовать хвост записей активного треда;
+        ``before_record`` — как у `_render_records`."""
         if (
             self._store is None
             or self._active_task_id is None
@@ -6457,7 +6670,9 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._rebuild_from_store()
             return
         self._cursor = tail.next_cursor
-        self._render_records(tail.new_records, live=True)
+        self._render_records(
+            tail.new_records, live=True, before_record=before_record
+        )
         self._refresh_header()
 
     def _rebuild_from_store(self) -> None:
@@ -6506,8 +6721,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Хвост архива, маркер, новый живой файл — живым путём, одним
         контекстом рендера (вызов в хвосте сводится с выводом в живом)."""
         start = len(self._task_events)
-        context = _records_context(
-            [*step.archive_tail, *step.live_records], self._current_cwd()
+        context = self._render_context(
+            rec.get("payload")
+            for rec in [*step.archive_tail, *step.live_records]
+            if isinstance(rec, dict)
         )
         self._render_records(step.archive_tail, live=True, context=context)
         self._mount_compaction_marker(step)
@@ -6786,6 +7003,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             [c for c in trace.children if c.id not in self._TRACE_HEADER_IDS]
         )
         self._show_brand()  # defensive: монтирует, только если шапки ещё нет
+        # Лента рисуется заново — с действующим флагом мыслей.
+        self._thoughts_shown = self._thoughts_on()
 
     @property
     def _any_picker_open(self) -> bool:
@@ -6907,6 +7126,11 @@ class TraceScreen(TraceFollowMixin, Screen):
             event.stop()
             event.prevent_default()
             self._voice_toggle()
+            return
+
+        if self._event_nav_key(event.key):
+            event.stop()
+            event.prevent_default()
             return
 
         # Input history: ↑/↓ для навигации (smart line-position check).
@@ -7181,7 +7405,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             cmd = self._palette.selected_command()
             inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
             if cmd is not None:
-                inp.text = f"/{cmd.name} "
+                inp.text = f"/{self._palette.completion(cmd)} "
                 inp.move_cursor(inp.document.end)
                 self._close_palette()
             else:
@@ -7250,8 +7474,8 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Состояние 2: /skill <фильтр> → skill-picker.
         if val.startswith("/") and " " in val:
             first, _, rest = val.partition(" ")
-            cmd = first[1:]
-            if cmd == "skill":
+            cmd_obj = self._command_for(first[1:])
+            if cmd_obj is not None and cmd_obj.name == "skill":
                 self._close_file_picker()  # ушли из файлового ввода: поиск в полёте больше не нужен
                 # /skill <валидный_id> <текст> → скилл зафиксирован, дальше промпт:
                 # закрываем picker (его фильтр по 'id текст' бессмыслен).
@@ -7259,7 +7483,8 @@ class TraceScreen(TraceFollowMixin, Screen):
                     self._skills_cache = await self._load_skills_safe()
                 skill_first, _, skill_rest = rest.partition(" ")
                 if skill_rest.strip() and isinstance(
-                    self._resolve_cached_skill(skill_first), Resolved
+                    self._resolve_cached_skill(self._skill_typed(skill_first)),
+                    Resolved,
                 ):
                     if self._skill_picker is not None:
                         self._close_skill_picker()
@@ -7277,7 +7502,6 @@ class TraceScreen(TraceFollowMixin, Screen):
 
             # Состояние 3: /<cmd> <фильтр>, где у команды есть arg_options
             # (статические или динамические через arg_options_provider) → arg-picker.
-            cmd_obj = self._registry.lookup(cmd)
             if cmd_obj is not None and (
                 cmd_obj.arg_options or cmd_obj.arg_options_provider is not None
             ):
@@ -7663,7 +7887,7 @@ class TraceScreen(TraceFollowMixin, Screen):
 
         first, sep, _rest = line.partition(" ")
         cmd_obj = (
-            self._registry.lookup(first[1:])
+            self._command_for(first[1:])
             if sep and first.startswith("/")
             else None
         )
@@ -7747,10 +7971,10 @@ class TraceScreen(TraceFollowMixin, Screen):
 
     def _is_known_command(self, name: str) -> bool:
         """`/имя` запустит команду (или алиас) или скилл — точный разбор
-        по прогретому кэшу, как при запуске; команда сильнее скилла."""
-        return self._registry.lookup(name) is not None or isinstance(
-            self._resolve_cached_skill(name), Resolved
-        )
+        по прогретому кэшу, как при запуске. Набранное как есть важнее
+        перевода раскладки; среди набранного как есть команда сильнее
+        скилла с тем же именем."""
+        return self._known_name(name) is not None
 
     async def on_command_text_area_submitted(
         self, event: CommandTextArea.Submitted
@@ -7856,7 +8080,7 @@ class TraceScreen(TraceFollowMixin, Screen):
             has_args = len(typed.split()) > 1
             if cmd is not None and not has_args:
                 if not cmd.runs_on_enter:
-                    inp.text = f"/{cmd.name} "
+                    inp.text = f"/{self._palette.completion(cmd)} "
                     inp.move_cursor(inp.document.end)
                     self._close_palette()
                     inp.focus()
@@ -8685,12 +8909,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             if runner.is_running():
                 self.app.last_stop_requested = True
                 self._stopping_runner = runner
-                # Предохранитель хода — в его тред сейчас: поток доработает
-                # отвязанным, и общий объект к тому времени может держать
-                # уже другой тред.
-                self.app.persist_circuit_breaker(
-                    self.app.run_thread_id(runner)
-                )
             runner.stop()
             runner._marked_stopped = True
             # Поток может ещё досиживать HTTP — тогда логгер отдаст он сам.
@@ -8975,10 +9193,61 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _resolve_cached_skill(self, name: str) -> ResolveResult | None:
         """Точный разбор имени скилла (полный id, пак, короткое имя) по
         прогретому кэшу, без нечёткого поиска; холодный кэш — None."""
+        catalog = self._skill_catalog()
+        return None if catalog is None else resolve_skill_exact(name, catalog)
+
+    def _skill_catalog(self):
+        """Каталог прогретого кэша скиллов — один на кэш; холодный — None."""
         if self._skills_cache is None:
             return None
-        catalog = catalog_from_entries(self._skills_cache)
-        return resolve_skill_exact(name, catalog)
+        if self._skill_catalog_memo is None:
+            self._skill_catalog_memo = catalog_from_entries(self._skills_cache)
+        return self._skill_catalog_memo
+
+    def _typed_name(self, name: str) -> str:
+        """Что имел в виду `/имя`; не распознано — как набрано."""
+        return self._known_name(name) or name
+
+    def _known_name(
+        self, name: str, knows: Callable[[str], bool] | None = None
+    ) -> str | None:
+        """`name`, если оно распознаётся (`knows`, по умолчанию — команда,
+        алиас или скилл); иначе то же слово в другой раскладке, если так
+        оно распознаётся (`ьщвуд` → `model`); иначе None. Набранное как
+        есть важнее перевода. Единственное место, где ввод переводится
+        между раскладками."""
+        knows = knows or self._knows
+        if knows(name):
+            return name
+        swapped = swap_layout(name)
+        return swapped if knows(swapped) else None
+
+    def _knows(self, name: str) -> bool:
+        return self._registry.lookup(name) is not None or self._is_skill(name)
+
+    def _is_skill(self, name: str) -> bool:
+        return isinstance(self._resolve_cached_skill(name), Resolved)
+
+    def _skill_typed(self, name: str) -> str:
+        """Имя скилла после `/skill`: перевод раскладки только по скиллам —
+        незнакомое слово не становится именем команды."""
+        return self._known_name(name, self._is_skill) or name
+
+    def _command_for(self, name: str) -> Command | None:
+        """Команда по набранному слову — с переводом раскладки."""
+        return self._registry.lookup(self._typed_name(name))
+
+    def _word_on_space(self, name: str) -> str | None:
+        """Чем заменить `/имя` по пробелу — команда в поле латиницей:
+        набранное не в той раскладке — тем же словом в нужной (`туц` →
+        `new`), русский алиас — именем команды (`очистить` → `new`).
+        Английский синоним, имя, скилл и незнакомое слово — None."""
+        known = self._known_name(name)
+        if known is None:
+            return None
+        cmd = self._registry.lookup(known)
+        shown = known if cmd is None else field_word(cmd, known)
+        return shown if shown != name else None
 
     def _insert_palette_skill(self, inp: TextArea, typed: str) -> bool:
         """Enter на строке скилла палитры: вставить `/имя ` — текст
@@ -9013,14 +9282,9 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _skill_input_name(self, skill: dict) -> str:
         """Запускаемый вид скилла (`skill_input_name`) по прогретому кэшу,
         реестру команд и командам плагинов снимка."""
-        catalog = (
-            None
-            if self._skills_cache is None
-            else catalog_from_entries(self._skills_cache)
-        )
         return skill_input_name(
             str(skill.get("id", "")),
-            catalog,
+            self._skill_catalog(),
             is_command=self._is_tui_command,
             commands=runtime_of(self.app.base_settings()).plugins.commands,
         )
@@ -9031,6 +9295,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._skills_cache is None:
             self._skills_cache = await self._load_skills_safe()
         first, _, rest = arg.partition(" ")
+        first = self._skill_typed(first)
         res = self._resolve_cached_skill(first)
         if isinstance(res, Resolved):
             await self._cmd_use_skill(res.canonical_id, prompt=rest.strip())
@@ -9078,7 +9343,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         имя раскрывается во все свои id."""
         if not self._skills_cache:
             return []
-        catalog = catalog_from_entries(self._skills_cache)
+        catalog = self._skill_catalog()
         ids: list[str] = []
         for cand in suggest_skills(name, catalog, 3):
             res = resolve_skill_exact(cand, catalog)
@@ -9618,7 +9883,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not raw:
             return
         parts = raw.split(None, 1)
-        name = parts[0]
+        name = self._typed_name(parts[0])
         arg = parts[1].strip() if len(parts) > 1 else ""
         cmd = self._registry.lookup(name)
         if cmd is None:
@@ -9789,7 +10054,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 from gc_tui.screens.viewer import ViewerScreen
 
                 # ViewerScreen сам делает render_payload — pretty-print JSON
-                # с solarized-dark подсветкой для dict/list или plain Static
+                # с подсветкой темой кода ленты для dict/list или plain Static
                 # для остального. Передаём raw payload без предварительного dumps.
                 # summary: в segments-пути full_payload пуст ({}); показываем
                 # синтез сводки (summary_content заполнен в обоих путях).
@@ -9914,7 +10179,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         if not detail or not isinstance(detail.get("call"), dict):
             return None, None
         return trace_events_from_nested_detail(
-            call_id, detail, root=self._current_cwd()
+            call_id,
+            detail,
+            root=self._current_cwd(),
+            injected=self._injected_fields(),
         )
 
     async def _fetch_skills(self) -> list[dict]:
@@ -9933,6 +10201,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Кэш скиллов; смена перерисовывает поле ввода: подсветка `/имени`
         зависит от кэша (холодный — не подсвечивает)."""
         self._skills_cache_value = value
+        self._skill_catalog_memo = None
         try:
             inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
         except NoMatches:
@@ -10131,8 +10400,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # check_breaker=False: /status показывает модель честно даже при открытом
         # активном алиасе (спека §12.2); недоступность отражаем отдельным флагом.
         resolved = router.resolve("main", check_breaker=False)
-        breaker_open = bool(resolved.alias) and router.breaker.is_open(
-            resolved.alias
+        breaker_open = (
+            bool(resolved.alias)
+            and router.breaker.known_unavailable(resolved.alias) is not None
         )
         ref = self.app.active_profile_ref()
         # Действующий выбор модели — тем же правилом, что у палитры и пикера.

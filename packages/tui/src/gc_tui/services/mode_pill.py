@@ -12,7 +12,7 @@ from __future__ import annotations
 from gc_core.security.permission_mode import DEFAULT_MODE, mode_label
 from rich.text import Text
 
-from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, RUN_COLOR
+from gc_tui.palette import ACCENT, AUTO_MODE, DEEP_DIM, DIM, INK
 
 GLYPH_PAUSE = "⏸"
 GLYPH_PLAY = "▸▸"
@@ -25,7 +25,7 @@ _STYLES = {
     "edit": (GLYPH_PLAY, INK),
     "manual": (GLYPH_PAUSE, DEEP_DIM),
     "plan": (GLYPH_PLAN, ACCENT),
-    "auto": (GLYPH_AUTO, RUN_COLOR),
+    "auto": (GLYPH_AUTO, AUTO_MODE),
 }
 
 #: Подсказка хоткея — постоянная подпись к режиму, а не одноразовый совет: она

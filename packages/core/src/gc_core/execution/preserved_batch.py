@@ -1,16 +1,11 @@
 """Pure batch preservation shared by local and durable compaction."""
 
-from copy import copy as shallow_copy
-
 from gc_core.execution.message_keys import make_message_key
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
 )
 
 _FUNCTION_CALL_TYPES = frozenset({"function_call", "tool_call"})
-_FUNCTION_OUTPUT_TYPES = frozenset(
-    {"function_call_output", "tool_call_output"}
-)
 
 
 def _messages_tail_matches(messages: list[dict], suffix: list[dict]) -> bool:
@@ -64,35 +59,33 @@ def _preserved_user_ask_batch(
     return out
 
 
+def _is_carry_over(message: dict) -> bool:
+    """Свежая реплика человека или сообщение с картинкой.
+
+    Технический текст без вложений (напоминание loop detector, подсказка)
+    в живой трейс после сводки не возвращается.
+    """
+    if str(message.get("role", "")).strip().lower() != "user":
+        return False
+    if message.get("attachments"):
+        return True
+    return bool(extract_real_user_message_text(message))
+
+
 def _preserved_function_output_batch(
     current_messages: list[dict], state_messages: list[dict]
 ) -> list[dict]:
-    outputs = [
-        m
-        for m in current_messages
-        if isinstance(m, dict) and m.get("type") in _FUNCTION_OUTPUT_TYPES
+    """Пара вызова и ответ сжимаются вместе с историей.
+
+    ``state_messages`` остаётся в сигнатуре: вызывающий передаёт снимок
+    state, как и для ``user_ask``. Для отбора он не нужен.
+    """
+    del state_messages
+    return [
+        message
+        for message in current_messages
+        if isinstance(message, dict) and _is_carry_over(message)
     ]
-    batches: list[dict] = []
-    seen_calls: set[str] = set()
-    for output in outputs:
-        call_id_raw = output.get("call_id")
-        if (
-            not isinstance(call_id_raw, str)
-            or not call_id_raw
-            or call_id_raw in seen_calls
-        ):
-            continue
-        call_msg = find_function_call_for_id(
-            call_id_raw,
-            current_messages=current_messages,
-            state_messages=state_messages,
-        )
-        if call_msg is None:
-            continue
-        seen_calls.add(call_id_raw)
-        batches.extend((shallow_copy(call_msg), shallow_copy(output)))
-    batches.extend(shallow_copy(m) for m in _technical_tail(current_messages))
-    return batches
 
 
 def build_preserved_batch(
@@ -116,10 +109,10 @@ def build_preserved_batch(
     остаются реплики человека, user-сообщения с вложениями (картинка тула или
     ответа на вопрос агента — сводка её не несёт) и последнее сообщение.
 
-    Для режима ``function_call_output``: пары «вызов → ответ» и за ними технический
-    хвост батча — user-сообщения после последнего ответа (напоминание loop detector,
-    картинки тулов) в исходном порядке. Реплик человека в таком батче нет
-    (``check_mode``).
+    Для режима ``function_call_output``: пара «вызов → ответ» уходит в сводку.
+    После неё остаются реплики человека и сообщения с вложениями (картинка
+    тула или ответ на вопрос агента — сводка её не несёт). Технические
+    напоминания без вложений не переносятся.
     """
     if not current_messages:
         return []
@@ -132,18 +125,6 @@ def build_preserved_batch(
             current_messages, state_messages
         )
     return []
-
-
-def _technical_tail(messages: list[dict]) -> list[dict]:
-    """User-сообщения после последнего ответа тула — в исходном порядке."""
-    tail: list[dict] = []
-    for m in reversed(messages):
-        if not isinstance(m, dict) or m.get("type") in _FUNCTION_OUTPUT_TYPES:
-            break
-        if str(m.get("role", "")).strip().lower() == "user":
-            tail.append(m)
-    tail.reverse()
-    return tail
 
 
 def find_function_call_for_id(

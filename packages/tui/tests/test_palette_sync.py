@@ -78,6 +78,17 @@ def _distance(a: str, b: str) -> float:
     return sum((x - y) ** 2 for x, y in zip(pa, pb)) ** 0.5
 
 
+def test_err_readable_on_feed_and_output_block():
+    """Текст ошибки (`└ код выхода 1`, причины сбоя) лежит на фоне ленты и
+    на блоке вывода под `Run`: контраст WCAG не ниже 4.5 на обоих. Прежний
+    ERR #C75C54 давал на блоке 4.21."""
+    for surface in (palette.BG, palette.BLOCK_BG):
+        ratio = palette.contrast(
+            palette._rgb(palette.ERR), palette._rgb(surface)
+        )
+        assert ratio >= 4.5, surface
+
+
 def test_selection_distinguishable_from_focus():
     """Выделение текста и подсветка сфокусированного события не должны сливаться.
 
@@ -160,16 +171,16 @@ def test_no_hex_in_py_outside_palette():
 
 _PREVIOUS_RAMPS = {
     "GLOW_SHADES": [
-        "#9c7a4a",
-        "#b8915c",
-        "#d4a574",
-        "#e0b585",
-        "#ecc596",
-        "#f0c896",
-        "#ecc596",
-        "#e0b585",
-        "#d4a574",
-        "#b8915c",
+        "#9f7943",
+        "#bb9054",
+        "#d8a46d",
+        "#e3b47e",
+        "#efc490",
+        "#f3c78f",
+        "#efc490",
+        "#e3b47e",
+        "#d8a46d",
+        "#bb9054",
     ],
     "PROCESSING_SHADES": [
         "#4c525b",

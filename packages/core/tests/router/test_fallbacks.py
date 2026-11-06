@@ -212,9 +212,27 @@ def test_service_consumer_degrades_and_pushes_fallback_notice(monkeypatch):
     notices = collect_runtime_notices()
     assert len(notices) == 1
     message = notices[0].message
-    assert "finish_gate" in message
+    assert message.startswith("самопроверка выполнения задачи: ")
     assert "flash" in message
     assert "glm-local" in message
+
+
+def test_consumer_labels_are_human_names():
+    """Уведомление о замене недоступной модели называет потребителя
+    по-человечески — теми же словами, что экран назначений (он берёт их
+    отсюда же)."""
+    from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
+
+    assert CONSUMER_RU_LABEL == {
+        "finish_gate": "самопроверка выполнения задачи",
+        "text_answer_judge": "формат ответа",
+        "command_judge": "судья команд",
+        "summary": "суммаризация",
+        "intent_scope": "журнал намерений",
+        "memory_compaction": "компакция памяти",
+        "vision": "модель для зрения",
+        "routing_judge": "судья автовыбора",
+    }
 
 
 def test_double_failure_service_consumer_propagates_for_per_consumer_fail_semantics(
@@ -546,6 +564,7 @@ def test_main_trace_trips_breaker_and_raises_honest_error_with_hint(
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         raise _http_error(500)
 
@@ -574,7 +593,8 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
     """Important-2: старт хода (`begin_turn`) при открытом активном алиасе кидает
     AliasCircuitOpenError ДО choke-point транспорта — витрина рана должна получить
     честную ошибку класса 2 (модель/endpoint/причина + подсказка /level //profiles),
-    а не сырое исключение предохранителя."""
+    а не сырое исключение предохранителя. Так — в durable-истории без
+    маркера пробы (`MODEL_BREAKER_PROBE_PATCH`)."""
     from gc_core import processing_responses as pr
     from gc_core.model_router import AliasCircuitOpenError
 
@@ -589,6 +609,7 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
         auth_connector=None,
         logger=None,
         is_tui=False,
+        execution_patch=lambda _patch: False,
     )
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -599,6 +620,49 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
     assert "/model" in message
     assert "профиль /profile." in message
     assert "glm-local" in message
+
+
+def test_reopened_alias_keeps_original_reason_across_turns(monkeypatch):
+    """Каждый ход пробует открытый алиас, проба падает: причина в
+    предохранителе — исходный текст отказа, без префиксов «алиас … в
+    предохранителе»; текст честной ошибки называет предохранитель не больше
+    одного раза."""
+    from gc_core import processing_responses as pr
+    from gc_core.execution.contracts import MainModelUnavailable
+    from gc_core.model_router import breaker_reason
+
+    router = _router(
+        {"models": {"glm-local": {}}, "slots": {"default": "glm-local"}},
+        level="default",
+    )
+    router.breaker.trip("glm-local", "ReadError")
+    ctx = _service_ctx(router)
+    state = _subagent_orchestrator_state()
+    calls = []
+
+    def _fake_policy(**kwargs):
+        calls.append(kwargs)
+        raise _http_error(503)
+
+    monkeypatch.setattr(
+        pr, "arequest_chat_completions_with_policy", as_coro(_fake_policy)
+    )
+
+    messages = []
+    for _ in range(3):
+        pr.begin_turn_main_trace(state, ctx)
+        for _ in range(2):  # проба, затем второй запрос того же хода
+            with pytest.raises(MainModelUnavailable) as excinfo:
+                run_coro(pr._arequest_backend_canonical([], state, ctx))
+            messages.append(str(excinfo.value))
+        assert router.breaker.snapshot() == {
+            "glm-local": breaker_reason(_http_error(503))
+        }
+        assert "в предохранителе" not in router.breaker.snapshot()["glm-local"]
+
+    assert len(calls) == 3
+    assert all(m.count("в предохранителе") <= 1 for m in messages)
+    assert messages[1] == messages[5]
 
 
 def test_begin_turn_main_trace_legacy_is_plain_passthrough():
@@ -697,6 +761,7 @@ def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         calls["n"] += 1
         return (["msg"], "rid", {})
@@ -731,6 +796,7 @@ def test_main_trace_legacy_breaker_not_tracked_error_unchanged(monkeypatch):
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         raise _http_error(500)
 
@@ -774,6 +840,7 @@ def test_main_trace_context_overflow_not_treated_as_unavailable(monkeypatch):
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         raise ValueError("maximum context length exceeded")
 
@@ -886,6 +953,40 @@ async def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):
     assert parent_router.breaker.is_open("deepseek-max") is True
 
 
+async def test_subagent_open_alias_failure_keeps_original_breaker_reason(
+    tmp_path,
+):
+    """Ребёнок упал на уже открытом алиасе: предохранитель хранит исходную
+    причину, а не текст `AliasCircuitOpenError` поверх неё."""
+    from gc_core.model_router import AliasCircuitOpenError
+    from gc_core.tools.subagents.runner import SubagentRunner
+
+    raw = {
+        "models": {"flash": {}, "deepseek-max": {}},
+        "slots": {"default": "flash"},
+        "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
+    }
+    cfg = _subagent_cfg(tmp_path, raw)
+    parent_router = _router(raw, level="default")
+    parent_ctx = _subagent_ctx(cfg, parent_router)
+    runner = SubagentRunner(parent_ctx, _subagent_orchestrator_state(), cfg)
+
+    calls = {"n": 0}
+
+    async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            resolved = child_ctx.model_router.resolve("main")
+            raise AliasCircuitOpenError(resolved, "ReadError")
+        return "ok"
+
+    await runner.arun(
+        "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
+    )
+
+    assert parent_router.breaker.snapshot() == {"deepseek-max": "ReadError"}
+
+
 @pytest.mark.parametrize("independent", [True, False])
 async def test_subagent_non_first_call_failure_degrades_without_restart(
     tmp_path,
@@ -940,6 +1041,37 @@ async def test_subagent_non_first_call_failure_degrades_without_restart(
     assert payload["ok"] is True
     assert calls["n"] == 2
     assert parent_router.breaker.is_open("deepseek-max") is True
+
+
+async def test_subagent_fallback_notice_names_the_role(tmp_path):
+    """Уведомление о замене модели субагента называет его ролью из таблицы
+    ролей ядра, а не именем тула."""
+    from gc_core.tools.subagents.runner import SubagentRunner
+
+    raw = {
+        "models": {"flash": {}, "deepseek-max": {}},
+        "slots": {"default": "flash"},
+        "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
+    }
+    cfg = _subagent_cfg(tmp_path, raw)
+    parent_router = _router(raw, level="default")
+    parent_ctx = _subagent_ctx(cfg, parent_router)
+    parent_ctx.is_tui = True
+    runner = SubagentRunner(parent_ctx, _subagent_orchestrator_state(), cfg)
+    calls = {"n": 0}
+
+    async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(500)
+        return "ok"
+
+    await runner.arun(
+        "subagent_planner", {"task": "plan it", "reason": "r"}, fake_run_agent
+    )
+
+    (notice,) = collect_runtime_notices()
+    assert notice.message.startswith("субагент Planner (рестарт): ")
 
 
 async def test_subagent_repeated_failure_after_fallback_returns_honest_tool_error(
@@ -1068,6 +1200,7 @@ async def test_unpinned_subagent_failure_trips_breaker_and_propagates_to_main(
         resolved=None,
         set_previous_response_id=True,
         mute_answer=False,
+        take_probe=None,
     ):
         once_calls["n"] += 1
         return (["msg"], "rid", {})
@@ -1095,12 +1228,15 @@ def test_subagent_pin_already_open_redirects_to_active_at_ctx_build_time(
     parent_router = _router(raw, level="default")
     parent_router.breaker.trip("deepseek-max", "5xx после ретраев")
     parent_ctx = _subagent_ctx(cfg, parent_router)
+    parent_ctx.is_tui = True
     orch = _subagent_orchestrator_state()
     runner = SubagentRunner(parent_ctx, orch, cfg)
 
     child_ctx = run_coro(runner._build_child_ctx(tool_name="subagent_planner"))
 
     assert child_ctx.model_router.resolve("main").alias == "flash"
+    (notice,) = collect_runtime_notices()
+    assert notice.message.startswith("субагент Planner: ")
 
 
 # ---------------------------------------------------------------------------

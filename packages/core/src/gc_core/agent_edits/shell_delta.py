@@ -36,13 +36,20 @@
 
 База «до» у канала своей породы: команду не видел ни один тул, и поднимать
 «до» приходится задним числом. Путь был ЧИСТ до команды (не значился в
-снимке ``git status`` до неё) и ``HEAD`` за команду не сдвинулся — тогда диск,
-индекс и ``HEAD`` до команды совпадали, «до» читается ИЗ ``HEAD`` в ТОЧНОЕ
-пространство (``.orig``/``.turn``), и такая правка становится откатываемой.
-Иначе (путь был грязен, ``HEAD`` сдвинулся сам — команда закоммитила, — или у
-пути настроен кастомный фильтр) — «до» поднимается из ИНДЕКСА git
-(``.gitorig``/``.gitturn``) и годится только для счётчиков: откату такая база
-не подаётся никогда (см. докстринг ``agent_edits.snapshots``). Файл,
+снимке ``git status`` до неё) — тогда диск, индекс и ``HEAD`` ДО команды
+совпадали. Если ``HEAD`` за команду не сдвинулся, «до» читается из ``HEAD``
+в ТОЧНОЕ пространство (``.orig``/``.turn``), и такая правка становится
+откатываемой. Сдвинула ``HEAD`` сама команда (гейт ``_own_commits``) —
+точной базы нет: тот же гейт пропустил бы и чужой коммит в окне команды, а
+откат затёр бы его. Пути, которые команда сама закоммитила, в status не
+видны вовсе — их добирает разница деревьев ``HEAD`` до и после за тем же
+гейтом (``_committed_paths``); они пишутся со строками от ``HEAD`` до
+команды, но без базы и без отметки создания. Иначе (путь был грязен, неслит
+после команды, ``HEAD`` сдвинулся — своими коммитами или чужой историей:
+``checkout``, ``pull``, ``reset``, — или у пути настроен кастомный фильтр)
+— «до» поднимается из ИНДЕКСА git (``.gitorig``/``.gitturn``) и годится
+только для счётчиков: откату такая база не подаётся никогда (см. докстринг
+``agent_edits.snapshots``). Файл,
 созданный самой командой, базы не получает вовсе: законность пустой базы
 выражается записью ``op="create"``, а ревизию для ступени HEAD несёт отметка
 создания в сторе (``SnapshotStore.mark_created``, ревизия ДО команды).
@@ -50,7 +57,9 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -67,13 +76,23 @@ from gc_core.agent_edits.ctx import (
     limit,
     protected_extra_from_ctx,
 )
+from gc_core.agent_edits.delete_records import (
+    DeleteBudget,
+    delete_record,
+    deletion_text,
+    is_binary_bytes,
+)
 from gc_core.agent_edits.deltas import (
     abs_path_for_key,
     build_diff,
     decode_edit_text,
     truncate_hunks,
 )
-from gc_core.agent_edits.journal import EditRecord, EditsJournal
+from gc_core.agent_edits.journal import (
+    CREATED_FLAG,
+    EditRecord,
+    EditsJournal,
+)
 from gc_core.agent_edits.mode import resolve_mode
 from gc_core.agent_edits.paths import (
     canonical_path_key,
@@ -96,8 +115,6 @@ from gc_core.config_modules.agent_edits import (
 from gc_core.thread_store import edits_journal_path
 from gc_core.tools.subagents.sidecar import current_turn_id
 from gc_core.utils.file_text import (
-    BINARY_SAMPLE_BYTES,
-    classify_content_from_sample,
     classify_file_content,
     sha256_hex_of_bytes,
     sha256_hex_of_file_bytes,
@@ -121,6 +138,24 @@ MAX_PATHS_PER_COMMAND = 10_000
 # кусок против сотен тысяч байт вывода: на запись 10 000 путей это ~100
 # запусков вместо 30 000 пофайловых.
 _RECORD_SLICE_PATHS = 500
+
+# Режимы git обычного файла → режим файла записи удаления. Симлинк
+# (``120000``) и подмодуль (``160000``) строк удаления не получают.
+_REGULAR_FILE_MODES = {"100644": 0o644, "100755": 0o755}
+
+# XY неслитого пути в ``git status`` (merge/rebase внутри команды): его «до»
+# неоднозначно — точной базы и строк удаления он не получает (§5.1).
+_UNMERGED_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
+
+# Темы журнала HEAD у коммитов, созданных самой командой (гейт
+# ``_own_commits``). Двоеточие сразу после действия: ``commit (amend):`` и
+# ``commit (merge):`` сюда не входят; пробела после него нет — у пустого
+# сообщения тема ``commit:``.
+_OWN_COMMIT_REFLOG = ("commit:", "cherry-pick:", "revert:")
+
+# Сколько записей журнала HEAD гейт просматривает: команда с бо́льшим числом
+# сдвигов своими коммитами не признаётся (как до гейта).
+_REFLOG_WALK_LIMIT = 256
 
 # Суммарный кап карманного снимка «до»: байты кандидатов держатся в памяти на
 # одну команду. Кандидатов две группы — известные журналу (обычно единицы) и
@@ -310,6 +345,40 @@ class _PocketEntry:
     abs_path: Path
     before_bytes: bytes
     before_signature: tuple[int, int]
+    mode: int
+
+
+def _journal_proves_own_commits(
+    entries: list[git_ops.ReflogEntry], before: str, after: str, start: int
+) -> bool:
+    """Журнал HEAD от ``after`` вниз до ``before`` — только свои коммиты.
+
+    Записи без сдвига HEAD (``stash``, checkout той же ветки, ``switch -c``)
+    пропускаются. Каждый сдвиг — коммит (``_OWN_COMMIT_REFLOG``) с одним
+    родителем, равным ревизии под ним, и временем коммиттера не раньше
+    начала команды ``start``: время отсекает ``cherry-pick --ff`` старого
+    чужого коммита (тема и родитель у него верные). Цепочка без слияний
+    сама доказывает, что ``before`` — предок ``after``. Чужой коммит,
+    сделанный в тот же worktree во время команды (IDE), журнал от своего
+    не отличит.
+    """
+    revs = [entry.rev for entry in entries]
+    if after not in revs:
+        return False
+    walk = entries[revs.index(after) :]
+    for entry, below in itertools.pairwise(walk):
+        if entry.rev == below.rev:
+            continue
+        own = (
+            entry.subject.startswith(_OWN_COMMIT_REFLOG)
+            and entry.parents == (below.rev,)
+            and entry.time >= start
+        )
+        if not own:
+            return False
+        if below.rev == before:
+            return True
+    return False
 
 
 class ShellDelta:
@@ -340,7 +409,14 @@ class ShellDelta:
         self._info_exclude_before: object = None
         self._head_before: str | None = None
         self._head_after: str | None = None
+        # Ответ гейта «свои коммиты» (`_own_commits`): раз на команду.
+        self._own_commits_memo: bool | None = None
+        # Пути, закоммиченные самой командой (`_committed_paths`).
+        self._committed: frozenset[str] = frozenset()
         self._pocket: dict[str, _PocketEntry] = {}
+        # Бюджет строк удалений на команду, общий для кармана и git-подканала:
+        # заводится в `after_and_record` — оба подканала пишут только оттуда.
+        self._delete_budget: DeleteBudget
 
     @classmethod
     def begin(
@@ -490,6 +566,7 @@ class ShellDelta:
                     abs_path=abs_path,
                     before_bytes=data,
                     before_signature=(st.st_size, st.st_mtime_ns),
+                    mode=stat.S_IMODE(st.st_mode),
                 )
         except Exception:
             _logger.warning(
@@ -585,6 +662,7 @@ class ShellDelta:
         пути, которые он записал, git-подканал ниже пропускает — иначе одна
         правка легла бы в журнал дважды.
         """
+        self._delete_budget = DeleteBudget(_max_diff_source_bytes(self._ctx))
         recorded = self._pocket_after_and_record()
         if self._before is None:
             # Git-подканал не активен (cache-mode либо снимок «до» не снялся):
@@ -607,17 +685,8 @@ class ShellDelta:
         *,
         skip: frozenset[str] = frozenset(),
     ) -> None:
-        changed = sorted(
-            (
-                {
-                    path
-                    for path, entry in after.items()
-                    if before.get(path) != entry
-                }
-                | {path for path in before if path not in after}
-            )
-            - skip
-        )
+        changed, committed = self._changed_paths(before, after, skip)
+        self._committed = committed
         if not changed:
             return
         # По ВСЕМ путям команды, до потолка: правило, ослабленное в `.gitignore`
@@ -671,6 +740,105 @@ class ShellDelta:
         if wrote_base:
             store.evict_lru(_snapshots_max_files(self._ctx))
 
+    def _changed_paths(
+        self,
+        before: dict[str, _StatusEntry],
+        after: dict[str, _StatusEntry],
+        skip: frozenset[str],
+    ) -> tuple[list[str], frozenset[str]]:
+        """Пути команды и закоммиченные ею: сперва разница снимков status,
+        за ней закоммиченные.
+
+        Порядок — часть контракта: потолок путей (``MAX_PATHS_PER_COMMAND``)
+        режет хвост, и закоммиченным достаётся только остаток. Пути, уже
+        записанные карманом (``skip``), из обеих групп вычитаются.
+        """
+        status_changed = sorted(
+            (
+                {
+                    path
+                    for path, entry in after.items()
+                    if before.get(path) != entry
+                }
+                | {path for path in before if path not in after}
+            )
+            - skip
+        )
+        committed = [
+            rel
+            for rel in self._committed_paths(before, after)
+            if rel not in skip
+        ]
+        return status_changed + committed, frozenset(committed)
+
+    def _committed_paths(
+        self,
+        before: dict[str, _StatusEntry],
+        after: dict[str, _StatusEntry],
+    ) -> list[str]:
+        """Пути, которые команда поправила, создала или удалила и закоммитила.
+
+        Раздел §5.3a.
+
+        В status такой путь не значится ни до, ни после команды. Множество —
+        разница деревьев HEAD до и после команды минус пути, грязные до неё
+        (их ловит карман, либо они честно вернулись к индексу), минус пути из
+        status после (их пишет обычная ветка). Только за гейтом
+        ``_own_commits``: иначе ``git pull`` или переключение ветки дали бы
+        тысячи «правок агента». Отказ git — пусто.
+        """
+        if not self._own_commits():
+            return []
+        changed = git_ops.paths_changed_between(
+            self._launch_root, self._head_before, self._head_after
+        )
+        if changed is None:
+            return []
+        return sorted(changed - before.keys() - after.keys())
+
+    def _own_commits(self) -> bool:
+        """HEAD за команду сдвинули только коммиты ЭТОЙ команды (гейт §5.3a).
+
+        HEAD сдвинулся, и журнал HEAD от нового HEAD вниз до старого —
+        цепочка коммитов команды (``_journal_proves_own_commits``): pull,
+        merge, checkout, reset, rebase и amend оставляют в журнале запись
+        другого вида, даже если даты коммитов свежие. Журнал выключен — не
+        свои. Считается раз на команду.
+        """
+        if self._own_commits_memo is None:
+            self._own_commits_memo = self._check_own_commits()
+        return self._own_commits_memo
+
+    def _check_own_commits(self) -> bool:
+        before, after = self._head_before, self._head_after
+        if before is None or after is None or before == after:
+            return False
+        entries = git_ops.head_reflog(self._launch_root, _REFLOG_WALK_LIMIT)
+        if entries is None:
+            return False
+        start = self._before_ts_ns // 1_000_000_000
+        return _journal_proves_own_commits(entries, before, after, start)
+
+    def _head_unmoved(self) -> bool:
+        """HEAD за команду не сдвинулся — условие точной базы (Р32, §5.3)."""
+        return (
+            self._head_before is not None
+            and self._head_before == self._head_after
+        )
+
+    def _head_before_trusted(self) -> bool:
+        """HEAD до команды годится в «до» для ПОКАЗА строк чистого пути.
+
+        Так, когда HEAD остался на месте или его сдвинули только свои коммиты
+        команды (``_own_commits``): строки закоммиченных командой путей и
+        удалений. Базы после своих коммитов нет (``_exact_step``). После
+        чужого сдвига (``git checkout other && rm …``) «до» от старого HEAD
+        показало бы разницу веток правкой агента — удаление без строк.
+        """
+        return self._head_unmoved() or (
+            self._head_before is not None and self._own_commits()
+        )
+
     def _record_slice(
         self,
         part: list[str],
@@ -686,25 +854,37 @@ class ShellDelta:
         ``command_paths`` — настоящее число путей урезанной потолком команды:
         ложится на КАЖДУЮ её запись (какая бы ни осталась в виде экрана, признак
         неполноты не потеряется).
+
+        Закоммиченный командой путь (``_committed``) пишется со строками от
+        HEAD до команды, но без базы и без отметки создания — откатить его
+        нельзя: коммит в окне команды мог сделать кто-то ещё (параллельный
+        субагент, пользователь), гейт ``_own_commits`` его не отличит, и
+        откат затёр бы чужую закоммиченную работу. Отметка коммита
+        (``mark_committed``) нужна только группе «закоммичено» «Сессии».
         """
         planned = self._plan(part)
         diffs = self._diffs_for(planned, before, after)
         created_rels = self._created_rels(planned, before, after)
+        added_by_commit = self._committed_created(planned)
+        deleted = self._slice_deleted_contents(planned, before, after)
         needs_base: list[tuple[str, str, bool]] = []
+        delete_bases: list[tuple[str, str, bytes]] = []
         for rel, key, file in planned:
             entry = after.get(rel)
             clean_before = rel not in before
-            created = rel in created_rels
+            deleted_before = deleted.get(rel)
             try:
                 record = self._build_record(
                     rel,
                     entry,
                     turn_id,
-                    created=created,
+                    created=rel in created_rels,
                     clean_before=clean_before,
                     hunks=diffs.get(rel),
                     key=key,
                     file=file,
+                    deleted=deleted_before,
+                    committed=rel in self._committed,
                 )
             except Exception:
                 _logger.warning(
@@ -713,32 +893,30 @@ class ShellDelta:
                 continue
             if record is None:
                 continue
-            record.command_paths = command_paths
-            record.command_call_id = self._command_call_id
+            self._stamp(record, command_paths, created=rel in added_by_commit)
             journal.append(record)
             self._remember(record)
             if record.op == "create":
-                # Базы у созданного пути нет и быть не должно, но ступень HEAD
-                # ему нужна (Д1): ревизию несёт отметка создания. Берём ту, что
-                # была ДО команды, даже если команда сама коммитила, — признак
-                # отвечает за «коммит ПОСЛЕ создания» (§3.2).
-                #
-                # Свой try — как у соседей по циклу (`_build_record`,
-                # `_capture_base`): `file_lock` индекса при конкуренции
-                # (сабагенты, swarm в одном проекте) отвечает таймаутом, и
-                # улети он во внешний except — пути, оставшиеся в наборе, не
-                # попали бы в журнал НИКОГДА. Потеря отметки стоит ступени
-                # HEAD у одного пути, потеря записей — всего остатка команды.
-                try:
-                    store.mark_created(record.path, head_rev=self._head_before)
-                except Exception:
-                    _logger.warning(
-                        "shell delta: отметка создания не записана rel=%r",
-                        rel,
-                        exc_info=True,
-                    )
-            elif record.op == "shell" and record.hunks:
-                needs_base.append((rel, record.path, clean_before))
+                self._mark_created(store, rel, record.path)
+            elif rel in self._committed:
+                # Закоммиченный командой путь создания не бывает (в status
+                # после его нет, ``_created_by_command``) — и базы не пишется.
+                # Отметка коммита только кладёт его в «закоммичено».
+                self._mark_committed(store, rel, record.path)
+            elif not record.hunks:
+                continue
+            elif record.op == "shell":
+                exact = self._exact_step(clean_before, _xy(entry))
+                needs_base.append((rel, record.path, exact))
+            elif (
+                record.op == "delete"
+                and deleted_before
+                and self._head_unmoved()
+            ):
+                # Строки удаления — блоб HEAD до команды
+                # (``_deleted_contents``); базой он становится, только пока
+                # HEAD стоит: после коммитов команды строки лишь для показа.
+                delete_bases.append((rel, record.path, deleted_before[0]))
 
         try:
             facts: _BaseFacts | None = self._base_facts(needs_base)
@@ -751,16 +929,240 @@ class ShellDelta:
             )
             facts = None
         wrote_base = False
-        for rel, key, clean_before in needs_base:
+        for rel, key, exact in needs_base:
             wrote_base |= self._capture_base(
                 store,
                 rel,
                 key,
                 turn_id,
-                clean_before=clean_before,
+                exact=exact,
                 facts=facts,
             )
+        for rel, key, content in delete_bases:
+            wrote_base |= self._capture_delete_base(
+                store, rel, key, content, turn_id
+            )
         return wrote_base
+
+    def _stamp(
+        self,
+        record: EditRecord,
+        command_paths: int | None,
+        *,
+        created: bool,
+    ) -> None:
+        """Поля команды на записи; ``created`` — флаг ``CREATED_FLAG``
+        закоммиченного пути, созданного командой (``_committed_created``)."""
+        if created:
+            record.flags.append(CREATED_FLAG)
+        record.command_paths = command_paths
+        record.command_call_id = self._command_call_id
+
+    def _mark_committed(
+        self, store: SnapshotStore, rel: str, key: str
+    ) -> None:
+        """Отметка коммита пути с ревизией ДО команды; свой try — как у
+        ``_mark_created``: таймаут замка индекса не теряет остаток команды."""
+        try:
+            store.mark_committed(key, head_rev=self._head_before)
+        except Exception:
+            _logger.warning(
+                "shell delta: отметка коммита не записана rel=%r",
+                rel,
+                exc_info=True,
+            )
+
+    def _mark_created(self, store: SnapshotStore, rel: str, key: str) -> None:
+        """Отметка создания пути — ступень HEAD для пути без базы.
+
+        Базы у созданного пути нет и быть не должно, но ступень HEAD ему
+        нужна (Д1): ревизию несёт отметка создания. Берём ту, что была ДО
+        команды, даже если команда сама коммитила, — признак отвечает за
+        «коммит ПОСЛЕ создания» (§3.2).
+
+        Свой try — как у соседей по циклу (`_build_record`, `_capture_base`):
+        `file_lock` индекса при конкуренции (сабагенты, swarm в одном
+        проекте) отвечает таймаутом, и улети он во внешний except — пути,
+        оставшиеся в наборе, не попали бы в журнал НИКОГДА. Потеря отметки
+        стоит ступени HEAD у одного пути, потеря записей — всего остатка
+        команды.
+        """
+        try:
+            store.mark_created(key, head_rev=self._head_before)
+        except Exception:
+            _logger.warning(
+                "shell delta: отметка создания не записана rel=%r",
+                rel,
+                exc_info=True,
+            )
+
+    def _slice_deleted_contents(
+        self,
+        planned: list[tuple[str, str, _FileFacts]],
+        before: dict[str, _StatusEntry],
+        after: dict[str, _StatusEntry],
+    ) -> dict[str, tuple[bytes, int]]:
+        """``_deleted_contents`` для пропавших путей куска, чистых до команды.
+
+        Неслитый после команды путь (``_UNMERGED_XY``) и путь после чужого
+        сдвига HEAD (``_head_before_trusted``) содержимого не получают:
+        удаление без строк и без базы. Отказ git стоит строк удаления, а не
+        записей: пути пишутся без строк.
+        """
+        rels = [
+            rel
+            for rel, _key, file in planned
+            if not file.exists
+            and rel not in before
+            and _xy(after.get(rel)) not in _UNMERGED_XY
+            and self._head_before_trusted()
+        ]
+        try:
+            return self._deleted_contents(rels)
+        except Exception:
+            _logger.warning(
+                "shell delta: содержимое удалённых путей не прочитано",
+                exc_info=True,
+            )
+            return {}
+
+    def _deleted_contents(
+        self, rels: list[str]
+    ) -> dict[str, tuple[bytes, int]]:
+        """``{путь: (байты «до», режим)}`` удалённых командой чистых путей.
+
+        Путь чист до команды — его «до» есть блоб ``HEAD`` до команды (Р32);
+        честность такого «до» отбирает ``_slice_deleted_contents``. Только
+        обычные файлы (``100644``/``100755``): блоб симлинка — текст
+        цели, откат поставил бы на место ссылки обычный файл. Гвард
+        кастомного фильтра — ДО чтения содержимого: конфиг чужого репозитория
+        не должен исполнять свой код; атрибуты для него и для формы выкладки
+        — одним запросом (``git_ops.worktree_attr_paths``). Режимы и размеры
+        — одним ``ls-tree``; бюджет команды резервируется по размерам ДО
+        чтения блобов (карман его уже потратил первым) в порядке
+        ``_reserve_order`` — читаются только влезшие. Прочитанное, что всё же
+        не текст, бюджет возвращает, и возвращённое достаётся ещё одним
+        проходом путям, не влезшим в первый. Концы строк — форма фильтра:
+        диска для «родной» формы нет.
+        """
+        if self._head_before is None or not rels:
+            return {}
+        entries = git_ops.tree_entries(
+            self._launch_root, rels, rev=self._head_before
+        )
+        if not entries:
+            return {}
+        max_source = _max_diff_source_bytes(self._ctx)
+        sizes = {
+            rel: entry.size
+            for rel, entry in entries.items()
+            if entry.mode in _REGULAR_FILE_MODES
+            and entry.size is not None
+            and entry.size <= max_source
+        }
+        modes = {rel: _REGULAR_FILE_MODES[entries[rel].mode] for rel in sizes}
+        filtered, affected = git_ops.worktree_attr_paths(
+            self._launch_root, list(sizes)
+        )
+        order = self._reserve_order(
+            [rel for rel in sizes if rel not in filtered], sizes
+        )
+        return self._reserve_and_read(order, sizes, modes, affected)
+
+    def _reserve_and_read(
+        self,
+        order: list[str],
+        sizes: dict[str, int],
+        modes: dict[str, int],
+        affected: set[str],
+    ) -> dict[str, tuple[bytes, int]]:
+        """Резерв по ``order`` и чтение влезших — двумя проходами: доля,
+        которую вернул не-текст первого, достаётся не влезшим в него."""
+        contents: dict[str, tuple[bytes, int]] = {}
+        pending = order
+        for _pass in range(2):
+            reserved = [
+                rel for rel in pending if self._delete_budget.take(sizes[rel])
+            ]
+            contents.update(
+                self._read_deleted(reserved, sizes, modes, affected)
+            )
+            taken = set(reserved)
+            pending = [rel for rel in pending if rel not in taken]
+        return contents
+
+    def _reserve_order(
+        self, rels: list[str], sizes: dict[str, int]
+    ) -> list[str]:
+        """Порядок резерва бюджета: сперва небинарные по git, затем бинарные,
+        каждая группа по путям. Влезают все — порядок не важен, и git о
+        бинарности не спрашивается."""
+        if self._delete_budget.fits(sum(sizes[rel] for rel in rels)):
+            return sorted(rels)
+        binary = self._binary_deletions(rels)
+        return sorted(rels, key=lambda rel: (rel in binary, rel))
+
+    def _read_deleted(
+        self,
+        rels: list[str],
+        sizes: dict[str, int],
+        modes: dict[str, int],
+        affected: set[str],
+    ) -> dict[str, tuple[bytes, int]]:
+        """Блобы зарезервированных путей; не текст возвращает бюджет."""
+        if not rels:
+            return {}
+        blobs = git_ops.blobs_filtered_at(
+            self._launch_root, rels, rev=self._head_before, affected=affected
+        )
+        contents: dict[str, tuple[bytes, int]] = {}
+        for rel in rels:
+            blob = blobs.get(rel)
+            if blob is None or deletion_text(blob) is None:
+                self._delete_budget.refund(sizes[rel])
+                continue
+            contents[rel] = (blob, modes[rel])
+        return contents
+
+    def _binary_deletions(self, rels: list[str]) -> set[str]:
+        """Бинарные по мнению git из удалённых путей — до чтения содержимого.
+
+        Они резервируют бюджет ПОСЛЕДНИМИ, а не исключаются: git зовёт
+        бинарём и текст, который классификатор проекта читает (UTF-16 с BOM,
+        атрибут ``-diff``). Настоящий бинарь вернёт свою долю после чтения.
+        Отказ git — пусто: порядок тогда просто по путям."""
+        binary = git_ops.binary_paths_at(
+            self._launch_root, rels, rev=self._head_before
+        )
+        return binary or set()
+
+    def _capture_delete_base(
+        self,
+        store: SnapshotStore,
+        rel: str,
+        key: str,
+        content: bytes,
+        turn_id: str,
+    ) -> bool:
+        """Точная база удалённого пути — его блоб ``HEAD`` до команды.
+
+        Та же точная ступень, что у ``_capture_base``: путь был чист, «до» —
+        ``HEAD`` до команды без кастомного фильтра. Soft-fail.
+        """
+        try:
+            wrote = store.capture_session(
+                key, content, head_rev=self._head_before
+            )
+            if turn_id:
+                store.capture_turn(key, content, turn_id)
+            return wrote
+        except Exception:
+            _logger.warning(
+                "shell delta: база удаления не снята rel=%r",
+                rel,
+                exc_info=True,
+            )
+            return False
 
     def _plan(self, part: list[str]) -> list[tuple[str, str, _FileFacts]]:
         """Пути куска, которые канал пишет, — с ключом и фактами о файле, ОДИН раз.
@@ -811,7 +1213,9 @@ class ShellDelta:
         Пропускаются пути, которым дифф не нужен (пропали, бинарь, сверх
         ``max_diff_source_bytes``): в пачке их содержимое ушло бы в дифф целиком
         — ровно то, от чего пофайловый путь их бережёт. Путь без ответа
-        ``_build_record`` добирает сам.
+        ``_build_record`` добирает сам. Закоммиченный командой путь
+        (``_committed``) в status после нет, но дифф ему нужен — от HEAD до
+        команды, в той же группе, что чистые пути из status.
         """
         max_source = _max_diff_source_bytes(self._ctx)
         untracked: list[str] = []
@@ -819,17 +1223,18 @@ class ShellDelta:
         for rel, _key, file in planned:
             entry = after.get(rel)
             if (
-                entry is None
+                (entry is None and rel not in self._committed)
                 or not file.is_file
                 or file.binary
                 or file.size > max_source
             ):
                 continue
-            if entry.xy == "??":
+            if _xy(entry) == "??":
                 untracked.append(rel)
             else:
                 by_rev.setdefault(
-                    self._diff_base_rev(rel not in before), []
+                    self._diff_base_rev(rel, clean_before=rel not in before),
+                    [],
                 ).append(rel)
         diffs = self._untracked_diffs(untracked)
         for rev, rels in by_rev.items():
@@ -841,33 +1246,34 @@ class ShellDelta:
     ) -> _BaseFacts:
         """Ответы git для ``_capture_base`` по всем путям сразу — тремя запусками.
 
-        Точная ступень (путь чист до команды, HEAD неподвижен): сперва атрибуты
+        Точная ступень (признак ``exact``, ``_exact_step``): сперва атрибуты
         — гвард фильтра обязан идти ПЕРЕД чтением содержимого, — затем блобы
-        HEAD без фильтра. Всем остальным и тем, кого HEAD не прочитал, — блобы
-        индекса для счётной базы.
+        HEAD до команды без фильтра. Всем остальным и тем, кого HEAD не
+        прочитал, — блобы индекса для счётной базы.
         """
-        exact = [
-            rel for rel, _key, clean in needs_base if self._exact_step(clean)
-        ]
+        exact = [rel for rel, _key, ok in needs_base if ok]
         filtered = git_ops.custom_filter_paths(self._launch_root, exact)
         head = git_ops.blobs_at(
             self._launch_root,
             [rel for rel in exact if rel not in filtered],
-            rev="HEAD",
+            rev=self._head_before,
         )
         index_rels = [
-            rel for rel, _key, _clean in needs_base if head.get(rel) is None
+            rel for rel, _key, _ok in needs_base if head.get(rel) is None
         ]
         index = git_ops.blobs_at(self._launch_root, index_rels, rev="")
         return _BaseFacts(filtered=filtered, head=head, index=index)
 
-    def _exact_step(self, clean_before: bool) -> bool:
-        """Годится ли пути точная база из HEAD (Р32): чист до команды, HEAD неподвижен."""
-        return (
-            clean_before
-            and self._head_before is not None
-            and self._head_before == self._head_after
-        )
+    def _exact_step(self, clean_before: bool, xy: str | None) -> bool:
+        """Годится ли пути точная база из HEAD до команды (Р32, §5.3).
+
+        Путь чист до команды ⇒ диск = индекс = HEAD ДО команды. База для
+        отката — только пока HEAD стоит (``_head_unmoved``): коммит в окне
+        команды мог быть чужим, гейт ``_own_commits`` его не отличит.
+        Неслитый после команды путь (``xy`` из ``_UNMERGED_XY``) остаётся на
+        счётной базе; ``xy=None`` — пути нет в status после команды.
+        """
+        return clean_before and xy not in _UNMERGED_XY and self._head_unmoved()
 
     def _pocket_after_and_record(self) -> frozenset[str]:
         """Карманные записи «после»: изменившимся — точная запись, пропавшим —
@@ -939,8 +1345,8 @@ class ShellDelta:
         Возвращает ``(запись или None, байты базы для ``_pocket_capture_base``
         или None)``. Байты базы отдаются и для ``op="delete"`` — карманный
         подканал уже держит точные байты «до» в памяти, второй (git) запрос
-        для этого не нужен (в отличие от ``_capture_base`` git-подканала,
-        который для удалённого пути базу не снимает вовсе).
+        для этого не нужен (git-подканал читает «до» удалённого пути из
+        блоба ``HEAD`` до команды, ``_deleted_contents``).
         """
         abs_path = entry.abs_path
         before_sha256 = sha256_hex_of_bytes(entry.before_bytes)
@@ -952,12 +1358,14 @@ class ShellDelta:
             exists_as_file = False
 
         if st is None or not exists_as_file:
-            record = _edit_record(
+            record = delete_record(
                 key,
                 turn_id,
-                op="delete",
-                before_sha256=before_sha256,
-                flags=["no_diff"],
+                entry.before_bytes,
+                mode=entry.mode,
+                budget=self._delete_budget,
+                context_lines=_hunk_context_lines(self._ctx),
+                max_chars=_max_diff_chars(self._ctx),
             )
             return record, entry.before_bytes
 
@@ -988,9 +1396,7 @@ class ShellDelta:
                 None,
             )  # изменился только mtime (та же дыра, что у git-подканала)
 
-        if _is_binary_bytes(entry.before_bytes) or _is_binary_bytes(
-            after_bytes
-        ):
+        if is_binary_bytes(entry.before_bytes) or is_binary_bytes(after_bytes):
             record = _edit_record(
                 key,
                 turn_id,
@@ -1078,7 +1484,8 @@ class ShellDelta:
         before: dict[str, _StatusEntry],
         after: dict[str, _StatusEntry],
     ) -> set[str]:
-        """Пути куска, созданные командой, — ``_created_by_command`` за вычетом игнорируемых.
+        """Пути куска, созданные командой (``_created_by_command``), — за
+        вычетом игнорируемых.
 
         Игнорируемого пути в ``git status`` нет никогда, поэтому «пути не было
         до команды» для него ничего не доказывает: файл пользователя, который
@@ -1100,6 +1507,55 @@ class ShellDelta:
             for rel, _key, _file in planned
             if self._created_by_command(rel, after.get(rel), before)
         ]
+        return self._not_ignored(candidates)
+
+    def _committed_created(
+        self, planned: list[tuple[str, str, _FileFacts]]
+    ) -> set[str]:
+        """Закоммиченные командой пути куска, которые она же и создала.
+
+        Те же признаки, что у ``_created_by_command``, в форме для пути вне
+        status: в ``HEAD`` до команды пути нет, файл свежее снимка «до» и не
+        скрыт правилами игнорирования (``_not_ignored``). Запись остаётся
+        ``op="shell"`` — ``op="create"`` дал бы откат удалением, а коммит мог
+        быть чужим; создание несёт только флаг ``created`` для глагола
+        экрана. Отказ git — пусто: путь покажется правкой.
+        """
+        rels = [
+            rel
+            for rel, _key, file in planned
+            if rel in self._committed and file.exists
+        ]
+        if not rels or self._head_before is None:
+            return set()
+        try:
+            in_head = git_ops.tree_entries(
+                self._launch_root, rels, rev=self._head_before
+            )
+            if in_head is None:
+                return set()
+            return self._not_ignored(
+                [
+                    rel
+                    for rel in rels
+                    if rel not in in_head
+                    and self._fresh(_file_signature(self._abs(rel)))
+                ]
+            )
+        except Exception:
+            _logger.warning(
+                "shell delta: созданные закоммиченные пути не определены",
+                exc_info=True,
+            )
+            return set()
+
+    def _not_ignored(self, candidates: list[str]) -> set[str]:
+        """Кандидаты в созданные, которых не скрывают правила игнорирования.
+
+        Там, где команда могла ослабить правила (``_loosened_scopes``,
+        ``info/exclude``), не проходит никто; остальные — одним запуском
+        ``git check-ignore`` (``git_ops.ignored_paths``).
+        """
         if not candidates:
             return set()
         scopes = list(self._loosened_scopes)
@@ -1182,9 +1638,17 @@ class ShellDelta:
             return False
         if entry.xy != "??" and entry.xy not in _STAGED_ADD_XY:
             return False
-        if entry.signature is None:
+        return self._fresh(entry.signature)
+
+    def _fresh(self, signature: tuple[int, int] | None) -> bool:
+        """Файл свежее снимка «до» (с допуском ``_MTIME_TOLERANCE_NS``).
+
+        Подписи нет (файл не читается) — не свежий: ошибка в эту сторону
+        лишает отката удалением, а не удаляет чужой файл.
+        """
+        if signature is None:
             return False
-        return entry.signature[1] >= self._before_ts_ns - _MTIME_TOLERANCE_NS
+        return signature[1] >= self._before_ts_ns - _MTIME_TOLERANCE_NS
 
     def _capture_base(
         self,
@@ -1193,15 +1657,16 @@ class ShellDelta:
         key: str,
         turn_id: str,
         *,
-        clean_before: bool,
+        exact: bool,
         facts: _BaseFacts | None,
     ) -> bool:
         """База «до» этой записи. ``True`` — записали новую (сигнал для эвикции).
 
-        Путь был чист до команды (``clean_before``), ``HEAD`` за команду не
-        сдвинулся и у пути нет кастомного фильтра — диск, индекс и ``HEAD`` до
-        команды совпадали (Р32): «до» читается из ``HEAD`` в форме файла на
-        диске (``git_ops.head_bytes_like_disk``) и кладётся в ТОЧНОЕ
+        Точная ступень применима (``exact``: путь был чист до команды, не
+        неслит после, а HEAD за команду не сдвинулся — ``_exact_step``) и у
+        пути нет кастомного фильтра — диск, индекс и ``HEAD`` до команды
+        совпадали (Р32): «до» читается из ``HEAD`` до команды в форме файла
+        на диске (``git_ops.head_bytes_like_disk``) и кладётся в ТОЧНОЕ
         пространство (``.orig``/``.turn``) — такой базе годится откат. Гвард
         фильтра обязан идти ПЕРЕД чтением содержимого: конфиг чужого
         репозитория не должен исполнять свой код.
@@ -1211,8 +1676,8 @@ class ShellDelta:
         унесёт его и в базу — зато файл, лежащий с LF в CRLF-репозитории, не
         считается изменённым целиком).
 
-        Иначе (путь был грязен, ``HEAD`` сдвинулся сам — команда закоммитила,
-        — фильтр есть, или ``HEAD`` не читает путь вовсе) — прежний путь:
+        Иначе (путь был грязен или неслит, фильтр есть, или ``HEAD`` до
+        команды не читает путь вовсе) — прежний путь:
         СЧЁТНАЯ база (Р13) из индекса git (``.gitorig``/``.gitturn``). Для
         отката не годится никогда: индекс не содержит несохранённых ручных
         правок пользователя (см. докстринг ``agent_edits.snapshots``).
@@ -1225,9 +1690,7 @@ class ShellDelta:
         пачка не собралась, и всё спрашивается по одному.
         """
         try:
-            content = self._exact_head_content(
-                rel, clean_before=clean_before, facts=facts
-            )
+            content = self._exact_head_content(rel, exact=exact, facts=facts)
             if content is not None:
                 wrote = store.capture_session(
                     key,
@@ -1259,15 +1722,16 @@ class ShellDelta:
             return False
 
     def _exact_head_content(
-        self, rel: str, *, clean_before: bool, facts: _BaseFacts | None
+        self, rel: str, *, exact: bool, facts: _BaseFacts | None
     ) -> bytes | None:
-        """«До» из ``HEAD`` в форме файла на диске — если точная ступень применима.
+        """«До» из ``HEAD`` до команды в форме файла на диске — если точная
+        ступень применима.
 
-        ``None`` — ступень неприменима (путь был грязен, ``HEAD`` сдвинулся,
-        у пути кастомный фильтр) или ``HEAD`` пути не читает. Гвард фильтра
-        идёт ПЕРЕД чтением содержимого (см. ``_capture_base``).
+        ``None`` — ступень неприменима (``exact`` ложен, у пути кастомный
+        фильтр) или ``HEAD`` до команды пути не читает. Гвард фильтра идёт
+        ПЕРЕД чтением содержимого (см. ``_capture_base``).
         """
-        if not self._exact_step(clean_before):
+        if not exact:
             return None
         filtered = (
             rel in facts.filtered
@@ -1281,7 +1745,7 @@ class ShellDelta:
             # Пачки нет, её кусок не прочитался, либо файл пропал уже после
             # команды («родной» формы не узнать — форма выкладки) — по одному.
             return git_ops.head_bytes_like_disk(
-                self._launch_root, rel, disk, rev="HEAD"
+                self._launch_root, rel, disk, rev=self._head_before
             )
         blob = facts.head[rel]
         return None if blob is None else git_ops.blob_like_disk(blob, disk)
@@ -1315,9 +1779,16 @@ class ShellDelta:
         hunks: str | None = None,
         key: str | None = None,
         file: _FileFacts | None = None,
+        deleted: tuple[bytes, int] | None = None,
+        committed: bool = False,
     ) -> EditRecord | None:
         """Запись пути. ``hunks``, ``key`` и ``file`` — уже посчитанное куском
         (``_diffs_for``, ``_plan``); ``None`` — считается здесь, по одному.
+        ``deleted`` — байты «до» и режим пропавшего пути с зарезервированным
+        бюджетом (``_deleted_contents``); ``None`` — удаление без строк.
+        ``committed`` — путь закоммичен самой командой (``_committed``): его
+        нет в status после, и правило «нет в status — записи нет» к нему не
+        применяется.
         """
         abs_path = self._abs(rel)
         if key is None:
@@ -1338,8 +1809,17 @@ class ShellDelta:
             file = _file_facts(abs_path)
 
         if not file.exists:
-            return _edit_record(key, turn_id, op="delete", flags=["no_diff"])
-        if entry is None:
+            before, mode = deleted or (None, None)
+            return delete_record(
+                key,
+                turn_id,
+                before,
+                mode=mode,
+                budget=None,
+                context_lines=_hunk_context_lines(self._ctx),
+                max_chars=_max_diff_chars(self._ctx),
+            )
+        if entry is None and not committed:
             # Путь ушёл из status, файл на месте: команда сама вернула его к
             # состоянию индекса (add / commit / restore) — показывать нечего.
             return None
@@ -1375,8 +1855,8 @@ class ShellDelta:
         if hunks is None:
             hunks = self._diff(
                 rel,
-                untracked=entry.xy == "??",
-                base_rev=self._diff_base_rev(clean_before),
+                untracked=_xy(entry) == "??",
+                base_rev=self._diff_base_rev(rel, clean_before=clean_before),
             )
         if not hunks:
             # git разницы не видит (правка отменена, изменилась только mtime).
@@ -1411,7 +1891,7 @@ class ShellDelta:
             raise _GitFailed("git status не выполнен")
         return rows
 
-    def _diff_base_rev(self, clean_before: bool) -> str | None:
+    def _diff_base_rev(self, rel: str, *, clean_before: bool) -> str | None:
         """Ревизия, против которой дифф пути честен. ``None`` — против индекса.
 
         ``git diff -- rel`` сравнивает ИНДЕКС с деревом, и команда, которая
@@ -1425,10 +1905,14 @@ class ShellDelta:
         независимо от того, попала правка в индекс или нет, а «до» у диффа и
         у базы остаётся одно.
 
-        Путь был грязен до команды или ``HEAD`` за команду сдвинулся (команда
-        закоммитила) — «до» этому подканалу неизвестно, и остаётся дифф от
-        индекса: правка со стейджем тогда по-прежнему не видна. Такие пути
-        ловит карманный подканал — по байтам, снятым до команды.
+        Закоммиченный командой путь (``_committed``) — дифф от ``HEAD`` до
+        команды: от индекса он пуст, а базы у такого пути нет, и счётчики
+        идут из журнала.
+
+        Путь был грязен до команды или ``HEAD`` за команду сдвинулся — «до»
+        у диффа то же, что у счётной базы, — индекс: правка со стейджем тогда
+        по-прежнему не видна. Такие пути ловит карманный подканал — по
+        байтам, снятым до команды.
 
         Окно диффа при этом шире «индекс↔дерево»: правку, которую пользователь
         сделал И ПРОИНДЕКСИРОВАЛ вручную, пока команда работала, запись отнесёт
@@ -1438,11 +1922,9 @@ class ShellDelta:
         двум снимкам состояния нельзя в принципе, и заводить ради этого
         механизм не за что.
         """
-        if not clean_before or self._head_before is None:
-            return None
-        if self._head_before != self._head_after:
-            return None
-        return self._head_before
+        if rel in self._committed or (clean_before and self._head_unmoved()):
+            return self._head_before
+        return None
 
     def _diff(self, rel: str, *, untracked: bool, base_rev: str | None) -> str:
         # Код возврата здесь намеренно не читается: у --no-index exit 1 значит
@@ -1588,6 +2070,11 @@ def _hunk_context_lines(ctx: Any) -> int:
     return limit(None, ctx, "hunk_context_lines", DEFAULT_HUNK_CONTEXT_LINES)
 
 
+def _xy(entry: _StatusEntry | None) -> str | None:
+    """XY пути в снимке status; ``None`` — пути в снимке нет."""
+    return None if entry is None else entry.xy
+
+
 def _dedup(paths: list[str]) -> list[str]:
     """Без повторов, порядок первого появления — приоритет у начала списка."""
     seen: set[str] = set()
@@ -1641,14 +2128,6 @@ def _is_binary_file(path: Path) -> bool:
         return classify_file_content(str(path)).is_binary
     except OSError:
         return False
-
-
-def _is_binary_bytes(data: bytes) -> bool:
-    """Тот же классификатор, что у рекордера, но по байтам уже в памяти
-    (карманный подканал их и так читает — второго чтения файла не нужно)."""
-    return classify_content_from_sample(
-        "", data[:BINARY_SAMPLE_BYTES]
-    ).is_binary
 
 
 def _file_size(path: Path) -> int:

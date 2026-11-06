@@ -11,6 +11,7 @@ import os
 import re
 import threading
 from collections import deque
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -28,6 +29,7 @@ from gc_core.constants.tool_display import (
     LEGACY_TOOL_NAMES,
     TOOL_DISPLAY,
     DisplayCategory,
+    think_parts,
     tool_display,
 )
 from gc_core.constants.tool_names import (
@@ -37,6 +39,7 @@ from gc_core.constants.tool_names import (
     FS_LIST_FILES_NAME,
     PROJECT_MEMORY_TOOL_NAME,
     SESSION_MEMORY_TOOL_NAME,
+    SESSION_THINK_TOOL_NAME,
     SESSION_TODO_TOOL_NAME,
     SKILLS_READ_ASSET_NAME,
     SKILLS_READ_REFERENCE_NAME,
@@ -247,6 +250,7 @@ def tool_args_summary(
     limit: int = _ARGS_SUMMARY_MAX,
     root: Optional[str] = None,
     nested: bool = False,
+    injected: Collection[str] = (),
 ) -> str:
     """Однострочная сводка аргументов вызова тула (спека P1a §2.5).
 
@@ -256,7 +260,9 @@ def tool_args_summary(
     ядра показывается от него (``display_path``), у команды снята
     приставка ``cd <корень> &&``; без корня — как записаны.
     ``nested`` — вызов субагента: таблица — с вложенным контекстом
-    (``tool_display(..., nested=True)``).
+    (``tool_display(..., nested=True)``). ``injected`` — служебные поля
+    схем (``agent.inject_tool_fields``): в сводку Think не идут, пока у
+    модели есть свой текст.
     Только показ: аргументы вызова не меняются."""
     data: Any = arguments
     if isinstance(arguments, str):
@@ -274,7 +280,9 @@ def tool_args_summary(
         return ""
     if root is not None and name in TOOL_DISPLAY:
         data = _rooted_command(name, _rooted_path(data, root), root)
-    primary = _primary_summary(name, data, limit, nested) if name else None
+    primary = (
+        _primary_summary(name, data, limit, nested, injected) if name else None
+    )
     if primary:
         return _clip(primary, limit)
     return _fallback_summary(name, data, limit)
@@ -374,12 +382,19 @@ def _clip(text: str, limit: int) -> str:
 
 
 def _primary_summary(
-    name: str, data: Dict[str, Any], limit: int, nested: bool
+    name: str,
+    data: Dict[str, Any],
+    limit: int,
+    nested: bool,
+    injected: Collection[str] = (),
 ) -> str:
     """Сводка по главному аргументу; пустая строка — главного нет."""
     shown = tool_display(name, nested=nested)
     if shown.category is DisplayCategory.MCP:
         return _first_scalar(data)
+    if name == SESSION_THINK_TOOL_NAME:
+        # Поля Think необязательные: первое заполненное, а не одно `thoughts`.
+        return next(iter(think_parts(data, injected)), "")
     key = shown.primary_arg
     value = data.get(key) if key else None
     if not isinstance(value, str) or not value.strip():

@@ -204,5 +204,5 @@ def test_footer_says_back_in_russian():
     pytest.importorskip("textual")
     from gc_tui.screens import skills
 
-    assert "[Esc] назад" in skills._FOOTER
+    assert "Esc — назад" in skills._FOOTER
     assert "back" not in skills._FOOTER

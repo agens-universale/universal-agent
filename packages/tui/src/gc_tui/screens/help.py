@@ -64,7 +64,7 @@ _QUICKSTART_HELP: tuple[tuple[str, str], ...] = (
     ),
     ("Ctrl+C", "Стоп агента (если нет выделения)"),
     ("Ctrl+J", "Перенос строки в поле ввода"),
-    ("Ctrl+клик", "Просмотр аргументов и результата инструмента / вызова"),
+    ("Ctrl/Cmd+клик", "Просмотр аргументов и результата инструмента / вызова"),
     ("[asking]", "Агент задал вопрос — напишите ответ в поле и Enter"),
 )
 
@@ -97,7 +97,7 @@ _EXTRA_HOTKEYS: tuple[tuple[str, str], ...] = (
     ),
     (
         "Клик по картинке",
-        "В ленте — плашка или строка под репликой; в поле ввода — Ctrl+клик по плашке: открыть картинку",
+        "В ленте — плашка или строка под репликой; в поле ввода — Ctrl/Cmd+клик по плашке: открыть картинку",
     ),
     ("мышь", "В трейсе: выделил — сразу в буфер обмена"),
     (
@@ -205,7 +205,7 @@ class HelpScreen(Screen):
             trace = VerticalScroll(id="trace")
             trace.can_focus = False
             yield trace
-            yield Static("[Esc] назад", id="footer", markup=False)
+            yield Static("Esc — назад", id="footer", markup=False)
 
     def on_mount(self) -> None:
         reg = build_default_registry()

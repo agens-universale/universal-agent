@@ -194,11 +194,11 @@ async def test_the_second_click_of_a_double_click_opens_nothing(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_plain_click_on_a_chip_under_security_confirm_selects_the_row(
+async def test_a_plain_click_on_a_chip_under_security_confirm_opens_nothing(
     tmp_path,
 ):
-    """Пока баннер подтверждения ждёт ответа, клик по картинке — как обычный клик: выделяет
-    строку (гейт клик-модели), подсветки нет."""
+    """Пока баннер подтверждения ждёт ответа, клик по картинке её не открывает
+    (гейт клик-модели), подсветки нет."""
     att = make_attachment_file(8, tmp_path)
     reply = UserReplyContainer(
         f"{chip_text(8)} глянь", event_no=7, images=(att,)
@@ -223,7 +223,7 @@ async def test_a_plain_click_on_a_chip_under_security_confirm_selects_the_row(
         await pilot.pause()
         assert pilot.app.images == []
         assert reply._hover_image_id is None
-        assert reply.has_focus
+        assert not reply.has_focus
 
 
 def _restored_reply_app(tmp_path):
@@ -314,9 +314,11 @@ async def test_real_plain_click_on_the_chip_and_the_sub_line_opens_the_image(
 
 
 @pytest.mark.asyncio
-async def test_real_plain_click_on_the_text_selects_the_row_and_opens_nothing(
+async def test_real_plain_click_on_the_text_neither_selects_nor_opens(
     tmp_path, monkeypatch
 ):
+    """Обычный клик по тексту реплики ничего не делает (клик-модель
+    2026-11-01): ни выделения строки, ни открытия."""
     opened = _record_opened(monkeypatch)
     app, tid, _att = _restored_reply_app(tmp_path)
     async with app.run_test(size=(100, 30)) as pilot:
@@ -324,7 +326,7 @@ async def test_real_plain_click_on_the_text_selects_the_row_and_opens_nothing(
         await pilot.click(reply, offset=text)
         await pilot.pause()
         assert opened == []
-        assert reply.has_focus
+        assert not reply.has_focus
 
 
 @pytest.mark.asyncio

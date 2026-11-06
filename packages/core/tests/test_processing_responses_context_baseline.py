@@ -1,4 +1,3 @@
-import importlib
 import json
 import logging
 import sys
@@ -8,7 +7,7 @@ import httpx
 import pytest
 from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
-from gc_testkit import run_coro
+from gc_testkit import as_coro, run_coro
 from gc_testkit.intent_fixtures import (
     intent_user_ask_texts,
     intent_user_ask_texts_from_jsonl,
@@ -16,7 +15,7 @@ from gc_testkit.intent_fixtures import (
 )
 from gc_testkit.paths import module_dir
 from gc_testkit.settings import fake_ctx
-from gc_testkit import as_coro
+from helpers.module_snapshot import ModuleSnapshot
 
 
 async def _anoop(*_a, **_k):
@@ -24,20 +23,12 @@ async def _anoop(*_a, **_k):
     return None
 
 
+_SNAPSHOT: ModuleSnapshot | None = None
+
+
 def teardown_module(_module) -> None:
-    # Нельзя выкидывать processing_responses: тесты вида
-    # `from processing_responses import f` держат f с устаревшим __globals__;
-    # monkeypatch затем меняет другой экземпляр модуля.
-    for name in list(sys.modules):
-        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
-            sys.modules.pop(name, None)
-    real_tools = importlib.import_module("gc_core.tools")
-    proc = sys.modules.get("gc_core.processing_responses")
-    if proc is not None:
-        proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+    if _SNAPSHOT is not None:
+        _SNAPSHOT.restore()
 
 
 processing_module = None
@@ -48,6 +39,8 @@ State = None
 
 def setup_module(module) -> None:
     global processing_module, request_policy, arun_agent, State
+    global _SNAPSHOT
+    _SNAPSHOT = ModuleSnapshot()
     _stub_tools_modules()
     from gc_core import processing_responses as pm
     from gc_core import request_backend_policy as rq

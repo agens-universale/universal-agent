@@ -43,13 +43,13 @@ def test_notice_from_http_error_includes_status_and_detail():
     )
     n = notice_from_llm_failure(
         exc,
-        request_label="intent_guard_finish_gate",
+        request_label="main_agent",
         url="http://x/v1/chat/completions",
     )
     assert n.level == "warning"
     assert n.code == "llm_error_400"
     assert "HTTP 400" in n.message
-    assert "судья" in n.message
+    assert "основной агент" in n.message
     assert "reasoning_effort" in n.highlights or "low" in n.message
 
 
@@ -180,3 +180,92 @@ def test_level_reroute_notice_names_the_dead_alias_and_the_replacement():
         and "mid-model" in notice.message
     )
     assert "активной" not in notice.message
+
+
+def _consumer_call(consumer: str, request_label: str) -> None:
+    """Вызов служебного потребителя через клиент ядра — тем же путём, что у
+    судей и журнала намерений; бэкенд отвечает 400."""
+    from types import SimpleNamespace
+
+    from gc_core.utils import llm_chat_client
+    from gc_testkit.settings import fake_ctx
+
+    ctx = fake_ctx(
+        {
+            "backend.completions_url": "http://backend.invalid/v1/chat/completions",
+            "backend.api_mode": "chat_completions",
+        },
+        model_router=None,
+        logger=None,
+        auth_connector=None,
+        is_tui=True,
+    )
+    state = SimpleNamespace(
+        state_id="s",
+        x_target=None,
+        default_model="m",
+        usage=None,
+        messages=[],
+        tools=[],
+        call_metadata={},
+        previous_response_id=None,
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        run_coro(
+            llm_chat_client.arequest_chat_completion_text(
+                ctx=ctx,
+                state=state,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=10,
+                consumer=consumer,
+                request_label=request_label,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "consumer,request_label,who",
+    [
+        (
+            "finish_gate",
+            "intent_guard_finish_gate",
+            "самопроверка выполнения задачи",
+        ),
+        ("text_answer_judge", "intent_guard_finish_gate", "формат ответа"),
+        ("intent_scope", "intent_scope:fs_read_file", "журнал намерений"),
+    ],
+)
+def test_api_error_notice_names_the_consumer(
+    monkeypatch, consumer, request_label, who
+):
+    """Уведомление об ошибке API называет потребителя тем же именем, что
+    уведомление о замене модели и экран назначений: по потребителю, а не по
+    ярлыку запроса (судья ответа ходит с ярлыком самопроверки)."""
+    clear_runtime_notices()
+
+    def boom(*args, **kwargs):
+        raise _http_error(400, {"message": "bad request"})
+
+    monkeypatch.setattr(
+        policy, "arequest_backend_chat_completions", as_coro(boom)
+    )
+    _consumer_call(consumer, request_label)
+
+    (notice,) = collect_runtime_notices()
+    assert notice.message.startswith(f"Ошибка LLM ({who}): HTTP 400.")
+
+
+def test_request_labels_keep_no_copy_of_consumer_names():
+    """Имена служебных потребителей живут в одном словаре ядра; у ярлыков
+    запросов своей копии нет."""
+    from gc_core.runtime_notices import _REQUEST_LABEL_RU
+    from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
+
+    assert set(_REQUEST_LABEL_RU) == {
+        "main_agent",
+        "chat_completion",
+        "subagent_special_agent",
+    }
+    assert not set(_REQUEST_LABEL_RU.values()) & set(
+        CONSUMER_RU_LABEL.values()
+    )

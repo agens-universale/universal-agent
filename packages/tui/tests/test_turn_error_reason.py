@@ -1,7 +1,9 @@
-"""Причина ошибки хода под `✕ Ошибка` (решение владельца 7, смоук P3a).
+"""Причина ошибки хода у `✕ Ошибка` (решение владельца 7, смоук P3a;
+спека предохранителя §2.4, ревизия 3).
 
-Ход упал — под свежей строкой итога в ленте строка `└ <класс>: <текст>`
-(`DIM`, S10 §4.6).
+Ход упал — у строки итога в ленте причина `<класс>: <текст>`: влезает —
+тусклым хвостом ` · …` в той же строке; не влезает — у свежей строки
+развёрнута под ней (как мысль), у осевшей свёрнута в хвост с `…`.
 Причина хранится в записи итога хода (`outcome.error.message`, пишет
 ядро): видна вживую и после повторного открытия треда; в мету TUI её не
 копирует; новый ход её снимает."""
@@ -14,7 +16,7 @@ import pytest
 from gc_core.persistence.turn_outcome import TurnOutcome
 from gc_testkit.develop_files import append_new_thread_messages
 from gc_testkit.thread_writes import turn_outcome_record
-from gc_testkit.tui_support import tui_settings
+from gc_testkit.tui_support import tui_settings, wait_until
 from gc_tui.services.stores.record_view import tui_section
 
 _TID = "lerr0000000000000000000000000001a"
@@ -94,10 +96,10 @@ async def test_live_failure_shows_reason_without_meta_copy(tmp_path):
         pilot.app.last_runner_error = "ReadError: boom"
         scr._poll_active()
         await pilot.pause()
-        assert _line_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
+        assert _line_text(scr) == "✕ Ошибка · ReadError: boom"
         tui = tui_section(scr._store.get_record(_TID))
         assert "last_error" not in tui
-        # Причина — под строкой итога, не отдельной строкой `!` в ленте.
+        # Причина — в строке итога, не отдельной строкой `!` в ленте.
         rows = [r for r in scr.query(TraceRow) if r.has_class("line-error")]
         assert rows == []
 
@@ -110,7 +112,7 @@ async def test_reopen_restores_reason(tmp_path):
         scr = pilot.app.screen
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
-        assert _line_text(scr) == "✕ Ошибка\n  └ ReadError: boom"
+        assert _line_text(scr) == "✕ Ошибка · ReadError: boom"
 
 
 @pytest.mark.asyncio
@@ -126,28 +128,7 @@ async def test_new_turn_clears_reason(tmp_path):
         assert scr._latest_turn_outcome() is None
 
 
-@pytest.mark.asyncio
-async def test_new_turn_after_failure_settles_reason_line(tmp_path):
-    """Причина ушла с новым ходом — строка ошибки осела в одну строку."""
-    pytest.importorskip("textual")
-    _write_task(tmp_path, {"status": "failed"}, reason="ReadError: boom")
-    async with _app(tmp_path).run_test() as pilot:
-        scr = pilot.app.screen
-        scr.attach_active_task(_TID, is_resume=True)
-        await pilot.pause()
-        line = _fresh_line(scr)
-        assert line.region.height == 2
-        scr._prepare_for_new_run()
-        await pilot.pause()
-        assert not line.is_fresh
-        assert line.region.height == 1
-
-
-_LONG = "MainModelUnavailable: " + "модель недоступна " * 8  # ~150 симв.
-
-
-def _rows(text: str) -> list[str]:
-    return text.split("\n")[1:]
+_LONG = "MainModelUnavailable: " + "модель недоступна " * 8  # ~160 симв.
 
 
 async def _bar_display(scr):
@@ -156,10 +137,19 @@ async def _bar_display(scr):
     return scr.query_one("#indicator-bar", Vertical).display
 
 
+def _body(scr):
+    """Тело развёрнутой причины — соседний виджет за строкой."""
+    (body,) = scr.query(".turn-reason")
+    return body
+
+
+def _body_rows(scr) -> int:
+    return _body(scr).region.height
+
+
 @pytest.mark.asyncio
-async def test_long_reason_wraps_in_line_after_reopen(tmp_path):
-    """Длинная причина — до трёх строк `└` у свежей строки; растёт лента,
-    бара в покое нет."""
+async def test_new_turn_after_failure_settles_reason_line(tmp_path):
+    """Новый ход — развёрнутая причина сворачивается в хвост строки."""
     pytest.importorskip("textual")
     _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
     async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
@@ -167,14 +157,42 @@ async def test_long_reason_wraps_in_line_after_reopen(tmp_path):
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
         line = _fresh_line(scr)
-        rows = len(_rows(_line_text(scr)))
-        assert 2 <= rows <= 3
-        assert line.region.height == 1 + rows
+        assert line.expanded is True
+        scr._prepare_for_new_run()
+        await pilot.pause()
+        assert not line.is_fresh
+        assert line.expanded is False
+        assert line.region.height == 1
+        assert line.render().plain.endswith("…")
+        assert _body(scr).display is False
+
+
+@pytest.mark.asyncio
+async def test_long_reason_expanded_after_reopen(tmp_path):
+    """Длинная причина последнего хода после переоткрытия — развёрнута под
+    строкой целиком, с `− свернуть`; растёт лента, бара в покое нет."""
+    pytest.importorskip("textual")
+    _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
+    async with _app(tmp_path).run_test(size=(80, 30)) as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(_TID, is_resume=True)
+        await pilot.pause()
+        line = _fresh_line(scr)
+        await wait_until(pilot, lambda: line.expanded, "причина развёрнута")
+        await pilot.pause()
+        assert _line_text(scr) == "✕ Ошибка"
+        body = str(_body(scr).query_one(".expandable-text").render())
+        assert " ".join(body.split()) == " ".join(_LONG.split())
+        # Тело — сразу под строкой: текст в 2+ строки и `− свернуть`.
+        assert _body(scr).region.y == line.region.bottom
+        assert _body_rows(scr) >= 3
         assert await _bar_display(scr) is False
 
 
 @pytest.mark.asyncio
-async def test_resize_follows_reason_rows(tmp_path):
+async def test_resize_follows_reason_fit(tmp_path):
+    """Влезла причина — хвост в строке; сузили окно — свежая строка
+    разворачивается."""
     pytest.importorskip("textual")
     _write_task(tmp_path, {"status": "failed"}, reason=_LONG)
     async with _app(tmp_path).run_test(size=(200, 30)) as pilot:
@@ -182,9 +200,10 @@ async def test_resize_follows_reason_rows(tmp_path):
         scr.attach_active_task(_TID, is_resume=True)
         await pilot.pause()
         line = _fresh_line(scr)
-        assert line.region.height == 2
+        assert line.expanded is False
+        assert line.region.height == 1
         await pilot.resize_terminal(70, 30)
         await pilot.pause()
-        rows = len(_rows(_line_text(scr)))
-        assert rows >= 2
-        assert line.region.height == 1 + rows
+        assert line.expanded is True
+        assert line.region.height == 1
+        assert _body_rows(scr) >= 3

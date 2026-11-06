@@ -472,3 +472,33 @@ async def test_closing_the_banner_keeps_a_trace_scrolled_up_in_place(
         await pilot.pause(0.5)
 
         assert trace.scroll_offset.y == 10
+
+
+async def test_plan_options_height_stays_on_selection():
+    """Пояснение режима — только у выделенного варианта, в узком окне оно
+    переносится: высота блока вариантов — под самый длинный выбор, ↑/↓ не
+    двигают ни варианты, ни тело плашки (дизайн-код §9)."""
+    from gc_tui.services.hint_height import wrapped_lines
+    from gc_tui.widgets.plan_banner import PLAN_OPTIONS, PlanApprovalBanner
+    from textual.app import App
+
+    banner = PlanApprovalBanner()
+
+    class _A(App):
+        def compose(self):
+            yield banner
+
+    async with _A().run_test(size=(60, 40)) as pilot:
+        await pilot.pause()
+        opts = banner.query_one(".cb-options")
+        heights = {opts.size.height}
+        for _ in range(len(PLAN_OPTIONS)):
+            banner.move_selection(1)
+            await pilot.pause()
+            heights.add(opts.size.height)
+        assert len(heights) == 1
+        width = opts.content_region.width
+        longest = max(wrapped_lines(v, width) for v in opts._variants())
+        # Перенос есть (вариантов с подсказкой — 6 строк), и он влезает.
+        assert longest > len(PLAN_OPTIONS) + 2
+        assert heights.pop() >= longest

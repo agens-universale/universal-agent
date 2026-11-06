@@ -639,9 +639,11 @@ def _edit_row():
 
 
 def test_edit_counts_follow_the_object():
-    """` (+a −r)` — сразу после объекта, до хвоста результата; `+a` — OK,
-    `−r` — ERR, скобки — INK, как объект слева (спека P4 §10)."""
-    from gc_tui.palette import ERR, INK, OK
+    """` (+a −r)` — сразу после объекта, до хвоста результата; `+a` —
+    DIFF_ADD_INK, `−r` — DIFF_DEL_INK (тот же «добавлено / удалено», что у
+    номера и маркера строки диффа), скобки — INK, как объект слева (спека
+    P4 §10)."""
+    from gc_tui.palette import DIFF_ADD_INK, DIFF_DEL_INK, INK
 
     row = _edit_row()
     row.set_edit_counts(12, 3, copy_text="diff")
@@ -650,8 +652,8 @@ def test_edit_counts_follow_the_object():
     styles = {
         content.plain[s.start : s.end]: str(s.style) for s in content.spans
     }
-    assert styles["+12"] == OK
-    assert styles["−3"] == ERR
+    assert styles["+12"] == DIFF_ADD_INK
+    assert styles["−3"] == DIFF_DEL_INK
     assert styles[" ("] == INK
     assert styles[")"] == INK
 
