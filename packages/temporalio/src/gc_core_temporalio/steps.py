@@ -38,6 +38,7 @@ from typing import Any
 from gc_core_temporalio import sandbox_passthrough  # noqa: F401
 
 # isort: split
+from gc_core.trace_id import normalize_trace_id
 from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 
@@ -74,6 +75,7 @@ async def agent_step(
     step: str | None = None,
     task_queue: str | None = None,
     format_text: str | None = None,
+    trace_id: str | None = None,
     **child_options: Any,
 ) -> AgentStepResult:
     """Один ход агента ``agent`` в треде ``thread_id`` — в коде workflow.
@@ -89,7 +91,16 @@ async def agent_step(
     ``ChildWorkflowError`` (сбой сессии) или ``ApplicationError`` типа
     ``TurnFailed`` (ход не уложился в запись истории); слишком большой
     промпт — ``ApplicationError`` типа ``HistoryLimitExceeded`` до запуска.
+    ``trace_id`` — внешний трейс шага: заголовком в модель и MCP шага и его
+    субагентов; кривое значение — ``ApplicationError`` типа
+    ``InvalidTraceId`` до запуска.
     """
+    try:
+        trace_id = normalize_trace_id(trace_id)
+    except ValueError as exc:
+        raise ApplicationError(
+            str(exc), type="InvalidTraceId", non_retryable=True
+        ) from None
     message_id = str(workflow.uuid4())
     try:
         UserMessage(message_id, prompt).validate()
@@ -121,6 +132,7 @@ async def agent_step(
             # шага одного треда не склеиваются дедупликацией.
             message_ids=[message_id],
             format_text=format_text,
+            trace_id=trace_id,
         ),
         id=child_id,
         task_queue=task_queue or workflow.info().task_queue,

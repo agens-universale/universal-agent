@@ -202,7 +202,7 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     try:
         # НЕ через to_thread: сессии ключуются по id(loop) и живут на ЭТОМ
         # loop — из чужого потока их не видно и закрыть нечем.
-        await _STREAM_SESSION_MANAGER.aclose_all()
+        await _STREAM_SESSION_MANAGER.aclose_all(in_owner_task=True)
     except asyncio.CancelledError as exc:
         cancelled = cancelled or exc
     except Exception:
@@ -450,6 +450,25 @@ async def _amark_turn(
         (logger or logging.getLogger(__name__)).warning(
             "thread turn mark failed", exc_info=True
         )
+
+
+async def _adiscard_nudges_after_pre_run(
+    summary: Any, state: Any, thread_session: Any
+) -> None:
+    """Стартовая сводка до цикла: старые подсказки в новый трейс не берём."""
+    if not await _acall_blocking_hook(
+        summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+    ):
+        return
+    from gc_core.message_policy.nudges import (
+        clear_nudge_counters_after_summary,
+    )
+
+    notice = getattr(thread_session, "notice", None)
+    clear_nudge_counters_after_summary(
+        state,
+        session_meta=notice if isinstance(notice, dict) else None,
+    )
 
 
 async def _apersist_state(
@@ -1731,8 +1750,8 @@ class AgentExecutor:
         # Старые истории сохраняют порядок команд. Новые исполнения проверяют
         # стартовую историю в цикле после выбора первого комплекта модели.
         if not deferred_startup_compaction:
-            await _acall_blocking_hook(
-                summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+            await _adiscard_nudges_after_pre_run(
+                summary, state, thread_session
             )
 
         inbox_tail = await self._aread_inbox_tail(thread_session, state)

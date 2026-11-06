@@ -6,8 +6,8 @@ import logging
 import sys
 import types
 
-from gc_core.auto_routing.policy import FINISH_REJECT
 import pytest
+from gc_core.auto_routing.policy import FINISH_REJECT
 from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.feedback import build_finish_gate_feedback
 from gc_core.intent_guard.guard import FinishGateGuard
@@ -21,6 +21,7 @@ from gc_testkit.intent_fixtures import (
 )
 from gc_testkit.paths import module_dir
 from gc_testkit.settings import fake_ctx
+from helpers.module_snapshot import ModuleSnapshot
 
 _trace_digest_tests = importlib.import_module("test_intent_guard_trace_digest")
 _ask_human_scenario_messages = _trace_digest_tests._ask_human_scenario_messages
@@ -125,6 +126,7 @@ def _unbind_stub(module, stub, real) -> None:
 @pytest.fixture(scope="module", autouse=True)
 def _load_processing_responses():
     global processing_module, arun_agent, State
+    snapshot = ModuleSnapshot()
     stub_tools = _stub_tools_modules()
     from gc_core import processing_responses as pm
     from gc_core.processing_responses import arun_agent as ra
@@ -140,12 +142,7 @@ def _load_processing_responses():
     # при этом в одиночку.
     pm.aapply_tool = stub_tools.aapply_tool
     yield
-    for name in list(sys.modules):
-        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
-            sys.modules.pop(name, None)
-    # Сохранить «прежние» значения до yield нельзя: к этому моменту они уже
-    # заглушка — pm импортирован после подмены. Настоящие объекты берём
-    # переимпортом уже очищенного пакета.
+    snapshot.restore()
     import gc_core.tools as real_tools
 
     _unbind_stub(pm, stub_tools, real_tools)

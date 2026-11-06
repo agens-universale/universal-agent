@@ -117,7 +117,16 @@ async def _acompact_session(
         logger=getattr(ctx, "logger", None),
     )
     ctx.on_summary_applied = coord.on_summary_applied
-    await coord.aforce_compact_once(trigger_reason="manual")
+    if await coord.aforce_compact_once(trigger_reason="manual"):
+        from gc_core.message_policy.nudges import (
+            clear_nudge_counters_after_summary,
+        )
+
+        notice = thread_session.notice
+        clear_nudge_counters_after_summary(
+            state,
+            session_meta=notice if isinstance(notice, dict) else None,
+        )
 
     # Компакция пишет расход из снимка сессии (старый кумулятив) — поэтому
     # обновлённый кумулятив (baseline + summary) персистим отдельным шагом и

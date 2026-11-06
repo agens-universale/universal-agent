@@ -17,6 +17,9 @@ _STEPS = "gc_core_temporalio.steps"
 _WORKER = "gc_core_temporalio.worker"
 
 _EXPORTS = {
+    "AgentActivity": "gc_core_temporalio.turn_activity",
+    "AgentActivityRequest": "gc_core_temporalio.turn_activity_contracts",
+    "AgentActivityResult": "gc_core_temporalio.turn_activity_contracts",
     "AgentPlugin": "gc_core_temporalio.plugin",
     "AgentSession": _CLIENT,
     "AnswerTruncated": _CLIENT,
@@ -42,6 +45,9 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "AgentActivity",
+    "AgentActivityRequest",
+    "AgentActivityResult",
     "AgentClient",
     "AgentPlugin",
     "AgentProfile",

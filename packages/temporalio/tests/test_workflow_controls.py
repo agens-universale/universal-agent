@@ -38,15 +38,26 @@ def finish(report="done"):
     )
 
 
+class _Recorded(list):
+    """Тела запросов; ``headers`` — их заголовки (имена в нижнем регистре)."""
+
+    def __init__(self):
+        super().__init__()
+        self.headers = []
+
+
 @pytest.fixture
 def scripted_http():
-    requests, script = [], []
+    requests, script = _Recorded(), []
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass
 
         def do_POST(self):
+            requests.headers.append(
+                {name.lower(): value for name, value in self.headers.items()}
+            )
             requests.append(
                 json.loads(
                     self.rfile.read(int(self.headers["content-length"]))
@@ -81,8 +92,22 @@ def scripted_http():
                 }
             )
             body = json.dumps(response).encode()
+            content_type = "application/json"
+            if requests[-1].get("stream") and "choices" in response:
+                content_type = "text/event-stream"
+                for choice in response["choices"]:
+                    delta = choice.pop("message")
+                    for index, tool in enumerate(
+                        delta.get("tool_calls") or []
+                    ):
+                        tool["index"] = index
+                    choice["delta"] = delta
+                response["object"] = "chat.completion.chunk"
+                body = (
+                    "data: " + json.dumps(response) + "\n\ndata: [DONE]\n\n"
+                ).encode()
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
