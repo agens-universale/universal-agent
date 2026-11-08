@@ -194,6 +194,18 @@ _PREVIOUS_RAMPS = {
         "#5d646e",
         "#545b65",
     ],
+    "ACCENT_BREATH_SHADES": [
+        "#2c4f4b",
+        "#335d58",
+        "#3a6b65",
+        "#417a73",
+        "#4a8d84",
+        "#54b3a6",
+        "#4a8d84",
+        "#417a73",
+        "#3a6b65",
+        "#335d58",
+    ],
     "VALIDATING_SHADES": [
         "#5e6675",
         "#69727f",
@@ -207,6 +219,15 @@ _PREVIOUS_RAMPS = {
         "#69727f",
     ],
 }
+
+
+def test_mcp_shimmer_is_built_from_text_tokens():
+    assert palette.MCP_SHIMMER_SHADES == [
+        palette.DIM,
+        palette.NOTE_INK,
+        palette.INK,
+        palette.BRIGHT,
+    ]
 
 
 def test_ramps_equal_previous_literals():

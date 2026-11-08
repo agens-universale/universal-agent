@@ -219,6 +219,21 @@ VALIDATING_SHADES = [
     "#747e8b",
     "#69727f",
 ]
+# Дыхание акцента в стартовой шапке: тёмно-бирюзовая, пик ACCENT.
+ACCENT_BREATH_SHADES = [
+    "#2c4f4b",
+    "#335d58",
+    "#3a6b65",
+    "#417a73",
+    "#4a8d84",
+    ACCENT,
+    "#4a8d84",
+    "#417a73",
+    "#3a6b65",
+    "#335d58",
+]
+# Блик по подписи MCP в стартовой шапке: цвета текста, пик BRIGHT.
+MCP_SHIMMER_SHADES = [DIM, NOTE_INK, INK, BRIGHT]
 
 
 # ── Тема auto: палитра от фона терминала ───────────────────────────────────
@@ -256,6 +271,7 @@ _RAMP_PEAKS = {
     "GLOW_SHADES": "#f3c78f",
     "PROCESSING_SHADES": DEEP_DIM,
     "VALIDATING_SHADES": CODE_BLOCK,
+    "ACCENT_BREATH_SHADES": ACCENT,
 }
 _GIGACODE = {
     name: globals()[name]
