@@ -359,7 +359,7 @@ def select_active_substate(
 
 # Футер с функциональными клавишами; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
-# подсказка «/mcp» уже в бренд-карточке.)
+# подсказка «/mcp» уже в строке статуса стартовой шапки.)
 # Diff: F3 в базовом хроме футера; в ленте о правках говорят блоки диффов.
 # Слева в футере — пилюля режима разрешений и счётчик уведомлений (решение
 # владельца): постоянный индикатор режима важнее списка F-клавиш, а клавиши
@@ -5890,8 +5890,12 @@ class TraceScreen(TraceFollowMixin, Screen):
         progress = getattr(self.app, "_mcp_progress", None)
         if progress is None or self._brand is None:
             return
+        # outcome раньше snapshot: `True` тогда гарантирует полный снимок,
+        # иначе сервер, чей статус пришёл между вызовами, встал бы в очередь
+        # как ✗ при `finish(True)`.
+        outcome = progress.outcome()
         servers, _active = progress.snapshot()
-        self._brand.feed(progress, servers, progress.outcome())
+        self._brand.feed(progress, servers, outcome)
 
     def on_start_header_settled(self, _event: StartHeader.Settled) -> None:
         # Итог загрузки: mcp_status осел, уведомления финальны → тосты.
@@ -6726,7 +6730,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._brand is not None and self._brand.parent is not None:
             return
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        servers = self.app.base_settings().settings.mcp.servers
+        servers = self.app.effective_settings().settings.mcp.servers
         brand = StartHeader(mcp_total=len(servers))
         brand.set_update(getattr(self.app, "_update_available", False))
         trace.mount(brand)

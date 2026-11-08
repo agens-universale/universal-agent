@@ -170,6 +170,19 @@ async def test_build_error_freezes_failed(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_build_error_without_servers_freezes_failed(tmp_path):
+    app = _app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        header = _header(app)
+        progress = _progress(outcome=False)
+        progress.begin([])
+        progress.finish(False)
+        await _feed(app, pilot, progress)
+        assert _status(header) == "⚠ агент не готов — причина в ленте ниже"
+        assert header._timer is None
+
+
+@pytest.mark.asyncio
 async def test_update_tail_added_and_removed(tmp_path):
     app = _app(tmp_path)
     async with app.run_test(size=(120, 40)) as pilot:
@@ -322,12 +335,61 @@ def test_build_failure_anywhere_marks_progress_failed(
     assert app._mcp_progress.outcome() is False
 
 
+def test_failed_build_keeps_foreign_published_progress(tmp_path, monkeypatch):
+    """Сбой первой сборки после публикации не затирает прогресс второй."""
+    from gc_tui.services.mcp_progress import McpProgress
+
+    app = _real_build_app(
+        tmp_path, monkeypatch, as_coro(lambda *a, **k: _Ctx())
+    )
+    second = McpProgress()
+
+    def _publish_foreign_then_fail(*_a, **_k):
+        app._mcp_progress = second  # вторая сборка успела встать на app
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "gc_core.agent_executor.AgentExecutor", _publish_foreign_then_fail
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        app._build_real_executor()
+    assert app._mcp_progress is second
+    assert second.outcome() is None
+
+
+@pytest.mark.asyncio
+async def test_startup_build_failure_without_servers_row(
+    tmp_path, monkeypatch
+):
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
+
+    monkeypatch.setattr(
+        "gc_core.config_modules.auth.build_auth_connector", _boom
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({}),
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        header = _header(app)
+        await wait_until(
+            pilot,
+            lambda: header._peephole.phase == "failed",
+            "шапка дошла до сбоя загрузки",
+        )
+        await pilot.pause()
+        assert _status(header) == "⚠ агент не готов — причина в ленте ниже"
+        assert header._timer is None
+
+
 @pytest.mark.asyncio
 async def test_startup_build_failure_freezes_header_failed(
     tmp_path, monkeypatch
 ):
-    """Сборка падает ещё до прогресса (настройки авторизации): шапка после
-    прогрева застывает на сбое, таймера нет."""
+    """Сборка падает ещё до прогресса (настройки авторизации): MCP не
+    стартовал, шапка после прогрева застывает на сбое, таймера нет."""
     from gc_testkit.tui_support import wait_until
 
     app = _real_build_app(
@@ -344,7 +406,7 @@ async def test_startup_build_failure_freezes_header_failed(
             "шапка дошла до сбоя загрузки",
         )
         await pilot.pause()
-        assert _status(header) == "⚠ MCP: загрузка не завершилась · /mcp"
+        assert _status(header) == "⚠ агент не готов — причина в ленте ниже"
         assert header._timer is None
 
 

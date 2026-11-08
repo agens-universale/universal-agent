@@ -60,9 +60,16 @@ def settled_row(connected: int, total: int) -> ColumnRow:
     return ColumnRow(Text("✓ ", style=OK), atoms)
 
 
-def failed_row() -> ColumnRow:
+def failed_row(total: int) -> ColumnRow:
+    """Сбой сборки: при MCP в конфиге — про загрузку MCP, без MCP — про
+    сам агент (слово MCP и `/mcp` там сбили бы с толку)."""
     head = Text.assemble(("⚠", WARN), " ")
-    atom = Text("MCP: загрузка не завершилась · /mcp", style=DIM)
+    label = (
+        "MCP: загрузка не завершилась · /mcp"
+        if total > 0
+        else "агент не готов — причина в ленте ниже"
+    )
+    atom = Text(label, style=DIM)
     return ColumnRow(head, [atom])
 
 
@@ -73,4 +80,4 @@ def status_renderable(peephole: McpPeephole, frame: int) -> Text | ColumnRow:
         )
     if peephole.phase == "settled":
         return settled_row(peephole.connected, peephole.total)
-    return failed_row()
+    return failed_row(peephole.total)

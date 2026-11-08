@@ -770,7 +770,7 @@ async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
+async def test_scaffold_shows_brand_stepper_and_esc_exits(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -781,7 +781,7 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        # логотип и степпер отрисованы
+        # бренд и степпер отрисованы
         assert scr.query_one("#onb-brand")
         assert scr.query_one("#onb-stepper")
         assert scr._step == 0

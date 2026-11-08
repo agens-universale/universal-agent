@@ -582,7 +582,7 @@ class TuiApp(App):
 
         def _on_available(fresh: bool) -> None:
             self._update_available = (
-                True  # постоянный сигнал: brand-строка + запись в /notices
+                True  # постоянный сигнал: шапка + /notices
             )
             if self.is_running:
                 if fresh:
@@ -590,11 +590,11 @@ class TuiApp(App):
                         _AUTO_UPDATE_NOTICE, severity="information"
                     )  # toast только при свежей находке
                 # M3: главный экран, а не активный (self.screen) — иначе, если авто-чек
-                # приходит, пока сверху онбординг/PostUpdate/Settings, строка в карточке
-                # так и не появится за всю сессию.
+                # приходит, пока сверху онбординг/PostUpdate/Settings, хвост обновления
+                # в шапке так и не появится за всю сессию.
                 scr = self._main_screen()
                 if scr is not None and hasattr(scr, "refresh_update_notice"):
-                    scr.refresh_update_notice()  # дорисовать строку в brand-блоке
+                    scr.refresh_update_notice()  # дорисовать хвост в строке версии шапки
 
         def _on_result(result) -> None:
             self._update_check_result = (
@@ -1852,20 +1852,29 @@ class TuiApp(App):
         from gc_tui.services.mcp_progress import McpProgress
 
         progress = McpProgress()
+        published = False
+
+        def publish() -> None:
+            nonlocal published
+            self._mcp_progress = progress
+            published = True
+
         try:
-            executor = self._assemble_executor(progress)
+            executor = self._assemble_executor(progress, publish)
         except BaseException:
             progress.finish(False)
-            # Упала до `begin` — прогресс ещё не на app; ставим, иначе шапка
-            # ждала бы загрузку вечно.
-            self._mcp_progress = progress
+            # Упала до публикации — прогресс ещё не на app; ставим, иначе
+            # шапка ждала бы загрузку вечно. После публикации на app мог
+            # встать прогресс более новой сборки — его не затираем.
+            if not published:
+                self._mcp_progress = progress
             raise
         progress.finish(True)
         return executor
 
-    def _assemble_executor(self, progress):
-        """Сборка executor; прогресс MCP встаёт на app после `begin`, чтобы
-        шапка не приняла пустой список серверов за «MCP нет»."""
+    def _assemble_executor(self, progress, publish):
+        """Сборка executor; прогресс MCP встаёт на app (`publish`) после
+        `begin`, чтобы шапка не приняла пустой список серверов за «MCP нет»."""
         from gc_core.agent_executor import AgentExecutor
         from gc_core.config import (
             cli_forces_legacy_model,
@@ -1882,7 +1891,7 @@ class TuiApp(App):
         choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
         progress.begin(list(settings_of(loaded).mcp.servers))
-        self._mcp_progress = progress
+        publish()
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 
         self._stream_pump = StreamPump(
