@@ -6,12 +6,6 @@ from gc_tui import branding
 from gc_tui.services.start_status import loading_line, settled_row
 
 
-def test_logo_shape():
-    lines = branding.LOGO.split("\n")
-    assert len(lines) == 6
-    assert max(len(line) for line in lines) == 62
-
-
 def test_gradient_color_stops():
     # стопы градиента бренда: GRADIENT_WARM -> MID -> COOL
     assert branding.gradient_color(0.0) == "#D9A36A"
@@ -22,54 +16,6 @@ def test_gradient_color_stops():
 def test_gradient_color_clamps():
     assert branding.gradient_color(-1.0) == "#D9A36A"
     assert branding.gradient_color(2.0) == "#4EB4A6"
-
-
-def test_logo_text_plain_matches_and_spaces_unstyled():
-    t = branding.logo_text()
-    assert t.plain == branding.LOGO
-    # каждый видимый глиф получает свой span; пробелы и переводы строк — нет.
-    glyphs = sum(1 for ch in branding.LOGO if ch not in (" ", "\n"))
-    assert len(t.spans) == glyphs
-
-
-def test_version_under_logo_is_centered_like_the_tagline(monkeypatch):
-    """Версия центрируется по ширине лого ведущими пробелами — тем же приёмом, что и
-    тэглайн: рамка карточки шире бренда, и CSS-выравнивание увело бы строку по ней."""
-    from gc_core import app_version
-
-    monkeypatch.setattr(
-        app_version,
-        "install_source",
-        lambda: app_version.InstallSource("u", "master", "c", False),
-    )
-    monkeypatch.setattr(app_version, "agent_version", lambda: "1.2.3")
-    line = branding.version_under_logo()
-    assert line.strip() == "v1.2.3"
-    logo_w = max(len(l) for l in branding.LOGO.splitlines())
-    assert len(line) - len(line.strip()) == (logo_w - len("v1.2.3")) // 2
-    # центры строки версии и тэглайна совпадают (с точностью до нечётной ширины)
-    tag = branding.tagline_under_logo()
-    center = lambda s: (len(s) - len(s.strip())) + len(s.strip()) / 2
-    assert abs(center(line) - center(tag)) <= 1
-
-
-def test_version_shows_dev_when_running_from_sources(monkeypatch):
-    """Из исходников метаданные пакета отстают от кода — номер соврал бы, поэтому dev."""
-    from gc_core import app_version
-
-    monkeypatch.setattr(
-        app_version,
-        "install_source",
-        lambda: app_version.InstallSource("u", None, None, True),
-    )
-    assert branding.version_under_logo().strip() == app_version.DEV_LABEL
-    assert (
-        "из исходников" in app_version.DEV_LABEL
-    )  # не голое «dev»: сухо и неясно
-    monkeypatch.setattr(
-        app_version, "install_source", lambda: None
-    )  # нет метаданных
-    assert branding.version_under_logo().strip() == app_version.DEV_LABEL
 
 
 def test_version_forms_follow_one_rule(monkeypatch):

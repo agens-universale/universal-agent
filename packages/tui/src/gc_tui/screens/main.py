@@ -1620,7 +1620,9 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _refresh_header(self) -> None:
         left, right = self._compose_header_segments()
         try:
-            update_if_changed(self.query_one("#header-left", Static), left)
+            header_left = self.query_one("#header-left", Static)
+            update_if_changed(header_left, left)
+            header_left.set_class(self._active_task_id is None, "welcome")
             update_if_changed(self.query_one("#header-right", Static), right)
         except Exception:
             pass

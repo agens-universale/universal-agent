@@ -172,3 +172,35 @@ async def test_brand_block_shown_on_attach_existing_session(tmp_path):
         assert children and children[0].id == "brand-block"
         text = "\n".join(str(c.render()) for c in trace.walk_children())
         assert "старое сообщение" in text
+
+
+@pytest.mark.asyncio
+async def test_welcome_header_is_ink(tmp_path):
+    """Приветствие белое только на свежем экране; с задачей класс снят."""
+    pytest.importorskip("textual")
+    import json
+    from pathlib import Path
+
+    from gc_tui.app import TuiApp
+
+    tid = "t1"
+    (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
+        json.dumps(
+            {"thread_id": tid, "updated_at": "...", "messages_count": 0}
+        ),
+        encoding="utf-8",
+    )
+    (Path(tmp_path) / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
+        ),
+    )
+    async with app.run_test() as pilot:
+        left = pilot.app.query_one("#header-left")
+        assert left.has_class("welcome")
+        pilot.app.screen.attach_active_task(tid)
+        await pilot.pause()
+        assert not left.has_class("welcome")
