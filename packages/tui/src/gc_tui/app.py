@@ -1843,7 +1843,29 @@ class TuiApp(App):
         return self.active_runner
 
     def _build_real_executor(self):
-        """Build the real AgentExecutor from config. Called when no factory injected."""
+        """Build the real AgentExecutor from config. Called when no factory injected.
+
+        Конец сборки — конец загрузки MCP для шапки, успешный или нет
+        (контракт §6.3): любой сбой сборки, в том числе до старта MCP,
+        отдаёт шапке прогресс с ошибкой, а успех отмечается только у
+        готового executor."""
+        from gc_tui.services.mcp_progress import McpProgress
+
+        progress = McpProgress()
+        try:
+            executor = self._assemble_executor(progress)
+        except BaseException:
+            progress.finish(False)
+            # Упала до `begin` — прогресс ещё не на app; ставим, иначе шапка
+            # ждала бы загрузку вечно.
+            self._mcp_progress = progress
+            raise
+        progress.finish(True)
+        return executor
+
+    def _assemble_executor(self, progress):
+        """Сборка executor; прогресс MCP встаёт на app после `begin`, чтобы
+        шапка не приняла пустой список серверов за «MCP нет»."""
         from gc_core.agent_executor import AgentExecutor
         from gc_core.config import (
             cli_forces_legacy_model,
@@ -1852,7 +1874,6 @@ class TuiApp(App):
         from gc_core.run_context import acreate_run_context
         from gc_core.settings import settings_of
 
-        from gc_tui.services.mcp_progress import McpProgress
         from gc_tui.toggles import tui_agent_settings
 
         # Своё у TUI поверх действующих настроек: промпт-ассеты, адаптивный bounce
@@ -1860,7 +1881,6 @@ class TuiApp(App):
         loaded = tui_agent_settings(self.effective_settings())
         choice_provider = self._run_choice_provider()
         auth = build_auth_connector(loaded)
-        progress = McpProgress()
         progress.begin(list(settings_of(loaded).mcp.servers))
         self._mcp_progress = progress
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
@@ -1911,11 +1931,7 @@ class TuiApp(App):
             finally:
                 await aclose_clients()
 
-        try:
-            ctx = asyncio.run(_abuild_ctx())
-        except BaseException:
-            progress.finish(False)  # конец загрузки MCP: сборка упала
-            raise
+        ctx = asyncio.run(_abuild_ctx())
         # Пометки ленты «изображение не просмотрено» (дизайн картинок §10) — с тредом
         # прогона: хук нужен уже собранному контексту, поэтому ставится здесь.
         ctx.on_trace_note = self._trace_note_sink.hook_for(ctx)
@@ -1936,7 +1952,6 @@ class TuiApp(App):
             loaded, ctx.tools_data, ctx.mcp_status
         )
         self._mcp_status = ctx.mcp_status
-        progress.finish(True)  # конец загрузки MCP: сборка завершена
         self._registered_tool_names = getattr(
             ctx, "registered_tool_names", None
         )

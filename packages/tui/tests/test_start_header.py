@@ -294,3 +294,72 @@ def test_build_error_marks_progress_failed(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         app._build_real_executor()
     assert app._mcp_progress.outcome() is False
+
+
+def _boom(*_a, **_k):
+    raise RuntimeError("boom")
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "gc_core.tools.mcp_snapshot.build_mcp_tools_snapshot",  # после ctx
+        "gc_core.config_modules.auth.build_auth_connector",  # до прогресса
+        "gc_core.agent_executor.AgentExecutor",  # после mcp_status
+    ],
+)
+def test_build_failure_anywhere_marks_progress_failed(
+    tmp_path, monkeypatch, target
+):
+    """Любой сбой сборки — конец загрузки с ошибкой, а не вечная загрузка
+    и не «готов» у упавшей сборки (контракт §6.3)."""
+    app = _real_build_app(
+        tmp_path, monkeypatch, as_coro(lambda *a, **k: _Ctx())
+    )
+    monkeypatch.setattr(target, _boom)
+    with pytest.raises(RuntimeError, match="boom"):
+        app._build_real_executor()
+    assert app._mcp_progress.outcome() is False
+
+
+@pytest.mark.asyncio
+async def test_startup_build_failure_freezes_header_failed(
+    tmp_path, monkeypatch
+):
+    """Сборка падает ещё до прогресса (настройки авторизации): шапка после
+    прогрева застывает на сбое, таймера нет."""
+    from gc_testkit.tui_support import wait_until
+
+    app = _real_build_app(
+        tmp_path, monkeypatch, as_coro(lambda *a, **k: _Ctx())
+    )
+    monkeypatch.setattr(
+        "gc_core.config_modules.auth.build_auth_connector", _boom
+    )
+    async with app.run_test(size=(120, 40)) as pilot:
+        header = _header(app)
+        await wait_until(
+            pilot,
+            lambda: header._peephole.phase == "failed",
+            "шапка дошла до сбоя загрузки",
+        )
+        await pilot.pause()
+        assert _status(header) == "⚠ MCP: загрузка не завершилась · /mcp"
+        assert header._timer is None
+
+
+@pytest.mark.asyncio
+async def test_two_blank_rows_between_header_and_first_reply(tmp_path):
+    """Между строкой статуса и первой репликой — две пустые строки
+    (контракт §3.5, §4): граница, где начинается диалог."""
+    app = _app(tmp_path)
+    async with app.run_test(size=(96, 30)) as pilot:
+        await pilot.pause()
+        app.screen._mount_user_reply("привет")
+        await pilot.pause()
+        rows = _screen_rows(app)
+        status = next(
+            i for i, r in enumerate(rows) if r.strip() == "✓ готов к работе"
+        )
+        reply = next(i for i, r in enumerate(rows) if "› привет" in r)
+        assert rows[status + 1 : reply] == ["", ""]
