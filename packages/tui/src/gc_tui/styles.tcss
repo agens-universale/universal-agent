@@ -718,7 +718,7 @@ TextArea.ask-human-mode { border: solid $run-color; }
 #onb-footer { height: 2; background: $bg; color: $dim; padding: 0 1; }
 #onb-frame { height: auto; width: 1fr; padding: 0 2; margin: 1 0; background: $bg; }
 #onb-brand { height: auto; padding: 0; }
-#onb-stepper { height: auto; padding: 1 0 2 0; }   /* одна пустая строка под знаком бренда */
+#onb-stepper { height: auto; padding: 2 0; }   /* две пустые строки под знаком бренда, как в макете */
 #onb-summary { height: 1; margin-bottom: 1; }   /* строка сводки — клип по краю, без переноса; воздух перед заголовком шага */
 /* Плашка о деградации загрузки: абзац в 2-3 строки, и под ним обязан быть воздух —
    иначе она сливается со следующей за ней плашкой о перекрывающем слое (тоже
