@@ -77,3 +77,10 @@ def test_format_settle_zero_connected():
     )
     assert "⚠" in text and "0/2" in text and "/mcp" in text
     assert "ни один" in text
+
+
+def test_finish_records_outcome():
+    sink = McpProgress()
+    assert sink.outcome() is None
+    sink.finish(True)
+    assert sink.outcome() is True

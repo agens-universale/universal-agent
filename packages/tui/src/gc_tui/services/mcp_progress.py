@@ -13,10 +13,21 @@ class McpProgress:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._servers: dict[str, Optional[dict]] = {}
+        self._outcome: Optional[bool] = None
 
     def begin(self, server_names) -> None:
         with self._lock:
             self._servers = dict.fromkeys(server_names)
+            self._outcome = None
+
+    def finish(self, ok: bool) -> None:
+        """Сигнал конца сборки: True — завершена, False — упала."""
+        with self._lock:
+            self._outcome = ok
+
+    def outcome(self) -> Optional[bool]:
+        with self._lock:
+            return self._outcome
 
     def update(self, server: str, status: dict) -> None:
         with self._lock:
