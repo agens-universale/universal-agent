@@ -89,7 +89,6 @@ from gc_tui.models import (
     ResultOutcome,
     TaskCursor,
 )
-from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
@@ -262,6 +261,7 @@ from gc_tui.widgets.model_mark import (
     restored_mark,
 )
 from gc_tui.widgets.plan_panel import PlanPanel
+from gc_tui.widgets.start_header import StartHeader
 from gc_tui.widgets.static_content import text_key, update_if_changed
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 from gc_tui.widgets.tool_blocks_view import (
@@ -361,9 +361,6 @@ def select_active_substate(
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp» уже в бренд-карточке.)
 # Diff: F3 в базовом хроме футера; в ленте о правках говорят блоки диффов.
-# Отступ колонки статусов от логотипа — тот же, что в CSS (#brand-mcp padding-left):
-# порог узости считается по нему, и разъехаться они не должны.
-_MCP_COL_PAD = 6
 # Слева в футере — пилюля режима разрешений и счётчик уведомлений (решение
 # владельца): постоянный индикатор режима важнее списка F-клавиш, а клавиши
 # перечислены в справке (F1). Во время хода к пилюле добавляется ТОЛЬКО
@@ -601,11 +598,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         super().__init__(*args, **kwargs)
         self._registry = build_default_registry()
         self._palette: CommandPalette | None = None
-        self._brand: Vertical | None = None
-        self._brand_wide: bool | None = (
-            None  # раскладка карточки: статусы сбоку/снизу
-        )
-        self._brand_row = None  # контейнер карточки (ссылка, не запрос)
+        self._brand: StartHeader | None = None
         self._task_events: list = []  # list[TraceEvent]; пополняется в _render_record/_render_segments
         # A1: правило показа ответов (дедуп, попытки turn_finish) — то же,
         # что у /copy.
@@ -634,15 +627,9 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Пометки вызова, чья строка ещё не в ленте: (тред, пометка, тиков
         # ожидания осталось) — см. _drain_trace_notes.
         self._waiting_notes: list[tuple[str | None, TraceNote, int]] = []
-        self._mcp_status_row = (
-            None  # Optional[Static] — live MCP-loading индикатор
-        )
         self._warnings_toasted = (
             False  # warning-тосты при старте показываются один раз за запуск
         )
-        self._mcp_status_done = False
-        # последняя MCP-строка карточки — для перерисовки (runtime-notice / update-notice)
-        self._last_mcp_card_line: Optional[str] = None
         # Phase 2: tool-row mutation state
         self._active_calls: dict[str, ToolCallRow] = {}
         # Блоки вызовов (P4): застывшие таймеры — один реестр на ленту,
@@ -951,10 +938,6 @@ class TraceScreen(TraceFollowMixin, Screen):
         self._refresh_header()  # пересчитать усечение пути под новую ширину
         self._refresh_footer()  # адаптивная вёрстка usage (стек сессии) под новую ширину
         self._sync_chrome_caps()  # потолки хрома под новую высоту экрана
-        # Раскладка бренд-карточки выбиралась только при сборке: сузив окно уже после
-        # старта, человек получал колонку статусов в пару символов шириной — слова
-        # рвались по буквам («подк / люче / ны»), а совсем узко она схлопывалась в ноль.
-        self._apply_brand_layout(self._brand_fits_beside(event.size.width))
         self.call_after_refresh(self._refresh_trace_overlays)
 
     def on_click(self, event: events.Click) -> None:
@@ -1854,8 +1837,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         return True
 
     def on_screen_resume(self) -> None:
-        """После возврата с под-экрана — освежить карточку и футер уведомлений."""
-        self._refresh_notices_card()
+        """После возврата с под-экрана — освежить футер уведомлений."""
         self._refresh_footer()
 
     def _current_cwd(self) -> str:
@@ -2277,7 +2259,6 @@ class TraceScreen(TraceFollowMixin, Screen):
             self, lambda: self.query_one_optional(_SEL_TRACE)
         )
         self._show_brand()
-        self._render_startup_notices()
         # Per-project история input-реплик: project_dir известен со старта
         # (threads_dir.parent), attach не нужен — ↑/↓ работают уже в empty-state.
         from gc_tui.services.input_history import InputHistory
@@ -5796,10 +5777,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         """Подготовить TUI к новому запуску runner.start:
         сбросить error-флаг, очистить last_runner_error,
         сбросить meta.tui.status → running (B1: иначе после прошлого completed
-        бейдж/список сессий врут, пока живой runner не перекрывает live).
-
-        _mcp_status_row НЕ обнуляем: колонка — часть бренд-карточки (#brand-mcp),
-        переживает пересборку (_clear_trace); ссылка остаётся валидной."""
+        бейдж/список сессий врут, пока живой runner не перекрывает live)."""
         # Сначала конец прошлого хода: кончился между тиками — его исход
         # пишется с его флагами, до сброса.
         self._settle_ended_run()
@@ -5868,7 +5846,6 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _reset_run_flags(self) -> None:
         """Сбросить error- и stop-флаги прошлого прогона (app-уровня)."""
         self._error_shown = False
-        self._mcp_status_done = False
         self.app.last_runner_error = None
         self.app.last_terminal_outcome = None
         self.app.last_stop_requested = False
@@ -5905,42 +5882,18 @@ class TraceScreen(TraceFollowMixin, Screen):
                 {k: tui.get(k) for k in ("status", "last_indicator")},
             )
 
-    def _update_mcp_indicator(self) -> None:
-        if self._mcp_status_done:
-            return
+    def _feed_start_header(self) -> None:
+        """Снимок загрузки MCP — в шапку. Каждая сборка executor заводит
+        свой `McpProgress`, другой объект шапка считает новым поколением."""
         progress = getattr(self.app, "_mcp_progress", None)
-        if progress is None:
+        if progress is None or self._brand is None:
             return
         servers, _active = progress.snapshot()
-        if not servers:
-            return
-        from gc_tui.services.mcp_progress import (
-            format_mcp_progress,
-            format_mcp_settle,
-        )
+        self._brand.feed(progress, servers, progress.outcome())
 
-        if self._mcp_status_row is None:
-            return  # карточка ещё не смонтирована
-        self._mcp_status_row.update(format_mcp_progress(servers))
-        if progress.all_reported():
-            self._mcp_status_done = True
-            self.app._mcp_progress = None
-            row = self._mcp_status_row
-            mcp_line = format_mcp_settle(servers)
-            self.set_timer(1.0, lambda: self._settle_mcp_row(row, mcp_line))
-
-    def _settle_mcp_row(self, row, mcp_line: str) -> None:
-        """Схлопнуть MCP-прогресс в итог-запись карточки: статус MCP + строка
-        уведомлений + готовность. Считается ЗДЕСЬ, а не на boot: к моменту settle
-        mcp_status осел → карточка и /notices согласованы (иначе счётчик уведомлений
-        недосчитывал бы MCP-фейлы)."""
-        try:
-            self._refresh_notices_card(
-                mcp_line=mcp_line
-            )  # запоминает mcp_line для перерисовок
-        except Exception:
-            pass
-        self._maybe_toast_warnings()  # notices финальны (mcp_status осел) → warning-тосты
+    def on_start_header_settled(self, _event: StartHeader.Settled) -> None:
+        # Итог загрузки: mcp_status осел, уведомления финальны → тосты.
+        self._maybe_toast_warnings()
 
     def _mcp_screen_snapshot(self):
         """Снапшот для экрана /mcp: предпочитаем boot-результат (app._mcp_snapshot,
@@ -6271,8 +6224,8 @@ class TraceScreen(TraceFollowMixin, Screen):
             self._refresh_trace_overlays()
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
         self._run_orphan_cleanups()
-        # Индикатор загрузки MCP — на старте (до появления активной задачи) тоже.
-        self._update_mcp_indicator()
+        # Загрузка MCP в шапке — на старте (до появления активной задачи) тоже.
+        self._feed_start_header()
         # Замок выбора в открытом пикере (`/profile` во время хода) снимается
         # с концом хода — без переоткрытия.
         if self._arg_picker is not None:
@@ -6767,95 +6720,18 @@ class TraceScreen(TraceFollowMixin, Screen):
         if any(ev.kind in _DIALOG_CONTINUATION_KINDS for ev in added[after:]):
             self._unmount_ask_human_banner()
 
-    # Ширина хрома вокруг колонки статусов. Порог узости считается по факту
-    # (`_brand_fits_beside`), а не константой: длина строк статусов зависит от MCP и
-    # уведомлений, и фиксированный порог либо рвал слова в колонке, либо уводил её
-    # вниз раньше времени. Слагаемые (styles.tcss, поэтому и продублированы здесь,
-    # как _MCP_COL_PAD): border round у #brand-block — 2, его padding 1 2 — 4,
-    # padding 0 1 у #trace — 2, вертикальный скроллбар трейса — 1. Скроллбар
-    # считаем всегда: в живой сессии он есть, а на пустом старте лишняя колонка
-    # стоит одной пограничной ширины, где статусы встанут под логотипом — это
-    # легальная раскладка, в отличие от «подк / люче / ны».
-    _BRAND_CHROME = 9
-
     def _show_brand(self) -> None:
         if self._brand is not None and self._brand.parent is not None:
             return
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        # без класса line-meta: его margin-top:1 опускал бы MCP-блок ниже логотипа;
-        # цвет MCP-колонки задаёт #brand-mcp (color: $deep-dim).
-        self._mcp_status_row = Static("", id="brand-mcp", markup=False)
-        try:
-            wide = self._brand_fits_beside(self.app.size.width)
-        except Exception:
-            wide = True
-        logo = Static(branding.logo_text(), classes="brand-logo")
-        # Тэглайн — отдельной строкой под логотипом, центрирован по ширине лого
-        # (а не border_subtitle: тот центрируется по всей рамке, не под брендом).
-        tagline = Static(
-            branding.tagline_under_logo(),
-            classes="brand-tagline",
-            markup=False,
-        )
-        # Версия — своей строкой под тэглайном, с воздухом над ней (CSS): карточка это
-        # визитка продукта, и номер читается там же, где имя. Рядом же появляется
-        # «↑ доступна новая версия» — текущая версия и предложение обновиться
-        # складываются в одну мысль.
-        version = Static(
-            branding.version_under_logo(),
-            classes="brand-version",
-            markup=False,
-        )
-        left = Vertical(logo, tagline, version, id="brand-left")
-        inner = Horizontal(left, self._mcp_status_row, id="brand-row")
-        self._brand_row = inner  # раскладку ставит _apply_brand_layout ниже
-        self._brand_wide = None
-        brand = Vertical(inner, id="brand-block")
+        servers = self.app.base_settings().settings.mcp.servers
+        brand = StartHeader(mcp_total=len(servers))
+        brand.set_update(getattr(self.app, "_update_available", False))
         trace.mount(brand)
         self._brand = brand
-        self._apply_brand_layout(wide)
-
-    def _brand_fits_beside(self, width: int) -> bool:
-        """Влезает ли колонка статусов СБОКУ от логотипа целиком.
-
-        Считаем по самой длинной строке статусов, а не по фиксированному порогу: их
-        длина зависит от MCP и уведомлений, и любое постоянное число либо рвало слова
-        («подк / люче / ны»), либо уводило колонку вниз там, где она помещалась."""
-        from gc_tui import branding
-
-        lines = self._compose_card_lines(
-            self._last_mcp_card_line
-        ).plain.splitlines()
-        need = max((len(line) for line in lines), default=0)
-        logo_w = max(
-            (len(line) for line in branding.LOGO.splitlines()), default=0
-        )
-        return width >= logo_w + _MCP_COL_PAD + need + self._BRAND_CHROME
-
-    def _apply_brand_layout(self, wide: bool) -> None:
-        """Статусы сбоку от логотипа (широкое окно) или под ним (узкое).
-
-        Меняем layout уже смонтированного контейнера, а не пересобираем карточку:
-        `remove()` у Textual отложенный, и на кадр в трейсе оказались бы две карточки.
-        Под логотипом первой строке нужен воздух сверху, сбоку — нет."""
-        row = self._brand_row
-        if row is None or self._brand_wide == wide:
-            return
-        # Ссылку на контейнер держим сами: сразу после mount он ещё не находится
-        # запросом (монтирование у Textual отложенное), а раскладку надо поставить
-        # уже на сборке — иначе старт в узком окне остался бы в широкой раскладке.
-        row.styles.layout = "horizontal" if wide else "vertical"
-        if self._mcp_status_row is not None:
-            toggle = (
-                self._mcp_status_row.remove_class
-                if wide
-                else self._mcp_status_row.add_class
-            )
-            toggle("brand-mcp-stacked")
-        self._brand_wide = wide  # только после успешного применения
 
     def _collect_notices(self):
-        """Бейдж КАРТОЧКИ: стартовые + unread runtime (без обновления — оно там строкой).
+        """Стартовые + unread runtime, без обновления (запасной путь бейджа футера).
 
         Владелец сборки — App (_startup_notices / collect_unread_notices): экран не
         пересобирает то же самое, иначе новый источник уведомлений, добавленный на
@@ -6872,51 +6748,13 @@ class TraceScreen(TraceFollowMixin, Screen):
             return collect()
         return self._collect_notices()
 
-    def _has_mcp_servers(self) -> bool:
-        """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
-        MCP-settle — карточку досбираем тогда; без них — сразу на boot."""
-        return bool(self.app.base_settings().settings.mcp.servers)
-
-    def _compose_card_lines(self, mcp_line: Optional[str]) -> Text:
-        """Итог-содержимое правой колонки карточки: до четырёх строк через пустую строку.
-
-            ⚠ MCP: 3/5 подключены · /mcp             (только если заданы MCP-серверы)
-
-            ⚠2 ℹ1 · F4/notices                  (только если есть уведомления)
-
-            ↑ доступна новая версия · /settings → Обновление  (teal, если авто-чек нашёл)
-
-            ✓ готов к работе                         (всегда)
-
-        Строка уведомлений — голый бейдж `format_notices_badge`, без слова-префикса:
-        тот же вид, что в футере и на /sessions (единый источник — notices_ui).
-        Детали уведомлений — на экране /notices (F4); трейс держим чистым."""
-        notices = self._collect_notices()
-        lines = []  # (text, style|None)
-        if mcp_line:
-            lines.append((mcp_line, None))
-        badge = format_notices_badge(notices)
-        if badge:
-            lines.append(
-                (badge, None)
-            )  # строка целиком — базовым цветом карточки
-        if getattr(self.app, "_update_available", False):
-            lines.append(
-                ("↑ доступна новая версия · /settings → Обновление", _ACCENT)
-            )
-        lines.append(("✓ готов к работе", None))
-        t = Text()
-        for i, (s, style) in enumerate(lines):
-            if i:
-                t.append("\n\n")
-            t.append(s, style=style)
-        return t
-
     def refresh_update_notice(self) -> None:
-        """Дорисовать строку «доступна новая версия» в brand-карточке — зовётся из
-        async авто-чека (app) при находке обновления. MCP-строку карточки не трогаем:
-        _refresh_notices_card без mcp_line переиспользует запомненную."""
-        self._refresh_notices_card()
+        """Хвост «доступна новая версия» в строке версии шапки — по флагу app
+        (авто-проверка, секция «Обновление»). Строку статуса не трогает."""
+        if self._brand is not None:
+            self._brand.set_update(
+                getattr(self.app, "_update_available", False)
+            )
 
     def _maybe_toast_warnings(self) -> None:
         """Один раз при старте (когда notices финальны): warning-уведомления → тост,
@@ -6948,36 +6786,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         except Exception:
             pass  # тосты — best-effort, не роняют старт
 
-    def _render_startup_notices(self) -> None:
-        """Boot-оркестрация карточки. Без MCP-серверов данные полны сразу →
-        выставляем карточку. С MCP-серверами откладываем до settle
-        (см. _settle_mcp_row), где mcp_status уже осел."""
-        if self._has_mcp_servers():
-            return
-        self._refresh_notices_card(mcp_line=None)
-        self._maybe_toast_warnings()
-
-    def _refresh_notices_card(self, *, mcp_line: Optional[str] = None) -> None:
-        """Обновить правую колонку карточки: MCP + счётчик уведомлений + готовность."""
-        if self._mcp_status_row is None:
-            return
-        if mcp_line is not None:
-            self._last_mcp_card_line = mcp_line
-        self._mcp_status_row.update(
-            self._compose_card_lines(self._last_mcp_card_line)
-        )
-        # Строки статусов только что могли стать длиннее (осели MCP, пришли
-        # уведомления) — раскладку пересчитываем по НИМ, иначе колонка осталась бы
-        # сбоку и рвала бы свежий текст по буквам.
-        try:
-            self._apply_brand_layout(
-                self._brand_fits_beside(self.app.size.width)
-            )
-        except Exception:
-            pass
-
-    # Шапка трейса: переживает пересборку (#brand-block — бренд,
-    # MCP-статус живёт внутри карточки как #brand-mcp).
+    # Шапка трейса: переживает пересборку (#brand-block — бренд и статус).
     _TRACE_HEADER_IDS = frozenset({"brand-block"})
 
     def _clear_trace(self) -> None:

@@ -1911,7 +1911,11 @@ class TuiApp(App):
             finally:
                 await aclose_clients()
 
-        ctx = asyncio.run(_abuild_ctx())
+        try:
+            ctx = asyncio.run(_abuild_ctx())
+        except BaseException:
+            progress.finish(False)  # конец загрузки MCP: сборка упала
+            raise
         # Пометки ленты «изображение не просмотрено» (дизайн картинок §10) — с тредом
         # прогона: хук нужен уже собранному контексту, поэтому ставится здесь.
         ctx.on_trace_note = self._trace_note_sink.hook_for(ctx)
@@ -1932,6 +1936,7 @@ class TuiApp(App):
             loaded, ctx.tools_data, ctx.mcp_status
         )
         self._mcp_status = ctx.mcp_status
+        progress.finish(True)  # конец загрузки MCP: сборка завершена
         self._registered_tool_names = getattr(
             ctx, "registered_tool_names", None
         )
@@ -2058,17 +2063,15 @@ class TuiApp(App):
         )
 
     def collect_unread_notices(self) -> List[Notice]:
-        """Бейдж КАРТОЧКИ: стартовые + unread runtime.
-
-        Обновления здесь нет намеренно: в карточке оно показано отдельной строкой
-        (_compose_card_lines), и счётчик утверждал бы то же самое второй раз."""
+        """Стартовые + unread runtime, без обновления (его добавляет бейдж
+        футера, `collect_footer_notices`)."""
         return self._startup_notices() + collect_unread_runtime_notices()
 
     def collect_footer_notices(self) -> List[Notice]:
-        """Бейдж ФУТЕРА: то же, что в карточке, ПЛЮС обновление.
+        """Бейдж ФУТЕРА: unread-уведомления ПЛЮС обновление.
 
-        В футере отдельной строки про обновление нет — без счётчика признак исчезал бы
-        вместе с карточкой, как только трейс уедет вверх, и до перезапуска не вернулся."""
+        Хвост обновления в шапке уезжает вверх вместе с трейсом — без счётчика
+        в футере признак пропадал бы до перезапуска."""
         return self._update_notice() + self.collect_unread_notices()
 
     # --- режим разрешений -------------------------------------------------
@@ -2308,10 +2311,7 @@ class TuiApp(App):
         main._cmd_diff()
 
     def refresh_notices_indicators(self) -> None:
-        """Обновить счётчики уведомлений в карточке главного экрана и футере активного."""
-        main = self._main_screen()
-        if main is not None and hasattr(main, "_refresh_notices_card"):
-            main._refresh_notices_card()
+        """Обновить счётчик уведомлений в футере активного экрана."""
         fn = getattr(self.screen, "_refresh_notices_footer", None)
         if callable(fn):
             fn()

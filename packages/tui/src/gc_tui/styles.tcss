@@ -82,14 +82,13 @@ TraceScreen #trace { width: 100%; margin: 0 0 1 0; }
 #indicator-bar { display: none; height: 2; padding: 0 1; background: $bg; }
 #indicator-bar.-turn { display: block; }
 
-/* Brand-блок — постоянная шапка трейса (Claude-style: стартовый экран = начало
- * трейса; ниже flow'ом индикатор загрузки MCP и далее диалог; не скрывается). */
+/* Стартовая шапка — первая запись трейса: знак, версия, статус MCP. Без
+ * рамки; сверху пустая строка под чертой хедера, снизу одна своя — вместе с
+ * отступом первой реплики выходит две. */
 #brand-block {
     width: 1fr;
     height: auto;
-    margin: 0;
-    padding: 1 2;
-    border: round $accent;
+    margin: 1 0 1 0;
 }
 
 /* Поле ввода — Claude-style: две тонкие линии ─ над и под input.
@@ -370,21 +369,6 @@ UserReplyContainer.-queued > .user-band {
 UserReplyContainer:focus > .user-band { background: $highlight-bg; }
 .queue-hint { display: none; height: auto; padding-left: 2; color: $muted; }
 UserReplyContainer.-queue-hint > .queue-hint { display: block; }
-
-/* Бренд-блок пустого состояния (§2.8) */
-.brand-logo { color: $brand; text-style: bold; width: auto; height: auto; }
-.brand-tagline { color: $dim; width: auto; height: auto; margin-top: 1; }
-/* Версия — своей строкой под тэглайном, через отступ: вплотную она читалась
-   как часть тэглайна. Тише его: это справка, а не часть бренда. */
-.brand-version { color: $deep-dim; width: auto; height: auto; margin-top: 1; }
-#brand-left { width: auto; height: auto; }
-#brand-row { width: 1fr; height: auto; }
-#brand-mcp  { width: 1fr; color: $deep-dim; padding-left: 6; height: auto; content-align: left top; }
-/* Тот же блок, когда он под брендом (узкое окно): воздух сверху и левый край без
-   отступа — под логотипом колонке не от чего отступать, отступ там читался как
-   случайный сдвиг. Отдельным правилом, а не в шортхенде выше: per-side margin из
-   разных правил Textual перетирает целиком. */
-#brand-mcp.brand-mcp-stacked { margin-top: 1; padding-left: 0; }
 
 /* ThinkingIndicator — «думаю…» (spec 2026-05-26) */
 /* padding слева = 0: глиф встаёт по колонке буллетов ●/> строк трейса

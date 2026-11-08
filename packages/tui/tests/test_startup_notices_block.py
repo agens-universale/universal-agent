@@ -1,9 +1,16 @@
-"""TUI: сбор стартовых уведомлений, бейдж готовности, сворачиваемый блок."""
+"""TUI: сбор стартовых уведомлений; бейдж — в футере, в шапке только
+готовность, MCP и хвост обновления."""
 
 from __future__ import annotations
 
 from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
+
+
+def _header_text(scr) -> str:
+    """Шапка так, как её раскладывает сам виджет по своей ширине."""
+    header = scr.query_one("#brand-block")
+    return header.render().laid_out(header.content_region.width).plain
 
 
 @pytest.mark.asyncio
@@ -32,28 +39,31 @@ async def test_startup_block_collapsed_shows_max_three(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_notices_summary_in_card_not_trace(tmp_path):
-    """При уведомлениях в КАРТОЧКЕ строка «⚠ N · F4/notices» (формат B); в трейсе
-    НЕТ блока-заголовка «Уведомления» — детали только на экране /notices."""
+async def test_notices_summary_in_footer_not_header_or_trace(tmp_path):
+    """Бейдж уведомлений «⚠ N · F4/notices» — только в футере: в шапке его нет,
+    в трейсе нет блока «Уведомления» — детали на экране /notices."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+    from gc_tui.services.notices_ui import WARN_GLYPH
     from textual.widgets import Static
 
+    # stop_tools_unknown + agentsmd_override_ignored — два warning, без info.
     cfg = {
         "agent.model": "M",
         "agent.stop_tools": ["bogus1"],
-        "backend.stream": True,  # устаревший ключ задан явно → deprecated_key
+        "tui.agentsmd_override": True,
+        "paths.agent_md_path": "/some/agent.md",
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
-    ).run_test() as pilot:
+    ).run_test(size=(120, 40)) as pilot:
         scr = pilot.app.screen
         await pilot.pause()
-        card = str(scr._mcp_status_row.render())
-        assert "⚠" in card and "F4/notices" in card, (
-            f"Строка уведомлений не найдена в карточке: {card!r}"
-        )
-        # Блок-заголовок «Уведомления · N» в трейсе не монтируется.
+        header = _header_text(scr)
+        assert "F4/notices" not in header and WARN_GLYPH not in header
+        assert header.splitlines()[-1] == "✓ готов к работе"
+        footer = str(scr.query_one("#footer-slot").render())
+        assert f"{WARN_GLYPH} 2 · F4/notices" in footer
         texts = [
             str(s.render())
             for s in pilot.app.query_one("#trace").query(Static)
@@ -64,89 +74,25 @@ async def test_notices_summary_in_card_not_trace(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_notices_line_format_b_glyph_and_breakdown(tmp_path):
-    """Формат B: ведущий severity-глиф, разбивка по уровням, без слова «уведомления»."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-
-    # stop_tools_unknown + agentsmd_override_ignored — оба warning, без info: чистый warn-only случай.
-    cfg = {
-        "agent.model": "M",
-        "agent.stop_tools": ["bogus1"],
-        "tui.agentsmd_override": True,
-        "paths.agent_md_path": "/some/agent.md",
-    }
-    async with TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
-    ).run_test() as pilot:
-        scr = pilot.app.screen
-        await pilot.pause()
-        card = str(scr._mcp_status_row.render())
-        from gc_tui.services.notices_ui import WARN_GLYPH
-
-        assert "уведомления:" not in card  # слово убрано
-        # Значок из общего источника: в нём вариационный селектор, и литерал разошёлся
-        # бы с кодом по невидимому символу. Число склеено со значком — иначе перенос
-        # строки в футере разрывал пару.
-        assert f"{WARN_GLYPH} 2 · F4/notices" in card  # 2 warning'а, формат B
-        # строка уведомлений — базовым цветом карточки, без амбер-подсветки глифа
-        from gc_tui.palette import WARN
-
-        t = scr._compose_card_lines(None)
-        assert not any(sp.style == WARN for sp in t.spans)
-
-
-def test_compose_card_lines_return_annotation_matches_actual_type():
-    """M2: _compose_card_lines собирает и возвращает rich.text.Text (не str) —
-    аннотация врала `-> str`."""
-    from gc_tui.screens.main import TraceScreen
-
-    assert TraceScreen._compose_card_lines.__annotations__["return"] == "Text"
-
-
-@pytest.mark.asyncio
-async def test_no_notices_line_when_clean_config(tmp_path):
-    """Без уведомлений — строки «уведомления:» в карточке нет, готовность простая."""
+async def test_update_available_tail_in_header(tmp_path):
+    """Найденное обновление (async авто-чек) — хвост строки версии в шапке;
+    строка статуса не меняется."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
     cfg = {"agent.model": "M"}
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
-    ).run_test() as pilot:
+    ).run_test(size=(120, 40)) as pilot:
         scr = pilot.app.screen
         await pilot.pause()
-        card = str(scr._mcp_status_row.render())
-        assert "уведомления:" not in card
-        assert "готов к работе" in card
-
-
-@pytest.mark.asyncio
-async def test_update_available_line_in_card_teal(tmp_path):
-    """При найденном обновлении (async авто-чек) в карточке — постоянная строка
-    «↑ доступна новая версия · Настройки → Обновление» accent-цветом; refresh дорисовывает."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.palette import ACCENT
-
-    cfg = {"agent.model": "M"}
-    async with TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
-    ).run_test() as pilot:
-        scr = pilot.app.screen
-        await pilot.pause()
-        assert "доступна новая версия" not in str(
-            scr._mcp_status_row.render()
-        )  # до чека — нет
+        assert "доступна новая версия" not in _header_text(scr)  # до чека
         pilot.app._update_available = True
         scr.refresh_update_notice()
-        card = str(scr._mcp_status_row.render())
-        assert "↑ доступна новая версия" in card and "/settings" in card
-        assert "готов к работе" in card
-        t = scr._compose_card_lines(None)
-        assert any(
-            sp.style == ACCENT for sp in t.spans
-        )  # строка обновления — accent
+        await pilot.pause()
+        lines = _header_text(scr).splitlines()
+        assert "↑ доступна новая версия · /settings → Обновление" in lines[1]
+        assert lines[-1] == "✓ готов к работе"
 
 
 @pytest.mark.asyncio
@@ -179,7 +125,7 @@ async def test_notices_screen_includes_update_available(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_auto_check_updates_main_card_when_other_screen_on_top(
+async def test_auto_check_updates_main_header_when_other_screen_on_top(
     tmp_path, monkeypatch
 ):
     """M3: авто-чек на старте маршаллит результат в ГЛАВНЫЙ экран (app._main_screen()),
@@ -227,9 +173,7 @@ async def test_auto_check_updates_main_card_when_other_screen_on_top(
             if app._update_available:
                 break
         assert app._update_available is True
-        main = app._main_screen()
-        card = str(main._mcp_status_row.render())
-        assert "↑ доступна новая версия" in card
+        assert "↑ доступна новая версия" in _header_text(app._main_screen())
 
 
 @pytest.mark.asyncio
@@ -275,9 +219,9 @@ async def test_warning_toasts_fire_on_change_then_silent(
 
 
 @pytest.mark.asyncio
-async def test_card_readiness_always_plain(tmp_path):
-    """Строка готовности в карточке всегда простая «✓ готов к работе» (счётчики —
-    на отдельной строке «уведомления:», не на готовности)."""
+async def test_header_readiness_always_plain(tmp_path):
+    """Строка готовности в шапке всегда простая «✓ готов к работе»: счётчики
+    уведомлений живут в футере, не на готовности."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -288,8 +232,7 @@ async def test_card_readiness_always_plain(tmp_path):
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
-    ).run_test() as pilot:
+    ).run_test(size=(120, 40)) as pilot:
         scr = pilot.app.screen
         await pilot.pause()
-        card = str(scr._mcp_status_row.render())
-        assert "✓ готов к работе" in card
+        assert _header_text(scr).splitlines()[-1] == "✓ готов к работе"

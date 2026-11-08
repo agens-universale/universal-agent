@@ -1,4 +1,4 @@
-"""TUI: runtime LLM error → счётчик в карточке, футере и /notices."""
+"""TUI: runtime LLM error → счётчик в футере и /notices (шапку не трогает)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from gc_tui.services.notices_ui import (
 
 
 @pytest.mark.asyncio
-async def test_runtime_notice_appears_in_card(tmp_path):
+async def test_runtime_notice_appears_in_footer_not_header(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -20,11 +20,16 @@ async def test_runtime_notice_appears_in_card(tmp_path):
     cfg = {"agent.model": "M"}
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
-    ).run_test() as pilot:
+    ).run_test(size=(120, 40)) as pilot:
         scr = pilot.app.screen
         await pilot.pause()
-        assert "/notices" not in str(scr._mcp_status_row.render())
+        header = scr.query_one("#brand-block")
 
+        def header_text() -> str:
+            width = header.content_region.width
+            return header.render().laid_out(width).plain
+
+        before = header_text()
         push_runtime_notice(
             Notice(
                 "warning",
@@ -33,9 +38,9 @@ async def test_runtime_notice_appears_in_card(tmp_path):
             )
         )
         pilot.app.refresh_notices_indicators()
-        card = str(scr._mcp_status_row.render())
-        assert f"{WARN_GLYPH} 1" in card
-        assert "F4/notices" in card
+        await pilot.pause()
+        assert header_text() == before  # шапка уведомлений не показывает
+        assert "/notices" not in before
         footer = str(scr.query_one("#footer-slot").render())
         assert f"{WARN_GLYPH} 1" in footer
         assert "F4/notices" in footer

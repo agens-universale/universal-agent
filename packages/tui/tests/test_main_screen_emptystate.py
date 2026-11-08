@@ -4,58 +4,22 @@ from gc_testkit.tui_support import tui_settings
 import pytest
 
 
+def _header_text(app) -> str:
+    header = app.screen.query_one("#brand-block")
+    return header.render().laid_out(header.content_region.width).plain
+
+
 @pytest.mark.asyncio
 async def test_brand_block_visible_when_no_task():
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-
-    async with TuiApp().run_test() as pilot:
-        logos = pilot.app.query(".brand-logo")
-        assert len(logos) > 0
-        from gc_tui import branding
-
-        assert str(logos[0].render()) == branding.LOGO
-
-
-@pytest.mark.asyncio
-async def test_status_column_beside_logo_does_not_wrap_at_threshold_width():
-    """`_brand_fits_beside` обещает: на этой ширине колонка статусов помещается
-    СБОКУ от логотипа ЦЕЛИКОМ. Проверяем обещание на живой раскладке — по факту
-    переноса, а не по region.width (тот включает padding-left 6 и «влезает»
-    даже когда текст уже рвётся на «подк / люче / ны»).
-
-    Трейс заполнен намеренно: в живой сессии виден скроллбар, и он забирает ещё
-    одну колонку сверх рамки с падингами — самый узкий из реальных случаев."""
-    pytest.importorskip("textual")
     from gc_tui import branding
     from gc_tui.app import TuiApp
-    from gc_tui.screens.main import _MCP_COL_PAD
 
     async with TuiApp().run_test(size=(120, 40)) as pilot:
-        scr = pilot.app.screen
-        for i in range(120):
-            scr._mount_trace_row(
-                prefix="> ", content=f"строка {i}", kind_class="line-user-mark"
-            )
         await pilot.pause()
-        trace = pilot.app.query_one("#trace")
-        assert (
-            trace.show_vertical_scrollbar is True
-        )  # иначе замер не про тот случай
-
-        card = scr._compose_card_lines(
-            scr._last_mcp_card_line
-        ).plain.splitlines()
-        need = max(len(line) for line in card)
-        logo_w = max(len(line) for line in branding.LOGO.splitlines())
-        width = logo_w + _MCP_COL_PAD + need + scr._BRAND_CHROME  # ровно порог
-        await pilot.resize_terminal(width, 40)
-        await pilot.pause()
-
-        assert scr._brand_fits_beside(width) is True  # порог: «влезает сбоку»
-        mcp = pilot.app.query_one("#brand-mcp")
-        assert mcp.content_region.width >= need  # и ширины правда хватает
-        assert mcp.content_region.height == len(card)  # строки не перенесены
+        text = _header_text(pilot.app)
+        assert branding.MARK[0] in text and branding.MARK[1] in text
+        assert "Universal Agent" in text
 
 
 @pytest.mark.asyncio
@@ -70,8 +34,6 @@ async def test_brand_block_persists_after_first_event():
             prefix="> ", content="привет", kind_class="line-user-mark"
         )
         await pilot.pause()
-        logos = pilot.app.query(".brand-logo")
-        assert len(logos) > 0
         # Бренд — первый ребёнок #trace, событие смонтировано ПОД ним.
         trace = pilot.app.query_one("#trace")
         children = list(trace.children)
@@ -156,8 +118,7 @@ async def test_brand_block_survives_switch_to_empty_state():
         await pilot.pause()
         scr._switch_to_empty_state()
         await pilot.pause()
-        logos = pilot.app.query(".brand-logo")
-        assert len(logos) > 0
+        assert len(pilot.app.query("#brand-block")) == 1
         trace = pilot.app.query_one("#trace")
         children = list(trace.children)
         assert children and children[0].id == "brand-block"
