@@ -133,7 +133,7 @@ def run_install_entries(
         except (subprocess.CalledProcessError, InstallError, OSError) as exc:
             reason = _short_reason(exc)
             results.append((entry.name, "failed", reason))
-            print(f"[warn] {entry.name}: пропущен — {reason}")
+            print(f"[warn] {entry.name}: не установлен — {reason}")
     return results
 
 
@@ -791,7 +791,7 @@ def _install_manifest(
         print(f"[summary] НЕ установлено: {n} — {d}")
     if failed:
         print(
-            f"[summary] {len(failed)} MCP пропущено — агент будет работать; "
+            f"[summary] {len(failed)} MCP не установлено — агент будет работать; "
             f"поставь вручную или используй совместимый Python"
         )
     state = save_runtime_state(manifest_path=manifest_path)

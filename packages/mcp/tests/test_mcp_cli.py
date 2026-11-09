@@ -40,7 +40,7 @@ def test_install_by_name_installs_and_wires(fake_env, monkeypatch):
         cli,
         "_install_one",
         lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: (
-            installed.append(e.name) or True
+            installed.append(e.name) or ("installed", "")
         ),
     )
     wired = []
@@ -84,7 +84,7 @@ def test_install_all_wires_only_installed(fake_env, monkeypatch):
         cli,
         "_install_one",
         lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: (
-            e.name == "good"
+            ("installed", "") if e.name == "good" else ("failed", "сбой")
         ),
     )
     wired = []
@@ -92,7 +92,7 @@ def test_install_all_wires_only_installed(fake_env, monkeypatch):
         cli, "_wire_one", lambda e, root, dep: wired.append(e.name)
     )
     rc = cli.main(["install"])  # no name → all
-    assert rc == 0
+    assert rc == 1  # сбой хоть одного — не успех
     assert wired == ["good"]  # bad failed install → not wired
 
 
@@ -167,7 +167,7 @@ def test_install_threads_config_and_editable(fake_env, monkeypatch):
         cli,
         "_install_one",
         lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: (
-            seen.setdefault("editable", editable) or True
+            seen.update(editable=editable) or ("installed", "")
         ),
     )
     monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: None)
@@ -197,7 +197,8 @@ def test_install_threads_repo_url(fake_env, monkeypatch):
         cli,
         "_install_one",
         lambda e, root, dep, editable=False, repo_url=None, repo_ref=None: (
-            seen.update(repo_url=repo_url, repo_ref=repo_ref) or True
+            seen.update(repo_url=repo_url, repo_ref=repo_ref)
+            or ("installed", "")
         ),
     )
     monkeypatch.setattr(cli, "_wire_one", lambda e, root, dep: None)
@@ -277,13 +278,28 @@ def test_install_by_name_explains_platform_skip(fake_env, monkeypatch, capsys):
         "_load_manifest_entries",
         lambda config=None: ([_windows_only()], Path(".")),
     )
-    called = []
+    wired = []
     monkeypatch.setattr(
-        cli, "_install_one", lambda *a, **k: called.append(a) or True
+        cli, "_install_one", lambda *a, **k: ("skipped", "только для Windows")
     )
-    assert cli.main(["install", "computer"]) == 0
-    assert called == []
+    monkeypatch.setattr(cli, "_wire_one", lambda *a: wired.append(a))
+    assert cli.main(["install", "computer"]) == 1
+    assert wired == []
     assert "[skip] computer: только для Windows" in capsys.readouterr().err
+
+
+def test_install_by_name_failure_is_not_success(fake_env, monkeypatch, capsys):
+    # TUI по коду возврата пишет [ok]/[fail]: сбой обязан быть не нулём.
+    from recommended_mcp.runtime import cli
+
+    monkeypatch.setattr(
+        cli,
+        "_load_manifest_entries",
+        lambda config=None: ([_windows_only("pw")], Path(".")),
+    )
+    monkeypatch.setattr(cli, "_install_one", lambda *a, **k: ("failed", "x"))
+    assert cli.main(["install", "pw"]) == 1
+    assert "[warn] pw не установлен — не подключаю" in capsys.readouterr().err
 
 
 def test_install_all_lists_platform_skip_apart_from_failures(
@@ -297,8 +313,10 @@ def test_install_all_lists_platform_skip_apart_from_failures(
         "_load_manifest_entries",
         lambda config=None: ([_windows_only()], Path(".")),
     )
-    monkeypatch.setattr(cli, "_install_one", lambda *a, **k: False)
-    assert cli.main(["install"]) == 0
+    monkeypatch.setattr(
+        cli, "_install_one", lambda *a, **k: ("skipped", "только для Windows")
+    )
+    assert cli.main(["install"]) == 0  # пропуск по ОС — норма, не сбой
     out = capsys.readouterr().out
     assert "пропущено: computer (только для Windows)" in out
     assert "не установлено" not in out

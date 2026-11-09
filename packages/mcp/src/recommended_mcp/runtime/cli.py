@@ -69,8 +69,9 @@ def _install_one(
     editable: bool = False,
     repo_url=None,
     repo_ref=None,
-) -> bool:
-    """Поставить один рецепт в MCP-venv. True если успех."""
+) -> tuple[str, str]:
+    """Поставить один рецепт в MCP-venv: (status, detail) из
+    run_install_entries, status ∈ {installed, skipped, failed}."""
     from recommended_mcp.runtime.venv import (
         ensure_mcp_venv,
         pip_install_target,
@@ -86,7 +87,8 @@ def _install_one(
             repo_url=repo_url,
             repo_ref=repo_ref,
         )
-    return any(s == "installed" for _, s, _ in results)
+    ((_, status, detail),) = results
+    return status, detail
 
 
 def _wiring_paths(agent_dep_dir) -> tuple[str, str]:
@@ -143,39 +145,46 @@ def _cmd_install(
                 file=sys.stderr,
             )
             return 2
-        _install_named(entry, root, dep, editable, repo_url, repo_ref)
-        return 0
-    _install_all(entries, root, dep, editable, repo_url, repo_ref)
-    return 0
+        return _install_named(entry, root, dep, editable, repo_url, repo_ref)
+    return _install_all(entries, root, dep, editable, repo_url, repo_ref)
 
 
-def _install_named(entry, root, dep, editable, repo_url, repo_ref) -> None:
-    skip = _inst().platform_skip_reason(entry)
-    if skip:
-        print(f"[skip] {entry.name}: {skip}", file=sys.stderr)
-    elif _install_one(entry, root, dep, editable, repo_url, repo_ref):
+def _install_named(entry, root, dep, editable, repo_url, repo_ref) -> int:
+    """Код возврата: 0 — поставлен и подключён; 1 — нет (TUI по нему
+    пишет [ok]/[fail])."""
+    status, detail = _install_one(
+        entry, root, dep, editable, repo_url, repo_ref
+    )
+    if status == "installed":
         _wire_one(entry, root, dep)
         print(f"[done] {entry.name} установлен и подключён")
+        return 0
+    if status == "skipped":
+        print(f"[skip] {entry.name}: {detail}", file=sys.stderr)
     else:
         print(
             f"[warn] {entry.name} не установлен — не подключаю",
             file=sys.stderr,
         )
+    return 1
 
 
-def _install_all(entries, root, dep, editable, repo_url, repo_ref) -> None:
+def _install_all(entries, root, dep, editable, repo_url, repo_ref) -> int:
+    """Код возврата 1 — что-то упало; пропуск по ОС сбоем не считается."""
     installed_names: list[str] = []
     skipped: list[str] = []
     failed_names: list[str] = []
     for entry in entries:
         if getattr(entry, "optional", False):
             continue
-        skip = _inst().platform_skip_reason(entry)
-        if skip:
-            skipped.append(f"{entry.name} ({skip})")
-        elif _install_one(entry, root, dep, editable, repo_url, repo_ref):
+        status, detail = _install_one(
+            entry, root, dep, editable, repo_url, repo_ref
+        )
+        if status == "installed":
             _wire_one(entry, root, dep)
             installed_names.append(entry.name)
+        elif status == "skipped":
+            skipped.append(f"{entry.name} ({detail})")
         else:
             failed_names.append(entry.name)
     print(
@@ -186,6 +195,7 @@ def _install_all(entries, root, dep, editable, repo_url, repo_ref) -> None:
     if failed_names:
         print(f"[summary] не установлено: {', '.join(failed_names)}")
     print("[done] install complete")
+    return 1 if failed_names else 0
 
 
 def installable_names(config: Optional[str] = None) -> list:
