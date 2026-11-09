@@ -221,12 +221,12 @@ _PREVIOUS_RAMPS = {
 }
 
 
-def test_mcp_shimmer_is_built_from_text_tokens():
+def test_mcp_shimmer_runs_from_dim_to_ink_in_even_steps():
     assert palette.MCP_SHIMMER_SHADES == [
         palette.DIM,
-        palette.NOTE_INK,
+        "#aab0b6",
+        "#caccce",
         palette.INK,
-        palette.BRIGHT,
     ]
 
 
