@@ -6768,7 +6768,7 @@ class TraceScreen(TraceFollowMixin, Screen):
     def _maybe_toast_warnings(self) -> None:
         """Один раз при старте (когда notices финальны): warning-уведомления → тост,
         только если набор warning-кодов изменился с прошлого показа (on-change — не
-        спамим тем же; карточка/notices держат постоянную видимость). info не тостим.
+        спамим тем же; постоянная видимость — футер и /notices). info не тостим.
         Кап 3 + сводный «+N ещё». Персист набора — в agent_state.json."""
         if self._warnings_toasted:
             return
@@ -6784,7 +6784,7 @@ class TraceScreen(TraceFollowMixin, Screen):
                 upgrade_gate.read_state().get("last_shown_warning_codes") or []
             )
             if codes == last:
-                return  # набор тот же — молчим (постоянная видимость в карточке)
+                return  # набор тот же — молчим (постоянная видимость — футер)
             upgrade_gate.write_state(
                 {"last_shown_warning_codes": sorted(codes)}
             )

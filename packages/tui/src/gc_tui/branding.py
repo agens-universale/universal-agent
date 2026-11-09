@@ -112,8 +112,13 @@ class BrandHeader(WidthAware):
     def _mark_need(self) -> int:
         return _MARK_W + len(_GAP) + max(_TAG_W, len(self.version))
 
-    def _tail(self) -> Text:
-        return Text.assemble((UPDATE_TAIL[0], ACCENT), (UPDATE_TAIL[1], DIM))
+    @staticmethod
+    def _tail_atoms() -> list[Text]:
+        """Хвост обновления: стрелка с текстом акцентом, адрес настроек — DIM."""
+        return [
+            Text(UPDATE_TAIL[0], style=ACCENT),
+            Text(UPDATE_TAIL[1], style=DIM),
+        ]
 
     def _tail_beside(self) -> int:
         """Ширина строки версии вместе с хвостом (две клетки зазора)."""
@@ -128,7 +133,8 @@ class BrandHeader(WidthAware):
         bottom.append(_GAP + self.version, style=MUTED)
         if beside:
             bottom.append("  ")
-            bottom.append_text(self._tail())
+            for atom in self._tail_atoms():
+                bottom.append_text(atom)
         return [top, bottom]
 
     def _single_row(self) -> ColumnRow:
@@ -140,13 +146,9 @@ class BrandHeader(WidthAware):
         return ColumnRow(head, atoms)
 
     def _status(self) -> RenderResult:
-        status = self.status
-        if isinstance(status, Text):
-            status = status.copy()
-            status.no_wrap = True
-            status.overflow = "ellipsis"
+        # Строка загрузки сама не переносится (`loading_line`): копия не нужна.
         yield Text("")
-        yield status
+        yield self.status
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
@@ -161,11 +163,7 @@ class BrandHeader(WidthAware):
         if self.status is not None:
             yield from self._status()
         if self.update and not beside:
-            atoms = [
-                Text(UPDATE_TAIL[0], style=ACCENT),
-                Text(UPDATE_TAIL[1], style=DIM),
-            ]
-            yield ColumnRow(Text("  "), atoms)
+            yield ColumnRow(Text("  "), self._tail_atoms())
 
     def __rich_measure__(
         self, console: Console, options: ConsoleOptions
