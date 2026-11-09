@@ -1,8 +1,8 @@
 """Сборка executor в TUI закрывает httpx-клиенты своего loop.
 
-`_build_real_executor` заводит собственный `asyncio.run`, а реестр клиентов
-`async_http` ключуется по loop. Ход и `/compact` закрывают пул в `finally` и
-пишут об этом прямо в комментариях, а сборка — нет: клиент легаси http/sse MCP
+Сборка (`_assemble_executor`) заводит собственный `asyncio.run`, а реестр
+клиентов `async_http` ключуется по loop. Ход и `/compact` закрывают пул
+в `finally` и пишут об этом прямо в комментариях, а сборка — нет: клиент легаси http/sse MCP
 оставался в реестре с открытыми сокетами после смерти loop, и так на каждой
 пересборке контекста (смена конфига сессии, `/profile`).
 
@@ -22,7 +22,7 @@ def _build_executor_node() -> ast.FunctionDef:
     return next(
         n
         for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == "_build_real_executor"
+        if isinstance(n, ast.FunctionDef) and n.name == "_assemble_executor"
     )
 
 
