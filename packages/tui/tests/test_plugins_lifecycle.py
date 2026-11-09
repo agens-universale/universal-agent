@@ -336,3 +336,23 @@ async def test_installed_skill_runs_on_first_submit(tmp_path):
         await _submit(pilot, "/pl:s main.py")
         assert len(captured) == 1
         assert "pl:s" in captured[0][0]
+
+
+@pytest.mark.asyncio
+async def test_start_header_counts_plugin_servers(tmp_path, monkeypatch):
+    from gc_tui.widgets.start_header import StartHeader
+
+    plugin = _plugin(tmp_path / "src", "pl", servers={"srv": HTTP})
+    installed.install(str(plugin))
+    app = _app(_started())
+    totals: list[int] = []
+    real_init = StartHeader.__init__
+
+    def _init(self, *, mcp_total, **kwargs):
+        totals.append(mcp_total)
+        real_init(self, mcp_total=mcp_total, **kwargs)
+
+    monkeypatch.setattr(StartHeader, "__init__", _init)
+    async with app.run_test():
+        pass
+    assert totals == [1]
