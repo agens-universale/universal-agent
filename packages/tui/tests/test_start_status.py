@@ -61,3 +61,7 @@ def test_failed_row_without_mcp_servers_plain():
 def test_server_name_is_note_ink():
     line = loading_line(3, 9, ("filesystem", True), 0)
     assert _style_at(line, line.plain.index("filesystem")) == NOTE_INK
+
+
+def test_ready_word_is_note_ink():
+    assert str(settled_row(0, 0).atoms[0].style) == NOTE_INK

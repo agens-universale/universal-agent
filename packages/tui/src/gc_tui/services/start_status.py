@@ -12,7 +12,6 @@ from gc_tui.palette import (
     ACCENT_BREATH_SHADES,
     DIM,
     ERR,
-    INK,
     MCP_SHIMMER_SHADES,
     MUTED,
     NOTE_INK,
@@ -50,7 +49,7 @@ def loading_line(
 
 def settled_row(connected: int, total: int) -> ColumnRow:
     """`✓ готов к работе` и, если MCP есть, хвост `MCP c/t · /mcp`."""
-    atoms = [Text("готов к работе", style=INK)]
+    atoms = [Text("готов к работе", style=NOTE_INK)]
     if total > 0:
         label = f" MCP {connected}/{total} · /mcp"
         if connected < total:
