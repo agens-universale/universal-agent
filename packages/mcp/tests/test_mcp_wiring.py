@@ -142,3 +142,10 @@ def test_unwired_recipe_is_not_outdated(tmp_path, monkeypatch):
         npx="/N/npx",
         cache="/C",
     )
+
+
+def test_recipe_without_snippet_is_not_outdated(tmp_path, monkeypatch):
+    wiring, _ = _playwright_wired(tmp_path, monkeypatch)
+    assert not wiring.wiring_outdated(
+        "browser_playwright", tmp_path / "gone", npx="/N/npx", cache="/C"
+    )
