@@ -2,7 +2,7 @@
 
 import asyncio
 import hashlib
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 
 # Сторонние транспорты — из процесса воркера, до первого импорта ядра.
@@ -234,7 +234,8 @@ class UniversalSubagentWorkflow:
                     ),
                     force_legacy=request.child_context["force_legacy"],
                     breaker=CircuitBreaker.restore(
-                        request.parent_transfer.circuit_breaker
+                        request.parent_transfer.circuit_breaker,
+                        lock_factory=nullcontext,
                     ),
                 )
                 parent_state = State.from_execution_snapshot(

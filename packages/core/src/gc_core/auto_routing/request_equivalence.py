@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -25,9 +26,15 @@ class PreparedRequestEquivalence:
 
 
 def resolve_level_requests(source: Any) -> dict[str, ResolvedModel]:
-    from gc_core.model_router import ModelRouter
+    from gc_core.model_router import CircuitBreaker, ModelRouter
 
-    router = ModelRouter(source, choice_provider=lambda: START_LEVEL)
+    # Синхронная проекция настроек: роутер не покидает этот вызов и не
+    # разделяется потоками. Работает и внутри workflow без thread-lock.
+    router = ModelRouter(
+        source,
+        choice_provider=lambda: START_LEVEL,
+        breaker=CircuitBreaker(lock_factory=nullcontext),
+    )
     kits = {}
     for level in LEVEL_ORDER:
         try:

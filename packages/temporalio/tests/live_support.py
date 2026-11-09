@@ -59,13 +59,14 @@ def provider(tmp_path):
                         "read",
                         "fs_read_file",
                         {
+                            "add_line_numbers": False,
                             "path": str(tmp_path / "example.txt")
                             if any(
                                 str(tmp_path) in str(m.get("content", ""))
                                 for m in request["messages"]
                                 if m.get("role") == "user"
                             )
-                            else "example.txt"
+                            else "example.txt",
                         },
                     ),
                 ]

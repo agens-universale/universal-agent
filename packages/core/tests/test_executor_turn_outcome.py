@@ -19,6 +19,7 @@ from gc_core import run_summary_coordinator as rsc
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config_modules.root import AppConfig
 from gc_core.execution import turn_clock
+from gc_core.execution.environment import utc_clock
 from gc_core.execution.turn_clock import TurnClock, current_turn_clock
 from gc_core.persistence.turn_outcome import (
     CANCELLED,
@@ -323,7 +324,7 @@ async def test_record_lands_before_turn_end_compaction(run, monkeypatch):
 async def test_subagent_loop_writes_nothing_and_keeps_parent_clock(run):
     """Цикл ребёнка хука не получает; подхват своей очереди часы
     родителя не перепривязывает и не закрывает."""
-    parent = TurnClock.start(mono=run.mono, wall=turn_clock.utc_now)
+    parent = TurnClock.start(mono=run.mono, wall=utc_clock())
     turn_clock.bind_turn_clock(run.ctx, parent)
     child = State(
         verbose=False,
@@ -974,7 +975,7 @@ async def test_turn_without_calls_has_no_calls_key(tmp_path, monkeypatch):
 async def test_nested_call_lands_in_parent_clock(run, monkeypatch):
     """Ребёнок исполняет вызов на ctx с часами родителя — время в их карте."""
     monkeypatch.setattr(pr, "time", SimpleNamespace(monotonic=run.mono))
-    parent = TurnClock.start(mono=run.mono, wall=turn_clock.utc_now)
+    parent = TurnClock.start(mono=run.mono, wall=utc_clock())
     turn_clock.bind_turn_clock(run.ctx, parent)
 
     async def _invoke(name, arguments, state, ctx, run_agent_func, call_id):
@@ -1008,7 +1009,7 @@ async def test_running_call_counts_on_turn_clock(run, monkeypatch):
     """Идущий вызов — на часах хода с его старта (живой счёт фронтенда);
     законченный — то же время, что в карте записи итога."""
     monkeypatch.setattr(pr, "time", SimpleNamespace(monotonic=run.mono))
-    clock = TurnClock.start(mono=run.mono, wall=turn_clock.utc_now)
+    clock = TurnClock.start(mono=run.mono, wall=utc_clock())
     turn_clock.bind_turn_clock(run.ctx, clock)
     seen = []
 
