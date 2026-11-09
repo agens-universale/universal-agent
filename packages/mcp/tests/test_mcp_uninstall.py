@@ -111,7 +111,9 @@ def test_uninstall_entry_npx_without_agent_node_warns(
     )
     inst.uninstall_entry(e, Path("."))
     assert calls == []
-    assert "[warn] pw: Node агента не найдена" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"[warn] pw: Node агента v{inst.NODE_VERSION} не найдена" in out
+    assert "gc-mcp remove --all" in out
 
 
 def test_dist_name_wheel(tmp_path):

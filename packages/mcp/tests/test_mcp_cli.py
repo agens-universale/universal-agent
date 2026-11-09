@@ -229,6 +229,19 @@ def test_remove_all_wipes_our_dirs(fake_env, monkeypatch):
     assert not (data / "node").exists()  # node снесён
 
 
+def test_remove_all_points_to_chromium_cache_not_bare_playwright(
+    fake_env, monkeypatch, capsys
+):
+    # Голый `playwright uninstall` скачал бы последнюю версию playwright.
+    from recommended_mcp.runtime import cli
+
+    monkeypatch.setattr("sys.platform", "darwin")
+    assert cli.main(["remove", "--all"]) == 0
+    out = capsys.readouterr().out
+    assert "~/Library/Caches/ms-playwright" in out
+    assert "playwright uninstall" not in out
+
+
 def test_remove_all_keep_package_keeps_dirs(fake_env, monkeypatch):
     from recommended_mcp.runtime import cli, wiring
 

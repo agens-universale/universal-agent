@@ -9,7 +9,7 @@ pyproject.toml соответствующего проекта в external/ — 
 import tomllib
 from pathlib import Path
 
-from gc_testkit.paths import RECIPES
+from gc_testkit.paths import RECIPES, REPO
 from recommended_mcp.install import _vendor_candidates
 from recommended_mcp.manifest import load_manifest
 
@@ -118,3 +118,27 @@ def test_playwright_browser_comes_from_the_wired_package():
     args = snippet["browser_playwright"]["args"]
     assert pinned in args
     assert args[args.index("--browser") + 1] == "chromium"
+
+
+def test_demo_config_playwright_example_matches_snippet():
+    """Закомментированный пример в demo_config.yml копируют руками — его
+    аргументы обязаны совпадать со сниппетом (кэш там — `<cache>`)."""
+    import yaml
+
+    snippet = yaml.safe_load(
+        (
+            RECIPES / "browser_playwright" / "agent_config.snippet.yml"
+        ).read_text(encoding="utf-8")
+    )
+    expected = [
+        a.replace("{cache}", "<cache>")
+        for a in snippet["browser_playwright"]["args"]
+    ]
+    demo = (REPO / "demo_config.yml").read_text(encoding="utf-8")
+    assert "# browser_playwright" in demo, "пример пропал из demo_config.yml"
+    block = demo.split("# browser_playwright", 1)[1].split("\n  meta:", 1)[0]
+    args_line = next(
+        (line for line in block.splitlines() if "args:" in line), None
+    )
+    assert args_line, "в примере browser_playwright нет строки args"
+    assert yaml.safe_load(args_line.split("args:", 1)[1]) == expected

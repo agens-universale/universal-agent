@@ -16,6 +16,8 @@ Windows: `~/.gc/...`).
 - **Chromium** — качается на этапе install playwright'ом из самого
   `@playwright/mcp` (ревизия зафиксирована версией пакета); сервер
   запускается с `--browser chromium`, системный Chrome не нужен.
+- **ОС** — Playwright официально поддерживает Windows 11+ и macOS 14+;
+  на macOS ниже 13.5 Node 24 не запускается.
 
 ## Установка
 

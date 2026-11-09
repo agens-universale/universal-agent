@@ -304,6 +304,13 @@ def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
             print(f"[warn] {name} нет в манифесте — деинсталл пропущен")
 
 
+# Кэш браузеров Playwright по умолчанию; на Linux — ~/.cache/ms-playwright.
+_PLAYWRIGHT_BROWSERS = {
+    "win32": r"%LOCALAPPDATA%\ms-playwright",
+    "darwin": "~/Library/Caches/ms-playwright",
+}
+
+
 def _remove_all(keep_package: bool) -> None:
     from recommended_mcp.runtime import wiring
 
@@ -333,8 +340,10 @@ def _remove_all(keep_package: bool) -> None:
                 print(
                     f"[warn] не удалось удалить {d}: {exc} (закрой gc-ua, если daemon держит файлы, и повтори)"
                 )
+    cache = _PLAYWRIGHT_BROWSERS.get(sys.platform, "~/.cache/ms-playwright")
     print(
-        "[note] Chromium (общий кэш ms-playwright, вне ~/.gc) не трогаем — убрать вручную: playwright uninstall"
+        f"[note] Chromium (общий кэш Playwright, вне ~/.gc) не трогаем — "
+        f"убрать вручную каталог (обычно {cache})"
     )
     print("[done] все MCP удалены, артефакты под ~/.gc вычищены")
 
