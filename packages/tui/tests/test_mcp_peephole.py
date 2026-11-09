@@ -25,16 +25,21 @@ def _hold_of_first(servers: dict) -> int:
     return n - 1
 
 
-def test_expect_zero_is_settled():
-    p = McpPeephole()
-    p.expect(0)
+def test_zero_servers_is_settled_before_first_snapshot():
+    p = McpPeephole(0)
     assert p.phase == "settled"
+    assert p.outcome is None  # итог виден, а сборка ещё не кончилась
 
 
-def test_expect_n_is_loading_with_total():
-    p = McpPeephole()
-    p.expect(3)
+def test_n_servers_is_loading_with_total():
+    p = McpPeephole(3)
     assert (p.phase, p.total) == ("loading", 3)
+
+
+def test_outcome_reports_end_of_build():
+    p = McpPeephole(0)
+    p.sync(object(), {}, True)
+    assert (p.phase, p.outcome) == ("settled", True)
 
 
 def test_shows_each_server_for_five_ticks_when_alone():

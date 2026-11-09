@@ -17,10 +17,11 @@ SETTLE_TICKS = 10
 
 
 class McpPeephole:
-    def __init__(self) -> None:
+    def __init__(self, total: int = 0) -> None:
+        """`total` — серверов в конфиге: фаза до первого снимка."""
         self._source: object = None
         self._generation = 0
-        self._reset(0)
+        self._reset(total)
 
     def _reset(self, total: int) -> None:
         self._total = total
@@ -55,11 +56,11 @@ class McpPeephole:
     def generation(self) -> int:
         return self._generation
 
-    def expect(self, total: int) -> None:
-        """Фаза до первого снимка; поколение не меняется."""
-        self._total = total
-        if self._phase != "failed":
-            self._phase = "loading" if total > 0 else "settled"
+    @property
+    def outcome(self) -> bool | None:
+        """Конец сборки поколения: True — собрана, False — упала, None — идёт.
+        Без серверов фаза `settled` наступает раньше него."""
+        return self._outcome
 
     def sync(
         self,

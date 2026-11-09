@@ -17,6 +17,7 @@ _TWO_SERVERS = {
     }
 }
 _STATUS_HEADS = ("•", "✓", "⚠")
+_FAILED = "⚠ не запустился · отправьте сообщение для перезапуска"
 
 
 def _app(tmp_path, config=None):
@@ -163,10 +164,10 @@ async def test_build_error_freezes_failed(tmp_path):
     async with app.run_test(size=(120, 40)) as pilot:
         header = _header(app)
         await _feed(app, pilot, _progress(outcome=False))
-        assert _status(header) == "⚠ MCP: загрузка не завершилась · /mcp"
+        assert _status(header) == _FAILED
         assert header._timer is None
         _spin(header)
-        assert _status(header) == "⚠ MCP: загрузка не завершилась · /mcp"
+        assert _status(header) == _FAILED
 
 
 @pytest.mark.asyncio
@@ -178,7 +179,7 @@ async def test_build_error_without_servers_freezes_failed(tmp_path):
         progress.begin([])
         progress.finish(False)
         await _feed(app, pilot, progress)
-        assert _status(header) == "⚠ агент не готов — причина в ленте ниже"
+        assert _status(header) == _FAILED
         assert header._timer is None
 
 
@@ -239,11 +240,12 @@ async def test_settled_toasts_once(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_settled_posted_after_mount_without_servers(
+async def test_settled_without_servers_waits_for_end_of_build(
     tmp_path, monkeypatch
 ):
-    """Без MCP-серверов итог наступает сразу — сигнал всё равно один,
-    уже после монтирования (тосты предупреждений на старте)."""
+    """Без MCP-серверов шапка сразу пишет «готов к работе», но сигнал итога
+    (тосты предупреждений) — только с концом сборки: часть уведомлений
+    появляется при регистрации тулов."""
     from gc_tui.screens.main import TraceScreen
 
     calls = []
@@ -258,6 +260,11 @@ async def test_settled_posted_after_mount_without_servers(
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         await pilot.pause()
+        assert calls == []
+        progress = _progress()
+        progress.begin([])
+        progress.finish(True)
+        await _feed(app, pilot, progress)
         assert len(calls) == 1
 
 
@@ -380,7 +387,7 @@ async def test_startup_build_failure_without_servers_row(
             "шапка дошла до сбоя загрузки",
         )
         await pilot.pause()
-        assert _status(header) == "⚠ агент не готов — причина в ленте ниже"
+        assert _status(header) == _FAILED
         assert header._timer is None
 
 
@@ -406,7 +413,7 @@ async def test_startup_build_failure_freezes_header_failed(
             "шапка дошла до сбоя загрузки",
         )
         await pilot.pause()
-        assert _status(header) == "⚠ агент не готов — причина в ленте ниже"
+        assert _status(header) == _FAILED
         assert header._timer is None
 
 

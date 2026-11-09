@@ -48,14 +48,11 @@ def test_settled_row_plain():
 
 
 def test_failed_row_plain():
-    assert failed_row(2).plain == "⚠ MCP: загрузка не завершилась · /mcp"
-
-
-def test_failed_row_without_mcp_servers_plain():
-    row = failed_row(0)
-    assert row.plain == "⚠ агент не готов — причина в ленте ниже"
+    """Сбой сборки — один текст: упасть могло не только MCP, а следующее
+    сообщение соберёт агента заново."""
+    row = failed_row()
+    assert row.plain == "⚠ не запустился · отправьте сообщение для перезапуска"
     assert "MCP" not in row.plain
-    assert "/mcp" not in row.plain
 
 
 def test_server_name_is_note_ink():

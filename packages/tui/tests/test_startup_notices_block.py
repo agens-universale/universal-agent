@@ -181,9 +181,10 @@ async def test_warning_toasts_fire_on_change_then_silent(
     tmp_path, monkeypatch
 ):
     """Warning-уведомления всплывают тостом на 1-м старте (severity=warning), а на 2-м
-    с ТЕМ ЖЕ набором — молчат (on-change; постоянная видимость держит карточка/notices)."""
+    с ТЕМ ЖЕ набором — молчат (on-change; постоянная видимость — футер и /notices)."""
     pytest.importorskip("textual")
     from gc_core import upgrade_gate
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
 
     state_path = tmp_path / "agent_state.json"
@@ -200,8 +201,8 @@ async def test_warning_toasts_fire_on_change_then_silent(
         app1, "notify", lambda msg, **k: t1.append(k.get("severity"))
     )
     async with app1.run_test() as pilot:
-        await pilot.pause()
-        await pilot.pause()
+        # Тосты — с концом сборки агента (там регистрируются тулы).
+        await wait_until(pilot, lambda: "warning" in t1, "тосты 1-го старта")
     assert "warning" in t1  # 1-й старт: warning-тосты всплыли
     assert upgrade_gate.read_state().get(
         "last_shown_warning_codes"
@@ -213,8 +214,10 @@ async def test_warning_toasts_fire_on_change_then_silent(
         app2, "notify", lambda msg, **k: t2.append(k.get("severity"))
     )
     async with app2.run_test() as pilot:
-        await pilot.pause()
-        await pilot.pause()
+        screen = app2._main_screen()
+        await wait_until(
+            pilot, lambda: screen._warnings_toasted, "итог 2-го старта"
+        )
     assert "warning" not in t2  # 2-й старт, тот же набор — тишина
 
 

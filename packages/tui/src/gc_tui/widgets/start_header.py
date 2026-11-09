@@ -25,13 +25,14 @@ class StartHeader(ColumnStatic):
     """Знак, подпись, версия [+ хвост обновления] и строка статуса."""
 
     class Settled(Message):
-        """Загрузка поколения дошла до итога или сбоя — раз на поколение."""
+        """Сборка поколения закончилась, итог или сбой показан — раз на
+        поколение. Без серверов «готов к работе» виден раньше, а сигнал
+        ждёт конца сборки: уведомления о тулах появляются при регистрации."""
 
     def __init__(self, *, mcp_total: int, **kwargs) -> None:
         kwargs.setdefault("id", "brand-block")
         super().__init__(**kwargs)
-        self._peephole = McpPeephole()
-        self._peephole.expect(mcp_total)
+        self._peephole = McpPeephole(mcp_total)
         self._version = version_label()
         self._update = False
         self._frame = 0
@@ -41,8 +42,6 @@ class StartHeader(ColumnStatic):
 
     def on_mount(self) -> None:
         self._sync_timer()
-        # Без серверов итог наступает сразу: сигнал — после первой отрисовки.
-        self.call_after_refresh(self._post_settled)
 
     def feed(
         self,
@@ -64,7 +63,14 @@ class StartHeader(ColumnStatic):
 
     def _state(self) -> tuple:
         p = self._peephole
-        return (p.generation, p.phase, p.total, p.connected, p.shown)
+        return (
+            p.generation,
+            p.phase,
+            p.outcome,
+            p.total,
+            p.connected,
+            p.shown,
+        )
 
     def _tick(self) -> None:
         if textual_compat.is_selecting(self.screen):
@@ -91,7 +97,11 @@ class StartHeader(ColumnStatic):
 
     def _post_settled(self) -> None:
         p = self._peephole
-        if p.phase != "loading" and self._settled_generation != p.generation:
+        if (
+            p.phase != "loading"
+            and p.outcome is not None
+            and self._settled_generation != p.generation
+        ):
             self._settled_generation = p.generation
             self.post_message(self.Settled())
 
