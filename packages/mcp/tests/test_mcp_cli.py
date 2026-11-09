@@ -256,3 +256,49 @@ def test_remove_no_name_no_all_errors(fake_env, monkeypatch):
     )
     rc = cli.main(["remove"])
     assert rc != 0
+
+
+def _windows_only(name="computer"):
+    from recommended_mcp.manifest import InstallSpec, MCPEntry
+
+    return MCPEntry(
+        name=name,
+        path=Path("."),
+        install=InstallSpec(type="source", platforms=("win32",)),
+    )
+
+
+def test_install_by_name_explains_platform_skip(fake_env, monkeypatch, capsys):
+    from recommended_mcp.runtime import cli
+
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr(
+        cli,
+        "_load_manifest_entries",
+        lambda config=None: ([_windows_only()], Path(".")),
+    )
+    called = []
+    monkeypatch.setattr(
+        cli, "_install_one", lambda *a, **k: called.append(a) or True
+    )
+    assert cli.main(["install", "computer"]) == 0
+    assert called == []
+    assert "[skip] computer: только для Windows" in capsys.readouterr().err
+
+
+def test_install_all_lists_platform_skip_apart_from_failures(
+    fake_env, monkeypatch, capsys
+):
+    from recommended_mcp.runtime import cli
+
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr(
+        cli,
+        "_load_manifest_entries",
+        lambda config=None: ([_windows_only()], Path(".")),
+    )
+    monkeypatch.setattr(cli, "_install_one", lambda *a, **k: False)
+    assert cli.main(["install"]) == 0
+    out = capsys.readouterr().out
+    assert "пропущено: computer (только для Windows)" in out
+    assert "не установлено" not in out

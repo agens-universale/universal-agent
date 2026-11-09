@@ -127,20 +127,37 @@ def _cmd_install(
                 file=sys.stderr,
             )
             return 2
-        if _install_one(entry, root, dep, editable, repo_url, repo_ref):
-            _wire_one(entry, root, dep)
-            print(f"[done] {name} установлен и подключён")
-        else:
-            print(
-                f"[warn] {name} не установлен — не подключаю", file=sys.stderr
-            )
+        _install_named(entry, root, dep, editable, repo_url, repo_ref)
         return 0
+    _install_all(entries, root, dep, editable, repo_url, repo_ref)
+    return 0
+
+
+def _install_named(entry, root, dep, editable, repo_url, repo_ref) -> None:
+    skip = _inst().platform_skip_reason(entry)
+    if skip:
+        print(f"[skip] {entry.name}: {skip}", file=sys.stderr)
+    elif _install_one(entry, root, dep, editable, repo_url, repo_ref):
+        _wire_one(entry, root, dep)
+        print(f"[done] {entry.name} установлен и подключён")
+    else:
+        print(
+            f"[warn] {entry.name} не установлен — не подключаю",
+            file=sys.stderr,
+        )
+
+
+def _install_all(entries, root, dep, editable, repo_url, repo_ref) -> None:
     installed_names: list[str] = []
+    skipped: list[str] = []
     failed_names: list[str] = []
     for entry in entries:
         if getattr(entry, "optional", False):
             continue
-        if _install_one(entry, root, dep, editable, repo_url, repo_ref):
+        skip = _inst().platform_skip_reason(entry)
+        if skip:
+            skipped.append(f"{entry.name} ({skip})")
+        elif _install_one(entry, root, dep, editable, repo_url, repo_ref):
             _wire_one(entry, root, dep)
             installed_names.append(entry.name)
         else:
@@ -148,10 +165,11 @@ def _cmd_install(
     print(
         f"[summary] установлено+подключено: {', '.join(installed_names) or '—'}"
     )
+    if skipped:
+        print(f"[summary] пропущено: {', '.join(skipped)}")
     if failed_names:
         print(f"[summary] не установлено: {', '.join(failed_names)}")
     print("[done] install complete")
-    return 0
 
 
 def installable_names(config: Optional[str] = None) -> list:

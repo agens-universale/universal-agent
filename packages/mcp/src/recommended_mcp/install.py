@@ -78,9 +78,26 @@ def _platform_supported(entry: MCPEntry) -> bool:
     )
 
 
+_PLATFORM_NAMES = {"win32": "Windows", "darwin": "macOS", "linux": "Linux"}
+
+
+def platform_skip_reason(entry: MCPEntry) -> str | None:
+    """Почему рецепт не ставится на этой ОС; None — ставится."""
+    if _platform_supported(entry):
+        return None
+    names = (_PLATFORM_NAMES.get(p, p) for p in entry.install.platforms)
+    return f"только для {', '.join(names)}"
+
+
 def _short_reason(exc: Exception) -> str:
     if isinstance(exc, subprocess.CalledProcessError):
-        return f"pip завершился с кодом {exc.returncode}"
+        # Шагов установки несколько (pip, npm, npx) — называем упавший.
+        name, *args = exc.cmd
+        shown = [Path(name).name, *args[:3]]
+        if len(args) > 3:
+            shown.append("…")
+        command = " ".join(shown)
+        return f"команда «{command}» завершилась с кодом {exc.returncode}"
     return str(exc) or exc.__class__.__name__
 
 
@@ -97,8 +114,9 @@ def run_install_entries(
     (name, status, detail), status ∈ {installed, skipped, failed}."""
     results: list[tuple[str, str, str]] = []
     for entry in manifest:
-        if not _platform_supported(entry):
-            results.append((entry.name, "skipped", f"platform {sys.platform}"))
+        reason = platform_skip_reason(entry)
+        if reason:
+            results.append((entry.name, "skipped", reason))
             continue
         try:
             if entry.install.type == "source" and editable:
