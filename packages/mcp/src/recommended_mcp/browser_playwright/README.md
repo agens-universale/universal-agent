@@ -5,15 +5,17 @@
 скрейпинг.
 
 Доставка — **через npx**, без Docker и без локальной сборки. Node.js
-ставится в `gc_paths()['data']/node/v18.0.0/` (Linux: `~/.local/share/gc/...`,
+ставится в `gc_paths()['data']/node/v24.22.2/` (Linux: `~/.local/share/gc/...`,
 Windows: `~/.gc/...`).
 
 ## Требования
 
-- **Node.js 18.0.0** — пин под совместимость с `@playwright/mcp@0.0.70`.
+- **Node.js 24.22.2** (LTS) — пин; `@playwright/mcp@0.0.70` требует Node ≥ 18.
   Ставится автоматически `install.py`, **системная Node не используется**
   и не трогается.
-- **Chromium** — качается Playwright'ом автоматически на этапе install.
+- **Chromium** — качается на этапе install playwright'ом из самого
+  `@playwright/mcp` (ревизия зафиксирована версией пакета); сервер
+  запускается с `--browser chromium`, системный Chrome не нужен.
 
 ## Установка
 
@@ -25,15 +27,16 @@ python recommended_mcp/install.py
 
 Что произойдёт:
 
-1. Проверяется `<agent_dep_dir>/node/v18.0.0/bin/node --version` (на Windows
+1. Проверяется `<agent_dep_dir>/node/v24.22.2/bin/node --version` (на Windows
    `…/node.exe`). Если совпадает с пином — скип. Дефолт `agent_dep_dir` —
    `gc_paths()['data']` (опционально переопределяется в `recommended_mcp/config.yml`).
-2. Иначе скачивается архив Node с `nodejs.org/dist/v18.0.0/` под текущую ОС.
+2. Иначе скачивается архив Node с `nodejs.org/dist/v24.22.2/` под текущую ОС.
 
-   SHA256 сверяется с `SHASUMS256.txt`. Распаковка в `<agent_dep_dir>/node/v18.0.0/`.
+   SHA256 сверяется с `SHASUMS256.txt`. Распаковка в `<agent_dep_dir>/node/v24.22.2/`.
 3. `npm install -g @playwright/mcp@0.0.70` — прогрев npm-кэша уже на нашей
    Node.
-4. `npx -y playwright install --with-deps chromium` — пред-скачивание браузера.
+4. `npx -y @playwright/mcp@0.0.70 install-browser --with-deps chromium` —
+   пред-скачивание браузера той ревизии, на которой работает пакет.
 
 В конце `install.py` печатает абсолютный путь до `npx` для текущей машины —
 он понадобится в следующем шаге.
@@ -55,8 +58,8 @@ python recommended_mcp/install.py
 mcp-servers:
   browser_playwright:
     transport: stream_stdio
-    command: ~/.local/share/gc/node/v18.0.0/bin/npx
-    args: ["-y", "@playwright/mcp@0.0.70", "--output-dir", "~/.cache/gc/playwright-mcp"]
+    command: ~/.local/share/gc/node/v24.22.2/bin/npx
+    args: ["-y", "@playwright/mcp@0.0.70", "--browser", "chromium", "--output-dir", "~/.cache/gc/playwright-mcp"]
     persistent_session: true
 ```
 

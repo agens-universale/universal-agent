@@ -81,3 +81,40 @@ def test_available_update_none_without_manifest_version():
         install=InstallSpec(type="npx", npm_package="@playwright/mcp"),
     )
     assert _available_update(entry, "1.0.0") is None
+
+
+def test_playwright_browser_comes_from_the_wired_package():
+    """Браузер ставит playwright того же `@playwright/mcp`, что запускается:
+    отдельный `playwright` тянет последнюю версию — чужая ревизия Chromium
+    и свои требования к Node. Запуск — на этом Chromium, не на системном
+    Chrome."""
+    import yaml
+
+    entry = next(
+        e
+        for e in load_manifest(RECIPES / "config.yml")
+        if e.name == "browser_playwright"
+    )
+    pinned = next(
+        arg
+        for cmd in entry.install.commands
+        for arg in cmd
+        if arg.startswith("@playwright/mcp@")
+    )
+    assert (
+        "npx",
+        "-y",
+        pinned,
+        "install-browser",
+        "--with-deps",
+        "chromium",
+    ) in entry.install.commands
+    assert all("playwright" not in cmd for cmd in entry.install.commands)
+    snippet = yaml.safe_load(
+        (
+            RECIPES / "browser_playwright" / "agent_config.snippet.yml"
+        ).read_text(encoding="utf-8")
+    )
+    args = snippet["browser_playwright"]["args"]
+    assert pinned in args
+    assert args[args.index("--browser") + 1] == "chromium"

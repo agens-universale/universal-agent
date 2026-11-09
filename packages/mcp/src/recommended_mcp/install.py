@@ -64,7 +64,7 @@ _EXT_TAR_GZ = "tar.gz"
 _MANIFEST_NAME = "pyproject.toml"
 
 
-NODE_VERSION = "18.0.0"
+NODE_VERSION = "24.22.2"
 _NODE_DIST_BASE = "https://nodejs.org/dist"
 
 
