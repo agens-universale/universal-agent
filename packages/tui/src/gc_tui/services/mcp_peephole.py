@@ -62,6 +62,15 @@ class McpPeephole:
         Без серверов фаза `settled` наступает раньше него."""
         return self._outcome
 
+    def finished(self, source: object) -> bool:
+        """Поколение `source` дошло до итога или сбоя: новые снимки того же
+        источника ничего не изменят."""
+        return (
+            source is self._source
+            and self._outcome is not None
+            and self._phase != "loading"
+        )
+
     def sync(
         self,
         source: object,

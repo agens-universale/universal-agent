@@ -55,6 +55,10 @@ class StartHeader(ColumnStatic):
         if self._state() != before:
             self._advance(layout=True)
 
+    def finished(self, source: object) -> bool:
+        """Снимки `source` больше не нужны: его загрузка дошла до итога."""
+        return self._peephole.finished(source)
+
     def set_update(self, available: bool) -> None:
         """Хвост «доступна новая версия» в строке версии."""
         if available != self._update:

@@ -130,3 +130,14 @@ def test_new_source_with_zero_servers_settles_without_mcp():
     p.sync(object(), {"a": OK}, None)
     p.sync(object(), {}, None)
     assert (p.phase, p.total) == ("settled", 0)
+
+
+def test_finished_only_for_current_source_with_outcome():
+    p = McpPeephole(1)
+    src = object()
+    p.sync(src, {"a": OK}, None)
+    assert not p.finished(src)  # сборка ещё идёт
+    p.sync(src, {"a": OK}, True)
+    _run(p, 20)
+    assert p.finished(src)
+    assert not p.finished(object())  # чужой источник — новое поколение

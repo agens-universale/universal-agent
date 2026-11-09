@@ -418,6 +418,28 @@ async def test_startup_build_failure_freezes_header_failed(
 
 
 @pytest.mark.asyncio
+async def test_finished_generation_is_not_polled(tmp_path):
+    """Поколение дошло до итога — новые снимки его не изменят: экран
+    перестаёт опрашивать прогресс (поллинг идёт всю сессию), а новая
+    сборка снова опрашивается."""
+    app = _app(tmp_path, _TWO_SERVERS)
+    async with app.run_test(size=(120, 40)) as pilot:
+        header = _header(app)
+        done = _progress(_ALL_OK, outcome=True)
+        await _feed(app, pilot, done)
+        _spin(header)
+        await pilot.pause()
+        reads = []
+        original = done.state
+        done.state = lambda: reads.append(1) or original()
+        app.screen._feed_start_header()
+        assert reads == []
+        rebuilt = _progress()
+        await _feed(app, pilot, rebuilt)
+        assert _status(header) == "• подключаю MCP 0/2"
+
+
+@pytest.mark.asyncio
 async def test_header_ignores_progress_while_selection_frozen(tmp_path):
     """Пока выделение заморожено (F2), шапка не меняется: смена фазы сдвинула
     бы высоту и выделенный текст. После разморозки снимок берётся свежий."""

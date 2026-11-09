@@ -5890,6 +5890,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         progress = getattr(self.app, "_mcp_progress", None)
         if progress is None or self._brand is None:
             return
+        # Прогресс живёт на app до следующей сборки: дошедший до итога
+        # не опрашиваем каждые 250 мс до конца сессии.
+        if self._brand.finished(progress):
+            return
         servers, outcome = progress.state()
         self._brand.feed(progress, servers, outcome)
 
