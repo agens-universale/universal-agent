@@ -58,6 +58,7 @@ from gc_core.security.permission_mode import Mode, mode_label
 from gc_core.settings import runtime_of
 from gc_core.threads.errors import OwnershipError, ThreadBusy
 from gc_core.threads.models import ThreadRecord
+from gc_core.tools.connect_mcp.effective import effective_mcp_servers
 from gc_core.tools.skills.skill_arg_resolver import (
     Failed,
     Resolved,
@@ -6741,7 +6742,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         if self._brand is not None and self._brand.parent is not None:
             return
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        servers = self.app.effective_settings().settings.mcp.servers
+        servers = effective_mcp_servers(self.app.effective_settings())
         brand = StartHeader(mcp_total=len(servers))
         brand.set_update(getattr(self.app, "_update_available", False))
         trace.mount(brand)
