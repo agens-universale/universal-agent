@@ -150,6 +150,27 @@ def test_clone_failure_is_notice(tmp_path, monkeypatch):
     assert len(snap.notices) == 1
 
 
+def test_unusable_source_is_notice_only(tmp_path, monkeypatch, caplog):
+    """Причина — в уведомлении; лог его не дублирует в stderr CLI."""
+    _isolate(tmp_path, monkeypatch)
+    repo, _ = _repo(tmp_path)
+    caplog.set_level("WARNING", logger=sources.__name__)
+    loaded = make_settings(
+        {
+            "plugins.sources": [
+                {"git": str(tmp_path / "nope")},
+                {"git": str(repo), "subdir": "nope"},
+            ],
+            "plugins.use_installed": False,
+        }
+    )
+
+    snap = catalog.build_plugin_snapshot(loaded, clone=True)
+
+    assert len(snap.notices) == 2
+    assert caplog.records == []
+
+
 def test_clone_is_memoised_per_process(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     repo, _ = _repo(tmp_path)

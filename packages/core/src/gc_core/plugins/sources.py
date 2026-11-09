@@ -120,13 +120,15 @@ def resolve_source(
             _clone(url, source.ref, target)
     except (OSError, subprocess.SubprocessError) as exc:
         detail = getattr(exc, "stderr", "") or exc
-        logger.warning("plugin source %s unavailable: %s", url, detail)
+        # Без клона пользователь получит уведомление набора; здесь — причина.
         if not (target / ".git").is_dir():
+            logger.debug("plugin source %s unavailable: %s", url, detail)
             _resolved[key] = None
             return None
+        logger.warning("plugin source %s not updated: %s", url, detail)
     result = root if root.is_dir() else None
     if result is None:
-        logger.warning("plugin source %s: no directory %s", url, source.subdir)
+        logger.debug("plugin source %s: no directory %s", url, source.subdir)
     _resolved[key] = result
     return result
 
