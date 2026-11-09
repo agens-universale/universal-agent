@@ -770,7 +770,7 @@ async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
+async def test_scaffold_shows_brand_stepper_and_esc_exits(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -781,8 +781,8 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        # логотип и степпер отрисованы
-        assert scr.query_one("#onb-logo")
+        # бренд и степпер отрисованы
+        assert scr.query_one("#onb-brand")
         assert scr.query_one("#onb-stepper")
         assert scr._step == 0
         # Esc → модалка подтверждения (не мгновенный выход); подтверждение → app.exit.
@@ -4947,3 +4947,23 @@ async def test_both_wizards_take_the_deactivation_warning_from_one_place(
         await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert sentinel in blob
+
+
+@pytest.mark.asyncio
+async def test_onboarding_shows_brand_block(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.branding import BrandHeader
+    from gc_tui.widgets.column_static import ColumnStatic
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        brand = scr.query_one("#onb-brand", ColumnStatic)
+        assert isinstance(brand.content, BrandHeader)
+        assert not scr.query("#onb-logo")
+        assert not scr.query("#onb-tagline")

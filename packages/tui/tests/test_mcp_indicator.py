@@ -1,181 +1,119 @@
 from gc_testkit.tui_support import tui_settings
 import pytest
 
-
-def _content(widget) -> str:
-    # Способ чтения контента Static в этом проекте (как в других tui-тестах).
-    return str(widget.render())
-
-
-def _stub_factory(app) -> None:
-    # Тест управляет app._mcp_progress сам; без стаба warm() из on_mount строит
-    # реальный executor и перезаписывает sink (_build_real_executor) — гонка/флак.
-    app._executor_factory = lambda: object()
+_OFFICE = {
+    "mcp.servers": {"office": {"transport": "stdio", "command": "office-mcp"}}
+}
 
 
-@pytest.mark.asyncio
-async def test_indicator_failed_settles_to_persistent_line(tmp_path):
-    pytest.importorskip("textual")
+def _header_text(app) -> str:
+    """Шапка так, как её раскладывает сам виджет по своей ширине."""
+    header = app.screen.query_one("#brand-block")
+    return header.render().laid_out(header.content_region.width).plain
+
+
+def _status(app) -> str:
+    return _header_text(app).splitlines()[-1]
+
+
+def _app(tmp_path):
     from gc_tui.app import TuiApp
-    from gc_tui.services.mcp_progress import McpProgress
 
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"agent.model": "M"}),
+        settings=tui_settings({"agent.model": "M", **_OFFICE}),
     )
-    _stub_factory(app)
-    async with app.run_test() as pilot:
+    # Тест управляет app._mcp_progress сам; без стаба warm() из on_mount строит
+    # реальный executor и перезаписывает sink (_build_real_executor) — гонка/флак.
+    app._executor_factory = lambda: object()
+    return app
+
+
+def _failed_office(*, finished: bool):
+    from gc_tui.services.mcp_progress import McpProgress
+
+    prog = McpProgress()
+    prog.begin(["office"])
+    prog.update("office", {"status": "failed", "reason": "timeout"})
+    if finished:
+        prog.finish(True)
+    return prog
+
+
+def _spin(app, ticks: int = 30) -> None:
+    header = app.screen.query_one("#brand-block")
+    for _ in range(ticks):
+        header._tick()
+
+
+@pytest.mark.asyncio
+async def test_failed_server_passes_the_peephole_then_warns(tmp_path):
+    pytest.importorskip("textual")
+    app = _app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
         scr = pilot.app.screen
-        prog = McpProgress()
-        prog.begin(["computer", "office"])
+        prog = _failed_office(finished=False)
         app._mcp_progress = prog
-        scr._update_mcp_indicator()
+        scr._feed_start_header()
+        _spin(app, 1)
         await pilot.pause()
-        assert scr._mcp_status_row is not None
-        body = _content(scr._mcp_status_row)
-        assert (
-            "office" in body and "⏳" in body
-        )  # многострочный блок, office грузится
-        # office упал, computer ок → all_reported → сначала финальный блок со
-        # статусами (лингер 1с, видно что все проверены), потом строка с /mcp.
-        prog.update("computer", {"status": "connected"})
-        prog.update("office", {"status": "failed", "reason": "x"})
-        scr._update_mcp_indicator()
+        # упавший сервер виден в «глазке», счётчик подключившихся не растёт
+        assert _status(app) == "• подключаю MCP 0/1 · office ✗"
+        prog.finish(True)
+        scr._feed_start_header()
+        _spin(app)
         await pilot.pause()
-        assert scr._mcp_status_done is True
-        assert app._mcp_progress is None  # sink погашен (показ один раз)
-        body = _content(scr._mcp_status_row)
-        assert "✓" in body and "✗" in body  # блок с итоговыми глифами
-        assert "/mcp" not in body  # предупреждение ещё не показано
-        # после лингера блок схлопывается в постоянный итог:
-        # статус MCP + строка готовности (запись в шапке).
-        await pilot.pause(1.2)
-        body = _content(scr._mcp_status_row)
-        assert "/mcp" in body
-        assert "готов к работе" in body
+        assert _status(app) == "✓ готов к работе   ⚠ MCP 0/1 · /mcp"
+        assert app._mcp_progress is prog  # sink экран не гасит
 
 
 @pytest.mark.asyncio
 async def test_indicator_warning_survives_trace_rebuild(tmp_path):
-    """Предупреждение о недоступных MCP — часть стартовой шапки (как бренд):
-    переживает пересборку #trace (первое сообщение / new / resume / stream_reset)."""
+    """Итог загрузки MCP — часть стартовой шапки (как бренд): переживает
+    пересборку #trace (первое сообщение / new / resume / stream_reset)."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.services.mcp_progress import McpProgress
-
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    _stub_factory(app)
-    async with app.run_test() as pilot:
+    app = _app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
         scr = pilot.app.screen
-        prog = McpProgress()
-        prog.begin(["office"])
-        app._mcp_progress = prog
-        scr._update_mcp_indicator()
-        prog.update("office", {"status": "failed", "reason": "x"})
-        scr._update_mcp_indicator()
-        await pilot.pause(
-            1.2
-        )  # лингер финального блока → строка-предупреждение
-        assert "/mcp" in _content(scr._mcp_status_row)
+        app._mcp_progress = _failed_office(finished=True)
+        scr._feed_start_header()
+        _spin(app)
+        await pilot.pause()
+        assert "⚠ MCP 0/1 · /mcp" in _status(app)
         # Пересборка трейса (все точки идут через _clear_trace)
         scr._switch_to_empty_state()
         await pilot.pause()
-        # MCP-статус теперь живёт внутри #brand-block как #brand-mcp (A2).
-        rows = pilot.app.query("#brand-mcp")
-        assert len(rows) == 1
-        assert "/mcp" in _content(rows[0])
-        # Шапка: только #brand-block (MCP внутри карточки, не отдельным виджетом).
+        assert len(pilot.app.query("#brand-block")) == 1
+        assert "⚠ MCP 0/1 · /mcp" in _status(app)
         trace = pilot.app.query_one("#trace")
-        children = list(trace.children)
-        assert children[0].id == "brand-block"
+        assert list(trace.children)[0].id == "brand-block"
 
 
 @pytest.mark.asyncio
-async def test_indicator_all_ok_settles_to_ready(tmp_path):
+async def test_settled_header_has_no_notices_and_trace_is_clean(tmp_path):
+    """После итога в шапке только готовность и MCP: бейдж уведомлений — в
+    футере; в трейсе одна строка готовности и нет блока «Уведомления»."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.services.mcp_progress import McpProgress
-
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings({"agent.model": "M"}),
-    )
-    _stub_factory(app)
-    async with app.run_test() as pilot:
-        scr = pilot.app.screen
-        prog = McpProgress()
-        prog.begin(["computer"])
-        app._mcp_progress = prog
-        scr._update_mcp_indicator()
-        prog.update("computer", {"status": "connected"})
-        scr._update_mcp_indicator()
-        await pilot.pause()
-        # все ✓ → done, sink погашен, блок с глифами ещё виден (лингер ~1с)
-        assert scr._mcp_status_done is True
-        assert app._mcp_progress is None
-        assert scr._mcp_status_row is not None
-        assert "готов к работе" not in _content(scr._mcp_status_row)
-        # после лингера блок схлопывается в итог-запись (не удаляется)
-        await pilot.pause(1.2)
-        assert scr._mcp_status_row is not None
-        assert scr._mcp_status_row.parent is not None
-        body = _content(scr._mcp_status_row)
-        assert "все подключены" in body
-        assert "готов к работе" in body
-
-
-@pytest.mark.asyncio
-async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
-    """После MCP-settle карточка несёт статус MCP + строку «⚠ N · /notices» (формат B,
-    учтён упавший MCP) + одну «готов»; трейс чистый (нет блока «Уведомления»)."""
-    pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.services.mcp_progress import McpProgress
     from textual.widgets import Static
 
-    app = TuiApp(
-        threads_dir=str(tmp_path),
-        system="cli",
-        settings=tui_settings(
-            {
-                "agent.model": "M",
-                "mcp.servers": {
-                    "office": {"transport": "stdio", "command": "office-mcp"}
-                },
-            }
-        ),
-    )
-    _stub_factory(app)
-    async with app.run_test() as pilot:
-        scr = pilot.app.screen
-        trace = pilot.app.query_one("#trace")
-        # mcp_status оседает к settle — эмулируем упавший office.
-        app._mcp_status = {"office": {"status": "failed", "reason": "timeout"}}
-        prog = McpProgress()
-        prog.begin(["office"])
-        app._mcp_progress = prog
-        scr._update_mcp_indicator()
-        prog.update("office", {"status": "failed", "reason": "timeout"})
-        scr._update_mcp_indicator()
-        await pilot.pause(1.2)  # лингер → settle
-        card = _content(scr._mcp_status_row)
-        # Точный формат карточки: три строки через пустую (MCP · уведомления · готовность).
-        from gc_tui.services.notices_ui import WARN_GLYPH
+    from gc_tui.services.notices_ui import WARN_GLYPH
 
-        assert card == (
-            f"⚠ MCP: 0/1 — ни один не подключился · /mcp\n\n{WARN_GLYPH} 1 · F4/notices\n\n✓ готов к работе"
-        ), f"Формат карточки разошёлся: {card!r}"
-        # Ровно одна «готов» во всём трейсе (готовность только в карточке).
-        texts = [str(s.render()) for s in trace.query(Static)]
-        ready_lines = [t for t in texts if "готов" in t]
-        assert len(ready_lines) == 1, (
-            f"Ожидалась одна строка готовности: {ready_lines}"
-        )
-        # Трейс чистый: блока-заголовка «Уведомления · N» нет.
+    app = _app(tmp_path)
+    async with app.run_test(size=(120, 40)) as pilot:
+        scr = pilot.app.screen
+        # mcp_status оседает к итогу — эмулируем упавший office.
+        app._mcp_status = {"office": {"status": "failed", "reason": "timeout"}}
+        app._mcp_progress = _failed_office(finished=True)
+        scr._feed_start_header()
+        _spin(app)
+        scr._refresh_footer()
+        await pilot.pause()
+        header = _header_text(app)
+        assert "F4/notices" not in header
+        footer = str(scr.query_one("#footer-slot").render())
+        assert f"{WARN_GLYPH} 1" in footer and "F4/notices" in footer
+        trace = pilot.app.query_one("#trace")
+        texts = [str(s.render()) for s in trace.query(Static)] + [header]
+        assert len([t for t in texts if "готов" in t]) == 1
         assert not any("Уведомления ·" in t for t in texts)
