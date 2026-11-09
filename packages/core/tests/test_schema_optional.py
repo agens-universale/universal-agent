@@ -2,14 +2,6 @@ import copy
 import json
 
 import pytest
-from gc_core.tools.arguments_validation import (
-    parse_and_validate_tool_arguments,
-)
-from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
-from gc_core.tools.fs.list_files import ListFiles
-from gc_core.tools.fs.read_file import ReadFile
-from gc_core.tools.fs.search_and_replace import SearchAndReplace
-from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
 from gc_core.execution.tool_schema import (
     OPTIONAL_EMPTY_AS_OMIT_HINT,
     OPTIONAL_OMIT_HINT,
@@ -21,8 +13,22 @@ from gc_core.execution.tool_schema import (
     parameters_schema_for_local_validation,
     resolve_optional_property_keys,
 )
+from gc_core.tools import aapply_tool
+from gc_core.tools.arguments_validation import (
+    parse_and_validate_tool_arguments,
+)
+from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
+from gc_core.tools.fs.list_files import ListFiles
+from gc_core.tools.fs.read_file import ReadFile
+from gc_core.tools.fs.search_and_replace import SearchAndReplace
+from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
 from gc_core.tools.skills.skills_tools import SkillsListTool
-from gc_testkit.helpers.tool_ctx import CallableTool, with_local_ctx
+from gc_core.utils.connect_backend import (
+    normalize_chat_completions_tools,
+    project_tool_specs,
+)
+from gc_core.utils.file_text import sha256_hex_of_bytes
+from gc_testkit.helpers.tool_ctx import CallableTool, local_ctx, with_local_ctx
 
 # Optional string fields that must receive augment hints in tool_description specs.
 _OPTIONAL_STRING_FIELDS = (
@@ -65,8 +71,7 @@ def test_parameters_schema_for_local_validation_semantic_required():
     assert validation is not params
     assert params["required"] == api_required
     assert "path" in validation["required"]
-    assert "add_line_numbers" in validation["required"]
-    for key in ("offset", "limit", "encoding"):
+    for key in ("offset", "limit", "encoding", "add_line_numbers"):
         assert key not in validation["required"]
         assert key in params["x-optional-keys"]
 
@@ -167,7 +172,6 @@ def test_strict_read_file_omits_optional_ok():
         arguments={
             "reason": "inspect",
             "path": "/tmp/f.txt",
-            "add_line_numbers": False,
         },
         tool_spec=spec,
         allow_empty_for_empty_schema=False,
@@ -175,8 +179,78 @@ def test_strict_read_file_omits_optional_ok():
     assert args == {
         "reason": "inspect",
         "path": "/tmp/f.txt",
-        "add_line_numbers": False,
     }
+
+
+def test_read_file_provider_strict_schema_keeps_all_properties_required():
+    spec = copy.deepcopy(ReadFile.tool_description())
+    apply_injected_fields_to_spec(spec, _REASON_FIELDS)
+    projected = project_tool_specs(
+        [spec], openai_strict=True, send_tool_strict=True
+    )[0]
+    params = projected["parameters"]
+    assert projected["strict"] is True
+    assert set(params["required"]) == set(params["properties"])
+    assert "add_line_numbers" in params["x-optional-keys"]
+    assert parameters_schema_for_local_validation(params)["required"] == [
+        "path"
+    ]
+    sent = normalize_chat_completions_tools([projected])[0]["function"]
+    assert sent["strict"] is True
+    assert set(sent["parameters"]["required"]) == set(
+        sent["parameters"]["properties"]
+    )
+    assert "x-optional-keys" not in sent["parameters"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("flag", "expected", "window"),
+    [
+        (None, "first\nsecond\nthird\n", False),
+        (False, "second\n", True),
+        (True, "     2|second\n", True),
+    ],
+)
+async def test_read_file_dispatch_accepts_optional_line_numbers(
+    tmp_path, flag, expected, window
+):
+    path = tmp_path / "sample.txt"
+    path.write_text("first\nsecond\nthird\n", encoding="utf-8", newline="")
+    spec = copy.deepcopy(ReadFile.tool_description())
+    apply_injected_fields_to_spec(spec, _REASON_FIELDS)
+    apply_openai_strict_parameters(spec["parameters"])
+    entry = {
+        "spec": spec,
+        "tool_fabric": ReadFile,
+        "injected_fields": ["reason"],
+    }
+    args = {
+        "path": str(path),
+        "reason": "Inspect the implementation",
+    }
+    if window:
+        args.update(offset=2, limit=1)
+    if flag is not None:
+        args["add_line_numbers"] = flag
+    result = json.loads(
+        await aapply_tool(
+            "fs_read_file",
+            args,
+            tools_data_={"fs_read_file": entry},
+            ctx=local_ctx(),
+        )
+    )
+    assert result["ok"] is True
+    assert result["content"] == expected
+    if window:
+        assert result["start_line"] == result["end_line"] == 2
+        assert result["next_offset"] == 3
+    else:
+        assert result["start_line"] == 1
+        assert result["end_line"] == 3
+        assert result["next_offset"] is None
+    assert result["sha256"] == sha256_hex_of_bytes(path.read_bytes())
 
 
 def test_strict_read_file_missing_reason_ok():
