@@ -1,17 +1,21 @@
-"""FileViewerScreen — постраничный read-only просмотр текстового файла (`/view`)."""
+"""FileViewerScreen — read-only просмотр текстового файла (`/view`)."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
+from textual import events, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.geometry import Offset
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Static, TextArea
 
+from gc_tui.services import file_view as file_view_service
 from gc_tui.services.file_view import (
     DEFAULT_PAGE_LINES_FALLBACK,
     MSG_EMPTY,
@@ -32,7 +36,10 @@ from gc_tui.services.file_view import (
     read_window,
     textarea_language_for_lexer,
 )
+from gc_tui.services.file_view_theme import FILE_VIEW_THEME, file_view_theme
 from gc_tui.services.skill_view import truncate_path_left
+from gc_tui.widgets.file_position_bar import WHEEL_LINES as _WHEEL_LINES
+from gc_tui.widgets.file_position_bar import FilePositionBar
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SEL_FILE_VIEW_BODY = "#file-view-body"
@@ -42,8 +49,30 @@ _PATH_MAXLEN = 56
 # Схлопываем key-repeat: не чаще ~10 Hz один read_window + load_text.
 # Одиночный тик — сразу (leading-edge); hold на больших файлах важнее «30 fps».
 _MOVE_THROTTLE_SEC = 1.0 / 10.0
-_FOOTER_OK = "[Esc] назад  ·  [↑↓] строка  ·  [PgUp/PgDn] стр."
-_FOOTER_ERR = "[Esc] назад"
+_FOOTER_OK = "↑/↓ — строка · PgUp/PgDn — страница · Esc — назад"
+_FOOTER_ERR = "Esc — назад"
+
+
+class _FileText(TextArea):
+    """Область текста `/view`. В режиме окон колесо листает файл, а не
+    прокручивает текущее окно: окно — лишь кусок файла."""
+
+    def __init__(self, *args, on_wheel: Callable[[int], None], **kwargs):
+        super().__init__(*args, **kwargs)
+        self._on_wheel = on_wheel
+        self.paged = False
+
+    def on_mouse_scroll_down(self, event: events.MouseScrollDown) -> None:
+        if self.paged:
+            event.prevent_default()
+            event.stop()
+            self._on_wheel(_WHEEL_LINES)
+
+    def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
+        if self.paged:
+            event.prevent_default()
+            event.stop()
+            self._on_wheel(-_WHEEL_LINES)
 
 
 class FileViewerScreen(Screen):
@@ -87,13 +116,15 @@ class FileViewerScreen(Screen):
         self._display_path = (raw_path or "").strip() or "view"
         self._pending_delta = 0
         self._move_timer: Optional[Timer] = None
+        # Файл целиком в области текста (до WHOLE_FILE_MAX_BYTES) или окнами.
+        self._whole = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
                 yield Static("", id="header-left", markup=False)
                 yield Static("", id="header-right", markup=False)
-            yield TextArea(
+            body = _FileText(
                 "",
                 id="file-view-body",
                 classes="viewer-body",
@@ -103,8 +134,17 @@ class FileViewerScreen(Screen):
                 show_cursor=True,
                 highlight_cursor_line=False,
                 tab_behavior="focus",
-                theme="vscode_dark",
+                on_wheel=self._queue_move,
             )
+            body.register_theme(file_view_theme())
+            body.theme = FILE_VIEW_THEME
+            with Horizontal(id="file-view-row"):
+                yield body
+                yield FilePositionBar(
+                    id="file-view-position",
+                    on_jump=self._jump_to_fraction,
+                    on_wheel=self._queue_move,
+                )
             yield Static(_FOOTER_ERR, id="footer", markup=False)
 
     def on_mount(self) -> None:
@@ -117,7 +157,7 @@ class FileViewerScreen(Screen):
             self.call_after_refresh(self._sync_page_from_layout)
 
     def on_resize(self) -> None:
-        if self._settings.page_lines is not None:
+        if self._whole or self._settings.page_lines is not None:
             return
         self._sync_page_from_layout()
 
@@ -131,16 +171,29 @@ class FileViewerScreen(Screen):
         self.dismiss()
 
     def action_line_up(self) -> None:
-        self._queue_move(-1)
+        self._step(-1)
 
     def action_line_down(self) -> None:
-        self._queue_move(1)
+        self._step(1)
 
     def action_page_up(self) -> None:
-        self._queue_move(-(max(1, self._page - 1)))
+        self._step(-(max(1, self._page_rows() - 1)))
 
     def action_page_down(self) -> None:
-        self._queue_move(max(1, self._page - 1))
+        self._step(max(1, self._page_rows() - 1))
+
+    def _step(self, delta: int) -> None:
+        """Целиком — прокрутка области текста; окнами — сдвиг окна."""
+        if not self._whole:
+            self._queue_move(delta)
+            return
+        self._body().scroll_relative(y=delta, animate=False)
+
+    def _page_rows(self) -> int:
+        return self._body().size.height if self._whole else self._page
+
+    def _body(self) -> TextArea:
+        return self.query_one(_SEL_FILE_VIEW_BODY, TextArea)
 
     def _initial_page(self) -> int:
         if self._settings.page_lines is not None:
@@ -164,9 +217,20 @@ class FileViewerScreen(Screen):
         self._total_lines = result.total_lines
         self._lexer = lexer_name_for_path(result.path)
         self._ta_language = textarea_language_for_lexer(self._lexer)
-        self._page = self._resolve_page()
         saved = self._store.get(result.path)
         self._start_line = saved if saved is not None else 1
+        self._whole = (
+            result.size_bytes <= file_view_service.WHOLE_FILE_MAX_BYTES
+        )
+        self.query_one(FilePositionBar).display = not self._whole
+        self._body().paged = not self._whole
+        self._body().set_class(not self._whole, "paged")
+        if self._whole:
+            self._load_whole()
+            return
+        self._page = self._resolve_page()
+        if self._total_lines is None:
+            self._count_lines_in_background(result.path)
         if self._total_lines is not None:
             self._start_line = clamp_start_line(
                 self._start_line,
@@ -174,6 +238,85 @@ class FileViewerScreen(Screen):
                 page=self._page,
             )
         self._reload_window()
+
+    def _load_whole(self) -> None:
+        """Файл целиком; позиция — первая видимая строка, восстанавливается
+        после раскладки (переносы известны только с шириной)."""
+        window = read_window(
+            self._path,
+            start_line=1,
+            line_count=max(1, self._total_lines or 1),
+            total_lines=self._total_lines,
+        )
+        self._apply_window(window)
+        body = self._body()
+        self.watch(body, "scroll_y", self._refresh_visible_range, init=False)
+        self.call_after_refresh(self._restore_whole_position)
+
+    def _restore_whole_position(self) -> None:
+        """Сохранённая строка — в пределах загруженного документа: файл
+        могли укоротить между открытиями."""
+        body = self._body()
+        last = max(0, body.document.line_count - 1)
+        line = min(max(0, self._start_line - 1), last)
+        if line:
+            row = body.wrapped_document.location_to_offset((line, 0)).y
+            body.scroll_to(y=row, animate=False)
+        self._refresh_visible_range()
+
+    def _visible_range(self) -> tuple[int, int]:
+        """Первая и последняя видимые строки файла (1-based) с учётом
+        переносов."""
+        body = self._body()
+        doc = body.wrapped_document
+        top = int(body.scroll_y)
+        bottom = top + max(0, body.size.height - 1)
+        first = doc.offset_to_location(Offset(0, top))[0] + 1
+        last = doc.offset_to_location(Offset(0, bottom))[0] + 1
+        return first, last
+
+    def _refresh_visible_range(self, *_args) -> None:
+        if not self._whole or self._window is None:
+            return
+        first, last = self._visible_range()
+        self._start_line = first
+        self._refresh_header(
+            empty=not self._window.lines, start=first, end=last
+        )
+
+    @work(thread=True, exclusive=True)
+    def _count_lines_in_background(self, path: Path) -> None:
+        """Длина большого файла — для полосы позиции и шапки; счёт по всему
+        файлу на десятках мегабайт — доли секунды, но не в цикле событий."""
+        try:
+            total = count_lines(path)
+        except OSError:
+            return
+        self.app.call_from_thread(self._on_total_counted, total)
+
+    def _on_total_counted(self, total: int) -> None:
+        self._total_lines = total
+        if self._window is not None:
+            self._refresh_header(
+                empty=not self._window.lines,
+                start=self._window.start_line,
+                end=self._window.end_line,
+            )
+        self._refresh_position_bar()
+
+    def _jump_to_fraction(self, fraction: float) -> None:
+        """Клик по полосе: окно — с центром в этом месте файла."""
+        if self._whole or not self._total_lines:
+            return
+        target = 1 + int(fraction * self._total_lines) - self._page // 2
+        self._queue_move(max(1, target) - self._start_line)
+
+    def _refresh_position_bar(self) -> None:
+        if self._whole:
+            return
+        self.query_one(FilePositionBar).set_position(
+            self._start_line, self._page, self._total_lines
+        )
 
     def _resolve_page(self) -> int:
         fixed = self._settings.page_lines
@@ -194,7 +337,7 @@ class FileViewerScreen(Screen):
         return max(PAGE_LINES_MIN, min(PAGE_LINES_MAX, h))
 
     def _sync_page_from_layout(self) -> None:
-        if self._error is not None or self._path is None:
+        if self._error is not None or self._path is None or self._whole:
             return
         if self._settings.page_lines is not None:
             return
@@ -304,7 +447,7 @@ class FileViewerScreen(Screen):
         plain = MSG_EMPTY if empty else "\n".join(window.lines)
         body = self.query_one(_SEL_FILE_VIEW_BODY, TextArea)
         # TextArea.language красит только при textual[syntax]/tree-sitter).
-        # Иначе — pygments → _highlights (та же тема vscode_dark).
+        # Иначе — pygments → _highlights (та же тема палитры).
         try:
             from textual._tree_sitter import TREE_SITTER
         except ImportError:
@@ -323,6 +466,7 @@ class FileViewerScreen(Screen):
             start=window.start_line,
             end=window.end_line,
         )
+        self._refresh_position_bar()
 
     def _show_error(self) -> None:
         body = self.query_one(_SEL_FILE_VIEW_BODY, TextArea)
@@ -381,5 +525,8 @@ class FileViewerScreen(Screen):
         except Exception:
             pass
         if self._window and self._window.lines:
+            if self._whole:
+                first, last = self._visible_range()
+                return "\n".join(self._window.lines[first - 1 : last])
             return "\n".join(self._window.lines)
         return ""

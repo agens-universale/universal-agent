@@ -62,7 +62,7 @@ async def test_url_prefilled_token_empty():
         tok_val = ed.query_one("#conn-token", Input).value
         assert url_val == "http://old/v1/chat/completions"
         assert tok_val == ""  # токен НЕ предзаполнен
-        rows = " ".join(str(w.render()) for w in ed.query(".onb-option"))
+        rows = " ".join(str(w.content) for w in ed.query(".onb-option"))
         assert "sk-SECRET" not in rows  # литерал не светится, только маска
 
 
@@ -558,9 +558,9 @@ async def test_preset_list_opens_whole_not_filtered_by_the_prefilled_address():
         await pilot.pause()
         visible = [w for w in ed.query(".conn-preset-row") if w.display]
         assert len(visible) == len(presets), (
-            f"список раскрылся суженным: {[str(w.render()) for w in visible]}"
+            f"список раскрылся суженным: {[str(w.content) for w in visible]}"
         )
-        assert str(visible[1].render()).startswith("▸ "), (
+        assert str(visible[1].content).startswith("▸ "), (
             "▸ не на совпавшем пресете"
         )
         # Печать поверх — уже настоящий фильтр, а не «значение поля».
@@ -596,9 +596,9 @@ async def test_section_entry_shows_the_whole_preset_list(tmp_path):
         rows = list(ed.query(".conn-preset-row"))
         visible = [w for w in rows if w.display]
         assert len(visible) == len(DEFAULT_ENDPOINT_PRESETS), (
-            f"список раскрылся суженным: {[str(w.render()) for w in visible]}"
+            f"список раскрылся суженным: {[str(w.content) for w in visible]}"
         )
-        assert str(visible[1].render()).startswith("▸ "), (
+        assert str(visible[1].content).startswith("▸ "), (
             "▸ не на совпавшем пресете"
         )
 
@@ -927,7 +927,7 @@ async def test_editing_the_address_reopens_the_list_as_a_filter():
         assert ed._presets_ctrl.is_open
         visible = [w for w in ed.query(".conn-preset-row") if w.display]
         assert len(visible) == 1  # ровно совпавший провайдер
-        assert presets[1].name in str(visible[0].render())
+        assert presets[1].name in str(visible[0].content)
 
 
 async def test_typing_an_unmatched_address_returns_the_arrows_to_the_form():

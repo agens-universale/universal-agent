@@ -1403,7 +1403,7 @@ async def test_inherit_preset_is_offered_when_editing_a_record_with_its_own_url(
         assert form.reload_presets() is True  # Alt+↓ раскрывает явно
         await pilot.pause()
         rows = [
-            str(w.render()) for w in form.query(".mef-preset-row") if w.display
+            str(w.content) for w in form.query(".mef-preset-row") if w.display
         ]
         assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
         # Слово «наследовать» несущее: адрес пункта часто совпадает с
@@ -1440,7 +1440,7 @@ async def test_inherit_preset_leaves_the_field_empty():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()  # курсор на адресе, список раскрыт
         rows = [
-            str(w.render()) for w in form.query(".mef-preset-row") if w.display
+            str(w.content) for w in form.query(".mef-preset-row") if w.display
         ]
         assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
         # Слово «наследовать» несущее: адрес пункта часто совпадает с
@@ -2220,7 +2220,7 @@ async def test_the_inherit_preset_is_gated_like_the_key_that_does_the_same():
         await pilot.pause()
         in_backend.reload_presets()
         await pilot.pause()
-        rows = [str(w.render()) for w in in_backend.query(".mef-preset-row")]
+        rows = [str(w.content) for w in in_backend.query(".mef-preset-row")]
         assert not any("наследовать" in r for r in rows), rows
         assert in_backend.token_cleared is False  # и снимать было нечем
 
@@ -2240,7 +2240,7 @@ async def test_the_inherit_preset_is_gated_like_the_key_that_does_the_same():
         assert own.reload_presets() is True
         await pilot.pause()
         rows = [
-            str(w.render()) for w in own.query(".mef-preset-row") if w.display
+            str(w.content) for w in own.query(".mef-preset-row") if w.display
         ]
         assert rows and "раздел «Подключение» · наследовать" in rows[0], rows
 
@@ -3629,7 +3629,7 @@ async def test_the_cursor_does_not_call_a_typed_address_inherited():
         assert form.reload_presets() is True  # Alt+↓ поверх своего адреса
         await pilot.pause()
         rows = [
-            str(w.render()) for w in form.query(".mef-preset-row") if w.display
+            str(w.content) for w in form.query(".mef-preset-row") if w.display
         ]
         selected = [r for r in rows if r.startswith("▸")]
         assert selected and "OpenRouter" in selected[0], rows
@@ -4591,3 +4591,17 @@ async def test_explicit_credential_source_switch_removes_the_previous_key(
             if from_header
             else {"Authorization": "new"}
         }
+
+
+def test_help_texts_name_service_calls_for_people():
+    """Справка и подсказка карточки модели называют служебные вызовы
+    человеческими именами, как экран назначений, — без ключей конфига."""
+    from gc_tui.editors.model_entry_form import KWARGS_HINT
+    from gc_tui.screens.model_help import MODEL_HELP
+
+    for text in (KWARGS_HINT, MODEL_HELP):
+        for technical in ("finish gate", "finish_gate", "intent scope"):
+            assert technical not in text
+        assert "intent_scope" not in text
+    assert "журнал намерений" in KWARGS_HINT
+    assert "журнал намерений" in MODEL_HELP

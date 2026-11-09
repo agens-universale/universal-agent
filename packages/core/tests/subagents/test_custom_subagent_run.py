@@ -182,7 +182,7 @@ def _todo_notices_over_steps(child_ctx, *, steps, session_todo):
     """Прогон канала подсказок перед запросом к модели на ``steps`` шагах
     ребёнка без вызова session_todo; возвращает тексты todo-подсказок."""
     from gc_core.message_policy.tool_usage_notice.apply import (
-        apply_tool_usage_notice_before_llm,
+        notice_texts_before_llm,
     )
 
     state = SimpleNamespace(
@@ -195,18 +195,13 @@ def _todo_notices_over_steps(child_ctx, *, steps, session_todo):
         step_messages = [
             {"role": "assistant", "content": f"шаг {step}", "id": f"a{step}"}
         ]
-        out = apply_tool_usage_notice_before_llm(
-            [],
+        out = notice_texts_before_llm(
             state,
             child_ctx,
             {},
             step_messages=step_messages,
         )
-        sent.extend(
-            str(m.get("content", ""))
-            for m in out
-            if "session_todo" in str(m.get("content", ""))
-        )
+        sent.extend(text for text in out if "session_todo" in text)
     return sent
 
 

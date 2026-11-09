@@ -39,7 +39,7 @@ def _build(tmp_path, overrides):
 
 
 def _resolve(config, level):
-    return ModelRouter(config, level_provider=lambda: level).resolve(
+    return ModelRouter(config, choice_provider=lambda: level).resolve(
         "main", check_breaker=False
     )
 

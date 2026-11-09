@@ -23,13 +23,16 @@ from gc_core.attachments.model import ORIGIN_USER, user_label, wh_text
 from gc_core.attachments.normalize import NormalizedImage
 from gc_core.attachments.store import ImageStore
 from gc_core.attachments.texts import (
+    STUB_ATTACHED_INLINE,
     STUB_MODEL_BLIND,
+    STUB_MODEL_REJECTS_NOBODY,
+    STUB_MODEL_REJECTS_VIEW,
     STUB_NOBODY,
     STUB_PROBE_FAILED,
 )
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.model_router import ModelRouter
-from gc_core.vision.notes import NOTE_MAIN_BLIND
+from gc_core.vision.notes import TraceNote, unsupported_note
 from gc_core.vision.rejects import (
     process_image_rejects,
 )
@@ -121,7 +124,7 @@ def _ctx(tmp_path, cfg, notes: list) -> SimpleNamespace:
         logger=logging.getLogger("test_image_rejection_retry"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(loaded, level_provider=lambda: "default"),
+        model_router=ModelRouter(loaded, choice_provider=lambda: "default"),
         image_store=ImageStore(str(tmp_path)),
         on_trace_note=notes.append,
     )
@@ -189,17 +192,17 @@ def test_image_rejection_marks_the_model_and_retries_once_without_images(
     assert _users(spy.requests[1]) == [
         {
             "role": "user",
-            "content": STUB_PROBE_FAILED.format(
-                label=att.label,
-                wh=wh_text(att),
-                reason="image_unsupported",
-                path=att.path,
+            "content": STUB_MODEL_REJECTS_NOBODY.format(
+                label=att.label, wh=wh_text(att), alias="blind-model"
             )
             + "\n[Изображение #1] что тут?",
         }
     ]
     assert unsupported(route_key(ctx, url=URL, model="blind-model")) is True
-    assert notes == [NOTE_MAIN_BLIND.format(alias="blind-model")]
+    # Отказ модели хода — вне вызова тула: пометка принадлежит ответу.
+    text, tone = unsupported_note("blind-model")
+    assert notes == [TraceNote(text, "reply", None, tone)]
+    assert tone == "warn"
     assert state.vision_audience.nobody is True
 
 
@@ -231,8 +234,8 @@ def test_with_assigned_eyes_the_retry_points_to_the_view_tool_and_stays_silent(
     assert _users(spy.requests[1]) == [
         {
             "role": "user",
-            "content": STUB_MODEL_BLIND.format(
-                label=att.label, wh=wh_text(att), path=att.path
+            "content": STUB_MODEL_REJECTS_VIEW.format(
+                label=att.label, wh=wh_text(att), alias="blind", path=att.path
             )
             + "\n[Изображение #1] что тут?",
         }
@@ -317,10 +320,11 @@ def test_unrelated_400_with_live_images_goes_up_without_mark_or_retry(
     )
     notes: list = []
     ctx = _ctx(tmp_path, _cfg(), notes)
-    _att, message = _user_with_image(ctx.image_store)
+    att, message = _user_with_image(ctx.image_store)
     state = _state([message])
     state.vision_routes = warm_routes(ctx)
     state.vision_probe_turn = "test-root"
+    inline = STUB_ATTACHED_INLINE.format(label=att.label, wh=wh_text(att))
 
     with pytest.raises(httpx.HTTPStatusError) as caught:
         run_coro(pr._arequest_backend_canonical([message], state, ctx))
@@ -331,7 +335,10 @@ def test_unrelated_400_with_live_images_goes_up_without_mark_or_retry(
         == 1 + policy._CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS
     )
     assert all(b"image_url" in request.content for request in spy.requests)
-    assert all("·" not in _user_texts(request) for request in spy.requests)
+    assert all(
+        _user_texts(request) == inline + "\n" + message["content"]
+        for request in spy.requests
+    )
     assert unsupported(route_key(ctx, url=URL, model="blind-model")) is False
     assert notes == []
 
@@ -510,9 +517,12 @@ def test_a_stated_limit_keeps_the_newest_images_and_is_remembered(
     assert f"{atts[0].label} · " in _user_texts(
         spy.requests[1]
     )  # старые — записками
-    assert f"{atts[2].label} · " not in _user_texts(
-        spy.requests[1]
-    )  # новая — картинкой
+    newest = STUB_ATTACHED_INLINE.format(
+        label=atts[2].label, wh=wh_text(atts[2])
+    )
+    assert f"{atts[2].label} · " not in _user_texts(spy.requests[1]).replace(
+        newest, ""
+    )  # новая — картинкой, только подпись
     assert (
         process_image_rejects().cap(
             route_key(ctx, url=URL, model="blind-model")
@@ -586,12 +596,12 @@ def test_an_inferred_limit_is_rechecked_after_its_scope_changes(
     elif reset == "model":
         ctx.model_router = ModelRouter(
             make_settings(_cfg(**{"agent.model": "another-model"})),
-            level_provider=lambda: "default",
+            choice_provider=lambda: "default",
         )
     else:
         ctx.model_router = ModelRouter(
             make_settings(_cfg(**{"backend.completions_url": URL + "/other"})),
-            level_provider=lambda: "default",
+            choice_provider=lambda: "default",
         )
     state.vision_routes.update(warm_routes(ctx))
     start = len(spy.requests)

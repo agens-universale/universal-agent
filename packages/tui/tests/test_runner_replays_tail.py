@@ -253,3 +253,28 @@ def test_message_during_compaction_does_not_start_a_parallel_run():
     finally:
         executor.release.set()
         runner.wait(timeout=_WAIT_SEC)
+
+
+def test_failed_run_reports_dropped_ids(env, monkeypatch):
+    """Хвост упавшего хода выброшен — раннер отдаёт экрану id выброшенных
+    реплик: им место в поле ввода, а не красным в ленте (спека §2.5)."""
+    ae = importlib.import_module("gc_core.agent_executor")
+    runner = AgentRunner(executor=env.executor)
+
+    async def _failing_loop(messages, state, ctx, **kw):
+        if messages[0].get("content") != "ход":
+            return {"finished": True}
+        runner.add_message(_user("первое"))
+        runner.add_message(_user("второе"))
+        raise RuntimeError("модель недоступна")
+
+    monkeypatch.setattr(ae, "arun_agent", _failing_loop)
+    assert runner.dropped_message_ids == frozenset()
+    assert runner.start(query="ход", thread_id="t", start_new_thread=True)
+    _finish(runner)
+
+    assert runner.dropped_message_ids == {"m_первое", "m_второе"}
+    # Новый прогон начинает с пустого: старые id не его.
+    assert runner.start(query="следующий", thread_id="t")
+    _finish(runner)
+    assert runner.dropped_message_ids == frozenset()

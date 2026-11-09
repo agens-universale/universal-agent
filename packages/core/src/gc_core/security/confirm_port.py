@@ -9,6 +9,7 @@ from typing import Any, Callable
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
 from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
 from gc_core.execution.ports import port
+from gc_core.execution.turn_clock import human_wait
 from gc_core.message_policy.permission_denials import (
     declined_error,
     session_denied_error,
@@ -250,6 +251,7 @@ def _ask_choice(
                 ),
                 via=via,
                 decision_key=decision_key,
+                call_id=_asking_call_id(),
             )
             result = coerce_confirm_choice(choice)
         else:
@@ -276,6 +278,13 @@ def _ask_choice(
             args_summary=title,
         )
     return result
+
+
+def _asking_call_id() -> str | None:
+    """Чей вызов спрашивает: ``call_id`` привязки диспетчера (вопрос
+    стадии режима идёт до тела тула, но внутри привязки)."""
+    scope = current_call()
+    return scope.call_id if scope is not None else None
 
 
 def _note_outcome(outcome: str | None) -> None:
@@ -339,13 +348,14 @@ def request_confirm(
     if current_call_abandoned():
         _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False
-    choice = _ask_choice(
-        ctx,
-        title=title,
-        question=question,
-        fields=fields,
-        decision_key=decision_key,
-    )
+    with human_wait(ctx):
+        choice = _ask_choice(
+            ctx,
+            title=title,
+            question=question,
+            fields=fields,
+            decision_key=decision_key,
+        )
     if current_call_abandoned():
         # Вопрос бросили (Ctrl+C), пока человек думал: ответ, если он и пришёл,
         # набран уже для ДРУГОГО вопроса. Записать его — значит выдать
@@ -399,7 +409,8 @@ async def aconfirm_via_human_port(request: HumanRequest, *, ctx: Any) -> bool:
     if cached is not None:
         return cached
     try:
-        choice = await port(request)
+        with human_wait(ctx):
+            choice = await port(request)
     except HumanRequestInterrupted:
         _note_outcome(CONFIRM_OUTCOME_TIMED_OUT)
         return False

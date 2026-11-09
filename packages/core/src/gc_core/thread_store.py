@@ -10,10 +10,19 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
+from gc_core.persistence.model_choice_record import (
+    ModelChoiceRecord,
+    model_choice_entry,
+)
 from gc_core.persistence.session_state import (
     extra_for_write,
     notice_state,
     session_after_compaction,
+)
+from gc_core.persistence.turn_outcome import (
+    TurnOutcome,
+    last_turn_of,
+    turn_entry,
 )
 from gc_core.settings import settings_of
 from gc_core.thread_paths import (
@@ -28,6 +37,8 @@ from gc_core.threads.instance import session_owner
 from gc_core.threads.models import (
     CONTROL,
     INBOX,
+    MODEL_CHOICES,
+    TURNS,
     Compaction,
     RuntimeStatus,
     SessionState,
@@ -567,6 +578,68 @@ class ThreadSession:
         await self._aset_runtime(
             rt_rules.with_mcp_tools(self.runtime, snapshot)
         )
+
+    async def aappend_turn_outcome(
+        self, outcome: TurnOutcome, *, discarded: bool
+    ) -> bool:
+        """Итог хода — запись потока ``turns`` за последним сообщением хода
+        и короткий итог в ``runtime.last_turn``, одной записью сбоку по
+        аренде хода (любое хранилище, durable — тоже).
+
+        ``discarded`` — записи хода отброшены стопом: отложенные шаги не
+        сливаются, запись встаёт за уже записанным. Пустой тред записи не
+        получает; отпущенный или потерянный тред — тоже: его runtime ведёт
+        другой ход. Отказ по аренде — ``ThreadBusy``. Возвращает, записано
+        ли."""
+        if not discarded:
+            await self.aflush_deferred()
+        if not self.history_messages or self.writer.gave_up_lease:
+            return False
+        after = await self._alast_message_id()
+        runtime = rt_rules.with_last_turn(self.runtime, last_turn_of(outcome))
+        await self.writer.aside(
+            append=[(TURNS, [turn_entry(outcome, after=after)])],
+            set_runtime=runtime,
+        )
+        self.runtime = runtime
+        return True
+
+    async def aappend_model_choice(
+        self, record: ModelChoiceRecord, *, discarded: bool
+    ) -> bool:
+        """Смена модели — запись потока ``model_choices`` за последним
+        записанным сообщением, сбоку по аренде хода. Те же правила, что у
+        итога хода (``aappend_turn_outcome``): отложенные шаги сначала
+        сливаются (кроме отброшенных стопом), пустой и отпущенный тред
+        записи не получают. Возвращает, записано ли."""
+        if not discarded:
+            await self.aflush_deferred()
+        if not self.history_messages or self.writer.gave_up_lease:
+            return False
+        after = await self._alast_message_id()
+        entry = model_choice_entry(record, after=after)
+        await self.writer.aside(append=[(MODEL_CHOICES, [entry])])
+        return True
+
+    async def _alast_message_id(self) -> Optional[str]:
+        """``id`` последнего записанного сообщения — тот, что видят
+        читатели. У сообщения без ``id`` — тот, что хранилище даёт на
+        чтении (два чтения); синтезирует его только файловое хранилище,
+        у остальных — ``None``."""
+        mid = self.history_messages[-1].get("id")
+        if not (isinstance(mid, str) and mid):
+            record = await self.writer.retried(
+                lambda: self.store.get_thread(self.key), _READ
+            )
+            high = record.max_seq.get(_HISTORY, 0) if record else 0
+            tail = await self.writer.retried(
+                lambda: self.store.read_stream(
+                    self.key, _HISTORY, after_seq=high - 1, limit=1
+                ),
+                _READ,
+            )
+            mid = tail[0].data.get("id") if tail else None
+        return mid if isinstance(mid, str) and mid else None
 
     # --- аренда ---------------------------------------------------------------
 

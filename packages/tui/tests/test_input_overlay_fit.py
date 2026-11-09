@@ -1,17 +1,13 @@
-"""Input-оверлей (дропдаун) при длинном трейсе: #trace ужимается под ЖЕЛАЕМУЮ
-высоту оверлея (по его контенту, virtual_size), а оверлей показывается целиком —
-не вжимается в остаток места.
+"""Input-оверлей (список над вводом) при длинном трейсе: #trace (`1fr`)
+ужимается под высоту оверлея, а оверлей показывается целиком — не вжимается в
+остаток места; потолок оверлея — половина экрана. На закрытии #trace растёт
+обратно."""
 
-Тонкость: оверлей — VerticalScroll; его region (зажатая высота) зависит от того,
-сколько места оставил #trace, а #trace (через _sync) — от region оверлея → петля
-(оверлей остаётся зажатым). Разрываем её, считая по virtual_size (стабильна).
-На закрытии #trace растёт обратно."""
-
-from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
 import pytest
+from gc_testkit.tui_support import tui_settings
 
 
 def _write_task(tmp_path, tid):
@@ -39,6 +35,10 @@ def _app(tmp_path):
     )
 
 
+def _trace_h(pilot):
+    return pilot.app.query_one("#trace").region.height
+
+
 async def _tall(pilot, tid):
     scr = pilot.app.screen
     scr.attach_active_task(tid)
@@ -58,7 +58,7 @@ async def test_palette_not_squished_when_trace_tall(tmp_path):
     _write_task(tmp_path, tid)
     async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr = await _tall(pilot, tid)
-        full_max = scr._trace_max_height
+        full_h = _trace_h(pilot)
         scr._open_palette(prefix="")  # ~13 команд + хинт
         await pilot.pause(0.4)
         palette = scr._palette
@@ -68,7 +68,7 @@ async def test_palette_not_squished_when_trace_tall(tmp_path):
         assert (
             palette.region.height >= 10
         )  # палитра НЕ зажата (показывает контент)
-        assert scr._trace_max_height < full_max  # #trace ужался под палитру
+        assert _trace_h(pilot) < full_h  # #trace ужался под палитру
 
 
 @pytest.mark.asyncio
@@ -78,13 +78,13 @@ async def test_trace_regrows_after_palette_close(tmp_path):
     _write_task(tmp_path, tid)
     async with _app(tmp_path).run_test(size=(80, 24)) as pilot:
         scr = await _tall(pilot, tid)
-        full_max = scr._trace_max_height
+        full_h = _trace_h(pilot)
         scr._open_palette(prefix="")
         await pilot.pause(0.4)
-        assert scr._trace_max_height < full_max  # ужался
+        assert _trace_h(pilot) < full_h  # ужался
         scr._close_palette()
         await pilot.pause(0.4)
-        assert scr._trace_max_height == full_max  # вырос обратно на весь экран
+        assert _trace_h(pilot) == full_h  # вырос обратно на весь экран
 
 
 @pytest.mark.asyncio
@@ -106,8 +106,7 @@ async def test_overlay_capped_at_half_screen(tmp_path):
 
 @pytest.mark.asyncio
 async def test_trace_regrows_when_palette_filtered_down(tmp_path):
-    """Фильтр сужает палитру → #trace растёт обратно. desired считаем по len(children)
-    (обновляется сразу), а не по virtual_size (залипает после rebuild)."""
+    """Фильтр сужает палитру → #trace растёт обратно."""
     pytest.importorskip("textual")
     tid = "ov3"
     _write_task(tmp_path, tid)
@@ -115,21 +114,18 @@ async def test_trace_regrows_when_palette_filtered_down(tmp_path):
         scr = await _tall(pilot, tid)
         scr._open_palette(prefix="")  # ~13 команд
         await pilot.pause(0.4)
-        full_palette = scr._trace_max_height  # ужат под полную палитру
+        full_palette = _trace_h(pilot)  # ужат под полную палитру
         scr._palette.set_filter("co")  # → 2 команды (compact, config)
-        await pilot.pause(0.4)  # poll пересчитает desired
-        assert (
-            scr._trace_max_height > full_palette
-        )  # палитра сузилась → #trace вырос
+        await pilot.pause(0.4)
+        assert _trace_h(pilot) > full_palette  # палитра сузилась → вырос
 
 
 @pytest.mark.asyncio
 async def test_palette_border_fits_on_screen_with_toggle_footer(tmp_path):
     """Геометрический баг: у CommandPalette дети overlay = N строк + ОДИН докнутый
     `.palette-footer`-контейнер (внутри — разделитель + toggle-строки + hint, т.е.
-    3-5 строк, не 1). `_sync_trace_max_height` считал desired = len(children)+2,
-    недосчитывая высоту подвала → #trace получал лишние строки, выдавливая нижнюю
-    рамку палитры за экран (полный список команд, трейс — почти весь экран)."""
+    3-5 строк, не 1). Недосчёт высоты подвала выдавливал нижнюю рамку палитры за
+    экран (полный список команд, трейс — почти весь экран)."""
     pytest.importorskip("textual")
     tid = "ov5"
     _write_task(tmp_path, tid)

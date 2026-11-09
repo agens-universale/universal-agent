@@ -1,23 +1,22 @@
 """Отправка сообщений с картинками: отказ «с командой», ветки хода, ответ на вопрос
 агента, pending, история и имя сессии, откат отправки, смена сессии (дизайн §12, §20.3)."""
 
-from gc_testkit.develop_files import meta_of
-
 import json
 from pathlib import Path
 
 import pytest
+from gc_testkit.develop_files import meta_of
 
 pytest.importorskip("textual")
 
 from gc_core.attachments.model import chip_text, user_label
+from gc_testkit.tui_support import tui_settings
 from gc_tui.app import TuiApp
 from gc_tui.models import TraceEvent
 from gc_tui.services.stores.file_store import FileTaskStore
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.user_reply import UserReplyContainer
 from image_helpers import make_attachment_file
-from gc_testkit.tui_support import tui_settings
 
 
 class _StartRunner:
@@ -69,6 +68,9 @@ class _AskingRunner:
 class _StoppableRunner:
     def is_running(self) -> bool:
         return True
+
+    def produced_output(self) -> bool:
+        return False
 
     def stop(self) -> None:
         pass
@@ -123,7 +125,7 @@ async def test_images_with_a_command_are_refused_and_the_input_is_kept(
             CommandTextArea.Submitted(value=inp.text, attachments=(att,))
         )
         await pilot.pause()
-        assert str(scr.query_one("#footer-left").render()) == (
+        assert str(scr.query_one("#footer-slot").render()) == (
             "✗ изображения нельзя отправить вместе с командой"
         )
         assert inp.text == f"{typed} {chip_text(1)}"
@@ -382,6 +384,7 @@ async def test_cancel_with_undo_restores_text_and_image_chips(tmp_path):
         att = make_attachment_file(8, tmp_path)
         text = f"{chip_text(8)} глянь"
         scr._on_user_text_submitted(text, (att,))
+        scr._last_user_message_id = "m_undo"
         scr._trace_mount(UserReplyContainer(text, event_no=0, images=(att,)))
         await pilot.pause()
         scr._cmd_stop()

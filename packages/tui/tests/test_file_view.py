@@ -230,3 +230,13 @@ def test_pygments_highlight_map_python_keywords():
     styles = {name for spans in mapped.values() for _, _, name in spans}
     assert "keyword" in styles
     assert mapped  # непусто
+
+
+def test_position_thumb_tracks_the_window_in_the_file():
+    from gc_tui.widgets.file_position_bar import thumb_span
+
+    assert thumb_span(1, 50, 1000, 20) == (0, 1)
+    assert thumb_span(951, 50, 1000, 20) == (19, 1)
+    assert thumb_span(501, 250, 1000, 20) == (10, 5)
+    assert thumb_span(1, 50, 40, 20) == (0, 0)  # файл целиком в окне
+    assert thumb_span(1, 50, None, 20) == (0, 0)  # длина ещё неизвестна

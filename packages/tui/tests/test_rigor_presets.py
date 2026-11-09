@@ -13,7 +13,7 @@ def test_presets_match_spec_table():
         "tui.text_answer_mode": "judge",
     }
     assert PRESETS["high"] == {
-        "tui.finish_gate_mode": "on",
+        "tui.finish_gate_mode": "always",
         "tui.text_answer_mode": "deny",
     }
 
@@ -43,14 +43,14 @@ def test_resolve_preset_names_and_custom():
     )
     assert (
         resolve_preset(
-            {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "deny"}
+            {"tui.finish_gate_mode": "always", "tui.text_answer_mode": "deny"}
         )
         == "high"
     )
     # нестандартная пара → custom
     assert (
         resolve_preset(
-            {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+            {"tui.finish_gate_mode": "always", "tui.text_answer_mode": "allow"}
         )
         == PRESET_CUSTOM
     )
@@ -67,7 +67,7 @@ def test_resolve_rigor_state_reads_effective_pair():
     assert resolve_rigor_state(cfg) == "medium"
     # нестандартная сессионная пара on+allow → custom
     cfg2 = make_settings(
-        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
+        {"tui.finish_gate_mode": "always", "tui.text_answer_mode": "allow"}
     )
     assert resolve_rigor_state(cfg2) == PRESET_CUSTOM
     # дефолты (нет ключей) → smart + judge → medium

@@ -11,8 +11,6 @@ from typing import Any
 
 from gc_tui.services.tool_identity import tool_id
 
-RETENTION_DETAIL_HINT = "детали вне окна retention; /export или архив"
-
 _LIGHT_KINDS = frozenset({"call", "result", "error"})
 _IDENTITY_KEYS = ("id", "type", "role", "name", "call_id")
 

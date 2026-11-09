@@ -2515,7 +2515,7 @@ def _two_level_cfg(tmp_path, *, level):
     )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
-    cfg["level"] = level
+    cfg["model"] = level
     return cfg_path, cfg
 
 
@@ -2637,7 +2637,7 @@ async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg = _resolved_conn_cfg(cfg_path)
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
-    cfg["level"] = "max"
+    cfg["model"] = "max"
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
     )
@@ -3712,17 +3712,17 @@ async def test_level_form_escape_returns_to_the_list_without_setting(tmp_path):
 
 
 def test_level_row_paints_the_level_name_with_its_own_color():
-    """Имя уровня в строке шага несёт ЦВЕТ уровня из `TOGGLES["level"]` (max — ACCENT),
+    """Имя уровня в строке шага несёт ЦВЕТ уровня из `model_sign.LEVEL_COLORS` (max — RUN_COLOR),
     как в раскрытом списке `/level` и в слотах секции «Модели»: одна сущность не имеет
     права выглядеть на одном экране двумя способами. Роль после «·» — обычная."""
-    from gc_tui.palette import ACCENT, INK
+    from gc_tui.palette import INK, RUN_COLOR
 
     scr = _screen()
     row = scr._level_row_text(False, "max")
     styles = {
         row.plain[span.start : span.end]: span.style for span in row.spans
     }
-    assert styles.get("max") == ACCENT
+    assert styles.get("max") == RUN_COLOR
     assert styles.get(" · самая сильная: сложные задачи") == INK
 
 

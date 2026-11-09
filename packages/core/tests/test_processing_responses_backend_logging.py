@@ -1,4 +1,3 @@
-import importlib
 import logging
 import sys
 import types
@@ -6,19 +5,14 @@ import types
 from gc_testkit import as_coro, run_coro
 from gc_testkit.paths import module_dir
 from gc_testkit.settings import fake_ctx
+from helpers.module_snapshot import ModuleSnapshot
+
+_SNAPSHOT: ModuleSnapshot | None = None
 
 
 def teardown_module(_module) -> None:
-    for name in list(sys.modules):
-        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
-            sys.modules.pop(name, None)
-    real_tools = importlib.import_module("gc_core.tools")
-    proc = sys.modules.get("gc_core.processing_responses")
-    if proc is not None:
-        proc.aapply_tool = real_tools.aapply_tool
-        proc.WrongFunctionArgumentsException = (
-            real_tools.WrongFunctionArgumentsException
-        )
+    if _SNAPSHOT is not None:
+        _SNAPSHOT.restore()
 
 
 def _stub_tools_modules() -> None:
@@ -56,6 +50,8 @@ State = None
 
 def setup_module(_module) -> None:
     global processing_module, State
+    global _SNAPSHOT
+    _SNAPSHOT = ModuleSnapshot()
     _stub_tools_modules()
     from gc_core import processing_responses as proc
     from gc_core.states import State as St

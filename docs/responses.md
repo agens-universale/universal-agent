@@ -19,14 +19,8 @@
 `gc-server`.
 
 ```bash
-gc-serve chat --config ./config.yml
-gc-serve chat --config ./config.yml --profile <имя>
-# настройки агента путём через точку поверх профиля/config.yml (как у gc-cli):
-gc-serve chat --config ./config.yml --profile work --level max --agent.max_steps 50
-```
-
 Флаги перекрывают **настройки агента** (`--agent.max_steps 50`, `--model`,
-`--completions_url`, `--level`) — так же, как у `gc-cli` (см. [переопределение из
+`--completions_url`) — так же, как у `gc-cli` (см. [переопределение из
 CLI](configuration.md#переопределение-настроек-из-cli)). Неизвестное имя, в том
 числе прежнее плоское, — ошибка с подсказкой пути, код выхода 2, порт не
 открывается. Адрес, порт, токен и режимы хода поверхности — в секции `chat`
@@ -56,7 +50,7 @@ config_server.yml, не флагами.
 | `chat.cors_origins` | `[]` | Пусто — CORS выключен: API доступен своей странице и не-браузерным клиентам. Непусто — только эти origin, методы `GET`, `POST`, `DELETE`, `OPTIONS`, заголовки `Authorization`, `Content-Type`. `"*"` из списка выбрасывается: любой сайт в браузере пользователя запускал бы агента с shell. Preflight с `Access-Control-Request-Private-Network` получает `Access-Control-Allow-Private-Network: true`. Страница чата открывается с порта этого процесса и CORS не использует. |
 | `chat.launch_root` | `null` | Корень ходов: рабочий каталог нового хода, если в запросе нет абсолютного `metadata.cwd`, и граница, за которую `metadata.cwd` не выходит. Относительный путь не используется: тогда корень — каталог процесса. |
 | `chat.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в рантайм хода (`text_answer_mode`). |
-| `chat.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `agent.strict_turn_finish_validation` (`true`, когда режим не `off`) и в рантайм-признак `finish_gate_smart` (`true` только для `smart`). |
+| `chat.finish_gate_mode` | `off` | `off`, `smart` или `always`. Пишется в `agent.strict_turn_finish_validation` (`true`, когда режим не `off`) и в рантайм-признак `finish_gate_smart` (`true` только для `smart`). |
 | `chat.todo_reminder_steps` | `0` | Напоминания про `session_todo`. `0` — не напоминать. Сам тул остаётся. Значение пишется в `todo.reminder_steps` настроек поверхности. |
 
 Защита от чужих сайтов в браузере (CSRF, DNS rebinding) действует всегда, токен её не заменяет: `POST` без `Content-Type: application/json` получает 415 — такой запрос браузер не шлёт без preflight. При bind на `127.0.0.1` или `localhost` заголовок `Host` должен быть `127.0.0.1` или `localhost`, иначе 400. При другом bind (например `0.0.0.0`) проверка `Host` выключена — закрывайте доступ токеном.

@@ -105,6 +105,17 @@ def test_snapshot_preserves_replay_data_and_excludes_resources():
     assert "logger" not in encoded["data"]
 
 
+def test_snapshot_roundtrip_keeps_applied_choice_and_reads_old_snapshot():
+    value = state()
+    value.applied_choice = "max"
+    encoded = json.loads(json.dumps(value.to_execution_snapshot()))
+    restored = ExecutionState.from_execution_snapshot(encoded)
+    assert restored.applied_choice == "max"
+    del encoded["data"]["applied_choice"]
+    old = ExecutionState.from_execution_snapshot(encoded)
+    assert old.applied_choice is None
+
+
 async def test_deterministic_ids_are_task_local():
     async def run(label):
         with execution_environment(

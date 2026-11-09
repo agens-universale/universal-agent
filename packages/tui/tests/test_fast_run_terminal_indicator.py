@@ -1,8 +1,8 @@
-"""Строка-итог хода, когда прогон уложился между тиками опроса.
+"""Строка итога хода, когда прогон уложился между тиками опроса.
 
 Индикатор создаёт только тик опроса, заставший прогон бегущим. Быстрый ход
 (завершился раньше первого тика) индикатора не имел — строка «✓ Выполнил»
-должна появиться и без него, как при переоткрытии сессии.
+встаёт в ленте и без него, как при переоткрытии сессии (S10).
 """
 
 import json
@@ -66,6 +66,17 @@ def _indicators(pilot):
     return list(pilot.app.screen.query(ThinkingIndicator))
 
 
+def _lines(pilot) -> list[str]:
+    """Свежие строки итога в ленте (голова и сводка)."""
+    from gc_tui.widgets.turn_line import TurnLine
+
+    screen = pilot.app.screen
+    return [
+        line.render().plain
+        for line in screen.query(TurnLine).filter(".-latest")
+    ]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seen_running", [True, False])
 async def test_finished_run_shows_done_line(tmp_path, seen_running):
@@ -76,14 +87,14 @@ async def test_finished_run_shows_done_line(tmp_path, seen_running):
         scr._poll_active()
         await pilot.pause()
 
-        inds = _indicators(pilot)
-        assert [i._state for i in inds] == ["done"]
-        assert inds[0]._render_text().plain.startswith("✓ Выполнил")
+        assert _indicators(pilot) == []
+        (line,) = _lines(pilot)
+        assert line.startswith("✓ Выполнил")
 
 
 @pytest.mark.asyncio
 async def test_undo_cancel_does_not_resurrect_line(tmp_path):
-    """Отмена без ответа агента — «undo»: строку-итог не возвращаем."""
+    """Отмена без ответа агента — «undo»: строку итога не возвращаем."""
     async with _app(tmp_path).run_test() as pilot:
         scr, _ = await _send(pilot, seen_running=True)
         scr._cancel_with_undo()
@@ -92,6 +103,7 @@ async def test_undo_cancel_does_not_resurrect_line(tmp_path):
         await pilot.pause()
 
         assert _indicators(pilot) == []
+        assert _lines(pilot) == []
 
 
 def _edit(tmp_path, turn):
@@ -133,9 +145,9 @@ async def test_fast_run_with_edits_shows_edit_counter(tmp_path):
     async with _app(tmp_path).run_test() as pilot:
         await _fast_turn(pilot, tmp_path, turn="T1")
 
-        inds = _indicators(pilot)
-        assert [i._state for i in inds] == ["done"]
-        assert "изменено 1 файл" in inds[0]._render_text().plain
+        assert _indicators(pilot) == []
+        (line,) = _lines(pilot)
+        assert "изменено 1 файл" in line
 
 
 @pytest.mark.asyncio
@@ -148,9 +160,10 @@ async def test_next_turn_summary_skips_fast_run_edits(tmp_path):
         scr._poll_active()
         await pilot.pause()
 
-        inds = _indicators(pilot)
-        assert [i._state for i in inds] == ["done"]
-        assert "изменено" not in inds[0]._render_text().plain
+        assert _indicators(pilot) == []
+        (line,) = _lines(pilot)
+        assert line.startswith("✓ Выполнил")
+        assert "изменено" not in line
 
 
 @pytest.mark.asyncio
@@ -165,8 +178,8 @@ async def test_fast_run_drops_skills_cache(tmp_path):
 
 @pytest.mark.asyncio
 async def test_fast_run_finish_keeps_done_state(tmp_path):
-    """Конец хода и turn_finish в одном тике: строка-итог не мигает
-    «завершаю…»."""
+    """Конец хода и turn_finish в одном тике: «завершаю…» не мигает —
+    индикатора нет, итог строкой."""
     from gc_core.threads.facade import Threads
     from gc_core.threads.file_store import FileThreadStore
     from gc_core.threads.models import ThreadKey
@@ -202,4 +215,6 @@ async def test_fast_run_finish_keeps_done_state(tmp_path):
         # бы «done» и скрыл мигание.
         scr._poll_active()
 
-        assert scr._thinking._state == "done"
+        assert scr._thinking is None
+        (line,) = _lines(pilot)
+        assert line.startswith("✓ Выполнил")

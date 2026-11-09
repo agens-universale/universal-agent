@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from textual.message import Message
+from textual.widget import Widget
 
 
 class OpenEventRequest(Message):
@@ -11,6 +12,17 @@ class OpenEventRequest(Message):
     def __init__(self, event_no: int) -> None:
         self.event_no = event_no
         super().__init__()
+
+
+class BlockToggle(Message):
+    """Раскрыть / свернуть блок вызовов ``key`` модели уровня ``level``
+    (`""` — верхний уровень, иначе `parent_call_id` субагента; спека P4
+    §5): пробел на строке блока, клик по фразе."""
+
+    def __init__(self, level: str, key: str) -> None:
+        super().__init__()
+        self.level = level
+        self.key = key
 
 
 class OpenToolCallDetailRequest(Message):
@@ -59,3 +71,15 @@ class OpenImageRequest(Message):
     def __init__(self, path: str) -> None:
         super().__init__()
         self.path = path
+
+
+class ScrollToReply(Message):
+    """Клик по липкой реплике над лентой → лента показывает её сверху."""
+
+    def __init__(self, reply: Widget) -> None:
+        super().__init__()
+        self.reply = reply
+
+
+class ScrollToEnd(Message):
+    """Клик по плашке «в конец» → лента к низу и снова липнет к нему."""

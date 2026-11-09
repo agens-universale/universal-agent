@@ -146,13 +146,16 @@ async def test_probe_sends_the_extra_gateway_header_like_the_agent(tmp_path):
             assert "x-session-id" not in {k.lower() for k in sent}
 
 
+@pytest.mark.parametrize("choice", ["default", "main", "auto"])
 async def test_probe_sends_the_main_registry_model_not_a_placeholder(
     tmp_path,
+    choice,
 ):
     """Шлюз с доступом по модели отвечает 401 на неизвестную модель. Плоского
     `agent.model` нет (шаблонная заглушка) — основная модель живёт в реестре."""
     with _Gateway(models={"corp/main-model"}) as gw:
         yaml_text = (
+            f"model: {choice}\n"
             "backend:\n"
             "  api_mode: chat_completions\n"
             f"  completions_url: {gw.url}\n"

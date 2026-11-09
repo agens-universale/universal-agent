@@ -281,7 +281,7 @@ class ResponsesFacade:
             created_at=record.created_at,
         )
         flow = await ToolFlow.start(
-            self._index.threads, thread_key(record.thread_id)
+            self._index.threads, thread_key(record.thread_id), root=record.cwd
         )
         run = TurnRun(
             agent=agent,

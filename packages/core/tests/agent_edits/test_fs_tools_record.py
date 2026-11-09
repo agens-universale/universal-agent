@@ -608,3 +608,27 @@ async def test_append_to_empty_existing_file_is_not_a_creation(roots):
     assert base == b"", (
         "база «до» у пустого файла не снята — откату не к чему вернуться"
     )
+
+
+async def test_save_base64_binary_records_size(roots):
+    """Бинарь без диффа: размер файла после правки — в записи."""
+    launch_root, threads_dir = roots
+    target = launch_root / "img.png"
+    await _tool(SaveBase64File, launch_root, threads_dir).acall(
+        path=str(target), data=base64.b64encode(PNG_BYTES).decode("ascii")
+    )
+
+    assert [r.size_bytes for r in _records(threads_dir)] == [len(PNG_BYTES)]
+
+
+async def test_text_edit_has_no_size(roots):
+    launch_root, threads_dir = roots
+    target = launch_root / "a.txt"
+    await _tool(WriteToFile, launch_root, threads_dir).acall(
+        path=str(target), content="hello\n"
+    )
+
+    assert [r.size_bytes for r in _records(threads_dir)] == [None]
+    journal = edits_journal_path(str(threads_dir), "cli", "th1")
+    with open(journal, encoding="utf-8") as fh:
+        assert '"size_bytes"' not in fh.read()

@@ -25,13 +25,13 @@ from gc_core.backends.remote_shell import (
 )
 from gc_core.backends.sandbox import SandboxBackend
 from gc_core.execution.contracts import ModelRequestStopped
+from gc_core.execution.tool_call_context import bind_tool_call
 from gc_core.tools.connect_mcp.client_port import _mcp_call_under_stop
 from gc_core.tools.connect_mcp.transport import _LineReader
 from gc_core.user_stop import (
     INTERRUPTED_CODE,
     UserStop,
     UserStopInterrupt,
-    bind_tool_call,
     bind_user_stop,
 )
 from gc_core.utils.connect_backend import (

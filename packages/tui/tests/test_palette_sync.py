@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 
 from gc_testkit.paths import TUI_PKG
@@ -77,6 +78,17 @@ def _distance(a: str, b: str) -> float:
     return sum((x - y) ** 2 for x, y in zip(pa, pb)) ** 0.5
 
 
+def test_err_readable_on_feed_and_output_block():
+    """Текст ошибки (`└ код выхода 1`, причины сбоя) лежит на фоне ленты и
+    на блоке вывода под `Run`: контраст WCAG не ниже 4.5 на обоих. Прежний
+    ERR #C75C54 давал на блоке 4.21."""
+    for surface in (palette.BG, palette.BLOCK_BG):
+        ratio = palette.contrast(
+            palette._rgb(palette.ERR), palette._rgb(surface)
+        )
+        assert ratio >= 4.5, surface
+
+
 def test_selection_distinguishable_from_focus():
     """Выделение текста и подсветка сфокусированного события не должны сливаться.
 
@@ -84,7 +96,8 @@ def test_selection_distinguishable_from_focus():
     поверх фокуса. Порог 40 держит нынешнюю разницу; уронить его правкой цвета
     молча теперь нельзя."""
     assert (
-        _distance(palette.SCREEN_SELECTION_BACKGROUND, palette.FOCUS_BG) >= 40
+        _distance(palette.SCREEN_SELECTION_BACKGROUND, palette.HIGHLIGHT_BG)
+        >= 40
     )
 
 
@@ -100,3 +113,104 @@ def test_selection_does_not_swallow_syntax_colors():
     """Самый тёмный токен подсветки остаётся различим на фоне выделения."""
     darkest_token = "#ae81ff"  # фиолетовый monokai — числа
     assert _contrast(darkest_token, palette.SCREEN_SELECTION_BACKGROUND) >= 3.0
+
+
+_HEX_RE = re.compile(r"#[0-9a-fA-F]{6}\b")
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def test_no_hex_in_tcss():
+    """Цвета в *.tcss — только `$var` палитры; hex-литералы вне комментариев
+    запрещены (комментарии вырезаются перед поиском)."""
+    violations = []
+    for path in sorted(TUI_PKG.rglob("*.tcss")):
+        text = _CSS_COMMENT_RE.sub("", path.read_text(encoding="utf-8"))
+        violations += [f"{path.name}: {h}" for h in _HEX_RE.findall(text)]
+    assert violations == []
+
+
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node,
+            (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+        ):
+            first = node.body[0] if node.body else None
+            if isinstance(first, ast.Expr) and isinstance(
+                first.value, ast.Constant
+            ):
+                ids.add(id(first.value))
+    return ids
+
+
+def _py_hex_violations(path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docs = _docstring_nodes(tree)
+    return [
+        f"{path.name}:{node.lineno}: {h}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docs
+        for h in _HEX_RE.findall(node.value)
+    ]
+
+
+def test_no_hex_in_py_outside_palette():
+    """Цвета в *.py — только из палитры; hex-литералы вне palette.py
+    запрещены (комментарии и докстринги не считаются; строки
+    DEFAULT_CSS ловятся)."""
+    violations = []
+    for path in sorted(TUI_PKG.rglob("*.py")):
+        if path.name == "palette.py":
+            continue
+        violations += _py_hex_violations(path)
+    assert violations == []
+
+
+_PREVIOUS_RAMPS = {
+    "GLOW_SHADES": [
+        "#9f7943",
+        "#bb9054",
+        "#d8a46d",
+        "#e3b47e",
+        "#efc490",
+        "#f3c78f",
+        "#efc490",
+        "#e3b47e",
+        "#d8a46d",
+        "#bb9054",
+    ],
+    "PROCESSING_SHADES": [
+        "#4c525b",
+        "#545b65",
+        "#5d646e",
+        "#666e78",
+        "#6f7782",
+        "#7a8290",
+        "#6f7782",
+        "#666e78",
+        "#5d646e",
+        "#545b65",
+    ],
+    "VALIDATING_SHADES": [
+        "#5e6675",
+        "#69727f",
+        "#747e8b",
+        "#808c99",
+        "#8c98a6",
+        "#9aa4b2",
+        "#8c98a6",
+        "#808c99",
+        "#747e8b",
+        "#69727f",
+    ],
+}
+
+
+def test_ramps_equal_previous_literals():
+    """Рампы анимаций переехали в палитру без изменения значений."""
+    for name, expected in _PREVIOUS_RAMPS.items():
+        actual = [color.lower() for color in getattr(palette, name)]
+        assert actual == expected, name

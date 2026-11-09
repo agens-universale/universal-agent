@@ -16,7 +16,7 @@ from textual.widgets import Static
 from gc_tui import palette
 from gc_tui.services import notices_ui
 
-_FOOTER = "/config · /mcp  [Esc] назад"
+_FOOTER = "/config · /mcp · Esc — назад"
 # Значки — из общего источника (tui.services.notices_ui): язык этого экрана и бейджа
 # обязан совпадать, а свои копии уже разъезжались по вариационному селектору.
 _WARN_GLYPH = notices_ui.WARN_GLYPH

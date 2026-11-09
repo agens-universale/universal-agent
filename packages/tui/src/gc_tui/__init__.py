@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import os
 import sys
 from typing import Optional, Sequence
@@ -47,8 +48,24 @@ def _force_truecolor_if_supported() -> None:
         os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
 
 
+def _select_theme(settings) -> None:
+    """Тема auto: палитра от фона терминала. Строго до импорта gc_tui.app —
+    модули берут токены через `from gc_tui.palette import X`, и значение
+    фиксируется при их импорте. Проба — до захвата терминала Textual."""
+    from gc_core.settings import settings_of
+
+    from gc_tui import palette
+    from gc_tui.services import terminal_caps
+
+    rgb = palette.select_palette(
+        settings_of(settings).tui.theme, terminal_caps.query_background
+    )
+    if rgb is not None:
+        palette.apply_background(rgb)
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    from gc_core.config_modules.model_registry import LEVEL_VALUES
+    from gc_core.config_modules.cli_args import add_removed_level_flag
     from gc_core.security.permission_mode import AVAILABLE_MODES
 
     parser = argparse.ArgumentParser(
@@ -66,14 +83,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--level",
-        choices=list(LEVEL_VALUES),
+        "--model",
+        type=str,
         default=None,
         help=(
-            "Активный уровень модели на этот запуск (перекрывает config.yml и профиль); "
-            "auto — уровень меняется автоматически по ходу работы"
+            "Модель на этот запуск: auto (модель выбирается автоматически "
+            "по ходу работы), слово уровня или алиас из реестра "
+            "(перекрывает config.yml и профиль)"
         ),
     )
+    add_removed_level_flag(parser)
     parser.add_argument(
         "--permission-mode",
         type=str.lower,
@@ -133,11 +152,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         return config_main(args_list[1:], program="gc-ua")
     _force_truecolor_if_supported()
-    try:
-        # importlib.import_module goes through sys.modules, not the package
-        # attribute cache, so evicting tui.app in tests forces a real re-import.
-        _app_mod = importlib.import_module("gc_tui.app")
-    except ImportError:
+    # Только проверка: импорт gc_tui.app ждёт выбора палитры (_select_theme).
+    if importlib.util.find_spec("textual") is None:
         print(_missing_textual_msg(), file=sys.stderr)
         return 1
 
@@ -148,7 +164,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.unknown:
         print(
             f"gc-ua: неизвестные аргументы: {' '.join(args.unknown)} (флаги не "
-            "сокращаются: --config, --profile, --level, --permission-mode, "
+            "сокращаются: --config, --profile, --model, --permission-mode, "
             "--init-config, --task-root, --no-auto-mcp; справка — gc-ua --help)",
             file=sys.stderr,
         )
@@ -282,7 +298,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 1
         settings = apply_cli_overrides(
             settings,
-            extra_overrides={"level": args.level} if args.level else None,
+            extra_overrides={"model": args.model} if args.model else None,
         )
         profile_meta = settings.profile_meta
 
@@ -312,6 +328,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if storage_rejection is not None:
         print(storage_rejection, file=sys.stderr)
         return 1
+
+    _select_theme(settings)
+    # importlib.import_module goes through sys.modules, not the package
+    # attribute cache, so evicting tui.app in tests forces a real re-import.
+    _app_mod = importlib.import_module("gc_tui.app")
 
     from gc_core.thread_store import resolve_threads_dir
 
@@ -355,7 +376,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         system="cli",
         settings=settings,
         profile_override=None if args.init_config else args.profile,
-        level_override=None if args.init_config else args.level,
+        model_override=None if args.init_config else args.model,
     )
     app.set_config_path(
         onb_write_path if onboarding_mode else resolve_config_path(args.config)

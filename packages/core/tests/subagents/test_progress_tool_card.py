@@ -13,7 +13,15 @@ from gc_core.execution.progress import tool_call_id, tool_card_title
 def test_title_is_name_with_brief_arguments():
     title = tool_card_title("fs_read_file", '{"path": "a.py"}')
 
-    assert title == "fs_read_file(path='a.py')"
+    assert title == "fs_read_file(a.py)"
+
+
+def test_title_displays_path_relative_to_root(tmp_path):
+    title = tool_card_title(
+        "fs_read_file", {"path": str(tmp_path / "a.py")}, root=str(tmp_path)
+    )
+
+    assert title == "fs_read_file(a.py)"
 
 
 @pytest.mark.parametrize("arguments", [None, "", "{}", {}])

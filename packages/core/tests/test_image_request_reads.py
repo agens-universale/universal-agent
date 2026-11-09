@@ -72,7 +72,7 @@ def test_a_live_image_is_read_once_per_request(tmp_path, monkeypatch):
         logger=logging.getLogger("test_image_request_reads"),
         auth_connector=None,
         is_tui=False,
-        model_router=ModelRouter(loaded, level_provider=lambda: "default"),
+        model_router=ModelRouter(loaded, choice_provider=lambda: "default"),
         image_store=store,
         on_trace_note=lambda _note: None,
     )

@@ -127,6 +127,11 @@ class State(ExecutionState):
         self.turn_messages_start: Optional[int] = None
         # Поле прежних снимков; уровень текущего запроса хранится в _call_level.
         self.turn_level: Optional[str] = None
+        # Выбор модели, которым идёт ран (`gc_core.model_choice`): ставит
+        # старт рана, меняет подготовка основного вызова главного трейса.
+        self.applied_choice: Optional[str] = None
+        # Запись смены выбора, ждущая запроса (`gc_core.model_choice`).
+        self.pending_choice_record: Optional[Any] = None
         # Optional sink for messages dropped by context compaction.
         # Core does not retain them; harbor/other hosts may archive for trajectory.
         self.on_messages_evicted: Optional[Any] = None
@@ -156,6 +161,10 @@ class State(ExecutionState):
         self.turn_tool_calls: int = (
             0  # вызовов инструментов за текущий ход (smart-гейт, спека §3)
         )
+        # Прогон что-то выдал или сделал: дельта стрима, запись агента в
+        # тред, старт тула. До этого фронтенд вправе отменить отправку без
+        # следов. Служебные записи (реплика, техзаметки) не в счёт.
+        self.produced_output: bool = False
         self.terminal_outcome: Optional[str] = (
             None  # None | "step_limit" | "tool_errors" | "plan_proposed" | "judge_unavailable"
         )

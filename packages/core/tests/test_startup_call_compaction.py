@@ -24,7 +24,7 @@ async def test_startup_compaction_uses_first_call_and_keeps_current_task(
     monkeypatch.chdir(tmp_path)
     config = AppConfig.model_validate(
         {
-            "level": mode,
+            "model": mode,
             "backend": {"api_mode": "chat_completions", "vision": False},
             "logging": {"save_logs": False, "console_trace": False},
             "agent": {

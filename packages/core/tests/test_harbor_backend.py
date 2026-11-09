@@ -67,6 +67,15 @@ class FakeEnv:
         if hit is not None:
             return FakeExecResult(stdout=hit, return_code=0)
         self.calls.append(command)
+        if 'mkdir -m 700 -- "$stage"' in command:
+            adjacent = next(
+                line
+                for line in command.splitlines()
+                if line.startswith("adjacent=")
+            )
+            return FakeExecResult(
+                stdout=shlex.split(adjacent)[0].split("=", 1)[1] + "\n"
+            )
         if command.startswith("if test "):
             # Проверки существования отвечают явными 0/1 (см. PosixShellFsMixin._test).
             return FakeExecResult(stdout="1\n", return_code=0)
@@ -122,7 +131,9 @@ async def test_write_uses_upload(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     await backend.write("/work/new.txt", "hello")
-    assert env.uploaded and env.uploaded[0][1] == "/work/new.txt"
+    assert env.uploaded_bytes == [b"hello"]
+    assert env.uploaded[0][1].startswith("/work/.gc-write-")
+    assert len(env.calls) == 2
 
 
 async def test_is_file_reads_shell_answer_and_raises_when_backend_is_down(
@@ -276,58 +287,15 @@ async def test_listdir_raises_on_nonzero_rc(loop_in_thread):
     assert not isinstance(ei.value, FileNotFoundError)
 
 
-async def test_append_creates_file_if_missing(loop_in_thread):
+async def test_append_uploads_only_the_new_chunk(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
 
-    # exists() -> exec("test -e ...") returns rc 0 by default FakeEnv.exec, so
-    # simulate missing file via a custom exec that fails "test -e" but succeeds otherwise.
-    async def fake_exec(command, **kw):
-        probed = _probe_result(command)
-        if probed is not None:
-            return probed
-        env.calls.append(command)
-        if command.startswith("test -e"):
-            return FakeExecResult(stdout="", return_code=1)
-        return FakeExecResult(stdout=f"ran:{command}", return_code=0)
-
-    env.exec = fake_exec
-    await backend.append("/work/new.txt", "hello")
-    assert env.uploaded and ".gc-append-tmp." in env.uploaded[0][1]
-    assert env.uploaded[0][1].startswith("/work/new.txt.gc-append-tmp.")
-    assert any(">>" in c and "/work/new.txt" in c for c in env.calls)
-
-
-async def test_append_concatenates_existing_content(loop_in_thread):
-    env = FakeEnv()
-    uploaded_payloads = []
-
-    async def fake_exec(command, **kw):
-        probed = _probe_result(command)
-        if probed is not None:
-            return probed
-        env.calls.append(command)
-        return FakeExecResult(stdout=f"ran:{command}", return_code=0)
-
-    async def fake_upload_file(src, dst):
-        from pathlib import Path
-
-        uploaded_payloads.append((dst, Path(src).read_bytes()))
-        env.uploaded.append((str(src), dst))
-
-    env.exec = fake_exec
-    env.upload_file = fake_upload_file
-    backend = HarborBackend(env, loop_in_thread)
     await backend.append("/work/f.txt", "more")
-    assert len(uploaded_payloads) == 1
-    remote_tmp, payload = uploaded_payloads[0]
-    assert remote_tmp.startswith("/work/f.txt.gc-append-tmp.")
-    assert ".gc-append-tmp." in remote_tmp
-    assert payload == b"more"
-    assert any(
-        "cat " in c and ">>" in c and "/work/f.txt" in c for c in env.calls
-    )
-    assert not any(c.startswith("test -e") for c in env.calls)
+
+    assert env.uploaded_bytes == [b"more"]
+    assert len(env.calls) == 2
+    assert 'cat < "$stage/payload" >> "$target"' in env.calls[1]
 
 
 async def test_exec_env_prefix_quoting(loop_in_thread):
@@ -593,8 +561,7 @@ async def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
     backend = HarborBackend(env, loop_in_thread)
     await backend.write("/work/a.txt", "data", encoding="utf-8")
     await backend.append("/work/a.txt", "more", encoding="utf-8")
-    assert any(dst == "/work/a.txt" for _, dst in env.uploaded)
-    assert any(".gc-append-tmp." in dst for _, dst in env.uploaded)
+    assert env.uploaded_bytes == [b"data", b"more"]
 
 
 async def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
@@ -1068,18 +1035,17 @@ async def test_upload_probes_before_mkdir(loop_in_thread):
     env = FakeEnv()
     recorded = []
 
+    original_exec = env.exec
+
     async def exec_record(command, **kw):
         recorded.append(command)
-        probed = _probe_result(command)
-        if probed is not None:
-            return probed
-        return FakeExecResult(stdout="", return_code=0)
+        return await original_exec(command, **kw)
 
     env.exec = exec_record
     backend = HarborBackend(env, loop_in_thread)
     await backend.write_bytes("/work/a.bin", b"x")
     assert probe_stdout(recorded[0]) is not None
-    assert recorded[1].startswith("mkdir -p ")
+    assert 'mkdir -m 700 -- "$stage"' in recorded[1]
     assert env.uploaded_bytes == [b"x"]
 
 

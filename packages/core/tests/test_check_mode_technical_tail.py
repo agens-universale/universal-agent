@@ -311,6 +311,7 @@ def test_run_agent_sends_loop_notice_tail_as_function_call_output(monkeypatch):
     assert [m.get("type") or m.get("role") for m in seen_batches[0]] == [
         "function_call_output",
         "function_call_output",
-        "user",
     ]
-    assert "Loop detector:" in seen_batches[0][-1]["content"]
+    body = json.loads(seen_batches[0][-1]["output"])
+    assert "Loop detector:" in body["technical_system_messages"][0]
+    assert body["ok"] is True

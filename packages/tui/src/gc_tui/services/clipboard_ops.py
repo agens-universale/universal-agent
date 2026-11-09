@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any
+from typing import Any, Callable
 
 from gc_tui.services.os_ops import write_clipboard
 
@@ -53,7 +53,7 @@ def _remember_internally(app: Any, text: str) -> None:
         pass  # чужая реализация app — внутренний буфер не наша забота
 
 
-def _send_osc52(app: Any, text: str) -> None:
+def _send_osc52(app: Any, text: str) -> bool:
     """Попросить терминал положить текст в буфер (управляющая последовательность).
 
     Дорогой путь на Windows: получив её, терминал сам захватывает системный
@@ -61,11 +61,13 @@ def _send_osc52(app: Any, text: str) -> None:
     захват занимал до 3-4 секунд, всё это время терминал не рисовал и не отдавал
     события (интерфейс выглядел зависшим), а параллельная нативная запись
     получала отказ. Поэтому на Windows и macOS шлём только как запасной путь;
-    на Linux и в SSH — всегда (там он безопасен и/или единственный)."""
+    на Linux и в SSH — всегда (там он безопасен и/или единственный).
+    `True` — последовательность ушла."""
     send = getattr(app, "copy_to_clipboard", None)
     if not callable(send):
-        return
+        return False
     send(text)
+    return True
 
 
 def copy_out(
@@ -74,6 +76,8 @@ def copy_out(
     *,
     toast: bool = False,
     blocking: bool = True,
+    quiet: bool = False,
+    on_done: Callable[[bool], None] | None = None,
 ) -> bool:
     """Скопировать text наружу, выбрав ОДИН путь доставки.
 
@@ -86,6 +90,9 @@ def copy_out(
     blocking=True — ждать write_clipboard (тесты / простой API).
     blocking=False — native в ``run_worker``; UI не ждёт запись (O9).
     При окончательной неудаче — warning раз за сессию (текст зависит от среды).
+    quiet=True — без уведомлений приложения: говорит только вызывающий.
+    on_done(ok or osc_sent) — итог доставки, в UI-потоке (при blocking=False — когда
+    фоновая запись закончилась).
     Пустой text — no-op, False.
     """
     if not text:
@@ -108,23 +115,42 @@ def copy_out(
 
     if blocking or not callable(getattr(app, "run_worker", None)):
         ok = write_clipboard(text)
-        if not ok and not osc_sent:
-            _send_osc52(app, text)
-        _feedback(app, ok, toast=toast)
+        _finish_write(app, text, ok, osc_sent, toast, quiet, on_done)
         return ok
 
     def _work() -> None:
         ok = write_clipboard(text)
         try:
-            if not ok and not osc_sent:
-                app.call_from_thread(_send_osc52, app, text)
-            app.call_from_thread(_feedback, app, ok, toast=toast)
+            app.call_from_thread(
+                _finish_write, app, text, ok, osc_sent, toast, quiet, on_done
+            )
         except RuntimeError:
             # App уже останавливается — feedback не нужен.
             pass
 
     app.run_worker(_work, thread=True, name="clipboard-write")
     return True
+
+
+def _finish_write(
+    app: Any,
+    text: str,
+    ok: bool,
+    osc_sent: bool,
+    toast: bool,
+    quiet: bool,
+    on_done: Callable[[bool], None] | None,
+) -> None:
+    """После нативной записи (UI-поток): запасной OSC 52, уведомление
+    (если не quiet), итог вызывающему."""
+    if not ok and not osc_sent:
+        osc_sent = _send_osc52(app, text)
+    if not quiet:
+        _feedback(app, ok, toast=toast)
+    if on_done is not None:
+        # Для вызывающего текст дошёл, если сработал любой из путей,
+        # запасной OSC 52 тоже (решение владельца 11 к плану P3b).
+        on_done(ok or osc_sent)
 
 
 def _feedback(app: Any, ok: bool, *, toast: bool) -> None:

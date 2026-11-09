@@ -31,6 +31,7 @@ from gc_core.execution.progress import (
     tool_call_id,
     tool_card_title,
 )
+from gc_core.message_policy.nudges import output_for_card
 from gc_core.threads.facade import Cursor, Threads
 from gc_core.threads.models import StreamEntry, ThreadKey
 
@@ -55,19 +56,29 @@ _CARD_LIMIT = 5000
 
 
 def report_from_record(
-    message: dict, seen: set[str], finished: set[str] | None = None
+    message: dict,
+    seen: set[str],
+    finished: set[str] | None = None,
+    *,
+    root: str | None = None,
 ) -> dict | None:
-    """Один function_call или его результат. Чужое и служебное — None."""
+    """Один function_call или его результат. Чужое и служебное — None.
+
+    ``root`` — cwd сессии: пути в подписи вызова от него."""
     kind = message.get("type")
     if kind == _CALL:
-        return _call_report(message, seen)
+        return _call_report(message, seen, root)
     if kind == _CALL_OUTPUT:
         return _output_report(message, seen, finished)
     return None
 
 
 def report_from_sidecar(
-    record: dict, seen: set[str], finished: set[str] | None = None
+    record: dict,
+    seen: set[str],
+    finished: set[str] | None = None,
+    *,
+    root: str | None = None,
 ) -> dict | None:
     """Запись sidecar → та же карточка, что у тула родителя.
 
@@ -80,7 +91,7 @@ def report_from_sidecar(
         return None
     message = _scoped_payload(payload, record.get("parent_call_id"))
     if kind == _SIDECAR_CALL:
-        return _call_report(message, seen)
+        return _call_report(message, seen, root)
     if kind not in _SIDECAR_DONE:
         return None
     update = _output_report(message, seen, finished)
@@ -95,10 +106,13 @@ class ToolFlow:
     История и вызовы субагента за один poll сливаются по ``ts``, чтобы тул
     внутри субагента встал между стартом субагента и его результатом, а не
     после. Сжатие истории посреди хода начинает её чтение заново; уже
-    показанные карточки не повторяются.
+    показанные карточки не повторяются. ``root`` — cwd сессии: пути в
+    подписях вызовов от него.
     """
 
-    def __init__(self, threads: Threads, key: ThreadKey) -> None:
+    def __init__(
+        self, threads: Threads, key: ThreadKey, *, root: str | None = None
+    ) -> None:
         self._threads = threads
         self._key = key
         self._cursor: Cursor | None = None
@@ -106,10 +120,13 @@ class ToolFlow:
         self._origin: Cursor | None = None
         self._seen: set[str] = set()
         self._finished: set[str] = set()
+        self._root = root
 
     @classmethod
-    async def start(cls, threads: Threads, key: ThreadKey) -> ToolFlow:
-        flow = cls(threads, key)
+    async def start(
+        cls, threads: Threads, key: ThreadKey, *, root: str | None = None
+    ) -> ToolFlow:
+        flow = cls(threads, key, root=root)
         flow._cursor = (
             await threads.tail(key, (_HISTORY, _SUBAGENTS), None)
         ).cursor
@@ -127,7 +144,9 @@ class ToolFlow:
         )
         updates: list[dict] = []
         for _ts, _order, stream, entry in ordered:
-            update = _decode(stream, entry, self._seen, self._finished)
+            update = _decode(
+                stream, entry, self._seen, self._finished, root=self._root
+            )
             if update is not None:
                 updates.append(update)
         return updates
@@ -174,7 +193,9 @@ def _open_call_ids(
     return [item for item in order if item not in finished]
 
 
-def _call_report(message: dict, seen: set[str]) -> dict | None:
+def _call_report(
+    message: dict, seen: set[str], root: str | None = None
+) -> dict | None:
     name = message.get("name")
     call_id = tool_call_id(message)
     if not isinstance(name, str) or name == "" or name in _HIDDEN:
@@ -186,7 +207,7 @@ def _call_report(message: dict, seen: set[str]) -> dict | None:
     report: dict[str, Any] = {
         "sessionUpdate": "tool_call",
         "toolCallId": call_id,
-        "title": tool_card_title(name, arguments),
+        "title": tool_card_title(name, arguments, root=root),
         "status": _IN_PROGRESS,
         "name": name,
     }
@@ -194,7 +215,7 @@ def _call_report(message: dict, seen: set[str]) -> dict | None:
     if parsed is None:
         return report
     shown = _arguments_for_card(name, parsed)
-    report["title"] = tool_card_title(name, shown)
+    report["title"] = tool_card_title(name, shown, root=root)
     report["rawInput"] = _truncate_values(shown)
     locations = _locations(name, parsed)
     if locations is not None:
@@ -347,6 +368,7 @@ def _preview_text(output: Any) -> str | None:
     if isinstance(output, str):
         if output == "":
             return None
+        output = output_for_card(output)
         try:
             value = json.loads(output)
         except json.JSONDecodeError:
@@ -366,9 +388,14 @@ def _preview_text(output: Any) -> str | None:
 
 
 def _decode(
-    stream: str, entry: StreamEntry, seen: set[str], finished: set[str]
+    stream: str,
+    entry: StreamEntry,
+    seen: set[str],
+    finished: set[str],
+    *,
+    root: str | None = None,
 ) -> dict | None:
     if stream == _SUBAGENTS:
         record = {"ts": entry.ts, "seq": entry.seq, **entry.data}
-        return report_from_sidecar(record, seen, finished)
-    return report_from_record(entry.data, seen, finished)
+        return report_from_sidecar(record, seen, finished, root=root)
+    return report_from_record(entry.data, seen, finished, root=root)

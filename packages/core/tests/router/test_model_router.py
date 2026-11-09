@@ -1,13 +1,16 @@
+import asyncio
 from dataclasses import replace
 
 import pytest
 from gc_core.config_modules.root import AppConfig
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.model_router import (
     CONSUMERS,
     SUBAGENT_CONSUMER_PREFIX,
     ModelRouter,
     ResolvedModel,
 )
+from gc_core.user_stop import UserStopInterrupt
 
 
 def _snapshot(raw: dict) -> AppConfig:
@@ -24,7 +27,7 @@ def _router(
 ) -> ModelRouter:
     return ModelRouter(
         _snapshot(raw),
-        level_provider=lambda: level,
+        choice_provider=lambda: level,
         force_legacy=force_legacy,
         unbound_override=unbound_override,
     )
@@ -234,7 +237,7 @@ def test_level_fallback_matrix_when_requested_slot_unset():
 def test_raw_auto_level_raises_honest_error_instead_of_key_error():
     """`_resolve_level` индексирует
     `LEVEL_FALLBACK[level]` — сырой литерал `auto` ("`level: auto`" не переведён
-    через `auto_routing.levels.effective_level`) раньше падал `KeyError: 'auto'`.
+    через `auto_routing.levels.effective_target`) раньше падал `KeyError: 'auto'`.
     Честная ошибка вместо этого — молчаливого дефолта нет."""
     router = _router(
         {"models": {"b": {}}, "slots": {"default": "b"}}, level="auto"
@@ -243,7 +246,7 @@ def test_raw_auto_level_raises_honest_error_instead_of_key_error():
         router.resolve_level("auto")
     message = str(excinfo.value)
     assert "auto" in message
-    assert "effective_level" in message
+    assert "effective_target" in message
 
 
 def test_single_model_registry_without_any_slot_resolves_to_it():
@@ -424,11 +427,11 @@ def test_tariff_none_when_model_has_no_pricing():
     assert router.resolve("main").tariff is None
 
 
-def test_active_level_reflects_level_provider_regardless_of_binding():
+def test_active_level_reflects_choice_provider_regardless_of_binding():
     router = _router(
         {"models": {"a": {}}, "slots": {"default": "a"}}, level="max"
     )
-    assert router.active_level() == "max"
+    assert router.active_target() == "max"
 
 
 def test_registry_empty_false_when_models_present():
@@ -605,25 +608,25 @@ _TWO_LEVELS = {
 }
 
 
-def test_resolve_main_at_level_follows_the_given_level_not_the_live_one():
+def test_resolve_main_at_follows_the_given_level_not_the_live_one():
     """Уровень вызова задаёт вызывающий (сегодня — закреплённый на ход): живой
     `/level`, переключённый посреди хода, резолв не уводит."""
     router = _router(_TWO_LEVELS, level="default")
-    assert router.resolve_main_at_level("light").alias == "small"
+    assert router.resolve_main_at("light").alias == "small"
     assert router.resolve("main").alias == "big"
 
 
-def test_resolve_main_at_level_without_a_level_is_the_live_resolve():
+def test_resolve_main_at_without_a_level_is_the_live_resolve():
     router = _router(_TWO_LEVELS, level="default")
-    assert router.resolve_main_at_level(None).alias == "big"
+    assert router.resolve_main_at(None).alias == "big"
 
 
-def test_resolve_main_at_level_keeps_the_subagent_override():
+def test_resolve_main_at_keeps_the_subagent_override():
     """У дочернего Router'а модель заморожена в нём самом — уровень родителя её
     не подменяет."""
     parent = _router(_TWO_LEVELS, level="default")
     child = parent.with_override(parent.resolve_level("light"))
-    assert child.resolve_main_at_level("default").alias == "small"
+    assert child.resolve_main_at("default").alias == "small"
 
 
 def test_resolve_level_can_skip_the_breaker_for_showcase_reads():
@@ -636,9 +639,89 @@ def test_resolve_level_can_skip_the_breaker_for_showcase_reads():
     with pytest.raises(AliasCircuitOpenError):
         router.resolve_level("light")
     with pytest.raises(AliasCircuitOpenError):
-        router.resolve_main_at_level("light")
+        router.resolve_main_at("light")
     assert router.resolve_level("light", check_breaker=False).alias == "small"
     assert (
-        router.resolve_main_at_level("light", check_breaker=False).alias
-        == "small"
+        router.resolve_main_at("light", check_breaker=False).alias == "small"
     )
+
+
+def _alias_settings(slots: dict) -> AppConfig:
+    models = {
+        alias: {"url": f"http://{alias}/v1/chat/completions", "token": ""}
+        for alias in ("a", "b")
+    }
+    return _snapshot({"models": models, "slots": slots})
+
+
+def test_choice_alias_resolves_main_to_that_model():
+    router = ModelRouter(
+        _alias_settings({"default": "a"}), choice_provider=lambda: "b"
+    )
+    assert router.resolve("main").alias == "b"
+    assert router.active_target() == "b"
+
+
+def test_level_word_choice_still_resolves_its_slot():
+    router = ModelRouter(
+        _alias_settings({"max": "b"}), choice_provider=lambda: "max"
+    )
+    assert router.resolve("main").alias == "b"
+
+
+def test_resolve_main_at_alias_target_even_when_auto_allowed():
+    router = ModelRouter(
+        _alias_settings({"default": "a"}), choice_provider=lambda: "auto"
+    )
+    assert router.resolve_main_at("b").alias == "b"
+
+
+def test_router_probing_none_and_legacy_resolve_are_not_probes():
+    router = _router({})
+    with router.probing(None) as probe:
+        assert probe is False
+    with router.probing(replace(_pin(), alias=None)) as probe:
+        assert probe is False
+
+
+def test_router_probing_is_one_shot_for_allowed_alias():
+    router = _router({})
+    router.breaker.trip("pinned", "ReadError")
+    router.breaker.allow_probe()
+    with router.probing(_pin()) as probe:
+        assert probe is True
+    with router.probing(_pin()) as probe:
+        assert probe is False
+    assert router.breaker.known_unavailable("pinned") is None
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [
+        asyncio.CancelledError,
+        lambda: ModelRequestStopped("стоп"),
+        lambda: UserStopInterrupt(kind="model"),
+    ],
+)
+def test_router_probing_returns_right_on_stop_before_response(stop):
+    router = _router({})
+    router.breaker.trip("pinned", "ReadError")
+    router.breaker.allow_probe()
+    with pytest.raises(type(stop())):
+        with router.probing(_pin()) as probe:
+            assert probe is True
+            raise stop()
+    assert router.breaker.is_open("pinned") is False
+    assert router.breaker.known_unavailable("pinned") == "ReadError"
+    with router.probing(_pin()) as probe:
+        assert probe is True
+
+
+def test_router_probing_spends_right_on_answered_error():
+    router = _router({})
+    router.breaker.trip("pinned", "ReadError")
+    router.breaker.allow_probe()
+    with pytest.raises(ValueError):
+        with router.probing(_pin()):
+            raise ValueError("400")
+    assert router.breaker.known_unavailable("pinned") is None

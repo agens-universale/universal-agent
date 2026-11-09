@@ -26,7 +26,9 @@ from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
 from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.execution.ports import port
+from gc_core.execution.turn_clock import current_turn_clock
 from gc_core.execution_workspace import launch_root_from_config
 from gc_core.intent_log.user_turn import (
     append_user_ask_deduped,
@@ -43,12 +45,20 @@ from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
     wrap_technical_user_content,
 )
+from gc_core.model_choice import note_applied_at_run_end, take_pending
 from gc_core.model_router import main_model_identity
+from gc_core.persistence.model_choice_record import ModelChoiceRecord
 from gc_core.persistence.session_state import (
     hydrate_state,
     session_from_state,
     shared_from_session,
     usage_from_state,
+)
+from gc_core.persistence.turn_outcome import (
+    CANCELLED,
+    USER_STOP,
+    TurnOutcome,
+    TurnStatus,
 )
 from gc_core.plan_store import (
     PLAN_STATUS_APPROVED,
@@ -105,6 +115,8 @@ from gc_core.tools.subagents.sidecar import (
     mint_turn_id,
 )
 from gc_core.trace_id import trace_id_from_config
+from gc_core.turn_boundary import opening_reply_id, resume_turn
+from gc_core.turn_error import describe_turn_error
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.report import build_run_usage_dict, build_run_usage_report
 from gc_core.utils.generate_message_id import (
@@ -121,6 +133,19 @@ ORCHESTRATOR_SPECIFIC_ROLE = (
     "- For complex work, decompose into subtasks and delegate appropriately; validate outcomes yourself "
     "or via a review subagent when quality or risk warrants it.\n"
     "- At the start of a large task, use a planner subagent only when planning overhead is justified.\n"
+)
+
+
+#: ``State.terminal_outcome``, которыми прогон остановлен лимитом: ход
+#: закрыт исходом ``stopped`` с этой причиной.
+_LIMIT_OUTCOMES = frozenset(
+    {
+        "step_limit",
+        "tool_call_limit",
+        "token_limit",
+        "tool_errors",
+        "judge_unavailable",
+    }
 )
 
 
@@ -177,7 +202,7 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     try:
         # НЕ через to_thread: сессии ключуются по id(loop) и живут на ЭТОМ
         # loop — из чужого потока их не видно и закрыть нечем.
-        await _STREAM_SESSION_MANAGER.aclose_all()
+        await _STREAM_SESSION_MANAGER.aclose_all(in_owner_task=True)
     except asyncio.CancelledError as exc:
         cancelled = cancelled or exc
     except Exception:
@@ -189,6 +214,16 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     reset_owner(owner_reset)
     if cancelled is not None:
         raise cancelled
+
+
+def _error_fact(exc: BaseException | None) -> dict[str, str] | None:
+    """Класс и замаскированная причина ошибки для записи итога хода."""
+    if exc is None:
+        return None
+    return {
+        "type": exc.__class__.__name__,
+        "message": describe_turn_error(exc),
+    }
 
 
 def undelivered_as_arun_args(messages: list[dict]) -> tuple[list[str], dict]:
@@ -415,6 +450,25 @@ async def _amark_turn(
         (logger or logging.getLogger(__name__)).warning(
             "thread turn mark failed", exc_info=True
         )
+
+
+async def _adiscard_nudges_after_pre_run(
+    summary: Any, state: Any, thread_session: Any
+) -> None:
+    """Стартовая сводка до цикла: старые подсказки в новый трейс не берём."""
+    if not await _acall_blocking_hook(
+        summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+    ):
+        return
+    from gc_core.message_policy.nudges import (
+        clear_nudge_counters_after_summary,
+    )
+
+    notice = getattr(thread_session, "notice", None)
+    clear_nudge_counters_after_summary(
+        state,
+        session_meta=notice if isinstance(notice, dict) else None,
+    )
 
 
 async def _apersist_state(
@@ -893,6 +947,11 @@ class AgentExecutor:
             attach(state)
         # Граница хода сбрасывает счётчики; модель выбирается перед вызовом.
         begin_turn_main_trace(state, self._ctx)
+        # Выбранное до старта уже показано фронтендом: применённый выбор
+        # рана — текущий, без события.
+        router = self.get_model_router()
+        if router is not None:
+            state.applied_choice = router.live_choice()
         state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(settings)
         )
@@ -908,6 +967,8 @@ class AgentExecutor:
                 thread_session.usage,
                 thread_session.notice,
             )
+            # Ход, приостановленный на вопросе, продолжается этим прогоном.
+            resume_turn(state, self._ctx, thread_session.state.suspended_turn)
         rendered_system_prompt: str | None = None
         if (
             backend_api_mode == "chat_completions"
@@ -944,6 +1005,11 @@ class AgentExecutor:
             if self._stop_pending:
                 self._state.stop_requested = True
                 self._stop_pending = False
+                # Стоп лёг на ход только сейчас: часы этого хода, открытые
+                # в сборке состояния, закрываются этим моментом.
+                clock = current_turn_clock(self._ctx)
+                if clock is not None:
+                    clock.close()
             # В shared уже лежит выбор, восстановленный из сессии; явный выбор
             # этого запуска — поверх. Под тем же замком, что публикует state:
             # иначе между публикацией и наложением вклинился бы
@@ -1371,6 +1437,34 @@ class AgentExecutor:
                 task.uncancel()
         await self.aclose_run_accounting()
 
+    async def _arecord_model_choice(
+        self, record: Optional[ModelChoiceRecord]
+    ) -> None:
+        """Записать смену модели в тред за последним записанным сообщением.
+
+        Зовут подготовка вызова (через `RunContext.record_model_choice`) и
+        завершение рана. Сбой записи — предупреждение в журнал прогона, ран
+        он не роняет."""
+        session = self._thread_session
+        state = self.get_state()
+        if record is None or session is None or state is None:
+            return
+        try:
+            await session.aappend_model_choice(
+                record, discarded=is_persist_discarded(state)
+            )
+        except Exception:
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("model_choice_write_failed", exc_info=True)
+
+    async def _arecord_model_choices(
+        self, records: tuple[Optional[ModelChoiceRecord], ...]
+    ) -> None:
+        """Записи смены по порядку — завершение рана пишет до двух."""
+        for record in records:
+            await self._arecord_model_choice(record)
+
     async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
         # Keep the unconsumed queue before the await; messages arriving during
         # MCP cleanup remain pending and are returned by take_undelivered_messages.
@@ -1661,13 +1755,14 @@ class AgentExecutor:
             ),
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
+        self._ctx.record_model_choice = self._arecord_model_choice
         self._ctx.is_cli_mode = is_cli_mode
 
         # Старые истории сохраняют порядок команд. Новые исполнения проверяют
         # стартовую историю в цикле после выбора первого комплекта модели.
         if not deferred_startup_compaction:
-            await _acall_blocking_hook(
-                summary.apre_run_compact_if_needed, trigger_reason="pre_run"
+            await _adiscard_nudges_after_pre_run(
+                summary, state, thread_session
             )
 
         inbox_tail = await self._aread_inbox_tail(thread_session, state)
@@ -1742,6 +1837,7 @@ class AgentExecutor:
         )
         loop_finished = False
         teardown_cancel: BaseException | None = None
+        run_error: BaseException | None = None
         keeper = _start_lease_keeper(thread_session, on_lost=self.stop_run)
         poller = self._start_inbox_poller(thread_session)
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
@@ -1766,6 +1862,7 @@ class AgentExecutor:
                 # всё время суммаризации, ради которого всё и переводилось.
                 pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
+                turn_closed_hook=self._arecord_turn_outcome,
                 force_compact_hook=summary.aforce_compact_once,
                 get_pending_messages=self._atake_pending_messages,
                 check_stop=self._is_stop_requested,
@@ -1792,15 +1889,33 @@ class AgentExecutor:
                 state, "pending_question", None
             )
             self.last_closing_reply = getattr(state, "closing_reply", "")
+        except BaseException as exc:
+            run_error = exc
+            raise
         finally:
             _stop_bound.__exit__(None, None, None)
             await _stop_lease_keeper(poller)
             await _stop_lease_keeper(keeper)
+            # Смена, остановленная до запроса, и выбор, так и не дошедший
+            # до вызова; записи смены пишут после итога хода — так их
+            # строки показывает лента.
+            choice_records = (
+                take_pending(state),
+                note_applied_at_run_end(state, self._ctx),
+            )
             state_ops.leave(state)
             state.turn_level = None
-            # Упавший ход отпускает тред выше (``_arun_turn``) — после
-            # отметки «ход окончен», не до неё.
-            teardown_cancel = await self._ateardown_run(_owner_reset)
+            try:
+                # Ход, уже записанный из цикла, — no-op. Под отменой
+                # счётчик задачи не трогаем: отмена уже доставлена, запись
+                # доходит, а `asyncio.timeout` и TaskGroup вызывающего
+                # опираются на `cancelling()`.
+                await self._arecord_turn_outcome(None, error=run_error)
+                await self._arecord_model_choices(choice_records)
+            finally:
+                # Упавший ход отпускает тред выше (``_arun_turn``) — после
+                # отметки «ход окончен», не до неё.
+                teardown_cancel = await self._ateardown_run(_owner_reset)
 
         if teardown_cancel is not None:
             # Незавершённый цикл сюда не попадает: его исключение выходит из
@@ -1984,6 +2099,19 @@ class AgentExecutor:
         with self._lock:
             self._pending_messages.append(message)
 
+    def withdraw_message(self, msg_id: str) -> bool:
+        """Забрать из очереди сообщение, которое агент ещё не впустил.
+
+        Вместе с ним уходит его технический спутник
+        (`companion_message_id`). Под замком очереди сообщение либо снято
+        здесь, либо уже впущено (`_atake_pending_messages`) — третьего нет.
+        Очередь субагента не смотрим: ввод ребёнку в очередь не ставят.
+        """
+        with self._lock:
+            return withdraw_from_queue(
+                self._pending_messages, msg_id
+            ) or withdraw_from_queue(self._undelivered_messages, msg_id)
+
     def is_child_input_active(self) -> bool:
         """Работает ли сейчас субагент, которому уйдёт ввод пользователя.
 
@@ -2017,7 +2145,7 @@ class AgentExecutor:
         его жизнь (пересборка — только следующим ``get_runner()`` после ``invalidate_runner``).
 
         Футеру TUI нужен именно этот Router для резолва подготовленного вызова по
-        его уровню: живой ``display_router()`` отражает /profiles мгновенно и подменил бы
+        его уровню: живой ``display_router()`` отражает /profile мгновенно и подменил бы
         факт моделью уже переключившегося профиля (резолв — перед каждым вызовом по
         живому уровню, ``processing_responses.resolve_main_for_call``). ``None`` — у
         ``ctx`` нет ``model_router`` (тестовые двойники).
@@ -2130,6 +2258,76 @@ class AgentExecutor:
 
         return bind_user_stop(self.user_stop)
 
+    async def _arecord_turn_outcome(
+        self,
+        reason: Optional[str] = None,
+        *,
+        error: BaseException | None = None,
+    ) -> None:
+        """Записать итог текущего хода — не больше одного раза на ход.
+
+        Зовут хук цикла (``_aclose_turn``: финал, принятый текст, план) и
+        ``finally`` прогона (остальные выходы). Признак ``recorded`` ставится
+        до записи: повтор ничего не пишет, даже если первая запись упала.
+        Ход, не положивший в историю ни одного сообщения (стоп в сетапе),
+        записи не получает: его на диске нет. Ход, приостановленный на
+        вопросе, — тоже: вопрос ход не завершает, итог запишет прогон,
+        который его продолжит. Сбой сборки или записи —
+        предупреждение в журнал прогона, ход он не роняет."""
+        clock = current_turn_clock(self._ctx)
+        state = self.get_state()
+        session = self._thread_session
+        if clock is None or clock.recorded or state is None:
+            return
+        clock.recorded = True
+        clock.close()
+        if session is None or state.turn_messages_start is None:
+            return
+        if getattr(state, "terminal_outcome", None) == "input_required":
+            return
+        status, why = self._classify_turn_end(reason, error)
+        try:
+            outcome = TurnOutcome(
+                status=status,
+                reason=why,
+                opened_by=opening_reply_id(state),
+                started_at=clock.started_at,
+                ended_at=clock.ended_at,
+                duration_sec=round(clock.elapsed(), 1),
+                error=_error_fact(error) if status == "error" else None,
+                calls=clock.calls() or None,
+            )
+            await session.aappend_turn_outcome(
+                outcome, discarded=is_persist_discarded(state)
+            )
+        except Exception:
+            logger = getattr(self._ctx, "logger", None)
+            if logger is not None:
+                logger.warning("turn_outcome_write_failed", exc_info=True)
+
+    def _classify_turn_end(
+        self, reason: Optional[str], error: BaseException | None
+    ) -> tuple[TurnStatus, Optional[str]]:
+        """Исход хода: стоп сильнее всего (исключение после запроса стопа —
+        его следствие), затем отмена, ошибка, причина из цикла, лимит.
+
+        Стоп пользователя — запрошенный `stop_run` или Ctrl+C; отмена
+        задачи без запроса — `cancelled`. Не различается: aio-поток при
+        отмене (таймаут, отвалившийся клиент) сам зовёт `stop_run` перед
+        `task.cancel()`, и такой ход пишется стопом пользователя."""
+        if self._is_stop_requested() or isinstance(error, KeyboardInterrupt):
+            return "stopped", USER_STOP
+        if isinstance(error, asyncio.CancelledError):
+            return "stopped", CANCELLED
+        if error is not None:
+            return "error", None
+        if reason is not None:
+            return "done", reason
+        outcome = getattr(self.get_state(), "terminal_outcome", None)
+        if outcome in _LIMIT_OUTCOMES:
+            return "stopped", outcome
+        return "done", None
+
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.
 
@@ -2141,8 +2339,29 @@ class AgentExecutor:
             else:
                 self._stop_pending = True
             run_logger = getattr(self._ctx, "logger", None)
+        # Момент стопа — конец хода: поток, доработавший после него, часы
+        # уже не двигает.
+        clock = current_turn_clock(self._ctx)
+        if clock is not None:
+            clock.close()
         if self.user_stop is not None:
             self.user_stop.request(run_logger)
+
+    def turn_effective_start(self) -> float | None:
+        """Старт текущего хода, сдвинутый на ожидания человека (монотоника
+        рантайма) — для живого счёта фронтенда. Часов нет или они закрыты
+        (ход кончился, часы следующего ещё не привязаны) — ``None``."""
+        clock = current_turn_clock(self._ctx)
+        if clock is None or clock.closed:
+            return None
+        return clock.effective_start()
+
+    def turn_call_elapsed(self, call_id: str) -> float | None:
+        """Время вызова текущего хода по его часам (идущего — живое,
+        законченного — как в записи итога) — для таймера строки фронтенда.
+        Часов нет или вызов им не известен — ``None``."""
+        clock = current_turn_clock(self._ctx)
+        return clock.call_elapsed(call_id) if clock is not None else None
 
     async def acompact_thread(
         self, thread_id: str, system: str | None = None

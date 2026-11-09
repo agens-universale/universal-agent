@@ -1,4 +1,5 @@
 import json
+from collections.abc import Collection
 from typing import Any, Dict, Optional
 
 from gc_core.execution.tool_schema import coalesce_optional_string
@@ -11,6 +12,8 @@ from gc_core.utils.fs_size_limits import (
     fs_read_max_bytes,
 )
 from gc_core.utils.tool_report_paths import tool_report_abspath
+
+_LINE_NUMBER_MIN_WIDTH = 6
 
 
 def _read_arg_error(offset, limit) -> "tuple[str, str] | None":
@@ -26,6 +29,24 @@ def _read_arg_error(offset, limit) -> "tuple[str, str] | None":
             f"Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})",
         )
     return None
+
+
+def _line_numbers_enabled(value) -> bool:
+    """Только буквальный true включает номера. Любое другое значение — false."""
+    return value is True
+
+
+def _with_line_numbers(
+    lines: list[str], start_line: int, total_lines: int
+) -> str:
+    """Префикс `N|` на каждую строку. Номер абсолютный, ширина минимум 6."""
+    if not lines:
+        return ""
+    width = max(_LINE_NUMBER_MIN_WIDTH, len(str(total_lines)))
+    return "".join(
+        f"{start_line + index:>{width}}|{line}"
+        for index, line in enumerate(lines)
+    )
 
 
 def _decode_error_payload(error) -> "tuple[dict, dict | None]":
@@ -157,7 +178,8 @@ class ReadFile(AbstractSimpleTool):
             "description": (
                 "Read a text file. Optional offset (1-based, default 1) and limit "
                 "(default: to end of file) select a line window. "
-                "Always includes full-file sha256 (for expected_file_sha256 in edit tools)."
+                "Always includes full-file sha256 (for expected_file_sha256 in edit tools). "
+                "Set add_line_numbers to true to prefix each line with its absolute number as N|."
             ),
             "parameters": {
                 "type": "object",
@@ -184,8 +206,18 @@ class ReadFile(AbstractSimpleTool):
                             "utf-16, utf-16-le, utf-16-be."
                         ),
                     },
+                    "add_line_numbers": {
+                        "type": "boolean",
+                        "description": (
+                            "Required. When true, prefix each returned line with its absolute "
+                            "1-based file line number, right-aligned (width at least 6), then '|'. "
+                            "Example: '     8|    line text'. false, and any non-boolean value, "
+                            "returns the raw line text. Prefixes are display-only; do not copy "
+                            "them into edits. sha256 stays the raw file digest."
+                        ),
+                    },
                 },
-                "required": ["path"],
+                "required": ["path", "add_line_numbers"],
                 "additionalProperties": False,
             },
             "strict": True,
@@ -195,7 +227,7 @@ class ReadFile(AbstractSimpleTool):
     @classmethod
     def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_read_file
-Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256.
+Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256. add_line_numbers is required: true prefixes each line as N|, false returns the raw text.
 Input schema: {
   "type": "object",
   "properties": {
@@ -210,9 +242,13 @@ Input schema: {
     "limit": {
       "type": "integer",
       "description": "Max lines to read starting from offset. Default: to end of file."
+    },
+    "add_line_numbers": {
+      "type": "boolean",
+      "description": "Required. true prefixes each line with its absolute number as N| (right-aligned, width at least 6). false, and any non-boolean value, returns raw line text. Prefixes are display-only; do not copy them into edits."
     }
   },
-  "required": ["path"],
+  "required": ["path", "add_line_numbers"],
   "additionalProperties": false
 }
 
@@ -226,14 +262,31 @@ Return format:
   - "truncated": boolean — true if more lines exist after this window.
   - "next_offset": integer or null — suggested 1-based line offset for the next window.
   - "returned_chars": integer — length of "content" in this response.
-  - "content": string — text of the selected line range.
+  - "content": string — text of the selected line range. With add_line_numbers, each line is prefixed `N|` (absolute file line, right-aligned to at least 6 columns). Prefixes are display-only; do not copy them into edits. sha256 stays the raw file digest. returned_chars counts this content.
 
 Usage:
 - Always use this tool to inspect the contents of any file before modifying it.
 - Line range defaults to offset=1 through end of file; narrow with offset/limit when needed.
+- add_line_numbers is required. Pass true for absolute N| prefixes, false for the raw line text. Any non-boolean value is treated as false.
 - On file_too_large: file_size_bytes is set; error.max_bytes has the limit; follow error.message.
 """
         return description
+
+    @classmethod
+    def prepare_args_before_strip(
+        cls,
+        args: Dict[str, Any],
+        *,
+        injected_fields: Collection[str] = (),  # договор базы
+    ) -> Dict[str, Any]:
+        if (
+            isinstance(args, dict)
+            and "add_line_numbers" in args
+            and args["add_line_numbers"] is not True
+        ):
+            args = dict(args)
+            args["add_line_numbers"] = False
+        return args
 
     @enforce_read_guard(path_arg="path")
     async def acall(
@@ -242,6 +295,7 @@ Usage:
         offset: Optional[int] = None,
         limit: Optional[int] = None,
         encoding: Optional[str] = None,
+        add_line_numbers: Optional[bool] = None,
         **kwargs,
     ) -> str:
         encoding = coalesce_optional_string(encoding)
@@ -256,6 +310,7 @@ Usage:
 
         file_size_bytes = await self._lookup_file_size_bytes(path)
 
+        add_line_numbers = _line_numbers_enabled(add_line_numbers)
         arg_error = _read_arg_error(offset, limit)
         if arg_error is not None:
             return self._error_result(
@@ -349,6 +404,10 @@ Usage:
         start_idx = max(0, start_1_based - 1)
         selected_lines = lines[start_idx:end_1_based]
         content = "".join(selected_lines)
+        if add_line_numbers:
+            content = _with_line_numbers(
+                selected_lines, start_1_based, total_lines
+            )
 
         line_truncated = end_1_based < total_lines
         next_line_offset = end_1_based + 1 if line_truncated else None

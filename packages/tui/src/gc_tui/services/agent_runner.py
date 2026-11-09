@@ -15,8 +15,8 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from gc_core.execution.message_keys import withdraw_from_queue
 from gc_core.security.confirm_port import call_with_optional
-from gc_core.utils.backend_errors import BackendBadResponseError
 
 from gc_tui.services.stdin_bridge import redirect_stdin
 
@@ -28,32 +28,16 @@ if TYPE_CHECKING:
 # 10 мин — достаточно человеку; дальше fail-closed deny.
 CONFIRM_WAIT_TIMEOUT_SEC = 600.0
 
+#: Сколько ждут поток остановленного хода: новый ход того же треда (его
+#: реплика встаёт после записи итога стопа) и выход приложения (ход
+#: закрывается записью итога «stopped»). Лучшее усилие, не гарантия: не
+#: дождались — новый ход идёт, запись стопа ляжет после его реплики; на
+#: выходе — после переоткрытия «■ Отменено» без времени (статус «stopped»
+#: пишет выход: ход закончил пользователь). «■ Прервано» — только ход
+#: убитого процесса.
+STOP_SETTLE_SEC = 2.0
+
 _log = logging.getLogger(__name__)
-
-
-def run_error_text(exc: BaseException) -> str:
-    """Строка ошибки хода для ленты TUI.
-
-    Неразборный ответ сервера модели — человеческим текстом: голое «Expecting
-    value: line 1 column 1 (char 0)» не говорило, что сломался ответ прокси, а
-    не агент. Прочее — с типом исключения: без него текст вроде
-    «'choices'» не опознать.
-    """
-    if isinstance(exc, BackendBadResponseError):
-        # В режиме responses запрос всегда стримовый — совет про
-        # stream:false там ложный; виноват поток, который прокси испортил.
-        if exc.api_mode == "responses":
-            hint = "прокси оборвал или испортил поток ответа"
-        else:
-            hint = "прокси не поддерживает stream:false"
-        return (
-            "Сервер модели вернул пустой или не-JSON ответ "
-            f"(HTTP {exc.status_code}, {exc.length} байт) — возможно, "
-            f"{hint}; повторите запрос"
-        )
-    text = str(exc)
-    name = exc.__class__.__name__
-    return f"runtime: {name}: {text}" if text else f"runtime: {name}"
 
 
 def _run_agent(executor, a, *, thread_id, start_new_thread, system) -> None:
@@ -177,6 +161,14 @@ class AgentRunner:
         #: Тред и система последнего прогона: в них доигрывается сообщение,
         #: опоздавшее к закрытию.
         self._last_target: Optional[tuple[str, str]] = None
+        #: Номер прогона: растёт на каждом заведённом воркере. Экран по его
+        #: смене видит конец хода, даже если следующий прогон (хвост из
+        #: очереди) стартовал между тиками опроса.
+        self.run_seq = 0
+        #: Id реплик, выброшенных прогоном мимо закрытия
+        #: (`_close_or_take_tail`): экран при сбое возвращает их в поле
+        #: ввода. Новый прогон начинает с пустого.
+        self.dropped_message_ids: frozenset[str] = frozenset()
         self._stop_requested = False
         # TUI _stop_and_replace_runner: runner снят с active_runner, но поток ещё
         # может досидеть HTTP/ретраи. Его on_error не должен залипать ✗ Ошибка
@@ -186,6 +178,9 @@ class AgentRunner:
         # стампа терминального статуса (main._poll_active) пропускает "compact",
         # чтобы ручной /compact не перетирал прежний терминал-статус на completed.
         self._thread_kind: str = ""
+        #: Состояние исполнителя на запуске прогона — прошлого прогона: новое
+        #: исполнитель привязывает позже, в рабочем потоке.
+        self._state_before_run: Any = None
         self._confirm_event = threading.Event()
         self._confirm_choice: str = "deny_once"
         # Runner сняли (замена, сброс, выход приложения) — логгер его прогона
@@ -193,6 +188,9 @@ class AgentRunner:
         # если поток ещё идёт, логгер отдаёт последний из них на выходе.
         self._released = False
         self._workers = 0
+        #: Остановленный раннер, чей поток ещё дописывает ход того же треда
+        #: (см. `follow`); его ждёт воркер этого прогона.
+        self._predecessor: Optional[AgentRunner] = None
 
     def _emit_error(self, exc: BaseException) -> None:
         """Сообщить об ошибке в TUI, если runner ещё «актуальный».
@@ -355,10 +353,52 @@ class AgentRunner:
             target=_target, name="gc-ua-warm", daemon=True
         ).start()
 
+    def follow(self, previous: AgentRunner) -> None:
+        """Следующий прогон начнётся, когда поток ``previous`` закроется.
+
+        ``previous`` — остановленный ход того же треда: отвязанным он
+        дописывает запись итога, и она встаёт до реплики нового хода.
+        Ждёт воркер прогона, не вызывающий (UI), — не дольше
+        `STOP_SETTLE_SEC`."""
+        self._predecessor = previous
+
     def is_running(self) -> bool:
         with self._lock:
             t = self._thread
         return t is not None and t.is_alive()
+
+    def turn_effective_start(self) -> Optional[float]:
+        """Старт текущего хода по часам ядра, сдвинутый на ожидания
+        человека: от него живой счёт индикатора. Исполнителя или открытых
+        часов хода нет (ядро не начало ход; прошлый закрыт, а новый — в
+        том числе хвост из очереди — ещё не привязан) или работа — не ход
+        (`/compact`) — None."""
+        probe = getattr(self._executor, "turn_effective_start", None)
+        if probe is None or self._thread_kind != "run":
+            return None
+        return probe()
+
+    def call_elapsed(self, call_id: str) -> Optional[float]:
+        """Время вызова по часам хода ядра — для таймера строки ленты:
+        идущего — живое, законченного — как в записи итога хода.
+        Исполнителя или вызова на часах нет — None."""
+        probe = getattr(self._executor, "turn_call_elapsed", None)
+        return probe(call_id) if probe is not None else None
+
+    def produced_output(self) -> bool:
+        """Текущий прогон уже что-то выдал или сделал (решает ядро:
+        ``State.produced_output``) — отправку не откатить. Иная работа
+        (``/compact``) — не отправка, откатывать нечего: True."""
+        if self._thread_kind != "run":
+            return True
+        state = self._executor_state()
+        if state is None or state is self._state_before_run:
+            return False
+        return bool(getattr(state, "produced_output", False))
+
+    def _executor_state(self) -> Any:
+        get_state = getattr(self._executor, "get_state", None)
+        return get_state() if get_state is not None else None
 
     def call_level(self) -> Optional[str]:
         """Фактический уровень подготовленного вызова из State, независимо от режима.
@@ -369,6 +409,16 @@ class AgentRunner:
         if ex is None or not hasattr(ex, "get_state"):
             return None
         return getattr(ex.get_state(), "_call_level", None)
+
+    def applied_choice(self) -> Optional[str]:
+        """Применённый выбор рана из State (`auto`, уровень или алиас).
+
+        Чтение не строит executor. До старта рана — None.
+        """
+        ex = self._executor
+        if ex is None or not hasattr(ex, "get_state"):
+            return None
+        return getattr(ex.get_state(), "applied_choice", None)
 
     def call_mode(self) -> Optional[str]:
         """Режим незакрытого такта; выбранный в UI режим может уже быть другим."""
@@ -383,7 +433,7 @@ class AgentRunner:
     def executor_router(self) -> Any:
         """Read-only: Router, зафиксированный при сборке ЭТОГО executor'а
         (`AgentExecutor.get_model_router`) — не живой `app.display_router()` TUI,
-        который отражает /profiles мгновенно. Футер резолвит модель бегущего хода
+        который отражает /profile мгновенно. Футер резолвит модель бегущего хода
         этим Router'ом по уровню подготовленного вызова: смена профиля
         посреди хода не подменяет факт моделью нового профиля.
 
@@ -395,24 +445,24 @@ class AgentRunner:
 
     def next_call_selection(self) -> Optional[tuple[bool, str, str]]:
         """Живой выбор следующего вызова в реестре работающего контекста."""
-        from gc_core.auto_routing.levels import auto_active, effective_level
+        from gc_core.auto_routing.levels import auto_active, effective_target
 
         router = self.executor_router()
         ctx = getattr(self._executor, "_ctx", None)
         if router is None or ctx is None:
             return None
-        live = router.live_level()
+        live = router.live_choice()
         available = getattr(ctx, "auto_available", True)
         selected_auto = auto_active(router, live, available)
-        level = effective_level(live, None, available)
-        resolved = router.resolve_main_at_level(level, check_breaker=False)
+        level = effective_target(live, None, available)
+        resolved = router.resolve_main_at(level, check_breaker=False)
         return selected_auto, level, resolved.alias or resolved.model
 
     def pinned_summary_limits(self) -> Any:
         """Read-only: пороги сжатия, по которым работает ЭТОТ executor
         (`AgentExecutor.summary_limits`) — его снимок конфига, его Router, уровень
         подготовленного вызова. Индикатор контекста берёт знаменатель отсюда, а не из живого конфига
-        экрана: тот отражает /level и /profiles раньше, чем их увидит ход.
+        экрана: тот отражает /level и /profile раньше, чем их увидит ход.
 
         None — executor ещё не построен."""
         ex = self._executor
@@ -434,6 +484,11 @@ class AgentRunner:
             if self._thread is not None and self._thread.is_alive():
                 return False
             self._thread_kind = "compact"
+            # Цель — сжимаемый тред: всё, что решается по цели раннера
+            # (чья ошибка, куда ход реплики после сжатия), — про него.
+            self._last_target = (thread_id, system)
+            # Свой прогон: экран отличает его от прошлого по номеру.
+            self.run_seq += 1
 
             def _target() -> None:
                 try:
@@ -551,8 +606,11 @@ class AgentRunner:
         """Завести воркер прогона. Звать под `_lock`; запускает вызывающий."""
         self._drop_stale_answers()
         self._thread_kind = "run"
+        self._state_before_run = self._executor_state()
         self._accepting = True
         self._last_target = (thread_id, system)
+        self.run_seq += 1
+        self.dropped_message_ids = frozenset()
         t = threading.Thread(
             target=self._run_worker,
             args=(batch, thread_id, start_new_thread, system),
@@ -602,6 +660,7 @@ class AgentRunner:
                     for m in self._prebuild_messages:
                         executor.add_message(m)
                     self._prebuild_messages.clear()
+                self._await_predecessor()
                 if self._stop_requested:
                     ending = "stopped"
                     return
@@ -647,12 +706,18 @@ class AgentRunner:
             finally:
                 if not closed:
                     # Мимо закрытия — ошибка, отмена или стоп до старта прогона.
-                    # Хвост не доигрываем: реплики упавшего хода UI уже пометил
-                    # неотправленными (`_mark_pending_failed`).
+                    # Хвост не доигрываем: его id — в `dropped_message_ids`,
+                    # экран вернёт эти реплики в поле (`_mark_pending_failed`).
                     self._close_or_take_tail(
                         executor, ending=ending, lost=in_flight
                     )
                 self._worker_exit()
+
+    def _await_predecessor(self) -> None:
+        """Дождаться потока остановленного хода (`follow`), ограниченно."""
+        previous, self._predecessor = self._predecessor, None
+        if previous is not None:
+            previous.wait(STOP_SETTLE_SEC)
 
     def _close_or_take_tail(
         self, executor, *, ending: str = "", lost: list | tuple = ()
@@ -677,7 +742,8 @@ class AgentRunner:
                 return tail
             self._accepting = False
             target = self._last_target
-        dropped = [*lost, *tail]
+            dropped = [*lost, *tail]
+            self.dropped_message_ids = frozenset(m.get("id") for m in dropped)
         if dropped:
             # Потеря — часть исхода прогона, но не молчаливая: то же событие,
             # что у сервера.
@@ -785,6 +851,19 @@ class AgentRunner:
             )
         t.start()
 
+    def withdraw_message(self, msg_id: str) -> bool:
+        """Забрать реплику из очереди, пока агент её не впустил.
+
+        Сначала буфер сборки, затем очередь исполнителя. Замки — в том же
+        порядке, что у `add_message` (раннер → исполнитель): под `_lock`
+        воркер не перельёт буфер и не заведёт ход хвоста между проверками.
+        """
+        with self._lock:
+            if withdraw_from_queue(self._prebuild_messages, msg_id):
+                return True
+            ex = self._executor
+            return ex is not None and ex.withdraw_message(msg_id)
+
     def is_child_input_active(self) -> bool:
         """Ждёт ли ввод субагент ЭТОГО прогона.
 
@@ -835,9 +914,14 @@ class AgentRunner:
             fields: list,
             via: str | None = None,
             decision_key: str | None = None,
+            call_id: str | None = None,
         ) -> str:
             self._confirm_event.clear()
             self._confirm_choice = "deny_once"
+            # Остановленный прогон дорабатывает отвязанным: его вопрос встал
+            # бы баннером в чужой открытой сессии — fail-closed без показа.
+            if self._stop_requested or self._marked_stopped:
+                return "deny_once"
             try:
                 mounted = call_with_optional(
                     present,
@@ -846,6 +930,7 @@ class AgentRunner:
                     fields,
                     via=via,
                     decision_key=decision_key,
+                    call_id=call_id,
                 )
             except Exception:
                 return "deny_once"

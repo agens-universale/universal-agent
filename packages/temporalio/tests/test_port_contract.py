@@ -73,6 +73,7 @@ CORE_CONTEXT_ATTRIBUTES = {
     "model_router": BOUND + " (маршрут по имени, model_routing)",
     "model_transport_configured": DATA,
     "on_messages_evicted": FRONTEND + ": хук TUI",
+    "on_model_choice_applied": FRONTEND + ": хук TUI, событий смены нет",
     "on_stream_delta": FRONTEND + ": потокового предпросмотра нет",
     "on_summary_applied": FRONTEND + ": хук TUI",
     "on_trace_note": FRONTEND + ": хук TUI",
@@ -84,6 +85,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     + " нет — остаток скоупа уходит родителю как undelivered",
     "permission_store": DATA,
     "project_gc_dir": DATA,
+    "record_model_choice": FRONTEND
+    + ": запись смены модели в тред; durable её не пишет, как итог хода",
     "project_memory_io": BOUND,
     "prompt_loader": BOUND,
     "prompt_resource": BOUND,
@@ -122,6 +125,8 @@ CORE_CONTEXT_ATTRIBUTES = {
     "tools_data": BOUND + " (метаданные воркера)",
     "tui_confirm": FRONTEND + ": подтверждение — human_request",
     "turn_id": DATA,
+    "turn_clock": DATA
+    + ": часы хода на operations.monotonic и utc_now, без ввода-вывода",
     "workspace": DATA,
 }
 
@@ -132,6 +137,7 @@ UNBOUND_BINDINGS = {
     "tools_cache": "discovery инструментов — на воркере",
     "on_stream_delta": "потокового предпросмотра в Temporal нет",
     "on_trace_note": "хук TUI",
+    "on_model_choice_applied": "хук TUI: событий смены модели нет",
     "on_messages_evicted": "хук TUI",
 }
 

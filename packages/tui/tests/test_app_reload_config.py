@@ -418,7 +418,7 @@ def test_reload_config_keeps_the_profile_named_by_the_flag(_profile_stack):
 
 
 def test_session_choice_still_wins_over_the_profile_flag(_profile_stack):
-    """Выбор из приложения (`/profiles`) сильнее флага запуска — как и сильнее
+    """Выбор из приложения (`/profile`) сильнее флага запуска — как и сильнее
     указателя файла: сессионное снятие профиля при флаге `corp` действует."""
     cfg_file, profiles = _profile_stack
     (profiles / "corp.yml").write_text(
@@ -761,13 +761,13 @@ def test_reload_drops_session_override_invalid_under_new_base(_typed_app):
 
     app, cfg_file = _typed_app
     app.load_session_overrides(
-        {"level": "bogus", "tui.text_answer_mode": "allow"}
+        {"tui.finish_gate_mode": "bogus", "tui.text_answer_mode": "allow"}
     )
     _rewrite(cfg_file)
 
     app.reload_config()
 
-    assert "level" not in app._session_overrides
+    assert "tui.finish_gate_mode" not in app._session_overrides
     assert app._session_overrides["tui.text_answer_mode"] == "allow"
     assert app.effective_settings().settings.tui.text_answer_mode == "allow"
     assert _url(app.effective_settings()) == "http://y/v2"
@@ -776,7 +776,7 @@ def test_reload_drops_session_override_invalid_under_new_base(_typed_app):
         for n in collect_runtime_notices()
         if n.code == "session_override_dropped"
     ]
-    assert len(dropped) == 1 and '"level"' in dropped[0].message
+    assert len(dropped) == 1 and '"tui.finish_gate_mode"' in dropped[0].message
 
 
 def test_restart_flagged_path_change_applies_with_notice(_typed_app, tmp_path):
@@ -829,7 +829,7 @@ def test_reader_during_reload_sees_one_consistent_snapshot(
     import threading
 
     app, cfg_file = _typed_app
-    app.load_session_overrides({"level": "max"})
+    app.load_session_overrides({"model": "max"})
     app._effective_cache = None  # читатель обязан собирать сам
     entered = threading.Event()
     release = threading.Event()
@@ -866,8 +866,8 @@ def test_reader_during_reload_sees_one_consistent_snapshot(
     reader.join(5)
 
     old = seen["loaded"]
-    assert _url(old) == "http://x/v1" and old.settings.level == "max"
+    assert _url(old) == "http://x/v1" and old.settings.model == "max"
     assert [_url(x) for x in mid_plan] == ["http://x/v1"]
     current = app.effective_settings()
-    assert _url(current) == "http://y/v2" and current.settings.level == "max"
+    assert _url(current) == "http://y/v2" and current.settings.model == "max"
     assert app._effective_cache[1] is current  # кэш перечитки не затёрт

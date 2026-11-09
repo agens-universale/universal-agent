@@ -55,7 +55,7 @@ def _input(pilot) -> CommandTextArea:
 
 
 def _footer(pilot) -> str:
-    return str(pilot.app.screen.query_one("#footer-left", Static).render())
+    return str(pilot.app.screen.query_one("#footer-slot", Static).render())
 
 
 async def _settle(pilot) -> None:

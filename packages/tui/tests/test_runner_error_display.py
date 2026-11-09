@@ -15,7 +15,8 @@ from types import SimpleNamespace
 import pytest
 from gc_core.utils.backend_errors import BackendBadResponseError
 from gc_testkit.tui_support import tui_settings
-from gc_tui.services.agent_runner import AgentRunner, run_error_text
+from gc_core.turn_error import describe_turn_error
+from gc_tui.services.agent_runner import AgentRunner
 
 
 def _bad_response(api_mode="chat_completions") -> BackendBadResponseError:
@@ -28,7 +29,7 @@ def _bad_response(api_mode="chat_completions") -> BackendBadResponseError:
 
 
 def test_bad_response_text_is_human():
-    assert run_error_text(_bad_response()) == (
+    assert describe_turn_error(_bad_response()) == (
         "Сервер модели вернул пустой или не-JSON ответ (HTTP 200, 0 байт) — "
         "возможно, прокси не поддерживает stream:false; повторите запрос"
     )
@@ -37,7 +38,7 @@ def test_bad_response_text_is_human():
 def test_bad_response_hint_in_responses_mode_is_about_the_stream():
     """В режиме responses запрос всегда стримовый: совет про stream:false
     там ложный — подсказка о потоке, который прокси оборвал или испортил."""
-    text = run_error_text(_bad_response("responses"))
+    text = describe_turn_error(_bad_response("responses"))
 
     assert "stream:false" not in text
     assert text == (
@@ -50,13 +51,13 @@ def test_bad_response_hint_in_responses_mode_is_about_the_stream():
 def test_other_error_text_names_exception_type():
     exc = json.JSONDecodeError("Expecting value", "", 0)
 
-    assert run_error_text(exc) == (
-        "runtime: JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+    assert describe_turn_error(exc) == (
+        "JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
     )
 
 
 def test_error_without_message_shows_type_only():
-    assert run_error_text(RuntimeError()) == "runtime: RuntimeError"
+    assert describe_turn_error(RuntimeError()) == "RuntimeError"
 
 
 class _Records(logging.Handler):
@@ -168,7 +169,7 @@ async def test_trace_shows_exception_type(tmp_path):
         tmp_path, json.JSONDecodeError("Expecting value", "", 0)
     )
 
-    assert "runtime: JSONDecodeError: Expecting value" in flat
+    assert "✕ Ошибка · JSONDecodeError: Expecting value" in flat
 
 
 @pytest.mark.asyncio

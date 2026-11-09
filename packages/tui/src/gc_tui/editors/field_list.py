@@ -37,6 +37,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Input, Static
 
 from gc_tui.palette import DEEP_DIM
+from gc_tui.widgets.column_static import ColumnStatic
 
 # Свёрнутый список: без этой строки поле молчит о том, что список вообще есть, и
 # свернувший его Esc'ом остаётся без пути назад. Глагол — из канон-словаря `Alt+↓`
@@ -434,7 +435,7 @@ class FieldListController:
         # зовут `query` тем же вызовом). `scroll.mount` здесь легален: `mount` выше уже
         # приаттачил контейнер к дереву (регистрация синхронная).
         row_cls = f"onb-option onb-dyn {self._row_class} {self._row_classes}".rstrip()
-        scroll.mount(*[Static("", classes=row_cls) for _ in self._items])
+        scroll.mount(*[ColumnStatic("", classes=row_cls) for _ in self._items])
 
     def close(
         self, *, restore: bool = True, closed_hint: str | None = None

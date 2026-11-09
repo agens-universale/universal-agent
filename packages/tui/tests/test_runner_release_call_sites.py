@@ -34,6 +34,9 @@ class _Runner:
     def release(self) -> None:
         self.events.append("release")
 
+    def wait(self, timeout=None) -> None:
+        self.events.append("wait")
+
 
 @pytest.fixture
 def app(tmp_path):
@@ -93,12 +96,16 @@ def test_exit_stops_the_runner_before_releasing_it(app):
     зовёт `app.exit()` и прогон не останавливает, поэтому снять ожидание должен
     `on_unmount`: `stop()` кладёт в очередь пустую строку и гасит confirm.
     """
+    import asyncio
+
     runner = _Runner(running=True)
     app.active_runner = runner
 
-    app.on_unmount()
+    asyncio.run(app.on_unmount())
 
-    assert runner.events == ["stop", "release"], (
+    # Между стопом и отдачей логгера — ожидание потока хода (решение
+    # плана 6): ядро успевает закрыть ход записью итога.
+    assert runner.events == ["stop", "wait", "release"], (
         f"порядок на выходе: {runner.events} — ожидание человека не снято"
     )
 
@@ -113,7 +120,14 @@ def test_stop_and_replace_releases_after_stop():
 
     runner = _Runner(running=True)
     screen = SimpleNamespace(
-        app=SimpleNamespace(active_runner=runner, last_stop_requested=False)
+        app=SimpleNamespace(
+            active_runner=runner,
+            last_stop_requested=False,
+            run_thread_id=lambda runner: None,
+            detach_run_sinks=lambda: None,
+        ),
+        _withdraw_queue=lambda runner: [],
+        _return_queue_to_input=lambda replies: None,
     )
 
     TraceScreen._stop_and_replace_runner(screen)

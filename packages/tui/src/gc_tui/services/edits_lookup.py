@@ -70,6 +70,26 @@ def disk_signature(launch_root: str, records: Iterable[EditRecord]) -> Tuple:
     return tuple(signature)
 
 
+def _command_index(
+    records: Iterable[EditRecord],
+) -> Dict[str, List[EditRecord]]:
+    """`command_call_id -> записи` в порядке журнала; идентификатор,
+    встреченный в разных ходах, выброшен (правило `by_call_id`)."""
+    by_command: Dict[str, List[EditRecord]] = {}
+    turn_of: Dict[str, str] = {}
+    loose: set = set()
+    for rec in records:
+        command = rec.command_call_id
+        if not command:
+            continue
+        if turn_of.setdefault(command, rec.turn_id) != rec.turn_id:
+            loose.add(command)
+        by_command.setdefault(command, []).append(rec)
+    for command in loose:
+        by_command.pop(command, None)
+    return by_command
+
+
 class EditsLookup:
     """Индекс журнала правок одного треда для нужд UI."""
 
@@ -101,6 +121,7 @@ class EditsLookup:
         )
         self._indexed_signature: Optional[Tuple[int, Optional[float]]] = None
         self._index: Dict[str, EditRecord] = {}
+        self._by_command: Dict[str, List[EditRecord]] = {}
         self._turn_ids: List[str] = []
         self._summary_cache: Optional[
             Tuple[str, Any, Tuple[int, int, int]]
@@ -110,11 +131,28 @@ class EditsLookup:
         self._ensure_index()
         return self._index.get(call_id)
 
-    def turn_ids(self) -> List[str]:
-        """Уникальные turn_id ходов с правками из тулов, в порядке появления.
+    def by_command(self, call_id: str) -> List[EditRecord]:
+        """Записи шелл-канала, сделанные вызовом команды ``call_id``, в
+        порядке журнала. Тот же идентификатор в разных ходах — пусто (то же
+        правило, что у `by_call_id`)."""
+        self._ensure_index()
+        return list(self._by_command.get(call_id, ()))
 
-        Ходы, собранные из одних шелл-записей (`call_id=None`), пропущены: они
-        не дают блоков в ленте, и окно реплея на них тратить нечего."""
+    def command_paths_of(self, call_id: str) -> Optional[int]:
+        """Сколько путей тронула команда, если их больше потолка записи;
+        `None` — команда не урезана или записей нет."""
+        for rec in self.by_command(call_id):
+            if rec.command_paths is not None:
+                return rec.command_paths
+        return None
+
+    def turn_ids(self) -> List[str]:
+        """Уникальные turn_id ходов с правками тулов и команд-вызовов, в
+        порядке появления.
+
+        Ходы из одних шелл-записей без вызова (`call_id` и `command_call_id`
+        пусты) пропущены: они не дают блоков в ленте, и окно реплея на них
+        тратить нечего."""
         self._ensure_index()
         return list(self._turn_ids)
 
@@ -185,9 +223,9 @@ class EditsLookup:
         turn_of: Dict[str, str] = {}
         ambiguous: set = set()
         for rec in records:
-            if rec.call_id:
-                # Ходы без call_id (записи шелл-канала) блоков не дают — не
-                # тратим на них окно реплея.
+            if rec.call_id or rec.command_call_id:
+                # Ходы без вызова (шелл-записи вне вызова тула) блоков не
+                # дают — не тратим на них окно реплея.
                 turns[rec.turn_id] = None
             if rec.call_id is not None:
                 # При нескольких записях на один call_id (тул правил
@@ -203,5 +241,30 @@ class EditsLookup:
         for call_id in ambiguous:
             index.pop(call_id, None)
         self._index = index
+        self._by_command = _command_index(records)
         self._turn_ids = list(turns)
         self._indexed_signature = signature
+
+
+def lookup_for_settings(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    settings: Any,
+    *,
+    launch_root: Optional[str] = None,
+) -> EditsLookup:
+    """Журнал правок треда с лимитами диффа секции `agent_edits`
+    настроек ``settings`` — одна фабрика для ленты и превью."""
+    # `edits_view` сам импортирует этот модуль — здесь лениво.
+    from gc_tui.services.edits_view import diff_limits
+
+    max_source_bytes, hunk_context_lines = diff_limits(settings)
+    return EditsLookup(
+        threads_dir,
+        system_id,
+        thread_id,
+        launch_root=launch_root,
+        max_diff_source_bytes=max_source_bytes,
+        hunk_context_lines=hunk_context_lines,
+    )

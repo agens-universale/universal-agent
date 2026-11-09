@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gc_core.config_modules.backend import endpoint_path_hint
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.model_registry import (
     LEVEL_FALLBACK,
@@ -42,6 +43,7 @@ from gc_core.config_modules.model_registry import (
     resolve_entry_address,
 )
 from gc_core.config_modules.model_sections_validation import SUBAGENT_NAMES
+from gc_core.settings import settings_of
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -54,6 +56,7 @@ from gc_tui.editors.model_entry_form import (
 )
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, WARN
+from gc_tui.services.model_sign import LEVEL_COLORS
 from gc_tui.widgets.action_row import ActionRow
 
 # Виджеты подтверждения в секции моделей.
@@ -125,8 +128,8 @@ _FOOTER_SLOT = (
 _FOOTER_ASSIGN = "↑/↓ · Enter — выбрать уровень или модель · n — добавить · PgUp/PgDn — секции · Esc"
 # Строка-действие «+ добавить модель…»: Del на ней не работает — удалять на ней
 # нечего, — и футер её не обещает (канон `_FOOTER_RESERVE`: недоступное не
-# обещаем). Enter и n здесь ОДНА роль, и названы одной парой — канон `←/→/Enter
-# — переключить` секции «Профили»: два обещания на одно действие только шумят.
+# обещаем). Enter и n здесь ОДНА роль, и названы одной парой: два
+# обещания на одно действие только шумят.
 _FOOTER_ADD = "↑/↓ · Enter/n — добавить · PgUp/PgDn — секции · Esc"
 # Под-вид открытого профиля: клавиши те же, но Esc возвращает К СПИСКУ профилей, а
 # не в меню хаба (вложенность из Global Constraints — её обязан назвать футер).
@@ -300,6 +303,11 @@ _NOTICE_REMOVE_RACED = "✗ не удалено: записи «{alias}» бол
 # честного no-op секции (`settings._save_legacy_model`, Enter без правок).
 _NOTICE_NO_CHANGE = "ничего не изменено"
 _NOTICE_ENTRY_SAVED = "Запись «{alias}» сохранена — {file}"
+# Адрес записи без пути эндпоинта режима: сохраняется (у прокси бывает свой
+# путь), но 404 по нему выглядел бы недоступной моделью.
+_ENDPOINT_PATH_HINT = (
+    "адрес обычно оканчивается путём эндпоинта — проверьте: {full}"
+)
 # Секрет-политика проектных профилей (docs/configuration.md, спека §3.5): файл
 # лежит в РЕПОЗИТОРИИ, и литеральный токен в нём — секрет, уезжающий в git.
 # Текст — ДОСЛОВНО тот, что печатает загрузчик (`profiles.load_profile_document`,
@@ -426,7 +434,7 @@ def fit_head(head: str, width: int) -> str:
     3. не влезает и имя — ужимается оно: строка не имеет права переноситься ни на
        какой ширине, но имя уровня/потребителя видно до последнего.
 
-    У служебных потребителей («суммаризация», «судья finish_gate») разделителя нет —
+    У служебных потребителей («суммаризация», «формат ответа») разделителя нет —
     вся голова считается именем и режется только на третьей ступени."""
     if width <= 0 or len(head) <= width:
         return head
@@ -462,37 +470,42 @@ _INHERITED_LABEL = "основной"
 # потребитель следует за активным уровнем (`ModelRouter.resolve`, ветка без binding).
 # «сейчас <уровень>» — вычисленное на этот момент, слово «сейчас» и помечает его
 # как текущее состояние, а не как часть выбора.
-_ACTIVE_DESC_LEAD = "работает активным уровнем: сейчас "
+_ACTIVE_DESC_LEAD = "работает выбранной моделью: сейчас "
 _SLOT_DEAD_HINT = "уровень не резолвится: задайте хотя бы один слот"
-# Подписи потребителей, которых НЕТ в транспортном словаре `CONSUMER_RU_LABEL`
-# (`utils/llm_chat_client.py`): тот заведён для notice деградации и остаётся его
-# собственностью — здесь только UI-добавка (контракт п.2 волны B).
+# Строки назначений называются по-человечески; ключ конфига — подсказкой
+# выбранной строки (`_key_line`). Имена служебных потребителей — из словаря ядра
+# `CONSUMER_RU_LABEL` (`utils/llm_chat_client.py`): им же говорит уведомление о
+# замене модели, и судья с ручкой называется там так же, как ручка (страж
+# `test_knob_labels_match_the_judge_names_of_the_core`).
 #
-# `*` — не «те, кого нет в списке»: в списке перечислены ВСЕ канонические имена, и
-# поимённо чужое имя вписать нельзя (валидатор фазы 2 отвергает ключ). Реальный
-# смысл ровно два: единственный способ привязать кастомных субагентов из
-# `.md`-файлов и общая привязка «всем сразу, кому своя не задана»
-# (`ModelRouter._lookup_binding`: точное имя → `*`).
+# `*` — единственный способ привязать кастомных субагентов из `.md`-файлов
+# (поимённо чужое имя валидатор отвергает) и общая привязка «всем, кому своя не
+# задана» (`ModelRouter._lookup_binding`: точное имя → `*`).
 _UI_CONSUMER_LABEL = {
-    "*": "* · кастомные и будущие субагенты",
+    "*": "остальные субагенты",
 }
-# Роль служебного потребителя к подписи из транспортного словаря — только на
-# экране: в уведомлениях о деградации подпись остаётся короткой.
+# Пояснение к подписи — только на экране: в уведомлениях о деградации подпись
+# остаётся короткой.
 _CONSUMER_ROLE = {
     "command_judge": "команды в edit, действия в режиме auto",
+    "intent_scope": "помнит ход после сжатия контекста",
+    "*": "кастомные и будущие",
 }
-# Роль субагента рядом с его именем — грамматика «имя · описание» канона
-# `_mode_row_text`: имя ключа в файле человеку нужно (он его там и увидит),
-# описание отвечает «а это кто».
+# Пояснение к роли субагента — грамматика «имя · описание» канона
+# `_mode_row_text`; сама роль — из таблицы ролей ядра (`subagent_role`).
 _SUBAGENT_ROLE = {
-    "subagent_worker": "исполнительские шаги",
+    "subagent_worker": "выполнение задач",
     "subagent_code_generator": "генерация кода",
     "subagent_code_planner": "планирование кода",
     "subagent_planner": "общее планирование",
     "subagent_critic": "критика решений",
     "subagent_code_reviewer": "ревью кода",
-    "subagent_special_agent": "агент по описанию",
+    "subagent_special_agent": "роль по описанию главного агента",
 }
+# Подсказка ключа под выбранной строкой назначений: ровно под головой строки,
+# подпись — как «в текущей сессии:» у «Режимов работы».
+_KEY_INDENT = "  "
+_KEY_LABEL = "ключ: "
 
 
 def assign_consumers() -> list:
@@ -513,8 +526,9 @@ def assign_consumers() -> list:
 
 
 def consumer_labels() -> dict:
-    """Подпись каждой строки привязок: 7 готовых берутся ИЗ транспортного словаря
-    (копия разошлась бы с ним на первой же правке), остальные — свои."""
+    """Подпись каждой строки привязок. Служебные — из словаря ядра, субагенты —
+    ролью ядра: копия разошлась бы с источником на первой же правке."""
+    from gc_core.constants.tool_display import subagent_role
     from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
 
     labels = dict(CONSUMER_RU_LABEL)
@@ -522,12 +536,22 @@ def consumer_labels() -> dict:
     for consumer, role in _CONSUMER_ROLE.items():
         labels[consumer] = f"{labels[consumer]} · {role}"
     for name in SUBAGENT_NAMES:
+        role = subagent_role(name, {})
         # `.get`, а не индекс: новый субагент в коде появляется строкой сам — пусть
         # витрина деградирует до общей подписи, а не роняет секцию `KeyError`.
         labels[f"subagents.{name}"] = (
-            f"{name} · {_SUBAGENT_ROLE.get(name, 'субагент')}"
+            f"{role} · {_SUBAGENT_ROLE.get(name, 'субагент')}"
         )
     return labels
+
+
+def assign_key(consumer: str) -> str:
+    """Путь ключа строки привязок в конфиге — по `AssignConfig`: служебный
+    потребитель — плоское поле, субагент — словарь `subagents`, `*` — в
+    кавычках, как его пишут в YAML."""
+    if consumer == "*":
+        return 'assign.subagents."*"'
+    return f"assign.{consumer}"
 
 
 def assign_value(assign: dict, consumer: str):
@@ -561,9 +585,9 @@ def slot_head(level: str) -> str:
 
 
 def slot_head_text(level: str, width: int = 0) -> Text:
-    """Голова строки слота: имя уровня — ЦВЕТОМ уровня (тот же `TOGGLES["level"]`, что
-    красит уровни в раскрытом списке: одна сущность не имеет права выглядеть на одном
-    экране двумя способами), роль после «·» — обычным INK.
+    """Голова строки слота: имя уровня — ЦВЕТОМ уровня (тот же
+    `model_sign.LEVEL_COLORS`, что красит уровни в раскрытом списке: одна сущность
+    не имеет права выглядеть на одном экране двумя способами), роль после «·» — обычным INK.
 
     Текст берётся у `slot_head` целиком, а не собирается заново: ширину колонки
     считают по нему же, и вторая сборка развела бы витрину с сеткой. Под колонку он
@@ -579,8 +603,8 @@ def slot_head_text(level: str, width: int = 0) -> Text:
 
 def value_style(value: str) -> str:
     """Цвет ЗАДАННОГО значения слота/привязки — §12.4: уровень — цветом уровня из
-    `TOGGLES["level"]` (единый источник, канон `main.py::_level_color` — будущий
-    авто-режим со своим цветом подхватится сам), алиас-пин — DIM.
+    `model_sign.LEVEL_COLORS` (единый источник, по нему же точки знака
+    модели в футере), алиас-пин — DIM.
 
     Отсутствие значения («не задан»/«активная» — DEEP_DIM) сюда не попадает: это не
     значение, и решает его тот, кто ЗНАЕТ факт (ключа в файле нет / это первая
@@ -588,11 +612,7 @@ def value_style(value: str) -> str:
     схемой разрешён (`validate_model_alias` режет только `RESERVED_WORDS`). Алиас с
     именем уровня, наоборот, невозможен — они и есть `RESERVED_WORDS`."""
     if value in LEVELS:
-        from gc_tui.toggles import TOGGLES
-
-        return {v.value: v.color for v in TOGGLES["level"].values}.get(
-            value, INK
-        )
+        return LEVEL_COLORS.get(value, INK)
     return DIM
 
 
@@ -694,7 +714,7 @@ class ModelsSectionEditor(Vertical):
         verify: bool | str = True,
         config_proxy: str | None = None,
         presets=(),
-        active_level: str = "default",
+        active_choice: str = "default",
         legacy_editor_factory=None,
         legacy_hints=(),
         on_change=None,
@@ -743,7 +763,7 @@ class ModelsSectionEditor(Vertical):
         self._presets = list(presets)
         # Активный уровень — знание ЭКРАНА (config + сессионные переключатели);
         # секция показывает файл, но описание «активной» в пикере говорит о рантайме.
-        self._active_level = active_level
+        self._active_choice = active_choice
         self._legacy_editor_factory = legacy_editor_factory
         self._legacy_hints = list(legacy_hints)
         self._on_change = on_change
@@ -1471,12 +1491,29 @@ class ModelsSectionEditor(Vertical):
 
     def _assign_row_text(self, consumer: str, selected: bool) -> Text:
         label = consumer_labels()[consumer]
-        return self._binding_row_text(
+        text = self._binding_row_text(
             lambda w: Text(fit_head(label, w), style=INK),
             self._assign_value(consumer),
             self._assign_unset_label(consumer),
             selected,
         )
+        if selected:
+            text.append("\n")
+            text.append_text(self._key_line(consumer))
+        return text
+
+    def _key_line(self, consumer: str) -> Text:
+        """Ключ конфига выбранной строки привязок — второй строкой, по канону
+        «в текущей сессии: …» `_mode_row_text`: подпись курсивом DEEP_DIM, путь
+        DEEP_DIM. Не влезает в рамку — режется многоточием: строка не
+        переносится ни на какой ширине."""
+        line = Text(_KEY_INDENT)
+        line.append(_KEY_LABEL, style=f"italic {DEEP_DIM}")
+        line.append(assign_key(consumer), style=DEEP_DIM)
+        width = self._row_width()
+        if width > 0:
+            line.truncate(width, overflow="ellipsis")
+        return line
 
     def _row_text(self, row: dict, selected: bool) -> Text:
         if row["kind"] == "reserve":
@@ -2431,6 +2468,8 @@ class ModelsSectionEditor(Vertical):
         for consumer in assign_consumers():
             if self._assign_value(consumer) == prev:
                 ops.append(("write_assign", consumer, alias))
+        if self._document.get("model") == prev:
+            ops.append(("write_pointer", "model", alias))
         ops.append(("remove_model", prev, True))
         return ops
 
@@ -2512,7 +2551,13 @@ class ModelsSectionEditor(Vertical):
         self._reload()
         self._cursor_to(alias)
         self._refresh_rows()
-        if not self._entry_address(alias):
+        path_hint = self._endpoint_path_hint(alias)
+        if path_hint is not None:
+            self._warn_literal_tokens(
+                f"⚠ запись «{alias}» сохранена в {Path(self._target).name}, "
+                + _ENDPOINT_PATH_HINT.format(full=path_hint)
+            )
+        elif not self._entry_address(alias):
             # Оба предупреждения (адрес и литеральный токен) едут каналом `ok=None`
             # — ОДНИМ виджетом (`_singleton`), и второй вызов подряд его не
             # дополняет, а замещает. Склеены здесь, а не по два отдельных вызова
@@ -2528,6 +2573,28 @@ class ModelsSectionEditor(Vertical):
                 ok=True,
             )
             self._warn_literal_tokens()
+
+    def _endpoint_path_hint(self, alias: str) -> str | None:
+        """Полный адрес, если СВОЙ адрес записи не оканчивается путём
+        эндпоинта режима бэкенда (`endpoint_path_hint`); иначе None."""
+        api_mode = self._api_mode()
+        if api_mode is None:
+            return None
+        return endpoint_path_hint(
+            entry_address(self._entry(alias), ""), api_mode
+        )
+
+    def _api_mode(self) -> str | None:
+        """Режим API, которым пойдут записи цели. Профиль — верхний файловый
+        слой своего стека: его `backend.api_mode` решает, если задан; иначе —
+        конфиг стека (`global_config`)."""
+        backend = self._document.get("backend") if self._is_profile else None
+        own = backend.get("api_mode") if isinstance(backend, dict) else None
+        if own:
+            return str(own).strip().lower()
+        if self._global_config is None:
+            return None
+        return settings_of(self._global_config).backend.api_mode
 
     def _warn_literal_tokens(self, pending: str | None = None) -> None:
         """Предупреждение секрет-политики — рядом с итогом записи и по ИТОГОВОМУ
@@ -2925,7 +2992,7 @@ class ModelsSectionEditor(Vertical):
 
     def _picker_active_desc(self) -> Text:
         t = Text(_ACTIVE_DESC_LEAD, style=DEEP_DIM)
-        t.append(self._active_level, style=value_style(self._active_level))
+        t.append(self._active_choice, style=value_style(self._active_choice))
         return t
 
     def _open_value_picker(self, row: dict) -> None:

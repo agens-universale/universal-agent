@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Optional
 
 from gc_core.agent_edits.journal import EditRecord
+from gc_core.message_policy.nudges import output_for_card
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -71,7 +72,7 @@ class ToolCallDetailScreen(Screen):
                 yield _section_header("OUTPUT")
                 yield self._output_widget()
             yield Static(
-                "[Esc] back  [↑↓ / PgUp PgDn] прокрутка",
+                "↑/↓ / PgUp/PgDn — прокрутка · Esc — назад",
                 id="footer",
                 markup=False,
             )
@@ -120,12 +121,9 @@ class ToolCallDetailScreen(Screen):
 
     def _header_text(self) -> str:
         ev = self._call_event
-        tool = ev.tool_name or "<tool>"
-        # short_args: то что mapper вычислил для row (summary без 'name(')
-        short_args = ev.summary or ""
-        if "(" in short_args:
-            short_args = short_args.split("(", 1)[1].rstrip(")")
-        return f"Viewer: {tool}({short_args}) · #{ev.no}"
+        # Экран вызова — место сырого wire-имени (в ленте — подпись).
+        tool = ev.wire_name or ev.tool_name or "<tool>"
+        return f"Viewer: {tool}({ev.args_summary}) · #{ev.no}"
 
     def _output_widget(self):
         if self._result_event is None:
@@ -138,6 +136,8 @@ class ToolCallDetailScreen(Screen):
         output_val = (
             payload.get("output") if isinstance(payload, dict) else payload
         )
+        if isinstance(output_val, str):
+            output_val = output_for_card(output_val)
         if output_val is None:
             return Static("(пустой output)", classes="line-meta", markup=False)
         if self._edit_record is not None:

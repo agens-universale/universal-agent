@@ -15,6 +15,7 @@ from textual.widgets import Static
 
 from gc_tui.app import TuiApp
 from gc_tui.services import image_hints, os_ops
+from gc_tui.services.footer_slot import IMAGE_OPEN_TIP
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_testkit.tui_support import tui_settings
 
@@ -51,7 +52,7 @@ class _Clipboard:
 
 
 def _footer(pilot) -> str:
-    return str(pilot.app.screen.query_one("#footer-left", Static).render())
+    return str(pilot.app.screen.query_one("#footer-slot", Static).render())
 
 
 def _input(pilot) -> CommandTextArea:
@@ -220,12 +221,12 @@ async def test_the_first_inserted_image_tells_how_to_open_it_once(
         await _settle(pilot)
         await _paste_image(pilot, monkeypatch)
         assert _input(pilot).text == "[Изображение #1]"
-        assert _footer(pilot) == image_hints.IMAGE_OPEN_TIP
+        assert _footer(pilot) == IMAGE_OPEN_TIP
 
         pilot.app.screen._clear_footer_hint()
         await _paste_image(pilot, monkeypatch, color=(1, 2, 3))
         assert "[Изображение #2]" in _input(pilot).text
-        assert _footer(pilot) != image_hints.IMAGE_OPEN_TIP
+        assert _footer(pilot) != IMAGE_OPEN_TIP
 
 
 def _gate_file_check(monkeypatch) -> threading.Event:
@@ -278,7 +279,7 @@ async def test_the_open_tip_comes_after_the_whole_file_queue(
         await _settle(pilot)
         await _paste_queued(pilot, monkeypatch, _files(tmp_path, 2))
         assert _input(pilot).text == "[Изображение #1] [Изображение #2]"
-        assert _footer(pilot) == image_hints.IMAGE_OPEN_TIP
+        assert _footer(pilot) == IMAGE_OPEN_TIP
 
 
 @pytest.mark.asyncio
@@ -307,4 +308,4 @@ async def test_the_open_tip_yields_to_a_refusal_and_waits(
         pilot.app.screen._clear_footer_hint()
         _input(pilot).load_text("")
         await _paste_image(pilot, monkeypatch, color=(9, 9, 9))
-        assert _footer(pilot) == image_hints.IMAGE_OPEN_TIP
+        assert _footer(pilot) == IMAGE_OPEN_TIP
