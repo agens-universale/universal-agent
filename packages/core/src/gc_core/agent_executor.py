@@ -314,6 +314,12 @@ async def _stop_lease_keeper(keeper: asyncio.Task | None) -> None:
     await asyncio.gather(keeper, return_exceptions=True)
 
 
+def _cancel_tasks(*tasks: asyncio.Task | None) -> None:
+    for task in tasks:
+        if task is not None:
+            task.cancel()
+
+
 async def _arelease_lease(thread_session: Any, logger: Any) -> None:
     """Отпустить аренду треда после хода; сбой — предупреждение (аренда
     истечёт сама)."""
@@ -1837,17 +1843,18 @@ class AgentExecutor:
         loop_finished = False
         teardown_cancel: BaseException | None = None
         run_error: BaseException | None = None
-        keeper = _start_lease_keeper(thread_session, on_lost=self.stop_run)
-        poller = self._start_inbox_poller(thread_session)
-        # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
-        # сообщений прогона: клиент, которому ответили `queued`, должен попасть
-        # к модели в том же запросе, а не ждать следующего хода.
-        queued_before_loop = await self._atake_pending_messages()
-        if queued_before_loop:
-            messages = [*messages, *queued_before_loop]
-        _stop_bound = self._user_stop_scope()
-        _stop_bound.__enter__()
+        keeper = poller = None
+        stop_scope = contextlib.ExitStack()
         try:
+            keeper = _start_lease_keeper(thread_session, on_lost=self.stop_run)
+            poller = self._start_inbox_poller(thread_session)
+            # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
+            # сообщений прогона: клиент, которому ответили `queued`, должен
+            # попасть к модели в том же запросе, а не ждать следующего хода.
+            queued_before_loop = await self._atake_pending_messages()
+            if queued_before_loop:
+                messages = [*messages, *queued_before_loop]
+            stop_scope.enter_context(self._user_stop_scope())
             response = await arun_agent(
                 messages,
                 state,
@@ -1893,9 +1900,10 @@ class AgentExecutor:
             run_error = exc
             raise
         finally:
-            _stop_bound.__exit__(None, None, None)
-            await _stop_lease_keeper(poller)
-            await _stop_lease_keeper(keeper)
+            # Синхронное — до первого await: отмена на ожидании ниже не
+            # оставит ни фоновых задач, ни неубранного хода.
+            stop_scope.close()
+            _cancel_tasks(poller, keeper)
             # Смена, остановленная до запроса, и выбор, так и не дошедший
             # до вызова; записи смены пишут после итога хода — так их
             # строки показывает лента.
@@ -1906,6 +1914,8 @@ class AgentExecutor:
             state_ops.leave(state)
             state.turn_level = None
             try:
+                await _stop_lease_keeper(poller)
+                await _stop_lease_keeper(keeper)
                 # Ход, уже записанный из цикла, — no-op. Под отменой
                 # счётчик задачи не трогаем: отмена уже доставлена, запись
                 # доходит, а `asyncio.timeout` и TaskGroup вызывающего
