@@ -102,6 +102,8 @@ async def test_preview_summary_marker_collapsed_then_toggles():
             )
 
     async with _A().run_test() as pilot:
+        # Метка строит подпись по ширине после первой раскладки экрана.
+        await pilot.pause()
         scr = pilot.app.screen
         body = next(
             w for w in scr.query(SummaryMarker) if w.has_class("summary-body")

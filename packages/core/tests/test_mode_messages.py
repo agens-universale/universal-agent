@@ -282,11 +282,12 @@ def test_compaction_puts_the_live_mode_into_the_summary(monkeypatch):
     а не отметка, с которой модель жила до сжатия."""
     from gc_core.states import State
     from gc_core.summarize.compaction import arun_summary_compaction
+    from gc_core.summarize.summary_spec import assemble_summary_xml
     from gc_testkit import run_coro
 
     async def _fake_summarize(**_kwargs):
         return {
-            "raw_summary": "итог",
+            "raw_summary": assemble_summary_xml({"task_and_context": "итог"}),
             "num_batches": 1,
             "last_dialog_steps": "",
             "trace": {"memory_patch": {"executed": False}},

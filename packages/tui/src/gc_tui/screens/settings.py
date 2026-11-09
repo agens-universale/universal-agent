@@ -950,6 +950,9 @@ class SettingsScreen(Screen):
         except NoMatches:
             pass
 
+    def _refresh_footer_after_layout(self) -> None:
+        self.call_after_refresh(self._refresh_footer)
+
     def on_mount(self) -> None:
         # Вердикт стартового авто-чека (app) — общий на сессию: хаб показывает статус сразу,
         # а секция не ходит в сеть второй раз (Enter на «Проверить обновления» — форсит).
@@ -960,6 +963,22 @@ class SettingsScreen(Screen):
         self._probe_in_flight = bool(
             endpoint
         )  # первый кадр меню сразу с …, без — → ✓ мелькания
+        # Поля секции монтируются позже экрана: доступность прокрутки
+        # меняется и без Resize самого экрана или движения курсора.
+        scroll = self.query_one(_SEL_SET_SCROLL, VerticalScroll)
+        self.watch(
+            scroll,
+            "show_vertical_scrollbar",
+            self._refresh_footer_after_layout,
+            init=False,
+        )
+        for geometry in ("window_virtual_size", "window_size"):
+            self.watch(
+                scroll.vertical_scrollbar,
+                geometry,
+                self._refresh_footer_after_layout,
+                init=False,
+            )
         self._render_view()
         # Каждое открытие секции начинается сверху. `VerticalScroll` сохраняет
         # собственное смещение между пересборками тела, поэтому без явного сброса

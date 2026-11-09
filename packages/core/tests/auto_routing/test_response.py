@@ -130,7 +130,14 @@ def test_subagent_tools_are_named_by_the_predicate(tools_data):
 def test_has_invalid_call_sees_one_bad_call_in_the_batch(tools_data, call):
     assert (
         has_invalid_call(
-            [_fc("fs_read_file", '{"path": "a.py"}'), call], tools_data
+            [
+                _fc(
+                    "fs_read_file",
+                    '{"path": "a.py", "add_line_numbers": false}',
+                ),
+                call,
+            ],
+            tools_data,
         )
         is True
     )
@@ -140,7 +147,15 @@ def test_has_invalid_call_is_false_for_valid_calls_and_for_no_calls(
     tools_data,
 ):
     assert (
-        has_invalid_call([_fc("fs_read_file", '{"path": "a.py"}')], tools_data)
+        has_invalid_call(
+            [
+                _fc(
+                    "fs_read_file",
+                    '{"path": "a.py", "add_line_numbers": false}',
+                )
+            ],
+            tools_data,
+        )
         is False
     )
     assert has_invalid_call([], tools_data) is False
@@ -156,7 +171,13 @@ def test_has_no_tool_call_covers_prose_an_empty_answer_and_a_salvaged_think():
     )
     assert (
         has_no_tool_call(
-            [_message("Читаю файл."), _fc("fs_read_file", '{"path": "a.py"}')]
+            [
+                _message("Читаю файл."),
+                _fc(
+                    "fs_read_file",
+                    '{"path": "a.py", "add_line_numbers": false}',
+                ),
+            ]
         )
         is False
     )

@@ -224,6 +224,34 @@ async def test_anchored_arrange_counts_anchor():
 
 
 @pytest.mark.asyncio
+async def test_anchor_layout_repaints_scrollbar_after_stale_frame():
+    from textual.geometry import Region
+
+    app = _TallAnchored()
+    async with app.run_test(size=(40, 20)) as pilot:
+        await pilot.pause()
+        scroll = app.query_one("#a")
+        scroll.anchor()
+        await pilot.pause()
+        bar = scroll.vertical_scrollbar
+        crop = Region(0, 0, bar.size.width, bar.size.height)
+
+        def painted():
+            return [list(line) for line in bar.render_lines(crop)]
+
+        expected = painted()
+        # Кадр между двумя раскладками: ползунок ещё по прежней высоте окна.
+        bar.position = scroll.scroll_y - 2
+        await pilot.pause()
+        assert painted() != expected
+        scroll.refresh(layout=True)
+        await pilot.pause()
+
+        assert bar.position == scroll.scroll_y == scroll.max_scroll_y
+        assert painted() == expected
+
+
+@pytest.mark.asyncio
 async def test_other_version_anchored_arrange_is_plain(monkeypatch):
     """На чужой версии раскладка якорную прокрутку не считает."""
     monkeypatch.setattr(textual, "__version__", "9.0.0")

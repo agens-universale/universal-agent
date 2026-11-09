@@ -267,7 +267,16 @@ def test_an_invalid_call_fires_under_two_level(registry, kind):
 
 def test_a_valid_read_does_not_fire_under_two_level(registry):
     assert (
-        _verdict(registry, [_fc("fs_read_file", '{"path": "a.py"}')]) is None
+        _verdict(
+            registry,
+            [
+                _fc(
+                    "fs_read_file",
+                    '{"path": "a.py", "add_line_numbers": false}',
+                )
+            ],
+        )
+        is None
     )
 
 
@@ -299,7 +308,7 @@ def test_an_answer_without_calls_fires_under_two_level(registry, kind):
 def test_prose_next_to_a_valid_call_is_not_an_answer_without_calls(registry):
     response = [
         _message("Сейчас прочитаю файл."),
-        _fc("fs_read_file", '{"path": "a.py"}'),
+        _fc("fs_read_file", '{"path": "a.py", "add_line_numbers": false}'),
     ]
     assert _verdict(registry, response) is None
 
