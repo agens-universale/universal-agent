@@ -13,8 +13,9 @@
 
 from pathlib import Path
 
-from recommended_mcp import install as inst
 from recommended_mcp.manifest import InstallSpec, MCPEntry
+
+from recommended_mcp import install as inst
 
 
 def _wheel_layout(tmp_path: Path, name: str) -> Path:
@@ -66,14 +67,14 @@ def test_uninstall_entry_pypi_calls_pip(monkeypatch):
     assert calls and "uninstall" in calls[0] and "ddgs-mcp" in calls[0]
 
 
-def test_uninstall_entry_npx_calls_npm(monkeypatch):
+def test_uninstall_entry_npx_calls_npm(monkeypatch, tmp_path):
     calls = []
+    npm = tmp_path / "npm"
+    npm.write_text("", encoding="utf-8")
     monkeypatch.setattr(
         inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
     )
-    monkeypatch.setattr(
-        inst, "_node_install_paths", lambda dep: {"npm": "NPM"}
-    )
+    monkeypatch.setattr(inst, "_node_install_paths", lambda dep: {"npm": npm})
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.gc_paths",
         lambda: {
@@ -90,6 +91,27 @@ def test_uninstall_entry_npx_calls_npm(monkeypatch):
     )
     inst.uninstall_entry(e, Path("."))
     assert calls and "uninstall" in calls[0] and "@playwright/mcp" in calls[0]
+
+
+def test_uninstall_entry_npx_without_agent_node_warns(
+    monkeypatch, tmp_path, capsys
+):
+    # Node агента сменилась, а новая ещё не скачана: npm на диске нет.
+    calls = []
+    monkeypatch.setattr(
+        inst.subprocess, "run", lambda argv, **kw: calls.append(argv)
+    )
+    monkeypatch.setattr(
+        inst, "_node_install_paths", lambda dep: {"npm": tmp_path / "npm"}
+    )
+    e = MCPEntry(
+        name="pw",
+        path=Path("."),
+        install=InstallSpec(type="npx", npm_package="@playwright/mcp"),
+    )
+    inst.uninstall_entry(e, Path("."))
+    assert calls == []
+    assert "[warn] pw: Node агента не найдена" in capsys.readouterr().out
 
 
 def test_dist_name_wheel(tmp_path):

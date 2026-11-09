@@ -226,6 +226,13 @@ def uninstall_entry(entry: MCPEntry, root: Path) -> None:
 
         agent_dep_dir = gc_paths()["data"]
         npm = _node_install_paths(agent_dep_dir)["npm"]
+        if not Path(npm).exists():
+            # Пакет жил в Node прошлой версии; её каталог чистит remove --all.
+            print(
+                f"[warn] {entry.name}: Node агента не найдена — npm-пакет "
+                f"не удалялся"
+            )
+            return
         print(f"[uninstall] {entry.name}: npm uninstall -g {pkg}")
         subprocess.run([str(npm), "uninstall", "-g", pkg], check=False)
     else:
