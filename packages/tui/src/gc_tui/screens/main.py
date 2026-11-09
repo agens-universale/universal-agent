@@ -5890,11 +5890,7 @@ class TraceScreen(TraceFollowMixin, Screen):
         progress = getattr(self.app, "_mcp_progress", None)
         if progress is None or self._brand is None:
             return
-        # outcome раньше snapshot: `True` тогда гарантирует полный снимок,
-        # иначе сервер, чей статус пришёл между вызовами, встал бы в очередь
-        # как ✗ при `finish(True)`.
-        outcome = progress.outcome()
-        servers, _active = progress.snapshot()
+        servers, outcome = progress.state()
         self._brand.feed(progress, servers, outcome)
 
     def on_start_header_settled(self, _event: StartHeader.Settled) -> None:
@@ -6231,7 +6227,10 @@ class TraceScreen(TraceFollowMixin, Screen):
         # Отложенное удаление осиротевших реплик (cancel-with-undo), когда idle.
         self._run_orphan_cleanups()
         # Загрузка MCP в шапке — на старте (до появления активной задачи) тоже.
-        self._feed_start_header()
+        # F2: при заморозке не подаём — смена фазы сдвинула бы высоту шапки и
+        # выделенный текст; после разморозки снимок возьмётся свежий.
+        if not _frozen:
+            self._feed_start_header()
         # Замок выбора в открытом пикере (`/profile` во время хода) снимается
         # с концом хода — без переоткрытия.
         if self._arg_picker is not None:

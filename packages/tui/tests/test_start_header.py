@@ -418,6 +418,26 @@ async def test_startup_build_failure_freezes_header_failed(
 
 
 @pytest.mark.asyncio
+async def test_header_ignores_progress_while_selection_frozen(tmp_path):
+    """Пока выделение заморожено (F2), шапка не меняется: смена фазы сдвинула
+    бы высоту и выделенный текст. После разморозки снимок берётся свежий."""
+    app = _app(tmp_path, _TWO_SERVERS)
+    async with app.run_test(size=(120, 40)) as pilot:
+        scr = app.screen
+        header = _header(app)
+        frozen = [True]
+        scr._ui_frozen_for_select = lambda: frozen[0]
+        app._mcp_progress = _progress(outcome=False)
+        scr._poll_active()
+        await pilot.pause()
+        assert header._peephole.phase == "loading"
+        frozen[0] = False
+        scr._poll_active()
+        await pilot.pause()
+        assert _status(header) == _FAILED
+
+
+@pytest.mark.asyncio
 async def test_two_blank_rows_between_header_and_first_reply(tmp_path):
     """Между строкой статуса и первой репликой — две пустые строки
     (контракт §3.5, §4): граница, где начинается диалог."""

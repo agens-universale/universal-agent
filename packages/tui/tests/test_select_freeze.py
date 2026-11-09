@@ -430,9 +430,10 @@ async def test_refresh_stream_content_gated_by_selecting(
 
 @pytest.mark.asyncio
 async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
-    """F6: freeze глушит только stick/scroll/stream/wipe, но НЕ весь poll.
-    Footer/title/orphan/MCP-indicator продолжают обновляться — UI не тупеет
-    целиком на 5с timeout. Это регрессия на прежний полный `return`."""
+    """F6: freeze глушит только stick/scroll/stream/wipe и стартовую шапку,
+    но НЕ весь poll. Footer/title/orphan продолжают обновляться — UI не
+    тупеет целиком на 5с timeout. Это регрессия на прежний полный `return`.
+    Шапку держит F2: смена фазы меняет её высоту и сдвинула бы выделение."""
     from gc_tui.app import TuiApp
 
     app = TuiApp(
@@ -472,9 +473,9 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
         scr._poll_active()
         assert calls["footer"] >= 1
         assert calls["title"] >= 1
-        # orphan/MCP тоже должны выполняться (до ранней ветки None)
+        # orphan тоже должен выполняться (до ранней ветки None)
         assert calls["orphan"] >= 1
-        assert calls["mcp"] >= 1
+        assert calls["mcp"] == 0
 
 
 @pytest.mark.asyncio

@@ -33,6 +33,8 @@ class McpProgress:
         with self._lock:
             self._servers[server] = status
 
-    def snapshot(self) -> tuple[dict, bool]:
+    def state(self) -> tuple[dict, Optional[bool]]:
+        """Статусы серверов и итог сборки одним снимком: при итоге `True`
+        в нём уже все статусы, которые успели прийти."""
         with self._lock:
-            return dict(self._servers), bool(self._servers)
+            return dict(self._servers), self._outcome
