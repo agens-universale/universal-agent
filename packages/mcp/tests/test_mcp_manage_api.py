@@ -86,6 +86,25 @@ def test_installed_state_installed_with_version(monkeypatch):
     assert st["installed"] is True and st["version"] == "0.3.1"
 
 
+def test_installed_state_offers_update_for_outdated_wiring(monkeypatch):
+    # Node агента сменилась: npm новой версии ещё нет (статус «?»), но
+    # подключение отстало от рецепта — переустановка его и перепишет.
+    class E:
+        name = "browser_playwright"
+
+        class install:
+            type = "npx"
+
+    monkeypatch.setattr(
+        cli, "_load_manifest_entries", lambda config=None: ([E()], "root")
+    )
+    monkeypatch.setattr(cli, "_agent_dep_dir", lambda: "dep")
+    monkeypatch.setattr(cli, "_installed_status", lambda e, r, d: "?")
+    monkeypatch.setattr(cli, "_wiring_outdated", lambda e, r, d: True)
+    st = cli.installed_state("browser_playwright")
+    assert st == {"installed": None, "version": None, "update": "обновление"}
+
+
 def test_manual_server_names_reads_runtime_key():
     server = {"transport": "stdio", "command": "x"}
     cfg = {"mcp.servers": {"corp-jira": server, "corp-confluence": server}}

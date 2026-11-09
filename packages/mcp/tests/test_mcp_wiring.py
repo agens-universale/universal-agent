@@ -93,3 +93,52 @@ def test_wire_playwright_resolves_real_paths(tmp_path, monkeypatch):
     assert srv["command"] == "/N/npx"
     assert "/C/playwright-mcp" in " ".join(srv["args"])
     assert leftover == []  # без хардкода и оставшихся {…}
+
+
+def _playwright_wired(tmp_path, monkeypatch):
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: _gc(tmp_path))
+    from gc_testkit.paths import RECIPES
+    from recommended_mcp.runtime import wiring
+
+    recipe = RECIPES / "browser_playwright"
+    wiring.wire_snippet("browser_playwright", recipe, npx="/N/npx", cache="/C")
+    return wiring, recipe
+
+
+def test_fresh_wiring_is_not_outdated(tmp_path, monkeypatch):
+    wiring, recipe = _playwright_wired(tmp_path, monkeypatch)
+    assert not wiring.wiring_outdated(
+        "browser_playwright", recipe, npx="/N/npx", cache="/C"
+    )
+
+
+def test_wiring_from_older_node_is_outdated(tmp_path, monkeypatch):
+    # Подключение прошлого релиза: npx из node/v18.0.0, без --browser.
+    wiring, recipe = _playwright_wired(tmp_path, monkeypatch)
+    data = wiring.load_managed()
+    data["mcp"]["servers"]["browser_playwright"]["args"] = [
+        "-y",
+        "@playwright/mcp@0.0.70",
+        "--output-dir",
+        "/C/playwright-mcp",
+    ]
+    wiring.save_managed(data)
+    assert wiring.wiring_outdated(
+        "browser_playwright", recipe, npx="/N/npx", cache="/C"
+    )
+    assert wiring.wiring_outdated(
+        "browser_playwright", recipe, npx="/N24/npx", cache="/C"
+    )
+
+
+def test_unwired_recipe_is_not_outdated(tmp_path, monkeypatch):
+    monkeypatch.setattr(env_vars, "gc_paths", lambda: _gc(tmp_path))
+    from gc_testkit.paths import RECIPES
+    from recommended_mcp.runtime import wiring
+
+    assert not wiring.wiring_outdated(
+        "browser_playwright",
+        RECIPES / "browser_playwright",
+        npx="/N/npx",
+        cache="/C",
+    )

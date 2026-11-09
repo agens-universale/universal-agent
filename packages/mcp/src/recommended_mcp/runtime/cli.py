@@ -89,13 +89,29 @@ def _install_one(
     return any(s == "installed" for _, s, _ in results)
 
 
-def _wire_one(entry, root: Path, agent_dep_dir) -> None:
+def _wiring_paths(agent_dep_dir) -> tuple[str, str]:
+    """Значения плейсхолдеров {npx}/{cache} сниппета на этой машине."""
     from gc_core.config_modules.env_vars import gc_paths
 
+    npx = str(_inst()._node_install_paths(agent_dep_dir)["npx"])
+    return npx, str(gc_paths()["cache"])
+
+
+def _wiring_outdated(entry, root: Path, agent_dep_dir) -> bool:
+    """Подключённый рецепт расходится со своим сниппетом на этой машине."""
     from recommended_mcp.runtime import wiring
 
-    npx = str(_inst()._node_install_paths(agent_dep_dir)["npx"])
-    cache = str(gc_paths()["cache"])
+    if entry.name not in wiring.wired_servers():
+        return False
+    npx, cache = _wiring_paths(agent_dep_dir)
+    recipe_dir = (root / entry.path).resolve()
+    return wiring.wiring_outdated(entry.name, recipe_dir, npx=npx, cache=cache)
+
+
+def _wire_one(entry, root: Path, agent_dep_dir) -> None:
+    from recommended_mcp.runtime import wiring
+
+    npx, cache = _wiring_paths(agent_dep_dir)
     recipe_dir = (root / entry.path).resolve()
     try:
         leftover = wiring.wire_snippet(
@@ -396,6 +412,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return 1
 
 
+# Обновление без номера версии: подключение отстало от рецепта.
+_WIRING_UPDATE = "обновление"
+
+
 def _available_update(entry, installed_version):
     """Версия из рецепта, если ≠ установленной. Локально, без сети.
 
@@ -435,12 +455,23 @@ def installed_state(
     entries, root = (
         manifest if manifest is not None else _load_manifest_entries(config)
     )
-    from recommended_mcp.runtime.venv import query_installed_version
-
     entry = _inst().find_entry(entries, name)
     if entry is None:
         return {"installed": None, "version": None, "update": None}
-    status = _installed_status(entry, root, _agent_dep_dir())
+    dep = _agent_dep_dir()
+    state = _package_state(entry, root, dep)
+    # npx-рецепт версию не сообщает, а Node агента и аргументы сниппета
+    # меняются с релизом: отставшее подключение — тоже повод переустановить.
+    if state["update"] is None and _wiring_outdated(entry, root, dep):
+        state["update"] = _WIRING_UPDATE
+    return state
+
+
+def _package_state(entry, root, agent_dep_dir) -> dict:
+    """installed_state без сверки подключения: пакет и его версия."""
+    from recommended_mcp.runtime.venv import query_installed_version
+
+    status = _installed_status(entry, root, agent_dep_dir)
     if status == "?":
         return {"installed": None, "version": None, "update": None}
     if status != "yes":

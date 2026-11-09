@@ -69,11 +69,10 @@ def wired_servers() -> dict[str, Any]:
     return (load_managed().get("mcp") or {}).get("servers") or {}
 
 
-def wire_snippet(
-    name: str, recipe_dir: Path, *, npx: str, cache: str
-) -> list[str]:
-    """Upsert mcp.servers.<name> из сниппета в managed-файл. Возвращает список
-    оставшихся неизвестных плейсхолдеров (для warn)."""
+def _resolved_snippet(
+    recipe_dir: Path, *, npx: str, cache: str
+) -> dict[str, Any]:
+    """Блок подключения, который сейчас дал бы сниппет рецепта."""
     snippet = read_snippet(recipe_dir)
     if len(snippet) != 1:
         raise ValueError(
@@ -81,7 +80,31 @@ def wire_snippet(
         )
     # сниппет — {server_key: config}; берём единственный config-блок
     config_block = next(iter(snippet.values()))
-    resolved = resolve_placeholders(config_block, npx=npx, cache=cache)
+    return resolve_placeholders(config_block, npx=npx, cache=cache)
+
+
+def wiring_outdated(
+    name: str, recipe_dir: Path, *, npx: str, cache: str
+) -> bool:
+    """Подключение отстало от рецепта: сменились путь npx (новая Node агента),
+    аргументы или другие поля сниппета. Не подключён или сниппет не читается —
+    False: переподключать нечего."""
+    wired = wired_servers().get(name)
+    if wired is None:
+        return False
+    try:
+        expected = _resolved_snippet(recipe_dir, npx=npx, cache=cache)
+    except (FileNotFoundError, ValueError):
+        return False
+    return wired != expected
+
+
+def wire_snippet(
+    name: str, recipe_dir: Path, *, npx: str, cache: str
+) -> list[str]:
+    """Upsert mcp.servers.<name> из сниппета в managed-файл. Возвращает список
+    оставшихся неизвестных плейсхолдеров (для warn)."""
+    resolved = _resolved_snippet(recipe_dir, npx=npx, cache=cache)
 
     data = load_managed()
     data.setdefault("mcp", {}).setdefault("servers", {})[name] = resolved
