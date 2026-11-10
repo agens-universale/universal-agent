@@ -9,8 +9,13 @@ import sys
 import time
 
 import pytest
-from gc_core.plugins.hook_runner import MAX_CONTEXT_CHARS, run_hook
+from gc_core.plugins.hook_runner import (
+    MAX_CONTEXT_CHARS,
+    HookResult,
+    run_hook,
+)
 from gc_core.plugins.manifest import HookCommand, load_plugin
+from gc_core.user_stop import UserStop, bind_user_stop
 
 PY = sys.executable
 
@@ -243,6 +248,41 @@ async def test_killpg_permission_error_keeps_contract(tmp_path, monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def _bound_stop() -> UserStop:
+    stop = UserStop()
+    stop.prepare_run(asyncio.get_running_loop(), None)
+    return stop
+
+
+@_posix_only
+async def test_user_stop_kills_hook_without_failure(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(command=_pid_command(pid_file))
+    stop = _bound_stop()
+    with bind_user_stop(stop):
+        task = asyncio.create_task(
+            run_hook(
+                plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30
+            )
+        )
+    pid = await _read_pid(pid_file)
+    stop.request()
+    res = await asyncio.wait_for(task, timeout=5)
+    assert res == HookResult(plugin="demo")
+    assert await _wait_dead(pid)
+
+
+async def test_hook_does_not_start_after_user_stop(tmp_path):
+    marker = tmp_path / "ran"
+    stop = _bound_stop()
+    stop.request()
+    with bind_user_stop(stop):
+        res = await _run(tmp_path, _cmd(f"open({str(marker)!r}, 'w')"))
+    assert res == HookResult(plugin="demo")
+    assert not marker.exists()
 
 
 async def test_no_bash_fails_open(tmp_path, monkeypatch, caplog):

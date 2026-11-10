@@ -15,6 +15,8 @@
   останавливается (fail-open), в лог уходит предупреждение.
 * Контекст и причина отказа ограничены ``MAX_CONTEXT_CHARS``, длиннее —
   обрезаются с пометкой.
+* Стоп хода убивает группу процессов идущего хука, а следующий хук не
+  запускает. Это не сбой: результат пустой, ход кончается стопом.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from gc_core.plugins.manifest import HookCommand, Plugin
+from gc_core.user_stop import UserStopInterrupt, current_user_stop
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +108,29 @@ async def _terminate(proc: asyncio.subprocess.Process) -> None:
     await proc.wait()
 
 
+def _stop_requested() -> bool:
+    stop = current_user_stop()
+    return stop is not None and stop.requested
+
+
+async def _acommunicate(
+    proc: asyncio.subprocess.Process, data: bytes, timeout: int
+) -> tuple[bytes, bytes] | None:
+    """Обмен с хуком под таймаутом; ``None`` — хук снят стопом хода."""
+    stop = current_user_stop()
+    if stop is None:
+        return await asyncio.wait_for(proc.communicate(data), timeout)
+    try:
+        async with stop.arm(
+            kind="hook", release=lambda: _terminate(proc)
+        ) as armed:
+            out = await asyncio.wait_for(proc.communicate(data), timeout)
+    except UserStopInterrupt:
+        await _terminate(proc)
+        return None
+    return None if armed.fired else out
+
+
 async def run_hook(
     plugin: Plugin,
     hook: HookCommand,
@@ -113,6 +139,8 @@ async def run_hook(
     cwd: str,
     default_timeout_sec: int,
 ) -> HookResult:
+    if _stop_requested():
+        return HookResult(plugin=plugin.name)
     shell = _find_bash()
     if shell is None:
         _warn_no_bash_once()
@@ -141,9 +169,8 @@ async def run_hook(
         logger.warning("plugin %s hook did not start: %s", plugin.name, exc)
         return HookResult(plugin=plugin.name, failed=True)
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(json.dumps(payload).encode("utf-8")),
-            timeout=timeout,
+        exchanged = await _acommunicate(
+            proc, json.dumps(payload).encode("utf-8"), timeout
         )
     except TimeoutError:
         logger.warning(
@@ -165,6 +192,9 @@ async def run_hook(
         await _terminate(proc)
         return HookResult(plugin=plugin.name, failed=True)
 
+    if exchanged is None:
+        return HookResult(plugin=plugin.name)
+    stdout, stderr = exchanged
     if proc.returncode == 2:
         reason = _bounded(
             stderr.decode("utf-8", "replace").strip() or "blocked"
