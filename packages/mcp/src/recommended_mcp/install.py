@@ -227,11 +227,13 @@ def uninstall_entry(entry: MCPEntry, root: Path) -> None:
         agent_dep_dir = gc_paths()["data"]
         npm = _node_install_paths(agent_dep_dir)["npm"]
         if not Path(npm).exists():
-            # Пакет жил в Node прошлой версии; её каталог чистит remove --all.
+            # Пакет жил в Node прошлой версии — с ней его и удаляют. Не
+            # remove --all: тот снёс бы все MCP ради одного пакета.
             print(
                 f"[warn] {entry.name}: Node агента v{NODE_VERSION} не найдена "
-                f"— npm-пакет не удалялся (старые версии Node убирает "
-                f"gc-mcp remove --all)"
+                f"— npm-пакет не удалялся; если он остался в прошлой версии "
+                f"Node, её каталог можно удалить вручную: "
+                f"{Path(agent_dep_dir) / 'node'}/v<версия>"
             )
             return
         print(f"[uninstall] {entry.name}: npm uninstall -g {pkg}")

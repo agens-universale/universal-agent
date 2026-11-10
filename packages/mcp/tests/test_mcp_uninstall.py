@@ -104,6 +104,10 @@ def test_uninstall_entry_npx_without_agent_node_warns(
     monkeypatch.setattr(
         inst, "_node_install_paths", lambda dep: {"npm": tmp_path / "npm"}
     )
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.gc_paths",
+        lambda: {"data": tmp_path},
+    )
     e = MCPEntry(
         name="pw",
         path=Path("."),
@@ -113,7 +117,10 @@ def test_uninstall_entry_npx_without_agent_node_warns(
     assert calls == []
     out = capsys.readouterr().out
     assert f"[warn] pw: Node агента v{inst.NODE_VERSION} не найдена" in out
-    assert "gc-mcp remove --all" in out
+    # Путь к каталогу прошлых Node — а не remove --all, который сносит
+    # все MCP ради одного пакета.
+    assert str(tmp_path / "node") in out
+    assert "remove --all" not in out
 
 
 def test_dist_name_wheel(tmp_path):
