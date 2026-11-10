@@ -785,10 +785,10 @@ async def test_queued_message_lands_after_tool_output_on_disk(
 
 
 @pytest.mark.parametrize("discard", [False, True])
-async def test_stop_during_session_start_before_next_request(
+async def test_stop_right_after_session_start_before_next_request(
     tmp_path, monkeypatch, discard
 ):
-    """Стоп, пока SessionStart работает перед вторым запросом хода: модель
+    """Стоп сразу после SessionStart перед вторым запросом хода: модель
     больше не зовётся, пара вызова и ответа тула на диске цела. Вывод хука
     записывается, только если записи после стопа не отбрасываются."""
     from gc_core import processing_responses as pr
@@ -802,17 +802,20 @@ async def test_stop_during_session_start_before_next_request(
     starts = []
 
     async def _hooks(state, ctx, messages, *, user_prompt):
-        if not user_prompt:
-            starts.append(True)
-            if len(starts) == 2:
-                # Маркера в истории нет (как после сводки): хук сработает.
-                state.messages = [
-                    m
-                    for m in state.messages
-                    if "plugin_session_start" not in str(m.get("id"))
-                ]
-                executor.stop_run()
-        return await real(state, ctx, messages, user_prompt=user_prompt)
+        if user_prompt:
+            return await real(state, ctx, messages, user_prompt=True)
+        starts.append(True)
+        if len(starts) == 2:
+            # Маркера в истории нет (как после сводки): хук сработает.
+            state.messages = [
+                m
+                for m in state.messages
+                if "plugin_session_start" not in str(m.get("id"))
+            ]
+        out = await real(state, ctx, messages, user_prompt=False)
+        if len(starts) == 2:
+            executor.stop_run()
+        return out
 
     monkeypatch.setattr(pr, "acontext_hook_messages", _hooks)
     ctx = await _ctx(tmp_path, monkeypatch, [root])
@@ -831,3 +834,46 @@ async def test_stop_during_session_start_before_next_request(
         ("function_call_output", ""),
         *after_tool,
     ]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="группы процессов только в POSIX"
+)
+async def test_stop_kills_running_session_start_hook(tmp_path, monkeypatch):
+    """Стоп, пока хук SessionStart работает: группа процессов хука убита
+    сразу, модель не зовётся, сбоем хука это не считается."""
+    import asyncio
+    import os
+
+    pid_file = tmp_path / "pid"
+    root = _plugin(
+        tmp_path,
+        "plug",
+        {"SessionStart": f"sleep 600 & echo $! > {pid_file}; wait"},
+    )
+    backend = install(monkeypatch, ScriptedBackend(_finish_turn()))
+    # Уведомление о сбое хука видно только в TUI.
+    ctx = await _ctx(tmp_path, monkeypatch, [root], is_tui=True)
+    executor = AgentExecutor(ctx)
+
+    async def _stop_when_hook_runs():
+        while not (pid_file.exists() and pid_file.read_text().strip()):
+            await asyncio.sleep(0.02)
+        executor.stop_run()
+
+    stopper = asyncio.create_task(_stop_when_hook_runs())
+    await asyncio.wait_for(executor.arun(["один"], thread_id="t1"), timeout=10)
+    await asyncio.wait_for(stopper, timeout=1)
+
+    child = int(pid_file.read_text())
+    for _ in range(100):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.02)
+    else:
+        pytest.fail("процесс хука пережил стоп")
+    assert backend.calls == []
+    assert _disk(ctx) == [("user", "один")]
+    assert _notice_codes() == []

@@ -5,12 +5,18 @@ import json
 import logging
 import os
 import shutil
+import signal
 import sys
 import time
 
 import pytest
-from gc_core.plugins.hook_runner import MAX_CONTEXT_CHARS, run_hook
+from gc_core.plugins.hook_runner import (
+    MAX_CONTEXT_CHARS,
+    HookResult,
+    run_hook,
+)
 from gc_core.plugins.manifest import HookCommand, load_plugin
+from gc_core.user_stop import UserStop, bind_user_stop
 
 PY = sys.executable
 
@@ -243,6 +249,141 @@ async def test_killpg_permission_error_keeps_contract(tmp_path, monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def _bound_stop() -> UserStop:
+    stop = UserStop()
+    stop.prepare_run(asyncio.get_running_loop(), None)
+    return stop
+
+
+@_posix_only
+async def test_user_stop_kills_hook_without_failure(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(command=_pid_command(pid_file))
+    stop = _bound_stop()
+    with bind_user_stop(stop):
+        task = asyncio.create_task(
+            run_hook(
+                plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30
+            )
+        )
+    pid = await _read_pid(pid_file)
+    stop.request()
+    res = await asyncio.wait_for(task, timeout=5)
+    assert res == HookResult(plugin="demo")
+    assert await _wait_dead(pid)
+
+
+@_posix_only
+async def test_user_stop_during_spawn_kills_hook(tmp_path, monkeypatch):
+    real_spawn = asyncio.create_subprocess_exec
+    stop = _bound_stop()
+    spawned = []
+
+    async def _spawn_then_stop(*args, **kwargs):
+        proc = await real_spawn(*args, **kwargs)
+        spawned.append(proc.pid)
+        stop.request()
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn_then_stop)
+    with bind_user_stop(stop):
+        res = await _run(tmp_path, "sleep 600")
+    assert res == HookResult(plugin="demo")
+    assert await _wait_dead(spawned[0])
+
+
+def _detached_child_command(pid_file) -> str:
+    """Потомок уходит в свою сессию, вне группы хука, и держит stdout."""
+    child = _cmd("import os, time; os.setsid(); time.sleep(600)")
+    return f"{child} & echo $! > {pid_file}; sleep 600"
+
+
+async def _detached_child(pid_file) -> int:
+    pid = await _read_pid(pid_file)
+    deadline = time.monotonic() + 5
+    while os.getsid(pid) != pid:
+        assert time.monotonic() < deadline, "потомок не ушёл в свою сессию"
+        await asyncio.sleep(0.02)
+    return pid
+
+
+@_posix_only
+async def test_user_stop_releases_hook_held_by_detached_child(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(command=_detached_child_command(pid_file))
+    stop = _bound_stop()
+    with bind_user_stop(stop):
+        task = asyncio.create_task(
+            run_hook(
+                plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30
+            )
+        )
+    child = await _detached_child(pid_file)
+    try:
+        stop.request()
+        res = await asyncio.wait_for(task, timeout=10)
+        assert res == HookResult(plugin="demo")
+    finally:
+        os.kill(child, signal.SIGKILL)
+
+
+@_posix_only
+async def test_timeout_releases_hook_held_by_detached_child(tmp_path):
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(
+        command=_detached_child_command(pid_file), timeout_sec=2
+    )
+    task = asyncio.create_task(
+        run_hook(plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30)
+    )
+    child = await _detached_child(pid_file)
+    try:
+        res = await asyncio.wait_for(task, timeout=10)
+        assert res.failed
+    finally:
+        os.kill(child, signal.SIGKILL)
+
+
+@_posix_only
+async def test_unsignalable_hook_still_fails_open(tmp_path, monkeypatch):
+    """Хуку нельзя слать сигналы (EPERM): таймаут всё равно даёт сбой хука,
+    а не исключение из ``run_hook``."""
+    real_killpg = os.killpg
+
+    def _eperm(*_args):
+        raise PermissionError
+
+    plugin = load_plugin(_make_plugin(tmp_path))
+    pid_file = tmp_path / "pid"
+    hook = HookCommand(
+        command=f"echo $$ > {pid_file}; sleep 600", timeout_sec=1
+    )
+    task = asyncio.create_task(
+        run_hook(plugin, hook, {}, cwd=str(tmp_path), default_timeout_sec=30)
+    )
+    group = await _read_pid(pid_file)
+    monkeypatch.setattr(os, "killpg", _eperm)
+    monkeypatch.setattr(os, "kill", _eperm)
+    try:
+        res = await asyncio.wait_for(task, timeout=10)
+        assert res.failed
+    finally:
+        real_killpg(group, signal.SIGKILL)
+
+
+async def test_hook_does_not_start_after_user_stop(tmp_path):
+    marker = tmp_path / "ran"
+    stop = _bound_stop()
+    stop.request()
+    with bind_user_stop(stop):
+        res = await _run(tmp_path, _cmd(f"open({str(marker)!r}, 'w')"))
+    assert res == HookResult(plugin="demo")
+    assert not marker.exists()
 
 
 async def test_no_bash_fails_open(tmp_path, monkeypatch, caplog):
