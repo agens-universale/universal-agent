@@ -10,11 +10,12 @@
 
 Активируется per-server флагом в config.yml:
 
-    mcp-servers:
-      browser:
-        transport: stdio
-        command: ...
-        persistent_session: true
+    mcp:
+      servers:
+        browser:
+          transport: stdio
+          command: ...
+          persistent_session: true
 
 Жизненный цикл сессий привязан к AgentExecutor.run(): в finally вызывается
 PersistentStdioRegistry.instance().aclose_all(), чтобы не оставлять висящие
