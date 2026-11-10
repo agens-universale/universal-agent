@@ -84,14 +84,11 @@ def _resolved_snippet(
 
 
 def wiring_outdated(
-    name: str, recipe_dir: Path, *, npx: str, cache: str
+    wired: dict[str, Any], recipe_dir: Path, *, npx: str, cache: str
 ) -> bool:
-    """Подключение отстало от рецепта: сменились путь npx (новая Node агента),
-    аргументы или другие поля сниппета. Не подключён или сниппет не читается —
-    False: переподключать нечего."""
-    wired = wired_servers().get(name)
-    if wired is None:
-        return False
+    """Подключённый блок `wired` отстал от рецепта: сменились путь npx (новая
+    Node агента), аргументы или другие поля сниппета. Сниппет не читается —
+    False: сверять не с чем."""
     try:
         expected = _resolved_snippet(recipe_dir, npx=npx, cache=cache)
     except (FileNotFoundError, ValueError):

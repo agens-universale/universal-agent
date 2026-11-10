@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import yaml
 from gc_core.config_modules import env_vars
 
@@ -105,10 +107,14 @@ def _playwright_wired(tmp_path, monkeypatch):
     return wiring, recipe
 
 
+def _wired(wiring):
+    return wiring.wired_servers()["browser_playwright"]
+
+
 def test_fresh_wiring_is_not_outdated(tmp_path, monkeypatch):
     wiring, recipe = _playwright_wired(tmp_path, monkeypatch)
     assert not wiring.wiring_outdated(
-        "browser_playwright", recipe, npx="/N/npx", cache="/C"
+        _wired(wiring), recipe, npx="/N/npx", cache="/C"
     )
 
 
@@ -124,28 +130,30 @@ def test_wiring_from_older_node_is_outdated(tmp_path, monkeypatch):
     ]
     wiring.save_managed(data)
     assert wiring.wiring_outdated(
-        "browser_playwright", recipe, npx="/N/npx", cache="/C"
+        _wired(wiring), recipe, npx="/N/npx", cache="/C"
     )
     assert wiring.wiring_outdated(
-        "browser_playwright", recipe, npx="/N24/npx", cache="/C"
+        _wired(wiring), recipe, npx="/N24/npx", cache="/C"
     )
 
 
 def test_unwired_recipe_is_not_outdated(tmp_path, monkeypatch):
+    # Не подключён — сверять нечего; пути Node при этом не считаются
+    # (dep-заглушка не путь: посчитай их cli — упал бы).
     monkeypatch.setattr(env_vars, "gc_paths", lambda: _gc(tmp_path))
-    from gc_testkit.paths import RECIPES
-    from recommended_mcp.runtime import wiring
+    from types import SimpleNamespace
 
-    assert not wiring.wiring_outdated(
-        "browser_playwright",
-        RECIPES / "browser_playwright",
-        npx="/N/npx",
-        cache="/C",
+    from gc_testkit.paths import RECIPES
+    from recommended_mcp.runtime import cli
+
+    entry = SimpleNamespace(
+        name="browser_playwright", path=Path("browser_playwright")
     )
+    assert not cli._wiring_outdated(entry, RECIPES, "dep")
 
 
 def test_recipe_without_snippet_is_not_outdated(tmp_path, monkeypatch):
     wiring, _ = _playwright_wired(tmp_path, monkeypatch)
     assert not wiring.wiring_outdated(
-        "browser_playwright", tmp_path / "gone", npx="/N/npx", cache="/C"
+        _wired(wiring), tmp_path / "gone", npx="/N/npx", cache="/C"
     )

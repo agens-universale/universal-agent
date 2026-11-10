@@ -103,11 +103,12 @@ def _wiring_outdated(entry, root: Path, agent_dep_dir) -> bool:
     """Подключённый рецепт расходится со своим сниппетом на этой машине."""
     from recommended_mcp.runtime import wiring
 
-    if entry.name not in wiring.wired_servers():
+    wired = wiring.wired_servers().get(entry.name)
+    if wired is None:
         return False
     npx, cache = _wiring_paths(agent_dep_dir)
     recipe_dir = (root / entry.path).resolve()
-    return wiring.wiring_outdated(entry.name, recipe_dir, npx=npx, cache=cache)
+    return wiring.wiring_outdated(wired, recipe_dir, npx=npx, cache=cache)
 
 
 def _wire_one(entry, root: Path, agent_dep_dir) -> None:
@@ -470,7 +471,10 @@ def installed_state(
     name: str, config: Optional[str] = None, *, manifest=None
 ) -> dict:
     """{'installed': bool|None, 'version': str|None, 'update': str|None}.
-    Медленно (subprocess-опрос venv). installed=None — проверить не удалось.
+    update — версия из рецепта, если она новее установленной, либо
+    «обновление» без номера, если подключение отстало от рецепта; None —
+    обновлять нечего. Медленно (subprocess-опрос venv). installed=None —
+    проверить не удалось.
     manifest=(entries, root) — уже загруженный манифест (кэш вызывающего); иначе грузим."""
     entries, root = (
         manifest if manifest is not None else _load_manifest_entries(config)
