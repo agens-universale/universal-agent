@@ -38,8 +38,12 @@ def test_supported_or_unknown_macos_goes_on(monkeypatch, tmp_path, release):
 
 
 def test_other_os_is_not_checked(monkeypatch, tmp_path):
+    # Старая «версия macOS» под рукой: проверка, сработай она не на той
+    # ОС, отказала бы раньше загрузки.
     monkeypatch.setattr(inst.sys, "platform", "linux")
-    monkeypatch.setattr(inst.platform, "mac_ver", _reached)
+    monkeypatch.setattr(
+        inst.platform, "mac_ver", lambda: ("10.15", ("", "", ""), "")
+    )
     monkeypatch.setattr(inst, "_fetch_expected_sha256", _reached)
     with pytest.raises(_Reached):
         inst._ensure_cached_node(tmp_path)
