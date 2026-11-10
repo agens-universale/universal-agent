@@ -3,7 +3,8 @@
 Fed by RunContext.on_stream_delta from the agent worker thread; drained by the
 TUI poll tick. `format_stream_block` renders the answer text only (inline <think>
 stripped); reasoning is surfaced via the ThinkingIndicator. The sink also tracks
-a self-counted progress counter and reasoning start/end timing for that indicator.
+a self-counted progress counter, reasoning start/end timing for that indicator
+and per-attempt thought snapshots (text and duration) for the ribbon.
 Presentation layer — no business logic, not a substitute for the thread store.
 """
 
@@ -130,16 +131,6 @@ class StreamSink:
         попытки и фаза мысли остаются — их сбрасывает `reset` ядра."""
         with self._lock:
             self._answer = ""
-
-    def reasoning_seconds(self) -> float | None:
-        """Время фазы мысли: идёт, пока мысль идёт, после — её длительность;
-        мысли не было — None."""
-        with self._lock:
-            started = self._reasoning_started_at
-            if started is None:
-                return None
-            ended = self._reasoning_ended_at
-            return (self._clock() if ended is None else ended) - started
 
     def reset(self) -> None:
         """Сброс экраном (конец хода, смена треда): мысль попытки уходит в
