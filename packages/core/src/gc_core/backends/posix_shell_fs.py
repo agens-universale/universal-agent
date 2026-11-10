@@ -142,17 +142,20 @@ class PosixShellFsMixin:
         n = max(0, int(n))
         if n == 0:
             return b""
-        # GNU coreutils on the remote side (same assumption as ``stat -c`` / ``find -printf``).
+        # ``head -c`` есть у GNU, BSD и busybox.
         # Capture at walk ceiling: append samples 100KiB (~137k base64) > tool cap.
         # Do not pass ``-w 0``: Harbor's streamed exec reads stdout with
         # ``StreamReader`` readline (64 KiB). An unwrapped blob is one line and
         # raises LimitOverrunError before we see stdout. Default wrap is 76
         # columns; ``b64decode(validate=False)`` ignores the newlines.
-        # Код конвейера — код base64 (в dash нет pipefail): пустое чтение
-        # открывает файл заранее, отказ несёт настоящий stderr с путём.
+        # Код конвейера — код base64 (в dash нет pipefail): без кода head
+        # отсутствующий файл читался бы пустым. Код head уходит через fd 3,
+        # данные — через fd 4 мимо подстановки; отказ base64 — его код.
+        # Файл открывается один раз: отдельная проба съедала бы начало канала.
         q = shlex.quote(path)
         res = await self._afs_exec(
-            f"head -c 0 {q} >/dev/null && head -c {n} {q} | base64"
+            f"( s=$( {{ {{ head -c {n} {q}; echo $? >&3; }} | base64 >&4; }}"
+            f' 3>&1 ) || exit; exit "$s" ) 4>&1'
         )
         if res.return_code != 0:
             raise self._fs_failure(path, res, what="head")

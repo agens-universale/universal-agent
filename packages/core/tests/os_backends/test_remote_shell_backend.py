@@ -2,9 +2,12 @@
 """RemoteShellBackend с префиксом ["env"]: «удалённая» сторона = локальный sh."""
 
 import asyncio
+import contextlib
 import os
+import shlex
 import shutil
 import subprocess
+import threading
 
 import pytest
 from gc_core.backends.protocol import FsBackend
@@ -187,14 +190,69 @@ async def test_read_missing_raises_file_not_found(be, tmp_path):
         await be.read(str(tmp_path / "nope"))
 
 
-async def test_read_head_bytes_of_missing_file_is_not_empty(be, tmp_path):
-    # Код конвейера — код base64: без проверки открытия отсутствующий файл
-    # читался бы пустым.
+def _with_shim(tmp_path, name: str, body: str) -> RemoteShellBackend:
+    """Бэкенд, у которого команда ``name`` на той стороне — скрипт ``body``."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / name).write_text(f"#!/bin/sh\n{body}\n")
+    (bin_dir / name).chmod(0o755)
+    return RemoteShellBackend(["env", f"PATH={bin_dir}:{os.environ['PATH']}"])
+
+
+@pytest.fixture(params=["host", "bsd"])
+def head_be(request, tmp_path):
+    if request.param == "host":
+        return RemoteShellBackend(["env"])
+    # BSD head (macOS) отвергает счётчик 0.
+    return _with_shim(
+        tmp_path,
+        "head",
+        '[ "$1" = -c ] && [ "$2" = 0 ] && '
+        '{ echo "head: illegal byte count -- 0" >&2; exit 1; }\n'
+        f'exec {shlex.quote(shutil.which("head"))} "$@"',
+    )
+
+
+async def test_read_head_bytes_of_missing_file_is_not_empty(head_be, tmp_path):
+    # Код конвейера — код base64: без кода head отсутствующий файл читался бы
+    # пустым.
     with pytest.raises(FileNotFoundError):
-        await be.read_head_bytes(str(tmp_path / "nope"), 8)
+        await head_be.read_head_bytes(str(tmp_path / "nope"), 8)
     p = tmp_path / "blob.bin"
     p.write_bytes(b"\x00\xffabcdef")
-    assert await be.read_head_bytes(str(p), 4) == b"\x00\xffab"
+    assert await head_be.read_head_bytes(str(p), 4) == b"\x00\xffab"
+
+
+async def test_read_head_bytes_encoder_failure_is_not_empty(tmp_path):
+    be = _with_shim(
+        tmp_path, "base64", 'echo "base64: write error" >&2; exit 1'
+    )
+    p = tmp_path / "a.txt"
+    p.write_text("abc")
+    with pytest.raises(OSError, match="base64: write error"):
+        await be.read_head_bytes(str(p), 4)
+
+
+async def test_read_head_bytes_of_fifo_keeps_first_byte(be, tmp_path):
+    # Файл открывается один раз: отдельная проба съела бы начало канала.
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+
+    def write():
+        with contextlib.suppress(BrokenPipeError), open(fifo, "wb") as f:
+            f.write(b"abcdef")
+
+    threading.Thread(target=write, daemon=True).start()
+    be.fs_op_timeout_sec = 5
+    assert await be.read_head_bytes(str(fifo), 4) == b"abcd"
+
+
+@pytest.mark.skipif(
+    not _gnu("head"), reason="BSD head не сообщает отказ чтения"
+)
+async def test_read_head_bytes_of_directory_is_not_empty(be, tmp_path):
+    with pytest.raises(IsADirectoryError):
+        await be.read_head_bytes(str(tmp_path), 8)
 
 
 async def test_run_python_feeds_code_on_stdin(be):
